@@ -146,16 +146,28 @@ function New-ChangelogFromCommits {
     }
 
     # Get commits since last tag
-    $lastTag = git describe --tags --abbrev=0
+    $lastTag = git describe --tags --abbrev=0 2>$null
     if ($LASTEXITCODE -ne 0) {
-        throw "No git tags found. Cannot determine commit range for changelog. Create a RELEASE_NOTES.md override for first releases."
-    }
-    $commitRange = "$lastTag..HEAD"
-
-    if ($ArtifactPaths) {
-        $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+        # First release - use all commits
+        $commitRange = "HEAD"
+        $useAllCommits = $true
     } else {
-        $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
+        $commitRange = "$lastTag..HEAD"
+        $useAllCommits = $false
+    }
+
+    if ($useAllCommits) {
+        if ($ArtifactPaths) {
+            $commits = git log --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+        } else {
+            $commits = git log --pretty=format:"%s" --reverse --no-merges
+        }
+    } else {
+        if ($ArtifactPaths) {
+            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+        } else {
+            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
+        }
     }
     if ($LASTEXITCODE -ne 0) {
         throw "git log failed (exit code $LASTEXITCODE) for range '$commitRange'. Check that the range is valid and the repository is not corrupt."

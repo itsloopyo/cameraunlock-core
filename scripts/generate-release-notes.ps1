@@ -27,9 +27,13 @@ if (Test-Path "RELEASE_NOTES.md") {
 }
 
 # Check for previous tag
-$previousTag = git describe --tags --abbrev=0 HEAD^
+$previousTag = git describe --tags --abbrev=0 HEAD^ 2>$null
 if ($LASTEXITCODE -ne 0) {
-    throw "No previous git tag found. Cannot determine commit range for release notes. Create a RELEASE_NOTES.md override for first releases."
+    # First release - use all commits
+    "First release." | Set-Content $OutputFile
+    Write-Host "First release - no previous tags found" -ForegroundColor Cyan
+    Get-Content $OutputFile
+    exit 0
 }
 
 # Get commits that touched artifact-affecting paths
