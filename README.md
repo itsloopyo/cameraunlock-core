@@ -47,12 +47,12 @@ cameraunlock-core/
 
 **OpenTrackReceiver** - Thread-safe UDP receiver
 ```csharp
-var receiver = new OpenTrackReceiver(port: 4242);
-receiver.Start();
+var receiver = new OpenTrackReceiver();
+receiver.Start(port: 4242);
 
 // In game loop:
 var pose = receiver.GetLatestPose();
-if (pose.IsDataFresh)
+if (receiver.IsDataFresh())
 {
     // Apply tracking
 }
@@ -90,7 +90,7 @@ OpenTrackReceiver (thread-safe parsing)
 TrackingProcessor Pipeline:
     1. Subtract center offset (recentering)
     2. Apply deadzone (ignore small movements)
-    3. Apply smoothing (exponential moving average)
+    3. Apply smoothing (SLERP interpolation)
     4. Apply sensitivity (per-axis multipliers)
     │
     ▼

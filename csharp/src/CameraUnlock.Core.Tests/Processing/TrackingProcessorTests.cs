@@ -48,9 +48,9 @@ namespace CameraUnlock.Core.Tests.Processing
 
             TrackingPose result = processor.Process(pose, false, DeltaTime);
 
-            Assert.Equal(10f, result.Yaw, precision: 5);
-            Assert.Equal(20f, result.Pitch, precision: 5);
-            Assert.Equal(15f, result.Roll, precision: 5);
+            Assert.Equal(10f, result.Yaw, precision: 4);
+            Assert.Equal(20f, result.Pitch, precision: 4);
+            Assert.Equal(15f, result.Roll, precision: 4);
         }
 
         [Fact]
@@ -65,9 +65,9 @@ namespace CameraUnlock.Core.Tests.Processing
 
             TrackingPose result = processor.Process(pose, false, DeltaTime);
 
-            Assert.Equal(20f, result.Yaw, precision: 5);
-            Assert.Equal(10f, result.Pitch, precision: 5);
-            Assert.Equal(15f, result.Roll, precision: 5);
+            Assert.Equal(20f, result.Yaw, precision: 4);
+            Assert.Equal(10f, result.Pitch, precision: 4);
+            Assert.Equal(15f, result.Roll, precision: 4);
         }
 
         [Fact]
@@ -82,9 +82,9 @@ namespace CameraUnlock.Core.Tests.Processing
 
             TrackingPose result = processor.Process(pose, false, DeltaTime);
 
-            Assert.Equal(-10f, result.Yaw, precision: 5);
-            Assert.Equal(-20f, result.Pitch, precision: 5);
-            Assert.Equal(-15f, result.Roll, precision: 5);
+            Assert.Equal(-10f, result.Yaw, precision: 4);
+            Assert.Equal(-20f, result.Pitch, precision: 4);
+            Assert.Equal(-15f, result.Roll, precision: 4);
         }
 
         [Fact]
@@ -99,25 +99,26 @@ namespace CameraUnlock.Core.Tests.Processing
 
             TrackingPose result = processor.Process(pose, false, DeltaTime);
 
-            Assert.Equal(0f, result.Yaw, precision: 5);
-            Assert.Equal(5f, result.Pitch, precision: 5);
-            Assert.Equal(1f, result.Roll, precision: 5);
+            Assert.Equal(0f, result.Yaw, precision: 4);
+            Assert.Equal(5f, result.Pitch, precision: 4);
+            Assert.Equal(1f, result.Roll, precision: 4);
         }
 
         [Fact]
         public void Process_WithCenter_SubtractsOffset()
         {
             var processor = new TrackingProcessor();
-            processor.CenterManager.SetCenter(10f, 10f, 10f);
+            // Use single-axis center where quaternion and Euler subtraction agree exactly
+            processor.CenterManager.SetCenter(10f, 0f, 0f);
 
             long timestamp = Stopwatch.GetTimestamp();
-            var pose = new TrackingPose(30f, 25f, 20f, timestamp);
+            var pose = new TrackingPose(30f, 15f, 5f, timestamp);
 
             TrackingPose result = processor.Process(pose, false, DeltaTime);
 
-            Assert.Equal(20f, result.Yaw, precision: 5);
-            Assert.Equal(15f, result.Pitch, precision: 5);
-            Assert.Equal(10f, result.Roll, precision: 5);
+            Assert.Equal(20f, result.Yaw, precision: 3);
+            Assert.Equal(15f, result.Pitch, precision: 3);
+            Assert.Equal(5f, result.Roll, precision: 3);
         }
 
         [Fact]
@@ -156,6 +157,26 @@ namespace CameraUnlock.Core.Tests.Processing
 
             Assert.True(processor.CenterManager.HasValidCenter);
             Assert.Equal(10f, processor.CenterManager.CenterOffset.Yaw);
+        }
+
+        [Fact]
+        public void Process_AtExtremeYaw_PitchDoesNotContaminateRoll()
+        {
+            var processor = new TrackingProcessor();
+            // Center at 80° yaw
+            processor.CenterManager.SetCenter(80f, 0f, 0f);
+
+            long timestamp = Stopwatch.GetTimestamp();
+            // Input at 80° yaw + 15° pitch — relative is ~15° pitch only
+            var pose = new TrackingPose(80f, 15f, 0f, timestamp);
+
+            TrackingPose result = processor.Process(pose, false, DeltaTime);
+
+            // The key assertion: roll should be near zero, not contaminated by cross-axis leakage
+            Assert.True(System.Math.Abs(result.Roll) < 2f,
+                $"Roll contamination detected: expected ~0, got {result.Roll}");
+            Assert.True(System.Math.Abs(result.Pitch - 15f) < 2f,
+                $"Pitch not preserved: expected ~15, got {result.Pitch}");
         }
 
         [Fact]

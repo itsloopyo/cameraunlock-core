@@ -5,16 +5,14 @@ namespace CameraUnlock.Core.Processing
 {
     /// <summary>
     /// Complete tracking data processing pipeline.
-    /// Pipeline: raw -> offset -> deadzone -> smooth -> sensitivity
+    /// Pipeline: raw(Euler) -> quat centering -> Euler deadzone -> quat SLERP smoothing -> Euler sensitivity
     /// </summary>
     public sealed class TrackingProcessor : ITrackingProcessor
     {
         private readonly CenterOffsetManager _centerManager = new CenterOffsetManager();
 
-        // Smoothed values (stored as doubles for precision)
-        private double _smoothedYaw;
-        private double _smoothedPitch;
-        private double _smoothedRoll;
+        // Smoothed rotation as quaternion for gimbal-lock-free SLERP
+        private Quat4 _smoothedQuat = Quat4.Identity;
         private bool _hasSmoothedValue;
 
         /// <summary>
@@ -45,17 +43,21 @@ namespace CameraUnlock.Core.Processing
         /// <param name="roll">Output: smoothed roll.</param>
         public void GetSmoothedRotation(out float yaw, out float pitch, out float roll)
         {
-            yaw = (float)_smoothedYaw;
-            pitch = (float)_smoothedPitch;
-            roll = (float)_smoothedRoll;
+            QuaternionUtils.ToEulerYXZ(_smoothedQuat, out yaw, out pitch, out roll);
         }
 
 #if NETSTANDARD2_0
         /// <summary>
         /// Gets the current smoothed rotation values (tuple version for modern runtimes).
         /// </summary>
-        public (float Yaw, float Pitch, float Roll) SmoothedRotation =>
-            ((float)_smoothedYaw, (float)_smoothedPitch, (float)_smoothedRoll);
+        public (float Yaw, float Pitch, float Roll) SmoothedRotation
+        {
+            get
+            {
+                QuaternionUtils.ToEulerYXZ(_smoothedQuat, out float y, out float p, out float r);
+                return (y, p, r);
+            }
+        }
 #endif
 
         /// <summary>
@@ -68,36 +70,37 @@ namespace CameraUnlock.Core.Processing
                 return rawPose;
             }
 
-            // Step 1: Apply center offset
-            _centerManager.ApplyOffset(rawPose.Yaw, rawPose.Pitch, rawPose.Roll, out float yaw, out float pitch, out float roll);
+            // Step 1: Convert raw Euler to quaternion and apply center offset
+            Quat4 rawQ = QuaternionUtils.FromYawPitchRoll(rawPose.Yaw, rawPose.Pitch, rawPose.Roll);
+            Quat4 centeredQ = _centerManager.ApplyOffsetQuat(rawQ);
 
-            // Step 2: Apply deadzone
+            // Step 2: Decompose to Euler for per-axis deadzone
+            QuaternionUtils.ToEulerYXZ(centeredQ, out float yaw, out float pitch, out float roll);
+
             yaw = (float)DeadzoneUtils.Apply(yaw, Deadzone.Yaw);
             pitch = (float)DeadzoneUtils.Apply(pitch, Deadzone.Pitch);
             roll = (float)DeadzoneUtils.Apply(roll, Deadzone.Roll);
 
-            // Step 3: Apply smoothing
+            // Step 3: Convert back to quaternion for SLERP smoothing
+            Quat4 targetQ = QuaternionUtils.FromYawPitchRoll(yaw, pitch, roll);
+
             float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(SmoothingFactor, isRemoteConnection);
 
             if (!_hasSmoothedValue)
             {
-                // First frame, snap to target
-                _smoothedYaw = yaw;
-                _smoothedPitch = pitch;
-                _smoothedRoll = roll;
+                _smoothedQuat = targetQ;
                 _hasSmoothedValue = true;
             }
             else
             {
-                // Calculate smoothing factor once for all axes (avoids 3x Math.Exp calls)
                 float t = SmoothingUtils.CalculateSmoothingFactor(effectiveSmoothing, deltaTime);
-                _smoothedYaw = _smoothedYaw + (yaw - _smoothedYaw) * t;
-                _smoothedPitch = _smoothedPitch + (pitch - _smoothedPitch) * t;
-                _smoothedRoll = _smoothedRoll + (roll - _smoothedRoll) * t;
+                _smoothedQuat = QuaternionUtils.Slerp(_smoothedQuat, targetQ, t);
             }
 
-            // Step 4: Apply sensitivity
-            return new TrackingPose((float)_smoothedYaw, (float)_smoothedPitch, (float)_smoothedRoll, rawPose.TimestampTicks)
+            // Step 4: Decompose to Euler for per-axis sensitivity
+            QuaternionUtils.ToEulerYXZ(_smoothedQuat, out float smoothedYaw, out float smoothedPitch, out float smoothedRoll);
+
+            return new TrackingPose(smoothedYaw, smoothedPitch, smoothedRoll, rawPose.TimestampTicks)
                 .ApplySensitivity(Sensitivity);
         }
 
@@ -106,7 +109,8 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public void Recenter()
         {
-            _centerManager.SetCenter((float)_smoothedYaw, (float)_smoothedPitch, (float)_smoothedRoll);
+            _centerManager.ComposeAdditionalOffset(_smoothedQuat);
+            _smoothedQuat = Quat4.Identity;
         }
 
         /// <summary>
@@ -115,9 +119,17 @@ namespace CameraUnlock.Core.Processing
         public void RecenterTo(TrackingPose pose)
         {
             _centerManager.SetCenter(pose);
-            _smoothedYaw = 0;
-            _smoothedPitch = 0;
-            _smoothedRoll = 0;
+            _smoothedQuat = Quat4.Identity;
+        }
+
+        /// <summary>
+        /// Resets only the smoothing state, preserving center offset.
+        /// Use on tracking regain to avoid blending from stale pre-loss values.
+        /// </summary>
+        public void ResetSmoothing()
+        {
+            _smoothedQuat = Quat4.Identity;
+            _hasSmoothedValue = false;
         }
 
         /// <summary>
@@ -126,9 +138,7 @@ namespace CameraUnlock.Core.Processing
         public void Reset()
         {
             _centerManager.Reset();
-            _smoothedYaw = 0;
-            _smoothedPitch = 0;
-            _smoothedRoll = 0;
+            _smoothedQuat = Quat4.Identity;
             _hasSmoothedValue = false;
         }
     }

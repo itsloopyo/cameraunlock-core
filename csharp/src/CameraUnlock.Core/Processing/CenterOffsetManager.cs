@@ -1,4 +1,5 @@
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 
 #if !NET35 && !NET40
 using System.Runtime.CompilerServices;
@@ -13,6 +14,7 @@ namespace CameraUnlock.Core.Processing
     public sealed class CenterOffsetManager
     {
         private TrackingPose _centerOffset;
+        private Quat4 _centerQuaternionInverse = Quat4.Identity;
         private bool _hasValidCenter;
 
         /// <summary>
@@ -31,6 +33,7 @@ namespace CameraUnlock.Core.Processing
         public void SetCenter(TrackingPose pose)
         {
             _centerOffset = new TrackingPose(pose.Yaw, pose.Pitch, pose.Roll, 0);
+            _centerQuaternionInverse = QuaternionUtils.FromYawPitchRoll(pose.Yaw, pose.Pitch, pose.Roll).Inverse;
             _hasValidCenter = true;
         }
 
@@ -40,6 +43,7 @@ namespace CameraUnlock.Core.Processing
         public void SetCenter(float yaw, float pitch, float roll)
         {
             _centerOffset = new TrackingPose(yaw, pitch, roll, 0);
+            _centerQuaternionInverse = QuaternionUtils.FromYawPitchRoll(yaw, pitch, roll).Inverse;
             _hasValidCenter = true;
         }
 
@@ -97,11 +101,39 @@ namespace CameraUnlock.Core.Processing
 #endif
 
         /// <summary>
+        /// Applies the center offset in quaternion space: centerInverse * inputQ.
+        /// </summary>
+#if !NET35 && !NET40
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#endif
+        public Quat4 ApplyOffsetQuat(Quat4 inputQ)
+        {
+            if (!_hasValidCenter)
+            {
+                return inputQ;
+            }
+            return _centerQuaternionInverse * inputQ;
+        }
+
+        /// <summary>
+        /// Composes an additional relative offset into the existing center.
+        /// Used by Recenter() to add the current smoothed rotation as an offset.
+        /// </summary>
+        public void ComposeAdditionalOffset(Quat4 relativeQ)
+        {
+            _centerQuaternionInverse = relativeQ.Inverse * _centerQuaternionInverse;
+            QuaternionUtils.ToEulerYXZ(_centerQuaternionInverse.Inverse, out float yaw, out float pitch, out float roll);
+            _centerOffset = new TrackingPose(yaw, pitch, roll, 0);
+            _hasValidCenter = true;
+        }
+
+        /// <summary>
         /// Resets the center offset.
         /// </summary>
         public void Reset()
         {
             _centerOffset = default;
+            _centerQuaternionInverse = Quat4.Identity;
             _hasValidCenter = false;
         }
     }

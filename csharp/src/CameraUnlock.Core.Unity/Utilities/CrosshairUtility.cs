@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -91,10 +93,8 @@ namespace CameraUnlock.Core.Unity.Utilities
                     var type = assembly.GetType(typeName);
                     if (type != null) return type;
                 }
-                catch
-                {
-                    // Assembly may not be fully loaded
-                }
+                catch (ReflectionTypeLoadException) { }
+                catch (FileNotFoundException) { }
             }
             return null;
         }

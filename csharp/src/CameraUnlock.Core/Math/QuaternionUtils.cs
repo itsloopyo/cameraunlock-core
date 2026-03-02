@@ -214,6 +214,46 @@ namespace CameraUnlock.Core.Math
 #endif
 
         /// <summary>
+        /// Decomposes a quaternion to yaw, pitch, roll angles in degrees using YXZ rotation order.
+        /// Inverse of <see cref="FromYawPitchRoll"/>. At gimbal lock (pitch ±90°), roll is set to 0
+        /// and the full rotation is attributed to yaw.
+        /// </summary>
+        /// <param name="q">Unit quaternion to decompose.</param>
+        /// <param name="yaw">Output yaw in degrees.</param>
+        /// <param name="pitch">Output pitch in degrees.</param>
+        /// <param name="roll">Output roll in degrees.</param>
+#if !NET35 && !NET40
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#endif
+        public static void ToEulerYXZ(Quat4 q, out float yaw, out float pitch, out float roll)
+        {
+            // sinPitch = 2(wx - yz) for YXZ order
+            float sinPitch = 2f * (q.W * q.X - q.Y * q.Z);
+
+            // Clamp to [-1, 1] to handle numerical drift
+            if (sinPitch >= 1f)
+            {
+                // Gimbal lock: pitch = +90°
+                pitch = 90f;
+                yaw = (float)(System.Math.Atan2(2f * (q.X * q.Z + q.W * q.Y), 1f - 2f * (q.X * q.X + q.Y * q.Y)) * MathConstants.RadToDeg);
+                roll = 0f;
+            }
+            else if (sinPitch <= -1f)
+            {
+                // Gimbal lock: pitch = -90°
+                pitch = -90f;
+                yaw = (float)(System.Math.Atan2(2f * (q.X * q.Z + q.W * q.Y), 1f - 2f * (q.X * q.X + q.Y * q.Y)) * MathConstants.RadToDeg);
+                roll = 0f;
+            }
+            else
+            {
+                pitch = (float)(System.Math.Asin(sinPitch) * MathConstants.RadToDeg);
+                yaw = (float)(System.Math.Atan2(2f * (q.X * q.Z + q.W * q.Y), 1f - 2f * (q.X * q.X + q.Y * q.Y)) * MathConstants.RadToDeg);
+                roll = (float)(System.Math.Atan2(2f * (q.X * q.Y + q.W * q.Z), 1f - 2f * (q.X * q.X + q.Z * q.Z)) * MathConstants.RadToDeg);
+            }
+        }
+
+        /// <summary>
         /// Identity quaternion (no rotation).
         /// </summary>
         public static readonly Quat4 Identity = Quat4.Identity;

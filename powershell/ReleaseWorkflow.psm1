@@ -145,18 +145,49 @@ function New-ChangelogFromCommits {
         }
     }
 
-    # Get commits since last tag (first release has no tags — catch the error)
-    $lastTag = try { git describe --tags --abbrev=0 2>$null } catch { $null }
-    $commitRange = if ($lastTag) { "$lastTag..HEAD" } else { "HEAD" }
-
-    if ($ArtifactPaths) {
-        $commits = git log $commitRange --pretty=format:"%s" --reverse -- $ArtifactPaths 2>$null
+    # Get commits since last tag
+    $lastTag = git describe --tags --abbrev=0 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        # First release - use all commits
+        $commitRange = "HEAD"
+        $useAllCommits = $true
     } else {
-        $commits = git log $commitRange --pretty=format:"%s" --reverse 2>$null
+        $commitRange = "$lastTag..HEAD"
+        $useAllCommits = $false
+    }
+
+    if ($useAllCommits) {
+        if ($ArtifactPaths) {
+            $commits = git log --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+        } else {
+            $commits = git log --pretty=format:"%s" --reverse --no-merges
+        }
+    } else {
+        if ($ArtifactPaths) {
+            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+        } else {
+            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
+        }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "git log failed (exit code $LASTEXITCODE) for range '$commitRange'. Check that the range is valid and the repository is not corrupt."
     }
 
     if (-not $commits) {
-        $commits = @("Initial release")
+        throw "No commits found in range '$commitRange'. If this is the first release, create a RELEASE_NOTES.md override instead."
+    }
+
+    # Filter out noise commits before categorization
+    $noisePattern = '^(chore|refactor|internal|clean ?up|wip|fixup|squash|ci|build|test|style|docs)(\(.*?\))?:'
+    $commits = @($commits | Where-Object {
+        $_ -notmatch $noisePattern -and
+        $_ -notmatch '^Merge ' -and
+        $_ -notmatch '^Release v\d+' -and
+        $_ -notmatch '^(bump|version)'
+    })
+
+    if ($commits.Count -eq 0) {
+        throw "All commits in range '$commitRange' were filtered as noise. If this release has user-facing changes, use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
     }
 
     # Categorize commits using conventional commit format
@@ -170,8 +201,8 @@ function New-ChangelogFromCommits {
             $features += "- $($matches[2])"
         } elseif ($commit -match '^fix(\(.*?\))?:\s*(.+)$') {
             $fixes += "- $($matches[2])"
-        } elseif ($commit -match '^(chore|refactor|perf|docs)(\(.*?\))?:\s*(.+)$') {
-            $changes += "- $($matches[3])"
+        } elseif ($commit -match '^perf(\(.*?\))?:\s*(.+)$') {
+            $changes += "- $($matches[2])"
         } else {
             $other += "- $commit"
         }
@@ -196,8 +227,8 @@ function New-ChangelogFromCommits {
         $newEntry += ($fixes -join "`n") + "`n`n"
     }
 
-    # Include other commits only if no categorized ones
-    if ($other.Count -gt 0 -and ($features.Count -eq 0 -and $changes.Count -eq 0 -and $fixes.Count -eq 0)) {
+    if ($other.Count -gt 0) {
+        $newEntry += "### Other`n`n"
         $newEntry += ($other -join "`n") + "`n`n"
     }
 

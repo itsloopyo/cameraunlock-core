@@ -1,5 +1,6 @@
 using Xunit;
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 
 namespace CameraUnlock.Core.Tests.Processing
@@ -110,6 +111,59 @@ namespace CameraUnlock.Core.Tests.Processing
             Assert.Equal(50f, result.Yaw);
             Assert.Equal(50f, result.Pitch);
             Assert.Equal(50f, result.Roll);
+        }
+
+        // --- Quaternion offset tests ---
+
+        [Fact]
+        public void ApplyOffsetQuat_NoCenter_ReturnsSame()
+        {
+            var manager = new CenterOffsetManager();
+            Quat4 input = QuaternionUtils.FromYawPitchRoll(30f, 20f, 10f);
+            Quat4 result = manager.ApplyOffsetQuat(input);
+
+            // Should be identical — no center set
+            Assert.Equal(input.X, result.X, precision: 5);
+            Assert.Equal(input.Y, result.Y, precision: 5);
+            Assert.Equal(input.Z, result.Z, precision: 5);
+            Assert.Equal(input.W, result.W, precision: 5);
+        }
+
+        [Fact]
+        public void ApplyOffsetQuat_WithCenter_RemovesOffset()
+        {
+            var manager = new CenterOffsetManager();
+            manager.SetCenter(45f, 0f, 0f);
+
+            Quat4 input = QuaternionUtils.FromYawPitchRoll(45f, 0f, 0f);
+            Quat4 result = manager.ApplyOffsetQuat(input);
+
+            // Should be near identity (the offset cancels the input)
+            QuaternionUtils.ToEulerYXZ(result, out float yaw, out float pitch, out float roll);
+            Assert.Equal(0f, yaw, precision: 3);
+            Assert.Equal(0f, pitch, precision: 3);
+            Assert.Equal(0f, roll, precision: 3);
+        }
+
+        [Fact]
+        public void ComposeAdditionalOffset_ComposesCorrectly()
+        {
+            var manager = new CenterOffsetManager();
+            // Start with center at 20° yaw
+            manager.SetCenter(20f, 0f, 0f);
+
+            // Compose an additional 10° yaw offset
+            Quat4 additional = QuaternionUtils.FromYawPitchRoll(10f, 0f, 0f);
+            manager.ComposeAdditionalOffset(additional);
+
+            // Input at 30° yaw should now give ~0° output (20 + 10 = 30 offset)
+            Quat4 input = QuaternionUtils.FromYawPitchRoll(30f, 0f, 0f);
+            Quat4 result = manager.ApplyOffsetQuat(input);
+
+            QuaternionUtils.ToEulerYXZ(result, out float yaw, out float pitch, out float roll);
+            Assert.Equal(0f, yaw, precision: 2);
+            Assert.Equal(0f, pitch, precision: 2);
+            Assert.Equal(0f, roll, precision: 2);
         }
     }
 }

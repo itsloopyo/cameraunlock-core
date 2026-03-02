@@ -152,6 +152,80 @@ namespace CameraUnlock.Core.Tests.Math
             Assert.Equal(Quat4.Identity.W, QuaternionUtils.Identity.W);
         }
 
+        // --- ToEulerYXZ tests ---
+
+        [Fact]
+        public void ToEulerYXZ_Identity_ReturnsZeros()
+        {
+            QuaternionUtils.ToEulerYXZ(Quat4.Identity, out float yaw, out float pitch, out float roll);
+            Assert.Equal(0f, yaw, precision: 4);
+            Assert.Equal(0f, pitch, precision: 4);
+            Assert.Equal(0f, roll, precision: 4);
+        }
+
+        [Fact]
+        public void ToEulerYXZ_90Yaw_ReturnsCorrect()
+        {
+            Quat4 q = QuaternionUtils.FromYawPitchRoll(90f, 0f, 0f);
+            QuaternionUtils.ToEulerYXZ(q, out float yaw, out float pitch, out float roll);
+            Assert.Equal(90f, yaw, precision: 3);
+            Assert.Equal(0f, pitch, precision: 3);
+            Assert.Equal(0f, roll, precision: 3);
+        }
+
+        [Fact]
+        public void ToEulerYXZ_45Pitch_ReturnsCorrect()
+        {
+            Quat4 q = QuaternionUtils.FromYawPitchRoll(0f, 45f, 0f);
+            QuaternionUtils.ToEulerYXZ(q, out float yaw, out float pitch, out float roll);
+            Assert.Equal(0f, yaw, precision: 3);
+            Assert.Equal(45f, pitch, precision: 3);
+            Assert.Equal(0f, roll, precision: 3);
+        }
+
+        [Fact]
+        public void ToEulerYXZ_30Roll_ReturnsCorrect()
+        {
+            Quat4 q = QuaternionUtils.FromYawPitchRoll(0f, 0f, 30f);
+            QuaternionUtils.ToEulerYXZ(q, out float yaw, out float pitch, out float roll);
+            Assert.Equal(0f, yaw, precision: 3);
+            Assert.Equal(0f, pitch, precision: 3);
+            Assert.Equal(30f, roll, precision: 3);
+        }
+
+        [Theory]
+        [InlineData(45f, 30f, 15f)]
+        [InlineData(-60f, 20f, -10f)]
+        [InlineData(120f, -40f, 25f)]
+        [InlineData(0f, 0f, 0f)]
+        public void ToEulerYXZ_RoundTrip_ReturnsOriginal(float inYaw, float inPitch, float inRoll)
+        {
+            Quat4 q = QuaternionUtils.FromYawPitchRoll(inYaw, inPitch, inRoll);
+            QuaternionUtils.ToEulerYXZ(q, out float yaw, out float pitch, out float roll);
+            Assert.Equal(inYaw, yaw, precision: 3);
+            Assert.Equal(inPitch, pitch, precision: 3);
+            Assert.Equal(inRoll, roll, precision: 3);
+        }
+
+        [Fact]
+        public void ToEulerYXZ_NearGimbalLock_PitchIsCorrect()
+        {
+            Quat4 q = QuaternionUtils.FromYawPitchRoll(0f, 89f, 0f);
+            QuaternionUtils.ToEulerYXZ(q, out float yaw, out float pitch, out float roll);
+            Assert.Equal(89f, pitch, precision: 2);
+        }
+
+        [Fact]
+        public void ToEulerYXZ_AtGimbalLock_PitchIs90_YawPlusRollPreserved()
+        {
+            Quat4 q = QuaternionUtils.FromYawPitchRoll(0f, 90f, 0f);
+            QuaternionUtils.ToEulerYXZ(q, out float yaw, out float pitch, out float roll);
+            // Float precision means sinPitch ≈ 0.99999 rather than exactly 1.0,
+            // so asin returns ~89.98 instead of exactly 90
+            Assert.Equal(90f, pitch, precision: 1);
+            Assert.Equal(0f, roll, precision: 1);
+        }
+
         private void AssertQuaternionEqual(Quat4 expected, Quat4 actual)
         {
             float dot = expected.X * actual.X + expected.Y * actual.Y +

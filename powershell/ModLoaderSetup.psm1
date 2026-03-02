@@ -279,7 +279,7 @@ Enabled = true
                 }
             }
         } catch {
-            # Ignore parse errors, overwrite state
+            throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
         }
     }
 
@@ -384,7 +384,7 @@ function Install-MelonLoader {
                 }
             }
         } catch {
-            # Ignore parse errors, overwrite state
+            throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
         }
     }
 
@@ -431,8 +431,7 @@ function Get-ModLoaderState {
     try {
         return Get-Content $stateFile -Raw | ConvertFrom-Json -AsHashtable
     } catch {
-        Write-Warning "Failed to parse state file: $_"
-        return $null
+        throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
     }
 }
 
@@ -788,7 +787,9 @@ function Install-UE4SS {
                     $state[$key] = $existingState[$key]
                 }
             }
-        } catch { }
+        } catch {
+            throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
+        }
     }
 
     $state | ConvertTo-Json -Depth 10 | Set-Content $stateFile -Encoding UTF8

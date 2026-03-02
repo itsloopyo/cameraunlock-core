@@ -53,27 +53,20 @@ namespace CameraUnlock.Core.Unity.Rendering
                 }
 
                 // Check if currentRenderPipeline is set
-                try
+                var graphicsSettingsType = Type.GetType("UnityEngine.Rendering.GraphicsSettings, UnityEngine.CoreModule");
+                if (graphicsSettingsType == null)
                 {
-                    var graphicsSettingsType = Type.GetType("UnityEngine.Rendering.GraphicsSettings, UnityEngine.CoreModule");
-                    if (graphicsSettingsType == null)
-                    {
-                        graphicsSettingsType = Type.GetType("UnityEngine.Rendering.GraphicsSettings, UnityEngine");
-                    }
-
-                    if (graphicsSettingsType != null)
-                    {
-                        var prop = graphicsSettingsType.GetProperty("currentRenderPipeline",
-                            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
-                        if (prop != null)
-                        {
-                            return prop.GetValue(null, null) != null;
-                        }
-                    }
+                    graphicsSettingsType = Type.GetType("UnityEngine.Rendering.GraphicsSettings, UnityEngine");
                 }
-                catch
+
+                if (graphicsSettingsType != null)
                 {
-                    // Reflection failed, assume no SRP
+                    var prop = graphicsSettingsType.GetProperty("currentRenderPipeline",
+                        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+                    if (prop != null)
+                    {
+                        return prop.GetValue(null, null) != null;
+                    }
                 }
 
                 return false;
@@ -120,14 +113,9 @@ namespace CameraUnlock.Core.Unity.Rendering
             if (_usingSRP)
             {
                 // SRP path - use reflection
-                if (!RegisterSRPCallbacks(onPreRender, onPostRender))
-                {
-                    // Fall back to legacy if SRP registration fails
-                    _usingSRP = false;
-                }
+                RegisterSRPCallbacks(onPreRender, onPostRender);
             }
-
-            if (!_usingSRP)
+            else
             {
                 // Legacy path - wrap Action<Camera> in Camera.CameraCallback
                 _legacyPreRender = new Camera.CameraCallback(onPreRender);
@@ -177,85 +165,69 @@ namespace CameraUnlock.Core.Unity.Rendering
         /// </summary>
         private static bool CheckSRPAvailable()
         {
-            try
+            var type = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
+            if (type == null)
             {
-                var type = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
-                if (type == null)
-                {
-                    type = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
-                }
-                return type != null;
+                type = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
             }
-            catch
-            {
-                return false;
-            }
+            return type != null;
         }
 
         /// <summary>
         /// Registers SRP callbacks using reflection.
         /// </summary>
-        private static bool RegisterSRPCallbacks(Action<Camera> onPreRender, Action<Camera> onPostRender)
+        private static void RegisterSRPCallbacks(Action<Camera> onPreRender, Action<Camera> onPostRender)
         {
-            try
+            var rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
+            if (rpmType == null)
             {
-                var rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
-                if (rpmType == null)
-                {
-                    rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
-                }
-
-                if (rpmType == null)
-                {
-                    return false;
-                }
-
-                var beginEvent = rpmType.GetEvent("beginCameraRendering");
-                var endEvent = rpmType.GetEvent("endCameraRendering");
-
-                if (beginEvent == null || endEvent == null)
-                {
-                    return false;
-                }
-
-                // Get the delegate type for the event (Action<ScriptableRenderContext, Camera>)
-                var delegateType = beginEvent.EventHandlerType;
-
-                // Create a wrapper delegate that ignores the context and just calls our Action<Camera>
-                // The event handler signature is: (ScriptableRenderContext context, Camera camera)
-                // We create a dynamic method that ignores the first parameter
-
-                var method = new System.Reflection.Emit.DynamicMethod(
-                    "SRPPreRenderWrapper",
-                    typeof(void),
-                    new[] { typeof(object), typeof(Camera) },
-                    typeof(RenderPipelineHelper).Module);
-
-                var il = method.GetILGenerator();
-                il.Emit(System.Reflection.Emit.OpCodes.Ldarg_1);
-                il.Emit(System.Reflection.Emit.OpCodes.Call, onPreRender.Method);
-                il.Emit(System.Reflection.Emit.OpCodes.Ret);
-
-                // This approach is complex - let's use a simpler wrapper class
-                // Actually, let's just create a lambda-compatible approach
-
-                // Simpler: store the Action<Camera> in a static field and use a static method as handler
-                _storedPreRender = onPreRender;
-                _storedPostRender = onPostRender;
-
-                // Create delegates using the SRP wrapper methods
-                _srpPreRenderDelegate = Delegate.CreateDelegate(delegateType, typeof(RenderPipelineHelper), "SRPPreRenderHandler");
-                _srpPostRenderDelegate = Delegate.CreateDelegate(delegateType, typeof(RenderPipelineHelper), "SRPPostRenderHandler");
-
-                beginEvent.AddEventHandler(null, (Delegate)_srpPreRenderDelegate);
-                endEvent.AddEventHandler(null, (Delegate)_srpPostRenderDelegate);
-
-                return true;
+                rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
             }
-            catch
+
+            if (rpmType == null)
             {
-                return false;
+                throw new InvalidOperationException("SRP detected but RenderPipelineManager type not found.");
             }
+
+            var beginEvent = rpmType.GetEvent("beginCameraRendering");
+            var endEvent = rpmType.GetEvent("endCameraRendering");
+
+            if (beginEvent == null || endEvent == null)
+            {
+                throw new InvalidOperationException("SRP detected but beginCameraRendering/endCameraRendering events not found.");
+            }
+
+            // Get the delegate type for the event (Action<ScriptableRenderContext, Camera>)
+            var delegateType = beginEvent.EventHandlerType;
+
+            // Create a wrapper delegate that ignores the context and just calls our Action<Camera>
+            // The event handler signature is: (ScriptableRenderContext context, Camera camera)
+            // We create a dynamic method that ignores the first parameter
+
+            var method = new System.Reflection.Emit.DynamicMethod(
+                "SRPPreRenderWrapper",
+                typeof(void),
+                new[] { typeof(object), typeof(Camera) },
+                typeof(RenderPipelineHelper).Module);
+
+            var il = method.GetILGenerator();
+            il.Emit(System.Reflection.Emit.OpCodes.Ldarg_1);
+            il.Emit(System.Reflection.Emit.OpCodes.Call, onPreRender.Method);
+            il.Emit(System.Reflection.Emit.OpCodes.Ret);
+
+            // This approach is complex - let's use a simpler wrapper class
+            // Actually, let's just create a lambda-compatible approach
+
+            // Simpler: store the Action<Camera> in a static field and use a static method as handler
+            _storedPreRender = onPreRender;
+            _storedPostRender = onPostRender;
+
+            // Create delegates using the SRP wrapper methods
+            _srpPreRenderDelegate = Delegate.CreateDelegate(delegateType, typeof(RenderPipelineHelper), "SRPPreRenderHandler");
+            _srpPostRenderDelegate = Delegate.CreateDelegate(delegateType, typeof(RenderPipelineHelper), "SRPPostRenderHandler");
+
+            beginEvent.AddEventHandler(null, (Delegate)_srpPreRenderDelegate);
+            endEvent.AddEventHandler(null, (Delegate)_srpPostRenderDelegate);
         }
 
         // Store the actual callbacks
@@ -286,35 +258,28 @@ namespace CameraUnlock.Core.Unity.Rendering
         /// </summary>
         private static void UnregisterSRPCallbacks()
         {
-            try
+            var rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
+            if (rpmType == null)
             {
-                var rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
-                if (rpmType == null)
-                {
-                    rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
-                }
-
-                if (rpmType == null)
-                {
-                    return;
-                }
-
-                var beginEvent = rpmType.GetEvent("beginCameraRendering");
-                var endEvent = rpmType.GetEvent("endCameraRendering");
-
-                if (beginEvent != null && _srpPreRenderDelegate != null)
-                {
-                    beginEvent.RemoveEventHandler(null, (Delegate)_srpPreRenderDelegate);
-                }
-
-                if (endEvent != null && _srpPostRenderDelegate != null)
-                {
-                    endEvent.RemoveEventHandler(null, (Delegate)_srpPostRenderDelegate);
-                }
+                rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
             }
-            catch
+
+            if (rpmType == null)
             {
-                // Ignore errors during cleanup
+                throw new InvalidOperationException("SRP was registered but RenderPipelineManager type no longer found.");
+            }
+
+            var beginEvent = rpmType.GetEvent("beginCameraRendering");
+            var endEvent = rpmType.GetEvent("endCameraRendering");
+
+            if (beginEvent != null && _srpPreRenderDelegate != null)
+            {
+                beginEvent.RemoveEventHandler(null, (Delegate)_srpPreRenderDelegate);
+            }
+
+            if (endEvent != null && _srpPostRenderDelegate != null)
+            {
+                endEvent.RemoveEventHandler(null, (Delegate)_srpPostRenderDelegate);
             }
 
             _srpPreRenderDelegate = null;

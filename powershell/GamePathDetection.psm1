@@ -128,15 +128,17 @@ function Find-SteamLibraries {
     $steamPath = $null
 
     # Try registry (64-bit)
-    try {
-        $steamPath = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -ErrorAction Stop).InstallPath
-    } catch { }
+    $regPath64 = 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam'
+    if (Test-Path $regPath64) {
+        $steamPath = (Get-ItemProperty -Path $regPath64 -ErrorAction Stop).InstallPath
+    }
 
-    # Try registry (32-bit fallback)
+    # Try registry (32-bit)
     if (-not $steamPath) {
-        try {
-            $steamPath = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Valve\Steam' -ErrorAction Stop).InstallPath
-        } catch { }
+        $regPath32 = 'HKLM:\SOFTWARE\Valve\Steam'
+        if (Test-Path $regPath32) {
+            $steamPath = (Get-ItemProperty -Path $regPath32 -ErrorAction Stop).InstallPath
+        }
     }
 
     if (-not $steamPath -or -not (Test-Path $steamPath)) {
@@ -192,12 +194,10 @@ function Find-GogGamePath {
 
         foreach ($key in $gogKeys) {
             if (Test-Path $key) {
-                try {
-                    $gamePath = (Get-ItemProperty -Path $key -ErrorAction Stop).path
-                    if ($gamePath -and (Test-Path (Join-Path $gamePath $Executable))) {
-                        return $gamePath
-                    }
-                } catch { }
+                $gamePath = (Get-ItemProperty -Path $key -ErrorAction Stop).path
+                if ($gamePath -and (Test-Path (Join-Path $gamePath $Executable))) {
+                    return $gamePath
+                }
             }
         }
     }
