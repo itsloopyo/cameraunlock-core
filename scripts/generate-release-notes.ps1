@@ -18,6 +18,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Import-Module (Join-Path $scriptDir "..\powershell\ReleaseWorkflow.psm1") -Force
+
 # Manual override takes priority
 if (Test-Path "RELEASE_NOTES.md") {
     Write-Host "Using RELEASE_NOTES.md override" -ForegroundColor Cyan
@@ -46,23 +49,17 @@ if (-not $commits) {
     throw "No artifact-affecting commits found between $previousTag and HEAD for paths: $($ArtifactPaths -join ', '). If this release has changes, widen ArtifactPaths or create a RELEASE_NOTES.md override."
 }
 
-# Filter out internal/noise commits
-$filtered = $commits | Where-Object {
-    $_ -notmatch "^- (chore|refactor|internal|clean ?up|wip|fixup|squash|ci|build|test|style|docs)(\(.*?\))?:" -and
-    $_ -notmatch "^- (Update (cameraunlock|submodule)|Merge )" -and
-    $_ -notmatch "^- (bump|release|version)" -and
-    $_ -notmatch "^- Release v\d+"
-}
+# Filter out internal/noise commits (strip "- " prefix for Test-NoiseCommit)
+$filtered = @($commits | Where-Object {
+    $subject = $_ -replace '^- ', ''
+    -not (Test-NoiseCommit $subject)
+})
 
-if (-not $filtered) {
+if ($filtered.Count -eq 0) {
     throw "All commits between $previousTag and HEAD were filtered as noise. If this release has user-facing changes, use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
 }
 
-if ($filtered -is [array]) {
-    $commitList = $filtered -join "`n"
-} else {
-    $commitList = $filtered
-}
+$commitList = $filtered -join "`n"
 $notes = "## What's Changed in v$Version`n`n$commitList"
 
 $notes | Out-File -FilePath $OutputFile -Encoding utf8

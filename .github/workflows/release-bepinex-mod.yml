@@ -1,0 +1,149 @@
+name: Release BepInEx Mod
+
+on:
+  workflow_call:
+    inputs:
+      csproj-path:
+        description: "Path to .csproj file (version source)"
+        required: true
+        type: string
+      project-name:
+        description: "Display name for the GitHub release title"
+        required: true
+        type: string
+      build-output-dir:
+        description: "Directory containing compiled DLLs"
+        required: true
+        type: string
+      mod-name:
+        description: "Mod name (used in ZIP filename)"
+        required: true
+        type: string
+      mod-dlls:
+        description: "Space-separated list of DLL filenames to include"
+        required: true
+        type: string
+      artifact-paths:
+        description: "Space-separated list of paths for release note generation"
+        required: true
+        type: string
+      prebuilt-dir:
+        description: "Directory with prebuilt DLLs (empty = skip prebuilt step)"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') {
+            Write-Host "::error::Tag format invalid. Use semantic versioning: v1.2.3"
+            exit 1
+          }
+          $version = $matches[1]
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: Validate version matches csproj
+        shell: pwsh
+        run: |
+          Import-Module cameraunlock-core/powershell/ReleaseWorkflow.psm1 -Force
+          $csprojVersion = Get-CsprojVersion "${{ inputs.csproj-path }}"
+          $tagVersion = "${{ steps.version.outputs.version }}"
+
+          Write-Host "csproj version: $csprojVersion"
+          Write-Host "Tag version: $tagVersion"
+
+          if ($csprojVersion -ne $tagVersion) {
+            Write-Host "::error::Version mismatch! Tag is v$tagVersion but csproj has $csprojVersion"
+            exit 1
+          }
+
+          Write-Host "Version matches!" -ForegroundColor Green
+
+      - name: Copy prebuilt DLLs
+        if: inputs.prebuilt-dir != ''
+        shell: pwsh
+        run: |
+          Write-Host "Using prebuilt DLLs..." -ForegroundColor Cyan
+
+          $buildOutput = "${{ inputs.build-output-dir }}"
+          New-Item -ItemType Directory -Path $buildOutput -Force | Out-Null
+
+          Copy-Item "${{ inputs.prebuilt-dir }}/*.dll" $buildOutput -Force
+
+          Write-Host "Prebuilt DLLs copied to build output:" -ForegroundColor Green
+          Get-ChildItem $buildOutput -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
+
+      - name: Package release
+        id: package
+        shell: pwsh
+        run: |
+          $dlls = "${{ inputs.mod-dlls }}" -split '\s+'
+
+          $zipPath = & cameraunlock-core/scripts/package-bepinex-mod.ps1 `
+            -ModName "${{ inputs.mod-name }}" `
+            -CsprojPath "${{ inputs.csproj-path }}" `
+            -BuildOutputDir "${{ inputs.build-output-dir }}" `
+            -ModDlls $dlls
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Packaging failed"
+            exit 1
+          }
+
+          # package-bepinex-mod.ps1 outputs the zip path as its last Write-Output
+          $zip = ($zipPath | Select-Object -Last 1)
+          echo "zip_path=$zip" >> $env:GITHUB_OUTPUT
+          Write-Host "Package created: $zip" -ForegroundColor Green
+
+      - name: Generate release notes
+        shell: pwsh
+        run: |
+          $artifactPaths = "${{ inputs.artifact-paths }}" -split '\s+'
+
+          & cameraunlock-core/scripts/generate-release-notes.ps1 `
+            -Version "${{ steps.version.outputs.version }}" `
+            -ArtifactPaths $artifactPaths `
+            -ProjectName "${{ inputs.project-name }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $zipPath = "${{ steps.package.outputs.zip_path }}"
+
+          Write-Host "Creating GitHub Release for $tag..." -ForegroundColor Cyan
+
+          gh release create $tag `
+            --title "${{ inputs.project-name }} $tag" `
+            --notes-file "release-notes.txt" `
+            $zipPath
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Failed to create GitHub release"
+            exit 1
+          }
+
+          Write-Host "Release created successfully!" -ForegroundColor Green
+          Write-Host "   View at: https://github.com/${{ github.repository }}/releases/tag/$tag" -ForegroundColor Cyan
