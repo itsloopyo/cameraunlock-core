@@ -99,19 +99,14 @@ jobs:
         run: |
           $dlls = "${{ inputs.mod-dlls }}" -split '\s+'
 
-          $zipPath = & cameraunlock-core/scripts/package-bepinex-mod.ps1 `
+          $output = & cameraunlock-core/scripts/package-bepinex-mod.ps1 `
             -ModName "${{ inputs.mod-name }}" `
             -CsprojPath "${{ inputs.csproj-path }}" `
             -BuildOutputDir "${{ inputs.build-output-dir }}" `
             -ModDlls $dlls
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Packaging failed"
-            exit 1
-          }
-
           # package-bepinex-mod.ps1 outputs the zip path as its last Write-Output
-          $zip = ($zipPath | Select-Object -Last 1)
+          $zip = ($output | Select-Object -Last 1)
           echo "zip_path=$zip" >> $env:GITHUB_OUTPUT
           Write-Host "Package created: $zip" -ForegroundColor Green
 
