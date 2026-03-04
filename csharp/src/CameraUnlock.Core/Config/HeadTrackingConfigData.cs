@@ -36,6 +36,9 @@ namespace CameraUnlock.Core.Config
         /// <inheritdoc />
         public float[] ReticleColorRgba { get; set; } = new float[] { 1f, 1f, 1f, 1f };
 
+        /// <inheritdoc />
+        public float Smoothing { get; set; } = 0f;
+
         /// <summary>
         /// Creates a new config with default values.
         /// </summary>
@@ -177,6 +180,11 @@ namespace CameraUnlock.Core.Config
                         float[] color;
                         if (ConfigParsingUtils.TryParseColor(value, out color))
                             ReticleColorRgba = color;
+                        break;
+
+                    case "smoothing":
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            Smoothing = System.Math.Max(0f, System.Math.Min(1f, floatVal));
                         break;
                 }
             }

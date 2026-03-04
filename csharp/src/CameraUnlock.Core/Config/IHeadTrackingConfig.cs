@@ -40,5 +40,8 @@ namespace CameraUnlock.Core.Config
         /// Returns array of 4 floats: [R, G, B, A].
         /// </summary>
         float[] ReticleColorRgba { get; }
+
+        /// <summary>Smoothing factor (0.0 = none, 1.0 = maximum). Higher values add latency.</summary>
+        float Smoothing { get; }
     }
 }
