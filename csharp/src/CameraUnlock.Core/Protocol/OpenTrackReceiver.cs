@@ -131,6 +131,19 @@ namespace CameraUnlock.Core.Protocol
         }
 
         /// <summary>
+        /// Gets raw pose with timestamp, without any offset applied.
+        /// Used by PoseInterpolator to detect new vs stale samples.
+        /// </summary>
+        public TrackingPose GetRawPose()
+        {
+            float yaw = _rotationYaw;
+            float pitch = _rotationPitch;
+            float roll = _rotationRoll;
+            long timestamp = Interlocked.Read(ref _timestampTicks);
+            return new TrackingPose(yaw, pitch, roll, timestamp);
+        }
+
+        /// <summary>
         /// Gets raw rotation values without offset or transformation applied.
         /// </summary>
         public void GetRawRotation(out float yaw, out float pitch, out float roll)
