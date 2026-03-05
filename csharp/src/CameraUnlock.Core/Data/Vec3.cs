@@ -98,6 +98,15 @@ namespace CameraUnlock.Core.Data
 #if !NET35 && !NET40
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
 #endif
+        public static Vec3 Lerp(Vec3 a, Vec3 b, float t) => new Vec3(
+            a.X + (b.X - a.X) * t,
+            a.Y + (b.Y - a.Y) * t,
+            a.Z + (b.Z - a.Z) * t
+        );
+
+#if !NET35 && !NET40
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#endif
         public static Vec3 Cross(Vec3 a, Vec3 b) => new Vec3(
             a.Y * b.Z - a.Z * b.Y,
             a.Z * b.X - a.X * b.Z,

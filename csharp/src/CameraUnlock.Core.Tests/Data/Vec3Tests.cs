@@ -175,6 +175,39 @@ namespace CameraUnlock.Core.Tests.Data
         }
 
         [Fact]
+        public void Lerp_T0_ReturnsA()
+        {
+            var a = new Vec3(1f, 2f, 3f);
+            var b = new Vec3(4f, 5f, 6f);
+            Vec3 r = Vec3.Lerp(a, b, 0f);
+            Assert.Equal(1f, r.X);
+            Assert.Equal(2f, r.Y);
+            Assert.Equal(3f, r.Z);
+        }
+
+        [Fact]
+        public void Lerp_T1_ReturnsB()
+        {
+            var a = new Vec3(1f, 2f, 3f);
+            var b = new Vec3(4f, 5f, 6f);
+            Vec3 r = Vec3.Lerp(a, b, 1f);
+            Assert.Equal(4f, r.X);
+            Assert.Equal(5f, r.Y);
+            Assert.Equal(6f, r.Z);
+        }
+
+        [Fact]
+        public void Lerp_Midpoint_ReturnsAverage()
+        {
+            var a = new Vec3(0f, 0f, 0f);
+            var b = new Vec3(10f, 20f, 30f);
+            Vec3 r = Vec3.Lerp(a, b, 0.5f);
+            Assert.Equal(5f, r.X, precision: 5);
+            Assert.Equal(10f, r.Y, precision: 5);
+            Assert.Equal(15f, r.Z, precision: 5);
+        }
+
+        [Fact]
         public void ToString_FormatsCorrectly()
         {
             var v = new Vec3(1.234f, 2.345f, 3.456f);

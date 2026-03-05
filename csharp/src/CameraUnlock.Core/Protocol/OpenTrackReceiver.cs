@@ -41,10 +41,18 @@ namespace CameraUnlock.Core.Protocol
         private long _timestampTicks;
         private volatile bool _isRemoteConnection;
 
+        // Position data (meters)
+        private volatile float _positionX;
+        private volatile float _positionY;
+        private volatile float _positionZ;
+
         // Recenter offset
         private float _offsetYaw;
         private float _offsetPitch;
         private float _offsetRoll;
+        private float _offsetX;
+        private float _offsetY;
+        private float _offsetZ;
         private readonly object _offsetLock = new object();
 
         // Optional coordinate transformer
@@ -197,6 +205,31 @@ namespace CameraUnlock.Core.Protocol
         }
 
         /// <summary>
+        /// Gets the latest position with recenter offset applied.
+        /// </summary>
+        public PositionData GetLatestPosition()
+        {
+            float x = _positionX;
+            float y = _positionY;
+            float z = _positionZ;
+            long timestamp = Interlocked.Read(ref _timestampTicks);
+
+            Monitor.Enter(_offsetLock);
+            try
+            {
+                x -= _offsetX;
+                y -= _offsetY;
+                z -= _offsetZ;
+            }
+            finally
+            {
+                Monitor.Exit(_offsetLock);
+            }
+
+            return new PositionData(x, y, z, timestamp);
+        }
+
+        /// <summary>
         /// Checks if the latest data is fresh (received within maxAgeMs milliseconds).
         /// More reliable than IsReceiving for detecting stale data.
         /// </summary>
@@ -221,6 +254,9 @@ namespace CameraUnlock.Core.Protocol
                 _offsetYaw = _rotationYaw;
                 _offsetPitch = _rotationPitch;
                 _offsetRoll = _rotationRoll;
+                _offsetX = _positionX;
+                _offsetY = _positionY;
+                _offsetZ = _positionZ;
             }
             finally
             {
@@ -240,6 +276,9 @@ namespace CameraUnlock.Core.Protocol
                 _offsetYaw = 0;
                 _offsetPitch = 0;
                 _offsetRoll = 0;
+                _offsetX = 0;
+                _offsetY = 0;
+                _offsetZ = 0;
             }
             finally
             {
@@ -267,6 +306,13 @@ namespace CameraUnlock.Core.Protocol
                             _rotationPitch = parsed.Pitch;
                             _rotationRoll = parsed.Roll;
                             Interlocked.Exchange(ref _timestampTicks, Stopwatch.GetTimestamp());
+                        }
+
+                        if (OpenTrackPacket.TryParsePosition(data, out PositionData positionParsed))
+                        {
+                            _positionX = positionParsed.X;
+                            _positionY = positionParsed.Y;
+                            _positionZ = positionParsed.Z;
                         }
 
                         _isRemoteConnection = !IPAddress.IsLoopback(remoteEndpoint.Address);

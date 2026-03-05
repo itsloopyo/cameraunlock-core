@@ -14,6 +14,15 @@ namespace CameraUnlock.Core.Protocol
         /// <summary>Minimum packet size (6 doubles = 48 bytes).</summary>
         public const int MinPacketSize = 48;
 
+        /// <summary>Byte offset of X position in the packet.</summary>
+        public const int XOffset = 0;
+
+        /// <summary>Byte offset of Y position in the packet.</summary>
+        public const int YOffset = 8;
+
+        /// <summary>Byte offset of Z position in the packet.</summary>
+        public const int ZOffset = 16;
+
         /// <summary>Byte offset of yaw in the packet.</summary>
         public const int YawOffset = 24;
 
@@ -22,6 +31,9 @@ namespace CameraUnlock.Core.Protocol
 
         /// <summary>Byte offset of roll in the packet.</summary>
         public const int RollOffset = 40;
+
+        /// <summary>Conversion factor from centimeters (OpenTrack default) to meters.</summary>
+        public const float CmToMeters = 0.01f;
 
         /// <summary>
         /// Attempts to parse an OpenTrack packet.
@@ -54,6 +66,37 @@ namespace CameraUnlock.Core.Protocol
             return true;
         }
 
+        /// <summary>
+        /// Attempts to parse position data (X/Y/Z) from an OpenTrack packet.
+        /// Converts from centimeters to meters.
+        /// </summary>
+        /// <param name="data">Raw packet data.</param>
+        /// <param name="position">Parsed position data if successful.</param>
+        /// <returns>True if parsing succeeded.</returns>
+        public static bool TryParsePosition(byte[] data, out PositionData position)
+        {
+            position = default;
+
+            if (data == null || data.Length < MinPacketSize)
+            {
+                return false;
+            }
+
+            double x = BitConverter.ToDouble(data, XOffset);
+            double y = BitConverter.ToDouble(data, YOffset);
+            double z = BitConverter.ToDouble(data, ZOffset);
+
+            if (double.IsNaN(x) || double.IsInfinity(x) ||
+                double.IsNaN(y) || double.IsInfinity(y) ||
+                double.IsNaN(z) || double.IsInfinity(z))
+            {
+                return false;
+            }
+
+            position = new PositionData((float)x * CmToMeters, (float)y * CmToMeters, (float)z * CmToMeters);
+            return true;
+        }
+
 #if NETSTANDARD2_1_OR_GREATER || NET5_0_OR_GREATER
         /// <summary>
         /// Attempts to parse an OpenTrack packet from a span.
@@ -79,6 +122,34 @@ namespace CameraUnlock.Core.Protocol
             }
 
             pose = new TrackingPose((float)yaw, (float)pitch, (float)roll);
+            return true;
+        }
+
+        /// <summary>
+        /// Attempts to parse position data (X/Y/Z) from an OpenTrack packet span.
+        /// Converts from centimeters to meters.
+        /// </summary>
+        public static bool TryParsePosition(ReadOnlySpan<byte> data, out PositionData position)
+        {
+            position = default;
+
+            if (data.Length < MinPacketSize)
+            {
+                return false;
+            }
+
+            double x = BitConverter.ToDouble(data.Slice(XOffset, 8));
+            double y = BitConverter.ToDouble(data.Slice(YOffset, 8));
+            double z = BitConverter.ToDouble(data.Slice(ZOffset, 8));
+
+            if (double.IsNaN(x) || double.IsInfinity(x) ||
+                double.IsNaN(y) || double.IsInfinity(y) ||
+                double.IsNaN(z) || double.IsInfinity(z))
+            {
+                return false;
+            }
+
+            position = new PositionData((float)x * CmToMeters, (float)y * CmToMeters, (float)z * CmToMeters);
             return true;
         }
 #endif
