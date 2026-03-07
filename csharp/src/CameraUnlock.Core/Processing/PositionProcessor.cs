@@ -29,10 +29,10 @@ namespace CameraUnlock.Core.Processing
         /// an arc, injecting phantom translation into the position data. This value
         /// is used to compute and subtract that artifact so only genuine leaning
         /// translation remains.
-        /// Default: 0.15m (typical face center to neck base distance).
+        /// Default: 0.01m (small residual after face-tracking calibration).
         /// Set to 0 to disable pivot compensation.
         /// </summary>
-        public float TrackerPivotForward { get; set; } = 0.15f;
+        public float TrackerPivotForward { get; set; } = 0.01f;
 
         /// <summary>
         /// Processes a raw position through the full pipeline.
