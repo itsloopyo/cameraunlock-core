@@ -102,6 +102,10 @@ $Script:GameConfigs = @{
         EnvVar = 'FIREWATCH_PATH'
         SteamFolder = 'Firewatch'
         Executable = 'Firewatch.exe'
+        DataFolder = 'Firewatch_Data'
+        XboxPaths = @(
+            'C:\XboxGames\Firewatch\Content'
+        )
     }
     'GreenLight' = @{
         EnvVar = 'GREENLIGHT_PATH'
@@ -324,6 +328,15 @@ function Find-GamePath {
     # Priority 4: Epic Games paths
     if ($Config.ContainsKey('EpicPaths') -and $Config.EpicPaths) {
         foreach ($path in $Config.EpicPaths) {
+            if (Test-GameInstallation -Path $path -Executable $executable) {
+                return $path
+            }
+        }
+    }
+
+    # Priority 5: Xbox/Microsoft Store paths
+    if ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths) {
+        foreach ($path in $Config.XboxPaths) {
             if (Test-GameInstallation -Path $path -Executable $executable) {
                 return $path
             }
