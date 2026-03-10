@@ -115,7 +115,7 @@ foreach ($doc in $docFiles) {
 Write-Host ""
 
 # Create ZIP archive
-$zipName = "$ModName-v$version.zip"
+$zipName = "$ModName-v$version-installer.zip"
 $zipPath = Join-Path $releaseDir $zipName
 
 if (Test-Path $zipPath) {
