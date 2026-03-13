@@ -35,6 +35,8 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         // Hotkey settings
         public ConfigEntry<KeyCode> RecenterKey { get; private set; }
         public ConfigEntry<KeyCode> ToggleKey { get; private set; }
+        public ConfigEntry<KeyCode> PositionToggleKey { get; private set; }
+        public ConfigEntry<KeyCode> ReticleToggleKey { get; private set; }
 
         // Aim decoupling settings
         public ConfigEntry<bool> EnableAimDecoupling { get; private set; }
@@ -79,6 +81,16 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         /// Default toggle hotkey.
         /// </summary>
         protected virtual KeyCode DefaultToggleKey => KeyCode.End;
+
+        /// <summary>
+        /// Default position toggle hotkey.
+        /// </summary>
+        protected virtual KeyCode DefaultPositionToggleKey => KeyCode.PageUp;
+
+        /// <summary>
+        /// Default reticle toggle hotkey.
+        /// </summary>
+        protected virtual KeyCode DefaultReticleToggleKey => KeyCode.Insert;
 
         /// <summary>
         /// Whether aim decoupling is enabled by default.
@@ -185,6 +197,20 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
                 "ToggleKey",
                 DefaultToggleKey,
                 "Key to toggle head tracking on/off"
+            );
+
+            PositionToggleKey = config.Bind(
+                "Hotkeys",
+                "PositionToggleKey",
+                DefaultPositionToggleKey,
+                "Key to toggle position (6DOF) tracking on/off"
+            );
+
+            ReticleToggleKey = config.Bind(
+                "Hotkeys",
+                "ReticleToggleKey",
+                DefaultReticleToggleKey,
+                "Key to toggle the decoupled aim reticle on/off"
             );
 
             // Aim decoupling section
