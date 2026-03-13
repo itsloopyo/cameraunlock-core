@@ -11,10 +11,9 @@ namespace CameraUnlock.Core.Processing
         /// Processes a raw tracking pose through the full pipeline.
         /// </summary>
         /// <param name="rawPose">Raw pose from the tracking source.</param>
-        /// <param name="isRemoteConnection">True if data is from a remote source.</param>
         /// <param name="deltaTime">Time since last frame in seconds.</param>
         /// <returns>Processed tracking pose.</returns>
-        TrackingPose Process(TrackingPose rawPose, bool isRemoteConnection, float deltaTime);
+        TrackingPose Process(TrackingPose rawPose, float deltaTime);
 
         /// <summary>
         /// Resets the processor state.

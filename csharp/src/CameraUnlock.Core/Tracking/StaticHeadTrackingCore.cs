@@ -153,9 +153,7 @@ namespace CameraUnlock.Core.Tracking
             {
                 _hasAutoRecentered = true;
                 _receiver.Recenter();
-                _log?.Invoke(_receiver.IsRemoteConnection
-                    ? "Remote connection detected - using smoothing, auto-recentered"
-                    : "Local connection detected - no smoothing, auto-recentered");
+                _log?.Invoke("Auto-recentered on first connection");
             }
 
             return true;
@@ -174,7 +172,7 @@ namespace CameraUnlock.Core.Tracking
             }
 
             TrackingPose rawPose = _receiver.GetLatestPose();
-            return _processor.Process(rawPose, _receiver.IsRemoteConnection, deltaTime);
+            return _processor.Process(rawPose, deltaTime);
         }
 
         /// <summary>

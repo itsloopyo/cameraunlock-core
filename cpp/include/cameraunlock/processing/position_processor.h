@@ -31,7 +31,7 @@ public:
 
     /// Processes a raw position through the full pipeline.
     math::Vec3 Process(const PositionData& raw, const math::Quat4& processed_rotation_q,
-                       bool is_remote, float delta_time) {
+                       float delta_time) {
         if (!raw.IsValid()) {
             return math::Vec3::Zero();
         }
@@ -59,7 +59,7 @@ public:
 
         // Step 3: Exponential smoothing on tracker position
         float effective_smoothing = static_cast<float>(
-            math::GetEffectiveSmoothing(m_settings.smoothing, is_remote));
+            math::GetEffectiveSmoothing(m_settings.smoothing));
 
         if (!m_hasSmoothedValue) {
             m_smoothedPosition = scaled;

@@ -20,7 +20,7 @@ namespace CameraUnlock.Core.Tests.Processing
             var proc = new PositionProcessor();
             var invalid = new PositionData(1f, 2f, 3f, 0);
 
-            Vec3 result = proc.Process(invalid, Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(invalid, Quat4.Identity, DeltaTime);
 
             Assert.Equal(0f, result.X);
             Assert.Equal(0f, result.Y);
@@ -35,7 +35,7 @@ namespace CameraUnlock.Core.Tests.Processing
                 NeckModelSettings = NeckModelSettings.Disabled
             };
 
-            Vec3 result = proc.Process(MakePos(0f, 0f, 0f), Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0f, 0f, 0f), Quat4.Identity, DeltaTime);
 
             Assert.Equal(0f, result.X, precision: 5);
             Assert.Equal(0f, result.Y, precision: 5);
@@ -55,7 +55,7 @@ namespace CameraUnlock.Core.Tests.Processing
             proc.SetCenter(MakePos(0.05f, 0.03f, 0.02f));
 
             // Input at (0.10, 0.06, 0.04) should produce (0.05, 0.03, 0.02)
-            Vec3 result = proc.Process(MakePos(0.10f, 0.06f, 0.04f), Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0.10f, 0.06f, 0.04f), Quat4.Identity, DeltaTime);
 
             Assert.Equal(0.05f, result.X, precision: 4);
             Assert.Equal(0.03f, result.Y, precision: 4);
@@ -71,7 +71,7 @@ namespace CameraUnlock.Core.Tests.Processing
                 NeckModelSettings = NeckModelSettings.Disabled
             };
 
-            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, DeltaTime);
 
             Assert.Equal(0.20f, result.X, precision: 4);
             Assert.Equal(0.05f, result.Y, precision: 4);
@@ -87,7 +87,7 @@ namespace CameraUnlock.Core.Tests.Processing
                 NeckModelSettings = NeckModelSettings.Disabled
             };
 
-            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, DeltaTime);
 
             Assert.Equal(-0.10f, result.X, precision: 4);
             Assert.Equal(0.10f, result.Y, precision: 4);
@@ -104,7 +104,7 @@ namespace CameraUnlock.Core.Tests.Processing
             };
 
             // Input well beyond limits
-            Vec3 result = proc.Process(MakePos(0.50f, -0.50f, 0.50f), Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0.50f, -0.50f, 0.50f), Quat4.Identity, DeltaTime);
 
             Assert.Equal(0.05f, result.X, precision: 5);
             Assert.Equal(-0.03f, result.Y, precision: 5);
@@ -121,7 +121,7 @@ namespace CameraUnlock.Core.Tests.Processing
             };
 
             // Negative values should be clamped to -limit
-            Vec3 result = proc.Process(MakePos(-0.50f, -0.50f, -0.50f), Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(-0.50f, -0.50f, -0.50f), Quat4.Identity, DeltaTime);
 
             Assert.Equal(-0.10f, result.X, precision: 5);
             Assert.Equal(-0.10f, result.Y, precision: 5);
@@ -141,7 +141,7 @@ namespace CameraUnlock.Core.Tests.Processing
             Vec3 result = Vec3.Zero;
             for (int i = 0; i < 300; i++)
             {
-                result = proc.Process(MakePos(0.10f, 0.05f, 0.08f), Quat4.Identity, false, DeltaTime);
+                result = proc.Process(MakePos(0.10f, 0.05f, 0.08f), Quat4.Identity, DeltaTime);
             }
 
             // After 300 frames at 60Hz (5 seconds), should converge
@@ -161,7 +161,7 @@ namespace CameraUnlock.Core.Tests.Processing
 
             // Zero tracker position, but rotation produces neck model offset
             Quat4 rotation = QuaternionUtils.FromYawPitchRoll(30f, 0f, 0f);
-            Vec3 result = proc.Process(MakePos(0f, 0f, 0f), rotation, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0f, 0f, 0f), rotation, DeltaTime);
 
             // Neck model should produce non-zero offset
             Assert.True(System.Math.Abs(result.X) > 0.001f || System.Math.Abs(result.Z) > 0.001f,
@@ -179,7 +179,7 @@ namespace CameraUnlock.Core.Tests.Processing
 
             // Large rotation + position should be clamped
             Quat4 rotation = QuaternionUtils.FromYawPitchRoll(45f, 0f, 0f);
-            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), rotation, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), rotation, DeltaTime);
 
             // All components should be within [-0.02, 0.02]
             Assert.True(result.X >= -0.02f && result.X <= 0.02f,
@@ -200,12 +200,12 @@ namespace CameraUnlock.Core.Tests.Processing
             };
 
             proc.SetCenter(MakePos(0.05f, 0.05f, 0.05f));
-            proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, false, DeltaTime);
+            proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, DeltaTime);
 
             proc.Reset();
 
             // After reset, center should be zero — same input should give raw values
-            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, DeltaTime);
             Assert.Equal(0.10f, result.X, precision: 4);
             Assert.Equal(0.10f, result.Y, precision: 4);
             Assert.Equal(0.10f, result.Z, precision: 4);
@@ -221,12 +221,12 @@ namespace CameraUnlock.Core.Tests.Processing
             };
 
             proc.SetCenter(MakePos(0.05f, 0.05f, 0.05f));
-            proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, false, DeltaTime);
+            proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, DeltaTime);
 
             proc.ResetSmoothing();
 
             // Center should still be subtracted; first frame after reset should snap to target
-            Vec3 result = proc.Process(MakePos(0.15f, 0.15f, 0.15f), Quat4.Identity, false, DeltaTime);
+            Vec3 result = proc.Process(MakePos(0.15f, 0.15f, 0.15f), Quat4.Identity, DeltaTime);
             Assert.Equal(0.10f, result.X, precision: 4);
             Assert.Equal(0.10f, result.Y, precision: 4);
             Assert.Equal(0.10f, result.Z, precision: 4);

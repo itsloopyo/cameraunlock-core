@@ -59,20 +59,6 @@ namespace CameraUnlock.Core.Processing
         }
 
         /// <summary>
-        /// Convenience overload that handles remote-connection baseline automatically.
-        /// Local connections (isRemoteConnection=false) snap to target with no smoothing.
-        /// Remote connections use <see cref="SmoothingUtils.RemoteConnectionBaseline"/>.
-        /// </summary>
-        public void Update(float yaw, float pitch, float roll,
-            float smoothing, bool isRemoteConnection, float deltaTime,
-            out float smoothedYaw, out float smoothedPitch, out float smoothedRoll)
-        {
-            float effective = SmoothingUtils.GetEffectiveSmoothing(smoothing, isRemoteConnection);
-            Update(yaw, pitch, roll, effective, deltaTime,
-                out smoothedYaw, out smoothedPitch, out smoothedRoll);
-        }
-
-        /// <summary>
         /// Clears interpolation state. Next <see cref="Update"/> will initialize from scratch.
         /// </summary>
         public void Reset()

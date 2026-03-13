@@ -5,11 +5,10 @@
 namespace cameraunlock {
 namespace math {
 
-/// Baseline smoothing factor for remote (non-localhost) connections.
-/// This compensates for network jitter and latency variations.
-/// Must match RemoteConnectionBaseline in C# SmoothingUtils.cs.
+/// Minimum smoothing floor applied to all connections.
+/// Must match BaselineSmoothing in C# SmoothingUtils.cs.
 /// 0.15 gives ~40% per frame at 60fps, settling in ~100-150ms.
-constexpr double kRemoteConnectionBaseline = 0.15;
+constexpr double kBaselineSmoothing = 0.15;
 
 /// Linear interpolation.
 inline double Lerp(double a, double b, double t) {
@@ -54,10 +53,10 @@ inline float Smooth(float current, float target, float smoothing, float delta_ti
     return current + (target - current) * t;
 }
 
-/// Gets the effective smoothing factor, applying baseline for remote connections.
-inline double GetEffectiveSmoothing(double base_smoothing, bool is_remote_connection) {
-    if (is_remote_connection && base_smoothing < kRemoteConnectionBaseline) {
-        return kRemoteConnectionBaseline;
+/// Gets the effective smoothing factor, ensuring the baseline floor is always applied.
+inline double GetEffectiveSmoothing(double base_smoothing) {
+    if (base_smoothing < kBaselineSmoothing) {
+        return kBaselineSmoothing;
     }
     return base_smoothing;
 }

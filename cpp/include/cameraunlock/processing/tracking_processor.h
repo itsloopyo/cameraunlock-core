@@ -15,10 +15,9 @@ public:
     /// @param yaw Raw yaw in degrees.
     /// @param pitch Raw pitch in degrees.
     /// @param roll Raw roll in degrees.
-    /// @param is_remote_connection True if data is from a remote source.
     /// @param delta_time Time since last frame in seconds.
     /// @return Processed pose.
-    TrackingPose Process(float yaw, float pitch, float roll, bool is_remote_connection, float delta_time);
+    TrackingPose Process(float yaw, float pitch, float roll, float delta_time);
 
     /// Sets the current smoothed pose as the center.
     void Recenter();

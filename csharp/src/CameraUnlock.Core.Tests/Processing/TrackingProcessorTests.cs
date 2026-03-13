@@ -32,7 +32,7 @@ namespace CameraUnlock.Core.Tests.Processing
             var processor = new TrackingProcessor();
             var invalidPose = new TrackingPose(10f, 20f, 30f, 0);
 
-            TrackingPose result = processor.Process(invalidPose, false, DeltaTime);
+            TrackingPose result = processor.Process(invalidPose, DeltaTime);
 
             Assert.Equal(10f, result.Yaw);
             Assert.Equal(20f, result.Pitch);
@@ -46,7 +46,7 @@ namespace CameraUnlock.Core.Tests.Processing
             long timestamp = Stopwatch.GetTimestamp();
             var pose = new TrackingPose(10f, 20f, 15f, timestamp);
 
-            TrackingPose result = processor.Process(pose, false, DeltaTime);
+            TrackingPose result = processor.Process(pose, DeltaTime);
 
             Assert.Equal(10f, result.Yaw, precision: 4);
             Assert.Equal(20f, result.Pitch, precision: 4);
@@ -63,7 +63,7 @@ namespace CameraUnlock.Core.Tests.Processing
             long timestamp = Stopwatch.GetTimestamp();
             var pose = new TrackingPose(10f, 20f, 15f, timestamp);
 
-            TrackingPose result = processor.Process(pose, false, DeltaTime);
+            TrackingPose result = processor.Process(pose, DeltaTime);
 
             Assert.Equal(20f, result.Yaw, precision: 4);
             Assert.Equal(10f, result.Pitch, precision: 4);
@@ -80,7 +80,7 @@ namespace CameraUnlock.Core.Tests.Processing
             long timestamp = Stopwatch.GetTimestamp();
             var pose = new TrackingPose(10f, 20f, 15f, timestamp);
 
-            TrackingPose result = processor.Process(pose, false, DeltaTime);
+            TrackingPose result = processor.Process(pose, DeltaTime);
 
             Assert.Equal(-10f, result.Yaw, precision: 4);
             Assert.Equal(-20f, result.Pitch, precision: 4);
@@ -97,7 +97,7 @@ namespace CameraUnlock.Core.Tests.Processing
             long timestamp = Stopwatch.GetTimestamp();
             var pose = new TrackingPose(3f, 10f, 6f, timestamp);
 
-            TrackingPose result = processor.Process(pose, false, DeltaTime);
+            TrackingPose result = processor.Process(pose, DeltaTime);
 
             Assert.Equal(0f, result.Yaw, precision: 4);
             Assert.Equal(5f, result.Pitch, precision: 4);
@@ -114,7 +114,7 @@ namespace CameraUnlock.Core.Tests.Processing
             long timestamp = Stopwatch.GetTimestamp();
             var pose = new TrackingPose(30f, 15f, 5f, timestamp);
 
-            TrackingPose result = processor.Process(pose, false, DeltaTime);
+            TrackingPose result = processor.Process(pose, DeltaTime);
 
             Assert.Equal(20f, result.Yaw, precision: 3);
             Assert.Equal(15f, result.Pitch, precision: 3);
@@ -128,7 +128,7 @@ namespace CameraUnlock.Core.Tests.Processing
             long timestamp = Stopwatch.GetTimestamp();
             var pose = new TrackingPose(10f, 20f, 30f, timestamp);
 
-            processor.Process(pose, false, DeltaTime);
+            processor.Process(pose, DeltaTime);
             processor.GetSmoothedRotation(out float yaw, out float pitch, out float roll);
 
             Assert.True(yaw >= 0);
@@ -141,7 +141,7 @@ namespace CameraUnlock.Core.Tests.Processing
             long timestamp = Stopwatch.GetTimestamp();
             var pose = new TrackingPose(10f, 20f, 30f, timestamp);
 
-            processor.Process(pose, false, DeltaTime);
+            processor.Process(pose, DeltaTime);
             processor.Recenter();
 
             Assert.True(processor.CenterManager.HasValidCenter);
@@ -170,7 +170,7 @@ namespace CameraUnlock.Core.Tests.Processing
             // Input at 80° yaw + 15° pitch — relative is ~15° pitch only
             var pose = new TrackingPose(80f, 15f, 0f, timestamp);
 
-            TrackingPose result = processor.Process(pose, false, DeltaTime);
+            TrackingPose result = processor.Process(pose, DeltaTime);
 
             // The key assertion: roll should be near zero, not contaminated by cross-axis leakage
             Assert.True(System.Math.Abs(result.Roll) < 2f,
@@ -186,7 +186,7 @@ namespace CameraUnlock.Core.Tests.Processing
             long timestamp = Stopwatch.GetTimestamp();
             var pose = new TrackingPose(10f, 20f, 30f, timestamp);
 
-            processor.Process(pose, false, DeltaTime);
+            processor.Process(pose, DeltaTime);
             processor.CenterManager.SetCenter(5f, 5f, 5f);
             processor.Reset();
 

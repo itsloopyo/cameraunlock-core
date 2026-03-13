@@ -5,7 +5,7 @@
 
 namespace cameraunlock {
 
-TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, bool is_remote_connection, float delta_time) {
+TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, float delta_time) {
     // Step 1: Apply center offset
     m_centerManager.ApplyOffset(yaw, pitch, roll);
 
@@ -15,7 +15,7 @@ TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, bool
     roll = static_cast<float>(math::ApplyDeadzone(roll, m_deadzone.roll));
 
     // Step 3: Apply smoothing
-    double effective_smoothing = math::GetEffectiveSmoothing(m_smoothingFactor, is_remote_connection);
+    double effective_smoothing = math::GetEffectiveSmoothing(m_smoothingFactor);
 
     if (!m_hasSmoothedValue) {
         // First frame, snap to target

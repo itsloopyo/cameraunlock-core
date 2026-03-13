@@ -22,21 +22,6 @@ namespace CameraUnlock.Core.Unity.Extensions
         }
 
         /// <summary>
-        /// Smooths a rotation with remote connection handling.
-        /// Applies minimum baseline smoothing for remote connections.
-        /// </summary>
-        /// <param name="current">Current smoothed rotation.</param>
-        /// <param name="target">Target rotation to smooth towards.</param>
-        /// <param name="smoothing">Smoothing factor 0-1.</param>
-        /// <param name="isRemoteConnection">True if tracking data is from a remote source.</param>
-        /// <returns>New smoothed rotation.</returns>
-        public static Quaternion SmoothRotation(Quaternion current, Quaternion target, float smoothing, bool isRemoteConnection)
-        {
-            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(smoothing, isRemoteConnection);
-            return SmoothRotation(current, target, effectiveSmoothing);
-        }
-
-        /// <summary>
         /// Smooths a Vector3 value (e.g., Euler angles or position).
         /// </summary>
         /// <param name="current">Current smoothed value.</param>
@@ -85,13 +70,5 @@ namespace CameraUnlock.Core.Unity.Extensions
             return SmoothingUtils.CalculateSmoothingFactor(smoothing, Time.deltaTime);
         }
 
-        /// <summary>
-        /// Gets the smoothing interpolation factor with remote connection handling.
-        /// </summary>
-        public static float GetSmoothingT(float smoothing, bool isRemoteConnection)
-        {
-            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(smoothing, isRemoteConnection);
-            return SmoothingUtils.CalculateSmoothingFactor(effectiveSmoothing, Time.deltaTime);
-        }
     }
 }

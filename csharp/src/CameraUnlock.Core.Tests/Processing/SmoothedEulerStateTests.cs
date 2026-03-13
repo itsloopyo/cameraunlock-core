@@ -126,37 +126,21 @@ namespace CameraUnlock.Core.Tests.Processing
         }
 
         [Fact]
-        public void Update_RemoteConvenience_LocalConnection_SnapsToTarget()
+        public void Update_BaselineSmoothing_AlwaysApplied()
         {
+            // Baseline smoothing (0.15) means smoothing=0 still interpolates
             var state = new SmoothedEulerState();
 
-            // Initialize at 0 (first frame)
-            state.Update(0f, 0f, 0f, 0f, false, DeltaTime,
+            // Initialize at 0
+            state.Update(0f, 0f, 0f, SmoothingUtils.BaselineSmoothing, DeltaTime,
                 out _, out _, out _);
 
-            // Second call as local — smoothing=0, isRemote=false → effective=0 → snap
-            state.Update(20f, 0f, 0f, 0f, false, DeltaTime,
+            // Second frame: baseline floor should prevent instant snap
+            state.Update(30f, 0f, 0f, SmoothingUtils.BaselineSmoothing, DeltaTime,
                 out float yaw, out _, out _);
 
-            Assert.Equal(20f, yaw, precision: 5);
-        }
-
-        [Fact]
-        public void Update_RemoteConvenience_RemoteConnection_AppliesBaseline()
-        {
-            var state = new SmoothedEulerState();
-
-            // Initialize at 0 with remote connection
-            state.Update(0f, 0f, 0f, 0f, true, DeltaTime,
-                out _, out _, out _);
-
-            // Second frame: remote with smoothing=0 → baseline applied → should interpolate
-            state.Update(30f, 0f, 0f, 0f, true, DeltaTime,
-                out float yaw, out _, out _);
-
-            // With remote baseline, should move toward 30 but not reach it
             Assert.True(yaw > 0f, "Should have moved toward target");
-            Assert.True(yaw < 30f, "Remote baseline should prevent instant snap");
+            Assert.True(yaw < 30f, "Baseline smoothing should prevent instant snap");
         }
 
         [Fact]

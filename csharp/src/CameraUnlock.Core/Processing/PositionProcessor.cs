@@ -39,10 +39,9 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         /// <param name="raw">Raw position data from the tracker.</param>
         /// <param name="processedRotationQ">Already-processed head rotation quaternion (for neck model).</param>
-        /// <param name="isRemote">Whether the data source is remote (for smoothing baseline).</param>
         /// <param name="deltaTime">Frame delta time in seconds.</param>
         /// <returns>Final position offset in meters, box-clamped.</returns>
-        public Vec3 Process(PositionData raw, Quat4 processedRotationQ, bool isRemote, float deltaTime)
+        public Vec3 Process(PositionData raw, Quat4 processedRotationQ, float deltaTime)
         {
             if (!raw.IsValid)
             {
@@ -76,7 +75,7 @@ namespace CameraUnlock.Core.Processing
             Vec3 scaled = new Vec3(x, y, z);
 
             // Step 3: Exponential smoothing on tracker position
-            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(Settings.Smoothing, isRemote);
+            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(Settings.Smoothing);
 
             if (!_hasSmoothedValue)
             {

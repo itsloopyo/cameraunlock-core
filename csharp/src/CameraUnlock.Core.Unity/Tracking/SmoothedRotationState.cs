@@ -6,7 +6,7 @@ namespace CameraUnlock.Core.Unity.Tracking
 {
     /// <summary>
     /// Manages smoothed rotation state for camera tracking.
-    /// Handles the common pattern of smoothing with remote connection baseline.
+    /// Applies baseline smoothing floor automatically.
     /// </summary>
     public class SmoothedRotationState
     {
@@ -25,16 +25,14 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         /// <summary>
         /// Updates the smoothed rotation towards a target.
-        /// Applies automatic smoothing for remote connections.
+        /// Applies baseline smoothing floor automatically.
         /// </summary>
         /// <param name="target">Target rotation to smooth towards.</param>
         /// <param name="smoothing">User-configured smoothing (0=instant).</param>
-        /// <param name="isRemoteConnection">True if data is from a remote source (phone app).</param>
         /// <returns>The new smoothed rotation.</returns>
-        public Quaternion Update(Quaternion target, float smoothing, bool isRemoteConnection)
+        public Quaternion Update(Quaternion target, float smoothing)
         {
-            // Get effective smoothing (applies remote baseline if needed)
-            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(smoothing, isRemoteConnection);
+            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(smoothing);
 
             // First update - initialize directly
             if (!_initialized)
@@ -59,17 +57,6 @@ namespace CameraUnlock.Core.Unity.Tracking
             );
 
             return _smoothedRotation;
-        }
-
-        /// <summary>
-        /// Updates the smoothed rotation towards a target with fixed smoothing.
-        /// </summary>
-        /// <param name="target">Target rotation to smooth towards.</param>
-        /// <param name="smoothing">Smoothing factor (0=instant, 1=very slow).</param>
-        /// <returns>The new smoothed rotation.</returns>
-        public Quaternion Update(Quaternion target, float smoothing)
-        {
-            return Update(target, smoothing, false);
         }
 
         /// <summary>

@@ -22,11 +22,11 @@ namespace CameraUnlock.Core.Math
     public static class SmoothingUtils
     {
         /// <summary>
-        /// Baseline smoothing factor for remote (non-localhost) connections.
-        /// Compensates for network latency jitter.
+        /// Minimum smoothing floor applied to all connections.
         /// 0.15 gives ~40% per frame at 60fps, settling in ~100-150ms.
+        /// Prevents raw tracker jitter from reaching the camera.
         /// </summary>
-        public const float RemoteConnectionBaseline = 0.15f;
+        public const float BaselineSmoothing = 0.15f;
 
         /// <summary>
         /// Maximum interpolation speed (used at smoothing=0). This is the frame interpolation
@@ -91,19 +91,18 @@ namespace CameraUnlock.Core.Math
         }
 
         /// <summary>
-        /// Gets the effective smoothing factor, applying baseline for remote connections.
+        /// Gets the effective smoothing factor, ensuring the baseline floor is always applied.
         /// </summary>
         /// <param name="baseSmoothing">Base smoothing factor from configuration.</param>
-        /// <param name="isRemoteConnection">True if data is from a non-localhost source.</param>
-        /// <returns>Effective smoothing factor to use.</returns>
+        /// <returns>Effective smoothing factor (at least <see cref="BaselineSmoothing"/>).</returns>
 #if !NET35 && !NET40
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
 #endif
-        public static float GetEffectiveSmoothing(float baseSmoothing, bool isRemoteConnection)
+        public static float GetEffectiveSmoothing(float baseSmoothing)
         {
-            if (isRemoteConnection && baseSmoothing < RemoteConnectionBaseline)
+            if (baseSmoothing < BaselineSmoothing)
             {
-                return RemoteConnectionBaseline;
+                return BaselineSmoothing;
             }
             return baseSmoothing;
         }

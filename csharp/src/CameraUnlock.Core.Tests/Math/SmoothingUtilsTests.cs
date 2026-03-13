@@ -103,24 +103,17 @@ namespace CameraUnlock.Core.Tests.Math
         }
 
         [Fact]
-        public void GetEffectiveSmoothing_LocalConnection_ReturnsBaseSmoothing()
+        public void GetEffectiveSmoothing_BelowBaseline_ReturnsBaseline()
         {
-            float result = SmoothingUtils.GetEffectiveSmoothing(0.05f, false);
-            Assert.Equal(0.05f, result);
+            float result = SmoothingUtils.GetEffectiveSmoothing(0.05f);
+            Assert.Equal(SmoothingUtils.BaselineSmoothing, result);
         }
 
         [Fact]
-        public void GetEffectiveSmoothing_RemoteConnection_LowBase_ReturnsBaseline()
-        {
-            float result = SmoothingUtils.GetEffectiveSmoothing(0.05f, true);
-            Assert.Equal(SmoothingUtils.RemoteConnectionBaseline, result);
-        }
-
-        [Fact]
-        public void GetEffectiveSmoothing_RemoteConnection_HighBase_ReturnsBaseSmoothing()
+        public void GetEffectiveSmoothing_AboveBaseline_ReturnsBaseSmoothing()
         {
             float highSmoothing = 0.5f;
-            float result = SmoothingUtils.GetEffectiveSmoothing(highSmoothing, true);
+            float result = SmoothingUtils.GetEffectiveSmoothing(highSmoothing);
             Assert.Equal(highSmoothing, result);
         }
     }

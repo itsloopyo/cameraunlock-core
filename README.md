@@ -67,7 +67,7 @@ processor.Sensitivity = new SensitivitySettings(yaw: 1.0f, pitch: 0.8f, roll: 0.
 processor.SmoothingFactor = 0.3f;
 
 // In game loop:
-var processed = processor.Process(rawPose, isRemoteConnection: false, deltaTime: Time.deltaTime);
+var processed = processor.Process(rawPose, deltaTime: Time.deltaTime);
 ```
 
 ### Aim Decoupling

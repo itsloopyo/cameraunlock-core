@@ -67,7 +67,7 @@ namespace CameraUnlock.Core.Processing
         /// <summary>
         /// Processes a raw tracking pose through the full pipeline.
         /// </summary>
-        public TrackingPose Process(TrackingPose rawPose, bool isRemoteConnection, float deltaTime)
+        public TrackingPose Process(TrackingPose rawPose, float deltaTime)
         {
             if (!rawPose.IsValid)
             {
@@ -86,7 +86,7 @@ namespace CameraUnlock.Core.Processing
             roll = (float)DeadzoneUtils.Apply(roll, Deadzone.Roll);
 
             // Step 3: Per-axis Euler smoothing (no quaternion SLERP — prevents phantom roll)
-            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(SmoothingFactor, isRemoteConnection);
+            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(SmoothingFactor);
 
             if (!_hasSmoothedValue)
             {
