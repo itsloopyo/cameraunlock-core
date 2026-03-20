@@ -237,26 +237,7 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
         public static Vector2 CalculateAimScreenOffset(Camera cam, Vector3 aimDirection)
         {
-            if (cam == null)
-            {
-                throw new ArgumentNullException(nameof(cam));
-            }
-
-            // Project a point along the aim direction to screen coordinates
-            Vector3 aimWorldPoint = cam.transform.position + aimDirection * 100f;
-            Vector3 screenPoint = cam.WorldToScreenPoint(aimWorldPoint);
-
-            float halfWidth = Screen.width * 0.5f;
-            float halfHeight = Screen.height * 0.5f;
-
-            // screenPoint.z > 0 means the point is in front of the camera
-            if (screenPoint.z > 0)
-            {
-                return new Vector2(screenPoint.x - halfWidth, screenPoint.y - halfHeight);
-            }
-
-            // Aim is behind camera - clamp to screen edge
-            return ClampToScreenEdge(aimDirection, cam, halfWidth, halfHeight);
+            return CalculateAimScreenOffsetCore(cam, aimDirection, 100f);
         }
 
         /// <summary>
@@ -270,7 +251,32 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
         public static Vector2 CalculateAimScreenOffset(Camera cam, Vector3 aimDirection, float canvasScaleFactor)
         {
-            Vector2 offset = CalculateAimScreenOffset(cam, aimDirection);
+            Vector2 offset = CalculateAimScreenOffsetCore(cam, aimDirection, 100f);
+
+            if (canvasScaleFactor > 0f && canvasScaleFactor != 1f)
+            {
+                offset.x /= canvasScaleFactor;
+                offset.y /= canvasScaleFactor;
+            }
+
+            return offset;
+        }
+
+        /// <summary>
+        /// Calculates the screen offset for a reticle using Unity's WorldToScreenPoint projection,
+        /// with a specified projection distance and canvas scale factor.
+        /// Use a shorter projection distance when position tracking is active to correctly
+        /// capture position parallax at gameplay distances.
+        /// </summary>
+        /// <param name="cam">The camera (with head tracking already applied).</param>
+        /// <param name="aimDirection">The world-space direction the player is aiming.</param>
+        /// <param name="projectionDistance">Distance along aim direction to project (affects position parallax).</param>
+        /// <param name="canvasScaleFactor">The canvas scale factor (use 1f for raw pixel offset).</param>
+        /// <returns>Screen offset in canvas-scaled units from center.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
+        public static Vector2 CalculateAimScreenOffset(Camera cam, Vector3 aimDirection, float projectionDistance, float canvasScaleFactor)
+        {
+            Vector2 offset = CalculateAimScreenOffsetCore(cam, aimDirection, projectionDistance);
 
             if (canvasScaleFactor > 0f && canvasScaleFactor != 1f)
             {
@@ -354,6 +360,30 @@ namespace CameraUnlock.Core.Unity.Extensions
             }
 
             return offset;
+        }
+
+        private static Vector2 CalculateAimScreenOffsetCore(Camera cam, Vector3 aimDirection, float projectionDistance)
+        {
+            if (cam == null)
+            {
+                throw new ArgumentNullException(nameof(cam));
+            }
+
+            // Project a point along the aim direction to screen coordinates
+            Vector3 aimWorldPoint = cam.transform.position + aimDirection * projectionDistance;
+            Vector3 screenPoint = cam.WorldToScreenPoint(aimWorldPoint);
+
+            float halfWidth = Screen.width * 0.5f;
+            float halfHeight = Screen.height * 0.5f;
+
+            // screenPoint.z > 0 means the point is in front of the camera
+            if (screenPoint.z > 0)
+            {
+                return new Vector2(screenPoint.x - halfWidth, screenPoint.y - halfHeight);
+            }
+
+            // Aim is behind camera - clamp to screen edge
+            return ClampToScreenEdge(aimDirection, cam, halfWidth, halfHeight);
         }
 
         /// <summary>
