@@ -70,6 +70,12 @@ $Script:GameConfigs = @{
         SteamFolder = 'Peak'
         Executable = 'Peak.exe'
     }
+    'Screencheat' = @{
+        EnvVar = 'SCREENCHEAT_PATH'
+        SteamFolder = 'Screencheat'
+        Executable = 'screencheat.exe'
+        DataFolder = 'screencheat_Data'
+    }
     'ShadowsOfDoubt' = @{
         EnvVar = 'SHADOWS_OF_DOUBT_PATH'
         SteamFolder = 'Shadows of Doubt'
@@ -97,6 +103,12 @@ $Script:GameConfigs = @{
         EnvVar = 'WOBBLY_LIFE_PATH'
         SteamFolder = 'Wobbly Life'
         Executable = 'Wobbly Life.exe'
+    }
+    'Zeepkist' = @{
+        EnvVar = 'ZEEPKIST_PATH'
+        SteamFolder = 'Zeepkist'
+        Executable = 'Zeepkist.exe'
+        DataFolder = 'Zeepkist_Data'
     }
     'Firewatch' = @{
         EnvVar = 'FIREWATCH_PATH'
