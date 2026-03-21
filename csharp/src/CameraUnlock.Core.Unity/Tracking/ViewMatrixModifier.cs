@@ -14,6 +14,19 @@ namespace CameraUnlock.Core.Unity.Tracking
     /// </summary>
     public static class ViewMatrixModifier
     {
+#if NET35
+        // Unity 5.x compat: Matrix4x4.Rotate/Translate/rotation don't exist before Unity 2017.1
+        private static Matrix4x4 RotateMatrix(Quaternion q)
+        {
+            return Matrix4x4.TRS(Vector3.zero, q, Vector3.one);
+        }
+
+        private static Matrix4x4 TranslateMatrix(Vector3 v)
+        {
+            return Matrix4x4.TRS(v, Quaternion.identity, Vector3.one);
+        }
+#endif
+
         /// <summary>
         /// Applies head tracking rotation to the camera's view matrix.
         /// Call this from Camera.onPreCull or Camera.onPreRender.
@@ -36,7 +49,11 @@ namespace CameraUnlock.Core.Unity.Tracking
             Matrix4x4 gameViewMatrix = cam.worldToCameraMatrix;
 
             // Create rotation matrix from head tracking
+#if NET35
+            Matrix4x4 headRotMatrix = RotateMatrix(headRotation);
+#else
             Matrix4x4 headRotMatrix = Matrix4x4.Rotate(headRotation);
+#endif
 
             // Apply head tracking: rotate the view in camera space
             // Multiplication order: headRot * gameView means head rotation is applied
@@ -102,8 +119,13 @@ namespace CameraUnlock.Core.Unity.Tracking
 
             // Build view matrix from the final rotation and camera position
             // View matrix = inverse of camera's world transform
+#if NET35
+            Matrix4x4 rotationMatrix = RotateMatrix(Quaternion.Inverse(finalRotation));
+            Matrix4x4 translationMatrix = TranslateMatrix(-cam.transform.position);
+#else
             Matrix4x4 rotationMatrix = Matrix4x4.Rotate(Quaternion.Inverse(finalRotation));
             Matrix4x4 translationMatrix = Matrix4x4.Translate(-cam.transform.position);
+#endif
             Matrix4x4 viewMatrix = rotationMatrix * translationMatrix;
 
             // Unity cameras look down -Z, so flip the Z row
@@ -143,8 +165,13 @@ namespace CameraUnlock.Core.Unity.Tracking
             Vector3 eyeMovement = (headRotation * neckPivotToEyes) - neckPivotToEyes;
             Vector3 cameraPos = cam.transform.position + baseRotation * eyeMovement;
 
+#if NET35
+            Matrix4x4 rotationMatrix = RotateMatrix(Quaternion.Inverse(finalRotation));
+            Matrix4x4 translationMatrix = TranslateMatrix(-cameraPos);
+#else
             Matrix4x4 rotationMatrix = Matrix4x4.Rotate(Quaternion.Inverse(finalRotation));
             Matrix4x4 translationMatrix = Matrix4x4.Translate(-cameraPos);
+#endif
             Matrix4x4 viewMatrix = rotationMatrix * translationMatrix;
 
             viewMatrix.m20 = -viewMatrix.m20;
@@ -181,8 +208,13 @@ namespace CameraUnlock.Core.Unity.Tracking
             Quaternion baseRotation = cam.transform.rotation;
             Vector3 neckWorldOffset = baseRotation * eyeMovement;
 
+#if NET35
+            Matrix4x4 headRotMatrix = RotateMatrix(headRotation);
+            Matrix4x4 neckTranslation = TranslateMatrix(cam.worldToCameraMatrix.MultiplyVector(-neckWorldOffset));
+#else
             Matrix4x4 headRotMatrix = Matrix4x4.Rotate(headRotation);
             Matrix4x4 neckTranslation = Matrix4x4.Translate(cam.worldToCameraMatrix.MultiplyVector(-neckWorldOffset));
+#endif
 
             cam.worldToCameraMatrix = neckTranslation * headRotMatrix * gameViewMatrix;
         }
@@ -259,7 +291,14 @@ namespace CameraUnlock.Core.Unity.Tracking
             // So: headRot = current * inverse(default)
             Matrix4x4 headRotMatrix = currentMatrix * defaultMatrix.inverse;
 
+#if NET35
+            // Matrix4x4.rotation doesn't exist in Unity 5.x; extract rotation manually
+            return Quaternion.LookRotation(
+                new Vector3(headRotMatrix.m02, headRotMatrix.m12, headRotMatrix.m22),
+                new Vector3(headRotMatrix.m01, headRotMatrix.m11, headRotMatrix.m21));
+#else
             return headRotMatrix.rotation;
+#endif
         }
     }
 }
