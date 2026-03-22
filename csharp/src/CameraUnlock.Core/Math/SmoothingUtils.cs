@@ -32,10 +32,10 @@ namespace CameraUnlock.Core.Math
         /// Maximum interpolation speed (used at smoothing=0). This is the frame interpolation
         /// floor: fast enough to be responsive, slow enough to hide discrete tracker sample
         /// boundaries at high refresh rates.
-        /// At 240Hz: t ≈ 0.34/frame, settles to 95% in ~30ms (~10ms average lag).
-        /// At 60Hz:  t ≈ 0.81/frame, settles to 95% in ~30ms (~10ms average lag).
+        /// At 240Hz: t ≈ 0.19/frame, settles to 95% in ~60ms (~20ms average lag).
+        /// At 60Hz:  t ≈ 0.57/frame, settles to 95% in ~50ms (~20ms average lag).
         /// </summary>
-        public const float FrameInterpolationSpeed = 100f;
+        public const float FrameInterpolationSpeed = 50f;
 
         // Minimum speed at maximum user smoothing (smoothing=1). ~5 second settling time.
         private const float MaxSmoothing = 0.1f;
