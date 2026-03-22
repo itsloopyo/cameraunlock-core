@@ -3,44 +3,35 @@ using CameraUnlock.Core.Data;
 namespace CameraUnlock.Core.Processing
 {
     /// <summary>
-    /// Fills in frames between low-rate position samples using velocity extrapolation.
+    /// Fills in frames between low-rate position samples using linear interpolation.
     /// Mirrors PoseInterpolator pattern, operating on PositionData (X/Y/Z) instead of TrackingPose (Yaw/Pitch/Roll).
     /// </summary>
     public sealed class PositionInterpolator
     {
         /// <summary>
-        /// Maximum time (seconds) to extrapolate beyond the last sample.
+        /// Kept for API compatibility. No longer controls behavior.
         /// </summary>
         public float MaxExtrapolationTime { get; set; } = 0.1f;
 
-        private const float VelocityBlend = 0.5f;
+        private const float IntervalBlend = 0.3f;
+        private const float DefaultSampleInterval = 1f / 30f;
+        private const float MinSampleInterval = 0.001f;
+        private const float MaxSampleInterval = 0.2f;
 
-        // Previous sample state
-        private long _prevTimestampTicks;
-        private float _prevX;
-        private float _prevY;
-        private float _prevZ;
-
-        // Last accepted sample (extrapolation base)
+        private float _fromX, _fromY, _fromZ;
+        private float _toX, _toY, _toZ;
         private long _lastTimestampTicks;
-        private float _lastX;
-        private float _lastY;
-        private float _lastZ;
 
-        // Smoothed velocity (meters per second)
-        private float _velocityX;
-        private float _velocityY;
-        private float _velocityZ;
-        private bool _hasVelocity;
+        private float _progress;
+        private float _sampleInterval = DefaultSampleInterval;
+        private float _timeSinceLastNewSample;
 
-        // Accumulated time since last new sample
-        private float _timeSinceLastSample;
-
-        private bool _hasAnySample;
+        private bool _hasFirstSample;
+        private bool _hasSecondSample;
 
         /// <summary>
         /// Update with the latest raw position and frame delta time.
-        /// Returns an interpolated (extrapolated) position.
+        /// Returns a smoothly interpolated position.
         /// </summary>
         public PositionData Update(PositionData rawPosition, float deltaTime)
         {
@@ -49,79 +40,66 @@ namespace CameraUnlock.Core.Processing
                 return rawPosition;
             }
 
+            _timeSinceLastNewSample += deltaTime;
+
             bool isNewSample = rawPosition.TimestampTicks != _lastTimestampTicks;
 
             if (isNewSample)
             {
-                if (_hasAnySample)
+                if (!_hasFirstSample)
                 {
-                    float sampleDt = _timeSinceLastSample;
-                    if (sampleDt > 0f)
-                    {
-                        float instVelX = (rawPosition.X - _lastX) / sampleDt;
-                        float instVelY = (rawPosition.Y - _lastY) / sampleDt;
-                        float instVelZ = (rawPosition.Z - _lastZ) / sampleDt;
-
-                        if (_hasVelocity)
-                        {
-                            _velocityX = _velocityX + (instVelX - _velocityX) * VelocityBlend;
-                            _velocityY = _velocityY + (instVelY - _velocityY) * VelocityBlend;
-                            _velocityZ = _velocityZ + (instVelZ - _velocityZ) * VelocityBlend;
-                        }
-                        else
-                        {
-                            _velocityX = instVelX;
-                            _velocityY = instVelY;
-                            _velocityZ = instVelZ;
-                            _hasVelocity = true;
-                        }
-                    }
+                    _fromX = rawPosition.X;
+                    _fromY = rawPosition.Y;
+                    _fromZ = rawPosition.Z;
+                    _toX = rawPosition.X;
+                    _toY = rawPosition.Y;
+                    _toZ = rawPosition.Z;
+                    _lastTimestampTicks = rawPosition.TimestampTicks;
+                    _progress = 1f;
+                    _timeSinceLastNewSample = 0f;
+                    _hasFirstSample = true;
+                    return rawPosition;
                 }
 
-                _prevTimestampTicks = _lastTimestampTicks;
-                _prevX = _lastX;
-                _prevY = _lastY;
-                _prevZ = _lastZ;
+                if (_timeSinceLastNewSample > MinSampleInterval)
+                {
+                    if (!_hasSecondSample)
+                    {
+                        _sampleInterval = _timeSinceLastNewSample;
+                        _hasSecondSample = true;
+                    }
+                    else
+                    {
+                        _sampleInterval += (_timeSinceLastNewSample - _sampleInterval) * IntervalBlend;
+                    }
 
+                    if (_sampleInterval < MinSampleInterval) _sampleInterval = MinSampleInterval;
+                    if (_sampleInterval > MaxSampleInterval) _sampleInterval = MaxSampleInterval;
+                }
+
+                float t = _progress > 1f ? 1f : _progress;
+                _fromX = _fromX + (_toX - _fromX) * t;
+                _fromY = _fromY + (_toY - _fromY) * t;
+                _fromZ = _fromZ + (_toZ - _fromZ) * t;
+
+                _toX = rawPosition.X;
+                _toY = rawPosition.Y;
+                _toZ = rawPosition.Z;
                 _lastTimestampTicks = rawPosition.TimestampTicks;
-                _lastX = rawPosition.X;
-                _lastY = rawPosition.Y;
-                _lastZ = rawPosition.Z;
 
-                _timeSinceLastSample = 0f;
-                _hasAnySample = true;
-
-                return rawPosition;
+                _progress = 0f;
+                _timeSinceLastNewSample = 0f;
             }
 
-            // No new sample this frame — extrapolate if we have velocity
-            _timeSinceLastSample += deltaTime;
+            _progress += deltaTime / _sampleInterval;
 
-            if (!_hasVelocity)
-            {
-                return rawPosition;
-            }
+            float pt = _progress > 1f ? 1f : (_progress < 0f ? 0f : _progress);
 
-            float extrapTime = _timeSinceLastSample;
-            if (extrapTime > MaxExtrapolationTime)
-            {
-                extrapTime = MaxExtrapolationTime;
-            }
+            float outX = _fromX + (_toX - _fromX) * pt;
+            float outY = _fromY + (_toY - _fromY) * pt;
+            float outZ = _fromZ + (_toZ - _fromZ) * pt;
 
-            // Decay factor: velocity influence fades as we get further from the last sample
-            float decay = 1f;
-            if (MaxExtrapolationTime > 0f)
-            {
-                float ratio = extrapTime / MaxExtrapolationTime;
-                float denom = 1f + ratio;
-                decay = 1f / (denom * denom);
-            }
-
-            float predX = _lastX + _velocityX * extrapTime * decay;
-            float predY = _lastY + _velocityY * extrapTime * decay;
-            float predZ = _lastZ + _velocityZ * extrapTime * decay;
-
-            return new PositionData(predX, predY, predZ, rawPosition.TimestampTicks);
+            return new PositionData(outX, outY, outZ, rawPosition.TimestampTicks);
         }
 
         /// <summary>
@@ -129,23 +107,20 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public void Reset()
         {
-            _prevTimestampTicks = 0;
-            _prevX = 0f;
-            _prevY = 0f;
-            _prevZ = 0f;
+            _fromX = 0f;
+            _fromY = 0f;
+            _fromZ = 0f;
+
+            _toX = 0f;
+            _toY = 0f;
+            _toZ = 0f;
 
             _lastTimestampTicks = 0;
-            _lastX = 0f;
-            _lastY = 0f;
-            _lastZ = 0f;
-
-            _velocityX = 0f;
-            _velocityY = 0f;
-            _velocityZ = 0f;
-            _hasVelocity = false;
-
-            _timeSinceLastSample = 0f;
-            _hasAnySample = false;
+            _progress = 0f;
+            _sampleInterval = DefaultSampleInterval;
+            _timeSinceLastNewSample = 0f;
+            _hasFirstSample = false;
+            _hasSecondSample = false;
         }
     }
 }

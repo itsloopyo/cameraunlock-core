@@ -42,7 +42,7 @@ namespace CameraUnlock.Core.Tests.Processing
         }
 
         [Fact]
-        public void SameTimestamp_ReturnsRawPosition_NoExtrapolation()
+        public void SameTimestamp_OutputsSamePosition()
         {
             var interp = new PositionInterpolator();
             var pos = MakePos(0.1f, 0.2f, 0.05f, 1000);
@@ -50,20 +50,20 @@ namespace CameraUnlock.Core.Tests.Processing
             interp.Update(pos, DeltaTime);
             var result = interp.Update(pos, DeltaTime);
 
-            Assert.Equal(0.1f, result.X);
-            Assert.Equal(0.2f, result.Y);
-            Assert.Equal(0.05f, result.Z);
+            Assert.Equal(0.1f, result.X, precision: 4);
+            Assert.Equal(0.2f, result.Y, precision: 4);
+            Assert.Equal(0.05f, result.Z, precision: 4);
         }
 
         [Fact]
-        public void AfterTwoSamples_ExtrapolatesBetweenThem()
+        public void AfterTwoSamples_InterpolatesBetweenThem()
         {
             var interp = new PositionInterpolator();
 
             var pos1 = MakePos(0f, 0f, 0f, 1000);
             interp.Update(pos1, DeltaTime);
 
-            // Simulate 4 frames passing
+            // Simulate 3 frames passing
             for (int i = 0; i < 3; i++)
             {
                 interp.Update(pos1, DeltaTime);
@@ -73,20 +73,20 @@ namespace CameraUnlock.Core.Tests.Processing
             var pos2 = MakePos(0.1f, 0f, 0f, 2000);
             interp.Update(pos2, DeltaTime);
 
-            // Next frame with same timestamp should extrapolate
+            // Next frame — should be interpolating between pos1 and pos2
             var result = interp.Update(pos2, DeltaTime);
 
-            Assert.True(result.X > 0.1f, $"Expected extrapolated X > 0.1, got {result.X}");
+            Assert.True(result.X > 0f && result.X < 0.1f,
+                $"Expected interpolated X between 0 and 0.1, got {result.X}");
         }
 
         [Fact]
-        public void Extrapolation_CapsAtMaxTime()
+        public void InterpolationHoldsAtTarget_WhenNoNewSample()
         {
-            var interp = new PositionInterpolator { MaxExtrapolationTime = 0.05f };
+            var interp = new PositionInterpolator();
 
             var pos1 = MakePos(0f, 0f, 0f, 1000);
             interp.Update(pos1, DeltaTime);
-
             for (int i = 0; i < 3; i++)
             {
                 interp.Update(pos1, DeltaTime);
@@ -95,26 +95,19 @@ namespace CameraUnlock.Core.Tests.Processing
             var pos2 = MakePos(0.1f, 0f, 0f, 2000);
             interp.Update(pos2, DeltaTime);
 
-            float resultAtMedium = 0f;
-            float resultAtLong = 0f;
-
-            for (int i = 0; i < 10; i++)
-            {
-                var r = interp.Update(pos2, DeltaTime);
-                resultAtMedium = r.X;
-            }
-
+            float lastX = 0f;
             for (int i = 0; i < 100; i++)
             {
                 var r = interp.Update(pos2, DeltaTime);
-                resultAtLong = r.X;
+                lastX = r.X;
             }
 
-            Assert.Equal(resultAtMedium, resultAtLong, precision: 3);
+            // Should be exactly at pos2, not beyond it
+            Assert.Equal(0.1f, lastX, precision: 3);
         }
 
         [Fact]
-        public void Reset_ClearsVelocityState()
+        public void Reset_ClearsState()
         {
             var interp = new PositionInterpolator();
 
@@ -137,11 +130,11 @@ namespace CameraUnlock.Core.Tests.Processing
             Assert.Equal(0.05f, result.Z);
 
             var result2 = interp.Update(pos3, DeltaTime);
-            Assert.Equal(0.05f, result2.X);
+            Assert.Equal(0.05f, result2.X, precision: 4);
         }
 
         [Fact]
-        public void HighFrequencyInput_NearZeroExtrapolation()
+        public void HighFrequencyInput_PassesThrough()
         {
             var interp = new PositionInterpolator();
 

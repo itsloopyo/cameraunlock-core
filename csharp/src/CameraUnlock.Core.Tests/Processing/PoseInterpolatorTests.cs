@@ -42,7 +42,7 @@ namespace CameraUnlock.Core.Tests.Processing
         }
 
         [Fact]
-        public void SameTimestamp_ReturnsRawPose_NoExtrapolation()
+        public void SameTimestamp_OutputsSamePose()
         {
             var interp = new PoseInterpolator();
             var pose = MakePose(10f, 20f, 5f, 1000);
@@ -50,16 +50,16 @@ namespace CameraUnlock.Core.Tests.Processing
             // First call establishes the sample
             interp.Update(pose, DeltaTime);
 
-            // Second call with same timestamp — no velocity yet, returns raw
+            // Second call with same timestamp — from=to, so output stays the same
             var result = interp.Update(pose, DeltaTime);
 
-            Assert.Equal(10f, result.Yaw);
-            Assert.Equal(20f, result.Pitch);
-            Assert.Equal(5f, result.Roll);
+            Assert.Equal(10f, result.Yaw, precision: 4);
+            Assert.Equal(20f, result.Pitch, precision: 4);
+            Assert.Equal(5f, result.Roll, precision: 4);
         }
 
         [Fact]
-        public void AfterTwoSamples_ExtrapolatesBetweenThem()
+        public void AfterTwoSamples_InterpolatesBetweenThem()
         {
             var interp = new PoseInterpolator();
 
@@ -67,33 +67,31 @@ namespace CameraUnlock.Core.Tests.Processing
             var pose1 = MakePose(0f, 0f, 0f, 1000);
             interp.Update(pose1, DeltaTime);
 
-            // Simulate 4 frames passing at 120Hz (33ms total ≈ one 30Hz interval)
+            // Simulate 3 frames passing at 120Hz
             for (int i = 0; i < 3; i++)
             {
-                interp.Update(pose1, DeltaTime); // same timestamp, accumulates time
+                interp.Update(pose1, DeltaTime);
             }
 
-            // Second sample: yaw moved to 10 over ~33ms
+            // Second sample: yaw moved to 10
             var pose2 = MakePose(10f, 0f, 0f, 2000);
             interp.Update(pose2, DeltaTime);
 
-            // Now on the next frame (same timestamp as pose2), extrapolation should kick in
+            // Next frame — should be interpolating between pose1 and pose2
             var result = interp.Update(pose2, DeltaTime);
 
-            // Should have extrapolated yaw beyond 10 (velocity is positive)
-            Assert.True(result.Yaw > 10f, $"Expected extrapolated yaw > 10, got {result.Yaw}");
+            Assert.True(result.Yaw > 0f && result.Yaw < 10f,
+                $"Expected interpolated yaw between 0 and 10, got {result.Yaw}");
         }
 
         [Fact]
-        public void Extrapolation_CapsAtMaxTime()
+        public void InterpolationHoldsAtTarget_WhenNoNewSample()
         {
-            var interp = new PoseInterpolator { MaxExtrapolationTime = 0.05f };
+            var interp = new PoseInterpolator();
 
-            // Establish velocity
+            // Establish two samples
             var pose1 = MakePose(0f, 0f, 0f, 1000);
             interp.Update(pose1, DeltaTime);
-
-            // 4 frames pass
             for (int i = 0; i < 3; i++)
             {
                 interp.Update(pose1, DeltaTime);
@@ -102,35 +100,24 @@ namespace CameraUnlock.Core.Tests.Processing
             var pose2 = MakePose(10f, 0f, 0f, 2000);
             interp.Update(pose2, DeltaTime);
 
-            // Let a LOT of time pass with same timestamp (well beyond max extrapolation)
-            float resultAtMedium = 0f;
-            float resultAtLong = 0f;
-
-            // Accumulate to just beyond max extrapolation
-            for (int i = 0; i < 10; i++)
-            {
-                var r = interp.Update(pose2, DeltaTime);
-                resultAtMedium = r.Yaw;
-            }
-
-            // Accumulate way beyond max extrapolation
+            // Run many frames without new sample — should converge to pose2 and hold
+            float lastYaw = 0f;
             for (int i = 0; i < 100; i++)
             {
                 var r = interp.Update(pose2, DeltaTime);
-                resultAtLong = r.Yaw;
+                lastYaw = r.Yaw;
             }
 
-            // Both should be capped — the long result should equal the medium result
-            // (extrapolation time is clamped, so no further movement)
-            Assert.Equal(resultAtMedium, resultAtLong, precision: 3);
+            // Should be exactly at pose2, not beyond it
+            Assert.Equal(10f, lastYaw, precision: 3);
         }
 
         [Fact]
-        public void Reset_ClearsVelocityState()
+        public void Reset_ClearsState()
         {
             var interp = new PoseInterpolator();
 
-            // Establish velocity
+            // Establish some state
             var pose1 = MakePose(0f, 0f, 0f, 1000);
             interp.Update(pose1, DeltaTime);
             for (int i = 0; i < 3; i++)
@@ -143,7 +130,7 @@ namespace CameraUnlock.Core.Tests.Processing
             // Reset
             interp.Reset();
 
-            // After reset, first sample should return raw (no velocity)
+            // After reset, first sample should return raw
             var pose3 = MakePose(5f, 5f, 5f, 3000);
             var result = interp.Update(pose3, DeltaTime);
 
@@ -151,13 +138,13 @@ namespace CameraUnlock.Core.Tests.Processing
             Assert.Equal(5f, result.Pitch);
             Assert.Equal(5f, result.Roll);
 
-            // And subsequent same-timestamp frame should NOT extrapolate (no velocity yet)
+            // Subsequent same-timestamp frame should stay at same pose (from=to)
             var result2 = interp.Update(pose3, DeltaTime);
-            Assert.Equal(5f, result2.Yaw);
+            Assert.Equal(5f, result2.Yaw, precision: 4);
         }
 
         [Fact]
-        public void HighFrequencyInput_NearZeroExtrapolation()
+        public void HighFrequencyInput_PassesThrough()
         {
             var interp = new PoseInterpolator();
 
@@ -171,9 +158,52 @@ namespace CameraUnlock.Core.Tests.Processing
                 result = interp.Update(pose, DeltaTime);
             }
 
-            // With a new sample every frame, the result should be exactly the raw pose
-            // because we never hit the "stale timestamp" branch
+            // With a new sample every frame, output should match the raw pose
             Assert.Equal(yaw, result.Yaw, precision: 5);
+        }
+
+        [Fact]
+        public void SteadyMotion_ProducesLinearOutput()
+        {
+            var interp = new PoseInterpolator();
+
+            // First sample at yaw=0
+            interp.Update(MakePose(0f, 0f, 0f, 1000), DeltaTime);
+            // 3 stale frames
+            for (int i = 0; i < 3; i++)
+                interp.Update(MakePose(0f, 0f, 0f, 1000), DeltaTime);
+
+            // Second sample at yaw=10 — establishes interval
+            interp.Update(MakePose(10f, 0f, 0f, 2000), DeltaTime);
+            // 3 stale frames (interpolating toward 10)
+            for (int i = 0; i < 3; i++)
+                interp.Update(MakePose(10f, 0f, 0f, 2000), DeltaTime);
+
+            // Third sample at yaw=20 — now we can check linearity
+            interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime);
+
+            // Collect interpolated values for the next segment
+            float prev = 0f;
+            float firstDelta = 0f;
+            bool isLinear = true;
+            for (int i = 0; i < 3; i++)
+            {
+                var r = interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime);
+                if (i == 0)
+                {
+                    firstDelta = r.Yaw - 10f; // should be positive
+                }
+                else
+                {
+                    float delta = r.Yaw - prev;
+                    // Each step should be approximately equal (linear)
+                    if (System.Math.Abs(delta - firstDelta) > 0.5f)
+                        isLinear = false;
+                }
+                prev = r.Yaw;
+            }
+
+            Assert.True(isLinear, "Interpolation should produce approximately linear output between samples");
         }
     }
 }

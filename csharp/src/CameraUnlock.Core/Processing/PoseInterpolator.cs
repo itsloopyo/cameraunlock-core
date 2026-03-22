@@ -3,47 +3,53 @@ using CameraUnlock.Core.Data;
 namespace CameraUnlock.Core.Processing
 {
     /// <summary>
-    /// Fills in frames between low-rate tracking samples using velocity extrapolation.
+    /// Fills in frames between low-rate tracking samples using linear interpolation.
+    /// Buffers one sample and lerps between the previous and current known positions,
+    /// trading one sample period of latency (~33ms at 30Hz) for guaranteed smooth output.
     /// Sits between the receiver and processor in the pipeline:
     /// Raw Pose (30Hz) → PoseInterpolator → TrackingProcessor → Camera
     /// </summary>
     public sealed class PoseInterpolator
     {
         /// <summary>
-        /// Maximum time (seconds) to extrapolate beyond the last sample.
-        /// Prevents runaway drift when tracking is lost or stalled.
+        /// Kept for API compatibility. No longer controls behavior.
         /// </summary>
         public float MaxExtrapolationTime { get; set; } = 0.1f;
 
-        // Velocity EMA blend factor. 0.5 balances responsiveness with jitter filtering.
-        private const float VelocityBlend = 0.5f;
+        // EMA blend factor for sample interval estimation
+        private const float IntervalBlend = 0.3f;
 
-        // Previous sample state
-        private long _prevTimestampTicks;
-        private float _prevYaw;
-        private float _prevPitch;
-        private float _prevRoll;
+        // Assumed interval until we observe real samples (30Hz)
+        private const float DefaultSampleInterval = 1f / 30f;
 
-        // Last accepted sample (used as extrapolation base)
+        // Bounds for sample interval estimate
+        private const float MinSampleInterval = 0.001f;
+        private const float MaxSampleInterval = 0.2f;
+
+        // Interpolation start point (where we're coming from)
+        private float _fromYaw, _fromPitch, _fromRoll;
+
+        // Interpolation target (latest known sample)
+        private float _toYaw, _toPitch, _toRoll;
+
+        // Last seen timestamp (for new-sample detection)
         private long _lastTimestampTicks;
-        private float _lastYaw;
-        private float _lastPitch;
-        private float _lastRoll;
 
-        // Smoothed velocity (degrees per second)
-        private float _velocityYaw;
-        private float _velocityPitch;
-        private float _velocityRoll;
-        private bool _hasVelocity;
+        // Interpolation progress within current segment
+        private float _progress;
 
-        // Accumulated time since last new sample
-        private float _timeSinceLastSample;
+        // EMA-smoothed estimate of time between tracker samples
+        private float _sampleInterval = DefaultSampleInterval;
 
-        private bool _hasAnySample;
+        // Accumulated wall time since last new sample arrived
+        private float _timeSinceLastNewSample;
+
+        private bool _hasFirstSample;
+        private bool _hasSecondSample;
 
         /// <summary>
         /// Update with the latest raw pose and frame delta time.
-        /// Returns an interpolated (extrapolated) pose suitable for feeding into TrackingProcessor.
+        /// Returns a smoothly interpolated pose suitable for feeding into TrackingProcessor.
         /// </summary>
         public TrackingPose Update(TrackingPose rawPose, float deltaTime)
         {
@@ -52,88 +58,72 @@ namespace CameraUnlock.Core.Processing
                 return rawPose;
             }
 
+            _timeSinceLastNewSample += deltaTime;
+
             bool isNewSample = rawPose.TimestampTicks != _lastTimestampTicks;
 
             if (isNewSample)
             {
-                if (_hasAnySample)
+                if (!_hasFirstSample)
                 {
-                    // Compute time delta between this sample and the previous one
-                    float sampleDt = _timeSinceLastSample;
-                    if (sampleDt > 0f)
-                    {
-                        // Instantaneous velocity from sample delta
-                        float instVelYaw = (rawPose.Yaw - _lastYaw) / sampleDt;
-                        float instVelPitch = (rawPose.Pitch - _lastPitch) / sampleDt;
-                        float instVelRoll = (rawPose.Roll - _lastRoll) / sampleDt;
-
-                        if (_hasVelocity)
-                        {
-                            // EMA smooth the velocity estimate
-                            _velocityYaw = _velocityYaw + (instVelYaw - _velocityYaw) * VelocityBlend;
-                            _velocityPitch = _velocityPitch + (instVelPitch - _velocityPitch) * VelocityBlend;
-                            _velocityRoll = _velocityRoll + (instVelRoll - _velocityRoll) * VelocityBlend;
-                        }
-                        else
-                        {
-                            _velocityYaw = instVelYaw;
-                            _velocityPitch = instVelPitch;
-                            _velocityRoll = instVelRoll;
-                            _hasVelocity = true;
-                        }
-                    }
+                    // Very first sample — park at this position
+                    _fromYaw = rawPose.Yaw;
+                    _fromPitch = rawPose.Pitch;
+                    _fromRoll = rawPose.Roll;
+                    _toYaw = rawPose.Yaw;
+                    _toPitch = rawPose.Pitch;
+                    _toRoll = rawPose.Roll;
+                    _lastTimestampTicks = rawPose.TimestampTicks;
+                    _progress = 1f;
+                    _timeSinceLastNewSample = 0f;
+                    _hasFirstSample = true;
+                    return rawPose;
                 }
 
-                // Store as the new base sample
-                _prevTimestampTicks = _lastTimestampTicks;
-                _prevYaw = _lastYaw;
-                _prevPitch = _lastPitch;
-                _prevRoll = _lastRoll;
+                // Update sample interval estimate (EMA)
+                if (_timeSinceLastNewSample > MinSampleInterval)
+                {
+                    if (!_hasSecondSample)
+                    {
+                        _sampleInterval = _timeSinceLastNewSample;
+                        _hasSecondSample = true;
+                    }
+                    else
+                    {
+                        _sampleInterval += (_timeSinceLastNewSample - _sampleInterval) * IntervalBlend;
+                    }
 
+                    if (_sampleInterval < MinSampleInterval) _sampleInterval = MinSampleInterval;
+                    if (_sampleInterval > MaxSampleInterval) _sampleInterval = MaxSampleInterval;
+                }
+
+                // Capture current interpolated position as new start point
+                float t = _progress > 1f ? 1f : _progress;
+                _fromYaw = _fromYaw + (_toYaw - _fromYaw) * t;
+                _fromPitch = _fromPitch + (_toPitch - _fromPitch) * t;
+                _fromRoll = _fromRoll + (_toRoll - _fromRoll) * t;
+
+                // New sample becomes the target
+                _toYaw = rawPose.Yaw;
+                _toPitch = rawPose.Pitch;
+                _toRoll = rawPose.Roll;
                 _lastTimestampTicks = rawPose.TimestampTicks;
-                _lastYaw = rawPose.Yaw;
-                _lastPitch = rawPose.Pitch;
-                _lastRoll = rawPose.Roll;
 
-                _timeSinceLastSample = 0f;
-                _hasAnySample = true;
-
-                // New sample just arrived — return it directly (no extrapolation needed)
-                return rawPose;
+                _progress = 0f;
+                _timeSinceLastNewSample = 0f;
             }
 
-            // No new sample this frame — extrapolate if we have velocity
-            _timeSinceLastSample += deltaTime;
+            // Advance interpolation
+            _progress += deltaTime / _sampleInterval;
 
-            if (!_hasVelocity)
-            {
-                return rawPose;
-            }
+            // Clamp for output — hold at target when waiting for next sample
+            float pt = _progress > 1f ? 1f : (_progress < 0f ? 0f : _progress);
 
-            // Cap extrapolation time to prevent drift
-            float extrapTime = _timeSinceLastSample;
-            if (extrapTime > MaxExtrapolationTime)
-            {
-                extrapTime = MaxExtrapolationTime;
-            }
+            float outYaw = _fromYaw + (_toYaw - _fromYaw) * pt;
+            float outPitch = _fromPitch + (_toPitch - _fromPitch) * pt;
+            float outRoll = _fromRoll + (_toRoll - _fromRoll) * pt;
 
-            // Decay factor: velocity influence fades as we get further from the last sample.
-            // At t=0 decay=1 (full velocity), at t=MaxExtrapolationTime decay≈0.37.
-            // This prevents overshoot when the head stops moving.
-            float decay = 1f;
-            if (MaxExtrapolationTime > 0f)
-            {
-                // Approximation of exp(-t/maxT) using 1/(1+t/maxT)^2 — cheap, no System.Math needed
-                float ratio = extrapTime / MaxExtrapolationTime;
-                float denom = 1f + ratio;
-                decay = 1f / (denom * denom);
-            }
-
-            float predYaw = _lastYaw + _velocityYaw * extrapTime * decay;
-            float predPitch = _lastPitch + _velocityPitch * extrapTime * decay;
-            float predRoll = _lastRoll + _velocityRoll * extrapTime * decay;
-
-            return new TrackingPose(predYaw, predPitch, predRoll, rawPose.TimestampTicks);
+            return new TrackingPose(outYaw, outPitch, outRoll, rawPose.TimestampTicks);
         }
 
         /// <summary>
@@ -141,23 +131,20 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public void Reset()
         {
-            _prevTimestampTicks = 0;
-            _prevYaw = 0f;
-            _prevPitch = 0f;
-            _prevRoll = 0f;
+            _fromYaw = 0f;
+            _fromPitch = 0f;
+            _fromRoll = 0f;
+
+            _toYaw = 0f;
+            _toPitch = 0f;
+            _toRoll = 0f;
 
             _lastTimestampTicks = 0;
-            _lastYaw = 0f;
-            _lastPitch = 0f;
-            _lastRoll = 0f;
-
-            _velocityYaw = 0f;
-            _velocityPitch = 0f;
-            _velocityRoll = 0f;
-            _hasVelocity = false;
-
-            _timeSinceLastSample = 0f;
-            _hasAnySample = false;
+            _progress = 0f;
+            _sampleInterval = DefaultSampleInterval;
+            _timeSinceLastNewSample = 0f;
+            _hasFirstSample = false;
+            _hasSecondSample = false;
         }
     }
 }
