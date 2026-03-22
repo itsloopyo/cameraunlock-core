@@ -362,6 +362,55 @@ namespace CameraUnlock.Core.Unity.Extensions
             return offset;
         }
 
+        /// <summary>
+        /// Calculates the screen offset for a known world-space point, projected through
+        /// the camera's current view matrix. Use this for parallax-correct reticle positioning
+        /// when position tracking is active — pass the actual aim hit point for exact results.
+        /// </summary>
+        /// <param name="cam">The camera (with head tracking already applied to the view matrix).</param>
+        /// <param name="worldPoint">The world-space point to project (e.g., a raycast hit point).</param>
+        /// <param name="canvasScaleFactor">The canvas scale factor (use 1f for raw pixel offset).</param>
+        /// <returns>Screen offset in canvas-scaled units from center.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
+        public static Vector2 CalculateScreenOffsetFromWorldPoint(Camera cam, Vector3 worldPoint, float canvasScaleFactor)
+        {
+            if (cam == null)
+            {
+                throw new ArgumentNullException(nameof(cam));
+            }
+
+            Vector3 screenPoint = cam.WorldToScreenPoint(worldPoint);
+
+            if (screenPoint.z <= 0)
+            {
+                // Point is behind the modified camera — fall back to direction-based edge clamp
+                Vector3 dirToPoint = (worldPoint - cam.transform.position).normalized;
+                float halfWidth = Screen.width * 0.5f;
+                float halfHeight = Screen.height * 0.5f;
+                Vector2 edgeOffset = ClampToScreenEdge(dirToPoint, cam, halfWidth, halfHeight);
+
+                if (canvasScaleFactor > 0f && canvasScaleFactor != 1f)
+                {
+                    edgeOffset.x /= canvasScaleFactor;
+                    edgeOffset.y /= canvasScaleFactor;
+                }
+
+                return edgeOffset;
+            }
+
+            Vector2 offset = new Vector2(
+                screenPoint.x - Screen.width * 0.5f,
+                screenPoint.y - Screen.height * 0.5f);
+
+            if (canvasScaleFactor > 0f && canvasScaleFactor != 1f)
+            {
+                offset.x /= canvasScaleFactor;
+                offset.y /= canvasScaleFactor;
+            }
+
+            return offset;
+        }
+
         private static Vector2 CalculateAimScreenOffsetCore(Camera cam, Vector3 aimDirection, float projectionDistance)
         {
             if (cam == null)
