@@ -33,20 +33,4 @@ struct PositionSettings {
     }
 };
 
-/// Configuration for the neck model pivot simulation.
-/// Port of CameraUnlock.Core.Data.NeckModelSettings (C#).
-struct NeckModelSettings {
-    bool enabled = true;
-    float neck_height = 0.10f;
-    float neck_forward = 0.08f;
-
-    NeckModelSettings() = default;
-
-    NeckModelSettings(bool enabled, float height, float forward)
-        : enabled(enabled), neck_height(height), neck_forward(forward) {}
-
-    static NeckModelSettings Default() { return NeckModelSettings(true, 0.10f, 0.08f); }
-    static NeckModelSettings Disabled() { return NeckModelSettings(false, 0.0f, 0.0f); }
-};
-
 }  // namespace cameraunlock

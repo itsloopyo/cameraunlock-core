@@ -1,6 +1,5 @@
 using Xunit;
 using CameraUnlock.Core.Data;
-using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 
 namespace CameraUnlock.Core.Tests.Processing
@@ -28,12 +27,9 @@ namespace CameraUnlock.Core.Tests.Processing
         }
 
         [Fact]
-        public void Process_ZeroInput_NeckModelDisabled_ReturnsZero()
+        public void Process_ZeroInput_ReturnsZero()
         {
-            var proc = new PositionProcessor
-            {
-                NeckModelSettings = NeckModelSettings.Disabled
-            };
+            var proc = new PositionProcessor();
 
             Vec3 result = proc.Process(MakePos(0f, 0f, 0f), Quat4.Identity, DeltaTime);
 
@@ -48,7 +44,6 @@ namespace CameraUnlock.Core.Tests.Processing
             var proc = new PositionProcessor
             {
                 Settings = new PositionSettings(1f, 1f, 1f, 1f, 1f, 1f, 1f, 0f),
-                NeckModelSettings = NeckModelSettings.Disabled
             };
 
             // Set center at (0.05, 0.03, 0.02)
@@ -68,7 +63,6 @@ namespace CameraUnlock.Core.Tests.Processing
             var proc = new PositionProcessor
             {
                 Settings = new PositionSettings(2f, 0.5f, 1.5f, 1f, 1f, 1f, 1f, 0f),
-                NeckModelSettings = NeckModelSettings.Disabled
             };
 
             Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, DeltaTime);
@@ -84,7 +78,6 @@ namespace CameraUnlock.Core.Tests.Processing
             var proc = new PositionProcessor
             {
                 Settings = new PositionSettings(1f, 1f, 1f, 1f, 1f, 1f, 1f, 0f, invertX: true, invertY: false, invertZ: true),
-                NeckModelSettings = NeckModelSettings.Disabled
             };
 
             Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, DeltaTime);
@@ -100,7 +93,6 @@ namespace CameraUnlock.Core.Tests.Processing
             var proc = new PositionProcessor
             {
                 Settings = new PositionSettings(1f, 1f, 1f, 0.05f, 0.03f, 0.08f, 0.08f, 0f),
-                NeckModelSettings = NeckModelSettings.Disabled
             };
 
             // Input well beyond limits
@@ -117,7 +109,6 @@ namespace CameraUnlock.Core.Tests.Processing
             var proc = new PositionProcessor
             {
                 Settings = new PositionSettings(1f, 1f, 1f, 0.10f, 0.10f, 0.10f, 0.10f, 0f),
-                NeckModelSettings = NeckModelSettings.Disabled
             };
 
             // Negative values should be clamped to -limit
@@ -134,7 +125,6 @@ namespace CameraUnlock.Core.Tests.Processing
             var proc = new PositionProcessor
             {
                 Settings = new PositionSettings(1f, 1f, 1f, 1f, 1f, 1f, 1f, 0.5f),
-                NeckModelSettings = NeckModelSettings.Disabled
             };
 
             // Feed same position for many frames
@@ -151,52 +141,11 @@ namespace CameraUnlock.Core.Tests.Processing
         }
 
         [Fact]
-        public void NeckModel_AddsOffset()
-        {
-            var proc = new PositionProcessor
-            {
-                Settings = new PositionSettings(1f, 1f, 1f, 1f, 1f, 1f, 1f, 0f),
-                NeckModelSettings = new NeckModelSettings(true, 0.10f, 0.08f)
-            };
-
-            // Zero tracker position, but rotation produces neck model offset
-            Quat4 rotation = QuaternionUtils.FromYawPitchRoll(30f, 0f, 0f);
-            Vec3 result = proc.Process(MakePos(0f, 0f, 0f), rotation, DeltaTime);
-
-            // Neck model should produce non-zero offset
-            Assert.True(System.Math.Abs(result.X) > 0.001f || System.Math.Abs(result.Z) > 0.001f,
-                $"Expected non-zero position from neck model, got ({result.X}, {result.Y}, {result.Z})");
-        }
-
-        [Fact]
-        public void TotalPositionIsClamped()
-        {
-            var proc = new PositionProcessor
-            {
-                Settings = new PositionSettings(1f, 1f, 1f, 0.02f, 0.02f, 0.02f, 0.02f, 0f),
-                NeckModelSettings = new NeckModelSettings(true, 0.10f, 0.08f)
-            };
-
-            // Large rotation + position should be clamped
-            Quat4 rotation = QuaternionUtils.FromYawPitchRoll(45f, 0f, 0f);
-            Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), rotation, DeltaTime);
-
-            // All components should be within [-0.02, 0.02]
-            Assert.True(result.X >= -0.02f && result.X <= 0.02f,
-                $"X {result.X} exceeds limit 0.02");
-            Assert.True(result.Y >= -0.02f && result.Y <= 0.02f,
-                $"Y {result.Y} exceeds limit 0.02");
-            Assert.True(result.Z >= -0.02f && result.Z <= 0.02f,
-                $"Z {result.Z} exceeds limit 0.02");
-        }
-
-        [Fact]
         public void Reset_ClearsAllState()
         {
             var proc = new PositionProcessor
             {
                 Settings = new PositionSettings(1f, 1f, 1f, 1f, 1f, 1f, 1f, 0f),
-                NeckModelSettings = NeckModelSettings.Disabled
             };
 
             proc.SetCenter(MakePos(0.05f, 0.05f, 0.05f));
@@ -217,7 +166,6 @@ namespace CameraUnlock.Core.Tests.Processing
             var proc = new PositionProcessor
             {
                 Settings = new PositionSettings(1f, 1f, 1f, 1f, 1f, 1f, 1f, 0.5f),
-                NeckModelSettings = NeckModelSettings.Disabled
             };
 
             proc.SetCenter(MakePos(0.05f, 0.05f, 0.05f));

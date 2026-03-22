@@ -5,7 +5,7 @@ namespace CameraUnlock.Core.Processing
 {
     /// <summary>
     /// Complete positional tracking data processing pipeline.
-    /// Pipeline: raw position → center subtraction → tracker pivot compensation → sensitivity/inversion → smoothing → add neck model → box clamp
+    /// Pipeline: raw position → center subtraction → tracker pivot compensation → sensitivity/inversion → smoothing → box clamp
     /// </summary>
     public sealed class PositionProcessor
     {
@@ -17,11 +17,6 @@ namespace CameraUnlock.Core.Processing
         /// Position settings (sensitivity, limits, smoothing, inversion).
         /// </summary>
         public PositionSettings Settings { get; set; } = PositionSettings.Default;
-
-        /// <summary>
-        /// Neck model settings.
-        /// </summary>
-        public NeckModelSettings NeckModelSettings { get; set; } = NeckModelSettings.Default;
 
         /// <summary>
         /// Forward distance (meters) of the tracker's face tracking point from the
@@ -38,7 +33,7 @@ namespace CameraUnlock.Core.Processing
         /// Processes a raw position through the full pipeline.
         /// </summary>
         /// <param name="raw">Raw position data from the tracker.</param>
-        /// <param name="processedRotationQ">Already-processed head rotation quaternion (for neck model).</param>
+        /// <param name="processedRotationQ">Already-processed head rotation quaternion (for pivot compensation).</param>
         /// <param name="deltaTime">Frame delta time in seconds.</param>
         /// <returns>Final position offset in meters, box-clamped.</returns>
         public Vec3 Process(PositionData raw, Quat4 processedRotationQ, float deltaTime)
@@ -92,17 +87,13 @@ namespace CameraUnlock.Core.Processing
                 );
             }
 
-            // Step 4: Add neck model offset
-            Vec3 neckOffset = NeckModel.ComputeOffset(processedRotationQ, NeckModelSettings);
-            Vec3 total = _smoothedPosition + neckOffset;
-
-            // Step 5: Box clamp total position against limits
+            // Step 4: Box clamp position against limits
             // Z uses asymmetric limits: positive Z = forward lean (generous),
             // negative Z = backward lean (restricted)
             Vec3 clamped = new Vec3(
-                MathUtils.Clamp(total.X, -Settings.LimitX, Settings.LimitX),
-                MathUtils.Clamp(total.Y, -Settings.LimitY, Settings.LimitY),
-                MathUtils.Clamp(total.Z, -Settings.LimitZBack, Settings.LimitZ)
+                MathUtils.Clamp(_smoothedPosition.X, -Settings.LimitX, Settings.LimitX),
+                MathUtils.Clamp(_smoothedPosition.Y, -Settings.LimitY, Settings.LimitY),
+                MathUtils.Clamp(_smoothedPosition.Z, -Settings.LimitZBack, Settings.LimitZ)
             );
 
             return clamped;

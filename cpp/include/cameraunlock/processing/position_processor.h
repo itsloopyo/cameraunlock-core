@@ -6,13 +6,12 @@
 #include "cameraunlock/math/quat4.h"
 #include "cameraunlock/math/smoothing_utils.h"
 #include "cameraunlock/math/angle_utils.h"
-#include "cameraunlock/processing/neck_model.h"
 
 namespace cameraunlock {
 
 /// Complete positional tracking data processing pipeline.
 /// Pipeline: raw position → center subtraction → tracker pivot compensation →
-///           sensitivity/inversion → smoothing → add neck model → box clamp
+///           sensitivity/inversion → smoothing → box clamp
 /// Port of CameraUnlock.Core.Processing.PositionProcessor (C#).
 class PositionProcessor {
 public:
@@ -21,10 +20,6 @@ public:
     PositionSettings& GetSettings() { return m_settings; }
     const PositionSettings& GetSettings() const { return m_settings; }
     void SetSettings(const PositionSettings& settings) { m_settings = settings; }
-
-    NeckModelSettings& GetNeckModelSettings() { return m_neckModelSettings; }
-    const NeckModelSettings& GetNeckModelSettings() const { return m_neckModelSettings; }
-    void SetNeckModelSettings(const NeckModelSettings& settings) { m_neckModelSettings = settings; }
 
     float GetTrackerPivotForward() const { return m_trackerPivotForward; }
     void SetTrackerPivotForward(float value) { m_trackerPivotForward = value; }
@@ -73,17 +68,13 @@ public:
             );
         }
 
-        // Step 4: Add neck model offset
-        math::Vec3 neck_offset = NeckModel::ComputeOffset(processed_rotation_q, m_neckModelSettings);
-        math::Vec3 total = m_smoothedPosition + neck_offset;
-
-        // Step 5: Box clamp total position against limits
+        // Step 4: Box clamp position against limits
         // Z uses asymmetric limits: positive Z = backward lean (restricted),
         // negative Z = forward lean (generous)
         math::Vec3 clamped(
-            math::Clamp(total.x, -m_settings.limit_x, m_settings.limit_x),
-            math::Clamp(total.y, -m_settings.limit_y, m_settings.limit_y),
-            math::Clamp(total.z, -m_settings.limit_z, m_settings.limit_z_back)
+            math::Clamp(m_smoothedPosition.x, -m_settings.limit_x, m_settings.limit_x),
+            math::Clamp(m_smoothedPosition.y, -m_settings.limit_y, m_settings.limit_y),
+            math::Clamp(m_smoothedPosition.z, -m_settings.limit_z, m_settings.limit_z_back)
         );
 
         return clamped;
@@ -109,7 +100,6 @@ public:
 
 private:
     PositionSettings m_settings;
-    NeckModelSettings m_neckModelSettings;
     float m_trackerPivotForward = 0.15f;
 
     math::Vec3 m_center;
