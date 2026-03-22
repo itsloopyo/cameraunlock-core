@@ -53,6 +53,15 @@ $Script:GameConfigs = @{
             'C:\Program Files\Epic Games\Subnautica'
         )
     }
+    'SubnauticaBelowZero' = @{
+        EnvVar = 'SubnauticaBelowZeroDir'
+        SteamFolder = 'SubnauticaZero'
+        Executable = 'SubnauticaZero.exe'
+        DataFolder = 'SubnauticaZero_Data'
+        EpicPaths = @(
+            'C:\Program Files\Epic Games\SubnauticaZero'
+        )
+    }
     'GreenHell' = @{
         EnvVar = 'GREEN_HELL_PATH'
         SteamFolder = 'Green Hell'
@@ -124,6 +133,12 @@ $Script:GameConfigs = @{
         SteamFolder = 'The Green Light'
         Executable = 'TheGreenLight.exe'
         DataFolder = 'TheGreenLight_Data'
+    }
+    'SonsOfTheForest' = @{
+        EnvVar = 'SONS_OF_THE_FOREST_PATH'
+        SteamFolder = 'Sons Of The Forest'
+        Executable = 'SonsOfTheForest.exe'
+        DataFolder = 'SonsOfTheForest_Data'
     }
 }
 
