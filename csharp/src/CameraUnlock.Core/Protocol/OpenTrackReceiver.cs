@@ -17,6 +17,8 @@ namespace CameraUnlock.Core.Protocol
         public const int DefaultPort = 4242;
         private const int ReceiveTimeoutMs = 100;
         private const int DisconnectThreshold = 50;
+        private const int RetryIntervalMs = 5000;
+        private const int RetryLogIntervalMs = 30000;
 
         /// <summary>
         /// Default max age in milliseconds for data to be considered fresh.
@@ -34,6 +36,15 @@ namespace CameraUnlock.Core.Protocol
         private volatile bool _isConnected;
         private int _consecutiveTimeouts;
         private bool _disposed;
+
+        // Port retry state
+        private volatile bool _retrying;
+#if NULLABLE_ENABLED
+        private Thread? _retryThread;
+#else
+        private Thread _retryThread;
+#endif
+        private int _port;
 
         private volatile float _rotationPitch;
         private volatile float _rotationYaw;
@@ -91,11 +102,22 @@ namespace CameraUnlock.Core.Protocol
         public bool IsFailed { get; private set; }
         public bool IsRemoteConnection => _isRemoteConnection;
 
+        /// <summary>
+        /// Optional logging callback for bind failures and retry messages.
+        /// </summary>
+#if NULLABLE_ENABLED
+        public Action<string>? Log { get; set; }
+#else
+        public Action<string> Log { get; set; }
+#endif
+
         public bool Start(int port = DefaultPort)
         {
             if (_disposed) return false;
             if (_isRunning) return true;
+            if (_retrying) return false;
             IsFailed = false;
+            _port = port;
 
             try
             {
@@ -105,6 +127,8 @@ namespace CameraUnlock.Core.Protocol
             catch (SocketException)
             {
                 IsFailed = true;
+                Log?.Invoke(string.Format("Failed to bind UDP port {0} -- will retry every {1}s", port, RetryIntervalMs / 1000));
+                StartRetryLoop();
                 return false;
             }
 
@@ -118,9 +142,80 @@ namespace CameraUnlock.Core.Protocol
             return true;
         }
 
+        private void StartRetryLoop()
+        {
+            _retrying = true;
+            _retryThread = new Thread(RetryLoop)
+            {
+                Name = "CameraUnlock-PortRetry",
+                IsBackground = true
+            };
+            _retryThread.Start();
+        }
+
+        private void RetryLoop()
+        {
+            int attemptsPerLog = RetryLogIntervalMs / RetryIntervalMs;
+            int attempts = 0;
+
+            while (_retrying && !_disposed)
+            {
+                // Sleep in short increments so Stop()/Dispose() can interrupt quickly
+                for (int i = 0; i < RetryIntervalMs / 100; i++)
+                {
+                    if (!_retrying || _disposed) return;
+                    Thread.Sleep(100);
+                }
+                if (!_retrying || _disposed) return;
+
+                attempts++;
+
+                try
+                {
+                    var client = new UdpClient(new IPEndPoint(IPAddress.Any, _port));
+                    client.Client.ReceiveTimeout = ReceiveTimeoutMs;
+
+                    if (!_retrying || _disposed)
+                    {
+                        try { client.Close(); }
+                        catch (SocketException) { }
+                        return;
+                    }
+
+                    _udpClient = client;
+                    IsFailed = false;
+                    _retrying = false;
+
+                    _isRunning = true;
+                    _receiveThread = new Thread(ReceiveLoop)
+                    {
+                        Name = "CameraUnlock-OpenTrackReceiver",
+                        IsBackground = true
+                    };
+                    _receiveThread.Start();
+
+                    Log?.Invoke(string.Format("Bound UDP port {0} after {1} retries", _port, attempts));
+                    return;
+                }
+                catch (SocketException)
+                {
+                    if (attempts % attemptsPerLog == 0)
+                    {
+                        Log?.Invoke(string.Format("Still waiting for UDP port {0} ({1}s elapsed)", _port, attempts * RetryIntervalMs / 1000));
+                    }
+                }
+            }
+        }
+
         public void Stop()
         {
             _isRunning = false;
+            _retrying = false;
+
+            var retryThread = _retryThread;
+            _retryThread = null;
+            if (retryThread != null)
+                retryThread.Join(1000);
 
             var thread = _receiveThread;
             _receiveThread = null;

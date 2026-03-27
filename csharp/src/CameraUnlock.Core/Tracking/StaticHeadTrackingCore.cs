@@ -119,13 +119,10 @@ namespace CameraUnlock.Core.Tracking
 
             // Start OpenTrack receiver
             _receiver = new OpenTrackReceiver();
+            _receiver.Log = _log;
             if (_receiver.Start(config.UdpPort))
             {
                 _log?.Invoke(string.Format("Listening on UDP port {0}", config.UdpPort));
-            }
-            else
-            {
-                _log?.Invoke(string.Format("Failed to start UDP receiver on port {0}", config.UdpPort));
             }
 
             _enabled = config.EnableOnStartup;
