@@ -1,11 +1,16 @@
 #pragma once
 
+#include <cmath>
 #include "cameraunlock/data/position_data.h"
 
 namespace cameraunlock {
 
-/// Fills in frames between low-rate position samples using velocity extrapolation.
-/// Port of CameraUnlock.Core.Processing.PositionInterpolator (C#).
+/// Fills in frames between low-rate position samples using velocity extrapolation
+/// with prediction-error correction for smooth output at any framerate.
+///
+/// Same algorithm as PoseInterpolator but for 3D position (x, y, z).
+/// When a new sample arrives, the prediction error is captured and exponentially
+/// blended out over subsequent frames — no hard snap at sample boundaries.
 class PositionInterpolator {
 public:
     PositionInterpolator() = default;
@@ -15,7 +20,7 @@ public:
     void SetMaxExtrapolationTime(float value) { m_maxExtrapolationTime = value; }
 
     /// Update with the latest raw position and frame delta time.
-    /// Returns an interpolated (extrapolated) position.
+    /// Returns an interpolated (extrapolated) position — smooth at any framerate.
     PositionData Update(const PositionData& raw, float delta_time) {
         if (!raw.IsValid()) {
             return raw;
@@ -43,7 +48,20 @@ public:
                         m_velocityZ = inst_vel_z;
                         m_hasVelocity = true;
                     }
+
+                    // Capture prediction error for smooth blending
+                    if (m_hasOutput) {
+                        m_correctionX = m_outputX - raw.x;
+                        m_correctionY = m_outputY - raw.y;
+                        m_correctionZ = m_outputZ - raw.z;
+                    }
                 }
+            } else {
+                // First sample ever — output directly
+                m_outputX = raw.x;
+                m_outputY = raw.y;
+                m_outputZ = raw.z;
+                m_hasOutput = true;
             }
 
             m_lastTimestampUs = raw.timestamp_us;
@@ -53,14 +71,11 @@ public:
 
             m_timeSinceLastSample = 0.0f;
             m_hasAnySample = true;
-
-            return raw;
+        } else {
+            m_timeSinceLastSample += delta_time;
         }
 
-        // No new sample this frame — extrapolate if we have velocity
-        m_timeSinceLastSample += delta_time;
-
-        if (!m_hasVelocity) {
+        if (!m_hasAnySample) {
             return raw;
         }
 
@@ -71,18 +86,34 @@ public:
 
         // Decay factor: velocity influence fades as we get further from the last sample
         // Uses 1/(1+r^2) — gentle near 0, only dampens near max extrapolation time.
-        // (The original 1/(1+r)^2 was too aggressive: lost 26.6% at one-frame gaps.)
         float decay = 1.0f;
         if (m_maxExtrapolationTime > 0.0f) {
             float ratio = extrap_time / m_maxExtrapolationTime;
             decay = 1.0f / (1.0f + ratio * ratio);
         }
 
-        float pred_x = m_lastX + m_velocityX * extrap_time * decay;
-        float pred_y = m_lastY + m_velocityY * extrap_time * decay;
-        float pred_z = m_lastZ + m_velocityZ * extrap_time * decay;
+        float target_x = m_lastX;
+        float target_y = m_lastY;
+        float target_z = m_lastZ;
 
-        return PositionData(pred_x, pred_y, pred_z, raw.timestamp_us);
+        if (m_hasVelocity) {
+            target_x += m_velocityX * extrap_time * decay;
+            target_y += m_velocityY * extrap_time * decay;
+            target_z += m_velocityZ * extrap_time * decay;
+        }
+
+        // Exponentially decay the correction toward zero
+        float corrBlend = std::exp(-kCorrectionSpeed * delta_time);
+        m_correctionX *= corrBlend;
+        m_correctionY *= corrBlend;
+        m_correctionZ *= corrBlend;
+
+        // Output = extrapolated target + diminishing correction
+        m_outputX = target_x + m_correctionX;
+        m_outputY = target_y + m_correctionY;
+        m_outputZ = target_z + m_correctionZ;
+
+        return PositionData(m_outputX, m_outputY, m_outputZ, raw.timestamp_us);
     }
 
     /// Resets all interpolation state.
@@ -97,10 +128,18 @@ public:
         m_hasVelocity = false;
         m_timeSinceLastSample = 0.0f;
         m_hasAnySample = false;
+        m_correctionX = 0.0f;
+        m_correctionY = 0.0f;
+        m_correctionZ = 0.0f;
+        m_outputX = 0.0f;
+        m_outputY = 0.0f;
+        m_outputZ = 0.0f;
+        m_hasOutput = false;
     }
 
 private:
     static constexpr float kVelocityBlend = 0.5f;
+    static constexpr float kCorrectionSpeed = 300.0f;
 
     float m_maxExtrapolationTime = 0.1f;
 
@@ -116,6 +155,17 @@ private:
 
     float m_timeSinceLastSample = 0.0f;
     bool m_hasAnySample = false;
+
+    // Prediction-error correction
+    float m_correctionX = 0.0f;
+    float m_correctionY = 0.0f;
+    float m_correctionZ = 0.0f;
+
+    // Last returned output values
+    float m_outputX = 0.0f;
+    float m_outputY = 0.0f;
+    float m_outputZ = 0.0f;
+    bool m_hasOutput = false;
 };
 
 }  // namespace cameraunlock
