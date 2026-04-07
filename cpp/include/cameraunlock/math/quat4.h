@@ -63,6 +63,14 @@ struct Quat4 {
 
     Quat4 operator*(const Quat4& b) const { return Multiply(b); }
 
+    /// Returns a unit-length copy of this quaternion.
+    Quat4 Normalized() const {
+        float len = std::sqrt(x * x + y * y + z * z + w * w);
+        if (len < 1e-6f) return Identity();
+        float inv = 1.0f / len;
+        return Quat4(x * inv, y * inv, z * inv, w * inv);
+    }
+
     /// Creates a quaternion from YXZ Euler angles (yaw, pitch, roll in degrees).
     /// Matches C# QuaternionUtils.FromYawPitchRoll.
     static Quat4 FromYawPitchRoll(float yawDeg, float pitchDeg, float rollDeg) {
@@ -83,6 +91,64 @@ struct Quat4 {
             sy * cp * cr - cy * sp * sr,
             cy * cp * sr - sy * sp * cr,
             cy * cp * cr + sy * sp * sr
+        );
+    }
+
+    /// Decomposes this quaternion into YXZ Euler angles (yaw, pitch, roll in degrees).
+    /// Matches C# QuaternionUtils.ToEulerYXZ. Handles gimbal lock at ±90° pitch.
+    void ToEulerYXZ(float& yaw, float& pitch, float& roll) const {
+        constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
+
+        float sinPitch = 2.0f * (w * x - y * z);
+
+        if (sinPitch >= 1.0f) {
+            pitch = 90.0f;
+            yaw = std::atan2(2.0f * (x * z + w * y), 1.0f - 2.0f * (x * x + y * y)) * kRadToDeg;
+            roll = 0.0f;
+        } else if (sinPitch <= -1.0f) {
+            pitch = -90.0f;
+            yaw = std::atan2(2.0f * (x * z + w * y), 1.0f - 2.0f * (x * x + y * y)) * kRadToDeg;
+            roll = 0.0f;
+        } else {
+            pitch = std::asin(sinPitch) * kRadToDeg;
+            yaw = std::atan2(2.0f * (x * z + w * y), 1.0f - 2.0f * (x * x + y * y)) * kRadToDeg;
+            roll = std::atan2(2.0f * (x * y + w * z), 1.0f - 2.0f * (x * x + z * z)) * kRadToDeg;
+        }
+    }
+
+    /// Spherical linear interpolation. Takes the shortest path through quaternion space.
+    /// Matches C# QuaternionUtils.Slerp.
+    static Quat4 Slerp(const Quat4& a, const Quat4& b, float t) {
+        float dot = a.Dot(b);
+
+        // Flip sign to take shorter path
+        float sign = 1.0f;
+        if (dot < 0.0f) {
+            sign = -1.0f;
+            dot = -dot;
+        }
+
+        // Near-identical quaternions: normalized lerp to avoid division by ~0
+        if (dot > 0.9995f) {
+            return Quat4(
+                a.x + t * (sign * b.x - a.x),
+                a.y + t * (sign * b.y - a.y),
+                a.z + t * (sign * b.z - a.z),
+                a.w + t * (sign * b.w - a.w)
+            ).Normalized();
+        }
+
+        float theta = std::acos(dot);
+        float sinTheta = std::sin(theta);
+        float invSinTheta = 1.0f / sinTheta;
+        float wa = std::sin((1.0f - t) * theta) * invSinTheta;
+        float wb = sign * std::sin(t * theta) * invSinTheta;
+
+        return Quat4(
+            wa * a.x + wb * b.x,
+            wa * a.y + wb * b.y,
+            wa * a.z + wb * b.z,
+            wa * a.w + wb * b.w
         );
     }
 };

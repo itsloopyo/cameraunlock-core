@@ -14,26 +14,30 @@ TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, floa
     pitch = static_cast<float>(math::ApplyDeadzone(pitch, m_deadzone.pitch));
     roll = static_cast<float>(math::ApplyDeadzone(roll, m_deadzone.roll));
 
-    // Step 3: Apply smoothing
+    // Step 3: Apply smoothing via quaternion SLERP.
+    // SLERP follows the shortest arc on the unit sphere, avoiding the gimbal
+    // artifacts that per-axis Euler smoothing can introduce at compound angles.
     double effective_smoothing = math::GetEffectiveSmoothing(m_smoothingFactor);
 
+    math::Quat4 target = math::Quat4::FromYawPitchRoll(yaw, pitch, roll);
+
     if (!m_hasSmoothedValue) {
-        // First frame, snap to target
-        m_smoothedYaw = yaw;
-        m_smoothedPitch = pitch;
-        m_smoothedRoll = roll;
+        m_smoothedQuat = target;
         m_hasSmoothedValue = true;
     } else {
-        double t = math::CalculateSmoothingFactor(effective_smoothing, static_cast<double>(delta_time));
-        m_smoothedYaw += (static_cast<double>(yaw) - m_smoothedYaw) * t;
-        m_smoothedPitch += (static_cast<double>(pitch) - m_smoothedPitch) * t;
-        m_smoothedRoll += (static_cast<double>(roll) - m_smoothedRoll) * t;
+        float t = static_cast<float>(
+            math::CalculateSmoothingFactor(effective_smoothing, static_cast<double>(delta_time)));
+        m_smoothedQuat = math::Quat4::Slerp(m_smoothedQuat, target, t);
     }
 
+    // Decompose back to Euler for sensitivity application
+    float smoothedYaw, smoothedPitch, smoothedRoll;
+    m_smoothedQuat.ToEulerYXZ(smoothedYaw, smoothedPitch, smoothedRoll);
+
     // Step 4: Apply sensitivity
-    float out_yaw = static_cast<float>(m_smoothedYaw) * m_sensitivity.yaw;
-    float out_pitch = static_cast<float>(m_smoothedPitch) * m_sensitivity.pitch;
-    float out_roll = static_cast<float>(m_smoothedRoll) * m_sensitivity.roll;
+    float out_yaw = smoothedYaw * m_sensitivity.yaw;
+    float out_pitch = smoothedPitch * m_sensitivity.pitch;
+    float out_roll = smoothedRoll * m_sensitivity.roll;
 
     if (m_sensitivity.invert_yaw) out_yaw = -out_yaw;
     if (m_sensitivity.invert_pitch) out_pitch = -out_pitch;
@@ -43,25 +47,20 @@ TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, floa
 }
 
 void TrackingProcessor::Recenter() {
-    m_centerManager.SetCenter(
-        static_cast<float>(m_smoothedYaw),
-        static_cast<float>(m_smoothedPitch),
-        static_cast<float>(m_smoothedRoll)
-    );
+    float yaw, pitch, roll;
+    m_smoothedQuat.ToEulerYXZ(yaw, pitch, roll);
+    m_centerManager.SetCenter(yaw, pitch, roll);
 }
 
 void TrackingProcessor::RecenterTo(float yaw, float pitch, float roll) {
     m_centerManager.SetCenter(yaw, pitch, roll);
-    m_smoothedYaw = 0.0;
-    m_smoothedPitch = 0.0;
-    m_smoothedRoll = 0.0;
+    m_smoothedQuat = math::Quat4::Identity();
+    m_hasSmoothedValue = false;
 }
 
 void TrackingProcessor::Reset() {
     m_centerManager.Reset();
-    m_smoothedYaw = 0.0;
-    m_smoothedPitch = 0.0;
-    m_smoothedRoll = 0.0;
+    m_smoothedQuat = math::Quat4::Identity();
     m_hasSmoothedValue = false;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cameraunlock/data/tracking_pose.h"
+#include "cameraunlock/math/quat4.h"
 #include "cameraunlock/processing/center_offset_manager.h"
 
 namespace cameraunlock {
@@ -42,18 +43,15 @@ public:
 
     /// Gets the current smoothed values.
     void GetSmoothedRotation(float& yaw, float& pitch, float& roll) const {
-        yaw = static_cast<float>(m_smoothedYaw);
-        pitch = static_cast<float>(m_smoothedPitch);
-        roll = static_cast<float>(m_smoothedRoll);
+        m_smoothedQuat.ToEulerYXZ(yaw, pitch, roll);
     }
 
 private:
     CenterOffsetManager m_centerManager;
 
-    // Smoothed values (doubles for precision)
-    double m_smoothedYaw = 0.0;
-    double m_smoothedPitch = 0.0;
-    double m_smoothedRoll = 0.0;
+    // Smoothed rotation as quaternion — SLERP avoids gimbal artifacts
+    // that per-axis Euler smoothing can introduce at compound angles.
+    math::Quat4 m_smoothedQuat;
     bool m_hasSmoothedValue = false;
 
     // Configuration
