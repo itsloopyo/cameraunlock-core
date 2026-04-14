@@ -80,6 +80,49 @@ if(CAMERAUNLOCK_BUILD_HOOKS)
     )
 endif()
 
+# Optional REFramework utilities module (requires REFramework headers from consumer)
+option(CAMERAUNLOCK_BUILD_REFRAMEWORK "Build REFramework utilities" OFF)
+if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
+    add_library(cameraunlock_reframework STATIC
+        src/reframework/log_callback.cpp
+        src/reframework/managed_utils.cpp
+        src/reframework/game_state_probing.cpp
+        src/reframework/tdb_inspector.cpp
+    )
+    # REFramework's API.hpp requires C++20 (std::span)
+    set_target_properties(cameraunlock_reframework PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+    )
+    target_include_directories(cameraunlock_reframework
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    # REFramework headers (reframework/API.hpp) must be provided by the consumer
+    # via CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR or by adding include dirs after
+    # add_subdirectory.
+    if(CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR)
+        target_include_directories(cameraunlock_reframework PRIVATE
+            ${CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR}
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(cameraunlock_reframework PRIVATE
+            $<$<CONFIG:Release>:/O2 /GL>
+        )
+        set_target_properties(cameraunlock_reframework PROPERTIES
+            STATIC_LIBRARY_OPTIONS "$<$<CONFIG:Release>:/LTCG>"
+        )
+    endif()
+
+    install(TARGETS cameraunlock_reframework
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+    )
+endif()
+
 # Tests
 if(CAMERAUNLOCK_BUILD_TESTS)
     enable_testing()
