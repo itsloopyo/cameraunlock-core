@@ -12,9 +12,13 @@ namespace CameraUnlock.Core.Processing
     public sealed class PoseInterpolator
     {
         /// <summary>
-        /// Kept for API compatibility. No longer controls behavior.
+        /// Maximum extrapolation past the target, as a fraction of the estimated
+        /// sample interval. 0.5 = continue the last velocity for up to half a
+        /// sample period beyond the latest known position.  This eliminates the
+        /// velocity-drops-to-zero flat spots that make 60 Hz tracking look choppy
+        /// on high-refresh displays (e.g. 240 Hz).
         /// </summary>
-        public float MaxExtrapolationTime { get; set; } = 0.1f;
+        public float MaxExtrapolationFraction { get; set; } = 0.5f;
 
         // EMA blend factor for sample interval estimation
         private const float IntervalBlend = 0.3f;
@@ -97,8 +101,9 @@ namespace CameraUnlock.Core.Processing
                     if (_sampleInterval > MaxSampleInterval) _sampleInterval = MaxSampleInterval;
                 }
 
-                // Capture current interpolated position as new start point
-                float t = _progress > 1f ? 1f : _progress;
+                // Capture current interpolated (possibly extrapolated) position as new start point
+                float maxP = 1f + MaxExtrapolationFraction;
+                float t = _progress < 0f ? 0f : (_progress > maxP ? maxP : _progress);
                 _fromYaw = _fromYaw + (_toYaw - _fromYaw) * t;
                 _fromPitch = _fromPitch + (_toPitch - _fromPitch) * t;
                 _fromRoll = _fromRoll + (_toRoll - _fromRoll) * t;
@@ -116,8 +121,10 @@ namespace CameraUnlock.Core.Processing
             // Advance interpolation
             _progress += deltaTime / _sampleInterval;
 
-            // Clamp for output — hold at target when waiting for next sample
-            float pt = _progress > 1f ? 1f : (_progress < 0f ? 0f : _progress);
+            // Allow extrapolation past 1.0 to maintain velocity continuity,
+            // bounded to avoid runaway prediction on direction reversals.
+            float maxPt = 1f + MaxExtrapolationFraction;
+            float pt = _progress > maxPt ? maxPt : (_progress < 0f ? 0f : _progress);
 
             float outYaw = _fromYaw + (_toYaw - _fromYaw) * pt;
             float outPitch = _fromPitch + (_toPitch - _fromPitch) * pt;

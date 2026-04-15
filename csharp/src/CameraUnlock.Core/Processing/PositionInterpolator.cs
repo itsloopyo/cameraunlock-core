@@ -9,9 +9,10 @@ namespace CameraUnlock.Core.Processing
     public sealed class PositionInterpolator
     {
         /// <summary>
-        /// Kept for API compatibility. No longer controls behavior.
+        /// Maximum extrapolation past the target, as a fraction of the estimated
+        /// sample interval. Mirrors PoseInterpolator.MaxExtrapolationFraction.
         /// </summary>
-        public float MaxExtrapolationTime { get; set; } = 0.1f;
+        public float MaxExtrapolationFraction { get; set; } = 0.5f;
 
         private const float IntervalBlend = 0.3f;
         private const float DefaultSampleInterval = 1f / 30f;
@@ -77,7 +78,8 @@ namespace CameraUnlock.Core.Processing
                     if (_sampleInterval > MaxSampleInterval) _sampleInterval = MaxSampleInterval;
                 }
 
-                float t = _progress > 1f ? 1f : _progress;
+                float maxP = 1f + MaxExtrapolationFraction;
+                float t = _progress < 0f ? 0f : (_progress > maxP ? maxP : _progress);
                 _fromX = _fromX + (_toX - _fromX) * t;
                 _fromY = _fromY + (_toY - _fromY) * t;
                 _fromZ = _fromZ + (_toZ - _fromZ) * t;
@@ -93,7 +95,8 @@ namespace CameraUnlock.Core.Processing
 
             _progress += deltaTime / _sampleInterval;
 
-            float pt = _progress > 1f ? 1f : (_progress < 0f ? 0f : _progress);
+            float maxPt = 1f + MaxExtrapolationFraction;
+            float pt = _progress > maxPt ? maxPt : (_progress < 0f ? 0f : _progress);
 
             float outX = _fromX + (_toX - _fromX) * pt;
             float outY = _fromY + (_toY - _fromY) * pt;

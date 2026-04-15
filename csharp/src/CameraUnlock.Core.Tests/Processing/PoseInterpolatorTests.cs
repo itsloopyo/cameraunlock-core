@@ -85,9 +85,39 @@ namespace CameraUnlock.Core.Tests.Processing
         }
 
         [Fact]
-        public void InterpolationHoldsAtTarget_WhenNoNewSample()
+        public void ExtrapolationIsBounded_WhenNoNewSample()
         {
             var interp = new PoseInterpolator();
+
+            // Establish two samples: 0 → 10 yaw
+            var pose1 = MakePose(0f, 0f, 0f, 1000);
+            interp.Update(pose1, DeltaTime);
+            for (int i = 0; i < 3; i++)
+            {
+                interp.Update(pose1, DeltaTime);
+            }
+
+            var pose2 = MakePose(10f, 0f, 0f, 2000);
+            interp.Update(pose2, DeltaTime);
+
+            // Run many frames without new sample — should extrapolate then cap
+            float lastYaw = 0f;
+            for (int i = 0; i < 100; i++)
+            {
+                var r = interp.Update(pose2, DeltaTime);
+                lastYaw = r.Yaw;
+            }
+
+            // With MaxExtrapolationFraction=0.5, the output should be
+            // from + (to - from) * 1.5 = 0 + 10 * 1.5 = 15
+            // (extrapolates half a sample period beyond the target, then caps)
+            Assert.Equal(15f, lastYaw, precision: 1);
+        }
+
+        [Fact]
+        public void NoExtrapolation_HoldsAtTarget()
+        {
+            var interp = new PoseInterpolator { MaxExtrapolationFraction = 0f };
 
             // Establish two samples
             var pose1 = MakePose(0f, 0f, 0f, 1000);
@@ -100,7 +130,7 @@ namespace CameraUnlock.Core.Tests.Processing
             var pose2 = MakePose(10f, 0f, 0f, 2000);
             interp.Update(pose2, DeltaTime);
 
-            // Run many frames without new sample — should converge to pose2 and hold
+            // Run many frames without new sample — should hold at target
             float lastYaw = 0f;
             for (int i = 0; i < 100; i++)
             {
@@ -108,7 +138,6 @@ namespace CameraUnlock.Core.Tests.Processing
                 lastYaw = r.Yaw;
             }
 
-            // Should be exactly at pose2, not beyond it
             Assert.Equal(10f, lastYaw, precision: 3);
         }
 
@@ -180,30 +209,21 @@ namespace CameraUnlock.Core.Tests.Processing
                 interp.Update(MakePose(10f, 0f, 0f, 2000), DeltaTime);
 
             // Third sample at yaw=20 — now we can check linearity
-            interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime);
+            // Collect 4 frames (isNewSample + 3 stale) and verify constant frame-to-frame deltas
+            var values = new float[4];
+            values[0] = interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime).Yaw;
+            for (int i = 1; i < 4; i++)
+                values[i] = interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime).Yaw;
 
-            // Collect interpolated values for the next segment
-            float prev = 0f;
-            float firstDelta = 0f;
-            bool isLinear = true;
-            for (int i = 0; i < 3; i++)
+            // All frame-to-frame deltas should be approximately equal (linear interpolation)
+            float refDelta = values[1] - values[0];
+            Assert.True(refDelta > 0f, $"Expected positive delta, got {refDelta}");
+            for (int i = 2; i < 4; i++)
             {
-                var r = interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime);
-                if (i == 0)
-                {
-                    firstDelta = r.Yaw - 10f; // should be positive
-                }
-                else
-                {
-                    float delta = r.Yaw - prev;
-                    // Each step should be approximately equal (linear)
-                    if (System.Math.Abs(delta - firstDelta) > 0.5f)
-                        isLinear = false;
-                }
-                prev = r.Yaw;
+                float delta = values[i] - values[i - 1];
+                Assert.True(System.Math.Abs(delta - refDelta) < 0.5f,
+                    $"Frame deltas should be equal: {refDelta} vs {delta} at frame {i}");
             }
-
-            Assert.True(isLinear, "Interpolation should produce approximately linear output between samples");
         }
     }
 }

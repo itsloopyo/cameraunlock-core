@@ -11,8 +11,8 @@ class PositionInterpolator {
 public:
     PositionInterpolator() = default;
 
-    float GetMaxExtrapolationTime() const { return m_maxExtrapolationTime; }
-    void SetMaxExtrapolationTime(float value) { m_maxExtrapolationTime = value; }
+    float GetMaxExtrapolationFraction() const { return m_maxExtrapolationFraction; }
+    void SetMaxExtrapolationFraction(float value) { m_maxExtrapolationFraction = value; }
 
     /// Update with the latest raw position and frame delta time.
     /// Returns a smoothly interpolated position.
@@ -48,8 +48,9 @@ public:
                 if (m_sampleInterval > kMaxSampleInterval) m_sampleInterval = kMaxSampleInterval;
             }
 
-            // Capture current interpolated position as new start point
-            float t = m_progress > 1.0f ? 1.0f : m_progress;
+            // Capture current interpolated (possibly extrapolated) position as new start point
+            float maxP = 1.0f + m_maxExtrapolationFraction;
+            float t = m_progress < 0.0f ? 0.0f : (m_progress > maxP ? maxP : m_progress);
             m_fromX = m_fromX + (m_toX - m_fromX) * t;
             m_fromY = m_fromY + (m_toY - m_fromY) * t;
             m_fromZ = m_fromZ + (m_toZ - m_fromZ) * t;
@@ -68,8 +69,9 @@ public:
         // Advance interpolation
         m_progress += delta_time / m_sampleInterval;
 
-        // Clamp — hold at target when waiting for next sample
-        float pt = m_progress > 1.0f ? 1.0f : (m_progress < 0.0f ? 0.0f : m_progress);
+        // Allow extrapolation past 1.0 to maintain velocity continuity
+        float maxPt = 1.0f + m_maxExtrapolationFraction;
+        float pt = m_progress > maxPt ? maxPt : (m_progress < 0.0f ? 0.0f : m_progress);
 
         float outX = m_fromX + (m_toX - m_fromX) * pt;
         float outY = m_fromY + (m_toY - m_fromY) * pt;
@@ -96,7 +98,7 @@ private:
     static constexpr float kMinSampleInterval = 0.001f;
     static constexpr float kMaxSampleInterval = 0.2f;
 
-    float m_maxExtrapolationTime = 0.1f;
+    float m_maxExtrapolationFraction = 0.5f;
 
     int64_t m_lastTimestampUs = 0;
 

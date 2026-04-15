@@ -20,8 +20,12 @@ struct InterpolatedPose {
 /// Port of CameraUnlock.Core.Processing.PoseInterpolator (C#).
 class PoseInterpolator {
 public:
-    /// Kept for API compatibility.
-    float max_extrapolation_time = 0.1f;
+    /// Maximum extrapolation past the target, as a fraction of the estimated
+    /// sample interval. 0.5 = continue the last velocity for up to half a
+    /// sample period beyond the latest known position.  This eliminates the
+    /// velocity-drops-to-zero flat spots that make 60 Hz tracking look choppy
+    /// on high-refresh displays (e.g. 240 Hz).
+    float max_extrapolation_fraction = 0.5f;
 
     PoseInterpolator() = default;
 
@@ -59,8 +63,9 @@ public:
                 if (m_sampleInterval > kMaxSampleInterval) m_sampleInterval = kMaxSampleInterval;
             }
 
-            // Capture current interpolated position as new start point
-            float t = m_progress > 1.0f ? 1.0f : m_progress;
+            // Capture current interpolated (possibly extrapolated) position as new start point
+            float maxP = 1.0f + max_extrapolation_fraction;
+            float t = m_progress < 0.0f ? 0.0f : (m_progress > maxP ? maxP : m_progress);
             m_fromYaw   = m_fromYaw   + (m_toYaw   - m_fromYaw)   * t;
             m_fromPitch = m_fromPitch + (m_toPitch - m_fromPitch) * t;
             m_fromRoll  = m_fromRoll  + (m_toRoll  - m_fromRoll)  * t;
@@ -78,8 +83,10 @@ public:
         // Advance interpolation
         m_progress += delta_time / m_sampleInterval;
 
-        // Clamp — hold at target when waiting for next sample
-        float pt = m_progress > 1.0f ? 1.0f : (m_progress < 0.0f ? 0.0f : m_progress);
+        // Allow extrapolation past 1.0 to maintain velocity continuity,
+        // bounded to avoid runaway prediction on direction reversals.
+        float maxPt = 1.0f + max_extrapolation_fraction;
+        float pt = m_progress > maxPt ? maxPt : (m_progress < 0.0f ? 0.0f : m_progress);
 
         float outYaw   = m_fromYaw   + (m_toYaw   - m_fromYaw)   * pt;
         float outPitch = m_fromPitch + (m_toPitch - m_fromPitch) * pt;
