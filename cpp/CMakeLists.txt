@@ -80,6 +80,34 @@ if(CAMERAUNLOCK_BUILD_HOOKS)
     )
 endif()
 
+# Optional camera discovery module (requires MinHook via cameraunlock_hooks)
+option(CAMERAUNLOCK_BUILD_DISCOVERY "Build camera discovery (requires MinHook)" OFF)
+if(CAMERAUNLOCK_BUILD_DISCOVERY)
+    if(NOT TARGET cameraunlock_hooks)
+        message(FATAL_ERROR "CAMERAUNLOCK_BUILD_DISCOVERY requires CAMERAUNLOCK_BUILD_HOOKS=ON")
+    endif()
+
+    add_library(cameraunlock_discovery STATIC
+        src/memory/rtti_vtable.cpp
+        src/discovery/camera_discovery.cpp
+        src/discovery/float_classifier.cpp
+    )
+    target_include_directories(cameraunlock_discovery
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(cameraunlock_discovery PUBLIC cameraunlock cameraunlock_hooks)
+    if(MSVC)
+        target_compile_options(cameraunlock_discovery PRIVATE /EHa)
+    endif()
+
+    install(TARGETS cameraunlock_discovery
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+    )
+endif()
+
 # Optional REFramework utilities module (requires REFramework headers from consumer)
 option(CAMERAUNLOCK_BUILD_REFRAMEWORK "Build REFramework utilities" OFF)
 if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
