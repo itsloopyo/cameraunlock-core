@@ -56,7 +56,12 @@
       <HintPath>$(UnityEnginePath)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="UnityEngine.InputLegacyModule">
+    <!-- Old Unity (pre-2017.3) shipped Input.* inside UnityEngine.dll rather
+         than a split InputLegacyModule.dll. Gate on file existence so games
+         like Gone Home and Obra Dinn don't emit MSB3245 warnings every
+         build while modern Unity titles still pick up the split module. -->
+    <Reference Include="UnityEngine.InputLegacyModule"
+               Condition="Exists('$(UnityEnginePath)\UnityEngine.InputLegacyModule.dll')">
       <HintPath>$(UnityEnginePath)\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
