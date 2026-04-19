@@ -854,6 +854,257 @@ function Set-UE4SSModEnabled {
 }
 
 # Export functions
+<#
+.SYNOPSIS
+    Resolves the latest upstream release of a mod loader within a pinned version range, then downloads the matching asset to OutputPath.
+.DESCRIPTION
+    Two modes:
+      - GitHub mode (Owner + Repo): queries GitHub API /repos/:owner/:repo/releases, filters by VersionPrefix + AllowPrerelease,
+        picks the highest-versioned matching release, then downloads the asset whose filename matches AssetPattern.
+      - Direct-URL mode (DirectUrl): fetches a single pinned URL (for non-GitHub sources like Thunderstore).
+    On any failure (network, 404, timeout, rate limit, missing asset, corrupt zip) this function throws. Callers (install.cmd
+    via fetch-latest.ps1) catch the non-zero exit code and fall back to the bundled vendor/<name>/<zip>.
+.PARAMETER OutputPath
+    Where to write the downloaded file.
+.PARAMETER Owner
+    GitHub repository owner (GitHub mode).
+.PARAMETER Repo
+    GitHub repository name (GitHub mode).
+.PARAMETER VersionPrefix
+    Tag prefix to filter by (e.g. "v5.4." rejects v5.5, v6). Empty string = no prefix filter.
+.PARAMETER AssetPattern
+    Regex matched against asset name (e.g. "BepInEx_win_x64_.*\.zip").
+.PARAMETER AllowPrerelease
+    Include prereleases/nightlies when selecting the latest match.
+.PARAMETER DirectUrl
+    Single pinned URL (Direct-URL mode). Overrides GitHub mode when provided.
+.PARAMETER TimeoutSec
+    Per-request timeout (default 30s).
+.OUTPUTS
+    Hashtable: @{ Tag; CommitSha; AssetUrl; AssetName; Sha256; FetchedAt; Source }
+#>
+function Invoke-FetchLatestLoader {
+    param(
+        [Parameter(Mandatory=$true)] [string]$OutputPath,
+        [string]$Owner,
+        [string]$Repo,
+        [string]$VersionPrefix = '',
+        [string]$AssetPattern,
+        [switch]$AllowPrerelease,
+        [string]$DirectUrl,
+        [int]$TimeoutSec = 30
+    )
+
+    $headers = @{ "User-Agent" = "CameraUnlock-HeadTracking" }
+    $outputDir = Split-Path -Parent $OutputPath
+    if ($outputDir -and -not (Test-Path $outputDir)) {
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+    }
+
+    if ($DirectUrl) {
+        Invoke-WebRequest -Uri $DirectUrl -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers $headers
+        $sha = (Get-FileHash -Path $OutputPath -Algorithm SHA256).Hash.ToLower()
+        return @{
+            Tag = ''
+            CommitSha = ''
+            AssetUrl = $DirectUrl
+            AssetName = (Split-Path -Leaf $DirectUrl)
+            Sha256 = $sha
+            FetchedAt = (Get-Date).ToString('o')
+            Source = 'direct-url'
+        }
+    }
+
+    if (-not $Owner -or -not $Repo -or -not $AssetPattern) {
+        throw "Invoke-FetchLatestLoader: GitHub mode requires -Owner, -Repo, -AssetPattern."
+    }
+
+    $apiUrl = "https://api.github.com/repos/$Owner/$Repo/releases?per_page=50"
+    $releases = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec $TimeoutSec
+
+    $matching = $releases | Where-Object {
+        ($VersionPrefix -eq '' -or $_.tag_name.StartsWith($VersionPrefix)) -and
+        ($AllowPrerelease.IsPresent -or -not $_.prerelease)
+    }
+
+    if (-not $matching) {
+        throw "No upstream release matches Owner=$Owner Repo=$Repo VersionPrefix='$VersionPrefix' AllowPrerelease=$($AllowPrerelease.IsPresent)."
+    }
+
+    $release = $matching | Select-Object -First 1
+    $asset = $release.assets | Where-Object { $_.name -match $AssetPattern } | Select-Object -First 1
+    if (-not $asset) {
+        throw "Release $($release.tag_name) has no asset matching regex '$AssetPattern'."
+    }
+
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers $headers
+
+    $sha = (Get-FileHash -Path $OutputPath -Algorithm SHA256).Hash.ToLower()
+
+    $commitSha = ''
+    try {
+        $tagInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$Owner/$Repo/git/refs/tags/$($release.tag_name)" -Headers $headers -TimeoutSec $TimeoutSec
+        $commitSha = $tagInfo.object.sha
+    } catch {
+        # Tag lookup is best-effort; fallback to empty.
+    }
+
+    return @{
+        Tag = $release.tag_name
+        CommitSha = $commitSha
+        AssetUrl = $asset.browser_download_url
+        AssetName = $asset.name
+        Sha256 = $sha
+        FetchedAt = (Get-Date).ToString('o')
+        Source = 'github'
+    }
+}
+
+<#
+.SYNOPSIS
+    Package-time helper. Refreshes vendor/<Name>/ to the latest upstream release within range and writes LICENSE + README.md.
+.DESCRIPTION
+    Called by each mod's scripts/package-release.ps1 before staging the release ZIP. Delegates the download to
+    Invoke-FetchLatestLoader, then writes sibling metadata so the committed vendor tree is self-describing:
+      vendor/<Name>/
+        <OutputFileName>    (the downloaded zip)
+        LICENSE             (fetched from the zip if present, else from the GitHub API)
+        README.md           (tag, commit SHA, asset URL, SHA-256, fetched_at)
+.PARAMETER Name
+    Loader slug (e.g. "bepinex", "melonloader", "reframework"). Determines vendor subdir name only.
+.PARAMETER OutputDir
+    Full path to vendor/<name>/. Created if missing.
+.PARAMETER OutputFileName
+    Filename of the zip inside OutputDir (default: asset's own name).
+.PARAMETER LicenseName
+    License file name in upstream repo (default 'LICENSE'). Used if the zip does not contain a LICENSE at its root.
+.PARAMETER Owner, Repo, VersionPrefix, AssetPattern, AllowPrerelease, DirectUrl, TimeoutSec
+    Passed through to Invoke-FetchLatestLoader.
+.OUTPUTS
+    Hashtable with the same fields as Invoke-FetchLatestLoader plus LocalPath.
+#>
+function Refresh-VendoredLoader {
+    param(
+        [Parameter(Mandatory=$true)] [string]$Name,
+        [Parameter(Mandatory=$true)] [string]$OutputDir,
+        [string]$OutputFileName,
+        [string]$Owner,
+        [string]$Repo,
+        [string]$VersionPrefix = '',
+        [string]$AssetPattern,
+        [switch]$AllowPrerelease,
+        [string]$DirectUrl,
+        [string]$LicenseName = 'LICENSE',
+        [string]$LicenseUrl,
+        [int]$TimeoutSec = 30
+    )
+
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    }
+
+    # Stage to a temp file first, then resolve final filename from the response.
+    $tempFile = Join-Path $env:TEMP ("vendor-refresh-$Name-" + [IO.Path]::GetRandomFileName())
+
+    Write-Host "  Refreshing vendor/$Name from upstream..." -ForegroundColor Cyan
+    $meta = Invoke-FetchLatestLoader `
+        -OutputPath $tempFile `
+        -Owner $Owner -Repo $Repo `
+        -VersionPrefix $VersionPrefix -AssetPattern $AssetPattern `
+        -AllowPrerelease:$AllowPrerelease `
+        -DirectUrl $DirectUrl -TimeoutSec $TimeoutSec
+
+    if (-not $OutputFileName) { $OutputFileName = $meta.AssetName }
+    $targetPath = Join-Path $OutputDir $OutputFileName
+
+    Move-Item -Path $tempFile -Destination $targetPath -Force
+
+    # LICENSE resolution order:
+    #   1. Explicit $LicenseUrl (e.g. LGPL mods or Thunderstore repacks that don't ship LICENSE).
+    #   2. LICENSE extracted from the downloaded zip.
+    #   3. GitHub API /repos/:owner/:repo/license as last resort.
+    $licensePath = Join-Path $OutputDir 'LICENSE'
+    $extractedLicense = $false
+
+    if ($LicenseUrl) {
+        try {
+            $licHeaders = @{ "User-Agent" = "CameraUnlock-HeadTracking" }
+            Invoke-WebRequest -Uri $LicenseUrl -OutFile $licensePath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers $licHeaders
+            $extractedLicense = $true
+        } catch {
+            Write-Warning "LicenseUrl fetch failed ($_); will try other sources."
+        }
+    }
+
+    if (-not $extractedLicense -and $targetPath -match '\.zip$') {
+        try {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+            $zip = [System.IO.Compression.ZipFile]::OpenRead($targetPath)
+            try {
+                $entry = $zip.Entries | Where-Object {
+                    $_.Name -match '^LICENSE(\.md|\.txt)?$' -and $_.FullName -notmatch '/.+/'
+                } | Select-Object -First 1
+                if ($entry) {
+                    $outStream = [System.IO.File]::Create($licensePath)
+                    try {
+                        $in = $entry.Open()
+                        try { $in.CopyTo($outStream) } finally { $in.Dispose() }
+                    } finally { $outStream.Dispose() }
+                    $extractedLicense = $true
+                }
+            } finally { $zip.Dispose() }
+        } catch {
+            # Fall through to API fetch.
+        }
+    }
+
+    if (-not $extractedLicense -and $Owner -and $Repo) {
+        try {
+            $headers = @{ "User-Agent" = "CameraUnlock-HeadTracking"; "Accept" = "application/vnd.github.raw" }
+            $licenseUrl = "https://raw.githubusercontent.com/$Owner/$Repo/$($meta.Tag)/$LicenseName"
+            Invoke-WebRequest -Uri $licenseUrl -OutFile $licensePath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers $headers
+            $extractedLicense = $true
+        } catch {
+            # Try API fallback
+            try {
+                $headers = @{ "User-Agent" = "CameraUnlock-HeadTracking" }
+                $licenseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$Owner/$Repo/license" -Headers $headers -TimeoutSec $TimeoutSec
+                [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($licenseInfo.content)) | Set-Content $licensePath -Encoding UTF8
+                $extractedLicense = $true
+            } catch {
+                Write-Warning "Could not resolve LICENSE for $Name - you must add it manually to $licensePath."
+            }
+        }
+    }
+
+    # README.md with metadata.
+    $readmePath = Join-Path $OutputDir 'README.md'
+    $readme = @()
+    $readme += "# $Name (vendored)"
+    $readme += ''
+    $readme += 'This directory contains a bundled copy of the upstream mod loader used as a fallback when'
+    $readme += 'install.cmd cannot reach upstream. Refreshed automatically by scripts/package-release.ps1'
+    $readme += 'via Refresh-VendoredLoader in cameraunlock-core/powershell/ModLoaderSetup.psm1.'
+    $readme += ''
+    $readme += '## Snapshot'
+    $readme += ''
+    $readme += "- Asset: ``$($meta.AssetName)``"
+    if ($meta.Tag) { $readme += "- Tag: ``$($meta.Tag)``" }
+    if ($meta.CommitSha) { $readme += "- Commit: ``$($meta.CommitSha)``" }
+    $readme += "- Upstream URL: $($meta.AssetUrl)"
+    $readme += "- SHA-256: ``$($meta.Sha256)``"
+    $readme += "- Fetched at: $($meta.FetchedAt)"
+    $readme += "- Source: $($meta.Source)"
+    $readme += ''
+    $readme += 'Do not edit this directory by hand. Run ``pixi run package`` (or CI release) to refresh.'
+    $readme -join "`n" | Set-Content $readmePath -Encoding UTF8
+
+    Write-Host "    tag=$($meta.Tag) asset=$($meta.AssetName) sha256=$($meta.Sha256.Substring(0,12))..." -ForegroundColor DarkGray
+
+    $meta.LocalPath = $targetPath
+    return $meta
+}
+
 Export-ModuleMember -Function @(
     'Test-BepInExInstalled',
     'Test-MelonLoaderInstalled',
@@ -872,5 +1123,7 @@ Export-ModuleMember -Function @(
     'Find-UE4BinariesPath',
     'Get-UE4SSModsPath',
     'Install-UE4SS',
-    'Set-UE4SSModEnabled'
+    'Set-UE4SSModEnabled',
+    'Invoke-FetchLatestLoader',
+    'Refresh-VendoredLoader'
 )

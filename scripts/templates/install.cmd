@@ -16,8 +16,10 @@ set "MOD_DLLS=MyMod.dll CameraUnlock.Core.dll CameraUnlock.Core.Unity.dll"
 set "MOD_INTERNAL_NAME=MyMod"
 set "MOD_VERSION=1.0.0"
 set "STATE_FILE=.mod-state.json"
-set "BEPINEX_VERSION=5.4.23.2"
 set "BEPINEX_ARCH=x86"
+:: BEPINEX_ARCH picks the vendored fallback zip name (BepInEx_win_<arch>.zip).
+:: Upstream version is resolved by vendor/bepinex/fetch-latest.ps1 at install time
+:: and the packager refreshes the vendored copy in vendor/bepinex/ at release time.
 set "MOD_CONTROLS="
 set "GOG_IDS="
 set "SEARCH_DIRS="
@@ -124,7 +126,7 @@ if not exist "%GAME_PATH%\BepInEx\core\BepInEx.dll" (
     echo.
     color
 ) else (
-    echo BepInEx found.
+    echo Existing BepInEx detected, skipping loader install, deploying plugin only.
 )
 echo.
 
@@ -284,27 +286,45 @@ for %%d in (%SEARCH_DIRS%) do (
 exit /b 1
 
 :: ============================================
-:: Install BepInEx
+:: Install BepInEx (upstream-first, fall back to vendored copy)
+:: See vendoring pattern docs in ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies"
 :: ============================================
 :install_bepinex
-set "BEP_URL=https://github.com/BepInEx/BepInEx/releases/download/v%BEPINEX_VERSION%/BepInEx_win_%BEPINEX_ARCH%_%BEPINEX_VERSION%.zip"
+set "VENDOR_DIR=%SCRIPT_DIR%vendor\bepinex"
+set "VENDOR_ZIP=%VENDOR_DIR%\BepInEx_win_%BEPINEX_ARCH%.zip"
+set "FETCH_SCRIPT=%VENDOR_DIR%\fetch-latest.ps1"
 set "BEP_ZIP=%TEMP%\BepInEx_install.zip"
+set "LOADER_SOURCE="
 
-echo   Downloading BepInEx v%BEPINEX_VERSION% (%BEPINEX_ARCH%)...
-curl -fL -o "%BEP_ZIP%" "%BEP_URL%"
-if errorlevel 1 (
-    echo   ERROR: Download failed. Check your internet connection.
-    exit /b 1
+if exist "%FETCH_SCRIPT%" (
+    echo   Trying upstream BepInEx %BEPINEX_ARCH% (latest within range)...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%FETCH_SCRIPT%" -OutputPath "%BEP_ZIP%" >nul 2>&1
+    if not errorlevel 1 (
+        set "LOADER_SOURCE=%BEP_ZIP%"
+        set "USED_UPSTREAM=1"
+        echo   Using upstream BepInEx.
+    )
 )
 
-echo   Extracting to game directory...
-tar -xf "%BEP_ZIP%" -C "%GAME_PATH%"
+if not defined LOADER_SOURCE (
+    if not exist "%VENDOR_ZIP%" (
+        echo   ERROR: Upstream unreachable AND bundled fallback missing at:
+        echo     %VENDOR_ZIP%
+        echo   The installer ZIP is corrupt. Re-download the release.
+        exit /b 1
+    )
+    set "LOADER_SOURCE=%VENDOR_ZIP%"
+    echo   Upstream unreachable, using bundled fallback copy.
+)
+
+echo   Extracting BepInEx to game directory...
+tar -xf "%LOADER_SOURCE%" -C "%GAME_PATH%"
 if errorlevel 1 (
     echo   ERROR: Extraction failed.
-    del "%BEP_ZIP%" 2>nul
+    if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
     exit /b 1
 )
-del "%BEP_ZIP%" 2>nul
+if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
 
 :: Create plugins directory
 if not exist "%GAME_PATH%\BepInEx\plugins" mkdir "%GAME_PATH%\BepInEx\plugins"
@@ -329,5 +349,5 @@ if not exist "%GAME_PATH%\BepInEx\config" mkdir "%GAME_PATH%\BepInEx\config"
     echo }
 )
 
-echo   BepInEx v%BEPINEX_VERSION% installed successfully!
+echo   BepInEx installed successfully!
 exit /b 0
