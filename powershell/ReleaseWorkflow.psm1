@@ -6,6 +6,57 @@ $ErrorActionPreference = "Stop"
 
 <#
 .SYNOPSIS
+    Stage the shared detection bundle into a release staging directory.
+.DESCRIPTION
+    Each mod's install.cmd / uninstall.cmd calls shared/find-game.ps1
+    at user-install time to resolve the game path via the canonical
+    games.json. This function copies games.json + GamePathDetection.psm1
+    + find-game.ps1 into <StagingDir>/shared/ so the release ZIP carries
+    them alongside install.cmd. Call this from each mod's
+    package-release.ps1 *after* creating the staging dir and *before*
+    compressing the zip.
+.PARAMETER StagingDir
+    Release staging directory (the one that's about to be zipped).
+.PARAMETER CoreRoot
+    Optional path to the cameraunlock-core checkout. Defaults to the
+    checkout this module lives in.
+#>
+function Copy-SharedBundle {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$StagingDir,
+        [string]$CoreRoot
+    )
+
+    if (-not $CoreRoot) {
+        # $PSScriptRoot is .../cameraunlock-core/powershell; the core root
+        # is one up. Normalize with GetFullPath to collapse the `..`.
+        $CoreRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    }
+
+    $sources = @(
+        @{ Src = 'data\games.json';                   Dest = 'games.json' }
+        @{ Src = 'powershell\GamePathDetection.psm1'; Dest = 'GamePathDetection.psm1' }
+        @{ Src = 'scripts\find-game.ps1';             Dest = 'find-game.ps1' }
+    )
+
+    $sharedDir = Join-Path $StagingDir 'shared'
+    if (-not (Test-Path $sharedDir)) {
+        New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null
+    }
+
+    foreach ($s in $sources) {
+        $src = Join-Path $CoreRoot $s.Src
+        if (-not (Test-Path $src)) {
+            throw "Shared bundle source missing: $src. Is cameraunlock-core checked out?"
+        }
+        Copy-Item -Path $src -Destination (Join-Path $sharedDir $s.Dest) -Force
+        Write-Host "  shared/$($s.Dest)" -ForegroundColor Green
+    }
+}
+
+<#
+.SYNOPSIS
     Tests if a version string is valid semantic versioning.
 .PARAMETER Version
     Version string to validate (e.g., "1.0.1").
@@ -439,6 +490,7 @@ function Set-CsprojVersion {
 
 # Export functions
 Export-ModuleMember -Function @(
+    'Copy-SharedBundle',
     'Test-SemanticVersion',
     'Test-CleanGitStatus',
     'Test-GitTagExists',

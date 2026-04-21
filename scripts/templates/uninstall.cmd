@@ -2,22 +2,18 @@
 :: ============================================
 :: CameraUnlock Uninstall Template
 :: ============================================
-:: Copy this file and fill in the config block below for your mod.
-:: Everything below the config block is shared logic — do not edit.
+:: Copy to <mod>/scripts/uninstall.cmd, edit CONFIG BLOCK, leave the
+:: rest alone. Detection is delegated to shared/find-game.ps1 which
+:: reads cameraunlock-core/data/games.json by game id.
 :: ============================================
 
 :: --- CONFIG BLOCK (edit these for your mod) ---
+set "GAME_ID=my-game-id"
 set "MOD_DISPLAY_NAME=My Mod Name"
-set "GAME_EXE=Game.exe"
-set "GAME_DISPLAY_NAME=Full Game Name"
-set "STEAM_FOLDER_NAME=GameFolder"
-set "ENV_VAR_NAME=GAME_PATH"
 set "MOD_DLLS=MyMod.dll CameraUnlock.Core.dll CameraUnlock.Core.Unity.dll"
 set "MOD_INTERNAL_NAME=MyMod"
-set "STATE_FILE=.mod-state.json"
+set "STATE_FILE=.headtracking-state.json"
 set "LEGACY_DLLS="
-set "GOG_IDS="
-set "SEARCH_DIRS="
 :: --- END CONFIG BLOCK ---
 
 call :main %*
@@ -33,54 +29,50 @@ echo.
 echo === %MOD_DISPLAY_NAME% - Uninstall ===
 echo.
 
-set "GAME_PATH="
+set "SCRIPT_DIR=%~dp0"
 set "FORCE=0"
 
-:: Parse arguments
+:: Parse args for --force / /force flags. The first path-looking arg
+:: (if any) is passed to the shim as -GivenPath and wins over detection.
+set "_GIVEN_PATH="
 :parse_args
 if "%~1"=="" goto :args_done
-if /i "%~1"=="/force" (
-    set "FORCE=1"
-    shift
-    goto :parse_args
+if /i "%~1"=="/force" ( set "FORCE=1" & shift & goto :parse_args )
+if /i "%~1"=="--force" ( set "FORCE=1" & shift & goto :parse_args )
+if not defined _GIVEN_PATH (
+    if exist "%~1\" (
+        set "_GIVEN_PATH=%~1"
+        shift
+        goto :parse_args
+    )
 )
-if /i "%~1"=="--force" (
-    set "FORCE=1"
-    shift
-    goto :parse_args
-)
-:: Treat as game path
-if exist "%~1\%GAME_EXE%" (
-    set "GAME_PATH=%~1"
-    shift
-    goto :parse_args
-)
-echo ERROR: %GAME_EXE% not found at: %~1
-echo.
-exit /b 1
+shift
+goto :parse_args
 
 :args_done
 
-:: --- Find game path ---
-if not defined GAME_PATH (
-    if defined %ENV_VAR_NAME% (
-        call set "_ENV_PATH=%%%ENV_VAR_NAME%%%"
-        if exist "!_ENV_PATH!\%GAME_EXE%" (
-            set "GAME_PATH=!_ENV_PATH!"
-        )
-    )
-)
-
-if not defined GAME_PATH call :find_steam_game
-if not defined GAME_PATH call :find_gog_game
-if not defined GAME_PATH call :find_epic_game
-if not defined GAME_PATH call :find_game_in_dirs
-
-if not defined GAME_PATH (
-    echo ERROR: Could not find %GAME_DISPLAY_NAME% installation.
-    echo.
+:: --- Resolve game path via shared shim ---
+set "_SHIM=%SCRIPT_DIR%shared\find-game.ps1"
+if not exist "%_SHIM%" (
+    echo ERROR: shared\find-game.ps1 missing from installer ZIP.
+    echo This release is corrupt - re-download it from GitHub.
     exit /b 1
 )
+set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
+set "_GIVEN_ARG="
+if defined _GIVEN_PATH set "_GIVEN_ARG=-GivenPath "!_GIVEN_PATH!""
+powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "!_SHIM_OUT!" !_GIVEN_ARG!
+set "_PS_EC=!errorlevel!"
+if not "!_PS_EC!"=="0" (
+    echo.
+    echo ERROR: Could not resolve game install path ^(shim exit code !_PS_EC!^).
+    echo Pass a path explicitly: uninstall.cmd "C:\path\to\game"
+    echo.
+    del "!_SHIM_OUT!" 2>nul
+    exit /b 1
+)
+call "!_SHIM_OUT!"
+del "!_SHIM_OUT!" 2>nul
 
 echo Game found: %GAME_PATH%
 echo.
@@ -108,7 +100,6 @@ for %%f in (%MOD_DLLS%) do (
     )
 )
 
-:: Remove legacy DLLs from previous versions
 if defined LEGACY_DLLS (
     for %%f in (%LEGACY_DLLS%) do (
         if exist "%PLUGINS_PATH%\%%f" (
@@ -121,7 +112,7 @@ if defined LEGACY_DLLS (
 
 if "!REMOVED!"=="0" echo   No mod files found
 
-:: --- Check if we should remove BepInEx ---
+:: --- Decide whether to remove BepInEx ---
 if "!FORCE!"=="1" (
     echo.
     echo Removing BepInEx ^(--force^)...
@@ -167,93 +158,3 @@ echo.
 echo === Uninstall Complete ===
 echo.
 exit /b 0
-
-:: ============================================
-:: Find game in Steam libraries
-:: ============================================
-:find_steam_game
-set "STEAM_PATH="
-
-:: Get Steam install path from registry (64-bit)
-for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\WOW6432Node\Valve\Steam" /v InstallPath 2^>nul') do set "STEAM_PATH=%%b"
-
-:: Try 32-bit registry
-if not defined STEAM_PATH (
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\Valve\Steam" /v InstallPath 2^>nul') do set "STEAM_PATH=%%b"
-)
-
-:: Check default Steam library
-if defined STEAM_PATH (
-    if exist "%STEAM_PATH%\steamapps\common\%STEAM_FOLDER_NAME%\%GAME_EXE%" (
-        set "GAME_PATH=%STEAM_PATH%\steamapps\common\%STEAM_FOLDER_NAME%"
-        exit /b 0
-    )
-)
-
-:: Parse libraryfolders.vdf for additional Steam library paths
-if defined STEAM_PATH (
-    set "VDF_FILE=%STEAM_PATH%\steamapps\libraryfolders.vdf"
-    if exist "!VDF_FILE!" (
-        for /f "tokens=1,2 delims=	 " %%a in ('findstr /c:"\"path\"" "!VDF_FILE!" 2^>nul') do (
-            set "_LIB_PATH=%%~b"
-            set "_LIB_PATH=!_LIB_PATH:\\=\!"
-            if exist "!_LIB_PATH!\steamapps\common\%STEAM_FOLDER_NAME%\%GAME_EXE%" (
-                set "GAME_PATH=!_LIB_PATH!\steamapps\common\%STEAM_FOLDER_NAME%"
-                exit /b 0
-            )
-        )
-    )
-)
-
-exit /b 1
-
-:: ============================================
-:: Find game in GOG registry
-:: ============================================
-:find_gog_game
-if not defined GOG_IDS exit /b 1
-for %%g in (%GOG_IDS%) do (
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\WOW6432Node\GOG.com\Games\%%g" /v path 2^>nul') do (
-        if exist "%%b\%GAME_EXE%" ( set "GAME_PATH=%%b" & exit /b 0 )
-    )
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\GOG.com\Games\%%g" /v path 2^>nul') do (
-        if exist "%%b\%GAME_EXE%" ( set "GAME_PATH=%%b" & exit /b 0 )
-    )
-)
-exit /b 1
-
-:: ============================================
-:: Find game in Epic Games manifests
-:: ============================================
-:find_epic_game
-set "_EPIC_MANIFESTS=%ProgramData%\Epic\EpicGamesLauncher\Data\Manifests"
-if not exist "%_EPIC_MANIFESTS%" exit /b 1
-for %%m in ("%_EPIC_MANIFESTS%\*.item") do (
-    for /f "usebackq delims=" %%l in ("%%m") do (
-        set "_EL=%%l"
-        if not "!_EL:InstallLocation=!"=="!_EL!" (
-            set "_EL=!_EL:*InstallLocation=!"
-            set "_EL=!_EL:~4!"
-            set "_EL=!_EL:~0,-2!"
-            set "_EL=!_EL:\\=\!"
-            if exist "!_EL!\%GAME_EXE%" ( set "GAME_PATH=!_EL!" & exit /b 0 )
-        )
-    )
-)
-exit /b 1
-
-:: ============================================
-:: Find game by scanning common directories
-:: ============================================
-:find_game_in_dirs
-if not defined SEARCH_DIRS exit /b 1
-for %%d in (%SEARCH_DIRS%) do (
-    if exist "%%~d\%GAME_EXE%" ( set "GAME_PATH=%%~d" & exit /b 0 )
-    for /f "delims=" %%p in ('dir /b /ad "%%~d" 2^>nul') do (
-        if exist "%%~d\%%p\%GAME_EXE%" ( set "GAME_PATH=%%~d\%%p" & exit /b 0 )
-        for /f "delims=" %%s in ('dir /b /ad "%%~d\%%p" 2^>nul') do (
-            if exist "%%~d\%%p\%%s\%GAME_EXE%" ( set "GAME_PATH=%%~d\%%p\%%s" & exit /b 0 )
-        )
-    )
-)
-exit /b 1

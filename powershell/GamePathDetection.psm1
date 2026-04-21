@@ -14,132 +14,96 @@ Set-StrictMode -Version Latest
     - Executable verification
 #>
 
-# Game configurations - add new games here
-$Script:GameConfigs = @{
-    'DyingLight2' = @{
-        EnvVar = 'DYING_LIGHT_2_PATH'
-        SteamFolder = 'Dying Light 2'
-        Executable = 'ph\work\bin\x64\DyingLightGame_x64_rwdi.exe'
+# Game detection data is loaded from ../data/games.json - the single
+# source of truth for where each supported game lives on disk. That
+# file is also (intended to be) consumed by install.cmd scripts and
+# the launcher, so fixing a Steam folder name / env var here fixes it
+# everywhere. The loader is lazy + memoised so modules that just call
+# e.g. Get-BepInExPluginsPath don't pay the JSON parse cost.
+
+# Two possible layouts (see find-game.ps1 for the same duality):
+#   1. Dev tree: cameraunlock-core/powershell/*.psm1 with data next door
+#      at cameraunlock-core/data/games.json.
+#   2. Release ZIP: <zip>/shared/*.psm1 with games.json co-located.
+# Try layout 2 first; it's the one end users hit.
+$Script:GamesFilePath = Join-Path $PSScriptRoot 'games.json'
+if (-not (Test-Path $Script:GamesFilePath)) {
+    $Script:GamesFilePath = Join-Path $PSScriptRoot '..\data\games.json'
+}
+$Script:GameConfigsCache = $null
+
+# Strict-mode-safe property existence check for PSCustomObjects
+# returned by ConvertFrom-Json. Strict-mode throws on `$obj.foo` when
+# the property is absent; this guards such accesses.
+function Test-JsonProp {
+    param([Parameter(Mandatory=$true)]$Object, [Parameter(Mandatory=$true)][string]$Name)
+    return [bool]$Object.PSObject.Properties[$Name]
+}
+
+<#
+.SYNOPSIS
+    Load and cache the canonical games.json. Returns a hashtable
+    keyed by game-id (hyphen-lowercase), each value normalised to the
+    field names the rest of this module expects (EnvVar, SteamFolder,
+    Executable, GogGameIds, EpicPaths, XboxPaths, DataFolder, UsesOWML).
+.OUTPUTS
+    System.Collections.Hashtable
+#>
+function Get-GameConfigs {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param()
+
+    if ($null -ne $Script:GameConfigsCache) {
+        return $Script:GameConfigsCache
     }
-    'GoneHome' = @{
-        EnvVar = 'GONEHOME_PATH'
-        SteamFolder = 'Gone Home'
-        Executable = 'GoneHome.exe'
-        DataFolder = 'GoneHome_Data'
+
+    if (-not (Test-Path $Script:GamesFilePath)) {
+        throw "canonical games.json not found at $($Script:GamesFilePath) - cameraunlock-core checkout is incomplete"
     }
-    'PainscreekKillings' = @{
-        EnvVar = 'PAINSCREEK_PATH'
-        SteamFolder = 'The Painscreek Killings'
-        Executable = 'Painscreek.exe'
-        DataFolder = 'Painscreek_Data'
+
+    $raw = Get-Content -Raw -Path $Script:GamesFilePath | ConvertFrom-Json
+    if (-not $raw.games) {
+        throw "games.json at $($Script:GamesFilePath) is malformed: missing top-level .games object"
     }
-    'FalloutNewVegas' = @{
-        EnvVar = 'FalloutNVPath'
-        SteamFolder = 'Fallout New Vegas'
-        Executable = 'FalloutNV.exe'
-        GogGameIds = @('1454587428')
-        EpicPaths = @(
-            'C:\Program Files\Epic Games\FalloutNewVegas\Fallout New Vegas English',
-            'C:\Program Files\Epic Games\FalloutNewVegas',
-            'D:\Epic Games\FalloutNewVegas\Fallout New Vegas English'
-        )
+
+    # `Set-StrictMode -Version Latest` at the top of the module makes
+    # missing-property access throw, so every optional field has to
+    # check PSObject.Properties first before reading. The nested-if
+    # pattern (rather than `$has -and $obj.foo`) keeps strict-mode
+    # happy because PowerShell short-circuits `-and` at the parameter
+    # binding level, not the property access level.
+    $out = @{}
+    foreach ($prop in $raw.games.PSObject.Properties) {
+        $id = $prop.Name
+        $src = $prop.Value
+        $cfg = @{
+            Executable = $src.executable_relpath
+        }
+        if (Test-JsonProp $src 'display_name') { $cfg.DisplayName = $src.display_name }
+        if (Test-JsonProp $src 'env_var')      { $cfg.EnvVar      = $src.env_var }
+        if (Test-JsonProp $src 'steam_folder') { $cfg.SteamFolder = $src.steam_folder }
+        if (Test-JsonProp $src 'data_folder')  { $cfg.DataFolder  = $src.data_folder }
+        if (Test-JsonProp $src 'uses_owml') {
+            if ($src.uses_owml) { $cfg.UsesOWML = [bool]$src.uses_owml }
+        }
+        if (Test-JsonProp $src 'gog_ids') {
+            if ($src.gog_ids.Count -gt 0) { $cfg.GogGameIds = @($src.gog_ids) }
+        }
+        if (Test-JsonProp $src 'epic_search_paths') {
+            if ($src.epic_search_paths.Count -gt 0) { $cfg.EpicPaths = @($src.epic_search_paths) }
+        }
+        if (Test-JsonProp $src 'xbox_paths') {
+            if ($src.xbox_paths.Count -gt 0) { $cfg.XboxPaths = @($src.xbox_paths) }
+        }
+        if (Test-JsonProp $src 'steam_app_id') {
+            if ($null -ne $src.steam_app_id) { $cfg.SteamAppId = [int]$src.steam_app_id }
+        }
+        $out[$id] = $cfg
     }
-    'Subnautica' = @{
-        EnvVar = 'SubnauticaDir'
-        SteamFolder = 'Subnautica'
-        Executable = 'Subnautica.exe'
-        DataFolder = 'Subnautica_Data'
-        EpicPaths = @(
-            'C:\Program Files\Epic Games\Subnautica'
-        )
-    }
-    'SubnauticaBelowZero' = @{
-        EnvVar = 'SubnauticaBelowZeroDir'
-        SteamFolder = 'SubnauticaZero'
-        Executable = 'SubnauticaZero.exe'
-        DataFolder = 'SubnauticaZero_Data'
-        EpicPaths = @(
-            'C:\Program Files\Epic Games\SubnauticaZero'
-        )
-    }
-    'GreenHell' = @{
-        EnvVar = 'GREEN_HELL_PATH'
-        SteamFolder = 'Green Hell'
-        Executable = 'GH.exe'
-        DataFolder = 'GH_Data'
-    }
-    'ObraDinn' = @{
-        EnvVar = 'OBRA_DINN_PATH'
-        SteamFolder = 'ObraDinn'
-        Executable = 'ObraDinn.exe'
-        DataFolder = 'ObraDinn_Data'
-    }
-    'Peak' = @{
-        EnvVar = 'PEAK_GAME_PATH'
-        SteamFolder = 'Peak'
-        Executable = 'Peak.exe'
-    }
-    'Screencheat' = @{
-        EnvVar = 'SCREENCHEAT_PATH'
-        SteamFolder = 'Screencheat'
-        Executable = 'screencheat.exe'
-        DataFolder = 'screencheat_Data'
-    }
-    'ShadowsOfDoubt' = @{
-        EnvVar = 'SHADOWS_OF_DOUBT_PATH'
-        SteamFolder = 'Shadows of Doubt'
-        Executable = 'Shadows of Doubt.exe'
-    }
-    'Valheim' = @{
-        EnvVar = 'VALHEIM_PATH'
-        SteamFolder = 'Valheim'
-        Executable = 'valheim.exe'
-    }
-    'OuterWilds' = @{
-        # Outer Wilds uses OWML mod manager, not direct game detection
-        EnvVar = 'OUTER_WILDS_PATH'
-        SteamFolder = 'Outer Wilds'
-        Executable = 'OuterWilds.exe'
-        UsesOWML = $true
-    }
-    'Tacoma' = @{
-        EnvVar = 'TACOMA_PATH'
-        SteamFolder = 'Tacoma'
-        Executable = 'Tacoma.exe'
-        DataFolder = 'Tacoma_Data'
-    }
-    'WobblyLife' = @{
-        EnvVar = 'WOBBLY_LIFE_PATH'
-        SteamFolder = 'Wobbly Life'
-        Executable = 'Wobbly Life.exe'
-    }
-    'Zeepkist' = @{
-        EnvVar = 'ZEEPKIST_PATH'
-        SteamFolder = 'Zeepkist'
-        Executable = 'Zeepkist.exe'
-        DataFolder = 'Zeepkist_Data'
-    }
-    'Firewatch' = @{
-        EnvVar = 'FIREWATCH_PATH'
-        SteamFolder = 'Firewatch'
-        Executable = 'Firewatch.exe'
-        DataFolder = 'Firewatch_Data'
-        XboxPaths = @(
-            'C:\XboxGames\Firewatch\Content'
-        )
-    }
-    'GreenLight' = @{
-        EnvVar = 'GREENLIGHT_PATH'
-        SteamFolder = 'The Green Light'
-        Executable = 'TheGreenLight.exe'
-        DataFolder = 'TheGreenLight_Data'
-    }
-    'SonsOfTheForest' = @{
-        EnvVar = 'SONS_OF_THE_FOREST_PATH'
-        SteamFolder = 'Sons Of The Forest'
-        Executable = 'SonsOfTheForest.exe'
-        DataFolder = 'SonsOfTheForest_Data'
-    }
+
+    $Script:GameConfigsCache = $out
+    return $out
 }
 
 <#
@@ -267,6 +231,60 @@ function Test-GameInstallation {
 
 <#
 .SYNOPSIS
+    Find a Steam game by its App ID, using Steam's own appmanifest as
+    the source of truth for the install folder name.
+.DESCRIPTION
+    For each Steam library, looks for `steamapps/appmanifest_<AppId>.acf`
+    and reads the `"installdir"` field out of it - that's the exact folder
+    name Steam chose for this machine's install of this game. No need to
+    know the folder name in advance: Steam records it, we read it.
+
+    This is the preferred Steam detection path because it's fully
+    dynamic. If a game's Steam folder is ever renamed (publisher
+    change, DLC bundling, whatever), we pick up the new name
+    automatically without a games.json edit.
+
+    Falls back to $null if the manifest is missing (game not installed
+    in this library) or the `installdir`-joined path doesn't contain
+    the expected executable.
+.OUTPUTS
+    System.String or $null
+#>
+function Find-SteamGameByAppId {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory=$true)]
+        [int]$AppId,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Executable
+    )
+
+    $libraries = Find-SteamLibraries
+    foreach ($library in $libraries) {
+        $manifest = Join-Path $library "steamapps\appmanifest_$AppId.acf"
+        if (-not (Test-Path $manifest)) {
+            continue
+        }
+        # ACF is Valve's simple VDF: quoted key/value pairs. We only
+        # need `installdir`. A one-line regex is safer than pulling in
+        # a VDF parser; `installdir` is always a simple "key" "value"
+        # on its own line.
+        $content = Get-Content -Raw -Path $manifest
+        if ($content -match '"installdir"\s+"([^"]+)"') {
+            $installDir = $matches[1]
+            $gamePath = Join-Path $library "steamapps\common\$installDir"
+            if (Test-GameInstallation -Path $gamePath -Executable $Executable) {
+                return $gamePath
+            }
+        }
+    }
+    return $null
+}
+
+<#
+.SYNOPSIS
     Finds the OWML mods path for Outer Wilds.
 .OUTPUTS
     System.String or $null
@@ -314,9 +332,10 @@ function Find-GamePath {
         if (-not $GameId) {
             throw "Either GameId or Config must be provided"
         }
-        $Config = $Script:GameConfigs[$GameId]
+        $configs = Get-GameConfigs
+        $Config = $configs[$GameId]
         if (-not $Config) {
-            throw "Unknown game: $GameId. Available games: $($Script:GameConfigs.Keys -join ', ')"
+            throw "Unknown game: $GameId. Available games: $($configs.Keys -join ', ')"
         }
     }
 
@@ -333,7 +352,20 @@ function Find-GamePath {
         }
     }
 
-    # Priority 2: Steam libraries
+    # Priority 2a: Steam via appmanifest (app_id-driven). This is the
+    # preferred path because Steam's own manifest records the exact
+    # install folder name, so we don't depend on a hand-maintained
+    # `steam_folder` string in games.json.
+    if ($Config.ContainsKey('SteamAppId') -and $Config.SteamAppId) {
+        $appidPath = Find-SteamGameByAppId -AppId $Config.SteamAppId -Executable $executable
+        if ($appidPath) {
+            return $appidPath
+        }
+    }
+
+    # Priority 2b: Steam via folder name. Fallback for games we haven't
+    # recorded a steam_app_id for (non-Steam or pre-release titles
+    # with a Steam entry but no published app_id in our catalog).
     if ($Config.SteamFolder) {
         $libraries = Find-SteamLibraries
         foreach ($library in $libraries) {
@@ -496,7 +528,8 @@ function Get-GameConfig {
         [string]$GameId
     )
 
-    return $Script:GameConfigs[$GameId]
+    $configs = Get-GameConfigs
+    return $configs[$GameId]
 }
 
 <#
@@ -510,12 +543,13 @@ function Get-AvailableGames {
     [OutputType([string[]])]
     param()
 
-    return @($Script:GameConfigs.Keys)
+    return @((Get-GameConfigs).Keys)
 }
 
 # Export functions
 Export-ModuleMember -Function @(
     'Find-SteamLibraries',
+    'Find-SteamGameByAppId',
     'Find-GogGamePath',
     'Find-GamePath',
     'Find-OWMLPath',
@@ -525,5 +559,6 @@ Export-ModuleMember -Function @(
     'Get-MelonLoaderModsPath',
     'Write-GameNotFoundError',
     'Get-GameConfig',
+    'Get-GameConfigs',
     'Get-AvailableGames'
 )

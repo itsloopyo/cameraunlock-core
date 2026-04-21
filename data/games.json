@@ -1,0 +1,242 @@
+{
+  "$comment": "Canonical per-game detection data for CameraUnlock head-tracking mods. This is the single source of truth for where each supported game lives on disk: env var name, Steam folder, GOG IDs, Epic/Xbox paths, executable relative path, Unity data folder (for Cecil patching). Consumed by cameraunlock-core/powershell/GamePathDetection.psm1 today, and destined to be consumed by install.cmd scripts and the launcher's Rust detect module (see roadmap in the mod-manager repo). Mod-specific fields (which DLLs to deploy, mod version, framework type) do NOT belong here - those live in each mod's install.cmd CONFIG BLOCK and the launcher's catalog/mods.json. Adding a new game: pick a hyphen-lowercase id, fill in at minimum `display_name`, `env_var`, and `executable_relpath`. Any field that's empty for a given game should be omitted rather than set to a null/empty value.",
+  "schema_version": 1,
+  "games": {
+    "obra-dinn": {
+      "display_name": "Return of the Obra Dinn",
+      "env_var": "OBRA_DINN_PATH",
+      "steam_app_id": 653530,
+      "steam_folder": "ObraDinn",
+      "executable_relpath": "ObraDinn.exe",
+      "data_folder": "ObraDinn_Data"
+    },
+    "peak": {
+      "display_name": "PEAK",
+      "env_var": "PEAK_GAME_PATH",
+      "steam_app_id": 3527290,
+      "steam_folder": "PEAK",
+      "executable_relpath": "Peak.exe"
+    },
+    "subnautica": {
+      "display_name": "Subnautica",
+      "env_var": "SUBNAUTICA_PATH",
+      "steam_app_id": 264710,
+      "steam_folder": "Subnautica",
+      "executable_relpath": "Subnautica.exe",
+      "data_folder": "Subnautica_Data",
+      "epic_search_paths": [
+        "C:\\Program Files\\Epic Games\\Subnautica"
+      ]
+    },
+    "subnautica-below-zero": {
+      "display_name": "Subnautica: Below Zero",
+      "env_var": "SubnauticaBelowZeroDir",
+      "steam_app_id": 848450,
+      "steam_folder": "SubnauticaZero",
+      "executable_relpath": "SubnauticaZero.exe",
+      "data_folder": "SubnauticaZero_Data",
+      "epic_search_paths": [
+        "C:\\Program Files\\Epic Games\\SubnauticaZero"
+      ]
+    },
+    "cyberpunk-2077": {
+      "display_name": "Cyberpunk 2077",
+      "env_var": "CYBERPUNK_2077_PATH",
+      "steam_app_id": 1091500,
+      "steam_folder": "Cyberpunk 2077",
+      "executable_relpath": "bin\\x64\\Cyberpunk2077.exe"
+    },
+    "easy-delivery-co": {
+      "display_name": "Easy Delivery Co",
+      "env_var": "EASY_DELIVERY_CO_PATH",
+      "steam_folder": "Easy Delivery Co",
+      "executable_relpath": "EasyDeliveryCo.exe",
+      "data_folder": "EasyDeliveryCo_Data"
+    },
+    "eternal-afternoon": {
+      "display_name": "Eternal Afternoon",
+      "env_var": "ETERNALAFTERNOON_PATH",
+      "steam_folder": "Eternal Afternoon",
+      "executable_relpath": "Eternal Afternoon.exe",
+      "data_folder": "Eternal Afternoon_Data"
+    },
+    "resident-evil-2": {
+      "display_name": "Resident Evil 2",
+      "env_var": "RE2_PATH",
+      "steam_app_id": 883710,
+      "steam_folder": "RESIDENT EVIL 2  BIOHAZARD RE2",
+      "executable_relpath": "re2.exe"
+    },
+    "resident-evil-3": {
+      "display_name": "Resident Evil 3",
+      "env_var": "RE3_PATH",
+      "steam_app_id": 952060,
+      "steam_folder": "RE3",
+      "executable_relpath": "re3.exe"
+    },
+    "resident-evil-4": {
+      "display_name": "Resident Evil 4",
+      "env_var": "RE4_PATH",
+      "steam_app_id": 2050650,
+      "steam_folder": "RESIDENT EVIL 4  BIOHAZARD RE4",
+      "executable_relpath": "re4.exe"
+    },
+    "resident-evil-7": {
+      "display_name": "Resident Evil 7 biohazard",
+      "env_var": "RE7_PATH",
+      "steam_app_id": 418370,
+      "steam_folder": "RESIDENT EVIL 7 biohazard",
+      "executable_relpath": "re7.exe"
+    },
+    "resident-evil-village": {
+      "display_name": "Resident Evil Village",
+      "env_var": "RE8_PATH",
+      "steam_app_id": 1196590,
+      "steam_folder": "Resident Evil Village BIOHAZARD VILLAGE",
+      "executable_relpath": "re8.exe"
+    },
+    "skyrim-special-edition": {
+      "display_name": "Skyrim Special Edition",
+      "env_var": "SKYRIM_SE_PATH",
+      "steam_app_id": 489830,
+      "steam_folder": "Skyrim Special Edition",
+      "executable_relpath": "SkyrimSE.exe"
+    },
+    "witcher-3": {
+      "display_name": "The Witcher 3: Wild Hunt",
+      "env_var": "WITCHER3_PATH",
+      "steam_app_id": 292030,
+      "steam_folder": "The Witcher 3 Wild Hunt",
+      "executable_relpath": "bin\\x64\\witcher3.exe"
+    },
+    "green-hell": {
+      "display_name": "Green Hell",
+      "env_var": "GREEN_HELL_PATH",
+      "steam_app_id": 815370,
+      "steam_folder": "Green Hell",
+      "executable_relpath": "GH.exe",
+      "data_folder": "GH_Data"
+    },
+    "gone-home": {
+      "display_name": "Gone Home",
+      "env_var": "GONEHOME_PATH",
+      "steam_app_id": 232430,
+      "steam_folder": "Gone Home",
+      "executable_relpath": "GoneHome.exe",
+      "data_folder": "GoneHome_Data"
+    },
+    "painscreek-killings": {
+      "display_name": "The Painscreek Killings",
+      "env_var": "PAINSCREEK_PATH",
+      "steam_folder": "The Painscreek Killings",
+      "executable_relpath": "Painscreek.exe",
+      "data_folder": "Painscreek_Data"
+    },
+    "fallout-new-vegas": {
+      "display_name": "Fallout: New Vegas",
+      "env_var": "FalloutNVPath",
+      "steam_folder": "Fallout New Vegas",
+      "executable_relpath": "FalloutNV.exe",
+      "gog_ids": ["1454587428"],
+      "epic_search_paths": [
+        "C:\\Program Files\\Epic Games\\FalloutNewVegas\\Fallout New Vegas English",
+        "C:\\Program Files\\Epic Games\\FalloutNewVegas",
+        "D:\\Epic Games\\FalloutNewVegas\\Fallout New Vegas English"
+      ]
+    },
+    "outer-wilds": {
+      "display_name": "Outer Wilds",
+      "env_var": "OUTER_WILDS_PATH",
+      "steam_app_id": 753640,
+      "steam_folder": "Outer Wilds",
+      "executable_relpath": "OuterWilds.exe",
+      "epic_search_paths": [
+        "C:\\Program Files\\Epic Games\\OuterWilds"
+      ],
+      "uses_owml": true
+    },
+    "dying-light-2": {
+      "display_name": "Dying Light 2 Stay Human",
+      "env_var": "DYING_LIGHT_2_PATH",
+      "steam_app_id": 534380,
+      "steam_folder": "Dying Light 2",
+      "executable_relpath": "ph\\work\\bin\\x64\\DyingLightGame_x64_rwdi.exe"
+    },
+    "bioshock-remastered": {
+      "display_name": "BioShock Remastered",
+      "env_var": "BIOSHOCK_PATH",
+      "steam_app_id": 409710,
+      "steam_folder": "BioShock Remastered",
+      "executable_relpath": "Build\\Final\\BioshockHD.exe"
+    },
+    "resident-evil-requiem": {
+      "display_name": "Resident Evil Requiem",
+      "env_var": "RE9_PATH",
+      "steam_folder": "RESIDENT EVIL requiem BIOHAZARD requiem",
+      "executable_relpath": "re9.exe"
+    },
+    "screencheat": {
+      "display_name": "Screencheat",
+      "env_var": "SCREENCHEAT_PATH",
+      "steam_folder": "Screencheat",
+      "executable_relpath": "screencheat.exe",
+      "data_folder": "screencheat_Data"
+    },
+    "shadows-of-doubt": {
+      "display_name": "Shadows of Doubt",
+      "env_var": "SHADOWS_OF_DOUBT_PATH",
+      "steam_folder": "Shadows of Doubt",
+      "executable_relpath": "Shadows of Doubt.exe"
+    },
+    "valheim": {
+      "display_name": "Valheim",
+      "env_var": "VALHEIM_PATH",
+      "steam_folder": "Valheim",
+      "executable_relpath": "valheim.exe"
+    },
+    "tacoma": {
+      "display_name": "Tacoma",
+      "env_var": "TACOMA_PATH",
+      "steam_folder": "Tacoma",
+      "executable_relpath": "Tacoma.exe",
+      "data_folder": "Tacoma_Data"
+    },
+    "wobbly-life": {
+      "display_name": "Wobbly Life",
+      "env_var": "WOBBLY_LIFE_PATH",
+      "steam_folder": "Wobbly Life",
+      "executable_relpath": "Wobbly Life.exe"
+    },
+    "zeepkist": {
+      "display_name": "Zeepkist",
+      "env_var": "ZEEPKIST_PATH",
+      "steam_folder": "Zeepkist",
+      "executable_relpath": "Zeepkist.exe",
+      "data_folder": "Zeepkist_Data"
+    },
+    "firewatch": {
+      "display_name": "Firewatch",
+      "env_var": "FIREWATCH_PATH",
+      "steam_folder": "Firewatch",
+      "executable_relpath": "Firewatch.exe",
+      "data_folder": "Firewatch_Data",
+      "xbox_paths": [
+        "C:\\XboxGames\\Firewatch\\Content"
+      ]
+    },
+    "the-green-light": {
+      "display_name": "The Green Light",
+      "env_var": "GREENLIGHT_PATH",
+      "steam_folder": "The Green Light",
+      "executable_relpath": "TheGreenLight.exe",
+      "data_folder": "TheGreenLight_Data"
+    },
+    "sons-of-the-forest": {
+      "display_name": "Sons of the Forest",
+      "env_var": "SONS_OF_THE_FOREST_PATH",
+      "steam_folder": "Sons Of The Forest",
+      "executable_relpath": "SonsOfTheForest.exe",
+      "data_folder": "SonsOfTheForest_Data"
+    }
+  }
+}

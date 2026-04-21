@@ -2,27 +2,25 @@
 :: ============================================
 :: CameraUnlock Install Template
 :: ============================================
-:: Copy this file and fill in the config block below for your mod.
-:: Everything below the config block is shared logic — do not edit.
+:: Copy this file to <mod>/scripts/install.cmd, edit the CONFIG BLOCK
+:: below, and leave everything after it alone. Detection fields
+:: (GAME_EXE, Steam folder, env var, etc.) come from the shared
+:: find-game.ps1 shim bundled into the release ZIP under `shared/`,
+:: which reads cameraunlock-core/data/games.json by game id. Adding
+:: a new game = one entry in games.json, not per-mod CONFIG duplication.
 :: ============================================
 
 :: --- CONFIG BLOCK (edit these for your mod) ---
+set "GAME_ID=my-game-id"
 set "MOD_DISPLAY_NAME=My Mod Name"
-set "GAME_EXE=Game.exe"
-set "GAME_DISPLAY_NAME=Full Game Name"
-set "STEAM_FOLDER_NAME=GameFolder"
-set "ENV_VAR_NAME=GAME_PATH"
 set "MOD_DLLS=MyMod.dll CameraUnlock.Core.dll CameraUnlock.Core.Unity.dll"
 set "MOD_INTERNAL_NAME=MyMod"
 set "MOD_VERSION=1.0.0"
-set "STATE_FILE=.mod-state.json"
+set "STATE_FILE=.headtracking-state.json"
 set "BEPINEX_ARCH=x86"
 :: BEPINEX_ARCH picks the vendored fallback zip name (BepInEx_win_<arch>.zip).
-:: Upstream version is resolved by vendor/bepinex/fetch-latest.ps1 at install time
-:: and the packager refreshes the vendored copy in vendor/bepinex/ at release time.
+:: Upstream version is resolved by vendor/bepinex/fetch-latest.ps1 at install time.
 set "MOD_CONTROLS="
-set "GOG_IDS="
-set "SEARCH_DIRS="
 :: --- END CONFIG BLOCK ---
 
 call :main %*
@@ -39,55 +37,38 @@ echo === %MOD_DISPLAY_NAME% - Install ===
 echo.
 
 set "SCRIPT_DIR=%~dp0"
-set "GAME_PATH="
 
-:: --- Find game path ---
-
-:: Check command line argument
-if not "%~1"=="" (
-    if exist "%~1\%GAME_EXE%" (
-        set "GAME_PATH=%~1"
-        goto :found_game
-    )
-    echo ERROR: %GAME_EXE% not found at: "%~1"
-    echo.
+:: --- Resolve game path via shared shim ---
+::
+:: find-game.ps1 reads cameraunlock-core/data/games.json (bundled into
+:: this ZIP's `shared/` folder), runs the shared detection pipeline
+:: (Steam appmanifest > Steam folder > GOG > Epic > Xbox > env var),
+:: and writes a short batch file we `call` to pick up GAME_PATH,
+:: GAME_EXE, GAME_DISPLAY_NAME, GAME_EXE_RELPATH, and ENV_VAR_NAME.
+:: Passing %~1 as `-GivenPath` lets the launcher (or a user invoking
+:: manually with a path) short-circuit detection entirely.
+set "_SHIM=%SCRIPT_DIR%shared\find-game.ps1"
+if not exist "%_SHIM%" (
+    echo ERROR: shared\find-game.ps1 missing from installer ZIP.
+    echo This release is corrupt - re-download it from GitHub.
     exit /b 1
 )
-
-:: Check environment variable
-if defined %ENV_VAR_NAME% (
-    call set "_ENV_PATH=%%%ENV_VAR_NAME%%%"
-    if exist "!_ENV_PATH!\%GAME_EXE%" (
-        set "GAME_PATH=!_ENV_PATH!"
-        goto :found_game
-    )
+set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
+set "_GIVEN_ARG="
+if not "%~1"=="" set "_GIVEN_ARG=-GivenPath "%~1""
+powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%" %_GIVEN_ARG%
+set "_PS_EC=!errorlevel!"
+if not "!_PS_EC!"=="0" (
+    echo.
+    echo ERROR: Could not resolve game install path ^(shim exit code !_PS_EC!^).
+    echo Pass a path explicitly: install.cmd "C:\path\to\game"
+    echo.
+    del "!_SHIM_OUT!" 2>nul
+    exit /b 1
 )
+call "!_SHIM_OUT!"
+del "!_SHIM_OUT!" 2>nul
 
-:: Check Steam
-call :find_steam_game
-if defined GAME_PATH goto :found_game
-
-:: Check GOG
-call :find_gog_game
-if defined GAME_PATH goto :found_game
-
-:: Check Epic
-call :find_epic_game
-if defined GAME_PATH goto :found_game
-
-:: Check common directories
-call :find_game_in_dirs
-if defined GAME_PATH goto :found_game
-
-echo ERROR: Could not find %GAME_DISPLAY_NAME% installation.
-echo.
-echo Please either:
-echo   1. Set %ENV_VAR_NAME% environment variable to your game folder
-echo   2. Run: install.cmd "C:\path\to\game"
-echo.
-exit /b 1
-
-:found_game
 echo Game found: %GAME_PATH%
 echo.
 
@@ -101,30 +82,25 @@ if not errorlevel 1 (
 )
 
 :: --- Check BepInEx ---
+::
+:: Second positional arg `UNATTENDED` means the launcher is invoking us -
+:: skip the interactive "type install to continue" gate, which would
+:: loop forever against a null stdin. BepInEx initialises on first game
+:: launch whether or not plugins are sitting in plugins\ already.
+set "UNATTENDED="
+if /i "%~2"=="UNATTENDED" set "UNATTENDED=1"
+
 if not exist "%GAME_PATH%\BepInEx\core\BepInEx.dll" (
     echo BepInEx not found. Installing...
     echo.
     call :install_bepinex
     if errorlevel 1 exit /b 1
     echo.
-    color 0E
-    echo ========================================
-    echo   BepInEx installed - action required
-    echo ========================================
-    echo.
-    echo BepInEx was just installed but needs to initialize first.
-    echo.
-    echo   1. Start %GAME_DISPLAY_NAME%
-    echo   2. Wait until you reach the main menu
-    echo   3. Close the game
-    echo   4. Come back here and type "install" to continue
-    echo.
-    :bepinex_gate
-    set "_CONFIRM="
-    set /p "_CONFIRM=Type install to continue: "
-    if /i not "!_CONFIRM!"=="install" goto :bepinex_gate
-    echo.
-    color
+    if defined UNATTENDED (
+        echo BepInEx installed. It will initialize on first game launch.
+    ) else (
+        call :prompt_bepinex_init
+    )
 ) else (
     echo Existing BepInEx detected, skipping loader install, deploying plugin only.
 )
@@ -196,94 +172,30 @@ echo.
 exit /b 0
 
 :: ============================================
-:: Find game in Steam libraries
+:: Interactive BepInEx init gate (manual-install flow only).
+:: Extracted to a subroutine so the label can live at the top level -
+:: cmd labels inside parenthesized blocks interact badly with `goto`.
 :: ============================================
-:find_steam_game
-set "STEAM_PATH="
-
-:: Get Steam install path from registry (64-bit)
-for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\WOW6432Node\Valve\Steam" /v InstallPath 2^>nul') do set "STEAM_PATH=%%b"
-
-:: Try 32-bit registry
-if not defined STEAM_PATH (
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\Valve\Steam" /v InstallPath 2^>nul') do set "STEAM_PATH=%%b"
-)
-
-:: Check default Steam library
-if defined STEAM_PATH (
-    if exist "%STEAM_PATH%\steamapps\common\%STEAM_FOLDER_NAME%\%GAME_EXE%" (
-        set "GAME_PATH=%STEAM_PATH%\steamapps\common\%STEAM_FOLDER_NAME%"
-        exit /b 0
-    )
-)
-
-:: Parse libraryfolders.vdf for additional Steam library paths
-if defined STEAM_PATH (
-    set "VDF_FILE=%STEAM_PATH%\steamapps\libraryfolders.vdf"
-    if exist "!VDF_FILE!" (
-        for /f "tokens=1,2 delims=	 " %%a in ('findstr /c:"\"path\"" "!VDF_FILE!" 2^>nul') do (
-            set "_LIB_PATH=%%~b"
-            set "_LIB_PATH=!_LIB_PATH:\\=\!"
-            if exist "!_LIB_PATH!\steamapps\common\%STEAM_FOLDER_NAME%\%GAME_EXE%" (
-                set "GAME_PATH=!_LIB_PATH!\steamapps\common\%STEAM_FOLDER_NAME%"
-                exit /b 0
-            )
-        )
-    )
-)
-
-exit /b 1
-
-:: ============================================
-:: Find game in GOG registry
-:: ============================================
-:find_gog_game
-if not defined GOG_IDS exit /b 1
-for %%g in (%GOG_IDS%) do (
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\WOW6432Node\GOG.com\Games\%%g" /v path 2^>nul') do (
-        if exist "%%b\%GAME_EXE%" ( set "GAME_PATH=%%b" & exit /b 0 )
-    )
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SOFTWARE\GOG.com\Games\%%g" /v path 2^>nul') do (
-        if exist "%%b\%GAME_EXE%" ( set "GAME_PATH=%%b" & exit /b 0 )
-    )
-)
-exit /b 1
-
-:: ============================================
-:: Find game in Epic Games manifests
-:: ============================================
-:find_epic_game
-set "_EPIC_MANIFESTS=%ProgramData%\Epic\EpicGamesLauncher\Data\Manifests"
-if not exist "%_EPIC_MANIFESTS%" exit /b 1
-for %%m in ("%_EPIC_MANIFESTS%\*.item") do (
-    for /f "usebackq delims=" %%l in ("%%m") do (
-        set "_EL=%%l"
-        if not "!_EL:InstallLocation=!"=="!_EL!" (
-            set "_EL=!_EL:*InstallLocation=!"
-            set "_EL=!_EL:~4!"
-            set "_EL=!_EL:~0,-2!"
-            set "_EL=!_EL:\\=\!"
-            if exist "!_EL!\%GAME_EXE%" ( set "GAME_PATH=!_EL!" & exit /b 0 )
-        )
-    )
-)
-exit /b 1
-
-:: ============================================
-:: Find game by scanning common directories
-:: ============================================
-:find_game_in_dirs
-if not defined SEARCH_DIRS exit /b 1
-for %%d in (%SEARCH_DIRS%) do (
-    if exist "%%~d\%GAME_EXE%" ( set "GAME_PATH=%%~d" & exit /b 0 )
-    for /f "delims=" %%p in ('dir /b /ad "%%~d" 2^>nul') do (
-        if exist "%%~d\%%p\%GAME_EXE%" ( set "GAME_PATH=%%~d\%%p" & exit /b 0 )
-        for /f "delims=" %%s in ('dir /b /ad "%%~d\%%p" 2^>nul') do (
-            if exist "%%~d\%%p\%%s\%GAME_EXE%" ( set "GAME_PATH=%%~d\%%p\%%s" & exit /b 0 )
-        )
-    )
-)
-exit /b 1
+:prompt_bepinex_init
+color 0E
+echo ========================================
+echo   BepInEx installed - action required
+echo ========================================
+echo.
+echo BepInEx was just installed but needs to initialize first.
+echo.
+echo   1. Start %GAME_DISPLAY_NAME%
+echo   2. Wait until you reach the main menu
+echo   3. Close the game
+echo   4. Come back here and type "install" to continue
+echo.
+:bepinex_gate
+set "_CONFIRM="
+set /p "_CONFIRM=Type install to continue: "
+if /i not "!_CONFIRM!"=="install" goto :bepinex_gate
+echo.
+color
+exit /b 0
 
 :: ============================================
 :: Install BepInEx (upstream-first, fall back to vendored copy)
@@ -297,7 +209,7 @@ set "BEP_ZIP=%TEMP%\BepInEx_install.zip"
 set "LOADER_SOURCE="
 
 if exist "%FETCH_SCRIPT%" (
-    echo   Trying upstream BepInEx %BEPINEX_ARCH% (latest within range)...
+    echo   Trying upstream BepInEx %BEPINEX_ARCH% ^(latest within range^)...
     powershell -NoProfile -ExecutionPolicy Bypass -File "%FETCH_SCRIPT%" -OutputPath "%BEP_ZIP%" >nul 2>&1
     if not errorlevel 1 (
         set "LOADER_SOURCE=%BEP_ZIP%"
@@ -318,7 +230,7 @@ if not defined LOADER_SOURCE (
 )
 
 echo   Extracting BepInEx to game directory...
-tar -xf "%LOADER_SOURCE%" -C "%GAME_PATH%"
+"%SystemRoot%\System32\tar.exe" -xf "%LOADER_SOURCE%" -C "%GAME_PATH%"
 if errorlevel 1 (
     echo   ERROR: Extraction failed.
     if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
