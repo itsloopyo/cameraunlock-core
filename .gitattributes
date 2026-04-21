@@ -46,6 +46,10 @@
 *.zsh text eol=lf
 *.fish text eol=lf
 
+# Windows batch/cmd scripts MUST be CRLF or they silently fail on Windows.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
 # Config files
 *.env text eol=lf
 *.cfg text eol=lf

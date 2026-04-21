@@ -47,10 +47,15 @@ set "SCRIPT_DIR=%~dp0"
 :: GAME_EXE, GAME_DISPLAY_NAME, GAME_EXE_RELPATH, and ENV_VAR_NAME.
 :: Passing %~1 as `-GivenPath` lets the launcher (or a user invoking
 :: manually with a path) short-circuit detection entirely.
+:: Release ZIP layout: scripts\ is the ZIP root, shim is at shared\find-game.ps1.
+:: Dev tree layout: scripts\ is <repo>\scripts\, shim is at ..\cameraunlock-core\scripts\find-game.ps1.
+:: The shim itself handles both layouts for its sibling GamePathDetection.psm1.
 set "_SHIM=%SCRIPT_DIR%shared\find-game.ps1"
+if not exist "%_SHIM%" set "_SHIM=%SCRIPT_DIR%..\cameraunlock-core\scripts\find-game.ps1"
 if not exist "%_SHIM%" (
-    echo ERROR: shared\find-game.ps1 missing from installer ZIP.
-    echo This release is corrupt - re-download it from GitHub.
+    echo ERROR: find-game.ps1 not found in shared\ or ..\cameraunlock-core\scripts\.
+    echo If this is a release ZIP, re-download it from GitHub ^(corrupt installer^).
+    echo If this is the dev tree, make sure the cameraunlock-core submodule is checked out.
     exit /b 1
 )
 set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
