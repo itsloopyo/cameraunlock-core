@@ -1,22 +1,16 @@
 @echo off
 :: ============================================
-:: CameraUnlock BepInEx Install Template
+:: CameraUnlock MelonLoader Install Template
 :: ============================================
-:: Source of truth: cameraunlock-core/scripts/templates/install.cmd.
-:: Copy this to <mod>/scripts/install.cmd, edit the CONFIG BLOCK below,
-:: leave everything after it alone. Contract documented in the global
-:: ~/.claude/CLAUDE.md under "install.cmd / uninstall.cmd - Unified
+:: Source of truth: cameraunlock-core/scripts/templates/install-melonloader.cmd.
+:: Copy to <mod>/scripts/install.cmd, edit CONFIG BLOCK, leave the rest alone.
+:: Contract: see ~/.claude/CLAUDE.md "install.cmd / uninstall.cmd - Unified
 :: Launcher Contract".
 ::
-:: Covers two BepInEx variants, dispatched by BEPINEX_SUBFOLDER:
-::   * Regular BepInEx: leave BEPINEX_SUBFOLDER empty. Vendor zip is
-::     BepInEx_win_<arch>.zip, extracted directly to the game root.
-::   * Thunderstore-wrapped (BepInExPack_<Game>): set BEPINEX_SUBFOLDER
-::     to the wrapper dir name. Override BEPINEX_VENDOR_ZIP_NAME to the
-::     actual zip filename. We extract to a temp dir and flatten the
-::     wrapper subfolder's contents into the game root.
+:: MelonLoader layout: mod DLL in <game>/Mods/, UserLibs in <game>/UserLibs/.
+:: Loader files: version.dll, dobby.dll, MelonLoader/ at game root.
 ::
-:: Launcher CLI (always): install.cmd [GAME_PATH] [/y]
+:: Launcher CLI: install.cmd [GAME_PATH] [/y]
 :: ============================================
 
 :: --- CONFIG BLOCK ---
@@ -26,11 +20,13 @@ set "MOD_DLLS=MyMod.dll CameraUnlock.Core.dll CameraUnlock.Core.Unity.dll"
 set "MOD_INTERNAL_NAME=MyMod"
 set "MOD_VERSION=1.0.0"
 set "STATE_FILE=.headtracking-state.json"
-set "FRAMEWORK_TYPE=BepInEx"
-set "BEPINEX_ARCH=x64"
-set "BEPINEX_VENDOR_ZIP_NAME="
-set "BEPINEX_SUBFOLDER="
+set "FRAMEWORK_TYPE=MelonLoader"
+set "MELONLOADER_MARKER=MelonLoader\net35\MelonLoader.dll"
 set "MOD_CONTROLS="
+:: MELONLOADER_MARKER tells us whether ML is already installed. Default is
+:: net35 (Unity 2017-era games). For IL2CPP / modern Mono games override
+:: to MelonLoader\net6\MelonLoader.dll. fetch-latest.ps1 is pinned to the
+:: right MelonLoader version range via vendor/melonloader/fetch-latest.ps1.
 :: --- END CONFIG BLOCK ---
 
 call :main %*
@@ -67,8 +63,6 @@ echo.
 set "SCRIPT_DIR=%~dp0"
 
 :: -------- Resolve game path via shared shim --------
-:: Release ZIP layout: scripts\ is the ZIP root, shim is at shared\find-game.ps1.
-:: Dev tree layout: scripts\ is <repo>\scripts\, shim is at ..\cameraunlock-core\scripts\find-game.ps1.
 set "_SHIM=%SCRIPT_DIR%shared\find-game.ps1"
 if not exist "%_SHIM%" set "_SHIM=%SCRIPT_DIR%..\cameraunlock-core\scripts\find-game.ps1"
 if not exist "%_SHIM%" (
@@ -105,43 +99,43 @@ if not errorlevel 1 (
     exit /b 1
 )
 
-:: -------- Prior state: preserve installed_by_us=true across re-installs --------
+:: -------- Prior state --------
 set "WE_INSTALLED=false"
 if exist "%GAME_PATH%\%STATE_FILE%" (
     findstr /c:"installed_by_us" "%GAME_PATH%\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
     if not errorlevel 1 set "WE_INSTALLED=true"
 )
 
-:: -------- Ensure BepInEx --------
-if not exist "%GAME_PATH%\BepInEx\core\BepInEx.dll" (
-    echo BepInEx not found. Installing...
+:: -------- Ensure MelonLoader --------
+if not exist "%GAME_PATH%\%MELONLOADER_MARKER%" (
+    echo MelonLoader not found. Installing...
     echo.
-    call :install_bepinex
+    call :install_melonloader
     if errorlevel 1 exit /b 1
     set "WE_INSTALLED=true"
     echo.
     if defined YES_FLAG (
-        echo BepInEx installed. It will initialize on first game launch.
+        echo MelonLoader installed. It will initialize on first game launch.
     ) else (
-        call :prompt_bepinex_init
+        call :prompt_melonloader_init
     )
 ) else (
-    echo Existing BepInEx detected, skipping loader install, deploying plugin only.
+    echo Existing MelonLoader detected, skipping loader install, deploying plugin only.
 )
 echo.
 
 :: -------- Deploy mod files --------
 echo Deploying mod files...
 
-set "PLUGINS_PATH=%GAME_PATH%\BepInEx\plugins"
+set "MODS_PATH=%GAME_PATH%\Mods"
 set "DLL_DIR=%SCRIPT_DIR%plugins"
 
-if not exist "%PLUGINS_PATH%" mkdir "%PLUGINS_PATH%"
+if not exist "%MODS_PATH%" mkdir "%MODS_PATH%"
 
 set "DEPLOY_FAILED=0"
 for %%f in (%MOD_DLLS%) do (
     if exist "%DLL_DIR%\%%f" (
-        copy /y "%DLL_DIR%\%%f" "%PLUGINS_PATH%\" >nul
+        copy /y "%DLL_DIR%\%%f" "%MODS_PATH%\" >nul
         echo   Deployed %%f
     ) else (
         echo   ERROR: %%f not found in plugins folder
@@ -167,7 +161,7 @@ echo   Deployment Complete!
 echo ========================================
 echo.
 echo %MOD_DISPLAY_NAME% has been deployed to:
-echo   %PLUGINS_PATH%
+echo   %MODS_PATH%
 echo.
 echo Start the game to use the mod!
 if defined MOD_CONTROLS (
@@ -178,115 +172,78 @@ echo.
 exit /b 0
 
 :: ============================================
-:: Interactive BepInEx init gate (manual-install flow only).
-:: Skipped entirely when /y (launcher/automation) is set.
+:: Interactive MelonLoader init gate (manual-install flow only).
 :: ============================================
-:prompt_bepinex_init
+:prompt_melonloader_init
 color 0E
 echo ========================================
-echo   BepInEx installed - action required
+echo   MelonLoader installed - action required
 echo ========================================
 echo.
-echo BepInEx was just installed but needs to initialize first.
+echo MelonLoader was just installed but needs to initialize first.
 echo.
 echo   1. Start %GAME_DISPLAY_NAME%
 echo   2. Wait until you reach the main menu
 echo   3. Close the game
 echo   4. Come back here and type "install" to continue
 echo.
-:bepinex_gate
+:melonloader_gate
 set "_CONFIRM="
 set /p "_CONFIRM=Type install to continue: "
-if /i not "!_CONFIRM!"=="install" goto :bepinex_gate
+if /i not "!_CONFIRM!"=="install" goto :melonloader_gate
 echo.
 color
 exit /b 0
 
 :: ============================================
-:: Install BepInEx (upstream-first, fall back to vendored copy).
-:: Handles both regular and Thunderstore-wrapped (BEPINEX_SUBFOLDER)
-:: variants. See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
+:: Install MelonLoader (upstream-first, fall back to vendored copy).
+:: See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
 :: ============================================
-:install_bepinex
-set "VENDOR_DIR=%SCRIPT_DIR%vendor\bepinex"
-if defined BEPINEX_VENDOR_ZIP_NAME (
-    set "VENDOR_ZIP=%VENDOR_DIR%\%BEPINEX_VENDOR_ZIP_NAME%"
-) else (
-    set "VENDOR_ZIP=%VENDOR_DIR%\BepInEx_win_%BEPINEX_ARCH%.zip"
-)
+:install_melonloader
+set "VENDOR_DIR=%SCRIPT_DIR%vendor\melonloader"
+set "VENDOR_ZIP=%VENDOR_DIR%\MelonLoader.x64.zip"
 set "FETCH_SCRIPT=%VENDOR_DIR%\fetch-latest.ps1"
-set "BEP_ZIP=%TEMP%\BepInEx_install.zip"
+set "ML_ZIP=%TEMP%\MelonLoader_install.zip"
 set "LOADER_SOURCE="
 set "USED_UPSTREAM="
 
 if exist "%FETCH_SCRIPT%" (
-    echo   Trying upstream BepInEx, latest within range...
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%FETCH_SCRIPT%" -OutputPath "%BEP_ZIP%" >nul 2>&1
+    echo   Trying upstream MelonLoader, latest within range...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%FETCH_SCRIPT%" -OutputPath "%ML_ZIP%" >nul 2>&1
     if not errorlevel 1 (
-        set "LOADER_SOURCE=%BEP_ZIP%"
+        set "LOADER_SOURCE=%ML_ZIP%"
         set "USED_UPSTREAM=1"
-        echo   Using upstream BepInEx.
+        echo   Using upstream MelonLoader.
     )
 )
 
 if not defined LOADER_SOURCE (
-    if not exist "!VENDOR_ZIP!" (
+    if not exist "%VENDOR_ZIP%" (
         echo   ERROR: Upstream unreachable AND bundled fallback missing at:
-        echo     !VENDOR_ZIP!
+        echo     %VENDOR_ZIP%
         echo   The installer ZIP is corrupt. Re-download the release.
         exit /b 1
     )
-    set "LOADER_SOURCE=!VENDOR_ZIP!"
+    set "LOADER_SOURCE=%VENDOR_ZIP%"
     echo   Upstream unreachable, using bundled fallback copy.
 )
 
-echo   Extracting BepInEx to game directory...
-if defined BEPINEX_SUBFOLDER (
-    :: Thunderstore BepInExPack: extract to temp, flatten wrapper into GAME_PATH.
-    set "BEP_TEMP=%TEMP%\BepInEx_extract"
-    if exist "!BEP_TEMP!" rmdir /s /q "!BEP_TEMP!"
-    mkdir "!BEP_TEMP!"
-    "%SystemRoot%\System32\tar.exe" -xf "!LOADER_SOURCE!" -C "!BEP_TEMP!"
-    if errorlevel 1 (
-        echo   ERROR: Extraction failed.
-        if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
-        rmdir /s /q "!BEP_TEMP!" 2>nul
-        exit /b 1
-    )
-    xcopy /s /e /y /q "!BEP_TEMP!\%BEPINEX_SUBFOLDER%\*" "%GAME_PATH%\" >nul
-    rmdir /s /q "!BEP_TEMP!"
-) else (
-    "%SystemRoot%\System32\tar.exe" -xf "!LOADER_SOURCE!" -C "%GAME_PATH%"
-    if errorlevel 1 (
-        echo   ERROR: Extraction failed.
-        if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
-        exit /b 1
-    )
+echo   Extracting MelonLoader to game directory...
+"%SystemRoot%\System32\tar.exe" -xf "!LOADER_SOURCE!" -C "%GAME_PATH%"
+if errorlevel 1 (
+    echo   ERROR: Extraction failed.
+    if defined USED_UPSTREAM del "%ML_ZIP%" 2>nul
+    exit /b 1
 )
-if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
+if defined USED_UPSTREAM del "%ML_ZIP%" 2>nul
 
-if not exist "%GAME_PATH%\BepInEx\plugins" mkdir "%GAME_PATH%\BepInEx\plugins"
+if not exist "%GAME_PATH%\Mods" mkdir "%GAME_PATH%\Mods"
 
-:: Enable console + disk logging. Skip if BepInEx.cfg already exists
-:: (Thunderstore packs ship preconfigured; don't clobber).
-if not exist "%GAME_PATH%\BepInEx\config\BepInEx.cfg" (
-    if not exist "%GAME_PATH%\BepInEx\config" mkdir "%GAME_PATH%\BepInEx\config"
-    > "%GAME_PATH%\BepInEx\config\BepInEx.cfg" (
-        echo [Logging.Console]
-        echo Enabled = true
-        echo.
-        echo [Logging.Disk]
-        echo Enabled = true
-    )
-)
-
-echo   BepInEx installed successfully!
+echo   MelonLoader installed successfully!
 exit /b 0
 
 :: ============================================
 :: Write the canonical state file.
-:: Schema version 1. Preserves WE_INSTALLED which may have been
-:: already-true from a prior install.
 :: ============================================
 :write_state_file
 > "%GAME_PATH%\%STATE_FILE%" (
