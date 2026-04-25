@@ -862,8 +862,9 @@ function Set-UE4SSModEnabled {
       - GitHub mode (Owner + Repo): queries GitHub API /repos/:owner/:repo/releases, filters by VersionPrefix + AllowPrerelease,
         picks the highest-versioned matching release, then downloads the asset whose filename matches AssetPattern.
       - Direct-URL mode (DirectUrl): fetches a single pinned URL (for non-GitHub sources like Thunderstore).
-    On any failure (network, 404, timeout, rate limit, missing asset, corrupt zip) this function throws. Callers (install.cmd
-    via fetch-latest.ps1) catch the non-zero exit code and fall back to the bundled vendor/<name>/<zip>.
+    On any failure (network, 404, timeout, rate limit, missing asset, corrupt zip) this function throws. Called from each mod's
+    update-deps.ps1 (the manual `pixi run update-deps` flow). install.cmd does not call this; the vendored zip is the install-time
+    source of truth.
 .PARAMETER OutputPath
     Where to write the downloaded file.
 .PARAMETER Owner
@@ -962,14 +963,15 @@ function Invoke-FetchLatestLoader {
 
 <#
 .SYNOPSIS
-    Package-time helper. Refreshes vendor/<Name>/ to the latest upstream release within range and writes LICENSE + README.md.
+    Dev-time helper. Refreshes vendor/<Name>/ to the latest upstream release within range and writes LICENSE + README.md.
 .DESCRIPTION
-    Called by each mod's scripts/package-release.ps1 before staging the release ZIP. Delegates the download to
+    Called by each mod's scripts/update-deps.ps1 (the manual `pixi run update-deps` flow). Delegates the download to
     Invoke-FetchLatestLoader, then writes sibling metadata so the committed vendor tree is self-describing:
       vendor/<Name>/
         <OutputFileName>    (the downloaded zip)
         LICENSE             (fetched from the zip if present, else from the GitHub API)
         README.md           (tag, commit SHA, asset URL, SHA-256, fetched_at)
+    The dev reviews the diff and commits. CI does not call this; install.cmd does not call this.
 .PARAMETER Name
     Loader slug (e.g. "bepinex", "melonloader", "reframework"). Determines vendor subdir name only.
 .PARAMETER OutputDir
@@ -1082,9 +1084,9 @@ function Refresh-VendoredLoader {
     $readme = @()
     $readme += "# $Name (vendored)"
     $readme += ''
-    $readme += 'This directory contains a bundled copy of the upstream mod loader used as a fallback when'
-    $readme += 'install.cmd cannot reach upstream. Refreshed automatically by scripts/package-release.ps1'
-    $readme += 'via Refresh-VendoredLoader in cameraunlock-core/powershell/ModLoaderSetup.psm1.'
+    $readme += 'This directory contains a bundled copy of the upstream mod loader. It is the install-time'
+    $readme += 'source of truth: install.cmd extracts directly from here and never reaches out to the network.'
+    $readme += 'Refresh manually with `pixi run update-deps`, then commit.'
     $readme += ''
     $readme += '## Snapshot'
     $readme += ''

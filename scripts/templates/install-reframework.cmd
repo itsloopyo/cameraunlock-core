@@ -11,8 +11,9 @@
 ::   Runtime:    <game>/reframework/
 ::   Plugins:    <game>/reframework/plugins/   (mod DLLs + INI go here)
 ::
-:: Upstream is prerelease-tracked (nightly zips), so fetch-latest.ps1
-:: uses `-IncludePrerelease`.
+:: REFramework upstream ships per-game nightly zips (RE9.zip, RE2.zip, ...).
+:: We vendor a known-good copy of the per-game zip into vendor/reframework/.
+:: To bump the bundled version, run `pixi run update-deps` and commit.
 ::
 :: Launcher CLI: install.cmd [GAME_PATH] [/y]
 :: ============================================
@@ -28,8 +29,8 @@ set "FRAMEWORK_TYPE=REFramework"
 set "REFRAMEWORK_VENDOR_ZIP_NAME=RE9.zip"
 set "MOD_CONTROLS="
 :: REFRAMEWORK_VENDOR_ZIP_NAME is per-game (RE:Requiem is RE9.zip, RE2 is
-:: RE2.zip, etc). The upstream release has one zip per supported game.
-:: fetch-latest.ps1 filters on the game-specific asset pattern.
+:: RE2.zip, etc). update-deps.ps1 must be configured with the same name so
+:: the refresh writes to the right vendor file.
 :: --- END CONFIG BLOCK ---
 
 call :main %*
@@ -170,41 +171,24 @@ echo.
 exit /b 0
 
 :: ============================================
-:: Install REFramework (upstream-first nightly, fall back to vendored copy).
+:: Install REFramework from the bundled vendored copy.
+:: Vendor tree is the single source of truth at install time. To bump the
+:: bundled nightly, run `pixi run update-deps` in the mod repo and commit.
 :: See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
 :: ============================================
 :install_reframework
 set "VENDOR_DIR=%SCRIPT_DIR%vendor\reframework"
 set "VENDOR_ZIP=%VENDOR_DIR%\%REFRAMEWORK_VENDOR_ZIP_NAME%"
-set "FETCH_SCRIPT=%VENDOR_DIR%\fetch-latest.ps1"
-set "TEMP_ZIP=%TEMP%\reframework_install.zip"
-set "LOADER_SOURCE="
-set "USED_UPSTREAM="
 
-if exist "%FETCH_SCRIPT%" (
-    echo   Trying upstream REFramework nightly...
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%FETCH_SCRIPT%" -OutputPath "%TEMP_ZIP%" >nul 2>&1
-    if not errorlevel 1 (
-        set "LOADER_SOURCE=%TEMP_ZIP%"
-        set "USED_UPSTREAM=1"
-        echo   Using upstream REFramework.
-    )
+if not exist "%VENDOR_ZIP%" (
+    echo   ERROR: Bundled REFramework not found at:
+    echo     %VENDOR_ZIP%
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
 )
 
-if not defined LOADER_SOURCE (
-    if not exist "%VENDOR_ZIP%" (
-        echo   ERROR: Upstream unreachable AND bundled fallback missing at:
-        echo     %VENDOR_ZIP%
-        echo   The installer ZIP is corrupt. Re-download the release.
-        exit /b 1
-    )
-    set "LOADER_SOURCE=%VENDOR_ZIP%"
-    echo   Upstream unreachable, using bundled fallback copy.
-)
-
-echo   Extracting REFramework...
-powershell -NoProfile -Command "Expand-Archive -Path '!LOADER_SOURCE!' -DestinationPath '%GAME_PATH%' -Force"
-if defined USED_UPSTREAM del "!TEMP_ZIP!" 2>nul
+echo   Extracting bundled REFramework...
+powershell -NoProfile -Command "Expand-Archive -Path '%VENDOR_ZIP%' -DestinationPath '%GAME_PATH%' -Force"
 
 if not exist "%GAME_PATH%\dinput8.dll" (
     echo   ERROR: REFramework installation failed.

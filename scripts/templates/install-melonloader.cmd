@@ -25,8 +25,8 @@ set "MELONLOADER_MARKER=MelonLoader\net35\MelonLoader.dll"
 set "MOD_CONTROLS="
 :: MELONLOADER_MARKER tells us whether ML is already installed. Default is
 :: net35 (Unity 2017-era games). For IL2CPP / modern Mono games override
-:: to MelonLoader\net6\MelonLoader.dll. fetch-latest.ps1 is pinned to the
-:: right MelonLoader version range via vendor/melonloader/fetch-latest.ps1.
+:: to MelonLoader\net6\MelonLoader.dll. The bundled MelonLoader version is
+:: pinned by vendor/melonloader/MelonLoader.x64.zip; bump via `pixi run update-deps`.
 :: --- END CONFIG BLOCK ---
 
 call :main %*
@@ -196,46 +196,28 @@ color
 exit /b 0
 
 :: ============================================
-:: Install MelonLoader (upstream-first, fall back to vendored copy).
+:: Install MelonLoader from the bundled vendored copy.
+:: Vendor tree is the single source of truth at install time. To bump the
+:: bundled version, run `pixi run update-deps` in the mod repo and commit.
 :: See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
 :: ============================================
 :install_melonloader
 set "VENDOR_DIR=%SCRIPT_DIR%vendor\melonloader"
 set "VENDOR_ZIP=%VENDOR_DIR%\MelonLoader.x64.zip"
-set "FETCH_SCRIPT=%VENDOR_DIR%\fetch-latest.ps1"
-set "ML_ZIP=%TEMP%\MelonLoader_install.zip"
-set "LOADER_SOURCE="
-set "USED_UPSTREAM="
 
-if exist "%FETCH_SCRIPT%" (
-    echo   Trying upstream MelonLoader, latest within range...
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%FETCH_SCRIPT%" -OutputPath "%ML_ZIP%" >nul 2>&1
-    if not errorlevel 1 (
-        set "LOADER_SOURCE=%ML_ZIP%"
-        set "USED_UPSTREAM=1"
-        echo   Using upstream MelonLoader.
-    )
-)
-
-if not defined LOADER_SOURCE (
-    if not exist "%VENDOR_ZIP%" (
-        echo   ERROR: Upstream unreachable AND bundled fallback missing at:
-        echo     %VENDOR_ZIP%
-        echo   The installer ZIP is corrupt. Re-download the release.
-        exit /b 1
-    )
-    set "LOADER_SOURCE=%VENDOR_ZIP%"
-    echo   Upstream unreachable, using bundled fallback copy.
-)
-
-echo   Extracting MelonLoader to game directory...
-"%SystemRoot%\System32\tar.exe" -xf "!LOADER_SOURCE!" -C "%GAME_PATH%"
-if errorlevel 1 (
-    echo   ERROR: Extraction failed.
-    if defined USED_UPSTREAM del "%ML_ZIP%" 2>nul
+if not exist "%VENDOR_ZIP%" (
+    echo   ERROR: Bundled MelonLoader not found at:
+    echo     %VENDOR_ZIP%
+    echo   The installer ZIP is corrupt. Re-download the release.
     exit /b 1
 )
-if defined USED_UPSTREAM del "%ML_ZIP%" 2>nul
+
+echo   Extracting bundled MelonLoader to game directory...
+"%SystemRoot%\System32\tar.exe" -xf "%VENDOR_ZIP%" -C "%GAME_PATH%"
+if errorlevel 1 (
+    echo   ERROR: Extraction failed.
+    exit /b 1
+)
 
 if not exist "%GAME_PATH%\Mods" mkdir "%GAME_PATH%\Mods"
 

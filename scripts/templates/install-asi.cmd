@@ -27,8 +27,8 @@ set "ASI_LOADER_NAME=winmm.dll"
 set "MOD_CONTROLS="
 :: ASI_LOADER_NAME is the filename the ASI DLL is renamed to. DL2 and most
 :: modern games use winmm.dll; older ones use dinput8.dll or xinput1_3.dll.
-:: fetch-latest.ps1 always downloads dinput8.dll from upstream; we copy it
-:: to ASI_LOADER_NAME in EXE_DIR.
+:: vendor/ultimate-asi-loader/dinput8.dll is the bundled source; we copy it
+:: to ASI_LOADER_NAME in EXE_DIR. Bump it via `pixi run update-deps`.
 :: --- END CONFIG BLOCK ---
 
 call :main %*
@@ -170,46 +170,28 @@ echo.
 exit /b 0
 
 :: ============================================
-:: Install Ultimate ASI Loader (upstream-first, MIT-licensed).
+:: Install Ultimate ASI Loader from the bundled vendored copy.
+:: Vendor tree is the single source of truth at install time. To bump the
+:: bundled version, run `pixi run update-deps` in the mod repo and commit.
 :: See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
 :: ============================================
 :install_asi_loader
 set "VENDOR_DIR=%SCRIPT_DIR%vendor\ultimate-asi-loader"
 set "VENDOR_DLL=%VENDOR_DIR%\dinput8.dll"
-set "FETCH_SCRIPT=%VENDOR_DIR%\fetch-latest.ps1"
-set "FETCHED_DLL=%TEMP%\asi-loader-dinput8.dll"
-set "ASI_SRC="
-set "USED_UPSTREAM="
 
-if exist "%FETCH_SCRIPT%" (
-    echo   Trying upstream Ultimate ASI Loader, latest within range...
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%FETCH_SCRIPT%" -OutputPath "%FETCHED_DLL%" >nul 2>&1
-    if not errorlevel 1 (
-        set "ASI_SRC=%FETCHED_DLL%"
-        set "USED_UPSTREAM=1"
-        echo   Using upstream Ultimate ASI Loader.
-    )
+if not exist "%VENDOR_DLL%" (
+    echo   ERROR: Bundled Ultimate ASI Loader not found at:
+    echo     %VENDOR_DLL%
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
 )
 
-if not defined ASI_SRC (
-    if not exist "%VENDOR_DLL%" (
-        echo   ERROR: Upstream unreachable AND bundled fallback missing at:
-        echo     %VENDOR_DLL%
-        echo   The installer ZIP is corrupt. Re-download the release.
-        exit /b 1
-    )
-    set "ASI_SRC=%VENDOR_DLL%"
-    echo   Upstream unreachable, using bundled fallback copy.
-)
-
-copy /y "!ASI_SRC!" "%EXE_DIR%\%ASI_LOADER_NAME%" >nul
+copy /y "%VENDOR_DLL%" "%EXE_DIR%\%ASI_LOADER_NAME%" >nul
 if errorlevel 1 (
     echo   ERROR: Failed to copy loader to %EXE_DIR%.
     echo   Check the game directory is writable.
-    if defined USED_UPSTREAM del "%FETCHED_DLL%" 2>nul
     exit /b 1
 )
-if defined USED_UPSTREAM del "%FETCHED_DLL%" 2>nul
 
 echo   Ultimate ASI Loader installed successfully!
 exit /b 0

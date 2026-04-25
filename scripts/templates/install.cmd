@@ -203,9 +203,10 @@ color
 exit /b 0
 
 :: ============================================
-:: Install BepInEx (upstream-first, fall back to vendored copy).
-:: Handles both regular and Thunderstore-wrapped (BEPINEX_SUBFOLDER)
-:: variants. See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
+:: Install BepInEx from the bundled vendored copy.
+:: Vendor tree is the single source of truth at install time. To bump the
+:: bundled version, run `pixi run update-deps` in the mod repo and commit.
+:: See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
 :: ============================================
 :install_bepinex
 set "VENDOR_DIR=%SCRIPT_DIR%vendor\bepinex"
@@ -214,56 +215,35 @@ if defined BEPINEX_VENDOR_ZIP_NAME (
 ) else (
     set "VENDOR_ZIP=%VENDOR_DIR%\BepInEx_win_%BEPINEX_ARCH%.zip"
 )
-set "FETCH_SCRIPT=%VENDOR_DIR%\fetch-latest.ps1"
-set "BEP_ZIP=%TEMP%\BepInEx_install.zip"
-set "LOADER_SOURCE="
-set "USED_UPSTREAM="
 
-if exist "%FETCH_SCRIPT%" (
-    echo   Trying upstream BepInEx, latest within range...
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%FETCH_SCRIPT%" -OutputPath "%BEP_ZIP%" >nul 2>&1
-    if not errorlevel 1 (
-        set "LOADER_SOURCE=%BEP_ZIP%"
-        set "USED_UPSTREAM=1"
-        echo   Using upstream BepInEx.
-    )
+if not exist "!VENDOR_ZIP!" (
+    echo   ERROR: Bundled BepInEx not found at:
+    echo     !VENDOR_ZIP!
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
 )
 
-if not defined LOADER_SOURCE (
-    if not exist "!VENDOR_ZIP!" (
-        echo   ERROR: Upstream unreachable AND bundled fallback missing at:
-        echo     !VENDOR_ZIP!
-        echo   The installer ZIP is corrupt. Re-download the release.
-        exit /b 1
-    )
-    set "LOADER_SOURCE=!VENDOR_ZIP!"
-    echo   Upstream unreachable, using bundled fallback copy.
-)
-
-echo   Extracting BepInEx to game directory...
+echo   Extracting bundled BepInEx to game directory...
 if defined BEPINEX_SUBFOLDER (
     :: Thunderstore BepInExPack: extract to temp, flatten wrapper into GAME_PATH.
     set "BEP_TEMP=%TEMP%\BepInEx_extract"
     if exist "!BEP_TEMP!" rmdir /s /q "!BEP_TEMP!"
     mkdir "!BEP_TEMP!"
-    "%SystemRoot%\System32\tar.exe" -xf "!LOADER_SOURCE!" -C "!BEP_TEMP!"
+    "%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "!BEP_TEMP!"
     if errorlevel 1 (
         echo   ERROR: Extraction failed.
-        if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
         rmdir /s /q "!BEP_TEMP!" 2>nul
         exit /b 1
     )
     xcopy /s /e /y /q "!BEP_TEMP!\%BEPINEX_SUBFOLDER%\*" "%GAME_PATH%\" >nul
     rmdir /s /q "!BEP_TEMP!"
 ) else (
-    "%SystemRoot%\System32\tar.exe" -xf "!LOADER_SOURCE!" -C "%GAME_PATH%"
+    "%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "%GAME_PATH%"
     if errorlevel 1 (
         echo   ERROR: Extraction failed.
-        if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
         exit /b 1
     )
 )
-if defined USED_UPSTREAM del "%BEP_ZIP%" 2>nul
 
 if not exist "%GAME_PATH%\BepInEx\plugins" mkdir "%GAME_PATH%\BepInEx\plugins"
 
