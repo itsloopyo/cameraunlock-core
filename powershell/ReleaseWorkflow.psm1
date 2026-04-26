@@ -74,6 +74,77 @@ function Test-SemanticVersion {
 
 <#
 .SYNOPSIS
+    Bumps a semantic version by the given component.
+.DESCRIPTION
+    Returns a new X.Y.Z by incrementing major, minor, or patch. Pre-release
+    and build suffixes on the input are dropped (a "patch" bump from
+    "1.2.3-rc.1" returns "1.2.4", not "1.2.4-rc.2"). The intent is that
+    callers feed in a release version and get a release version back.
+.PARAMETER Version
+    Current version (must be parseable as X.Y.Z, optionally with -prerelease).
+.PARAMETER Bump
+    One of major, minor, patch.
+.OUTPUTS
+    The bumped version string.
+#>
+function Step-SemanticVersion {
+    param(
+        [Parameter(Mandatory=$true)][string]$Version,
+        [Parameter(Mandatory=$true)][ValidateSet('major','minor','patch')][string]$Bump
+    )
+
+    $core = ($Version -split '[-+]')[0]
+    if ($core -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+        throw "Cannot bump '$Version': not in X.Y.Z form"
+    }
+    $maj = [int]$matches[1]
+    $min = [int]$matches[2]
+    $pat = [int]$matches[3]
+
+    switch ($Bump) {
+        'major' { return "$($maj + 1).0.0" }
+        'minor' { return "$maj.$($min + 1).0" }
+        'patch' { return "$maj.$min.$($pat + 1)" }
+    }
+}
+
+<#
+.SYNOPSIS
+    Resolves a release argument (literal version or major/minor/patch) into a concrete version.
+.DESCRIPTION
+    The mod release scripts accept either a literal X.Y.Z or one of the
+    bump keywords 'major', 'minor', 'patch'. This helper centralizes that
+    resolution so the call site stays a one-liner.
+.PARAMETER Argument
+    User-supplied argument: 'major', 'minor', 'patch', or a literal X.Y.Z[-prerelease].
+.PARAMETER CurrentVersion
+    Current version, used as the base when Argument is a bump keyword.
+.OUTPUTS
+    The resolved new version string. Throws on invalid input.
+#>
+function Resolve-ReleaseVersion {
+    param(
+        [Parameter(Mandatory=$true)][string]$Argument,
+        [string]$CurrentVersion
+    )
+
+    $arg = $Argument.Trim().ToLowerInvariant()
+
+    if ($arg -in @('major','minor','patch')) {
+        if ([string]::IsNullOrWhiteSpace($CurrentVersion)) {
+            throw "Cannot bump '$arg': no current version available."
+        }
+        return Step-SemanticVersion -Version $CurrentVersion -Bump $arg
+    }
+
+    if ($Argument -notmatch '^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$') {
+        throw "Invalid version '$Argument'. Use 'major', 'minor', 'patch', or X.Y.Z[-prerelease]."
+    }
+    return $Argument
+}
+
+<#
+.SYNOPSIS
     Checks if the git working directory is clean.
 .OUTPUTS
     Boolean indicating if the working directory is clean.
@@ -492,6 +563,8 @@ function Set-CsprojVersion {
 Export-ModuleMember -Function @(
     'Copy-SharedBundle',
     'Test-SemanticVersion',
+    'Step-SemanticVersion',
+    'Resolve-ReleaseVersion',
     'Test-CleanGitStatus',
     'Test-GitTagExists',
     'Test-NoiseCommit',
