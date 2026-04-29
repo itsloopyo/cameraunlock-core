@@ -1,4 +1,4 @@
-<!-- managed by ticketing app - edit via Agents in the sidebar; changes here are overwritten on the next sync -->
+<!-- managed by Lab - edit via Agents in the sidebar; changes here are overwritten on the next sync -->
 
 <!-- agent: Code quality minimums -->
 ## Code quality minimums
@@ -52,6 +52,12 @@ If something is unused, delete it completely. Don't rename to `_unused`,
 don't add `// removed` comments, don't re-export removed types as
 aliases. Backwards compatibility is for shipped public APIs (see the
 Libraries category rule); internal scaffolding gets cut clean.
+
+
+<!-- agent: Pixi rules -->
+In pixi files:
+
+The `project` field is deprecated. Use `workspace` instead.
 
 
 <!-- agent: Library API stability -->
