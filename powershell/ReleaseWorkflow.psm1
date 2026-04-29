@@ -189,6 +189,12 @@ function Test-NoiseCommit {
         [string]$Subject
     )
 
+    # `^Update (cameraunlock|submodule)` covers parent-repo subjects from a
+    # submodule pointer bump. The bump commit itself is opaque ("Update
+    # cameraunlock-core to v1.2.3" tells users nothing); the underlying
+    # changes are expanded in by New-ChangelogFromCommits, so the parent
+    # subject can be safely filtered as noise. Do NOT remove this pattern
+    # without also stripping the expansion logic.
     $noisePattern = '^(chore|refactor|internal|clean ?up|wip|fixup|squash|ci|build|test|style|docs)(\(.*?\))?:'
     return (
         $Subject -match $noisePattern -or
@@ -258,6 +264,97 @@ function Update-ManifestVersion {
 
 <#
 .SYNOPSIS
+    Collects commit subjects across a range, expanding submodule pointer
+    changes into the underlying library commits.
+.DESCRIPTION
+    Submodule pointer bumps in a parent repo show up as a single opaque
+    commit ("Update cameraunlock-core to v1.2.3") that tells consumers
+    nothing about what actually changed. This helper walks a commit range
+    and, whenever it hits a commit that updates a submodule pointer
+    (160000-mode entry in `git diff-tree --raw`), it descends into the
+    submodule's own history and inlines the commit subjects between the
+    old and new SHA. Library-side fixes/features therefore appear as
+    first-class entries in mod changelogs and CI release notes instead of
+    being hidden behind one anonymous "Update submodule" line.
+
+    The parent commit's own subject is always retained; the noise filter
+    in Test-NoiseCommit drops pure pointer-bump subjects ("Update
+    cameraunlock..." / "chore: bump...") so they don't duplicate the
+    expansion, while meaningful subjects ("feat: bump cameraunlock-core
+    for X") survive as feat entries.
+.PARAMETER CommitRange
+    Range expression understood by `git log` (e.g. "v1.0.0..HEAD" or
+    "HEAD"). Required when -UseAllCommits is $false.
+.PARAMETER UseAllCommits
+    If $true, the range is ignored and `git log` walks all reachable
+    history (used for first releases where no prior tag exists).
+.PARAMETER ArtifactPaths
+    Optional pathspec list passed to `git log -- <paths>` to constrain
+    which parent-repo commits are considered. Submodule expansion still
+    applies to whatever commits survive the filter.
+.OUTPUTS
+    Array of commit subject strings, in chronological order, with
+    submodule pointer commits replaced (in addition to their own subject)
+    by the expanded list of subjects from inside the submodule.
+#>
+function Get-CommitSubjectsWithSubmoduleExpansion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$CommitRange,
+        [switch]$UseAllCommits,
+        [string[]]$ArtifactPaths
+    )
+
+    $logArgs = @('log', '--pretty=format:%H%x09%s', '--reverse', '--no-merges')
+    if (-not $UseAllCommits) { $logArgs += $CommitRange }
+    if ($ArtifactPaths) { $logArgs += @('--') + $ArtifactPaths }
+    $rawLines = & git @logArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "git log failed (exit code $LASTEXITCODE) for range '$CommitRange'."
+    }
+    if (-not $rawLines) { return @() }
+
+    $repoRoot = (& git rev-parse --show-toplevel).Trim()
+    $commits = @()
+    foreach ($line in $rawLines) {
+        $tab = $line.IndexOf("`t")
+        if ($tab -lt 0) { continue }
+        $hash    = $line.Substring(0, $tab)
+        $subject = $line.Substring($tab + 1)
+
+        $commits += $subject
+
+        # `git diff-tree -r --raw <hash>` emits one line per changed entry:
+        #   :<old_mode> <new_mode> <old_sha> <new_sha> <status>\t<path>
+        # Submodule pointer entries use mode 160000.
+        $rawDiff = & git diff-tree -r --raw --no-commit-id $hash 2>$null
+        if ($LASTEXITCODE -eq 0 -and $rawDiff) {
+            foreach ($rawLine in $rawDiff) {
+                if ($rawLine -match '^:160000 160000 ([0-9a-f]+) ([0-9a-f]+) [A-Z]\s+(.+)$') {
+                    $oldSha  = $matches[1]
+                    $newSha  = $matches[2]
+                    $subPath = $matches[3]
+                    $subFull = Join-Path $repoRoot $subPath
+                    if (Test-Path (Join-Path $subFull '.git')) {
+                        Push-Location $subFull
+                        try {
+                            $subCommits = & git log "$oldSha..$newSha" --pretty=format:"%s" --reverse --no-merges 2>$null
+                            if ($LASTEXITCODE -eq 0 -and $subCommits) {
+                                $commits += @($subCommits)
+                            }
+                        } finally {
+                            Pop-Location
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return $commits
+}
+
+<#
+.SYNOPSIS
     Generates a changelog entry from git commit history.
 .PARAMETER ChangelogPath
     Path to the CHANGELOG.md file.
@@ -307,26 +404,7 @@ function New-ChangelogFromCommits {
         $useAllCommits = $false
     }
 
-    if ($useAllCommits) {
-        if ($ArtifactPaths) {
-            $commits = git log --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
-        } else {
-            $commits = git log --pretty=format:"%s" --reverse --no-merges
-        }
-    } else {
-        if ($ArtifactPaths) {
-            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
-        } else {
-            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
-        }
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw "git log failed (exit code $LASTEXITCODE) for range '$commitRange'. Check that the range is valid and the repository is not corrupt."
-    }
-
-    if (-not $commits) {
-        throw "No commits found in range '$commitRange'. If this is the first release, create a RELEASE_NOTES.md override instead."
-    }
+    $commits = Get-CommitSubjectsWithSubmoduleExpansion -CommitRange $commitRange -UseAllCommits:$useAllCommits -ArtifactPaths $ArtifactPaths
 
     # Filter out noise commits before categorization
     if (-not $IncludeAll) {
@@ -569,6 +647,7 @@ Export-ModuleMember -Function @(
     'Test-GitTagExists',
     'Test-NoiseCommit',
     'Update-ManifestVersion',
+    'Get-CommitSubjectsWithSubmoduleExpansion',
     'New-ChangelogFromCommits',
     'Get-ChangelogSection',
     'Invoke-VersionCommit',
