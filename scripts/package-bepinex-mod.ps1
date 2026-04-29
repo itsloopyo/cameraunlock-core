@@ -90,6 +90,10 @@ foreach ($script in @("install.cmd", "uninstall.cmd")) {
     }
 }
 
+# install.cmd / uninstall.cmd resolve the game via shared/find-game.ps1.
+# Bundle that shim alongside them so the release ZIP is self-contained.
+Copy-SharedBundle -StagingDir $stagingDir
+
 # Copy mod DLLs to plugins subfolder
 $pluginsDestDir = Join-Path $stagingDir "plugins"
 New-Item -ItemType Directory -Path $pluginsDestDir -Force | Out-Null
