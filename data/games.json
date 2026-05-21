@@ -46,6 +46,13 @@
         "C:\\Program Files\\Epic Games\\SubnauticaZero"
       ]
     },
+    "subnautica-2": {
+      "display_name": "Subnautica 2",
+      "env_var": "SUBNAUTICA_2_PATH",
+      "steam_app_id": 3367150,
+      "steam_folder": "Subnautica2",
+      "executable_relpath": "Subnautica2\\Binaries\\Win64\\Subnautica2-Win64-Shipping.exe"
+    },
     "cyberpunk-2077": {
       "display_name": "Cyberpunk 2077",
       "env_var": "CYBERPUNK_2077_PATH",
