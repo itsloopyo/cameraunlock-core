@@ -310,7 +310,9 @@
     "black-and-white": {
       "display_name": "Black & White",
       "env_var": "BLACK_AND_WHITE_PATH",
-      "steam_folder": "Lionhead Studios Ltd\\Black & White",
+      "registry_paths": [
+        { "hive": "HKCU", "key": "Software\\Lionhead Studios Ltd\\Black & White", "value": "GameDir" }
+      ],
       "executable_relpath": "runblack.exe"
     },
     "metro-2033-redux": {

@@ -102,6 +102,9 @@ function Get-GameConfigs {
         if (Test-JsonProp $src 'steam_app_id') {
             if ($null -ne $src.steam_app_id) { $cfg.SteamAppId = [int]$src.steam_app_id }
         }
+        if (Test-JsonProp $src 'registry_paths') {
+            if ($src.registry_paths.Count -gt 0) { $cfg.RegistryPaths = @($src.registry_paths) }
+        }
         $out[$id] = $cfg
     }
 
@@ -239,6 +242,55 @@ function Find-UbisoftGamePath {
                         return $gamePath
                     }
                 }
+            }
+        }
+    }
+
+    return $null
+}
+
+<#
+.SYNOPSIS
+    Finds a game via a direct registry value written by its installer.
+.DESCRIPTION
+    For retail / InstallShield-era titles that aren't on any launcher,
+    the installer often records the install directory under a vendor
+    key (e.g. Black & White's HKCU\Software\Lionhead Studios Ltd\Black
+    & White\GameDir). Each entry names a hive ("HKCU"/"HKLM"), a key
+    path under that hive, and the value holding the install directory.
+.PARAMETER RegistryPaths
+    Array of entries, each with .hive, .key, .value (as loaded from
+    games.json registry_paths).
+.PARAMETER Executable
+    Executable name to verify the installation.
+.OUTPUTS
+    System.String or $null
+#>
+function Find-RegistryGamePath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory=$true)]
+        [array]$RegistryPaths,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Executable
+    )
+
+    foreach ($entry in $RegistryPaths) {
+        $regPath = "$($entry.hive):\$($entry.key)"
+        if (-not (Test-Path $regPath)) {
+            continue
+        }
+        $props = Get-ItemProperty -Path $regPath -ErrorAction Stop
+        if (-not $props.PSObject.Properties[$entry.value]) {
+            continue
+        }
+        $gamePath = $props.$($entry.value)
+        if ($gamePath) {
+            $gamePath = $gamePath.TrimEnd('/', '\')
+            if (Test-GameInstallation -Path $gamePath -Executable $Executable) {
+                return $gamePath
             }
         }
     }
@@ -400,7 +452,17 @@ function Find-GamePath {
         }
     }
 
-    # Priority 2a: Steam via appmanifest (app_id-driven). This is the
+    # Priority 2: Registry value written by the game's own installer.
+    # Authoritative for retail / InstallShield titles that predate any
+    # launcher (e.g. Black & White), so it sits ahead of store lookups.
+    if ($Config.ContainsKey('RegistryPaths') -and $Config.RegistryPaths) {
+        $regPath = Find-RegistryGamePath -RegistryPaths $Config.RegistryPaths -Executable $executable
+        if ($regPath) {
+            return $regPath
+        }
+    }
+
+    # Priority 3a: Steam via appmanifest (app_id-driven). This is the
     # preferred path because Steam's own manifest records the exact
     # install folder name, so we don't depend on a hand-maintained
     # `steam_folder` string in games.json.
@@ -411,7 +473,7 @@ function Find-GamePath {
         }
     }
 
-    # Priority 2b: Steam via folder name. Fallback for games we haven't
+    # Priority 3b: Steam via folder name. Fallback for games we haven't
     # recorded a steam_app_id for (non-Steam or pre-release titles
     # with a Steam entry but no published app_id in our catalog).
     if ($Config.SteamFolder) {
@@ -424,7 +486,7 @@ function Find-GamePath {
         }
     }
 
-    # Priority 3: GOG registry
+    # Priority 4: GOG registry
     if ($Config.ContainsKey('GogGameIds') -and $Config.GogGameIds) {
         $gogPath = Find-GogGamePath -GogGameIds $Config.GogGameIds -Executable $executable
         if ($gogPath) {
@@ -432,7 +494,7 @@ function Find-GamePath {
         }
     }
 
-    # Priority 4: Ubisoft Connect registry
+    # Priority 5: Ubisoft Connect registry
     if ($Config.ContainsKey('UbisoftAppIds') -and $Config.UbisoftAppIds) {
         $ubiPath = Find-UbisoftGamePath -UbisoftAppIds $Config.UbisoftAppIds -Executable $executable
         if ($ubiPath) {
@@ -440,7 +502,7 @@ function Find-GamePath {
         }
     }
 
-    # Priority 5: Epic Games paths
+    # Priority 6: Epic Games paths
     if ($Config.ContainsKey('EpicPaths') -and $Config.EpicPaths) {
         foreach ($path in $Config.EpicPaths) {
             if (Test-GameInstallation -Path $path -Executable $executable) {
@@ -449,7 +511,7 @@ function Find-GamePath {
         }
     }
 
-    # Priority 6: Xbox/Microsoft Store paths
+    # Priority 7: Xbox/Microsoft Store paths
     if ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths) {
         foreach ($path in $Config.XboxPaths) {
             if (Test-GameInstallation -Path $path -Executable $executable) {
@@ -608,6 +670,7 @@ Export-ModuleMember -Function @(
     'Find-SteamGameByAppId',
     'Find-GogGamePath',
     'Find-UbisoftGamePath',
+    'Find-RegistryGamePath',
     'Find-GamePath',
     'Find-OWMLPath',
     'Test-GameInstallation',
