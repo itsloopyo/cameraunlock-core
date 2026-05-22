@@ -89,6 +89,9 @@ private:
     void StartRetryLoop();
     void StartReceiverThread();
 
+    // Thread-safe tracking data
+    TrackingData m_trackingData;
+
     UdpSocket m_socket;
     std::thread m_thread;
     std::thread m_retryThread;
@@ -98,9 +101,6 @@ private:
     std::atomic<bool> m_failed{false};
     uint16_t m_port{kDefaultPort};
     std::function<void(const std::string&)> m_log;
-
-    // Thread-safe tracking data
-    TrackingData m_trackingData;
 
     // Offset for recentering
     std::atomic<float> m_yawOffset{0.0f};
