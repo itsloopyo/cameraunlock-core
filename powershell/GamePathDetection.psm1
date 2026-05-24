@@ -369,7 +369,7 @@ function Find-SteamGameByAppId {
         # need `installdir`. A one-line regex is safer than pulling in
         # a VDF parser; `installdir` is always a simple "key" "value"
         # on its own line.
-        $content = Get-Content -Raw -Path $manifest
+        $content = Get-Content -Raw -Path $manifest -Encoding UTF8
         if ($content -match '"installdir"\s+"([^"]+)"') {
             $installDir = $matches[1]
             $gamePath = Join-Path $library "steamapps\common\$installDir"
