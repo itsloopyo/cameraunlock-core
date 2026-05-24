@@ -119,11 +119,20 @@ if (-not $gamePath) {
 # `.cmd` extension trips Windows Defender's script-scan, which briefly
 # locks the freshly-created file. Out-File's longer write window
 # races with that scan and intermittently throws a sharing violation.
+# Escape `&` in the display name as `^&`. The value is consumed by
+# `echo %GAME_DISPLAY_NAME%` in install/uninstall scripts, and echo's
+# parser reparses the expanded value as a command line - a bare `&`
+# splits the echo into two commands ("White is not recognized..."). The
+# caret is preserved literally inside `set "var=..."` (quoted assignment
+# skips caret-processing) and consumed by cmd's tokenizer on the echo
+# side. Affects names like "Black & White".
+$displayNameEscaped = $displayName -replace '&', '^&'
+
 $lines = @(
     "set `"GAME_PATH=$gamePath`""
     "set `"GAME_EXE=$exeLeaf`""
     "set `"GAME_EXE_RELPATH=$exeRelPath`""
-    "set `"GAME_DISPLAY_NAME=$displayName`""
+    "set `"GAME_DISPLAY_NAME=$displayNameEscaped`""
     "set `"ENV_VAR_NAME=$envVarName`""
 )
 [System.IO.File]::WriteAllBytes($OutFile, [System.Text.Encoding]::ASCII.GetBytes($lines -join "`r`n"))
