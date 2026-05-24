@@ -70,8 +70,6 @@ if (-not $cfg) {
     exit 1
 }
 
-$exeRelPath = $cfg.Executable
-$exeLeaf    = Split-Path $exeRelPath -Leaf
 $displayName = if ($cfg.ContainsKey('DisplayName')) { $cfg.DisplayName } else { $GameId }
 $envVarName  = if ($cfg.ContainsKey('EnvVar'))      { $cfg.EnvVar }      else { '' }
 
@@ -89,6 +87,18 @@ if ($GivenPath) {
     $gamePath = Find-GamePath -GameId $GameId
 }
 
+# Pick the executable relpath. GDK / Xbox builds can ship under a different
+# exe name and folder layout than the Steam build (see XboxExecutable in
+# GamePathDetection.psm1). If the resolved path is one of the configured
+# Xbox paths AND the game defines an Xbox-specific relpath, use that.
+$exeRelPath = $cfg.Executable
+if ($gamePath -and $cfg.ContainsKey('XboxExecutable') -and $cfg.XboxExecutable) {
+    if (Test-IsXboxPath -Config $cfg -Path $gamePath) {
+        $exeRelPath = $cfg.XboxExecutable
+    }
+}
+$exeLeaf = Split-Path $exeRelPath -Leaf
+
 if (-not $gamePath) {
     $libraries = @(Find-SteamLibraries)
     $hint = if ($libraries.Count -gt 0) {
@@ -100,28 +110,21 @@ if (-not $gamePath) {
     exit 2
 }
 
-# UTF-8 (no BOM) with a leading `chcp 65001` so cmd parses the
-# subsequent `set` lines under the UTF-8 codepage. Game paths can
-# contain extended chars (e.g. Ni no Kuni's Steam folder has U+2122)
-# and a plain-ASCII encoding mangles those to `?`, breaking every
-# downstream filesystem operation. The codepage switch persists in
-# the caller's session after `call`, which is intentional - status
-# messages from install.cmd are ASCII-safe and any path-containing
-# operations (echo of GAME_PATH, copy /y to EXE_DIR) need cp 65001
-# to round-trip correctly.
+# ASCII encoding for batch. Paths with extended chars (unusual on
+# Windows game installs) would need UTF-8 but we write with ASCII
+# to stay compatible with cmd.exe's legacy interpreter without BOM
+# tricks. Real paths under Steam/GOG/Epic are ASCII in practice.
 #
 # WriteAllBytes (single tight win32 call) instead of Out-File: the
 # `.cmd` extension trips Windows Defender's script-scan, which briefly
 # locks the freshly-created file. Out-File's longer write window
 # races with that scan and intermittently throws a sharing violation.
 $lines = @(
-    "chcp 65001 >nul"
     "set `"GAME_PATH=$gamePath`""
     "set `"GAME_EXE=$exeLeaf`""
     "set `"GAME_EXE_RELPATH=$exeRelPath`""
     "set `"GAME_DISPLAY_NAME=$displayName`""
     "set `"ENV_VAR_NAME=$envVarName`""
 )
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllBytes($OutFile, $utf8NoBom.GetBytes($lines -join "`r`n"))
+[System.IO.File]::WriteAllBytes($OutFile, [System.Text.Encoding]::ASCII.GetBytes($lines -join "`r`n"))
 exit 0

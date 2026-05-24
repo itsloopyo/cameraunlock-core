@@ -99,6 +99,14 @@ function Get-GameConfigs {
         if (Test-JsonProp $src 'xbox_paths') {
             if ($src.xbox_paths.Count -gt 0) { $cfg.XboxPaths = @($src.xbox_paths) }
         }
+        # Optional override used by titles whose Xbox/GDK build ships under a
+        # different executable name + relpath than their Steam build (e.g.
+        # UE5 GDK games: Foo-WinGDK-Shipping.exe under Binaries\WinGDK\
+        # vs the Steam Foo-Win64-Shipping.exe under Binaries\Win64\). If
+        # absent, callers fall back to the platform-neutral Executable field.
+        if (Test-JsonProp $src 'xbox_executable_relpath') {
+            $cfg.XboxExecutable = $src.xbox_executable_relpath
+        }
         if (Test-JsonProp $src 'steam_app_id') {
             if ($null -ne $src.steam_app_id) { $cfg.SteamAppId = [int]$src.steam_app_id }
         }
@@ -369,7 +377,7 @@ function Find-SteamGameByAppId {
         # need `installdir`. A one-line regex is safer than pulling in
         # a VDF parser; `installdir` is always a simple "key" "value"
         # on its own line.
-        $content = Get-Content -Raw -Path $manifest -Encoding UTF8
+        $content = Get-Content -Raw -Path $manifest
         if ($content -match '"installdir"\s+"([^"]+)"') {
             $installDir = $matches[1]
             $gamePath = Join-Path $library "steamapps\common\$installDir"
@@ -513,14 +521,53 @@ function Find-GamePath {
 
     # Priority 7: Xbox/Microsoft Store paths
     if ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths) {
+        # GDK builds may live under a different exe name than the Steam exe
+        # (Foo-WinGDK-Shipping.exe vs Foo-Win64-Shipping.exe), so prefer
+        # XboxExecutable for the existence check when it's set.
+        $xboxExecutable = if ($Config.ContainsKey('XboxExecutable') -and $Config.XboxExecutable) {
+            $Config.XboxExecutable
+        } else {
+            $executable
+        }
         foreach ($path in $Config.XboxPaths) {
-            if (Test-GameInstallation -Path $path -Executable $executable) {
+            if (Test-GameInstallation -Path $path -Executable $xboxExecutable) {
                 return $path
             }
         }
     }
 
     return $null
+}
+
+<#
+.SYNOPSIS
+    Test whether a resolved game path is one of the configured Xbox paths
+    for that game. Used by callers that need to know which platform a
+    given install came from (e.g. to pick the correct executable name
+    when the Xbox build differs from the Steam build).
+#>
+function Test-IsXboxPath {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    if (-not ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths)) {
+        return $false
+    }
+    $normalised = (Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue).Path
+    if (-not $normalised) { $normalised = $Path }
+    foreach ($candidate in $Config.XboxPaths) {
+        $cn = (Resolve-Path -LiteralPath $candidate -ErrorAction SilentlyContinue).Path
+        if (-not $cn) { $cn = $candidate }
+        if ([string]::Equals($normalised.TrimEnd('\'), $cn.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
 }
 
 <#
@@ -672,6 +719,7 @@ Export-ModuleMember -Function @(
     'Find-UbisoftGamePath',
     'Find-RegistryGamePath',
     'Find-GamePath',
+    'Test-IsXboxPath',
     'Find-OWMLPath',
     'Test-GameInstallation',
     'Get-ManagedPath',

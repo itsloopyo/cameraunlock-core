@@ -51,7 +51,11 @@
       "env_var": "SUBNAUTICA_2_PATH",
       "steam_app_id": 1962700,
       "steam_folder": "Subnautica2",
-      "executable_relpath": "Subnautica2\\Binaries\\Win64\\Subnautica2-Win64-Shipping.exe"
+      "executable_relpath": "Subnautica2\\Binaries\\Win64\\Subnautica2-Win64-Shipping.exe",
+      "xbox_paths": [
+        "C:\\XboxGames\\Subnautica 2\\Content"
+      ],
+      "xbox_executable_relpath": "Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe"
     },
     "cyberpunk-2077": {
       "display_name": "Cyberpunk 2077",
@@ -328,20 +332,6 @@
       "steam_app_id": 1622910,
       "steam_folder": "Still Wakes the Deep",
       "executable_relpath": "Habitat\\Binaries\\Win64\\StillWakesTheDeep.exe"
-    },
-    "ni-no-kuni-wrath-of-the-white-witch": {
-      "display_name": "Ni no Kuni: Wrath of the White Witch Remastered",
-      "env_var": "NI_NO_KUNI_PATH",
-      "steam_app_id": 798460,
-      "steam_folder": "Ni no Kuni Wrath of the White Witch™ Remastered",
-      "executable_relpath": "NinoKuni_WotWW_Remastered.exe"
-    },
-    "yakuza-0": {
-      "display_name": "Yakuza 0",
-      "env_var": "YAKUZA_0_PATH",
-      "steam_app_id": 638970,
-      "steam_folder": "Yakuza 0",
-      "executable_relpath": "media\\Yakuza0.exe"
     }
   }
 }
