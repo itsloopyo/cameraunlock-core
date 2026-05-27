@@ -198,6 +198,17 @@
       "steam_folder": "Dying Light 2",
       "executable_relpath": "ph\\work\\bin\\x64\\DyingLightGame_x64_rwdi.exe"
     },
+    "deus-ex-mankind-divided": {
+      "display_name": "Deus Ex: Mankind Divided",
+      "env_var": "DXMD_PATH",
+      "steam_app_id": 337000,
+      "steam_folder": "Deus Ex Mankind Divided",
+      "executable_relpath": "retail\\DXMD.exe",
+      "epic_search_paths": [
+        "C:\\Program Files\\Epic Games\\DeusExMankindDividedGkfxK",
+        "C:\\Program Files\\Epic Games\\DeusExMankindDivided"
+      ]
+    },
     "dishonored-2": {
       "display_name": "Dishonored 2",
       "env_var": "DISHONORED_2_PATH",
