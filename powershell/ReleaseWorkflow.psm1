@@ -47,9 +47,12 @@ function Update-CameraUnlockCoreToRemoteTip {
     }
 
     Write-Host "Refreshing cameraunlock-core submodule from origin/main..." -ForegroundColor Cyan
-    & git -C $modRoot submodule update --remote --merge -- cameraunlock-core 2>&1 | ForEach-Object {
-        Write-Host "  $_" -ForegroundColor Gray
-    }
+    # Don't pipe stderr through 2>&1: in Windows PowerShell 5.1, native-command
+    # stderr lines (git prints progress like "From https://...") get wrapped
+    # as NativeCommandError records and turn a successful run (exit 0) into a
+    # terminating exception. Let git stream both streams to the console
+    # directly; we only care about $LASTEXITCODE for routing.
+    & git -C $modRoot submodule update --remote --merge -- cameraunlock-core
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to fast-forward cameraunlock-core (git exit $LASTEXITCODE). Resolve local conflicts in cameraunlock-core/ and re-run, or pass -NoRefresh to Copy-SharedBundle to skip."
     }
