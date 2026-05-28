@@ -17,6 +17,13 @@
       "executable_relpath": "ObraDinn.exe",
       "data_folder": "ObraDinn_Data"
     },
+    "mixtape": {
+      "display_name": "Mixtape",
+      "env_var": "MIXTAPE_PATH",
+      "steam_app_id": 2582320,
+      "steam_folder": "Mixtape",
+      "executable_relpath": "NewMoon\\Binaries\\Win64\\Mixtape-Win64-Shipping.exe"
+    },
     "peak": {
       "display_name": "PEAK",
       "env_var": "PEAK_GAME_PATH",
