@@ -138,25 +138,35 @@ function Publish-NightlyBuild {
         "Version: $nightlyVersion`nCommit: $fullSha`nBuilt (UTC): $builtAt`nSHA-256: $zipHash"
 
     Push-Location $ProjectRoot
+    # gh writes progress/info to stderr - and "release not found" when the
+    # dev release doesn't exist yet - and under ErrorActionPreference=Stop
+    # *any* native stderr line surfaces as a terminating NativeCommandError,
+    # even on success. Drop to Continue for the gh calls and gate on
+    # $LASTEXITCODE, which is the correct success signal for a native exe.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         # Rolling tag: drop the existing dev pre-release + its tag, then
         # recreate at HEAD, so the single "Development build" release is
-        # always the newest commit's build. The delete is best-effort
-        # (no-op / non-zero on the first publish when nothing exists);
-        # only the create is fatal. Separate stream redirects avoid PS
-        # 5.1's 2>&1 NativeCommandError wrapping.
+        # always the newest commit's build. The delete is best-effort: on
+        # the first publish there's nothing to delete (gh prints "release
+        # not found" to stderr, suppressed here) and that's fine.
         Write-Host "Replacing $DevTag pre-release on GitHub..." -ForegroundColor Cyan
-        & gh release delete $DevTag --yes --cleanup-tag > $null 2> $null
+        & gh release delete $DevTag --yes --cleanup-tag 2>$null
 
         & gh release create $DevTag $assetPath `
             --prerelease `
             --target $fullSha `
             --title $title `
             --notes $notes
-        if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+        if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)" }
 
-        $repo = (& gh repo view --json nameWithOwner --jq .nameWithOwner).Trim()
-    } finally { Pop-Location }
+        $repo = (& gh repo view --json nameWithOwner --jq .nameWithOwner 2>$null).Trim()
+        if (-not $repo) { $repo = '<owner>/<repo>' }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+        Pop-Location
+    }
 
     Write-Host ''
     Write-Host "Published dev build $nightlyVersion" -ForegroundColor Green
