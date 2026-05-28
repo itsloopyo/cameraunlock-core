@@ -181,10 +181,23 @@ void UdpReceiver::ReceiverThread() {
     pollFd.events = POLLIN;
 #endif
 
+    int64_t s_recvErrLogged = 0;
+    int64_t s_pollErrLogged = 0;
+    int64_t s_firstPacketLogged = 0;
+    int64_t s_shortPacketLogged = 0;
+    int64_t s_parseFailLogged = 0;
+
     while (!m_stopFlag.load(std::memory_order_relaxed)) {
 #ifdef _WIN32
+        senderAddrSize = sizeof(senderAddr);
         int pollResult = WSAPoll(&pollFd, 1, 1);
-        if (pollResult < 0) break;
+        if (pollResult < 0) {
+            if (!s_pollErrLogged++ && m_log) {
+                m_log("WSAPoll failed with " + std::to_string(WSAGetLastError()) +
+                      " - receiver thread exiting");
+            }
+            break;
+        }
         if (pollResult == 0) continue;
 
         int bytesReceived = recvfrom(
@@ -195,6 +208,26 @@ void UdpReceiver::ReceiverThread() {
             reinterpret_cast<sockaddr*>(&senderAddr),
             &senderAddrSize
         );
+        if (bytesReceived == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err != WSAEWOULDBLOCK && !s_recvErrLogged++ && m_log) {
+                m_log("recvfrom failed with WSA error " + std::to_string(err) +
+                      " (continuing)");
+            }
+            continue;
+        }
+        if (!s_firstPacketLogged++ && m_log) {
+            char ip[INET_ADDRSTRLEN] = {};
+            inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
+            m_log("First UDP packet received: " + std::to_string(bytesReceived) +
+                  " bytes from " + ip + ":" + std::to_string(ntohs(senderAddr.sin_port)));
+        }
+        if (bytesReceived < static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
+            if (!s_shortPacketLogged++ && m_log) {
+                m_log("packet too short: " + std::to_string(bytesReceived) +
+                      " bytes (need >= " + std::to_string(OpenTrackPacket::kMinPacketSize) + ")");
+            }
+        }
 #else
         socklen_t addrLen = sizeof(senderAddr);
         int bytesReceived = recvfrom(
@@ -210,7 +243,11 @@ void UdpReceiver::ReceiverThread() {
         if (bytesReceived >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
             TrackingPose pose;
             PositionData position;
-            if (OpenTrackPacket::TryParseAll(buffer, bytesReceived, pose, position)) {
+            const bool parsed = OpenTrackPacket::TryParseAll(buffer, bytesReceived, pose, position);
+            if (!parsed && !s_parseFailLogged++ && m_log) {
+                m_log("OpenTrack parse failed on " + std::to_string(bytesReceived) + "-byte packet");
+            }
+            if (parsed) {
                 m_trackingData.Set(pose.yaw, pose.pitch, pose.roll);
 
                 // Store position data

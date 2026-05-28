@@ -45,6 +45,18 @@ bool UdpSocket::Open(uint16_t port) {
         m_wsaInitialized = false;
         return false;
     }
+
+    // Disable WSAECONNRESET on UDP: by default Windows surfaces ICMP
+    // port-unreachable replies (from any prior sendto, or from intermediate
+    // hops on the inbound path) as a recvfrom error, which silently kills
+    // throughput for receive-only sockets. SIO_UDP_CONNRESET = 0x9800000C.
+    {
+        DWORD bytesReturned = 0;
+        BOOL  enabled = FALSE;
+        DWORD ioctl = 0x9800000C;  // SIO_UDP_CONNRESET
+        WSAIoctl(m_socket, ioctl, &enabled, sizeof(enabled),
+                 nullptr, 0, &bytesReturned, nullptr, nullptr);
+    }
 #else
     int flags = fcntl(m_socket, F_GETFL, 0);
     if (flags == -1 || fcntl(m_socket, F_SETFL, flags | O_NONBLOCK) == -1) {
