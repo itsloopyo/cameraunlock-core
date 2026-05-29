@@ -83,6 +83,23 @@ function Resolve-DevExeDir {
     return $exeDir
 }
 
+# Internal: refuse to deploy while the game is running. A loaded mod holds
+# an exclusive handle on its DLL/.asi, so Copy-Item -Force fails with an
+# opaque IOException mid-deploy. Fail fast with an actionable message
+# before touching any files.
+function Assert-DevGameNotRunning {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName
+    )
+    $exeLeaf  = Split-Path -Leaf (Get-GameConfig -GameId $GameId).Executable
+    $procName = [IO.Path]::GetFileNameWithoutExtension($exeLeaf)
+    if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
+        throw "$GameDisplayName is running ($exeLeaf). Close it before deploying - the loaded mod locks its files."
+    }
+}
+
 <#
 .SYNOPSIS
     Dev-deploy a Mono.Cecil-patched mod into the game's Managed folder.
@@ -332,6 +349,7 @@ function Invoke-DevDeployASILoader {
     }
 
     $gamePath = Resolve-DevGamePath -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    Assert-DevGameNotRunning -GameId $GameId -GameDisplayName $GameDisplayName
     $exeDir   = Resolve-DevExeDir -GamePath $gamePath -GameId $GameId
 
     $loaderTarget = Join-Path $exeDir $AsiLoaderName
