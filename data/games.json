@@ -223,6 +223,13 @@
       "steam_folder": "Dishonored2",
       "executable_relpath": "Dishonored2.exe"
     },
+    "bioshock-infinite": {
+      "display_name": "BioShock Infinite",
+      "env_var": "BIOSHOCK_INFINITE_PATH",
+      "steam_app_id": 8870,
+      "steam_folder": "BioShock Infinite",
+      "executable_relpath": "Binaries\\Win32\\BioShockInfinite.exe"
+    },
     "bioshock-remastered": {
       "display_name": "BioShock Remastered",
       "env_var": "BIOSHOCK_PATH",

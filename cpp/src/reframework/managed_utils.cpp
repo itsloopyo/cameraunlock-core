@@ -1,5 +1,7 @@
 #include <cameraunlock/reframework/managed_utils.h>
 
+#include <span>
+
 namespace cameraunlock::reframework {
 
 static const std::vector<void*> s_emptyArgs{};
@@ -28,8 +30,21 @@ void* CallMethod(::reframework::API::Method* method, void* obj) {
 ::reframework::API::ManagedObject* ArrayGetValue(
     ::reframework::API::ManagedObject* arr, int i) {
     if (!arr) return nullptr;
-    std::vector<void*> idxArgs = { (void*)(uintptr_t)i };
-    auto ret = arr->invoke("GetValue", idxArgs);
+    // GetValue lives on System.Array, so the resolved Method* is shared across
+    // every managed array type. Cache it against the last seen array type to
+    // skip the cross-DLL string method search on tight per-frame array loops,
+    // and pass the index through a stack span to avoid a per-call heap vector.
+    static ::reframework::API::TypeDefinition* s_td = nullptr;
+    static ::reframework::API::Method* s_getValue = nullptr;
+    auto td = arr->get_type_definition();
+    if (!td) return nullptr;
+    if (td != s_td) {
+        s_td = td;
+        s_getValue = td->find_method("GetValue");
+    }
+    if (!s_getValue) return nullptr;
+    void* idxArgs[1] = { (void*)(uintptr_t)i };
+    auto ret = s_getValue->invoke(arr, std::span<void*>(idxArgs, 1));
     if (ret.exception_thrown) return nullptr;
     return reinterpret_cast<::reframework::API::ManagedObject*>(ret.ptr);
 }
