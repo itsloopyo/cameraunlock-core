@@ -190,6 +190,18 @@ if not exist "%GAME_PATH%\dinput8.dll" (
     exit /b 1
 )
 
+:: Flatscreen-only. The per-game nightly zip bundles VR runtime DLLs; if
+:: present, REFramework auto-loads its VR mod when a runtime is available
+:: (e.g. SteamVR installed) and takes over the camera with per-eye stereo
+:: rendering, which fights our flat head-tracking. Strip them so REFramework
+:: stays flatscreen. See https://cursey.github.io/reframework-book/ VR notes.
+for %%f in (openvr_api.dll openxr_loader.dll DELETE_OPENVR_API_DLL_IF_YOU_WANT_TO_USE_OPENXR) do (
+    if exist "%GAME_PATH%\%%f" (
+        del /q "%GAME_PATH%\%%f" >nul 2>&1
+        echo   Removed VR runtime file: %%f ^(flatscreen install^)
+    )
+)
+
 exit /b 0
 
 :write_state_file

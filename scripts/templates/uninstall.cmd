@@ -391,6 +391,14 @@ if exist "%GAME_PATH%\reframework" (
     rmdir /s /q "%GAME_PATH%\reframework"
     echo   Removed: reframework/
 )
+:: VR runtime DLLs the install stripped for flatscreen mode; clean up any that
+:: an older install left behind so uninstall returns the game to vanilla.
+for %%f in (openvr_api.dll openxr_loader.dll DELETE_OPENVR_API_DLL_IF_YOU_WANT_TO_USE_OPENXR) do (
+    if exist "%GAME_PATH%\%%f" (
+        del /q "%GAME_PATH%\%%f" >nul 2>&1
+        echo   Removed: %%f
+    )
+)
 exit /b 0
 
 :: ============================================
