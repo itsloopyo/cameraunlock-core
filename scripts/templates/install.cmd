@@ -200,10 +200,13 @@ echo %MOD_DISPLAY_NAME% has been deployed to:
 echo   %PLUGINS_PATH%
 echo.
 echo Start the game to use the mod!
-if defined MOD_CONTROLS (
-    echo.
-    echo !MOD_CONTROLS!
-)
+:: Percent-expansion splits MOD_CONTROLS on its embedded &echo separators;
+:: delayed expansion prints them literally. Kept outside a ( ) block so a
+:: literal ) in the controls text cannot close the block.
+if not defined MOD_CONTROLS goto :controls_done
+echo.
+echo %MOD_CONTROLS%
+:controls_done
 echo.
 exit /b 0
 

@@ -186,10 +186,13 @@ echo ============================================
 echo  %MOD_DISPLAY_NAME% v%MOD_VERSION% installed!
 echo ============================================
 echo.
-if defined MOD_CONTROLS (
-    echo !MOD_CONTROLS!
-    echo.
-)
+:: Percent-expansion splits MOD_CONTROLS on its embedded &echo separators;
+:: delayed expansion prints them literally. Kept outside a ( ) block so a
+:: literal ) in the controls text cannot close the block.
+if not defined MOD_CONTROLS goto :controls_done
+echo %MOD_CONTROLS%
+echo.
+:controls_done
 echo Make sure OpenTrack is running and sending
 echo data to UDP port 4242.
 echo.

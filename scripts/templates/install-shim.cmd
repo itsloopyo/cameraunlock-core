@@ -179,10 +179,13 @@ echo ========================================
 echo.
 echo Launch the game normally.
 echo.
-if defined MOD_CONTROLS (
-    echo !MOD_CONTROLS!
-    echo.
-)
+:: Percent-expansion splits MOD_CONTROLS on its embedded &echo separators;
+:: delayed expansion prints them literally. Kept outside a ( ) block so a
+:: literal ) in the controls text cannot close the block.
+if not defined MOD_CONTROLS goto :controls_done
+echo %MOD_CONTROLS%
+echo.
+:controls_done
 exit /b 0
 
 :: ============================================
