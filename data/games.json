@@ -357,6 +357,13 @@
       "steam_app_id": 1622910,
       "steam_folder": "Still Wakes the Deep",
       "executable_relpath": "Habitat\\Binaries\\Win64\\StillWakesTheDeep.exe"
+    },
+    "yapyap": {
+      "display_name": "YAPYAP",
+      "env_var": "YAPYAP_PATH",
+      "steam_app_id": 3834090,
+      "steam_folder": "YAPYAP",
+      "executable_relpath": "yapyap.exe"
     }
   }
 }
