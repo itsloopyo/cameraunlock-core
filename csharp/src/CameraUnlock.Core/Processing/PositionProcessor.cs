@@ -88,11 +88,11 @@ namespace CameraUnlock.Core.Processing
             }
 
             // Step 4: Box clamp position against limits
-            // Z uses asymmetric limits: positive Z = forward lean (generous),
-            // negative Z = backward lean (restricted)
+            // Y and Z use asymmetric limits: up/forward lean is generous,
+            // down/backward lean is restricted to avoid clipping into the player body
             Vec3 clamped = new Vec3(
                 MathUtils.Clamp(_smoothedPosition.X, -Settings.LimitX, Settings.LimitX),
-                MathUtils.Clamp(_smoothedPosition.Y, -Settings.LimitY, Settings.LimitY),
+                MathUtils.Clamp(_smoothedPosition.Y, -Settings.LimitYDown, Settings.LimitY),
                 MathUtils.Clamp(_smoothedPosition.Z, -Settings.LimitZBack, Settings.LimitZ)
             );
 

@@ -1,0 +1,26 @@
+<Project>
+  <!--
+    Shared Unity-side source for IL2CPP (BepInEx 6 + Il2CppInterop) mods.
+
+    IL2CPP mods compile against game-generated interop proxy assemblies, which are
+    binary-incompatible with the real UnityEngine reference assemblies that
+    CameraUnlock.Core.Unity targets. Unity-coupled helpers are therefore shared as
+    SOURCE: import this file from the mod's .csproj and the listed files compile
+    directly into the mod against its own libs/ references.
+
+      <Import Project="..\..\cameraunlock-core\csharp\il2cpp\CameraUnlock.Core.Unity.Il2Cpp.props" />
+
+    Opt-in items (set the property to 'true' before the Import):
+      CameraUnlockFastBoot - FastBootBehaviour (requires UnityEngine.VideoModule +
+                             Il2CppInterop.Runtime references).
+  -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)SplitInjectionCameraTracker.cs"
+             Link="CameraUnlock.Il2Cpp\SplitInjectionCameraTracker.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\src\CameraUnlock.Core.Unity\Extensions\ChordHotkeys.cs"
+             Link="CameraUnlock.Il2Cpp\ChordHotkeys.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FastBootBehaviour.cs"
+             Link="CameraUnlock.Il2Cpp\FastBootBehaviour.cs"
+             Condition="'$(CameraUnlockFastBoot)' == 'true'" />
+  </ItemGroup>
+</Project>

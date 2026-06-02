@@ -61,5 +61,35 @@ inline double GetEffectiveSmoothing(double base_smoothing) {
     return base_smoothing;
 }
 
+/// Exponentially smoothed scalar that snaps to the first sample instead of
+/// blending up from zero. Replaces the per-call-site "static value + init
+/// flag + Lerp" boilerplate around screen-space projection values.
+class SmoothedFloat {
+public:
+    /// Feed the next raw sample and return the smoothed value.
+    float Update(float target, float smoothing, float delta_time) {
+        if (!m_initialized) {
+            m_value = target;
+            m_initialized = true;
+            return m_value;
+        }
+        m_value = Smooth(m_value, target, smoothing, delta_time);
+        return m_value;
+    }
+
+    float Get() const { return m_value; }
+    bool IsInitialized() const { return m_initialized; }
+
+    /// Forget the current value; the next Update snaps to its sample.
+    void Reset() {
+        m_value = 0.0f;
+        m_initialized = false;
+    }
+
+private:
+    float m_value = 0.0f;
+    bool m_initialized = false;
+};
+
 }  // namespace math
 }  // namespace cameraunlock

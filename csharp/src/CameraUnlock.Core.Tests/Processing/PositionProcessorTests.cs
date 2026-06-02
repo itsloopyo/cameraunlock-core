@@ -120,6 +120,30 @@ namespace CameraUnlock.Core.Tests.Processing
         }
 
         [Fact]
+        public void BoxClamp_AsymmetricYLimits()
+        {
+            var proc = new PositionProcessor
+            {
+                Settings = new PositionSettings(1f, 1f, 1f, 0.30f, 0.15f, 0.05f, 0.40f, 0.10f, 0f),
+            };
+
+            Vec3 up = proc.Process(MakePos(0f, 0.50f, 0f), Quat4.Identity, DeltaTime);
+            Assert.Equal(0.15f, up.Y, precision: 5);
+
+            proc.ResetSmoothing();
+            Vec3 down = proc.Process(MakePos(0f, -0.50f, 0f), Quat4.Identity, DeltaTime);
+            Assert.Equal(-0.05f, down.Y, precision: 5);
+        }
+
+        [Fact]
+        public void BoxClamp_SymmetricCtor_MirrorsLimitYDown()
+        {
+            var settings = new PositionSettings(1f, 1f, 1f, 0.30f, 0.20f, 0.40f, 0.10f, 0f);
+
+            Assert.Equal(settings.LimitY, settings.LimitYDown);
+        }
+
+        [Fact]
         public void Smoothing_ConvergesToTarget()
         {
             var proc = new PositionProcessor

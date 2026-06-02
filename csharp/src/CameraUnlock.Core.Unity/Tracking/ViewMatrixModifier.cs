@@ -84,6 +84,52 @@ namespace CameraUnlock.Core.Unity.Tracking
         }
 
         /// <summary>
+        /// Applies head tracking rotation and a positional (6DOF) offset to the camera's view matrix.
+        /// The position offset is applied in original view space (before head rotation) so leaning
+        /// follows body orientation rather than the head-rotated view.
+        /// </summary>
+        /// <param name="cam">The camera to modify.</param>
+        /// <param name="headRotation">The head tracking rotation quaternion.</param>
+        /// <param name="positionOffset">Positional offset in meters (X = right, Y = up, Z = forward).</param>
+        /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
+        public static void ApplyHeadRotation(Camera cam, Quaternion headRotation, Vector3 positionOffset)
+        {
+            if (cam == null)
+            {
+                throw new ArgumentNullException(nameof(cam), "Camera cannot be null");
+            }
+
+            cam.ResetWorldToCameraMatrix();
+            Matrix4x4 gameViewMatrix = cam.worldToCameraMatrix;
+
+#if NET35
+            Matrix4x4 headRotMatrix = RotateMatrix(headRotation);
+            Matrix4x4 offsetMatrix = TranslateMatrix(-positionOffset);
+#else
+            Matrix4x4 headRotMatrix = Matrix4x4.Rotate(headRotation);
+            Matrix4x4 offsetMatrix = Matrix4x4.Translate(-positionOffset);
+#endif
+
+            cam.worldToCameraMatrix = headRotMatrix * offsetMatrix * gameViewMatrix;
+        }
+
+        /// <summary>
+        /// Applies head tracking rotation and a positional (6DOF) offset using Euler angles.
+        /// Roll is inverted to match view-space conventions (negative roll = tilt right).
+        /// </summary>
+        /// <param name="cam">The camera to modify.</param>
+        /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
+        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
+        /// <param name="positionOffset">Positional offset in meters (X = right, Y = up, Z = forward).</param>
+        /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
+        public static void ApplyHeadRotation(Camera cam, float yaw, float pitch, float roll, Vector3 positionOffset)
+        {
+            Quaternion headRotation = Quaternion.Euler(pitch, yaw, -roll);
+            ApplyHeadRotation(cam, headRotation, positionOffset);
+        }
+
+        /// <summary>
         /// Applies head tracking rotation with world-space yaw and camera-local pitch/roll.
         /// This is the correct rotation order for natural head tracking:
         /// - Yaw rotates around world up (gravity) - turning your head left/right is always horizontal
@@ -125,6 +171,49 @@ namespace CameraUnlock.Core.Unity.Tracking
 #else
             Matrix4x4 rotationMatrix = Matrix4x4.Rotate(Quaternion.Inverse(finalRotation));
             Matrix4x4 translationMatrix = Matrix4x4.Translate(-cam.transform.position);
+#endif
+            Matrix4x4 viewMatrix = rotationMatrix * translationMatrix;
+
+            // Unity cameras look down -Z, so flip the Z row
+            viewMatrix.m20 = -viewMatrix.m20;
+            viewMatrix.m21 = -viewMatrix.m21;
+            viewMatrix.m22 = -viewMatrix.m22;
+            viewMatrix.m23 = -viewMatrix.m23;
+
+            cam.worldToCameraMatrix = viewMatrix;
+        }
+
+        /// <summary>
+        /// Applies head tracking rotation with world-space yaw, camera-local pitch/roll, and a
+        /// positional (6DOF) offset. The position offset is applied in body space (the camera's
+        /// base rotation before head tracking) so leaning follows body orientation.
+        /// </summary>
+        /// <param name="cam">The camera to modify.</param>
+        /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
+        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
+        /// <param name="positionOffset">Positional offset in meters (X = right, Y = up, Z = forward).</param>
+        /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
+        public static void ApplyHeadRotationDecomposed(Camera cam, float yaw, float pitch, float roll, Vector3 positionOffset)
+        {
+            if (cam == null)
+            {
+                throw new ArgumentNullException(nameof(cam), "Camera cannot be null");
+            }
+
+            Quaternion worldYaw = Quaternion.AngleAxis(yaw, Vector3.up);
+            Quaternion localPitchRoll = Quaternion.Euler(pitch, 0, roll);
+            Quaternion baseRotation = cam.transform.rotation;
+            Quaternion finalRotation = worldYaw * baseRotation * localPitchRoll;
+
+            Vector3 cameraPosition = cam.transform.position + baseRotation * positionOffset;
+
+#if NET35
+            Matrix4x4 rotationMatrix = RotateMatrix(Quaternion.Inverse(finalRotation));
+            Matrix4x4 translationMatrix = TranslateMatrix(-cameraPosition);
+#else
+            Matrix4x4 rotationMatrix = Matrix4x4.Rotate(Quaternion.Inverse(finalRotation));
+            Matrix4x4 translationMatrix = Matrix4x4.Translate(-cameraPosition);
 #endif
             Matrix4x4 viewMatrix = rotationMatrix * translationMatrix;
 

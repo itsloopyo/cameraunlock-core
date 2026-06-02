@@ -17,8 +17,11 @@ namespace CameraUnlock.Core.Data
         /// <summary>Maximum X displacement in meters.</summary>
         public float LimitX { get; }
 
-        /// <summary>Maximum Y displacement in meters.</summary>
+        /// <summary>Maximum Y displacement in meters (upward).</summary>
         public float LimitY { get; }
+
+        /// <summary>Maximum Y displacement in meters (downward). Restricts how far below eye height the camera can move.</summary>
+        public float LimitYDown { get; }
 
         /// <summary>Maximum Z displacement in meters (forward).</summary>
         public float LimitZ { get; }
@@ -51,12 +54,28 @@ namespace CameraUnlock.Core.Data
             float limitX, float limitY, float limitZ, float limitZBack,
             float smoothing,
             bool invertX = false, bool invertY = false, bool invertZ = false)
+            : this(sensitivityX, sensitivityY, sensitivityZ,
+                   limitX, limitY, limitY, limitZ, limitZBack,
+                   smoothing, invertX, invertY, invertZ)
+        {
+        }
+
+        /// <summary>
+        /// Overload with an asymmetric vertical limit. Crouching range (down) is usually
+        /// tighter than standing range (up) to stop the camera clipping into the player body.
+        /// </summary>
+        public PositionSettings(
+            float sensitivityX, float sensitivityY, float sensitivityZ,
+            float limitX, float limitY, float limitYDown, float limitZ, float limitZBack,
+            float smoothing,
+            bool invertX = false, bool invertY = false, bool invertZ = false)
         {
             SensitivityX = sensitivityX;
             SensitivityY = sensitivityY;
             SensitivityZ = sensitivityZ;
             LimitX = limitX;
             LimitY = limitY;
+            LimitYDown = limitYDown;
             LimitZ = limitZ;
             LimitZBack = limitZBack;
             Smoothing = smoothing;

@@ -118,7 +118,7 @@ if not "!_PS_EC!"=="0" (
 call "!_SHIM_OUT!"
 del "!_SHIM_OUT!" 2>nul
 
-echo Game found: %GAME_PATH%
+echo Game found: "%GAME_PATH%"
 echo.
 
 :: -------- Game-running check --------

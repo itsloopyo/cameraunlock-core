@@ -160,6 +160,98 @@ namespace CameraUnlock.Core.Unity.Rendering
             _isRegistered = false;
         }
 
+        // Stored callback for the standalone beginCameraRendering subscription
+        private static Action<Camera> _storedBeginCameraRendering;
+        private static Delegate _beginCameraRenderingDelegate;
+
+        /// <summary>
+        /// Subscribes to SRP's RenderPipelineManager.beginCameraRendering when the type exists
+        /// in this Unity build; no-op otherwise. Unlike RegisterCallbacks, this does not pick
+        /// between SRP and legacy - subscribe Camera.onPreCull separately to cover legacy
+        /// pipelines. A given Unity build only invokes one of the two paths per frame, so
+        /// subscribing to both is safe and avoids relying on pipeline detection.
+        /// </summary>
+        /// <param name="onBeginCameraRendering">Called with the camera about to render.</param>
+        /// <exception cref="ArgumentNullException">Thrown if the callback is null.</exception>
+        /// <exception cref="InvalidOperationException">Thrown if a callback is already subscribed.</exception>
+        public static void AddBeginCameraRendering(Action<Camera> onBeginCameraRendering)
+        {
+            if (onBeginCameraRendering == null)
+            {
+                throw new ArgumentNullException("onBeginCameraRendering");
+            }
+
+            if (_storedBeginCameraRendering != null)
+            {
+                throw new InvalidOperationException("A beginCameraRendering callback is already subscribed. Call RemoveBeginCameraRendering() first.");
+            }
+
+            var rpmType = GetRenderPipelineManagerType();
+            if (rpmType == null)
+            {
+                return;
+            }
+
+            var beginEvent = rpmType.GetEvent("beginCameraRendering");
+            if (beginEvent == null)
+            {
+                return;
+            }
+
+            var delegateType = beginEvent.EventHandlerType;
+            var invokeParams = delegateType.GetMethod("Invoke").GetParameters();
+            var paramTypes = new Type[invokeParams.Length];
+            for (int i = 0; i < invokeParams.Length; i++)
+            {
+                paramTypes[i] = invokeParams[i].ParameterType;
+            }
+
+            _storedBeginCameraRendering = onBeginCameraRendering;
+            _beginCameraRenderingDelegate = CreateSRPWrapperDelegate(
+                "SRPBeginCameraRenderingWrapper", paramTypes, delegateType, "_storedBeginCameraRendering");
+            beginEvent.AddEventHandler(null, _beginCameraRenderingDelegate);
+        }
+
+        /// <summary>
+        /// Removes the beginCameraRendering subscription. Safe to call when not subscribed.
+        /// </summary>
+        public static void RemoveBeginCameraRendering()
+        {
+            if (_storedBeginCameraRendering == null)
+            {
+                return;
+            }
+
+            if (_beginCameraRenderingDelegate != null)
+            {
+                var rpmType = GetRenderPipelineManagerType();
+                if (rpmType != null)
+                {
+                    var beginEvent = rpmType.GetEvent("beginCameraRendering");
+                    if (beginEvent != null)
+                    {
+                        beginEvent.RemoveEventHandler(null, _beginCameraRenderingDelegate);
+                    }
+                }
+            }
+
+            _beginCameraRenderingDelegate = null;
+            _storedBeginCameraRendering = null;
+        }
+
+        /// <summary>
+        /// Resolves the RenderPipelineManager type, or null when this Unity build has no SRP.
+        /// </summary>
+        private static Type GetRenderPipelineManagerType()
+        {
+            var rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
+            if (rpmType == null)
+            {
+                rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
+            }
+            return rpmType;
+        }
+
         /// <summary>
         /// Checks if SRP types are available in this Unity build.
         /// </summary>

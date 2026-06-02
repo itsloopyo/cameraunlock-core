@@ -27,7 +27,10 @@ set(CAMERAUNLOCK_SOURCES
     src/processing/tracking_processor.cpp
     src/config/ini_reader.cpp
     src/memory/pattern_scanner.cpp
+    src/memory/pe_fingerprint.cpp
     src/input/hotkey_poller.cpp
+    src/logging/file_log.cpp
+    src/diagnostics/crash_handler.cpp
 )
 
 # Create static library
@@ -108,6 +111,31 @@ if(CAMERAUNLOCK_BUILD_DISCOVERY)
     )
 endif()
 
+# Optional Unreal Engine runtime helpers (UE5 LWC math, GUObjectArray/FName
+# reflection, SEH-guarded memory access). Windows-only.
+option(CAMERAUNLOCK_BUILD_UNREAL "Build Unreal Engine runtime helpers" OFF)
+if(CAMERAUNLOCK_BUILD_UNREAL)
+    add_library(cameraunlock_unreal STATIC src/unreal/ue_runtime.cpp)
+    target_include_directories(cameraunlock_unreal
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    if(MSVC)
+        target_compile_options(cameraunlock_unreal PRIVATE
+            $<$<CONFIG:Release>:/O2 /GL>
+        )
+        set_target_properties(cameraunlock_unreal PROPERTIES
+            STATIC_LIBRARY_OPTIONS "$<$<CONFIG:Release>:/LTCG>"
+        )
+    endif()
+
+    install(TARGETS cameraunlock_unreal
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+    )
+endif()
+
 # Optional REFramework utilities module (requires REFramework headers from consumer)
 option(CAMERAUNLOCK_BUILD_REFRAMEWORK "Build REFramework utilities" OFF)
 if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
@@ -116,6 +144,9 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
         src/reframework/managed_utils.cpp
         src/reframework/game_state_probing.cpp
         src/reframework/tdb_inspector.cpp
+        src/reframework/camera_chain.cpp
+        src/reframework/camera_controller_hook.cpp
+        src/reframework/game_window.cpp
     )
     # REFramework's API.hpp requires C++20 (std::span)
     set_target_properties(cameraunlock_reframework PROPERTIES
