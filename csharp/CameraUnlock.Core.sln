@@ -8,6 +8,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraUnlock.Core.Unity", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraUnlock.Core.Tests", "src\CameraUnlock.Core.Tests\CameraUnlock.Core.Tests.csproj", "{C3D4E5F6-A7B8-9012-CDEF-123456789012}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraUnlock.Core.Unity.BepInEx", "src\CameraUnlock.Core.Unity.BepInEx\CameraUnlock.Core.Unity.BepInEx.csproj", "{32064EDC-9C7A-42FB-BC26-08000A9E7F02}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraUnlock.Core.Unity.Harmony", "src\CameraUnlock.Core.Unity.Harmony\CameraUnlock.Core.Unity.Harmony.csproj", "{0CCCBF67-28A1-44FE-B885-0DC6F22ACD09}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,5 +30,13 @@ Global
 		{C3D4E5F6-A7B8-9012-CDEF-123456789012}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C3D4E5F6-A7B8-9012-CDEF-123456789012}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C3D4E5F6-A7B8-9012-CDEF-123456789012}.Release|Any CPU.Build.0 = Release|Any CPU
+		{32064EDC-9C7A-42FB-BC26-08000A9E7F02}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{32064EDC-9C7A-42FB-BC26-08000A9E7F02}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{32064EDC-9C7A-42FB-BC26-08000A9E7F02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{32064EDC-9C7A-42FB-BC26-08000A9E7F02}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0CCCBF67-28A1-44FE-B885-0DC6F22ACD09}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0CCCBF67-28A1-44FE-B885-0DC6F22ACD09}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0CCCBF67-28A1-44FE-B885-0DC6F22ACD09}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0CCCBF67-28A1-44FE-B885-0DC6F22ACD09}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

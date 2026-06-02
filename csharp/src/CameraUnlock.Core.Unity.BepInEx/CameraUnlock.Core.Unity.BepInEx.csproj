@@ -46,9 +46,9 @@
 
   <!-- Default paths if not specified - use Valheim libs as fallback (has BepInEx + Unity) -->
   <PropertyGroup Condition="'$(BepInExPath)' == ''">
-    <BepInExPath>$(MSBuildThisFileDirectory)..\..\..\..\valheim\src\ValheimHeadTracking\libs</BepInExPath>
+    <BepInExPath>$(MSBuildThisFileDirectory)..\..\..\..\valheim-headtracking\src\ValheimHeadTracking\libs</BepInExPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
-    <UnityEnginePath>$(MSBuildThisFileDirectory)..\..\..\..\valheim\src\ValheimHeadTracking\libs</UnityEnginePath>
+    <UnityEnginePath>$(MSBuildThisFileDirectory)..\..\..\..\valheim-headtracking\src\ValheimHeadTracking\libs</UnityEnginePath>
   </PropertyGroup>
 </Project>

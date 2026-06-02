@@ -1,15 +1,16 @@
 # CameraUnlock Core
 
-A cross-platform head tracking library for games. Provides complete tracking data processing, aim decoupling, and UI compensation with implementations in both C# (Unity/.NET) and C++ (native).
+A cross-platform head tracking library for games. Provides complete tracking data processing, aim decoupling, and UI compensation with implementations in both C# (Unity/.NET) and C++ (native). Consumed as a git submodule by game head-tracking mod repos.
 
 ## Features
 
 - **OpenTrack Protocol Support** - UDP receiver for OpenTrack's 48-byte packet format
-- **Full Processing Pipeline** - Offset, deadzone, smoothing, and sensitivity
+- **Full Processing Pipeline** - Offset, deadzone, smoothing, and sensitivity (rotation and position)
 - **Aim Decoupling** - Separates aim direction from camera rotation for natural FPS gameplay
 - **UI Compensation** - Reticle positioning that accounts for head tracking offset
-- **Thread-Safe Design** - Lock-free UDP receiver with atomic operations
-- **Broad Compatibility** - Supports .NET 3.5 through .NET Standard 2.0, Unity 2018+
+- **Thread-Safe Design** - Background UDP receiver safe to poll from the game thread
+- **Broad Compatibility** - Supports .NET 3.5 through .NET Standard 2.0, Unity 2018+, IL2CPP (source-shared)
+- **Release Tooling** - PowerShell modules, install script templates, and a reusable CI workflow shared by every mod repo
 
 ## Directory Structure
 
@@ -21,14 +22,23 @@ cameraunlock-core/
 │   │   ├── CameraUnlock.Core.Unity/              # Unity extensions
 │   │   ├── CameraUnlock.Core.Unity.BepInEx/      # BepInEx integration
 │   │   ├── CameraUnlock.Core.Unity.Harmony/      # Harmony IL patching utilities
-│   │   └── CameraUnlock.Core.Tests/              # xUnit tests
+│   │   └── CameraUnlock.Core.Tests/              # xUnit tests (net6.0)
+│   ├── il2cpp/                                   # Source-shared helpers for IL2CPP mods (see its README.md)
 │   └── CameraUnlock.Core.sln
 ├── cpp/
 │   ├── include/cameraunlock/                     # Public headers
-│   ├── src/                                    # Implementation
-│   ├── tests/                                  # C++ tests
+│   ├── src/                                      # Implementation
+│   ├── tests/                                    # C++ tests
 │   └── CMakeLists.txt
-└── powershell/                                 # Build & deployment automation
+├── powershell/                                   # 7 reusable .psm1 modules for mod release pipelines
+├── scripts/
+│   ├── templates/                                # install.cmd / uninstall.cmd templates copied into mod repos
+│   └── *.ps1, install-body-*.cmd                 # Game detection, packaging, release-note scripts
+├── data/
+│   └── games.json                                # Game detection metadata (single source of truth)
+├── .github/workflows/
+│   └── release-bepinex-mod.yml                   # Reusable release workflow (workflow_call)
+└── pixi.toml                                     # Build/test task definitions
 ```
 
 ## Core Components
@@ -38,10 +48,12 @@ cameraunlock-core/
 | Type | Description |
 |------|-------------|
 | `TrackingPose` | Immutable struct: Yaw, Pitch, Roll + timestamp |
+| `PositionData` | Immutable struct: X, Y, Z head position + timestamp |
 | `Vec3` | 3D vector |
 | `Quat4` | Quaternion |
 | `SensitivitySettings` | Per-axis multipliers and invert flags |
 | `DeadzoneSettings` | Per-axis deadzone values |
+| `PositionSettings` | Position scaling and travel limits |
 
 ### Protocol
 
@@ -70,6 +82,10 @@ processor.SmoothingFactor = 0.3f;
 var processed = processor.Process(rawPose, deltaTime: Time.deltaTime);
 ```
 
+**PositionProcessor** / **PositionInterpolator** provide the same pipeline for
+positional tracking, and **PoseInterpolator** interpolates between UDP packets
+for frame-rate independent smoothness.
+
 ### Aim Decoupling
 
 **AimDecoupler** - Computes aim direction independent of camera rotation
@@ -77,6 +93,19 @@ var processed = processor.Process(rawPose, deltaTime: Time.deltaTime);
 // Camera rotates with head tracking, but aim stays stable
 var aimDirection = AimDecoupler.ComputeAimDirectionLocal(trackingRotation);
 ```
+
+### Higher-Level Components
+
+| Type | Description |
+|------|-------------|
+| `HeadTrackingSession` | Per-frame pipeline (receiver → interpolators → processors) with auto-recenter, tracking-loss hold, and mode cycling |
+| `MultiPlayerTrackingManager` | One `HeadTrackingSession` per local player, each with its own UDP port (split-screen multiplayer) |
+| `StaticHeadTrackingCore` | Static receiver + processor core that survives Unity lifecycle events |
+| `CenterOffsetManager` | Recentering state |
+| `AxisTransform` (`MappingConfig`, `MappingPreset`, `SensitivityCurve`) | Axis remapping and non-linear sensitivity curves |
+| `Config.Profiles` (`ProfileManager`, `ProfileSerializer`) | Named configuration profiles |
+| `HotkeyHandler` | Framework-agnostic hotkey dispatch |
+| `PerformanceMonitor` | Per-frame processing statistics |
 
 ## Processing Pipeline
 
@@ -88,10 +117,11 @@ OpenTrackReceiver (thread-safe parsing)
     │
     ▼
 TrackingProcessor Pipeline:
-    1. Subtract center offset (recentering)
-    2. Apply deadzone (ignore small movements)
-    3. Apply smoothing (SLERP interpolation)
-    4. Apply sensitivity (per-axis multipliers)
+    1. Convert to quaternion, subtract center offset (recentering)
+    2. Apply per-axis deadzone (ignore small movements)
+    3. Apply per-axis Euler smoothing (exponential moving average;
+       deliberately not quaternion SLERP, which causes phantom roll)
+    4. Apply per-axis sensitivity
     │
     ▼
 Processed TrackingPose → Game patches
@@ -104,13 +134,13 @@ Processed TrackingPose → Game patches
 Singleton managing aim decoupling state:
 ```csharp
 // Update with current tracking
-AimDecouplingState.Instance.UpdateTracking(trackingRotation);
+AimDecouplingState.Instance.UpdateTracking(trackingQuaternion, trackingEuler);
 
-// Get decoupled aim direction
-var aimDir = AimDecouplingState.Instance.GetAimDirection();
+// Get decoupled aim direction for a camera
+var aimDir = AimDecouplingState.Instance.GetAimDirection(camera);
 
 // Get screen offset for UI positioning
-var offset = AimDecouplingState.Instance.GetScreenOffset();
+var offset = AimDecouplingState.Instance.GetScreenOffset(camera);
 ```
 
 ### BaseRotationTracker
@@ -119,9 +149,10 @@ Separates game rotation from head tracking:
 ```csharp
 var tracker = new BaseRotationTracker();
 
-// In camera update:
-tracker.Update(camera.rotation, trackingRotation);
-var baseRotation = tracker.BaseRotation; // Game's intended rotation
+// In camera patch:
+tracker.Update(cameraTransform, gameWantedRotation, headTrackingRotation);
+var baseRotation = tracker.BaseRotation;       // Game's intended rotation (world space)
+var combined = tracker.CombinedRotation;       // What the camera actually shows
 ```
 
 ### SelfHealingModBase
@@ -140,6 +171,22 @@ public class MyMod : SelfHealingModBase
 SelfHealingModBase.CreateMod<MyMod>();
 ```
 
+### Other Unity Components
+
+| Area | Types |
+|------|-------|
+| Tracking | `ViewMatrixModifier`, `ViewMatrixTrackingController`, `TrackingLossHandler`, `CameraLifecycleManager`, `CameraRotationComposer`, `PositionApplicator` |
+| Rendering / UI | `IMGUIReticle`, `RenderPipelineHelper`, `NotificationUI`, `StatusIndicatorUI`, `CanvasCompensation`, `UIElementOffsetController` |
+| Input | `UnityHotkeyHandler`, `ChordHotkeys` |
+| Utilities | `PerFrameCache`, `CrosshairUtility`, `GameUIFinder`, `FramerateHelper` |
+
+### IL2CPP Games
+
+IL2CPP mods (BepInEx 6 + Il2CppInterop) cannot reference the `CameraUnlock.Core.Unity*`
+DLLs. Unity-coupled helpers are shared as **source** instead via
+`csharp/il2cpp/CameraUnlock.Core.Unity.Il2Cpp.props` - see
+[csharp/il2cpp/README.md](csharp/il2cpp/README.md).
+
 ## Configuration
 
 Implement `IHeadTrackingConfig`:
@@ -154,12 +201,53 @@ public interface IHeadTrackingConfig
     bool AimDecouplingEnabled { get; }
     bool ShowDecoupledReticle { get; }
     float[] ReticleColorRgba { get; }
+    float Smoothing { get; }
 }
 ```
 
 BepInEx integration available via `CameraUnlock.Core.Unity.BepInEx`.
 
+## C++ Library
+
+A CMake static library `cameraunlock` (C++17, CMake 3.20+) mirroring the C# core
+plus native-only modules for in-process game modding.
+
+| Module | Contents |
+|--------|----------|
+| `data/`, `math/`, `processing/`, `protocol/` | Same pipeline as C#: tracking pose, vec/quat math, deadzone/smoothing, OpenTrack UDP receiver (threaded and polling variants) |
+| `config/` | INI file reader |
+| `input/` | Hotkey polling, chord hotkeys, deferred actions |
+| `logging/`, `diagnostics/` | File logging, crash handler |
+| `memory/` | Pattern scanner, PE fingerprinting, RTTI/vtable inspection |
+| `rendering/` | Crosshair/aim projection, DX11/DX12 overlays, GUI marker compensation |
+| `time/` | QPC clock, frame clock |
+| `tracking/` | `HeadTrackingSession` - full session orchestration |
+| `hooks/` | Function hooking (optional module) |
+| `discovery/` | Camera address discovery via float classification (optional module) |
+| `unreal/` | Unreal Engine runtime helpers: UE5 LWC math, GUObjectArray/FName reflection (optional module) |
+| `reframework/` | RE Engine (REFramework) utilities: camera chain, TDB inspection, game state probing (optional module) |
+
+Optional modules (all `OFF` by default):
+
+| CMake option | Target | Requires |
+|--------------|--------|----------|
+| `CAMERAUNLOCK_BUILD_HOOKS` | `cameraunlock_hooks` | MinHook target provided by consumer |
+| `CAMERAUNLOCK_BUILD_DISCOVERY` | `cameraunlock_discovery` | `CAMERAUNLOCK_BUILD_HOOKS=ON` |
+| `CAMERAUNLOCK_BUILD_UNREAL` | `cameraunlock_unreal` | Windows |
+| `CAMERAUNLOCK_BUILD_REFRAMEWORK` | `cameraunlock_reframework` | REFramework headers from consumer (C++20) |
+
+Tests build by default (`CAMERAUNLOCK_BUILD_TESTS=ON`) into `cameraunlock_tests`.
+
 ## Building
+
+### With pixi (recommended)
+
+```bash
+pixi run build          # dotnet build csharp -c Release
+pixi run test           # dotnet test csharp
+pixi run check          # debug build + quick tests
+pixi run pack           # dotnet pack to dist/
+```
 
 ### C# (.NET)
 
@@ -168,12 +256,21 @@ cd csharp
 dotnet build CameraUnlock.Core.sln
 ```
 
+The Unity-coupled projects compile against Unity/BepInEx reference DLLs they do
+not vendor. Consuming mod repos provide them by setting `UnityEnginePath` /
+`BepInExPath` (usually in a `Directory.Build.props`). When building this repo
+standalone, the projects fall back to sibling checkouts of
+`gone-home-headtracking` (pre-2017.3 Unity DLLs, needed for net35) and
+`valheim-headtracking` (modern Unity + BepInEx); override with
+`-p:UnityEnginePath=...` / `-p:BepInExPath=...` if those aren't present.
+
 ### C++ (CMake)
 
 ```bash
 cd cpp
 cmake -B build
 cmake --build build
+ctest --test-dir build
 ```
 
 ## Target Framework Compatibility
@@ -184,6 +281,7 @@ cmake --build build
 | CameraUnlock.Core.Unity | net35, net472, net48 | Unity 2018+ Mono compatibility |
 | CameraUnlock.Core.Unity.BepInEx | net472, net48 | BepInEx requires .NET 4.x |
 | CameraUnlock.Core.Unity.Harmony | net35, net472, net48 | Harmony IL patching (via Lib.Harmony 2.2.2) |
+| CameraUnlock.Core.Tests | net6.0 | A passing test here does not prove Unity Mono compatibility - build the full solution |
 
 ### Framework Notes
 
@@ -204,15 +302,45 @@ cmake --build build
 
 ## PowerShell Modules
 
-Located in `powershell/`:
+Located in `powershell/`, imported by every mod repo's `release.ps1` / `update-deps.ps1`:
 
 | Module | Purpose |
 |--------|---------|
-| `AssemblyPatching.psm1` | IL patching utilities (Mono.Cecil) |
-| `GamePathDetection.psm1` | Game installation detection |
-| `ModDeployment.psm1` | Mod deployment helpers |
-| `ModLoaderSetup.psm1` | BepInEx/mod loader setup |
-| `ReleaseWorkflow.psm1` | Release automation |
+| `AssemblyPatching.psm1` | Mono.Cecil IL patching (`Invoke-HeadTrackingPatch`, `New-ScreenCenterPatcher`) |
+| `DevDeploy.psm1` | Local dev-deploy pipelines per loader (`Invoke-DevDeployBepInEx`, `-Cecil`, `-MelonLoader`, `-ASILoader`, `-REFramework`, `-Shim`) |
+| `GamePathDetection.psm1` | Game install detection across Steam/GOG/Epic/Ubisoft/Xbox/registry (`Find-GamePath`, `Get-GameConfig`) |
+| `ModDeployment.psm1` | Mod file deployment, backups, verification (`Copy-ModFiles`, `Test-ModDeployment`) |
+| `ModLoaderSetup.psm1` | BepInEx/MelonLoader/UE4SS install and vendored loader refresh (`Install-BepInEx`, `Refresh-VendoredLoader`) |
+| `NightlyRelease.psm1` | Rolling GitHub pre-release publishing for dev builds (`Publish-NightlyBuild`) |
+| `ReleaseWorkflow.psm1` | Release automation: versioning, changelog, tagging, submodule sync (`Get-CsprojVersion`, `New-ChangelogFromCommits`, `Update-CameraUnlockCoreToRemoteTip`) |
+
+## Install Scripts & Templates
+
+`scripts/templates/` is the source of truth for every mod repo's `install.cmd` /
+`uninstall.cmd` (plus per-loader variants: ASI, Cecil, MelonLoader, REFramework,
+shim, UE4SS). Templates are copied verbatim into mod repos; only the CONFIG BLOCK
+differs per mod. Supporting scripts:
+
+- `find-game.ps1` - bridges `install.cmd` to `GamePathDetection.psm1`
+- `package-bepinex-mod.ps1` - builds the installer ZIP for releases
+- `check-loader-arch.ps1` - detects x86/x64 loader mismatches
+- `generate-release-notes.ps1` - changelog from git history
+
+Install scripts never reach the network: vendored loaders committed under each
+mod's `vendor/` directory are the install-time source of truth.
+
+## Game Detection Metadata
+
+`data/games.json` (schema v1) maps game ids to detection metadata: `display_name`,
+`env_var`, `executable_relpath`, Steam/GOG/Epic/Ubisoft/Xbox/registry lookup keys,
+and an optional `data_folder` for Cecil-patched mods. Consumed by
+`GamePathDetection.psm1` and `find-game.ps1` in every mod repo.
+
+## Reusable CI Workflow
+
+`.github/workflows/release-bepinex-mod.yml` is called via `workflow_call` from mod
+repos. It validates that the git tag version matches the csproj version, packages
+the installer ZIP, generates release notes, and publishes the GitHub release.
 
 ## Dependencies
 
@@ -223,7 +351,8 @@ Located in `powershell/`:
 
 ### C++
 - Winsock2 (Windows UDP)
-- MinHook (optional, for function hooking)
+- MinHook (optional, for hooks/discovery modules)
+- REFramework headers (optional, for reframework module)
 
 ### Runtime
 - Unity assemblies provided by consuming projects (weak references)

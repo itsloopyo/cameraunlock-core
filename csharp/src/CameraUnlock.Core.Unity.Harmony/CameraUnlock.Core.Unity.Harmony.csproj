@@ -39,8 +39,8 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Default Unity path if not specified -->
+  <!-- Default Unity path if not specified - Gone Home's pre-2017.3 Unity DLLs work for net35 -->
   <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
-    <UnityEnginePath>$(MSBuildThisFileDirectory)..\..\..\..\gone-home\src\GoneHomeHeadTracking\libs</UnityEnginePath>
+    <UnityEnginePath>$(MSBuildThisFileDirectory)..\..\..\..\gone-home-headtracking\src\GoneHomeHeadTracking\libs</UnityEnginePath>
   </PropertyGroup>
 </Project>

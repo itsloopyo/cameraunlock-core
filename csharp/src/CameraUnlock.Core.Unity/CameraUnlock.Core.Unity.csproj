@@ -75,8 +75,13 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Require UnityEnginePath to be set by consuming project -->
+  <!-- Default Unity path if not specified - Gone Home's pre-2017.3 Unity DLLs work for net35 -->
+  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
+    <UnityEnginePath>$(MSBuildThisFileDirectory)..\..\..\..\gone-home-headtracking\src\GoneHomeHeadTracking\libs</UnityEnginePath>
+  </PropertyGroup>
+
+  <!-- Consuming projects must provide Unity DLLs (usually via Directory.Build.props) -->
   <Target Name="ValidateUnityEnginePath" BeforeTargets="ResolveAssemblyReferences">
-    <Error Condition="'$(UnityEnginePath)' == ''" Text="UnityEnginePath property must be set. Pass it via -p:UnityEnginePath=path/to/unity/dlls" />
+    <Error Condition="!Exists('$(UnityEnginePath)')" Text="UnityEnginePath '$(UnityEnginePath)' does not exist. Pass it via -p:UnityEnginePath=path/to/unity/dlls" />
   </Target>
 </Project>
