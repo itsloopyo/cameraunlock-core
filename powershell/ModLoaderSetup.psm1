@@ -7,6 +7,22 @@ $ProgressPreference = "SilentlyContinue"
 
 $Script:StateFileName = ".headtracking-state.json"
 
+# The state file is parsed by the Lopari launcher with a strict JSON parser
+# that rejects a UTF-8 BOM (the mod then reads as "not installed"). Windows
+# PowerShell 5.1's `Set-Content -Encoding UTF8` writes one, so all state-file
+# writes go through this BOM-less helper.
+function Write-StateFile {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [Parameter(Mandatory=$true)]
+        $State
+    )
+
+    $json = $State | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 <#
 .SYNOPSIS
     Tests if BepInEx is installed at the specified game path.
@@ -307,7 +323,7 @@ Enabled = true
         }
     }
 
-    $state | ConvertTo-Json -Depth 10 | Set-Content $stateFile -Encoding UTF8
+    Write-StateFile -Path $stateFile -State $state
 
     Write-Host "  BepInEx v$version installed successfully!" -ForegroundColor Green
 
@@ -412,7 +428,7 @@ function Install-MelonLoader {
         }
     }
 
-    $state | ConvertTo-Json -Depth 10 | Set-Content $stateFile -Encoding UTF8
+    Write-StateFile -Path $stateFile -State $state
 
     Write-Host "  MelonLoader v$Version installed!" -ForegroundColor Green
 
@@ -486,7 +502,7 @@ function Update-ModLoaderState {
         $state[$key] = $Updates[$key]
     }
 
-    $state | ConvertTo-Json -Depth 10 | Set-Content $stateFile -Encoding UTF8
+    Write-StateFile -Path $stateFile -State $state
 }
 
 <#
@@ -816,7 +832,7 @@ function Install-UE4SS {
         }
     }
 
-    $state | ConvertTo-Json -Depth 10 | Set-Content $stateFile -Encoding UTF8
+    Write-StateFile -Path $stateFile -State $state
 
     Write-Host "  UE4SS v$version installed successfully!" -ForegroundColor Green
 
