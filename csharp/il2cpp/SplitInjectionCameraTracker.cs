@@ -34,8 +34,7 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
             public TrackedCamera(Camera camera) { Camera = camera; }
 
             public readonly Camera Camera;
-            public Vector3 CleanLocalPosition;
-            public Vector3 LastWrittenLocalPosition;
+            public Vector3 AppliedLocalDelta;
             public bool HasWrite;
         }
 
@@ -122,14 +121,14 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 // this frame's mouse look); position was returned to clean by RestorePositions.
                 Quaternion baseWorld = cam.transform.rotation;
                 Vector3 basePosition = cam.transform.position;
-                t.CleanLocalPosition = cam.transform.localPosition;
 
                 Vector3 finalPosition = basePosition;
                 if (positionActive)
                 {
+                    Vector3 cleanLocalPosition = cam.transform.localPosition;
                     finalPosition = basePosition + baseWorld * positionOffset;
                     cam.transform.position = finalPosition;
-                    t.LastWrittenLocalPosition = cam.transform.localPosition;
+                    t.AppliedLocalDelta = cam.transform.localPosition - cleanLocalPosition;
                     t.HasWrite = true;
                 }
 
@@ -142,9 +141,11 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
         }
 
         /// <summary>
-        /// Undoes this tracker's position offsets in LOCAL space (parent-movement-independent).
-        /// If the game rewrote the camera's local position since the last write, that value is
-        /// already clean and is left alone.
+        /// Undoes this tracker's position offset by subtracting exactly the local-space delta
+        /// it applied last frame. Operating on our own delta (rather than restoring an absolute
+        /// clean value behind a "did the game touch it" guard) preserves any movement the game
+        /// made to the camera in between - e.g. weapon aim/ADS, which drives the camera transform
+        /// every frame - and can never accumulate our offset into a runaway.
         /// </summary>
         public void RestorePositions()
         {
@@ -153,10 +154,7 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 var t = _targets[i];
                 if (!t.HasWrite || t.Camera == null) continue;
 
-                if (t.Camera.transform.localPosition == t.LastWrittenLocalPosition)
-                {
-                    t.Camera.transform.localPosition = t.CleanLocalPosition;
-                }
+                t.Camera.transform.localPosition -= t.AppliedLocalDelta;
                 t.HasWrite = false;
             }
         }
