@@ -399,6 +399,13 @@
       "steam_app_id": 638970,
       "steam_folder": "Yakuza 0",
       "executable_relpath": "media\\Yakuza0.exe"
+    },
+    "mass-effect-legendary-edition": {
+      "display_name": "Mass Effect Legendary Edition",
+      "env_var": "MASS_EFFECT_LE_PATH",
+      "steam_app_id": 1328670,
+      "steam_folder": "Mass Effect Legendary Edition",
+      "executable_relpath": "Game\\Launcher\\MassEffectLauncher.exe"
     }
   }
 }
