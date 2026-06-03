@@ -1,8 +1,5 @@
 #include <cameraunlock/unreal/ue_runtime.h>
 
-#include <cctype>
-#include <cstring>
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -152,25 +149,6 @@ std::string OuterName(std::uintptr_t obj) {
     if (!SafeReadPtr(obj + g_layout.kOuterPrivate, outer) || !outer)
         return std::string();
     return ObjectName(outer);
-}
-
-// Semantics match lowercase(hay).find(lowercase(needle)) (empty needle -> true).
-bool ContainsCI(const std::string& hay, const char* needle) {
-    const std::size_t nlen = std::strlen(needle);
-    if (nlen == 0) return true;
-    if (hay.size() < nlen) return false;
-    auto lc = [](char c) {
-        return static_cast<char>(::tolower(static_cast<unsigned char>(c)));
-    };
-    const std::size_t last = hay.size() - nlen;
-    for (std::size_t i = 0; i <= last; ++i) {
-        std::size_t j = 0;
-        for (; j < nlen; ++j) {
-            if (lc(hay[i + j]) != lc(needle[j])) break;
-        }
-        if (j == nlen) return true;
-    }
-    return false;
 }
 
 std::uintptr_t FindLiveObject(const char* wantClass, const char* wantName,

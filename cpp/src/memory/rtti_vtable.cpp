@@ -43,6 +43,11 @@ bool FindVtableFromTypeDescriptor(void* module, void* type_descriptor,
         auto* col = reinterpret_cast<const RTTICompleteObjectLocator*>(start + i);
 
         if (col->signature != 1) continue;  // x64 signature
+        // Primary vtable only. Multiple-inheritance classes have one COL per
+        // base sub-object; the secondary ones (offset != 0) point at vtables
+        // whose vfunc layout belongs to that base, not the class being looked
+        // up, so hooking through them lands on the wrong functions.
+        if (col->offset != 0) continue;
         if (col->pTypeDescriptor != tdRva) continue;
 
         // Validate self-reference

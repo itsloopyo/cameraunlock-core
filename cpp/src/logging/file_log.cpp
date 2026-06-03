@@ -25,6 +25,11 @@ HANDLE g_handle = INVALID_HANDLE_VALUE;
 std::mutex g_mutex;
 std::atomic<bool> g_open{false};
 
+// No FlushFileBuffers here: Line() is called from render/hook threads where a
+// physical-disk flush is a multi-millisecond stall. OS-buffered writes survive
+// a process crash (the page cache outlives the process); only kernel
+// crash/power loss can lose them, which EmergencyLine covers for the one path
+// where that durability matters.
 void WriteTimestampedLocked(const char* msg, size_t len) {
     if (g_handle == INVALID_HANDLE_VALUE) return;
     SYSTEMTIME st;
@@ -37,7 +42,6 @@ void WriteTimestampedLocked(const char* msg, size_t len) {
     if (n > 0) WriteFile(g_handle, prefix, static_cast<DWORD>(n), &written, nullptr);
     WriteFile(g_handle, msg, static_cast<DWORD>(len), &written, nullptr);
     WriteFile(g_handle, "\r\n", 2, &written, nullptr);
-    FlushFileBuffers(g_handle);
 }
 
 }  // namespace
@@ -51,7 +55,7 @@ void Open(const std::wstring& filename) {
         FILE_SHARE_READ,
         nullptr,
         CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
+        FILE_ATTRIBUTE_NORMAL,
         nullptr);
     g_open.store(g_handle != INVALID_HANDLE_VALUE, std::memory_order_release);
 }

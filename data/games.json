@@ -216,6 +216,20 @@
         "C:\\Program Files\\Epic Games\\DeusExMankindDivided"
       ]
     },
+    "dishonored": {
+      "display_name": "Dishonored",
+      "env_var": "DISHONORED_PATH",
+      "steam_app_id": 205100,
+      "steam_folder": "Dishonored",
+      "executable_relpath": "Binaries\\Win32\\Dishonored.exe"
+    },
+    "deus-ex-human-revolution": {
+      "display_name": "Deus Ex: Human Revolution - Director's Cut",
+      "env_var": "DXHR_PATH",
+      "steam_app_id": 238010,
+      "steam_folder": "Deus Ex Human Revolution Director's Cut",
+      "executable_relpath": "DXHRDC.exe"
+    },
     "dishonored-2": {
       "display_name": "Dishonored 2",
       "env_var": "DISHONORED_2_PATH",
@@ -321,6 +335,13 @@
       "steam_folder": "The Witness",
       "executable_relpath": "witness64_d3d11.exe"
     },
+    "mafia-ii-definitive-edition": {
+      "display_name": "Mafia II: Definitive Edition",
+      "env_var": "MAFIA_II_DE_PATH",
+      "steam_app_id": 1030830,
+      "steam_folder": "Mafia II Definitive Edition",
+      "executable_relpath": "pc\\Mafia II Definitive Edition.exe"
+    },
     "assassins-creed-unity": {
       "display_name": "Assassin's Creed Unity",
       "env_var": "ASSASSINS_CREED_UNITY_PATH",
@@ -328,6 +349,13 @@
       "steam_folder": "Assassin's Creed Unity",
       "ubisoft_app_ids": [720],
       "executable_relpath": "ACU.exe"
+    },
+    "assassins-creed-origins": {
+      "display_name": "Assassin's Creed Origins",
+      "env_var": "ASSASSINS_CREED_ORIGINS_PATH",
+      "steam_app_id": 582160,
+      "steam_folder": "Assassins Creed Origins",
+      "executable_relpath": "ACOrigins.exe"
     },
     "portal-2": {
       "display_name": "Portal 2",
@@ -364,6 +392,13 @@
       "steam_app_id": 3834090,
       "steam_folder": "YAPYAP",
       "executable_relpath": "yapyap.exe"
+    },
+    "yakuza-0": {
+      "display_name": "Yakuza 0",
+      "env_var": "YAKUZA_0_PATH",
+      "steam_app_id": 638970,
+      "steam_folder": "Yakuza 0",
+      "executable_relpath": "media\\Yakuza0.exe"
     }
   }
 }

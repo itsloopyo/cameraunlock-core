@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 #include <cameraunlock/unreal/ue_math.h>
@@ -66,8 +68,25 @@ std::string OuterName(std::uintptr_t obj);
 
 // Case-insensitive substring test. Folds case in place rather than
 // allocating lowercased copies - this runs once per UObject across
-// full-table enumerations.
-bool ContainsCI(const std::string& hay, const char* needle);
+// full-table enumerations. Semantics match
+// lowercase(hay).find(lowercase(needle)) (empty needle -> true).
+inline bool ContainsCI(const std::string& hay, const char* needle) {
+    const std::size_t nlen = std::strlen(needle);
+    if (nlen == 0) return true;
+    if (hay.size() < nlen) return false;
+    auto lc = [](char c) {
+        return static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    };
+    const std::size_t last = hay.size() - nlen;
+    for (std::size_t i = 0; i <= last; ++i) {
+        std::size_t j = 0;
+        for (; j < nlen; ++j) {
+            if (lc(hay[i + j]) != lc(needle[j])) break;
+        }
+        if (j == nlen) return true;
+    }
+    return false;
+}
 
 // Visit every live UObject. visit(obj) returns true to stop early.
 template <typename Fn>

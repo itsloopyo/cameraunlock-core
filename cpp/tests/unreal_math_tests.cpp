@@ -1,14 +1,26 @@
-// Tests for the UE5 LWC math helpers (cameraunlock/unreal/ue_math.h).
+// Tests for the UE5 LWC math helpers (cameraunlock/unreal/ue_math.h) and the
+// pure-logic helpers in ue_runtime.h.
 //
 // The conversions are byte-for-byte ports of UE5's FRotator::Quaternion() and
 // FQuat::Rotator(); these tests pin the conventions (axis order, signs,
 // singularity handling) so a future "simplification" can't silently flip a
 // sign and rotate every UE mod's camera the wrong way.
+//
+// ContainsCI is the case-insensitive matcher every UE mod's UObject/widget
+// discovery filters with (e.g. the "Default__" CDO skip across full-table
+// enumerations). The equivalence test pins its hand-rolled in-place case fold
+// against the obvious allocating reference so an edge-case regression can't
+// silently make widget discovery stop matching.
 
 #include <cameraunlock/unreal/ue_math.h>
+#include <cameraunlock/unreal/ue_runtime.h>
 
 #include <cmath>
+#include <cstring>
 #include <iostream>
+#include <random>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -73,6 +85,66 @@ void TestQuatAlgebra() {
     Check(Near(v.X, 1) && Near(v.Y, 2) && Near(v.Z, 3), "identity rotation is a no-op");
 }
 
+// Reference semantics: lowercase(hay).find(lowercase(needle)).
+bool ContainsCIReference(const std::string& hay, const char* needle) {
+    auto lower = [](std::string s) {
+        for (char& c : s)
+            c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    return lower(hay).find(lower(needle)) != std::string::npos;
+}
+
+void TestContainsCI() {
+    using cameraunlock::unreal::ContainsCI;
+    std::cout << "ContainsCI:\n";
+
+    // Curated edge cases: empty strings, needle == hay, case folds, repeated
+    // prefixes, needle longer than hay, underscores.
+    const std::vector<std::string> hays = {
+        "", "a", "A", "Default__BP_HUD", "default__", "DEFAULT__C",
+        "InteractionIcon", "ReticleOverlay", "WBP_HUD_C", "hud",
+        "HUD", "xHUDx", "AbC", "aaa", "AAAA", "ArrowTexture",
+        "Default", "fault__", "__", "Crosshair_Reticle_0",
+    };
+    const std::vector<const char*> needles = {
+        "", "a", "A", "Default__", "default__", "HUD", "WBP_HUD",
+        "icon", "ICON", "overlay", "x", "AbC", "aaaa", "reticle",
+        "crosshair", "_", "__", "zzz", "Default", "fault",
+    };
+    bool allMatch = true;
+    for (const auto& h : hays) {
+        for (const char* n : needles) {
+            if (ContainsCI(h, n) != ContainsCIReference(h, n)) {
+                allMatch = false;
+                std::cout << "  mismatch: hay=\"" << h << "\" needle=\"" << n << "\"\n";
+            }
+        }
+    }
+    Check(allMatch, "curated cases match allocating reference");
+
+    // Deterministic fuzz over mixed-case printable ASCII.
+    std::mt19937 rng(12345);
+    std::uniform_int_distribution<int> lenD(0, 24);
+    std::uniform_int_distribution<int> chD(32, 126);
+    auto randstr = [&](int n) {
+        std::string s;
+        for (int i = 0; i < n; ++i) s.push_back(static_cast<char>(chD(rng)));
+        return s;
+    };
+    bool fuzzMatch = true;
+    for (int it = 0; it < 200000; ++it) {
+        const std::string h = randstr(lenD(rng));
+        const std::string n = randstr(lenD(rng));
+        if (ContainsCI(h, n.c_str()) != ContainsCIReference(h, n.c_str())) {
+            fuzzMatch = false;
+            std::cout << "  fuzz mismatch: hay=\"" << h << "\" needle=\"" << n << "\"\n";
+            break;
+        }
+    }
+    Check(fuzzMatch, "200k randomized cases match allocating reference");
+}
+
 }  // namespace
 
 int RunUnrealMathTests() {
@@ -80,6 +152,7 @@ int RunUnrealMathTests() {
 
     TestEulerQuatRoundTrip();
     TestQuatAlgebra();
+    TestContainsCI();
 
     if (g_failures == 0) {
         std::cout << "Unreal math tests: all passed\n";

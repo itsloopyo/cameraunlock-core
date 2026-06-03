@@ -11,9 +11,14 @@ namespace {
 
 // Update-method name candidates shared across RE Engine titles. The gameplay
 // camera controller's per-frame update goes by one of these regardless of the
-// game-specific controller type name.
+// game-specific controller type name. updateCameraPosition is the RE2/RE3
+// generation's per-frame transform writer (REFramework's own camera hook
+// target); onCameraUpdate is its RE8/RE9 generation counterpart. Both sit
+// ahead of the generic lateUpdate/update names so the dedicated writer wins
+// on types that expose both.
 const char* const kUpdateMethodNames[] = {
     "onCameraUpdate",
+    "updateCameraPosition",
     "lateUpdate",
     "update",
     "doUpdate",
@@ -34,11 +39,8 @@ bool IsEffectControllerName(const char* typeName) {
     return false;
 }
 
-bool CameraControllerHooker::TryHookType(const char* fullTypeName) {
-    auto tdb = ::reframework::API::get()->tdb();
-    auto type = tdb->find_type(fullTypeName);
-    if (!type) return false;
-
+bool CameraControllerHooker::TryHookTypeDef(::reframework::API::TypeDefinition* type,
+                                            const char* fullTypeName) {
     for (auto methodName : kUpdateMethodNames) {
         auto method = type->find_method(methodName);
         if (!method) continue;
@@ -48,6 +50,13 @@ bool CameraControllerHooker::TryHookType(const char* fullTypeName) {
         return true;
     }
     return false;
+}
+
+bool CameraControllerHooker::TryHookType(const char* fullTypeName) {
+    auto tdb = ::reframework::API::get()->tdb();
+    auto type = tdb->find_type(fullTypeName);
+    if (!type) return false;
+    return TryHookTypeDef(type, fullTypeName);
 }
 
 bool CameraControllerHooker::WalkParentChain(void* cameraTransform) {
@@ -115,6 +124,17 @@ bool CameraControllerHooker::TryHook(void* cameraTransform) {
 
     for (int i = 0; i < m_candidateTypeCount; i++) {
         if (TryHookType(m_candidateTypes[i])) return true;
+    }
+
+    // Namespace-agnostic fallback: RE Engine titles move the player camera
+    // controller between namespaces across releases (app.ropeway.* vs
+    // offline.* vs app.*) but keep the short type name. Exact short-name
+    // matching cannot hit the Camera*Controller effect-controller shapes.
+    for (auto type : FindTypesByShortName("PlayerCameraController")) {
+        const char* ns = type->get_namespace();
+        char fullName[256];
+        snprintf(fullName, sizeof(fullName), "%s.%s", ns ? ns : "", "PlayerCameraController");
+        if (TryHookTypeDef(type, fullName)) return true;
     }
 
     if (!cameraTransform) return false;

@@ -17,7 +17,10 @@ bool IsEffectControllerName(const char* typeName);
 //
 // Discovery order per TryHook() call:
 //   1. Game-specific fully-qualified candidate type names (fast path).
-//   2. Parent-chain walk from the primary camera transform: accept the first
+//   2. Namespace-agnostic TDB scan for types short-named
+//      "PlayerCameraController" (titles rename the namespace across
+//      releases, not the type).
+//   3. Parent-chain walk from the primary camera transform: accept the first
 //      component whose type looks like a camera controller and is not an
 //      effect controller, logging every component seen so an unrecognized
 //      game's real controller type can be promoted to the fast path later.
@@ -44,14 +47,16 @@ public:
 
     // Attempt discovery and hooking. cameraTransform is the primary camera's
     // via.Transform managed object (for the parent-chain walk); pass nullptr
-    // to limit discovery to the candidate-type fast path. Returns true once
-    // hooked; further calls after success are no-ops returning true.
+    // to limit discovery to the candidate-type and TDB short-name fast paths.
+    // Returns true once hooked; further calls after success are no-ops
+    // returning true.
     bool TryHook(void* cameraTransform);
 
     bool IsHooked() const { return m_hooked; }
     int AttemptCount() const { return m_attempts; }
 
 private:
+    bool TryHookTypeDef(::reframework::API::TypeDefinition* type, const char* fullTypeName);
     bool TryHookType(const char* fullTypeName);
     bool WalkParentChain(void* cameraTransform);
 

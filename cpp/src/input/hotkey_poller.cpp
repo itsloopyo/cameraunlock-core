@@ -118,14 +118,15 @@ void HotkeyPoller::SetRecenterKeyCode(int vkCode) {
     m_recenterKey.store(vkCode);
 }
 
-void HotkeyPoller::CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback) {
+void HotkeyPoller::CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
+                            bool allowFire) {
     if (vkCode == 0 || !callback) return;
 
 #ifdef _WIN32
     bool pressed = (GetAsyncKeyState(vkCode) & kKeyPressedMask) != 0;
     if (pressed && !keyDown.load()) {
         keyDown.store(true);
-        callback();
+        if (allowFire) callback();
     } else if (!pressed && keyDown.load()) {
         keyDown.store(false);
     }
@@ -141,12 +142,32 @@ void HotkeyPoller::PollLoop() {
     }
 }
 
+// GetAsyncKeyState sees keystrokes system-wide, so without a foreground guard
+// a user typing End/Home/PageUp in another window silently toggles the mod.
+// Key edges are still tracked while unfocused (allowFire=false) so a press
+// that starts in another window doesn't fire a stale callback on refocus.
+#ifdef _WIN32
+namespace {
+bool IsOwnProcessForeground() {
+    DWORD foregroundPid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &foregroundPid);
+    return foregroundPid == GetCurrentProcessId();
+}
+}  // namespace
+#endif
+
 void HotkeyPoller::Poll() {
+#ifdef _WIN32
+    const bool allowFire = IsOwnProcessForeground();
+#else
+    const bool allowFire = true;
+#endif
+
     // Check built-in keys under callback lock (avoids copying std::function)
     {
         std::lock_guard<std::mutex> lock(m_callbackMutex);
-        CheckKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback);
-        CheckKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback);
+        CheckKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback, allowFire);
+        CheckKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback, allowFire);
     }
 
     // Check generic hotkeys
@@ -159,7 +180,7 @@ void HotkeyPoller::Poll() {
             bool pressed = (GetAsyncKeyState(entry.vkCode) & kKeyPressedMask) != 0;
             if (pressed && !entry.keyDown) {
                 entry.keyDown = true;
-                entry.callback();
+                if (allowFire) entry.callback();
             } else if (!pressed && entry.keyDown) {
                 entry.keyDown = false;
             }

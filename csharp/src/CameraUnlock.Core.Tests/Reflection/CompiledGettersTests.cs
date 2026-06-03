@@ -14,6 +14,7 @@ namespace CameraUnlock.Core.Tests.Reflection
 #pragma warning restore 414
             public int health = 42;
             public string Name => "player";
+            public static bool Loading { get; set; }
         }
 
         [Fact]
@@ -47,6 +48,29 @@ namespace CameraUnlock.Core.Tests.Reflection
             Func<object, object> getter = CompiledGetters.ForInstanceProperty(property);
 
             Assert.Equal("player", getter(new FakeGameType()));
+        }
+
+        [Fact]
+        public void ForStaticProperty_Typed_ReadsCurrentValue()
+        {
+            PropertyInfo property = typeof(FakeGameType).GetProperty("Loading", BindingFlags.Public | BindingFlags.Static)!;
+            Func<bool> getter = CompiledGetters.ForStaticProperty<bool>(property);
+
+            FakeGameType.Loading = false;
+            Assert.False(getter());
+
+            FakeGameType.Loading = true;
+            Assert.True(getter());
+        }
+
+        [Fact]
+        public void ForInstanceField_Typed_ReadsFieldFromInstance()
+        {
+            FieldInfo field = typeof(FakeGameType).GetField("health", BindingFlags.Public | BindingFlags.Instance)!;
+            Func<object, int> getter = CompiledGetters.ForInstanceField<int>(field);
+
+            var instance = new FakeGameType { health = 7 };
+            Assert.Equal(7, getter(instance));
         }
     }
 }

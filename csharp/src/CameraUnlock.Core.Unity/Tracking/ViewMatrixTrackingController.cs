@@ -26,6 +26,7 @@ namespace CameraUnlock.Core.Unity.Tracking
     {
         private const float TransitionInDuration = 0.5f;
         private const float TransitionOutDuration = 0.3f;
+        private const float ProjectionEpsilon = 1e-6f;
 
         private readonly OpenTrackReceiver _receiver;
         private readonly TrackingProcessor _processor;
@@ -187,6 +188,45 @@ namespace CameraUnlock.Core.Unity.Tracking
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Projects the game's clean aim direction into the head-tracked view and returns its
+        /// screen offset from center in pixels (+X right, +Y up, matching uGUI anchoredPosition).
+        /// Uses the same rotation composition as the camera modification, selected by
+        /// <see cref="WorldSpaceYaw"/>, so the reticle lands exactly on the aim point.
+        /// Call after ProcessFrame. Returns false when tracking is not being applied, no camera
+        /// is available, or the aim point is outside the tracked view (behind the camera).
+        /// </summary>
+        public bool TryGetAimScreenOffset(out Vector2 screenOffset)
+        {
+            screenOffset = Vector2.zero;
+
+            if (!IsApplyingTracking)
+                return false;
+
+            var cam = _mainCameraCache.Get();
+            if (cam == null)
+                return false;
+
+            Vector3 aimDirection = WorldSpaceYaw
+                ? ViewMatrixModifier.ComputeAimDirectionInTrackedViewDecomposed(
+                    cam.transform.rotation, _lastYaw, _lastPitch, _lastRoll)
+                : ViewMatrixModifier.ComputeAimDirectionInTrackedView(_lastYaw, _lastPitch, _lastRoll);
+
+            float forward = -aimDirection.z;
+            if (forward < ProjectionEpsilon)
+                return false;
+
+            float tanHalfFovY = Mathf.Tan(cam.fieldOfView * Mathf.Deg2Rad * 0.5f);
+            float tanHalfFovX = tanHalfFovY * cam.aspect;
+            if (tanHalfFovX < ProjectionEpsilon || tanHalfFovY < ProjectionEpsilon)
+                return false;
+
+            screenOffset = new Vector2(
+                aimDirection.x / forward / tanHalfFovX * (Screen.width * 0.5f),
+                aimDirection.y / forward / tanHalfFovY * (Screen.height * 0.5f));
+            return true;
         }
 
         public void OnTrackingEnabled()

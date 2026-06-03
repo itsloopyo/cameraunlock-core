@@ -65,7 +65,8 @@ public:
 
 private:
     void PollLoop();
-    void CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback);
+    void CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
+                  bool allowFire);
 
     std::thread m_thread;
     std::atomic<bool> m_stopFlag{false};

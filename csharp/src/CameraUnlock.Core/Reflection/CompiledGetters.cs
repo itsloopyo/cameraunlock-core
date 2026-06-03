@@ -44,5 +44,28 @@ namespace CameraUnlock.Core.Reflection
             Expression body = Expression.Convert(Expression.Property(typedInstance, property), typeof(object));
             return Expression.Lambda<Func<object, object>>(body, instance).Compile();
         }
+
+        /// <summary>
+        /// Builds a typed getter for a static property. The typed result avoids boxing
+        /// value-type members (e.g. a bool "is loading" flag read every frame).
+        /// </summary>
+        public static Func<T> ForStaticProperty<T>(PropertyInfo property)
+        {
+            Expression body = Expression.Convert(Expression.Property(null, property), typeof(T));
+            return Expression.Lambda<Func<T>>(body).Compile();
+        }
+
+        /// <summary>
+        /// Builds a typed getter for an instance field. The argument is the instance to
+        /// read from. Use when the field type is known at compile time (e.g. a Unity
+        /// component reference) so callers avoid a per-call cast.
+        /// </summary>
+        public static Func<object, T> ForInstanceField<T>(FieldInfo field)
+        {
+            ParameterExpression instance = Expression.Parameter(typeof(object), "instance");
+            Expression typedInstance = Expression.Convert(instance, field.DeclaringType);
+            Expression body = Expression.Convert(Expression.Field(typedInstance, field), typeof(T));
+            return Expression.Lambda<Func<object, T>>(body, instance).Compile();
+        }
     }
 }

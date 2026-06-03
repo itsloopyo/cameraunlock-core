@@ -227,6 +227,45 @@ namespace CameraUnlock.Core.Unity.Tracking
         }
 
         /// <summary>
+        /// Computes the clean aim direction (camera.transform.forward) expressed in the
+        /// head-tracked view space produced by <see cref="ApplyHeadRotation(Camera, float, float, float)"/>.
+        /// Use this to project the aim point / reticle into the tracked view.
+        /// Unity view-space convention: forward is -Z.
+        /// </summary>
+        /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
+        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
+        public static Vector3 ComputeAimDirectionInTrackedView(float yaw, float pitch, float roll)
+        {
+            // Must mirror ApplyHeadRotation exactly: tracked view = Rotate(Euler(pitch, yaw, -roll)) * cleanView,
+            // and the clean aim direction is (0, 0, -1) in clean view space by definition.
+            Quaternion headRotation = Quaternion.Euler(pitch, yaw, -roll);
+            return headRotation * Vector3.back;
+        }
+
+        /// <summary>
+        /// Computes the clean aim direction expressed in the head-tracked view space produced by
+        /// <see cref="ApplyHeadRotationDecomposed(Camera, float, float, float)"/> (world-space yaw,
+        /// camera-local pitch/roll). Unity view-space convention: forward is -Z.
+        /// </summary>
+        /// <param name="baseRotation">The camera transform's clean rotation (the game's intended view direction).</param>
+        /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
+        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
+        public static Vector3 ComputeAimDirectionInTrackedViewDecomposed(
+            Quaternion baseRotation, float yaw, float pitch, float roll)
+        {
+            // Must mirror ApplyHeadRotationDecomposed exactly, including its Z-row flip.
+            Quaternion worldYaw = Quaternion.AngleAxis(yaw, Vector3.up);
+            Quaternion localPitchRoll = Quaternion.Euler(pitch, 0, roll);
+            Quaternion finalRotation = worldYaw * baseRotation * localPitchRoll;
+
+            Vector3 cleanForward = baseRotation * Vector3.forward;
+            Vector3 direction = Quaternion.Inverse(finalRotation) * cleanForward;
+            return new Vector3(direction.x, direction.y, -direction.z);
+        }
+
+        /// <summary>
         /// Sets the view matrix to match the camera's current transform.
         /// Use this to keep the camera in "manual matrix mode" when head tracking is disabled,
         /// ensuring consistent behavior (some games behave differently when matrix is auto vs manual).
