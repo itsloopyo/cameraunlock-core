@@ -62,7 +62,11 @@ function Get-GameConfigs {
         throw "canonical games.json not found at $($Script:GamesFilePath) - cameraunlock-core checkout is incomplete"
     }
 
-    $raw = Get-Content -Raw -Path $Script:GamesFilePath | ConvertFrom-Json
+    # -Encoding UTF8: games.json is UTF-8 and contains non-ASCII characters
+    # (e.g. the trademark sign in the PixelJunk Monsters 2 steam_folder). Windows
+    # PowerShell 5.1 defaults Get-Content to the ANSI codepage, which mojibakes
+    # those bytes and breaks steam_folder matching for unicode-named games.
+    $raw = Get-Content -Raw -Encoding UTF8 -Path $Script:GamesFilePath | ConvertFrom-Json
     if (-not $raw.games) {
         throw "games.json at $($Script:GamesFilePath) is malformed: missing top-level .games object"
     }

@@ -128,6 +128,26 @@ foreach ($doc in $docFiles) {
     }
 }
 
+# Stamp launcher-manifest.json with the real release version and stage it at
+# the ZIP root. The launcher reads this file to deploy natively (manifest
+# delivery mode), falling back to install.cmd for legacy packages - without
+# it in the ZIP the launcher can't tell the two apart and always runs the
+# script. Written through a no-BOM encoder: PowerShell 5.1's
+# Set-Content -Encoding UTF8 emits a BOM that serde_json rejects.
+$manifestSource = Join-Path $ProjectRoot "launcher-manifest.json"
+if (-not (Test-Path $manifestSource)) {
+    throw "launcher-manifest.json not found at project root ($manifestSource)"
+}
+$manifestJson = Get-Content $manifestSource -Raw | ConvertFrom-Json
+$manifestJson.mod_info.version = $version
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText(
+    (Join-Path $stagingDir "launcher-manifest.json"),
+    ($manifestJson | ConvertTo-Json -Depth 10),
+    $utf8NoBom
+)
+Write-Host "  launcher-manifest.json (v$version)" -ForegroundColor Green
+
 Write-Host ""
 
 # Create ZIP archive

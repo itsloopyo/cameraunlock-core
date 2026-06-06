@@ -2,6 +2,56 @@
   "$comment": "Canonical per-game detection data for CameraUnlock head-tracking mods. This is the single source of truth for where each supported game lives on disk: env var name, Steam folder, GOG IDs, Epic/Xbox paths, executable relative path, Unity data folder (for Cecil patching). Consumed by cameraunlock-core/powershell/GamePathDetection.psm1 today, and destined to be consumed by install.cmd scripts and the launcher's Rust detect module (see roadmap in the mod-manager repo). Mod-specific fields (which DLLs to deploy, mod version, framework type) do NOT belong here - those live in each mod's install.cmd CONFIG BLOCK and the launcher's catalog/mods.json. Adding a new game: pick a hyphen-lowercase id, fill in at minimum `display_name`, `env_var`, and `executable_relpath`. Any field that's empty for a given game should be omitted rather than set to a null/empty value.",
   "schema_version": 1,
   "games": {
+    "arkham-city": {
+      "display_name": "Batman: Arkham City GOTY",
+      "env_var": "ARKHAM_CITY_PATH",
+      "steam_app_id": 200260,
+      "steam_folder": "Batman Arkham City GOTY",
+      "executable_relpath": "Binaries\\Win32\\BatmanAC.exe"
+    },
+    "pixeljunk-monsters-2": {
+      "display_name": "PixelJunk Monsters 2",
+      "env_var": "PIXELJUNK_MONSTERS_2_PATH",
+      "steam_app_id": 749800,
+      "steam_folder": "PixelJunk™ Monsters 2",
+      "executable_relpath": "PixeljunkMonsters2.exe",
+      "data_folder": "PixeljunkMonsters2_Data"
+    },
+    "quake-ii-rtx": {
+      "display_name": "Quake II RTX",
+      "env_var": "QUAKE_II_RTX_PATH",
+      "steam_app_id": 1089130,
+      "steam_folder": "Quake II RTX",
+      "executable_relpath": "q2rtx.exe"
+    },
+    "battlefield-bad-company-2": {
+      "display_name": "Battlefield: Bad Company 2",
+      "env_var": "BFBC2_PATH",
+      "steam_app_id": 24960,
+      "steam_folder": "Battlefield Bad Company 2",
+      "executable_relpath": "BFBC2Game.exe"
+    },
+    "amnesia-the-dark-descent": {
+      "display_name": "Amnesia: The Dark Descent",
+      "env_var": "AMNESIA_TDD_PATH",
+      "steam_app_id": 57300,
+      "steam_folder": "Amnesia The Dark Descent",
+      "executable_relpath": "Amnesia.exe"
+    },
+    "alien-isolation": {
+      "display_name": "Alien: Isolation",
+      "env_var": "ALIEN_ISOLATION_PATH",
+      "steam_app_id": 214490,
+      "steam_folder": "Alien Isolation",
+      "executable_relpath": "AI.exe"
+    },
+    "bully-scholarship-edition": {
+      "display_name": "Bully: Scholarship Edition",
+      "env_var": "BULLY_PATH",
+      "steam_app_id": 12200,
+      "steam_folder": "Bully Scholarship Edition",
+      "executable_relpath": "Bully.exe"
+    },
     "abzu": {
       "display_name": "ABZU",
       "env_var": "ABZU_PATH",
@@ -70,7 +120,10 @@
       "steam_app_id": 1091500,
       "steam_folder": "Cyberpunk 2077",
       "executable_relpath": "bin\\x64\\Cyberpunk2077.exe",
-      "gog_ids": ["1423049311", "1256837418"]
+      "gog_ids": [
+        "1423049311",
+        "1256837418"
+      ]
     },
     "control-ultimate-edition": {
       "display_name": "Control: Ultimate Edition",
@@ -180,7 +233,9 @@
       "env_var": "FalloutNVPath",
       "steam_folder": "Fallout New Vegas",
       "executable_relpath": "FalloutNV.exe",
-      "gog_ids": ["1454587428"],
+      "gog_ids": [
+        "1454587428"
+      ],
       "epic_search_paths": [
         "C:\\Program Files\\Epic Games\\FalloutNewVegas\\Fallout New Vegas English",
         "C:\\Program Files\\Epic Games\\FalloutNewVegas",
@@ -198,12 +253,30 @@
       ],
       "uses_owml": true
     },
+    "dragon-age-inquisition": {
+      "display_name": "Dragon Age: Inquisition",
+      "env_var": "DRAGON_AGE_INQUISITION_PATH",
+      "executable_relpath": "DragonAgeInquisition.exe",
+      "ea_search_paths": [
+        "C:\\Program Files\\EA Games\\Dragon Age Inquisition",
+        "C:\\Program Files (x86)\\Origin Games\\Dragon Age Inquisition",
+        "C:\\Program Files (x86)\\EA Games\\Dragon Age Inquisition",
+        "C:\\Program Files\\Origin Games\\Dragon Age Inquisition"
+      ]
+    },
     "dying-light-2": {
       "display_name": "Dying Light 2 Stay Human",
       "env_var": "DYING_LIGHT_2_PATH",
       "steam_app_id": 534380,
       "steam_folder": "Dying Light 2",
       "executable_relpath": "ph\\work\\bin\\x64\\DyingLightGame_x64_rwdi.exe"
+    },
+    "burnout-paradise-the-ultimate-box": {
+      "display_name": "Burnout Paradise: The Ultimate Box",
+      "env_var": "BURNOUT_PARADISE_PATH",
+      "steam_app_id": 24740,
+      "steam_folder": "Burnout(TM) Paradise The Ultimate Box",
+      "executable_relpath": "BurnoutParadise.exe"
     },
     "deus-ex-mankind-divided": {
       "display_name": "Deus Ex: Mankind Divided",
@@ -222,6 +295,13 @@
       "steam_app_id": 205100,
       "steam_folder": "Dishonored",
       "executable_relpath": "Binaries\\Win32\\Dishonored.exe"
+    },
+    "dead-rising-2": {
+      "display_name": "Dead Rising 2",
+      "env_var": "DEAD_RISING_2_PATH",
+      "steam_app_id": 45740,
+      "steam_folder": "Dead Rising 2",
+      "executable_relpath": "deadrising2.exe"
     },
     "deus-ex-human-revolution": {
       "display_name": "Deus Ex: Human Revolution - Director's Cut",
@@ -347,7 +427,9 @@
       "env_var": "ASSASSINS_CREED_UNITY_PATH",
       "steam_app_id": 289650,
       "steam_folder": "Assassin's Creed Unity",
-      "ubisoft_app_ids": [720],
+      "ubisoft_app_ids": [
+        720
+      ],
       "executable_relpath": "ACU.exe"
     },
     "assassins-creed-origins": {
@@ -364,11 +446,22 @@
       "steam_folder": "Portal 2",
       "executable_relpath": "portal2.exe"
     },
+    "titanfall-2": {
+      "display_name": "Titanfall 2",
+      "env_var": "TITANFALL_2_PATH",
+      "steam_app_id": 1237970,
+      "steam_folder": "Titanfall2",
+      "executable_relpath": "Titanfall2.exe"
+    },
     "black-and-white": {
       "display_name": "Black & White",
       "env_var": "BLACK_AND_WHITE_PATH",
       "registry_paths": [
-        { "hive": "HKCU", "key": "Software\\Lionhead Studios Ltd\\Black & White", "value": "GameDir" }
+        {
+          "hive": "HKCU",
+          "key": "Software\\Lionhead Studios Ltd\\Black & White",
+          "value": "GameDir"
+        }
       ],
       "executable_relpath": "runblack.exe"
     },
@@ -378,6 +471,13 @@
       "steam_app_id": 286690,
       "steam_folder": "Metro 2033 Redux",
       "executable_relpath": "metro.exe"
+    },
+    "little-nightmares-enhanced-edition": {
+      "display_name": "Little Nightmares Enhanced Edition",
+      "env_var": "LITTLE_NIGHTMARES_ENHANCED_EDITION_PATH",
+      "steam_app_id": 2149010,
+      "steam_folder": "Little Nightmares Enhanced Edition",
+      "executable_relpath": "Atlas\\Binaries\\Win64\\Atlas-Win64-Shipping.exe"
     },
     "still-wakes-the-deep": {
       "display_name": "Still Wakes the Deep",
@@ -406,6 +506,92 @@
       "steam_app_id": 1328670,
       "steam_folder": "Mass Effect Legendary Edition",
       "executable_relpath": "Game\\Launcher\\MassEffectLauncher.exe"
+    },
+    "stormworks": {
+      "display_name": "Stormworks: Build and Rescue",
+      "env_var": "STORMWORKS_PATH",
+      "steam_app_id": 573090,
+      "steam_folder": "Stormworks",
+      "executable_relpath": "stormworks64.exe"
+    },
+    "no-mans-sky": {
+      "display_name": "No Man's Sky",
+      "env_var": "NO_MANS_SKY_PATH",
+      "steam_app_id": 275850,
+      "steam_folder": "No Man's Sky",
+      "executable_relpath": "Binaries\\NMS.exe"
+    },
+    "trailmakers": {
+      "display_name": "Trailmakers",
+      "env_var": "TRAILMAKERS_PATH",
+      "steam_app_id": 585420,
+      "steam_folder": "Trailmakers",
+      "executable_relpath": "Trailmakers.exe",
+      "data_folder": "Trailmakers_Data"
+    },
+    "outer-worlds-spacers-choice-edition": {
+      "display_name": "The Outer Worlds: Spacer's Choice Edition",
+      "env_var": "OUTER_WORLDS_SPACERS_CHOICE_EDITION_PATH",
+      "steam_app_id": 1920490,
+      "steam_folder": "The Outer Worlds Spacer's Choice",
+      "executable_relpath": "Indiana\\Binaries\\Win64\\Indiana-Win64-Shipping.exe"
+    },
+    "sonic-racing-crossworlds": {
+      "display_name": "Sonic Racing: CrossWorlds",
+      "env_var": "SONIC_RACING_CROSSWORLDS_PATH",
+      "steam_app_id": 2486820,
+      "steam_folder": "SonicRacingCrossWorlds",
+      "executable_relpath": "UNION\\Binaries\\Win64\\SonicRacingCrossWorldsSteam.exe"
+    },
+    "la-noire": {
+      "display_name": "L.A. Noire",
+      "env_var": "LA_NOIRE_PATH",
+      "steam_app_id": 110800,
+      "steam_folder": "L.A.Noire",
+      "executable_relpath": "LANoire.exe"
+    },
+    "dorfromantik": {
+      "display_name": "Dorfromantik",
+      "env_var": "DORFROMANTIK_PATH",
+      "steam_app_id": 1455840,
+      "steam_folder": "Dorfromantik",
+      "executable_relpath": "Dorfromantik.exe",
+      "data_folder": "Dorfromantik_Data"
+    },
+    "crysis": {
+      "display_name": "Crysis",
+      "env_var": "CRYSIS_PATH",
+      "steam_app_id": 17300,
+      "steam_folder": "Crysis",
+      "executable_relpath": "Bin64\\Crysis64.exe"
+    },
+    "spec-ops-the-line": {
+      "display_name": "Spec Ops: The Line",
+      "env_var": "SPEC_OPS_THE_LINE_PATH",
+      "steam_app_id": 50300,
+      "steam_folder": "SpecOps_TheLine",
+      "executable_relpath": "Binaries\\Win32\\SpecOpsTheLine.exe"
+    },
+    "south-park-the-stick-of-truth": {
+      "display_name": "South Park: The Stick of Truth",
+      "env_var": "SOUTH_PARK_STICK_OF_TRUTH_PATH",
+      "steam_app_id": 213670,
+      "steam_folder": "South Park - The Stick of Truth",
+      "executable_relpath": "South Park - The Stick of Truth.exe"
+    },
+    "ethan-carter-redux": {
+      "display_name": "The Vanishing of Ethan Carter Redux",
+      "env_var": "ETHAN_CARTER_REDUX_PATH",
+      "executable_relpath": "EthanCarter\\Binaries\\Win64\\EthanCarter-Win64-Shipping.exe",
+      "steam_app_id": 258520,
+      "steam_folder": "The Vanishing of Ethan Carter Redux"
+    },
+    "edith-finch": {
+      "display_name": "What Remains of Edith Finch",
+      "env_var": "EDITH_FINCH_PATH",
+      "executable_relpath": "FinchGame\\Binaries\\Win64\\FinchGame.exe",
+      "steam_app_id": 501300,
+      "steam_folder": "EdithFinch"
     }
   }
 }
