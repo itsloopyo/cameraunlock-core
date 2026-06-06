@@ -271,6 +271,13 @@
       "steam_folder": "Dying Light 2",
       "executable_relpath": "ph\\work\\bin\\x64\\DyingLightGame_x64_rwdi.exe"
     },
+    "pacific-drive": {
+      "display_name": "Pacific Drive",
+      "env_var": "PACIFIC_DRIVE_PATH",
+      "steam_app_id": 1458140,
+      "steam_folder": "Pacific Drive",
+      "executable_relpath": "PenDriverPro\\Binaries\\Win64\\PenDriverPro-Win64-Shipping.exe"
+    },
     "burnout-paradise-the-ultimate-box": {
       "display_name": "Burnout Paradise: The Ultimate Box",
       "env_var": "BURNOUT_PARADISE_PATH",
