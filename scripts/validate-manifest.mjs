@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+//
+// Validate that a built installer ZIP is a coherent manifest-mode package:
+// delivery_mode is "manifest", and every path the launcher's deploy engine
+// will read (loader.archives[].source, files[].source) actually exists
+// inside the ZIP. This mirrors the engine's hard requirement ("manifest
+// lists file X but it is not in the package") so a broken manifest is caught
+// at build time, before a user ever downloads it.
+//
+// cameraunlock-core is vendored (git submodule) into every mod repo, so this
+// is the single home for the check that every mod's release pipeline can run.
+// The launcher (lopari) owns the manifest SCHEMA; this validator is the
+// mod-side gate for it, the same split as the install.cmd contract.
+//
+//   node scripts/validate-manifest.mjs                 # this repo's own zip
+//   node scripts/validate-manifest.mjs <repo-or-zip> [...]
+//
+// With no args it validates the host repo's newest release/*-installer.zip
+// (run it right after packaging). A bare repo token (e.g. dying-light-2, or
+// dying-light-2-headtracking) resolves to a sibling repo's newest
+// release/*-installer.zip, for validating across a full checkout.
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+// core lives at <root>/cameraunlock-core/scripts. Two levels up is the repo
+// that vendors core (a mod repo -> self-validate target), or the repos root
+// when core is a standalone sibling checkout (-> sibling repo tokens resolve).
+const ROOT = path.resolve(SCRIPT_DIR, "..", "..");
+
+// Sentinel for the no-args case: validate this repo's own built zip.
+const SELF = Symbol("self");
+
+const tokens = process.argv.slice(2);
+const jobs = tokens.length ? tokens : [SELF];
+
+let failures = 0;
+for (const token of jobs) {
+  const isSelf = token === SELF;
+  const zip = isSelf ? newestInstaller(path.join(ROOT, "release")) : resolveZip(token);
+  const label = isSelf ? path.basename(ROOT) : token;
+  if (!zip) {
+    console.error(`FAIL ${label}: no installer zip found`);
+    failures += 1;
+    continue;
+  }
+  try {
+    validate(label, zip);
+  } catch (e) {
+    console.error(`FAIL ${label}: ${e.message}`);
+    failures += 1;
+  }
+}
+
+if (failures > 0) {
+  console.error(`\n${failures} package(s) failed validation.`);
+  process.exit(1);
+}
+console.log("\nall packages valid.");
+
+function validate(label, zip) {
+  const entries = new Set(listZip(zip).map((e) => e.replace(/\\/g, "/")));
+  const manifestRaw = readEntry(zip, "launcher-manifest.json");
+  if (manifestRaw === null) throw new Error("no launcher-manifest.json in zip");
+  const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
+
+  if (man.delivery_mode !== "manifest") {
+    throw new Error(`delivery_mode is "${man.delivery_mode}", expected "manifest"`);
+  }
+
+  const sources = [];
+  // A fetched loader archive carries no in-zip source - its bytes are
+  // downloaded + hash-verified at install time - so only check bundled ones.
+  for (const a of man.loader?.archives ?? []) if (a.source) sources.push(a.source);
+  for (const f of man.files ?? []) sources.push(f.source);
+
+  const missing = sources.filter((s) => !entries.has(s.replace(/\\/g, "/")));
+  if (missing.length > 0) {
+    throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
+  }
+
+  const seeds = (man.loader?.seed ?? []).length;
+  const rt = (man.runtime_requirements ?? []).length;
+  console.log(
+    `OK   ${label}: ${path.basename(zip)} — ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)`,
+  );
+}
+
+function resolveZip(token) {
+  if (token.endsWith(".zip")) return fs.existsSync(token) ? path.resolve(token) : null;
+  // token is a repo dir name or a catalog id; find its release dir under the
+  // repos root (only meaningful from a standalone core checkout).
+  for (const name of [token, `${token}-headtracking`]) {
+    const z = newestInstaller(path.join(ROOT, name, "release"));
+    if (z) return z;
+  }
+  return null;
+}
+
+function newestInstaller(dir) {
+  if (!fs.existsSync(dir)) return null;
+  const zips = fs
+    .readdirSync(dir)
+    .filter((n) => n.endsWith("-installer.zip"))
+    .map((n) => path.join(dir, n))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+  return zips[0] ?? null;
+}
+
+function systemTar() {
+  if (process.platform === "win32") {
+    const sys = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
+    if (fs.existsSync(sys)) return sys;
+  }
+  return "tar";
+}
+
+function listZip(zip) {
+  return execFileSync(systemTar(), ["-tf", zip], { encoding: "utf8" })
+    .split(/\r?\n/)
+    .filter(Boolean);
+}
+
+function readEntry(zip, name) {
+  try {
+    return execFileSync(systemTar(), ["-xf", zip, "-O", name], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}

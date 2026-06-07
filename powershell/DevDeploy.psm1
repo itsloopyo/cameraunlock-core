@@ -328,6 +328,11 @@ function Invoke-DevDeployMelonLoader {
     AsiLoaderName.
 .PARAMETER AsiLoaderName
     Filename the ASI DLL is renamed to (winmm.dll, dinput8.dll, etc.).
+.PARAMETER ExeSubDir
+    Optional game-exe-relative subdirectory the loader and .asi deploy into
+    instead of the exe directory itself. Source-engine games load tier0.dll
+    from <game>\bin with an altered search path, so the proxy + .asi must
+    live there (Portal 2 passes 'bin'). Created if absent.
 #>
 function Invoke-DevDeployASILoader {
     [CmdletBinding()]
@@ -340,7 +345,8 @@ function Invoke-DevDeployASILoader {
         [string]$VendorLoaderDll,
         [string]$AsiLoaderName = 'winmm.dll',
         [string[]]$ExtraDlls = @(),
-        [string]$GivenPath
+        [string]$GivenPath,
+        [string]$ExeSubDir
     )
 
     Assert-DevBuildArtifact -BuildOutputPath $BuildOutputPath -FileName $ModDllName
@@ -351,6 +357,10 @@ function Invoke-DevDeployASILoader {
     $gamePath = Resolve-DevGamePath -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
     Assert-DevGameNotRunning -GameId $GameId -GameDisplayName $GameDisplayName
     $exeDir   = Resolve-DevExeDir -GamePath $gamePath -GameId $GameId
+    if ($ExeSubDir) {
+        $exeDir = Join-Path $exeDir $ExeSubDir
+        if (-not (Test-Path $exeDir)) { New-Item -ItemType Directory -Path $exeDir -Force | Out-Null }
+    }
 
     $loaderTarget = Join-Path $exeDir $AsiLoaderName
     if (-not (Test-Path $loaderTarget)) {

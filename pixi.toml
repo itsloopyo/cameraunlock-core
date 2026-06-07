@@ -23,6 +23,15 @@ rebuild = { depends-on = ["clean", "build"] }
 # Packaging
 pack = "dotnet pack csharp -c Release -o dist"
 
+# Validate a built installer ZIP is a coherent manifest-mode package
+# (delivery_mode == "manifest" and every declared source exists in the zip).
+# No args: validates the host repo's own release/*-installer.zip - run after
+# packaging. Or pass repo tokens / zip paths to validate across a checkout:
+#   pixi run validate-manifest
+#   pixi run validate-manifest dying-light-2 bioshock-remastered
+#   pixi run validate-manifest path/to/Mod-v1.0.0-installer.zip
+validate-manifest = "node scripts/validate-manifest.mjs"
+
 # Development workflow
 check = { depends-on = ["build-debug", "test-quick"] }
 
@@ -30,3 +39,4 @@ check = { depends-on = ["build-debug", "test-quick"] }
 # doc = "docfx docfx.json"
 
 [dependencies]
+nodejs = ">=20"
