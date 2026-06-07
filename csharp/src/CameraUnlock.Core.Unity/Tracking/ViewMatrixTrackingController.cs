@@ -130,14 +130,16 @@ namespace CameraUnlock.Core.Unity.Tracking
         {
             // Both hooks are needed: onPreCull doesn't fire under SRP/URP, but legacy
             // pipelines don't fire beginCameraRendering. Subscribing to both is safe -
-            // a given Unity build only invokes one path per frame.
-            Camera.onPreCull += OnPreCull;
+            // a given Unity build only invokes one path per frame. Both go through
+            // reflection: SRP-only Unity 6 builds strip the legacy Camera.onPreCull
+            // accessor, so a direct reference throws MissingMethodException at JIT time.
+            RenderPipelineHelper.AddOnPreCull(OnPreCull);
             RenderPipelineHelper.AddBeginCameraRendering(OnPreCull);
         }
 
         public void Disable()
         {
-            Camera.onPreCull -= OnPreCull;
+            RenderPipelineHelper.RemoveOnPreCull();
             RenderPipelineHelper.RemoveBeginCameraRendering();
 
             var cam = _mainCameraCache.Get();

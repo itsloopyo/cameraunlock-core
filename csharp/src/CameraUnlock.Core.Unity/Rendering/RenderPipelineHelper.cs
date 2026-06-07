@@ -239,6 +239,68 @@ namespace CameraUnlock.Core.Unity.Rendering
             _storedBeginCameraRendering = null;
         }
 
+        // Stored callback for the standalone onPreCull subscription.
+        private static Action<Camera> _storedOnPreCull;
+        private static Delegate _onPreCullDelegate;
+
+        /// <summary>
+        /// Subscribes to the legacy Camera.onPreCull event via reflection when it exists in this
+        /// Unity build; no-op otherwise. SRP-only builds (Unity 6 URP/HDRP) strip the onPreCull
+        /// accessor entirely, so a direct <c>Camera.onPreCull += ...</c> throws MissingMethodException
+        /// at JIT time the moment the calling method runs - subscribing reflectively keeps the
+        /// reference out of compiled IL. Pair with AddBeginCameraRendering to cover both pipelines.
+        /// </summary>
+        /// <param name="onPreCull">Called with the camera about to render.</param>
+        /// <exception cref="ArgumentNullException">Thrown if the callback is null.</exception>
+        /// <exception cref="InvalidOperationException">Thrown if a callback is already subscribed.</exception>
+        public static void AddOnPreCull(Action<Camera> onPreCull)
+        {
+            if (onPreCull == null)
+            {
+                throw new ArgumentNullException("onPreCull");
+            }
+
+            if (_storedOnPreCull != null)
+            {
+                throw new InvalidOperationException("An onPreCull callback is already subscribed. Call RemoveOnPreCull() first.");
+            }
+
+            var onPreCullEvent = typeof(Camera).GetEvent("onPreCull",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (onPreCullEvent == null)
+            {
+                return;
+            }
+
+            _storedOnPreCull = onPreCull;
+            _onPreCullDelegate = Delegate.CreateDelegate(onPreCullEvent.EventHandlerType, onPreCull.Target, onPreCull.Method);
+            onPreCullEvent.AddEventHandler(null, _onPreCullDelegate);
+        }
+
+        /// <summary>
+        /// Removes the onPreCull subscription. Safe to call when not subscribed.
+        /// </summary>
+        public static void RemoveOnPreCull()
+        {
+            if (_storedOnPreCull == null)
+            {
+                return;
+            }
+
+            if (_onPreCullDelegate != null)
+            {
+                var onPreCullEvent = typeof(Camera).GetEvent("onPreCull",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                if (onPreCullEvent != null)
+                {
+                    onPreCullEvent.RemoveEventHandler(null, _onPreCullDelegate);
+                }
+            }
+
+            _onPreCullDelegate = null;
+            _storedOnPreCull = null;
+        }
+
         /// <summary>
         /// Resolves the RenderPipelineManager type, or null when this Unity build has no SRP.
         /// </summary>
