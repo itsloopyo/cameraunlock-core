@@ -23,6 +23,29 @@ function Write-StateFile {
     [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function New-GitHubRequestHeaders {
+    param(
+        [string]$UserAgent = "CameraUnlock-HeadTracking",
+        [hashtable]$AdditionalHeaders = @{}
+    )
+
+    $headers = @{ "User-Agent" = $UserAgent }
+    foreach ($key in $AdditionalHeaders.Keys) {
+        $headers[$key] = $AdditionalHeaders[$key]
+    }
+
+    foreach ($name in @("GITHUB_TOKEN", "GH_TOKEN", "LOPARI_GITHUB_TOKEN", "LOPARI_GH_TOKEN")) {
+        $token = [Environment]::GetEnvironmentVariable($name)
+        if (-not [string]::IsNullOrWhiteSpace($token)) {
+            $headers["Authorization"] = "Bearer $token"
+            $headers["X-GitHub-Api-Version"] = "2022-11-28"
+            break
+        }
+    }
+
+    return $headers
+}
+
 <#
 .SYNOPSIS
     Tests if BepInEx is installed at the specified game path.
@@ -225,7 +248,7 @@ function Install-BepInEx {
         $apiUrl = "https://api.github.com/repos/BepInEx/BepInEx/releases"
 
         try {
-            $releases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "HeadTracking-ModLoader" }
+            $releases = Invoke-RestMethod -Uri $apiUrl -Headers (New-GitHubRequestHeaders -UserAgent "HeadTracking-ModLoader")
         } catch {
             throw "Failed to fetch BepInEx releases from GitHub: $_"
         }
@@ -684,7 +707,7 @@ function Install-UE4SS {
     $apiUrl = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 
     try {
-        $releases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "HeadTracking-ModLoader" }
+        $releases = Invoke-RestMethod -Uri $apiUrl -Headers (New-GitHubRequestHeaders -UserAgent "HeadTracking-ModLoader")
     } catch {
         throw "Failed to fetch UE4SS releases from GitHub: $_"
     }
@@ -936,7 +959,7 @@ function Invoke-FetchLatestLoader {
         [int]$TimeoutSec = 30
     )
 
-    $headers = @{ "User-Agent" = "CameraUnlock-HeadTracking" }
+    $headers = New-GitHubRequestHeaders
     $outputDir = Split-Path -Parent $OutputPath
     if ($outputDir -and -not (Test-Path $outputDir)) {
         New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
@@ -1127,14 +1150,14 @@ function Refresh-VendoredLoader {
 
     if (-not $extractedLicense -and $Owner -and $Repo) {
         try {
-            $headers = @{ "User-Agent" = "CameraUnlock-HeadTracking"; "Accept" = "application/vnd.github.raw" }
+            $headers = New-GitHubRequestHeaders -AdditionalHeaders @{ "Accept" = "application/vnd.github.raw" }
             $licenseUrl = "https://raw.githubusercontent.com/$Owner/$Repo/$($meta.Tag)/$LicenseName"
             Invoke-WebRequest -Uri $licenseUrl -OutFile $licensePath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers $headers
             $extractedLicense = $true
         } catch {
             # Try API fallback
             try {
-                $headers = @{ "User-Agent" = "CameraUnlock-HeadTracking" }
+                $headers = New-GitHubRequestHeaders
                 $licenseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$Owner/$Repo/license" -Headers $headers -TimeoutSec $TimeoutSec
                 [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($licenseInfo.content)) | Set-Content $licensePath -Encoding UTF8
                 $extractedLicense = $true
