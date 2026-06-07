@@ -616,11 +616,12 @@ function Invoke-VersionCommit {
 
     foreach ($file in $Files) {
         if (Test-Path $file) {
-            git add $file 2>$null
+            git add -- $file
+            if ($LASTEXITCODE -ne 0) { throw "git add failed for $file" }
         }
     }
 
-    $stagedChanges = git diff --cached --name-only 2>$null
+    $stagedChanges = git diff --cached --name-only
     if (-not $stagedChanges) {
         return $false
     }
