@@ -310,7 +310,7 @@ Located in `powershell/`, imported by every mod repo's `release.ps1` / `update-d
 | `DevDeploy.psm1` | Local dev-deploy pipelines per loader (`Invoke-DevDeployBepInEx`, `-Cecil`, `-MelonLoader`, `-ASILoader`, `-REFramework`, `-Shim`) |
 | `GamePathDetection.psm1` | Game install detection across Steam/GOG/Epic/Ubisoft/Xbox/registry (`Find-GamePath`, `Get-GameConfig`) |
 | `ModDeployment.psm1` | Mod file deployment, backups, verification (`Copy-ModFiles`, `Test-ModDeployment`) |
-| `ModLoaderSetup.psm1` | BepInEx/MelonLoader/UE4SS install and vendored loader refresh (`Install-BepInEx`, `Refresh-VendoredLoader`) |
+| `ModLoaderSetup.psm1` | BepInEx/MelonLoader/UE4SS install and vendored loader update (`Install-BepInEx`, `Update-VendoredLoader`) |
 | `NightlyRelease.psm1` | Rolling GitHub pre-release publishing for dev builds (`Publish-NightlyBuild`) |
 | `ReleaseWorkflow.psm1` | Release automation: versioning, changelog, tagging, submodule sync (`Get-CsprojVersion`, `New-ChangelogFromCommits`, `Update-CameraUnlockCoreToRemoteTip`) |
 

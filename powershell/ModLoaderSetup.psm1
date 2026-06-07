@@ -1037,7 +1037,7 @@ function Invoke-FetchLatestLoader {
 
 <#
 .SYNOPSIS
-    Dev-time helper. Refreshes vendor/<Name>/ to the latest upstream release within range and writes LICENSE + README.md.
+    Dev-time helper. Updates vendor/<Name>/ to the latest upstream release within range and writes LICENSE + README.md.
 .DESCRIPTION
     Called by each mod's scripts/update-deps.ps1 (the manual `pixi run update-deps` flow). Delegates the download to
     Invoke-FetchLatestLoader, then writes sibling metadata so the committed vendor tree is self-describing:
@@ -1059,7 +1059,7 @@ function Invoke-FetchLatestLoader {
 .OUTPUTS
     Hashtable with the same fields as Invoke-FetchLatestLoader plus LocalPath.
 #>
-function Refresh-VendoredLoader {
+function Update-VendoredLoader {
     param(
         [Parameter(Mandatory=$true)] [string]$Name,
         [Parameter(Mandatory=$true)] [string]$OutputDir,
@@ -1082,7 +1082,7 @@ function Refresh-VendoredLoader {
     # Stage to a temp file first, then resolve final filename from the response.
     $tempFile = Join-Path $env:TEMP ("vendor-refresh-$Name-" + [IO.Path]::GetRandomFileName())
 
-    Write-Host "  Refreshing vendor/$Name from upstream..." -ForegroundColor Cyan
+    Write-Host "  Updating vendor/$Name from upstream..." -ForegroundColor Cyan
     $meta = Invoke-FetchLatestLoader `
         -OutputPath $tempFile `
         -Owner $Owner -Repo $Repo `
@@ -1194,6 +1194,16 @@ function Refresh-VendoredLoader {
     return $meta
 }
 
+<#
+.SYNOPSIS
+    Deprecated alias for Update-VendoredLoader. Kept for consumer mods whose update-deps.ps1 still calls the
+    old name; will be removed in a future major version. Migrate callers to Update-VendoredLoader.
+#>
+function Refresh-VendoredLoader {
+    Write-Warning "Refresh-VendoredLoader is deprecated; use Update-VendoredLoader. This alias will be removed in a future major version."
+    Update-VendoredLoader @args
+}
+
 Export-ModuleMember -Function @(
     'Test-BepInExInstalled',
     'Test-MelonLoaderInstalled',
@@ -1214,5 +1224,6 @@ Export-ModuleMember -Function @(
     'Install-UE4SS',
     'Set-UE4SSModEnabled',
     'Invoke-FetchLatestLoader',
+    'Update-VendoredLoader',
     'Refresh-VendoredLoader'
 )

@@ -15,7 +15,7 @@
 # Wiring required in pixi.toml:
 #   update-deps = "powershell -ExecutionPolicy Bypass -File scripts/update-deps.ps1"
 #
-# Customise the CALL BLOCK below with one Refresh-VendoredLoader call per
+# Customise the CALL BLOCK below with one Update-VendoredLoader call per
 # loader slug the mod ships. See ~/.claude/CLAUDE.md "Vendoring Third-Party
 # Dependencies" for the canonical version-prefix table.
 # ============================================================================
@@ -56,10 +56,10 @@ Import-Module $modulePath -Force
 #                          NOTE: extract the zip locally and commit only the
 #                          dinput8.dll if the upstream asset is a wrapper zip.
 #
-# Refresh-VendoredLoader writes LICENSE + README.md alongside the zip.
+# Update-VendoredLoader writes LICENSE + README.md alongside the zip.
 # Use -OutputFileName to force a stable filename (install.cmd looks for it).
 
-Refresh-VendoredLoader `
+Update-VendoredLoader `
     -Name 'bepinex' `
     -OutputDir (Join-Path $projectDir 'vendor/bepinex') `
     -OutputFileName 'BepInEx_win_x64.zip' `
