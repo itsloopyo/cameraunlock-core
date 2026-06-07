@@ -113,6 +113,7 @@ function Copy-SharedBundle {
         @{ Src = 'powershell\GamePathDetection.psm1'; Dest = 'GamePathDetection.psm1' }
         @{ Src = 'scripts\find-game.ps1';             Dest = 'find-game.ps1' }
         @{ Src = 'scripts\check-loader-arch.ps1';     Dest = 'check-loader-arch.ps1' }
+        @{ Src = 'scripts\cecil-marker-check.ps1';    Dest = 'cecil-marker-check.ps1' }
     )
     $optionalBodies = @(
         'install-body-cecil.cmd'

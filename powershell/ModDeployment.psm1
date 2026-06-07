@@ -149,6 +149,45 @@ function New-FileBackup {
 
 <#
 .SYNOPSIS
+    Tests whether a (binary) file contains a marker's ASCII byte sequence.
+.DESCRIPTION
+    Used to tell a Mono.Cecil-patched assembly (which carries an injected
+    marker type name) from a pristine one, so backup logic never captures or
+    trusts a patched file as the .original. Reads raw bytes rather than using
+    findstr/Select-String, which are unreliable on multi-MB binaries.
+.PARAMETER FilePath
+    Path to the file to inspect.
+.PARAMETER Marker
+    The marker string to search for.
+.OUTPUTS
+    Boolean. $true if the marker bytes are present.
+#>
+function Test-FileContainsMarker {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [Parameter(Mandatory=$true)][string]$Marker
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        throw "File not found, cannot check for marker: $FilePath"
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    $needle = [System.Text.Encoding]::ASCII.GetBytes($Marker)
+    $limit = $bytes.Length - $needle.Length
+    for ($i = 0; $i -le $limit; $i++) {
+        $match = $true
+        for ($j = 0; $j -lt $needle.Length; $j++) {
+            if ($bytes[$i + $j] -ne $needle[$j]) { $match = $false; break }
+        }
+        if ($match) { return $true }
+    }
+    return $false
+}
+
+<#
+.SYNOPSIS
     Restores a file from backup.
 .PARAMETER FilePath
     Path to the file to restore.
@@ -371,6 +410,7 @@ function Get-BuildOutputPath {
 Export-ModuleMember -Function @(
     'Copy-ModFiles',
     'New-FileBackup',
+    'Test-FileContainsMarker',
     'Restore-FileFromBackup',
     'Remove-OldDoorstopFiles',
     'Test-ModDeployment',

@@ -169,14 +169,36 @@ if exist "%GAME_PATH%\%STATE_FILE%" (
     if not errorlevel 1 set "WE_INSTALLED=true"
 )
 
-:: -------- Back up Assembly DLL (or restore clean state if we're re-patching) --------
+:: -------- Back up Assembly DLL (pristine-backup guard) --------
+:: A Mono.Cecil patch is additive: the patched assembly carries PATCH_MARKER.
+:: The .original backup MUST be a pristine (marker-free) assembly, else a
+:: later uninstall restores a broken file. So we never copy ASSEMBLY ->
+:: .original unless the source is proven clean, and never restore from a
+:: marker-bearing .original. This makes the corrupt-backup state unreachable.
+if not defined PATCH_MARKER (
+    echo ERROR: PATCH_MARKER is not set in the install.cmd CONFIG BLOCK.
+    echo This is required to protect the pristine %ASSEMBLY_DLL% backup.
+    exit /b 1
+)
+set "_MARKER_CHECK=%SCRIPT_DIR%shared\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=%SCRIPT_DIR%..\cameraunlock-core\scripts\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" (
+    echo ERROR: cecil-marker-check.ps1 not found in shared\ or ..\cameraunlock-core\scripts\.
+    echo If this is a release ZIP, re-download it from GitHub ^(corrupt installer^).
+    exit /b 1
+)
+
 echo Backing up %ASSEMBLY_DLL%...
 if not exist "%BACKUP_PATH%" (
+    call :assert_pristine "!ASSEMBLY_PATH!" "%ASSEMBLY_DLL% is already patched but no .original backup exists"
+    if errorlevel 1 exit /b 1
     copy /y "%ASSEMBLY_PATH%" "%BACKUP_PATH%" >nul
     echo   Created: %ASSEMBLY_DLL%.original
     set "WE_INSTALLED=true"
 ) else (
-    echo   Backup already exists, restoring clean state before re-patch...
+    call :assert_pristine "!BACKUP_PATH!" "%ASSEMBLY_DLL%.original is itself patched - corrupt backup"
+    if errorlevel 1 exit /b 1
+    echo   Backup verified clean, restoring before re-patch...
     copy /y "%BACKUP_PATH%" "%ASSEMBLY_PATH%" >nul
     :: WE_INSTALLED stays whatever it was - we backed up on the first install,
     :: and that entitlement doesn't regress just because we're re-running.
@@ -276,3 +298,21 @@ exit /b 0
     echo }
 )
 exit /b 0
+
+:: ============================================
+:: Assert an assembly is pristine (no PATCH_MARKER) before we trust it as the
+:: clean baseline. Returns errorlevel 0 if clean, 1 if patched or unreadable
+:: (caller aborts). %~1 = assembly path, %~2 = human-readable failure context.
+:: ============================================
+:assert_pristine
+powershell -NoProfile -ExecutionPolicy Bypass -File "%_MARKER_CHECK%" -AssemblyPath "%~1" -Marker "%PATCH_MARKER%"
+set "_MK_EC=%errorlevel%"
+if "%_MK_EC%"=="1" exit /b 0
+if "%_MK_EC%"=="0" (
+    echo   ERROR: %~2.
+    echo   A clean state cannot be established from a modified file.
+    echo   Verify the game files through Steam, which restores the original, then re-run.
+    exit /b 1
+)
+echo   ERROR: could not read assembly to verify patch state ^(code %_MK_EC%^).
+exit /b 1

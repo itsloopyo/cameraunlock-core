@@ -133,7 +133,16 @@ function Invoke-DevDeployCecil {
         [string]$AssemblyDll = 'Assembly-CSharp.dll',
         [string[]]$ExtraDlls = @(),
         [string]$GivenPath,
-        [Parameter(Mandatory)][scriptblock]$Patcher
+        [Parameter(Mandatory)][scriptblock]$Patcher,
+        # Optional: the additive patch marker. When set, the backup is
+        # guaranteed pristine - a patched assembly is never captured as the
+        # .original. With $Unpatcher we self-heal a patched source; without it
+        # we fail fast rather than enshrine a corrupt backup.
+        [string]$PatchMarker = '',
+        # Optional: [scriptblock] called with one positional arg ($assemblyPath)
+        # to reverse the patch in place. Enables self-heal of an already-patched
+        # source when no pristine backup exists.
+        [scriptblock]$Unpatcher = $null
     )
 
     Assert-DevBuildArtifact -BuildOutputPath $BuildOutputPath -FileName $ModDllName
@@ -162,6 +171,38 @@ function Invoke-DevDeployCecil {
 
     Write-Host ""
     Write-Host "Patching $AssemblyDll..." -ForegroundColor Yellow
+
+    # Guarantee the .original backup is pristine. The patch is additive, so a
+    # patched file copied to .original would silently become a corrupt backup
+    # that uninstall later restores as a broken assembly. With a marker we can
+    # tell patched from clean; with an unpatcher we repair in place.
+    if ($PatchMarker) {
+        $backupFile = "$assemblyPath.original"
+        if (Test-Path $backupFile) {
+            if (Test-FileContainsMarker -FilePath $backupFile -Marker $PatchMarker) {
+                if ($Unpatcher) {
+                    Write-Host "  Existing .original is patched (corrupt backup) - repairing via unpatch..." -ForegroundColor Yellow
+                    & $Unpatcher $backupFile
+                    if (Test-FileContainsMarker -FilePath $backupFile -Marker $PatchMarker) {
+                        throw "Unpatch did not clean $AssemblyDll.original; refusing to keep a corrupt backup. Verify game files via Steam."
+                    }
+                } else {
+                    throw "$AssemblyDll.original is patched (corrupt backup). Verify game files via Steam, delete the .original, and re-run."
+                }
+            }
+        } elseif (Test-FileContainsMarker -FilePath $assemblyPath -Marker $PatchMarker) {
+            if ($Unpatcher) {
+                Write-Host "  $AssemblyDll is patched but has no .original - reconstructing a clean baseline via unpatch..." -ForegroundColor Yellow
+                & $Unpatcher $assemblyPath
+                if (Test-FileContainsMarker -FilePath $assemblyPath -Marker $PatchMarker) {
+                    throw "Unpatch did not clean $AssemblyDll; cannot establish a pristine baseline. Verify game files via Steam."
+                }
+            } else {
+                throw "$AssemblyDll is patched but no .original exists; cannot establish a clean baseline. Verify game files via Steam, then re-run."
+            }
+        }
+    }
+
     $backupPath = New-FileBackup -FilePath $assemblyPath
     if ($backupPath -and (Test-Path $backupPath)) {
         Restore-FileFromBackup -FilePath $assemblyPath | Out-Null

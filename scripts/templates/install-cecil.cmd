@@ -26,6 +26,11 @@ set "FRAMEWORK_TYPE=MonoCecil"
 set "MANAGED_SUBFOLDER=MyGame_Data\Managed"
 set "ASSEMBLY_DLL=Assembly-CSharp.dll"
 set "PATCHER_FILE=BootstrapPatcher.cs"
+:: REQUIRED: the type-name marker the patcher injects (BootstrapPatcher.cs
+:: PatchMarker const). The install/uninstall bodies use it to guarantee the
+:: .original backup is always pristine - they refuse to capture or restore a
+:: patched Assembly-CSharp.dll. Must match the patcher exactly.
+set "PATCH_MARKER=HeadTracking_Patched_MyGame_v1"
 set "MOD_CONTROLS="
 :: --- END CONFIG BLOCK ---
 

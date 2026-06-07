@@ -35,6 +35,10 @@ set "LEGACY_DLLS="
 :: MonoCecil: used to find + restore the original Assembly-CSharp.dll.
 set "MANAGED_SUBFOLDER="
 set "ASSEMBLY_DLL="
+:: MonoCecil REQUIRED: the patcher's marker (must match install.cmd /
+:: BootstrapPatcher.cs). The uninstall body refuses to restore a patched
+:: .original over the game assembly. Leave blank for non-MonoCecil mods.
+set "PATCH_MARKER="
 :: MonoCecil: extra files to also remove from MANAGED_SUBFOLDER (config/log
 :: files left behind by the mod itself).
 set "MANAGED_EXTRAS="

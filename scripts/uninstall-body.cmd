@@ -139,8 +139,13 @@ if errorlevel 1 exit /b 1
 if /i "%FRAMEWORK_TYPE%"=="None" (
     call :remove_shim_files
 ) else if /i "%FRAMEWORK_TYPE%"=="MonoCecil" (
-    rem Cecil: restore backup THEN remove our DLLs from Managed/.
+    rem Cecil: restore the pristine assembly FIRST. If it can't be restored
+    rem (missing or corrupt backup over a still-patched assembly) abort WITHOUT
+    rem stripping the mod DLLs - that would orphan a patched Assembly-CSharp.dll
+    rem that can no longer load HeadTracking.dll and break the game. Keep the
+    rem working install intact; the user repairs via Steam and re-runs.
     call :remove_MonoCecil
+    if errorlevel 1 exit /b 1
     call :remove_mod_files_plain
     call :remove_managed_extras
 ) else (
@@ -369,15 +374,48 @@ exit /b 0
 set "MANAGED_PATH=%GAME_PATH%\%MANAGED_SUBFOLDER%"
 set "ASSEMBLY_PATH=%MANAGED_PATH%\%ASSEMBLY_DLL%"
 set "BACKUP_PATH=%ASSEMBLY_PATH%.original"
-if exist "%BACKUP_PATH%" (
-    copy /y "%BACKUP_PATH%" "%ASSEMBLY_PATH%" >nul
-    del "%BACKUP_PATH%"
-    echo   Restored: %ASSEMBLY_DLL% from backup
-) else (
-    echo   WARNING: no %ASSEMBLY_DLL%.original backup found.
-    echo   Run Steam "Verify integrity of game files" if the game misbehaves.
+:: The .original must be pristine: never restore a patched backup over the
+:: game assembly, and never strip the mod DLLs while leaving a patched
+:: assembly that can no longer find them. PATCH_MARKER drives the check.
+if not defined PATCH_MARKER (
+    echo   ERROR: PATCH_MARKER is not set in the uninstall.cmd CONFIG BLOCK.
+    echo   Cannot verify assembly patch state; aborting.
+    exit /b 1
 )
+if not exist "%BACKUP_PATH%" (
+    rem No backup. Safe only if the live assembly is already clean; otherwise
+    rem removing the mod DLLs would orphan a patched assembly.
+    call :cecil_marker_state "%ASSEMBLY_PATH%"
+    if errorlevel 2 ( echo   ERROR: could not verify %ASSEMBLY_DLL% patch state. & exit /b 1 )
+    if errorlevel 1 ( echo   No backup, and %ASSEMBLY_DLL% is already clean - nothing to restore. & exit /b 0 )
+    echo   ERROR: %ASSEMBLY_DLL% is patched but no .original backup exists.
+    echo   Run Steam "Verify integrity of game files" to restore a clean assembly, then re-run uninstall.
+    exit /b 1
+)
+call :cecil_marker_state "%BACKUP_PATH%"
+if errorlevel 2 ( echo   ERROR: could not read %ASSEMBLY_DLL%.original to verify it is pristine. & exit /b 1 )
+if errorlevel 1 goto :_cecil_restore
+echo   ERROR: %ASSEMBLY_DLL%.original is patched - corrupt backup, not restoring.
+echo   Delete it and run Steam "Verify integrity of game files" to restore a clean %ASSEMBLY_DLL%.
+exit /b 1
+:_cecil_restore
+copy /y "%BACKUP_PATH%" "%ASSEMBLY_PATH%" >nul
+del "%BACKUP_PATH%"
+echo   Restored: %ASSEMBLY_DLL% from backup
 exit /b 0
+
+:: ============================================
+:: Resolve the marker-check helper and report whether %~1 is patched.
+:: Returns errorlevel 0 = patched, 1 = pristine, 2 = error. Requires
+:: PATCH_MARKER. Kept as its own routine so the errorlevel reads stay outside
+:: parenthesised blocks where %errorlevel% would expand too early.
+:: ============================================
+:cecil_marker_state
+set "_MARKER_CHECK=%SCRIPT_DIR%shared\cecil-marker-check.ps1"
+if not exist "%_MARKER_CHECK%" set "_MARKER_CHECK=%SCRIPT_DIR%..\cameraunlock-core\scripts\cecil-marker-check.ps1"
+if not exist "%_MARKER_CHECK%" exit /b 2
+powershell -NoProfile -ExecutionPolicy Bypass -File "%_MARKER_CHECK%" -AssemblyPath "%~1" -Marker "%PATCH_MARKER%"
+exit /b %errorlevel%
 
 :: ============================================
 :: Remove Ultimate ASI Loader from EXE_DIR.
