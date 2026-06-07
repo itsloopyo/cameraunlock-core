@@ -35,6 +35,18 @@ bool UdpSocket::Open(uint16_t port) {
         return false;
     }
 
+    // Claim the port even if a socket from a prior run -- or a slow-exiting
+    // previous game instance -- is still lingering on it. Without this, a
+    // relaunch a few seconds after quitting hits bind() EADDRINUSE and the
+    // receiver drops into its multi-second retry loop, so head tracking is
+    // dead for up to ~20s after launch (it looks flaky/broken, then springs
+    // to life). We are the only consumer of this port, so reuse is safe.
+    {
+        int reuse = 1;
+        setsockopt(m_socket, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+    }
+
     // Set non-blocking
 #ifdef _WIN32
     u_long mode = 1;
