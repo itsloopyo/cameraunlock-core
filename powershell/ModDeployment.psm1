@@ -312,9 +312,14 @@ function Test-ModDeployment {
 .PARAMETER DeployPath
     Path where the mod was deployed.
 .PARAMETER RecenterKey
-    Key for recentering (default: "Home").
+    Key for recentering (default: "Home"). Used only when -Controls is not supplied.
 .PARAMETER ToggleKey
-    Key for toggling (default: "End").
+    Key for toggling (default: "End"). Used only when -Controls is not supplied.
+.PARAMETER Controls
+    Full list of control lines to print under "Controls:", e.g.
+    @("Home      - Recenter", "End       - Toggle tracking"). When supplied, this
+    overrides RecenterKey/ToggleKey so mods with more than two hotkeys can show them
+    all. Pre-align the descriptions yourself. Omit it for the legacy two-line output.
 #>
 function Write-DeploymentSuccess {
     [CmdletBinding()]
@@ -329,7 +334,10 @@ function Write-DeploymentSuccess {
         [string]$RecenterKey = "Home",
 
         [Parameter(Mandatory=$false)]
-        [string]$ToggleKey = "End"
+        [string]$ToggleKey = "End",
+
+        [Parameter(Mandatory=$false)]
+        [string[]]$Controls
     )
 
     Write-Host ""
@@ -343,8 +351,14 @@ function Write-DeploymentSuccess {
     Write-Host "Start the game to use head tracking!" -ForegroundColor White
     Write-Host ""
     Write-Host "Controls:" -ForegroundColor Yellow
-    Write-Host "  $RecenterKey - Recenter head tracking" -ForegroundColor Gray
-    Write-Host "  $ToggleKey  - Toggle head tracking on/off" -ForegroundColor Gray
+    if ($Controls) {
+        foreach ($line in $Controls) {
+            Write-Host "  $line" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "  $RecenterKey - Recenter head tracking" -ForegroundColor Gray
+        Write-Host "  $ToggleKey  - Toggle head tracking on/off" -ForegroundColor Gray
+    }
     Write-Host ""
 }
 
