@@ -172,6 +172,28 @@ function Publish-NightlyBuild {
     Write-Host "Published dev build $nightlyVersion" -ForegroundColor Green
     Write-Host "  release  : https://github.com/$repo/releases/tag/$DevTag" -ForegroundColor DarkGray
     Write-Host "  download : https://github.com/$repo/releases/download/$DevTag/$assetName" -ForegroundColor DarkGray
+
+    # Mirror the tagged-release Discord announce (scripts/templates/
+    # discord-announce-step.yml), reusing the same webhook. Inert until
+    # DISCORD_RELEASE_WEBHOOK is present in the environment that runs the
+    # nightly (the dev's shell, or a nightly CI job exposing the secret).
+    if ($env:DISCORD_RELEASE_WEBHOOK) {
+        $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
+        $releaseUrl = "https://github.com/$repo/releases/tag/$DevTag"
+        $payload = @{
+            username = 'Loopy Releases'
+            embeds   = @(@{
+                title       = "$name Head Tracking - dev build $nightlyVersion"
+                url         = $releaseUrl
+                description = "A new development build is up - buggy but playable, not release-quality.`n`n[Download the latest dev build]($releaseUrl)"
+                color       = 15844367
+            })
+        } | ConvertTo-Json -Depth 5
+        Invoke-RestMethod -Uri $env:DISCORD_RELEASE_WEBHOOK -Method Post -ContentType 'application/json' -Body $payload | Out-Null
+        Write-Host "  discord  : announced to release channel" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  discord  : DISCORD_RELEASE_WEBHOOK not set; announcement skipped" -ForegroundColor DarkGray
+    }
 }
 
 Export-ModuleMember -Function Publish-NightlyBuild
