@@ -1,0 +1,35 @@
+# Canonical "announce release to Discord" step for every head-tracking mod's
+# release workflow. Self-contained on purpose: it must work in mods that do not
+# check out the cameraunlock-core submodule and across BepInEx/ASI/Rust
+# toolchains, so it depends on nothing but github context and the secret.
+#
+# Synced verbatim into each mod's release workflow by
+# scripts/sync-discord-announce.mjs (re-indented to match the target's steps).
+# It is placed immediately after the "Create GitHub Release" step. The webhook
+# is read from the DISCORD_RELEASE_WEBHOOK repo secret; when that secret is
+# absent the step emits a notice and exits 0, so rolling this out ahead of
+# wiring the secret never turns a release run red.
+      - name: Announce release to Discord
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::notice::DISCORD_RELEASE_WEBHOOK not set; skipping Discord announcement."
+            exit 0
+          }
+          $tag  = "${{ github.ref_name }}"
+          $repo = "${{ github.repository }}"
+          $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
+          $url  = "https://github.com/$repo/releases/tag/$tag"
+          $payload = @{
+            username = 'Loopy Releases'
+            embeds   = @(@{
+              title       = "$name Head Tracking $tag"
+              url         = $url
+              description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**"
+              color       = 5814783
+            })
+          } | ConvertTo-Json -Depth 5
+          Invoke-RestMethod -Uri $env:DISCORD_RELEASE_WEBHOOK -Method Post -ContentType 'application/json' -Body $payload
+          Write-Host "Announced $tag to Discord."
