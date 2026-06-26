@@ -2,6 +2,13 @@
   "$comment": "Canonical per-game detection data for CameraUnlock head-tracking mods. This is the single source of truth for where each supported game lives on disk: env var name, Steam folder, GOG IDs, Epic/Xbox paths, executable relative path, Unity data folder (for Cecil patching). Consumed by cameraunlock-core/powershell/GamePathDetection.psm1 today, and destined to be consumed by install.cmd scripts and the launcher's Rust detect module (see roadmap in the mod-manager repo). Mod-specific fields (which DLLs to deploy, mod version, framework type) do NOT belong here - those live in each mod's install.cmd CONFIG BLOCK and the launcher's catalog/mods.json. Adding a new game: pick a hyphen-lowercase id, fill in at minimum `display_name`, `env_var`, and `executable_relpath`. Any field that's empty for a given game should be omitted rather than set to a null/empty value.",
   "schema_version": 1,
   "games": {
+    "metaphor": {
+      "display_name": "Metaphor: ReFantazio",
+      "env_var": "METAPHOR_PATH",
+      "steam_app_id": 2679460,
+      "steam_folder": "METAPHOR",
+      "executable_relpath": "METAPHOR.exe"
+    },
     "repo": {
       "display_name": "R.E.P.O.",
       "env_var": "REPO_PATH",

@@ -209,14 +209,14 @@ set "VENDOR_DLL=%VENDOR_DIR%\dinput8.dll"
 
 if not exist "%VENDOR_DLL%" (
     echo   ERROR: Bundled Ultimate ASI Loader not found at:
-    echo     %VENDOR_DLL%
+    echo     !VENDOR_DLL!
     echo   The installer ZIP is corrupt. Re-download the release.
     exit /b 1
 )
 
 copy /y "%VENDOR_DLL%" "%EXE_DIR%\%ASI_LOADER_NAME%" >nul
 if errorlevel 1 (
-    echo   ERROR: Failed to copy loader to %EXE_DIR%.
+    echo   ERROR: Failed to copy loader to !EXE_DIR!.
     echo   Check the game directory is writable.
     exit /b 1
 )
