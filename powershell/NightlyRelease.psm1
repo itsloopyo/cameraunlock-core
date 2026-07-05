@@ -25,6 +25,8 @@
 # Auth: requires the GitHub CLI (`gh`) authenticated with permission to
 # create releases on the repo. In CI that's the workflow's GITHUB_TOKEN
 # (needs `contents: write`); locally it's your `gh auth login`.
+# Also requires DISCORD_RELEASE_WEBHOOK in the environment - every dev
+# build is announced, so publishing without it is refused up front.
 
 function Publish-NightlyBuild {
     [CmdletBinding()]
@@ -62,6 +64,13 @@ function Publish-NightlyBuild {
 
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
         throw "GitHub CLI (gh) not found on PATH. Install via 'winget install GitHub.cli', run 'gh auth login', then re-run."
+    }
+
+    # Checked before any build/publish work: a dev build that ships without
+    # its Discord announce reaches nobody tracking dev, so refuse up front
+    # rather than publish silently.
+    if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+        throw "DISCORD_RELEASE_WEBHOOK is not set. Every dev build must be announced - set the release-channel webhook URL in this shell, then re-run."
     }
 
     Push-Location $ProjectRoot
@@ -174,26 +183,21 @@ function Publish-NightlyBuild {
     Write-Host "  download : https://github.com/$repo/releases/download/$DevTag/$assetName" -ForegroundColor DarkGray
 
     # Mirror the tagged-release Discord announce (scripts/templates/
-    # discord-announce-step.yml), reusing the same webhook. Inert until
-    # DISCORD_RELEASE_WEBHOOK is present in the environment that runs the
-    # nightly (the dev's shell, or a nightly CI job exposing the secret).
-    if ($env:DISCORD_RELEASE_WEBHOOK) {
-        $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
-        $releaseUrl = "https://github.com/$repo/releases/tag/$DevTag"
-        $payload = @{
-            username = 'Loopy Releases'
-            embeds   = @(@{
-                title       = "$name Head Tracking - dev build $nightlyVersion"
-                url         = $releaseUrl
-                description = "A new development build is up - buggy but playable, not release-quality.`n`n[Download the latest dev build]($releaseUrl)"
-                color       = 15844367
-            })
-        } | ConvertTo-Json -Depth 5
-        Invoke-RestMethod -Uri $env:DISCORD_RELEASE_WEBHOOK -Method Post -ContentType 'application/json' -Body $payload | Out-Null
-        Write-Host "  discord  : announced to release channel" -ForegroundColor DarkGray
-    } else {
-        Write-Host "  discord  : DISCORD_RELEASE_WEBHOOK not set; announcement skipped" -ForegroundColor DarkGray
-    }
+    # discord-announce-step.yml), reusing the same webhook. The webhook is
+    # validated as a precondition above, so this always runs.
+    $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
+    $releaseUrl = "https://github.com/$repo/releases/tag/$DevTag"
+    $payload = @{
+        username = 'Loopy Releases'
+        embeds   = @(@{
+            title       = "$name Head Tracking - dev build $nightlyVersion"
+            url         = $releaseUrl
+            description = "A new development build is up - buggy but playable, not release-quality.`n`n[Download the latest dev build]($releaseUrl)"
+            color       = 15844367
+        })
+    } | ConvertTo-Json -Depth 5
+    Invoke-RestMethod -Uri $env:DISCORD_RELEASE_WEBHOOK -Method Post -ContentType 'application/json' -Body $payload | Out-Null
+    Write-Host "  discord  : announced to release channel" -ForegroundColor DarkGray
 }
 
 Export-ModuleMember -Function Publish-NightlyBuild
