@@ -2,6 +2,13 @@
   "$comment": "Canonical per-game detection data for CameraUnlock head-tracking mods. This is the single source of truth for where each supported game lives on disk: env var name, Steam folder, GOG IDs, Epic/Xbox paths, executable relative path, Unity data folder (for Cecil patching). Consumed by cameraunlock-core/powershell/GamePathDetection.psm1 today, and destined to be consumed by install.cmd scripts and the launcher's Rust detect module (see roadmap in the mod-manager repo). Mod-specific fields (which DLLs to deploy, mod version, framework type) do NOT belong here - those live in each mod's install.cmd CONFIG BLOCK and the launcher's catalog/mods.json. Adding a new game: pick a hyphen-lowercase id, fill in at minimum `display_name`, `env_var`, and `executable_relpath`. Any field that's empty for a given game should be omitted rather than set to a null/empty value.",
   "schema_version": 1,
   "games": {
+    "mirrors-edge": {
+      "display_name": "Mirror's Edge",
+      "env_var": "MIRRORS_EDGE_PATH",
+      "steam_app_id": 17410,
+      "steam_folder": "mirrors edge",
+      "executable_relpath": "Binaries\\MirrorsEdge.exe"
+    },
     "metaphor": {
       "display_name": "Metaphor: ReFantazio",
       "env_var": "METAPHOR_PATH",
@@ -135,6 +142,17 @@
         "C:\\XboxGames\\Subnautica 2\\Content"
       ],
       "xbox_executable_relpath": "Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe"
+    },
+    "rv-there-yet": {
+      "display_name": "RV There Yet?",
+      "env_var": "RV_THERE_YET_PATH",
+      "steam_app_id": 3949040,
+      "steam_folder": "Ride",
+      "executable_relpath": "Ride\\Binaries\\Win64\\Ride-Win64-Shipping.exe",
+      "xbox_paths": [
+        "C:\\XboxGames\\RV There Yet\\Content"
+      ],
+      "xbox_executable_relpath": "Ride\\Binaries\\WinGDK\\Ride-WinGDK-Shipping.exe"
     },
     "cyberpunk-2077": {
       "display_name": "Cyberpunk 2077",
@@ -621,6 +639,13 @@
       "executable_relpath": "FinchGame\\Binaries\\Win64\\FinchGame.exe",
       "steam_app_id": 501300,
       "steam_folder": "EdithFinch"
+    },
+    "prey": {
+      "display_name": "Prey",
+      "env_var": "PREY_PATH",
+      "steam_app_id": 480490,
+      "steam_folder": "Prey",
+      "executable_relpath": "Binaries\\Danielle\\x64\\Release\\Prey.exe"
     }
   }
 }
