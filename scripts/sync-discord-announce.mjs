@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-// Sync the canonical Discord release-announce step (scripts/templates/
-// discord-announce-step.yml) into every head-tracking mod's release workflow.
+// Sync the canonical Discord release steps into every head-tracking mod's
+// release workflow:
 //
-// Inserts the step immediately after the "Create GitHub Release" step (anchored
-// on the `gh release create` command), re-indented to match the target file's
-// step indentation. Idempotent: a workflow that already references
-// DISCORD_RELEASE_WEBHOOK is left untouched. Reusable-workflow callers are
-// skipped (they inherit the step from release-bepinex-mod.yml).
+//   - scripts/templates/discord-webhook-check-step.yml -> first step of the
+//     release job, so a missing DISCORD_RELEASE_WEBHOOK secret fails the run
+//     before anything is built or released.
+//   - scripts/templates/discord-announce-step.yml -> immediately after the
+//     "Create GitHub Release" step (anchored on the release-create command).
+//
+// Reconciling, not insert-once: a step that exists but no longer matches its
+// template is replaced in place, so template edits propagate on re-run.
+// Reusable-workflow callers are skipped (they inherit both steps from
+// release-bepinex-mod.yml).
 //
 //   node sync-discord-announce.mjs            # dry run, reports per repo
 //   node sync-discord-announce.mjs --apply    # write changes
@@ -25,26 +30,29 @@ const siblingsRoot = resolve(coreRoot, '..');
 const apply = process.argv.includes('--apply');
 const explicitRepos = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 
-const templatePath = join(coreRoot, 'scripts', 'templates', 'discord-announce-step.yml');
-
 function leadingSpaces(line) {
   const m = line.match(/^( *)/);
   return m[1].length;
 }
 
-// The template step, dedented to a zero baseline. Drops the leading comment
+// A template step, dedented to a zero baseline. Drops the leading comment
 // header and surrounding blank lines so only the `- name:` step remains.
-function loadTemplateStep() {
-  const raw = readFileSync(templatePath, 'utf8').replace(/\r\n/g, '\n').split('\n');
+function loadTemplateStep(file) {
+  const raw = readFileSync(join(coreRoot, 'scripts', 'templates', file), 'utf8')
+    .replace(/\r\n/g, '\n')
+    .split('\n');
   const start = raw.findIndex((l) => l.trim().startsWith('- name:'));
-  if (start === -1) throw new Error('template has no `- name:` step');
+  if (start === -1) throw new Error(`${file} has no \`- name:\` step`);
   let lines = raw.slice(start);
   while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
   const base = leadingSpaces(lines[0]);
   return lines.map((l) => (l.trim() === '' ? '' : l.slice(base)));
 }
 
-const templateStep = loadTemplateStep();
+const announceStep = loadTemplateStep('discord-announce-step.yml');
+const checkStep = loadTemplateStep('discord-webhook-check-step.yml');
+const ANNOUNCE_NAME = 'Announce release to Discord';
+const CHECK_NAME = 'Require Discord release webhook';
 
 function reindent(stepLines, indent) {
   const pad = ' '.repeat(indent);
@@ -72,6 +80,38 @@ function validateYaml(path) {
   });
 }
 
+function findStepHeaders(lines) {
+  const headers = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (/^ *- name:/.test(lines[i])) headers.push({ i, indent: leadingSpaces(lines[i]), name: lines[i].replace(/^ *- name:\s*/, '').trim() });
+  }
+  return headers;
+}
+
+// End of the step block starting at header index `start`: the next step header
+// at the same indent, or the first non-blank line indented less than the
+// header (next job/key), whichever comes first. Trailing blank separator
+// lines are excluded so they survive a replacement.
+function stepBlockEnd(lines, start, indent) {
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '') continue;
+    const li = leadingSpaces(line);
+    if (li < indent || (li === indent && /^ *- /.test(line))) {
+      end = i;
+      break;
+    }
+  }
+  while (end > start + 1 && lines[end - 1].trim() === '') end--;
+  return end;
+}
+
+function blocksEqual(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every((l, i) => l.trimEnd() === b[i].trimEnd());
+}
+
 function processRepo(repoPath) {
   const name = basename(repoPath);
   const wfs = findReleaseWorkflows(repoPath);
@@ -81,38 +121,78 @@ function processRepo(repoPath) {
 
 function processWorkflowFile(repoName, wf) {
   const name = `${repoName}/${basename(wf.path)}`;
-  if (/DISCORD_RELEASE_WEBHOOK/.test(wf.text)) return { name, status: 'ALREADY' };
   if (/release-bepinex-mod\.yml/.test(wf.text)) return { name, status: 'REUSABLE_CALLER' };
 
   const eol = wf.text.includes('\r\n') ? '\r\n' : '\n';
   const lines = wf.text.replace(/\r\n/g, '\n').split('\n');
-
-  // Locate every `- name:` step header, then the one whose body runs
-  // `gh release create` — that is the anchor we insert after.
-  const headers = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (/^ *- name:/.test(lines[i])) headers.push({ i, indent: leadingSpaces(lines[i]) });
-  }
+  const headers = findStepHeaders(lines);
   if (!headers.length) return { name, status: 'NO_STEPS' };
 
+  // The release-create step anchors everything: the announce step goes after
+  // it, and the check step goes at the top of the job that contains it.
   let anchor = null;
   for (let h = 0; h < headers.length; h++) {
     const start = headers[h].i;
     const end = h + 1 < headers.length ? headers[h + 1].i : lines.length;
     if (lines.slice(start, end).some((l) => ANCHOR_RE.test(l))) {
-      anchor = { indent: headers[h].indent, blockEnd: end };
+      anchor = { headerIndex: start, indent: headers[h].indent, blockEnd: end };
     }
   }
   if (!anchor) return { name, status: 'NO_RELEASE_STEP', wf: wf.path };
 
-  // blockEnd may include trailing blank lines that belong before the next
-  // sibling; back up over them so the new step sits flush after the anchor.
-  let insertAt = anchor.blockEnd;
-  while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+  // Edits collected as {at, remove, insert} and applied bottom-up so earlier
+  // line indexes stay valid.
+  const edits = [];
+  const ops = [];
 
-  const step = reindent(templateStep, anchor.indent);
-  const newLines = [...lines.slice(0, insertAt), '', ...step, ...lines.slice(insertAt)];
+  const announceHeader = headers.find((h) => h.name === ANNOUNCE_NAME);
+  if (announceHeader) {
+    const end = stepBlockEnd(lines, announceHeader.i, announceHeader.indent);
+    const rendered = reindent(announceStep, announceHeader.indent);
+    if (!blocksEqual(lines.slice(announceHeader.i, end), rendered)) {
+      edits.push({ at: announceHeader.i, remove: end - announceHeader.i, insert: rendered });
+      ops.push('announce:updated');
+    }
+  } else {
+    let insertAt = anchor.blockEnd;
+    while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    edits.push({ at: insertAt, remove: 0, insert: ['', ...reindent(announceStep, anchor.indent)] });
+    ops.push('announce:inserted');
+  }
+
+  const checkHeader = headers.find((h) => h.name === CHECK_NAME);
+  if (checkHeader) {
+    const end = stepBlockEnd(lines, checkHeader.i, checkHeader.indent);
+    const rendered = reindent(checkStep, checkHeader.indent);
+    if (!blocksEqual(lines.slice(checkHeader.i, end), rendered)) {
+      edits.push({ at: checkHeader.i, remove: end - checkHeader.i, insert: rendered });
+      ops.push('check:updated');
+    }
+  } else {
+    // First step of the job containing the anchor: the first step header after
+    // the last `steps:` line above the anchor.
+    let stepsLine = -1;
+    for (let i = anchor.headerIndex - 1; i >= 0; i--) {
+      if (/^\s*steps:\s*$/.test(lines[i])) {
+        stepsLine = i;
+        break;
+      }
+    }
+    if (stepsLine === -1) return { name, status: 'NO_STEPS_KEY', wf: wf.path };
+    const firstStep = headers.find((h) => h.i > stepsLine);
+    edits.push({ at: firstStep.i, remove: 0, insert: [...reindent(checkStep, firstStep.indent), ''] });
+    ops.push('check:inserted');
+  }
+
+  if (!edits.length) return { name, status: 'CURRENT' };
+
+  edits.sort((a, b) => b.at - a.at);
+  let newLines = lines;
+  for (const e of edits) {
+    newLines = [...newLines.slice(0, e.at), ...e.insert, ...newLines.slice(e.at + e.remove)];
+  }
   const out = newLines.join(eol);
+  const opsLabel = ops.sort().join(',');
 
   if (apply) {
     writeFileSync(wf.path, out, 'utf8');
@@ -122,7 +202,7 @@ function processWorkflowFile(repoName, wf) {
       writeFileSync(wf.path, wf.text, 'utf8'); // revert
       return { name, status: 'YAML_INVALID_REVERTED', error: String(e.stderr || e), wf: wf.path };
     }
-    return { name, status: 'PATCHED', indent: anchor.indent, wf: wf.path };
+    return { name, status: 'PATCHED', ops: opsLabel, wf: wf.path };
   }
 
   // Dry run: validate a temp render without touching the file.
@@ -137,7 +217,7 @@ function processWorkflowFile(repoName, wf) {
     yamlErr = String(e.stderr || e);
   }
   execFileSync('node', ['-e', `require('fs').unlinkSync(${JSON.stringify(tmp)})`]);
-  return { name, status: yamlOk ? 'WOULD_PATCH' : 'WOULD_FAIL_YAML', indent: anchor.indent, error: yamlErr, wf: wf.path };
+  return { name, status: yamlOk ? 'WOULD_PATCH' : 'WOULD_FAIL_YAML', ops: opsLabel, error: yamlErr, wf: wf.path };
 }
 
 function discoverRepos() {
@@ -166,7 +246,7 @@ for (const status of Object.keys(byStatus).sort()) {
   console.log(`== ${status} (${rs.length}) ==`);
   for (const r of rs) {
     let extra = '';
-    if (r.indent != null) extra += ` [indent ${r.indent}]`;
+    if (r.ops) extra += ` [${r.ops}]`;
     if (r.error) extra += ` ${r.error.split('\n')[0]}`;
     console.log(`   ${r.name}${extra}`);
   }

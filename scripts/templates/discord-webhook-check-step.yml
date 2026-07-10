@@ -1,0 +1,18 @@
+# Canonical "require the Discord release webhook" pre-flight for every
+# head-tracking mod's release workflow. Placed as the first step of the
+# release job so a missing DISCORD_RELEASE_WEBHOOK secret fails the run
+# seconds after the tag push - before anything is built and before the
+# GitHub release exists - instead of surfacing after the release is live.
+#
+# Synced into each mod's release workflow by scripts/sync-discord-announce.mjs
+# alongside discord-announce-step.yml.
+      - name: Require Discord release webhook
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if (-not $env:DISCORD_RELEASE_WEBHOOK) {
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - every release must be announced to Discord, so this run is refused before the release is created. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run."
+            exit 1
+          }
+          Write-Host "Discord release webhook is configured."

@@ -6,24 +6,25 @@
 # Synced verbatim into each mod's release workflow by
 # scripts/sync-discord-announce.mjs (re-indented to match the target's steps).
 # It is placed immediately after the "Create GitHub Release" step. The webhook
-# is read from the DISCORD_RELEASE_WEBHOOK repo secret; when that secret is
-# absent the step emits a notice and exits 0, so rolling this out ahead of
-# wiring the secret never turns a release run red.
+# is read from the DISCORD_RELEASE_WEBHOOK repo secret; a missing secret is a
+# hard failure - every release must be announced, and the paired early-check
+# step (discord-webhook-check-step.yml) refuses the run before the release is
+# even created, so this guard only fires if that step was removed.
       - name: Announce release to Discord
         shell: pwsh
         env:
           DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
         run: |
           if (-not $env:DISCORD_RELEASE_WEBHOOK) {
-            Write-Host "::notice::DISCORD_RELEASE_WEBHOOK not set; skipping Discord announcement."
-            exit 0
+            Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - the release was created but not announced. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run this job."
+            exit 1
           }
           $tag  = "${{ github.ref_name }}"
           $repo = "${{ github.repository }}"
           $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
           $url  = "https://github.com/$repo/releases/tag/$tag"
           $payload = @{
-            username = 'Loopy Releases'
+            username = 'Mod Releases'
             embeds   = @(@{
               title       = "$name Head Tracking $tag"
               url         = $url

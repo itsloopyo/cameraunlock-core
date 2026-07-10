@@ -188,7 +188,7 @@ function Publish-NightlyBuild {
     $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
     $releaseUrl = "https://github.com/$repo/releases/tag/$DevTag"
     $payload = @{
-        username = 'Loopy Releases'
+        username = 'Mod Releases'
         embeds   = @(@{
             title       = "$name Head Tracking - dev build $nightlyVersion"
             url         = $releaseUrl
