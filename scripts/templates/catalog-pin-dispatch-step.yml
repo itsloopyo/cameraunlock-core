@@ -1,0 +1,65 @@
+# Canonical "sync Lopari catalog pin" step for every head-tracking mod's
+# release workflow, placed BETWEEN release creation and the Discord
+# announce. The announcement's "Run in Lopari" link serves whatever the
+# live catalog pins, so this step triggers lopari.app's update-pins
+# workflow and then waits until lopari.app/mods.json actually pins the
+# version just released - only then may the announce run. That keeps the
+# link correct from the instant the Discord post is visible; the cost is
+# a couple of minutes inside this workflow, not a wrong link.
+#
+# Repos without a catalog entry skip the wait: their link lands on the
+# /run/ page's GitHub-download fallback by design.
+#
+# LOPARI_APP_ACTIONS_TOKEN is a fine-grained PAT with Actions:write scoped
+# to itsloopyo/lopari.app ONLY. It cannot write catalog contents; the worst
+# a leaked token enables is triggering our own re-pin job. The pre-flight
+# step already refused the run if a catalog-listed mod lacks the token.
+#
+# The poll cache-busts with a unique query string so GitHub Pages' CDN
+# cache (max-age 600) never serves a stale catalog to the check.
+      - name: Sync Lopari catalog pin
+        shell: pwsh
+        env:
+          LOPARI_APP_ACTIONS_TOKEN: ${{ secrets.LOPARI_APP_ACTIONS_TOKEN }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          function Get-PinnedVersion {
+            $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+            $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
+            $entry = @($mods) | Where-Object { $_.repo -eq $repo }
+            if (-not $entry) { return $null }
+            return @{ inCatalog = $true; pinned = $entry.release.pinned.version }
+          }
+          $state = Get-PinnedVersion
+          if (-not $state) {
+            Write-Host "::notice::$repo has no Lopari catalog entry - the announce link will use the /run/ page's GitHub fallback."
+            exit 0
+          }
+          if ($state.pinned -eq $version) {
+            Write-Host "Catalog already pins $version."
+            exit 0
+          }
+          Invoke-RestMethod -Method Post `
+            -Uri 'https://api.github.com/repos/itsloopyo/lopari.app/actions/workflows/update-pins.yml/dispatches' `
+            -Headers @{ Authorization = "Bearer $env:LOPARI_APP_ACTIONS_TOKEN"; Accept = 'application/vnd.github+json' } `
+            -ContentType 'application/json' -Body '{"ref":"main"}'
+          Write-Host "Requested lopari.app catalog re-pin; waiting for $version to go live..."
+          $deadline = [DateTime]::UtcNow.AddMinutes(10)
+          while ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Seconds 15
+            try {
+              $state = Get-PinnedVersion
+            } catch {
+              # A transient fetch failure is part of what the poll absorbs;
+              # a persistent one runs into the deadline below.
+              continue
+            }
+            if ($state.pinned -eq $version) {
+              Write-Host "Catalog pin is live: $version."
+              exit 0
+            }
+            Write-Host "  still pinned at $($state.pinned)..."
+          }
+          Write-Host "::error::Timed out waiting for lopari.app to pin $version (still $($state.pinned)). Check https://github.com/itsloopyo/lopari.app/actions, then re-run this job - the release exists; only the pin sync and announcement are pending."
+          exit 1

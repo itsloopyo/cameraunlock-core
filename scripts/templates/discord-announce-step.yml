@@ -5,10 +5,12 @@
 #
 # Synced verbatim into each mod's release workflow by
 # scripts/sync-discord-announce.mjs (re-indented to match the target's steps).
-# It is placed immediately after the "Create GitHub Release" step. The webhook
-# is read from the DISCORD_RELEASE_WEBHOOK repo secret; a missing secret is a
-# hard failure - every release must be announced, and the paired early-check
-# step (discord-webhook-check-step.yml) refuses the run before the release is
+# It runs AFTER the "Sync Lopari catalog pin" step, which blocks until the
+# live catalog pins the version being announced - so the "Run in Lopari"
+# link is correct the instant this post is visible. The webhook is read from
+# the DISCORD_RELEASE_WEBHOOK repo secret; a missing secret is a hard
+# failure - every release must be announced, and the paired pre-flight step
+# (discord-webhook-check-step.yml) refuses the run before the release is
 # even created, so this guard only fires if that step was removed.
       - name: Announce release to Discord
         shell: pwsh

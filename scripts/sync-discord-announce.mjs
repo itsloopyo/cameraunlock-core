@@ -5,8 +5,12 @@
 //   - scripts/templates/discord-webhook-check-step.yml -> first step of the
 //     release job, so a missing DISCORD_RELEASE_WEBHOOK secret fails the run
 //     before anything is built or released.
-//   - scripts/templates/discord-announce-step.yml -> immediately after the
-//     "Create GitHub Release" step (anchored on the release-create command).
+//   - scripts/templates/catalog-pin-dispatch-step.yml then
+//     scripts/templates/discord-announce-step.yml -> in that order,
+//     immediately after the "Create GitHub Release" step (anchored on the
+//     release-create command). The pin sync blocks until lopari.app pins
+//     the new version, so the announce's "Run in Lopari" link is correct
+//     the moment the Discord post exists.
 //
 // Reconciling, not insert-once: a step that exists but no longer matches its
 // template is replaced in place, so template edits propagate on re-run.
@@ -51,8 +55,13 @@ function loadTemplateStep(file) {
 
 const announceStep = loadTemplateStep('discord-announce-step.yml');
 const checkStep = loadTemplateStep('discord-webhook-check-step.yml');
+const pinSyncStep = loadTemplateStep('catalog-pin-dispatch-step.yml');
 const ANNOUNCE_NAME = 'Announce release to Discord';
-const CHECK_NAME = 'Require Discord release webhook';
+const CHECK_NAME = 'Require release announcement prerequisites';
+// Prior names a step may still carry in a workflow synced before a rename;
+// matched for replacement so the rename propagates instead of duplicating.
+const CHECK_LEGACY_NAMES = ['Require Discord release webhook'];
+const PIN_SYNC_NAME = 'Sync Lopari catalog pin';
 
 function reindent(stepLines, indent) {
   const pad = ' '.repeat(indent);
@@ -145,22 +154,44 @@ function processWorkflowFile(repoName, wf) {
   const edits = [];
   const ops = [];
 
+  // The pin-sync + announce pair is normalized as a unit: pin-sync MUST
+  // precede announce (the announce's link is only correct once the pin is
+  // live), so any deviation in content OR order removes both existing
+  // blocks and re-inserts the canonical sequence after the release step.
   const announceHeader = headers.find((h) => h.name === ANNOUNCE_NAME);
-  if (announceHeader) {
-    const end = stepBlockEnd(lines, announceHeader.i, announceHeader.indent);
-    const rendered = reindent(announceStep, announceHeader.indent);
-    if (!blocksEqual(lines.slice(announceHeader.i, end), rendered)) {
-      edits.push({ at: announceHeader.i, remove: end - announceHeader.i, insert: rendered });
-      ops.push('announce:updated');
+  const pinSyncHeader = headers.find((h) => h.name === PIN_SYNC_NAME);
+  const pairCurrent =
+    announceHeader &&
+    pinSyncHeader &&
+    pinSyncHeader.i < announceHeader.i &&
+    blocksEqual(
+      lines.slice(announceHeader.i, stepBlockEnd(lines, announceHeader.i, announceHeader.indent)),
+      reindent(announceStep, announceHeader.indent),
+    ) &&
+    blocksEqual(
+      lines.slice(pinSyncHeader.i, stepBlockEnd(lines, pinSyncHeader.i, pinSyncHeader.indent)),
+      reindent(pinSyncStep, pinSyncHeader.indent),
+    );
+  if (!pairCurrent) {
+    for (const h of [announceHeader, pinSyncHeader].filter(Boolean)) {
+      let start = h.i;
+      const end = stepBlockEnd(lines, start, h.indent);
+      // Absorb the blank separator above the block so removal+reinsert
+      // doesn't accumulate blank lines run over run.
+      if (start > 0 && lines[start - 1].trim() === '') start--;
+      edits.push({ at: start, remove: end - start, insert: [] });
     }
-  } else {
     let insertAt = anchor.blockEnd;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    edits.push({ at: insertAt, remove: 0, insert: ['', ...reindent(announceStep, anchor.indent)] });
-    ops.push('announce:inserted');
+    edits.push({
+      at: insertAt,
+      remove: 0,
+      insert: ['', ...reindent(pinSyncStep, anchor.indent), '', ...reindent(announceStep, anchor.indent)],
+    });
+    ops.push(announceHeader || pinSyncHeader ? 'release-steps:normalized' : 'release-steps:inserted');
   }
 
-  const checkHeader = headers.find((h) => h.name === CHECK_NAME);
+  const checkHeader = headers.find((h) => h.name === CHECK_NAME || CHECK_LEGACY_NAMES.includes(h.name));
   if (checkHeader) {
     const end = stepBlockEnd(lines, checkHeader.i, checkHeader.indent);
     const rendered = reindent(checkStep, checkHeader.indent);
@@ -186,7 +217,10 @@ function processWorkflowFile(repoName, wf) {
 
   if (!edits.length) return { name, status: 'CURRENT' };
 
-  edits.sort((a, b) => b.at - a.at);
+  // Bottom-up, and at equal indexes removals before inserts: the canonical
+  // pair is inserted exactly where a removed block started, and inserting
+  // first would put the new lines inside the removal range.
+  edits.sort((a, b) => b.at - a.at || b.remove - a.remove);
   let newLines = lines;
   for (const e of edits) {
     newLines = [...newLines.slice(0, e.at), ...e.insert, ...newLines.slice(e.at + e.remove)];
