@@ -28,7 +28,7 @@
             embeds   = @(@{
               title       = "$name Head Tracking $tag"
               url         = $url
-              description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**"
+              description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**`n**[Run in Lopari](https://lopari.app/run/?repo=$repo)**"
               color       = 5814783
             })
           } | ConvertTo-Json -Depth 5
