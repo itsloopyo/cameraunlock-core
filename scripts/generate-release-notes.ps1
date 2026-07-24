@@ -39,20 +39,21 @@ if ($LASTEXITCODE -ne 0) {
     exit 0
 }
 
-# Get commit subjects (with submodule pointer commits expanded into their
-# underlying library commits — see Get-CommitSubjectsWithSubmoduleExpansion).
+# Get commits that touched artifact-affecting paths
 Write-Host "Generating changelog from $previousTag to HEAD" -ForegroundColor Cyan
 Write-Host "Artifact paths: $($ArtifactPaths -join ', ')" -ForegroundColor Gray
 
-$subjects = Get-CommitSubjectsWithSubmoduleExpansion `
-    -CommitRange "$previousTag..HEAD" `
-    -ArtifactPaths $ArtifactPaths
+$commits = git log "$previousTag..HEAD" --pretty=format:"- %s" --no-merges -- $ArtifactPaths
 
-if (-not $subjects) {
+if (-not $commits) {
     throw "No artifact-affecting commits found between $previousTag and HEAD for paths: $($ArtifactPaths -join ', '). If this release has changes, widen ArtifactPaths or create a RELEASE_NOTES.md override."
 }
 
-$filtered = @($subjects | Where-Object { -not (Test-NoiseCommit $_) } | ForEach-Object { "- $_" })
+# Filter out internal/noise commits (strip "- " prefix for Test-NoiseCommit)
+$filtered = @($commits | Where-Object {
+    $subject = $_ -replace '^- ', ''
+    -not (Test-NoiseCommit $subject)
+})
 
 if ($filtered.Count -eq 0) {
     throw "All commits between $previousTag and HEAD were filtered as noise. If this release has user-facing changes, use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
