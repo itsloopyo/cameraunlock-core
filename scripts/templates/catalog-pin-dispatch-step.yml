@@ -8,7 +8,10 @@
 # a couple of minutes inside this workflow, not a wrong link.
 #
 # Repos without a catalog entry skip the wait: their link lands on the
-# /run/ page's GitHub-download fallback by design.
+# /run/ page's GitHub-download fallback by design. So do External-strategy
+# entries (installs route to a third-party mod manager): update-pins never
+# stamps release.pinned for those, so polling for a pin would time out on
+# every release.
 #
 # LOPARI_APP_ACTIONS_TOKEN is a fine-grained PAT with Actions:write scoped
 # to itsloopyo/lopari.app ONLY. It cannot write catalog contents; the worst
@@ -29,11 +32,12 @@
             $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
             $entry = @($mods) | Where-Object { $_.repo -eq $repo }
             if (-not $entry) { return $null }
+            if ($entry.install_strategy -eq 'External') { return $null }
             return @{ inCatalog = $true; pinned = $entry.release.pinned.version }
           }
           $state = Get-PinnedVersion
           if (-not $state) {
-            Write-Host "::notice::$repo has no Lopari catalog entry - the announce link will use the /run/ page's GitHub fallback."
+            Write-Host "::notice::$repo has no syncable Lopari catalog pin (no entry, or External install strategy) - the /run/ page serves its own install steps."
             exit 0
           }
           if ($state.pinned -eq $version) {

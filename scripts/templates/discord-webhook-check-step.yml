@@ -7,10 +7,12 @@
 # Two requirements:
 #   - DISCORD_RELEASE_WEBHOOK: always. Every release must be announced.
 #   - LOPARI_APP_ACTIONS_TOKEN: only when this repo has a Lopari catalog
-#     entry. The announcement's "Run in Lopari" link serves whatever the
-#     catalog pins, so the pin must be synced (and confirmed live) BEFORE
-#     the announce - without the token that sync can't be triggered and
-#     the link would install the previous release.
+#     entry the pin sync applies to. The announcement's "Run in Lopari"
+#     link serves whatever the catalog pins, so the pin must be synced
+#     (and confirmed live) BEFORE the announce - without the token that
+#     sync can't be triggered and the link would install the previous
+#     release. External-strategy entries (installs route to a third-party
+#     mod manager) never carry a pin, so they don't need the token.
 #
 # Synced into each mod's release workflow by scripts/sync-discord-announce.mjs
 # alongside catalog-pin-dispatch-step.yml and discord-announce-step.yml.
@@ -27,6 +29,7 @@
           $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
           $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
           $entry = @($mods) | Where-Object { $_.repo -eq "${{ github.repository }}" }
+          if ($entry -and $entry.install_strategy -eq 'External') { $entry = $null }
           if ($entry -and -not $env:LOPARI_APP_ACTIONS_TOKEN) {
             Write-Host "::error::${{ github.repository }} is in the Lopari catalog but LOPARI_APP_ACTIONS_TOKEN is not set - the catalog pin can't be synced before the announcement, so the Run in Lopari link would serve the previous release. Set the fine-grained PAT (Actions:write on itsloopyo/lopari.app only) and re-run."
             exit 1
