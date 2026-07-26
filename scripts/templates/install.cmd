@@ -142,22 +142,8 @@ if exist "%GAME_PATH%\%STATE_FILE%" (
 :: shot. BepInEx bootstraps itself on first game launch and loads any
 :: plugins it finds in BepInEx\plugins\ at that point - no separate
 :: "init then install" dance required.
-:: BepInEx 5 ships core/BepInEx.dll; BepInEx 6 (IL2CPP) renamed to
-:: BepInEx.Core.dll. Check both so v6 IL2CPP installs are detected.
-set "_LOADER_PRESENT="
-if exist "%GAME_PATH%\BepInEx\core\BepInEx.dll"      set "_LOADER_PRESENT=1"
-if exist "%GAME_PATH%\BepInEx\core\BepInEx.Core.dll" set "_LOADER_PRESENT=1"
-if not defined _LOADER_PRESENT (
-    echo BepInEx not found. Installing...
-    echo.
-    call :install_bepinex
-    if errorlevel 1 exit /b 1
-    set "WE_INSTALLED=true"
-    echo.
-    echo BepInEx installed. It will initialize on first game launch.
-) else (
-    echo Existing BepInEx detected, skipping loader install, deploying plugin only.
-)
+call :ensure_bepinex
+if errorlevel 1 exit /b 1
 echo.
 
 :: -------- Deploy mod files --------
@@ -212,18 +198,143 @@ exit /b 0
 
 
 :: ============================================
-:: Install BepInEx from the bundled vendored copy.
-:: Vendor tree is the single source of truth at install time. To bump the
-:: bundled version, run `pixi run update-deps` in the mod repo and commit.
-:: See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
+:: Decide whether the game needs the loader installed, repaired, or left
+:: alone, then act on it. BepInEx 5 ships core\BepInEx.dll; BepInEx 6
+:: (IL2CPP) renamed it to BepInEx.Core.dll. Check both so v6 IL2CPP
+:: installs are detected.
 :: ============================================
-:install_bepinex
+:ensure_bepinex
+set "_LOADER_PRESENT="
+if exist "%GAME_PATH%\BepInEx\core\BepInEx.dll"      set "_LOADER_PRESENT=1"
+if exist "%GAME_PATH%\BepInEx\core\BepInEx.Core.dll" set "_LOADER_PRESENT=1"
+
+if not defined _LOADER_PRESENT (
+    echo BepInEx not found. Installing...
+    echo.
+    call :install_bepinex
+    if errorlevel 1 exit /b 1
+    set "WE_INSTALLED=true"
+    echo.
+    echo BepInEx installed. It will initialize on first game launch.
+    exit /b 0
+)
+
+call :check_bepinex_health
+
+if defined _LOADER_FOREIGN (
+    echo Existing BepInEx is a different edition to the bundled one, skipping loader install, deploying plugin only.
+    exit /b 0
+)
+
+if !_LOADER_MISSING! equ 0 (
+    echo Existing BepInEx detected, skipping loader install, deploying plugin only.
+    exit /b 0
+)
+
+echo Existing BepInEx is incomplete - !_LOADER_MISSING! of its files are missing. Repairing from the bundled copy.
+echo.
+call :install_bepinex
+if errorlevel 1 exit /b 1
+
+call :check_bepinex_health
+if !_LOADER_MISSING! gtr 0 (
+    echo   ERROR: BepInEx is still incomplete after extraction.
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
+)
+
+:: A repair does not transfer ownership: WE_INSTALLED keeps whatever the
+:: prior state file said, so uninstall still leaves a loader the user
+:: installed themselves intact.
+exit /b 0
+
+:: ============================================
+:: Compare the installed loader against the bundled zip's own file list and
+:: set _LOADER_MISSING (count) plus _LOADER_FOREIGN.
+::
+:: A marker-file check is not enough on its own. A half-deleted BepInEx keeps
+:: core\BepInEx.dll while doorstop_config.ini and the Cecil/MonoMod
+:: assemblies go missing, so Doorstop loads with no target assembly and the
+:: chainloader never runs. The marker check calls that "installed" and skips
+:: the loader step, which is how a broken install survives a reinstall and
+:: presents as "the mod just stopped working".
+::
+:: Only .dll and .ini entries count - the XML doc files and changelog.txt in
+:: the zip are not load-bearing, and a user who cleaned them out does not
+:: need a repair. _LOADER_FOREIGN guards the other direction: if the install
+:: is a different BepInEx edition to the one we bundle, it belongs to
+:: someone else's setup and extracting our core over theirs would break it.
+:: ============================================
+:check_bepinex_health
+set "_LOADER_MISSING=0"
+set "_LOADER_FOREIGN="
+call :resolve_vendor_zip
+if not exist "!VENDOR_ZIP!" exit /b 0
+
+set "_ZIP_LIST=%TEMP%\cameraunlock_bepinex_list.txt"
+"%SystemRoot%\System32\tar.exe" -tf "!VENDOR_ZIP!" > "!_ZIP_LIST!" 2>nul
+if errorlevel 1 (
+    del "!_ZIP_LIST!" 2>nul
+    exit /b 0
+)
+
+set "_VENDOR_MARKER="
+for /f "usebackq delims=" %%e in ("!_ZIP_LIST!") do (
+    call :normalize_zip_entry "%%e"
+    if /i "!_ENTRY!"=="BepInEx\core\BepInEx.dll"      set "_VENDOR_MARKER=!_ENTRY!"
+    if /i "!_ENTRY!"=="BepInEx\core\BepInEx.Core.dll" set "_VENDOR_MARKER=!_ENTRY!"
+)
+
+if not defined _VENDOR_MARKER (
+    del "!_ZIP_LIST!" 2>nul
+    exit /b 0
+)
+
+if not exist "%GAME_PATH%\!_VENDOR_MARKER!" (
+    set "_LOADER_FOREIGN=1"
+    del "!_ZIP_LIST!" 2>nul
+    exit /b 0
+)
+
+for /f "usebackq delims=" %%e in ("!_ZIP_LIST!") do (
+    call :normalize_zip_entry "%%e"
+    set "_WANT="
+    if /i "!_ENTRY:~-4!"==".dll" set "_WANT=1"
+    if /i "!_ENTRY:~-4!"==".ini" set "_WANT=1"
+    if defined _WANT if not exist "%GAME_PATH%\!_ENTRY!" set /a _LOADER_MISSING+=1
+)
+
+del "!_ZIP_LIST!" 2>nul
+exit /b 0
+
+:: Turn one zip entry into a game-relative path: drop the Thunderstore
+:: wrapper dir the install step flattens away, and swap separators.
+:normalize_zip_entry
+set "_ENTRY=%~1"
+if defined BEPINEX_SUBFOLDER set "_ENTRY=!_ENTRY:*%BEPINEX_SUBFOLDER%/=!"
+set "_ENTRY=!_ENTRY:/=\!"
+exit /b 0
+
+:: ============================================
+:: Resolve the bundled loader zip into VENDOR_ZIP.
+:: ============================================
+:resolve_vendor_zip
 set "VENDOR_DIR=%SCRIPT_DIR%vendor\bepinex"
 if defined BEPINEX_VENDOR_ZIP_NAME (
     set "VENDOR_ZIP=%VENDOR_DIR%\%BEPINEX_VENDOR_ZIP_NAME%"
 ) else (
     set "VENDOR_ZIP=%VENDOR_DIR%\BepInEx_win_%BEPINEX_ARCH%.zip"
 )
+exit /b 0
+
+:: ============================================
+:: Install BepInEx from the bundled vendored copy.
+:: Vendor tree is the single source of truth at install time. To bump the
+:: bundled version, run `pixi run update-deps` in the mod repo and commit.
+:: See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
+:: ============================================
+:install_bepinex
+call :resolve_vendor_zip
 
 if not exist "!VENDOR_ZIP!" (
     echo   ERROR: Bundled BepInEx not found at:
