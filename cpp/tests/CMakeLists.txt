@@ -5,6 +5,7 @@ add_executable(cameraunlock_tests
     test_main.cpp
     math_tests.cpp
     protocol_tests.cpp
+    receiver_tests.cpp
     util_tests.cpp
     session_tests.cpp
     unreal_math_tests.cpp

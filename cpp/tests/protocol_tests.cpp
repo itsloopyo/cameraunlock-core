@@ -84,6 +84,42 @@ int RunProtocolTests() {
         Check(!OpenTrackPacket::TryParsePosition(pkt, sizeof(pkt), pos), "Inf position rejected");
     }
 
+    // Headcam trailer: magic + version + recenter counter after the pose.
+    {
+        uint8_t pkt[54];
+        BuildPacket(pkt, 0, 0, 0, 0, 0, 0);
+        pkt[48] = 'H'; pkt[49] = 'C'; pkt[50] = 'A'; pkt[51] = 'M';
+        pkt[52] = 1;
+        pkt[53] = 42;
+
+        uint8_t counter = 0;
+        Check(OpenTrackPacket::TryParseRecenterCounter(pkt, sizeof(pkt), counter) && counter == 42,
+              "valid trailer yields counter");
+
+        Check(!OpenTrackPacket::TryParseRecenterCounter(pkt, 48, counter),
+              "plain 48-byte packet has no trailer");
+
+        pkt[52] = 2;
+        Check(OpenTrackPacket::TryParseRecenterCounter(pkt, sizeof(pkt), counter),
+              "newer trailer version still parses");
+        pkt[52] = 0;
+        Check(!OpenTrackPacket::TryParseRecenterCounter(pkt, sizeof(pkt), counter),
+              "version zero rejected");
+        pkt[52] = 1;
+
+        // Some OpenTrack builds append an 8-byte frame number after the pose.
+        uint8_t framePkt[56];
+        BuildPacket(framePkt, 0, 0, 0, 0, 0, 0);
+        const double frameNumber = 12345.0;
+        std::memcpy(framePkt + 48, &frameNumber, sizeof(double));
+        Check(!OpenTrackPacket::TryParseRecenterCounter(framePkt, sizeof(framePkt), counter),
+              "frame-number suffix is not a trailer");
+
+        TrackingPose pose;
+        Check(OpenTrackPacket::TryParse(pkt, sizeof(pkt), pose),
+              "trailered packet still parses as pose");
+    }
+
     // Regression: finite double that overflows float range must be rejected,
     // not silently turned into +/-inf by the narrowing cast.
     {

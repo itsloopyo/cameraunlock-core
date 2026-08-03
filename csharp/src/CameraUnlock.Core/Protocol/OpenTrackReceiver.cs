@@ -57,9 +57,11 @@ namespace CameraUnlock.Core.Protocol
         private volatile float _positionY;
         private volatile float _positionZ;
 
-        // Remote recenter (Headcam trailer). The first observed counter is
-        // latched without triggering, so attaching to a running stream never
-        // fires a spurious recenter; every later change triggers one.
+        // Remote recenter (Headcam trailer). The trailer only rides a short
+        // burst of packets right after a CENTER press (steady-state packets
+        // must stay 48 bytes for plain OpenTrack), so the first sighting is
+        // itself a press and must trigger -- latching it silently would
+        // swallow the first press after every receiver start.
         private bool _hasRecenterCounter;
         private byte _lastRecenterCounter;
         private int _recenterRequested;
@@ -433,7 +435,7 @@ namespace CameraUnlock.Core.Protocol
 
                         if (OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
                         {
-                            if (_hasRecenterCounter && recenterCounter != _lastRecenterCounter)
+                            if (!_hasRecenterCounter || recenterCounter != _lastRecenterCounter)
                             {
                                 Interlocked.Exchange(ref _recenterRequested, 1);
                             }
@@ -454,6 +456,11 @@ namespace CameraUnlock.Core.Protocol
                         if (_consecutiveTimeouts >= DisconnectThreshold)
                         {
                             _isConnected = false;
+                            // Re-arm first-sighting: the tracker app restarting
+                            // resets its counter to zero, so a value latched from
+                            // the old session would swallow the first CENTER
+                            // press of the new one.
+                            _hasRecenterCounter = false;
                         }
                     }
                     else if (ex.SocketErrorCode == SocketError.Interrupted)

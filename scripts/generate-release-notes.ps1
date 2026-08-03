@@ -46,7 +46,10 @@ Write-Host "Artifact paths: $($ArtifactPaths -join ', ')" -ForegroundColor Gray
 $commits = git log "$previousTag..HEAD" --pretty=format:"- %s" --no-merges -- $ArtifactPaths
 
 if (-not $commits) {
-    $commits = @()
+    # An empty match means a bad/stale -ArtifactPaths, never a core-only
+    # release (those still carry the version-bump and submodule pointer
+    # commits), so the generic fallback below must not apply.
+    throw "No artifact-affecting commits found between $previousTag and HEAD for paths: $($ArtifactPaths -join ', '). If this release has changes, widen ArtifactPaths or create a RELEASE_NOTES.md override."
 }
 
 # Filter out internal/noise commits (strip "- " prefix for Test-NoiseCommit)

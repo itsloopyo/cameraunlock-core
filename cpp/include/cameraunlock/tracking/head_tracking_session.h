@@ -11,8 +11,18 @@
 
 #include <atomic>
 #include <cstdint>
+#include <type_traits>
+#include <utility>
 
 namespace cameraunlock {
+
+namespace detail {
+template <typename T, typename = void>
+struct HasRecenterRequest : std::false_type {};
+template <typename T>
+struct HasRecenterRequest<T, std::void_t<decltype(std::declval<T&>().TryConsumeRecenterRequest())>>
+    : std::true_type {};
+}  // namespace detail
 
 /// Active tracking mode for a HeadTrackingSession.
 enum class TrackingMode {
@@ -42,6 +52,10 @@ enum class TrackingMode {
 ///   bool GetPosition(float&, float&, float&) const
 ///   int64_t GetLastReceiveTimestamp() const
 ///   void Recenter()
+/// and may provide (detected at compile time):
+///   bool TryConsumeRecenterRequest()
+/// When present, Update() recenters whenever the tracker app signals CENTER
+/// through the packet trailer.
 ///
 /// Unlike the C# session, recentering happens at the receiver level: the C++
 /// TrackingProcessor's center manager overwrites rather than composes offsets,
@@ -101,12 +115,31 @@ public:
         }
 
         // Auto-recenter once tracking has stabilized after the first connection.
+        bool recentered = false;
         if (!m_hasCentered) {
             m_stabilizationCount++;
             if (m_stabilizationCount >= m_stabilizationFrames) {
                 m_hasCentered = true;
                 Recenter();
+                recentered = true;
             }
+        }
+
+        if constexpr (detail::HasRecenterRequest<TReceiver>::value) {
+            if (m_receiver.TryConsumeRecenterRequest()) {
+                m_hasCentered = true;
+                Recenter();
+                recentered = true;
+            }
+        }
+
+        if (recentered) {
+            // Recenter() changed the receiver's offset; re-fetch so this
+            // frame's pipeline is seeded with the centered pose (matching the
+            // C# session, which consumes before fetching). Feeding the stale
+            // pre-recenter values into the freshly reset interpolator would
+            // hold the old orientation for a packet interval.
+            m_receiver.GetRotation(rawYaw, rawPitch, rawRoll);
         }
 
         int64_t receiveTs = m_receiver.GetLastReceiveTimestamp();

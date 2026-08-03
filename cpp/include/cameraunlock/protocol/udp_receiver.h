@@ -76,12 +76,19 @@ public:
     /// @return True if data is available.
     bool GetRotation(float& yaw, float& pitch, float& roll) const;
 
-    /// Gets the current position values (in mm, from OpenTrack).
+    /// Gets the current position values with offset applied.
     /// @return True if position data is available.
     bool GetPosition(float& x, float& y, float& z) const;
 
-    /// Sets the current position as the new center point.
+    /// Sets the current rotation and position as the new center point.
     void Recenter();
+
+    /// True once per recenter request signaled by the tracker app through
+    /// the packet trailer (e.g. the user pressing CENTER in Headcam). The
+    /// caller routes it into its own recenter path.
+    bool TryConsumeRecenterRequest() {
+        return m_recenterRequested.exchange(false, std::memory_order_acq_rel);
+    }
 
 private:
     void ReceiverThread();
@@ -106,12 +113,23 @@ private:
     std::atomic<float> m_yawOffset{0.0f};
     std::atomic<float> m_pitchOffset{0.0f};
     std::atomic<float> m_rollOffset{0.0f};
+    std::atomic<float> m_posXOffset{0.0f};
+    std::atomic<float> m_posYOffset{0.0f};
+    std::atomic<float> m_posZOffset{0.0f};
 
     // Position data (mm, from OpenTrack)
     std::atomic<float> m_posX{0.0f};
     std::atomic<float> m_posY{0.0f};
     std::atomic<float> m_posZ{0.0f};
     std::atomic<bool> m_hasPosition{false};
+
+    // Remote recenter (Headcam trailer). The trailer only rides packets sent
+    // right after a CENTER press, so any sighting with a new counter is a
+    // press. Counter state is receive-thread-only; Stop() resets it after
+    // the join.
+    std::atomic<bool> m_recenterRequested{false};
+    uint8_t m_lastRecenterCounter{0};
+    bool m_hasRecenterCounter{false};
 
     // Timestamp for connection detection
     std::atomic<int64_t> m_lastReceiveTimestamp{0};

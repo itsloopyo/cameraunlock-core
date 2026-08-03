@@ -416,7 +416,10 @@ function New-ChangelogFromCommits {
     }
 
     if (-not $commits) {
-        $commits = @()
+        # An empty range means a re-tag of an already-released commit or a bad
+        # pathspec, never a core-only release (those still carry the submodule
+        # pointer bump), so the generic fallback below must not apply.
+        throw "No commits found in range '$commitRange'. If this is the first release, create a RELEASE_NOTES.md override instead."
     }
 
     # Filter out noise commits before categorization
@@ -425,7 +428,7 @@ function New-ChangelogFromCommits {
     }
 
     if ($commits.Count -eq 0 -and $useAllCommits) {
-        throw "No commits found for the first release. Use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
+        throw "No user-facing commits found for the first release. Use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
     }
 
     # Categorize commits using conventional commit format

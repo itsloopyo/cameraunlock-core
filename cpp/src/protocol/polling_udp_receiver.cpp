@@ -28,6 +28,9 @@ bool PollingUdpReceiver::Initialize(uint16_t port) {
     m_isRemoteConnection = false;
     m_hasData = false;
     m_hasOffset = false;
+    m_lastRecenterCounter = 0;
+    m_hasRecenterCounter = false;
+    m_recenterRequested = false;
     std::memset(m_receiveBuffer, 0, sizeof(m_receiveBuffer));
 
     return true;
@@ -50,6 +53,14 @@ bool PollingUdpReceiver::Poll() {
     bool receivedAny = false;
     int packetsThisFrame = 0;
     constexpr int kMaxPacketsPerFrame = 1000;  // Safety limit
+
+    // Re-arm first-sighting after a tracking gap: the tracker app restarting
+    // resets its counter to zero, so a value latched from the old session
+    // would swallow the first CENTER press of the new one.
+    if (m_lastReceiveTimeMs != 0 &&
+        GetCurrentTimeMs() - m_lastReceiveTimeMs >= kConnectionTimeoutMs) {
+        m_hasRecenterCounter = false;
+    }
 
     SOCKET sock = m_socket.GetHandle();
 
@@ -163,12 +174,20 @@ void PollingUdpReceiver::Recenter() {
         m_rollOffset = m_roll;
         m_hasOffset = true;
     }
+    if (m_hasPosition) {
+        m_posXOffset = m_posX;
+        m_posYOffset = m_posY;
+        m_posZOffset = m_posZ;
+    }
 }
 
 void PollingUdpReceiver::ResetOffset() {
     m_yawOffset = 0.0f;
     m_pitchOffset = 0.0f;
     m_rollOffset = 0.0f;
+    m_posXOffset = 0.0f;
+    m_posYOffset = 0.0f;
+    m_posZOffset = 0.0f;
     m_hasOffset = false;
 }
 
@@ -185,13 +204,24 @@ bool PollingUdpReceiver::GetPosition(float& x, float& y, float& z) const {
     if (!m_hasPosition) {
         return false;
     }
-    x = m_posX;
-    y = m_posY;
-    z = m_posZ;
+    x = m_posX - m_posXOffset;
+    y = m_posY - m_posYOffset;
+    z = m_posZ - m_posZOffset;
     return true;
 }
 
 bool PollingUdpReceiver::ParsePacket(const char* buffer, int bytesReceived) {
+    // Checked per datagram, not just on the one Poll() keeps: a whole
+    // recenter burst can land inside a single game frame.
+    uint8_t recenterCounter;
+    if (OpenTrackPacket::TryParseRecenterCounter(buffer, static_cast<size_t>(bytesReceived), recenterCounter)) {
+        if (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter) {
+            m_recenterRequested = true;
+        }
+        m_lastRecenterCounter = recenterCounter;
+        m_hasRecenterCounter = true;
+    }
+
     // Use shared OpenTrack packet parsing (rotation + position)
     TrackingPose pose;
     PositionData position;

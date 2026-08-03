@@ -121,6 +121,11 @@ namespace CameraUnlock.Core.Tracking
 
                 if (_receiver.TryConsumeRecenterRequest())
                 {
+                    // Counts as the connection recenter too: without this the
+                    // stabilization countdown fires a few frames later and
+                    // re-captures the center from wherever the head moved to,
+                    // wiping the press the user just made.
+                    _freshFrames = StabilizationFrames;
                     Recenter();
                     Log?.Invoke("Recentered by tracker app");
                 }

@@ -1,6 +1,7 @@
 #include <iostream>
 
 int RunProtocolTests();
+int RunReceiverTests();
 int RunMathTests();
 int RunUtilTests();
 int RunSessionTests();
@@ -14,6 +15,7 @@ int main() {
 
     int failures = 0;
     failures += RunProtocolTests();
+    failures += RunReceiverTests();
     failures += RunMathTests();
     failures += RunUtilTests();
     failures += RunSessionTests();

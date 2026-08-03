@@ -60,15 +60,24 @@ public:
     /// @return True if valid data is available.
     bool GetRotation(float& yaw, float& pitch, float& roll) const;
 
-    /// Gets the latest position values (in mm, from OpenTrack).
+    /// Gets the latest position values with offset applied.
     /// @return True if position data is available.
     bool GetPosition(float& x, float& y, float& z) const;
 
-    /// Sets the current position as the new center point.
+    /// Sets the current rotation and position as the new center point.
     void Recenter();
 
     /// Resets the center offset to zero.
     void ResetOffset();
+
+    /// True once per recenter request signaled by the tracker app through
+    /// the packet trailer (e.g. the user pressing CENTER in Headcam). The
+    /// caller routes it into its own recenter path.
+    bool TryConsumeRecenterRequest() {
+        bool requested = m_recenterRequested;
+        m_recenterRequested = false;
+        return requested;
+    }
 
     /// True if the receiver is properly initialized.
     bool IsInitialized() const { return m_initialized; }
@@ -106,7 +115,17 @@ private:
     float m_yawOffset = 0.0f;
     float m_pitchOffset = 0.0f;
     float m_rollOffset = 0.0f;
+    float m_posXOffset = 0.0f;
+    float m_posYOffset = 0.0f;
+    float m_posZOffset = 0.0f;
     bool m_hasOffset = false;
+
+    // Remote recenter (Headcam trailer). The trailer only rides packets sent
+    // right after a CENTER press, so any sighting with a new counter is a
+    // press.
+    uint8_t m_lastRecenterCounter = 0;
+    bool m_hasRecenterCounter = false;
+    bool m_recenterRequested = false;
 
     // Connection state
     int64_t m_lastReceiveTimeMs = 0;

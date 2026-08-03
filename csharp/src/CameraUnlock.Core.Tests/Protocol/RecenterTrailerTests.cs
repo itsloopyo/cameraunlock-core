@@ -89,13 +89,16 @@ namespace CameraUnlock.Core.Tests.Protocol
         }
 
         [Fact]
-        public void Receiver_FirstCounterObservation_LatchesWithoutTriggering()
+        public void Receiver_FirstTrailerSighting_TriggersRecenterRequest()
         {
+            // The trailer only rides the post-press burst, so a receiver that
+            // starts mid-session sees its first trailer BECAUSE of a press.
             _receiver = StartReceiver();
 
             Send(BuildPacket(10, 20, 30, recenterCounter: 5));
             Thread.Sleep(100);
 
+            Assert.True(_receiver.TryConsumeRecenterRequest());
             Assert.False(_receiver.TryConsumeRecenterRequest());
         }
 
@@ -151,6 +154,29 @@ namespace CameraUnlock.Core.Tests.Protocol
             Assert.Equal(0f, session.Rotation.Yaw, precision: 0);
             Assert.Equal(0f, session.Rotation.Pitch, precision: 0);
             Assert.Equal(0f, session.Rotation.Roll, precision: 0);
+        }
+
+        [Fact]
+        public void Session_RemoteRecenter_SuppressesStabilizationAutoRecenter()
+        {
+            _receiver = StartReceiver();
+            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor())
+            {
+                StabilizationFrames = 3
+            };
+            var logs = new System.Collections.Generic.List<string>();
+            session.Log = logs.Add;
+
+            Send(BuildPacket(45, 30, 15, recenterCounter: 1));
+            Thread.Sleep(100);
+
+            for (int i = 0; i < 10; i++)
+            {
+                session.Update(1f / 60f);
+            }
+
+            Assert.Contains("Recentered by tracker app", logs);
+            Assert.DoesNotContain("Auto-recentered on tracker connection", logs);
         }
 
         private static OpenTrackReceiver StartReceiver()

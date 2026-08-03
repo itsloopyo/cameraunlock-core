@@ -115,6 +115,12 @@ void UdpReceiver::Stop() {
     m_yawOffset.store(0.0f, std::memory_order_relaxed);
     m_pitchOffset.store(0.0f, std::memory_order_relaxed);
     m_rollOffset.store(0.0f, std::memory_order_relaxed);
+    m_posXOffset.store(0.0f, std::memory_order_relaxed);
+    m_posYOffset.store(0.0f, std::memory_order_relaxed);
+    m_posZOffset.store(0.0f, std::memory_order_relaxed);
+    m_recenterRequested.store(false, std::memory_order_relaxed);
+    m_lastRecenterCounter = 0;
+    m_hasRecenterCounter = false;
     m_posX.store(0.0f, std::memory_order_relaxed);
     m_posY.store(0.0f, std::memory_order_relaxed);
     m_posZ.store(0.0f, std::memory_order_relaxed);
@@ -152,9 +158,9 @@ bool UdpReceiver::GetPosition(float& x, float& y, float& z) const {
     if (!m_hasPosition.load(std::memory_order_relaxed)) {
         return false;
     }
-    x = m_posX.load(std::memory_order_relaxed);
-    y = m_posY.load(std::memory_order_relaxed);
-    z = m_posZ.load(std::memory_order_relaxed);
+    x = m_posX.load(std::memory_order_relaxed) - m_posXOffset.load(std::memory_order_relaxed);
+    y = m_posY.load(std::memory_order_relaxed) - m_posYOffset.load(std::memory_order_relaxed);
+    z = m_posZ.load(std::memory_order_relaxed) - m_posZOffset.load(std::memory_order_relaxed);
     return true;
 }
 
@@ -164,6 +170,11 @@ void UdpReceiver::Recenter() {
         m_yawOffset.store(yaw, std::memory_order_relaxed);
         m_pitchOffset.store(pitch, std::memory_order_relaxed);
         m_rollOffset.store(roll, std::memory_order_relaxed);
+    }
+    if (m_hasPosition.load(std::memory_order_relaxed)) {
+        m_posXOffset.store(m_posX.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        m_posYOffset.store(m_posY.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        m_posZOffset.store(m_posZ.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
 }
 
@@ -241,6 +252,19 @@ void UdpReceiver::ReceiverThread() {
 #endif
 
         if (bytesReceived >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
+            auto now = std::chrono::steady_clock::now();
+            int64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                now.time_since_epoch()).count();
+
+            // Re-arm first-sighting after a tracking gap: the tracker app
+            // restarting resets its counter to zero, so a value latched from
+            // the old session would swallow the first CENTER press of the new
+            // one.
+            int64_t prevTs = m_lastReceiveTimestamp.load(std::memory_order_relaxed);
+            if (prevTs != 0 && (nowUs - prevTs) / 1000 >= kConnectionTimeoutMs) {
+                m_hasRecenterCounter = false;
+            }
+
             TrackingPose pose;
             PositionData position;
             const bool parsed = OpenTrackPacket::TryParseAll(buffer, bytesReceived, pose, position);
@@ -258,11 +282,16 @@ void UdpReceiver::ReceiverThread() {
 
                 m_isRemoteConnection.store(IsRemoteAddress(senderAddr), std::memory_order_relaxed);
 
-                // Update timestamp
-                auto now = std::chrono::steady_clock::now();
-                int64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                    now.time_since_epoch()).count();
                 m_lastReceiveTimestamp.store(nowUs, std::memory_order_release);
+            }
+
+            uint8_t recenterCounter;
+            if (OpenTrackPacket::TryParseRecenterCounter(buffer, bytesReceived, recenterCounter)) {
+                if (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter) {
+                    m_recenterRequested.store(true, std::memory_order_release);
+                }
+                m_lastRecenterCounter = recenterCounter;
+                m_hasRecenterCounter = true;
             }
         }
     }

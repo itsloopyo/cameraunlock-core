@@ -30,6 +30,9 @@ struct FakeReceiver {
     float posX = 0.f, posY = 0.f, posZ = 0.f;
     int64_t timestamp = 0;
     int recenterCalls = 0;
+    // Emulate the real receivers' offset capture: after Recenter() the
+    // reported rotation reads as zero.
+    bool zeroOnRecenter = false;
 
     bool GetRotation(float& y, float& p, float& r) const {
         if (!hasRotation) return false;
@@ -42,7 +45,31 @@ struct FakeReceiver {
         return true;
     }
     int64_t GetLastReceiveTimestamp() const { return timestamp; }
-    void Recenter() { recenterCalls++; }
+    void Recenter() {
+        recenterCalls++;
+        if (zeroOnRecenter) {
+            yaw = pitch = roll = 0.f;
+        }
+    }
+
+    bool recenterRequested = false;
+    bool TryConsumeRecenterRequest() {
+        bool requested = recenterRequested;
+        recenterRequested = false;
+        return requested;
+    }
+};
+
+// A receiver without TryConsumeRecenterRequest must keep compiling and
+// updating -- the method is an optional part of the TReceiver contract.
+struct MinimalReceiver {
+    bool GetRotation(float& y, float& p, float& r) const {
+        y = p = r = 0.f;
+        return true;
+    }
+    bool GetPosition(float&, float&, float&) const { return false; }
+    int64_t GetLastReceiveTimestamp() const { return 1; }
+    void Recenter() {}
 };
 
 using Session = cameraunlock::HeadTrackingSession<FakeReceiver>;
@@ -209,6 +236,58 @@ void TestRecenterZeroesPose() {
           "position offset settles at zero after recenter (center captured)");
 }
 
+void TestRemoteRecenterRequest() {
+    std::cout << "Remote recenter request (packet trailer):\n";
+
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.yaw = 30.f;
+    rx.timestamp = 1;
+
+    Session session(rx);
+    session.SetStabilizationFrames(5);
+
+    session.Update(0.016f);
+    Check(rx.recenterCalls == 0, "no recenter without a request");
+
+    rx.recenterRequested = true;
+    session.Update(0.016f);
+    Check(rx.recenterCalls == 1, "request triggers a recenter");
+    Check(!rx.recenterRequested, "request is consumed");
+
+    for (int i = 0; i < 10; i++) {
+        rx.timestamp++;
+        session.Update(0.016f);
+    }
+    Check(rx.recenterCalls == 1,
+          "remote recenter counts as centered - stabilization auto-recenter does not re-fire");
+
+    MinimalReceiver minimalRx;
+    cameraunlock::HeadTrackingSession<MinimalReceiver> minimalSession(minimalRx);
+    Check(minimalSession.Update(0.016f), "receiver without the request method still works");
+}
+
+void TestRecenterSeedsCurrentFrameWithCenteredPose() {
+    std::cout << "Recenter frame seeding:\n";
+
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.yaw = 30.f;
+    rx.timestamp = 1;
+    rx.zeroOnRecenter = true;
+
+    Session session(rx);
+    session.SetStabilizationFrames(1000);
+
+    session.Update(0.016f);
+
+    rx.recenterRequested = true;
+    rx.timestamp = 2;
+    session.Update(0.016f);
+    Check(NearEqual(session.GetLastRaw().yaw, 0.f),
+          "consume frame is seeded with the centered pose, not the stale pre-recenter fetch");
+}
+
 }  // namespace
 
 int RunSessionTests() {
@@ -221,6 +300,8 @@ int RunSessionTests() {
     TestModeCycling();
     TestDuplicatePacketFiltering();
     TestRecenterZeroesPose();
+    TestRemoteRecenterRequest();
+    TestRecenterSeedsCurrentFrameWithCenteredPose();
 
     if (g_failures == 0) {
         std::cout << "Session tests: all passed\n";

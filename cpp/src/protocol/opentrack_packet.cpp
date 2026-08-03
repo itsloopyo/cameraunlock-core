@@ -86,4 +86,22 @@ bool OpenTrackPacket::TryParseAll(const void* data, size_t length, TrackingPose&
     return true;
 }
 
+bool OpenTrackPacket::TryParseRecenterCounter(const void* data, size_t length, uint8_t& recenterCounter) {
+    if (data == nullptr || length < kPacketSizeWithTrailer) {
+        return false;
+    }
+
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    if (bytes[kTrailerOffset] != 'H' || bytes[kTrailerOffset + 1] != 'C' ||
+        bytes[kTrailerOffset + 2] != 'A' || bytes[kTrailerOffset + 3] != 'M') {
+        return false;
+    }
+    if (bytes[kTrailerOffset + 4] < kTrailerVersion) {
+        return false;
+    }
+
+    recenterCounter = bytes[kRecenterCounterOffset];
+    return true;
+}
+
 }  // namespace cameraunlock
