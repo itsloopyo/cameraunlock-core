@@ -157,6 +157,36 @@ namespace CameraUnlock.Core.Tests.Protocol
         }
 
         [Fact]
+        public void Session_TrackerZeroesStreamBeforeSignaling_DoesNotDoubleSubtract()
+        {
+            _receiver = StartReceiver();
+            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor())
+            {
+                StabilizationFrames = int.MaxValue
+            };
+
+            // Drifted steady state: plain packets, smoothing settles on the pose.
+            Send(BuildPacket(45, 30, 15));
+            Thread.Sleep(100);
+            for (int i = 0; i < 30; i++)
+            {
+                session.Update(1f / 60f);
+            }
+
+            // CENTER press: the tracker subtracts the pose at its end and the
+            // trailer rides the first packets of the zeroed stream. Folding the
+            // old smoothed pose into the center as well lands the view at the
+            // mirrored drift instead of zero.
+            Send(BuildPacket(0, 0, 0, recenterCounter: 1));
+            Thread.Sleep(100);
+            session.Update(1f / 60f);
+
+            Assert.Equal(0f, session.Rotation.Yaw, precision: 0);
+            Assert.Equal(0f, session.Rotation.Pitch, precision: 0);
+            Assert.Equal(0f, session.Rotation.Roll, precision: 0);
+        }
+
+        [Fact]
         public void Session_RemoteRecenter_SuppressesStabilizationAutoRecenter()
         {
             _receiver = StartReceiver();

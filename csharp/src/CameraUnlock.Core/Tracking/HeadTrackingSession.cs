@@ -126,7 +126,16 @@ namespace CameraUnlock.Core.Tracking
                     // re-captures the center from wherever the head moved to,
                     // wiping the press the user just made.
                     _freshFrames = StabilizationFrames;
-                    Recenter();
+                    // The tracker app zeroes its own output before signaling, so
+                    // the packet carrying the counter already holds the new
+                    // center. Recenter() would fold the previous smoothed pose -
+                    // which the tracker just subtracted at its end - into the
+                    // offset a second time, parking the view mirrored from the
+                    // pre-press drift.
+                    _processor.RecenterTo(_receiver.GetLatestPose());
+                    _poseInterpolator.Reset();
+                    _positionProcessor.SetCenter(_receiver.GetLatestPosition());
+                    _positionInterpolator.Reset();
                     Log?.Invoke("Recentered by tracker app");
                 }
 
