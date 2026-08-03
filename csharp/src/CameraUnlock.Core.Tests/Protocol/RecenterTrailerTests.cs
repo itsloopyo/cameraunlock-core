@@ -209,6 +209,81 @@ namespace CameraUnlock.Core.Tests.Protocol
             Assert.DoesNotContain("Auto-recentered on tracker connection", logs);
         }
 
+        [Fact]
+        public void Session_TrackingLossGap_DoesNotRearmAutoRecenter()
+        {
+            _receiver = StartReceiver();
+            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor())
+            {
+                StabilizationFrames = 3
+            };
+            var logs = new System.Collections.Generic.List<string>();
+            session.Log = logs.Add;
+
+            Send(BuildPacket(10, 5, 0));
+            Thread.Sleep(100);
+            for (int i = 0; i < 5; i++)
+            {
+                session.Update(1f / 60f);
+            }
+            Assert.Single(logs, "Auto-recentered on tracker connection");
+
+            // Face lost: the tracker stops sending and data goes stale.
+            Thread.Sleep(OpenTrackReceiver.DefaultMaxDataAgeMs + 100);
+            session.Update(1f / 60f);
+            Assert.True(session.IsHolding);
+
+            // Face re-acquired mid-motion: resuming packets must not re-capture
+            // the center - that decision belongs to the tracker app (trailer).
+            Send(BuildPacket(40, 20, 10));
+            Thread.Sleep(100);
+            for (int i = 0; i < 5; i++)
+            {
+                session.Update(1f / 60f);
+            }
+            Assert.Single(logs, "Auto-recentered on tracker connection");
+        }
+
+        [Fact]
+        public void RemoteRecenter_NoRequest_ReturnsFalse()
+        {
+            _receiver = StartReceiver();
+
+            Send(BuildPacket(10, 20, 30));
+            Thread.Sleep(100);
+
+            Assert.False(RemoteRecenter.TryConsume(_receiver, new TrackingProcessor()));
+        }
+
+        [Fact]
+        public void RemoteRecenter_TrackerZeroesStreamBeforeSignaling_DoesNotDoubleSubtract()
+        {
+            _receiver = StartReceiver();
+            var processor = new TrackingProcessor();
+            var poseInterpolator = new PoseInterpolator();
+            var positionProcessor = new PositionProcessor();
+            var positionInterpolator = new PositionInterpolator();
+
+            Send(BuildPacket(45, 30, 15));
+            Thread.Sleep(100);
+            for (int i = 0; i < 30; i++)
+            {
+                processor.Process(_receiver.GetLatestPose(), 1f / 60f);
+            }
+
+            Send(BuildPacket(0, 0, 0, recenterCounter: 1));
+            Thread.Sleep(100);
+
+            Assert.True(RemoteRecenter.TryConsume(
+                _receiver, processor, poseInterpolator, positionProcessor, positionInterpolator));
+            Assert.False(RemoteRecenter.TryConsume(_receiver, processor));
+
+            TrackingPose rotation = processor.Process(_receiver.GetLatestPose(), 1f / 60f);
+            Assert.Equal(0f, rotation.Yaw, precision: 0);
+            Assert.Equal(0f, rotation.Pitch, precision: 0);
+            Assert.Equal(0f, rotation.Roll, precision: 0);
+        }
+
         private static OpenTrackReceiver StartReceiver()
         {
             var receiver = new OpenTrackReceiver();

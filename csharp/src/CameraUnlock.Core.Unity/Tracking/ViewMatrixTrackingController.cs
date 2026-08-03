@@ -60,6 +60,14 @@ namespace CameraUnlock.Core.Unity.Tracking
         // so 3DOF-only users don't get a position offset before recentering.
         private bool _detected6DOF;
 
+        // Centering fires once per enable, not on every IsReceiving resume:
+        // the tracker app stops sending while the face is lost, so capturing
+        // a center when packets resume bakes in whatever pose the user holds
+        // while sitting back down. Re-acquisition recentering is the app's
+        // decision, signaled through the packet trailer.
+        private bool _hasCentered;
+        private bool _recenterOnStabilize;
+
         // worldToCameraMatrix is a sticky override: once set, Unity stops
         // recomputing it from camera.transform each frame. When we stop
         // applying tracking we must call ResetWorldToCameraMatrix() once,
@@ -70,6 +78,15 @@ namespace CameraUnlock.Core.Unity.Tracking
         public bool PositionEnabled { get; set; }
         public bool RotationEnabled { get; set; }
         public bool WorldSpaceYaw { get; set; }
+
+        /// <summary>
+        /// Invoked after the controller consumes a tracker-app recenter request
+        /// (packet trailer) inside ProcessFrame. Hook notifications/logging here
+        /// instead of calling receiver.TryConsumeRecenterRequest() in mod code -
+        /// the controller already consumes the request, so a second consumer
+        /// races it and only one of the two ever sees a given press.
+        /// </summary>
+        public Action OnRemoteRecenter { get; set; }
         public bool IsApplyingTracking
         {
             get { return _wasApplyingTracking && !_isTransitioningOut; }
@@ -161,7 +178,10 @@ namespace CameraUnlock.Core.Unity.Tracking
                     BeginTrackingSession();
 
                 if (_receiver.TryConsumeRecenterRequest())
+                {
                     Recenter();
+                    OnRemoteRecenter?.Invoke();
+                }
 
                 float scale = AdvanceTransitionIn();
 
@@ -239,6 +259,8 @@ namespace CameraUnlock.Core.Unity.Tracking
             ResetSmoothingState();
             ResetInterpolators();
             _isTransitioningOut = false;
+            // A deliberate user re-enable recaptures the center; data gaps do not.
+            _hasCentered = false;
         }
 
         /// <summary>
@@ -249,6 +271,8 @@ namespace CameraUnlock.Core.Unity.Tracking
         {
             RecenterToLatest();
             ResetInterpolators();
+            _hasCentered = true;
+            _recenterOnStabilize = false;
         }
 
         public void OnTrackingDisabled()
@@ -277,13 +301,20 @@ namespace CameraUnlock.Core.Unity.Tracking
             _currentPosition = Vec3.Zero;
             _hasPosition = false;
             _detected6DOF = false;
+            _hasCentered = false;
+            _recenterOnStabilize = false;
             ResetSmoothingState();
             ResetInterpolators();
         }
 
         private void BeginTrackingSession()
         {
-            RecenterToLatest();
+            if (!_hasCentered)
+            {
+                RecenterToLatest();
+                _hasCentered = true;
+                _recenterOnStabilize = true;
+            }
             _isTransitioningIn = true;
             _transitionInProgress = 0f;
             _detected6DOF = false;
@@ -322,8 +353,11 @@ namespace CameraUnlock.Core.Unity.Tracking
 
                 // Re-recenter after stabilization so the rest of the session uses
                 // a clean reference pose rather than whatever was first received.
-                if (_receiver.IsReceiving)
+                // Only when this transition-in captured the center: skipped on
+                // re-acquisition resumes and after a deliberate recenter.
+                if (_recenterOnStabilize && _receiver.IsReceiving)
                     RecenterToLatest();
+                _recenterOnStabilize = false;
             }
             return _transitionInProgress * _transitionInProgress;
         }

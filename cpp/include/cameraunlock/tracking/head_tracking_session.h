@@ -55,11 +55,20 @@ enum class TrackingMode {
 /// and may provide (detected at compile time):
 ///   bool TryConsumeRecenterRequest()
 /// When present, Update() recenters whenever the tracker app signals CENTER
-/// through the packet trailer.
+/// through the packet trailer. When absent the whole remote-recenter branch
+/// compiles away with no diagnostic - a receiver ADAPTER that wraps a core
+/// receiver but forgets to forward TryConsumeRecenterRequest() silently loses
+/// tracker-app recentering. Adapters should assert against it:
+///   static_assert(MySession::kHasRemoteRecenter);
 ///
 /// Unlike the C# session, recentering happens at the receiver level: the C++
 /// TrackingProcessor's center manager overwrites rather than composes offsets,
-/// so processor-level recentering only works for the first recenter.
+/// so processor-level recentering only works for the first recenter. This is
+/// also what makes the remote recenter immune to double subtraction: the
+/// tracker app zeroes its own output before signaling, and Recenter() captures
+/// the receiver's raw (already-zeroed) pose as the offset rather than folding
+/// the previous smoothed pose in a second time. A refactor to processor-level
+/// centering must preserve that (see TestRecenterSeedsCurrentFrameWithCenteredPose).
 ///
 /// Thread safety matches typical mod usage: Update() runs on the render
 /// thread; SetMode()/CycleMode()/Recenter() may be called from a hotkey
@@ -68,6 +77,10 @@ enum class TrackingMode {
 template <typename TReceiver>
 class HeadTrackingSession {
 public:
+    /// True when TReceiver exposes TryConsumeRecenterRequest() and remote
+    /// (tracker-app) recentering is active for this instantiation.
+    static constexpr bool kHasRemoteRecenter = detail::HasRecenterRequest<TReceiver>::value;
+
     explicit HeadTrackingSession(TReceiver& receiver) : m_receiver(receiver) {}
 
     HeadTrackingSession(const HeadTrackingSession&) = delete;

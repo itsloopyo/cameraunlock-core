@@ -31,6 +31,7 @@ namespace CameraUnlock.Core.Tracking
         private TrackingMode _mode = TrackingMode.RotationAndPosition;
         private bool _wasFresh;
         private int _freshFrames;
+        private bool _hasCentered;
         private TrackingPose _heldRotation;
         private Vec3 _heldPositionOffset;
         private bool _hasPose;
@@ -78,8 +79,9 @@ namespace CameraUnlock.Core.Tracking
         }
 
         /// <summary>
-        /// Consecutive fresh frames required after a (re)connection before the automatic
-        /// recenter fires, giving phone trackers time to settle.
+        /// Consecutive fresh frames required after the first connection before the
+        /// automatic recenter fires, giving phone trackers time to settle. Fires once
+        /// per session; later tracking-loss gaps do not re-arm it.
         /// </summary>
         public int StabilizationFrames { get; set; } = 10;
 
@@ -125,7 +127,7 @@ namespace CameraUnlock.Core.Tracking
                     // stabilization countdown fires a few frames later and
                     // re-captures the center from wherever the head moved to,
                     // wiping the press the user just made.
-                    _freshFrames = StabilizationFrames;
+                    _hasCentered = true;
                     // The tracker app zeroes its own output before signaling, so
                     // the packet carrying the counter already holds the new
                     // center. Recenter() would fold the previous smoothed pose -
@@ -217,22 +219,28 @@ namespace CameraUnlock.Core.Tracking
             IsHolding = false;
         }
 
+        // Fires once per session. Deliberately NOT re-armed by tracking-loss
+        // gaps: the tracker app stops sending while the face is lost, and
+        // recentering on packet resumption would capture whatever pose the
+        // user happens to hold while sitting back down. Re-acquisition
+        // recentering is the app's decision - it signals through the packet
+        // trailer after walking the user through its hold-still flow.
         private void HandleConnectionRecenter()
         {
+            if (_hasCentered) return;
+
             if (!_wasFresh)
             {
                 _freshFrames = 0;
                 _wasFresh = true;
             }
 
-            if (_freshFrames < StabilizationFrames)
+            _freshFrames++;
+            if (_freshFrames >= StabilizationFrames)
             {
-                _freshFrames++;
-                if (_freshFrames == StabilizationFrames)
-                {
-                    Recenter();
-                    Log?.Invoke("Auto-recentered on tracker connection");
-                }
+                _hasCentered = true;
+                Recenter();
+                Log?.Invoke("Auto-recentered on tracker connection");
             }
         }
     }

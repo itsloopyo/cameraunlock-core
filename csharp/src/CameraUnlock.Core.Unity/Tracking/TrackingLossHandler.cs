@@ -8,7 +8,8 @@ namespace CameraUnlock.Core.Unity.Tracking
     /// - Delay before starting to fade (hold position briefly)
     /// - Smooth fade toward identity rotation
     /// - Stabilization wait when tracking resumes (for phone apps that need recalibration)
-    /// - Auto-recenter after extended loss
+    /// - Optional auto-recenter after extended loss (off by default; see
+    ///   RecenterThresholdFrames)
     /// </summary>
     public class TrackingLossHandler
     {
@@ -32,9 +33,14 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         /// <summary>
         /// Number of frames without data before triggering auto-recenter.
-        /// Set to 0 to disable auto-recenter.
+        /// 0 (the default) disables it: the tracker app stops sending while the
+        /// face is lost, so a mod-side recenter on resumption captures whatever
+        /// pose the user holds while sitting back down. Re-acquisition
+        /// recentering is the tracker app's decision, signaled through the
+        /// packet trailer after its hold-still flow. Set above 0 only for
+        /// sources that cannot signal (plain OpenTrack).
         /// </summary>
-        public int RecenterThresholdFrames { get; set; } = 60;
+        public int RecenterThresholdFrames { get; set; } = 0;
 
         private int _framesWithoutData;
         private float _secondsWithoutData;

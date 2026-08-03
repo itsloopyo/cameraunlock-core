@@ -265,6 +265,11 @@ void TestRemoteRecenterRequest() {
     MinimalReceiver minimalRx;
     cameraunlock::HeadTrackingSession<MinimalReceiver> minimalSession(minimalRx);
     Check(minimalSession.Update(0.016f), "receiver without the request method still works");
+
+    static_assert(Session::kHasRemoteRecenter,
+                  "FakeReceiver forwards TryConsumeRecenterRequest");
+    static_assert(!cameraunlock::HeadTrackingSession<MinimalReceiver>::kHasRemoteRecenter,
+                  "MinimalReceiver has no remote recenter");
 }
 
 void TestRecenterSeedsCurrentFrameWithCenteredPose() {
