@@ -46,7 +46,7 @@ Write-Host "Artifact paths: $($ArtifactPaths -join ', ')" -ForegroundColor Gray
 $commits = git log "$previousTag..HEAD" --pretty=format:"- %s" --no-merges -- $ArtifactPaths
 
 if (-not $commits) {
-    throw "No artifact-affecting commits found between $previousTag and HEAD for paths: $($ArtifactPaths -join ', '). If this release has changes, widen ArtifactPaths or create a RELEASE_NOTES.md override."
+    $commits = @()
 }
 
 # Filter out internal/noise commits (strip "- " prefix for Test-NoiseCommit)
@@ -56,7 +56,11 @@ $filtered = @($commits | Where-Object {
 })
 
 if ($filtered.Count -eq 0) {
-    throw "All commits between $previousTag and HEAD were filtered as noise. If this release has user-facing changes, use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
+    # Core-only release: everything since the last tag is a submodule pointer
+    # bump or other noise-filtered commit. The release still ships a fresh
+    # shared bundle, so publish generic notes instead of failing the run.
+    Write-Host "No mod-local commits since $previousTag - using generic release notes." -ForegroundColor Yellow
+    $filtered = @('- Performance and stability improvements')
 }
 
 $commitList = $filtered -join "`n"

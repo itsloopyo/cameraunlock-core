@@ -416,16 +416,16 @@ function New-ChangelogFromCommits {
     }
 
     if (-not $commits) {
-        throw "No commits found in range '$commitRange'. If this is the first release, create a RELEASE_NOTES.md override instead."
+        $commits = @()
     }
 
     # Filter out noise commits before categorization
     if (-not $IncludeAll) {
         $commits = @($commits | Where-Object { -not (Test-NoiseCommit $_) })
+    }
 
-        if ($commits.Count -eq 0) {
-            throw "All commits in range '$commitRange' were filtered as noise. If this release has user-facing changes, use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
-        }
+    if ($commits.Count -eq 0 -and $useAllCommits) {
+        throw "No commits found for the first release. Use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
     }
 
     # Categorize commits using conventional commit format
@@ -433,6 +433,15 @@ function New-ChangelogFromCommits {
     $fixes = @()
     $changes = @()
     $other = @()
+
+    $generic = ($commits.Count -eq 0)
+    if ($generic) {
+        # Core-only release: everything since the last tag is a submodule
+        # pointer bump or other noise-filtered commit, so there is nothing
+        # mod-local to list. The shared bundle still picks up the new core at
+        # package time, so release with a generic entry instead of blocking.
+        $changes += '- Performance and stability improvements'
+    }
 
     foreach ($commit in $commits) {
         if ($commit -match '^feat(\(.*?\))?:\s*(.+)$') {
@@ -485,6 +494,7 @@ function New-ChangelogFromCommits {
         Features = $features.Count
         Fixes = $fixes.Count
         Changes = $changes.Count
+        Generic = $generic
     }
 }
 
