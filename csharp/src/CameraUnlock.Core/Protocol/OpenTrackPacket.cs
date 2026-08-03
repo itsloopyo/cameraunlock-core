@@ -35,6 +35,24 @@ namespace CameraUnlock.Core.Protocol
         /// <summary>Conversion factor from centimeters (OpenTrack default) to meters.</summary>
         public const float CmToMeters = 0.01f;
 
+        /// <summary>Byte offset of the optional Headcam trailer.</summary>
+        public const int TrailerOffset = 48;
+
+        /// <summary>Trailer magic bytes: "HCAM".</summary>
+        public const byte TrailerMagic0 = 0x48;
+        public const byte TrailerMagic1 = 0x43;
+        public const byte TrailerMagic2 = 0x41;
+        public const byte TrailerMagic3 = 0x4D;
+
+        /// <summary>Current trailer version.</summary>
+        public const byte TrailerVersion = 1;
+
+        /// <summary>Packet size including the version-1 trailer (magic + version + recenter counter).</summary>
+        public const int PacketSizeWithTrailer = 54;
+
+        /// <summary>Byte offset of the recenter counter within the packet.</summary>
+        public const int RecenterCounterOffset = 53;
+
         /// <summary>
         /// Attempts to parse an OpenTrack packet.
         /// </summary>
@@ -94,6 +112,42 @@ namespace CameraUnlock.Core.Protocol
             }
 
             position = new PositionData((float)x * CmToMeters, (float)y * CmToMeters, (float)z * CmToMeters);
+            return true;
+        }
+
+        /// <summary>
+        /// Attempts to parse the recenter counter from a Headcam trailer.
+        /// The trailer is appended after the standard 48 OpenTrack bytes:
+        /// magic "HCAM", version byte, recenter counter byte. Packets from
+        /// plain OpenTrack (48 bytes, or 56 with a frame counter) fail the
+        /// magic check and return false.
+        /// </summary>
+        /// <param name="data">Raw packet data.</param>
+        /// <param name="recenterCounter">Parsed recenter counter if successful.</param>
+        /// <returns>True if a version-1 (or later, backward-compatible) trailer is present.</returns>
+        public static bool TryParseRecenterCounter(byte[] data, out byte recenterCounter)
+        {
+            recenterCounter = 0;
+
+            if (data == null || data.Length < PacketSizeWithTrailer)
+            {
+                return false;
+            }
+
+            if (data[TrailerOffset] != TrailerMagic0 ||
+                data[TrailerOffset + 1] != TrailerMagic1 ||
+                data[TrailerOffset + 2] != TrailerMagic2 ||
+                data[TrailerOffset + 3] != TrailerMagic3)
+            {
+                return false;
+            }
+
+            if (data[TrailerOffset + 4] < TrailerVersion)
+            {
+                return false;
+            }
+
+            recenterCounter = data[RecenterCounterOffset];
             return true;
         }
 

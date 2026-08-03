@@ -57,6 +57,13 @@ namespace CameraUnlock.Core.Protocol
         private volatile float _positionY;
         private volatile float _positionZ;
 
+        // Remote recenter (Headcam trailer). The first observed counter is
+        // latched without triggering, so attaching to a running stream never
+        // fires a spurious recenter; every later change triggers one.
+        private bool _hasRecenterCounter;
+        private byte _lastRecenterCounter;
+        private int _recenterRequested;
+
         // Recenter offset
         private float _offsetYaw;
         private float _offsetPitch;
@@ -118,6 +125,8 @@ namespace CameraUnlock.Core.Protocol
             if (_retrying) return false;
             IsFailed = false;
             _port = port;
+            _hasRecenterCounter = false;
+            Interlocked.Exchange(ref _recenterRequested, 0);
 
             try
             {
@@ -360,6 +369,18 @@ namespace CameraUnlock.Core.Protocol
         }
 
         /// <summary>
+        /// Returns true once per recenter request signaled by the tracker app
+        /// through the packet trailer (e.g. the user pressing CENTER in Headcam).
+        /// The caller routes it into its own recenter path - the receiver never
+        /// applies it, because session-based pipelines center in the processor
+        /// and centering at both levels double-subtracts.
+        /// </summary>
+        public bool TryConsumeRecenterRequest()
+        {
+            return Interlocked.Exchange(ref _recenterRequested, 0) == 1;
+        }
+
+        /// <summary>
         /// Resets the recenter offset to zero.
         /// </summary>
         public void ResetOffset()
@@ -408,6 +429,16 @@ namespace CameraUnlock.Core.Protocol
                             _positionX = positionParsed.X;
                             _positionY = positionParsed.Y;
                             _positionZ = positionParsed.Z;
+                        }
+
+                        if (OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
+                        {
+                            if (_hasRecenterCounter && recenterCounter != _lastRecenterCounter)
+                            {
+                                Interlocked.Exchange(ref _recenterRequested, 1);
+                            }
+                            _lastRecenterCounter = recenterCounter;
+                            _hasRecenterCounter = true;
                         }
 
                         _isRemoteConnection = !IPAddress.IsLoopback(remoteEndpoint.Address);

@@ -160,6 +160,9 @@ namespace CameraUnlock.Core.Unity.Tracking
                 if (!_wasApplyingTracking)
                     BeginTrackingSession();
 
+                if (_receiver.TryConsumeRecenterRequest())
+                    Recenter();
+
                 float scale = AdvanceTransitionIn();
 
                 var rawPose = _receiver.GetLatestPose();

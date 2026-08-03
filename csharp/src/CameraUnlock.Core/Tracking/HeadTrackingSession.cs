@@ -119,6 +119,12 @@ namespace CameraUnlock.Core.Tracking
             {
                 HandleConnectionRecenter();
 
+                if (_receiver.TryConsumeRecenterRequest())
+                {
+                    Recenter();
+                    Log?.Invoke("Recentered by tracker app");
+                }
+
                 TrackingPose rawPose = _receiver.GetLatestPose();
                 TrackingPose interpolated = _poseInterpolator.Update(rawPose, deltaTime);
                 TrackingPose rotation = _processor.Process(interpolated, deltaTime);

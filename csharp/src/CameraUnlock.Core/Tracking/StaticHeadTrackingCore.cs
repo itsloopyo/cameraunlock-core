@@ -153,6 +153,11 @@ namespace CameraUnlock.Core.Tracking
                 _log?.Invoke("Auto-recentered on first connection");
             }
 
+            if (_receiver.TryConsumeRecenterRequest())
+            {
+                Recenter();
+            }
+
             return true;
         }
 
