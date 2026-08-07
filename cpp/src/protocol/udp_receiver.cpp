@@ -29,7 +29,9 @@ bool UdpReceiver::Start(uint16_t port) {
         m_failed.store(true, std::memory_order_release);
         if (m_log) {
             m_log("Failed to bind UDP port " + std::to_string(port) +
-                  " -- will retry every " + std::to_string(kRetryIntervalMs / 1000) + "s");
+                  " (another app is listening on it -- OpenTrack, or another"
+                  " game) -- retrying every " + std::to_string(kRetryIntervalMs) +
+                  "ms until it is free");
         }
         StartRetryLoop();
         return false;

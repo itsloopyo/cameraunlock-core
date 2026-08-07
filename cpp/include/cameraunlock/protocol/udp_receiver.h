@@ -24,7 +24,11 @@ public:
     static constexpr int kConnectionTimeoutMs = 500;
 
     /// Interval between bind retries when the port is held by another process.
-    static constexpr int kRetryIntervalMs = 5000;
+    /// Short on purpose: this is the only path that reclaims the port, so it
+    /// covers both a slow-exiting previous game instance (sub-second) and a
+    /// tracker app the user quits mid-session, which should be picked up
+    /// promptly rather than feeling broken.
+    static constexpr int kRetryIntervalMs = 500;
 
     /// Interval between "still waiting" retry log messages.
     static constexpr int kRetryLogIntervalMs = 30000;
