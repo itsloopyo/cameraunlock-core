@@ -196,6 +196,13 @@
       "executable_relpath": "Eternal Afternoon.exe",
       "data_folder": "Eternal Afternoon_Data"
     },
+    "red-eclipse": {
+      "display_name": "Red Eclipse",
+      "env_var": "RED_ECLIPSE_PATH",
+      "steam_app_id": 967460,
+      "steam_folder": "Red Eclipse",
+      "executable_relpath": "bin\\amd64\\redeclipse.exe"
+    },
     "resident-evil-2": {
       "display_name": "Resident Evil 2",
       "env_var": "RE2_PATH",
