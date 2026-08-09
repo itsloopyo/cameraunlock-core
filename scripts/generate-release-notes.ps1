@@ -30,7 +30,13 @@ if (Test-Path "RELEASE_NOTES.md") {
 }
 
 # Check for previous tag
+# Temporarily allow errors so git describe doesn't throw when there are no tags:
+# under ErrorActionPreference=Stop, PowerShell 5.1 wraps the redirected stderr as
+# a NativeCommandError and terminates before the first-release branch below runs.
+$prevPref = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 $previousTag = git describe --tags --abbrev=0 HEAD^ 2>$null
+$ErrorActionPreference = $prevPref
 if ($LASTEXITCODE -ne 0) {
     # First release - use all commits
     "First release." | Set-Content $OutputFile
