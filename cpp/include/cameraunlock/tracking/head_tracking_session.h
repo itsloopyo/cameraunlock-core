@@ -10,6 +10,7 @@
 #include "cameraunlock/processing/tracking_processor.h"
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <type_traits>
 #include <utility>
@@ -112,10 +113,13 @@ public:
     bool IsRotationActive() const { return GetMode() != TrackingMode::PositionOnly; }
     bool IsPositionActive() const { return GetMode() != TrackingMode::RotationOnly; }
 
-    /// Consecutive frames with tracker data required before the automatic
+    /// Consecutive settled packets required before the automatic
     /// first-connection recenter fires, giving phone trackers time to settle.
     void SetStabilizationFrames(int frames) { m_stabilizationFrames = frames; }
     int GetStabilizationFrames() const { return m_stabilizationFrames; }
+
+    /// True once a center has been captured, automatically or on request.
+    bool HasCentered() const { return m_hasCentered; }
 
     /// Runs the pipeline for this frame. Returns false when the receiver has
     /// no rotation data; cached outputs report invalid in that case.
@@ -127,11 +131,35 @@ public:
             return false;
         }
 
-        // Auto-recenter once tracking has stabilized after the first connection.
+        const int64_t receiveTs = m_receiver.GetLastReceiveTimestamp();
+        const bool isNewPacket = (receiveTs != m_lastReceiveTimestamp);
+        m_lastReceiveTimestamp = receiveTs;
+
+        // Auto-recenter once, on the first pose the player HOLDS still after the
+        // first connection.
+        //
+        // Elapsed frames alone say nothing about whether the player is in
+        // position: a mod starts tracking while the game is still on its intro
+        // screens, so a plain countdown captures whatever pose they happened to
+        // hold half a minute before they sit down, and that offset then rides
+        // the view for the rest of the session. A held pose is the moment they
+        // have settled in front of the monitor.
+        //
+        // The window counts PACKETS, not frames. Receivers report their last
+        // known pose whether or not it is fresh, so a tracker that has stopped
+        // sending reads as a perfectly still head - the one state that must
+        // never be mistaken for a settled player.
         bool recentered = false;
-        if (!m_hasCentered) {
-            m_stabilizationCount++;
-            if (m_stabilizationCount >= m_stabilizationFrames) {
+        if (!m_hasCentered && isNewPacket) {
+            if (!m_hasSettleAnchor || fabsf(rawYaw - m_settleYaw) > kSettleDegrees ||
+                fabsf(rawPitch - m_settlePitch) > kSettleDegrees ||
+                fabsf(rawRoll - m_settleRoll) > kSettleDegrees) {
+                m_settleYaw = rawYaw;
+                m_settlePitch = rawPitch;
+                m_settleRoll = rawRoll;
+                m_hasSettleAnchor = true;
+                m_stabilizationCount = 0;
+            } else if (++m_stabilizationCount >= m_stabilizationFrames) {
                 m_hasCentered = true;
                 Recenter();
                 recentered = true;
@@ -154,10 +182,6 @@ public:
             // hold the old orientation for a packet interval.
             m_receiver.GetRotation(rawYaw, rawPitch, rawRoll);
         }
-
-        int64_t receiveTs = m_receiver.GetLastReceiveTimestamp();
-        bool isNewPacket = (receiveTs != m_lastReceiveTimestamp);
-        m_lastReceiveTimestamp = receiveTs;
 
         // Detect new DATA, not just new packets.
         bool isNewSample = isNewPacket &&
@@ -263,8 +287,15 @@ private:
     PositionProcessor m_positionProcessor;
 
     std::atomic<int> m_mode{static_cast<int>(TrackingMode::RotationAndPosition)};
+    // How far the pose may wander, per axis, and still count as held. Wide
+    // enough to ride out tracker jitter, narrow enough that reaching for the
+    // mouse or glancing at the keyboard restarts the window.
+    static constexpr float kSettleDegrees = 1.5f;
+
     int m_stabilizationFrames = 30;
     int m_stabilizationCount = 0;
+    float m_settleYaw = 0.0f, m_settlePitch = 0.0f, m_settleRoll = 0.0f;
+    bool m_hasSettleAnchor = false;
     bool m_hasCentered = false;
 
     int64_t m_lastReceiveTimestamp = 0;

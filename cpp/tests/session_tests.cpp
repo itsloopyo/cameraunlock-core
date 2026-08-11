@@ -127,18 +127,55 @@ void TestStabilizationRecenter() {
     Session session(rx);
     session.SetStabilizationFrames(5);
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
+        rx.timestamp++;
         session.Update(0.016f);
     }
-    Check(rx.recenterCalls == 0, "no recenter before stabilization frames elapse");
+    Check(rx.recenterCalls == 0, "no recenter before the settle window fills");
 
+    rx.timestamp++;
     session.Update(0.016f);
-    Check(rx.recenterCalls == 1, "recenter fires once stabilization frames reached");
+    Check(rx.recenterCalls == 1, "recenter fires once the pose has been held");
 
     for (int i = 0; i < 10; i++) {
+        rx.timestamp++;
         session.Update(0.016f);
     }
     Check(rx.recenterCalls == 1, "auto-recenter fires only once");
+}
+
+void TestAutoRecenterWaitsForSettle() {
+    std::cout << "Auto-recenter settle window:\n";
+
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.timestamp = 1;
+
+    Session session(rx);
+    session.SetStabilizationFrames(5);
+
+    // A player still moving their head never fills the window.
+    for (int i = 0; i < 200; i++) {
+        rx.timestamp++;
+        rx.yaw += 4.f;
+        session.Update(0.016f);
+    }
+    Check(rx.recenterCalls == 0, "a moving pose never triggers the automatic recenter");
+
+    // A frozen tracker reads as a perfectly still head; it must not count.
+    for (int i = 0; i < 200; i++) {
+        session.Update(0.016f);
+    }
+    Check(rx.recenterCalls == 0, "a tracker that stopped sending does not count as settled");
+
+    // Held still, within jitter, for the length of the window.
+    for (int i = 0; i < 6; i++) {
+        rx.timestamp++;
+        rx.yaw += (i % 2) ? 0.2f : -0.2f;
+        session.Update(0.016f);
+    }
+    Check(rx.recenterCalls == 1, "a held pose captures the center");
+    Check(session.HasCentered(), "session reports it has centered");
 }
 
 void TestModeCycling() {
@@ -302,6 +339,7 @@ int RunSessionTests() {
     TestNoData();
     TestRotationFlowsThrough();
     TestStabilizationRecenter();
+    TestAutoRecenterWaitsForSettle();
     TestModeCycling();
     TestDuplicatePacketFiltering();
     TestRecenterZeroesPose();
