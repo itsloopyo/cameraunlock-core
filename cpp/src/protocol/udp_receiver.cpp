@@ -7,101 +7,115 @@
 namespace cameraunlock {
 
 namespace {
-constexpr int kRetrySleepIncrementMs = 100;
+
+/// Supervisor wake-up granularity. Retries are timed off the clock rather than
+/// off tick counts, so this only bounds how fast Stop() interrupts the thread.
+constexpr int kSupervisorTickMs = 100;
+
+int64_t NowUs() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+
+}  // namespace
 
 UdpReceiver::~UdpReceiver() {
     Stop();
 }
 
 bool UdpReceiver::Start(uint16_t port) {
-    if (m_running.load(std::memory_order_acquire)) {
-        return true;
+    if (m_supervising.load(std::memory_order_acquire)) {
+        return m_running.load(std::memory_order_acquire);
     }
-    if (m_retrying.load(std::memory_order_acquire)) {
+
+    m_port = port;
+    m_supervising.store(true, std::memory_order_release);
+
+    const bool bound = BindAndReceive();
+    if (!bound && m_log) {
+        m_log("Failed to bind UDP port " + std::to_string(port) +
+              " (another app is listening on it -- OpenTrack, or another"
+              " game) -- retrying every " + std::to_string(kRetryIntervalMs) +
+              "ms until it is free");
+    }
+
+    m_supervisorThread = std::thread(&UdpReceiver::SupervisorThread, this);
+    return bound;
+}
+
+bool UdpReceiver::BindAndReceive() {
+    if (!m_socket.Open(m_port)) {
+        m_failed.store(true, std::memory_order_release);
+        m_retrying.store(true, std::memory_order_release);
         return false;
     }
 
     m_failed.store(false, std::memory_order_release);
-    m_port = port;
+    m_retrying.store(false, std::memory_order_release);
 
-    if (!m_socket.Open(port)) {
-        m_failed.store(true, std::memory_order_release);
-        if (m_log) {
-            m_log("Failed to bind UDP port " + std::to_string(port) +
-                  " (another app is listening on it -- OpenTrack, or another"
-                  " game) -- retrying every " + std::to_string(kRetryIntervalMs) +
-                  "ms until it is free");
-        }
-        StartRetryLoop();
-        return false;
-    }
-
-    StartReceiverThread();
-    return true;
-}
-
-void UdpReceiver::StartRetryLoop() {
-    m_retrying.store(true, std::memory_order_release);
-    m_retryThread = std::thread(&UdpReceiver::RetryThread, this);
-}
-
-void UdpReceiver::RetryThread() {
-    const int sleepIncrements = kRetryIntervalMs / kRetrySleepIncrementMs;
-    const int attemptsPerLog = kRetryLogIntervalMs / kRetryIntervalMs;
-    int attempts = 0;
-
-    while (m_retrying.load(std::memory_order_acquire)) {
-        // Sleep in short increments so Stop() can interrupt quickly.
-        for (int i = 0; i < sleepIncrements; ++i) {
-            if (!m_retrying.load(std::memory_order_acquire)) return;
-            std::this_thread::sleep_for(std::chrono::milliseconds(kRetrySleepIncrementMs));
-        }
-        if (!m_retrying.load(std::memory_order_acquire)) return;
-
-        attempts++;
-
-        if (m_socket.Open(m_port)) {
-            if (!m_retrying.load(std::memory_order_acquire)) {
-                m_socket.Close();
-                return;
-            }
-
-            m_failed.store(false, std::memory_order_release);
-            m_retrying.store(false, std::memory_order_release);
-
-            // Stop() blocks on this thread's join, so spinning up the receive
-            // thread here is safe -- a concurrent Stop() will see the post-join
-            // m_running and tear it down through the normal path.
-            StartReceiverThread();
-
-            if (m_log) {
-                m_log("Bound UDP port " + std::to_string(m_port) +
-                      " after " + std::to_string(attempts) + " retries");
-            }
-            return;
-        }
-
-        if (attempts % attemptsPerLog == 0 && m_log) {
-            int elapsedSec = attempts * kRetryIntervalMs / 1000;
-            m_log("Still waiting for UDP port " + std::to_string(m_port) +
-                  " (" + std::to_string(elapsedSec) + "s elapsed)");
-        }
-    }
-}
-
-void UdpReceiver::StartReceiverThread() {
+    m_receiveFailed.store(false, std::memory_order_release);
     m_stopFlag.store(false, std::memory_order_release);
     m_running.store(true, std::memory_order_release);
     m_thread = std::thread(&UdpReceiver::ReceiverThread, this);
+    return true;
 }
 
-void UdpReceiver::Stop() {
-    m_retrying.store(false, std::memory_order_release);
-    if (m_retryThread.joinable()) {
-        m_retryThread.join();
-    }
+void UdpReceiver::SupervisorThread() {
+    int64_t retryingSinceUs = NowUs();
+    int64_t lastAttemptUs = retryingSinceUs;
+    int64_t lastWaitLogUs = retryingSinceUs;
 
+    while (m_supervising.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(kSupervisorTickMs));
+        if (!m_supervising.load(std::memory_order_acquire)) return;
+
+        const int64_t now = NowUs();
+
+        if (m_retrying.load(std::memory_order_acquire)) {
+            if (now - lastAttemptUs < static_cast<int64_t>(kRetryIntervalMs) * 1000) continue;
+            lastAttemptUs = now;
+
+            if (BindAndReceive()) {
+                if (m_log) {
+                    m_log("Bound UDP port " + std::to_string(m_port) + " after " +
+                          std::to_string((now - retryingSinceUs) / 1000000) +
+                          "s of waiting - tracking is live");
+                }
+            } else if (m_log && now - lastWaitLogUs >=
+                                    static_cast<int64_t>(kRetryLogIntervalMs) * 1000) {
+                lastWaitLogUs = now;
+                m_log("Still waiting for UDP port " + std::to_string(m_port) +
+                      " (" + std::to_string((now - retryingSinceUs) / 1000000) + "s elapsed)");
+            }
+            continue;
+        }
+
+        // Bound. Silence needs no action: a socket that another holder is
+        // taking delivery from starts receiving again by itself the moment
+        // that holder exits. A receive thread that died on a socket error is
+        // the one state that never recovers on its own, so re-establish it.
+        if (!m_receiveFailed.load(std::memory_order_acquire)) continue;
+
+        StopReceiverThread();
+        if (BindAndReceive()) {
+            if (m_log) {
+                m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
+                      " - socket re-established");
+            }
+        } else {
+            retryingSinceUs = NowUs();
+            lastAttemptUs = retryingSinceUs;
+            lastWaitLogUs = retryingSinceUs;
+            if (m_log) {
+                m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
+                      " and another app has since taken it -- retrying every " +
+                      std::to_string(kRetryIntervalMs) + "ms until it is free");
+            }
+        }
+    }
+}
+
+void UdpReceiver::StopReceiverThread() {
     if (m_running.load(std::memory_order_acquire)) {
         m_stopFlag.store(true, std::memory_order_release);
         if (m_thread.joinable()) {
@@ -109,10 +123,20 @@ void UdpReceiver::Stop() {
         }
         m_running.store(false, std::memory_order_release);
     }
-
     m_socket.Close();
+}
 
+void UdpReceiver::Stop() {
+    m_supervising.store(false, std::memory_order_release);
+    if (m_supervisorThread.joinable()) {
+        m_supervisorThread.join();
+    }
+
+    StopReceiverThread();
+
+    m_retrying.store(false, std::memory_order_release);
     m_failed.store(false, std::memory_order_release);
+    m_receiveFailed.store(false, std::memory_order_release);
     m_trackingData.Reset();
     m_yawOffset.store(0.0f, std::memory_order_relaxed);
     m_pitchOffset.store(0.0f, std::memory_order_relaxed);
@@ -209,6 +233,7 @@ void UdpReceiver::ReceiverThread() {
                 m_log("WSAPoll failed with " + std::to_string(WSAGetLastError()) +
                       " - receiver thread exiting");
             }
+            m_receiveFailed.store(true, std::memory_order_release);
             break;
         }
         if (pollResult == 0) continue;

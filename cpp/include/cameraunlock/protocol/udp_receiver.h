@@ -40,15 +40,17 @@ public:
     UdpReceiver(const UdpReceiver&) = delete;
     UdpReceiver& operator=(const UdpReceiver&) = delete;
 
-    /// Starts the UDP receiver on the specified port.
-    /// If the port is already in use, schedules a background retry every
-    /// kRetryIntervalMs and returns false. The retry thread takes over without
-    /// further action from the caller; once it binds successfully the receive
-    /// thread starts and IsRunning becomes true.
+    /// Starts the UDP receiver on the specified port and a supervisor thread
+    /// that keeps it listening for as long as the receiver lives. If the port
+    /// is already in use, Start returns false and the supervisor retries every
+    /// kRetryIntervalMs until it frees up, with no further action from the
+    /// caller; once it binds, the receive thread starts and IsRunning becomes
+    /// true. The supervisor also re-establishes the socket if the receive
+    /// thread dies on a socket error.
     /// @return True if bound and the receive thread started immediately.
     bool Start(uint16_t port = kDefaultPort);
 
-    /// Stops the UDP receiver. Cancels any pending retry, joins both threads,
+    /// Stops the UDP receiver. Joins the supervisor and receive threads,
     /// closes the socket, and clears tracking state.
     void Stop();
 
@@ -60,7 +62,7 @@ public:
     /// True if the receive thread is running.
     bool IsRunning() const { return m_running.load(std::memory_order_acquire); }
 
-    /// True if a background retry is in progress (port currently unavailable).
+    /// True if the supervisor is retrying the bind (port currently unavailable).
     bool IsRetrying() const { return m_retrying.load(std::memory_order_acquire); }
 
     /// True if data has been received recently.
@@ -96,20 +98,25 @@ public:
 
 private:
     void ReceiverThread();
-    void RetryThread();
-    void StartRetryLoop();
-    void StartReceiverThread();
+    void SupervisorThread();
+    bool BindAndReceive();
+    void StopReceiverThread();
 
     // Thread-safe tracking data
     TrackingData m_trackingData;
 
     UdpSocket m_socket;
     std::thread m_thread;
-    std::thread m_retryThread;
+    std::thread m_supervisorThread;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_stopFlag{false};
+    std::atomic<bool> m_supervising{false};
     std::atomic<bool> m_retrying{false};
     std::atomic<bool> m_failed{false};
+    /// Set by the receive thread when it gives up on a socket error, so the
+    /// supervisor re-establishes the socket instead of leaving the receiver
+    /// bound and permanently deaf.
+    std::atomic<bool> m_receiveFailed{false};
     uint16_t m_port{kDefaultPort};
     std::function<void(const std::string&)> m_log;
 

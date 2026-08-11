@@ -1,8 +1,10 @@
-// PollingUdpReceiver loopback tests: recenter trailer and offset behavior
-// through the real socket drain path.
+// Receiver loopback tests: PollingUdpReceiver recenter trailer and offset
+// behavior through the real socket drain path, plus UdpReceiver's supervisor
+// reclaiming a port it could not get, or lost, to another process.
 
 #include "cameraunlock/protocol/polling_udp_receiver.h"
 #include "cameraunlock/protocol/opentrack_packet.h"
+#include "cameraunlock/protocol/udp_receiver.h"
 #include "cameraunlock/protocol/udp_socket.h"
 
 #include <chrono>
@@ -27,6 +29,8 @@ void Check(bool cond, const char* name) {
 
 constexpr uint16_t kReceiverPort = 14261;
 constexpr uint16_t kSenderPort = 14262;
+constexpr uint16_t kSupervisedPort = 14263;
+constexpr uint16_t kSupervisedSenderPort = 14264;
 
 size_t BuildPacket(uint8_t out[54], double x, double y, double z,
                    double yaw, double pitch, double roll,
@@ -46,15 +50,79 @@ size_t BuildPacket(uint8_t out[54], double x, double y, double z,
     return 54;
 }
 
-bool SendTo(cameraunlock::UdpSocket& sender, const uint8_t* data, size_t length) {
+bool SendToPort(cameraunlock::UdpSocket& sender, uint16_t port,
+                const uint8_t* data, size_t length) {
     sockaddr_in addr = {};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(kReceiverPort);
+    addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
     int sent = sendto(sender.GetHandle(), reinterpret_cast<const char*>(data),
                       static_cast<int>(length), 0,
                       reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
     return sent == static_cast<int>(length);
+}
+
+bool SendTo(cameraunlock::UdpSocket& sender, const uint8_t* data, size_t length) {
+    return SendToPort(sender, kReceiverPort, data, length);
+}
+
+/// Another process competing for the tracker port. Raw winsock because
+/// UdpSocket deliberately omits SO_REUSEADDR, and the hijack case needs it.
+SOCKET OpenCompetitor(uint16_t port, bool reuseAddr) {
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return INVALID_SOCKET;
+#ifdef _WIN32
+    if (reuseAddr) {
+        BOOL on = TRUE;
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&on), sizeof(on));
+    }
+#else
+    (void)reuseAddr;
+#endif
+    sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+#ifdef _WIN32
+        closesocket(s);
+#else
+        close(s);
+#endif
+        return INVALID_SOCKET;
+    }
+    return s;
+}
+
+void CloseCompetitor(SOCKET s) {
+    if (s == INVALID_SOCKET) return;
+#ifdef _WIN32
+    closesocket(s);
+#else
+    close(s);
+#endif
+}
+
+/// True once the receiver reports a packet newer than `sinceUs`, within
+/// `timeoutMs`. Polls rather than sleeps so a fast path stays fast.
+bool WaitForPacketAfter(cameraunlock::UdpReceiver& rx, int64_t sinceUs,
+                        cameraunlock::UdpSocket& sender, const uint8_t* pkt,
+                        size_t len, int timeoutMs) {
+    for (int elapsed = 0; elapsed < timeoutMs; elapsed += 50) {
+        if (!SendToPort(sender, kSupervisedPort, pkt, len)) return false;
+        if (rx.GetLastReceiveTimestamp() > sinceUs) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return rx.GetLastReceiveTimestamp() > sinceUs;
+}
+
+bool WaitUntilRunning(cameraunlock::UdpReceiver& rx, int timeoutMs) {
+    for (int elapsed = 0; elapsed < timeoutMs; elapsed += 25) {
+        if (rx.IsRunning()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    return rx.IsRunning();
 }
 
 bool PollUntilReceived(cameraunlock::PollingUdpReceiver& rx) {
@@ -137,6 +205,49 @@ int RunReceiverTests() {
 
     rx.Shutdown();
     sender.Close();
+
+    // ---- UdpReceiver supervisor: keeping hold of a contested tracker port ----
+    std::cout << "UdpReceiver supervisor tests:\n";
+
+    using cameraunlock::UdpReceiver;
+
+    UdpSocket supervisedSender;
+    if (!supervisedSender.Open(kSupervisedSenderPort)) {
+        Check(false, "supervisor sender binds loopback test port");
+        return g_failures;
+    }
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0);
+
+    // The previous game is still holding the tracker port when this one starts.
+    SOCKET occupier = OpenCompetitor(kSupervisedPort, false);
+    Check(occupier != INVALID_SOCKET, "another process holds the tracker port");
+
+    UdpReceiver supervised;
+    Check(!supervised.Start(kSupervisedPort), "Start reports the port as unavailable");
+    Check(supervised.IsRetrying(), "supervisor waits for the port");
+    Check(!supervised.IsRunning(), "no receive thread while the port is held");
+
+    // The user remembers, and closes the other game.
+    CloseCompetitor(occupier);
+    Check(WaitUntilRunning(supervised, 5 * UdpReceiver::kRetryIntervalMs),
+          "binds within a few retry intervals of the port freeing up");
+    Check(WaitForPacketAfter(supervised, 0, supervisedSender, pkt, len, 2000),
+          "tracker data flows once the port is reclaimed");
+
+#ifdef _WIN32
+    // The reason there is no "bound but silent, so re-bind" path: nothing can
+    // take the stream away from a plain bind in the first place. Windows
+    // refuses a SO_REUSEADDR bind on top of one (WSAEACCES).
+    SOCKET hijacker = OpenCompetitor(kSupervisedPort, true);
+    Check(hijacker == INVALID_SOCKET,
+          "a bound port cannot be taken over by a SO_REUSEADDR process");
+    CloseCompetitor(hijacker);
+#endif
+
+    supervised.Stop();
+    Check(!supervised.IsRunning() && !supervised.IsRetrying(),
+          "Stop tears the supervisor and receive thread down");
+    supervisedSender.Close();
 
     if (g_failures == 0) {
         std::cout << "Receiver tests: all passed\n";
