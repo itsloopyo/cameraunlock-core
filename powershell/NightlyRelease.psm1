@@ -157,11 +157,16 @@ function Publish-NightlyBuild {
     try {
         # Rolling tag: drop the existing dev pre-release + its tag, then
         # recreate at HEAD, so the single "Development build" release is
-        # always the newest commit's build. The delete is best-effort: on
-        # the first publish there's nothing to delete (gh prints "release
-        # not found" to stderr, suppressed here) and that's fine.
+        # always the newest commit's build. "release not found" is the one
+        # tolerated failure (first publish, nothing to delete). Anything
+        # else (auth, rate limit, network) must throw here - swallowing it
+        # leaves the old release in place and the create then fails with a
+        # misleading "tag already exists" collision.
         Write-Host "Replacing $DevTag pre-release on GitHub..." -ForegroundColor Cyan
-        & gh release delete $DevTag --yes --cleanup-tag 2>$null
+        $deleteOutput = (& gh release delete $DevTag --yes --cleanup-tag 2>&1 | ForEach-Object { "$_" }) -join "`n"
+        if ($LASTEXITCODE -ne 0 -and $deleteOutput -notmatch 'release not found') {
+            throw "gh release delete $DevTag failed (exit $LASTEXITCODE):`n$deleteOutput"
+        }
 
         & gh release create $DevTag $assetPath `
             --prerelease `
