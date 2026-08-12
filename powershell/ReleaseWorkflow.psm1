@@ -600,12 +600,16 @@ function New-ReleaseTag {
 
     git push origin $Branch
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to push commits. Tag created locally. Run: git push origin $Branch --tags"
+        throw "Failed to push commits. Tag created locally. Run: git push origin $Branch; git push origin $tag"
     }
 
-    git push origin --tags
+    # Push only the tag being released. `--tags` pushes every local tag, so a
+    # remote missing older ones (a recreated repo, a fresh fork) gets them all
+    # at once - release.yml fires per tag and republishes stale versions
+    # alongside this one, each with its own Discord announcement.
+    git push origin $tag
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to push tags. Run manually: git push origin --tags"
+        throw "Failed to push tag $tag. Run manually: git push origin $tag"
     }
 }
 
