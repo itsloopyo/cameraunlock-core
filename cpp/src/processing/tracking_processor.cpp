@@ -47,9 +47,18 @@ TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, floa
 }
 
 void TrackingProcessor::Recenter() {
+    // Accumulate onto the existing centre rather than replace it. Process()
+    // subtracts the centre before smoothing, so m_smoothedQuat already has it
+    // removed; setting the centre to that value directly works the first time
+    // and leaves a residual equal to the previous centre on every later call.
+    // Any mod that recentres automatically once and then offers a recentre
+    // hotkey hits this on the user's first press.
     float yaw, pitch, roll;
     m_smoothedQuat.ToEulerYXZ(yaw, pitch, roll);
-    m_centerManager.SetCenter(yaw, pitch, roll);
+    const TrackingPose& current = m_centerManager.GetCenterOffset();
+    m_centerManager.SetCenter(math::NormalizeAngle(current.yaw + yaw),
+                              math::NormalizeAngle(current.pitch + pitch),
+                              math::NormalizeAngle(current.roll + roll));
 }
 
 void TrackingProcessor::RecenterTo(float yaw, float pitch, float roll) {
