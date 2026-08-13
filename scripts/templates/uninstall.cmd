@@ -375,11 +375,13 @@ exit /b 0
 :remove_ASILoader
 for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "EXE_DIR=%%~dpi"
 if "!EXE_DIR:~-1!"=="\" set "EXE_DIR=!EXE_DIR:~0,-1!"
-for %%f in (%ASI_LOADER_NAME% winmm.dll dinput8.dll xinput1_3.dll) do (
-    if exist "!EXE_DIR!\%%f" (
-        del "!EXE_DIR!\%%f"
-        echo   Removed: %%f
-    )
+:: Only the proxy this package actually installed. Sweeping the other common
+:: ASI names off the disk deletes OTHER software's loader: winmm.dll and
+:: dinput8.dll are what ReShade and most other ASI mods proxy through, so
+:: uninstalling this mod used to silently break them.
+if exist "!EXE_DIR!\%ASI_LOADER_NAME%" (
+    del "!EXE_DIR!\%ASI_LOADER_NAME%"
+    echo   Removed: %ASI_LOADER_NAME%
 )
 exit /b 0
 
