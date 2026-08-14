@@ -3,6 +3,7 @@ bin/
 obj/
 out/
 build/
+build-test/
 x64/
 Debug/
 Release/
