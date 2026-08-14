@@ -2,6 +2,7 @@
 #include "cameraunlock/protocol/opentrack_packet.h"
 #include "cameraunlock/data/position_data.h"
 #include <chrono>
+#include <cmath>
 #include <string>
 
 namespace cameraunlock {
@@ -153,6 +154,19 @@ void UdpReceiver::Stop() {
     m_hasPosition.store(false, std::memory_order_relaxed);
     m_lastReceiveTimestamp.store(0, std::memory_order_relaxed);
     m_isRemoteConnection.store(false, std::memory_order_relaxed);
+    m_primarySource = 0;
+    m_avoidSource = 0;
+    m_cycleRequested.store(false, std::memory_order_relaxed);
+    m_primaryLastSeenUs = 0;
+    m_hasAcceptedPose = false;
+    m_pendingValid = false;
+    m_lastStepWasLarge = false;
+    m_frozenPackets.store(0, std::memory_order_relaxed);
+    m_seenSourceCount = 0;
+    m_lastSourceYaw = 0.0f;
+    m_lastSourcePitch = 0.0f;
+    m_lastSourceRoll = 0.0f;
+    m_rejectedPackets.store(0, std::memory_order_relaxed);
 }
 
 bool UdpReceiver::IsReceiving() const {
@@ -202,6 +216,98 @@ void UdpReceiver::Recenter() {
         m_posYOffset.store(m_posY.load(std::memory_order_relaxed), std::memory_order_relaxed);
         m_posZOffset.store(m_posZ.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
+}
+
+namespace {
+
+float LargestAxisChange(const TrackingPose& a, const TrackingPose& b) {
+    const float dy = std::fabs(a.yaw - b.yaw);
+    const float dp = std::fabs(a.pitch - b.pitch);
+    const float dr = std::fabs(a.roll - b.roll);
+    float worst = dy > dp ? dy : dp;
+    return worst > dr ? worst : dr;
+}
+
+}  // namespace
+
+// Decides whether a freshly arrived pose is head tracking or the tracker having
+// stopped tracking.
+//
+// A head tracker that loses the head does not say so - it just starts repeating
+// one pose, usually centred. Followed faithfully, that swings the view from
+// wherever the head was to centre and back every time tracking blinks, which is
+// the single most visible failure this mod can have and is indistinguishable
+// from a camera bug. Measured against a simulated eye-tracker dropout, each
+// 200 ms blink moved the view 17 to 25 degrees.
+//
+// The tell is that the repeat is BIT-IDENTICAL. Real sensor output always
+// jitters, so a value that arrives twice unchanged is not a measurement. That
+// cannot be known until the repeat arrives, so a large jump is held back for one
+// packet and only accepted once the following packet DIFFERS from it. Small
+// changes - ordinary head movement - are never delayed.
+bool UdpReceiver::AcceptPose(const TrackingPose& pose, bool repeatsPrevious) {
+    if (!m_hasAcceptedPose) {
+        m_hasAcceptedPose = true;
+        m_lastStepWasLarge = false;
+        m_acceptedPose = pose;
+        return true;
+    }
+
+    if (repeatsPrevious) {
+        // A resent duplicate is harmless - it is the value already published, so
+        // publishing it again changes nothing. Refusing them would fight every
+        // tracker app that resends faster than its sensor updates, which is most
+        // of them, and that fight would itself look like jitter.
+        //
+        // The one case that matters is a repeat of a jump still awaiting
+        // confirmation: a source that has stopped tracking repeats its "lost"
+        // pose exactly, so the jump toward it was never a head movement. Keep
+        // holding the last pose the head was actually in.
+        if (m_pendingValid) {
+            // The source has stopped moving, so whatever movement preceded this
+            // is over: the next real step starts a new movement and gets the
+            // confirmation hold again.
+            m_lastStepWasLarge = false;
+            m_frozenPackets.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        return true;
+    }
+
+    const float jump = LargestAxisChange(pose, m_acceptedPose);
+
+    // Hold back the FIRST large step of a movement, never a continuing one.
+    //
+    // The `m_lastStepWasLarge` half is not a refinement, it is the whole
+    // correctness of this gate. Without it, sustained fast movement is rejected
+    // on every OTHER packet: one is held, the next is accepted, the one after
+    // that is a large step again from the newly accepted pose, and so on. The
+    // published pose then alternates between current and one packet stale for as
+    // long as the head keeps moving, at half the tracker's rate - which is
+    // exactly "the view flickers between two poses", and it appears only while
+    // the head is moving, so a held test pose never shows it.
+    //
+    // Rejecting a packet also leaves `m_acceptedPose` behind, so the next step
+    // measures even larger and the gate is more certain to trip again. It
+    // self-sustains.
+    //
+    // The threshold reasons in degrees per PACKET, so what counts as "large"
+    // depends on the tracker's sample rate: 300 deg/s is 5 degrees a packet at
+    // 60 Hz but 9 at 33 Hz, and plenty of trackers (eye trackers especially) run
+    // at the low end. A dropout is still caught, because the thing that
+    // identifies one is not the size of the jump but that the pose STOPS moving
+    // afterwards - which the repeat branch above tests directly.
+    const bool sustainedMovement = m_lastStepWasLarge;
+    if (jump > kConfirmJumpDegrees && !m_pendingValid && !sustainedMovement) {
+        m_pendingValid = true;
+        m_frozenPackets.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    m_pendingValid = false;
+    m_lastStepWasLarge = jump > kConfirmJumpDegrees;
+    m_acceptedPose = pose;
+    return true;
 }
 
 void UdpReceiver::ReceiverThread() {
@@ -279,9 +385,119 @@ void UdpReceiver::ReceiverThread() {
 #endif
 
         if (bytesReceived >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
+            // Lock onto the first tracker that turns up and ignore any other.
+            //
+            // Nothing stops two apps sending to this port, and both used to get
+            // through: the pose then alternates between them packet by packet
+            // and the view flicks between two positions in every camera mode.
+            // Averaging two trackers is never what anyone wants, and silently
+            // doing it hides the real problem, so the second one is dropped and
+            // named in the log.
             auto now = std::chrono::steady_clock::now();
-            int64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            const int64_t arrivedUs = std::chrono::duration_cast<std::chrono::microseconds>(
                 now.time_since_epoch()).count();
+
+            const uint64_t source =
+                (static_cast<uint64_t>(senderAddr.sin_addr.s_addr) << 16) | ntohs(senderAddr.sin_port);
+
+            // Census of every endpoint that sends here, logged once each. Which
+            // apps are really on this port - and whether one of them rotates its
+            // source port - decides whether "ignore the second source" is even
+            // the right rule, and neither is guessable from outside.
+            if (m_log) {
+                bool known = false;
+                for (int i = 0; i < m_seenSourceCount; ++i) {
+                    if (m_seenSources[i] == source) { known = true; break; }
+                }
+                if (!known && m_seenSourceCount < kMaxSeenSources) {
+                    m_seenSources[m_seenSourceCount++] = source;
+                    char ip[INET_ADDRSTRLEN] = {};
+                    inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
+                    m_log(std::string("tracker source seen: ") + ip + ":" +
+                          std::to_string(ntohs(senderAddr.sin_port)) + " (" +
+                          std::to_string(m_seenSourceCount) + " distinct so far)");
+                }
+            }
+            // Which app wins the lock is decided by whichever packet lands first
+            // after the mod starts listening, and that is a race measured in
+            // milliseconds - three senders arrived 6 ms apart on a real machine,
+            // so "start the one you want first" does not decide it. When the
+            // wrong one wins there is nothing the player can do about it from
+            // inside the game, and the symptom (wrong sensitivity) does not look
+            // like a source problem at all. This lets them step to the next one
+            // until the view responds the way they expect.
+            if (m_cycleRequested.exchange(false, std::memory_order_acq_rel)) {
+                m_avoidSource = m_primarySource;
+                m_primarySource = 0;
+            }
+
+            if (m_primarySource == 0) {
+                // Skip the source just cycled away from, unless it is the only
+                // one sending - in which case re-locking to it is the honest
+                // outcome, and the log line says so.
+                if (source == m_avoidSource &&
+                    (arrivedUs - m_cycleRequestedAtUs.load(std::memory_order_relaxed)) / 1000 < kSourceHandoverMs) {
+                    continue;
+                }
+                if (m_log && m_avoidSource != 0) {
+                    char ip[INET_ADDRSTRLEN] = {};
+                    inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
+                    m_log(std::string(source == m_avoidSource
+                                          ? "only one tracker source is sending; staying on "
+                                          : "switched to tracker source ") +
+                          ip + ":" + std::to_string(ntohs(senderAddr.sin_port)));
+                }
+                m_avoidSource = 0;
+                m_primarySource = source;
+                m_primaryLastSeenUs = arrivedUs;
+            } else if (source != m_primarySource) {
+                // A challenger takes over ONLY if the incumbent has gone
+                // SILENT. A still head is not a dead tracker.
+                //
+                // This used to hand over when the incumbent "stopped moving"
+                // while a challenger was moving, so that an idle app winning the
+                // race could not strand the player. With more than one app
+                // actually sending - an OpenTrack instance and a vendor tool
+                // like Tobii Game Hub, say - that rule flaps: hold your head
+                // still for two seconds and the lock jumps to whichever other
+                // app is jittering, move again and it jumps back. Two apps
+                // rarely agree on scaling, so the view alternates between two
+                // different amounts of head rotation, seconds apart, in every
+                // camera mode. It survives any amount of work on the camera
+                // because nothing about it is in the camera.
+                //
+                // Silence is the only signal that cannot be produced by the
+                // player simply sitting still, so it is the only one used. An
+                // idle app that wins the race is handled by SAYING SO - loudly,
+                // and repeatedly - rather than by guessing.
+                const bool incumbentSilent =
+                    (arrivedUs - m_primaryLastSeenUs) / 1000 >= kSourceHandoverMs;
+
+                if (incumbentSilent) {
+                    if (m_log) {
+                        char ip[INET_ADDRSTRLEN] = {};
+                        inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
+                        m_log(std::string("tracker source went silent; switching to ") +
+                              ip + ":" + std::to_string(ntohs(senderAddr.sin_port)));
+                    }
+                    m_primarySource = source;
+                    m_primaryLastSeenUs = arrivedUs;
+                } else {
+                    if (m_rejectedPackets.fetch_add(1, std::memory_order_relaxed) == 0 && m_log) {
+                        char ip[INET_ADDRSTRLEN] = {};
+                        inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
+                        m_log(std::string("a SECOND tracker source is sending to this port (") + ip +
+                              ":" + std::to_string(ntohs(senderAddr.sin_port)) +
+                              ") - ignoring it. Two sources make the head pose alternate between"
+                              " them, which looks like the view flicking between two positions."
+                              " Close whichever tracker you are not using.");
+                    }
+                    continue;
+                }
+            } else {
+                m_primaryLastSeenUs = arrivedUs;
+            }
+            const int64_t nowUs = arrivedUs;
 
             // Re-arm first-sighting after a tracking gap: the tracker app
             // restarting resets its counter to zero, so a value latched from
@@ -299,6 +515,18 @@ void UdpReceiver::ReceiverThread() {
                 m_log("OpenTrack parse failed on " + std::to_string(bytesReceived) + "-byte packet");
             }
             if (parsed) {
+                const bool repeatsPrevious = pose.yaw == m_lastSourceYaw &&
+                                             pose.pitch == m_lastSourcePitch &&
+                                             pose.roll == m_lastSourceRoll;
+                if (!repeatsPrevious) {
+                    m_lastSourceYaw = pose.yaw;
+                    m_lastSourcePitch = pose.pitch;
+                    m_lastSourceRoll = pose.roll;
+                }
+
+                if (!AcceptPose(pose, repeatsPrevious)) {
+                    continue;
+                }
                 m_trackingData.Set(pose.yaw, pose.pitch, pose.roll);
 
                 // Store position data

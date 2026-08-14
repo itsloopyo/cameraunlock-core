@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <string>
 #include <thread>
@@ -22,6 +23,27 @@ public:
     /// Lower than PollingUdpReceiver (500 vs 1000) because the threaded receiver
     /// checks more frequently and can detect disconnects sooner.
     static constexpr int kConnectionTimeoutMs = 500;
+    /// How long the chosen tracker may go quiet before another sender is
+    /// allowed to take over. Long enough that ordinary jitter or a dropped
+    /// packet never hands control to a second app mid-session.
+    static constexpr int kSourceHandoverMs = 2000;
+
+    /// The FIRST pose change larger than this is held back one packet and only
+    /// accepted if the next packet differs from it.
+    ///
+    /// Note what this measures: degrees per PACKET, not per second, so what
+    /// counts as large depends entirely on the tracker's sample rate. 300 deg/s
+    /// is 5 degrees a packet at 60 Hz but 9 at 33 Hz, and eye trackers commonly
+    /// run at the low end - so ordinary movement DOES cross this on real
+    /// hardware. That is survivable only because a continuing movement is never
+    /// held (see m_lastStepWasLarge); holding every large step rejects alternate
+    /// packets and publishes a pose that alternates between current and stale.
+    /// A pose change larger than this waits one packet for the next one to land
+    /// near it before it is published. Ordinary head movement between packets is
+    /// far smaller; a tracker snapping to its "lost the head" pose is far
+    /// larger, and the packet after it corroborates the snap rather than
+    /// continuing the movement.
+    static constexpr float kConfirmJumpDegrees = 8.0f;
 
     /// Interval between bind retries when the port is held by another process.
     /// Short on purpose: this is the only path that reclaims the port, so it
@@ -96,7 +118,31 @@ public:
         return m_recenterRequested.exchange(false, std::memory_order_acq_rel);
     }
 
+    /// Packets ignored because the tracker had stopped tracking and was
+    /// repeating one pose. Non-zero means head tracking survived a dropout that
+    /// would otherwise have swung the view to centre and back.
+    uint64_t GetFrozenPacketCount() const {
+        return m_frozenPackets.load(std::memory_order_relaxed);
+    }
+
+    /// Step to a different tracker app when the wrong one won the startup race.
+    /// Safe to call from any thread; it takes effect on the next packet.
+    void CycleSource() {
+        m_cycleRequestedAtUs.store(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count(),
+            std::memory_order_relaxed);
+        m_cycleRequested.store(true, std::memory_order_release);
+    }
+
+    /// Packets dropped because they came from a second tracker source. Non-zero
+    /// means two apps are sending to this port and one of them is being ignored.
+    uint64_t GetRejectedPacketCount() const {
+        return m_rejectedPackets.load(std::memory_order_relaxed);
+    }
+
 private:
+    bool AcceptPose(const TrackingPose& pose, bool repeatsPrevious);
     void ReceiverThread();
     void SupervisorThread();
     bool BindAndReceive();
@@ -145,6 +191,42 @@ private:
     // Timestamp for connection detection
     std::atomic<int64_t> m_lastReceiveTimestamp{0};
     std::atomic<bool> m_isRemoteConnection{false};
+
+    // The first sender seen, and anything else that turns up.
+    //
+    // Two tracker apps pointed at this port both get through, and the head pose
+    // then alternates between them packet by packet - which looks exactly like
+    // the view flicking between two positions, in every camera mode, and is
+    // impossible to tell from a mod bug without knowing to look. Receive-thread
+    // only; the counter is atomic so the outside can report it.
+    uint64_t m_primarySource{0};
+    // The source cycled away from, so the next lock does not land back on it.
+    uint64_t m_avoidSource{0};
+    std::atomic<bool> m_cycleRequested{false};
+    std::atomic<int64_t> m_cycleRequestedAtUs{0};
+    int64_t m_primaryLastSeenUs{0};
+    float m_lastSourceYaw{0.0f};
+    float m_lastSourcePitch{0.0f};
+    float m_lastSourceRoll{0.0f};
+    std::atomic<uint64_t> m_rejectedPackets{0};
+
+    /// Dropout rejection: the last pose actually published, and whether a large
+    /// jump is waiting to be confirmed by a following packet that differs from
+    /// it.
+    TrackingPose m_acceptedPose;
+    bool m_hasAcceptedPose{false};
+    bool m_pendingValid{false};
+    /// True when the last accepted step was itself larger than the threshold, so
+    /// the head is mid-movement rather than starting one. Only the FIRST large
+    /// step of a movement is held for confirmation; holding every one rejects
+    /// alternate packets for as long as the movement lasts and publishes a pose
+    /// that alternates between current and stale.
+    bool m_lastStepWasLarge{false};
+    std::atomic<uint64_t> m_frozenPackets{0};
+
+    static constexpr int kMaxSeenSources = 8;
+    uint64_t m_seenSources[kMaxSeenSources]{};
+    int m_seenSourceCount{0};
 };
 
 }  // namespace cameraunlock
