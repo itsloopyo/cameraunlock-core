@@ -17,8 +17,12 @@ namespace CameraUnlock.Core.Protocol
         public const int DefaultPort = 4242;
         private const int ReceiveTimeoutMs = 100;
         private const int DisconnectThreshold = 50;
-        private const int RetryIntervalMs = 5000;
+        // Polled fast rather than lazily: the common case is a second game still
+        // holding the port, and the user expects tracking to come alive as soon as
+        // they close it. A failed bind is cheap, so the wait is sub-second.
+        private const int RetryIntervalMs = 500;
         private const int RetryLogIntervalMs = 30000;
+        private const int RetrySleepSliceMs = 100;
 
         /// <summary>
         /// Default max age in milliseconds for data to be considered fresh.
@@ -138,7 +142,7 @@ namespace CameraUnlock.Core.Protocol
             catch (SocketException)
             {
                 IsFailed = true;
-                Log?.Invoke(string.Format("Failed to bind UDP port {0} -- will retry every {1}s", port, RetryIntervalMs / 1000));
+                Log?.Invoke(string.Format("UDP port {0} is in use by another process (another game still running?) -- polling every {1}ms and will start listening as soon as it frees up", port, RetryIntervalMs));
                 StartRetryLoop();
                 return false;
             }
@@ -172,10 +176,10 @@ namespace CameraUnlock.Core.Protocol
             while (_retrying && !_disposed)
             {
                 // Sleep in short increments so Stop()/Dispose() can interrupt quickly
-                for (int i = 0; i < RetryIntervalMs / 100; i++)
+                for (int i = 0; i < RetryIntervalMs / RetrySleepSliceMs; i++)
                 {
                     if (!_retrying || _disposed) return;
-                    Thread.Sleep(100);
+                    Thread.Sleep(RetrySleepSliceMs);
                 }
                 if (!_retrying || _disposed) return;
 
@@ -205,7 +209,7 @@ namespace CameraUnlock.Core.Protocol
                     };
                     _receiveThread.Start();
 
-                    Log?.Invoke(string.Format("Bound UDP port {0} after {1} retries", _port, attempts));
+                    Log?.Invoke(string.Format("UDP port {0} freed up - now listening (waited {1}s)", _port, attempts * RetryIntervalMs / 1000));
                     return;
                 }
                 catch (SocketException)
