@@ -227,6 +227,28 @@ namespace CameraUnlock.Core.Unity.Tracking
         {
             screenOffset = Vector2.zero;
 
+            Vector2 ndc;
+            if (!TryGetAimNdcOffset(out ndc))
+                return false;
+
+            screenOffset = new Vector2(ndc.x * (Screen.width * 0.5f), ndc.y * (Screen.height * 0.5f));
+            return true;
+        }
+
+        /// <summary>
+        /// The same projection as <see cref="TryGetAimScreenOffset"/>, but in normalized device
+        /// coordinates: ±1 at the edges of the camera's frustum, +X right, +Y up.
+        ///
+        /// This is the resolution-independent form, and the one to use whenever the target is a
+        /// uGUI element rather than a raw screen blit. Screen pixels are only the right unit for
+        /// a screen-space-overlay canvas that covers the whole window; a world-space HUD canvas,
+        /// or a game that renders through a render texture of a different aspect than the window,
+        /// needs the offset scaled by the canvas rather than by Screen.width/height.
+        /// </summary>
+        public bool TryGetAimNdcOffset(out Vector2 ndcOffset)
+        {
+            ndcOffset = Vector2.zero;
+
             if (!IsApplyingTracking)
                 return false;
 
@@ -248,9 +270,9 @@ namespace CameraUnlock.Core.Unity.Tracking
             if (tanHalfFovX < ProjectionEpsilon || tanHalfFovY < ProjectionEpsilon)
                 return false;
 
-            screenOffset = new Vector2(
-                aimDirection.x / forward / tanHalfFovX * (Screen.width * 0.5f),
-                aimDirection.y / forward / tanHalfFovY * (Screen.height * 0.5f));
+            ndcOffset = new Vector2(
+                aimDirection.x / forward / tanHalfFovX,
+                aimDirection.y / forward / tanHalfFovY);
             return true;
         }
 

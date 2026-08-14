@@ -17,6 +17,7 @@ namespace CameraUnlock.Core.Unity.UI
 
         private RectTransform _targetRect;
         private Canvas _canvas;
+        private RectTransform _canvasRect;
         private Vector2 _originalAnchoredPosition;
         private bool _hasOriginal;
         private bool _isOffset;
@@ -37,16 +38,46 @@ namespace CameraUnlock.Core.Unity.UI
             if (!EnsureTarget())
                 return;
 
+            float scale = _canvas != null ? _canvas.scaleFactor : 1f;
+            if (scale <= 0f) scale = 1f;
+
+            ApplyLocalOffset(screenPixelOffset / scale);
+        }
+
+        /// <summary>
+        /// Offsets the element by a normalized-device-coordinate amount (±1 at the edges of the
+        /// view), scaled by the canvas's own rect.
+        ///
+        /// Prefer this over <see cref="ApplyOffset"/>. Screen pixels are only the correct unit
+        /// for a screen-space-overlay canvas filling the window: a world-space HUD canvas has no
+        /// meaningful scaleFactor, and a game rendering through a render texture whose aspect
+        /// differs from the window makes Screen.width the wrong divisor. Going through the canvas
+        /// rect is right in every one of those cases, and reduces to the same result as
+        /// ApplyOffset for a plain overlay canvas.
+        /// </summary>
+        public void ApplyNdcOffset(Vector2 ndcOffset)
+        {
+            if (!EnsureTarget())
+                return;
+
+            if (_canvasRect == null)
+                return;
+
+            Rect canvasArea = _canvasRect.rect;
+            ApplyLocalOffset(new Vector2(
+                ndcOffset.x * canvasArea.width * 0.5f,
+                ndcOffset.y * canvasArea.height * 0.5f));
+        }
+
+        private void ApplyLocalOffset(Vector2 localOffset)
+        {
             if (!_hasOriginal)
             {
                 _originalAnchoredPosition = _targetRect.anchoredPosition;
                 _hasOriginal = true;
             }
 
-            float scale = _canvas != null ? _canvas.scaleFactor : 1f;
-            if (scale <= 0f) scale = 1f;
-
-            _targetRect.anchoredPosition = _originalAnchoredPosition + screenPixelOffset / scale;
+            _targetRect.anchoredPosition = _originalAnchoredPosition + localOffset;
             _isOffset = true;
         }
 
@@ -78,6 +109,7 @@ namespace CameraUnlock.Core.Unity.UI
                 _cachedTarget = target;
                 _targetRect = target.GetComponent<RectTransform>();
                 _canvas = target.GetComponentInParent<Canvas>();
+                _canvasRect = _canvas != null ? _canvas.GetComponent<RectTransform>() : null;
                 _hasOriginal = false;
                 _isOffset = false;
             }
