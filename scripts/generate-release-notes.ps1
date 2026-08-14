@@ -30,12 +30,16 @@ if (Test-Path "RELEASE_NOTES.md") {
 }
 
 # Check for previous tag
+# Match version tags only. The nightly publisher moves the rolling `dev` tag to
+# the tip on every build, so an unfiltered describe resolves to `dev` sitting
+# just behind HEAD: a first release never reaches the branch below, and a later
+# one diffs against last night's build instead of the previous version.
 # Temporarily allow errors so git describe doesn't throw when there are no tags:
 # under ErrorActionPreference=Stop, PowerShell 5.1 wraps the redirected stderr as
 # a NativeCommandError and terminates before the first-release branch below runs.
 $prevPref = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-$previousTag = git describe --tags --abbrev=0 HEAD^ 2>$null
+$previousTag = git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>$null
 $ErrorActionPreference = $prevPref
 if ($LASTEXITCODE -ne 0) {
     # First release - use all commits
