@@ -244,11 +244,15 @@ namespace CameraUnlock.Core.Unity.Rendering
         private static Delegate _onPreCullDelegate;
 
         /// <summary>
-        /// Subscribes to the legacy Camera.onPreCull event via reflection when it exists in this
-        /// Unity build; no-op otherwise. SRP-only builds (Unity 6 URP/HDRP) strip the onPreCull
-        /// accessor entirely, so a direct <c>Camera.onPreCull += ...</c> throws MissingMethodException
-        /// at JIT time the moment the calling method runs - subscribing reflectively keeps the
-        /// reference out of compiled IL. Pair with AddBeginCameraRendering to cover both pipelines.
+        /// Subscribes to the legacy Camera.onPreCull hook via reflection when this Unity build has
+        /// it; no-op otherwise. SRP-only builds (Unity 6 URP/HDRP) strip it entirely, so a direct
+        /// <c>Camera.onPreCull += ...</c> throws MissingMethodException at JIT time the moment the
+        /// calling method runs - going through reflection keeps the reference out of compiled IL.
+        /// Pair with AddBeginCameraRendering to cover both pipelines.
+        ///
+        /// Unity declares onPreCull as a public static delegate FIELD, not an event, so it has to
+        /// be resolved with GetField and combined by hand. Resolving it with GetEvent returns null
+        /// and silently subscribes nothing - which is exactly how this shipped broken.
         /// </summary>
         /// <param name="onPreCull">Called with the camera about to render.</param>
         /// <exception cref="ArgumentNullException">Thrown if the callback is null.</exception>
@@ -265,10 +269,21 @@ namespace CameraUnlock.Core.Unity.Rendering
                 throw new InvalidOperationException("An onPreCull callback is already subscribed. Call RemoveOnPreCull() first.");
             }
 
-            var onPreCullEvent = typeof(Camera).GetEvent("onPreCull",
-                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            var onPreCullField = GetOnPreCullField();
+            if (onPreCullField != null)
+            {
+                _storedOnPreCull = onPreCull;
+                _onPreCullDelegate = Delegate.CreateDelegate(onPreCullField.FieldType, onPreCull.Target, onPreCull.Method);
+                var existing = (Delegate)onPreCullField.GetValue(null);
+                onPreCullField.SetValue(null, Delegate.Combine(existing, _onPreCullDelegate));
+                return;
+            }
+
+            var onPreCullEvent = GetOnPreCullEvent();
             if (onPreCullEvent == null)
             {
+                // SRP-only build: the legacy hook genuinely does not exist here and
+                // AddBeginCameraRendering is the path that fires.
                 return;
             }
 
@@ -289,16 +304,36 @@ namespace CameraUnlock.Core.Unity.Rendering
 
             if (_onPreCullDelegate != null)
             {
-                var onPreCullEvent = typeof(Camera).GetEvent("onPreCull",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (onPreCullEvent != null)
+                var onPreCullField = GetOnPreCullField();
+                if (onPreCullField != null)
                 {
-                    onPreCullEvent.RemoveEventHandler(null, _onPreCullDelegate);
+                    var existing = (Delegate)onPreCullField.GetValue(null);
+                    onPreCullField.SetValue(null, Delegate.Remove(existing, _onPreCullDelegate));
+                }
+                else
+                {
+                    var onPreCullEvent = GetOnPreCullEvent();
+                    if (onPreCullEvent != null)
+                    {
+                        onPreCullEvent.RemoveEventHandler(null, _onPreCullDelegate);
+                    }
                 }
             }
 
             _onPreCullDelegate = null;
             _storedOnPreCull = null;
+        }
+
+        private static System.Reflection.FieldInfo GetOnPreCullField()
+        {
+            return typeof(Camera).GetField("onPreCull",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        }
+
+        private static System.Reflection.EventInfo GetOnPreCullEvent()
+        {
+            return typeof(Camera).GetEvent("onPreCull",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
         }
 
         /// <summary>
