@@ -118,6 +118,25 @@ public:
     void SetStabilizationFrames(int frames) { m_stabilizationFrames = frames; }
     int GetStabilizationFrames() const { return m_stabilizationFrames; }
 
+    /// How far past the latest sample the interpolators may continue the last
+    /// velocity, as a fraction of the estimated sample interval. Applies to
+    /// rotation and position together.
+    ///
+    /// The default 0.5 fills the flat spots when a slow tracker drives a fast
+    /// display, but it does so by OVERSHOOTING the newest known pose and then
+    /// holding there until the next sample arrives. When the render rate is far
+    /// above the sample rate, each sample period becomes: interpolate, overshoot,
+    /// freeze, then correct back on the next sample - a wobble at the tracker's
+    /// sample rate that shows up in every camera mode. Set to 0 to interpolate
+    /// only between known samples.
+    void SetMaxExtrapolationFraction(float fraction) {
+        m_poseInterpolator.max_extrapolation_fraction = fraction;
+        m_positionInterpolator.SetMaxExtrapolationFraction(fraction);
+    }
+    float GetMaxExtrapolationFraction() const {
+        return m_poseInterpolator.max_extrapolation_fraction;
+    }
+
     /// True once a center has been captured, automatically or on request.
     bool HasCentered() const { return m_hasCentered; }
 
