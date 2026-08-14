@@ -31,6 +31,7 @@ constexpr uint16_t kReceiverPort = 14261;
 constexpr uint16_t kSenderPort = 14262;
 constexpr uint16_t kSupervisedPort = 14263;
 constexpr uint16_t kSupervisedSenderPort = 14264;
+constexpr uint16_t kReusePort = 14265;
 
 size_t BuildPacket(uint8_t out[54], double x, double y, double z,
                    double yaw, double pitch, double roll,
@@ -107,10 +108,10 @@ void CloseCompetitor(SOCKET s) {
 /// True once the receiver reports a packet newer than `sinceUs`, within
 /// `timeoutMs`. Polls rather than sleeps so a fast path stays fast.
 bool WaitForPacketAfter(cameraunlock::UdpReceiver& rx, int64_t sinceUs,
-                        cameraunlock::UdpSocket& sender, const uint8_t* pkt,
-                        size_t len, int timeoutMs) {
+                        cameraunlock::UdpSocket& sender, uint16_t port,
+                        const uint8_t* pkt, size_t len, int timeoutMs) {
     for (int elapsed = 0; elapsed < timeoutMs; elapsed += 50) {
-        if (!SendToPort(sender, kSupervisedPort, pkt, len)) return false;
+        if (!SendToPort(sender, port, pkt, len)) return false;
         if (rx.GetLastReceiveTimestamp() > sinceUs) return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -231,10 +232,32 @@ int RunReceiverTests() {
     CloseCompetitor(occupier);
     Check(WaitUntilRunning(supervised, 5 * UdpReceiver::kRetryIntervalMs),
           "binds within a few retry intervals of the port freeing up");
-    Check(WaitForPacketAfter(supervised, 0, supervisedSender, pkt, len, 2000),
+    Check(WaitForPacketAfter(supervised, 0, supervisedSender, kSupervisedPort, pkt, len, 2000),
           "tracker data flows once the port is reclaimed");
 
 #ifdef _WIN32
+    // Same scenario, except the game still running holds the port with
+    // SO_REUSEADDR - which is how our own older mod builds held it. Windows
+    // refuses a plain bind on top of that too, and it has to: a bind that
+    // succeeded into a shared port would set the receiver running, report
+    // tracking as live, and then sit deaf because the datagrams go to the
+    // other holder. Failing is what keeps the port recoverable.
+    SOCKET reuseOccupier = OpenCompetitor(kReusePort, true);
+    Check(reuseOccupier != INVALID_SOCKET, "a SO_REUSEADDR process holds the tracker port");
+
+    UdpReceiver againstReuse;
+    Check(!againstReuse.Start(kReusePort),
+          "Start refuses to share a port held with SO_REUSEADDR");
+    Check(againstReuse.IsRetrying() && !againstReuse.IsRunning(),
+          "supervisor waits rather than binding alongside and going deaf");
+
+    CloseCompetitor(reuseOccupier);
+    Check(WaitUntilRunning(againstReuse, 5 * UdpReceiver::kRetryIntervalMs),
+          "binds once the SO_REUSEADDR holder exits");
+    Check(WaitForPacketAfter(againstReuse, 0, supervisedSender, kReusePort, pkt, len, 2000),
+          "tracker data flows after reclaiming from a SO_REUSEADDR holder");
+    againstReuse.Stop();
+
     // The reason there is no "bound but silent, so re-bind" path: nothing can
     // take the stream away from a plain bind in the first place. Windows
     // refuses a SO_REUSEADDR bind on top of one (WSAEACCES).
