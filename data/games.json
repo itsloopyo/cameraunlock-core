@@ -9,6 +9,13 @@
       "steam_folder": "Assetto Corsa EVO",
       "executable_relpath": "AssettoCorsaEVO.exe"
     },
+    "assetto-corsa-rally": {
+      "display_name": "Assetto Corsa Rally",
+      "env_var": "ASSETTO_CORSA_RALLY_PATH",
+      "steam_app_id": 3917090,
+      "steam_folder": "Assetto Corsa Rally",
+      "executable_relpath": "acr/Binaries/Win64/acr.exe"
+    },
     "mirrors-edge": {
       "display_name": "Mirror's Edge",
       "env_var": "MIRRORS_EDGE_PATH",
