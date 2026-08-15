@@ -198,6 +198,12 @@ namespace CameraUnlock.Core.Tracking
         /// </summary>
         public void Recenter()
         {
+            // Disarms the automatic recenter. A deliberate recenter is the
+            // definitive answer to where centre is, and leaving the automatic one
+            // armed means it fires the moment the player next holds still for
+            // long enough and silently replaces the centre they just chose - the
+            // same trap the remote recenter path above already guards against.
+            _hasCentered = true;
             _processor.Recenter();
             _poseInterpolator.Reset();
             _positionProcessor.SetCenter(_receiver.GetLatestPosition());

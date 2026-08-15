@@ -254,7 +254,14 @@ public:
 
     /// Sets the current head pose and position as the new center and resets
     /// transient interpolation/smoothing state.
+    ///
+    /// Also disarms the automatic recenter. A deliberate recenter is the
+    /// definitive answer to where centre is, and leaving the automatic one armed
+    /// means it fires the moment the player next holds still for long enough and
+    /// silently replaces the centre they just chose - the same trap the remote
+    /// recenter path already guards against.
     void Recenter() {
+        m_hasCentered = true;
         m_receiver.Recenter();
         m_processor.Reset();
         m_poseInterpolator.Reset();

@@ -169,6 +169,33 @@ namespace CameraUnlock.Core.Tests.Tracking
         }
 
         [Fact]
+        public void Recenter_DisarmsTheAutomaticRecenter()
+        {
+            // A deliberate recenter is the definitive answer to where centre is.
+            // Left armed, the automatic one fires the moment the player next
+            // holds still for long enough and silently replaces it - so holding
+            // a pose after a manual recenter must NOT collapse it to zero the
+            // way Update_AutoRecenters_AfterStabilizationFrames expects when no
+            // one has recentered by hand.
+            _session.StabilizationFrames = 5;
+            _session.Log = _ => { };
+            StartReceiverAndSend(yaw: 0.0, pitch: 0.0, roll: 0.0);
+            _session.Update(FrameTime);
+
+            _session.Recenter();
+
+            SendTestPacket(TestPort, 40.0, 0.0, 0.0);
+            WaitForData();
+            for (int i = 0; i < 60; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            Assert.True(System.Math.Abs(_session.Rotation.Yaw) > 20f,
+                $"The automatic recenter stole the manual centre: yaw collapsed to {_session.Rotation.Yaw}");
+        }
+
+        [Fact]
         public void Reset_ClearsHeldPose()
         {
             StartReceiverAndSend(yaw: 30.0, pitch: 0.0, roll: 0.0);

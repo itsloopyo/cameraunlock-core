@@ -240,6 +240,32 @@ void TestDuplicatePacketFiltering() {
     Check(session.WasNewSample(), "new packet with changed data is a new sample");
 }
 
+void TestManualRecenterDisarmsTheAutomaticOne() {
+    std::cout << "Manual recenter disarms the automatic one:" << std::endl;
+
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.yaw = 0.f; rx.pitch = 0.f;
+    rx.timestamp = 1;
+
+    Session session(rx);
+    session.SetStabilizationFrames(10);
+
+    // Recenter deliberately, before the automatic one has had its chance.
+    session.Recenter();
+    Check(rx.recenterCalls == 1, "the deliberate recenter reached the receiver");
+
+    // Now hold a pose perfectly still for far longer than the stabilization
+    // window. That is exactly what arms the automatic recenter, and it must not
+    // fire: it would capture THIS pose as centre and throw away the one the
+    // player chose.
+    rx.yaw = 25.f;
+    for (int i = 0; i < 200; i++) { rx.timestamp++; session.Update(0.016f); }
+
+    Check(rx.recenterCalls == 1,
+          "holding still after a manual recenter does not recenter again");
+}
+
 void TestRecenterZeroesPose() {
     std::cout << "Recenter:\n";
 
@@ -343,6 +369,7 @@ int RunSessionTests() {
     TestModeCycling();
     TestDuplicatePacketFiltering();
     TestRecenterZeroesPose();
+    TestManualRecenterDisarmsTheAutomaticOne();
     TestRemoteRecenterRequest();
     TestRecenterSeedsCurrentFrameWithCenteredPose();
 
