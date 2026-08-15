@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <!-- net6.0 went out of support in Nov 2024 and no current Microsoft.NET.Test.Sdk
+         builds against it. The library under test still multi-targets down to net35;
+         only the test host moves. -->
+    <TargetFramework>net8.0</TargetFramework>
     <AssemblyName>CameraUnlock.Core.Tests</AssemblyName>
     <RootNamespace>CameraUnlock.Core.Tests</RootNamespace>
     <LangVersion>9.0</LangVersion>
@@ -10,9 +13,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.6.0" />
-    <PackageReference Include="xunit" Version="2.4.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5">
+    <!-- 17.6.0 dragged in NETStandard.Library 1.6.1, and with it System.Net.Http
+         4.3.0 and System.Text.RegularExpressions 4.3.0 - both carrying High
+         advisories that showed up on every vulnerable-package scan. Test-only,
+         never shipped, but the noise buries a real hit. 17.14.1 is the end of
+         the 17.x line and clears them; moving to 18.x is a separate decision,
+         not a prerequisite. -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <!-- 2.4.2 is what pulled NETStandard.Library 1.6.1 into the graph, and with it
+         the two High-severity 4.3.0 facade packages. -->
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>

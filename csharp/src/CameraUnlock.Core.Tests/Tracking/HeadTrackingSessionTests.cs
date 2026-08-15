@@ -224,7 +224,7 @@ namespace CameraUnlock.Core.Tests.Tracking
                 if (_receiver.IsDataFresh()) return;
                 Thread.Sleep(10);
             }
-            Assert.True(false, "Receiver never reported fresh data");
+            Assert.Fail("Receiver never reported fresh data");
         }
 
         /// <summary>

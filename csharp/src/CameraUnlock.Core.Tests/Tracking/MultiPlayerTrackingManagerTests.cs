@@ -164,7 +164,7 @@ namespace CameraUnlock.Core.Tests.Tracking
                 if (_manager.IsReceiving(playerIndex)) return;
                 Thread.Sleep(10);
             }
-            Assert.True(false, $"Player {playerIndex} never reported fresh data");
+            Assert.Fail($"Player {playerIndex} never reported fresh data");
         }
 
         /// <summary>
