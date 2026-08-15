@@ -140,6 +140,13 @@ public:
     /// True once a center has been captured, automatically or on request.
     bool HasCentered() const { return m_hasCentered; }
 
+    /// How many times the tracker app has recentered us through the packet
+    /// trailer. Compare across frames to report a press: the session recenters
+    /// itself inside Update(), so without this a mod cannot say whether the
+    /// player's CENTER press reached the game, and "I pressed it and nothing
+    /// happened" has no evidence either way.
+    uint64_t GetRemoteRecenterCount() const { return m_remoteRecenters; }
+
     /// Runs the pipeline for this frame. Returns false when the receiver has
     /// no rotation data; cached outputs report invalid in that case.
     bool Update(float deltaTime) {
@@ -190,6 +197,7 @@ public:
                 m_hasCentered = true;
                 Recenter();
                 recentered = true;
+                ++m_remoteRecenters;
             }
         }
 
@@ -323,6 +331,7 @@ private:
     float m_settleYaw = 0.0f, m_settlePitch = 0.0f, m_settleRoll = 0.0f;
     bool m_hasSettleAnchor = false;
     bool m_hasCentered = false;
+    uint64_t m_remoteRecenters = 0;
 
     int64_t m_lastReceiveTimestamp = 0;
     float m_lastRawYaw = 0.0f;

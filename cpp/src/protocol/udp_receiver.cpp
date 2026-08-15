@@ -220,6 +220,15 @@ void UdpReceiver::Recenter() {
 
 namespace {
 
+/// "ip:port" for a source packed as (s_addr << 16) | port.
+std::string DescribeSource(uint64_t source) {
+    in_addr addr = {};
+    addr.s_addr = static_cast<uint32_t>(source >> 16);
+    char ip[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &addr, ip, sizeof(ip));
+    return std::string(ip) + ":" + std::to_string(static_cast<uint16_t>(source & 0xFFFF));
+}
+
 float LargestAxisChange(const TrackingPose& a, const TrackingPose& b) {
     const float dy = std::fabs(a.yaw - b.yaw);
     const float dp = std::fabs(a.pitch - b.pitch);
@@ -229,6 +238,15 @@ float LargestAxisChange(const TrackingPose& a, const TrackingPose& b) {
 }
 
 }  // namespace
+
+// Takes `pose` as the truth the gate measures the next one against, discarding
+// any jump it was still holding for confirmation.
+void UdpReceiver::SeedPoseGate(const TrackingPose& pose) {
+    m_hasAcceptedPose = true;
+    m_pendingValid = false;
+    m_lastStepWasLarge = false;
+    m_acceptedPose = pose;
+}
 
 // Decides whether a freshly arrived pose is head tracking or the tracker having
 // stopped tracking.
@@ -247,9 +265,7 @@ float LargestAxisChange(const TrackingPose& a, const TrackingPose& b) {
 // changes - ordinary head movement - are never delayed.
 bool UdpReceiver::AcceptPose(const TrackingPose& pose, bool repeatsPrevious) {
     if (!m_hasAcceptedPose) {
-        m_hasAcceptedPose = true;
-        m_lastStepWasLarge = false;
-        m_acceptedPose = pose;
+        SeedPoseGate(pose);
         return true;
     }
 
@@ -484,12 +500,17 @@ void UdpReceiver::ReceiverThread() {
                     m_primaryLastSeenUs = arrivedUs;
                 } else {
                     if (m_rejectedPackets.fetch_add(1, std::memory_order_relaxed) == 0 && m_log) {
-                        char ip[INET_ADDRSTRLEN] = {};
-                        inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
-                        m_log(std::string("a SECOND tracker source is sending to this port (") + ip +
-                              ":" + std::to_string(ntohs(senderAddr.sin_port)) +
-                              ") - ignoring it. Two sources make the head pose alternate between"
-                              " them, which looks like the view flicking between two positions."
+                        // Name BOTH endpoints. Which one is driving the view is
+                        // the whole question when this fires, and the ignored
+                        // source loses everything it sends - poses and CENTER
+                        // presses alike - so a player whose recenter does
+                        // nothing is reading the symptom of exactly this line.
+                        m_log("a SECOND tracker source is sending to this port (" +
+                              DescribeSource(source) + ") - IGNORING it; the view is driven by " +
+                              DescribeSource(m_primarySource) +
+                              ". Two sources make the head pose alternate between them, which"
+                              " looks like the view flicking between two positions, and nothing"
+                              " the ignored app sends reaches the game - including its recenter."
                               " Close whichever tracker you are not using.");
                     }
                     continue;
@@ -508,6 +529,25 @@ void UdpReceiver::ReceiverThread() {
                 m_hasRecenterCounter = false;
             }
 
+            // Read the CENTER press BEFORE the pose gate below, never after.
+            //
+            // A press is announced metadata, not a measurement, and the packet
+            // carrying one is precisely the shape the gate exists to reject: the
+            // app has just subtracted its new neutral, so the pose lands a long
+            // way from the last accepted one and then sits still. Parsed below
+            // the gate's `continue`, a burst whose packets repeat bit-identically
+            // is swallowed entire and the press never reaches the game - the
+            // player recenters on their phone and the view does not move.
+            uint8_t recenterCounter;
+            const bool hasTrailer =
+                OpenTrackPacket::TryParseRecenterCounter(buffer, bytesReceived, recenterCounter);
+            const bool pressed = hasTrailer &&
+                (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter);
+            if (hasTrailer) {
+                m_lastRecenterCounter = recenterCounter;
+                m_hasRecenterCounter = true;
+            }
+
             TrackingPose pose;
             PositionData position;
             const bool parsed = OpenTrackPacket::TryParseAll(buffer, bytesReceived, pose, position);
@@ -524,7 +564,14 @@ void UdpReceiver::ReceiverThread() {
                     m_lastSourceRoll = pose.roll;
                 }
 
-                if (!AcceptPose(pose, repeatsPrevious)) {
+                // A press is the one discontinuity the tracker announces, so the
+                // gate has nothing left to decide - take the pose it carries.
+                // Holding it back would leave Recenter() to capture the
+                // PRE-press pose as the new centre, baking in the very offset
+                // the player just cleared.
+                if (pressed) {
+                    SeedPoseGate(pose);
+                } else if (!AcceptPose(pose, repeatsPrevious)) {
                     continue;
                 }
                 m_trackingData.Set(pose.yaw, pose.pitch, pose.roll);
@@ -540,13 +587,10 @@ void UdpReceiver::ReceiverThread() {
                 m_lastReceiveTimestamp.store(nowUs, std::memory_order_release);
             }
 
-            uint8_t recenterCounter;
-            if (OpenTrackPacket::TryParseRecenterCounter(buffer, bytesReceived, recenterCounter)) {
-                if (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter) {
-                    m_recenterRequested.store(true, std::memory_order_release);
-                }
-                m_lastRecenterCounter = recenterCounter;
-                m_hasRecenterCounter = true;
+            // Published after the pose, so a consumer that observes the request
+            // reads the pose the app zeroed rather than the one before it.
+            if (pressed) {
+                m_recenterRequested.store(true, std::memory_order_release);
             }
         }
     }

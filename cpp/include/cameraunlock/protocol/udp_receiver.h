@@ -143,6 +143,7 @@ public:
 
 private:
     bool AcceptPose(const TrackingPose& pose, bool repeatsPrevious);
+    void SeedPoseGate(const TrackingPose& pose);
     void ReceiverThread();
     void SupervisorThread();
     bool BindAndReceive();

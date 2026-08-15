@@ -32,6 +32,8 @@ constexpr uint16_t kSenderPort = 14262;
 constexpr uint16_t kSupervisedPort = 14263;
 constexpr uint16_t kSupervisedSenderPort = 14264;
 constexpr uint16_t kReusePort = 14265;
+constexpr uint16_t kPressPort = 14266;
+constexpr uint16_t kPressSenderPort = 14267;
 
 size_t BuildPacket(uint8_t out[54], double x, double y, double z,
                    double yaw, double pitch, double roll,
@@ -116,6 +118,17 @@ bool WaitForPacketAfter(cameraunlock::UdpReceiver& rx, int64_t sinceUs,
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     return rx.GetLastReceiveTimestamp() > sinceUs;
+}
+
+/// True once the threaded receiver has raised a recenter request, within
+/// `timeoutMs`. The packet is sent once: a burst that has to be repeated to
+/// land is a burst whose first packets were dropped.
+bool WaitForRecenter(cameraunlock::UdpReceiver& rx, int timeoutMs) {
+    for (int elapsed = 0; elapsed < timeoutMs; elapsed += 10) {
+        if (rx.TryConsumeRecenterRequest()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return rx.TryConsumeRecenterRequest();
 }
 
 bool WaitUntilRunning(cameraunlock::UdpReceiver& rx, int timeoutMs) {
@@ -271,6 +284,44 @@ int RunReceiverTests() {
     Check(!supervised.IsRunning() && !supervised.IsRetrying(),
           "Stop tears the supervisor and receive thread down");
     supervisedSender.Close();
+
+    // ---- UdpReceiver: a CENTER press outranks the pose-freeze gate ----
+    //
+    // The gate holds a large jump back until the following packet proves the
+    // tracker is still moving, which is right for a tracker that lost the head
+    // and started repeating one pose. A recenter is indistinguishable from the
+    // outside: the app subtracts its new neutral, so the pose leaps and then
+    // sits still. The trailer says outright that the leap is deliberate, so it
+    // has to be read BEFORE the gate can drop the packet carrying it - the
+    // player pressing CENTER on their phone is the one thing that must not be
+    // mistaken for a dropout.
+    std::cout << "UdpReceiver remote recenter tests:\n";
+
+    UdpSocket pressSender;
+    Check(pressSender.Open(kPressSenderPort), "press sender binds loopback test port");
+
+    UdpReceiver pressRx;
+    Check(pressRx.Start(kPressPort), "press receiver binds loopback test port");
+    Check(WaitUntilRunning(pressRx, 2000), "press receiver thread running");
+
+    // Head held 20 degrees off centre, untrailered.
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitForPacketAfter(pressRx, 0, pressSender, kPressPort, pkt, len, 2000),
+          "off-centre pose received");
+    Check(!pressRx.TryConsumeRecenterRequest(), "a plain pose asks for no recenter");
+
+    // CENTER on the phone: the app zeroes its output and the trailer rides the
+    // burst. Sent once, landing 20 degrees from the last accepted pose.
+    uint8_t pressCounter = 1;
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &pressCounter);
+    Check(SendToPort(pressSender, kPressPort, pkt, len), "press packet sent");
+    Check(WaitForRecenter(pressRx, 1000),
+          "a press is read even though its pose jumps past the freeze gate");
+    Check(pressRx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 0.f),
+          "the pose the press carried is published, so Recenter centres on it");
+
+    pressRx.Stop();
+    pressSender.Close();
 
     if (g_failures == 0) {
         std::cout << "Receiver tests: all passed\n";
