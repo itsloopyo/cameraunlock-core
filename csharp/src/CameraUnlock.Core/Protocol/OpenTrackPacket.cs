@@ -72,10 +72,7 @@ namespace CameraUnlock.Core.Protocol
             double pitch = BitConverter.ToDouble(data, PitchOffset);
             double roll = BitConverter.ToDouble(data, RollOffset);
 
-            // Validate values are not NaN or Infinity
-            if (double.IsNaN(yaw) || double.IsInfinity(yaw) ||
-                double.IsNaN(pitch) || double.IsInfinity(pitch) ||
-                double.IsNaN(roll) || double.IsInfinity(roll))
+            if (!IsFiniteAsFloat(yaw) || !IsFiniteAsFloat(pitch) || !IsFiniteAsFloat(roll))
             {
                 return false;
             }
@@ -104,15 +101,31 @@ namespace CameraUnlock.Core.Protocol
             double y = BitConverter.ToDouble(data, YOffset);
             double z = BitConverter.ToDouble(data, ZOffset);
 
-            if (double.IsNaN(x) || double.IsInfinity(x) ||
-                double.IsNaN(y) || double.IsInfinity(y) ||
-                double.IsNaN(z) || double.IsInfinity(z))
+            if (!IsFiniteAsFloat(x) || !IsFiniteAsFloat(y) || !IsFiniteAsFloat(z))
             {
                 return false;
             }
 
             position = new PositionData((float)x * CmToMeters, (float)y * CmToMeters, (float)z * CmToMeters);
             return true;
+        }
+
+        /// <summary>
+        /// True when the value is still a finite number after the narrowing to float
+        /// that every parse here performs.
+        ///
+        /// Checking the double alone is not enough: a finite double outside float range
+        /// (1e300, say) narrows to +/-Infinity, and one such packet is permanent. The
+        /// smoothing stages hold their own state and lerp towards each new sample, so
+        /// Infinity turns that state to NaN on the very next finite sample and every
+        /// lerp after it keeps it NaN - the view stays broken until the mod is toggled
+        /// off and on. The socket accepts packets from any host on the network, so this
+        /// is the boundary that has to reject them.
+        /// </summary>
+        private static bool IsFiniteAsFloat(double value)
+        {
+            float narrowed = (float)value;
+            return !float.IsNaN(narrowed) && !float.IsInfinity(narrowed);
         }
 
         /// <summary>
@@ -168,9 +181,7 @@ namespace CameraUnlock.Core.Protocol
             double pitch = BitConverter.ToDouble(data.Slice(PitchOffset, 8));
             double roll = BitConverter.ToDouble(data.Slice(RollOffset, 8));
 
-            if (double.IsNaN(yaw) || double.IsInfinity(yaw) ||
-                double.IsNaN(pitch) || double.IsInfinity(pitch) ||
-                double.IsNaN(roll) || double.IsInfinity(roll))
+            if (!IsFiniteAsFloat(yaw) || !IsFiniteAsFloat(pitch) || !IsFiniteAsFloat(roll))
             {
                 return false;
             }
@@ -196,9 +207,7 @@ namespace CameraUnlock.Core.Protocol
             double y = BitConverter.ToDouble(data.Slice(YOffset, 8));
             double z = BitConverter.ToDouble(data.Slice(ZOffset, 8));
 
-            if (double.IsNaN(x) || double.IsInfinity(x) ||
-                double.IsNaN(y) || double.IsInfinity(y) ||
-                double.IsNaN(z) || double.IsInfinity(z))
+            if (!IsFiniteAsFloat(x) || !IsFiniteAsFloat(y) || !IsFiniteAsFloat(z))
             {
                 return false;
             }

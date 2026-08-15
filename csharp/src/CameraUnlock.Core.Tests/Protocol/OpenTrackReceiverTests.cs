@@ -63,6 +63,38 @@ namespace CameraUnlock.Core.Tests.Protocol
         }
 
         [Fact]
+        public void Start_WhenPortInUse_BindsSoonAfterItIsReleased()
+        {
+            const int port = 14243;
+
+            var holder = new OpenTrackReceiver();
+            Assert.True(holder.Start(port));
+
+            _receiver = new OpenTrackReceiver();
+            Assert.False(_receiver.Start(port));
+            Assert.True(_receiver.IsFailed);
+
+            holder.Dispose();
+
+            Assert.True(WaitFor(() => !_receiver.IsFailed, 3000), "receiver did not claim the port after it was released");
+
+            // Proves it is really listening, not just flagged as bound.
+            SendTestPacket(port, 10.0, 20.0, 30.0);
+            Assert.True(WaitFor(() => _receiver.IsReceiving, 1000), "receiver bound the port but received no data");
+        }
+
+        private static bool WaitFor(Func<bool> condition, int timeoutMs)
+        {
+            var elapsed = Stopwatch.StartNew();
+            while (elapsed.ElapsedMilliseconds < timeoutMs)
+            {
+                if (condition()) return true;
+                Thread.Sleep(25);
+            }
+            return condition();
+        }
+
+        [Fact]
         public void Start_WhenAlreadyRunning_ReturnsTrue()
         {
             _receiver = new OpenTrackReceiver();
