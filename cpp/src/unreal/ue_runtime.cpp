@@ -47,6 +47,16 @@ bool SafeReadU16(std::uintptr_t addr, std::uint16_t& out) {
     __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
+bool SafeReadFloat(std::uintptr_t addr, float& out) {
+    __try { out = *reinterpret_cast<const float*>(addr); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+bool SafeWriteFloat(std::uintptr_t addr, float v) {
+    __try { *reinterpret_cast<float*>(addr) = v; return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
 bool SafeReadFQuat(std::uintptr_t addr, FQuat4d& out) {
     __try {
         out = *reinterpret_cast<const FQuat4d*>(addr);

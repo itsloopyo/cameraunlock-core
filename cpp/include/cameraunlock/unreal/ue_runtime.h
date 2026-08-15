@@ -52,8 +52,10 @@ const UObjectGlobalsLayout& Layout();
 bool SafeReadPtr(std::uintptr_t addr, std::uintptr_t& out);
 bool SafeReadU32(std::uintptr_t addr, std::uint32_t& out);
 bool SafeReadU16(std::uintptr_t addr, std::uint16_t& out);
+bool SafeReadFloat(std::uintptr_t addr, float& out);
 bool SafeReadFQuat(std::uintptr_t addr, FQuat4d& out);
 bool SafeReadFVector(std::uintptr_t addr, FVector& out);
+bool SafeWriteFloat(std::uintptr_t addr, float v);
 bool SafeWriteFQuat(std::uintptr_t addr, const FQuat4d& q);
 bool SafeWriteFVector(std::uintptr_t addr, const FVector& v);
 
