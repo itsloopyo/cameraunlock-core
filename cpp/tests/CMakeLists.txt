@@ -10,6 +10,7 @@ add_executable(cameraunlock_tests
     session_tests.cpp
     unreal_math_tests.cpp
     projection_tests.cpp
+    interpolator_tests.cpp
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)

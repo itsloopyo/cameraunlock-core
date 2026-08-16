@@ -14,6 +14,19 @@ public:
     float GetMaxExtrapolationFraction() const { return m_maxExtrapolationFraction; }
     void SetMaxExtrapolationFraction(float value) { m_maxExtrapolationFraction = value; }
 
+    /// Segment position to sample at, for a given progress. Mirrors
+    /// PoseInterpolator::SegmentPosition - see there for why extrapolation
+    /// eases back to the last known sample once the next one is late rather
+    /// than parking on the overshoot.
+    float SegmentPosition(float progress) const {
+        if (progress < 0.0f) return 0.0f;
+        const float maxPt = 1.0f + m_maxExtrapolationFraction;
+        if (progress <= maxPt) return progress;
+        const float over = progress - maxPt;
+        const float blend = over > 1.0f ? 1.0f : over;
+        return maxPt + (1.0f - maxPt) * blend;
+    }
+
     /// Update with the latest raw position and frame delta time.
     /// Returns a smoothly interpolated position.
     PositionData Update(const PositionData& raw, float delta_time) {
@@ -49,8 +62,7 @@ public:
             }
 
             // Capture current interpolated (possibly extrapolated) position as new start point
-            float maxP = 1.0f + m_maxExtrapolationFraction;
-            float t = m_progress < 0.0f ? 0.0f : (m_progress > maxP ? maxP : m_progress);
+            const float t = SegmentPosition(m_progress);
             m_fromX = m_fromX + (m_toX - m_fromX) * t;
             m_fromY = m_fromY + (m_toY - m_fromY) * t;
             m_fromZ = m_fromZ + (m_toZ - m_fromZ) * t;
@@ -70,8 +82,7 @@ public:
         m_progress += delta_time / m_sampleInterval;
 
         // Allow extrapolation past 1.0 to maintain velocity continuity
-        float maxPt = 1.0f + m_maxExtrapolationFraction;
-        float pt = m_progress > maxPt ? maxPt : (m_progress < 0.0f ? 0.0f : m_progress);
+        const float pt = SegmentPosition(m_progress);
 
         float outX = m_fromX + (m_toX - m_fromX) * pt;
         float outY = m_fromY + (m_toY - m_fromY) * pt;

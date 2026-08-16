@@ -29,6 +29,27 @@ public:
 
     PoseInterpolator() = default;
 
+    /// Segment position to sample at, for a given progress.
+    ///
+    /// Progress past 1.0 is extrapolation: a short prediction that keeps
+    /// velocity continuous between samples. It is only a prediction, so it
+    /// must not outlive the sample it was predicting from. Once the next
+    /// sample is a full interval late (tracker app holding its last value on
+    /// face loss, a stalled feed, or a head so still the values repeat
+    /// bit-for-bit and the duplicate filter suppresses them), this eases back
+    /// to the last KNOWN sample instead of parking at the extrapolated
+    /// overshoot. Holding 1.5x the reported pose indefinitely is the bug this
+    /// exists to prevent - the contract on a stalled tracker is to hold what
+    /// it actually reported, never to keep inventing.
+    float SegmentPosition(float progress) const {
+        if (progress < 0.0f) return 0.0f;
+        const float maxPt = 1.0f + max_extrapolation_fraction;
+        if (progress <= maxPt) return progress;
+        const float over = progress - maxPt;
+        const float blend = over > 1.0f ? 1.0f : over;
+        return maxPt + (1.0f - maxPt) * blend;
+    }
+
     /// Update with the latest raw pose and frame timing.
     /// @param yaw Raw yaw in degrees.
     /// @param pitch Raw pitch in degrees.
@@ -64,8 +85,7 @@ public:
             }
 
             // Capture current interpolated (possibly extrapolated) position as new start point
-            float maxP = 1.0f + max_extrapolation_fraction;
-            float t = m_progress < 0.0f ? 0.0f : (m_progress > maxP ? maxP : m_progress);
+            const float t = SegmentPosition(m_progress);
             m_fromYaw   = m_fromYaw   + (m_toYaw   - m_fromYaw)   * t;
             m_fromPitch = m_fromPitch + (m_toPitch - m_fromPitch) * t;
             m_fromRoll  = m_fromRoll  + (m_toRoll  - m_fromRoll)  * t;
@@ -85,8 +105,7 @@ public:
 
         // Allow extrapolation past 1.0 to maintain velocity continuity,
         // bounded to avoid runaway prediction on direction reversals.
-        float maxPt = 1.0f + max_extrapolation_fraction;
-        float pt = m_progress > maxPt ? maxPt : (m_progress < 0.0f ? 0.0f : m_progress);
+        const float pt = SegmentPosition(m_progress);
 
         float outYaw   = m_fromYaw   + (m_toYaw   - m_fromYaw)   * pt;
         float outPitch = m_fromPitch + (m_toPitch - m_fromPitch) * pt;
