@@ -14,6 +14,37 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public float MaxExtrapolationFraction { get; set; } = 0.5f;
 
+        /// <summary>
+        /// Mirrors PoseInterpolator.ExtrapolationHoldSeconds.
+        /// </summary>
+        public const float ExtrapolationHoldSeconds = 0.25f;
+
+        /// <summary>
+        /// Mirrors PoseInterpolator.ExtrapolationDecaySeconds.
+        /// </summary>
+        public const float ExtrapolationDecaySeconds = 0.35f;
+
+        /// <summary>
+        /// Segment position to sample at, given progress and how long the next
+        /// sample has been outstanding. Mirrors PoseInterpolator.SegmentPosition -
+        /// see there for why the extrapolation expires on a wall clock rather
+        /// than parking on the overshoot, and why a dropped packet must not
+        /// trigger it.
+        /// </summary>
+        public float SegmentPosition(float progress, float timeSinceLastSample)
+        {
+            if (progress < 0f) return 0f;
+            float maxPt = 1f + MaxExtrapolationFraction;
+            float pt = progress > maxPt ? maxPt : progress;
+            if (timeSinceLastSample <= ExtrapolationHoldSeconds) return pt;
+
+            float late = timeSinceLastSample - ExtrapolationHoldSeconds;
+            float u = late / ExtrapolationDecaySeconds;
+            if (u > 1f) u = 1f;
+            float eased = u * u * (3f - 2f * u);
+            return pt + (1f - pt) * eased;
+        }
+
         private const float IntervalBlend = 0.3f;
         private const float DefaultSampleInterval = 1f / 30f;
         private const float MinSampleInterval = 0.001f;
@@ -78,8 +109,7 @@ namespace CameraUnlock.Core.Processing
                     if (_sampleInterval > MaxSampleInterval) _sampleInterval = MaxSampleInterval;
                 }
 
-                float maxP = 1f + MaxExtrapolationFraction;
-                float t = _progress < 0f ? 0f : (_progress > maxP ? maxP : _progress);
+                float t = SegmentPosition(_progress, _timeSinceLastNewSample);
                 _fromX = _fromX + (_toX - _fromX) * t;
                 _fromY = _fromY + (_toY - _fromY) * t;
                 _fromZ = _fromZ + (_toZ - _fromZ) * t;
@@ -95,8 +125,7 @@ namespace CameraUnlock.Core.Processing
 
             _progress += deltaTime / _sampleInterval;
 
-            float maxPt = 1f + MaxExtrapolationFraction;
-            float pt = _progress > maxPt ? maxPt : (_progress < 0f ? 0f : _progress);
+            float pt = SegmentPosition(_progress, _timeSinceLastNewSample);
 
             float outX = _fromX + (_toX - _fromX) * pt;
             float outY = _fromY + (_toY - _fromY) * pt;

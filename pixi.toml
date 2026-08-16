@@ -11,6 +11,13 @@ test = "dotnet test csharp --verbosity normal"
 test-quick = "dotnet test csharp --verbosity quiet"
 test-coverage = "dotnet test csharp --collect:\"XPlat Code Coverage\""
 
+# The C++ half of the library has its own suite. It is a separate build system,
+# so it needs its own task - without one `pixi run test` silently covers only
+# the C# port, and a C++-only regression (the two interpolators, the projection
+# maths, the receivers) reaches every native mod ungated.
+test-cpp = { cmd = "ctest --test-dir cpp/build-test -C Release --output-on-failure", depends-on = ["build-cpp"] }
+build-cpp = "cmake -S cpp -B cpp/build-test -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build-test --config Release"
+
 # Windows-only: the powershell/ modules are a Windows surface, so this is not
 # part of `check`. Covers the vendoring soak that keeps update-deps off
 # freshly-published upstream releases.
@@ -38,7 +45,7 @@ pack = "dotnet pack csharp -c Release -o dist"
 validate-manifest = "node scripts/validate-manifest.mjs"
 
 # Development workflow
-check = { depends-on = ["build-debug", "test-quick"] }
+check = { depends-on = ["build-debug", "test-quick", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

@@ -85,7 +85,7 @@ namespace CameraUnlock.Core.Tests.Processing
         }
 
         [Fact]
-        public void ExtrapolationIsBounded_WhenNoNewSample()
+        public void ExtrapolationHoldsThenExpires_WhenNoNewSample()
         {
             var interp = new PoseInterpolator();
 
@@ -101,17 +101,27 @@ namespace CameraUnlock.Core.Tests.Processing
             interp.Update(pose2, DeltaTime);
 
             // Run many frames without new sample — should extrapolate then cap
-            float lastYaw = 0f;
-            for (int i = 0; i < 100; i++)
+            // A short gap - a dropped packet or a Wi-Fi burst - is still a live
+            // feed: extrapolate half a sample period past the target, then hold
+            // there (from + (to - from) * 1.5).
+            float held = 0f;
+            int holdFrames = (int)(PoseInterpolator.ExtrapolationHoldSeconds / DeltaTime) - 2;
+            for (int i = 0; i < holdFrames; i++)
             {
-                var r = interp.Update(pose2, DeltaTime);
-                lastYaw = r.Yaw;
+                held = interp.Update(pose2, DeltaTime).Yaw;
             }
+            Assert.Equal(15f, held, precision: 1);
 
-            // With MaxExtrapolationFraction=0.5, the output should be
-            // from + (to - from) * 1.5 = 0 + 10 * 1.5 = 15
-            // (extrapolates half a sample period beyond the target, then caps)
-            Assert.Equal(15f, lastYaw, precision: 1);
+            // Keep the feed stalled and the prediction expires: it converges
+            // back to what the tracker actually reported. Holding 1.5x forever
+            // left the view half again past where the head was.
+            float settled = 0f;
+            int decayFrames = (int)(PoseInterpolator.ExtrapolationDecaySeconds / DeltaTime) + 10;
+            for (int i = 0; i < decayFrames; i++)
+            {
+                settled = interp.Update(pose2, DeltaTime).Yaw;
+            }
+            Assert.Equal(10f, settled, precision: 1);
         }
 
         [Fact]

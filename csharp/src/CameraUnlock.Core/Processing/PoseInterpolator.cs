@@ -20,6 +20,55 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public float MaxExtrapolationFraction { get; set; } = 0.5f;
 
+        /// <summary>
+        /// Seconds a sample may be late before the extrapolation starts expiring.
+        /// Sized to outlast an ordinary Wi-Fi loss burst (50-200 ms): a dropped
+        /// packet or two is a live feed and must behave as it always did -
+        /// continue the prediction, then hold. Retreating on a dropped packet
+        /// would pull the camera backwards against a head that is still turning.
+        /// </summary>
+        public const float ExtrapolationHoldSeconds = 0.25f;
+
+        /// <summary>
+        /// Seconds over which a genuinely stalled feed converges back to the
+        /// last reported sample, so the correction is a drift and not a snap.
+        /// </summary>
+        public const float ExtrapolationDecaySeconds = 0.35f;
+
+        /// <summary>
+        /// Segment position to sample at, given interpolation progress and how
+        /// long the next sample has been outstanding.
+        /// <para>
+        /// Progress past 1.0 is extrapolation - a short prediction that keeps
+        /// velocity continuous between samples. Clamping it and then HOLDING
+        /// parks the output at 1.5x the last reported pose for as long as new
+        /// samples fail to arrive: a tracker app streaming its last value while
+        /// the face is lost, or a silent socket inside the freshness window. A
+        /// 25 degree head turn then renders as 37.5 degrees.
+        /// </para>
+        /// <para>
+        /// So the prediction expires, on a WALL CLOCK rather than on progress -
+        /// progress is measured in units of a sample-interval estimate that is
+        /// stale by construction in the stall case. Below the hold threshold
+        /// this is bit-for-bit the old behaviour; past it the segment position
+        /// eases (smoothstep, so no velocity step at either end) to 1.0, the
+        /// pose the tracker actually reported.
+        /// </para>
+        /// </summary>
+        public float SegmentPosition(float progress, float timeSinceLastSample)
+        {
+            if (progress < 0f) return 0f;
+            float maxPt = 1f + MaxExtrapolationFraction;
+            float pt = progress > maxPt ? maxPt : progress;
+            if (timeSinceLastSample <= ExtrapolationHoldSeconds) return pt;
+
+            float late = timeSinceLastSample - ExtrapolationHoldSeconds;
+            float u = late / ExtrapolationDecaySeconds;
+            if (u > 1f) u = 1f;
+            float eased = u * u * (3f - 2f * u);
+            return pt + (1f - pt) * eased;
+        }
+
         // EMA blend factor for sample interval estimation
         private const float IntervalBlend = 0.3f;
 
@@ -102,8 +151,7 @@ namespace CameraUnlock.Core.Processing
                 }
 
                 // Capture current interpolated (possibly extrapolated) position as new start point
-                float maxP = 1f + MaxExtrapolationFraction;
-                float t = _progress < 0f ? 0f : (_progress > maxP ? maxP : _progress);
+                float t = SegmentPosition(_progress, _timeSinceLastNewSample);
                 _fromYaw = _fromYaw + (_toYaw - _fromYaw) * t;
                 _fromPitch = _fromPitch + (_toPitch - _fromPitch) * t;
                 _fromRoll = _fromRoll + (_toRoll - _fromRoll) * t;
@@ -123,8 +171,7 @@ namespace CameraUnlock.Core.Processing
 
             // Allow extrapolation past 1.0 to maintain velocity continuity,
             // bounded to avoid runaway prediction on direction reversals.
-            float maxPt = 1f + MaxExtrapolationFraction;
-            float pt = _progress > maxPt ? maxPt : (_progress < 0f ? 0f : _progress);
+            float pt = SegmentPosition(_progress, _timeSinceLastNewSample);
 
             float outYaw = _fromYaw + (_toYaw - _fromYaw) * pt;
             float outPitch = _fromPitch + (_toPitch - _fromPitch) * pt;

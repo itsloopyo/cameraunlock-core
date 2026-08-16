@@ -14,17 +14,24 @@ public:
     float GetMaxExtrapolationFraction() const { return m_maxExtrapolationFraction; }
     void SetMaxExtrapolationFraction(float value) { m_maxExtrapolationFraction = value; }
 
-    /// Segment position to sample at, for a given progress. Mirrors
-    /// PoseInterpolator::SegmentPosition - see there for why extrapolation
-    /// eases back to the last known sample once the next one is late rather
-    /// than parking on the overshoot.
-    float SegmentPosition(float progress) const {
+    static constexpr float kExtrapolationHoldSeconds = 0.25f;
+    static constexpr float kExtrapolationDecaySeconds = 0.35f;
+
+    /// Segment position to sample at, given progress and how long the next
+    /// sample has been outstanding. Mirrors PoseInterpolator::SegmentPosition -
+    /// see there for why the extrapolation expires on a wall clock rather than
+    /// parking on the overshoot, and why a dropped packet must not trigger it.
+    float SegmentPosition(float progress, float time_since_last_sample) const {
         if (progress < 0.0f) return 0.0f;
         const float maxPt = 1.0f + m_maxExtrapolationFraction;
-        if (progress <= maxPt) return progress;
-        const float over = progress - maxPt;
-        const float blend = over > 1.0f ? 1.0f : over;
-        return maxPt + (1.0f - maxPt) * blend;
+        const float pt = progress > maxPt ? maxPt : progress;
+        if (time_since_last_sample <= kExtrapolationHoldSeconds) return pt;
+
+        const float late = time_since_last_sample - kExtrapolationHoldSeconds;
+        float u = late / kExtrapolationDecaySeconds;
+        if (u > 1.0f) u = 1.0f;
+        const float eased = u * u * (3.0f - 2.0f * u);  // smoothstep
+        return pt + (1.0f - pt) * eased;
     }
 
     /// Update with the latest raw position and frame delta time.
@@ -62,7 +69,7 @@ public:
             }
 
             // Capture current interpolated (possibly extrapolated) position as new start point
-            const float t = SegmentPosition(m_progress);
+            const float t = SegmentPosition(m_progress, m_timeSinceLastNewSample);
             m_fromX = m_fromX + (m_toX - m_fromX) * t;
             m_fromY = m_fromY + (m_toY - m_fromY) * t;
             m_fromZ = m_fromZ + (m_toZ - m_fromZ) * t;
@@ -82,7 +89,7 @@ public:
         m_progress += delta_time / m_sampleInterval;
 
         // Allow extrapolation past 1.0 to maintain velocity continuity
-        const float pt = SegmentPosition(m_progress);
+        const float pt = SegmentPosition(m_progress, m_timeSinceLastNewSample);
 
         float outX = m_fromX + (m_toX - m_fromX) * pt;
         float outY = m_fromY + (m_toY - m_fromY) * pt;

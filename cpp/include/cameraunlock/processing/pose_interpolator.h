@@ -1,8 +1,8 @@
-#pragma once
+﻿#pragma once
 
 namespace cameraunlock {
 
-/// Return type for PoseInterpolator — interpolated rotation values in degrees.
+/// Return type for PoseInterpolator â€” interpolated rotation values in degrees.
 struct InterpolatedPose {
     float yaw = 0.0f;
     float pitch = 0.0f;
@@ -29,25 +29,48 @@ public:
 
     PoseInterpolator() = default;
 
-    /// Segment position to sample at, for a given progress.
+    /// Seconds a sample may be late before the extrapolation starts expiring.
+    /// Sized to outlast an ordinary Wi-Fi loss burst (50-200 ms), because a
+    /// dropped packet or two is a live feed and must behave exactly as it did
+    /// before: continue the prediction, then hold. Retreating on a dropped
+    /// packet would pull the camera BACKWARDS against a head that is still
+    /// turning, which reads far worse than the flat spot it replaces.
+    static constexpr float kExtrapolationHoldSeconds = 0.25f;
+    /// Seconds over which a genuinely stalled feed converges back to the last
+    /// reported sample. Long enough that the correction is a drift, not a snap.
+    static constexpr float kExtrapolationDecaySeconds = 0.35f;
+
+    /// Segment position to sample at, given interpolation progress and how
+    /// long the next sample has been outstanding.
     ///
     /// Progress past 1.0 is extrapolation: a short prediction that keeps
     /// velocity continuous between samples. It is only a prediction, so it
-    /// must not outlive the sample it was predicting from. Once the next
-    /// sample is a full interval late (tracker app holding its last value on
-    /// face loss, a stalled feed, or a head so still the values repeat
-    /// bit-for-bit and the duplicate filter suppresses them), this eases back
-    /// to the last KNOWN sample instead of parking at the extrapolated
-    /// overshoot. Holding 1.5x the reported pose indefinitely is the bug this
-    /// exists to prevent - the contract on a stalled tracker is to hold what
-    /// it actually reported, never to keep inventing.
-    float SegmentPosition(float progress) const {
+    /// must not outlive the sample it was predicting from by much. Clamping it
+    /// and then HOLDING - the original behaviour - parks the output at 1.5x
+    /// the last reported pose forever whenever new samples stop arriving: a
+    /// tracker app streaming its last value while the face is lost, or a head
+    /// so still that consecutive samples are bit-identical and the session's
+    /// duplicate filter suppresses them. A 25 deg head turn then renders as
+    /// 37.5 deg and stays there.
+    ///
+    /// So the prediction expires, but on a WALL CLOCK rather than on progress:
+    /// progress is measured in units of an estimated sample interval, and that
+    /// estimate is stale by construction in exactly the stall case (the EMA
+    /// only updates when a new sample arrives). Below the hold threshold this
+    /// is bit-for-bit the old behaviour; past it the segment position eases -
+    /// smoothstep, so there is no velocity step at either end - to 1.0, which
+    /// is the pose the tracker actually reported.
+    float SegmentPosition(float progress, float time_since_last_sample) const {
         if (progress < 0.0f) return 0.0f;
         const float maxPt = 1.0f + max_extrapolation_fraction;
-        if (progress <= maxPt) return progress;
-        const float over = progress - maxPt;
-        const float blend = over > 1.0f ? 1.0f : over;
-        return maxPt + (1.0f - maxPt) * blend;
+        const float pt = progress > maxPt ? maxPt : progress;
+        if (time_since_last_sample <= kExtrapolationHoldSeconds) return pt;
+
+        const float late = time_since_last_sample - kExtrapolationHoldSeconds;
+        float u = late / kExtrapolationDecaySeconds;
+        if (u > 1.0f) u = 1.0f;
+        const float eased = u * u * (3.0f - 2.0f * u);  // smoothstep
+        return pt + (1.0f - pt) * eased;
     }
 
     /// Update with the latest raw pose and frame timing.
@@ -63,7 +86,7 @@ public:
 
         if (is_new_sample) {
             if (!m_hasFirstSample) {
-                // Very first sample — park at this position
+                // Very first sample â€” park at this position
                 m_fromYaw = yaw;    m_fromPitch = pitch;    m_fromRoll = roll;
                 m_toYaw = yaw;      m_toPitch = pitch;      m_toRoll = roll;
                 m_progress = 1.0f;
@@ -85,7 +108,7 @@ public:
             }
 
             // Capture current interpolated (possibly extrapolated) position as new start point
-            const float t = SegmentPosition(m_progress);
+            const float t = SegmentPosition(m_progress, m_timeSinceLastNewSample);
             m_fromYaw   = m_fromYaw   + (m_toYaw   - m_fromYaw)   * t;
             m_fromPitch = m_fromPitch + (m_toPitch - m_fromPitch) * t;
             m_fromRoll  = m_fromRoll  + (m_toRoll  - m_fromRoll)  * t;
@@ -105,7 +128,7 @@ public:
 
         // Allow extrapolation past 1.0 to maintain velocity continuity,
         // bounded to avoid runaway prediction on direction reversals.
-        const float pt = SegmentPosition(m_progress);
+        const float pt = SegmentPosition(m_progress, m_timeSinceLastNewSample);
 
         float outYaw   = m_fromYaw   + (m_toYaw   - m_fromYaw)   * pt;
         float outPitch = m_fromPitch + (m_toPitch - m_fromPitch) * pt;
@@ -134,7 +157,7 @@ private:
     static constexpr float kMinSampleInterval = 0.001f;
     static constexpr float kMaxSampleInterval = 0.2f;
 
-    // Interpolation segment: lerp from → to
+    // Interpolation segment: lerp from â†’ to
     float m_fromYaw = 0.0f, m_fromPitch = 0.0f, m_fromRoll = 0.0f;
     float m_toYaw = 0.0f, m_toPitch = 0.0f, m_toRoll = 0.0f;
 
@@ -152,3 +175,4 @@ private:
 };
 
 }  // namespace cameraunlock
+
