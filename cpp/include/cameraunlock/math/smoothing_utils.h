@@ -12,17 +12,23 @@ namespace math {
 constexpr double kDefaultLocalSmoothing = 0.0;
 
 /// Default smoothing for connections from a remote network device. Must match
-/// DefaultRemoteSmoothing in C# SmoothingUtils.cs. 0.15 gives ~40% per frame at
-/// 60fps, settling in ~100-150ms, which covers the jitter a WiFi/phone tracker
-/// adds over the network.
+/// DefaultRemoteSmoothing in C# SmoothingUtils.cs. 0.15 maps to speed 42.5, a
+/// flat 23.5 ms time constant at every frame rate; only the per-frame factor
+/// varies with dt (0.51 at 60fps, 0.16 at 240fps). That covers the jitter a
+/// WiFi/phone tracker adds over the network.
 constexpr double kDefaultRemoteSmoothing = 0.15;
 
 /// Maximum interpolation speed, used at smoothing=0. This is the frame
 /// interpolation floor: fast enough to be responsive, slow enough to hide
-/// discrete tracker sample boundaries at high refresh rates.
+/// discrete tracker sample boundaries at high refresh rates. Speed 50 is a flat
+/// 20 ms time constant (1/50) and so ~20 ms of average lag, identical at every
+/// frame rate; only the per-frame factor varies with dt (0.81 at 30fps, 0.57 at
+/// 60fps, 0.19 at 240fps).
 constexpr double kFrameInterpolationSpeed = 50.0;
 
-/// Minimum speed at maximum user smoothing (smoothing=1). ~5 second settling.
+/// Minimum speed at maximum user smoothing (smoothing=1). Speed 0.1 is a flat
+/// 10 second time constant (1/0.1) at every frame rate. Quote the time constant
+/// rather than a settling time: 5 seconds reaches only ~39% convergence.
 constexpr double kMaxSmoothingSpeed = 0.1;
 
 /// Linear interpolation.

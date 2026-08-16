@@ -20,8 +20,11 @@ now two user-configurable values selected per connection from the packet source 
 | `RemoteSmoothing` | `0.15` | Tracker on a remote network device |
 
 Selection goes through `SmoothingUtils.GetEffectiveSmoothing(local, remote, isRemote)`.
-No call site picks the value itself. Local users now get zero-latency tracking by default
-instead of the old floored 0.15.
+No call site picks the value itself. Local users now get the lightest available response by
+default instead of the old floored 0.15: smoothing 0.0 drops the added smoothing lag to
+nothing, leaving only the frame interpolation floor at speed 50, a flat 20 ms time constant.
+It is the lightest setting, not zero latency. The old 0.15 floor mapped to speed 42.5, a
+23.5 ms time constant, so the default saves about 3.5 ms of lag on a local tracker.
 
 - **Removed** `SmoothingUtils.BaselineSmoothing` / `math::kBaselineSmoothing`.
 - **Removed** the single-argument `GetEffectiveSmoothing(float)`.

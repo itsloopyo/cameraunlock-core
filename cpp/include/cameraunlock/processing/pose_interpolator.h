@@ -11,8 +11,8 @@ struct InterpolatedPose {
 
 /// Fills in frames between tracking samples using linear interpolation.
 /// Buffers one sample and lerps between the previous and current known positions,
-/// trading one sample period of latency (~8ms at 60Hz) for guaranteed smooth output
-/// at any display refresh rate.
+/// trading one sample period of latency (16.7 ms at 60Hz, ~8 ms averaged over the
+/// segment) for guaranteed smooth output at any display refresh rate.
 ///
 /// Sits between the UDP receiver and tracking processor in the pipeline:
 ///   Raw Pose (60Hz) -> PoseInterpolator -> TrackingProcessor -> Camera

@@ -37,8 +37,10 @@ namespace CameraUnlock.Core.Math
 
         /// <summary>
         /// Default smoothing for connections from a remote network device.
-        /// 0.15 gives ~40% per frame at 60fps, settling in ~100-150ms, which covers the
-        /// jitter a WiFi/phone tracker adds over the network.
+        /// Must match kDefaultRemoteSmoothing in C++ smoothing_utils.h. 0.15 maps to
+        /// speed 42.5, a flat 23.5 ms time constant at every frame rate; only the
+        /// per-frame factor varies with dt (0.51 at 60fps, 0.16 at 240fps). That covers
+        /// the jitter a WiFi/phone tracker adds over the network.
         /// </summary>
         public const float DefaultRemoteSmoothing = 0.15f;
 
@@ -46,12 +48,16 @@ namespace CameraUnlock.Core.Math
         /// Maximum interpolation speed (used at smoothing=0). This is the frame interpolation
         /// floor: fast enough to be responsive, slow enough to hide discrete tracker sample
         /// boundaries at high refresh rates.
-        /// At 240Hz: t ≈ 0.19/frame, settles to 95% in ~60ms (~20ms average lag).
-        /// At 60Hz:  t ≈ 0.57/frame, settles to 95% in ~50ms (~20ms average lag).
+        /// Speed 50 is a flat 20 ms time constant (1/50) and so ~20 ms of average lag,
+        /// identical at every frame rate: 95% convergence takes ~60 ms (3 time constants)
+        /// at 30fps and at 240fps alike. Only the per-frame factor varies with dt:
+        /// t = 0.81/frame at 30Hz, 0.57 at 60Hz, 0.29 at 144Hz, 0.19 at 240Hz.
         /// </summary>
         public const float FrameInterpolationSpeed = 50f;
 
-        // Minimum speed at maximum user smoothing (smoothing=1). ~5 second settling time.
+        // Minimum speed at maximum user smoothing (smoothing=1). Speed 0.1 is a flat
+        // 10 second time constant (1/0.1) at every frame rate. Quote the time constant
+        // rather than a settling time: 5 seconds reaches only ~39% convergence.
         private const float MaxSmoothing = 0.1f;
         private const float SpeedRange = FrameInterpolationSpeed - MaxSmoothing;
 
