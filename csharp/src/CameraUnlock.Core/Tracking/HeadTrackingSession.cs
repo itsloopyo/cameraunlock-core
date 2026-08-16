@@ -10,8 +10,8 @@ namespace CameraUnlock.Core.Tracking
     /// Complete per-frame head tracking pipeline with connection auto-recenter,
     /// tracking-loss hold, and tracking-mode cycling:
     ///
-    ///   rotation: OpenTrackReceiver -> PoseInterpolator -> TrackingProcessor
-    ///   position: OpenTrackReceiver -> PositionInterpolator -> PositionProcessor
+    ///   rotation: ITrackingDataSource -> PoseInterpolator -> TrackingProcessor
+    ///   position: ITrackingDataSource -> PositionInterpolator -> PositionProcessor
     ///
     /// Framework-agnostic: call <see cref="Update"/> once per frame, then read
     /// <see cref="Rotation"/> and <see cref="PositionOffset"/> and apply them to the
@@ -22,7 +22,7 @@ namespace CameraUnlock.Core.Tracking
     /// </summary>
     public sealed class HeadTrackingSession
     {
-        private readonly OpenTrackReceiver _receiver;
+        private readonly ITrackingDataSource _receiver;
         private readonly TrackingProcessor _processor;
         private readonly PositionProcessor _positionProcessor;
         private readonly PoseInterpolator _poseInterpolator = new PoseInterpolator();
@@ -36,7 +36,18 @@ namespace CameraUnlock.Core.Tracking
         private Vec3 _heldPositionOffset;
         private bool _hasPose;
 
-        public HeadTrackingSession(OpenTrackReceiver receiver, TrackingProcessor processor, PositionProcessor positionProcessor)
+        // The session, not PositionSettings, is the owner of the two smoothing values.
+        // They still LIVE in PositionSettings (that is the shape mods are wired to), but
+        // a settings struct is assigned wholesale, so an ApplyPositionSettings after an
+        // ApplySmoothing used to silently reset position smoothing to the struct's
+        // defaults while rotation smoothing kept the value the user asked for. Owning the
+        // pair here and recomposing it onto every settings assignment - and again each
+        // Update, which also catches a write straight to the caller-held processor -
+        // makes call order irrelevant in both directions.
+        private float _localSmoothing;
+        private float _remoteSmoothing;
+
+        public HeadTrackingSession(ITrackingDataSource receiver, TrackingProcessor processor, PositionProcessor positionProcessor)
         {
             if (receiver == null) throw new ArgumentNullException("receiver");
             if (processor == null) throw new ArgumentNullException("processor");
@@ -45,6 +56,10 @@ namespace CameraUnlock.Core.Tracking
             _receiver = receiver;
             _processor = processor;
             _positionProcessor = positionProcessor;
+
+            _localSmoothing = processor.LocalSmoothing;
+            _remoteSmoothing = processor.RemoteSmoothing;
+            PushSmoothing();
         }
 
         /// <summary>
@@ -86,6 +101,64 @@ namespace CameraUnlock.Core.Tracking
         public int StabilizationFrames { get; set; } = 10;
 
         /// <summary>
+        /// User smoothing applied when the tracker runs on this machine (loopback).
+        /// Forwarded to both the rotation and the position processor. The getter reports
+        /// the session's own value, which is what both processors are actually running.
+        /// </summary>
+        public float LocalSmoothing
+        {
+            get { return _localSmoothing; }
+            set
+            {
+                _localSmoothing = value;
+                PushSmoothing();
+            }
+        }
+
+        /// <summary>
+        /// User smoothing applied when the tracker is a remote device on the network.
+        /// Forwarded to both the rotation and the position processor. The getter reports
+        /// the session's own value, which is what both processors are actually running.
+        /// </summary>
+        public float RemoteSmoothing
+        {
+            get { return _remoteSmoothing; }
+            set
+            {
+                _remoteSmoothing = value;
+                PushSmoothing();
+            }
+        }
+
+        /// <summary>
+        /// Position settings for this session. Assigning recomposes the session's two
+        /// smoothing values onto the incoming struct, so assigning settings can never
+        /// undo a <see cref="LocalSmoothing"/> / <see cref="RemoteSmoothing"/> change and
+        /// the two can be set in either order. To change smoothing, set those properties;
+        /// the smoothing fields carried by the assigned struct are ignored.
+        /// </summary>
+        public PositionSettings PositionSettings
+        {
+            get { return _positionProcessor.Settings; }
+            set { _positionProcessor.Settings = value.WithSmoothing(_localSmoothing, _remoteSmoothing); }
+        }
+
+        private void PushSmoothing()
+        {
+            _processor.LocalSmoothing = _localSmoothing;
+            _processor.RemoteSmoothing = _remoteSmoothing;
+            _positionProcessor.Settings =
+                _positionProcessor.Settings.WithSmoothing(_localSmoothing, _remoteSmoothing);
+        }
+
+        /// <summary>
+        /// Whether the latest <see cref="Update"/> saw a remote connection. Read from
+        /// the receiver every update, so switching between a local tracker and a phone
+        /// on WiFi swaps the smoothing parameter without a restart.
+        /// </summary>
+        public bool IsRemoteConnection { get; private set; }
+
+        /// <summary>
         /// Optional logging callback (auto-recenter notifications).
         /// </summary>
 #if NULLABLE_ENABLED
@@ -119,6 +192,19 @@ namespace CameraUnlock.Core.Tracking
         {
             if (_receiver.IsDataFresh())
             {
+                // Re-assert rather than trust: the caller holds its own reference to the
+                // PositionProcessor this session was constructed with, so a settings
+                // assignment made straight on the processor would otherwise carry that
+                // struct's smoothing fields and quietly displace the session's.
+                PushSmoothing();
+
+                // Re-read every frame: the smoothing parameter is selected per
+                // connection, so a switch from a local tracker to a remote one
+                // must take effect without a restart.
+                IsRemoteConnection = _receiver.IsRemoteConnection;
+                _processor.IsRemoteConnection = IsRemoteConnection;
+                _positionProcessor.IsRemoteConnection = IsRemoteConnection;
+
                 HandleConnectionRecenter();
 
                 if (_receiver.TryConsumeRecenterRequest())

@@ -19,6 +19,13 @@ namespace CameraUnlock.Core.Processing
         public PositionSettings Settings { get; set; } = PositionSettings.Default;
 
         /// <summary>
+        /// Whether the current connection comes from a remote device. Fed from the
+        /// receiver every update so a switch between a local and a remote tracker
+        /// picks up the other parameter without a restart.
+        /// </summary>
+        public bool IsRemoteConnection { get; set; }
+
+        /// <summary>
         /// Forward distance (meters) of the tracker's face tracking point from the
         /// neck/rotation pivot. When the head rotates, the tracked face point traces
         /// an arc, injecting phantom translation into the position data. This value
@@ -70,7 +77,8 @@ namespace CameraUnlock.Core.Processing
             Vec3 scaled = new Vec3(x, y, z);
 
             // Step 3: Exponential smoothing on tracker position
-            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(Settings.Smoothing);
+            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(
+                Settings.LocalSmoothing, Settings.RemoteSmoothing, IsRemoteConnection);
 
             if (!_hasSmoothedValue)
             {
@@ -89,11 +97,14 @@ namespace CameraUnlock.Core.Processing
 
             // Step 4: Box clamp position against limits
             // Y and Z use asymmetric limits: up/forward lean is generous,
-            // down/backward lean is restricted to avoid clipping into the player body
+            // down/backward lean is restricted to avoid clipping into the player body.
+            // NEGATIVE z is the forward lean, so LimitZ (forward) is the lower bound and
+            // LimitZBack (backward) the upper one. Reading LimitZ as "the +z bound"
+            // transposes the pair and hands forward lean the tight backward budget.
             Vec3 clamped = new Vec3(
                 MathUtils.Clamp(_smoothedPosition.X, -Settings.LimitX, Settings.LimitX),
                 MathUtils.Clamp(_smoothedPosition.Y, -Settings.LimitYDown, Settings.LimitY),
-                MathUtils.Clamp(_smoothedPosition.Z, -Settings.LimitZBack, Settings.LimitZ)
+                MathUtils.Clamp(_smoothedPosition.Z, -Settings.LimitZ, Settings.LimitZBack)
             );
 
             return clamped;

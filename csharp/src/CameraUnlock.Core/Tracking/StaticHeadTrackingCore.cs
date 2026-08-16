@@ -2,6 +2,7 @@ using System;
 using CameraUnlock.Core.Aim;
 using CameraUnlock.Core.Config;
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 using CameraUnlock.Core.Protocol;
 
@@ -35,6 +36,15 @@ namespace CameraUnlock.Core.Tracking
         private static bool _initialized;
         private static bool _enabled = true;
         private static bool _hasAutoRecentered;
+
+        // Smoothing parameters, mirrored here so the getters keep working before
+        // Initialize() and after Shutdown(), when there is no processor to read from.
+        //
+        // Initialize() OVERWRITES both from the config it is handed. Setting them before
+        // Initialize() therefore has no lasting effect - config is the source of truth at
+        // startup. Set them AFTER Initialize() to override what the config supplied.
+        private static float _localSmoothing = SmoothingUtils.DefaultLocalSmoothing;
+        private static float _remoteSmoothing = SmoothingUtils.DefaultRemoteSmoothing;
 
         // Logging
 #if NULLABLE_ENABLED
@@ -80,6 +90,46 @@ namespace CameraUnlock.Core.Tracking
         }
 
         /// <summary>
+        /// User smoothing applied when the tracker runs on this machine (loopback).
+        /// 0 = frame interpolation only, 1 = heavy smoothing. No floor is applied.
+        ///
+        /// <see cref="Initialize"/> overwrites this from the supplied config, so set it
+        /// after Initialize() rather than before.
+        /// </summary>
+        public static float LocalSmoothing
+        {
+            get { return _localSmoothing; }
+            set
+            {
+                _localSmoothing = value;
+                if (_processor != null)
+                {
+                    _processor.LocalSmoothing = value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// User smoothing applied when the tracker is a remote device on the network.
+        /// 0 = frame interpolation only, 1 = heavy smoothing. No floor is applied.
+        ///
+        /// <see cref="Initialize"/> overwrites this from the supplied config, so set it
+        /// after Initialize() rather than before.
+        /// </summary>
+        public static float RemoteSmoothing
+        {
+            get { return _remoteSmoothing; }
+            set
+            {
+                _remoteSmoothing = value;
+                if (_processor != null)
+                {
+                    _processor.RemoteSmoothing = value;
+                }
+            }
+        }
+
+        /// <summary>
         /// Whether the core has been initialized.
         /// </summary>
         public static bool IsInitialized
@@ -111,10 +161,14 @@ namespace CameraUnlock.Core.Tracking
             _log?.Invoke("StaticHeadTrackingCore initializing...");
 
             // Create tracking processor with config settings
+            _localSmoothing = config.LocalSmoothing;
+            _remoteSmoothing = config.RemoteSmoothing;
+
             _processor = new TrackingProcessor
             {
                 Sensitivity = config.Sensitivity,
-                SmoothingFactor = 0f // Will be set dynamically based on connection type
+                LocalSmoothing = _localSmoothing,
+                RemoteSmoothing = _remoteSmoothing
             };
 
             // Start OpenTrack receiver
@@ -145,6 +199,8 @@ namespace CameraUnlock.Core.Tracking
                 return false;
             }
 
+            RefreshConnectionFlag();
+
             // Auto-recenter on first connection
             if (!_hasAutoRecentered)
             {
@@ -173,8 +229,28 @@ namespace CameraUnlock.Core.Tracking
                 return new TrackingPose(0, 0, 0, 0);
             }
 
+            // Also refreshed here, not just in Update(): this method runs the processor
+            // and is reachable on its own. Update() returns early when the core is
+            // disabled or the receiver is not yet receiving, so a mod that calls
+            // GetProcessedPose directly - or on a frame Update bailed out of - would
+            // otherwise smooth with a stale connection flag and silently get the wrong
+            // parameter. Both call sites read the same receiver, so they cannot disagree.
+            RefreshConnectionFlag();
+
             TrackingPose rawPose = _receiver.GetLatestPose();
             return _processor.Process(rawPose, deltaTime);
+        }
+
+        // The smoothing parameter is selected per connection, so this must be re-read
+        // rather than sampled once: switching from a local tracker to a phone on WiFi
+        // has to take effect without a restart.
+        private static void RefreshConnectionFlag()
+        {
+            if (_receiver == null || _processor == null)
+            {
+                return;
+            }
+            _processor.IsRemoteConnection = _receiver.IsRemoteConnection;
         }
 
         /// <summary>
@@ -284,6 +360,12 @@ namespace CameraUnlock.Core.Tracking
             _config = null;
             _initialized = false;
             _hasAutoRecentered = false;
+            // Belongs to the session that is ending. Left populated, the static getters
+            // keep reporting the previous session's config after shutdown, and a caller
+            // that reads them before the next Initialize() gets stale values that look
+            // perfectly plausible.
+            _localSmoothing = SmoothingUtils.DefaultLocalSmoothing;
+            _remoteSmoothing = SmoothingUtils.DefaultRemoteSmoothing;
             _log?.Invoke("StaticHeadTrackingCore shut down");
             _log = null;
         }

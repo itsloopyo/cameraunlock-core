@@ -24,6 +24,13 @@ public:
     float GetTrackerPivotForward() const { return m_trackerPivotForward; }
     void SetTrackerPivotForward(float value) { m_trackerPivotForward = value; }
 
+    /// Fed from the receiver's IsRemoteConnection() every update so a switch
+    /// between a local tracker and a remote one picks up the other parameter
+    /// without a restart. Runtime state, deliberately not part of PositionSettings.
+    void SetIsRemoteConnection(bool is_remote) { m_isRemoteConnection = is_remote; }
+
+    bool IsRemoteConnection() const { return m_isRemoteConnection; }
+
     /// Processes a raw position through the full pipeline.
     math::Vec3 Process(const PositionData& raw, const math::Quat4& processed_rotation_q,
                        float delta_time) {
@@ -54,7 +61,9 @@ public:
 
         // Step 3: Exponential smoothing on tracker position
         float effective_smoothing = static_cast<float>(
-            math::GetEffectiveSmoothing(m_settings.smoothing));
+            math::GetEffectiveSmoothing(m_settings.local_smoothing,
+                                        m_settings.remote_smoothing,
+                                        m_isRemoteConnection));
 
         if (!m_hasSmoothedValue) {
             m_smoothedPosition = scaled;
@@ -101,6 +110,7 @@ public:
 private:
     PositionSettings m_settings;
     float m_trackerPivotForward = 0.15f;
+    bool m_isRemoteConnection = false;
 
     math::Vec3 m_center;
     math::Vec3 m_smoothedPosition;

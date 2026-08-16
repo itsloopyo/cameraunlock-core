@@ -26,6 +26,7 @@ set(CAMERAUNLOCK_SOURCES
     src/processing/center_offset_manager.cpp
     src/processing/tracking_processor.cpp
     src/config/ini_reader.cpp
+    src/discovery/probe_selection.cpp
     src/memory/pattern_scanner.cpp
     src/memory/pe_fingerprint.cpp
     src/input/hotkey_poller.cpp

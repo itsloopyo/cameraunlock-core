@@ -13,10 +13,16 @@ namespace CameraUnlock.Core.Tracking
     public static class RemoteRecenter
     {
         /// <summary>
-        /// Consumes a pending recenter request and centers the pipeline on the
-        /// current pose. Returns true when a request was consumed, so the
-        /// caller can notify the user and cancel any pending
-        /// connection-stabilization recenter of its own.
+        /// Pushes the source's connection flag onto the processors, then consumes a
+        /// pending recenter request and centers the pipeline on the current pose. Returns
+        /// true when a request was consumed, so the caller can notify the user and cancel
+        /// any pending connection-stabilization recenter of its own.
+        ///
+        /// Call this every frame, not only when a recenter is expected: a hand-wired
+        /// pipeline has no other component that owns the connection flag, and the two
+        /// smoothing parameters are selected per connection. Without a per-frame push both
+        /// processors stay local forever and RemoteSmoothing is dead config with nothing to
+        /// catch it, which is exactly the population this helper exists for.
         ///
         /// Centers via <see cref="TrackingProcessor.RecenterTo"/> with the
         /// latest received pose: the tracker app zeroes its own output before
@@ -27,27 +33,34 @@ namespace CameraUnlock.Core.Tracking
         /// pre-press drift. Never also call OpenTrackReceiver.Recenter():
         /// centering at both levels subtracts the offset twice.
         /// </summary>
-        /// <param name="receiver">Receiver to consume the request from.</param>
-        /// <param name="processor">Rotation processor to center.</param>
+        /// <param name="receiver">Source to read the connection flag from and consume the request from.</param>
+        /// <param name="processor">Rotation processor to feed and center.</param>
         /// <param name="poseInterpolator">Optional pose interpolator to reset.</param>
-        /// <param name="positionProcessor">Optional position processor to center.</param>
+        /// <param name="positionProcessor">Optional position processor to feed and center.</param>
         /// <param name="positionInterpolator">Optional position interpolator to reset.</param>
 #if NULLABLE_ENABLED
         public static bool TryConsume(
-            OpenTrackReceiver receiver,
+            ITrackingDataSource receiver,
             TrackingProcessor processor,
             PoseInterpolator? poseInterpolator = null,
             PositionProcessor? positionProcessor = null,
             PositionInterpolator? positionInterpolator = null)
 #else
         public static bool TryConsume(
-            OpenTrackReceiver receiver,
+            ITrackingDataSource receiver,
             TrackingProcessor processor,
             PoseInterpolator poseInterpolator = null,
             PositionProcessor positionProcessor = null,
             PositionInterpolator positionInterpolator = null)
 #endif
         {
+            bool isRemote = receiver.IsRemoteConnection;
+            processor.IsRemoteConnection = isRemote;
+            if (positionProcessor != null)
+            {
+                positionProcessor.IsRemoteConnection = isRemote;
+            }
+
             if (!receiver.TryConsumeRecenterRequest())
             {
                 return false;

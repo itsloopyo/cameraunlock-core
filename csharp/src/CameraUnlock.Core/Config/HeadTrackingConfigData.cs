@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Protocol;
 
 namespace CameraUnlock.Core.Config
@@ -50,7 +51,10 @@ namespace CameraUnlock.Core.Config
         public float[] ReticleColorRgba { get; set; } = new float[] { 1f, 1f, 1f, 1f };
 
         /// <inheritdoc />
-        public float Smoothing { get; set; } = 0f;
+        public float LocalSmoothing { get; set; } = SmoothingUtils.DefaultLocalSmoothing;
+
+        /// <inheritdoc />
+        public float RemoteSmoothing { get; set; } = SmoothingUtils.DefaultRemoteSmoothing;
 
         /// <summary>
         /// Creates a new config with default values.
@@ -205,14 +209,78 @@ namespace CameraUnlock.Core.Config
                             ReticleColorRgba = color;
                         break;
 
-                    case "smoothing":
+                    case "localsmoothing":
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
-                            Smoothing = System.Math.Max(0f, System.Math.Min(1f, floatVal));
+                        {
+                            LocalSmoothing = MathUtils.Clamp01(floatVal);
+                        }
+                        else
+                        {
+                            LocalSmoothing = SmoothingUtils.DefaultLocalSmoothing;
+                            WarnUnusable(log, "LocalSmoothing", value, LocalSmoothing);
+                        }
+                        break;
+
+                    case "remotesmoothing":
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
+                            RemoteSmoothing = MathUtils.Clamp01(floatVal);
+                        }
+                        else
+                        {
+                            RemoteSmoothing = SmoothingUtils.DefaultRemoteSmoothing;
+                            WarnUnusable(log, "RemoteSmoothing", value, RemoteSmoothing);
+                        }
+                        break;
+
+                    case "smoothing":
+                    case "smoothingfactor":
+                        WarnRetiredSmoothingKey(log, kvp.Key);
                         break;
                 }
             }
 
             Sensitivity = new SensitivitySettings(yawSens, pitchSens, rollSens, invertYaw, invertPitch, invertRoll);
+        }
+
+#if NULLABLE_ENABLED
+        private static void WarnUnusable(Action<string>? log, string key, string value, float fallback)
+#else
+        private static void WarnUnusable(Action<string> log, string key, string value, float fallback)
+#endif
+        {
+            log?.Invoke(string.Format(
+                "Config key '{0}' has an unusable value '{1}' (not a finite number) - using {2}",
+                key, value, fallback.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        // Warned once per process rather than once per load: mods reload config on a
+        // hotkey or a file watcher, and repeating this every reload buries it.
+        private static bool _warnedRetiredSmoothingKey;
+
+#if NULLABLE_ENABLED
+        private static void WarnRetiredSmoothingKey(Action<string>? log, string key)
+#else
+        private static void WarnRetiredSmoothingKey(Action<string> log, string key)
+#endif
+        {
+            if (_warnedRetiredSmoothingKey) return;
+            _warnedRetiredSmoothingKey = true;
+
+            // Deliberately NOT migrated into the new keys. The old single value carried a
+            // hidden 0.15 floor, so the number in an existing config does not mean what it
+            // used to: copying 0.8 across would silently hand a local user smoothing they
+            // never chose under the new semantics, and copying it into only one of the two
+            // would be a guess about which connection they were on.
+            log?.Invoke(string.Format(
+                "Config key '{0}' has been retired and is IGNORED. Smoothing is now two keys: " +
+                "LocalSmoothing (default {1}, applies to a tracker on this machine) and " +
+                "RemoteSmoothing (default {2}, applies to a tracker on the network). The old " +
+                "value is not migrated because the semantics changed - it carried a hidden " +
+                "{2} floor that no longer exists. Set the two new keys.",
+                key,
+                SmoothingUtils.DefaultLocalSmoothing.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                SmoothingUtils.DefaultRemoteSmoothing.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
 
         /// <summary>

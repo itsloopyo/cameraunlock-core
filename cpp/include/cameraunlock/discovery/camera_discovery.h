@@ -47,6 +47,38 @@ struct DiscoveryConfig {
     int pulse_frames       = 15;               // frames to hold each pulse
     int settle_frames      = 10;               // frames to wait between pulses
     int instance_size      = 512;              // bytes to analyze/snapshot
+
+    // Pin the per-frame camera update to a known vfunc index on the first
+    // (most-specific) candidate instead of letting the call-count heuristic
+    // choose. Leave at -1, the default, for auto-discovery.
+    //
+    // The heuristic ranks slots by how close their call count sits to a
+    // per-frame rate, which mis-picks when the real camera update has not
+    // begun firing inside the probe window (a probe that lands on a load-in,
+    // say). It then latches silently onto a high-frequency getter and head
+    // tracking "never starts" on that launch. When the correct index is known
+    // from reversing, forcing it removes that non-determinism.
+    //
+    // Probing still runs, so the slot's instance pointer is captured the same
+    // way, and selection still waits until the slot is being called at a
+    // per-frame RATE (see kForcedSlotMinCallsPerWindow in probe_selection.h)
+    // before committing. That wait is not bounded by probe_frames: a forced
+    // slot that never fires keeps the phase in Probing rather than picking
+    // something else, and logs a periodic line saying so.
+    //
+    // An index that does not exist on the class actually found is reported as
+    // an error once and then ignored, leaving auto-discovery to run. It is not
+    // a discovery failure; see probe_selection.h for why that distinction
+    // matters to consumers.
+    int forced_vfunc_index = -1;               // -1 = auto-discover
+};
+
+// Rolling window backing the forced-slot rate gate. Lives here rather than in
+// probe_selection.h so CameraDiscovery can hold one by value; the thresholds
+// that give it meaning are in probe_selection.h alongside the algorithm.
+struct ForcedSlotWindow {
+    int start_frame = 0;   // probe frame the current window opened on
+    int start_count = 0;   // the forced slot's call count when it opened
 };
 
 using LogFn = void(*)(const char* msg);
@@ -119,6 +151,7 @@ private:
     int m_probeFrameCount = 0;
     int m_activeSlot = -1;
     void* m_activeTarget = nullptr;
+    ForcedSlotWindow m_forcedWindow{};
 
     // Instance
     std::atomic<uintptr_t> m_instance{0};

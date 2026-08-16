@@ -196,6 +196,122 @@ namespace CameraUnlock.Core.Tests.Tracking
         }
 
         [Fact]
+        public void SmoothingSetters_ReachThePositionProcessorSettings()
+        {
+            _session.LocalSmoothing = 0.25f;
+            _session.RemoteSmoothing = 0.75f;
+
+            Assert.Equal(0.25f, _processor.LocalSmoothing);
+            Assert.Equal(0.75f, _processor.RemoteSmoothing);
+            Assert.Equal(0.25f, _positionProcessor.Settings.LocalSmoothing);
+            Assert.Equal(0.75f, _positionProcessor.Settings.RemoteSmoothing);
+        }
+
+        // The two smoothing values live inside PositionSettings, which is assigned
+        // wholesale, so without a structural owner a settings assignment silently reset
+        // position smoothing while rotation smoothing survived on its own processor. The
+        // session owns the pair and recomposes it, so both orders must land identically -
+        // a config-reload handler naturally does smoothing first, which was the unsafe
+        // order under the old contract.
+        private static PositionSettings ProbeSettings()
+        {
+            return PositionSettings.Symmetric(2f, 2f, 2f, 0.31f, 0.21f, 0.41f, 0.11f, 0f, 0f);
+        }
+
+        private void AssertSmoothingSurvivedSettings()
+        {
+            Assert.Equal(0.25f, _session.LocalSmoothing);
+            Assert.Equal(0.75f, _session.RemoteSmoothing);
+            Assert.Equal(0.25f, _processor.LocalSmoothing);
+            Assert.Equal(0.75f, _processor.RemoteSmoothing);
+            Assert.Equal(0.25f, _positionProcessor.Settings.LocalSmoothing);
+            Assert.Equal(0.75f, _positionProcessor.Settings.RemoteSmoothing);
+
+            // Everything else in the assigned struct must still have landed.
+            Assert.Equal(2f, _positionProcessor.Settings.SensitivityX);
+            Assert.Equal(0.31f, _positionProcessor.Settings.LimitX);
+            Assert.Equal(0.41f, _positionProcessor.Settings.LimitZ);
+            Assert.Equal(0.11f, _positionProcessor.Settings.LimitZBack);
+        }
+
+        [Fact]
+        public void SmoothingThenPositionSettings_SmoothingSurvives()
+        {
+            _session.LocalSmoothing = 0.25f;
+            _session.RemoteSmoothing = 0.75f;
+
+            _session.PositionSettings = ProbeSettings();
+
+            AssertSmoothingSurvivedSettings();
+        }
+
+        [Fact]
+        public void PositionSettingsThenSmoothing_SmoothingSurvives()
+        {
+            _session.PositionSettings = ProbeSettings();
+
+            _session.LocalSmoothing = 0.25f;
+            _session.RemoteSmoothing = 0.75f;
+
+            AssertSmoothingSurvivedSettings();
+        }
+
+        [Fact]
+        public void Update_ReassertsSmoothingOverADirectProcessorWrite()
+        {
+            // The caller keeps its own reference to the PositionProcessor, so a settings
+            // assignment made straight on the processor bypasses the session entirely.
+            // The session getter must not be left lying about the effective state.
+            _session.LocalSmoothing = 0.25f;
+            _session.RemoteSmoothing = 0.75f;
+            _positionProcessor.Settings = ProbeSettings();
+
+            StartReceiverAndSend(yaw: 10.0, pitch: 0.0, roll: 0.0);
+            _session.Update(FrameTime);
+
+            Assert.Equal(0.25f, _positionProcessor.Settings.LocalSmoothing);
+            Assert.Equal(0.75f, _positionProcessor.Settings.RemoteSmoothing);
+            Assert.Equal(0.25f, _session.LocalSmoothing);
+            Assert.Equal(0.75f, _session.RemoteSmoothing);
+        }
+
+        [Fact]
+        public void Update_PushesReceiverConnectionFlagOntoBothProcessors()
+        {
+            // Pre-poison both processors. If Update() merely leaves the flag alone
+            // (the ViewMatrixTrackingController bug: never propagated at all), these
+            // stay true. A loopback sender is local, so a correct Update overwrites
+            // both from the receiver every frame.
+            _processor.IsRemoteConnection = true;
+            _positionProcessor.IsRemoteConnection = true;
+
+            StartReceiverAndSend(yaw: 10.0, pitch: 0.0, roll: 0.0);
+            _session.Update(FrameTime);
+
+            Assert.False(_session.IsRemoteConnection, "A loopback sender is a local connection");
+            Assert.False(_processor.IsRemoteConnection, "Rotation processor must be fed from the receiver every update");
+            Assert.False(_positionProcessor.IsRemoteConnection, "Position processor must be fed from the receiver every update");
+        }
+
+        [Fact]
+        public void Update_ReassertsConnectionFlagEveryFrame()
+        {
+            StartReceiverAndSend(yaw: 10.0, pitch: 0.0, roll: 0.0);
+            _session.Update(FrameTime);
+
+            // Something else stomps the flag between frames (a mod writing it itself,
+            // a stale cached settings push). The next Update must correct it rather
+            // than sampling the connection once and trusting it forever.
+            _processor.IsRemoteConnection = true;
+            _positionProcessor.IsRemoteConnection = true;
+
+            _session.Update(FrameTime);
+
+            Assert.False(_processor.IsRemoteConnection);
+            Assert.False(_positionProcessor.IsRemoteConnection);
+        }
+
+        [Fact]
         public void Reset_ClearsHeldPose()
         {
             StartReceiverAndSend(yaw: 30.0, pitch: 0.0, roll: 0.0);

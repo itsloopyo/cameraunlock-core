@@ -14,14 +14,24 @@ namespace CameraUnlock.Core.Processing
         private bool _initialized;
 
         /// <summary>
-        /// Update smoothing with caller-managed smoothing value.
-        /// When <paramref name="smoothing"/> &lt; 0.001 the target is returned immediately
-        /// and internal state is cleared (no lag on next transition to smoothed mode).
+        /// Update smoothing with a caller-selected smoothing value, which is expected to be
+        /// the already-selected effective value from
+        /// <see cref="SmoothingUtils.GetEffectiveSmoothing(float, float, bool)"/>.
+        ///
+        /// There is deliberately no snap branch at low smoothing. It used to be
+        /// unreachable, because the old GetEffectiveSmoothing could never return below the
+        /// 0.15 baseline floor. With that floor gone and LocalSmoothing defaulting to 0.0,
+        /// a snap would become the DEFAULT path for every local user, which is the opposite
+        /// of what the same migration did to SmoothedRotationState, the C++
+        /// CalculateSmoothingFactor and the mods. The speed clamp inside
+        /// <see cref="SmoothingUtils.CalculateSmoothingFactor"/> keeps the per-frame factor
+        /// strictly below 1 at smoothing 0, so interpolation stays active and the output is
+        /// never stepped.
         /// </summary>
         /// <param name="yaw">Target yaw in degrees.</param>
         /// <param name="pitch">Target pitch in degrees.</param>
         /// <param name="roll">Target roll in degrees.</param>
-        /// <param name="smoothing">Smoothing factor 0-1. 0 = instant.</param>
+        /// <param name="smoothing">Effective smoothing factor 0-1. 0 = frame interpolation only.</param>
         /// <param name="deltaTime">Frame delta time in seconds.</param>
         /// <param name="smoothedYaw">Output smoothed yaw.</param>
         /// <param name="smoothedPitch">Output smoothed pitch.</param>
@@ -30,17 +40,6 @@ namespace CameraUnlock.Core.Processing
             float smoothing, float deltaTime,
             out float smoothedYaw, out float smoothedPitch, out float smoothedRoll)
         {
-            if (smoothing < 0.001f)
-            {
-                // No smoothing: snap to target, clear state so next
-                // transition to smoothed mode starts fresh.
-                _initialized = false;
-                smoothedYaw = yaw;
-                smoothedPitch = pitch;
-                smoothedRoll = roll;
-                return;
-            }
-
             Quat4 target = QuaternionUtils.FromYawPitchRoll(yaw, pitch, roll);
 
             if (!_initialized)

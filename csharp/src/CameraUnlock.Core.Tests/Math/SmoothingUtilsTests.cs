@@ -103,18 +103,59 @@ namespace CameraUnlock.Core.Tests.Math
         }
 
         [Fact]
-        public void GetEffectiveSmoothing_BelowBaseline_ReturnsBaseline()
+        public void Defaults_AreZeroLocalAndFifteenHundredthsRemote()
         {
-            float result = SmoothingUtils.GetEffectiveSmoothing(0.05f);
-            Assert.Equal(SmoothingUtils.BaselineSmoothing, result);
+            Assert.Equal(0.0f, SmoothingUtils.DefaultLocalSmoothing);
+            Assert.Equal(0.15f, SmoothingUtils.DefaultRemoteSmoothing);
         }
 
         [Fact]
-        public void GetEffectiveSmoothing_AboveBaseline_ReturnsBaseSmoothing()
+        public void GetEffectiveSmoothing_LocalConnection_ReturnsLocalSmoothing()
         {
-            float highSmoothing = 0.5f;
-            float result = SmoothingUtils.GetEffectiveSmoothing(highSmoothing);
-            Assert.Equal(highSmoothing, result);
+            float result = SmoothingUtils.GetEffectiveSmoothing(0.05f, 0.5f, false);
+            Assert.Equal(0.05f, result);
+        }
+
+        [Fact]
+        public void GetEffectiveSmoothing_RemoteConnection_ReturnsRemoteSmoothing()
+        {
+            float result = SmoothingUtils.GetEffectiveSmoothing(0.05f, 0.5f, true);
+            Assert.Equal(0.5f, result);
+        }
+
+        [Fact]
+        public void GetEffectiveSmoothing_ZeroLocal_IsNotFloored()
+        {
+            // The old baseline floor silently raised anything below 0.15. It is gone:
+            // whatever the user set is what the pipeline gets, including 0.
+            float result = SmoothingUtils.GetEffectiveSmoothing(0f, SmoothingUtils.DefaultRemoteSmoothing, false);
+            Assert.Equal(0f, result);
+        }
+
+        [Fact]
+        public void GetEffectiveSmoothing_ConnectionFlipsLocalToRemote_ChangesEffectiveValue()
+        {
+            const float local = 0f;
+            const float remote = 0.15f;
+
+            float whileLocal = SmoothingUtils.GetEffectiveSmoothing(local, remote, false);
+            float whileRemote = SmoothingUtils.GetEffectiveSmoothing(local, remote, true);
+            float backToLocal = SmoothingUtils.GetEffectiveSmoothing(local, remote, false);
+
+            Assert.Equal(local, whileLocal);
+            Assert.Equal(remote, whileRemote);
+            Assert.Equal(local, backToLocal);
+            Assert.NotEqual(whileLocal, whileRemote);
+        }
+
+        [Fact]
+        public void GetEffectiveSmoothing_ZeroSmoothing_StillLeavesFrameInterpolationActive()
+        {
+            float effective = SmoothingUtils.GetEffectiveSmoothing(0f, 0.15f, false);
+            float factor = SmoothingUtils.CalculateSmoothingFactor(effective, DeltaTime60Fps);
+
+            Assert.True(factor > 0f, "Frame interpolation must produce a non-zero blend at smoothing 0");
+            Assert.True(factor < 1f, "Frame interpolation must never snap (factor 1.0) at smoothing 0");
         }
     }
 }

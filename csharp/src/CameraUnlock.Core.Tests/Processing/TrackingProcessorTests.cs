@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Xunit;
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 
 namespace CameraUnlock.Core.Tests.Processing
@@ -16,7 +17,65 @@ namespace CameraUnlock.Core.Tests.Processing
 
             Assert.Equal(SensitivitySettings.Default, processor.Sensitivity);
             Assert.Equal(DeadzoneSettings.None, processor.Deadzone);
-            Assert.Equal(0f, processor.SmoothingFactor);
+            Assert.Equal(SmoothingUtils.DefaultLocalSmoothing, processor.LocalSmoothing);
+            Assert.Equal(SmoothingUtils.DefaultRemoteSmoothing, processor.RemoteSmoothing);
+            Assert.False(processor.IsRemoteConnection);
+        }
+
+        [Fact]
+        public void Process_LocalConnection_UsesLocalSmoothingVerbatim()
+        {
+            // LocalSmoothing 0 means no user smoothing at all: no floor raises it.
+            // Frame interpolation still applies, so a step lands part-way, but the
+            // heavier remote value would land noticeably shorter.
+            var local = new TrackingProcessor
+            {
+                LocalSmoothing = 0f,
+                RemoteSmoothing = 0.9f,
+                IsRemoteConnection = false
+            };
+            var remote = new TrackingProcessor
+            {
+                LocalSmoothing = 0f,
+                RemoteSmoothing = 0.9f,
+                IsRemoteConnection = true
+            };
+
+            long timestamp = Stopwatch.GetTimestamp();
+            local.Process(new TrackingPose(0f, 0f, 0f, timestamp), DeltaTime);
+            remote.Process(new TrackingPose(0f, 0f, 0f, timestamp), DeltaTime);
+
+            TrackingPose localStep = local.Process(new TrackingPose(30f, 0f, 0f, timestamp), DeltaTime);
+            TrackingPose remoteStep = remote.Process(new TrackingPose(30f, 0f, 0f, timestamp), DeltaTime);
+
+            Assert.True(localStep.Yaw > remoteStep.Yaw,
+                $"Local (unfloored 0) must react faster than remote 0.9: local={localStep.Yaw}, remote={remoteStep.Yaw}");
+            Assert.True(localStep.Yaw < 30f, "Frame interpolation must still apply at smoothing 0");
+            Assert.True(localStep.Yaw > 0f, "Must move toward the target");
+        }
+
+        [Fact]
+        public void Process_ConnectionFlipsLocalToRemote_ChangesResponse()
+        {
+            var processor = new TrackingProcessor
+            {
+                LocalSmoothing = 0f,
+                RemoteSmoothing = 0.9f,
+                IsRemoteConnection = false
+            };
+
+            long timestamp = Stopwatch.GetTimestamp();
+            processor.Process(new TrackingPose(0f, 0f, 0f, timestamp), DeltaTime);
+            TrackingPose asLocal = processor.Process(new TrackingPose(30f, 0f, 0f, timestamp), DeltaTime);
+
+            // Same processor, same input, connection now reports remote.
+            processor.ResetSmoothing();
+            processor.IsRemoteConnection = true;
+            processor.Process(new TrackingPose(0f, 0f, 0f, timestamp), DeltaTime);
+            TrackingPose asRemote = processor.Process(new TrackingPose(30f, 0f, 0f, timestamp), DeltaTime);
+
+            Assert.True(asLocal.Yaw > asRemote.Yaw,
+                $"Flipping to a remote connection must apply RemoteSmoothing: local={asLocal.Yaw}, remote={asRemote.Yaw}");
         }
 
         [Fact]

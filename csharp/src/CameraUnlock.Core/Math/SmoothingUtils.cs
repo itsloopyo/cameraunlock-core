@@ -15,18 +15,32 @@ namespace CameraUnlock.Core.Math
     /// refresh rate. Even at smoothing=0, the output is interpolated between tracker samples
     /// so that e.g. 30Hz tracker data looks smooth on a 240Hz display. Speed = <see cref="FrameInterpolationSpeed"/>.</item>
     /// <item><b>User smoothing (configurable)</b>: Reduces jitter/noise at the cost of added
-    /// latency. Controlled by the smoothing parameter (0 = frame interpolation only, 1 = heavy smoothing).</item>
+    /// latency. Controlled by two user parameters, <see cref="DefaultLocalSmoothing"/> and
+    /// <see cref="DefaultRemoteSmoothing"/>, selected per connection by
+    /// <see cref="GetEffectiveSmoothing(float, float, bool)"/>.</item>
     /// </list>
+    /// </para>
+    /// <para>
+    /// There is no smoothing floor. Whatever the user configured is what the pipeline uses,
+    /// including 0. Frame interpolation survives that because the speed clamp inside
+    /// <see cref="CalculateSmoothingFactor"/> never lets the per-frame factor reach 1.
     /// </para>
     /// </summary>
     public static class SmoothingUtils
     {
         /// <summary>
-        /// Minimum smoothing floor applied to all connections.
-        /// 0.15 gives ~40% per frame at 60fps, settling in ~100-150ms.
-        /// Prevents raw tracker jitter from reaching the camera.
+        /// Default smoothing for connections originating on the machine running the mod
+        /// (loopback / same-host sender). Zero: a same-machine tracker is already stable,
+        /// so smoothing only buys latency.
         /// </summary>
-        public const float BaselineSmoothing = 0.15f;
+        public const float DefaultLocalSmoothing = 0.0f;
+
+        /// <summary>
+        /// Default smoothing for connections from a remote network device.
+        /// 0.15 gives ~40% per frame at 60fps, settling in ~100-150ms, which covers the
+        /// jitter a WiFi/phone tracker adds over the network.
+        /// </summary>
+        public const float DefaultRemoteSmoothing = 0.15f;
 
         /// <summary>
         /// Maximum interpolation speed (used at smoothing=0). This is the frame interpolation
@@ -91,20 +105,19 @@ namespace CameraUnlock.Core.Math
         }
 
         /// <summary>
-        /// Gets the effective smoothing factor, ensuring the baseline floor is always applied.
+        /// Selects the smoothing value for the current connection. This is the only path by
+        /// which a smoothing value reaches a processor - no caller picks the value itself.
         /// </summary>
-        /// <param name="baseSmoothing">Base smoothing factor from configuration.</param>
-        /// <returns>Effective smoothing factor (at least <see cref="BaselineSmoothing"/>).</returns>
+        /// <param name="localSmoothing">Smoothing configured for same-machine (loopback) senders.</param>
+        /// <param name="remoteSmoothing">Smoothing configured for remote network senders.</param>
+        /// <param name="isRemoteConnection">True when the packet source is a remote device.</param>
+        /// <returns>The configured value for this connection, unmodified.</returns>
 #if !NET35 && !NET40
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
 #endif
-        public static float GetEffectiveSmoothing(float baseSmoothing)
+        public static float GetEffectiveSmoothing(float localSmoothing, float remoteSmoothing, bool isRemoteConnection)
         {
-            if (baseSmoothing < BaselineSmoothing)
-            {
-                return BaselineSmoothing;
-            }
-            return baseSmoothing;
+            return isRemoteConnection ? remoteSmoothing : localSmoothing;
         }
     }
 }

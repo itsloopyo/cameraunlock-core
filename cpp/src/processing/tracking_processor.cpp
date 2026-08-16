@@ -17,7 +17,8 @@ TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, floa
     // Step 3: Apply smoothing via quaternion SLERP.
     // SLERP follows the shortest arc on the unit sphere, avoiding the gimbal
     // artifacts that per-axis Euler smoothing can introduce at compound angles.
-    double effective_smoothing = math::GetEffectiveSmoothing(m_smoothingFactor);
+    double effective_smoothing = math::GetEffectiveSmoothing(
+        m_localSmoothing, m_remoteSmoothing, m_isRemoteConnection);
 
     math::Quat4 target = math::Quat4::FromYawPitchRoll(yaw, pitch, roll);
 

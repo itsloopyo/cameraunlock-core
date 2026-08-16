@@ -5,6 +5,7 @@ using System;
 using Xunit;
 using CameraUnlock.Core.Config;
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Tracking;
 
 namespace CameraUnlock.Core.Tests.Tracking
@@ -28,6 +29,38 @@ namespace CameraUnlock.Core.Tests.Tracking
         public void IsInitialized_BeforeInitialize_ReturnsFalse()
         {
             Assert.False(StaticHeadTrackingCore.IsInitialized);
+        }
+
+        [Fact]
+        public void Initialize_TakesBothSmoothingParametersFromConfig()
+        {
+            _config.LocalSmoothing = 0.2f;
+            _config.RemoteSmoothing = 0.6f;
+
+            StaticHeadTrackingCore.Initialize(_config);
+
+            Assert.Equal(0.2f, StaticHeadTrackingCore.LocalSmoothing);
+            Assert.Equal(0.6f, StaticHeadTrackingCore.RemoteSmoothing);
+            Assert.Equal(0.2f, StaticHeadTrackingCore.Processor.LocalSmoothing);
+            Assert.Equal(0.6f, StaticHeadTrackingCore.Processor.RemoteSmoothing);
+        }
+
+        [Fact]
+        public void GetProcessedPose_RefreshesConnectionFlag_WithoutUpdate()
+        {
+            // Update() early-returns when the receiver is not receiving, so the flag copy
+            // cannot live there alone: GetProcessedPose runs the processor on its own and
+            // must refresh the flag itself, or a mod calling it directly smooths with a
+            // stale connection and silently gets the wrong parameter.
+            StaticHeadTrackingCore.Initialize(_config);
+            StaticHeadTrackingCore.Processor.IsRemoteConnection = true;
+
+            StaticHeadTrackingCore.GetProcessedPose(1f / 60f);
+
+            // No packets have arrived, so the receiver reports a local connection and the
+            // poisoned flag must have been overwritten rather than left standing.
+            Assert.False(StaticHeadTrackingCore.Receiver.IsRemoteConnection);
+            Assert.False(StaticHeadTrackingCore.Processor.IsRemoteConnection);
         }
 
         [Fact]
@@ -105,6 +138,55 @@ namespace CameraUnlock.Core.Tests.Tracking
             StaticHeadTrackingCore.Shutdown();
 
             Assert.Null(StaticHeadTrackingCore.Config);
+        }
+
+        [Fact]
+        public void Shutdown_ResetsSmoothingToDefaults()
+        {
+            // The two values belong to the session that is ending. Left populated, the
+            // static getters keep reporting the previous session's config after shutdown
+            // and a caller reading them before the next Initialize() gets stale values
+            // that look perfectly plausible.
+            _config.LocalSmoothing = 0.4f;
+            _config.RemoteSmoothing = 0.6f;
+            StaticHeadTrackingCore.Initialize(_config);
+            Assert.Equal(0.4f, StaticHeadTrackingCore.LocalSmoothing);
+
+            StaticHeadTrackingCore.Shutdown();
+
+            Assert.Equal(SmoothingUtils.DefaultLocalSmoothing, StaticHeadTrackingCore.LocalSmoothing);
+            Assert.Equal(SmoothingUtils.DefaultRemoteSmoothing, StaticHeadTrackingCore.RemoteSmoothing);
+        }
+
+        [Fact]
+        public void Initialize_OverwritesSmoothingSetBeforehand()
+        {
+            // Pins the documented contract: config is the source of truth at startup, so
+            // a value set BEFORE Initialize does not survive it. The comment on the fields
+            // used to claim the opposite.
+            StaticHeadTrackingCore.LocalSmoothing = 0.9f;
+            StaticHeadTrackingCore.RemoteSmoothing = 0.95f;
+
+            _config.LocalSmoothing = 0.4f;
+            _config.RemoteSmoothing = 0.6f;
+            StaticHeadTrackingCore.Initialize(_config);
+
+            Assert.Equal(0.4f, StaticHeadTrackingCore.LocalSmoothing);
+            Assert.Equal(0.6f, StaticHeadTrackingCore.RemoteSmoothing);
+            Assert.Equal(0.4f, StaticHeadTrackingCore.Processor.LocalSmoothing);
+            Assert.Equal(0.6f, StaticHeadTrackingCore.Processor.RemoteSmoothing);
+        }
+
+        [Fact]
+        public void SmoothingSetAfterInitialize_ReachesTheProcessor()
+        {
+            StaticHeadTrackingCore.Initialize(_config);
+
+            StaticHeadTrackingCore.LocalSmoothing = 0.9f;
+            StaticHeadTrackingCore.RemoteSmoothing = 0.95f;
+
+            Assert.Equal(0.9f, StaticHeadTrackingCore.Processor.LocalSmoothing);
+            Assert.Equal(0.95f, StaticHeadTrackingCore.Processor.RemoteSmoothing);
         }
 
         [Fact]
@@ -282,7 +364,8 @@ namespace CameraUnlock.Core.Tests.Tracking
             public bool AimDecouplingEnabled { get; set; } = true;
             public bool ShowDecoupledReticle { get; set; } = true;
             public float[] ReticleColorRgba { get; set; } = new[] { 1f, 1f, 1f, 1f };
-            public float Smoothing { get; set; } = 0f;
+            public float LocalSmoothing { get; set; } = 0f;
+            public float RemoteSmoothing { get; set; } = 0.15f;
         }
     }
 }

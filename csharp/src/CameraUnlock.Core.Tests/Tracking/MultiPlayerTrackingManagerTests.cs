@@ -129,7 +129,7 @@ namespace CameraUnlock.Core.Tests.Tracking
         public void ApplySensitivity_ScalesProcessedRotation()
         {
             _manager.ApplyStabilizationFrames(int.MaxValue);
-            _manager.ApplySmoothing(0f);
+            _manager.ApplySmoothing(0f, 0f);
             _manager.Start();
             SendTestPacket(BasePort, yaw: 20.0, pitch: 0.0, roll: 0.0);
             WaitForData(0);
@@ -146,6 +146,91 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             Assert.True(System.Math.Abs(scaledYaw - 2f * baseYaw) < 1f,
                 $"Expected ~{2f * baseYaw}, got {scaledYaw}");
+        }
+
+        [Fact]
+        public void ApplySmoothing_SetsBothParametersOnEverySession()
+        {
+            _manager.ApplySmoothing(0.25f, 0.75f);
+
+            for (int i = 0; i < _manager.PlayerCount; i++)
+            {
+                Assert.Equal(0.25f, _manager.GetSession(i).LocalSmoothing);
+                Assert.Equal(0.75f, _manager.GetSession(i).RemoteSmoothing);
+            }
+        }
+
+        // A config-reload handler naturally applies smoothing then position settings, which
+        // was the order that used to silently reset position smoothing to the struct's
+        // values. Both orders must now land identically.
+        private static PositionSettings ProbeSettings()
+        {
+            return PositionSettings.Symmetric(2f, 2f, 2f, 0.31f, 0.21f, 0.41f, 0.11f, 0f, 0f);
+        }
+
+        private void AssertSmoothingSurvivedSettings()
+        {
+            Assert.Equal(0.25f, _manager.LocalSmoothing);
+            Assert.Equal(0.75f, _manager.RemoteSmoothing);
+            for (int i = 0; i < _manager.PlayerCount; i++)
+            {
+                Assert.Equal(0.25f, _manager.GetSession(i).LocalSmoothing);
+                Assert.Equal(0.75f, _manager.GetSession(i).RemoteSmoothing);
+                Assert.Equal(0.25f, _manager.GetSession(i).PositionSettings.LocalSmoothing);
+                Assert.Equal(0.75f, _manager.GetSession(i).PositionSettings.RemoteSmoothing);
+                Assert.Equal(0.41f, _manager.GetSession(i).PositionSettings.LimitZ);
+                Assert.Equal(0.11f, _manager.GetSession(i).PositionSettings.LimitZBack);
+            }
+        }
+
+        [Fact]
+        public void ApplySmoothing_ThenApplyPositionSettings_SmoothingSurvives()
+        {
+            _manager.ApplySmoothing(0.25f, 0.75f);
+            _manager.ApplyPositionSettings(ProbeSettings());
+
+            AssertSmoothingSurvivedSettings();
+        }
+
+        [Fact]
+        public void ApplyPositionSettings_ThenApplySmoothing_SmoothingSurvives()
+        {
+            _manager.ApplyPositionSettings(ProbeSettings());
+            _manager.ApplySmoothing(0.25f, 0.75f);
+
+            AssertSmoothingSurvivedSettings();
+        }
+
+        [Fact]
+        public void ApplyPositionSettings_Default_DoesNotResetSmoothing()
+        {
+            // The exact reported reproduction: ApplySmoothing then ApplyPositionSettings
+            // with the Default struct, which carries 0.0 / 0.15.
+            _manager.ApplySmoothing(0.25f, 0.75f);
+            _manager.ApplyPositionSettings(PositionSettings.Default);
+
+            for (int i = 0; i < _manager.PlayerCount; i++)
+            {
+                Assert.Equal(0.25f, _manager.GetSession(i).PositionSettings.LocalSmoothing);
+                Assert.Equal(0.75f, _manager.GetSession(i).PositionSettings.RemoteSmoothing);
+            }
+        }
+
+        [Fact]
+        public void IsRemoteConnection_IsPerPlayer_NotShared()
+        {
+            // Only player 1 gets data, and it arrives over loopback. Player 1 must
+            // report a local connection; player 2, which never received anything,
+            // must not have been touched by player 1's flag.
+            _manager.ApplyStabilizationFrames(int.MaxValue);
+            _manager.Start();
+            SendTestPacket(BasePort, yaw: 5.0, pitch: 0.0, roll: 0.0);
+            WaitForData(0);
+            _manager.Update(FrameTime);
+
+            Assert.True(_manager.IsReceiving(0));
+            Assert.False(_manager.IsRemoteConnection(0), "A loopback sender is a local connection");
+            Assert.False(_manager.IsRemoteConnection(1), "Player 2 received nothing and must not inherit player 1's flag");
         }
 
         [Fact]

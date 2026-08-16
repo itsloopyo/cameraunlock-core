@@ -5,10 +5,25 @@
 namespace cameraunlock {
 namespace math {
 
-/// Minimum smoothing floor applied to all connections.
-/// Must match BaselineSmoothing in C# SmoothingUtils.cs.
-/// 0.15 gives ~40% per frame at 60fps, settling in ~100-150ms.
-constexpr double kBaselineSmoothing = 0.15;
+/// Default smoothing for connections originating on the machine running the mod
+/// (loopback / same-host sender). Must match DefaultLocalSmoothing in C#
+/// SmoothingUtils.cs. Zero: a same-machine tracker is already stable, so
+/// smoothing only buys latency.
+constexpr double kDefaultLocalSmoothing = 0.0;
+
+/// Default smoothing for connections from a remote network device. Must match
+/// DefaultRemoteSmoothing in C# SmoothingUtils.cs. 0.15 gives ~40% per frame at
+/// 60fps, settling in ~100-150ms, which covers the jitter a WiFi/phone tracker
+/// adds over the network.
+constexpr double kDefaultRemoteSmoothing = 0.15;
+
+/// Maximum interpolation speed, used at smoothing=0. This is the frame
+/// interpolation floor: fast enough to be responsive, slow enough to hide
+/// discrete tracker sample boundaries at high refresh rates.
+constexpr double kFrameInterpolationSpeed = 50.0;
+
+/// Minimum speed at maximum user smoothing (smoothing=1). ~5 second settling.
+constexpr double kMaxSmoothingSpeed = 0.1;
 
 /// Linear interpolation.
 inline double Lerp(double a, double b, double t) {
@@ -20,25 +35,30 @@ inline float Lerp(float a, float b, float t) {
 }
 
 /// Calculates the smoothing interpolation factor for the current frame.
-/// Uses frame-rate independent exponential smoothing.
-/// @param smoothing Smoothing factor 0-1. 0=instant, 1=very slow.
+/// Uses frame-rate independent exponential smoothing: t = 1 - exp(-speed * dt).
+/// The speed is clamped to [kMaxSmoothingSpeed, kFrameInterpolationSpeed], so the
+/// factor is always strictly between 0 and 1 and frame interpolation stays active
+/// whatever the smoothing input is. There is deliberately no snap branch at low
+/// smoothing: interpolation is gated on receiving data, never on the smoothing
+/// value, and with the local default at 0 a snap would leave every local user with
+/// raw stepped output on a high-refresh display.
+/// @param smoothing Smoothing factor 0-1. 0=frame interpolation only, 1=very slow.
 /// @param delta_time Time since last frame in seconds.
-/// @return Interpolation factor to use with Lerp/Slerp.
+/// @return Interpolation factor to use with Lerp/Slerp, always in (0, 1).
 inline double CalculateSmoothingFactor(double smoothing, double delta_time) {
-    if (smoothing < 0.001) {
-        return 1.0;  // No smoothing, snap to target
-    }
-
-    // Map smoothing 0->50 speed, 1->0.1 speed
-    double smoothing_speed = Lerp(50.0, 0.1, smoothing);
+    double smoothing_speed =
+        kFrameInterpolationSpeed - (kFrameInterpolationSpeed - kMaxSmoothingSpeed) * smoothing;
+    if (smoothing_speed > kFrameInterpolationSpeed) smoothing_speed = kFrameInterpolationSpeed;
+    if (smoothing_speed < kMaxSmoothingSpeed) smoothing_speed = kMaxSmoothingSpeed;
     return 1.0 - std::exp(-smoothing_speed * delta_time);
 }
 
 inline float CalculateSmoothingFactor(float smoothing, float delta_time) {
-    if (smoothing < 0.001f) {
-        return 1.0f;
-    }
-    float smoothing_speed = Lerp(50.0f, 0.1f, smoothing);
+    constexpr float kSpeedMax = static_cast<float>(kFrameInterpolationSpeed);
+    constexpr float kSpeedMin = static_cast<float>(kMaxSmoothingSpeed);
+    float smoothing_speed = kSpeedMax - (kSpeedMax - kSpeedMin) * smoothing;
+    if (smoothing_speed > kSpeedMax) smoothing_speed = kSpeedMax;
+    if (smoothing_speed < kSpeedMin) smoothing_speed = kSpeedMin;
     return 1.0f - std::exp(-smoothing_speed * delta_time);
 }
 
@@ -53,12 +73,15 @@ inline float Smooth(float current, float target, float smoothing, float delta_ti
     return current + (target - current) * t;
 }
 
-/// Gets the effective smoothing factor, ensuring the baseline floor is always applied.
-inline double GetEffectiveSmoothing(double base_smoothing) {
-    if (base_smoothing < kBaselineSmoothing) {
-        return kBaselineSmoothing;
-    }
-    return base_smoothing;
+/// Selects the smoothing value for the current connection. This is the only path
+/// by which a smoothing value reaches a processor - no caller picks it itself.
+/// @param local_smoothing Smoothing configured for same-machine (loopback) senders.
+/// @param remote_smoothing Smoothing configured for remote network senders.
+/// @param is_remote_connection True when the packet source is a remote device.
+/// @return The configured value for this connection, unmodified.
+inline double GetEffectiveSmoothing(double local_smoothing, double remote_smoothing,
+                                    bool is_remote_connection) {
+    return is_remote_connection ? remote_smoothing : local_smoothing;
 }
 
 /// Exponentially smoothed scalar that snaps to the first sample instead of

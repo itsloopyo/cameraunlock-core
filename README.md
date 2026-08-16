@@ -76,7 +76,9 @@ if (receiver.IsDataFresh())
 ```csharp
 var processor = new TrackingProcessor();
 processor.Sensitivity = new SensitivitySettings(yaw: 1.0f, pitch: 0.8f, roll: 0.5f);
-processor.SmoothingFactor = 0.3f;
+processor.LocalSmoothing = 0.0f;    // same-machine (loopback) tracker
+processor.RemoteSmoothing = 0.15f;  // remote device on the network
+processor.IsRemoteConnection = receiver.IsRemoteConnection;  // fed each update
 
 // In game loop:
 var processed = processor.Process(rawPose, deltaTime: Time.deltaTime);
@@ -201,7 +203,8 @@ public interface IHeadTrackingConfig
     bool AimDecouplingEnabled { get; }
     bool ShowDecoupledReticle { get; }
     float[] ReticleColorRgba { get; }
-    float Smoothing { get; }
+    float LocalSmoothing { get; }
+    float RemoteSmoothing { get; }
 }
 ```
 
@@ -237,6 +240,34 @@ Optional modules (all `OFF` by default):
 | `CAMERAUNLOCK_BUILD_REFRAMEWORK` | `cameraunlock_reframework` | REFramework headers from consumer (C++20) |
 
 Tests build by default (`CAMERAUNLOCK_BUILD_TESTS=ON`) into `cameraunlock_tests`.
+
+### Forcing a known camera vfunc
+
+`CameraDiscovery` normally picks the per-frame camera update by call-count heuristic:
+during the probe window it ranks each hooked vfunc by how close its call count sits to a
+per-frame rate. That is non-deterministic when the real camera update has not begun firing
+inside the window (a probe that lands on a load-in), and it can latch onto a high-frequency
+getter instead, so the mod "never starts" on that launch.
+
+When the correct index is already known from reversing, pin it:
+
+```cpp
+cameraunlock::discovery::DiscoveryConfig config;
+config.candidate_names = {"CCustomCamera", "CCamera"};
+config.forced_vfunc_index = 2;  // default -1 = auto-discover, unchanged behaviour
+```
+
+The index applies to the first (most-specific) candidate only. Probing still runs, so the
+instance pointer is captured as usual, and the slot is committed only once it is being
+called at a per-frame *rate* rather than having merely accumulated calls. That wait is not
+bounded by `probe_frames` (a long load-in must not hand the choice back to the heuristic)
+and logs a line every ~5s while it waits. An index that does not exist on the class actually
+found is reported as an error once and then ignored, leaving auto-discovery to run; it is
+not reported as discovery failure, which consumers treat as transient and retry on.
+
+The decision itself lives in `discovery/probe_selection.h` as a free function,
+`SelectProbeSlot`, with no MinHook or live-process dependency, so both paths are unit
+tested. It is built into the base `cameraunlock` library, not the optional discovery module.
 
 ## Building
 
@@ -298,7 +329,7 @@ ctest --test-dir build
 | `MathUtils` | Clamp, Clamp01, Lerp |
 | `QuaternionUtils` | FromYawPitchRoll, Multiply, Slerp, Normalize, Inverse |
 | `AngleUtils` | NormalizeAngle, ShortestAngleDelta, ToRadians, ToDegrees |
-| `SmoothingUtils` | GetEffectiveSmoothing (adjusts for latency), Smooth (exponential MA) |
+| `SmoothingUtils` | GetEffectiveSmoothing (selects local vs remote by connection), Smooth (exponential MA) |
 | `DeadzoneUtils` | Apply (axial deadzone with smooth activation) |
 
 ## PowerShell Modules

@@ -60,8 +60,11 @@ struct FakeReceiver {
     }
 };
 
-// A receiver without TryConsumeRecenterRequest must keep compiling and
-// updating -- the method is an optional part of the TReceiver contract.
+// A receiver without TryConsumeRecenterRequest OR IsRemoteConnection must keep
+// compiling and updating -- both are optional parts of the TReceiver contract.
+// Kept deliberately as the graceful-degradation case; TestGracefulDegradation
+// asserts what that degradation actually looks like rather than leaving it
+// implied.
 struct MinimalReceiver {
     bool GetRotation(float& y, float& p, float& r) const {
         y = p = r = 0.f;
@@ -70,6 +73,56 @@ struct MinimalReceiver {
     bool GetPosition(float&, float&, float&) const { return false; }
     int64_t GetLastReceiveTimestamp() const { return 1; }
     void Recenter() {}
+};
+
+// The receiver shape the real UdpReceiver / PollingUdpReceiver present: a
+// scriptable IsRemoteConnection() so the session can select between the two
+// smoothing parameters itself. Neither FakeReceiver nor MinimalReceiver had one,
+// so kHasRemoteConnection was false for every session the suite instantiated and
+// the whole propagation block was discarded by if constexpr in all 188
+// assertions.
+struct RemoteAwareReceiver {
+    bool hasRotation = true;
+    float yaw = 0.f, pitch = 0.f, roll = 0.f;
+    bool hasPosition = false;
+    float posX = 0.f, posY = 0.f, posZ = 0.f;
+    int64_t timestamp = 1;
+    bool isRemote = false;
+
+    bool GetRotation(float& y, float& p, float& r) const {
+        if (!hasRotation) return false;
+        y = yaw; p = pitch; r = roll;
+        return true;
+    }
+    bool GetPosition(float& x, float& y, float& z) const {
+        if (!hasPosition) return false;
+        x = posX; y = posY; z = posZ;
+        return true;
+    }
+    int64_t GetLastReceiveTimestamp() const { return timestamp; }
+    void Recenter() {}
+    bool IsRemoteConnection() const { return isRemote; }
+};
+
+// The same shape with IsRemoteConnection() lacking the const qualifier. An
+// adapter written this way is easy to produce by hand and used to fail detection
+// with ZERO diagnostic: the trait probed through declval<const T&>() while its
+// sibling HasRecenterRequest probed through declval<T&>(), so the mods'
+// static_assert(kHasRemoteRecenter) pattern passed while remote connections
+// silently reported local forever and every remote user got 0.0 instead of 0.15.
+struct NonConstRemoteReceiver {
+    float yaw = 0.f;
+    int64_t timestamp = 1;
+    bool isRemote = true;
+
+    bool GetRotation(float& y, float& p, float& r) const {
+        y = yaw; p = 0.f; r = 0.f;
+        return true;
+    }
+    bool GetPosition(float&, float&, float&) const { return false; }
+    int64_t GetLastReceiveTimestamp() const { return timestamp; }
+    void Recenter() {}
+    bool IsRemoteConnection() { return isRemote; }
 };
 
 using Session = cameraunlock::HeadTrackingSession<FakeReceiver>;
@@ -356,6 +409,252 @@ void TestRecenterSeedsCurrentFrameWithCenteredPose() {
           "consume frame is seeded with the centered pose, not the stale pre-recenter fetch");
 }
 
+using RemoteSession = cameraunlock::HeadTrackingSession<RemoteAwareReceiver>;
+
+void TestConnectionFlagReachesBothProcessors() {
+    std::cout << "Connection flag propagation:\n";
+
+    static_assert(RemoteSession::kHasRemoteConnection,
+                  "RemoteAwareReceiver exposes IsRemoteConnection");
+
+    RemoteAwareReceiver rx;
+    rx.isRemote = true;
+    RemoteSession session(rx);
+    session.SetStabilizationFrames(1000);
+
+    // Pre-poison both processors so a session that simply leaves them alone fails.
+    session.GetProcessor().SetIsRemoteConnection(false);
+    session.GetPositionProcessor().SetIsRemoteConnection(false);
+
+    session.Update(0.016f);
+
+    Check(session.IsRemoteConnection(), "session reports the remote connection");
+    Check(session.GetProcessor().IsRemoteConnection(),
+          "rotation processor received the remote flag");
+    Check(session.GetPositionProcessor().IsRemoteConnection(),
+          "position processor received the remote flag");
+
+    RemoteAwareReceiver localRx;
+    localRx.isRemote = false;
+    RemoteSession localSession(localRx);
+    localSession.SetStabilizationFrames(1000);
+    localSession.GetProcessor().SetIsRemoteConnection(true);
+    localSession.GetPositionProcessor().SetIsRemoteConnection(true);
+
+    localSession.Update(0.016f);
+
+    Check(!localSession.IsRemoteConnection(), "session reports the local connection");
+    Check(!localSession.GetProcessor().IsRemoteConnection(),
+          "rotation processor received the local flag");
+    Check(!localSession.GetPositionProcessor().IsRemoteConnection(),
+          "position processor received the local flag");
+}
+
+void TestLiveConnectionSwitch() {
+    std::cout << "Live local -> remote -> local switch:\n";
+
+    RemoteAwareReceiver rx;
+    rx.isRemote = false;
+    RemoteSession session(rx);
+    session.SetStabilizationFrames(1000);
+
+    session.Update(0.016f);
+    Check(!session.IsRemoteConnection(), "starts local");
+
+    // A user unplugging a local OpenTrack instance and picking up a phone on WiFi
+    // must get the other parameter without restarting the game.
+    rx.isRemote = true;
+    rx.timestamp++;
+    session.Update(0.016f);
+    Check(session.IsRemoteConnection(), "switch to remote is picked up mid-session");
+    Check(session.GetProcessor().IsRemoteConnection(), "rotation processor follows the switch");
+    Check(session.GetPositionProcessor().IsRemoteConnection(),
+          "position processor follows the switch");
+
+    rx.isRemote = false;
+    rx.timestamp++;
+    session.Update(0.016f);
+    Check(!session.IsRemoteConnection(), "switch back to local is picked up too");
+    Check(!session.GetProcessor().IsRemoteConnection(), "rotation processor follows back");
+    Check(!session.GetPositionProcessor().IsRemoteConnection(), "position processor follows back");
+}
+
+void TestSmoothingSelectionFollowsTheConnection() {
+    std::cout << "Smoothing selection follows the connection:\n";
+
+    // The flag reaching the processor is only half the contract. This asserts the
+    // pose actually moves differently, which is what the user feels.
+    auto stepMagnitude = [](bool isRemote) {
+        RemoteAwareReceiver rx;
+        rx.isRemote = isRemote;
+        RemoteSession session(rx);
+        session.SetStabilizationFrames(100000);
+        session.SetLocalSmoothing(0.0f);
+        session.SetRemoteSmoothing(0.95f);
+        session.SetMaxExtrapolationFraction(0.0f);
+
+        rx.yaw = 0.f;
+        for (int i = 0; i < 5; i++) {
+            rx.timestamp++;
+            session.Update(0.016f);
+        }
+
+        rx.yaw = 20.f;
+        rx.timestamp++;
+        session.Update(0.016f);
+
+        float y = 0.f, p = 0.f, r = 0.f;
+        session.GetRotation(y, p, r);
+        return y;
+    };
+
+    float local = stepMagnitude(false);
+    float remote = stepMagnitude(true);
+
+    Check(local > remote,
+          "a remote connection smooths harder than a local one");
+    Check(remote > 0.f, "a remote connection still tracks the target");
+    Check(local < 20.f, "frame interpolation still applies at local smoothing 0");
+}
+
+void TestNonConstIsRemoteConnectionIsDetected() {
+    std::cout << "Non-const IsRemoteConnection detection:\n";
+
+    using NonConstSession = cameraunlock::HeadTrackingSession<NonConstRemoteReceiver>;
+
+    // The regression this guards: detection through declval<const T&>() rejected a
+    // non-const IsRemoteConnection() silently, and the session then reported local
+    // forever. Nothing in the mods' static_assert pattern caught it because the
+    // sibling recenter trait was looser and still passed.
+    static_assert(NonConstSession::kHasRemoteConnection,
+                  "an adapter whose IsRemoteConnection() is not const must still be detected");
+
+    NonConstRemoteReceiver rx;
+    rx.isRemote = true;
+    NonConstSession session(rx);
+    session.SetStabilizationFrames(1000);
+
+    session.Update(0.016f);
+
+    Check(session.IsRemoteConnection(),
+          "a non-const IsRemoteConnection() reaches the session");
+    Check(session.GetProcessor().IsRemoteConnection(),
+          "a non-const IsRemoteConnection() reaches the rotation processor");
+    Check(session.GetPositionProcessor().IsRemoteConnection(),
+          "a non-const IsRemoteConnection() reaches the position processor");
+}
+
+void TestGracefulDegradation() {
+    std::cout << "Graceful degradation without IsRemoteConnection:\n";
+
+    using MinimalSession = cameraunlock::HeadTrackingSession<MinimalReceiver>;
+
+    static_assert(!MinimalSession::kHasRemoteConnection,
+                  "MinimalReceiver has no IsRemoteConnection");
+    static_assert(!Session::kHasRemoteConnection,
+                  "FakeReceiver has no IsRemoteConnection either");
+
+    MinimalReceiver rx;
+    MinimalSession session(rx);
+    session.SetStabilizationFrames(1000);
+
+    Check(session.Update(0.016f), "a receiver without the method still updates");
+    Check(!session.IsRemoteConnection(),
+          "the session reports local, which is the documented degradation");
+
+    // The mod is expected to drive the flag itself in this case, and the session
+    // must not fight it: with no detection there is no per-frame overwrite.
+    session.GetProcessor().SetIsRemoteConnection(true);
+    session.GetPositionProcessor().SetIsRemoteConnection(true);
+    session.Update(0.016f);
+    Check(session.GetProcessor().IsRemoteConnection(),
+          "a mod-driven flag survives Update when the receiver cannot supply one");
+    Check(session.GetPositionProcessor().IsRemoteConnection(),
+          "the same on the position processor");
+}
+
+void TestSmoothingSurvivesSettingsAssignmentInBothOrders() {
+    std::cout << "Settings/smoothing ordering:\n";
+
+    cameraunlock::PositionSettings probe(2.0f, 2.0f, 2.0f,
+                                         0.31f, 0.21f, 0.41f, 0.11f,
+                                         0.0f, 0.0f);
+
+    // Smoothing first, then settings. This is the order a config-reload handler
+    // naturally uses, and it was the unsafe one: assigning a settings struct
+    // carried its own smoothing fields and silently displaced the session's.
+    {
+        RemoteAwareReceiver rx;
+        RemoteSession session(rx);
+        session.SetLocalSmoothing(0.25f);
+        session.SetRemoteSmoothing(0.75f);
+        session.SetPositionSettings(probe);
+
+        Check(NearEqual(session.GetPositionSettings().local_smoothing, 0.25f),
+              "smoothing-then-settings keeps local_smoothing");
+        Check(NearEqual(session.GetPositionSettings().remote_smoothing, 0.75f),
+              "smoothing-then-settings keeps remote_smoothing");
+        Check(NearEqual(session.GetPositionSettings().limit_z, 0.41f),
+              "smoothing-then-settings still applies the rest of the struct");
+    }
+
+    // Settings first, then smoothing.
+    {
+        RemoteAwareReceiver rx;
+        RemoteSession session(rx);
+        session.SetPositionSettings(probe);
+        session.SetLocalSmoothing(0.25f);
+        session.SetRemoteSmoothing(0.75f);
+
+        Check(NearEqual(session.GetPositionSettings().local_smoothing, 0.25f),
+              "settings-then-smoothing keeps local_smoothing");
+        Check(NearEqual(session.GetPositionSettings().remote_smoothing, 0.75f),
+              "settings-then-smoothing keeps remote_smoothing");
+        Check(NearEqual(session.GetPositionSettings().limit_z, 0.41f),
+              "settings-then-smoothing still applies the rest of the struct");
+    }
+
+    // A SetSettings straight on the processor bypasses the session entirely.
+    // Update() re-asserts, so the getters cannot be left lying about the state.
+    {
+        RemoteAwareReceiver rx;
+        RemoteSession session(rx);
+        session.SetStabilizationFrames(1000);
+        session.SetLocalSmoothing(0.25f);
+        session.SetRemoteSmoothing(0.75f);
+        session.GetPositionProcessor().SetSettings(probe);
+
+        session.Update(0.016f);
+
+        Check(NearEqual(session.GetPositionSettings().local_smoothing, 0.25f),
+              "Update re-asserts local_smoothing over a direct SetSettings");
+        Check(NearEqual(session.GetPositionSettings().remote_smoothing, 0.75f),
+              "Update re-asserts remote_smoothing over a direct SetSettings");
+        Check(NearEqual(session.GetLocalSmoothing(), 0.25f),
+              "the session getter reports the effective value");
+    }
+}
+
+void TestSessionSmoothingReachesBothProcessors() {
+    std::cout << "Smoothing setters reach both processors:\n";
+
+    RemoteAwareReceiver rx;
+    RemoteSession session(rx);
+    session.SetLocalSmoothing(0.25f);
+    session.SetRemoteSmoothing(0.75f);
+
+    Check(NearEqual(session.GetProcessor().GetLocalSmoothing(), 0.25f),
+          "rotation processor got local_smoothing");
+    Check(NearEqual(session.GetProcessor().GetRemoteSmoothing(), 0.75f),
+          "rotation processor got remote_smoothing");
+    Check(NearEqual(session.GetPositionSettings().local_smoothing, 0.25f),
+          "position processor got local_smoothing");
+    Check(NearEqual(session.GetPositionSettings().remote_smoothing, 0.75f),
+          "position processor got remote_smoothing");
+    Check(NearEqual(session.GetLocalSmoothing(), 0.25f), "session reports local_smoothing");
+    Check(NearEqual(session.GetRemoteSmoothing(), 0.75f), "session reports remote_smoothing");
+}
+
 }  // namespace
 
 int RunSessionTests() {
@@ -372,6 +671,13 @@ int RunSessionTests() {
     TestManualRecenterDisarmsTheAutomaticOne();
     TestRemoteRecenterRequest();
     TestRecenterSeedsCurrentFrameWithCenteredPose();
+    TestConnectionFlagReachesBothProcessors();
+    TestLiveConnectionSwitch();
+    TestSmoothingSelectionFollowsTheConnection();
+    TestNonConstIsRemoteConnectionIsDetected();
+    TestGracefulDegradation();
+    TestSmoothingSurvivesSettingsAssignmentInBothOrders();
+    TestSessionSmoothingReachesBothProcessors();
 
     if (g_failures == 0) {
         std::cout << "Session tests: all passed\n";

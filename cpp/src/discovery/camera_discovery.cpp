@@ -1,4 +1,5 @@
 #include <cameraunlock/discovery/camera_discovery.h>
+#include <cameraunlock/discovery/probe_selection.h>
 #include <cameraunlock/hooks/hook_manager.h>
 
 #include <cstdarg>
@@ -74,6 +75,7 @@ void CameraDiscovery::Start(const DiscoveryConfig& config) {
     m_probeFrameCount = 0;
     m_activeSlot = -1;
     m_activeTarget = nullptr;
+    m_forcedWindow = {};
     m_instance.store(0);
     m_offsets = {};
     m_layout = {};
@@ -155,6 +157,23 @@ Phase CameraDiscovery::RunFindVtables() {
         return Phase::Failed;
     }
 
+    // Validate a forced index here, the first moment the real vfunc count is
+    // known, so the problem is reported once rather than rediscovered every
+    // probe frame. An index that does not exist is downgraded to auto-discovery
+    // rather than failing: Failed from probing means "no camera activity, try
+    // again later" to consumers, several of which respond by tearing discovery
+    // down and rescanning ~10s later. A permanently bad index answered with
+    // Failed would put them in a rescan loop for the process lifetime, blaming
+    // the wrong cause in the log.
+    if (m_config.forced_vfunc_index >= 0 &&
+        !ForcedIndexIsSelectable(m_config.forced_vfunc_index, m_candidates[0].vtable.vfunc_count)) {
+        Log("DISC: ERROR forced vfunc[%d] does not exist on %s, only %d vfunc(s) resolved; "
+            "falling back to auto-discovery for this run",
+            m_config.forced_vfunc_index, m_candidates[0].name.c_str(),
+            m_candidates[0].vtable.vfunc_count);
+        m_config.forced_vfunc_index = -1;
+    }
+
     InstallProbeHooks();
     return Phase::Probing;
 }
@@ -166,84 +185,64 @@ Phase CameraDiscovery::RunFindVtables() {
 Phase CameraDiscovery::RunProbing() {
     m_probeFrameCount++;
 
-    if (m_probeFrameCount < m_config.probe_frames) return Phase::Probing;
+    // This runs from the swapchain Present hook, so nothing here may allocate.
+    // On the auto path the answer is fixed until the window closes, so skip the
+    // counter reads entirely rather than snapshotting 32 atomics per frame.
+    if (!ProbeDecisionPossible(m_config, m_probeFrameCount)) return Phase::Probing;
+
+    // Snapshot the shared counters once so the decision below sees a single
+    // consistent view of the probe window rather than a moving one.
+    const int candidateCount = (int)m_candidates.size();
+    int vfuncCounts[kMaxCandidates];
+    for (int c = 0; c < candidateCount; c++) vfuncCounts[c] = m_candidates[c].vtable.vfunc_count;
+
+    int callCounts[kMaxProbeSlots];
+    for (int i = 0; i < kMaxProbeSlots; i++)
+        callCounts[i] = s_callCounts[i].load(std::memory_order_relaxed);
+
+    ProbeSelection sel = SelectProbeSlot(m_config, m_probeFrameCount, vfuncCounts,
+                                         candidateCount, callCounts, m_forcedWindow);
+
+    if (sel.decision == ProbeDecision::KeepProbing) {
+        // Waiting on a forced slot never times out, so say so periodically,
+        // otherwise the log just stops and "forced slot never fired" looks
+        // exactly like the silent non-start this feature was added to fix.
+        if (m_config.forced_vfunc_index >= 0 &&
+            m_probeFrameCount % kForcedWaitLogIntervalFrames == 0) {
+            Log("DISC: forced vfunc[%d] still waiting, %d calls after %d frames",
+                m_config.forced_vfunc_index,
+                callCounts[m_config.forced_vfunc_index], m_probeFrameCount);
+        }
+        return Phase::Probing;
+    }
 
     // Log all results
     for (int c = 0; c < (int)m_candidates.size(); c++) {
         for (int v = 0; v < m_candidates[c].vtable.vfunc_count; v++) {
             int slot = c * kMaxVfuncsPerCandidate + v;
-            int count = s_callCounts[slot].load();
-            if (count > 0) {
+            if (callCounts[slot] > 0) {
                 Log("DISC: %s::vfunc[%d] called %d times (this=%p)",
-                    m_candidates[c].name.c_str(), v, count,
+                    m_candidates[c].name.c_str(), v, callCounts[slot],
                     reinterpret_cast<void*>(s_lastThis[slot].load()));
             }
         }
     }
 
-    // Selection: prefer a vfunc called at roughly per-frame rate (~60Hz).
-    // A camera update runs 1-2x per frame. Utility functions run 100s of times.
-    // Target: ~1-10 calls per frame = probe_frames to probe_frames*10 total calls.
-    // Prefer the first candidate (most specific class) with a match.
-    int targetCallsLow = m_config.probe_frames;       // ~1x per frame
-    int targetCallsHigh = m_config.probe_frames * 10;  // ~10x per frame
-
-    int bestSlot = -1;
-    int bestCount = 0;
-    int bestDistance = INT_MAX;  // distance from ideal range
-
-    for (int c = 0; c < (int)m_candidates.size(); c++) {
-        int candidateBestSlot = -1;
-        int candidateBestDist = INT_MAX;
-        int candidateBestCount = 0;
-
-        for (int v = 0; v < m_candidates[c].vtable.vfunc_count; v++) {
-            int slot = c * kMaxVfuncsPerCandidate + v;
-            int count = s_callCounts[slot].load();
-            if (count == 0) continue;
-
-            // Distance from ideal per-frame range
-            int dist = 0;
-            if (count < targetCallsLow) dist = targetCallsLow - count;
-            else if (count > targetCallsHigh) dist = count - targetCallsHigh;
-            // else in range, dist = 0
-
-            if (dist < candidateBestDist || (dist == candidateBestDist && count > candidateBestCount)) {
-                candidateBestDist = dist;
-                candidateBestSlot = slot;
-                candidateBestCount = count;
-            }
-        }
-
-        // If this candidate has any calls in/near the per-frame range, use it
-        if (candidateBestSlot >= 0 && candidateBestCount >= 50) {
-            bestSlot = candidateBestSlot;
-            bestCount = candidateBestCount;
-            bestDistance = candidateBestDist;
-            break;  // prefer first candidate (most specific class)
-        }
-        // Fallback: track best overall
-        if (candidateBestSlot >= 0 && candidateBestDist < bestDistance) {
-            bestDistance = candidateBestDist;
-            bestSlot = candidateBestSlot;
-            bestCount = candidateBestCount;
-        }
-    }
-
-    if (bestSlot < 0 || bestCount == 0) {
+    if (sel.decision == ProbeDecision::Failed) {
         Log("DISC: No vfuncs called during probe period — failed");
         RemoveProbeHooks();
         return Phase::Failed;
     }
 
-    int ci = bestSlot / kMaxVfuncsPerCandidate;
-    int vi = bestSlot % kMaxVfuncsPerCandidate;
-    Log("DISC: Winner: %s::vfunc[%d] (%d calls)",
-        m_candidates[ci].name.c_str(), vi, bestCount);
+    int ci = sel.slot / kMaxVfuncsPerCandidate;
+    int vi = sel.slot % kMaxVfuncsPerCandidate;
+    Log(sel.forced ? "DISC: Winner (forced): %s::vfunc[%d] (%d calls)"
+                   : "DISC: Winner: %s::vfunc[%d] (%d calls)",
+        m_candidates[ci].name.c_str(), vi, sel.call_count);
 
-    m_activeSlot = bestSlot;
+    m_activeSlot = sel.slot;
     m_activeTarget = reinterpret_cast<void*>(m_candidates[ci].vtable.vfuncs[vi]);
-    m_instance.store(s_lastThis[bestSlot].load());
+    m_instance.store(s_lastThis[sel.slot].load());
 
     // Remove all probe hooks except the winner
     // (we keep the winner hooked so we continue getting this-pointers)
@@ -251,7 +250,7 @@ Phase CameraDiscovery::RunProbing() {
     for (int c = 0; c < (int)m_candidates.size(); c++) {
         for (int v = 0; v < m_candidates[c].vtable.vfunc_count; v++) {
             int slot = c * kMaxVfuncsPerCandidate + v;
-            if (slot == bestSlot) continue;
+            if (slot == sel.slot) continue;
             void* target = reinterpret_cast<void*>(m_candidates[c].vtable.vfuncs[v]);
             hm.DisableHook(target);
             hm.RemoveHook(target);

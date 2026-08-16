@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 using CameraUnlock.Core.Protocol;
 
@@ -27,6 +28,12 @@ namespace CameraUnlock.Core.Tracking
         private TrackingMode _mode = TrackingMode.RotationAndPosition;
         private bool _started;
         private bool _disposed;
+
+        // Owned here for the same reason the sessions own theirs: the values live inside
+        // PositionSettings, which is assigned wholesale, so without an owner an
+        // ApplyPositionSettings would reset whatever ApplySmoothing had just put there.
+        private float _localSmoothing = SmoothingUtils.DefaultLocalSmoothing;
+        private float _remoteSmoothing = SmoothingUtils.DefaultRemoteSmoothing;
 
         /// <summary>
         /// Optional logging callback. Receiver bind/retry messages and session
@@ -139,6 +146,12 @@ namespace CameraUnlock.Core.Tracking
 
         /// <summary>
         /// Runs every player's pipeline for this frame. Call once per frame.
+        ///
+        /// Each session reads the connection flag from ITS OWN receiver and feeds its own
+        /// processors, so there is deliberately no shared flag here: split-screen players
+        /// bind separate ports and can legitimately differ, one on a local tracker and one
+        /// on a phone over WiFi, and a shared flag would hand one of them the wrong
+        /// smoothing parameter.
         /// </summary>
         public void Update(float deltaTime)
         {
@@ -146,6 +159,15 @@ namespace CameraUnlock.Core.Tracking
             {
                 _hasPose[i] = _sessions[i].Update(deltaTime);
             }
+        }
+
+        /// <summary>
+        /// Whether the given player's latest <see cref="Update"/> saw a remote connection.
+        /// Per player, never shared.
+        /// </summary>
+        public bool IsRemoteConnection(int playerIndex)
+        {
+            return _sessions[playerIndex].IsRemoteConnection;
         }
 
         /// <summary>
@@ -194,21 +216,56 @@ namespace CameraUnlock.Core.Tracking
             }
         }
 
-        /// <summary>Applies the rotation smoothing factor to every player's processor.</summary>
-        public void ApplySmoothing(float smoothingFactor)
+        /// <summary>
+        /// The local smoothing value currently applied to every player, as actually held by
+        /// the sessions.
+        /// </summary>
+        public float LocalSmoothing
         {
-            for (int i = 0; i < _processors.Length; i++)
+            get { return _localSmoothing; }
+        }
+
+        /// <summary>
+        /// The remote smoothing value currently applied to every player, as actually held by
+        /// the sessions.
+        /// </summary>
+        public float RemoteSmoothing
+        {
+            get { return _remoteSmoothing; }
+        }
+
+        /// <summary>
+        /// Applies both smoothing parameters to every player's session, covering rotation
+        /// and position. Which one is used is decided per connection from the packet source
+        /// address, re-evaluated by the session every frame.
+        /// </summary>
+        public void ApplySmoothing(float localSmoothing, float remoteSmoothing)
+        {
+            _localSmoothing = localSmoothing;
+            _remoteSmoothing = remoteSmoothing;
+
+            for (int i = 0; i < _sessions.Length; i++)
             {
-                _processors[i].SmoothingFactor = smoothingFactor;
+                _sessions[i].LocalSmoothing = localSmoothing;
+                _sessions[i].RemoteSmoothing = remoteSmoothing;
             }
         }
 
-        /// <summary>Applies position settings to every player's position processor.</summary>
+        /// <summary>
+        /// Applies position settings to every player's session.
+        ///
+        /// Order does not matter: the smoothing fields carried by <paramref name="settings"/>
+        /// are discarded and replaced with the values from <see cref="ApplySmoothing"/>, so
+        /// the two calls compose in either direction. Change smoothing through
+        /// <see cref="ApplySmoothing"/>, never by building it into
+        /// <paramref name="settings"/>. The connection flag is unaffected - it lives on the
+        /// processor, not in the settings struct.
+        /// </summary>
         public void ApplyPositionSettings(PositionSettings settings)
         {
-            for (int i = 0; i < _positionProcessors.Length; i++)
+            for (int i = 0; i < _sessions.Length; i++)
             {
-                _positionProcessors[i].Settings = settings;
+                _sessions[i].PositionSettings = settings;
             }
         }
 

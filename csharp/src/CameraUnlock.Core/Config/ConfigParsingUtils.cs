@@ -62,7 +62,14 @@ namespace CameraUnlock.Core.Config
         }
 
         /// <summary>
-        /// Parses a float value using invariant culture.
+        /// Parses a finite float value using invariant culture. "NaN", "Infinity" and
+        /// "-Infinity" parse successfully as far as <c>float.TryParse</c> is concerned, so
+        /// they are rejected here instead: a config file is a system boundary, and a
+        /// non-finite value that gets past it is not recoverable downstream. A NaN
+        /// smoothing value slips through the clamp in
+        /// <see cref="MathUtils.Clamp01"/> and <c>CalculateSmoothingFactor</c> alike -
+        /// every comparison against NaN is false, so no bound fires - reaches exp(), and
+        /// the smoothed pose is NaN from that frame on, permanently.
         /// </summary>
         public static bool TryParseFloat(string value, out float result)
         {
@@ -71,7 +78,16 @@ namespace CameraUnlock.Core.Config
                 result = 0f;
                 return false;
             }
-            return float.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+            if (!float.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out result))
+            {
+                return false;
+            }
+            if (float.IsNaN(result) || float.IsInfinity(result))
+            {
+                result = 0f;
+                return false;
+            }
+            return true;
         }
 
         /// <summary>

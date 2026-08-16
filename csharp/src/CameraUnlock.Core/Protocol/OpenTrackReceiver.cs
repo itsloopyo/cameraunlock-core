@@ -116,6 +116,20 @@ namespace CameraUnlock.Core.Protocol
         public bool IsRemoteConnection => _isRemoteConnection;
 
         /// <summary>
+        /// Classifies a packet source as remote or same-machine. Loopback is the whole
+        /// 127.0.0.0/8 block, not just 127.0.0.1: pointing OpenTrack at 127.0.0.2 to keep
+        /// several local streams apart is a real pattern.
+        ///
+        /// Must stay in agreement with cameraunlock::IsRemoteAddress on the C++ side. The
+        /// two languages disagreeing means the same sender gets LocalSmoothing in one mod
+        /// and RemoteSmoothing in another, with nothing to catch it.
+        /// </summary>
+        public static bool IsRemoteAddress(IPAddress address)
+        {
+            return !IPAddress.IsLoopback(address);
+        }
+
+        /// <summary>
         /// Optional logging callback for bind failures and retry messages.
         /// </summary>
 #if NULLABLE_ENABLED
@@ -132,10 +146,15 @@ namespace CameraUnlock.Core.Protocol
             IsFailed = false;
             _port = port;
             _hasRecenterCounter = false;
+            _isRemoteConnection = false;
             Interlocked.Exchange(ref _recenterRequested, 0);
 
             try
             {
+                // IPv4 only. Binding dual-stack would deliver a same-machine IPv4 sender
+                // as ::ffff:127.0.0.1, which IPAddress.IsLoopback does not recognise, so
+                // every local user would be silently reclassified as remote and handed
+                // RemoteSmoothing. Widen the classifier to unmap first if this ever changes.
                 _udpClient = new UdpClient(new IPEndPoint(IPAddress.Any, port));
                 _udpClient.Client.ReceiveTimeout = ReceiveTimeoutMs;
             }
@@ -246,6 +265,9 @@ namespace CameraUnlock.Core.Protocol
             }
 
             _isConnected = false;
+            // Locality belongs to the connection that is ending. Left set, the next
+            // session reports the previous sender's locality until its first packet.
+            _isRemoteConnection = false;
         }
 
         /// <summary>
@@ -428,6 +450,13 @@ namespace CameraUnlock.Core.Protocol
                             _rotationPitch = parsed.Pitch;
                             _rotationRoll = parsed.Roll;
                             Interlocked.Exchange(ref _timestampTicks, Stopwatch.GetTimestamp());
+
+                            // Classify only packets that survived validation. A malformed
+                            // datagram is discarded, so letting it set the flag would let
+                            // any LAN host flip a local user onto RemoteSmoothing by
+                            // sending 48 bytes of garbage at the port.
+                            //
+                            _isRemoteConnection = IsRemoteAddress(remoteEndpoint.Address);
                         }
 
                         if (OpenTrackPacket.TryParsePosition(data, out PositionData positionParsed))
@@ -447,7 +476,6 @@ namespace CameraUnlock.Core.Protocol
                             _hasRecenterCounter = true;
                         }
 
-                        _isRemoteConnection = !IPAddress.IsLoopback(remoteEndpoint.Address);
                         _isConnected = true;
                         _consecutiveTimeouts = 0;
                     }

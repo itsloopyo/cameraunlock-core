@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>CameraUnlock.Core.Unity.Tests</AssemblyName>
+    <RootNamespace>CameraUnlock.Core.Unity.Tests</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- The classes under test are compiled from source rather than referenced, so
+         this project must NOT pick up the sibling project's own file glob. -->
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CameraUnlock.Core\CameraUnlock.Core.csproj" />
+  </ItemGroup>
+
+  <!-- CameraUnlock.Core.Unity is compiled against the real UnityEngine reference
+       assemblies, where nearly every member of Quaternion, Matrix4x4, Time and Camera
+       is an extern into the native player. Referencing that built DLL from a test host
+       links fine and then throws on the first call, which is why the Unity half of the
+       library had no executable coverage at all.
+
+       So the classes under test are compiled FROM SOURCE against the stubs in
+       UnityStubs.cs instead. Only the files needed to exercise the tracking pipeline
+       are pulled in; the UI, IMGUI and lifecycle files are deliberately left out
+       because they would drag in a far larger Unity surface for no coverage gain.
+
+       Adding a new Unity source file to this list is the intended way to widen
+       coverage. -->
+  <ItemGroup>
+    <Compile Include="..\CameraUnlock.Core.Unity\Tracking\ViewMatrixTrackingController.cs">
+      <Link>UnderTest\ViewMatrixTrackingController.cs</Link>
+    </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Tracking\ViewMatrixModifier.cs">
+      <Link>UnderTest\ViewMatrixModifier.cs</Link>
+    </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Tracking\SmoothedRotationState.cs">
+      <Link>UnderTest\SmoothedRotationState.cs</Link>
+    </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Extensions\UnitySmoothingHelper.cs">
+      <Link>UnderTest\UnitySmoothingHelper.cs</Link>
+    </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Utilities\PerFrameCache.cs">
+      <Link>UnderTest\PerFrameCache.cs</Link>
+    </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Rendering\RenderPipelineHelper.cs">
+      <Link>UnderTest\RenderPipelineHelper.cs</Link>
+    </Compile>
+  </ItemGroup>
+</Project>

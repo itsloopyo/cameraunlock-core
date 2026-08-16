@@ -12,6 +12,50 @@ namespace cameraunlock {
 
 /// Generic INI file reader with type-safe reading methods.
 /// Supports hot-reload detection via file modification time.
+///
+/// ===================== VALUE PARSING RULES (READ THIS) =====================
+///
+/// On Windows every reader is built on GetPrivateProfileStringA, which does NOT
+/// treat ';' as an inline comment introducer. Everything after '=' up to the
+/// end of line is part of the value. What each reader then does with that text
+/// decides whether a trailing comment is survivable. The rules below are
+/// verified against this implementation, not assumed.
+///
+/// 1. TRAILING COMMENTS ON AN UNQUOTED NUMBER ARE SAFE.
+///    ReadFloat/ReadDouble/ReadHex use strtod/strtol, and ReadInt uses
+///    GetPrivateProfileIntA. All of them parse a prefix and stop at the first
+///    character they cannot use, so `Sens=1.5 ; scale` yields 1.5.
+///
+/// 2. TRAILING COMMENTS ON A BOOL OR A STRING ARE NOT SAFE.
+///    ReadBool compares the WHOLE string against "true"/"1"/"yes"/... , so
+///    `Enabled=true ; comment` matches nothing and silently returns
+///    defaultValue - the user's edit is discarded with no diagnostic.
+///    ReadString returns the comment as part of the value, so
+///    `BindAddress=0.0.0.0 ; listen everywhere` yields the entire trailing text.
+///    A key whose emptiness is meaningful is the worst case: `Names= ; note`
+///    reads back as the non-empty comment text, so an `if (!value.empty())`
+///    branch fires on what the author meant as documentation.
+///    => Put comments for bool and string keys on their OWN LINE above the key.
+///       That form always works, for every type.
+///
+/// 3. A QUOTED VALUE WITH A TRAILING COMMENT IS NOT SAFE, EVEN IF NUMERIC.
+///    Windows strips surrounding double quotes only when the value is WHOLLY
+///    quoted with nothing after the closing quote. `Sens="1.5"` reads as 1.5,
+///    but `Sens="1.5" ; scale` keeps the quotes, so the leading '"' stops the
+///    parse dead: ReadFloat/ReadDouble return defaultValue and ReadInt returns
+///    0 (see rule 4). Quoting does not rescue an inline comment; it breaks a
+///    case that would otherwise have worked.
+///
+/// 4. ReadInt RETURNS 0, NOT defaultValue, ON A PRESENT-BUT-UNPARSEABLE VALUE.
+///    This diverges from every other reader here: ReadDouble, ReadFloat and
+///    ReadHex all fall back to defaultValue when the text will not parse.
+///    ReadInt only honours defaultValue when the key or section is ABSENT;
+///    if the key exists and holds garbage, GetPrivateProfileIntA yields 0 and
+///    that 0 is what the caller gets. A caller that needs a non-zero fallback
+///    on malformed input must range-check the result (see ReadIntInRange) or
+///    read the raw text with ReadString and parse it itself.
+///
+/// ===========================================================================
 class IniReader {
 public:
     /// Error callback type for logging.

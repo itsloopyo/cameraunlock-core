@@ -23,6 +23,18 @@ struct HasRecenterRequest : std::false_type {};
 template <typename T>
 struct HasRecenterRequest<T, std::void_t<decltype(std::declval<T&>().TryConsumeRecenterRequest())>>
     : std::true_type {};
+
+// Detected through a NON-const T&, matching HasRecenterRequest above. A const T&
+// probe would reject an adapter whose IsRemoteConnection() merely forgot the
+// const qualifier, and it would reject it silently: detection failing just
+// compiles the propagation block away, so the session reports local forever and
+// every remote user gets the local smoothing value with no diagnostic anywhere.
+// The non-const form accepts both spellings.
+template <typename T, typename = void>
+struct HasRemoteConnection : std::false_type {};
+template <typename T>
+struct HasRemoteConnection<T, std::void_t<decltype(std::declval<T&>().IsRemoteConnection())>>
+    : std::true_type {};
 }  // namespace detail
 
 /// Active tracking mode for a HeadTrackingSession.
@@ -82,12 +94,23 @@ public:
     /// (tracker-app) recentering is active for this instantiation.
     static constexpr bool kHasRemoteRecenter = detail::HasRecenterRequest<TReceiver>::value;
 
-    explicit HeadTrackingSession(TReceiver& receiver) : m_receiver(receiver) {}
+    /// True when TReceiver exposes IsRemoteConnection() and Update() can select
+    /// between the local and remote smoothing parameters itself. When absent the
+    /// session always reports a local connection and the mod must call
+    /// GetProcessor().SetIsRemoteConnection() itself.
+    static constexpr bool kHasRemoteConnection = detail::HasRemoteConnection<TReceiver>::value;
+
+    explicit HeadTrackingSession(TReceiver& receiver) : m_receiver(receiver) { PushSmoothing(); }
 
     HeadTrackingSession(const HeadTrackingSession&) = delete;
     HeadTrackingSession& operator=(const HeadTrackingSession&) = delete;
 
     TrackingProcessor& GetProcessor() { return m_processor; }
+
+    /// Prefer SetPositionSettings() over GetPositionProcessor().SetSettings(): the
+    /// session owns the two smoothing values and a raw SetSettings would carry the
+    /// struct's own smoothing fields instead. Update() re-asserts the owned pair, so
+    /// a raw assignment is corrected on the next frame rather than persisting.
     PositionProcessor& GetPositionProcessor() { return m_positionProcessor; }
 
     TrackingMode GetMode() const { return static_cast<TrackingMode>(m_mode.load()); }
@@ -112,6 +135,42 @@ public:
 
     bool IsRotationActive() const { return GetMode() != TrackingMode::PositionOnly; }
     bool IsPositionActive() const { return GetMode() != TrackingMode::RotationOnly; }
+
+    /// Smoothing applied when the tracker runs on this machine (loopback).
+    /// Forwarded to both the rotation and the position processor.
+    void SetLocalSmoothing(float smoothing) {
+        m_localSmoothing = smoothing;
+        PushSmoothing();
+    }
+
+    /// Smoothing applied when the tracker is a remote device on the network.
+    /// Forwarded to both the rotation and the position processor.
+    void SetRemoteSmoothing(float smoothing) {
+        m_remoteSmoothing = smoothing;
+        PushSmoothing();
+    }
+
+    /// The session's own smoothing values, which is what both processors are running.
+    float GetLocalSmoothing() const { return m_localSmoothing; }
+    float GetRemoteSmoothing() const { return m_remoteSmoothing; }
+
+    /// Position settings for this session. The session's two smoothing values are
+    /// recomposed onto the incoming struct, so assigning settings can never undo a
+    /// SetLocalSmoothing()/SetRemoteSmoothing() call and the two compose in either
+    /// order. The smoothing fields carried by @p settings are ignored.
+    void SetPositionSettings(const PositionSettings& settings) {
+        PositionSettings next = settings;
+        next.local_smoothing = m_localSmoothing;
+        next.remote_smoothing = m_remoteSmoothing;
+        m_positionProcessor.SetSettings(next);
+    }
+
+    const PositionSettings& GetPositionSettings() const {
+        return m_positionProcessor.GetSettings();
+    }
+
+    /// Whether the latest Update() saw a remote connection.
+    bool IsRemoteConnection() const { return m_isRemoteConnection; }
 
     /// Consecutive settled packets required before the automatic
     /// first-connection recenter fires, giving phone trackers time to settle.
@@ -155,6 +214,20 @@ public:
             m_rotationValid = false;
             m_positionValid = false;
             return false;
+        }
+
+        // Re-assert rather than trust: GetPositionProcessor() hands the caller a
+        // reference, so a SetSettings() made straight on the processor would otherwise
+        // carry that struct's smoothing fields and quietly displace the session's.
+        PushSmoothing();
+
+        // Re-read every frame: the smoothing parameter is selected per connection,
+        // so a switch from a local tracker to a remote one must take effect without
+        // a restart.
+        if constexpr (detail::HasRemoteConnection<TReceiver>::value) {
+            m_isRemoteConnection = m_receiver.IsRemoteConnection();
+            m_processor.SetIsRemoteConnection(m_isRemoteConnection);
+            m_positionProcessor.SetIsRemoteConnection(m_isRemoteConnection);
         }
 
         const int64_t receiveTs = m_receiver.GetLastReceiveTimestamp();
@@ -314,6 +387,18 @@ public:
     bool WasNewSample() const { return m_lastWasNewSample; }
 
 private:
+    // The session, not PositionSettings, owns the two smoothing values. They still live
+    // in PositionSettings (that is the shape mods are wired to), but a settings struct is
+    // assigned wholesale, so a SetSettings after a SetLocalSmoothing would otherwise reset
+    // position smoothing to the struct's defaults while rotation smoothing kept the value
+    // the user asked for.
+    void PushSmoothing() {
+        m_processor.SetLocalSmoothing(m_localSmoothing);
+        m_processor.SetRemoteSmoothing(m_remoteSmoothing);
+        m_positionProcessor.GetSettings().local_smoothing = m_localSmoothing;
+        m_positionProcessor.GetSettings().remote_smoothing = m_remoteSmoothing;
+    }
+
     TReceiver& m_receiver;
     PoseInterpolator m_poseInterpolator;
     TrackingProcessor m_processor;
@@ -332,6 +417,10 @@ private:
     bool m_hasSettleAnchor = false;
     bool m_hasCentered = false;
     uint64_t m_remoteRecenters = 0;
+    bool m_isRemoteConnection = false;
+
+    float m_localSmoothing = static_cast<float>(math::kDefaultLocalSmoothing);
+    float m_remoteSmoothing = static_cast<float>(math::kDefaultRemoteSmoothing);
 
     int64_t m_lastReceiveTimestamp = 0;
     float m_lastRawYaw = 0.0f;

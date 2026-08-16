@@ -28,7 +28,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         private const float TransitionOutDuration = 0.3f;
         private const float ProjectionEpsilon = 1e-6f;
 
-        private readonly OpenTrackReceiver _receiver;
+        private readonly ITrackingDataSource _receiver;
         private readonly TrackingProcessor _processor;
         private readonly PoseInterpolator _interpolator;
         private readonly PositionProcessor _positionProcessor;
@@ -92,6 +92,15 @@ namespace CameraUnlock.Core.Unity.Tracking
             get { return _wasApplyingTracking && !_isTransitioningOut; }
         }
 
+        /// <summary>
+        /// Whether the latest <see cref="ProcessFrame"/> saw a remote connection, read from
+        /// the receiver and pushed onto both processors. A mod that also sets the flag on
+        /// the processors itself is harmless as long as it reads the same receiver: this
+        /// write happens later in the frame, immediately before either processor runs, so
+        /// the controller is authoritative.
+        /// </summary>
+        public bool IsRemoteConnection { get; private set; }
+
         public float LastTrackingYaw
         {
             get { return _lastYaw; }
@@ -120,7 +129,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// Null falls back to Camera.main. The result is cached per frame.
         /// </param>
         public ViewMatrixTrackingController(
-            OpenTrackReceiver receiver, TrackingProcessor processor, PoseInterpolator interpolator,
+            ITrackingDataSource receiver, TrackingProcessor processor, PoseInterpolator interpolator,
             PositionProcessor positionProcessor, PositionInterpolator positionInterpolator,
             Func<Camera> cameraResolver = null)
         {
@@ -173,6 +182,17 @@ namespace CameraUnlock.Core.Unity.Tracking
             if (enabled && _receiver.IsReceiving)
             {
                 _isTransitioningOut = false;
+
+                // Re-read every frame, before either processor runs: the smoothing
+                // parameter is selected per connection, so a switch from a local
+                // tracker to a phone on WiFi must take effect without a restart.
+                // The controller owns this write because it owns the processors from
+                // construction - a mod routing everything through the controller has
+                // no other way to feed the flag, and without it both processors stay
+                // local forever and RemoteSmoothing becomes dead config.
+                IsRemoteConnection = _receiver.IsRemoteConnection;
+                _processor.IsRemoteConnection = IsRemoteConnection;
+                _positionProcessor.IsRemoteConnection = IsRemoteConnection;
 
                 if (!_wasApplyingTracking)
                     BeginTrackingSession();

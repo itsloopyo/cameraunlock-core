@@ -28,10 +28,23 @@ namespace CameraUnlock.Core.Processing
         public DeadzoneSettings Deadzone { get; set; } = DeadzoneSettings.None;
 
         /// <summary>
-        /// User smoothing factor (0 = frame interpolation only, 1 = heavy smoothing).
-        /// Frame interpolation is always applied regardless of this value.
+        /// User smoothing applied when the tracker runs on this machine (loopback).
+        /// 0 = frame interpolation only, 1 = heavy smoothing. No floor is applied.
         /// </summary>
-        public float SmoothingFactor { get; set; } = 0f;
+        public float LocalSmoothing { get; set; } = SmoothingUtils.DefaultLocalSmoothing;
+
+        /// <summary>
+        /// User smoothing applied when the tracker is a remote device on the network.
+        /// 0 = frame interpolation only, 1 = heavy smoothing. No floor is applied.
+        /// </summary>
+        public float RemoteSmoothing { get; set; } = SmoothingUtils.DefaultRemoteSmoothing;
+
+        /// <summary>
+        /// Whether the current connection comes from a remote device. Fed from the
+        /// receiver every update so a switch between a local and a remote tracker
+        /// picks up the other parameter without a restart.
+        /// </summary>
+        public bool IsRemoteConnection { get; set; }
 
         /// <summary>
         /// The center offset manager for recentering.
@@ -86,7 +99,8 @@ namespace CameraUnlock.Core.Processing
             roll = (float)DeadzoneUtils.Apply(roll, Deadzone.Roll);
 
             // Step 3: Per-axis Euler smoothing (no quaternion SLERP — prevents phantom roll)
-            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(SmoothingFactor);
+            float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(
+                LocalSmoothing, RemoteSmoothing, IsRemoteConnection);
 
             if (!_hasSmoothedValue)
             {

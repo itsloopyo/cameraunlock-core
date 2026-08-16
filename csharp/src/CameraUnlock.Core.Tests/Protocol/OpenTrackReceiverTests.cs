@@ -19,6 +19,25 @@ namespace CameraUnlock.Core.Tests.Protocol
             _receiver?.Dispose();
         }
 
+        // The C++ suite asserts this exact address set against cameraunlock::IsRemoteAddress
+        // in TestLoopbackClassification. The two languages must agree: the same sender
+        // getting LocalSmoothing in a C# mod and RemoteSmoothing in a C++ mod is invisible
+        // to the user and to every existing test.
+        [Theory]
+        [InlineData("127.0.0.1", false)]
+        [InlineData("127.0.0.2", false)]
+        [InlineData("127.1.2.3", false)]
+        [InlineData("127.255.255.254", false)]
+        [InlineData("192.168.1.50", true)]
+        [InlineData("10.0.0.7", true)]
+        [InlineData("8.8.8.8", true)]
+        [InlineData("128.0.0.1", true)]
+        [InlineData("126.255.255.255", true)]
+        public void IsRemoteAddress_TreatsWholeLoopbackBlockAsLocal(string address, bool expectedRemote)
+        {
+            Assert.Equal(expectedRemote, OpenTrackReceiver.IsRemoteAddress(IPAddress.Parse(address)));
+        }
+
         [Fact]
         public void Constructor_WithNoTransformer_HasTransformerIsFalse()
         {

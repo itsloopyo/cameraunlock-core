@@ -41,7 +41,16 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         float[] ReticleColorRgba { get; }
 
-        /// <summary>Smoothing factor (0.0 = none, 1.0 = maximum). Higher values add latency.</summary>
-        float Smoothing { get; }
+        /// <summary>
+        /// Smoothing applied when the tracker runs on this machine (loopback).
+        /// 0.0 = none, 1.0 = heavy. Higher values add latency.
+        /// </summary>
+        float LocalSmoothing { get; }
+
+        /// <summary>
+        /// Smoothing applied when the tracker is a remote device on the network.
+        /// 0.0 = none, 1.0 = heavy. Higher values add latency.
+        /// </summary>
+        float RemoteSmoothing { get; }
     }
 }
