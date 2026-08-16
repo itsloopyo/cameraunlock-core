@@ -283,6 +283,12 @@ bool IsValidHotkeyCode(int vkCode) {
     if (vkCode == 0x2C) return true;  // PrintScreen
     if (vkCode == 0x90) return true;  // NumLock
     if (vkCode == 0x91) return true;  // ScrollLock
+    // Nav cluster. Home/End/PageUp/PageDown are the shared default bindings
+    // every mod ships (recenter / toggle / position / yaw mode), so all four
+    // have to pass - PageUp and PageDown were missing, which made this
+    // function reject half of its own convention.
+    if (vkCode == 0x21) return true;  // PageUp
+    if (vkCode == 0x22) return true;  // PageDown
     if (vkCode == 0x24) return true;  // Home
     if (vkCode == 0x23) return true;  // End
     if (vkCode == 0x2D) return true;  // Insert
