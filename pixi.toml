@@ -11,6 +11,11 @@ test = "dotnet test csharp --verbosity normal"
 test-quick = "dotnet test csharp --verbosity quiet"
 test-coverage = "dotnet test csharp --collect:\"XPlat Code Coverage\""
 
+# Windows-only: the powershell/ modules are a Windows surface, so this is not
+# part of `check`. Covers the vendoring soak that keeps update-deps off
+# freshly-published upstream releases.
+test-powershell = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/ModLoaderSetup.Soak.Tests.ps1"
+
 # Building
 build = "dotnet build csharp -c Release"
 build-debug = "dotnet build csharp -c Debug"

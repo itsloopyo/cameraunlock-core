@@ -18,6 +18,13 @@
 # Customise the CALL BLOCK below with one Update-VendoredLoader call per
 # loader slug the mod ships. See ~/.claude/CLAUDE.md "Vendoring Third-Party
 # Dependencies" for the canonical version-prefix table.
+#
+# Update-VendoredLoader will not take a GitHub release that has been public
+# for less than 14 days, so a compromised upstream publish has time to be
+# caught before it lands here. When every release in range is still inside
+# that window the run fails and names the date the newest one becomes
+# eligible. Override per call with -MinimumAgeDays only when you have looked
+# at what upstream actually shipped.
 # ============================================================================
 
 Set-StrictMode -Version Latest
@@ -52,9 +59,10 @@ Import-Module $modulePath -Force
 #   REFramework nightly:   Owner=praydog Repo=REFramework-nightly  AllowPrerelease
 #                          AssetPattern=^RE9\.zip$  (or RE2.zip / RE4.zip / ...)
 #   Ultimate ASI Loader:   Owner=ThirteenAG Repo=Ultimate-ASI-Loader VersionPrefix=v9.
-#                          AssetPattern=^dinput8\.zip$
-#                          NOTE: extract the zip locally and commit only the
-#                          dinput8.dll if the upstream asset is a wrapper zip.
+#                          AssetPattern=^Ultimate-ASI-Loader_x64\.zip$
+#                          (x86: ^Ultimate-ASI-Loader\.zip$)
+#                          NOTE: the asset is a wrapper zip - extract it locally
+#                          and commit only the proxy DLL your mod loads.
 #
 # Update-VendoredLoader writes LICENSE + README.md alongside the zip.
 # Use -OutputFileName to force a stable filename (install.cmd looks for it).

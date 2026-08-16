@@ -247,6 +247,7 @@ pixi run build          # dotnet build csharp -c Release
 pixi run test           # dotnet test csharp
 pixi run check          # debug build + quick tests
 pixi run pack           # dotnet pack to dist/
+pixi run test-powershell # vendoring soak tests (Windows only)
 ```
 
 ### C# (.NET)
@@ -327,7 +328,11 @@ differs per mod. Supporting scripts:
 - `generate-release-notes.ps1` - changelog from git history
 
 Install scripts never reach the network: vendored loaders committed under each
-mod's `vendor/` directory are the install-time source of truth.
+mod's `vendor/` directory are the install-time source of truth. The only path
+that does reach the network is `pixi run update-deps`, and it will not take a
+GitHub release that has been public for less than 14 days
+(`Invoke-FetchLatestLoader -MinimumAgeDays`), so a compromised upstream publish
+has a window to be caught before it can be vendored.
 
 ## Game Detection Metadata
 

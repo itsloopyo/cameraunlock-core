@@ -23,6 +23,67 @@ function Write-StateFile {
     [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+# GitHub timestamps arrive either as ISO-8601 strings or as [datetime] already
+# converted by ConvertFrom-Json, depending on the PowerShell edition.
+function ConvertTo-UtcDateTime {
+    param($Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
+
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+
+    $parsed = [datetime]::MinValue
+    $styles = [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
+    if ([datetime]::TryParse($text, [cultureinfo]::InvariantCulture, $styles, [ref]$parsed)) {
+        return $parsed
+    }
+    return $null
+}
+
+# Soak period. A version-prefix pin alone still tracks upstream's newest build
+# within minutes of it being published, which is exactly the window a
+# compromised release is live before anyone yanks it. Every path here that
+# resolves "newest release from GitHub" filters through this first; the default
+# is 14 days and callers override it only deliberately.
+function Select-SoakedReleases {
+    param(
+        [Parameter(Mandatory=$true)] [AllowEmptyCollection()] $Releases,
+        [Parameter(Mandatory=$true)] [int]$MinimumAgeDays
+    )
+
+    if ($MinimumAgeDays -le 0) { return @($Releases) }
+
+    $now = (Get-Date).ToUniversalTime()
+    $cutoff = $now.AddDays(-$MinimumAgeDays)
+    $eligible = @()
+
+    foreach ($candidate in $Releases) {
+        $published = ConvertTo-UtcDateTime $candidate.published_at
+        if (-not $published) {
+            Write-Host "    skipping $($candidate.tag_name): no published_at timestamp, age cannot be verified" -ForegroundColor DarkYellow
+            continue
+        }
+        if ($published -gt $cutoff) {
+            $ageDays = [math]::Floor(($now - $published).TotalDays)
+            Write-Host "    skipping $($candidate.tag_name): published $($published.ToString('yyyy-MM-dd')), ${ageDays}d old, minimum is ${MinimumAgeDays}d" -ForegroundColor DarkYellow
+            continue
+        }
+        $eligible += $candidate
+    }
+
+    return $eligible
+}
+
+function Get-SoakEligibilityDetail {
+    param($NewestRelease, [int]$MinimumAgeDays)
+
+    $published = ConvertTo-UtcDateTime $NewestRelease.published_at
+    if (-not $published) { return '' }
+    return " Newest match '$($NewestRelease.tag_name)' was published $($published.ToString('yyyy-MM-dd')) and becomes usable on $($published.AddDays($MinimumAgeDays).ToString('yyyy-MM-dd'))."
+}
+
 function New-GitHubRequestHeaders {
     param(
         [string]$UserAgent = "CameraUnlock-HeadTracking",
@@ -197,6 +258,9 @@ function Get-MelonLoaderLibPath {
     doctrine-clean dev-deploy: install.cmd uses the same vendored copy.
     When the path is supplied but does not exist, this throws - we never
     silently fall back to the network when vendor was requested.
+.PARAMETER MinimumAgeDays
+    Soak period an upstream release must have been public before the GitHub-fetch path will install it (default 14).
+    Ignored when -VendorZip is used. 0 disables the check.
 .OUTPUTS
     Hashtable with installation details including version.
 #>
@@ -210,7 +274,9 @@ function Install-BepInEx {
         [int]$MajorVersion = 5,
         [bool]$EnableConsole = $true,
         [switch]$Force,
-        [string]$VendorZip
+        [string]$VendorZip,
+        [ValidateRange(0, 3650)]
+        [int]$MinimumAgeDays = 14
     )
 
     # Check if already installed
@@ -253,18 +319,21 @@ function Install-BepInEx {
             throw "Failed to fetch BepInEx releases from GitHub: $_"
         }
 
-        if ($MajorVersion -eq 5) {
-            $release = $releases | Where-Object { $_.tag_name -match '^v5\.' -and -not $_.prerelease } | Select-Object -First 1
-        } else {
-            $release = $releases | Where-Object { $_.tag_name -match '^v6\.' -and -not $_.prerelease } | Select-Object -First 1
-            if (-not $release) {
-                $release = $releases | Where-Object { $_.tag_name -match '^v6\.' } | Select-Object -First 1
-            }
+        $candidates = $releases | Where-Object { $_.tag_name -match "^v$MajorVersion\." -and -not $_.prerelease }
+        if (-not $candidates -and $MajorVersion -eq 6) {
+            $candidates = $releases | Where-Object { $_.tag_name -match '^v6\.' }
         }
 
-        if (-not $release) {
+        if (-not $candidates) {
             throw "Could not find BepInEx $MajorVersion.x release"
         }
+
+        $soaked = Select-SoakedReleases -Releases $candidates -MinimumAgeDays $MinimumAgeDays
+        if (-not $soaked) {
+            $detail = Get-SoakEligibilityDetail -NewestRelease ($candidates | Select-Object -First 1) -MinimumAgeDays $MinimumAgeDays
+            throw "No BepInEx $MajorVersion.x release has been public for $MinimumAgeDays days.$detail Install from the committed vendored copy with -VendorZip, or pass -MinimumAgeDays 0 deliberately."
+        }
+        $release = $soaked | Select-Object -First 1
 
         $version = $release.tag_name -replace '^v', ''
         Write-Host "  Found BepInEx v$version" -ForegroundColor Cyan
@@ -670,6 +739,9 @@ function Get-UE4SSModsPath {
     UE4SS version to install (default: latest stable).
 .PARAMETER Force
     Reinstall even if already present.
+.PARAMETER MinimumAgeDays
+    Soak period a release must have been public before it is installable (default 14). Only applies when resolving
+    "latest"; an explicit -Version is the caller naming an exact build. 0 disables the check.
 .OUTPUTS
     Hashtable with installation details.
 #>
@@ -679,7 +751,9 @@ function Install-UE4SS {
         [string]$GamePath,
         [string]$BinariesPath,
         [string]$Version,
-        [switch]$Force
+        [switch]$Force,
+        [ValidateRange(0, 3650)]
+        [int]$MinimumAgeDays = 14
     )
 
     if (-not $BinariesPath) {
@@ -712,27 +786,34 @@ function Install-UE4SS {
         throw "Failed to fetch UE4SS releases from GitHub: $_"
     }
 
-    # Find appropriate release
+    # An explicitly requested -Version is the caller naming an exact build, so
+    # the soak does not apply to it - it applies to "whatever upstream published
+    # last", which is what the unpinned path below resolves.
     $release = $null
     if ($Version) {
         $release = $releases | Where-Object { $_.tag_name -eq "v$Version" -or $_.tag_name -eq $Version } | Select-Object -First 1
     }
 
     if (-not $release) {
-        # Get latest stable (non-prerelease, non-experimental)
-        $release = $releases | Where-Object {
+        # Latest stable (non-prerelease, non-experimental), else latest of anything.
+        $candidates = $releases | Where-Object {
             -not $_.prerelease -and
             $_.tag_name -notmatch 'experimental|beta|alpha'
-        } | Select-Object -First 1
-    }
+        }
+        if (-not $candidates) {
+            $candidates = $releases
+        }
 
-    if (-not $release) {
-        # Fall back to latest release
-        $release = $releases | Select-Object -First 1
-    }
+        if (-not $candidates) {
+            throw "Could not find UE4SS release"
+        }
 
-    if (-not $release) {
-        throw "Could not find UE4SS release"
+        $soaked = Select-SoakedReleases -Releases $candidates -MinimumAgeDays $MinimumAgeDays
+        if (-not $soaked) {
+            $detail = Get-SoakEligibilityDetail -NewestRelease ($candidates | Select-Object -First 1) -MinimumAgeDays $MinimumAgeDays
+            throw "No UE4SS release has been public for $MinimumAgeDays days.$detail Pin an older build with -Version, or pass -MinimumAgeDays 0 deliberately."
+        }
+        $release = $soaked | Select-Object -First 1
     }
 
     $version = $release.tag_name -replace '^v', ''
@@ -922,9 +1003,11 @@ function Set-UE4SSModEnabled {
     Resolves the latest upstream release of a mod loader within a pinned version range, then downloads the matching asset to OutputPath.
 .DESCRIPTION
     Two modes:
-      - GitHub mode (Owner + Repo): queries GitHub API /repos/:owner/:repo/releases, filters by VersionPrefix + AllowPrerelease,
-        picks the highest-versioned matching release, then downloads the asset whose filename matches AssetPattern.
-      - Direct-URL mode (DirectUrl): fetches a single pinned URL (for non-GitHub sources like Thunderstore).
+      - GitHub mode (Owner + Repo): queries GitHub API /repos/:owner/:repo/releases, filters by VersionPrefix +
+        AllowPrerelease + MinimumAgeDays, picks the highest-versioned matching release, then downloads the asset whose
+        filename matches AssetPattern.
+      - Direct-URL mode (DirectUrl): fetches a single pinned URL (for non-GitHub sources like Thunderstore). The age
+        soak does not apply here - the URL names an exact version the dev chose, not whatever upstream published last.
     On any failure (network, 404, timeout, rate limit, missing asset, corrupt zip) this function throws. Called from each mod's
     update-deps.ps1 (the manual `pixi run update-deps` flow). install.cmd does not call this; the vendored zip is the install-time
     source of truth.
@@ -942,6 +1025,10 @@ function Set-UE4SSModEnabled {
     Include prereleases/nightlies when selecting the latest match.
 .PARAMETER DirectUrl
     Single pinned URL (Direct-URL mode). Overrides GitHub mode when provided.
+.PARAMETER MinimumAgeDays
+    Soak period a GitHub release must have been public before it can be vendored (default 14). Releases younger than
+    this are skipped with a note; if that leaves nothing, this throws with the date the newest match becomes eligible.
+    0 disables the check - use it only with a deliberate look at what upstream just shipped.
 .PARAMETER TimeoutSec
     Per-request timeout (default 30s).
 .OUTPUTS
@@ -956,6 +1043,8 @@ function Invoke-FetchLatestLoader {
         [string]$AssetPattern,
         [switch]$AllowPrerelease,
         [string]$DirectUrl,
+        [ValidateRange(0, 3650)]
+        [int]$MinimumAgeDays = 14,
         [int]$TimeoutSec = 30
     )
 
@@ -994,6 +1083,13 @@ function Invoke-FetchLatestLoader {
     if (-not $matching) {
         throw "No upstream release matches Owner=$Owner Repo=$Repo VersionPrefix='$VersionPrefix' AllowPrerelease=$($AllowPrerelease.IsPresent)."
     }
+
+    $soaked = Select-SoakedReleases -Releases $matching -MinimumAgeDays $MinimumAgeDays
+    if (-not $soaked) {
+        $detail = Get-SoakEligibilityDetail -NewestRelease ($matching | Select-Object -First 1) -MinimumAgeDays $MinimumAgeDays
+        throw "No upstream release for $Owner/$Repo matching VersionPrefix='$VersionPrefix' has been public for $MinimumAgeDays days.$detail Re-run then, or pass -MinimumAgeDays 0 to take the fresh release deliberately."
+    }
+    $matching = $soaked
 
     # REFramework-nightly: each nightly publishes a per-game subset (RE2.zip,
     # RE4.zip, ...) and may skip ours. Walk newest-to-oldest until we find one
@@ -1054,8 +1150,9 @@ function Invoke-FetchLatestLoader {
     Filename of the zip inside OutputDir (default: asset's own name).
 .PARAMETER LicenseName
     License file name in upstream repo (default 'LICENSE'). Used if the zip does not contain a LICENSE at its root.
-.PARAMETER Owner, Repo, VersionPrefix, AssetPattern, AllowPrerelease, DirectUrl, TimeoutSec
-    Passed through to Invoke-FetchLatestLoader.
+.PARAMETER Owner, Repo, VersionPrefix, AssetPattern, AllowPrerelease, DirectUrl, MinimumAgeDays, TimeoutSec
+    Passed through to Invoke-FetchLatestLoader. MinimumAgeDays defaults to 14: a fresh upstream release is not
+    vendorable until it has been public that long.
 .OUTPUTS
     Hashtable with the same fields as Invoke-FetchLatestLoader plus LocalPath.
 #>
@@ -1072,6 +1169,8 @@ function Update-VendoredLoader {
         [string]$DirectUrl,
         [string]$LicenseName = 'LICENSE',
         [string]$LicenseUrl,
+        [ValidateRange(0, 3650)]
+        [int]$MinimumAgeDays = 14,
         [int]$TimeoutSec = 30
     )
 
@@ -1088,7 +1187,7 @@ function Update-VendoredLoader {
         -Owner $Owner -Repo $Repo `
         -VersionPrefix $VersionPrefix -AssetPattern $AssetPattern `
         -AllowPrerelease:$AllowPrerelease `
-        -DirectUrl $DirectUrl -TimeoutSec $TimeoutSec
+        -DirectUrl $DirectUrl -MinimumAgeDays $MinimumAgeDays -TimeoutSec $TimeoutSec
 
     if (-not $OutputFileName) { $OutputFileName = $meta.AssetName }
     $targetPath = Join-Path $OutputDir $OutputFileName
