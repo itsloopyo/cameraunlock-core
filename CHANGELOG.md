@@ -208,6 +208,65 @@ Newly `[Obsolete]`, each with a correct replacement:
   Dragon Age Inquisition); `-LiteralPath` throughout (a game path containing `[` reported
   as not installed); a BOM breaking UE4SS's `mods.txt` parser; tag-name script injection
   in the release workflow; and three CI gates that could pass while failing.
+- **The DX12 overlay's fence state was shared across three threads with no lock.** One
+  non-atomic `UINT64` counter and one auto-reset event served `Present` (render thread),
+  `ResizeBuffers` (whichever thread resizes) and `Remove` (unload thread). Two threads in
+  the counter's read-modify-write hand out the same fence value, and D3D12 requires
+  monotonically increasing signals per queue, so the wait returns while the GPU is still
+  reading the resources the caller is about to free. With one event, whichever waiter the
+  OS wakes consumes the other's signal and the loser blocks on an `INFINITE` wait - a
+  permanent game hang. Everything is now serialised under one mutex, and both waits are
+  bounded above Windows' 2s TDR delay so a removed device can no longer hang the render
+  thread.
+- **The overlay headers were never compiled.** All three bodies live behind
+  `CAMERAUNLOCK_DX*_OVERLAY_IMPLEMENTATION` and their dependencies are vendored per mod,
+  so no build here had ever expanded them - the blind spot that shipped both the fence
+  race and `MH_DisableHook(nullptr)` (which disables *every* MinHook hook in the process,
+  other mods' included). `cameraunlock_overlay_compile` typechecks all three on every
+  build against minimal stubs.
+- **`Find-UE4BinariesPath` returned the engine's tool folder.** It checked
+  `Engine\Binaries\Win64` before scanning for the project folder, and every UE install
+  ships that directory - so any game whose project folder is not named after its install
+  folder (Palworld ships `Pal`, Hogwarts Legacy ships `Phoenix`) resolved to
+  CrashReportClient's folder instead of the one holding the game exe, which is the only
+  place UE4SS's `dwmapi.dll` can sit.
+- **`Get-ReleaseVersionKey` ranked releases by the first digit run in the tag.**
+  `BepInEx_x64_5.4.22.0` scored `64.0` and `UE4SS_v3.0.1` scored `4.0`, both outranking
+  every real version. Bounded in practice only because `-VersionPrefix` usually made each
+  candidate set homogeneous - and it defaults to empty.
+- **Two patch markers could share one generated patcher.** `New-ScreenCenterPatcher`
+  flattened the marker through `[^A-Za-z0-9_]`, which is not injective: `cul.center` and
+  `cul-center` both became `ScreenCenterPatcher_cul_center`, and the by-name lookup handed
+  the second marker a patcher hard-coded with the first's string. The marker is the only
+  thing preventing a double patch.
+- **Release notes shipped with a BOM.** `Out-File -Encoding utf8` means UTF-8 *with* BOM
+  on PowerShell 5.1, and the file goes straight to `gh release create --notes-file`, so
+  every published release body opened with a literal mojibake prefix. The first-release
+  branch used `Set-Content` with no encoding at all, mangling non-ASCII commit subjects
+  through the system ANSI codepage.
+- **`uninstall.ps1` aimed `Remove-Item -Recurse -Force` at the wrong tree.** Its
+  containment check used `[System.IO.Path]::GetFullPath`, which resolves relative paths
+  against `[Environment]::CurrentDirectory` - and that does not follow `Set-Location`. So
+  running it from the game folder with `-GamePath .` validated the real game folder
+  (`Test-Path` goes through the provider) while the containment check resolved `.` to the
+  process start directory. Root and target resolved consistently wrong, so the check
+  passed.
+- **The release workflow's Lopari predicate was not Lopari's.** It keyed on
+  `install_strategy -eq 'External'`; lopari.app's `update-metadata.mjs`, which actually
+  stamps pins, filters on `public === true` plus a release carrying an `-installer.zip`
+  and never reads `install_strategy`. A dev-only catalog entry therefore demanded the
+  sync token and then polled for a pin that is never stamped, running the 10 minute
+  deadline into a hard failure.
+- Plus: `HotkeyPoller`'s `noexcept` move operations restarting a thread (a failed spawn is
+  `std::terminate`, killing the game with no diagnostic); the DX11/DX9 overlays copying a
+  `std::function` per frame on the render thread inside a hooked `Present`, and a second
+  `Install()` silently stealing the process-wide hooks from the first;
+  `CameraCallbackLifecycle`'s preCull/preRender wrappers invoking the static callback
+  unguarded, so `ForceCleanupAll` mid-dispatch would abort Unity's whole invocation list
+  and take every other mod's camera hook with it; `:remove_UE4SS` deleting two of the five
+  files it laid down while reporting success; `mods.txt` deregistration matching a name
+  prefix (so removing `HeadTracking` deregistered `HeadTracking Extras`); and
+  `sync-discord-announce` exiting 0 from a dry run that found a dozen unreconciled repos.
 
 ### Added
 
@@ -225,6 +284,9 @@ Newly `[Obsolete]`, each with a correct replacement:
 - Test coverage for the pivot path (which had none in either port, in any test, which is
   why the sign error survived) and for gimbal lock, plus fake-null modelling in the Unity
   stubs so the destroyed-object defect class is reachable from a test at all.
+- `cameraunlock_overlay_compile` - a compile-only CMake target that expands all three
+  overlay implementation blocks against minimal ImGui/kiero/MinHook stubs. It builds
+  under the existing `pixi run build-cpp`, so the headers can no longer ship untypechecked.
 
 ### Earlier in this cycle
 
