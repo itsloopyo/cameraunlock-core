@@ -18,9 +18,17 @@
 
 $ErrorActionPreference = "Stop"
 
-Import-Module (Join-Path $PSScriptRoot 'GamePathDetection.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'ModDeployment.psm1')     -Force
-Import-Module (Join-Path $PSScriptRoot 'ModLoaderSetup.psm1')    -Force
+# NO -Force on any of these. -Force is Remove-Module + re-import, and Remove-Module
+# is not scoped to the importing module: it unloads the module from the CALLER's
+# session too. A mod's deploy.ps1 that imports GamePathDetection or ModDeployment
+# for itself and THEN imports this module lost Find-GamePath and
+# Test-FileContainsMarker the moment this line ran - order-dependent, so it
+# presents as intermittent. Reproduced in a child runspace: both went from
+# available to CommandNotFoundException across this import. Same defect as the one
+# already fixed in ModLoaderSetup.psm1.
+Import-Module (Join-Path $PSScriptRoot 'GamePathDetection.psm1')
+Import-Module (Join-Path $PSScriptRoot 'ModDeployment.psm1')
+Import-Module (Join-Path $PSScriptRoot 'ModLoaderSetup.psm1')
 
 # Shared resolver: prefer caller-supplied -GivenPath (the launcher always
 # passes one), else fall back to Find-GamePath against games.json. Throws
@@ -599,7 +607,12 @@ function Invoke-DevDeployShim {
         [Parameter(Mandatory)][string]$ModDllName,
         [string]$SourceDllName,
         [string[]]$ExtraDlls = @(),
-        [string]$GivenPath
+        [string]$GivenPath,
+        # A byte sequence present in EVERY build of this mod's shim, used to answer
+        # "is the file already sitting there ours?" independently of build config.
+        # Required, and deliberately not defaulted - see the backup block below for
+        # what guessing costs.
+        [Parameter(Mandatory)][string]$ShimMarker
     )
 
     if (-not $SourceDllName) { $SourceDllName = $ModDllName }
@@ -617,9 +630,20 @@ function Invoke-DevDeployShim {
     # to back up), deploy 2 sees the target present (it is OUR shim) with no
     # backup and copies the shim to <name>.backup; uninstall then "restores the
     # original", reinstalling the mod permanently and reporting success.
-    # Decided PER FILE by CONTENT, matching scripts/install-body-shim.cmd. The question
-    # that actually matters is "is the file already sitting there ours?", and comparing
-    # the bytes answers it directly - no sentinel to go stale.
+    # Decided PER FILE by IDENTITY, not by comparing against the build about to be
+    # written. That comparison was the bug: it answers "is this byte-identical to THIS
+    # build", which is a different question. A Release shim already in place (from a
+    # lopari install) does not match a Debug build a developer deploys, so our OWN shim
+    # was captured as the user's pre-mod original. Uninstall then "restored the
+    # original", silently reinstalling the mod and reporting a clean removal. Observed
+    # on a real install, where the shim, its .backup AND lopari's .lopari-backup were
+    # all head-tracking binaries and the game ships no file of that name at all.
+    #
+    # A marker present in every build answers the real question. This is the shim
+    # equivalent of the Cecil path's PatchMarker, and it is Mandatory for the same
+    # reason: with no way to establish identity there is no safe default. Backing up
+    # unconditionally poisons the backup; skipping the backup unconditionally loses a
+    # file that really was the user's. So the caller has to say.
     #
     # A sentinel file was tried and removed: nothing read or deleted it, so after a
     # deploy/uninstall cycle it survived with the shim gone. If the user then installed
@@ -633,18 +657,7 @@ function Invoke-DevDeployShim {
         if (Test-Path -LiteralPath $backup) { continue }
         if (-not (Test-Path -LiteralPath $target)) { continue }
 
-        # The source this deploy is about to write. $ModDllName is renamed from
-        # $SourceDllName; the extras keep their own names.
-        $sourceName = if ($f -eq $ModDllName) { $SourceDllName } else { $f }
-        $source = Join-Path $BuildOutputPath $sourceName
-
-        $isOurs = $false
-        if (Test-Path -LiteralPath $source) {
-            $isOurs = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -eq
-                      (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
-        }
-
-        if ($isOurs) {
+        if (Test-FileContainsMarker -FilePath $target -Marker $ShimMarker) {
             Write-Host "  $f is already this mod's shim - not capturing it as an original" -ForegroundColor Gray
         } else {
             Copy-Item -LiteralPath $target -Destination $backup -Force
