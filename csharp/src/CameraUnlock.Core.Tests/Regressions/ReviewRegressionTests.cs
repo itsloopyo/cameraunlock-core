@@ -45,13 +45,17 @@ namespace CameraUnlock.Core.Tests.Regressions
         }
 
         [Fact]
-        public void Calculate_YawEitherSideOfNinety_HasNoSignDiscontinuity()
+        public void Calculate_PastNinety_RejectsInsteadOfFlippingSign()
         {
             ScreenOffsetCalculator.Calculate(89.9f, 0f, 0f, 90f, 50.625f, 1920f, 1080f, 1f,
                 out float justUnder, out _);
             ScreenOffsetCalculator.Calculate(90.1f, 0f, 0f, 90f, 50.625f, 1920f, 1080f, 1f,
                 out float justOver, out _);
 
+            // There IS still a large step here - the projection genuinely diverges as az
+            // approaches zero. What must not happen is the old behaviour, where justOver
+            // came back as a large POSITIVE number: a reticle confidently drawn on the
+            // wrong side of the screen reads as correct, where a rejected one does not.
             Assert.True(justUnder < 0f, "yaw right stays negative up to the singularity");
             Assert.Equal(0f, justOver);
         }
@@ -168,8 +172,8 @@ namespace CameraUnlock.Core.Tests.Regressions
 
         [Theory]
         [InlineData("70000")]
+        [InlineData("65536")]
         [InlineData("0")]
-        [InlineData("80")]
         [InlineData("-1")]
         public void ApplyValues_OutOfRangePort_KeepsDefault(string port)
         {
@@ -184,16 +188,23 @@ namespace CameraUnlock.Core.Tests.Regressions
             Assert.Equal(original, config.UdpPort);
         }
 
-        [Fact]
-        public void ApplyValues_InRangePort_IsApplied()
+        [Theory]
+        [InlineData("5555", 5555)]
+        [InlineData("1", 1)]
+        [InlineData("65535", 65535)]
+        // Below 1024 is a working configuration: Windows imposes no privileged-port
+        // restriction on a UDP bind, so the validation must not borrow the BepInEx
+        // binding's 1024 floor and break a user who is already running there.
+        [InlineData("80", 80)]
+        public void ApplyValues_InRangePort_IsApplied(string port, int expected)
         {
             var config = new HeadTrackingConfigData();
             config.ApplyValues(new System.Collections.Generic.Dictionary<string, string>
             {
-                { "port", "5555" }
+                { "port", port }
             });
 
-            Assert.Equal(5555, config.UdpPort);
+            Assert.Equal(expected, config.UdpPort);
         }
 
         // ---- ProfileSerializer ----
@@ -274,8 +285,11 @@ namespace CameraUnlock.Core.Tests.Regressions
             try
             {
                 var manager = new ProfileManager(dir);
+                // '/' rather than ':' - Path.GetInvalidFileNameChars() is 41 characters on
+                // Windows but only { ' ', '/' } on Unix, so a ':' case would pass on a
+                // Linux dev container while CI (windows-latest) stayed green.
                 Assert.Throws<ArgumentException>(() =>
-                    manager.CreateProfile("Sniper: Long Range", "d"));
+                    manager.CreateProfile("Sniper/Long Range", "d"));
             }
             finally { Cleanup(dir); }
         }

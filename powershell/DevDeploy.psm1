@@ -208,11 +208,17 @@ function Invoke-DevDeployCecil {
         Restore-FileFromBackup -FilePath $assemblyPath | Out-Null
     }
 
-    # Out-Null, or the scriptblock's return value joins this function's output stream
-    # and the documented Hashtable return becomes an array. The canonical patcher in
-    # this repo, Invoke-HeadTrackingPatch, always returns $results - so the obvious
-    # wrapper made $r.DeployedDllPath null for every caller.
-    & $Patcher $assemblyPath | Out-Null
+    # Captured, not discarded and not left to leak. Leaking it joins this function's
+    # output stream and the documented Hashtable return becomes a 2-element array, so
+    # $result.Count and $result.Keys report on the array rather than the hashtable.
+    #
+    # Discarding it is just as wrong: Invoke-HeadTrackingPatch, the canonical patcher
+    # here, never throws - it returns @{ Success = $false; Errors = @(...) }. Piping to
+    # Out-Null would swallow that and return deployment success after a failed patch.
+    $patchResult = & $Patcher $assemblyPath
+    if ($patchResult -is [hashtable] -and -not $patchResult.Success) {
+        throw "Patcher reported failure for ${assemblyPath}: $($patchResult.Errors -join '; ')"
+    }
 
     $removedFiles = @(Remove-OldDoorstopFiles -GamePath $gamePath)
     if ($removedFiles.Count -gt 0) {

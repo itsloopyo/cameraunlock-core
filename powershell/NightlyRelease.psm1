@@ -175,12 +175,19 @@ function Publish-NightlyBuild {
             --notes $notes
         if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)" }
 
-        # .Trim() on the command output directly makes the fallback below unreachable:
-        # a failed `gh repo view` emits nothing and $null.Trim() throws. The release has
-        # already been published by this point, so the throw skipped the Discord announce
-        # entirely - exactly the silent-no-announce case the webhook guard exists for.
+        # The old form called .Trim() on the command output directly, so a failed
+        # `gh repo view` threw on $null.Trim() and the '<owner>/<repo>' fallback below
+        # was unreachable. Do NOT make that placeholder reachable: it flows straight
+        # into the announce block and posts an embed linking to
+        # https://github.com/<owner>/<repo>/releases/tag/dev - a 404 - in the public
+        # release channel, which Invoke-RestMethod reports as success. A broken
+        # announcement is worse than none. gh only fails here when it is missing or
+        # unauthenticated, which is not recoverable at this point, so fail loudly.
         $repoRaw = & gh repo view --json nameWithOwner --jq .nameWithOwner 2>$null
-        $repo = if ($repoRaw) { ([string]$repoRaw).Trim() } else { '<owner>/<repo>' }
+        if (-not $repoRaw) {
+            throw "gh repo view failed - cannot resolve owner/repo for the release announcement. Check that gh is installed and authenticated."
+        }
+        $repo = ([string]$repoRaw).Trim()
     } finally {
         $ErrorActionPreference = $prevEAP
         Pop-Location

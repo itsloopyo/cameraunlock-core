@@ -62,13 +62,15 @@ void TrackingProcessor::Recenter() {
                               math::NormalizeAngle(current.roll + roll));
 
     // The smoothing state still holds the pre-recentre rotation, so without this the
-    // next Process() slerps down from the old offset instead of starting at centre -
-    // the view slides back rather than snapping, for as long as the smoothing constant
-    // takes. RecenterTo below already does this, and the C# port zeroes its smoothed
-    // Euler here too. Only reachable for mods driving the processor directly, since
-    // HeadTrackingSession masks it by calling Reset().
+    // next Process() slerps down from the old offset instead of starting at centre and
+    // the view slides back rather than snapping. Only reachable for mods driving the
+    // processor directly, since HeadTrackingSession masks it by calling Reset().
+    //
+    // m_hasSmoothedValue is deliberately left SET, matching C# TrackingProcessor
+    // .Recenter(), which zeroes the smoothed Euler but not the flag. Clearing it would
+    // send the next Process() down the first-value branch and snap straight to the raw
+    // sample instead of taking one smoothing step out of identity.
     m_smoothedQuat = math::Quat4::Identity();
-    m_hasSmoothedValue = false;
 }
 
 void TrackingProcessor::RecenterTo(float yaw, float pitch, float roll) {

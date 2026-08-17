@@ -16,12 +16,17 @@
         shell: pwsh
         env:
           DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          # Read through the environment, never interpolated into the script body.
+          # ${{ }} is substituted textually before pwsh parses the run block, so a tag
+          # name containing a double quote closes the assignment and the remainder runs
+          # as code - in a job that holds the release webhook and contents:write.
+          REF_NAME: ${{ github.ref_name }}
         run: |
           if (-not $env:DISCORD_RELEASE_WEBHOOK) {
             Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - the release was created but not announced. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run this job."
             exit 1
           }
-          $tag  = "${{ github.ref_name }}"
+          $tag  = $env:REF_NAME
           $repo = "${{ github.repository }}"
           $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
           $url  = "https://github.com/$repo/releases/tag/$tag"

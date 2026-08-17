@@ -134,12 +134,19 @@ namespace CameraUnlock.Core.Processing
                     return rawPose;
                 }
 
-                // Update sample interval estimate (EMA). A packet-loss gap is not an
-                // observation of the tracker's rate, so it is rejected rather than clamped
-                // into the estimate - folding a 0.5s stall in at MaxSampleInterval drags the
-                // estimate up and leaves the camera lagging for ~12 samples after recovery.
-                if (_timeSinceLastNewSample > MinSampleInterval &&
-                    _timeSinceLastNewSample <= MaxSampleInterval)
+                // Update sample interval estimate (EMA).
+                //
+                // A packet-loss gap does get folded in here and transiently inflates the
+                // estimate, which costs a few hundred ms of extra smoothing after a
+                // dropout. Do NOT "fix" that by gating the observation on
+                // <= MaxSampleInterval: _hasSecondSample is only set inside this block,
+                // so any tracker whose genuine interval exceeds MaxSampleInterval (a
+                // throttled phone below 5Hz) would then never update the estimate at all
+                // and would sit permanently at the default, extrapolating to the cap for
+                // most of every sample period. Telling a one-off gap from a genuinely slow
+                // source needs a consistency check across several samples, not a
+                // single-observation bound.
+                if (_timeSinceLastNewSample > MinSampleInterval)
                 {
                     if (!_hasSecondSample)
                     {

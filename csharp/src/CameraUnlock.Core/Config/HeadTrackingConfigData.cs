@@ -130,19 +130,23 @@ namespace CameraUnlock.Core.Config
                         // Range-checked here rather than left to the socket. An
                         // out-of-range port reached UdpClient's constructor and threw
                         // ArgumentOutOfRangeException at plugin Awake(), killing the mod
-                        // with a socket stack trace that names no config key. The BepInEx
-                        // path already binds this to AcceptableValueRange(1024, 65535);
-                        // the INI path is the same boundary and had nothing.
+                        // with a socket stack trace that names no config key.
+                        //
+                        // The bound is the actual protocol range, NOT the BepInEx
+                        // binding's 1024 floor: Windows imposes no privileged-port
+                        // restriction on a UDP bind, so a user running with udpport
+                        // below 1024 has a working configuration today and rejecting it
+                        // would break them.
                         if (ConfigParsingUtils.TryParseInt(value, out intVal))
                         {
-                            if (intVal >= 1024 && intVal <= 65535)
+                            if (intVal >= 1 && intVal <= 65535)
                             {
                                 UdpPort = intVal;
                             }
                             else
                             {
                                 log?.Invoke(string.Format(
-                                    "Config key '{0}' has an out-of-range value '{1}' (expected 1024-65535) - using {2}",
+                                    "Config key '{0}' has an out-of-range value '{1}' (expected 1-65535) - using {2}",
                                     key, value, UdpPort.ToString(CultureInfo.InvariantCulture)));
                             }
                         }

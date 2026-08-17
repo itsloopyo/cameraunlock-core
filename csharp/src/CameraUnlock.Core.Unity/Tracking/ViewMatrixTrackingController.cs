@@ -159,15 +159,14 @@ namespace CameraUnlock.Core.Unity.Tracking
             // a given Unity build only invokes one path per frame. Both go through
             // reflection: SRP-only Unity 6 builds strip the legacy Camera.onPreCull
             // accessor, so a direct reference throws MissingMethodException at JIT time.
-            // The helper's registry is a single global slot per hook and Add throws when
-            // one is already taken. A controller recreated by SelfHealingModBase before
-            // the old one's Disable() ran would throw out of Enable(), and in the ordering
-            // where the first Add succeeds and the second throws, the two hooks end up
-            // pointing at different controllers. Both Removes are documented safe when
-            // nothing is subscribed.
-            RenderPipelineHelper.RemoveOnPreCull();
-            RenderPipelineHelper.RemoveBeginCameraRendering();
-
+            // Deliberately does NOT Remove first. The helper's registry is a single global
+            // slot per hook with no ownership token, so RemoveOnPreCull() clears whoever
+            // holds it - including a mod's own AddOnPreCull subscription, which is public
+            // API the helper's own docs invite. Clearing it blind would silently unhook
+            // that mod and leave its later Remove taking out this controller instead. The
+            // throw from a double Add is the diagnostic, and it is worth keeping: a
+            // controller recreated before the old one's Disable() ran is a lifecycle bug
+            // in the consumer that should surface loudly, not be papered over here.
             RenderPipelineHelper.AddOnPreCull(OnPreCull);
             RenderPipelineHelper.AddBeginCameraRendering(OnPreCull);
         }
@@ -396,7 +395,12 @@ namespace CameraUnlock.Core.Unity.Tracking
             if (!_isTransitioningIn)
                 return 1f;
 
-            _transitionInProgress += Time.unscaledDeltaTime / TransitionInDuration;
+            // Scaled, unlike AdvanceTransitionOut. This ramp only runs alongside the
+            // interpolator and processor, which are driven by Time.deltaTime - so on
+            // unscaled time at timeScale 0 it would fade in a frozen, stale head offset,
+            // and its completion fires RecenterToLatest(), capturing the centre on
+            // whatever pose the user happens to hold while the game is paused.
+            _transitionInProgress += Time.deltaTime / TransitionInDuration;
             if (_transitionInProgress >= 1f)
             {
                 _transitionInProgress = 1f;
@@ -518,6 +522,12 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         private void AdvanceTransitionOut()
         {
+            // Unscaled, unlike AdvanceTransitionIn. This ramp only lerps the last applied
+            // rotation toward zero and consumes no pipeline state, so it is safe on real
+            // time - and it MUST be, because SceneGameStateDetector disables tracking on
+            // pause by default. On Time.deltaTime the fade could never complete at
+            // timeScale 0 and the pause menu rendered through a view matrix still rotated
+            // by whatever the head was doing when the player pressed Escape.
             _transitionOutProgress += Time.unscaledDeltaTime / TransitionOutDuration;
             if (_transitionOutProgress >= 1f)
             {

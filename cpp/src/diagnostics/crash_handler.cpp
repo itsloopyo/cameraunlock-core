@@ -152,6 +152,13 @@ LONG WINAPI UnhandledFilter(EXCEPTION_POINTERS* info) {
 
 void InstallCrashHandler() {
     g_previousFilter = SetUnhandledExceptionFilter(&UnhandledFilter);
+    // A second InstallCrashHandler in the same module gets our OWN filter back, and
+    // chaining to it would recurse until the stack is gone - taking out the crash
+    // report for the crash we were installed to report. (Two separate plugins each
+    // linking this static library are fine: distinct UnhandledFilter addresses.)
+    if (g_previousFilter == &UnhandledFilter) {
+        g_previousFilter = nullptr;
+    }
     logging::Line("crash-handler: installed (unhandled-exception filter)");
 }
 

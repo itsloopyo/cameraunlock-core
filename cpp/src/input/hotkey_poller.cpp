@@ -120,15 +120,6 @@ void HotkeyPoller::SetRecenterKeyCode(int vkCode) {
     m_recenterKey.store(vkCode);
 }
 
-void HotkeyPoller::CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
-                            bool allowFire) {
-    std::vector<HotkeyCallback> toFire;
-    CollectKey(vkCode, keyDown, callback, allowFire, toFire);
-    for (auto& cb : toFire) {
-        cb();
-    }
-}
-
 void HotkeyPoller::CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
                               bool allowFire, std::vector<HotkeyCallback>& toFire) {
     if (vkCode == 0 || !callback) return;

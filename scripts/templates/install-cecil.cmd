@@ -30,7 +30,13 @@ set "PATCHER_FILE=BootstrapPatcher.cs"
 :: PatchMarker const). The install/uninstall bodies use it to guarantee the
 :: .original backup is always pristine - they refuse to capture or restore a
 :: patched Assembly-CSharp.dll. Must match the patcher exactly.
-set "PATCH_MARKER=HeadTracking_Patched_MyGame_v1"
+::
+:: Left EMPTY on purpose, matching uninstall.cmd. A placeholder value here would
+:: satisfy the "is it defined" guard while still being the WRONG marker, so the
+:: pristine check would find no match, report the already-patched assembly as clean,
+:: and capture it as the .original - the exact corrupt backup the guard exists to
+:: prevent. Empty makes an unedited copy fail loudly at install instead.
+set "PATCH_MARKER="
 set "MOD_CONTROLS="
 :: --- END CONFIG BLOCK ---
 

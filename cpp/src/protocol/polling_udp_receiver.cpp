@@ -101,10 +101,6 @@ bool PollingUdpReceiver::Poll() {
             if (errno == EWOULDBLOCK || errno == EAGAIN) {
                 break;  // No more data available
             }
-            if (errno == EMSGSIZE) {
-                packetsThisFrame++;
-                continue;
-            }
 #endif
             break;  // Other error
         }

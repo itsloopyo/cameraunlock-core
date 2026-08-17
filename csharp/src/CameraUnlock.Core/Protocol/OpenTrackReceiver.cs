@@ -158,14 +158,15 @@ namespace CameraUnlock.Core.Protocol
             Interlocked.Exchange(ref _recenterRequested, 0);
             Interlocked.Exchange(ref _timestampTicks, 0L);
 
+            UdpClient client;
             try
             {
                 // IPv4 only. Binding dual-stack would deliver a same-machine IPv4 sender
                 // as ::ffff:127.0.0.1, which IPAddress.IsLoopback does not recognise, so
                 // every local user would be silently reclassified as remote and handed
                 // RemoteSmoothing. Widen the classifier to unmap first if this ever changes.
-                _udpClient = new UdpClient(new IPEndPoint(IPAddress.Any, port));
-                _udpClient.Client.ReceiveTimeout = ReceiveTimeoutMs;
+                client = new UdpClient(new IPEndPoint(IPAddress.Any, port));
+                client.Client.ReceiveTimeout = ReceiveTimeoutMs;
             }
             catch (SocketException)
             {
@@ -175,13 +176,23 @@ namespace CameraUnlock.Core.Protocol
                 return false;
             }
 
-            _isRunning = true;
-            _receiveThread = new Thread(ReceiveLoop)
+            // Published under the same lock RetryLoop uses, for the same reason: a Stop()
+            // landing between the socket assignment and the _isRunning write would close
+            // the socket and then see no thread to join, leaving _isRunning true with no
+            // receiver - and every later Start() short-circuits on "already running" while
+            // tracking is dead. The bind stays outside the lock so a blocking failure
+            // path cannot hold it.
+            lock (_lifecycleLock)
             {
-                Name = "CameraUnlock-OpenTrackReceiver",
-                IsBackground = true
-            };
-            _receiveThread.Start();
+                _udpClient = client;
+                _isRunning = true;
+                _receiveThread = new Thread(ReceiveLoop)
+                {
+                    Name = "CameraUnlock-OpenTrackReceiver",
+                    IsBackground = true
+                };
+                _receiveThread.Start();
+            }
             return true;
         }
 

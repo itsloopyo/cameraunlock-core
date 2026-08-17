@@ -135,17 +135,37 @@ namespace CameraUnlock.Core.Config.Profiles
 
             string content = Serialize(profile);
 
-            // Write-then-rename. A direct WriteAllText truncates in place, so a crash
+            // Write-then-replace. A direct WriteAllText truncates in place, so a crash
             // mid-write leaves a half-file that Deserialize happily accepts (it skips
             // unparseable lines and never throws), silently replacing the user's tuned
             // profile with constructor defaults that still load clean.
+            //
+            // File.Replace, not Delete-then-Move: it is one MoveFileEx with
+            // REPLACE_EXISTING, so the destination is never absent. Delete-then-Move
+            // leaves NO file at all if the Move fails (an antivirus scanner holding the
+            // freshly-closed temp file is enough) or if the process dies between the two
+            // - which is strictly worse than the partial file this is meant to prevent.
             string tempPath = filePath + ".tmp";
             File.WriteAllText(tempPath, content, Encoding.UTF8);
-            if (File.Exists(filePath))
+            try
             {
-                File.Delete(filePath);
+                if (File.Exists(filePath))
+                {
+                    File.Replace(tempPath, filePath, null);
+                }
+                else
+                {
+                    File.Move(tempPath, filePath);
+                }
             }
-            File.Move(tempPath, filePath);
+            catch
+            {
+                // Don't strand the temp file in the profiles directory on a failed swap.
+                // The original is still intact either way; the exception propagates.
+                try { File.Delete(tempPath); }
+                catch (IOException) { }
+                throw;
+            }
         }
 
         /// <summary>

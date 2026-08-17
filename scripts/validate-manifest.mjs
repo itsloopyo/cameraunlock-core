@@ -75,7 +75,14 @@ function validate(label, zip) {
   // A fetched loader archive carries no in-zip source - its bytes are
   // downloaded + hash-verified at install time - so only check bundled ones.
   for (const a of man.loader?.archives ?? []) if (a.source) sources.push(a.source);
-  for (const f of man.files ?? []) sources.push(f.source);
+  // Guarded like the archives line above. An entry missing `source` otherwise pushed
+  // undefined, which threw a bare TypeError from the replace() below - reported as the
+  // failure reason with neither the file nor the entry named - and counted toward the
+  // length check, defeating it.
+  for (const f of man.files ?? []) {
+    if (!f.source) throw new Error(`manifest files[] entry has no "source": ${JSON.stringify(f)}`);
+    sources.push(f.source);
+  }
 
   // A manifest that declares nothing passed the "everything declared is present"
   // check vacuously and printed OK. That is the worst outcome for a gate whose whole

@@ -100,10 +100,10 @@ namespace CameraUnlock.Core.Config
                 result = 0;
                 return false;
             }
-            // Pinned like TryParseFloat above. The default overload uses CurrentCulture,
-            // so a config value picks up whatever digit grouping the user's Windows
-            // install applies - this is the untrusted-input boundary and must not vary
-            // by locale.
+            // Pinned like TryParseFloat above. The default overload resolves the
+            // negative sign and the accepted whitespace from CurrentCulture, so on a
+            // locale whose NegativeSign is not U+002D a leading "-" stops parsing. This
+            // is the untrusted-input boundary and must not vary by locale.
             return int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
         }
 

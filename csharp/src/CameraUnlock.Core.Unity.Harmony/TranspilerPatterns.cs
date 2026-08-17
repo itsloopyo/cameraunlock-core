@@ -48,7 +48,7 @@ namespace CameraUnlock.Core.Unity.Harmony
             var getTransform = AccessTools.PropertyGetter(typeof(UnityEngine.Component), "transform");
             var getForward = AccessTools.PropertyGetter(typeof(UnityEngine.Transform), "forward");
 
-            var codes = new List<CodeInstruction>(instructions);
+            var codes = CloneInstructions(instructions);
 
             // Look for the 4-instruction pattern
             for (int i = 0; i < codes.Count - 3; i++)
@@ -94,7 +94,7 @@ namespace CameraUnlock.Core.Unity.Harmony
             var getTransform = AccessTools.PropertyGetter(typeof(UnityEngine.Component), "transform");
             var getForward = AccessTools.PropertyGetter(typeof(UnityEngine.Transform), "forward");
 
-            var codes = new List<CodeInstruction>(instructions);
+            var codes = CloneInstructions(instructions);
 
             // Look for the 3-instruction pattern
             for (int i = 0; i < codes.Count - 2; i++)
@@ -139,7 +139,7 @@ namespace CameraUnlock.Core.Unity.Harmony
                 throw new ArgumentNullException(nameof(replacementMethod));
             }
 
-            var codes = new List<CodeInstruction>(instructions);
+            var codes = CloneInstructions(instructions);
 
             // Calculate pattern length
             int patternLength = propertyGetters.Length;
@@ -290,6 +290,24 @@ namespace CameraUnlock.Core.Unity.Harmony
         // targets on exactly the kind of instruction these patterns match (the first of a
         // statement). Losing one makes the ILGenerator fail to resolve the label, which
         // aborts the whole PatchAll - so every other patch in the mod, camera hook
+
+        // Clones rather than copying references. The replacement below mutates entries in
+        // place - which is required, because constructing a fresh CodeInstruction drops
+        // the original's labels and exception blocks and an unresolvable branch label
+        // aborts the whole PatchAll. Mutating the CALLER's objects would be visible to it
+        // though: a mod that calls CountCameraForwardPatterns on the same enumerable
+        // afterwards would get 0, and its instructions would be silently rewritten.
+        // Harmony's copy constructor carries labels and blocks across.
+        private static List<CodeInstruction> CloneInstructions(IEnumerable<CodeInstruction> instructions)
+        {
+            var codes = new List<CodeInstruction>();
+            foreach (var instruction in instructions)
+            {
+                codes.Add(new CodeInstruction(instruction));
+            }
+            return codes;
+        }
+
         // included, silently never applies.
         private static void ReplaceWithCall(CodeInstruction instruction, MethodInfo replacementMethod)
         {

@@ -108,7 +108,7 @@ namespace CameraUnlock.Core.Math
         /// <param name="target">Target angle in degrees.</param>
         /// <param name="smoothing">Effective smoothing factor (0-1).</param>
         /// <param name="deltaTime">Frame delta time in seconds.</param>
-        /// <returns>Smoothed angle, normalized to (-180, 180].</returns>
+        /// <returns>Smoothed angle, normalized to [-180, 180].</returns>
 #if !NET35 && !NET40
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
 #endif

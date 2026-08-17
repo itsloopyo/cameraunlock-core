@@ -24,9 +24,12 @@
         shell: pwsh
         env:
           LOPARI_APP_ACTIONS_TOKEN: ${{ secrets.LOPARI_APP_ACTIONS_TOKEN }}
+          # See the note in discord-announce-step.yml: a tag name is attacker-controlled
+          # text and must not be interpolated into a run block that holds a token.
+          REF_NAME: ${{ github.ref_name }}
         run: |
           $repo = "${{ github.repository }}"
-          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $version = $env:REF_NAME -replace '^v', ''
           function Get-PinnedVersion {
             $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
             $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods

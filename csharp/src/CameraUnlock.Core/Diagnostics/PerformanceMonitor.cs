@@ -96,6 +96,8 @@ namespace CameraUnlock.Core.Diagnostics
 #endif
         private void RecordTicksInternal(long ticks)
         {
+            // Rejected, not clamped: 0 is this class's empty-slot sentinel, so the
+            // sample contributes nothing to either the sum or the count.
             // The valid-sample bookkeeping below only handles 0 <-> positive transitions,
             // so a negative sample matches neither branch while the running sum still
             // takes it: the count desynchronises from the sum permanently, and on a

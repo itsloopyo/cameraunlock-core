@@ -93,11 +93,8 @@ namespace CameraUnlock.Core.Processing
                     return rawPosition;
                 }
 
-                // A packet-loss gap is not an observation of the tracker's rate; clamping it
-                // in at MaxSampleInterval drags the estimate up and leaves position lagging
-                // for ~12 samples after recovery. See PoseInterpolator for the twin.
-                if (_timeSinceLastNewSample > MinSampleInterval &&
-                    _timeSinceLastNewSample <= MaxSampleInterval)
+                // See PoseInterpolator for why this is NOT gated on <= MaxSampleInterval.
+                if (_timeSinceLastNewSample > MinSampleInterval)
                 {
                     if (!_hasSecondSample)
                     {
