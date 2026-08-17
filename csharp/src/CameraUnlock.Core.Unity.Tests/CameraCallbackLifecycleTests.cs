@@ -34,6 +34,65 @@ namespace CameraUnlock.Core.Unity.Tests
         }
 
         [Fact]
+        public void ForceCleanupAll_ThenDispose_DoesNotTearDownTheNewOwnersCallback()
+        {
+            // ForceCleanupAll is static and cannot reach instances, so `first` went on
+            // believing it owned the slot. Its Dispose then unregistered SECOND's
+            // callback - a mod shutting down silently killed a live overlay's camera
+            // hook, which is the failure this whole class exists to prevent.
+            var first = new CameraCallbackLifecycle();
+            first.RegisterPreCull(cam => { });
+
+            CameraCallbackLifecycle.ForceCleanupAll();
+
+            int secondCalls = 0;
+            var second = new CameraCallbackLifecycle();
+            second.RegisterPreCull(cam => secondCalls++);
+
+            first.Dispose();
+
+            Assert.True(second.HasPreCull);
+            Assert.NotNull(Camera.onPreCull);
+            Camera.onPreCull(new Camera());
+            Assert.Equal(1, secondCalls);
+        }
+
+        [Fact]
+        public void ForceCleanupAll_ClearsTheOriginalOwnersHasFlag()
+        {
+            var lifecycle = new CameraCallbackLifecycle();
+            lifecycle.RegisterPreCull(cam => { });
+            Assert.True(lifecycle.HasPreCull);
+
+            CameraCallbackLifecycle.ForceCleanupAll();
+
+            // It no longer owns anything, and must not claim otherwise.
+            Assert.False(lifecycle.HasPreCull);
+        }
+
+        [Fact]
+        public void SecondLifecycleCanClaimEverySlotAfterForceCleanupAll()
+        {
+            var first = new CameraCallbackLifecycle();
+            first.RegisterPreCull(cam => { });
+            first.RegisterPreRender(cam => { });
+            first.RegisterWillRenderCanvases(() => { });
+
+            CameraCallbackLifecycle.ForceCleanupAll();
+
+            var second = new CameraCallbackLifecycle();
+            second.RegisterPreCull(cam => { });
+            second.RegisterPreRender(cam => { });
+            second.RegisterWillRenderCanvases(() => { });
+
+            first.Dispose();
+
+            Assert.True(second.HasPreCull);
+            Assert.True(second.HasPreRender);
+            Assert.True(second.HasWillRenderCanvases);
+        }
+
+        [Fact]
         public void PreCull_LiveOwner_InvokesTheCallback()
         {
             var owner = new UnityEngine.Object();

@@ -38,6 +38,15 @@ namespace CameraUnlock.Core.Unity.Tracking
         private static UnityEngine.Object _willRenderCanvasesOwner;
         private static bool _hasWillRenderCanvasesOwner;
 
+        // Which lifecycle instance currently holds each slot. A per-instance bool alone
+        // was not enough: ForceCleanupAll is static and cannot reach instances, so after
+        // A.Register -> ForceCleanupAll -> B.Register, A still believed it owned the slot
+        // and A.Dispose tore down B's callback - while B.HasPreCull went on reporting
+        // true. Ownership is only real when the static slot still names this instance.
+        private static CameraCallbackLifecycle _preCullHolder;
+        private static CameraCallbackLifecycle _preRenderHolder;
+        private static CameraCallbackLifecycle _willRenderCanvasesHolder;
+
         // Track whether we own the current static callbacks
         private bool _ownsPreCull;
         private bool _ownsPreRender;
@@ -47,17 +56,17 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <summary>
         /// Returns true if this instance owns the preCull callback.
         /// </summary>
-        public bool HasPreCull => _ownsPreCull && !_disposed;
+        public bool HasPreCull => _ownsPreCull && ReferenceEquals(_preCullHolder, this) && !_disposed;
 
         /// <summary>
         /// Returns true if this instance owns the preRender callback.
         /// </summary>
-        public bool HasPreRender => _ownsPreRender && !_disposed;
+        public bool HasPreRender => _ownsPreRender && ReferenceEquals(_preRenderHolder, this) && !_disposed;
 
         /// <summary>
         /// Returns true if this instance owns the willRenderCanvases callback.
         /// </summary>
-        public bool HasWillRenderCanvases => _ownsWillRenderCanvases && !_disposed;
+        public bool HasWillRenderCanvases => _ownsWillRenderCanvases && ReferenceEquals(_willRenderCanvasesHolder, this) && !_disposed;
 
         /// <summary>
         /// Returns true if this instance has been disposed.
@@ -96,6 +105,7 @@ namespace CameraUnlock.Core.Unity.Tracking
             _preCullOwner = owner;
             _hasPreCullOwner = owner != null;
             Camera.onPreCull += OnPreCullWrapper;
+            _preCullHolder = this;
             _ownsPreCull = true;
         }
 
@@ -109,7 +119,13 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            ClearPreCull();
+            // Only tear the slot down if it is still OURS. ForceCleanupAll or another
+            // lifecycle may have taken it since; clearing it then would unregister
+            // somebody else's callback.
+            if (ReferenceEquals(_preCullHolder, this))
+            {
+                ClearPreCull();
+            }
             _ownsPreCull = false;
         }
 
@@ -139,6 +155,7 @@ namespace CameraUnlock.Core.Unity.Tracking
 
             Camera.onPreCull -= OnPreCullWrapper;
             _staticPreCullCallback = null;
+            _preCullHolder = null;
             _preCullOwner = null;
             _hasPreCullOwner = false;
         }
@@ -175,6 +192,7 @@ namespace CameraUnlock.Core.Unity.Tracking
             _preRenderOwner = owner;
             _hasPreRenderOwner = owner != null;
             Camera.onPreRender += OnPreRenderWrapper;
+            _preRenderHolder = this;
             _ownsPreRender = true;
         }
 
@@ -188,7 +206,13 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            ClearPreRender();
+            // Only tear the slot down if it is still OURS. ForceCleanupAll or another
+            // lifecycle may have taken it since; clearing it then would unregister
+            // somebody else's callback.
+            if (ReferenceEquals(_preRenderHolder, this))
+            {
+                ClearPreRender();
+            }
             _ownsPreRender = false;
         }
 
@@ -212,6 +236,7 @@ namespace CameraUnlock.Core.Unity.Tracking
 
             Camera.onPreRender -= OnPreRenderWrapper;
             _staticPreRenderCallback = null;
+            _preRenderHolder = null;
             _preRenderOwner = null;
             _hasPreRenderOwner = false;
         }
@@ -247,6 +272,7 @@ namespace CameraUnlock.Core.Unity.Tracking
             _willRenderCanvasesOwner = owner;
             _hasWillRenderCanvasesOwner = owner != null;
             Canvas.willRenderCanvases += OnWillRenderCanvasesWrapper;
+            _willRenderCanvasesHolder = this;
             _ownsWillRenderCanvases = true;
         }
 
@@ -260,7 +286,13 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            ClearWillRenderCanvases();
+            // Only tear the slot down if it is still OURS. ForceCleanupAll or another
+            // lifecycle may have taken it since; clearing it then would unregister
+            // somebody else's callback.
+            if (ReferenceEquals(_willRenderCanvasesHolder, this))
+            {
+                ClearWillRenderCanvases();
+            }
             _ownsWillRenderCanvases = false;
         }
 
@@ -289,6 +321,7 @@ namespace CameraUnlock.Core.Unity.Tracking
 
             Canvas.willRenderCanvases -= OnWillRenderCanvasesWrapper;
             _staticWillRenderCanvasesCallback = null;
+            _willRenderCanvasesHolder = null;
             _willRenderCanvasesOwner = null;
             _hasWillRenderCanvasesOwner = false;
         }

@@ -272,6 +272,23 @@ Newly `[Obsolete]`, each with a correct replacement:
   files it laid down while reporting success; `mods.txt` deregistration matching a name
   prefix (so removing `HeadTracking` deregistered `HeadTracking Extras`); and
   `sync-discord-announce` exiting 0 from a dry run that found a dozen unreconciled repos.
+- **`ForceCleanupAll` left the previous owner believing it still owned the slot.**
+  It is static and cannot reach instances, so after `A.Register()` ->
+  `ForceCleanupAll()` -> `B.Register()`, `A.Dispose()` unregistered **B's** callback
+  while `B.HasPreCull` went on reporting true. A mod shutting down silently killed a
+  live overlay's camera hook - the exact failure `CameraCallbackLifecycle` exists to
+  prevent. Ownership is now only real while the static slot still names that instance.
+- **`SplitInjectionCameraTracker` dropped real cameras.** `IsTokenStart` treated any
+  lowercase predecessor as a word boundary, so `ui` matched mid-word and `yuicamera` /
+  `EquiviewCamera` lost head tracking - Yui, Rui, Sui and Gui are ordinary romanised
+  names. The tail-word rule was also a bare prefix test, so `cam` swallowed camp, camo,
+  campaign and camshaft. The file ships to IL2CPP mods as source and belonged to no
+  `.csproj`, so nothing here compiled it; it is now linked into the Unity test project
+  with 38 tests over the filter.
+- **`Invoke-DevDeployCecil` reported success after a failed patch** for two of the three
+  result shapes in use: `-is [hashtable]` is false for both `[pscustomobject]` and
+  `[ordered]` (an `OrderedDictionary`), and `PSObject.Properties` does not see a
+  Hashtable's keys at all. Matched on shape now.
 
 ### Added
 
