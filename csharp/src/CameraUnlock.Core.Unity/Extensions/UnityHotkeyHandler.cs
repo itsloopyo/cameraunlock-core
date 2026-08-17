@@ -124,7 +124,10 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// </summary>
         public void Update()
         {
-            _handler.Update(Time.time);
+            // Unscaled: Time.time stops advancing at timeScale 0, so the hotkey cooldown
+            // never expires while the game is paused and every press after the first is
+            // rejected - in menus, which is exactly where users go to toggle the mod.
+            _handler.Update(Time.unscaledTime);
         }
 
         /// <summary>

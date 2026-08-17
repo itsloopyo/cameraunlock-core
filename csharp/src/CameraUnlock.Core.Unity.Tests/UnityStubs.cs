@@ -435,6 +435,12 @@ namespace UnityEngine
     public static class Time
     {
         public static float deltaTime = 1f / 60f;
+
+        // Separate from deltaTime so a test can model a paused game (timeScale 0), where
+        // Unity zeroes deltaTime but keeps unscaledDeltaTime advancing. Anything that
+        // must keep running while paused - the view-matrix transitions, hotkey cooldowns -
+        // is only testable against that split.
+        public static float unscaledDeltaTime = 1f / 60f;
         public static int frameCount = 1;
 
         public static void AdvanceFrame()
@@ -445,6 +451,7 @@ namespace UnityEngine
         public static void Reset()
         {
             deltaTime = 1f / 60f;
+            unscaledDeltaTime = 1f / 60f;
             frameCount = 1;
         }
     }

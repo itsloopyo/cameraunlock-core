@@ -186,7 +186,12 @@ namespace CameraUnlock.Core.Input
             // Check toggle key
             if (_toggleKeyCode != 0 && _keyDownCheck(_toggleKeyCode))
             {
-                if (currentTime - _lastToggleTime >= _cooldownSeconds)
+                // A negative delta means the caller's clock went backwards (a mod passing
+                // Time.timeSinceLevelLoad, which restarts on every load). Treating that as
+                // "cooldown not elapsed" left the hotkey dead for as long as the old
+                // timestamp was large - minutes of play with no way to diagnose it.
+                float sinceToggle = currentTime - _lastToggleTime;
+                if (sinceToggle < 0f || sinceToggle >= _cooldownSeconds)
                 {
                     _lastToggleTime = currentTime;
                     _toggleCount++;
@@ -211,7 +216,8 @@ namespace CameraUnlock.Core.Input
             // Check recenter key
             if (_recenterKeyCode != 0 && _keyDownCheck(_recenterKeyCode))
             {
-                if (currentTime - _lastRecenterTime >= _cooldownSeconds)
+                float sinceRecenter = currentTime - _lastRecenterTime;
+                if (sinceRecenter < 0f || sinceRecenter >= _cooldownSeconds)
                 {
                     _lastRecenterTime = currentTime;
                     _recenterCount++;

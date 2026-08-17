@@ -159,6 +159,15 @@ namespace CameraUnlock.Core.Unity.Tracking
             // a given Unity build only invokes one path per frame. Both go through
             // reflection: SRP-only Unity 6 builds strip the legacy Camera.onPreCull
             // accessor, so a direct reference throws MissingMethodException at JIT time.
+            // The helper's registry is a single global slot per hook and Add throws when
+            // one is already taken. A controller recreated by SelfHealingModBase before
+            // the old one's Disable() ran would throw out of Enable(), and in the ordering
+            // where the first Add succeeds and the second throws, the two hooks end up
+            // pointing at different controllers. Both Removes are documented safe when
+            // nothing is subscribed.
+            RenderPipelineHelper.RemoveOnPreCull();
+            RenderPipelineHelper.RemoveBeginCameraRendering();
+
             RenderPipelineHelper.AddOnPreCull(OnPreCull);
             RenderPipelineHelper.AddBeginCameraRendering(OnPreCull);
         }
@@ -387,7 +396,7 @@ namespace CameraUnlock.Core.Unity.Tracking
             if (!_isTransitioningIn)
                 return 1f;
 
-            _transitionInProgress += Time.deltaTime / TransitionInDuration;
+            _transitionInProgress += Time.unscaledDeltaTime / TransitionInDuration;
             if (_transitionInProgress >= 1f)
             {
                 _transitionInProgress = 1f;
@@ -509,7 +518,7 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         private void AdvanceTransitionOut()
         {
-            _transitionOutProgress += Time.deltaTime / TransitionOutDuration;
+            _transitionOutProgress += Time.unscaledDeltaTime / TransitionOutDuration;
             if (_transitionOutProgress >= 1f)
             {
                 _isTransitioningOut = false;
