@@ -262,6 +262,19 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
             InvertRoll.SettingChanged += HandleSettingChanged;
             EnableAimDecoupling.SettingChanged += HandleSettingChanged;
             ShowDecoupledCrosshair.SettingChanged += HandleSettingChanged;
+
+            // OnConfigChanged is documented as firing when ANY value changes, but these
+            // six were never wired up. Rebinding a hotkey through ConfigurationManager
+            // mid-game fired SettingChanged with nothing listening, so the mod's handler
+            // never ran and the new key did nothing until a restart - and any subclass
+            // cache keyed off these entries went stale. Additive: the event fires more
+            // often, which is what the documentation already promised.
+            UdpPort.SettingChanged += HandleSettingChanged;
+            EnableOnStartup.SettingChanged += HandleSettingChanged;
+            RecenterKey.SettingChanged += HandleSettingChanged;
+            ToggleKey.SettingChanged += HandleSettingChanged;
+            PositionToggleKey.SettingChanged += HandleSettingChanged;
+            ReticleToggleKey.SettingChanged += HandleSettingChanged;
         }
 
         private void HandleSettingChanged(object sender, EventArgs e)
