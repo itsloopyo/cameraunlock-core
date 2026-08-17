@@ -54,15 +54,15 @@ namespace CameraUnlock.Core.Unity.Harmony
             for (int i = 0; i < codes.Count - 3; i++)
             {
                 if (IsLoadArgInstruction(codes[i]) &&
-                    codes[i + 1].opcode == OpCodes.Ldfld && ReferenceEquals(codes[i + 1].operand, cameraField) &&
-                    codes[i + 2].opcode == OpCodes.Callvirt && ReferenceEquals(codes[i + 2].operand, getTransform) &&
-                    codes[i + 3].opcode == OpCodes.Callvirt && ReferenceEquals(codes[i + 3].operand, getForward))
+                    codes[i + 1].opcode == OpCodes.Ldfld && Equals(codes[i + 1].operand, cameraField) &&
+                    codes[i + 2].opcode == OpCodes.Callvirt && Equals(codes[i + 2].operand, getTransform) &&
+                    codes[i + 3].opcode == OpCodes.Callvirt && Equals(codes[i + 3].operand, getForward))
                 {
                     // Replace the 4 instructions with a single call
-                    codes[i] = new CodeInstruction(OpCodes.Call, replacementMethod);
-                    codes[i + 1] = new CodeInstruction(OpCodes.Nop);
-                    codes[i + 2] = new CodeInstruction(OpCodes.Nop);
-                    codes[i + 3] = new CodeInstruction(OpCodes.Nop);
+                    ReplaceWithCall(codes[i], replacementMethod);
+                    NopOut(codes[i + 1]);
+                    NopOut(codes[i + 2]);
+                    NopOut(codes[i + 3]);
                 }
             }
 
@@ -99,13 +99,13 @@ namespace CameraUnlock.Core.Unity.Harmony
             // Look for the 3-instruction pattern
             for (int i = 0; i < codes.Count - 2; i++)
             {
-                if (codes[i].opcode == OpCodes.Call && ReferenceEquals(codes[i].operand, getCameraMain) &&
-                    codes[i + 1].opcode == OpCodes.Callvirt && ReferenceEquals(codes[i + 1].operand, getTransform) &&
-                    codes[i + 2].opcode == OpCodes.Callvirt && ReferenceEquals(codes[i + 2].operand, getForward))
+                if (codes[i].opcode == OpCodes.Call && Equals(codes[i].operand, getCameraMain) &&
+                    codes[i + 1].opcode == OpCodes.Callvirt && Equals(codes[i + 1].operand, getTransform) &&
+                    codes[i + 2].opcode == OpCodes.Callvirt && Equals(codes[i + 2].operand, getForward))
                 {
-                    codes[i] = new CodeInstruction(OpCodes.Call, replacementMethod);
-                    codes[i + 1] = new CodeInstruction(OpCodes.Nop);
-                    codes[i + 2] = new CodeInstruction(OpCodes.Nop);
+                    ReplaceWithCall(codes[i], replacementMethod);
+                    NopOut(codes[i + 1]);
+                    NopOut(codes[i + 2]);
                 }
             }
 
@@ -165,7 +165,7 @@ namespace CameraUnlock.Core.Unity.Harmony
                 if (startField != null)
                 {
                     if (codes[i + offset].opcode != OpCodes.Ldfld ||
-                        !ReferenceEquals(codes[i + offset].operand, startField))
+                        !Equals(codes[i + offset].operand, startField))
                     {
                         continue;
                     }
@@ -178,7 +178,7 @@ namespace CameraUnlock.Core.Unity.Harmony
                 {
                     var code = codes[i + offset + j];
                     if ((code.opcode != OpCodes.Call && code.opcode != OpCodes.Callvirt) ||
-                        !ReferenceEquals(code.operand, propertyGetters[j]))
+                        !Equals(code.operand, propertyGetters[j]))
                     {
                         match = false;
                     }
@@ -187,10 +187,10 @@ namespace CameraUnlock.Core.Unity.Harmony
                 if (match)
                 {
                     // Replace first instruction with call, nop the rest
-                    codes[i] = new CodeInstruction(OpCodes.Call, replacementMethod);
+                    ReplaceWithCall(codes[i], replacementMethod);
                     for (int k = 1; k < patternLength; k++)
                     {
-                        codes[i + k] = new CodeInstruction(OpCodes.Nop);
+                        NopOut(codes[i + k]);
                     }
                 }
             }
@@ -220,9 +220,9 @@ namespace CameraUnlock.Core.Unity.Harmony
             for (int i = 0; i < codes.Count - 3; i++)
             {
                 if (IsLoadArgInstruction(codes[i]) &&
-                    codes[i + 1].opcode == OpCodes.Ldfld && ReferenceEquals(codes[i + 1].operand, cameraField) &&
-                    codes[i + 2].opcode == OpCodes.Callvirt && ReferenceEquals(codes[i + 2].operand, getTransform) &&
-                    codes[i + 3].opcode == OpCodes.Callvirt && ReferenceEquals(codes[i + 3].operand, getForward))
+                    codes[i + 1].opcode == OpCodes.Ldfld && Equals(codes[i + 1].operand, cameraField) &&
+                    codes[i + 2].opcode == OpCodes.Callvirt && Equals(codes[i + 2].operand, getTransform) &&
+                    codes[i + 3].opcode == OpCodes.Callvirt && Equals(codes[i + 3].operand, getForward))
                 {
                     count++;
                 }
@@ -284,5 +284,23 @@ namespace CameraUnlock.Core.Unity.Harmony
                    instruction.opcode == OpCodes.Ldarg_S ||
                    instruction.opcode == OpCodes.Ldarg;
         }
-    }
+    
+        // Mutated in place rather than replaced. A fresh CodeInstruction drops the
+        // original's labels and exception blocks, and Harmony's IL reader parks branch
+        // targets on exactly the kind of instruction these patterns match (the first of a
+        // statement). Losing one makes the ILGenerator fail to resolve the label, which
+        // aborts the whole PatchAll - so every other patch in the mod, camera hook
+        // included, silently never applies.
+        private static void ReplaceWithCall(CodeInstruction instruction, MethodInfo replacementMethod)
+        {
+            instruction.opcode = OpCodes.Call;
+            instruction.operand = replacementMethod;
+        }
+
+        private static void NopOut(CodeInstruction instruction)
+        {
+            instruction.opcode = OpCodes.Nop;
+            instruction.operand = null;
+        }
+}
 }
