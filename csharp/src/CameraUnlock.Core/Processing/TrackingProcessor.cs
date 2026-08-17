@@ -111,9 +111,11 @@ namespace CameraUnlock.Core.Processing
             }
             else
             {
-                _smoothedYaw = SmoothingUtils.Smooth(_smoothedYaw, yaw, effectiveSmoothing, deltaTime);
+                // Yaw and roll come out of ToEulerYXZ in (-180, 180] and can therefore step
+                // across the seam; pitch is bounded to ±90 by asin and never wraps.
+                _smoothedYaw = SmoothingUtils.SmoothAngle(_smoothedYaw, yaw, effectiveSmoothing, deltaTime);
                 _smoothedPitch = SmoothingUtils.Smooth(_smoothedPitch, pitch, effectiveSmoothing, deltaTime);
-                _smoothedRoll = SmoothingUtils.Smooth(_smoothedRoll, roll, effectiveSmoothing, deltaTime);
+                _smoothedRoll = SmoothingUtils.SmoothAngle(_smoothedRoll, roll, effectiveSmoothing, deltaTime);
             }
 
             // Step 4: Apply per-axis sensitivity

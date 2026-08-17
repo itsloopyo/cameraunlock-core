@@ -1,4 +1,5 @@
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 
 namespace CameraUnlock.Core.Processing
 {
@@ -133,8 +134,12 @@ namespace CameraUnlock.Core.Processing
                     return rawPose;
                 }
 
-                // Update sample interval estimate (EMA)
-                if (_timeSinceLastNewSample > MinSampleInterval)
+                // Update sample interval estimate (EMA). A packet-loss gap is not an
+                // observation of the tracker's rate, so it is rejected rather than clamped
+                // into the estimate - folding a 0.5s stall in at MaxSampleInterval drags the
+                // estimate up and leaves the camera lagging for ~12 samples after recovery.
+                if (_timeSinceLastNewSample > MinSampleInterval &&
+                    _timeSinceLastNewSample <= MaxSampleInterval)
                 {
                     if (!_hasSecondSample)
                     {
@@ -151,10 +156,14 @@ namespace CameraUnlock.Core.Processing
                 }
 
                 // Capture current interpolated (possibly extrapolated) position as new start point
+                // Yaw and roll are (-180, 180] and can step across the seam, so the segment
+                // is traversed along the shortest arc; a plain (to - from) turns a 1° move
+                // from 179.5 to -179.5 into a -359° sweep the long way round. Pitch is
+                // bounded to ±90 by asin and never wraps.
                 float t = SegmentPosition(_progress, _timeSinceLastNewSample);
-                _fromYaw = _fromYaw + (_toYaw - _fromYaw) * t;
+                _fromYaw = AngleUtils.NormalizeAngle(_fromYaw + AngleUtils.ShortestAngleDelta(_fromYaw, _toYaw) * t);
                 _fromPitch = _fromPitch + (_toPitch - _fromPitch) * t;
-                _fromRoll = _fromRoll + (_toRoll - _fromRoll) * t;
+                _fromRoll = AngleUtils.NormalizeAngle(_fromRoll + AngleUtils.ShortestAngleDelta(_fromRoll, _toRoll) * t);
 
                 // New sample becomes the target
                 _toYaw = rawPose.Yaw;
@@ -173,9 +182,9 @@ namespace CameraUnlock.Core.Processing
             // bounded to avoid runaway prediction on direction reversals.
             float pt = SegmentPosition(_progress, _timeSinceLastNewSample);
 
-            float outYaw = _fromYaw + (_toYaw - _fromYaw) * pt;
+            float outYaw = AngleUtils.NormalizeAngle(_fromYaw + AngleUtils.ShortestAngleDelta(_fromYaw, _toYaw) * pt);
             float outPitch = _fromPitch + (_toPitch - _fromPitch) * pt;
-            float outRoll = _fromRoll + (_toRoll - _fromRoll) * pt;
+            float outRoll = AngleUtils.NormalizeAngle(_fromRoll + AngleUtils.ShortestAngleDelta(_fromRoll, _toRoll) * pt);
 
             return new TrackingPose(outYaw, outPitch, outRoll, rawPose.TimestampTicks);
         }

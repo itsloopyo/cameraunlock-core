@@ -99,6 +99,26 @@ namespace CameraUnlock.Core.Math
         }
 
         /// <summary>
+        /// Applies smoothing to an angle in degrees, taking the shortest path around the
+        /// ±180 seam. <see cref="Smooth(float,float,float,float)"/> lerps the raw scalar
+        /// difference, so smoothing 179.5 toward -179.5 - a 1° head movement across the
+        /// seam - travels -359° and swings the camera the long way round.
+        /// </summary>
+        /// <param name="current">Current angle in degrees.</param>
+        /// <param name="target">Target angle in degrees.</param>
+        /// <param name="smoothing">Effective smoothing factor (0-1).</param>
+        /// <param name="deltaTime">Frame delta time in seconds.</param>
+        /// <returns>Smoothed angle, normalized to (-180, 180].</returns>
+#if !NET35 && !NET40
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+#endif
+        public static float SmoothAngle(float current, float target, float smoothing, float deltaTime)
+        {
+            float t = CalculateSmoothingFactor(smoothing, deltaTime);
+            return AngleUtils.NormalizeAngle(current + AngleUtils.ShortestAngleDelta(current, target) * t);
+        }
+
+        /// <summary>
         /// Applies smoothing to a double value.
         /// </summary>
 #if !NET35 && !NET40
