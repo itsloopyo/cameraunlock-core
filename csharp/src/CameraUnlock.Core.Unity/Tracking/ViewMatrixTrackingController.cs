@@ -88,9 +88,15 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <summary>
         /// Invoked after the controller consumes a tracker-app recenter request
         /// (packet trailer) inside ProcessFrame. Hook notifications/logging here
-        /// instead of calling receiver.TryConsumeRecenterRequest() in mod code -
+        /// rather than calling receiver.TryConsumeRecenterRequest() in mod code -
         /// the controller already consumes the request, so a second consumer
-        /// races it and only one of the two ever sees a given press.
+        /// competes with it and only one of the two sees a given press.
+        ///
+        /// Not a race if the mod's own consume is strictly ORDERED after
+        /// ProcessFrame: the controller gets first claim every frame and the mod's
+        /// call is a no-op in the normal path. Several mods do this to drive a
+        /// notification without holding a delegate. Calling it BEFORE ProcessFrame,
+        /// or from Update while ProcessFrame runs in LateUpdate, does steal presses.
         /// </summary>
         public Action OnRemoteRecenter { get; set; }
         public bool IsApplyingTracking
@@ -235,6 +241,16 @@ namespace CameraUnlock.Core.Unity.Tracking
                 _wasApplyingTracking = true;
                 return true;
             }
+
+            // Drained, not left latched. The receive thread raises the request whenever a
+            // trailer press lands, but it is only consumed in the applying branch above, so
+            // a CENTER press made while tracking was off survived indefinitely and fired on
+            // the first frame of the NEXT session - where it cancelled the
+            // stabilise-then-recenter BeginTrackingSession had just armed (Recenter clears
+            // _recenterOnStabilize) and anchored the session to whichever raw pose happened
+            // to arrive first. A press made while nothing is being tracked has no meaningful
+            // target, and a fresh session recenters on stabilise regardless.
+            _receiver.TryConsumeRecenterRequest();
 
             if (_isTransitioningOut)
             {

@@ -43,6 +43,63 @@ namespace CameraUnlock.Core.Unity.Tests
                 () => _camera);
         }
 
+        [Fact]
+        public void RecenterPressWhileDisabled_IsNotHonouredOnTheNextSession()
+        {
+            // The receive thread raises the request whenever a trailer press lands, whether
+            // or not the mod is applying tracking. Only the applying branch consumed it, so a
+            // press made with tracking OFF stayed latched and fired on the first frame of the
+            // next session - cancelling the stabilise-then-recenter that session had just
+            // armed, and anchoring it to whichever raw pose arrived first.
+            _source.RecenterRequested = true;
+
+            Time.AdvanceFrame();
+            _controller.ProcessFrame(false);
+
+            Assert.False(_source.RecenterRequested);
+
+            int callsBefore = _source.RecenterCalls;
+            _source.Yaw = 30f;
+            Time.AdvanceFrame();
+            _controller.ProcessFrame(true);
+
+            // The session's own centring is the only thing that ran; the stale press did not
+            // add a second one.
+            Assert.Equal(callsBefore, _source.RecenterCalls);
+        }
+
+        [Fact]
+        public void RecenterPressWhileEnabled_IsStillHonoured()
+        {
+            // The drain must not swallow a live press. Guard against "fixing" the stale case
+            // by never consuming at all.
+            Time.AdvanceFrame();
+            _controller.ProcessFrame(true);
+
+            _source.RecenterRequested = true;
+            Time.AdvanceFrame();
+            _controller.ProcessFrame(true);
+
+            Assert.False(_source.RecenterRequested);
+        }
+
+        [Fact]
+        public void RemoteRecenterCallback_FiresOnlyForAPressConsumedWhileEnabled()
+        {
+            int fired = 0;
+            _controller.OnRemoteRecenter = () => fired++;
+
+            _source.RecenterRequested = true;
+            Time.AdvanceFrame();
+            _controller.ProcessFrame(false);
+            Assert.Equal(0, fired);
+
+            _source.RecenterRequested = true;
+            Time.AdvanceFrame();
+            _controller.ProcessFrame(true);
+            Assert.Equal(1, fired);
+        }
+
         private void Frame()
         {
             Time.AdvanceFrame();
