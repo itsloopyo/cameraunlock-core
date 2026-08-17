@@ -9,6 +9,77 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - `Copy-SharedBundle` no longer moves your submodule pointer
+
+`Copy-SharedBundle` fast-forwarded `cameraunlock-core` to `origin/main` on every
+call, so `pixi run package` silently moved the submodule working tree out from
+under the developer. The artifact was then built against a core commit the mod's
+history does not record, and `git status` grew an unexplained
+` M cameraunlock-core` that a later scripted commit could sweep up. Three repos
+hit exactly that during a fleet sweep.
+
+- Refreshing is **opt-in** now: pass `-RefreshCore`, or call
+  `Update-CameraUnlockCoreToRemoteTip` directly and commit the pointer.
+- `-NoRefresh` is kept, accepted and ignored, because most of the fleet's
+  `package-release.ps1` passes it and removing a parameter would break those
+  callers for nothing. Passing both it and `-RefreshCore` throws rather than
+  silently picking one.
+- **What this costs**: the old default was a real guarantee - a fix to an install
+  body, `find-game.ps1` or `games.json` reached a mod's users on that mod's next
+  release with no pointer bump. That is gone. A mod ships whatever core commit it
+  pins, so a stale pin ships a stale bundle. `Copy-SharedBundle` therefore always
+  reports the core commit it bundled and warns when that commit is behind the
+  `origin/main` the checkout last saw. It never fetches and never fails the run.
+- **Migration**: nothing to change to keep building. To keep the old behaviour on
+  a specific mod, pass `-RefreshCore`. Note that a mod still pinned to a core
+  commit *before* this change keeps the old auto-refresh until its pointer is
+  bumped.
+
+### Fixed (continued)
+
+- **`quat4.h` shadowed `angle_utils.h` and hard-broke every `/W4 /WX` consumer.**
+  `Quat4::FromYawPitchRoll` and `ToEulerYXZ` declared function-local
+  `constexpr float kDegToRad` / `kRadToDeg`, which live in `cameraunlock::math`
+  alongside `angle_utils.h`'s namespace-scope `constexpr double` constants of the
+  same names. Neither header is wrong alone; together they are MSVC C4459, and for
+  the mods compiling core headers with warnings-as-errors that escalated to
+  `error C2220` and no binary at all. Seven repos were confirmed broken. Renamed
+  to `kDegToRadF` / `kRadToDegF`; the emitted maths is bit-identical.
+  `cameraunlock_headers_strict` now pulls all 45 self-contained public headers
+  into one TU at `/W4 /WX` so this class of defect cannot recur - every build in
+  this repo had included those two headers separately, which is why nothing here
+  saw it while it was fatal downstream.
+- **A recenter press that arrived while tracking was off corrupted the next
+  session.** The receive thread raises the request whenever a trailer press lands,
+  but `ViewMatrixTrackingController` only consumed it inside its
+  `enabled && IsReceiving` branch and nothing else cleared the latch. A press made
+  with tracking toggled off survived indefinitely and fired on the first frame of
+  the next session - where it cancelled the stabilise-then-recenter
+  `BeginTrackingSession` had just armed (`Recenter()` clears
+  `_recenterOnStabilize`) and anchored the whole session to whichever raw pose
+  arrived first. Drained in the not-applying path now.
+  `OnRemoteRecenter`'s doc also read as forbidding any mod-side consume, which is
+  stricter than the truth: a consume strictly ordered *after* `ProcessFrame` is
+  safe, and several mods legitimately do it.
+
+### Added (continued)
+
+- `docs/porting-the-pipeline.md` - the invariants a non-C#/C++ port of the
+  pipeline has to reproduce, each with a check that fails on the wrong
+  implementation. Written because an audit of four independent ports (two Lua, one
+  Rust, one Python) found all four had the HCAM trailer right and three of four
+  had the interpolator's angle handling wrong in the same way. The difference was
+  that HCAM has a spec with a conformance vector and the pipeline had nothing.
+- `cameraunlock_headers_strict` - compile-only CMake target, all self-contained
+  public headers in one TU at the strictest warning level the fleet uses. `/WX` is
+  deliberately NOT applied to the `cameraunlock` library target, because mods build
+  core from source via `add_subdirectory` and that would turn any future compiler's
+  new warning into a fleet-wide outage.
+- `Write-CoreBundleProvenance` - reports which core commit a release bundle came
+  from, and warns when it is behind.
+- `data/games.json`: `persona-5-royal`, recovered from a mod's vendored submodule
+  where it had been added locally and never made it upstream.
+
 ### BREAKING - tracker pivot compensation was inverted, and is now opt-in
 
 `PositionProcessor` built its pivot vector as `+z`, but negative z is forward
