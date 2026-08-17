@@ -23,6 +23,8 @@
 
 #include <functional>
 #include <cstdint>
+#include <atomic>
+#include <mutex>
 
 #ifdef CAMERAUNLOCK_DX12_OVERLAY_IMPLEMENTATION
 
@@ -127,7 +129,10 @@ public:
     void Remove() {
         if (!m_hookInstalled) return;
 
-        TeardownRenderState();
+        {
+            std::lock_guard<std::mutex> lock(m_gpuMutex);
+            TeardownRenderState();
+        }
 
         kiero::unbind(m_config.executeCommandListsIndex);
         kiero::unbind(m_config.presentIndex);
@@ -145,20 +150,39 @@ public:
     bool IsInitialized() const { return m_initialized; }
 
 private:
+    // Every wait below is bounded rather than INFINITE. A removed device (TDR,
+    // driver reset, alt-tab on some drivers) never advances the fence, so an
+    // unbounded wait hangs the game's render thread forever with no diagnostic -
+    // and it is our overlay, not the game, that caused it. The bound is above
+    // Windows' own 2s TDR delay, so it can only expire once the driver has
+    // already given up.
+    static const DWORD kFenceWaitMs = 3000;
+
     // Blocks until the GPU has retired everything we have submitted. Every
     // release path below frees objects the GPU may still be reading.
-    void WaitForGpuIdle() {
-        if (!m_pFence || !m_pCommandQueue || !m_fenceEvent) return;
+    //
+    // Caller must hold m_gpuMutex. The fence counter is a read-modify-write and
+    // the event is auto-reset and single: two threads in here at once either
+    // hand out the same fence value (D3D12 requires monotonically increasing
+    // signals per queue, so the wait then returns while the GPU is still reading
+    // what we are about to free) or one consumes the other's signal and the
+    // loser blocks forever.
+    bool WaitForGpuIdleLocked() {
+        if (!m_pFence || !m_pCommandQueue || !m_fenceEvent) return true;
         const UINT64 target = ++m_fenceValue;
-        if (FAILED(m_pCommandQueue->Signal(m_pFence, target))) return;
-        if (m_pFence->GetCompletedValue() >= target) return;
-        if (SUCCEEDED(m_pFence->SetEventOnCompletion(target, m_fenceEvent))) {
-            WaitForSingleObject(m_fenceEvent, INFINITE);
+        if (FAILED(m_pCommandQueue->Signal(m_pFence, target))) return false;
+        if (m_pFence->GetCompletedValue() >= target) return true;
+        if (FAILED(m_pFence->SetEventOnCompletion(target, m_fenceEvent))) return false;
+        if (WaitForSingleObject(m_fenceEvent, kFenceWaitMs) != WAIT_OBJECT_0) {
+            m_deviceLost = true;
+            return false;
         }
+        return true;
     }
 
+    // Caller must hold m_gpuMutex.
     void CleanupResources() {
-        WaitForGpuIdle();
+        WaitForGpuIdleLocked();
 
         if (m_pBackBuffers) {
             for (UINT i = 0; i < m_bufferCount; i++) {
@@ -192,10 +216,11 @@ private:
         m_commandQueueReady = false;
         m_bufferCount = 0;
         m_fenceValue = 0;
+        m_deviceLost = false;
     }
 
     // Full teardown of everything InitializeDX12 built, in reverse order, so
-    // the next Present can rebuild from scratch.
+    // the next Present can rebuild from scratch. Caller must hold m_gpuMutex.
     void TeardownRenderState() {
         if (m_initialized) {
             ImGui_ImplDX12_Shutdown();
@@ -212,6 +237,7 @@ private:
         m_initialized = false;
     }
 
+    // Caller must hold m_gpuMutex.
     bool InitializeDX12(IDXGISwapChain* pSwapChain) {
         if (m_initialized) return true;
         if (!m_commandQueueReady || !m_pCommandQueue) return false;
@@ -306,8 +332,9 @@ private:
         return true;
     }
 
+    // Caller must hold m_gpuMutex.
     void RenderImGui(IDXGISwapChain* pSwapChain) {
-        if (!m_initialized) return;
+        if (!m_initialized || m_deviceLost) return;
 
         IDXGISwapChain3* pSwapChain3 = nullptr;
         UINT bufferIndex = 0;
@@ -318,10 +345,15 @@ private:
         if (bufferIndex >= m_bufferCount || !m_pBackBuffers[bufferIndex]) return;
 
         // The CPU runs one to three frames ahead of the GPU, so this allocator's
-        // previous submission may still be executing.
+        // previous submission may still be executing. Bailing out on a wait we
+        // did not win is load-bearing: resetting an allocator whose commands are
+        // still executing is D3D12 UB.
         if (m_pFence->GetCompletedValue() < m_fenceValues[bufferIndex]) {
             if (FAILED(m_pFence->SetEventOnCompletion(m_fenceValues[bufferIndex], m_fenceEvent))) return;
-            WaitForSingleObject(m_fenceEvent, INFINITE);
+            if (WaitForSingleObject(m_fenceEvent, kFenceWaitMs) != WAIT_OBJECT_0) {
+                m_deviceLost = true;
+                return;
+            }
         }
 
         m_pCommandAllocators[bufferIndex]->Reset();
@@ -370,14 +402,20 @@ private:
     static DX12Overlay* s_instance;
 
     static void __stdcall HkExecuteCommandLists(ID3D12CommandQueue* pQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) {
+        // The unlocked read is the fast path - this runs on every draw submission
+        // and is false for all but the first. m_commandQueueReady is atomic, and
+        // the claim below re-checks under the lock.
         if (s_instance && !s_instance->m_commandQueueReady && pQueue) {
             D3D12_COMMAND_QUEUE_DESC desc = pQueue->GetDesc();
             if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-                // Engines create transient DIRECT queues and release them; without
-                // our own reference this becomes a dangling pointer used every frame.
-                pQueue->AddRef();
-                s_instance->m_pCommandQueue = pQueue;
-                s_instance->m_commandQueueReady = true;
+                std::lock_guard<std::mutex> lock(s_instance->m_gpuMutex);
+                if (!s_instance->m_commandQueueReady) {
+                    // Engines create transient DIRECT queues and release them; without
+                    // our own reference this becomes a dangling pointer used every frame.
+                    pQueue->AddRef();
+                    s_instance->m_pCommandQueue = pQueue;
+                    s_instance->m_commandQueueReady = true;
+                }
             }
         }
         if (s_instance) {
@@ -387,16 +425,24 @@ private:
 
     static HRESULT __stdcall HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
         if (s_instance) {
+            // Deliberately outside the lock: this is consumer code that may call
+            // back into the overlay, and it touches no GPU state of ours.
             if (s_instance->m_updateCallback) s_instance->m_updateCallback();
 
-            if (!s_instance->m_initialized && s_instance->m_commandQueueReady) {
-                s_instance->InitializeDX12(pSwapChain);
+            {
+                std::lock_guard<std::mutex> lock(s_instance->m_gpuMutex);
+
+                if (!s_instance->m_initialized && s_instance->m_commandQueueReady) {
+                    s_instance->InitializeDX12(pSwapChain);
+                }
+
+                if (s_instance->m_initialized) {
+                    s_instance->RenderImGui(pSwapChain);
+                }
             }
 
-            if (s_instance->m_initialized) {
-                s_instance->RenderImGui(pSwapChain);
-            }
-
+            // The game's own Present runs unlocked - holding our mutex across it
+            // would stall a concurrent resize behind a vsync.
             return s_instance->m_oPresent(pSwapChain, SyncInterval, Flags);
         }
         return S_OK;
@@ -404,16 +450,24 @@ private:
 
     static HRESULT __stdcall HkPresent1(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT Flags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
         if (s_instance) {
+            // Deliberately outside the lock: this is consumer code that may call
+            // back into the overlay, and it touches no GPU state of ours.
             if (s_instance->m_updateCallback) s_instance->m_updateCallback();
 
-            if (!s_instance->m_initialized && s_instance->m_commandQueueReady) {
-                s_instance->InitializeDX12(pSwapChain);
+            {
+                std::lock_guard<std::mutex> lock(s_instance->m_gpuMutex);
+
+                if (!s_instance->m_initialized && s_instance->m_commandQueueReady) {
+                    s_instance->InitializeDX12(pSwapChain);
+                }
+
+                if (s_instance->m_initialized) {
+                    s_instance->RenderImGui(pSwapChain);
+                }
             }
 
-            if (s_instance->m_initialized) {
-                s_instance->RenderImGui(pSwapChain);
-            }
-
+            // The game's own Present runs unlocked - holding our mutex across it
+            // would stall a concurrent resize behind a vsync.
             return s_instance->m_oPresent1(pSwapChain, SyncInterval, Flags, pPresentParameters);
         }
         return S_OK;
@@ -426,8 +480,10 @@ private:
             const UINT newCount = (BufferCount == 0) ? s_instance->m_bufferCount : BufferCount;
             const bool countChanged = s_instance->m_initialized && newCount != s_instance->m_bufferCount;
 
+            std::unique_lock<std::mutex> lock(s_instance->m_gpuMutex);
+
             if (s_instance->m_pBackBuffers) {
-                s_instance->WaitForGpuIdle();
+                s_instance->WaitForGpuIdleLocked();
                 for (UINT i = 0; i < s_instance->m_bufferCount; i++) {
                     if (s_instance->m_pBackBuffers[i]) {
                         s_instance->m_pBackBuffers[i]->Release();
@@ -436,7 +492,11 @@ private:
                 }
             }
 
+            // Released around the game's own ResizeBuffers for the same reason as
+            // Present, then retaken to rebuild our views.
+            lock.unlock();
             HRESULT hr = s_instance->m_oResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+            lock.lock();
 
             if (SUCCEEDED(hr) && s_instance->m_initialized) {
                 if (countChanged) {
@@ -469,7 +529,14 @@ private:
     // State
     bool m_hookInstalled = false;
     bool m_initialized = false;
-    bool m_commandQueueReady = false;
+    std::atomic<bool> m_commandQueueReady{false};
+    // Latched when a fence wait times out. The device is gone; continuing to
+    // submit would just repeat the stall every frame.
+    bool m_deviceLost = false;
+    // Guards the fence counter, the fence event, and the lifetime of every D3D12
+    // object below. Present, ResizeBuffers and Remove all run on different
+    // threads and all touch them.
+    std::mutex m_gpuMutex;
     DX12OverlayConfig m_config;
 
     // Callbacks
