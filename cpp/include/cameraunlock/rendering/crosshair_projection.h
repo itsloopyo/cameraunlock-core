@@ -105,8 +105,18 @@ inline ScreenPosition ProjectCrosshair(const CrosshairProjectionParams& params) 
     float bUp    = newUp[0];
     float bLeft  = newLeft[0];
 
-    // Prevent division by zero (body aim behind camera)
-    if (bDepth < 0.01f) bDepth = 0.01f;
+    // Body aim at or behind the camera plane. Clamping bDepth to +0.01f here flipped the
+    // sign of the perspective divide for negative depth, so past ~90° of head turn the
+    // marker did not disappear - it teleported to the opposite edge and pinned there,
+    // pointing the player away from where their shots actually go. Fall back to the same
+    // centred result the other degenerate paths in this function return, which is also
+    // what ScreenOffsetCalculator does on the C# side.
+    if (bDepth < 0.01f) {
+        result.x = params.screenWidth / 2.0f;
+        result.y = params.screenHeight / 2.0f;
+        result.valid = true;
+        return result;
+    }
 
     // NaN check
     if (bDepth != bDepth || bUp != bUp || bLeft != bLeft) {
