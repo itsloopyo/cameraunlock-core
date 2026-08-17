@@ -1,5 +1,7 @@
 #include <cameraunlock/input/hotkey_poller.h>
 
+#include <vector>
+
 #ifdef _WIN32
 #include <Windows.h>
 #endif
@@ -120,16 +122,27 @@ void HotkeyPoller::SetRecenterKeyCode(int vkCode) {
 
 void HotkeyPoller::CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
                             bool allowFire) {
+    std::vector<HotkeyCallback> toFire;
+    CollectKey(vkCode, keyDown, callback, allowFire, toFire);
+    for (auto& cb : toFire) {
+        cb();
+    }
+}
+
+void HotkeyPoller::CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
+                              bool allowFire, std::vector<HotkeyCallback>& toFire) {
     if (vkCode == 0 || !callback) return;
 
 #ifdef _WIN32
     bool pressed = (GetAsyncKeyState(vkCode) & kKeyPressedMask) != 0;
     if (pressed && !keyDown.load()) {
         keyDown.store(true);
-        if (allowFire) callback();
+        if (allowFire) toFire.push_back(callback);
     } else if (!pressed && keyDown.load()) {
         keyDown.store(false);
     }
+#else
+    (void)keyDown; (void)allowFire; (void)toFire;
 #endif
 }
 
@@ -163,11 +176,18 @@ void HotkeyPoller::Poll() {
     const bool allowFire = true;
 #endif
 
-    // Check built-in keys under callback lock (avoids copying std::function)
+    // Edge detection happens under the lock; the callbacks themselves are collected and
+    // invoked after it is released. Firing in place deadlocked the polling thread against
+    // itself for any callback that rebinds a key, since AddHotkey / RemoveHotkey /
+    // SetToggleKey / SetRecenterKey all take one of these two (non-recursive) mutexes -
+    // and "re-register bindings on config reload, triggered by a hotkey" is a normal
+    // shape for a mod.
+    std::vector<HotkeyCallback> toFire;
+
     {
         std::lock_guard<std::mutex> lock(m_callbackMutex);
-        CheckKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback, allowFire);
-        CheckKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback, allowFire);
+        CollectKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback, allowFire, toFire);
+        CollectKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback, allowFire, toFire);
     }
 
     // Check generic hotkeys
@@ -180,12 +200,16 @@ void HotkeyPoller::Poll() {
             bool pressed = (GetAsyncKeyState(entry.vkCode) & kKeyPressedMask) != 0;
             if (pressed && !entry.keyDown) {
                 entry.keyDown = true;
-                if (allowFire) entry.callback();
+                if (allowFire) toFire.push_back(entry.callback);
             } else if (!pressed && entry.keyDown) {
                 entry.keyDown = false;
             }
 #endif
         }
+    }
+
+    for (auto& callback : toFire) {
+        callback();
     }
 }
 
@@ -293,6 +317,16 @@ bool IsValidHotkeyCode(int vkCode) {
     if (vkCode == 0x23) return true;  // End
     if (vkCode == 0x2D) return true;  // Insert
     if (vkCode == 0x2E) return true;  // Delete
+
+    if (vkCode == 0x1B) return true;  // Escape
+    if (vkCode == 0x20) return true;  // Space
+
+    // Letters and digits. chord_hotkeys.h documents Ctrl+Shift+<letter> as the binding
+    // convention every mod registers, and VirtualKeyToString already names all 26 - so
+    // a mod validating a user's INI rebind through this function rejected the very keys
+    // the library tells it to use, and silently fell back to its default.
+    if (vkCode >= 0x30 && vkCode <= 0x39) return true;  // 0-9
+    if (vkCode >= 0x41 && vkCode <= 0x5A) return true;  // A-Z
 
     return false;
 }

@@ -67,6 +67,10 @@ private:
     void PollLoop();
     void CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
                   bool allowFire);
+    // Edge-detects and appends the callback to fire rather than invoking it, so Poll()
+    // can release its locks before running user code. See the note in Poll().
+    void CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
+                    bool allowFire, std::vector<HotkeyCallback>& toFire);
 
     std::thread m_thread;
     std::atomic<bool> m_stopFlag{false};

@@ -129,9 +129,21 @@ void LogException(EXCEPTION_POINTERS* info) {
     logging::EmergencyLine("!! end exception report");
 }
 
+// There is exactly one top-level filter slot per process, and returning
+// EXCEPTION_CONTINUE_SEARCH from it goes to the OS default - it does NOT chain to the
+// filter we displaced. Discarding the previous filter therefore silently disabled the
+// host's own crash reporting: an RE Engine title with a dump uploader stops producing
+// dumps the moment the mod is installed, and with two cameraunlock plugins in one
+// process the second to load blanked the first. Both are the "masks a real fault" case
+// the doctrine forbids.
+LPTOP_LEVEL_EXCEPTION_FILTER g_previousFilter = nullptr;
+
 LONG WINAPI UnhandledFilter(EXCEPTION_POINTERS* info) {
     if (!g_alreadyLogged.exchange(true)) {
         LogException(info);
+    }
+    if (g_previousFilter != nullptr) {
+        return g_previousFilter(info);
     }
     return EXCEPTION_CONTINUE_SEARCH;  // let WER / OS produce a dump
 }
@@ -139,7 +151,7 @@ LONG WINAPI UnhandledFilter(EXCEPTION_POINTERS* info) {
 }  // namespace
 
 void InstallCrashHandler() {
-    SetUnhandledExceptionFilter(&UnhandledFilter);
+    g_previousFilter = SetUnhandledExceptionFilter(&UnhandledFilter);
     logging::Line("crash-handler: installed (unhandled-exception filter)");
 }
 
