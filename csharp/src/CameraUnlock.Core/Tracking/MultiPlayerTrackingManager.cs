@@ -51,6 +51,24 @@ namespace CameraUnlock.Core.Tracking
             if (ports == null) throw new ArgumentNullException("ports");
             if (ports.Length == 0) throw new ArgumentException("At least one port is required", "ports");
 
+            // Duplicates rejected at the boundary, alongside the null and empty checks.
+            // Only the first receiver can bind a shared port; the rest fail and spin a
+            // retry thread every 500ms FOREVER, because the port will never be released
+            // by the sibling holding it. The log then reads "port in use" immediately
+            // followed by "listening on port" for the same player.
+            for (int a = 0; a < ports.Length; a++)
+            {
+                for (int b = a + 1; b < ports.Length; b++)
+                {
+                    if (ports[a] == ports[b])
+                    {
+                        throw new ArgumentException(
+                            "Duplicate UDP port " + ports[a] + " (players " + (a + 1) + " and " + (b + 1) +
+                            "): each player needs its own port.", "ports");
+                    }
+                }
+            }
+
             _ports = (int[])ports.Clone();
             _receivers = new OpenTrackReceiver[_ports.Length];
             _processors = new TrackingProcessor[_ports.Length];
@@ -139,8 +157,18 @@ namespace CameraUnlock.Core.Tracking
 
             for (int i = 0; i < _receivers.Length; i++)
             {
-                _receivers[i].Start(_ports[i]);
-                Log?.Invoke("Player " + (i + 1) + " receiver listening on port " + _ports[i]);
+                // Logged on the result, not unconditionally: a failed bind puts the
+                // receiver into its retry loop, and claiming it is listening there
+                // contradicts the failure message the receiver itself just logged.
+                if (_receivers[i].Start(_ports[i]))
+                {
+                    Log?.Invoke("Player " + (i + 1) + " receiver listening on port " + _ports[i]);
+                }
+                else
+                {
+                    Log?.Invoke("Player " + (i + 1) + " receiver could not bind port " + _ports[i] +
+                                " yet - retrying in the background");
+                }
             }
         }
 

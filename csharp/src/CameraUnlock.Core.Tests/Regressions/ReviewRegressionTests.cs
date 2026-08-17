@@ -286,7 +286,7 @@ namespace CameraUnlock.Core.Tests.Regressions
             {
                 var manager = new ProfileManager(dir);
                 // '/' rather than ':' - Path.GetInvalidFileNameChars() is 41 characters on
-                // Windows but only { ' ', '/' } on Unix, so a ':' case would pass on a
+                // Windows but only { NUL, '/' } on Unix, so a ':' case would pass on a
                 // Linux dev container while CI (windows-latest) stayed green.
                 Assert.Throws<ArgumentException>(() =>
                     manager.CreateProfile("Sniper/Long Range", "d"));

@@ -39,6 +39,7 @@ namespace CameraUnlock.Core.Protocol
         private volatile bool _isRunning;
         private volatile bool _isConnected;
         private int _consecutiveTimeouts;
+        private SocketError _lastLoggedSocketError = SocketError.Success;
         private bool _disposed;
 
         // Port retry state
@@ -49,6 +50,14 @@ namespace CameraUnlock.Core.Protocol
         private Thread _retryThread;
 #endif
         private int _port;
+
+        // Publication sequence for the pose/position/timestamp group. Each of those
+        // fields is individually volatile, but the GROUP is not: a reader could observe
+        // packet N's timestamp beside packet N-1's position, which the interpolator reads
+        // as a new sample and latches one behind, then skips the real value because it
+        // arrives on an unchanged timestamp. Odd means a write is in progress. Single
+        // writer (the receive thread), so a reader only has to retry.
+        private long _publishSeq;
 
         private volatile float _rotationPitch;
         private volatile float _rotationYaw;
@@ -323,10 +332,9 @@ namespace CameraUnlock.Core.Protocol
         /// </summary>
         public TrackingPose GetRawPose()
         {
-            float yaw = _rotationYaw;
-            float pitch = _rotationPitch;
-            float roll = _rotationRoll;
-            long timestamp = Interlocked.Read(ref _timestampTicks);
+            float yaw, pitch, roll, px, py, pz;
+            long timestamp;
+            ReadSnapshot(out yaw, out pitch, out roll, out px, out py, out pz, out timestamp);
             return new TrackingPose(yaw, pitch, roll, timestamp);
         }
 
@@ -340,16 +348,44 @@ namespace CameraUnlock.Core.Protocol
             roll = _rotationRoll;
         }
 
+        // Reads the pose/position/timestamp group as one consistent snapshot. Retries
+        // while the writer is mid-publication (odd sequence) or if the sequence moved
+        // during the read. Bounded: the writer holds the window for six float stores, so
+        // this converges immediately in practice, and exhausting the budget just returns
+        // the fields as read - exactly the behaviour before the seqlock existed, never
+        // worse. Spinning unbounded on the render thread would be the bigger hazard.
+        private void ReadSnapshot(out float yaw, out float pitch, out float roll,
+                                  out float px, out float py, out float pz,
+                                  out long timestamp)
+        {
+            const int MaxSpins = 64;
+            for (int spin = 0; ; spin++)
+            {
+                long before = Interlocked.Read(ref _publishSeq);
+
+                yaw = _rotationYaw;
+                pitch = _rotationPitch;
+                roll = _rotationRoll;
+                px = _positionX;
+                py = _positionY;
+                pz = _positionZ;
+                timestamp = Interlocked.Read(ref _timestampTicks);
+
+                long after = Interlocked.Read(ref _publishSeq);
+                if (before == after && (before & 1L) == 0L) return;
+                if (spin >= MaxSpins) return;
+            }
+        }
+
         /// <summary>
-        /// Gets the latest pose with recenter offset applied (but no transformation).
-        /// Use GetLatestPoseTransformed() if you want coordinate transformation applied.
+        /// Gets the latest pose with the recenter offset applied, and the configured
+        /// coordinate transformation if the receiver was constructed with one.
         /// </summary>
         public TrackingPose GetLatestPose()
         {
-            float yaw = _rotationYaw;
-            float pitch = _rotationPitch;
-            float roll = _rotationRoll;
-            long timestamp = Interlocked.Read(ref _timestampTicks);
+            float yaw, pitch, roll, px, py, pz;
+            long timestamp;
+            ReadSnapshot(out yaw, out pitch, out roll, out px, out py, out pz, out timestamp);
 
             // Use explicit Monitor calls for old Mono compatibility
             Monitor.Enter(_offsetLock);
@@ -364,17 +400,15 @@ namespace CameraUnlock.Core.Protocol
                 Monitor.Exit(_offsetLock);
             }
 
-            return new TrackingPose(yaw, pitch, roll, timestamp);
-        }
+            var pose = new TrackingPose(yaw, pitch, roll, timestamp);
 
-        /// <summary>
-        /// Gets the latest pose with both recenter offset and coordinate transformation applied.
-        /// If no transformer is configured, behaves identically to GetLatestPose().
-        /// </summary>
-        public TrackingPose GetLatestPoseTransformed()
-        {
-            TrackingPose pose = GetLatestPose();
-
+            // Applied HERE, not only in GetLatestPoseTransformed. The transformer is a
+            // constructor argument and the class doc has always said it is applied at
+            // receive time, but nothing in the shipped pipeline called the Transformed
+            // variant - it is not on ITrackingDataSource, and HeadTrackingSession,
+            // StaticHeadTrackingCore, RemoteRecenter and ViewMatrixTrackingController all
+            // call this one. A mod that passed a transformer got HasTransformer == true,
+            // a camera yawing the wrong way, and no error.
             if (_transformer != null)
             {
                 pose = _transformer.Transform(pose);
@@ -384,14 +418,23 @@ namespace CameraUnlock.Core.Protocol
         }
 
         /// <summary>
+        /// Identical to <see cref="GetLatestPose"/>, which now applies the transformer
+        /// itself. Retained so existing callers keep compiling.
+        /// </summary>
+        [Obsolete("GetLatestPose() now applies the coordinate transformer. Call that instead.")]
+        public TrackingPose GetLatestPoseTransformed()
+        {
+            return GetLatestPose();
+        }
+
+        /// <summary>
         /// Gets the latest position with recenter offset applied.
         /// </summary>
         public PositionData GetLatestPosition()
         {
-            float x = _positionX;
-            float y = _positionY;
-            float z = _positionZ;
-            long timestamp = Interlocked.Read(ref _timestampTicks);
+            float ry, rp, rr, x, y, z;
+            long timestamp;
+            ReadSnapshot(out ry, out rp, out rr, out x, out y, out z, out timestamp);
 
             Monitor.Enter(_offsetLock);
             try
@@ -477,6 +520,25 @@ namespace CameraUnlock.Core.Protocol
             }
         }
 
+        // Wall-clock re-arm for trailer first-sighting. Matches the ~5s the wire contract
+        // specifies and the C++ ports' kRecenterRearmMs.
+        private const long RecenterRearmMs = 5000;
+
+        private void MaybeRearmRecenterFirstSighting()
+        {
+            long last = Interlocked.Read(ref _timestampTicks);
+            if (last == 0L) return;
+
+            long elapsedMs = (Stopwatch.GetTimestamp() - last) * 1000L / Stopwatch.Frequency;
+            if (elapsedMs >= RecenterRearmMs)
+            {
+                // The tracker app restarting resets its counter to zero, so a value
+                // latched from the old session would swallow the first CENTER press of
+                // the new one.
+                _hasRecenterCounter = false;
+            }
+        }
+
         private void ReceiveLoop()
         {
             var remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
@@ -500,6 +562,9 @@ namespace CameraUnlock.Core.Protocol
 
                         if (poseValid)
                         {
+                            // Odd for the duration of the write; readers spin past it.
+                            Interlocked.Increment(ref _publishSeq);
+
                             _rotationYaw = parsed.Yaw;
                             _rotationPitch = parsed.Pitch;
                             _rotationRoll = parsed.Roll;
@@ -525,6 +590,9 @@ namespace CameraUnlock.Core.Protocol
                             // with the previous packet's position, which the interpolator
                             // reads as a new sample and latches one sample behind.
                             Interlocked.Exchange(ref _timestampTicks, Stopwatch.GetTimestamp());
+
+                            // Back to even: the group is now consistent.
+                            Interlocked.Increment(ref _publishSeq);
 
                             // Same-connection liveness, for validated traffic only. Set for
                             // any 48-byte datagram, a LAN host streaming garbage would hold
@@ -559,17 +627,40 @@ namespace CameraUnlock.Core.Protocol
                         if (_consecutiveTimeouts >= DisconnectThreshold)
                         {
                             _isConnected = false;
-                            // Re-arm first-sighting: the tracker app restarting
-                            // resets its counter to zero, so a value latched from
-                            // the old session would swallow the first CENTER
-                            // press of the new one.
-                            _hasRecenterCounter = false;
                         }
                     }
                     else if (ex.SocketErrorCode == SocketError.Interrupted)
                     {
                         break;
                     }
+                    else
+                    {
+                        // Everything else used to be swallowed with no log, no disconnect
+                        // accounting and no backoff - so an unexpected socket error stopped
+                        // all tracking while IsReceiving kept reporting healthy. Logged
+                        // once per distinct code, and counted, so IsReceiving degrades
+                        // honestly.
+                        if (ex.SocketErrorCode != _lastLoggedSocketError)
+                        {
+                            _lastLoggedSocketError = ex.SocketErrorCode;
+                            Log?.Invoke(string.Format(
+                                "UDP receive error {0} ({1}) - tracking may stall",
+                                ex.SocketErrorCode, ex.ErrorCode));
+                        }
+                        _consecutiveTimeouts++;
+                        if (_consecutiveTimeouts >= DisconnectThreshold)
+                        {
+                            _isConnected = false;
+                        }
+                    }
+
+                    // Re-armed on a WALL CLOCK rather than on a count of consecutive recv
+                    // timeouts. The count only approximates 5s while the socket is
+                    // COMPLETELY silent, and it is reset by any datagram from any source -
+                    // so a second tracker (or an opentrack instance sharing port 4242)
+                    // held it at zero indefinitely and a genuine tracker restart behind
+                    // that noise had its first CENTER press swallowed.
+                    MaybeRearmRecenterFirstSighting();
                 }
                 catch (ObjectDisposedException)
                 {
