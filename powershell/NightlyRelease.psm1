@@ -104,13 +104,21 @@ function Publish-NightlyBuild {
     Write-Host "  pre-release tag : $DevTag (rolling)" -ForegroundColor DarkGray
     Write-Host ''
 
+    $buildStartedAt = Get-Date
+
     Push-Location $ProjectRoot
     try {
+        # $LASTEXITCODE is only meaningful after a NATIVE exe. A -BuildCommand
+        # that resolves to a PowerShell script or function leaves it holding the
+        # exit code of the last native call (the git above, i.e. 0), so a
+        # silently-failing build would read as success. Reset before each run.
         Write-Host 'Building...' -ForegroundColor Cyan
+        $global:LASTEXITCODE = 0
         Invoke-Expression $BuildCommand
         if ($LASTEXITCODE -ne 0) { throw "$BuildCommand failed" }
 
         Write-Host 'Packaging...' -ForegroundColor Cyan
+        $global:LASTEXITCODE = 0
         Invoke-Expression $PackageCommand
         if ($LASTEXITCODE -ne 0) { throw "$PackageCommand failed" }
     } finally { Pop-Location }
@@ -118,8 +126,16 @@ function Publish-NightlyBuild {
     if (-not $InstallerZipPath) {
         $InstallerZipPath = Join-Path $ProjectRoot "release\$ModName-v$Version-installer.zip"
     }
-    if (-not (Test-Path $InstallerZipPath)) {
+    if (-not (Test-Path -LiteralPath $InstallerZipPath)) {
         throw "Expected installer ZIP missing: $InstallerZipPath"
+    }
+
+    # release/ keeps the previous run's zip. If the package step didn't actually
+    # produce one this time, that stale file is what gets hashed, uploaded as the
+    # new dev asset and announced as a fresh build.
+    $zipWrittenAt = (Get-Item -LiteralPath $InstallerZipPath).LastWriteTime
+    if ($zipWrittenAt -lt $buildStartedAt) {
+        throw "Installer ZIP $InstallerZipPath was last written $($zipWrittenAt.ToString('o')), before this build started ($($buildStartedAt.ToString('o'))). '$PackageCommand' did not produce it - refusing to publish a stale artifact."
     }
 
     # Fixed asset name -> stable download URL:
@@ -127,10 +143,10 @@ function Publish-NightlyBuild {
     $releaseDir = Join-Path $ProjectRoot 'release'
     $assetName = "$ModName-dev-installer.zip"
     $assetPath = Join-Path $releaseDir $assetName
-    Copy-Item -Force $InstallerZipPath $assetPath
+    Copy-Item -LiteralPath $InstallerZipPath -Destination $assetPath -Force
 
-    $zipBytes = (Get-Item $assetPath).Length
-    $zipHash = (Get-FileHash -Algorithm SHA256 $assetPath).Hash.ToLowerInvariant()
+    $zipBytes = (Get-Item -LiteralPath $assetPath).Length
+    $zipHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
     Write-Host "Built : $assetName" -ForegroundColor Green
     Write-Host "  size   : $zipBytes bytes" -ForegroundColor DarkGray

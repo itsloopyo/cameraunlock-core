@@ -13,6 +13,11 @@ Set-StrictMode -Version Latest
     - Cleanup of old mod loader files
 #>
 
+# Same file ModLoaderSetup.psm1 writes. Duplicated as a literal rather than
+# imported: pulling the loader-install module in here would drag its network
+# paths into every deployment.
+$Script:StateFileName = '.headtracking-state.json'
+
 <#
 .SYNOPSIS
     Copies a mod DLL and its dependencies to the target directory.
@@ -55,23 +60,23 @@ function Copy-ModFiles {
     }
 
     # Verify source directory exists
-    if (-not (Test-Path $SourceDir)) {
+    if (-not (Test-Path -LiteralPath $SourceDir)) {
         $results.Success = $false
         $results.Errors += "Source directory not found: $SourceDir"
         return $results
     }
 
     # Create target directory if it doesn't exist
-    if (-not (Test-Path $TargetDir)) {
+    if (-not (Test-Path -LiteralPath $TargetDir)) {
         New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
         Write-Host "Created target directory: $TargetDir" -ForegroundColor Gray
     }
 
     # Copy main mod DLL
     $modDllPath = Join-Path $SourceDir $ModDllName
-    if (Test-Path $modDllPath) {
+    if (Test-Path -LiteralPath $modDllPath) {
         $destPath = Join-Path $TargetDir $ModDllName
-        Copy-Item -Path $modDllPath -Destination $destPath -Force
+        Copy-Item -LiteralPath $modDllPath -Destination $destPath -Force
         $results.CopiedFiles += $ModDllName
         Write-Host "Deployed $ModDllName" -ForegroundColor Green
     } else {
@@ -83,8 +88,8 @@ function Copy-ModFiles {
     # Copy required dependencies
     foreach ($dep in $Dependencies) {
         $depPath = Join-Path $SourceDir $dep
-        if (Test-Path $depPath) {
-            Copy-Item -Path $depPath -Destination $TargetDir -Force
+        if (Test-Path -LiteralPath $depPath) {
+            Copy-Item -LiteralPath $depPath -Destination $TargetDir -Force
             $results.CopiedFiles += $dep
             Write-Host "Deployed $dep" -ForegroundColor Green
         } else {
@@ -96,8 +101,8 @@ function Copy-ModFiles {
     # Copy optional dependencies
     foreach ($dep in $OptionalDependencies) {
         $depPath = Join-Path $SourceDir $dep
-        if (Test-Path $depPath) {
-            Copy-Item -Path $depPath -Destination $TargetDir -Force
+        if (Test-Path -LiteralPath $depPath) {
+            Copy-Item -LiteralPath $depPath -Destination $TargetDir -Force
             $results.CopiedFiles += $dep
             Write-Host "Deployed $dep" -ForegroundColor Green
         }
@@ -130,19 +135,19 @@ function New-FileBackup {
         [switch]$Force
     )
 
-    if (-not (Test-Path $FilePath)) {
+    if (-not (Test-Path -LiteralPath $FilePath)) {
         Write-Warning "File not found, cannot create backup: $FilePath"
         return $null
     }
 
     $backupPath = $FilePath + $BackupSuffix
 
-    if ((Test-Path $backupPath) -and -not $Force) {
+    if ((Test-Path -LiteralPath $backupPath) -and -not $Force) {
         Write-Host "Backup already exists: $backupPath" -ForegroundColor Gray
         return $backupPath
     }
 
-    Copy-Item -Path $FilePath -Destination $backupPath -Force
+    Copy-Item -LiteralPath $FilePath -Destination $backupPath -Force
     Write-Host "Created backup: $backupPath" -ForegroundColor Gray
     return $backupPath
 }
@@ -208,23 +213,62 @@ function Restore-FileFromBackup {
 
     $backupPath = $FilePath + $BackupSuffix
 
-    if (-not (Test-Path $backupPath)) {
+    if (-not (Test-Path -LiteralPath $backupPath)) {
         Write-Warning "Backup not found: $backupPath"
         return $false
     }
 
-    Copy-Item -Path $backupPath -Destination $FilePath -Force
+    Copy-Item -LiteralPath $backupPath -Destination $FilePath -Force
     Write-Host "Restored from backup: $backupPath" -ForegroundColor Gray
     return $true
 }
 
 <#
 .SYNOPSIS
+    Reports whether the state file records the installed framework as ours.
+.DESCRIPTION
+    Ownership gate for destructive cleanup. Absent state file, absent
+    framework block, or installed_by_us false all mean "not ours" - a
+    hand-installed loader, or one another mod put there.
+#>
+function Test-FrameworkInstalledByUs {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$GamePath
+    )
+
+    $stateFile = Join-Path $GamePath $Script:StateFileName
+    if (-not (Test-Path -LiteralPath $stateFile)) {
+        return $false
+    }
+
+    $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+    if (-not $state.PSObject.Properties['framework']) {
+        return $false
+    }
+    $framework = $state.framework
+    if (-not $framework.PSObject.Properties['installed_by_us']) {
+        return $false
+    }
+    return [bool]$framework.installed_by_us
+}
+
+<#
+.SYNOPSIS
     Removes old Unity Doorstop files from a game directory.
 .DESCRIPTION
-    Cleans up doorstop files that may be left over from previous mod installations.
+    Cleans up doorstop files left over from a previous install OF OURS.
+    winhttp.dll is BepInEx 5's own proxy and version.dll is a common
+    Ultimate ASI Loader proxy, so deleting them blind takes out whatever
+    other mod put them there. Nothing is removed unless
+    .headtracking-state.json records the framework as installed by us.
 .PARAMETER GamePath
     Path to the game installation directory.
+.PARAMETER Force
+    Delete without the ownership check. Only for callers that already know
+    the doorstop is theirs.
 .OUTPUTS
     Array of removed file names.
 #>
@@ -232,16 +276,23 @@ function Remove-OldDoorstopFiles {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
-        [string]$GamePath
+        [string]$GamePath,
+
+        [switch]$Force
     )
 
     $doorstopFiles = @('winhttp.dll', 'version.dll', 'doorstop_config.ini', '.doorstop_version')
     $removedFiles = @()
 
+    if (-not $Force -and -not (Test-FrameworkInstalledByUs -GamePath $GamePath)) {
+        Write-Host "Leaving doorstop files in place: $Script:StateFileName does not record this framework as ours." -ForegroundColor Gray
+        return $removedFiles
+    }
+
     foreach ($file in $doorstopFiles) {
         $filePath = Join-Path $GamePath $file
-        if (Test-Path $filePath) {
-            Remove-Item $filePath -Force
+        if (Test-Path -LiteralPath $filePath) {
+            Remove-Item -LiteralPath $filePath -Force
             $removedFiles += $file
             Write-Host "Removed old doorstop file: $file" -ForegroundColor Gray
         }
@@ -283,7 +334,7 @@ function Test-ModDeployment {
 
     # Check main mod DLL
     $modPath = Join-Path $TargetDir $ModDllName
-    if (Test-Path $modPath) {
+    if (Test-Path -LiteralPath $modPath) {
         $results.FoundFiles += $ModDllName
     } else {
         $results.Success = $false
@@ -293,7 +344,7 @@ function Test-ModDeployment {
     # Check dependencies
     foreach ($dep in $Dependencies) {
         $depPath = Join-Path $TargetDir $dep
-        if (Test-Path $depPath) {
+        if (Test-Path -LiteralPath $depPath) {
             $results.FoundFiles += $dep
         } else {
             $results.Success = $false
@@ -380,8 +431,8 @@ function Write-DeploymentError {
     Write-Host "  Deployment Failed!" -ForegroundColor Red
     Write-Host "========================================" -ForegroundColor Red
     Write-Host ""
-    foreach ($error in $Errors) {
-        Write-Host "  - $error" -ForegroundColor Red
+    foreach ($message in $Errors) {
+        Write-Host "  - $message" -ForegroundColor Red
     }
     Write-Host ""
 }
@@ -426,6 +477,7 @@ Export-ModuleMember -Function @(
     'New-FileBackup',
     'Test-FileContainsMarker',
     'Restore-FileFromBackup',
+    'Test-FrameworkInstalledByUs',
     'Remove-OldDoorstopFiles',
     'Test-ModDeployment',
     'Write-DeploymentSuccess',

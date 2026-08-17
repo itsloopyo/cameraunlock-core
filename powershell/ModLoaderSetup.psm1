@@ -5,6 +5,13 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+# Get-BepInExPluginsPath / Get-MelonLoaderModsPath live in GamePathDetection.
+# They used to be defined here as well, with different path separators, so which
+# implementation a consumer got depended on module import order. Imported and
+# re-exported instead, so the name keeps working for callers that only import
+# this module.
+Import-Module (Join-Path $PSScriptRoot 'GamePathDetection.psm1') -Force
+
 $Script:StateFileName = ".headtracking-state.json"
 
 # The state file is parsed by the Lopari launcher with a strict JSON parser
@@ -21,6 +28,24 @@ function Write-StateFile {
 
     $json = $State | ConvertTo-Json -Depth 10
     [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# UE4SS parses mods.txt line by line with no BOM handling, so a BOM written by
+# 5.1's `Set-Content -Encoding UTF8` becomes part of the first mod name and that
+# mod silently never loads.
+function Write-ModsTxt {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [Parameter(Mandatory=$true)]
+        [AllowEmptyCollection()]
+        [string[]]$Lines
+    )
+
+    # .NET resolves a relative path against the process directory, not the
+    # PowerShell location.
+    $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    [System.IO.File]::WriteAllLines($fullPath, $Lines, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 # GitHub timestamps arrive either as ISO-8601 strings or as [datetime] already
@@ -57,7 +82,7 @@ function Select-SoakedReleases {
 
     $now = (Get-Date).ToUniversalTime()
     $cutoff = $now.AddDays(-$MinimumAgeDays)
-    $eligible = @()
+    $eligible = [System.Collections.Generic.List[object]]::new()
 
     foreach ($candidate in $Releases) {
         $published = ConvertTo-UtcDateTime $candidate.published_at
@@ -70,18 +95,53 @@ function Select-SoakedReleases {
             Write-Host "    skipping $($candidate.tag_name): published $($published.ToString('yyyy-MM-dd')), ${ageDays}d old, minimum is ${MinimumAgeDays}d" -ForegroundColor DarkYellow
             continue
         }
-        $eligible += $candidate
+        $eligible.Add($candidate)
     }
 
-    return $eligible
+    return $eligible.ToArray()
 }
 
-function Get-SoakEligibilityDetail {
-    param($NewestRelease, [int]$MinimumAgeDays)
+# GitHub returns /releases in created_at order, which is not version order.
+# Upstream shipping v5.4.24 and then back-porting v5.4.23-hotfix a week later
+# puts the older version first, and "take element 0" silently downgrades the
+# vendored loader. Sort by parsed version, falling back to publish date for tags
+# that carry no version (nightly builds).
+function Get-ReleaseVersionKey {
+    param([string]$Tag)
 
-    $published = ConvertTo-UtcDateTime $NewestRelease.published_at
-    if (-not $published) { return '' }
-    return " Newest match '$($NewestRelease.tag_name)' was published $($published.ToString('yyyy-MM-dd')) and becomes usable on $($published.AddDays($MinimumAgeDays).ToString('yyyy-MM-dd'))."
+    if ($Tag -match '(\d+(?:\.\d+){0,3})') {
+        $text = $matches[1]
+        if ($text -notmatch '\.') { $text = "$text.0" }
+        $parsed = [version]'0.0'
+        if ([version]::TryParse($text, [ref]$parsed)) { return $parsed }
+    }
+    return [version]'0.0'
+}
+
+function Sort-ReleasesByVersion {
+    param([Parameter(Mandatory=$true)] [AllowEmptyCollection()] $Releases)
+
+    return @($Releases | Sort-Object `
+        @{ Expression = { Get-ReleaseVersionKey $_.tag_name }; Descending = $true }, `
+        @{ Expression = {
+                $published = ConvertTo-UtcDateTime $_.published_at
+                if ($published) { $published } else { [datetime]::MinValue }
+            }; Descending = $true })
+}
+
+# The failure message has to name the date the newest match becomes eligible,
+# so it reports the newest candidate that actually carries a timestamp rather
+# than element 0, which may be the one we skipped for having none.
+function Get-SoakEligibilityDetail {
+    param([AllowEmptyCollection()] $Releases, [int]$MinimumAgeDays)
+
+    foreach ($candidate in @($Releases)) {
+        $published = ConvertTo-UtcDateTime $candidate.published_at
+        if ($published) {
+            return " Newest match '$($candidate.tag_name)' was published $($published.ToString('yyyy-MM-dd')) and becomes usable on $($published.AddDays($MinimumAgeDays).ToString('yyyy-MM-dd'))."
+        }
+    }
+    return " No matching release carries a usable publish timestamp, so none can be age-verified."
 }
 
 # ConvertFrom-Json -AsHashtable is PowerShell 6+. Every install-time entry point in
@@ -122,6 +182,48 @@ function ConvertFrom-JsonToHashtable {
 
     if ([string]::IsNullOrWhiteSpace($Json)) { return @{} }
     return ConvertTo-HashtableRecursive ($Json | ConvertFrom-Json)
+}
+
+# Single reader for the state file. A parse failure is reported once, here.
+function Read-ModLoaderStateFile {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$StateFile
+    )
+
+    if (-not (Test-Path -LiteralPath $StateFile)) { return @{} }
+
+    try {
+        return ConvertFrom-JsonToHashtable (Get-Content -LiteralPath $StateFile -Raw)
+    } catch {
+        throw "State file is corrupt: $StateFile - delete it manually and re-run. Parse error: $_"
+    }
+}
+
+# Installer state write: the framework block belongs to whoever is installing,
+# every other stored key (installed_at from the first install, per-mod
+# bookkeeping the uninstaller reads) survives untouched.
+function Merge-ModLoaderState {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$StateFile,
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Framework
+    )
+
+    $state = @{
+        installed_at = (Get-Date).ToString("o")
+        framework    = $Framework
+    }
+
+    $existing = Read-ModLoaderStateFile -StateFile $StateFile
+    foreach ($key in $existing.Keys) {
+        if ($key -ne 'framework') {
+            $state[$key] = $existing[$key]
+        }
+    }
+
+    return $state
 }
 
 function New-DownloadRequestHeaders {
@@ -186,7 +288,7 @@ function Test-BepInExInstalled {
 
     $v5Marker = Join-Path $GamePath "BepInEx/core/BepInEx.dll"
     $v6Marker = Join-Path $GamePath "BepInEx/core/BepInEx.Core.dll"
-    return ((Test-Path $v5Marker) -or (Test-Path $v6Marker))
+    return ((Test-Path -LiteralPath $v5Marker) -or (Test-Path -LiteralPath $v6Marker))
 }
 
 <#
@@ -204,7 +306,7 @@ function Test-MelonLoaderInstalled {
     )
 
     $melonLoaderPath = Join-Path $GamePath "MelonLoader"
-    return (Test-Path $melonLoaderPath)
+    return (Test-Path -LiteralPath $melonLoaderPath)
 }
 
 <#
@@ -225,7 +327,7 @@ function Test-MelonLoaderInitialized {
     )
 
     $melonDll = Join-Path $GamePath "MelonLoader/$NetFolder/MelonLoader.dll"
-    return (Test-Path $melonDll)
+    return (Test-Path -LiteralPath $melonDll)
 }
 
 <#
@@ -243,40 +345,6 @@ function Get-BepInExCorePath {
     )
 
     return Join-Path $GamePath "BepInEx/core"
-}
-
-<#
-.SYNOPSIS
-    Gets the BepInEx plugins path.
-.PARAMETER GamePath
-    Path to the game installation directory.
-.OUTPUTS
-    Full path to BepInEx plugins directory.
-#>
-function Get-BepInExPluginsPath {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$GamePath
-    )
-
-    return Join-Path $GamePath "BepInEx/plugins"
-}
-
-<#
-.SYNOPSIS
-    Gets the MelonLoader Mods path.
-.PARAMETER GamePath
-    Path to the game installation directory.
-.OUTPUTS
-    Full path to MelonLoader Mods directory.
-#>
-function Get-MelonLoaderModsPath {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$GamePath
-    )
-
-    return Join-Path $GamePath "Mods"
 }
 
 <#
@@ -354,19 +422,19 @@ function Install-BepInEx {
     Write-Host "Installing BepInEx to: $GamePath" -ForegroundColor Yellow
 
     if ($VendorZip) {
-        if (-not (Test-Path $VendorZip)) {
+        if (-not (Test-Path -LiteralPath $VendorZip)) {
             throw "VendorZip not found at: $VendorZip. Run 'pixi run update-deps' to refresh the vendored loader."
         }
         Write-Host "  Extracting vendored: $VendorZip" -ForegroundColor Gray
         try {
-            Expand-Archive -Path $VendorZip -DestinationPath $GamePath -Force
+            Expand-Archive -LiteralPath $VendorZip -DestinationPath $GamePath -Force
         } catch {
             throw "Failed to extract vendored BepInEx from $VendorZip : $_"
         }
         $coreDllName = if ($MajorVersion -eq 6) { 'BepInEx.Core.dll' } else { 'BepInEx.dll' }
         $coreDll = Join-Path $GamePath "BepInEx/core/$coreDllName"
-        if (Test-Path $coreDll) {
-            $version = (Get-Item $coreDll).VersionInfo.FileVersion
+        if (Test-Path -LiteralPath $coreDll) {
+            $version = (Get-Item -LiteralPath $coreDll).VersionInfo.FileVersion
         } else {
             throw "$coreDllName missing after extracting $VendorZip - vendored zip is corrupt."
         }
@@ -390,10 +458,11 @@ function Install-BepInEx {
         if (-not $candidates) {
             throw "Could not find BepInEx $MajorVersion.x release"
         }
+        $candidates = Sort-ReleasesByVersion -Releases $candidates
 
         $soaked = Select-SoakedReleases -Releases $candidates -MinimumAgeDays $MinimumAgeDays
         if (-not $soaked) {
-            $detail = Get-SoakEligibilityDetail -NewestRelease ($candidates | Select-Object -First 1) -MinimumAgeDays $MinimumAgeDays
+            $detail = Get-SoakEligibilityDetail -Releases $candidates -MinimumAgeDays $MinimumAgeDays
             throw "No BepInEx $MajorVersion.x release has been public for $MinimumAgeDays days.$detail Install from the committed vendored copy with -VendorZip, or pass -MinimumAgeDays 0 deliberately."
         }
         $release = $soaked | Select-Object -First 1
@@ -419,24 +488,24 @@ function Install-BepInEx {
 
         Write-Host "  Extracting to game directory..." -ForegroundColor Gray
         try {
-            Expand-Archive -Path $tempZip -DestinationPath $GamePath -Force
+            Expand-Archive -LiteralPath $tempZip -DestinationPath $GamePath -Force
         } catch {
             throw "Failed to extract BepInEx: $_"
         }
 
-        Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
     }
 
     # Create plugins directory
     $pluginsPath = Get-BepInExPluginsPath -GamePath $GamePath
-    if (-not (Test-Path $pluginsPath)) {
+    if (-not (Test-Path -LiteralPath $pluginsPath)) {
         New-Item -ItemType Directory -Path $pluginsPath -Force | Out-Null
     }
 
     # Configure console logging
     if ($EnableConsole) {
         $configDir = Join-Path $GamePath "BepInEx/config"
-        if (-not (Test-Path $configDir)) {
+        if (-not (Test-Path -LiteralPath $configDir)) {
             New-Item -ItemType Directory -Path $configDir -Force | Out-Null
         }
 
@@ -454,28 +523,11 @@ Enabled = true
 
     # Update state file
     $stateFile = Join-Path $GamePath $Script:StateFileName
-    $state = @{
-        installed_at = (Get-Date).ToString("o")
-        framework = @{
-            type = "BepInEx"
-            version = $version
-            architecture = $Architecture
-            installed_by_us = $true
-        }
-    }
-
-    # Merge with existing state if present
-    if (Test-Path $stateFile) {
-        try {
-            $existingState = ConvertFrom-JsonToHashtable (Get-Content $stateFile -Raw)
-            foreach ($key in $existingState.Keys) {
-                if ($key -ne 'framework') {
-                    $state[$key] = $existingState[$key]
-                }
-            }
-        } catch {
-            throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
-        }
+    $state = Merge-ModLoaderState -StateFile $stateFile -Framework @{
+        type = "BepInEx"
+        version = $version
+        architecture = $Architecture
+        installed_by_us = $true
     }
 
     Write-StateFile -Path $stateFile -State $state
@@ -544,43 +596,26 @@ function Install-MelonLoader {
     # Extract
     Write-Host "  Extracting to game directory..." -ForegroundColor Gray
     try {
-        Expand-Archive -Path $tempZip -DestinationPath $GamePath -Force
+        Expand-Archive -LiteralPath $tempZip -DestinationPath $GamePath -Force
     } catch {
         throw "Failed to extract MelonLoader: $_"
     }
 
-    Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
 
     # Create Mods directory
     $modsPath = Get-MelonLoaderModsPath -GamePath $GamePath
-    if (-not (Test-Path $modsPath)) {
+    if (-not (Test-Path -LiteralPath $modsPath)) {
         New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
     }
 
     # Update state file
     $stateFile = Join-Path $GamePath $Script:StateFileName
-    $state = @{
-        installed_at = (Get-Date).ToString("o")
-        framework = @{
-            type = "MelonLoader"
-            version = $Version
-            architecture = $Architecture
-            installed_by_us = $true
-        }
-    }
-
-    # Merge with existing state if present
-    if (Test-Path $stateFile) {
-        try {
-            $existingState = ConvertFrom-JsonToHashtable (Get-Content $stateFile -Raw)
-            foreach ($key in $existingState.Keys) {
-                if ($key -ne 'framework') {
-                    $state[$key] = $existingState[$key]
-                }
-            }
-        } catch {
-            throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
-        }
+    $state = Merge-ModLoaderState -StateFile $stateFile -Framework @{
+        type = "MelonLoader"
+        version = $Version
+        architecture = $Architecture
+        installed_by_us = $true
     }
 
     Write-StateFile -Path $stateFile -State $state
@@ -619,15 +654,11 @@ function Get-ModLoaderState {
     )
 
     $stateFile = Join-Path $GamePath $Script:StateFileName
-    if (-not (Test-Path $stateFile)) {
+    if (-not (Test-Path -LiteralPath $stateFile)) {
         return $null
     }
 
-    try {
-        return ConvertFrom-JsonToHashtable (Get-Content $stateFile -Raw)
-    } catch {
-        throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
-    }
+    return Read-ModLoaderStateFile -StateFile $stateFile
 }
 
 <#
@@ -715,13 +746,13 @@ function Test-UE4SSInstalled {
     $ue4ssDir = Join-Path $BinariesPath "ue4ss"
     $ue4ssDll = Join-Path $ue4ssDir "UE4SS.dll"
 
-    if (Test-Path $ue4ssDll) {
+    if (Test-Path -LiteralPath $ue4ssDll) {
         return $true
     }
 
     # Also check for older layout (files directly in binaries)
     $legacyDll = Join-Path $BinariesPath "UE4SS.dll"
-    return (Test-Path $legacyDll)
+    return (Test-Path -LiteralPath $legacyDll)
 }
 
 <#
@@ -741,22 +772,24 @@ function Find-UE4BinariesPath {
     # Standard UE layout: GameName/Binaries/Win64
     $gameName = Split-Path $GamePath -Leaf
     $standardPath = Join-Path $GamePath "$gameName\Binaries\Win64"
-    if (Test-Path $standardPath) {
+    if (Test-Path -LiteralPath $standardPath) {
         return $standardPath
     }
 
     # Some games use Engine/Binaries/Win64
     $enginePath = Join-Path $GamePath "Engine\Binaries\Win64"
-    if (Test-Path $enginePath) {
+    if (Test-Path -LiteralPath $enginePath) {
         return $enginePath
     }
 
-    # Search for any Win64 folder with an exe
-    $win64Folders = Get-ChildItem -Path $GamePath -Recurse -Directory -Filter "Win64" -ErrorAction SilentlyContinue |
-        Where-Object { Get-ChildItem $_.FullName -Filter "*.exe" -ErrorAction SilentlyContinue }
-
-    if ($win64Folders) {
-        return $win64Folders[0].FullName
+    # Fallback: <project>\Binaries\Win64 for a project folder we couldn't guess
+    # the name of. Bounded to that one shape - a -Recurse walk of an installed UE
+    # game is tens of GB and minutes of wall time before it can return $null.
+    foreach ($candidate in @(Get-ChildItem -LiteralPath $GamePath -Directory -ErrorAction SilentlyContinue)) {
+        $win64 = Join-Path $candidate.FullName 'Binaries\Win64'
+        if ((Test-Path -LiteralPath $win64) -and (Get-ChildItem -LiteralPath $win64 -Filter '*.exe' -ErrorAction SilentlyContinue)) {
+            return $win64
+        }
     }
 
     return $null
@@ -870,10 +903,11 @@ function Install-UE4SS {
         if (-not $candidates) {
             throw "Could not find UE4SS release"
         }
+        $candidates = Sort-ReleasesByVersion -Releases $candidates
 
         $soaked = Select-SoakedReleases -Releases $candidates -MinimumAgeDays $MinimumAgeDays
         if (-not $soaked) {
-            $detail = Get-SoakEligibilityDetail -NewestRelease ($candidates | Select-Object -First 1) -MinimumAgeDays $MinimumAgeDays
+            $detail = Get-SoakEligibilityDetail -Releases $candidates -MinimumAgeDays $MinimumAgeDays
             throw "No UE4SS release has been public for $MinimumAgeDays days.$detail Pin an older build with -Version, or pass -MinimumAgeDays 0 deliberately."
         }
         $release = $soaked | Select-Object -First 1
@@ -904,13 +938,13 @@ function Install-UE4SS {
 
     # Extract to temp folder first to inspect structure
     $tempExtract = Join-Path $env:TEMP "UE4SS_extract"
-    if (Test-Path $tempExtract) {
-        Remove-Item $tempExtract -Recurse -Force
+    if (Test-Path -LiteralPath $tempExtract) {
+        Remove-Item -LiteralPath $tempExtract -Recurse -Force
     }
 
     Write-Host "  Extracting..." -ForegroundColor Gray
     try {
-        Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
+        Expand-Archive -LiteralPath $tempZip -DestinationPath $tempExtract -Force
     } catch {
         throw "Failed to extract UE4SS: $_"
     }
@@ -920,7 +954,7 @@ function Install-UE4SS {
     $proxyDll = $null
 
     # Find the ue4ss folder and proxy DLL in extracted content
-    if (Test-Path (Join-Path $tempExtract "ue4ss")) {
+    if (Test-Path -LiteralPath (Join-Path $tempExtract "ue4ss")) {
         $ue4ssSourceDir = Join-Path $tempExtract "ue4ss"
         $proxyDll = Get-ChildItem $tempExtract -Filter "*.dll" | Where-Object { $_.Name -ne "UE4SS.dll" } | Select-Object -First 1
     } else {
@@ -930,7 +964,7 @@ function Install-UE4SS {
 
     # Copy UE4SS files
     $ue4ssDestDir = Join-Path $BinariesPath "ue4ss"
-    if (-not (Test-Path $ue4ssDestDir)) {
+    if (-not (Test-Path -LiteralPath $ue4ssDestDir)) {
         New-Item -ItemType Directory -Path $ue4ssDestDir -Force | Out-Null
     }
 
@@ -939,15 +973,15 @@ function Install-UE4SS {
 
     # Copy proxy DLL to binaries root
     if ($proxyDll) {
-        Copy-Item -Path $proxyDll.FullName -Destination $BinariesPath -Force
+        Copy-Item -LiteralPath $proxyDll.FullName -Destination $BinariesPath -Force
         Write-Host "  Installed proxy DLL: $($proxyDll.Name)" -ForegroundColor Gray
     } else {
         # Try to find dwmapi.dll or other common proxy
         $commonProxies = @("dwmapi.dll", "xinput1_3.dll", "d3d11.dll")
         foreach ($proxy in $commonProxies) {
             $proxyPath = Join-Path $tempExtract $proxy
-            if (Test-Path $proxyPath) {
-                Copy-Item -Path $proxyPath -Destination $BinariesPath -Force
+            if (Test-Path -LiteralPath $proxyPath) {
+                Copy-Item -LiteralPath $proxyPath -Destination $BinariesPath -Force
                 Write-Host "  Installed proxy DLL: $proxy" -ForegroundColor Gray
                 break
             }
@@ -956,47 +990,31 @@ function Install-UE4SS {
 
     # Create Mods directory
     $modsPath = Join-Path $ue4ssDestDir "Mods"
-    if (-not (Test-Path $modsPath)) {
+    if (-not (Test-Path -LiteralPath $modsPath)) {
         New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
     }
 
     # Create default mods.txt if it doesn't exist
     $modsTxt = Join-Path $modsPath "mods.txt"
-    if (-not (Test-Path $modsTxt)) {
-        @"
-; UE4SS Mods Configuration
-; Format: ModName : 1 (enabled) or 0 (disabled)
-
-"@ | Set-Content $modsTxt -Encoding UTF8
+    if (-not (Test-Path -LiteralPath $modsTxt)) {
+        Write-ModsTxt -Path $modsTxt -Lines @(
+            '; UE4SS Mods Configuration'
+            '; Format: ModName : 1 (enabled) or 0 (disabled)'
+            ''
+        )
     }
 
     # Cleanup
-    Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
-    Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 
     # Update state file
     $stateFile = Join-Path $GamePath $Script:StateFileName
-    $state = @{
-        installed_at = (Get-Date).ToString("o")
-        framework = @{
-            type = "UE4SS"
-            version = $version
-            installed_by_us = $true
-            binaries_path = $BinariesPath
-        }
-    }
-
-    if (Test-Path $stateFile) {
-        try {
-            $existingState = ConvertFrom-JsonToHashtable (Get-Content $stateFile -Raw)
-            foreach ($key in $existingState.Keys) {
-                if ($key -ne 'framework') {
-                    $state[$key] = $existingState[$key]
-                }
-            }
-        } catch {
-            throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
-        }
+    $state = Merge-ModLoaderState -StateFile $stateFile -Framework @{
+        type = "UE4SS"
+        version = $version
+        installed_by_us = $true
+        binaries_path = $BinariesPath
     }
 
     Write-StateFile -Path $stateFile -State $state
@@ -1033,14 +1051,13 @@ function Set-UE4SSModEnabled {
 
     $modsTxt = Join-Path $ModsPath "mods.txt"
 
-    if (-not (Test-Path $modsTxt)) {
+    if (-not (Test-Path -LiteralPath $modsTxt)) {
         # Create new mods.txt
-        $content = "$ModName : $(if ($Enabled) { '1' } else { '0' })"
-        Set-Content $modsTxt -Value $content -Encoding UTF8
+        Write-ModsTxt -Path $modsTxt -Lines @("$ModName : $(if ($Enabled) { '1' } else { '0' })")
         return
     }
 
-    $lines = Get-Content $modsTxt
+    $lines = @(Get-Content -LiteralPath $modsTxt)
     $found = $false
     $newLines = @()
 
@@ -1057,7 +1074,7 @@ function Set-UE4SSModEnabled {
         $newLines += "$ModName : $(if ($Enabled) { '1' } else { '0' })"
     }
 
-    Set-Content $modsTxt -Value $newLines -Encoding UTF8
+    Write-ModsTxt -Path $modsTxt -Lines $newLines
 }
 
 # Export functions
@@ -1113,13 +1130,13 @@ function Invoke-FetchLatestLoader {
 
     $headers = New-GitHubRequestHeaders
     $outputDir = Split-Path -Parent $OutputPath
-    if ($outputDir -and -not (Test-Path $outputDir)) {
+    if ($outputDir -and -not (Test-Path -LiteralPath $outputDir)) {
         New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     }
 
     if ($DirectUrl) {
         Invoke-WebRequest -Uri $DirectUrl -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
-        $sha = (Get-FileHash -Path $OutputPath -Algorithm SHA256).Hash.ToLower()
+        $sha = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash.ToLower()
         return @{
             Tag = ''
             CommitSha = ''
@@ -1146,10 +1163,11 @@ function Invoke-FetchLatestLoader {
     if (-not $matching) {
         throw "No upstream release matches Owner=$Owner Repo=$Repo VersionPrefix='$VersionPrefix' AllowPrerelease=$($AllowPrerelease.IsPresent)."
     }
+    $matching = Sort-ReleasesByVersion -Releases $matching
 
     $soaked = Select-SoakedReleases -Releases $matching -MinimumAgeDays $MinimumAgeDays
     if (-not $soaked) {
-        $detail = Get-SoakEligibilityDetail -NewestRelease ($matching | Select-Object -First 1) -MinimumAgeDays $MinimumAgeDays
+        $detail = Get-SoakEligibilityDetail -Releases $matching -MinimumAgeDays $MinimumAgeDays
         throw "No upstream release for $Owner/$Repo matching VersionPrefix='$VersionPrefix' has been public for $MinimumAgeDays days.$detail Re-run then, or pass -MinimumAgeDays 0 to take the fresh release deliberately."
     }
     $matching = $soaked
@@ -1173,7 +1191,7 @@ function Invoke-FetchLatestLoader {
 
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
 
-    $sha = (Get-FileHash -Path $OutputPath -Algorithm SHA256).Hash.ToLower()
+    $sha = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash.ToLower()
 
     $commitSha = ''
     try {
@@ -1237,7 +1255,7 @@ function Update-VendoredLoader {
         [int]$TimeoutSec = 30
     )
 
-    if (-not (Test-Path $OutputDir)) {
+    if (-not (Test-Path -LiteralPath $OutputDir)) {
         New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
     }
 
@@ -1252,7 +1270,16 @@ function Update-VendoredLoader {
         -AllowPrerelease:$AllowPrerelease `
         -DirectUrl $DirectUrl -MinimumAgeDays $MinimumAgeDays -TimeoutSec $TimeoutSec
 
-    if (-not $OutputFileName) { $OutputFileName = $meta.AssetName }
+    if (-not $OutputFileName) {
+        # A Thunderstore-style DirectUrl ends in the version (".../5.4.2100/"),
+        # so the derived asset name is "5.4.2100": the vendored file lands with
+        # no extension, the zip LICENSE extraction below is skipped, and the
+        # name install.cmd hardcodes is missing from the tree.
+        if (-not [IO.Path]::GetExtension($meta.AssetName)) {
+            throw "Cannot derive a vendored filename from '$($meta.AssetUrl)' - the URL's last segment ('$($meta.AssetName)') has no extension. Pass -OutputFileName with the name install.cmd expects."
+        }
+        $OutputFileName = $meta.AssetName
+    }
     $targetPath = Join-Path $OutputDir $OutputFileName
     $readmePath = Join-Path $OutputDir 'README.md'
     $licensePath = Join-Path $OutputDir 'LICENSE'
@@ -1260,17 +1287,17 @@ function Update-VendoredLoader {
     # Idempotency: if the on-disk vendor copy already matches the freshly-downloaded
     # SHA-256, leave the tree alone. Otherwise every run dirties README.md with a new
     # FetchedAt timestamp even when upstream is unchanged.
-    if ((Test-Path $targetPath) -and (Test-Path $readmePath) -and (Test-Path $licensePath)) {
-        $existingSha = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower()
+    if ((Test-Path -LiteralPath $targetPath) -and (Test-Path -LiteralPath $readmePath) -and (Test-Path -LiteralPath $licensePath)) {
+        $existingSha = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash.ToLower()
         if ($existingSha -eq $meta.Sha256) {
-            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
             Write-Host "    no change (sha256=$($meta.Sha256.Substring(0,12))... matches on-disk vendor copy)" -ForegroundColor DarkGray
             $meta.LocalPath = $targetPath
             return $meta
         }
     }
 
-    Move-Item -Path $tempFile -Destination $targetPath -Force
+    Move-Item -LiteralPath $tempFile -Destination $targetPath -Force
 
     # LICENSE resolution order:
     #   1. Explicit $LicenseUrl (e.g. LGPL mods or Thunderstore repacks that don't ship LICENSE).

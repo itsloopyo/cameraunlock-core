@@ -137,6 +137,13 @@ Set-MockReleases @((New-MockRelease -Tag 'v9.9.9' -AgeDays 0 -NoPublishedAt))
 $err = $null
 try { Invoke-FetchLatestLoader -OutputPath $outFile @asiArgs } catch { $err = $_.Exception.Message }
 Check 'a release with no published_at is not usable' ($null -ne $err) 'no throw'
+Check 'the error says why no date could be named' ($err -like '*publish timestamp*') $err
+
+# GitHub lists releases created_at-descending, which is not version order. A
+# back-ported v9.6.9 published after v9.7.0 must not downgrade the vendored copy.
+Set-MockReleases @((New-MockRelease -Tag 'v9.6.9' -AgeDays 20), (New-MockRelease -Tag 'v9.7.0' -AgeDays 30))
+$meta = Invoke-FetchLatestLoader -OutputPath $outFile @asiArgs
+Check 'takes the highest version, not the most recently published' ($meta.Tag -eq 'v9.7.0') "got $($meta.Tag)"
 
 Set-MockReleases @(
     (New-MockRelease -Tag 'v9.7.3' -AgeDays 2),

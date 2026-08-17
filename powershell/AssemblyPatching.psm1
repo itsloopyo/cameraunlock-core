@@ -20,6 +20,12 @@ Set-StrictMode -Version Latest
 $Script:CecilLoaded = $false
 $Script:CecilPath = $null
 
+# Compiled patcher types, keyed by patch marker. The marker is baked into the
+# generated type as a const, so one cached type per marker: a session that
+# patches two assemblies with different markers (a mod moving _v2 to _v3, a
+# batch dev-deploy across mods) must not reuse the first marker's type.
+$Script:PatcherTypes = @{}
+
 <#
 .SYNOPSIS
     Initializes the assembly patching module by loading Mono.Cecil.
@@ -33,11 +39,11 @@ function Initialize-AssemblyPatching {
         [string]$CecilPath
     )
 
-    if (-not (Test-Path $CecilPath)) {
+    if (-not (Test-Path -LiteralPath $CecilPath)) {
         throw "Mono.Cecil.dll not found at: $CecilPath"
     }
 
-    Add-Type -Path $CecilPath
+    Add-Type -LiteralPath $CecilPath
     $Script:CecilLoaded = $true
     $Script:CecilPath = $CecilPath
     Write-Host "Loaded Mono.Cecil from: $CecilPath" -ForegroundColor Gray
@@ -52,6 +58,10 @@ function Initialize-AssemblyPatching {
     to call a custom method instead.
 .PARAMETER PatchMarker
     Name of the marker type to add (default: "HeadTracking_Patched_v2").
+.PARAMETER TypeName
+    Name of the generated class (default: "ScreenCenterPatcher"). The marker is
+    a const in the generated type, so a caller compiling more than one marker in
+    a single session needs a distinct name per marker.
 .OUTPUTS
     String containing the C# patcher code.
 #>
@@ -59,7 +69,10 @@ function Get-ScreenCenterPatcherCode {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$false)]
-        [string]$PatchMarker = "HeadTracking_Patched_v2"
+        [string]$PatchMarker = "HeadTracking_Patched_v2",
+
+        [Parameter(Mandatory=$false)]
+        [string]$TypeName = "ScreenCenterPatcher"
     )
 
     return @"
@@ -70,7 +83,7 @@ using System.Linq;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
-public static class ScreenCenterPatcher
+public static class $TypeName
 {
     private const string PatchMarker = "$PatchMarker";
 
@@ -125,9 +138,67 @@ public static class ScreenCenterPatcher
             {
                 instr.Operand = callInstruction;
             }
+
+            var switchTargets = instr.Operand as Instruction[];
+            if (switchTargets != null)
+            {
+                for (int t = 0; t < switchTargets.Length; t++)
+                {
+                    if (switchTargets[t] == retInstruction)
+                        switchTargets[t] = callInstruction;
+                }
+            }
+        }
+
+        // TryEnd/HandlerEnd are exclusive bounds. One pointing at ret would
+        // swallow the instruction we just inserted before it, putting the
+        // injected call inside a protected region it was never in. Pull the
+        // bound back to the call so the region keeps its original extent.
+        foreach (var handler in targetMethod.Body.ExceptionHandlers)
+        {
+            if (handler.TryEnd == retInstruction) handler.TryEnd = callInstruction;
+            if (handler.HandlerEnd == retInstruction) handler.HandlerEnd = callInstruction;
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Repoints every reference to an instruction that is about to be removed
+    /// at its replacement: branch/leave operands, switch target arrays, and
+    /// exception-handler bounds. A dangling reference makes AssemblyDefinition.Write
+    /// emit a branch to offset 0 (or throw), producing a method that fails to JIT.
+    /// </summary>
+    private static void RetargetReferences(MethodBody body, List<Instruction> removed, Instruction replacement)
+    {
+        foreach (var instr in body.Instructions)
+        {
+            var target = instr.Operand as Instruction;
+            if (target != null && removed.Contains(target))
+            {
+                instr.Operand = replacement;
+                continue;
+            }
+
+            var switchTargets = instr.Operand as Instruction[];
+            if (switchTargets != null)
+            {
+                for (int t = 0; t < switchTargets.Length; t++)
+                {
+                    if (removed.Contains(switchTargets[t]))
+                        switchTargets[t] = replacement;
+                }
+            }
+        }
+
+        foreach (var handler in body.ExceptionHandlers)
+        {
+            if (handler.TryStart != null && removed.Contains(handler.TryStart)) handler.TryStart = replacement;
+            if (handler.TryEnd != null && removed.Contains(handler.TryEnd)) handler.TryEnd = replacement;
+            if (handler.HandlerStart != null && removed.Contains(handler.HandlerStart)) handler.HandlerStart = replacement;
+            if (handler.HandlerEnd != null && removed.Contains(handler.HandlerEnd)) handler.HandlerEnd = replacement;
+            if (handler.FilterStart != null && removed.Contains(handler.FilterStart)) handler.FilterStart = replacement;
+        }
     }
 
     /// <summary>
@@ -202,6 +273,10 @@ public static class ScreenCenterPatcher
             var newCall = il.Create(OpCodes.Call, replacementMethod);
             il.InsertBefore(instructions[startIdx], newCall);
 
+            // Anything branching into the run we are about to delete (the raycast
+            // may sit inside an `if`) has to land on the replacement call instead.
+            RetargetReferences(method.Body, instructionsToRemove, newCall);
+
             // Remove the old instructions
             foreach (var toRemove in instructionsToRemove)
             {
@@ -257,25 +332,49 @@ function New-ScreenCenterPatcher {
         throw "Mono.Cecil path not set. Call Initialize-AssemblyPatching first."
     }
 
-    $code = Get-ScreenCenterPatcherCode -PatchMarker $PatchMarker
+    if ($Script:PatcherTypes.ContainsKey($PatchMarker)) {
+        return $Script:PatcherTypes[$PatchMarker]
+    }
 
-    $compilerParams = New-Object System.CodeDom.Compiler.CompilerParameters
-    [void]$compilerParams.ReferencedAssemblies.Add($CecilPath)
-    [void]$compilerParams.ReferencedAssemblies.Add("System.dll")
-    [void]$compilerParams.ReferencedAssemblies.Add("System.Core.dll")
-    $compilerParams.CompilerOptions = "/nowarn:1668 /warn:0"
-    $compilerParams.TreatWarningsAsErrors = $false
+    # One type per marker, so two markers in one session don't collide. A type
+    # can't be unloaded, so the name has to differ, not just the cache key.
+    $typeName = 'ScreenCenterPatcher_' + ($PatchMarker -replace '[^A-Za-z0-9_]', '_')
+    $code = Get-ScreenCenterPatcherCode -PatchMarker $PatchMarker -TypeName $typeName
 
-    # Check if type already exists to avoid Add-Type output issues
+    # GetTypes() throws ReflectionTypeLoadException on any assembly whose
+    # references don't all resolve, which is normal in a session that has loaded
+    # Cecil-read game DLLs. GetType(name, false) never throws.
     $existingType = [AppDomain]::CurrentDomain.GetAssemblies() |
-        ForEach-Object { $_.GetTypes() } |
-        Where-Object { $_.Name -eq 'ScreenCenterPatcher' } |
+        ForEach-Object { $_.GetType($typeName, $false) } |
+        Where-Object { $null -ne $_ } |
         Select-Object -First 1
 
     if (-not $existingType) {
-        Add-Type -TypeDefinition $code -CompilerParameters $compilerParams
+        # Add-Type -CompilerParameters is Windows PowerShell only; PS Core removed
+        # it along with the CodeDom compiler. CI runs pwsh, install-time runs 5.1,
+        # so both paths have to exist.
+        if ($PSVersionTable.PSEdition -eq 'Core') {
+            Add-Type -TypeDefinition $code -ReferencedAssemblies $CecilPath
+        } else {
+            $compilerParams = New-Object System.CodeDom.Compiler.CompilerParameters
+            [void]$compilerParams.ReferencedAssemblies.Add($CecilPath)
+            [void]$compilerParams.ReferencedAssemblies.Add("System.dll")
+            [void]$compilerParams.ReferencedAssemblies.Add("System.Core.dll")
+            $compilerParams.CompilerOptions = "/nowarn:1668 /warn:0"
+            $compilerParams.TreatWarningsAsErrors = $false
+            Add-Type -TypeDefinition $code -CompilerParameters $compilerParams
+        }
+        $existingType = [AppDomain]::CurrentDomain.GetAssemblies() |
+            ForEach-Object { $_.GetType($typeName, $false) } |
+            Where-Object { $null -ne $_ } |
+            Select-Object -First 1
+        if (-not $existingType) {
+            throw "Compiled $typeName but the type is not loadable - Add-Type produced no usable assembly."
+        }
     }
-    return [ScreenCenterPatcher]
+
+    $Script:PatcherTypes[$PatchMarker] = $existingType
+    return $existingType
 }
 
 <#
@@ -339,13 +438,10 @@ function Invoke-HeadTrackingPatch {
         return $results
     }
 
-    # Compile patcher
-    try {
-        $patcher = New-ScreenCenterPatcher -CecilPath $CecilPath -PatchMarker $PatchMarker
-    } catch {
-        $results.Errors += "Failed to compile patcher: $_"
-        return $results
-    }
+    # A compile failure is a defect in this module or a broken Cecil reference,
+    # not a per-assembly patch outcome. Folding it into $results.Errors hid the
+    # cross-edition Add-Type breakage behind "Failed to compile patcher".
+    $patcher = New-ScreenCenterPatcher -CecilPath $CecilPath -PatchMarker $PatchMarker
 
     $managedDir = Split-Path -Parent $AssemblyPath
 
