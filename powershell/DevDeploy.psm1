@@ -122,6 +122,24 @@ function Assert-DevGameNotRunning {
 .OUTPUTS
     Hashtable: @{ GamePath; ManagedPath; DeployedDllPath }
 #>
+# True when a patcher's return value reports failure, whatever shape it arrived in.
+#
+# Three shapes are all in use and none of the obvious tests covers them: `-is [hashtable]`
+# is FALSE for an [ordered] dictionary (that is an OrderedDictionary) and for a
+# [pscustomobject], while PSObject.Properties does not see a Hashtable's KEYS at all - they
+# come through the dictionary adapter. Getting this wrong fails OPEN: the failure check is
+# skipped and a failed patch reports deployment success.
+function Test-PatchResultFailure {
+    param($Result)
+
+    if ($null -eq $Result) { return $false }
+    if ($Result -is [System.Collections.IDictionary]) {
+        return $Result.Contains('Success') -and -not $Result['Success']
+    }
+    $property = $Result.PSObject.Properties['Success']
+    return ($null -ne $property) -and (-not $property.Value)
+}
+
 function Invoke-DevDeployCecil {
     [CmdletBinding()]
     param(
@@ -219,18 +237,21 @@ function Invoke-DevDeployCecil {
     # output stream and the documented Hashtable return becomes a 2-element array, so
     # $result.Count and $result.Keys report on the array rather than the hashtable.
     #
-    # Discarding it is just as wrong: Invoke-HeadTrackingPatch, the canonical patcher
-    # here, never throws - it returns @{ Success = $false; Errors = @(...) }. Piping to
-    # Out-Null would swallow that and return deployment success after a failed patch.
-    # The patcher's return value may arrive alongside stray pipeline output (a
-    # Copy-Item -PassThru, a New-Item), in which case it is an array rather than the
-    # hashtable. Sniffing the whole stream for [hashtable] silently SKIPPED the failure
-    # check in exactly that case, so a failed patch reported deployment success. Pick the
-    # result object out of whatever came back instead.
+    # Discarding it is just as wrong: Invoke-HeadTrackingPatch signals a patch failure by
+    # RETURNING @{ Success = $false; Errors = @(...) }, not by throwing (it does throw for
+    # a patcher compile failure - see CHANGELOG - but not for the patch itself). Piping to
+    # Out-Null would swallow that and report deployment success after a failed patch.
+    #
+    # Matched on shape rather than on type. A patcher's result may arrive alongside stray
+    # pipeline output (a Copy-Item -PassThru, a New-Item), and it may be a hashtable, a
+    # [pscustomobject] or an [ordered] dictionary - and `-is [hashtable]` is FALSE for the
+    # latter two, so a type test silently skipped the failure check for both. Anything
+    # carrying a falsey Success is treated as a failure, which is the direction that must
+    # not fail open.
     $patchOutput = @(& $Patcher $assemblyPath)
-    $patchResult = $patchOutput | Where-Object { $_ -is [hashtable] -and $_.ContainsKey('Success') } | Select-Object -Last 1
-    if ($patchResult -and -not $patchResult.Success) {
-        throw "Patcher reported failure for ${assemblyPath}: $($patchResult.Errors -join '; ')"
+    $patchFailure = $patchOutput | Where-Object { Test-PatchResultFailure $_ } | Select-Object -First 1
+    if ($patchFailure) {
+        throw "Patcher reported failure for ${assemblyPath}: $($patchFailure.Errors -join '; ')"
     }
 
     if ($CleanDoorstop) {

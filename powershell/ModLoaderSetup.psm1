@@ -114,15 +114,33 @@ function Select-SoakedReleases {
 function Get-ReleaseVersionKey {
     param([string]$Tag)
 
-    # Anchored, and requires at least one dot. An unanchored bare-digit match takes the
-    # FIRST digit run anywhere in the tag, so 'BepInEx_x64_5.4.22.0' scored 64.0 and
-    # 'UE4SS_v3.0.1' scored 4.0 - both outranking every real 5.4.x. That is bounded today
-    # only because -VersionPrefix usually makes each candidate set homogeneous, and it
-    # defaults to empty.
-    if ($Tag -match '(?:^|[^0-9.])v?(\d+(?:\.\d+){1,3})') {
-        $parsed = [version]'0.0'
-        if ([version]::TryParse($matches[1], [ref]$parsed)) { return $parsed }
+    # Two stages, because the fleet's tags are two different shapes and a single pattern
+    # cannot rank both.
+    #
+    # Dotted first, LONGEST wins. A plain "first digit run" search picks the architecture
+    # out of a tag like 'BepInEx_x64_5.4.22.0' and scores it 64.0, outranking every real
+    # 5.4.x. Taking the longest dotted run picks 5.4.22.0 there while still handling
+    # 'BepInEx.5.4.22' and 'v10.0.0-rc.1', which an anchored pattern rejects because the
+    # character before the version is a dot.
+    $best = $null
+    foreach ($m in [regex]::Matches($Tag, '\d+(?:\.\d+){1,3}')) {
+        if ($null -eq $best -or $m.Value.Length -gt $best.Length) { $best = $m.Value }
     }
+
+    # No dotted run: fall back to the FIRST bare digit run, which is the build number in
+    # praydog's 'nightly-01394-<sha40>' tags. Seven RE-Engine mods vendor REFramework
+    # nightlies with no -VersionPrefix and nothing else to rank by, and scoring those 0.0
+    # collapses the sort onto published_at - exactly the ordering the comment above says
+    # cannot be trusted. First, not longest: the trailing sha is hex and its digit runs
+    # are routinely longer than the build number.
+    if ($null -eq $best) {
+        $bare = [regex]::Match($Tag, '\d+')
+        if (-not $bare.Success) { return [version]'0.0' }
+        $best = "$($bare.Value).0"
+    }
+
+    $parsed = [version]'0.0'
+    if ([version]::TryParse($best, [ref]$parsed)) { return $parsed }
     return [version]'0.0'
 }
 
@@ -777,10 +795,19 @@ function Find-UE4BinariesPath {
         [string]$GamePath
     )
 
+    # Every candidate must actually hold an executable. The standard-layout branch used
+    # to short-circuit on a bare Test-Path, so an install whose <GameName>\Binaries\Win64
+    # exists but is empty returned that folder and never reached the scan below - UE4SS
+    # then landed next to nothing.
+    function Test-HasExecutable([string]$Path) {
+        if (-not (Test-Path -LiteralPath $Path)) { return $false }
+        return [bool](Get-ChildItem -LiteralPath $Path -Filter '*.exe' -ErrorAction SilentlyContinue)
+    }
+
     # Standard UE layout: GameName/Binaries/Win64
     $gameName = Split-Path $GamePath -Leaf
     $standardPath = Join-Path $GamePath "$gameName\Binaries\Win64"
-    if (Test-Path -LiteralPath $standardPath) {
+    if (Test-HasExecutable $standardPath) {
         return $standardPath
     }
 
@@ -795,13 +822,25 @@ function Find-UE4BinariesPath {
     # (CrashReportClient and friends) instead of the one holding the game exe -
     # and UE4SS only loads from the latter, because that is where dwmapi.dll has
     # to sit.
+    # A shipping UE build names its executable <Project>-Win64-Shipping.exe, so preferring
+    # that is a principled choice rather than "whichever directory sorted first". The old
+    # any-exe scan returned AALauncher over ZZGame purely on name order, and Get-ChildItem
+    # ordering is NTFS index order - deterministic on local NTFS, not guaranteed by the API
+    # and different on ReFS or a network share.
+    $fallback = $null
     foreach ($candidate in @(Get-ChildItem -LiteralPath $GamePath -Directory -ErrorAction SilentlyContinue)) {
         if ($candidate.Name -eq 'Engine') { continue }
         $win64 = Join-Path $candidate.FullName 'Binaries\Win64'
-        if ((Test-Path -LiteralPath $win64) -and (Get-ChildItem -LiteralPath $win64 -Filter '*.exe' -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path -LiteralPath $win64)) { continue }
+
+        if (Get-ChildItem -LiteralPath $win64 -Filter '*-Win64-Shipping.exe' -ErrorAction SilentlyContinue) {
             return $win64
         }
+        if ($null -eq $fallback -and (Test-HasExecutable $win64)) {
+            $fallback = $win64
+        }
     }
+    if ($fallback) { return $fallback }
 
     # Last resort only, for the rare layout that really does run out of Engine.
     $enginePath = Join-Path $GamePath "Engine\Binaries\Win64"
@@ -1294,7 +1333,8 @@ function Update-VendoredLoader {
         # name install.cmd hardcodes is missing from the tree.
         # NOTE the version-like test: [IO.Path]::GetExtension('5.4.2100') returns
         # '.2100', so an extension check ALONE never fires for exactly the Thunderstore
-        # URL described above - which is the case this guard exists for.
+        # URL described above - which is the case this guard exists for. The message
+        # below says "usable filename" rather than "no extension" for the same reason.
         if ((-not [IO.Path]::GetExtension($meta.AssetName)) -or ($meta.AssetName -match '^[0-9]+(\.[0-9]+)*$')) {
             throw "Cannot derive a vendored filename from '$($meta.AssetUrl)' - the URL's last segment ('$($meta.AssetName)') has no extension. Pass -OutputFileName with the name install.cmd expects."
         }

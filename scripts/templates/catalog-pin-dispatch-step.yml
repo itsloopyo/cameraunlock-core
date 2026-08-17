@@ -35,13 +35,10 @@
             $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
             $entry = @($mods) | Where-Object { $_.repo -eq $repo }
             if (-not $entry) { return $null }
-            # Mirrors lopari.app's update-metadata.mjs: it pins on `public === true`
-            # plus a release carrying an -installer.zip, and never reads
-            # install_strategy. A dev-only entry (public: false) is never pinned, so
-            # polling for one ran the full deadline into a failure. External stays in
-            # the skip because those installs route to a third-party mod manager and
-            # ship no installer zip to pin.
-            if ($entry.public -ne $true -or $entry.install_strategy -eq 'External') { return $null }
+            # See the note on the prerequisites step above: the served catalog is already
+            # public-only, External is our stand-in for "ships no installer zip", and a
+            # first release genuinely has no pin to find until lopari stamps one.
+            if (@($entry)[0].install_strategy -eq 'External') { return $null }
             return @{ inCatalog = $true; pinned = $entry.release.pinned.version }
           }
           $state = Get-PinnedVersion

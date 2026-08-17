@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -13,8 +12,14 @@ namespace CameraUnlock.Core.Unity.Utilities
     /// </summary>
     public static class CrosshairUtility
     {
+        // Guarded by _typeCacheLock. FindTypeByName touches no Unity API - only AppDomain,
+        // Assembly and Type - so a mod is free to call it from a config loader, an async
+        // init task or a Harmony patch on a worker thread, and nothing here makes the main
+        // thread a guarantee. A torn Dictionary write is not an exception, it is a corrupt
+        // bucket chain and a 100% CPU spin with no diagnostic.
         private static readonly Dictionary<string, Type> _typeCache =
             new Dictionary<string, Type>(StringComparer.Ordinal);
+        private static readonly object _typeCacheLock = new object();
 
         /// <summary>
         /// Searches all loaded Image components for ones likely to be crosshairs.
@@ -81,38 +86,34 @@ namespace CameraUnlock.Core.Unity.Utilities
         {
             if (string.IsNullOrEmpty(typeName)) return null;
 
-            // Cached. The miss path below materialises every type in the process, and the
-            // documented usage is polling for a game HUD type that may not exist yet, so
-            // an uncached miss is a full reflection sweep every frame. Only successful
-            // resolutions are cached: a negative would latch a failure across the assembly
-            // load that would have satisfied it.
+            // Cached because the documented usage is polling for a game HUD type from a
+            // per-frame path, and the simple-name sweep below materialises every type in
+            // every loaded assembly - in a BepInEx process that is a full GetTypes() of
+            // ~120 assemblies, every frame, forever, even after it has already succeeded.
+            // Only successful resolutions are cached: a negative would latch a failure
+            // across the assembly load that would have satisfied it.
+            //
+            // The key is the caller's own argument, so the two lookups below cannot
+            // contaminate each other - a query resolved by qualified name and a query
+            // resolved by simple name are different keys by construction.
             Type cached;
-            if (_typeCache.TryGetValue(typeName, out cached)) return cached;
+            lock (_typeCacheLock)
+            {
+                if (_typeCache.TryGetValue(typeName, out cached)) return cached;
+            }
 
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
 
             foreach (var assembly in assemblies)
             {
-                // Guarded: a single broken assembly in a modded process must not abort the
-                // search for everyone. GetType can throw FileLoadException and
-                // BadImageFormatException as well as the load exceptions below - the
-                // FileNotFoundException handler that used to be here is evidence this is
-                // hit in the wild.
-                Type type;
-                try
-                {
-                    type = assembly.GetType(typeName);
-                }
-                catch (ReflectionTypeLoadException) { continue; }
-                catch (FileNotFoundException) { continue; }
-                catch (FileLoadException) { continue; }
-                catch (BadImageFormatException) { continue; }
-
-                if (type != null)
-                {
-                    _typeCache[typeName] = type;
-                    return type;
-                }
+                // Deliberately unguarded. Assembly.GetType(String) only throws for an
+                // assembly-qualified or generic name it has to resolve elsewhere, and this
+                // overload is documented as taking a plain name, so a throw here means the
+                // caller passed something malformed and should hear about it. Catching it
+                // would be a fallback for a case that cannot arise from correct use - and
+                // 0e54911 already removed one such catch on purpose.
+                Type type = assembly.GetType(typeName);
+                if (type != null) return Remember(typeName, type);
             }
 
             // Assembly.GetType only matches the namespace-qualified name, so the documented
@@ -135,11 +136,23 @@ namespace CameraUnlock.Core.Unity.Utilities
 
                 for (int i = 0; i < types.Length; i++)
                 {
-                    if (types[i] != null && types[i].Name == typeName) return types[i];
+                    if (types[i] != null && types[i].Name == typeName)
+                    {
+                        return Remember(typeName, types[i]);
+                    }
                 }
             }
 
             return null;
+        }
+
+        private static Type Remember(string typeName, Type type)
+        {
+            lock (_typeCacheLock)
+            {
+                _typeCache[typeName] = type;
+            }
+            return type;
         }
 
         /// <summary>

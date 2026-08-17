@@ -24,19 +24,16 @@ Import-Module (Join-Path $scriptDir "..\powershell\ReleaseWorkflow.psm1") -Force
 # Manual override takes priority
 if (Test-Path "RELEASE_NOTES.md") {
     Write-Host "Using RELEASE_NOTES.md override" -ForegroundColor Cyan
-    Copy-Item "RELEASE_NOTES.md" $OutputFile
+    # Re-written rather than copied. A byte-for-byte Copy-Item preserves whatever
+    # encoding the hand-authored file has, and a UTF-8 BOM here publishes straight into
+    # the release body - this is the likeliest path to carry one, because it is the only
+    # file a human edits in an editor. Every Update-VendoredLoader README in the fleet
+    # opens with a BOM, so the assumption that local files are BOM-less does not hold.
+    Write-NotesFile -Path $OutputFile -Text (Get-Content -Raw -LiteralPath "RELEASE_NOTES.md")
     Get-Content $OutputFile
     exit 0
 }
 
-# Check for previous tag
-# Match version tags only. The nightly publisher moves the rolling `dev` tag to
-# the tip on every build, so an unfiltered describe resolves to `dev` sitting
-# just behind HEAD: a first release never reaches the branch below, and a later
-# one diffs against last night's build instead of the previous version.
-# Temporarily allow errors so git describe doesn't throw when there are no tags:
-# under ErrorActionPreference=Stop, PowerShell 5.1 wraps the redirected stderr as
-# a NativeCommandError and terminates before the first-release branch below runs.
 function Write-NotesFile {
     param([string]$Path, [string]$Text)
 
@@ -55,6 +52,14 @@ function Write-NotesFile {
     [System.IO.File]::WriteAllText($full, $Text, (New-Object System.Text.UTF8Encoding $false))
 }
 
+# Check for previous tag
+# Match version tags only. The nightly publisher moves the rolling `dev` tag to
+# the tip on every build, so an unfiltered describe resolves to `dev` sitting
+# just behind HEAD: a first release never reaches the branch below, and a later
+# one diffs against last night's build instead of the previous version.
+# Temporarily allow errors so git describe doesn't throw when there are no tags:
+# under ErrorActionPreference=Stop, PowerShell 5.1 wraps the redirected stderr as
+# a NativeCommandError and terminates before the first-release branch below runs.
 $prevPref = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 $previousTag = git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>$null

@@ -164,18 +164,23 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
 
         // A token starts at the string start, after a separator, or at a camel-case hump
         // ("hudUI"). An uppercase run does NOT start one, so "GUICamera" never matches "ui".
+        //
+        // A lowercase predecessor only counts at a GENUINE hump, which means the token's
+        // own first character has to be uppercase. Accepting any lowercase predecessor let
+        // a plain letter act as a separator, so "yuicamera" matched "ui" and lost head
+        // tracking - and Yui, Rui, Sui, Gui are ordinary romanised names. "EquiviewCamera"
+        // was the same fault mid-word.
         private static bool IsTokenStart(string name, int index)
         {
             if (index == 0) return true;
             char previous = name[index - 1];
-            return !char.IsLetterOrDigit(previous) || char.IsLower(previous);
+            if (!char.IsLetterOrDigit(previous)) return true;
+            return char.IsLower(previous) && char.IsUpper(name[index]);
         }
 
         // Words a token may run straight into in an all-lowercase name. "uicam" has no
-        // separator and no camel hump, so the boundary rules below cannot see the join -
-        // yet it is obviously a UI camera and must stay excluded. Kept deliberately short
-        // and camera-specific so it cannot swallow an unrelated word: "guidance" is still
-        // not a "gui" match, because "dance" is not in here.
+        // separator and no camel hump, so the character-level rules cannot see the join -
+        // yet it is obviously a UI camera and must stay excluded.
         private static readonly string[] TokenTailWords =
         {
             "cam", "camera", "canvas", "overlay", "layer", "view", "root"
@@ -192,15 +197,28 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 return true;
             }
 
+            return IsTailWordAt(name, end);
+        }
+
+        // The tail has to run to a boundary itself. A bare prefix test would let any word
+        // merely STARTING with a tail word close the token - "cam" would match camp, camo,
+        // campaign and camshaft; "root" would match rooted; "layer" would match layers -
+        // which is exactly the "swallows an unrelated word" failure the list is meant to
+        // avoid. It is also what keeps "camera" in the list doing work: "uicamera" ends
+        // "cam" at a lowercase 'e', so only the longer entry reaches the end of the string.
+        private static bool IsTailWordAt(string name, int start)
+        {
             for (int i = 0; i < TokenTailWords.Length; i++)
             {
                 string tail = TokenTailWords[i];
-                if (name.Length - end >= tail.Length &&
-                    string.Compare(name, end, tail, 0, tail.Length,
-                                   StringComparison.OrdinalIgnoreCase) == 0)
-                {
-                    return true;
-                }
+                int end = start + tail.Length;
+                if (end > name.Length) continue;
+                if (string.Compare(name, start, tail, 0, tail.Length,
+                                   StringComparison.OrdinalIgnoreCase) != 0) continue;
+                if (end == name.Length) return true;
+
+                char after = name[end];
+                if (!char.IsLetterOrDigit(after) || char.IsUpper(after)) return true;
             }
             return false;
         }

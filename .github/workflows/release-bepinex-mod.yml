@@ -60,15 +60,19 @@ jobs:
           $bust = "cb$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
           $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
           $entry = @($mods) | Where-Object { $_.repo -eq "${{ github.repository }}" }
-          # Mirrors lopari.app's update-metadata.mjs, which decides what actually
-          # gets pinned. Its gate is `public === true` plus a release carrying an
-          # -installer.zip; it never reads install_strategy. Keeping only the
-          # strategy test meant a dev-only catalog entry (public: false) demanded
-          # the token and then polled for a pin that is never stamped.
-          # External stays in the skip because those installs route to a
-          # third-party mod manager and ship no installer zip for lopari to pin -
-          # our proxy for "no zip", not a field lopari keys on.
-          if ($entry -and ($entry.public -ne $true -or $entry.install_strategy -eq 'External')) { $entry = $null }
+          # The served catalog is ALREADY filtered to public entries - update-metadata.mjs
+          # writes the Pages copy as { ...catalog, mods: publicMods } - so there is no
+          # public/private test to make here; anything we find is public by construction.
+          #
+          # External is our own heuristic, not a field lopari consults: those installs route
+          # to a third-party mod manager and ship no *-installer.zip, and an installer zip is
+          # what update-metadata.mjs actually requires before it will stamp a pin.
+          #
+          # Known gap, deliberately left loud: lopari also skips any entry that is not yet
+          # `released` and has no dev-release, so a mod's FIRST stable release is never
+          # auto-pinned and the poll below runs its deadline out. That failure is correct -
+          # the Run in Lopari link really would be stale - and the timeout message says so.
+          if ($entry -and @($entry)[0].install_strategy -eq 'External') { $entry = $null }
           if ($entry -and -not $env:LOPARI_APP_ACTIONS_TOKEN) {
             Write-Host "::error::${{ github.repository }} is in the Lopari catalog but LOPARI_APP_ACTIONS_TOKEN is not set - the catalog pin can't be synced before the announcement, so the Run in Lopari link would serve the previous release. Set the fine-grained PAT (Actions:write on itsloopyo/lopari.app only) and re-run."
             exit 1
@@ -226,13 +230,10 @@ jobs:
             $mods = (Invoke-RestMethod "https://lopari.app/mods.json?$bust").mods
             $entry = @($mods) | Where-Object { $_.repo -eq $repo }
             if (-not $entry) { return $null }
-            # Mirrors lopari.app's update-metadata.mjs: it pins on `public === true`
-            # plus a release carrying an -installer.zip, and never reads
-            # install_strategy. A dev-only entry (public: false) is never pinned, so
-            # polling for one ran the full 10-minute deadline into a failure.
-            # External stays in the skip because those installs route to a
-            # third-party mod manager and ship no installer zip to pin.
-            if ($entry.public -ne $true -or $entry.install_strategy -eq 'External') { return $null }
+            # See the note on the prerequisites step above: the served catalog is already
+            # public-only, External is our stand-in for "ships no installer zip", and a
+            # first release genuinely has no pin to find until lopari stamps one.
+            if (@($entry)[0].install_strategy -eq 'External') { return $null }
             return @{ inCatalog = $true; pinned = $entry.release.pinned.version }
           }
           $state = Get-PinnedVersion

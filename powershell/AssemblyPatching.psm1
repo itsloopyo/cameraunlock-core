@@ -59,9 +59,10 @@ function Initialize-AssemblyPatching {
 .PARAMETER PatchMarker
     Name of the marker type to add (default: "HeadTracking_Patched_v2").
 .PARAMETER TypeName
-    Name of the generated class (default: "ScreenCenterPatcher"). The marker is
-    a const in the generated type, so a caller compiling more than one marker in
-    a single session needs a distinct name per marker.
+    Name of the generated class. Required, because the marker is a const in the
+    generated type and a type cannot be unloaded: a caller compiling more than one
+    marker in a session needs a distinct name per marker, and New-ScreenCenterPatcher
+    derives one by appending a hash of the marker.
 .OUTPUTS
     String containing the C# patcher code.
 #>
@@ -71,8 +72,11 @@ function Get-ScreenCenterPatcherCode {
         [Parameter(Mandatory=$false)]
         [string]$PatchMarker = "HeadTracking_Patched_v2",
 
-        [Parameter(Mandatory=$false)]
-        [string]$TypeName = "ScreenCenterPatcher"
+        # No default, and mandatory. The generated type name has to stay unique per marker
+        # (see New-ScreenCenterPatcher), and a bare "ScreenCenterPatcher" default handed a
+        # direct caller exactly the colliding name that function exists to avoid.
+        [Parameter(Mandatory=$true)]
+        [string]$TypeName
     )
 
     return @"

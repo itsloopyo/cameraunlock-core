@@ -124,8 +124,13 @@ changed in all 15 scripts, and it is contractually byte-identical across them.
   longer runs by default.
 - `Invoke-HeadTrackingPatch` now throws on a patcher compile failure instead of returning
   `Success = $false`.
-- `New-ScreenCenterPatcher` emits `ScreenCenterPatcher_<marker>`; a mod hardcoding
-  `[ScreenCenterPatcher]::...` after calling it will break.
+- `New-ScreenCenterPatcher` emits `ScreenCenterPatcher_<sanitised-marker>_<hash8>`; a mod
+  hardcoding `[ScreenCenterPatcher]::...` after calling it will break. The hash suffix is
+  load-bearing, not cosmetic: sanitising alone is not injective, so `cul.center` and
+  `cul-center` collided on one generated type and the second marker silently got the
+  first's patcher.
+- `Get-ScreenCenterPatcherCode`'s `-TypeName` is now mandatory. Its old default was the
+  bare `ScreenCenterPatcher`, which handed a direct caller exactly the colliding name.
 - `Get-BepInExPluginsPath` / `Get-MelonLoaderModsPath` are re-homed to
   `GamePathDetection.psm1` and re-exported from `ModLoaderSetup.psm1`, so no import
   changes - but the separator is now consistently `\`.

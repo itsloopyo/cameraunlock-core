@@ -28,10 +28,17 @@ namespace CameraUnlock.Core.Unity.Tracking
     /// new yaw snaps the camera through a 180 degree roll it can then latch in.
     ///
     /// Migrating is not a drop-in substitution. The deprecated overloads REPLACE the camera's
-    /// local yaw; the replacements COMPOSE with it. They agree only when the clean rotation
-    /// has no yaw of its own. If the game keeps local yaw on the camera (recoil, lean, weapon
-    /// sway), the replacements preserve it - usually what you want, but it is a behaviour
-    /// change. Pass a yaw-free clean rotation to reproduce the old semantics exactly.
+    /// local yaw; the replacements COMPOSE with it. If the game keeps local yaw on the camera
+    /// (recoil, lean, weapon sway), the replacements preserve it - usually what you want, but
+    /// it is a behaviour change.
+    ///
+    /// Two conditions have to hold for the two to agree, not one: the clean rotation must
+    /// carry no yaw of its own, AND the camera's pitch must be within +/-90. Past vertical
+    /// the deprecated path does not see the clean rotation at all - it reads
+    /// <c>localEulerAngles</c>, and Unity's decomposition clamps pitch, reporting the
+    /// (91, 180, 180) above for a rotation whose own yaw is zero. So a yaw-free clean
+    /// rotation reproduces the old semantics only below vertical; an unclamped vehicle,
+    /// ragdoll or spectator camera will still differ.
     /// </summary>
     public static class DecoupledMovementHelper
     {
@@ -254,8 +261,11 @@ namespace CameraUnlock.Core.Unity.Tracking
             // REPLACES whatever yaw the camera's local rotation carried. This composes:
             // for a clean rotation of Ry(gy) * Rx * Rz it yields Ry(yaw + gy) * Rx * Rz,
             // preserving the game's own local yaw (recoil, lean, weapon sway) instead of
-            // destroying it. The two agree exactly when the clean rotation has no yaw of
-            // its own, which is the common case and the one the parameter asks for.
+            // destroying it. The two agree when the clean rotation has no yaw of its own
+            // AND the camera's pitch is within +/-90 - past vertical the Euler getter's
+            // decomposition reports a yaw of 180 for a rotation that has none, so there
+            // is nothing to agree with. That is the common case and the one the parameter
+            // asks for.
             cameraTransform.localRotation =
                 Quaternion.AngleAxis(yaw, Vector3.up) * cleanCameraLocalRotation;
         }

@@ -113,10 +113,14 @@ namespace CameraUnlock.Core.Unity.UI
             // Put the surviving children back on their ORIGINALS before re-capturing.
             // anchoredPosition currently reads original + offset, so capturing it as the
             // new original folds one offset in permanently - and then clearing _isOffset
-            // discards the only record needed to undo it. A HUD element that toggles
-            // visibility (a damage flash, an ammo counter) changes childCount twice per
-            // appearance, so this accumulated on every toggle and walked the HUD off
-            // screen: exactly the unbounded drift this class exists to prevent.
+            // discards the only record needed to undo it.
+            //
+            // The trigger is a STRUCTURAL change, not a visibility one: the guard above
+            // watches childCount, and SetActive does not change it (childCount counts
+            // children regardless of active state). It takes an Instantiate, a Destroy or
+            // a reparent - a HUD that pools damage numbers or rebuilds a hotbar. One
+            // offset folds in per rebuild rather than per frame, so it drifts in steps,
+            // but nothing ever gives the accumulated offset back.
             Restore();
 
             _children.Clear();

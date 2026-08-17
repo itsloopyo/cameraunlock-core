@@ -502,6 +502,10 @@ namespace UnityEngine
     {
         public Quaternion rotation = Quaternion.identity;
         public Vector3 position = Vector3.zero;
+        public Quaternion localRotation = Quaternion.identity;
+        public Vector3 localPosition = Vector3.zero;
+        public string name = string.Empty;
+        public Transform parent;
 
         public Matrix4x4 localToWorldMatrix => Matrix4x4.TRS(position, rotation, Vector3.one);
         public Matrix4x4 worldToLocalMatrix => localToWorldMatrix.inverse;
@@ -510,6 +514,15 @@ namespace UnityEngine
     public class Canvas : Object
     {
         public static Action willRenderCanvases;
+    }
+
+    public enum CameraType
+    {
+        Game = 1,
+        SceneView = 2,
+        Preview = 4,
+        VR = 8,
+        Reflection = 16,
     }
 
     public class Camera : Object
@@ -522,9 +535,17 @@ namespace UnityEngine
 
         public static Camera main;
 
+        /// Assigned directly by tests; Unity populates it from the live scene.
+        public static Camera[] allCameras = new Camera[0];
+
         public Transform transform = new Transform();
+        public string name = string.Empty;
         public float fieldOfView = 60f;
         public float aspect = 16f / 9f;
+        public float depth;
+        public bool enabled = true;
+        public CameraType cameraType = CameraType.Game;
+        public object targetTexture;
 
         public Matrix4x4 worldToCameraMatrix = Matrix4x4.identity;
 
