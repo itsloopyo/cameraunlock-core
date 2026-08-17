@@ -14,6 +14,18 @@ namespace cameraunlock {
 
 constexpr size_t kMaxIniValueLength = 1024;
 
+#ifdef _MSC_VER
+// One "C" locale shared by the read and the write side. Both strtod and printf's %g
+// follow LC_NUMERIC, and a consumer built /MD shares the game's CRT - so a title that
+// calls setlocale(LC_ALL, "") on a German install would otherwise turn Sensitivity=2.5
+// into 2.0 on read, or write it back as "2,5". Pinning only one side leaves the round
+// trip broken in the other direction.
+static _locale_t CNumericLocale() {
+    static const _locale_t loc = _create_locale(LC_NUMERIC, "C");
+    return loc;
+}
+#endif
+
 bool IniReader::Open(const std::string& path) {
     if (path.empty()) {
         LogError("Empty path provided to IniReader::Open");
@@ -210,12 +222,7 @@ double IniReader::ReadDouble(const char* section, const char* key, double defaul
 
     char* end;
 #ifdef _MSC_VER
-    // Parsed in the C locale explicitly. strtod follows LC_NUMERIC, and a
-    // consumer built /MD shares the game's CRT: a title that calls
-    // setlocale(LC_ALL, "") on a German install turns Sensitivity=2.5 into 2.0
-    // with no diagnostic.
-    static const _locale_t cLocale = _create_locale(LC_NUMERIC, "C");
-    double value = _strtod_l(str.c_str(), &end, cLocale);
+    double value = _strtod_l(str.c_str(), &end, CNumericLocale());
 #else
     double value = strtod(str.c_str(), &end);
 #endif
@@ -347,7 +354,16 @@ void IniWriter::WriteInt(const char* key, int value) {
 
 void IniWriter::WriteDouble(const char* key, double value) {
     if (!m_file) return;
+    // Formatted through the SAME "C" locale the reader parses with. printf's %g follows
+    // LC_NUMERIC, so pinning only ReadDouble left the round trip broken in the opposite
+    // direction: a consumer building /MD inside a game that calls setlocale(LC_ALL, "")
+    // on a German install wrote Sensitivity=2,5 and then read it back as 2.0 - a value
+    // that survived the round trip before the read side was pinned at all.
+#ifdef _MSC_VER
+    _fprintf_l(static_cast<FILE*>(m_file), "%s=%.6g\n", CNumericLocale(), key, value);
+#else
     fprintf(static_cast<FILE*>(m_file), "%s=%.6g\n", key, value);
+#endif
 }
 
 void IniWriter::WriteBool(const char* key, bool value) {

@@ -537,10 +537,11 @@ inline void RenderFrame() {
 
 inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT flags) {
     auto& s = State();
-    // Remove() nulls these; a thread that entered just before it ran has no
-    // trampoline left to forward to.
+    // Unreachable in practice: MH_DisableHook restores the original bytes before it
+    // returns, so the detour cannot be entered after Remove(). Kept as cheap insurance
+    // against a MinHook failure, and it must not pretend the frame was presented.
     auto orig = s.origPresent;
-    if (!orig) return S_OK;
+    if (!orig) return DXGI_ERROR_INVALID_CALL;
     if (!s.firstPresentLogged) {
         s.firstPresentLogged = true;
         Log("dx11_overlay: Present hook fired (first invocation)");
@@ -557,8 +558,11 @@ inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT fla
 inline HRESULT __stdcall HookedResizeBuffers(IDXGISwapChain* swap, UINT bufferCount, UINT width, UINT height,
                                              DXGI_FORMAT format, UINT swapChainFlags) {
     auto& s = State();
+    // See HookedPresent. Returning S_OK here would be the worse lie of the two: the
+    // engine would believe the swap chain resized and go on to use buffers that are
+    // still the old size.
     auto orig = s.origResize;
-    if (!orig) return S_OK;
+    if (!orig) return DXGI_ERROR_INVALID_CALL;
     if (s.initialized) {
         // Drop view + remaining device-bound buffers; they'll be recreated on next Present.
         if (s.rtv) { s.rtv->Release(); s.rtv = nullptr; }
@@ -682,20 +686,32 @@ inline void DX11Overlay::Remove() {
     if (!m_hookInstalled) return;
 
     auto& s = detail::State();
-    MH_DisableHook(s.presentTarget);
-    MH_DisableHook(s.resizeBuffersTarget);
-    MH_RemoveHook(s.presentTarget);
-    MH_RemoveHook(s.resizeBuffersTarget);
+    // NULL-GUARDED. MH_ALL_HOOKS is defined as NULL, so passing a null target here
+    // disables and removes EVERY MinHook hook in the process - the camera hook, the
+    // discovery probes, other mods' hooks. That is reachable with two overlay
+    // instances: the first Remove() nulls the shared targets, the second passes null.
+    // dx9_overlay.h has always guarded these; this side did not.
+    if (s.presentTarget) {
+        MH_DisableHook(s.presentTarget);
+        MH_RemoveHook(s.presentTarget);
+    }
+    if (s.resizeBuffersTarget) {
+        MH_DisableHook(s.resizeBuffersTarget);
+        MH_RemoveHook(s.resizeBuffersTarget);
+    }
 
     detail::ReleaseDeviceResources();
     {
         std::lock_guard<std::mutex> lock(s.callbackMutex);
         s.callback = nullptr;
     }
-    // A render thread already inside HookedPresent would otherwise call a
-    // trampoline MinHook has freed.
-    s.origPresent = nullptr;
-    s.origResize = nullptr;
+    // The TARGETS are cleared so a second Remove() cannot pass null to MinHook (above).
+    // The TRAMPOLINES deliberately are not: MH_DisableHook does not return until no
+    // thread is executing the detour, so nothing can enter it afterwards, while a
+    // thread already inside has copied the pointer into a local before this runs.
+    // Nulling them only affected threads that cannot exist, and made the detours'
+    // defensive branch reachable in the one case where it lies to the engine - see
+    // HookedResizeBuffers.
     s.presentTarget = nullptr;
     s.resizeBuffersTarget = nullptr;
     s.hookInstalled = false;

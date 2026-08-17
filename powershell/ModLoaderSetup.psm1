@@ -10,7 +10,12 @@ $ProgressPreference = "SilentlyContinue"
 # implementation a consumer got depended on module import order. Imported and
 # re-exported instead, so the name keeps working for callers that only import
 # this module.
-Import-Module (Join-Path $PSScriptRoot 'GamePathDetection.psm1') -Force
+# NO -Force here. Remove-Module is not scoped to the importing module, so -Force
+# (which is Remove-Module + re-import) unloads GamePathDetection from the CALLER's
+# session too - and every mod's release.ps1 imports GamePathDetection first, then this
+# module, then calls Find-GamePath. That is a CommandNotFoundException for the whole
+# fleet, and an order-dependent one, so it presents as intermittent.
+Import-Module (Join-Path $PSScriptRoot 'GamePathDetection.psm1')
 
 $Script:StateFileName = ".headtracking-state.json"
 

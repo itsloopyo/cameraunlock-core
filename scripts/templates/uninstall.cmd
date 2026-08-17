@@ -456,6 +456,16 @@ if "!EXE_DIR:~-1!"=="\" set "EXE_DIR=!EXE_DIR:~0,-1!"
 :: ASI names off the disk deletes OTHER software's loader: winmm.dll and
 :: dinput8.dll are what ReShade and most other ASI mods proxy through, so
 :: uninstalling this mod used to silently break them.
+:: Guarded because an unset ASI_LOADER_NAME collapses the path to the exe
+:: DIRECTORY, and deleting a bare directory path expands to every file in it
+:: and prompts "Are you sure (Y/N)?" - which under /y has no answer and blocks
+:: on stdin forever. The CONFIG BLOCK documents this name as optional with a
+:: default, but the body never applied one.
+if not defined ASI_LOADER_NAME (
+    echo   ERROR: ASI_LOADER_NAME is not set in the uninstall.cmd CONFIG BLOCK.
+    echo   Cannot tell which proxy DLL belongs to this mod; refusing to guess.
+    exit /b 1
+)
 if exist "!EXE_DIR!\%ASI_LOADER_NAME%" (
     del "!EXE_DIR!\%ASI_LOADER_NAME%"
     echo   Removed: %ASI_LOADER_NAME%

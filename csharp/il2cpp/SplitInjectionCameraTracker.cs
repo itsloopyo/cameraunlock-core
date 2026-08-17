@@ -171,13 +171,38 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
             return !char.IsLetterOrDigit(previous) || char.IsLower(previous);
         }
 
-        // A token ends at the string end, before a separator, or before the next camel-case
-        // hump ("UICamera").
+        // Words a token may run straight into in an all-lowercase name. "uicam" has no
+        // separator and no camel hump, so the boundary rules below cannot see the join -
+        // yet it is obviously a UI camera and must stay excluded. Kept deliberately short
+        // and camera-specific so it cannot swallow an unrelated word: "guidance" is still
+        // not a "gui" match, because "dance" is not in here.
+        private static readonly string[] TokenTailWords =
+        {
+            "cam", "camera", "canvas", "overlay", "layer", "view", "root"
+        };
+
+        // A token ends at the string end, before a separator, before the next camel-case
+        // hump ("UICamera"), or immediately before one of the tail words above.
         private static bool IsTokenEnd(string name, int end)
         {
             if (end >= name.Length) return true;
             char next = name[end];
-            return !char.IsLetterOrDigit(next) || char.IsUpper(next) || char.IsDigit(next);
+            if (!char.IsLetterOrDigit(next) || char.IsUpper(next) || char.IsDigit(next))
+            {
+                return true;
+            }
+
+            for (int i = 0; i < TokenTailWords.Length; i++)
+            {
+                string tail = TokenTailWords[i];
+                if (name.Length - end >= tail.Length &&
+                    string.Compare(name, end, tail, 0, tail.Length,
+                                   StringComparison.OrdinalIgnoreCase) == 0)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>

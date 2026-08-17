@@ -154,12 +154,22 @@ for %%f in (%MOD_DLLS%) do (
         set "DEPLOY_FAILED=1"
     ) else (
         set "_BACKUP_OK=1"
-        if defined FIRST_INSTALL if exist "%EXE_DIR%\%%f" if not exist "%EXE_DIR%\%%f.backup" (
-            copy /y "%EXE_DIR%\%%f" "%EXE_DIR%\%%f.backup" >nul
+        rem Decided PER FILE by CONTENT, not by whether this is the first install.
+        rem Two failure modes have to be avoided at once. Backing up unconditionally
+        rem enshrines OUR shim as "the original" on the second install of a game that
+        rem ships no such DLL, so uninstall reinstalls the mod. Gating the whole backup
+        rem on first-install instead means a DLL newly ADDED to MOD_DLLS in a later mod
+        rem version overwrites the game's real file with no backup at all. Comparing the
+        rem bytes answers the actual question: is the file already there ours?
+        if exist "%EXE_DIR%\%%f" if not exist "%EXE_DIR%\%%f.backup" (
+            fc /b "%EXE_DIR%\%%f" "%SRC_DIR%\%%f" >nul 2>&1
             if errorlevel 1 (
-                set "_BACKUP_OK="
-            ) else (
-                echo   Backed up original %%f to %%f.backup
+                copy /y "%EXE_DIR%\%%f" "%EXE_DIR%\%%f.backup" >nul
+                if errorlevel 1 (
+                    set "_BACKUP_OK="
+                ) else (
+                    echo   Backed up original %%f to %%f.backup
+                )
             )
         )
         if defined _BACKUP_OK (

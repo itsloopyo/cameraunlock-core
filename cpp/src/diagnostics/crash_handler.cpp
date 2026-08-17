@@ -173,6 +173,7 @@ void LogException(EXCEPTION_POINTERS* info) {
 // process the second to load blanked the first. Both are the "masks a real fault" case
 // the doctrine forbids.
 LPTOP_LEVEL_EXCEPTION_FILTER g_previousFilter = nullptr;
+bool g_installed = false;
 
 LONG WINAPI UnhandledFilter(EXCEPTION_POINTERS* info) {
     if (!g_alreadyLogged.exchange(true)) {
@@ -187,12 +188,20 @@ LONG WINAPI UnhandledFilter(EXCEPTION_POINTERS* info) {
 }  // namespace
 
 void InstallCrashHandler() {
+    // Idempotent. A second call would otherwise get our OWN filter back from
+    // SetUnhandledExceptionFilter and then null it under the self-chain guard below,
+    // DESTROYING the host's filter saved on the first call - which is exactly the
+    // suppression this function exists to avoid. Guarding the whole install is the fix;
+    // guarding only the self-chain was not.
+    if (g_installed) return;
+    g_installed = true;
+
     SnapshotModules();
     g_previousFilter = SetUnhandledExceptionFilter(&UnhandledFilter);
-    // A second InstallCrashHandler in the same module gets our OWN filter back, and
-    // chaining to it would recurse until the stack is gone - taking out the crash
-    // report for the crash we were installed to report. (Two separate plugins each
-    // linking this static library are fine: distinct UnhandledFilter addresses.)
+    // Belt and braces for the same self-chain: chaining to ourselves would recurse
+    // until the stack is gone, taking out the report for the crash we were installed
+    // to make. (Two separate plugins each linking this static library are fine:
+    // distinct UnhandledFilter addresses.)
     if (g_previousFilter == &UnhandledFilter) {
         g_previousFilter = nullptr;
     }

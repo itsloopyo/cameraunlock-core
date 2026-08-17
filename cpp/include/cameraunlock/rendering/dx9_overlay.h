@@ -280,7 +280,10 @@ inline HRESULT __stdcall HookedPresent(IDirect3DDevice9* dev, const RECT* src, c
     // Remove() nulls this; a thread that entered just before it ran has no
     // trampoline left to forward to.
     auto orig = s.origPresent;
-    if (!orig) return D3D_OK;
+    // Unreachable in practice: MH_DisableHook restores the original bytes before it
+    // returns, so the detour cannot be entered after Remove(). Must not claim the frame
+    // was presented.
+    if (!orig) return D3DERR_INVALIDCALL;
     if (!s.firstPresentLogged) {
         s.firstPresentLogged = true;
         Log("dx9_overlay: Present hook fired (first invocation)");
@@ -386,13 +389,15 @@ inline void DX9Overlay::Remove() {
         MH_DisableHook(s.presentTarget);
         MH_RemoveHook(s.presentTarget);
         s.presentHooked = false;
-        s.origPresent = nullptr;
+        // Trampoline deliberately NOT nulled - see the note on the CreateDevice path.
         s.presentTarget = nullptr;
     }
     if (s.createDeviceTarget) {
         MH_DisableHook(s.createDeviceTarget);
         MH_RemoveHook(s.createDeviceTarget);
-        s.origCreateDevice = nullptr;
+        // Trampoline deliberately NOT nulled - MH_DisableHook has already ensured
+        // no thread is in the detour, and clearing it only makes the detour's
+        // defensive branch reachable, where it would fail a legitimate call.
         s.createDeviceTarget = nullptr;
     }
     {

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -12,6 +13,9 @@ namespace CameraUnlock.Core.Unity.Utilities
     /// </summary>
     public static class CrosshairUtility
     {
+        private static readonly Dictionary<string, Type> _typeCache =
+            new Dictionary<string, Type>(StringComparer.Ordinal);
+
         /// <summary>
         /// Searches all loaded Image components for ones likely to be crosshairs.
         /// Returns candidates matching common crosshair naming patterns.
@@ -75,12 +79,40 @@ namespace CameraUnlock.Core.Unity.Utilities
         /// <returns>The Type if found, null otherwise.</returns>
         public static Type FindTypeByName(string typeName)
         {
+            if (string.IsNullOrEmpty(typeName)) return null;
+
+            // Cached. The miss path below materialises every type in the process, and the
+            // documented usage is polling for a game HUD type that may not exist yet, so
+            // an uncached miss is a full reflection sweep every frame. Only successful
+            // resolutions are cached: a negative would latch a failure across the assembly
+            // load that would have satisfied it.
+            Type cached;
+            if (_typeCache.TryGetValue(typeName, out cached)) return cached;
+
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
 
             foreach (var assembly in assemblies)
             {
-                var type = assembly.GetType(typeName);
-                if (type != null) return type;
+                // Guarded: a single broken assembly in a modded process must not abort the
+                // search for everyone. GetType can throw FileLoadException and
+                // BadImageFormatException as well as the load exceptions below - the
+                // FileNotFoundException handler that used to be here is evidence this is
+                // hit in the wild.
+                Type type;
+                try
+                {
+                    type = assembly.GetType(typeName);
+                }
+                catch (ReflectionTypeLoadException) { continue; }
+                catch (FileNotFoundException) { continue; }
+                catch (FileLoadException) { continue; }
+                catch (BadImageFormatException) { continue; }
+
+                if (type != null)
+                {
+                    _typeCache[typeName] = type;
+                    return type;
+                }
             }
 
             // Assembly.GetType only matches the namespace-qualified name, so the documented

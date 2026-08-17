@@ -202,7 +202,12 @@ echo BepInEx not found. Installing...
 :do_install_loader
 echo.
 call :install_bepinex
-if errorlevel 1 exit /b 1
+set "_BEP_INSTALL_EC=!errorlevel!"
+if not "!_BEP_INSTALL_EC!"=="0" (
+    echo   Loader install failed - putting your BepInEx plugins/config back.
+    call :restore_bepinex_stash
+    exit /b 1
+)
 call :restore_bepinex_stash
 if errorlevel 1 exit /b 1
 set "WE_INSTALLED=true"
@@ -317,13 +322,30 @@ exit /b %errorlevel%
 :: ============================================
 :wipe_existing_bepinex
 echo   Replacing the wrong-architecture BepInEx core...
+:: Staged INSIDE the game folder under a fixed name, not %%TEMP%% under a
+:: random one. The old form was unrecoverable: :restore_bepinex_stash only
+:: ran on the success path, so any loader-install failure (missing vendored
+:: zip, extraction error, xcopy error) - or a Ctrl+C - deleted BepInEx\ from
+:: the game and left the user's other mods' plugins and every plugin config
+:: in a %%TEMP%% folder whose randomised name was never printed. Same volume
+:: also makes the move atomic rather than a copy.
+set "_BEP_STASH=%GAME_PATH%\BepInEx-cul-stash"
+:: A stash already here means a previous run died between the move and the
+:: restore. Put it back before doing anything else, or this run overwrites
+:: the only copy of the user's data.
+if exist "!_BEP_STASH!" (
+    echo   Found plugins/config staged by an earlier interrupted run - restoring first.
+    call :restore_bepinex_stash
+    if errorlevel 1 exit /b 1
+)
 set "_BEP_STASH="
-if exist "%GAME_PATH%\BepInEx\plugins" set "_BEP_STASH=%TEMP%\cul-bepinex-stash-%RANDOM%-%RANDOM%"
-if exist "%GAME_PATH%\BepInEx\config" if not defined _BEP_STASH set "_BEP_STASH=%TEMP%\cul-bepinex-stash-%RANDOM%-%RANDOM%"
+if exist "%GAME_PATH%\BepInEx\plugins" set "_BEP_STASH=%GAME_PATH%\BepInEx-cul-stash"
+if exist "%GAME_PATH%\BepInEx\config" if not defined _BEP_STASH set "_BEP_STASH=%GAME_PATH%\BepInEx-cul-stash"
 if defined _BEP_STASH (
     mkdir "!_BEP_STASH!"
     if errorlevel 1 (
-        echo   ERROR: could not create a staging folder under %%TEMP%%.
+        echo   ERROR: could not create the staging folder next to BepInEx\.
+        echo   Is the game folder writable?
         exit /b 1
     )
 )
@@ -357,7 +379,9 @@ exit /b 0
 :: for an empty source tree; its exit codes below 8 are all success.
 :: ============================================
 :restore_bepinex_stash
-if not defined _BEP_STASH exit /b 0
+:: Resolve from the fixed path rather than the variable, so this still works
+:: on a later run whose _BEP_STASH was never set.
+set "_BEP_STASH=%GAME_PATH%\BepInEx-cul-stash"
 if not exist "!_BEP_STASH!" exit /b 0
 robocopy "!_BEP_STASH!" "%GAME_PATH%\BepInEx" /e /njh /njs /ndl /nfl /nc /ns >nul
 if errorlevel 8 (

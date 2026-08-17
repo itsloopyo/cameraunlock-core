@@ -547,11 +547,12 @@ function Invoke-DevDeployREFramework {
     exe directory, with first-install backup of any pre-existing file.
 .DESCRIPTION
     Shim mods replace a system DLL the game loads at startup
-    (xinput1_3.dll / dxgi.dll / winmm.dll / etc.). On first deploy, if
-    the target name already exists in the exe dir, back it up to
-    <name>.backup so uninstall can restore it. If it does NOT exist, a
-    <name>.nobackup sentinel records that, so a later deploy never mistakes
-    our own shim for the user's original.
+    (xinput1_3.dll / dxgi.dll / winmm.dll / etc.). If the target name
+    already exists in the exe dir and its bytes DIFFER from the shim about
+    to be written, it is the game's own file and is backed up to
+    <name>.backup so uninstall can restore it. If the bytes match, it is
+    this mod's shim from an earlier deploy and is left alone rather than
+    enshrined as "the original".
 
     For builds that emit a different filename than the deployed name
     (Rust/cargo crates often produce `<crate_name>.dll`, not the system
@@ -589,20 +590,38 @@ function Invoke-DevDeployShim {
     # to back up), deploy 2 sees the target present (it is OUR shim) with no
     # backup and copies the shim to <name>.backup; uninstall then "restores the
     # original", reinstalling the mod permanently and reporting success.
+    # Decided PER FILE by CONTENT, matching scripts/install-body-shim.cmd. The question
+    # that actually matters is "is the file already sitting there ours?", and comparing
+    # the bytes answers it directly - no sentinel to go stale.
+    #
+    # A sentinel file was tried and removed: nothing read or deleted it, so after a
+    # deploy/uninstall cycle it survived with the shim gone. If the user then installed
+    # something that legitimately owns that name (ReShade's dxgi.dll), the next deploy
+    # saw the stale sentinel, skipped the backup, and overwrote it with no way back.
     $allFiles = @($ModDllName) + $ExtraDlls
     foreach ($f in $allFiles) {
         $target = Join-Path $exeDir $f
         $backup = "$target.backup"
-        $noBackup = "$target.nobackup"
-        if ((Test-Path -LiteralPath $backup) -or (Test-Path -LiteralPath $noBackup)) {
-            continue
+
+        if (Test-Path -LiteralPath $backup) { continue }
+        if (-not (Test-Path -LiteralPath $target)) { continue }
+
+        # The source this deploy is about to write. $ModDllName is renamed from
+        # $SourceDllName; the extras keep their own names.
+        $sourceName = if ($f -eq $ModDllName) { $SourceDllName } else { $f }
+        $source = Join-Path $BuildOutputPath $sourceName
+
+        $isOurs = $false
+        if (Test-Path -LiteralPath $source) {
+            $isOurs = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -eq
+                      (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
         }
-        if (Test-Path -LiteralPath $target) {
+
+        if ($isOurs) {
+            Write-Host "  $f is already this mod's shim - not capturing it as an original" -ForegroundColor Gray
+        } else {
             Copy-Item -LiteralPath $target -Destination $backup -Force
             Write-Host "  Backed up original $f to $f.backup" -ForegroundColor Gray
-        } else {
-            [System.IO.File]::WriteAllText($noBackup, "The game shipped no $f before this mod was installed. Uninstall deletes $f rather than restoring a backup.`r`n")
-            Write-Host "  No pre-existing $f - recorded $f.nobackup" -ForegroundColor Gray
         }
     }
 

@@ -110,6 +110,15 @@ namespace CameraUnlock.Core.Unity.UI
                 return;
             }
 
+            // Put the surviving children back on their ORIGINALS before re-capturing.
+            // anchoredPosition currently reads original + offset, so capturing it as the
+            // new original folds one offset in permanently - and then clearing _isOffset
+            // discards the only record needed to undo it. A HUD element that toggles
+            // visibility (a damage flash, an ammo counter) changes childCount twice per
+            // appearance, so this accumulated on every toggle and walked the HUD off
+            // screen: exactly the unbounded drift this class exists to prevent.
+            Restore();
+
             _children.Clear();
             _originals.Clear();
             _canvasRect = canvasRectTransform;
