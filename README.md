@@ -130,6 +130,13 @@ TrackingProcessor Pipeline:
 Processed TrackingPose → Game patches
 ```
 
+Mods that cannot link this library and reimplement the pipeline instead (CET Lua,
+UE4SS Lua, Rust ASI, Python) do not receive fixes made here. The invariants such
+a port has to reproduce, each with a check that fails on the wrong
+implementation, are in [docs/porting-the-pipeline.md](docs/porting-the-pipeline.md).
+An audit of four independent ports found three had made the same angle-handling
+mistake, which is why that document exists.
+
 ## Unity Integration
 
 ### AimDecouplingState
