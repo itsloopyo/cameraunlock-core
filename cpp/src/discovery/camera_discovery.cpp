@@ -70,6 +70,14 @@ void CameraDiscovery::Log(const char* fmt, ...) {
 }
 
 void CameraDiscovery::Start(const DiscoveryConfig& config) {
+    // Must precede the state reset below. A run that reached Probing leaves the winning
+    // slot deliberately hooked, and RemoveProbeHooks recovers its targets from
+    // m_candidates - so clearing that list first strands the hooks permanently. The next
+    // camera update then enters ProbeDetour with s_originals[Slot] already nulled and
+    // calls through a null trampoline. Consumers rescan ~10s after a Failed, which is
+    // exactly the path that reaches this.
+    Cleanup();
+
     m_config = config;
     m_phase = Phase::FindingVtables;
     m_probeFrameCount = 0;
@@ -366,6 +374,17 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
 
     // Camera Euler angles are stored consecutively: roll, pitch, yaw
     // (or some permutation). Yaw is at yawOff. Pitch is at yawOff-4, roll at yawOff-8.
+    // yawOff is unsigned and the derived offsets walk backwards from it. Group offsets
+    // carry an 8-byte skip, so anything below that would put roll at or before offset 0 -
+    // the vtable pointer - and the mod would write head-tracking floats over it, taking
+    // out the next virtual call on the camera object. Below 8 it underflows outright and
+    // the write lands at inst-4.
+    if (yawOff < 2 * sizeof(float) + 8) {
+        Log("DISC: Yaw offset +0x%X too low to carry a preceding pitch/roll pair — failed",
+            (int)yawOff);
+        return Phase::Failed;
+    }
+
     size_t pitchOff = yawOff - sizeof(float);
     size_t rollOff  = yawOff - 2 * sizeof(float);
 

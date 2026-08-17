@@ -79,6 +79,10 @@ bool FindVtableFromTypeDescriptor(void* module, void* type_descriptor,
         info.vfunc_count = 0;
 
         for (int v = 0; v < max_vfuncs; v++) {
+            // The COL scan permits a match at the very end of the image, which puts
+            // vtable at base+modSize - so the first read is already past the mapping.
+            // The "is it a code address" test below only runs after the dereference.
+            if (vtable + (v + 1) * sizeof(uintptr_t) > codeEnd) break;
             uintptr_t funcAddr = *reinterpret_cast<const uintptr_t*>(vtable + v * sizeof(uintptr_t));
             // Valid code address: within the module
             if (funcAddr < codeStart || funcAddr >= codeEnd) break;

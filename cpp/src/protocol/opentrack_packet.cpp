@@ -11,6 +11,9 @@ namespace {
 // source double is not enough; the float result must also be finite. Packets
 // arrive from any host on the network (the socket binds INADDR_ANY), so this
 // is an untrusted-input boundary.
+// Matches OpenTrackPacket.CmToMeters on the C# side.
+constexpr float kCmToMeters = 0.01f;
+
 inline bool FiniteFloat(double v, float& out) {
     out = static_cast<float>(v);
     return std::isfinite(out);
@@ -51,12 +54,17 @@ bool OpenTrackPacket::TryParsePosition(const void* data, size_t length, Position
     std::memcpy(&pz, bytes + kPosZOffset, sizeof(double));
 
     // OpenTrack position is in centimeters, convert to meters.
+    // The finiteness gate is applied to the RAW double's narrowing, then the scale runs
+    // in float - matching OpenTrackPacket.cs, which validates IsFiniteAsFloat(x) before
+    // computing (float)x * CmToMeters. Scaling first in double instead let the whole band
+    // 3.4e38..3.4e40 cm through here while C# rejected it, so the same hostile datagram
+    // produced a 1e37 m position in native mods and no position at all in Unity mods.
     float fx, fy, fz;
-    if (!FiniteFloat(px * 0.01, fx) || !FiniteFloat(py * 0.01, fy) || !FiniteFloat(pz * 0.01, fz)) {
+    if (!FiniteFloat(px, fx) || !FiniteFloat(py, fy) || !FiniteFloat(pz, fz)) {
         return false;
     }
 
-    position = PositionData(fx, fy, fz);
+    position = PositionData(fx * kCmToMeters, fy * kCmToMeters, fz * kCmToMeters);
     return true;
 }
 
@@ -76,13 +84,14 @@ bool OpenTrackPacket::TryParseAll(const void* data, size_t length, TrackingPose&
     std::memcpy(&roll, bytes + kRollOffset, sizeof(double));
 
     float fyaw, fpitch, froll, fx, fy, fz;
+    // See TryParsePosition: validate the raw double's narrowing, scale in float.
     if (!FiniteFloat(yaw, fyaw) || !FiniteFloat(pitch, fpitch) || !FiniteFloat(roll, froll) ||
-        !FiniteFloat(px * 0.01, fx) || !FiniteFloat(py * 0.01, fy) || !FiniteFloat(pz * 0.01, fz)) {
+        !FiniteFloat(px, fx) || !FiniteFloat(py, fy) || !FiniteFloat(pz, fz)) {
         return false;
     }
 
     pose = TrackingPose(fyaw, fpitch, froll);
-    position = PositionData(fx, fy, fz);
+    position = PositionData(fx * kCmToMeters, fy * kCmToMeters, fz * kCmToMeters);
     return true;
 }
 

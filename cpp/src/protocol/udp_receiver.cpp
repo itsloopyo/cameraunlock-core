@@ -525,7 +525,7 @@ void UdpReceiver::ReceiverThread() {
             // the old session would swallow the first CENTER press of the new
             // one.
             int64_t prevTs = m_lastReceiveTimestamp.load(std::memory_order_relaxed);
-            if (prevTs != 0 && (nowUs - prevTs) / 1000 >= kConnectionTimeoutMs) {
+            if (prevTs != 0 && (nowUs - prevTs) / 1000 >= kRecenterRearmMs) {
                 m_hasRecenterCounter = false;
             }
 

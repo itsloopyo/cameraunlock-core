@@ -21,6 +21,10 @@ public:
     /// tolerate variable frame intervals in the game loop.
     static constexpr int kConnectionTimeoutMs = 1000;
 
+    // See UdpReceiver::kRecenterRearmMs - the trailer re-arm window is a wire-contract
+    // constant (~5s of silence), not the connection-liveness timeout.
+    static constexpr int kRecenterRearmMs = 5000;
+
     /// Maximum receive buffer size.
     static constexpr size_t kMaxBufferSize = 256;
 

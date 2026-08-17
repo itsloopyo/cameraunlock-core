@@ -23,6 +23,14 @@ public:
     /// Lower than PollingUdpReceiver (500 vs 1000) because the threaded receiver
     /// checks more frequently and can detect disconnects sooner.
     static constexpr int kConnectionTimeoutMs = 500;
+
+    // Separate from the connection-liveness timeout above. Re-arming trailer
+    // first-sighting is a wire-contract rule fixed at ~5s of packet silence (see
+    // AGENTS.md and OpenTrackReceiver.cs, which implements 50 x 100ms). Reusing the
+    // 500ms liveness value meant a routine Wi-Fi stall inside a recenter burst re-armed
+    // mid-burst, so the burst's tail - carrying the SAME counter - read as a second
+    // press and recentred on whatever pose the head had drifted to.
+    static constexpr int kRecenterRearmMs = 5000;
     /// How long the chosen tracker may go quiet before another sender is
     /// allowed to take over. Long enough that ordinary jitter or a dropped
     /// packet never hands control to a second app mid-session.

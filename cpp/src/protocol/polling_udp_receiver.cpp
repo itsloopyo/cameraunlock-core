@@ -58,7 +58,7 @@ bool PollingUdpReceiver::Poll() {
     // resets its counter to zero, so a value latched from the old session
     // would swallow the first CENTER press of the new one.
     if (m_lastReceiveTimeMs != 0 &&
-        GetCurrentTimeMs() - m_lastReceiveTimeMs >= kConnectionTimeoutMs) {
+        GetCurrentTimeMs() - m_lastReceiveTimeMs >= kRecenterRearmMs) {
         m_hasRecenterCounter = false;
     }
 
@@ -89,9 +89,21 @@ bool PollingUdpReceiver::Poll() {
             if (error == WSAEWOULDBLOCK) {
                 break;  // No more data available
             }
+            // The datagram was larger than m_receiveBuffer. It has already been consumed,
+            // so this is not the end of the queue: breaking here let one oversized packet
+            // from any LAN host discard every tracker packet still queued behind it.
+            // Counted so the kMaxPacketsPerFrame bound still advances.
+            if (error == WSAEMSGSIZE) {
+                packetsThisFrame++;
+                continue;
+            }
 #else
             if (errno == EWOULDBLOCK || errno == EAGAIN) {
                 break;  // No more data available
+            }
+            if (errno == EMSGSIZE) {
+                packetsThisFrame++;
+                continue;
             }
 #endif
             break;  // Other error
@@ -211,8 +223,18 @@ bool PollingUdpReceiver::GetPosition(float& x, float& y, float& z) const {
 }
 
 bool PollingUdpReceiver::ParsePacket(const char* buffer, int bytesReceived) {
-    // Checked per datagram, not just on the one Poll() keeps: a whole
-    // recenter burst can land inside a single game frame.
+    // Use shared OpenTrack packet parsing (rotation + position)
+    TrackingPose pose;
+    PositionData position;
+    if (!OpenTrackPacket::TryParseAll(buffer, static_cast<size_t>(bytesReceived), pose, position)) {
+        return false;
+    }
+
+    // Checked per datagram, not just on the one Poll() keeps: a whole recenter burst can
+    // land inside a single game frame. Gated on the parse above, because the trailer only
+    // means anything alongside the zeroed pose it rides with - honouring it on a packet
+    // whose pose was rejected centres on the PREVIOUS pose, i.e. the pre-press drift the
+    // tracker just cleared, which is the double-subtract failure by another route.
     uint8_t recenterCounter;
     if (OpenTrackPacket::TryParseRecenterCounter(buffer, static_cast<size_t>(bytesReceived), recenterCounter)) {
         if (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter) {
@@ -220,13 +242,6 @@ bool PollingUdpReceiver::ParsePacket(const char* buffer, int bytesReceived) {
         }
         m_lastRecenterCounter = recenterCounter;
         m_hasRecenterCounter = true;
-    }
-
-    // Use shared OpenTrack packet parsing (rotation + position)
-    TrackingPose pose;
-    PositionData position;
-    if (!OpenTrackPacket::TryParseAll(buffer, static_cast<size_t>(bytesReceived), pose, position)) {
-        return false;
     }
 
     m_yaw = pose.yaw;
