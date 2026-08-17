@@ -8,13 +8,22 @@ $ErrorActionPreference = "Stop"
 .SYNOPSIS
     Fast-forward the cameraunlock-core submodule to its origin/main tip.
 .DESCRIPTION
-    Called by Copy-SharedBundle by default so the templates / bodies /
-    games.json shipped in a release zip are always whatever's on the
-    cameraunlock-core main branch when the release is cut - regardless
-    of where the mod's submodule pointer was last bumped to. This is
-    the "single source of truth" guarantee: a body bug fix in
-    cameraunlock-core ships to a mod's users on that mod's next release
-    with no per-mod template re-syncing or submodule-pointer bumping.
+    OPT-IN. Call this deliberately, or pass -RefreshCore to Copy-SharedBundle.
+    It used to run on every Copy-SharedBundle, which meant `pixi run package`
+    silently moved the submodule working tree out from under the developer -
+    the packaged artifact was then built against a core commit the mod's
+    history does not record, and `git status` grew an unexplained
+    ` M cameraunlock-core` that a later scripted commit could sweep up.
+    Moving the pin is a decision with a commit attached, not a side effect of
+    packaging.
+
+    What that costs, stated plainly: the old default was a "single source of
+    truth" guarantee - a body or games.json fix in cameraunlock-core reached a
+    mod's users on that mod's next release with no pointer bump. That is gone.
+    A mod now ships whatever core commit it pins, so a stale pin ships a stale
+    bundle. Copy-SharedBundle therefore prints the core commit it bundled, and
+    warns when that commit is behind origin/main, so a stale bundle is loud
+    instead of silent.
 
     Locates the parent mod repo by walking one level up from CoreRoot
     (the standard layout is <mod>/cameraunlock-core/) and runs
@@ -75,18 +84,45 @@ function Update-CameraUnlockCoreToRemoteTip {
     Optional path to the cameraunlock-core checkout. Defaults to the
     checkout this module lives in.
 #>
+# Reports which cameraunlock-core commit the shared bundle is being copied from,
+# and whether it is behind origin/main. Advisory only - it never fetches and never
+# fails the packaging run, because a release must not depend on network reachability.
+function Write-CoreBundleProvenance {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$CoreRoot)
+
+    $head = & git -C $CoreRoot rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $head) {
+        Write-Host "  Shared bundle: cameraunlock-core commit unknown (not a git checkout)." -ForegroundColor DarkYellow
+        return
+    }
+    Write-Host "  Shared bundle from cameraunlock-core $head" -ForegroundColor Gray
+
+    # No fetch: report against whatever origin/main this checkout already knows.
+    $behind = & git -C $CoreRoot rev-list --count "HEAD..origin/main" 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $behind) { return }
+    if ([int]$behind -gt 0) {
+        Write-Warning "cameraunlock-core is $behind commit(s) behind the origin/main it last saw, so this release ships an older shared bundle (install/uninstall bodies, find-game.ps1, games.json). If that is not deliberate, bump the submodule and commit the pointer before releasing."
+    }
+}
+
 function Copy-SharedBundle {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)][string]$StagingDir,
         [string]$CoreRoot,
-        # Skip pulling cameraunlock-core to its remote tip before copying.
-        # Default behaviour fast-forwards the submodule so the bodies /
-        # find-game.ps1 / games.json shipped in the release zip are
-        # always whatever is on cameraunlock-core's main branch at
-        # release time. Pass -NoRefresh in CI flows that have already
-        # synced the submodule themselves, or during local iteration
-        # when you're testing against a deliberately-pinned core.
+        # Opt in to fast-forwarding cameraunlock-core to origin/main before
+        # copying. OFF by default: packaging must not move the submodule the
+        # build just used, because the artifact would then be built against a
+        # commit the mod's history does not record. Bumping the pin is a
+        # deliberate act with a commit attached - run
+        # Update-CameraUnlockCoreToRemoteTip, or `git submodule update --remote`,
+        # and commit the pointer.
+        [switch]$RefreshCore,
+        # Deprecated and now redundant: not refreshing IS the default. Kept
+        # because most of the fleet's package-release.ps1 passes it, and
+        # removing a parameter breaks those callers for no gain. Accepted and
+        # ignored; it will be removed in a future major version.
         [switch]$NoRefresh
     )
 
@@ -96,9 +132,17 @@ function Copy-SharedBundle {
         $CoreRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
     }
 
-    if (-not $NoRefresh) {
+    if ($RefreshCore -and $NoRefresh) {
+        throw "Copy-SharedBundle: -RefreshCore and -NoRefresh contradict each other. -NoRefresh is the default and deprecated; drop it and pass -RefreshCore only if you mean to move the submodule pointer."
+    }
+    if ($RefreshCore) {
         Update-CameraUnlockCoreToRemoteTip -CoreRoot $CoreRoot
     }
+
+    # Provenance, always. The bundle below is copied out of whatever core commit
+    # is checked out right now, and since that is no longer force-refreshed, the
+    # packager is the only place a stale pin can be caught before users get it.
+    Write-CoreBundleProvenance -CoreRoot $CoreRoot
 
     # install-body-* and uninstall-body are the per-strategy script bodies
     # used by thin per-mod wrapper install.cmd / uninstall.cmd files. Every
@@ -701,6 +745,7 @@ function Set-CsprojVersion {
 # Export functions
 Export-ModuleMember -Function @(
     'Update-CameraUnlockCoreToRemoteTip',
+    'Write-CoreBundleProvenance',
     'Copy-SharedBundle',
     'Test-SemanticVersion',
     'Step-SemanticVersion',
