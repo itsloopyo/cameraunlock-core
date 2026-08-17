@@ -269,6 +269,12 @@ function Test-FrameworkInstalledByUs {
 .PARAMETER Force
     Delete without the ownership check. Only for callers that already know
     the doorstop is theirs.
+.NOTES
+    Deprecated, and unexercised. Nothing in the fleet reaches this: the only
+    caller is Invoke-DevDeployCecil's -CleanDoorstop switch, which is off by
+    default and which no mod repo passes. Kept because it is exported public
+    API - removal is a major bump - but treat its behaviour as untested and do
+    not build anything new on it.
 .OUTPUTS
     Array of removed file names.
 #>

@@ -338,7 +338,19 @@ function New-ScreenCenterPatcher {
 
     # One type per marker, so two markers in one session don't collide. A type
     # can't be unloaded, so the name has to differ, not just the cache key.
-    $typeName = 'ScreenCenterPatcher_' + ($PatchMarker -replace '[^A-Za-z0-9_]', '_')
+    #
+    # The hash suffix is what actually makes that true. Sanitising alone is not
+    # injective - "cul.center" and "cul-center" both flatten to
+    # ScreenCenterPatcher_cul_center - and because the lookup below reuses any
+    # type it finds BY NAME, the second marker silently got a patcher hard-coded
+    # with the first marker's string. The marker is the only thing preventing a
+    # double patch, so that means re-patching an assembly that was already done,
+    # or skipping one that was not.
+    $markerBytes = [System.Text.Encoding]::UTF8.GetBytes($PatchMarker)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $markerHash = $sha.ComputeHash($markerBytes) } finally { $sha.Dispose() }
+    $suffix = -join ($markerHash[0..3] | ForEach-Object { '{0:x2}' -f $_ })
+    $typeName = 'ScreenCenterPatcher_' + ($PatchMarker -replace '[^A-Za-z0-9_]', '_') + '_' + $suffix
     $code = Get-ScreenCenterPatcherCode -PatchMarker $PatchMarker -TypeName $typeName
 
     # GetTypes() throws ReflectionTypeLoadException on any assembly whose
