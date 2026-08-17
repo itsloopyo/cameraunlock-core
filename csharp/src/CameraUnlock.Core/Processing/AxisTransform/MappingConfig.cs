@@ -30,20 +30,17 @@ namespace CameraUnlock.Core.Processing.AxisTransform
         {
             YawConfig = new AxisConfig
             {
-                Source = AxisSource.Yaw,
-                Target = TargetAxis.Yaw
+                Source = AxisSource.Yaw
             };
 
             PitchConfig = new AxisConfig
             {
-                Source = AxisSource.Pitch,
-                Target = TargetAxis.Pitch
+                Source = AxisSource.Pitch
             };
 
             RollConfig = new AxisConfig
             {
-                Source = AxisSource.Roll,
-                Target = TargetAxis.Roll
+                Source = AxisSource.Roll
             };
         }
 
@@ -164,21 +161,18 @@ namespace CameraUnlock.Core.Processing.AxisTransform
             YawConfig = new AxisConfig
             {
                 Source = AxisSource.Yaw,
-                Target = TargetAxis.Yaw,
                 Sensitivity = 1.0f
             };
 
             PitchConfig = new AxisConfig
             {
                 Source = AxisSource.Pitch,
-                Target = TargetAxis.Pitch,
                 Sensitivity = 1.0f
             };
 
             RollConfig = new AxisConfig
             {
                 Source = AxisSource.Roll,
-                Target = TargetAxis.Roll,
                 Sensitivity = 1.0f
             };
         }
@@ -200,9 +194,9 @@ namespace CameraUnlock.Core.Processing.AxisTransform
         {
             return new MappingConfig
             {
-                YawConfig = YawConfig?.Clone() ?? new AxisConfig { Source = AxisSource.Yaw, Target = TargetAxis.Yaw },
-                PitchConfig = PitchConfig?.Clone() ?? new AxisConfig { Source = AxisSource.Pitch, Target = TargetAxis.Pitch },
-                RollConfig = RollConfig?.Clone() ?? new AxisConfig { Source = AxisSource.Roll, Target = TargetAxis.Roll }
+                YawConfig = YawConfig?.Clone() ?? new AxisConfig { Source = AxisSource.Yaw },
+                PitchConfig = PitchConfig?.Clone() ?? new AxisConfig { Source = AxisSource.Pitch },
+                RollConfig = RollConfig?.Clone() ?? new AxisConfig { Source = AxisSource.Roll }
             };
         }
     }

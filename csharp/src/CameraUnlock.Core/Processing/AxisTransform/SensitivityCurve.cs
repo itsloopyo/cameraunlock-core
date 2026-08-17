@@ -28,7 +28,7 @@ namespace CameraUnlock.Core.Processing.AxisTransform
         Cubic,
 
         /// <summary>
-        /// Exponential response ((e^x - 1)/(e^2 - 1)). Aggressive acceleration.
+        /// Exponential response ((e^(2x) - 1)/(e^2 - 1)). Aggressive acceleration.
         /// </summary>
         Exponential,
 
