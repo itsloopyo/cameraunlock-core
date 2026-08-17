@@ -482,11 +482,18 @@ function New-ChangelogFromCommits {
         $newEntry += ($other -join "`n") + "`n`n"
     }
 
+    # $newEntry is built from raw commit subjects and is about to be used as a -replace
+    # REPLACEMENT string, where .NET expands $_, $&, $1, $` and $'. A commit subject like
+    # "fix: use $_ instead of $PSItem" would otherwise splice the entire existing
+    # changelog into the new entry, and that gets committed and shipped as the release
+    # body. Doubling every $ makes the regex engine emit it literally.
+    $safeEntry = $newEntry -replace '\$', '$$$$'
+
     # Insert new entry after header
     if ($changelog -match '(?s)(# Changelog.*?)(## \[)') {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$newEntry"
+        $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$safeEntry"
     } else {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$newEntry"
+        $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$safeEntry"
     }
 
     $changelog = $changelog.TrimEnd() + "`n"
@@ -633,7 +640,10 @@ function Get-CsprojVersion {
 
     $content = Get-Content $CsprojPath -Raw
     if ($content -match '<Version>([^<]+)</Version>') {
-        return $matches[1]
+        # Trimmed: a pretty-printed <Version> element puts newlines and indentation in
+        # the capture, and the CI gate compares it to the git tag with -ne. That fails
+        # with both sides printing an identical-looking version and no visible cause.
+        return $matches[1].Trim()
     }
 
     throw "No <Version> element found in $CsprojPath"

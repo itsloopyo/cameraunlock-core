@@ -84,6 +84,69 @@ function Get-SoakEligibilityDetail {
     return " Newest match '$($NewestRelease.tag_name)' was published $($published.ToString('yyyy-MM-dd')) and becomes usable on $($published.AddDays($MinimumAgeDays).ToString('yyyy-MM-dd'))."
 }
 
+# ConvertFrom-Json -AsHashtable is PowerShell 6+. Every install-time entry point in
+# this repo runs Windows PowerShell 5.1 (pixi.toml and all the install-body-*.cmd
+# wrappers invoke `powershell`, not `pwsh`), where the parameter does not exist. The
+# resulting parameter-binding error was caught by the surrounding handlers and
+# re-reported as "State file is corrupt: delete it manually and re-run" - telling the
+# user to destroy a perfectly valid file, and taking the installed_by_us bookkeeping
+# that uninstall depends on with it.
+function ConvertTo-HashtableRecursive {
+    param($InputObject)
+
+    if ($null -eq $InputObject) { return $null }
+
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $hash = @{}
+        foreach ($prop in $InputObject.PSObject.Properties) {
+            $hash[$prop.Name] = ConvertTo-HashtableRecursive $prop.Value
+        }
+        return $hash
+    }
+
+    if ($InputObject -is [object[]]) {
+        $list = @()
+        foreach ($item in $InputObject) { $list += ,(ConvertTo-HashtableRecursive $item) }
+        return ,$list
+    }
+
+    return $InputObject
+}
+
+function ConvertFrom-JsonToHashtable {
+    param(
+        [Parameter(Mandatory=$true)]
+        [AllowEmptyString()]
+        [string]$Json
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Json)) { return @{} }
+    return ConvertTo-HashtableRecursive ($Json | ConvertFrom-Json)
+}
+
+function New-DownloadRequestHeaders {
+    <#
+    .SYNOPSIS
+        Headers for fetching a FILE, deliberately without the GitHub token.
+    .DESCRIPTION
+        Never attach the Authorization header to a file download. Two reasons:
+
+        - DirectUrl mode is documented for non-GitHub sources (Thunderstore), so a dev
+          with GH_TOKEN exported would send their PAT to an unrelated host.
+        - A browser_download_url 302s to objects.githubusercontent.com, which is
+          presigned. Windows PowerShell 5.1 re-sends caller headers across the redirect,
+          so S3 sees two auth mechanisms and answers 400 - a failure that vanishes when
+          the dev unsets the variable, which makes it very hard to diagnose.
+
+        Use New-GitHubRequestHeaders for api.github.com calls only.
+    #>
+    param(
+        [string]$UserAgent = "CameraUnlock-HeadTracking"
+    )
+
+    return @{ "User-Agent" = $UserAgent }
+}
+
 function New-GitHubRequestHeaders {
     param(
         [string]$UserAgent = "CameraUnlock-HeadTracking",
@@ -404,7 +467,7 @@ Enabled = true
     # Merge with existing state if present
     if (Test-Path $stateFile) {
         try {
-            $existingState = Get-Content $stateFile -Raw | ConvertFrom-Json -AsHashtable
+            $existingState = ConvertFrom-JsonToHashtable (Get-Content $stateFile -Raw)
             foreach ($key in $existingState.Keys) {
                 if ($key -ne 'framework') {
                     $state[$key] = $existingState[$key]
@@ -509,7 +572,7 @@ function Install-MelonLoader {
     # Merge with existing state if present
     if (Test-Path $stateFile) {
         try {
-            $existingState = Get-Content $stateFile -Raw | ConvertFrom-Json -AsHashtable
+            $existingState = ConvertFrom-JsonToHashtable (Get-Content $stateFile -Raw)
             foreach ($key in $existingState.Keys) {
                 if ($key -ne 'framework') {
                     $state[$key] = $existingState[$key]
@@ -561,7 +624,7 @@ function Get-ModLoaderState {
     }
 
     try {
-        return Get-Content $stateFile -Raw | ConvertFrom-Json -AsHashtable
+        return ConvertFrom-JsonToHashtable (Get-Content $stateFile -Raw)
     } catch {
         throw "State file is corrupt: $stateFile - delete it manually and re-run. Parse error: $_"
     }
@@ -925,7 +988,7 @@ function Install-UE4SS {
 
     if (Test-Path $stateFile) {
         try {
-            $existingState = Get-Content $stateFile -Raw | ConvertFrom-Json -AsHashtable
+            $existingState = ConvertFrom-JsonToHashtable (Get-Content $stateFile -Raw)
             foreach ($key in $existingState.Keys) {
                 if ($key -ne 'framework') {
                     $state[$key] = $existingState[$key]
@@ -1055,7 +1118,7 @@ function Invoke-FetchLatestLoader {
     }
 
     if ($DirectUrl) {
-        Invoke-WebRequest -Uri $DirectUrl -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers $headers
+        Invoke-WebRequest -Uri $DirectUrl -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
         $sha = (Get-FileHash -Path $OutputPath -Algorithm SHA256).Hash.ToLower()
         return @{
             Tag = ''
@@ -1108,7 +1171,7 @@ function Invoke-FetchLatestLoader {
         throw "No release in the matching set has an asset matching regex '$AssetPattern' (scanned $($matching.Count) releases)."
     }
 
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers $headers
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
 
     $sha = (Get-FileHash -Path $OutputPath -Algorithm SHA256).Hash.ToLower()
 
@@ -1251,7 +1314,7 @@ function Update-VendoredLoader {
         try {
             $headers = New-GitHubRequestHeaders -AdditionalHeaders @{ "Accept" = "application/vnd.github.raw" }
             $licenseUrl = "https://raw.githubusercontent.com/$Owner/$Repo/$($meta.Tag)/$LicenseName"
-            Invoke-WebRequest -Uri $licenseUrl -OutFile $licensePath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers $headers
+            Invoke-WebRequest -Uri $licenseUrl -OutFile $licensePath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
             $extractedLicense = $true
         } catch {
             # Try API fallback

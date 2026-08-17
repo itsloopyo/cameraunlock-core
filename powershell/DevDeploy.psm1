@@ -182,7 +182,7 @@ function Invoke-DevDeployCecil {
             if (Test-FileContainsMarker -FilePath $backupFile -Marker $PatchMarker) {
                 if ($Unpatcher) {
                     Write-Host "  Existing .original is patched (corrupt backup) - repairing via unpatch..." -ForegroundColor Yellow
-                    & $Unpatcher $backupFile
+                    & $Unpatcher $backupFile | Out-Null
                     if (Test-FileContainsMarker -FilePath $backupFile -Marker $PatchMarker) {
                         throw "Unpatch did not clean $AssemblyDll.original; refusing to keep a corrupt backup. Verify game files via Steam."
                     }
@@ -193,7 +193,7 @@ function Invoke-DevDeployCecil {
         } elseif (Test-FileContainsMarker -FilePath $assemblyPath -Marker $PatchMarker) {
             if ($Unpatcher) {
                 Write-Host "  $AssemblyDll is patched but has no .original - reconstructing a clean baseline via unpatch..." -ForegroundColor Yellow
-                & $Unpatcher $assemblyPath
+                & $Unpatcher $assemblyPath | Out-Null
                 if (Test-FileContainsMarker -FilePath $assemblyPath -Marker $PatchMarker) {
                     throw "Unpatch did not clean $AssemblyDll; cannot establish a pristine baseline. Verify game files via Steam."
                 }
@@ -208,7 +208,11 @@ function Invoke-DevDeployCecil {
         Restore-FileFromBackup -FilePath $assemblyPath | Out-Null
     }
 
-    & $Patcher $assemblyPath
+    # Out-Null, or the scriptblock's return value joins this function's output stream
+    # and the documented Hashtable return becomes an array. The canonical patcher in
+    # this repo, Invoke-HeadTrackingPatch, always returns $results - so the obvious
+    # wrapper made $r.DeployedDllPath null for every caller.
+    & $Patcher $assemblyPath | Out-Null
 
     $removedFiles = @(Remove-OldDoorstopFiles -GamePath $gamePath)
     if ($removedFiles.Count -gt 0) {

@@ -175,8 +175,12 @@ function Publish-NightlyBuild {
             --notes $notes
         if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)" }
 
-        $repo = (& gh repo view --json nameWithOwner --jq .nameWithOwner 2>$null).Trim()
-        if (-not $repo) { $repo = '<owner>/<repo>' }
+        # .Trim() on the command output directly makes the fallback below unreachable:
+        # a failed `gh repo view` emits nothing and $null.Trim() throws. The release has
+        # already been published by this point, so the throw skipped the Discord announce
+        # entirely - exactly the silent-no-announce case the webhook guard exists for.
+        $repoRaw = & gh repo view --json nameWithOwner --jq .nameWithOwner 2>$null
+        $repo = if ($repoRaw) { ([string]$repoRaw).Trim() } else { '<owner>/<repo>' }
     } finally {
         $ErrorActionPreference = $prevEAP
         Pop-Location
