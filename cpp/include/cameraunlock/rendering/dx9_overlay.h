@@ -115,6 +115,7 @@ private:
 #include <MinHook.h>
 #include <Windows.h>
 #include <cmath>
+#include <memory>
 #include <mutex>
 
 #pragma comment(lib, "d3d9.lib")
@@ -198,7 +199,13 @@ struct DX9State {
     // The callback is assigned from the mod thread and invoked from the render
     // thread; a settings hot-reload that re-registers it would otherwise tear
     // the std::function under RenderFrame.
-    DX9RenderCallback callback;
+    // Held by shared_ptr so RenderFrame copies a refcount rather than the
+    // functor. Copying a std::function allocates whenever its target exceeds the
+    // small-object buffer, which any lambda capturing more than a pointer or two
+    // does - that was a heap allocation per frame on the render thread, inside a
+    // hooked Present. Replacing the pointer also keeps an in-flight invocation's
+    // target alive, which is what the copy was really for.
+    std::shared_ptr<const DX9RenderCallback> callback;
     std::mutex        callbackMutex;
     DX9LogFn          logFn = nullptr;
     DX9DeviceReadyFn  deviceReadyFn = nullptr;
@@ -218,18 +225,18 @@ inline void Log(const char* msg) {
 inline void RenderFrame(IDirect3DDevice9* dev) {
     auto& s = State();
 
-    DX9RenderCallback callback;
+    std::shared_ptr<const DX9RenderCallback> callback;
     {
         std::lock_guard<std::mutex> lock(s.callbackMutex);
         callback = s.callback;
     }
-    if (!callback) return;
+    if (!callback || !*callback) return;
 
     D3DVIEWPORT9 vp = {};
     if (FAILED(dev->GetViewport(&vp)) || vp.Width == 0 || vp.Height == 0) return;
 
     DX9DrawContext dc(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
-    callback(dc);
+    (*callback)(dc);
     const auto& verts = dc.TriVerts();
     if (verts.empty()) return;
 
@@ -336,15 +343,15 @@ inline void SetDX9DeviceReadyCallback(DX9DeviceReadyFn fn) { detail::State().dev
 inline bool DX9Overlay::Install() {
     auto& s = detail::State();
     if (s.hookInstalled) {
-        // The hooks are process-wide, but the callback and m_hookInstalled are
-        // per instance: without claiming both here this instance never renders,
-        // and its destructor would not know it owns anything.
-        {
-            std::lock_guard<std::mutex> lock(s.callbackMutex);
-            s.callback = m_callback;
-        }
-        m_hookInstalled = true;
-        return true;
+        // Refused, not silently taken over. The hooks and the callback slot are
+        // process-wide but there is exactly one of each, so a second instance
+        // claiming them evicts the first: the live overlay stops rendering, and
+        // whichever instance is destroyed FIRST tears down the hooks and D3D
+        // resources out from under the other. Returning true here also told the
+        // caller it had a working overlay when it had stolen someone else's.
+        detail::Log("dx9_overlay: Install refused, another DX9Overlay in this "
+                    "module already owns the hooks");
+        return false;
     }
 
     // Direct3DCreate9 returns only the IDirect3D9 factory (no device, no adapter
@@ -371,7 +378,7 @@ inline bool DX9Overlay::Install() {
 
     {
         std::lock_guard<std::mutex> lock(s.callbackMutex);
-        s.callback = m_callback;
+        s.callback = std::make_shared<const DX9RenderCallback>(m_callback);
     }
     s.hookInstalled = true;
     m_hookInstalled = true;
@@ -413,7 +420,7 @@ inline void DX9Overlay::SetRenderCallback(DX9RenderCallback cb) {
     m_callback = cb;
     auto& s = detail::State();
     std::lock_guard<std::mutex> lock(s.callbackMutex);
-    s.callback = std::move(cb);
+    s.callback = std::make_shared<const DX9RenderCallback>(std::move(cb));
 }
 
 #endif // CAMERAUNLOCK_DX9_OVERLAY_IMPLEMENTATION

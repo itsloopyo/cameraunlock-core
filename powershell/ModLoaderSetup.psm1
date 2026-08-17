@@ -784,20 +784,29 @@ function Find-UE4BinariesPath {
         return $standardPath
     }
 
-    # Some games use Engine/Binaries/Win64
-    $enginePath = Join-Path $GamePath "Engine\Binaries\Win64"
-    if (Test-Path -LiteralPath $enginePath) {
-        return $enginePath
-    }
-
-    # Fallback: <project>\Binaries\Win64 for a project folder we couldn't guess
-    # the name of. Bounded to that one shape - a -Recurse walk of an installed UE
-    # game is tens of GB and minutes of wall time before it can return $null.
+    # <project>\Binaries\Win64 where the project folder is not named after the
+    # install folder - Palworld ships "Pal", Hogwarts Legacy ships "Phoenix".
+    # Bounded to that one shape: a -Recurse walk of an installed UE game is tens
+    # of GB and minutes of wall time before it can return $null.
+    #
+    # This runs BEFORE the Engine fallback, and Engine is excluded from it. Every
+    # UE install ships Engine\Binaries\Win64, so checking it first meant every
+    # game with a non-matching project name resolved to the engine's tool folder
+    # (CrashReportClient and friends) instead of the one holding the game exe -
+    # and UE4SS only loads from the latter, because that is where dwmapi.dll has
+    # to sit.
     foreach ($candidate in @(Get-ChildItem -LiteralPath $GamePath -Directory -ErrorAction SilentlyContinue)) {
+        if ($candidate.Name -eq 'Engine') { continue }
         $win64 = Join-Path $candidate.FullName 'Binaries\Win64'
         if ((Test-Path -LiteralPath $win64) -and (Get-ChildItem -LiteralPath $win64 -Filter '*.exe' -ErrorAction SilentlyContinue)) {
             return $win64
         }
+    }
+
+    # Last resort only, for the rare layout that really does run out of Engine.
+    $enginePath = Join-Path $GamePath "Engine\Binaries\Win64"
+    if (Test-Path -LiteralPath $enginePath) {
+        return $enginePath
     }
 
     return $null

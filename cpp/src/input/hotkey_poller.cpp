@@ -18,7 +18,7 @@ HotkeyPoller::~HotkeyPoller() {
 // handed over: it is stopped on the source and restarted on the destination.
 // Without the restart, a poller moved into a container silently stopped firing
 // hotkeys.
-HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) noexcept {
+HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) {
     const bool wasRunning = other.m_running.load();
     const int interval = other.m_pollInterval.load();
     other.Stop();
@@ -38,7 +38,7 @@ HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) noexcept {
     if (wasRunning) Start(interval);
 }
 
-HotkeyPoller& HotkeyPoller::operator=(HotkeyPoller&& other) noexcept {
+HotkeyPoller& HotkeyPoller::operator=(HotkeyPoller&& other) {
     if (this != &other) {
         const bool wasRunning = other.m_running.load();
         const int interval = other.m_pollInterval.load();

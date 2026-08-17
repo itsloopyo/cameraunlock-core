@@ -37,13 +37,31 @@ if (Test-Path "RELEASE_NOTES.md") {
 # Temporarily allow errors so git describe doesn't throw when there are no tags:
 # under ErrorActionPreference=Stop, PowerShell 5.1 wraps the redirected stderr as
 # a NativeCommandError and terminates before the first-release branch below runs.
+function Write-NotesFile {
+    param([string]$Path, [string]$Text)
+
+    # Written through .NET rather than Out-File/Set-Content because neither gives
+    # BOM-less UTF-8 on Windows PowerShell 5.1: -Encoding utf8 there means UTF-8
+    # WITH a BOM, and the notes file is handed straight to `gh release create
+    # --notes-file`, so the BOM renders as a literal "" at the top of the
+    # published release body. Set-Content with no -Encoding is worse - it writes
+    # the system ANSI codepage, mangling any non-ASCII character in a commit
+    # subject.
+    #
+    # The path is resolved through the provider: [IO.File] resolves a relative
+    # path against [Environment]::CurrentDirectory, which does not follow
+    # Set-Location.
+    $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    [System.IO.File]::WriteAllText($full, $Text, (New-Object System.Text.UTF8Encoding $false))
+}
+
 $prevPref = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 $previousTag = git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>$null
 $ErrorActionPreference = $prevPref
 if ($LASTEXITCODE -ne 0) {
     # First release - use all commits
-    "First release." | Set-Content $OutputFile
+    Write-NotesFile -Path $OutputFile -Text "First release."
     Write-Host "First release - no previous tags found" -ForegroundColor Cyan
     Get-Content $OutputFile
     exit 0
@@ -82,6 +100,6 @@ if ($filtered.Count -eq 0) {
 $commitList = $filtered -join "`n"
 $notes = "## What's Changed in v$Version`n`n$commitList"
 
-$notes | Out-File -FilePath $OutputFile -Encoding utf8
+Write-NotesFile -Path $OutputFile -Text $notes
 Write-Host "`nRelease notes:" -ForegroundColor Green
 Get-Content $OutputFile

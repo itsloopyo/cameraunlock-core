@@ -27,8 +27,16 @@ public:
     // bound to the source's this-pointer, so it is stopped there and a fresh
     // one is started here. Key edge states reset in the process, so a key held
     // down across the move fires again on its next press, not immediately.
-    HotkeyPoller(HotkeyPoller&& other) noexcept;
-    HotkeyPoller& operator=(HotkeyPoller&& other) noexcept;
+    //
+    // Deliberately NOT noexcept. Restarting the thread constructs a
+    // std::thread, which throws std::system_error when the process cannot spawn
+    // one, and throwing out of a noexcept function calls std::terminate - the
+    // game dies outright with no diagnostic. Moving a poller is not on any hot
+    // path, so propagating is strictly better than terminating. Both stay
+    // usable for std::vector: move_if_noexcept picks the move anyway, because
+    // the type is non-copyable.
+    HotkeyPoller(HotkeyPoller&& other);
+    HotkeyPoller& operator=(HotkeyPoller&& other);
 
     // Set the toggle key and callback
     // vkCode: Windows virtual key code (e.g., VK_F10 = 0x79)

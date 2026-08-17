@@ -121,7 +121,13 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            _staticPreCullCallback(cam);
+            // Null-conditional for the same reason the class exists at all. Unity
+            // snapshots the multicast invocation list before dispatching, so a
+            // subscriber earlier in the list that calls ForceCleanupAll (public, and
+            // documented for exactly the unhandled-exception case) nulls this while
+            // our wrapper is still in the snapshot. Throwing here would abort the
+            // rest of the invocation and take every other mod's camera hook with it.
+            _staticPreCullCallback?.Invoke(cam);
         }
 
         private static void ClearPreCull()
@@ -194,7 +200,7 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            _staticPreRenderCallback(cam);
+            _staticPreRenderCallback?.Invoke(cam);
         }
 
         private static void ClearPreRender()

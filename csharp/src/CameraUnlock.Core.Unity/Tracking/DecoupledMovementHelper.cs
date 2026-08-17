@@ -26,6 +26,12 @@ namespace CameraUnlock.Core.Unity.Tracking
     /// Euler getter is not round-trip stable: near a vertical look it can return (91, 180, 180)
     /// for the rotation that read as (89, 0, 0) a frame earlier, and writing that back with a
     /// new yaw snaps the camera through a 180 degree roll it can then latch in.
+    ///
+    /// Migrating is not a drop-in substitution. The deprecated overloads REPLACE the camera's
+    /// local yaw; the replacements COMPOSE with it. They agree only when the clean rotation
+    /// has no yaw of its own. If the game keeps local yaw on the camera (recoil, lean, weapon
+    /// sway), the replacements preserve it - usually what you want, but it is a behaviour
+    /// change. Pass a yaw-free clean rotation to reproduce the old semantics exactly.
     /// </summary>
     public static class DecoupledMovementHelper
     {
@@ -74,7 +80,8 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <param name="playerBodyTransform">The player body transform (parent, controls movement direction).</param>
         /// <param name="cameraTransform">The camera transform (child, controls view direction).</param>
         /// <param name="cleanCameraLocalRotation">The camera's local rotation with no tracking yaw
-        /// applied - what the game's own pitch system produced this frame.</param>
+        /// applied - what the game's own pitch system produced this frame. Any yaw this rotation
+        /// carries is composed with, not replaced; the deprecated Euler overload replaced it.</param>
         /// <param name="pureAimYaw">The pure aim yaw from mouse/gamepad input (degrees, 0-360).</param>
         /// <param name="trackingYaw">Head tracking yaw in degrees.</param>
         /// <param name="trackingPitch">Head tracking pitch in degrees.</param>
@@ -147,7 +154,8 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         /// <param name="playerBodyTransform">The player body transform.</param>
         /// <param name="cameraTransform">The camera transform.</param>
-        /// <param name="cleanCameraLocalRotation">The camera's local rotation with no tracking yaw applied.</param>
+        /// <param name="cleanCameraLocalRotation">The camera's local rotation with no tracking yaw
+        /// applied. Any yaw it carries is composed with, not replaced.</param>
         /// <param name="pureAimYaw">The pure aim yaw from mouse/gamepad input (degrees, 0-360).</param>
         /// <param name="lastTrackingYaw">The last tracking yaw that was applied.</param>
         /// <param name="lastTrackingPitch">The last tracking pitch that was applied.</param>
@@ -199,7 +207,9 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         /// <param name="cameraTransform">The camera transform.</param>
         /// <param name="playerBodyTransform">The player body transform (to ensure camera is different).</param>
-        /// <param name="cleanCameraLocalRotation">The camera's local rotation with no tracking yaw applied.</param>
+        /// <param name="cleanCameraLocalRotation">The camera's local rotation with no tracking yaw
+        /// applied. Restoring it leaves any yaw it carries intact, where the deprecated overload
+        /// forced the camera's local yaw to zero.</param>
         public static void ResetCameraYawOffset(
             Transform cameraTransform,
             Transform playerBodyTransform,
@@ -235,9 +245,17 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            // Unity's Euler(x, y, z) is Qy * Qx * Qz, so replacing the yaw component of a
-            // pitch/roll rotation is a LEFT multiplication by the yaw - the same result the
-            // Euler substitution produced, without ever reading a rotation back as Euler.
+            // Unity's Euler(x, y, z) is Qy * Qx * Qz, so a left multiplication by the yaw
+            // is what the Euler substitution was reaching for - without ever reading a
+            // rotation back as Euler.
+            //
+            // It is NOT identical, and the difference is the one thing to know when
+            // migrating. Writing Euler(ex, yaw, ez) yields Ry(yaw) * Rx * Rz, so it
+            // REPLACES whatever yaw the camera's local rotation carried. This composes:
+            // for a clean rotation of Ry(gy) * Rx * Rz it yields Ry(yaw + gy) * Rx * Rz,
+            // preserving the game's own local yaw (recoil, lean, weapon sway) instead of
+            // destroying it. The two agree exactly when the clean rotation has no yaw of
+            // its own, which is the common case and the one the parameter asks for.
             cameraTransform.localRotation =
                 Quaternion.AngleAxis(yaw, Vector3.up) * cleanCameraLocalRotation;
         }

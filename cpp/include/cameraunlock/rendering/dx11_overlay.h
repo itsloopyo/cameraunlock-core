@@ -106,6 +106,7 @@ private:
 #include <Windows.h>
 #include <cstring>
 #include <cmath>
+#include <memory>
 #include <mutex>
 
 #pragma comment(lib, "d3d11.lib")
@@ -205,7 +206,13 @@ struct OverlayState {
     // The callback is assigned from the mod thread and invoked from the render
     // thread; a settings hot-reload that re-registers it would otherwise tear
     // the std::function under RenderFrame.
-    DX11RenderCallback callback;
+    // Held by shared_ptr so RenderFrame copies a refcount rather than the
+    // functor. Copying a std::function allocates whenever its target exceeds the
+    // small-object buffer, which any lambda capturing more than a pointer or two
+    // does - that was a heap allocation per frame on the render thread, inside a
+    // hooked Present. Replacing the pointer also keeps an in-flight invocation's
+    // target alive, which is what the copy was really for.
+    std::shared_ptr<const DX11RenderCallback> callback;
     std::mutex         callbackMutex;
     DX11LogFn          logFn = nullptr;
     bool               firstPresentLogged = false;
@@ -464,15 +471,15 @@ inline void RenderFrame() {
     if (!s.initialized) return;
     if (s.backbufferW == 0 || s.backbufferH == 0) return;
 
-    DX11RenderCallback callback;
+    std::shared_ptr<const DX11RenderCallback> callback;
     {
         std::lock_guard<std::mutex> lock(s.callbackMutex);
         callback = s.callback;
     }
-    if (!callback) return;
+    if (!callback || !*callback) return;
 
     DX11DrawContext dc(static_cast<float>(s.backbufferW), static_cast<float>(s.backbufferH));
-    callback(dc);
+    (*callback)(dc);
     const auto& verts = dc.TriVerts();
     if (verts.empty()) return;
 
@@ -628,15 +635,15 @@ inline void SetDX11OverlayLogger(DX11LogFn fn) { detail::State().logFn = fn; }
 inline bool DX11Overlay::Install() {
     auto& s = detail::State();
     if (s.hookInstalled) {
-        // The hooks are process-wide, but the callback and m_hookInstalled are
-        // per instance: without claiming both here this instance never renders,
-        // and its destructor would not know it owns anything.
-        {
-            std::lock_guard<std::mutex> lock(s.callbackMutex);
-            s.callback = m_callback;
-        }
-        m_hookInstalled = true;
-        return true;
+        // Refused, not silently taken over. The hooks and the callback slot are
+        // process-wide but there is exactly one of each, so a second instance
+        // claiming them evicts the first: the live overlay stops rendering, and
+        // whichever instance is destroyed FIRST tears down the hooks and D3D
+        // resources out from under the other. Returning true here also told the
+        // caller it had a working overlay when it had stolen someone else's.
+        detail::Log("dx11_overlay: Install refused, another DX11Overlay in this "
+                    "module already owns the hooks");
+        return false;
     }
 
     void** vtable = nullptr;
@@ -671,7 +678,7 @@ inline bool DX11Overlay::Install() {
 
     {
         std::lock_guard<std::mutex> lock(s.callbackMutex);
-        s.callback = m_callback;
+        s.callback = std::make_shared<const DX11RenderCallback>(m_callback);
     }
     s.hookInstalled = true;
     m_hookInstalled = true;
@@ -725,7 +732,7 @@ inline void DX11Overlay::SetRenderCallback(DX11RenderCallback cb) {
     m_callback = cb;
     auto& s = detail::State();
     std::lock_guard<std::mutex> lock(s.callbackMutex);
-    s.callback = std::move(cb);
+    s.callback = std::make_shared<const DX11RenderCallback>(std::move(cb));
 }
 
 #endif // CAMERAUNLOCK_DX11_OVERLAY_IMPLEMENTATION

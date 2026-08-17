@@ -3,7 +3,8 @@ bin/
 obj/
 out/
 build/
-build-test/
+# Any local CMake build tree, not just the two names that happened to exist.
+build*/
 x64/
 Debug/
 Release/

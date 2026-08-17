@@ -326,6 +326,12 @@ const FAILING = new Set([
   'NO_STEPS_KEY',
   'YAML_INVALID_REVERTED',
   'WOULD_FAIL_YAML',
+  // WOULD_PATCH is a dry run saying "this repo is not reconciled yet". Leaving it
+  // out made the dry run - the only mode safe to wire into CI as a drift check -
+  // exit 0 while reporting a dozen unreconciled repos, which is precisely the
+  // state the gate is supposed to catch. It cannot occur in APPLY mode: a repo
+  // that needed patching there comes back PATCHED.
+  'WOULD_PATCH',
 ]);
 
 const failed = results.filter((r) => FAILING.has(r.status));
