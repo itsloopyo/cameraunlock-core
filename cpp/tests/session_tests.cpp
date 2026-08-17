@@ -576,9 +576,10 @@ void TestGracefulDegradation() {
 void TestSmoothingSurvivesSettingsAssignmentInBothOrders() {
     std::cout << "Settings/smoothing ordering:\n";
 
-    cameraunlock::PositionSettings probe(2.0f, 2.0f, 2.0f,
-                                         0.31f, 0.21f, 0.41f, 0.11f,
-                                         0.0f, 0.0f);
+    cameraunlock::PositionSettings probe = cameraunlock::PositionSettings::Symmetric(
+        2.0f, 2.0f, 2.0f,
+        0.31f, 0.21f, 0.41f, 0.11f,
+        0.0f, 0.0f);
 
     // Smoothing first, then settings. This is the order a config-reload handler
     // naturally uses, and it was the unsafe one: assigning a settings struct

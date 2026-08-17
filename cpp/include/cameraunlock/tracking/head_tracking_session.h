@@ -315,9 +315,16 @@ public:
                 PositionData rawPos(rawX, rawY, rawZ, receiveTs);
                 PositionData interpolatedPos = m_positionInterpolator.Update(rawPos, deltaTime);
 
-                math::Quat4 headRotQ = math::Quat4::FromYawPitchRoll(m_yaw, m_pitch, m_roll);
+                // The PHYSICAL head rotation, taken from the processor's smoothed state
+                // rather than from m_yaw/m_pitch/m_roll. Those carry per-axis sensitivity
+                // and inversion, and in PositionOnly mode they are forced to zero - so the
+                // pivot quaternion became identity and no compensation was applied at all,
+                // while the C# port applied the full term. Matches HeadTrackingSession.cs.
+                float physYaw, physPitch, physRoll;
+                m_processor.GetSmoothedRotation(physYaw, physPitch, physRoll);
+                math::Quat4 physicalRotQ = math::Quat4::FromYawPitchRoll(physYaw, physPitch, physRoll);
 
-                math::Vec3 offset = m_positionProcessor.Process(interpolatedPos, headRotQ, deltaTime);
+                math::Vec3 offset = m_positionProcessor.Process(interpolatedPos, physicalRotQ, deltaTime);
                 m_posX = offset.x;
                 m_posY = offset.y;
                 m_posZ = offset.z;

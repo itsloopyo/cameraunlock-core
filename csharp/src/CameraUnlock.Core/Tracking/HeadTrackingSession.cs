@@ -236,8 +236,17 @@ namespace CameraUnlock.Core.Tracking
                 {
                     PositionData rawPosition = _receiver.GetLatestPosition();
                     PositionData interpolatedPosition = _positionInterpolator.Update(rawPosition, deltaTime);
-                    Quat4 rotationQ = QuaternionUtils.FromYawPitchRoll(rotation.Yaw, rotation.Pitch, rotation.Roll);
-                    positionOffset = _positionProcessor.Process(interpolatedPosition, rotationQ, deltaTime);
+
+                    // The PHYSICAL head rotation, not `rotation` - that one has per-axis
+                    // sensitivity and inversion applied. The pivot artifact is a property
+                    // of where the tracker's face point sits relative to the neck, so a
+                    // 2x sensitivity would have the compensation remove twice the arc that
+                    // is actually present, and an inverted axis would remove it backwards.
+                    float physYaw, physPitch, physRoll;
+                    _processor.GetSmoothedRotation(out physYaw, out physPitch, out physRoll);
+                    Quat4 physicalRotationQ = QuaternionUtils.FromYawPitchRoll(physYaw, physPitch, physRoll);
+
+                    positionOffset = _positionProcessor.Process(interpolatedPosition, physicalRotationQ, deltaTime);
                 }
 
                 Rotation = rotation;
