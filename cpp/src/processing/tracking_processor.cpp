@@ -6,39 +6,50 @@
 namespace cameraunlock {
 
 TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, float delta_time) {
-    // Step 1: Apply center offset
-    m_centerManager.ApplyOffset(yaw, pitch, roll);
+    // A port of TrackingProcessor.Process in C#, and it must stay step-for-step
+    // identical: the two ports disagreed on BOTH the centring and the smoothing, so the
+    // same tracker produced different camera motion in a native mod and a Unity mod -
+    // and each port's comment asserted the opposite rationale to the other's.
 
-    // Step 2: Apply deadzone
-    yaw = static_cast<float>(math::ApplyDeadzone(yaw, m_deadzone.yaw));
-    pitch = static_cast<float>(math::ApplyDeadzone(pitch, m_deadzone.pitch));
-    roll = static_cast<float>(math::ApplyDeadzone(roll, m_deadzone.roll));
+    // Step 1: Convert raw Euler to quaternion and apply the centre offset there.
+    // Quaternion composition, not per-axis Euler subtraction: with a centre captured at
+    // a non-zero pitch, subtracting components leaves the yaw axis tilted and drops the
+    // roll term the true head-relative rotation carries.
+    math::Quat4 rawQ = math::Quat4::FromYawPitchRoll(yaw, pitch, roll);
+    math::Quat4 centeredQ = m_centerManager.ApplyOffsetQuat(rawQ);
 
-    // Step 3: Apply smoothing via quaternion SLERP.
-    // SLERP follows the shortest arc on the unit sphere, avoiding the gimbal
-    // artifacts that per-axis Euler smoothing can introduce at compound angles.
-    double effective_smoothing = math::GetEffectiveSmoothing(
-        m_localSmoothing, m_remoteSmoothing, m_isRemoteConnection);
+    // Step 2: Decompose to Euler for per-axis deadzone
+    float cyaw, cpitch, croll;
+    centeredQ.ToEulerYXZ(cyaw, cpitch, croll);
 
-    math::Quat4 target = math::Quat4::FromYawPitchRoll(yaw, pitch, roll);
+    cyaw = static_cast<float>(math::ApplyDeadzone(cyaw, m_deadzone.yaw));
+    cpitch = static_cast<float>(math::ApplyDeadzone(cpitch, m_deadzone.pitch));
+    croll = static_cast<float>(math::ApplyDeadzone(croll, m_deadzone.roll));
+
+    // Step 3: Per-axis Euler smoothing, NOT quaternion SLERP. Slerp follows the great
+    // circle between two orientations, and that arc's Euler decomposition carries a
+    // non-zero roll term for compound movement - so diagonal head motion rolled the
+    // horizon here while the C# port kept it at exactly zero. Yaw and roll take the
+    // shortest arc because ToEulerYXZ returns them in (-180, 180] and they can step
+    // across the seam; pitch is bounded to +/-90 by asin and cannot wrap.
+    float effective_smoothing = static_cast<float>(math::GetEffectiveSmoothing(
+        m_localSmoothing, m_remoteSmoothing, m_isRemoteConnection));
 
     if (!m_hasSmoothedValue) {
-        m_smoothedQuat = target;
+        m_smoothedYaw = cyaw;
+        m_smoothedPitch = cpitch;
+        m_smoothedRoll = croll;
         m_hasSmoothedValue = true;
     } else {
-        float t = static_cast<float>(
-            math::CalculateSmoothingFactor(effective_smoothing, static_cast<double>(delta_time)));
-        m_smoothedQuat = math::Quat4::Slerp(m_smoothedQuat, target, t);
+        m_smoothedYaw = math::SmoothAngle(m_smoothedYaw, cyaw, effective_smoothing, delta_time);
+        m_smoothedPitch = math::Smooth(m_smoothedPitch, cpitch, effective_smoothing, delta_time);
+        m_smoothedRoll = math::SmoothAngle(m_smoothedRoll, croll, effective_smoothing, delta_time);
     }
 
-    // Decompose back to Euler for sensitivity application
-    float smoothedYaw, smoothedPitch, smoothedRoll;
-    m_smoothedQuat.ToEulerYXZ(smoothedYaw, smoothedPitch, smoothedRoll);
-
     // Step 4: Apply sensitivity
-    float out_yaw = smoothedYaw * m_sensitivity.yaw;
-    float out_pitch = smoothedPitch * m_sensitivity.pitch;
-    float out_roll = smoothedRoll * m_sensitivity.roll;
+    float out_yaw = m_smoothedYaw * m_sensitivity.yaw;
+    float out_pitch = m_smoothedPitch * m_sensitivity.pitch;
+    float out_roll = m_smoothedRoll * m_sensitivity.roll;
 
     if (m_sensitivity.invert_yaw) out_yaw = -out_yaw;
     if (m_sensitivity.invert_pitch) out_pitch = -out_pitch;
@@ -48,41 +59,41 @@ TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, floa
 }
 
 void TrackingProcessor::Recenter() {
-    // Accumulate onto the existing centre rather than replace it. Process()
-    // subtracts the centre before smoothing, so m_smoothedQuat already has it
-    // removed; setting the centre to that value directly works the first time
-    // and leaves a residual equal to the previous centre on every later call.
-    // Any mod that recentres automatically once and then offers a recentre
-    // hotkey hits this on the user's first press.
-    float yaw, pitch, roll;
-    m_smoothedQuat.ToEulerYXZ(yaw, pitch, roll);
-    const TrackingPose& current = m_centerManager.GetCenterOffset();
-    m_centerManager.SetCenter(math::NormalizeAngle(current.yaw + yaw),
-                              math::NormalizeAngle(current.pitch + pitch),
-                              math::NormalizeAngle(current.roll + roll));
+    // Composed onto the existing centre in QUATERNION space rather than replacing it.
+    // Process() removes the centre before smoothing, so the smoothed value already has
+    // it taken out; assigning that directly as the new centre works the first time and
+    // leaves a residual equal to the previous centre on every later call. Any mod that
+    // recentres automatically once and then offers a recentre hotkey hits it on the
+    // user's first press. Matches TrackingProcessor.Recenter in C#.
+    math::Quat4 smoothedQ =
+        math::Quat4::FromYawPitchRoll(m_smoothedYaw, m_smoothedPitch, m_smoothedRoll);
+    m_centerManager.ComposeAdditionalOffset(smoothedQ);
 
-    // The smoothing state still holds the pre-recentre rotation, so without this the
-    // next Process() slerps down from the old offset instead of starting at centre and
-    // the view slides back rather than snapping. Only reachable for mods driving the
-    // processor directly, since HeadTrackingSession masks it by calling Reset().
-    //
-    // m_hasSmoothedValue is deliberately left SET, matching C# TrackingProcessor
-    // .Recenter(), which zeroes the smoothed Euler but not the flag. Clearing it would
-    // send the next Process() down the first-value branch and snap straight to the raw
-    // sample instead of taking one smoothing step out of identity.
-    m_smoothedQuat = math::Quat4::Identity();
+    // m_hasSmoothedValue is deliberately left SET, matching C#. Clearing it would send
+    // the next Process() down the first-value branch and snap straight to the raw sample
+    // instead of taking one smoothing step out of centre.
+    m_smoothedYaw = 0.0f;
+    m_smoothedPitch = 0.0f;
+    m_smoothedRoll = 0.0f;
 }
 
 void TrackingProcessor::RecenterTo(float yaw, float pitch, float roll) {
     m_centerManager.SetCenter(yaw, pitch, roll);
-    m_smoothedQuat = math::Quat4::Identity();
+    m_smoothedYaw = 0.0f;
+    m_smoothedPitch = 0.0f;
+    m_smoothedRoll = 0.0f;
+}
+
+void TrackingProcessor::ResetSmoothing() {
+    m_smoothedYaw = 0.0f;
+    m_smoothedPitch = 0.0f;
+    m_smoothedRoll = 0.0f;
     m_hasSmoothedValue = false;
 }
 
 void TrackingProcessor::Reset() {
     m_centerManager.Reset();
-    m_smoothedQuat = math::Quat4::Identity();
-    m_hasSmoothedValue = false;
+    ResetSmoothing();
 }
 
 }  // namespace cameraunlock

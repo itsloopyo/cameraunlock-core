@@ -119,6 +119,11 @@ public:
     /// Sets the current rotation and position as the new center point.
     void Recenter();
 
+    /// Clears the centering offset, so raw tracker values pass through untouched.
+    /// PollingUdpReceiver and the C# OpenTrackReceiver have always had this; its
+    /// absence here was a public-API asymmetry between two receivers of one protocol.
+    void ResetOffset();
+
     /// True once per recenter request signaled by the tracker app through
     /// the packet trailer (e.g. the user pressing CENTER in Headcam). The
     /// caller routes it into its own recenter path.

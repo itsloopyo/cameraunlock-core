@@ -45,6 +45,13 @@ inline double ShortestAngleDelta(double from, double to) {
     return NormalizeAngle(to - from);
 }
 
+/// Float overload, matching AngleUtils.ShortestAngleDelta(float, float) in C#. Without
+/// it the float call sites promote to double and narrow back, which is both slower and
+/// a source of last-bit divergence from the C# port.
+inline float ShortestAngleDelta(float from, float to) {
+    return NormalizeAngle(to - from);
+}
+
 /// Clamps a value between min and max.
 template <typename T>
 constexpr T Clamp(T value, T min_val, T max_val) {

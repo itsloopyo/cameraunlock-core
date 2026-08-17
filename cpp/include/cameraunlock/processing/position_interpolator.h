@@ -34,16 +34,26 @@ public:
         return pt + (1.0f - pt) * eased;
     }
 
-    /// Update with the latest raw position and frame delta time.
-    /// Returns a smoothly interpolated position.
+    /// Update with the latest raw position and frame delta time, deriving
+    /// "is this a new sample" from the timestamp alone.
+    ///
+    /// Prefer the overload below where the caller can tell a genuinely new SAMPLE from a
+    /// merely new PACKET. A phone app resending at 60Hz off a 30Hz sensor advances the
+    /// receive timestamp every datagram, so this form estimates a 16.7ms interval for a
+    /// 33ms source: the segment reaches progress 1.0 halfway through each real sample
+    /// period and then sits pinned at the extrapolation cap for the rest of it, which
+    /// reads as a position-only wobble while the head rotation stays smooth.
     PositionData Update(const PositionData& raw, float delta_time) {
+        return Update(raw, raw.timestamp_us != m_lastTimestampUs, delta_time);
+    }
+
+    /// Update with an explicit new-sample flag, mirroring PoseInterpolator::Update.
+    PositionData Update(const PositionData& raw, bool is_new_sample, float delta_time) {
         if (!raw.IsValid()) {
             return raw;
         }
 
         m_timeSinceLastNewSample += delta_time;
-
-        bool is_new_sample = raw.timestamp_us != m_lastTimestampUs;
 
         if (is_new_sample) {
             if (!m_hasFirstSample) {
@@ -112,7 +122,11 @@ public:
 
 private:
     static constexpr float kIntervalBlend = 0.3f;
-    static constexpr float kDefaultSampleInterval = 1.0f / 60.0f;
+    // Matches PoseInterpolator/PositionInterpolator in C#. Used only until the SECOND
+    // sample arrives; at 1/60 a 30Hz tracker's first segment reached progress 1.0 in
+    // half a sample period and extrapolated to the cap and back, a first-second-of-
+    // session jolt that native mods had and Unity mods did not.
+    static constexpr float kDefaultSampleInterval = 1.0f / 30.0f;
     static constexpr float kMinSampleInterval = 0.001f;
     static constexpr float kMaxSampleInterval = 0.2f;
 

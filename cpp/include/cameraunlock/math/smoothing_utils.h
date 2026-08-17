@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cameraunlock/math/angle_utils.h"
+
 #include <cmath>
 
 namespace cameraunlock {
@@ -77,6 +79,15 @@ inline double Smooth(double current, double target, double smoothing, double del
 inline float Smooth(float current, float target, float smoothing, float delta_time) {
     float t = CalculateSmoothingFactor(smoothing, delta_time);
     return current + (target - current) * t;
+}
+
+/// Smooths an angle in DEGREES, taking the shortest path around the +/-180 seam.
+/// Smooth() lerps the raw scalar difference, so smoothing 179.5 toward -179.5 - a 1
+/// degree head movement across the seam - travels -359 degrees and swings the camera
+/// the long way round. Matches SmoothingUtils.SmoothAngle in C#.
+inline float SmoothAngle(float current, float target, float smoothing, float delta_time) {
+    float t = CalculateSmoothingFactor(smoothing, delta_time);
+    return NormalizeAngle(current + ShortestAngleDelta(current, target) * t);
 }
 
 /// Selects the smoothing value for the current connection. This is the only path

@@ -54,17 +54,27 @@ public:
     /// Gets the center offset manager.
     CenterOffsetManager& GetCenterManager() { return m_centerManager; }
 
-    /// Gets the current smoothed values.
+    /// The centered, smoothed rotation BEFORE per-axis sensitivity and inversion.
+    /// This is the physical head rotation, and the value PositionProcessor needs for
+    /// pivot compensation.
     void GetSmoothedRotation(float& yaw, float& pitch, float& roll) const {
-        m_smoothedQuat.ToEulerYXZ(yaw, pitch, roll);
+        yaw = m_smoothedYaw;
+        pitch = m_smoothedPitch;
+        roll = m_smoothedRoll;
     }
+
+    /// Resets only the smoothing state, preserving the centre offset.
+    void ResetSmoothing();
 
 private:
     CenterOffsetManager m_centerManager;
 
-    // Smoothed rotation as quaternion — SLERP avoids gimbal artifacts
-    // that per-axis Euler smoothing can introduce at compound angles.
-    math::Quat4 m_smoothedQuat;
+    // Smoothed rotation held as per-axis Euler, matching the C# port. Quaternion SLERP
+    // was used here and introduced a roll term on compound movement that the C# side
+    // does not produce; see Process() for the full rationale.
+    float m_smoothedYaw = 0.0f;
+    float m_smoothedPitch = 0.0f;
+    float m_smoothedRoll = 0.0f;
     bool m_hasSmoothedValue = false;
 
     // Configuration

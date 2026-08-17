@@ -313,7 +313,23 @@ public:
             float rawX, rawY, rawZ;
             if (m_receiver.GetPosition(rawX, rawY, rawZ)) {
                 PositionData rawPos(rawX, rawY, rawZ, receiveTs);
-                PositionData interpolatedPos = m_positionInterpolator.Update(rawPos, deltaTime);
+
+                // Same duplicate-sample filter the rotation path uses. receiveTs advances
+                // on every datagram, so a phone resending at 60Hz off a 30Hz sensor made
+                // the position interpolator estimate half the true sample interval while
+                // rotation estimated it correctly - position then reached the
+                // extrapolation cap halfway through every sample period and wobbled at
+                // 30Hz while the head rotation stayed smooth.
+                bool isNewPosSample = isNewPacket &&
+                    (rawX != m_lastRawPosX || rawY != m_lastRawPosY || rawZ != m_lastRawPosZ);
+                if (isNewPacket) {
+                    m_lastRawPosX = rawX;
+                    m_lastRawPosY = rawY;
+                    m_lastRawPosZ = rawZ;
+                }
+
+                PositionData interpolatedPos =
+                    m_positionInterpolator.Update(rawPos, isNewPosSample, deltaTime);
 
                 // The PHYSICAL head rotation, taken from the processor's smoothed state
                 // rather than from m_yaw/m_pitch/m_roll. Those carry per-axis sensitivity
@@ -351,7 +367,15 @@ public:
     void Recenter() {
         m_hasCentered = true;
         m_receiver.Recenter();
-        m_processor.Reset();
+
+        // ResetSmoothing, not Reset. Reset() also clears the processor's centre offset,
+        // so any mod-configured correction applied through
+        // GetProcessor().GetCenterManager().SetCenter(...) - the documented way to trim a
+        // phone sitting a few degrees off-axis - was wiped by every automatic and remote
+        // recenter, and the player had to re-apply it each time the tracker fired
+        // DEVICE_MOVED. Centring here happens at the receiver level, so the processor
+        // only needs its transient smoothing cleared.
+        m_processor.ResetSmoothing();
         m_poseInterpolator.Reset();
 
         float px, py, pz;
@@ -433,6 +457,9 @@ private:
     float m_lastRawYaw = 0.0f;
     float m_lastRawPitch = 0.0f;
     float m_lastRawRoll = 0.0f;
+    float m_lastRawPosX = 0.0f;
+    float m_lastRawPosY = 0.0f;
+    float m_lastRawPosZ = 0.0f;
 
     float m_yaw = 0.0f, m_pitch = 0.0f, m_roll = 0.0f;
     bool m_rotationValid = false;

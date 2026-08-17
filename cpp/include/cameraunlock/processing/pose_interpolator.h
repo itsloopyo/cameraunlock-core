@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include "cameraunlock/math/angle_utils.h"
+
 namespace cameraunlock {
 
 /// Return type for PoseInterpolator â€” interpolated rotation values in degrees.
@@ -107,11 +109,16 @@ public:
                 if (m_sampleInterval > kMaxSampleInterval) m_sampleInterval = kMaxSampleInterval;
             }
 
-            // Capture current interpolated (possibly extrapolated) position as new start point
+            // Capture current interpolated (possibly extrapolated) position as new start
+            // point. Yaw and roll traverse the SHORTEST arc: they arrive in (-180, 180]
+            // and can step across the seam, where a plain (to - from) turns a 1 degree
+            // move from 179.5 to -179.5 into a -359 degree sweep the long way round.
+            // Pitch is bounded to +/-90 by asin and cannot wrap. Matches C#
+            // PoseInterpolator.
             const float t = SegmentPosition(m_progress, m_timeSinceLastNewSample);
-            m_fromYaw   = m_fromYaw   + (m_toYaw   - m_fromYaw)   * t;
+            m_fromYaw   = math::NormalizeAngle(m_fromYaw + math::ShortestAngleDelta(m_fromYaw, m_toYaw) * t);
             m_fromPitch = m_fromPitch + (m_toPitch - m_fromPitch) * t;
-            m_fromRoll  = m_fromRoll  + (m_toRoll  - m_fromRoll)  * t;
+            m_fromRoll  = math::NormalizeAngle(m_fromRoll + math::ShortestAngleDelta(m_fromRoll, m_toRoll) * t);
 
             // New sample becomes the target
             m_toYaw = yaw;    m_toPitch = pitch;    m_toRoll = roll;
@@ -130,9 +137,9 @@ public:
         // bounded to avoid runaway prediction on direction reversals.
         const float pt = SegmentPosition(m_progress, m_timeSinceLastNewSample);
 
-        float outYaw   = m_fromYaw   + (m_toYaw   - m_fromYaw)   * pt;
+        float outYaw   = math::NormalizeAngle(m_fromYaw + math::ShortestAngleDelta(m_fromYaw, m_toYaw) * pt);
         float outPitch = m_fromPitch + (m_toPitch - m_fromPitch) * pt;
-        float outRoll  = m_fromRoll  + (m_toRoll  - m_fromRoll)  * pt;
+        float outRoll  = math::NormalizeAngle(m_fromRoll + math::ShortestAngleDelta(m_fromRoll, m_toRoll) * pt);
 
         return {outYaw, outPitch, outRoll};
     }
@@ -152,7 +159,11 @@ private:
     // EMA blend factor for sample interval estimation
     static constexpr float kIntervalBlend = 0.3f;
     // Default until we observe real samples
-    static constexpr float kDefaultSampleInterval = 1.0f / 60.0f;
+    // Matches PoseInterpolator/PositionInterpolator in C#. Used only until the SECOND
+    // sample arrives; at 1/60 a 30Hz tracker's first segment reached progress 1.0 in
+    // half a sample period and extrapolated to the cap and back, a first-second-of-
+    // session jolt that native mods had and Unity mods did not.
+    static constexpr float kDefaultSampleInterval = 1.0f / 30.0f;
     // Bounds for sample interval estimate
     static constexpr float kMinSampleInterval = 0.001f;
     static constexpr float kMaxSampleInterval = 0.2f;

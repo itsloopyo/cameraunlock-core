@@ -63,11 +63,17 @@ struct Quat4 {
 
     Quat4 operator*(const Quat4& b) const { return Multiply(b); }
 
+    /// Length below which a quaternion is treated as degenerate and replaced with
+    /// identity. Matches QuaternionUtils.NormalizationEpsilon in C#, which tests
+    /// lengthSq against its square - this side used 1e-6f, so a quaternion of length
+    /// 1e-5 normalised here and returned identity there.
+    static constexpr float kNormalizationEpsilon = 0.0001f;
+
     /// Returns a unit-length copy of this quaternion.
     Quat4 Normalized() const {
-        float len = std::sqrt(x * x + y * y + z * z + w * w);
-        if (len < 1e-6f) return Identity();
-        float inv = 1.0f / len;
+        float lengthSq = x * x + y * y + z * z + w * w;
+        if (lengthSq < kNormalizationEpsilon * kNormalizationEpsilon) return Identity();
+        float inv = 1.0f / std::sqrt(lengthSq);
         return Quat4(x * inv, y * inv, z * inv, w * inv);
     }
 
