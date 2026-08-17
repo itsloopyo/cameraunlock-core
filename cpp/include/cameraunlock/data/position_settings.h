@@ -31,11 +31,17 @@ struct PositionSettings {
 
     PositionSettings() = default;
 
-    /// The full asymmetric form, mirroring the single C# constructor. There is
-    /// deliberately no second overload: C# removed its symmetric one because the two
-    /// arities ended up adjacent and a stale positional call silently rebound one slot
-    /// to the left, turning a lean limit into a smoothing value with no compiler signal.
-    /// Use Symmetric() for the symmetric case.
+    /// The full asymmetric form, mirroring the single C# constructor. Use Symmetric()
+    /// for the symmetric case.
+    ///
+    /// C# is immune to a stale positional call because it has no implicit bool->float
+    /// conversion, so the old 9-float shape is simply a compile error there. C++ is NOT:
+    /// a stale (9 floats + 3 bools) call binds here with the first bool converted into
+    /// remote_smoothing, silently producing limit_z_back = 0 (backward lean disabled),
+    /// remote_smoothing = 0, and invert_z landing in invert_y - all at /W4 with no
+    /// diagnostic. The deleted overloads below exist purely to turn that into an error;
+    /// they are a better match for a bool argument than the float parameter is, so
+    /// overload resolution picks them.
     PositionSettings(float sens_x, float sens_y, float sens_z,
                      float lim_x, float lim_y, float lim_y_down, float lim_z, float lim_z_back,
                      float local_smooth, float remote_smooth,
@@ -45,6 +51,16 @@ struct PositionSettings {
         , limit_z(lim_z), limit_z_back(lim_z_back)
         , local_smoothing(local_smooth), remote_smoothing(remote_smooth)
         , invert_x(inv_x), invert_y(inv_y), invert_z(inv_z) {}
+
+    /// Poison overloads for the pre-limit_y_down argument shape. Never defined: any call
+    /// that matches one is a compile error naming this line, which is the diagnostic the
+    /// arity change would otherwise not produce. Convert the call to Symmetric().
+    PositionSettings(float, float, float, float, float, float, float, float, float,
+                     bool) = delete;
+    PositionSettings(float, float, float, float, float, float, float, float, float,
+                     bool, bool) = delete;
+    PositionSettings(float, float, float, float, float, float, float, float, float,
+                     bool, bool, bool) = delete;
 
     /// Symmetric vertical limits: lim_y is mirrored into limit_y_down.
     static PositionSettings Symmetric(float sens_x, float sens_y, float sens_z,

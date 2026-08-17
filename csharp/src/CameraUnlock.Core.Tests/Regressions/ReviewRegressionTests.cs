@@ -16,9 +16,18 @@ using CameraUnlock.Core.Processing.AxisTransform;
 namespace CameraUnlock.Core.Tests.Regressions
 {
     /// <summary>
-    /// Pins the defects found in the adversarial review. Each test fails against the
-    /// pre-fix code, so a future change that reintroduces one of these is caught here
-    /// rather than on a user's machine.
+    /// Pins the defects found in the adversarial review.
+    /// <para>
+    /// MOST of these fail against the pre-fix code, so a change that reintroduces the
+    /// defect is caught here rather than on a user's machine. A few are deliberately
+    /// GUARD tests that pass both before and after - they exist to catch a FUTURE fix
+    /// over-reaching, not to pin the original bug. Those are
+    /// Calculate_NormalYaw_StillProducesOffset,
+    /// HotkeyHandler_WithinCooldown_StillSuppressed, ApplyValues_InRangePort_IsApplied,
+    /// CreateProfile_OrdinaryNameWithSpaces_IsAccepted and
+    /// SaveProfile_LeavesNoStrayTempFile. Do not "fix" them by making them fail against
+    /// old code; that is not what they are for.
+    /// </para>
     /// </summary>
     public class ReviewRegressionTests
     {
@@ -241,11 +250,15 @@ namespace CameraUnlock.Core.Tests.Regressions
         public void RoundTrip_PreservesMaxInputRange()
         {
             var profile = new ConfigProfile("Test", "d", "General");
-            profile.AxisMapping.YawConfig.MaxInputRange = 45f;
+
+            // Deliberately NOT the default (45). A round-trip asserted against the default
+            // passes even if the field stops being serialised altogether.
+            profile.AxisMapping.YawConfig.MaxInputRange = 62.5f;
+            Assert.NotEqual(AxisConfig.DefaultMaxInputRange, 62.5f);
 
             var restored = ProfileSerializer.Deserialize(ProfileSerializer.Serialize(profile));
 
-            Assert.Equal(45f, restored.AxisMapping.YawConfig.MaxInputRange, precision: 3);
+            Assert.Equal(62.5f, restored.AxisMapping.YawConfig.MaxInputRange, precision: 3);
         }
 
         [Fact]

@@ -107,14 +107,28 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public TrackingPose Update(TrackingPose rawPose, float deltaTime)
         {
+            return Update(rawPose, rawPose.TimestampTicks != _lastTimestampTicks, deltaTime);
+        }
+
+        /// <summary>
+        /// Update with an explicit new-sample flag.
+        /// <para>
+        /// Prefer this where the caller can tell a genuinely new SAMPLE from a merely new
+        /// PACKET. A phone app resending at 60Hz off a 30Hz sensor advances the receive
+        /// timestamp on every datagram, so the timestamp-only form estimates a 16.7ms
+        /// interval for a 33ms source: the segment reaches progress 1.0 halfway through
+        /// each real sample period and then sits pinned at the extrapolation cap for the
+        /// rest of it. Matches PoseInterpolator::Update in the C++ port.
+        /// </para>
+        /// </summary>
+        public TrackingPose Update(TrackingPose rawPose, bool isNewSample, float deltaTime)
+        {
             if (!rawPose.IsValid)
             {
                 return rawPose;
             }
 
             _timeSinceLastNewSample += deltaTime;
-
-            bool isNewSample = rawPose.TimestampTicks != _lastTimestampTicks;
 
             if (isNewSample)
             {

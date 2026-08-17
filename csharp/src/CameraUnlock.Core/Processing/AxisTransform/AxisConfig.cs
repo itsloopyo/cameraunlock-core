@@ -176,26 +176,27 @@ namespace CameraUnlock.Core.Processing.AxisTransform
                 return 0f;
             }
 
-            // If smooth deadzone is configured (max > min), apply smooth scaling
-            if (DeadzoneMax > DeadzoneMin && absInput < DeadzoneMax)
+            // ONE model, everywhere: the deadzone removes DeadzoneMin from the magnitude,
+            // and the optional band between DeadzoneMin and DeadzoneMax only shapes how
+            // the output ramps in. Output is 0 at DeadzoneMin, (DeadzoneMax - DeadzoneMin)
+            // at DeadzoneMax, and (|input| - DeadzoneMin) above - continuous at both ends,
+            // and the same form DeadzoneUtils.Apply uses.
+            //
+            // Previously the no-band case returned `input` untouched, which put a hard step
+            // at the threshold: with DeadzoneMin = 5, an input of 4.99 gave 0 and 5.01 gave
+            // 5.01, so a 0.02 degree head movement popped the camera 5 degrees. Fixing only
+            // that case would have left the band case scaling to DeadzoneMax and then
+            // passing input straight through, so widening DeadzoneMax from 5 to 10 would
+            // have made the SAME head angle produce a 5 degree larger output - two
+            // incompatible deadzone models in one method.
+            float deadzoneRange = DeadzoneMax - DeadzoneMin;
+            if (deadzoneRange > 0f && absInput < DeadzoneMax)
             {
-                float deadzoneRange = DeadzoneMax - DeadzoneMin;
                 float normalizedInput = (absInput - DeadzoneMin) / deadzoneRange;
-                return sign * normalizedInput * DeadzoneMax;
+                return sign * normalizedInput * deadzoneRange;
             }
 
-            // No smooth band configured (DeadzoneMax <= DeadzoneMin, which is the
-            // DEFAULT): subtract the threshold rather than passing the input through
-            // untouched. Returning `input` here put a hard step at the boundary - with
-            // DeadzoneMin = 5, an input of 4.99 gave 0 and 5.01 gave 5.01, so a 0.02
-            // degree head movement popped the camera 5 degrees. This is the same
-            // continuous form DeadzoneUtils.Apply uses.
-            if (DeadzoneMax <= DeadzoneMin)
-            {
-                return sign * (absInput - DeadzoneMin);
-            }
-
-            return input;
+            return sign * (absInput - DeadzoneMin);
         }
 
         /// <summary>

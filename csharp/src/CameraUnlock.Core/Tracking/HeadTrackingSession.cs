@@ -228,6 +228,17 @@ namespace CameraUnlock.Core.Tracking
                 }
 
                 TrackingPose rawPose = _receiver.GetLatestPose();
+
+                // Timestamp-only new-sample detection, NOT the value-change filter the C++
+                // session uses. That is a deliberate consequence of where each port
+                // centres: C++ centres at the RECEIVER, so a recenter changes the raw
+                // values it reports and the interpolator re-seeds on the next packet. This
+                // port centres at the PROCESSOR, so the raw stream is untouched by a
+                // recenter - and a value-change filter would then stall a re-Reset
+                // interpolator indefinitely for a user holding perfectly still, because no
+                // value ever changes to re-seed it. Both PoseInterpolator and
+                // PositionInterpolator expose an explicit is-new-sample overload for
+                // callers whose plumbing does make the filter safe.
                 TrackingPose interpolated = _poseInterpolator.Update(rawPose, deltaTime);
                 TrackingPose rotation = _processor.Process(interpolated, deltaTime);
 

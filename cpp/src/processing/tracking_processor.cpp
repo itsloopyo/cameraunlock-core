@@ -72,6 +72,11 @@ void TrackingProcessor::Recenter() {
     // m_hasSmoothedValue is deliberately left SET, matching C#. Clearing it would send
     // the next Process() down the first-value branch and snap straight to the raw sample
     // instead of taking one smoothing step out of centre.
+    //
+    // Note this applies to a DIRECT call. HeadTrackingSession::Recenter centres at the
+    // receiver and calls ResetSmoothing(), which does clear the flag - so the session's
+    // recenter path snaps by design, because the receiver offset has already moved the
+    // raw stream to centre and there is nothing to ease out of.
     m_smoothedYaw = 0.0f;
     m_smoothedPitch = 0.0f;
     m_smoothedRoll = 0.0f;

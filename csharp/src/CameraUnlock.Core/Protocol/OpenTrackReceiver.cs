@@ -343,9 +343,9 @@ namespace CameraUnlock.Core.Protocol
         /// </summary>
         public void GetRawRotation(out float yaw, out float pitch, out float roll)
         {
-            pitch = _rotationPitch;
-            yaw = _rotationYaw;
-            roll = _rotationRoll;
+            float px, py, pz;
+            long timestamp;
+            ReadSnapshot(out yaw, out pitch, out roll, out px, out py, out pz, out timestamp);
         }
 
         // Reads the pose/position/timestamp group as one consistent snapshot. Retries
@@ -469,16 +469,25 @@ namespace CameraUnlock.Core.Protocol
 
         public void Recenter()
         {
+            // Through the snapshot, NOT six independent volatile loads. This is the one
+            // caller where a torn rotation/position pair becomes a PERSISTENT offset
+            // rather than a one-frame glitch: capture packet N's rotation beside packet
+            // N-1's position and the mismatch is baked into the centre until the next
+            // recenter.
+            float yaw, pitch, roll, px, py, pz;
+            long timestamp;
+            ReadSnapshot(out yaw, out pitch, out roll, out px, out py, out pz, out timestamp);
+
             // Use explicit Monitor calls for old Mono compatibility
             Monitor.Enter(_offsetLock);
             try
             {
-                _offsetYaw = _rotationYaw;
-                _offsetPitch = _rotationPitch;
-                _offsetRoll = _rotationRoll;
-                _offsetX = _positionX;
-                _offsetY = _positionY;
-                _offsetZ = _positionZ;
+                _offsetYaw = yaw;
+                _offsetPitch = pitch;
+                _offsetRoll = roll;
+                _offsetX = px;
+                _offsetY = py;
+                _offsetZ = pz;
             }
             finally
             {
@@ -558,7 +567,17 @@ namespace CameraUnlock.Core.Protocol
 
                     if (data.Length >= OpenTrackPacket.MinPacketSize)
                     {
-                        bool poseValid = OpenTrackPacket.TryParse(data, out TrackingPose parsed);
+                        // ALL-OR-NOTHING, matching the C++ ports' TryParseAll: a datagram
+                        // counts only if BOTH the angles and the position are finite.
+                        // Validating them independently meant a packet with good angles and
+                        // a non-finite x published a NEW timestamp beside the PREVIOUS
+                        // packet's position - which is exactly the stale pairing the
+                        // sequence bracket below exists to prevent, arriving through the
+                        // front door. Every 48-byte packet carries all six doubles, so this
+                        // rejects nothing a well-behaved tracker sends.
+                        bool anglesValid = OpenTrackPacket.TryParse(data, out TrackingPose parsed);
+                        bool positionValid = OpenTrackPacket.TryParsePosition(data, out PositionData positionParsed);
+                        bool poseValid = anglesValid && positionValid;
 
                         if (poseValid)
                         {
@@ -576,12 +595,9 @@ namespace CameraUnlock.Core.Protocol
                             //
                             _isRemoteConnection = IsRemoteAddress(remoteEndpoint.Address);
 
-                            if (OpenTrackPacket.TryParsePosition(data, out PositionData positionParsed))
-                            {
-                                _positionX = positionParsed.X;
-                                _positionY = positionParsed.Y;
-                                _positionZ = positionParsed.Z;
-                            }
+                            _positionX = positionParsed.X;
+                            _positionY = positionParsed.Y;
+                            _positionZ = positionParsed.Z;
 
                             // Published last of the pose data, and with a full fence, so a
                             // reader that observes this timestamp is guaranteed to see the

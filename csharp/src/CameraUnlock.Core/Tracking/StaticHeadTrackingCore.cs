@@ -342,12 +342,12 @@ namespace CameraUnlock.Core.Tracking
         /// <para>
         /// Deliberately does NOT re-arm the automatic recenter. Disabling tracking calls
         /// this, so re-arming meant the next Update() captured a fresh centre on the very
-        /// first frame packets resumed - with none of the settling delay the automatic
-        /// path exists to provide. Toggling the mod off and on while leaning forward to
-        /// read something therefore discarded the centre the user had chosen and replaced
-        /// it with the leaning pose. <see cref="HeadTrackingSession"/> already leaves its
-        /// own centring decision alone for the same reason. Call
-        /// <see cref="Shutdown"/> (or <see cref="Recenter"/>) to deliberately re-centre.
+        /// first frame packets resumed - and this class has NO settling delay at all (the
+        /// stabilization countdown lives in <see cref="HeadTrackingSession"/>, not here),
+        /// so the capture is immediate and unconditional. Toggling the mod off and on
+        /// while leaning forward to read something therefore discarded the centre the user
+        /// had chosen and replaced it with the leaning pose. Call <see cref="Shutdown"/>
+        /// or <see cref="Recenter"/> to deliberately re-centre.
         /// </para>
         /// </summary>
         public static void Reset()
