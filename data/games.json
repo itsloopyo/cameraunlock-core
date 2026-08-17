@@ -30,6 +30,13 @@
       "steam_folder": "METAPHOR",
       "executable_relpath": "METAPHOR.exe"
     },
+    "persona-5-royal": {
+      "display_name": "Persona 5 Royal",
+      "env_var": "PERSONA_5_ROYAL_PATH",
+      "steam_app_id": 1687950,
+      "steam_folder": "P5R",
+      "executable_relpath": "P5R.exe"
+    },
     "repo": {
       "display_name": "R.E.P.O.",
       "env_var": "REPO_PATH",
