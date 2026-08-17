@@ -127,18 +127,7 @@ public:
     void Remove() {
         if (!m_hookInstalled) return;
 
-        if (m_initialized) {
-            ImGui_ImplDX12_Shutdown();
-            ImGui_ImplWin32_Shutdown();
-            ImGui::DestroyContext();
-
-            if (m_oWndProc && m_hWindow) {
-                SetWindowLongPtr(m_hWindow, GWLP_WNDPROC, (LONG_PTR)m_oWndProc);
-            }
-
-            CleanupResources();
-            m_initialized = false;
-        }
+        TeardownRenderState();
 
         kiero::unbind(m_config.executeCommandListsIndex);
         kiero::unbind(m_config.presentIndex);
@@ -156,7 +145,21 @@ public:
     bool IsInitialized() const { return m_initialized; }
 
 private:
+    // Blocks until the GPU has retired everything we have submitted. Every
+    // release path below frees objects the GPU may still be reading.
+    void WaitForGpuIdle() {
+        if (!m_pFence || !m_pCommandQueue || !m_fenceEvent) return;
+        const UINT64 target = ++m_fenceValue;
+        if (FAILED(m_pCommandQueue->Signal(m_pFence, target))) return;
+        if (m_pFence->GetCompletedValue() >= target) return;
+        if (SUCCEEDED(m_pFence->SetEventOnCompletion(target, m_fenceEvent))) {
+            WaitForSingleObject(m_fenceEvent, INFINITE);
+        }
+    }
+
     void CleanupResources() {
+        WaitForGpuIdle();
+
         if (m_pBackBuffers) {
             for (UINT i = 0; i < m_bufferCount; i++) {
                 if (m_pBackBuffers[i]) m_pBackBuffers[i]->Release();
@@ -165,11 +168,48 @@ private:
             m_pBackBuffers = nullptr;
         }
 
+        if (m_pCommandAllocators) {
+            for (UINT i = 0; i < m_bufferCount; i++) {
+                if (m_pCommandAllocators[i]) m_pCommandAllocators[i]->Release();
+            }
+            delete[] m_pCommandAllocators;
+            m_pCommandAllocators = nullptr;
+        }
+
+        delete[] m_fenceValues;
+        m_fenceValues = nullptr;
+
+        if (m_fenceEvent) { CloseHandle(m_fenceEvent); m_fenceEvent = nullptr; }
+        if (m_pFence) { m_pFence->Release(); m_pFence = nullptr; }
         if (m_pCommandList) { m_pCommandList->Release(); m_pCommandList = nullptr; }
-        if (m_pCommandAllocator) { m_pCommandAllocator->Release(); m_pCommandAllocator = nullptr; }
         if (m_pRtvDescHeap) { m_pRtvDescHeap->Release(); m_pRtvDescHeap = nullptr; }
         if (m_pSrvDescHeap) { m_pSrvDescHeap->Release(); m_pSrvDescHeap = nullptr; }
         if (m_pDevice) { m_pDevice->Release(); m_pDevice = nullptr; }
+
+        // The queue is re-captured by the ExecuteCommandLists hook, which the
+        // game drives every frame.
+        if (m_pCommandQueue) { m_pCommandQueue->Release(); m_pCommandQueue = nullptr; }
+        m_commandQueueReady = false;
+        m_bufferCount = 0;
+        m_fenceValue = 0;
+    }
+
+    // Full teardown of everything InitializeDX12 built, in reverse order, so
+    // the next Present can rebuild from scratch.
+    void TeardownRenderState() {
+        if (m_initialized) {
+            ImGui_ImplDX12_Shutdown();
+            ImGui_ImplWin32_Shutdown();
+            ImGui::DestroyContext();
+
+            if (m_oWndProc && m_hWindow) {
+                SetWindowLongPtr(m_hWindow, GWLP_WNDPROC, (LONG_PTR)m_oWndProc);
+                m_oWndProc = nullptr;
+            }
+        }
+
+        CleanupResources();
+        m_initialized = false;
     }
 
     bool InitializeDX12(IDXGISwapChain* pSwapChain) {
@@ -177,11 +217,11 @@ private:
         if (!m_commandQueueReady || !m_pCommandQueue) return false;
 
         HRESULT hr = m_pCommandQueue->GetDevice(__uuidof(ID3D12Device), (void**)&m_pDevice);
-        if (FAILED(hr) || !m_pDevice) return false;
+        if (FAILED(hr) || !m_pDevice) { CleanupResources(); return false; }
 
         DXGI_SWAP_CHAIN_DESC desc;
         hr = pSwapChain->GetDesc(&desc);
-        if (FAILED(hr)) return false;
+        if (FAILED(hr)) { CleanupResources(); return false; }
 
         m_hWindow = desc.OutputWindow;
         m_bufferCount = desc.BufferCount;
@@ -191,28 +231,43 @@ private:
         srvHeapDesc.NumDescriptors = 1;
         srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         hr = m_pDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_pSrvDescHeap));
-        if (FAILED(hr)) return false;
+        if (FAILED(hr)) { CleanupResources(); return false; }
 
         D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
         rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         rtvHeapDesc.NumDescriptors = m_bufferCount;
         hr = m_pDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_pRtvDescHeap));
-        if (FAILED(hr)) return false;
+        if (FAILED(hr)) { CleanupResources(); return false; }
 
         m_rtvDescriptorSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-        hr = m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_pCommandAllocator));
-        if (FAILED(hr)) return false;
+        // One allocator per back buffer, recycled only once the GPU has retired
+        // the frame that used it. Sharing a single allocator across frames means
+        // resetting one whose commands are still executing, which is D3D12 UB
+        // and surfaces as intermittent TDRs / DXGI_ERROR_DEVICE_REMOVED.
+        m_pCommandAllocators = new ID3D12CommandAllocator*[m_bufferCount]();
+        for (UINT i = 0; i < m_bufferCount; i++) {
+            hr = m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                   IID_PPV_ARGS(&m_pCommandAllocators[i]));
+            if (FAILED(hr)) { CleanupResources(); return false; }
+        }
 
-        hr = m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pCommandAllocator, nullptr, IID_PPV_ARGS(&m_pCommandList));
-        if (FAILED(hr)) return false;
+        hr = m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pCommandAllocators[0], nullptr, IID_PPV_ARGS(&m_pCommandList));
+        if (FAILED(hr)) { CleanupResources(); return false; }
         m_pCommandList->Close();
 
-        m_pBackBuffers = new ID3D12Resource*[m_bufferCount];
+        hr = m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence));
+        if (FAILED(hr)) { CleanupResources(); return false; }
+        m_fenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        if (!m_fenceEvent) { CleanupResources(); return false; }
+        m_fenceValue = 0;
+        m_fenceValues = new UINT64[m_bufferCount]();
+
+        m_pBackBuffers = new ID3D12Resource*[m_bufferCount]();
         D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_pRtvDescHeap->GetCPUDescriptorHandleForHeapStart();
         for (UINT i = 0; i < m_bufferCount; i++) {
             hr = pSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_pBackBuffers[i]));
-            if (FAILED(hr)) return false;
+            if (FAILED(hr)) { CleanupResources(); return false; }
             m_pDevice->CreateRenderTargetView(m_pBackBuffers[i], nullptr, rtvHandle);
             rtvHandle.ptr += m_rtvDescriptorSize;
         }
@@ -236,7 +291,16 @@ private:
         initInfo.LegacySingleSrvCpuDescriptor = m_pSrvDescHeap->GetCPUDescriptorHandleForHeapStart();
         initInfo.LegacySingleSrvGpuDescriptor = m_pSrvDescHeap->GetGPUDescriptorHandleForHeapStart();
 
-        if (!ImGui_ImplDX12_Init(&initInfo)) return false;
+        if (!ImGui_ImplDX12_Init(&initInfo)) {
+            ImGui_ImplWin32_Shutdown();
+            ImGui::DestroyContext();
+            if (m_oWndProc && m_hWindow) {
+                SetWindowLongPtr(m_hWindow, GWLP_WNDPROC, (LONG_PTR)m_oWndProc);
+                m_oWndProc = nullptr;
+            }
+            CleanupResources();
+            return false;
+        }
 
         m_initialized = true;
         return true;
@@ -251,9 +315,17 @@ private:
             bufferIndex = pSwapChain3->GetCurrentBackBufferIndex();
             pSwapChain3->Release();
         }
+        if (bufferIndex >= m_bufferCount || !m_pBackBuffers[bufferIndex]) return;
 
-        m_pCommandAllocator->Reset();
-        m_pCommandList->Reset(m_pCommandAllocator, nullptr);
+        // The CPU runs one to three frames ahead of the GPU, so this allocator's
+        // previous submission may still be executing.
+        if (m_pFence->GetCompletedValue() < m_fenceValues[bufferIndex]) {
+            if (FAILED(m_pFence->SetEventOnCompletion(m_fenceValues[bufferIndex], m_fenceEvent))) return;
+            WaitForSingleObject(m_fenceEvent, INFINITE);
+        }
+
+        m_pCommandAllocators[bufferIndex]->Reset();
+        m_pCommandList->Reset(m_pCommandAllocators[bufferIndex], nullptr);
 
         D3D12_RESOURCE_BARRIER barrier = {};
         barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -289,6 +361,9 @@ private:
         m_pCommandList->Close();
         ID3D12CommandList* ppCommandLists[] = { m_pCommandList };
         m_pCommandQueue->ExecuteCommandLists(1, ppCommandLists);
+
+        m_fenceValues[bufferIndex] = ++m_fenceValue;
+        m_pCommandQueue->Signal(m_pFence, m_fenceValue);
     }
 
     // Static callbacks for hooks
@@ -298,6 +373,9 @@ private:
         if (s_instance && !s_instance->m_commandQueueReady && pQueue) {
             D3D12_COMMAND_QUEUE_DESC desc = pQueue->GetDesc();
             if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+                // Engines create transient DIRECT queues and release them; without
+                // our own reference this becomes a dangling pointer used every frame.
+                pQueue->AddRef();
                 s_instance->m_pCommandQueue = pQueue;
                 s_instance->m_commandQueueReady = true;
             }
@@ -343,7 +421,13 @@ private:
 
     static HRESULT __stdcall HkResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
         if (s_instance) {
+            // BufferCount == 0 is the documented DXGI way to say "keep the
+            // current count".
+            const UINT newCount = (BufferCount == 0) ? s_instance->m_bufferCount : BufferCount;
+            const bool countChanged = s_instance->m_initialized && newCount != s_instance->m_bufferCount;
+
             if (s_instance->m_pBackBuffers) {
+                s_instance->WaitForGpuIdle();
                 for (UINT i = 0; i < s_instance->m_bufferCount; i++) {
                     if (s_instance->m_pBackBuffers[i]) {
                         s_instance->m_pBackBuffers[i]->Release();
@@ -354,13 +438,19 @@ private:
 
             HRESULT hr = s_instance->m_oResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
 
-            if (SUCCEEDED(hr) && s_instance->m_initialized && s_instance->m_pBackBuffers) {
-                s_instance->m_bufferCount = BufferCount;
-                D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = s_instance->m_pRtvDescHeap->GetCPUDescriptorHandleForHeapStart();
-                for (UINT i = 0; i < s_instance->m_bufferCount; i++) {
-                    pSwapChain->GetBuffer(i, IID_PPV_ARGS(&s_instance->m_pBackBuffers[i]));
-                    s_instance->m_pDevice->CreateRenderTargetView(s_instance->m_pBackBuffers[i], nullptr, rtvHandle);
-                    rtvHandle.ptr += s_instance->m_rtvDescriptorSize;
+            if (SUCCEEDED(hr) && s_instance->m_initialized) {
+                if (countChanged) {
+                    // The back-buffer array and the RTV heap are both sized for
+                    // the old count; writing newCount entries into them corrupts
+                    // the heap. Rebuild from scratch on the next Present instead.
+                    s_instance->TeardownRenderState();
+                } else if (s_instance->m_pBackBuffers) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = s_instance->m_pRtvDescHeap->GetCPUDescriptorHandleForHeapStart();
+                    for (UINT i = 0; i < s_instance->m_bufferCount; i++) {
+                        pSwapChain->GetBuffer(i, IID_PPV_ARGS(&s_instance->m_pBackBuffers[i]));
+                        s_instance->m_pDevice->CreateRenderTargetView(s_instance->m_pBackBuffers[i], nullptr, rtvHandle);
+                        rtvHandle.ptr += s_instance->m_rtvDescriptorSize;
+                    }
                 }
             }
 
@@ -396,10 +486,14 @@ private:
     ID3D12Device* m_pDevice = nullptr;
     ID3D12CommandQueue* m_pCommandQueue = nullptr;
     ID3D12DescriptorHeap* m_pSrvDescHeap = nullptr;
-    ID3D12CommandAllocator* m_pCommandAllocator = nullptr;
+    ID3D12CommandAllocator** m_pCommandAllocators = nullptr;  // one per back buffer
     ID3D12GraphicsCommandList* m_pCommandList = nullptr;
     ID3D12Resource** m_pBackBuffers = nullptr;
     ID3D12DescriptorHeap* m_pRtvDescHeap = nullptr;
+    ID3D12Fence* m_pFence = nullptr;
+    HANDLE m_fenceEvent = nullptr;
+    UINT64 m_fenceValue = 0;
+    UINT64* m_fenceValues = nullptr;   // last submission per back buffer
     UINT m_rtvDescriptorSize = 0;
     UINT m_bufferCount = 0;
 

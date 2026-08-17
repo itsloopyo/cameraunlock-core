@@ -44,12 +44,30 @@ bool CameraControllerHooker::TryHookTypeDef(::reframework::API::TypeDefinition* 
     for (auto methodName : kUpdateMethodNames) {
         auto method = type->find_method(methodName);
         if (!method) continue;
+        // REFramework returns 0 when the hook could not be installed. Latching
+        // m_hooked on that made TryHook() return true forever, so the discovery
+        // ladder never ran again and aim decoupling did nothing for the rest of
+        // the session while the log claimed "Hooked".
         auto id = method->add_hook(m_preHook, m_postHook, false);
+        if (id == 0) {
+            Log(LogLevel::Warning, "add_hook failed on %s.%s", fullTypeName, methodName);
+            continue;
+        }
         Log(LogLevel::Info, "Hooked %s.%s (id=%u)", fullTypeName, methodName, id);
+        m_hookedMethod = method;
+        m_hookId = id;
         m_hooked = true;
         return true;
     }
     return false;
+}
+
+void CameraControllerHooker::Unhook() {
+    if (!m_hooked) return;
+    m_hookedMethod->remove_hook(m_hookId);
+    m_hookedMethod = nullptr;
+    m_hookId = 0;
+    m_hooked = false;
 }
 
 bool CameraControllerHooker::TryHookType(const char* fullTypeName) {

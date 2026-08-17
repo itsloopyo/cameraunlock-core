@@ -14,6 +14,17 @@ namespace cameraunlock::memory {
 // Returns false if module is null or info cannot be retrieved
 bool GetModuleRange(void* module, uintptr_t& base, size_t& size);
 
+// Advance `cursor` to the next run of committed, readable memory inside
+// [cursor, end) and report it in runBase/runSize. Returns false once the range
+// is exhausted. Adjacent readable regions are merged into one run.
+//
+// Anything scanning a module image must iterate through this rather than
+// walking MODULEINFO::SizeOfImage directly: packed titles (Denuvo, VMProtect)
+// map sections PAGE_NOACCESS until first execution, and a raw dereference there
+// closes the game to desktop. Callers must still guard the reads themselves -
+// a protection change can race the scan.
+bool NextReadableRange(uintptr_t& cursor, uintptr_t end, uintptr_t& runBase, size_t& runSize);
+
 // Scan for byte pattern in module
 // Pattern uses ?? for wildcards, e.g., "48 8B 05 ?? ?? ?? ??"
 // Returns nullptr if pattern not found

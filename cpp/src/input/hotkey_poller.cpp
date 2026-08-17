@@ -14,35 +14,50 @@ HotkeyPoller::~HotkeyPoller() {
     Stop();
 }
 
+// The polling thread captures a this-pointer, so the running thread cannot be
+// handed over: it is stopped on the source and restarted on the destination.
+// Without the restart, a poller moved into a container silently stopped firing
+// hotkeys.
 HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) noexcept {
-    // Stop the other's thread first
+    const bool wasRunning = other.m_running.load();
+    const int interval = other.m_pollInterval.load();
     other.Stop();
 
     m_toggleKey.store(other.m_toggleKey.load());
     m_recenterKey.store(other.m_recenterKey.load());
-    m_pollInterval.store(other.m_pollInterval.load());
+    m_pollInterval.store(interval);
     m_toggleCallback = std::move(other.m_toggleCallback);
     m_recenterCallback = std::move(other.m_recenterCallback);
 
-    std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
-    m_hotkeys = std::move(other.m_hotkeys);
-    m_nextHotkeyId = other.m_nextHotkeyId;
+    {
+        std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
+        m_hotkeys = std::move(other.m_hotkeys);
+        m_nextHotkeyId = other.m_nextHotkeyId;
+    }
+
+    if (wasRunning) Start(interval);
 }
 
 HotkeyPoller& HotkeyPoller::operator=(HotkeyPoller&& other) noexcept {
     if (this != &other) {
+        const bool wasRunning = other.m_running.load();
+        const int interval = other.m_pollInterval.load();
         Stop();
         other.Stop();
 
         m_toggleKey.store(other.m_toggleKey.load());
         m_recenterKey.store(other.m_recenterKey.load());
-        m_pollInterval.store(other.m_pollInterval.load());
+        m_pollInterval.store(interval);
         m_toggleCallback = std::move(other.m_toggleCallback);
         m_recenterCallback = std::move(other.m_recenterCallback);
 
-        std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
-        m_hotkeys = std::move(other.m_hotkeys);
-        m_nextHotkeyId = other.m_nextHotkeyId;
+        {
+            std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
+            m_hotkeys = std::move(other.m_hotkeys);
+            m_nextHotkeyId = other.m_nextHotkeyId;
+        }
+
+        if (wasRunning) Start(interval);
     }
     return *this;
 }

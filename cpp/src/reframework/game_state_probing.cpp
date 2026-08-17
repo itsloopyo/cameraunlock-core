@@ -5,6 +5,8 @@
 #include <windows.h>
 #include <cstring>
 #include <cstdio>
+#include <deque>
+#include <mutex>
 #include <string>
 
 namespace cameraunlock::reframework {
@@ -45,6 +47,24 @@ const char* FindSingleton(const ::reframework::API* api, const char* baseName) {
     return nullptr;
 }
 
+// Backing store for MethodCheck::singletonName. A deque never relocates the
+// elements it already holds, so every pointer handed out stays valid for the
+// process lifetime. The 16-entry ring this replaced silently repointed an
+// earlier check's name at a different singleton on the 17th probe, and
+// InvokeBool/InvokeInt resolve the singleton by that name on every call - so
+// the check then invoked a method resolved for one type against an unrelated
+// object.
+static const char* InternSingletonName(const char* name) {
+    static std::deque<std::string> store;
+    static std::mutex mutex;
+    std::lock_guard<std::mutex> lock(mutex);
+    for (const auto& stored : store) {
+        if (stored == name) return stored.c_str();
+    }
+    store.emplace_back(name);
+    return store.back().c_str();
+}
+
 ::reframework::API::Method* FindMethod(
     ::reframework::API::TypeDefinition* type, const char* names[], int count) {
     for (int i = 0; i < count; i++) {
@@ -72,14 +92,8 @@ bool ProbeManager(
     auto singleton = FindSingleton(api, typeName);
     if (!singleton) return false;
 
-    // Store a persistent copy of the singleton name
-    static char singletonBufs[16][256];
-    static int singletonBufIdx = 0;
-    strncpy(singletonBufs[singletonBufIdx], singleton, 255);
-    singletonBufs[singletonBufIdx][255] = '\0';
     out.method = method;
-    out.singletonName = singletonBufs[singletonBufIdx];
-    singletonBufIdx = (singletonBufIdx + 1) % 16;
+    out.singletonName = InternSingletonName(singleton);
 
     Log(LogLevel::Info, "Probe OK: %s -> %s (singleton: %s)", label, methodNames[0], out.singletonName);
     return true;

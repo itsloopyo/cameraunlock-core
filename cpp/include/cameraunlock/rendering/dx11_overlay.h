@@ -106,6 +106,7 @@ private:
 #include <Windows.h>
 #include <cstring>
 #include <cmath>
+#include <mutex>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -192,15 +193,31 @@ struct OverlayState {
     ID3D11InputLayout*      inputLayout     = nullptr;
     ID3D11Buffer*           vb              = nullptr;
     UINT                    vbCapacity      = 0;
+    ID3D11Buffer*           cb              = nullptr;
+    UINT                    cbW             = 0;   // viewport the cb currently holds
+    UINT                    cbH             = 0;
     ID3D11BlendState*       blendState      = nullptr;
     ID3D11RasterizerState*  rasterState     = nullptr;
     ID3D11DepthStencilState* depthState     = nullptr;
     UINT                    backbufferW     = 0;
     UINT                    backbufferH     = 0;
 
+    // The callback is assigned from the mod thread and invoked from the render
+    // thread; a settings hot-reload that re-registers it would otherwise tear
+    // the std::function under RenderFrame.
     DX11RenderCallback callback;
+    std::mutex         callbackMutex;
     DX11LogFn          logFn = nullptr;
     bool               firstPresentLogged = false;
+};
+
+// Viewport half-extents for the vertex shader. 16 bytes, the constant-buffer
+// alignment unit.
+struct OverlayCB {
+    float invHalfW;
+    float invHalfH;
+    float pad0;
+    float pad1;
 };
 
 inline OverlayState& State() {
@@ -310,6 +327,20 @@ inline bool InitDeviceResources(IDXGISwapChain* swap) {
         ReleaseDeviceResources(); return false;
     }
 
+    // One dynamic constant buffer for the lifetime of the device resources. The
+    // previous per-frame IMMUTABLE buffer was a driver allocation on the hot path.
+    D3D11_BUFFER_DESC cbd = {};
+    cbd.Usage          = D3D11_USAGE_DYNAMIC;
+    cbd.ByteWidth      = sizeof(OverlayCB);
+    cbd.BindFlags      = D3D11_BIND_CONSTANT_BUFFER;
+    cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(s.device->CreateBuffer(&cbd, nullptr, &s.cb))) {
+        Log("dx11_overlay: constant-buffer create failed");
+        ReleaseDeviceResources(); return false;
+    }
+    s.cbW = 0;
+    s.cbH = 0;
+
     // Standard alpha-blended state
     D3D11_BLEND_DESC blend = {};
     blend.RenderTarget[0].BlendEnable           = TRUE;
@@ -352,6 +383,7 @@ inline void ReleaseDeviceResources() {
     if (s.depthState)   { s.depthState->Release();   s.depthState = nullptr; }
     if (s.rasterState)  { s.rasterState->Release();  s.rasterState = nullptr; }
     if (s.blendState)   { s.blendState->Release();   s.blendState = nullptr; }
+    if (s.cb)           { s.cb->Release();           s.cb = nullptr; }
     if (s.vb)           { s.vb->Release();           s.vb = nullptr; }
     if (s.inputLayout)  { s.inputLayout->Release();  s.inputLayout = nullptr; }
     if (s.ps)           { s.ps->Release();           s.ps = nullptr; }
@@ -429,11 +461,18 @@ struct ContextStateScope {
 
 inline void RenderFrame() {
     auto& s = State();
-    if (!s.initialized || !s.callback) return;
+    if (!s.initialized) return;
     if (s.backbufferW == 0 || s.backbufferH == 0) return;
 
+    DX11RenderCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        callback = s.callback;
+    }
+    if (!callback) return;
+
     DX11DrawContext dc(static_cast<float>(s.backbufferW), static_cast<float>(s.backbufferH));
-    s.callback(dc);
+    callback(dc);
     const auto& verts = dc.TriVerts();
     if (verts.empty()) return;
 
@@ -457,18 +496,16 @@ inline void RenderFrame() {
     std::memcpy(mapped.pData, verts.data(), sizeof(DX11OverlayVertex) * needed);
     s.context->Unmap(s.vb, 0);
 
-    // Build viewport-cb data on the stack each frame so resize is automatic.
-    struct CB { float invHalfW; float invHalfH; float pad0; float pad1; };
-    CB cbData = { 2.0f / s.backbufferW, 2.0f / s.backbufferH, 0, 0 };
-
-    // One transient CB per frame avoids carrying around state for resizes.
-    ID3D11Buffer* cb = nullptr;
-    D3D11_BUFFER_DESC cbDesc = {};
-    cbDesc.Usage          = D3D11_USAGE_IMMUTABLE;
-    cbDesc.ByteWidth      = sizeof(CB);
-    cbDesc.BindFlags      = D3D11_BIND_CONSTANT_BUFFER;
-    D3D11_SUBRESOURCE_DATA cbInit = { &cbData, 0, 0 };
-    if (FAILED(s.device->CreateBuffer(&cbDesc, &cbInit, &cb))) return;
+    // Refresh the viewport constants only when the backbuffer actually changes.
+    if (s.cbW != s.backbufferW || s.cbH != s.backbufferH) {
+        D3D11_MAPPED_SUBRESOURCE cbMapped = {};
+        if (FAILED(s.context->Map(s.cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &cbMapped))) return;
+        OverlayCB cbData = { 2.0f / s.backbufferW, 2.0f / s.backbufferH, 0, 0 };
+        std::memcpy(cbMapped.pData, &cbData, sizeof(cbData));
+        s.context->Unmap(s.cb, 0);
+        s.cbW = s.backbufferW;
+        s.cbH = s.backbufferH;
+    }
 
     {
         ContextStateScope save(s.context);
@@ -487,7 +524,7 @@ inline void RenderFrame() {
         s.context->IASetVertexBuffers(0, 1, &s.vb, &stride, &offset);
         s.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         s.context->VSSetShader(s.vs, nullptr, 0);
-        s.context->VSSetConstantBuffers(0, 1, &cb);
+        s.context->VSSetConstantBuffers(0, 1, &s.cb);
         s.context->PSSetShader(s.ps, nullptr, 0);
         s.context->RSSetState(s.rasterState);
         FLOAT bf[4] = {0,0,0,0};
@@ -496,12 +533,14 @@ inline void RenderFrame() {
 
         s.context->Draw(needed, 0);
     }
-
-    cb->Release();
 }
 
 inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT flags) {
     auto& s = State();
+    // Remove() nulls these; a thread that entered just before it ran has no
+    // trampoline left to forward to.
+    auto orig = s.origPresent;
+    if (!orig) return S_OK;
     if (!s.firstPresentLogged) {
         s.firstPresentLogged = true;
         Log("dx11_overlay: Present hook fired (first invocation)");
@@ -512,18 +551,20 @@ inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT fla
     if (s.initialized) {
         RenderFrame();
     }
-    return s.origPresent(swap, sync, flags);
+    return orig(swap, sync, flags);
 }
 
 inline HRESULT __stdcall HookedResizeBuffers(IDXGISwapChain* swap, UINT bufferCount, UINT width, UINT height,
                                              DXGI_FORMAT format, UINT swapChainFlags) {
     auto& s = State();
+    auto orig = s.origResize;
+    if (!orig) return S_OK;
     if (s.initialized) {
         // Drop view + remaining device-bound buffers; they'll be recreated on next Present.
         if (s.rtv) { s.rtv->Release(); s.rtv = nullptr; }
         s.initialized = false;
     }
-    return s.origResize(swap, bufferCount, width, height, format, swapChainFlags);
+    return orig(swap, bufferCount, width, height, format, swapChainFlags);
 }
 
 // Get the IDXGISwapChain vtable by spawning a tiny temp swap chain.
@@ -582,7 +623,17 @@ inline void SetDX11OverlayLogger(DX11LogFn fn) { detail::State().logFn = fn; }
 
 inline bool DX11Overlay::Install() {
     auto& s = detail::State();
-    if (s.hookInstalled) return true;
+    if (s.hookInstalled) {
+        // The hooks are process-wide, but the callback and m_hookInstalled are
+        // per instance: without claiming both here this instance never renders,
+        // and its destructor would not know it owns anything.
+        {
+            std::lock_guard<std::mutex> lock(s.callbackMutex);
+            s.callback = m_callback;
+        }
+        m_hookInstalled = true;
+        return true;
+    }
 
     void** vtable = nullptr;
     if (!detail::GetSwapChainVTable(vtable)) {
@@ -614,7 +665,10 @@ inline bool DX11Overlay::Install() {
         return false;
     }
 
-    s.callback     = m_callback;
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        s.callback = m_callback;
+    }
     s.hookInstalled = true;
     m_hookInstalled = true;
     detail::Log("dx11_overlay: hooks enabled");
@@ -622,16 +676,28 @@ inline bool DX11Overlay::Install() {
 }
 
 inline void DX11Overlay::Remove() {
-    auto& s = detail::State();
-    if (!s.hookInstalled) return;
+    // Keyed on this instance, not the shared state: an instance that never
+    // installed anything must not tear down the live overlay's hooks and
+    // release its D3D resources when it goes out of scope.
+    if (!m_hookInstalled) return;
 
+    auto& s = detail::State();
     MH_DisableHook(s.presentTarget);
     MH_DisableHook(s.resizeBuffersTarget);
     MH_RemoveHook(s.presentTarget);
     MH_RemoveHook(s.resizeBuffersTarget);
 
     detail::ReleaseDeviceResources();
-    s.callback = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        s.callback = nullptr;
+    }
+    // A render thread already inside HookedPresent would otherwise call a
+    // trampoline MinHook has freed.
+    s.origPresent = nullptr;
+    s.origResize = nullptr;
+    s.presentTarget = nullptr;
+    s.resizeBuffersTarget = nullptr;
     s.hookInstalled = false;
     m_hookInstalled = false;
 }
@@ -641,7 +707,9 @@ inline void DX11Overlay::Remove() {
 // reads the State() copy to avoid touching this-pointer in a free function.)
 inline void DX11Overlay::SetRenderCallback(DX11RenderCallback cb) {
     m_callback = cb;
-    detail::State().callback = std::move(cb);
+    auto& s = detail::State();
+    std::lock_guard<std::mutex> lock(s.callbackMutex);
+    s.callback = std::move(cb);
 }
 
 #endif // CAMERAUNLOCK_DX11_OVERLAY_IMPLEMENTATION

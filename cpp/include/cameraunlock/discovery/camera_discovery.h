@@ -15,17 +15,8 @@ enum class Phase {
     FindingVtables,
     Probing,
     AnalyzingLayout,
-    Calibrating,
     Complete,
     Failed,
-};
-
-// Rotation pulse the mod should inject during calibration
-struct CalibrationPulse {
-    float yaw;
-    float pitch;
-    float roll;
-    bool active;
 };
 
 // Discovered camera rotation offsets
@@ -43,10 +34,7 @@ struct DiscoveryConfig {
     void* module;                              // game module handle
     std::vector<std::string> candidate_names;  // RTTI class names to try
     int probe_frames       = 180;              // frames to probe vfuncs (~3s at 60fps)
-    float calibration_deg  = 5.0f;             // rotation to inject per axis
-    int pulse_frames       = 15;               // frames to hold each pulse
-    int settle_frames      = 10;               // frames to wait between pulses
-    int instance_size      = 512;              // bytes to analyze/snapshot
+    int instance_size      = 512;              // bytes to analyze
 
     // Pin the per-frame camera update to a known vfunc index on the first
     // (most-specific) candidate instead of letting the call-count heuristic
@@ -100,8 +88,6 @@ public:
     // Vfunc probe callback — each probe detour calls this
     void ReportVfuncCall(int slot, void* this_ptr);
 
-    // Calibration interface
-    CalibrationPulse GetCalibrationPulse() const;
     void SetInstancePointer(void* ptr);
 
     // Results (valid when phase == Complete)
@@ -119,19 +105,11 @@ public:
     static std::atomic<uintptr_t> s_lastThis[kMaxProbeSlots];
     static CameraDiscovery* s_instance;
 
-    // Calibration injection — probe detours apply this after calling original
-    static std::atomic<bool> s_calibActive;
-    static float s_calibDeltas[3];          // yaw, pitch, roll to inject
-    static size_t s_calibAngleOffsets[3];   // byte offsets for the 3 floats in the angle group
-    static bool s_calibOffsetsSet;
-    static std::atomic<int> s_calibInjectedThisFrame;  // guard: only inject once per frame
-
 private:
     void Log(const char* fmt, ...);
     Phase RunFindVtables();
     Phase RunProbing();
     Phase RunAnalyzeLayout();
-    Phase RunCalibrating();
 
     void InstallProbeHooks();
     void RemoveProbeHooks();
@@ -158,42 +136,17 @@ private:
 
     // Layout analysis
     LayoutReport m_layout{};
-
-    // Calibration state
-    enum class CalibAxis { Yaw, Pitch, Roll, Done };
-    CalibAxis m_calibAxis = CalibAxis::Yaw;
-    int m_calibFrame = 0;
-    bool m_calibPulsing = false;
-    std::vector<float> m_preSnapshot;
-    std::vector<float> m_postSnapshot;
     std::vector<size_t> m_candidateAngleOffsets;
 
     CameraOffsets m_offsets{};
 };
 
 // Template probe detours — each slot gets a unique function address.
-// During calibration, the winning slot also injects rotation pulses.
 template<int Slot>
 static uintptr_t __fastcall ProbeDetour(void* thisPtr, void* a2, void* a3, void* a4) {
     CameraDiscovery::s_callCounts[Slot].fetch_add(1, std::memory_order_relaxed);
     CameraDiscovery::s_lastThis[Slot].store(reinterpret_cast<uintptr_t>(thisPtr), std::memory_order_relaxed);
-    uintptr_t ret = CameraDiscovery::s_originals[Slot](thisPtr, a2, a3, a4);
-
-    // Calibration injection — apply rotation pulse after game processes (once per frame)
-    if (CameraDiscovery::s_calibActive.load(std::memory_order_relaxed) &&
-        CameraDiscovery::s_calibOffsetsSet) {
-        int expected = 0;
-        if (CameraDiscovery::s_calibInjectedThisFrame.compare_exchange_strong(
-                expected, 1, std::memory_order_relaxed)) {
-            uintptr_t inst = reinterpret_cast<uintptr_t>(thisPtr);
-            for (int i = 0; i < 3; i++) {
-                *reinterpret_cast<float*>(inst + CameraDiscovery::s_calibAngleOffsets[i]) +=
-                    CameraDiscovery::s_calibDeltas[i];
-            }
-        }
-    }
-
-    return ret;
+    return CameraDiscovery::s_originals[Slot](thisPtr, a2, a3, a4);
 }
 
 } // namespace cameraunlock::discovery

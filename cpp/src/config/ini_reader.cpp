@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cctype>
+#include <clocale>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -52,28 +53,14 @@ bool IniReader::HasChanged() const {
     }
 
 #ifdef _WIN32
-    HANDLE hFile = CreateFileA(
-        m_path.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-
-    if (hFile == INVALID_HANDLE_VALUE) {
+    // Attribute query rather than open/query/close: this is polled every frame
+    // by hot-reload consumers.
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+    if (!GetFileAttributesExA(m_path.c_str(), GetFileExInfoStandard, &attrs)) {
         return false;
     }
 
-    FILETIME currentModTime;
-    BOOL success = GetFileTime(hFile, nullptr, nullptr, &currentModTime);
-    CloseHandle(hFile);
-
-    if (!success) {
-        return false;
-    }
-
-    return CompareFileTime(&m_lastModTime, &currentModTime) != 0;
+    return CompareFileTime(&m_lastModTime, &attrs.ftLastWriteTime) != 0;
 #else
     struct stat st;
     if (stat(m_path.c_str(), &st) != 0) {
@@ -89,18 +76,9 @@ void IniReader::RefreshModTime() {
     }
 
 #ifdef _WIN32
-    HANDLE hFile = CreateFileA(
-        m_path.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-
-    if (hFile != INVALID_HANDLE_VALUE) {
-        GetFileTime(hFile, nullptr, nullptr, &m_lastModTime);
-        CloseHandle(hFile);
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+    if (GetFileAttributesExA(m_path.c_str(), GetFileExInfoStandard, &attrs)) {
+        m_lastModTime = attrs.ftLastWriteTime;
     }
 #else
     struct stat st;
@@ -231,7 +209,16 @@ double IniReader::ReadDouble(const char* section, const char* key, double defaul
     if (str.empty()) return defaultValue;
 
     char* end;
+#ifdef _MSC_VER
+    // Parsed in the C locale explicitly. strtod follows LC_NUMERIC, and a
+    // consumer built /MD shares the game's CRT: a title that calls
+    // setlocale(LC_ALL, "") on a German install turns Sensitivity=2.5 into 2.0
+    // with no diagnostic.
+    static const _locale_t cLocale = _create_locale(LC_NUMERIC, "C");
+    double value = _strtod_l(str.c_str(), &end, cLocale);
+#else
     double value = strtod(str.c_str(), &end);
+#endif
     if (end == str.c_str()) return defaultValue;
     return value;
 }

@@ -23,7 +23,10 @@ public:
     HotkeyPoller(const HotkeyPoller&) = delete;
     HotkeyPoller& operator=(const HotkeyPoller&) = delete;
 
-    // Move-only
+    // Move-only. A running poller keeps polling after a move: the thread is
+    // bound to the source's this-pointer, so it is stopped there and a fresh
+    // one is started here. Key edge states reset in the process, so a key held
+    // down across the move fires again on its next press, not immediately.
     HotkeyPoller(HotkeyPoller&& other) noexcept;
     HotkeyPoller& operator=(HotkeyPoller&& other) noexcept;
 

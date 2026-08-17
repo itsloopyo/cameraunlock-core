@@ -65,7 +65,103 @@ bool MatchPattern(const uint8_t* data, const uint8_t* pattern, const char* mask,
     return true;
 }
 
+#ifdef _WIN32
+
+bool IsReadableProtect(DWORD protect) {
+    if (protect & PAGE_GUARD) return false;
+    switch (protect & 0xFFu) {
+        case PAGE_READONLY:
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+#endif // _WIN32
+
+// The scan bodies live in their own functions: MSVC rejects __try in a function
+// that needs C++ object unwinding, and a protection change racing the scan can
+// still fault a page that VirtualQuery reported as readable.
+void* ScanRunMask(const uint8_t* start, size_t lastIndex,
+                  const uint8_t* pattern, const char* mask, size_t length) {
+#ifdef _WIN32
+    __try {
+#endif
+        for (size_t i = 0; i <= lastIndex; ++i) {
+            if (MatchPattern(start + i, pattern, mask, length)) {
+                return const_cast<uint8_t*>(start + i);
+            }
+        }
+#ifdef _WIN32
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+#endif
+    return nullptr;
+}
+
+const uint8_t* ScanRunBytes(const uint8_t* start, size_t lastIndex,
+                            const uint8_t* needle, size_t length) {
+#ifdef _WIN32
+    __try {
+#endif
+        for (size_t i = 0; i <= lastIndex; ++i) {
+            if (std::memcmp(start + i, needle, length) == 0) {
+                return start + i;
+            }
+        }
+#ifdef _WIN32
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+#endif
+    return nullptr;
+}
+
 } // anonymous namespace
+
+bool NextReadableRange(uintptr_t& cursor, uintptr_t end, uintptr_t& runBase, size_t& runSize) {
+#ifdef _WIN32
+    uintptr_t runStart = 0;
+    uintptr_t runEnd = 0;
+
+    while (cursor < end) {
+        MEMORY_BASIC_INFORMATION mbi = {};
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi)) break;
+
+        const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (regionEnd <= cursor) break;
+
+        const uintptr_t chunkStart = cursor;
+        const uintptr_t chunkEnd = regionEnd < end ? regionEnd : end;
+        cursor = regionEnd;
+
+        // Chunks are contiguous by construction, so an adjacent readable region
+        // just extends the run: a pattern straddling a section boundary still
+        // matches.
+        if (mbi.State == MEM_COMMIT && IsReadableProtect(mbi.Protect)) {
+            if (runEnd == 0) runStart = chunkStart;
+            runEnd = chunkEnd;
+        } else if (runEnd != 0) {
+            break;
+        }
+    }
+
+    if (runEnd == 0) return false;
+    runBase = runStart;
+    runSize = runEnd - runStart;
+    return true;
+#else
+    if (cursor >= end) return false;
+    runBase = cursor;
+    runSize = end - cursor;
+    cursor = end;
+    return true;
+#endif
+}
 
 bool GetModuleRange(void* module, uintptr_t& base, size_t& size) {
     if (!module) return false;
@@ -94,36 +190,24 @@ void* ScanPatternInRange(uintptr_t base, size_t size, std::string_view pattern) 
         return nullptr;
     }
 
-    if (patternBytes.size() > size) {
-        return nullptr;
-    }
-
-    const uint8_t* start = reinterpret_cast<const uint8_t*>(base);
-    const size_t searchSize = size - patternBytes.size();
-
-    for (size_t i = 0; i <= searchSize; ++i) {
-        if (MatchPattern(start + i, patternBytes.data(), patternMask.data(), patternBytes.size())) {
-            return const_cast<uint8_t*>(start + i);
-        }
-    }
-
-    return nullptr;
+    return ScanPatternMaskInRange(base, size, patternBytes.data(), patternMask.data(), patternBytes.size());
 }
 
 void* ScanPatternMaskInRange(uintptr_t base, size_t size, const uint8_t* pattern, const char* mask, size_t length) {
-    if (length > size) {
+    if (length == 0 || length > size) {
         return nullptr;
     }
 
-    const uint8_t* start = reinterpret_cast<const uint8_t*>(base);
-    const size_t searchSize = size - length;
-
-    for (size_t i = 0; i <= searchSize; ++i) {
-        if (MatchPattern(start + i, pattern, mask, length)) {
-            return const_cast<uint8_t*>(start + i);
-        }
+    uintptr_t cursor = base;
+    const uintptr_t end = base + size;
+    uintptr_t runBase = 0;
+    size_t runSize = 0;
+    while (NextReadableRange(cursor, end, runBase, runSize)) {
+        if (runSize < length) continue;
+        void* hit = ScanRunMask(reinterpret_cast<const uint8_t*>(runBase), runSize - length,
+                                pattern, mask, length);
+        if (hit) return hit;
     }
-
     return nullptr;
 }
 
@@ -177,24 +261,27 @@ void* FindRTTIDescriptor(void* module, std::string_view class_name) {
 
     // Search for the class name string in the module
     // RTTI type descriptor starts with vtable pointer followed by spare data, then name
-    const uint8_t* start = reinterpret_cast<const uint8_t*>(base);
+    // The structure layout is:
+    // - vtable pointer (8 bytes on x64)
+    // - spare data pointer (8 bytes on x64)
+    // - name string (variable length, null terminated)
+    const size_t type_info_offset = sizeof(void*) * 2;  // 16 bytes on x64
+    const auto* needle = reinterpret_cast<const uint8_t*>(class_name.data());
 
-    const size_t maxStart = size - class_name.size();
-    for (size_t i = 0; i <= maxStart; ++i) {
-        if (std::memcmp(start + i, class_name.data(), class_name.size()) == 0) {
-            // Found the name string - this is inside the type_info structure
-            // The structure layout is:
-            // - vtable pointer (8 bytes on x64)
-            // - spare data pointer (8 bytes on x64)
-            // - name string (variable length, null terminated)
-            // We found the name, so go back to find the start of type_info
-            const size_t type_info_offset = sizeof(void*) * 2;  // 16 bytes on x64
-            if (i >= type_info_offset) {
-                return const_cast<uint8_t*>(start + i - type_info_offset);
-            }
-        }
+    uintptr_t cursor = base;
+    const uintptr_t end = base + size;
+    uintptr_t runBase = 0;
+    size_t runSize = 0;
+    while (NextReadableRange(cursor, end, runBase, runSize)) {
+        if (runSize < class_name.size()) continue;
+        const uint8_t* hit = ScanRunBytes(reinterpret_cast<const uint8_t*>(runBase),
+                                          runSize - class_name.size(), needle, class_name.size());
+        if (!hit) continue;
+        // A hit inside the PE header cannot be a type_info name; stepping back
+        // from it would leave the module.
+        if (reinterpret_cast<uintptr_t>(hit) < base + type_info_offset) continue;
+        return const_cast<uint8_t*>(hit - type_info_offset);
     }
-
     return nullptr;
 }
 

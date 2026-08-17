@@ -21,9 +21,20 @@ namespace {
 // exception handler without going through the CRT (locks, heap, TLS).
 // FILE_SHARE_READ so external tools can tail the log while we hold write
 // access.
-HANDLE g_handle = INVALID_HANDLE_VALUE;
+//
+// One atomic rather than a handle plus an open flag: EmergencyLine reads it
+// without the mutex (a faulted thread may already hold that), and two unordered
+// variables let it pick up a handle value Close() had already given back to the
+// OS. Win32 recycles handle values, so the game reopening a file in that window
+// can receive the same numeric handle and take our crash report into the
+// player's save.
+constexpr intptr_t kNoHandle = -1;  // INVALID_HANDLE_VALUE, as a constant initializer
+std::atomic<intptr_t> g_handle{kNoHandle};
 std::mutex g_mutex;
-std::atomic<bool> g_open{false};
+
+HANDLE CurrentHandle() {
+    return reinterpret_cast<HANDLE>(g_handle.load(std::memory_order_acquire));
+}
 
 // No FlushFileBuffers here: Line() is called from render/hook threads where a
 // physical-disk flush is a multi-millisecond stall. OS-buffered writes survive
@@ -31,7 +42,8 @@ std::atomic<bool> g_open{false};
 // crash/power loss can lose them, which EmergencyLine covers for the one path
 // where that durability matters.
 void WriteTimestampedLocked(const char* msg, size_t len) {
-    if (g_handle == INVALID_HANDLE_VALUE) return;
+    const HANDLE handle = CurrentHandle();
+    if (handle == INVALID_HANDLE_VALUE) return;
     SYSTEMTIME st;
     GetLocalTime(&st);
     char prefix[32];
@@ -39,17 +51,17 @@ void WriteTimestampedLocked(const char* msg, size_t len) {
         "[%02d:%02d:%02d.%03d] ",
         st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
     DWORD written = 0;
-    if (n > 0) WriteFile(g_handle, prefix, static_cast<DWORD>(n), &written, nullptr);
-    WriteFile(g_handle, msg, static_cast<DWORD>(len), &written, nullptr);
-    WriteFile(g_handle, "\r\n", 2, &written, nullptr);
+    if (n > 0) WriteFile(handle, prefix, static_cast<DWORD>(n), &written, nullptr);
+    WriteFile(handle, msg, static_cast<DWORD>(len), &written, nullptr);
+    WriteFile(handle, "\r\n", 2, &written, nullptr);
 }
 
 }  // namespace
 
 void Open(const std::wstring& filename) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_handle != INVALID_HANDLE_VALUE) return;
-    g_handle = CreateFileW(
+    if (CurrentHandle() != INVALID_HANDLE_VALUE) return;
+    const HANDLE handle = CreateFileW(
         filename.c_str(),
         GENERIC_WRITE,
         FILE_SHARE_READ,
@@ -57,20 +69,21 @@ void Open(const std::wstring& filename) {
         CREATE_ALWAYS,
         FILE_ATTRIBUTE_NORMAL,
         nullptr);
-    g_open.store(g_handle != INVALID_HANDLE_VALUE, std::memory_order_release);
+    g_handle.store(reinterpret_cast<intptr_t>(handle), std::memory_order_release);
 }
 
 void Close() {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_handle != INVALID_HANDLE_VALUE) {
-        CloseHandle(g_handle);
-        g_handle = INVALID_HANDLE_VALUE;
+    // Publish the closed state before the handle value goes back to the OS, so
+    // no reader can still be holding it once it can be reissued.
+    const auto old = g_handle.exchange(kNoHandle, std::memory_order_acq_rel);
+    if (reinterpret_cast<HANDLE>(old) != INVALID_HANDLE_VALUE) {
+        CloseHandle(reinterpret_cast<HANDLE>(old));
     }
-    g_open.store(false, std::memory_order_release);
 }
 
 void Line(const char* fmt, ...) {
-    if (!g_open.load(std::memory_order_acquire)) return;
+    if (CurrentHandle() == INVALID_HANDLE_VALUE) return;
     char buf[2048];
     va_list args;
     va_start(args, fmt);
@@ -85,15 +98,15 @@ void Line(const char* fmt, ...) {
 }
 
 void EmergencyLine(const char* fmt, ...) {
-    // Read the handle through the atomic flag - no mutex, because a
-    // faulted thread may already hold it. Worst case during a Close()
-    // race is a write to a closed handle, which WriteFile rejects
-    // cleanly with no crash. Acceptable for crash-reporting.
-    if (!g_open.load(std::memory_order_acquire)) return;
-    const HANDLE h = g_handle;
+    // No mutex: a faulted thread may already hold it. The single atomic is what
+    // makes that safe - see the note on g_handle.
+    const HANDLE h = CurrentHandle();
     if (h == INVALID_HANDLE_VALUE) return;
 
-    char buf[2048];
+    // Deliberately small. This runs on the crash path, and EXCEPTION_STACK_OVERFLOW
+    // leaves roughly one page of stack: a 2KB buffer plus the vsnprintf frame
+    // costs the report we are here to write.
+    char buf[512];
     va_list args;
     va_start(args, fmt);
     const int n = std::vsnprintf(buf, sizeof(buf), fmt, args);

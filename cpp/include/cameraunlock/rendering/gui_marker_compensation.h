@@ -86,6 +86,9 @@ inline GuiMarkerResult ComputeGuiMarkerCompensation(const GuiMarkerInput& in) {
     GuiMarkerResult out;
 
     if (in.fovDegY < 10.f || in.fovDegY > 170.f) return out;
+    // A mod that reads the canvas size before the swapchain reports a valid one
+    // gets 0 here, which makes aspect infinite and every delta NaN.
+    if (!(in.screenW > 0.f) || !(in.screenH > 0.f)) return out;
 
     const float aspect = in.screenW / in.screenH;
     const float halfW  = in.screenW * 0.5f;
@@ -135,10 +138,16 @@ inline GuiMarkerResult ComputeGuiMarkerCompensation(const GuiMarkerInput& in) {
     const float yR = r12*Xc + r22*Yc + r32*Zc;
     const float zR = r13*Xc + r23*Yc + r33*Zc;
 
-    if (zR < 1e-4f) return out;  // behind camera
+    // Written as a positive test so a NaN zR is rejected: every comparison
+    // against NaN is false, so `zR < 1e-4f` let one straight through and the
+    // caller wrote NaN into an engine transform. RE Engine's transform
+    // hierarchy propagates that, and every world-anchored marker vanishes for
+    // the rest of the session.
+    if (!(zR >= 1e-4f)) return out;  // behind camera, or degenerate input
 
     const float newX = (xR / zR) * Fx;
     const float newY = (yR / zR) * Fy;
+    if (!(newX == newX) || !(newY == newY)) return out;
 
     // Clamp to reasonable screen range.
     constexpr float kMax = 1600.f;
@@ -176,6 +185,7 @@ inline bool FocalLengthsFromProjection(float p00, float p11,
                                        float halfCanvasW, float halfCanvasH,
                                        float& fx, float& fy) {
     if (p00 < 0.1f || p00 > 20.f || p11 < 0.1f || p11 > 20.f) return false;
+    if (!(halfCanvasW > 0.f) || !(halfCanvasH > 0.f)) return false;
     fx = p00 * halfCanvasW;
     fy = p11 * halfCanvasH;
     return true;
@@ -188,6 +198,7 @@ inline bool FocalLengthsFromVerticalFov(float fovDegY,
                                         float halfCanvasW, float halfCanvasH,
                                         float& fx, float& fy) {
     if (fovDegY < 10.f || fovDegY > 170.f) return false;
+    if (!(halfCanvasW > 0.f) || !(halfCanvasH > 0.f)) return false;
     float aspect = halfCanvasW / halfCanvasH;
     float tanHalfFovY = std::tan(fovDegY * kGuiDegToRad * 0.5f);
     fx = halfCanvasW / (tanHalfFovY * aspect);

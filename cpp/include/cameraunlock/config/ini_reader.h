@@ -157,7 +157,8 @@ public:
     IniWriter() = default;
     ~IniWriter();
 
-    /// Opens a file for writing. Creates parent directories if needed.
+    /// Opens a file for writing, truncating any existing content. The parent
+    /// directory must already exist; this does not create one.
     bool Open(const std::string& path);
 
     /// Closes the file.

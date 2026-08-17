@@ -26,6 +26,59 @@ namespace logging = cameraunlock::logging;
 // mislead anyone reading the log.
 std::atomic<bool> g_alreadyLogged{false};
 
+// Module map captured at install time. Resolving an address from inside the
+// filter used to call GetModuleHandleExA/GetModuleBaseNameA once per frame;
+// both take the loader lock, so a crash that already holds it (a fault inside
+// DllMain, or a LoadLibrary in flight on another thread) deadlocked the filter
+// forever. The game froze on its last frame with no dump and had to be killed -
+// strictly worse than the crash it replaced.
+//
+// The snapshot goes stale for modules loaded afterwards; those addresses print
+// raw, which is a diagnostic that arrives rather than one that hangs.
+constexpr int kMaxModules = 512;
+constexpr int kModuleNameLen = 40;
+
+struct ModuleRange {
+    std::uintptr_t base;
+    std::uintptr_t end;
+    char name[kModuleNameLen];
+};
+
+ModuleRange g_modules[kMaxModules];
+int g_moduleCount = 0;
+
+void SnapshotModules() {
+    HMODULE mods[kMaxModules] = {};
+    DWORD needed = 0;
+    if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed)) {
+        g_moduleCount = 0;
+        return;
+    }
+    int count = static_cast<int>(needed / sizeof(HMODULE));
+    if (count > kMaxModules) count = kMaxModules;
+
+    int stored = 0;
+    for (int i = 0; i < count; ++i) {
+        MODULEINFO mi = {};
+        if (!GetModuleInformation(GetCurrentProcess(), mods[i], &mi, sizeof(mi))) continue;
+        ModuleRange& m = g_modules[stored];
+        m.base = reinterpret_cast<std::uintptr_t>(mi.lpBaseOfDll);
+        m.end = m.base + mi.SizeOfImage;
+        m.name[0] = '\0';
+        GetModuleBaseNameA(GetCurrentProcess(), mods[i], m.name, kModuleNameLen);
+        m.name[kModuleNameLen - 1] = '\0';
+        ++stored;
+    }
+    g_moduleCount = stored;
+}
+
+const ModuleRange* FindModule(std::uintptr_t addr) {
+    for (int i = 0; i < g_moduleCount; ++i) {
+        if (addr >= g_modules[i].base && addr < g_modules[i].end) return &g_modules[i];
+    }
+    return nullptr;
+}
+
 const char* CodeName(DWORD code) {
     switch (code) {
         case EXCEPTION_ACCESS_VIOLATION:         return "ACCESS_VIOLATION";
@@ -79,23 +132,12 @@ void LogException(EXCEPTION_POINTERS* info) {
     }
 
     // Resolve fault address -> module+RVA.
-    {
-        HMODULE faultMod = nullptr;
-        if (GetModuleHandleExA(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-              | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCSTR>(addr),
-                &faultMod) && faultMod) {
-            char name[MAX_PATH] = {};
-            GetModuleBaseNameA(GetCurrentProcess(), faultMod,
-                               name, static_cast<DWORD>(sizeof(name)));
-            const auto base = reinterpret_cast<std::uintptr_t>(faultMod);
-            logging::EmergencyLine("   in %s+0x%llx", name,
-                static_cast<unsigned long long>(addr - base));
-        } else {
-            logging::EmergencyLine("   in <no module> (raw 0x%016llx)",
-                static_cast<unsigned long long>(addr));
-        }
+    if (const ModuleRange* faultMod = FindModule(addr)) {
+        logging::EmergencyLine("   in %s+0x%llx", faultMod->name,
+            static_cast<unsigned long long>(addr - faultMod->base));
+    } else {
+        logging::EmergencyLine("   in <no module> (raw 0x%016llx)",
+            static_cast<unsigned long long>(addr));
     }
 
     // Stack walk. RtlCaptureStackBackTrace needs no dbghelp - we
@@ -105,22 +147,16 @@ void LogException(EXCEPTION_POINTERS* info) {
     // sitting above the faulted frame on the same thread; the
     // 'address=' line above is the authoritative fault IP.
     logging::EmergencyLine("   stack:");
-    void* frames[32] = {};
-    const USHORT n = RtlCaptureStackBackTrace(0, 32, frames, nullptr);
+    // 16 frames rather than 32: this array and everything else on the crash
+    // path has to fit in what EXCEPTION_STACK_OVERFLOW leaves us.
+    constexpr USHORT kFrames = 16;
+    void* frames[kFrames] = {};
+    const USHORT n = RtlCaptureStackBackTrace(0, kFrames, frames, nullptr);
     for (USHORT i = 0; i < n; ++i) {
         const auto ip = reinterpret_cast<std::uintptr_t>(frames[i]);
-        HMODULE frameMod = nullptr;
-        if (GetModuleHandleExA(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-              | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCSTR>(ip),
-                &frameMod) && frameMod) {
-            char name[MAX_PATH] = {};
-            GetModuleBaseNameA(GetCurrentProcess(), frameMod,
-                               name, static_cast<DWORD>(sizeof(name)));
-            const auto base = reinterpret_cast<std::uintptr_t>(frameMod);
-            logging::EmergencyLine("     [%02u] %s+0x%llx", i, name,
-                static_cast<unsigned long long>(ip - base));
+        if (const ModuleRange* frameMod = FindModule(ip)) {
+            logging::EmergencyLine("     [%02u] %s+0x%llx", i, frameMod->name,
+                static_cast<unsigned long long>(ip - frameMod->base));
         } else {
             logging::EmergencyLine("     [%02u] 0x%016llx <no module>",
                 i, static_cast<unsigned long long>(ip));
@@ -151,6 +187,7 @@ LONG WINAPI UnhandledFilter(EXCEPTION_POINTERS* info) {
 }  // namespace
 
 void InstallCrashHandler() {
+    SnapshotModules();
     g_previousFilter = SetUnhandledExceptionFilter(&UnhandledFilter);
     // A second InstallCrashHandler in the same module gets our OWN filter back, and
     // chaining to it would recurse until the stack is gone - taking out the crash
@@ -159,7 +196,8 @@ void InstallCrashHandler() {
     if (g_previousFilter == &UnhandledFilter) {
         g_previousFilter = nullptr;
     }
-    logging::Line("crash-handler: installed (unhandled-exception filter)");
+    logging::Line("crash-handler: installed (unhandled-exception filter, %d modules mapped)",
+                  g_moduleCount);
 }
 
 }  // namespace cameraunlock::diagnostics

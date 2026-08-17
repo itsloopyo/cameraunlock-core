@@ -18,6 +18,12 @@ namespace cameraunlock::diagnostics {
 //
 // Call once, as early as possible after logging::Open. Safe to call before any
 // hook is installed.
+//
+// The loaded-module map is snapshotted here, not looked up from the filter:
+// GetModuleHandleEx / GetModuleBaseName take the loader lock, and a crash that
+// already holds it would hang the game instead of reporting. Addresses in
+// modules loaded after this call print raw rather than as module+RVA, so call
+// it late enough that the engine's own modules are in.
 void InstallCrashHandler();
 
 }  // namespace cameraunlock::diagnostics

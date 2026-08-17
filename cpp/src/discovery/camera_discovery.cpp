@@ -19,11 +19,33 @@ uintptr_t(__fastcall* CameraDiscovery::s_originals[kMaxProbeSlots])(void*, void*
 std::atomic<int> CameraDiscovery::s_callCounts[kMaxProbeSlots] = {};
 std::atomic<uintptr_t> CameraDiscovery::s_lastThis[kMaxProbeSlots] = {};
 CameraDiscovery* CameraDiscovery::s_instance = nullptr;
-std::atomic<bool> CameraDiscovery::s_calibActive{false};
-float CameraDiscovery::s_calibDeltas[3] = {};
-size_t CameraDiscovery::s_calibAngleOffsets[3] = {};
-bool CameraDiscovery::s_calibOffsetsSet = false;
-std::atomic<int> CameraDiscovery::s_calibInjectedThisFrame{0};
+
+namespace {
+
+// m_instance is a this-pointer a probe detour captured, possibly many frames
+// before the analysis runs. A level transition or a cutscene camera swap in
+// between frees the object, so every read of it carries its own SEH frame
+// (which is also why these are free functions - MSVC rejects __try in a
+// function that needs C++ object unwinding).
+bool SafeClassify(uintptr_t addr, size_t size, LayoutReport& out) {
+    __try {
+        out = ClassifyMemoryRegion(reinterpret_cast<const void*>(addr), size);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool SafeReadFloat(uintptr_t addr, float& out) {
+    __try {
+        out = *reinterpret_cast<const float*>(addr);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+}  // namespace
 
 // Probe detour instantiations — need unique function addresses for MinHook
 // We generate 32 slots (4 candidates × 8 vfuncs)
@@ -87,9 +109,6 @@ void CameraDiscovery::Start(const DiscoveryConfig& config) {
     m_instance.store(0);
     m_offsets = {};
     m_layout = {};
-    m_calibAxis = CalibAxis::Yaw;
-    m_calibFrame = 0;
-    m_calibPulsing = false;
     m_candidates.clear();
 
     for (int i = 0; i < kMaxProbeSlots; i++) {
@@ -102,14 +121,10 @@ void CameraDiscovery::Start(const DiscoveryConfig& config) {
 }
 
 Phase CameraDiscovery::Advance() {
-    // Reset per-frame calibration guard
-    s_calibInjectedThisFrame.store(0, std::memory_order_relaxed);
-
     switch (m_phase) {
         case Phase::FindingVtables: m_phase = RunFindVtables(); break;
         case Phase::Probing:        m_phase = RunProbing(); break;
         case Phase::AnalyzingLayout: m_phase = RunAnalyzeLayout(); break;
-        // Calibration skipped — heuristic axis assignment in AnalyzeLayout
         default: break;
     }
     return m_phase;
@@ -119,19 +134,6 @@ void CameraDiscovery::ReportVfuncCall(int slot, void* this_ptr) {
     if (slot < 0 || slot >= kMaxProbeSlots) return;
     s_callCounts[slot].fetch_add(1, std::memory_order_relaxed);
     s_lastThis[slot].store(reinterpret_cast<uintptr_t>(this_ptr), std::memory_order_relaxed);
-}
-
-CalibrationPulse CameraDiscovery::GetCalibrationPulse() const {
-    CalibrationPulse p{};
-    if (m_phase != Phase::Calibrating || !m_calibPulsing) return p;
-    p.active = true;
-    switch (m_calibAxis) {
-        case CalibAxis::Yaw:   p.yaw = m_config.calibration_deg; break;
-        case CalibAxis::Pitch: p.pitch = m_config.calibration_deg; break;
-        case CalibAxis::Roll:  p.roll = m_config.calibration_deg; break;
-        default: p.active = false; break;
-    }
-    return p;
 }
 
 void CameraDiscovery::SetInstancePointer(void* ptr) {
@@ -193,9 +195,11 @@ Phase CameraDiscovery::RunFindVtables() {
 Phase CameraDiscovery::RunProbing() {
     m_probeFrameCount++;
 
-    // This runs from the swapchain Present hook, so nothing here may allocate.
-    // On the auto path the answer is fixed until the window closes, so skip the
-    // counter reads entirely rather than snapshotting 32 atomics per frame.
+    // This runs from the swapchain Present hook every frame until a winner is
+    // picked, so the steady-state path must stay allocation-free. (The one-shot
+    // layout analysis that follows does allocate; it runs once.) On the auto
+    // path the answer is fixed until the window closes, so skip the counter
+    // reads entirely rather than snapshotting 32 atomics per frame.
     if (!ProbeDecisionPossible(m_config, m_probeFrameCount)) return Phase::Probing;
 
     // Snapshot the shared counters once so the decision below sees a single
@@ -254,12 +258,19 @@ Phase CameraDiscovery::RunProbing() {
 
     // Remove all probe hooks except the winner
     // (we keep the winner hooked so we continue getting this-pointers)
+    //
+    // Pruned by target ADDRESS, not by slot: DisableHook/RemoveHook are keyed on
+    // the address, and aliased vtable entries are routine (inherited stubs, and
+    // MSVC release builds fold identical functions under /OPT:ICF). Skipping only
+    // the winning slot therefore unhooked the winner through one of its aliases,
+    // after which discovery reports success while m_instance goes permanently
+    // stale at the first scene change.
     auto& hm = hooks::HookManager::Instance();
+    void* keepTarget = m_activeTarget;
     for (int c = 0; c < (int)m_candidates.size(); c++) {
         for (int v = 0; v < m_candidates[c].vtable.vfunc_count; v++) {
-            int slot = c * kMaxVfuncsPerCandidate + v;
-            if (slot == sel.slot) continue;
             void* target = reinterpret_cast<void*>(m_candidates[c].vtable.vfuncs[v]);
+            if (target == keepTarget) continue;
             hm.DisableHook(target);
             hm.RemoveHook(target);
         }
@@ -287,8 +298,11 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     int analyzeSize = m_config.instance_size - skipBytes;
     if (analyzeSize <= 0) analyzeSize = 256;
 
-    m_layout = ClassifyMemoryRegion(
-        reinterpret_cast<const void*>(inst + skipBytes), analyzeSize);
+    if (!SafeClassify(inst + skipBytes, static_cast<size_t>(analyzeSize), m_layout)) {
+        Log("DISC: Instance at %p faulted during layout analysis — failed",
+            reinterpret_cast<void*>(inst));
+        return Phase::Failed;
+    }
 
     // Adjust offsets to be relative to instance base (not the skip-adjusted pointer)
     for (int i = 0; i < m_layout.group_count; i++) {
@@ -340,7 +354,12 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     struct AngleCandidate { size_t offset; float value; float absValue; };
     std::vector<AngleCandidate> candidates;
     for (size_t off : m_candidateAngleOffsets) {
-        float val = *reinterpret_cast<float*>(inst + off);
+        float val = 0.0f;
+        if (!SafeReadFloat(inst + off, val)) {
+            Log("DISC: Instance at %p faulted reading +0x%X — failed",
+                reinterpret_cast<void*>(inst), (int)off);
+            return Phase::Failed;
+        }
         candidates.push_back({off, val, std::fabsf(val)});
     }
 
@@ -389,9 +408,14 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     size_t rollOff  = yawOff - 2 * sizeof(float);
 
     // Read the values for logging
-    float yawVal = *reinterpret_cast<float*>(inst + yawOff);
-    float pitchVal = *reinterpret_cast<float*>(inst + pitchOff);
-    float rollVal = *reinterpret_cast<float*>(inst + rollOff);
+    float yawVal = 0.0f, pitchVal = 0.0f, rollVal = 0.0f;
+    if (!SafeReadFloat(inst + yawOff, yawVal) ||
+        !SafeReadFloat(inst + pitchOff, pitchVal) ||
+        !SafeReadFloat(inst + rollOff, rollVal)) {
+        Log("DISC: Instance at %p faulted reading the angle triple — failed",
+            reinterpret_cast<void*>(inst));
+        return Phase::Failed;
+    }
 
     Log("DISC: Found consecutive angles: roll=+0x%X(%.1f) pitch=+0x%X(%.1f) yaw=+0x%X(%.1f)",
         (int)rollOff, rollVal, (int)pitchOff, pitchVal, (int)yawOff, yawVal);
@@ -406,140 +430,6 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     m_offsets.valid = true;
 
     return Phase::Complete;
-}
-
-// ============================================================================
-// Phase 4: Calibrate — inject known rotation, detect which floats change
-// ============================================================================
-
-static void SnapshotAngles(uintptr_t inst, const std::vector<size_t>& offsets, std::vector<float>& out) {
-    out.resize(offsets.size());
-    __try {
-        for (size_t i = 0; i < offsets.size(); i++) {
-            out[i] = *reinterpret_cast<float*>(inst + offsets[i]);
-        }
-    }
-    __except (1) {}
-}
-
-Phase CameraDiscovery::RunCalibrating() {
-    uintptr_t inst = m_instance.load();
-    if (inst == 0) return Phase::Failed;
-
-    if (m_calibAxis == CalibAxis::Done) {
-        s_calibActive.store(false);
-        m_offsets.valid = (m_offsets.yaw_offset != 0 || m_offsets.pitch_offset != 0);
-        if (m_offsets.valid) {
-            Log("DISC: Calibration complete — yaw=+0x%X(%+.0f) pitch=+0x%X(%+.0f) roll=+0x%X(%+.0f)",
-                (int)m_offsets.yaw_offset, m_offsets.yaw_sign,
-                (int)m_offsets.pitch_offset, m_offsets.pitch_sign,
-                (int)m_offsets.roll_offset, m_offsets.roll_sign);
-            return Phase::Complete;
-        }
-        Log("DISC: Calibration found no matching offsets — failed");
-        return Phase::Failed;
-    }
-
-    // Set up calibration angle offsets for the probe detour (once)
-    if (!s_calibOffsetsSet && !m_candidateAngleOffsets.empty()) {
-        // Find the first angle group and use its 3 offsets
-        for (int i = 0; i < m_layout.group_count; i++) {
-            if (m_layout.groups[i].type == FloatClass::Angle && m_layout.groups[i].count >= 3) {
-                size_t base = m_layout.groups[i].offset;
-                s_calibAngleOffsets[0] = base;
-                s_calibAngleOffsets[1] = base + 4;
-                s_calibAngleOffsets[2] = base + 8;
-                s_calibOffsetsSet = true;
-                Log("DISC: Calibration target: angle group at +0x%X", (int)base);
-                break;
-            }
-        }
-        if (!s_calibOffsetsSet) {
-            Log("DISC: No angle group with 3+ floats found");
-            return Phase::Failed;
-        }
-    }
-
-    m_calibFrame++;
-
-    int settleEnd = m_config.settle_frames;
-    int pulseEnd = settleEnd + m_config.pulse_frames;
-
-    if (m_calibFrame == settleEnd) {
-        // Take pre-snapshot, then start pulse via probe detour
-        SnapshotAngles(inst, m_candidateAngleOffsets, m_preSnapshot);
-
-        // Set up the pulse for the probe detour to apply on ONE axis
-        s_calibDeltas[0] = s_calibDeltas[1] = s_calibDeltas[2] = 0;
-        switch (m_calibAxis) {
-            case CalibAxis::Yaw:   s_calibDeltas[2] = m_config.calibration_deg; break;
-            case CalibAxis::Pitch: s_calibDeltas[1] = m_config.calibration_deg; break;
-            case CalibAxis::Roll:  s_calibDeltas[0] = m_config.calibration_deg; break;
-            default: break;
-        }
-        s_calibActive.store(true);
-    }
-    else if (m_calibFrame == pulseEnd) {
-        // Stop pulse, take post-snapshot
-        s_calibActive.store(false);
-        SnapshotAngles(inst, m_candidateAngleOffsets, m_postSnapshot);
-
-        // Find the offset with the LARGEST delta — that's the axis we pulsed.
-        // Only consider offsets within the calibration target angle group
-        // (3 consecutive floats). The pulsed axis should have a much larger
-        // delta than the other two.
-        float minDelta = 1.0f;  // ignore tiny changes (noise, mouse movement)
-        size_t bestOffset = 0;
-        float bestSign = 1.0f;
-        float bestAbsDelta = 0;
-        bool found = false;
-
-        for (size_t i = 0; i < 3; i++) {
-            size_t off = s_calibAngleOffsets[i];
-            // Find this offset in the candidate list to get its index
-            for (size_t j = 0; j < m_candidateAngleOffsets.size(); j++) {
-                if (m_candidateAngleOffsets[j] != off) continue;
-                float delta = m_postSnapshot[j] - m_preSnapshot[j];
-                float absDelta = std::fabsf(delta);
-                if (absDelta > minDelta && absDelta > bestAbsDelta) {
-                    bestAbsDelta = absDelta;
-                    bestOffset = off;
-                    bestSign = (delta > 0) ? 1.0f : -1.0f;
-                    found = true;
-                }
-                break;
-            }
-        }
-
-        const char* axisName = m_calibAxis == CalibAxis::Yaw ? "Yaw" :
-                               m_calibAxis == CalibAxis::Pitch ? "Pitch" : "Roll";
-        if (found) {
-            Log("DISC: %s axis: offset=+0x%X, delta=%.2f, sign=%+.0f", axisName,
-                (int)bestOffset, bestAbsDelta * bestSign, bestSign);
-        } else {
-            Log("DISC: %s axis: no significant delta found", axisName);
-        }
-
-        switch (m_calibAxis) {
-            case CalibAxis::Yaw:
-                if (found) { m_offsets.yaw_offset = bestOffset; m_offsets.yaw_sign = bestSign; }
-                m_calibAxis = CalibAxis::Pitch;
-                break;
-            case CalibAxis::Pitch:
-                if (found) { m_offsets.pitch_offset = bestOffset; m_offsets.pitch_sign = bestSign; }
-                m_calibAxis = CalibAxis::Roll;
-                break;
-            case CalibAxis::Roll:
-                if (found) { m_offsets.roll_offset = bestOffset; m_offsets.roll_sign = bestSign; }
-                m_calibAxis = CalibAxis::Done;
-                break;
-            default: break;
-        }
-
-        m_calibFrame = 0;
-    }
-
-    return Phase::Calibrating;
 }
 
 // ============================================================================
