@@ -20,8 +20,10 @@ namespace CameraUnlock.Core.Unity.Utilities
         /// Creates a new per-frame cache with a value fetcher function.
         /// </summary>
         /// <param name="fetcher">Function that fetches the value when cache is invalid.</param>
+        /// <exception cref="ArgumentNullException">Thrown when fetcher is null.</exception>
         public PerFrameCache(Func<T> fetcher)
         {
+            if (fetcher == null) throw new ArgumentNullException("fetcher");
             _fetcher = fetcher;
             _cachedFrameCount = -1;
         }
@@ -49,8 +51,15 @@ namespace CameraUnlock.Core.Unity.Utilities
         /// Gets the cached value using the constructor-provided fetcher.
         /// </summary>
         /// <returns>The cached or freshly fetched value.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when this cache was built with the
+        /// parameterless constructor and so has no fetcher.</exception>
         public T Get()
         {
+            if (_fetcher == null)
+            {
+                throw new InvalidOperationException("PerFrameCache was constructed without a fetcher. Use Get(Func<T>) or the PerFrameCache(Func<T>) constructor.");
+            }
+
             int currentFrame = Time.frameCount;
             if (_cachedFrameCount != currentFrame)
             {

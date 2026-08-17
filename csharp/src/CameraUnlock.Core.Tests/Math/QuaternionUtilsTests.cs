@@ -234,5 +234,48 @@ namespace CameraUnlock.Core.Tests.Math
                 $"Quaternions not equal. Expected: ({expected.X}, {expected.Y}, {expected.Z}, {expected.W}), " +
                 $"Actual: ({actual.X}, {actual.Y}, {actual.Z}, {actual.W}), Dot: {dot}");
         }
-    }
+    
+        [Fact]
+        public void ToEulerYXZ_AtExactGimbalLock_AttributesRotationToYaw()
+        {
+            // sinPitch = 2(wx - yz) = 2(0.25 + 0.25) = 1 exactly, so this takes the lock
+            // branch. The general-case yaw formula degenerates to atan2(0, 0) here and
+            // returned 0, silently discarding the rotation - which inside TrackingProcessor
+            // is a 90 degree camera snap.
+            var q = new Quat4(0.5f, 0.5f, -0.5f, 0.5f);
+
+            QuaternionUtils.ToEulerYXZ(q, out float yaw, out float pitch, out float roll);
+
+            Assert.Equal(90f, pitch, precision: 3);
+            Assert.Equal(0f, roll, precision: 3);
+            Assert.NotEqual(0f, yaw);
+        }
+
+        [Fact]
+        public void ToEulerYXZ_LockBranchAgreesWithNearLockGeneralBranch()
+        {
+            // The strongest available check that the lock formula is the RIGHT one rather
+            // than merely non-zero: walk in from just below the singularity, where the
+            // general branch is well-conditioned, and require the lock branch to continue
+            // the same curve rather than jump.
+            for (float yawDeg = -150f; yawDeg <= 150f; yawDeg += 30f)
+            {
+                Quat4 nearLock = QuaternionUtils.FromYawPitchRoll(yawDeg, 89.9f, 0f);
+                QuaternionUtils.ToEulerYXZ(nearLock, out float nearYaw, out float nearPitch, out _);
+                Assert.True(nearPitch < 90f, "fixture should sit below the lock branch");
+
+                Quat4 atLock = QuaternionUtils.FromYawPitchRoll(yawDeg, 90f, 0f);
+                QuaternionUtils.ToEulerYXZ(atLock, out float lockYaw, out float lockPitch, out _);
+
+                float drift = System.Math.Abs(AngleUtils.ShortestAngleDelta(nearYaw, lockYaw));
+                Assert.True(drift < 1.0f,
+                    "yaw jumped " + drift.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    " deg crossing into the lock branch at yaw=" +
+                    yawDeg.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    " (near=" + nearYaw.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    " lock=" + lockYaw.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    ", lockPitch=" + lockPitch.ToString(System.Globalization.CultureInfo.InvariantCulture) + ")");
+            }
+        }
+}
 }

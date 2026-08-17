@@ -367,11 +367,14 @@ function New-ChangelogFromCommits {
         [switch]$IncludeAll
     )
 
-    if (-not (Test-Path $ChangelogPath)) {
+    if (-not (Test-Path -LiteralPath $ChangelogPath)) {
         throw "CHANGELOG.md not found: $ChangelogPath"
     }
 
-    $changelog = Get-Content $ChangelogPath -Raw
+    # CHANGELOG.md is UTF-8. Windows PowerShell 5.1 reads with the ANSI codepage
+    # by default, so an existing entry with an en dash or an accented name comes
+    # back mojibaked and is rewritten that way.
+    $changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
 
     # Check if entry already exists
     if ($changelog -match "\[$Version\]") {
@@ -398,18 +401,28 @@ function New-ChangelogFromCommits {
         $useAllCommits = $false
     }
 
-    if ($useAllCommits) {
-        if ($ArtifactPaths) {
-            $commits = git log --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+    # git emits UTF-8, but a native command's output is decoded with
+    # [Console]::OutputEncoding - OEM 437/850 on a stock Windows console - so a
+    # commit subject with an en dash or an accented name arrives mojibaked and
+    # is committed that way, then served as the GitHub release body.
+    $prevConsoleEncoding = [Console]::OutputEncoding
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    try {
+        if ($useAllCommits) {
+            if ($ArtifactPaths) {
+                $commits = git log --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+            } else {
+                $commits = git log --pretty=format:"%s" --reverse --no-merges
+            }
         } else {
-            $commits = git log --pretty=format:"%s" --reverse --no-merges
+            if ($ArtifactPaths) {
+                $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
+            } else {
+                $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
+            }
         }
-    } else {
-        if ($ArtifactPaths) {
-            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
-        } else {
-            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
-        }
+    } finally {
+        [Console]::OutputEncoding = $prevConsoleEncoding
     }
     if ($LASTEXITCODE -ne 0) {
         throw "git log failed (exit code $LASTEXITCODE) for range '$commitRange'. Check that the range is valid and the repository is not corrupt."
@@ -482,15 +495,27 @@ function New-ChangelogFromCommits {
         $newEntry += ($other -join "`n") + "`n`n"
     }
 
+    # $newEntry is built from raw commit subjects and is about to be used as a -replace
+    # REPLACEMENT string, where .NET expands $_, $&, $1, $` and $'. A commit subject like
+    # "fix: use $_ instead of $PSItem" would otherwise splice the entire existing
+    # changelog into the new entry, and that gets committed and shipped as the release
+    # body. Doubling every $ makes the regex engine emit it literally.
+    $safeEntry = $newEntry -replace '\$', '$$$$'
+
     # Insert new entry after header
     if ($changelog -match '(?s)(# Changelog.*?)(## \[)') {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$newEntry"
+        $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$safeEntry"
     } else {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$newEntry"
+        $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$safeEntry"
     }
 
     $changelog = $changelog.TrimEnd() + "`n"
-    Set-Content $ChangelogPath $changelog -NoNewline
+    # BOM-less UTF-8: Set-Content's default is the ANSI codepage on 5.1, which
+    # writes the mojibake the read above now avoids. .NET resolves a relative
+    # path against the process directory, not the PowerShell location, so the
+    # path is made absolute first.
+    $changelogFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ChangelogPath)
+    [System.IO.File]::WriteAllText($changelogFullPath, $changelog, (New-Object System.Text.UTF8Encoding($false)))
 
     return @{
         AlreadyExists = $false
@@ -519,11 +544,13 @@ function Get-ChangelogSection {
         [string]$Version
     )
 
-    if (-not (Test-Path $ChangelogPath)) {
+    if (-not (Test-Path -LiteralPath $ChangelogPath)) {
         return ""
     }
 
-    $changelog = Get-Content $ChangelogPath -Raw
+    # This section becomes the GitHub release body, so it reads with the same
+    # explicit UTF-8 the writer uses.
+    $changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
 
     if ($changelog -match "(?s)## \[$Version\].*?(?=(## \[|\z))") {
         return $matches[0].Trim()
@@ -633,7 +660,10 @@ function Get-CsprojVersion {
 
     $content = Get-Content $CsprojPath -Raw
     if ($content -match '<Version>([^<]+)</Version>') {
-        return $matches[1]
+        # Trimmed: a pretty-printed <Version> element puts newlines and indentation in
+        # the capture, and the CI gate compares it to the git tag with -ne. That fails
+        # with both sides printing an identical-looking version and no visible cause.
+        return $matches[1].Trim()
     }
 
     throw "No <Version> element found in $CsprojPath"

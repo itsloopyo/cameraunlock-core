@@ -96,6 +96,17 @@ namespace CameraUnlock.Core.Diagnostics
 #endif
         private void RecordTicksInternal(long ticks)
         {
+            // Clamped to 0, which is this class's empty-slot sentinel - so the effect is
+            // rejection: the sample contributes nothing to either the running sum or the
+            // valid-sample count, it only consumes a ring slot.
+            // The valid-sample bookkeeping below only handles 0 <-> positive transitions,
+            // so a negative sample matches neither branch while the running sum still
+            // takes it: the count desynchronises from the sum permanently, and on a
+            // small window it can pin AverageMicroseconds at 0 forever despite valid
+            // samples arriving. RecordTicks is public and unvalidated, and a caller
+            // differencing a Stopwatch across a Restart hands it a negative.
+            if (ticks < 0) ticks = 0;
+
             long oldValue = _samples[_sampleIndex];
 
             // Update running sum: subtract old value, add new value

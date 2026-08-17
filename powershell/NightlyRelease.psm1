@@ -104,13 +104,21 @@ function Publish-NightlyBuild {
     Write-Host "  pre-release tag : $DevTag (rolling)" -ForegroundColor DarkGray
     Write-Host ''
 
+    $buildStartedAt = Get-Date
+
     Push-Location $ProjectRoot
     try {
+        # $LASTEXITCODE is only meaningful after a NATIVE exe. A -BuildCommand
+        # that resolves to a PowerShell script or function leaves it holding the
+        # exit code of the last native call (the git above, i.e. 0), so a
+        # silently-failing build would read as success. Reset before each run.
         Write-Host 'Building...' -ForegroundColor Cyan
+        $global:LASTEXITCODE = 0
         Invoke-Expression $BuildCommand
         if ($LASTEXITCODE -ne 0) { throw "$BuildCommand failed" }
 
         Write-Host 'Packaging...' -ForegroundColor Cyan
+        $global:LASTEXITCODE = 0
         Invoke-Expression $PackageCommand
         if ($LASTEXITCODE -ne 0) { throw "$PackageCommand failed" }
     } finally { Pop-Location }
@@ -118,8 +126,16 @@ function Publish-NightlyBuild {
     if (-not $InstallerZipPath) {
         $InstallerZipPath = Join-Path $ProjectRoot "release\$ModName-v$Version-installer.zip"
     }
-    if (-not (Test-Path $InstallerZipPath)) {
+    if (-not (Test-Path -LiteralPath $InstallerZipPath)) {
         throw "Expected installer ZIP missing: $InstallerZipPath"
+    }
+
+    # release/ keeps the previous run's zip. If the package step didn't actually
+    # produce one this time, that stale file is what gets hashed, uploaded as the
+    # new dev asset and announced as a fresh build.
+    $zipWrittenAt = (Get-Item -LiteralPath $InstallerZipPath).LastWriteTime
+    if ($zipWrittenAt -lt $buildStartedAt) {
+        throw "Installer ZIP $InstallerZipPath was last written $($zipWrittenAt.ToString('o')), before this build started ($($buildStartedAt.ToString('o'))). '$PackageCommand' did not produce it - refusing to publish a stale artifact."
     }
 
     # Fixed asset name -> stable download URL:
@@ -127,10 +143,10 @@ function Publish-NightlyBuild {
     $releaseDir = Join-Path $ProjectRoot 'release'
     $assetName = "$ModName-dev-installer.zip"
     $assetPath = Join-Path $releaseDir $assetName
-    Copy-Item -Force $InstallerZipPath $assetPath
+    Copy-Item -LiteralPath $InstallerZipPath -Destination $assetPath -Force
 
-    $zipBytes = (Get-Item $assetPath).Length
-    $zipHash = (Get-FileHash -Algorithm SHA256 $assetPath).Hash.ToLowerInvariant()
+    $zipBytes = (Get-Item -LiteralPath $assetPath).Length
+    $zipHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
     Write-Host "Built : $assetName" -ForegroundColor Green
     Write-Host "  size   : $zipBytes bytes" -ForegroundColor DarkGray
@@ -175,8 +191,19 @@ function Publish-NightlyBuild {
             --notes $notes
         if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)" }
 
-        $repo = (& gh repo view --json nameWithOwner --jq .nameWithOwner 2>$null).Trim()
-        if (-not $repo) { $repo = '<owner>/<repo>' }
+        # The old form called .Trim() on the command output directly, so a failed
+        # `gh repo view` threw on $null.Trim() and the '<owner>/<repo>' fallback below
+        # was unreachable. Do NOT make that placeholder reachable: it flows straight
+        # into the announce block and posts an embed linking to
+        # https://github.com/<owner>/<repo>/releases/tag/dev - a 404 - in the public
+        # release channel, which Invoke-RestMethod reports as success. A broken
+        # announcement is worse than none. gh only fails here when it is missing or
+        # unauthenticated, which is not recoverable at this point, so fail loudly.
+        $repoRaw = & gh repo view --json nameWithOwner --jq .nameWithOwner 2>$null
+        if (-not $repoRaw) {
+            throw "gh repo view failed - cannot resolve owner/repo for the release announcement. Check that gh is installed and authenticated."
+        }
+        $repo = ([string]$repoRaw).Trim()
     } finally {
         $ErrorActionPreference = $prevEAP
         Pop-Location

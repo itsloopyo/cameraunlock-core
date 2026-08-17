@@ -22,6 +22,7 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <param name="pitch">Head tracking pitch in degrees.</param>
         /// <param name="roll">Head tracking roll in degrees.</param>
         /// <exception cref="ArgumentNullException">Thrown when canvasRectTransform or cam is null.</exception>
+        [Obsolete("Reads and rewrites anchoredPosition with no stored original, so a per-frame caller accumulates the offset without bound, and it measures the element from the canvas bottom-left, which is wrong for every centre-anchored element. Use CanvasChildrenCompensator (CameraUnlock.Core.Unity.UI) or AnchoredOffsetCompensator instead.")]
         public static void RepositionChildren(
             RectTransform canvasRectTransform,
             Camera cam,
@@ -107,6 +108,7 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <param name="pitch">Head tracking pitch in degrees.</param>
         /// <param name="roll">Head tracking roll in degrees.</param>
         /// <exception cref="ArgumentNullException">Thrown when element or cam is null.</exception>
+        [Obsolete("Reads and rewrites anchoredPosition with no stored original, so a per-frame caller accumulates the offset without bound, and it measures the element from the canvas bottom-left, which is wrong for every centre-anchored element. Use the overload that takes the element's original anchoredPosition, or AnchoredOffsetCompensator.")]
         public static void RepositionElement(
             RectTransform element,
             float canvasWidth,
@@ -154,6 +156,89 @@ namespace CameraUnlock.Core.Unity.Extensions
             float newY = rotatedRelY + offsetY + halfHeight;
 
             element.anchoredPosition = new Vector2(newX, newY);
+        }
+
+        /// <summary>
+        /// Repositions a single UI element to compensate for head tracking rotation, always
+        /// writing <paramref name="originalAnchoredPosition"/> plus this frame's offset so
+        /// repeated per-frame calls cannot accumulate.
+        ///
+        /// The element's distance from the canvas centre - which is what roll rotates about -
+        /// is derived from its anchors, so a centre-anchored element at anchoredPosition (0,0)
+        /// is correctly treated as being at the centre.
+        /// </summary>
+        /// <param name="element">The RectTransform to reposition.</param>
+        /// <param name="originalAnchoredPosition">The element's authored anchoredPosition, captured
+        /// once by the caller before any compensation was applied.</param>
+        /// <param name="canvasWidth">The width of the containing canvas.</param>
+        /// <param name="canvasHeight">The height of the containing canvas.</param>
+        /// <param name="cam">The camera to get FOV information from.</param>
+        /// <param name="yaw">Head tracking yaw in degrees.</param>
+        /// <param name="pitch">Head tracking pitch in degrees.</param>
+        /// <param name="roll">Head tracking roll in degrees.</param>
+        /// <exception cref="ArgumentNullException">Thrown when element or cam is null.</exception>
+        public static void RepositionElement(
+            RectTransform element,
+            Vector2 originalAnchoredPosition,
+            float canvasWidth,
+            float canvasHeight,
+            Camera cam,
+            float yaw,
+            float pitch,
+            float roll)
+        {
+            if (element == null)
+            {
+                throw new ArgumentNullException(nameof(element));
+            }
+
+            if (cam == null)
+            {
+                throw new ArgumentNullException(nameof(cam));
+            }
+
+            float verticalFov = cam.fieldOfView;
+            float horizontalFov = ScreenOffsetCalculator.CalculateHorizontalFov(verticalFov, cam.aspect);
+
+            ScreenOffsetCalculator.Calculate(
+                yaw, pitch, 0f,
+                horizontalFov, verticalFov,
+                canvasWidth, canvasHeight,
+                1f,
+                out float offsetX, out float offsetY);
+
+            GetCenterRelativePosition(
+                element, originalAnchoredPosition, canvasWidth, canvasHeight,
+                out float relX, out float relY);
+
+            ScreenOffsetCalculator.ApplyRollRotation(relX, relY, roll, out float rotatedRelX, out float rotatedRelY);
+
+            element.anchoredPosition = new Vector2(
+                originalAnchoredPosition.x + (rotatedRelX - relX) + offsetX,
+                originalAnchoredPosition.y + (rotatedRelY - relY) + offsetY);
+        }
+
+        /// <summary>
+        /// Converts an anchoredPosition into a position measured from the canvas centre.
+        /// anchoredPosition is relative to the element's own anchor, so the anchor's own
+        /// offset from the centre has to be added back before roll can rotate about it.
+        /// </summary>
+        private static void GetCenterRelativePosition(
+            RectTransform element,
+            Vector2 anchoredPosition,
+            float canvasWidth,
+            float canvasHeight,
+            out float relX,
+            out float relY)
+        {
+            Vector2 anchorMin = element.anchorMin;
+            Vector2 anchorMax = element.anchorMax;
+
+            float anchorX = ((anchorMin.x + anchorMax.x) * 0.5f - 0.5f) * canvasWidth;
+            float anchorY = ((anchorMin.y + anchorMax.y) * 0.5f - 0.5f) * canvasHeight;
+
+            relX = anchorX + anchoredPosition.x;
+            relY = anchorY + anchoredPosition.y;
         }
 
         /// <summary>

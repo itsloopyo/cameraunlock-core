@@ -30,6 +30,14 @@ set "MOD_CONTROLS="
 :: --- END CONFIG BLOCK ---
 
 call :detect_yes_flag %*
+:: :detect_yes_flag and the arg parser both break if the shell left delayed
+:: expansion on - cmd /V:ON, or DelayedExpansion=1 under
+:: HKCU\Software\Microsoft\Command Processor. Under either, a "!" in the game
+:: path is eaten out of the expanded line before the parser ever compares it, and
+:: a real directory is rejected as a malformed argument. Moving the enable to
+:: after :args_done is not enough on its own; the default has to be pinned OFF.
+setlocal disabledelayedexpansion
+
 call :main %*
 set "_EC=%errorlevel%"
 if not defined YES_FLAG ( echo. & pause )
@@ -57,7 +65,6 @@ shift
 goto :detect_yes_flag
 
 :main
-setlocal enabledelayedexpansion
 
 :: Capture script dir BEFORE the arg parser runs. Inside `call :main`,
 :: `shift` rotates %0 too, so %~dp0 read after shifts resolves to the
@@ -65,23 +72,42 @@ setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 
 :: -------- Arg parser (canonical, do not modify) --------
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
+:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
+:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
+:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
+:: fails, and a valid directory is rejected as a malformed argument.
 set "YES_FLAG="
 set "_GIVEN_PATH="
 :parse_args
 if "%~1"=="" goto :args_done
 set "_ARG=%~1"
-if /i "!_ARG!"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
-if /i "!_ARG!"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
-if /i "!_ARG!"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
-if "!_ARG:~0,2!"=="--" ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
-if "!_ARG:~0,1!"=="/"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
-if "!_ARG:~0,1!"=="-"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
+if /i "%_ARG%"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
+if /i "%_ARG%"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
+if /i "%_ARG%"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
+if "%_ARG:~0,2%"=="--" ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
+if "%_ARG:~0,1%"=="/"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
+if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
-    if exist "!_ARG!\" ( set "_GIVEN_PATH=!_ARG!" & shift & goto :parse_args )
+    if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
-echo ERROR: unrecognised argument "!_ARG!"
+echo ERROR: unrecognised argument "%_ARG%"
 exit /b 2
 :args_done
+set "_ARG="
+
+setlocal enabledelayedexpansion
+
+:: -------- Validate CONFIG BLOCK --------
+:: Every name below is interpolated straight into a path that gets written,
+:: deleted or recursively removed. A blank one does not fail - it silently
+:: retargets the operation at the parent directory, which is the game folder.
+for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS MELONLOADER_MARKER) do (
+    if not defined %%v (
+        echo ERROR: %%v is not set in this script's CONFIG BLOCK.
+        exit /b 1
+    )
+)
 
 echo.
 echo === %MOD_DISPLAY_NAME% - Install ===
@@ -112,7 +138,7 @@ if not "!_PS_EC!"=="0" (
 call "!_SHIM_OUT!"
 del "!_SHIM_OUT!" 2>nul
 
-echo Game found: %GAME_PATH%
+echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
@@ -161,7 +187,12 @@ set "DEPLOY_FAILED=0"
 for %%f in (%MOD_DLLS%) do (
     if exist "%DLL_DIR%\%%f" (
         copy /y "%DLL_DIR%\%%f" "%MODS_PATH%\" >nul
-        echo   Deployed %%f
+        if errorlevel 1 (
+            echo   ERROR: Failed to copy %%f - is the game folder writable?
+            set "DEPLOY_FAILED=1"
+        ) else (
+            echo   Deployed %%f
+        )
     ) else (
         echo   ERROR: %%f not found in plugins folder
         set "DEPLOY_FAILED=1"
@@ -186,7 +217,7 @@ echo   Deployment Complete!
 echo ========================================
 echo.
 echo %MOD_DISPLAY_NAME% has been deployed to:
-echo   %MODS_PATH%
+echo   !MODS_PATH!
 echo.
 echo Start the game to use the mod!
 :: Percent-expansion splits MOD_CONTROLS on its embedded &echo separators;
@@ -211,7 +242,7 @@ set "VENDOR_ZIP=%VENDOR_DIR%\MelonLoader.x64.zip"
 
 if not exist "%VENDOR_ZIP%" (
     echo   ERROR: Bundled MelonLoader not found at:
-    echo     %VENDOR_ZIP%
+    echo     !VENDOR_ZIP!
     echo   The installer ZIP is corrupt. Re-download the release.
     exit /b 1
 )

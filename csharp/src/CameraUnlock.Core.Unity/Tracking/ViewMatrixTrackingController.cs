@@ -75,6 +75,12 @@ namespace CameraUnlock.Core.Unity.Tracking
         // permanent residual offset in menus / after toggle-off.
         private bool _needsMatrixReset;
 
+        // The camera the override was actually written to. Resetting whatever the resolver
+        // returns now is wrong the moment the game switches cameras: the reset lands on the
+        // cutscene camera while the gameplay camera keeps the head offset baked in, and a
+        // recenter cannot clear it because it only changes the delta, not the stale matrix.
+        private Camera _appliedCamera;
+
         public bool PositionEnabled { get; set; }
         public bool RotationEnabled { get; set; }
         public bool WorldSpaceYaw { get; set; }
@@ -159,6 +165,14 @@ namespace CameraUnlock.Core.Unity.Tracking
             // a given Unity build only invokes one path per frame. Both go through
             // reflection: SRP-only Unity 6 builds strip the legacy Camera.onPreCull
             // accessor, so a direct reference throws MissingMethodException at JIT time.
+            // Deliberately does NOT Remove first. The helper's registry is a single global
+            // slot per hook with no ownership token, so RemoveOnPreCull() clears whoever
+            // holds it - including a mod's own AddOnPreCull subscription, which is public
+            // API the helper's own docs invite. Clearing it blind would silently unhook
+            // that mod and leave its later Remove taking out this controller instead. The
+            // throw from a double Add is the diagnostic, and it is worth keeping: a
+            // controller recreated before the old one's Disable() ran is a lifecycle bug
+            // in the consumer that should surface loudly, not be papered over here.
             RenderPipelineHelper.AddOnPreCull(OnPreCull);
             RenderPipelineHelper.AddBeginCameraRendering(OnPreCull);
         }
@@ -168,9 +182,10 @@ namespace CameraUnlock.Core.Unity.Tracking
             RenderPipelineHelper.RemoveOnPreCull();
             RenderPipelineHelper.RemoveBeginCameraRendering();
 
-            var cam = _mainCameraCache.Get();
-            if (cam != null)
-                cam.ResetWorldToCameraMatrix();
+            if (_appliedCamera != null)
+                _appliedCamera.ResetWorldToCameraMatrix();
+            _appliedCamera = null;
+            _needsMatrixReset = false;
         }
 
         /// <summary>
@@ -387,6 +402,11 @@ namespace CameraUnlock.Core.Unity.Tracking
             if (!_isTransitioningIn)
                 return 1f;
 
+            // Scaled, unlike AdvanceTransitionOut. This ramp only runs alongside the
+            // interpolator and processor, which are driven by Time.deltaTime - so on
+            // unscaled time at timeScale 0 it would fade in a frozen, stale head offset,
+            // and its completion fires RecenterToLatest(), capturing the centre on
+            // whatever pose the user happens to hold while the game is paused.
             _transitionInProgress += Time.deltaTime / TransitionInDuration;
             if (_transitionInProgress >= 1f)
             {
@@ -441,10 +461,22 @@ namespace CameraUnlock.Core.Unity.Tracking
             }
 
             var interpolatedPos = _positionInterpolator.Update(rawPos, Time.deltaTime);
-            // Pivot compensation needs the physical head orientation (interpolated, pre-processing),
-            // with pitch negated to match tracker conventions.
-            var physicalRotQ = QuaternionUtils.FromYawPitchRoll(
-                interpolated.Yaw, -interpolated.Pitch, interpolated.Roll);
+
+            // Taken from the processor's smoothed state, exactly as both HeadTrackingSession
+            // ports do. Two things were wrong here and this fixes both:
+            //
+            // Pitch was negated, which no other call site does - three agreed and this one
+            // did not, so the vertical half of the compensation was applied backwards in
+            // view-matrix mods only.
+            //
+            // And it used the raw interpolated pose, which is UNCENTERED. The position
+            // centre is captured at the same moment as the rotation centre, so subsequent
+            // position deltas are relative to the centred orientation; measuring the arc
+            // from an uncentered rotation adds a constant offset that never cancels.
+            float physYaw, physPitch, physRoll;
+            _processor.GetSmoothedRotation(out physYaw, out physPitch, out physRoll);
+            var physicalRotQ = QuaternionUtils.FromYawPitchRoll(physYaw, physPitch, physRoll);
+
             var finalPos = _positionProcessor.Process(interpolatedPos, physicalRotQ, Time.deltaTime);
             _currentPosition = finalPos * scale;
             _hasPosition = true;
@@ -463,16 +495,21 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         private void OnPreCull(Camera cam)
         {
-            var mainCam = _mainCameraCache.Get();
-            if (cam != mainCam || mainCam == null)
-                return;
-
+            // The reset is deliberately not gated on cam == mainCam: it targets the camera the
+            // override was written to, which after a camera switch is no longer the one the
+            // resolver returns.
             if (_needsMatrixReset && !_shouldApply && !_isTransitioningOut)
             {
-                cam.ResetWorldToCameraMatrix();
+                if (_appliedCamera != null)
+                    _appliedCamera.ResetWorldToCameraMatrix();
+                _appliedCamera = null;
                 _needsMatrixReset = false;
                 return;
             }
+
+            var mainCam = _mainCameraCache.Get();
+            if (cam != mainCam || mainCam == null)
+                return;
 
             if (_shouldApply)
             {
@@ -500,6 +537,10 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         private void ApplyToCamera(Camera cam, float yaw, float pitch, float roll, Vec3 position)
         {
+            if (_appliedCamera != null && _appliedCamera != cam)
+                _appliedCamera.ResetWorldToCameraMatrix();
+            _appliedCamera = cam;
+
             var offset = new Vector3(position.X, position.Y, position.Z);
             if (WorldSpaceYaw)
                 ViewMatrixModifier.ApplyHeadRotationDecomposed(cam, yaw, pitch, roll, offset);
@@ -509,7 +550,13 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         private void AdvanceTransitionOut()
         {
-            _transitionOutProgress += Time.deltaTime / TransitionOutDuration;
+            // Unscaled, unlike AdvanceTransitionIn. This ramp only lerps the last applied
+            // rotation toward zero and consumes no pipeline state, so it is safe on real
+            // time - and it MUST be, because SceneGameStateDetector disables tracking on
+            // pause by default. On Time.deltaTime the fade could never complete at
+            // timeScale 0 and the pause menu rendered through a view matrix still rotated
+            // by whatever the head was doing when the player pressed Escape.
+            _transitionOutProgress += Time.unscaledDeltaTime / TransitionOutDuration;
             if (_transitionOutProgress >= 1f)
             {
                 _isTransitioningOut = false;

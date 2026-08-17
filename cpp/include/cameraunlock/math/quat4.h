@@ -63,11 +63,17 @@ struct Quat4 {
 
     Quat4 operator*(const Quat4& b) const { return Multiply(b); }
 
+    /// Length below which a quaternion is treated as degenerate and replaced with
+    /// identity. Matches QuaternionUtils.NormalizationEpsilon in C#, which tests
+    /// lengthSq against its square - this side used 1e-6f, so a quaternion of length
+    /// 1e-5 normalised here and returned identity there.
+    static constexpr float kNormalizationEpsilon = 0.0001f;
+
     /// Returns a unit-length copy of this quaternion.
     Quat4 Normalized() const {
-        float len = std::sqrt(x * x + y * y + z * z + w * w);
-        if (len < 1e-6f) return Identity();
-        float inv = 1.0f / len;
+        float lengthSq = x * x + y * y + z * z + w * w;
+        if (lengthSq < kNormalizationEpsilon * kNormalizationEpsilon) return Identity();
+        float inv = 1.0f / std::sqrt(lengthSq);
         return Quat4(x * inv, y * inv, z * inv, w * inv);
     }
 
@@ -98,16 +104,26 @@ struct Quat4 {
     /// Matches C# QuaternionUtils.ToEulerYXZ. Handles gimbal lock at ±90° pitch.
     void ToEulerYXZ(float& yaw, float& pitch, float& roll) const {
         constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
+        // sin(89.9 deg) is 0.9999985, so the general branch keeps every angle where it
+        // is still well-conditioned.
+        constexpr float kGimbalLockSinThreshold = 0.9999995f;
 
         float sinPitch = 2.0f * (w * x - y * z);
 
-        if (sinPitch >= 1.0f) {
+        // Switch to the lock branch slightly BEFORE the exact singularity, and use the
+        // row-0 form there. At pitch = 90 the general formula's two atan2 arguments are
+        // identically zero for every yaw - 2(xz + wy) and 1 - 2(x^2 + y^2) both cancel
+        // exactly - so it returns atan2(0, 0) = 0 and discards the rotation. Testing
+        // sinPitch >= 1 never caught that: accumulated float error leaves sinPitch a
+        // shade under 1 for a quaternion built at exactly 90 degrees, so the degenerate
+        // general branch ran anyway. Matches QuaternionUtils.ToEulerYXZ in C#.
+        if (sinPitch >= kGimbalLockSinThreshold) {
             pitch = 90.0f;
-            yaw = std::atan2(2.0f * (x * z + w * y), 1.0f - 2.0f * (x * x + y * y)) * kRadToDeg;
+            yaw = std::atan2(2.0f * (x * y - w * z), 1.0f - 2.0f * (y * y + z * z)) * kRadToDeg;
             roll = 0.0f;
-        } else if (sinPitch <= -1.0f) {
+        } else if (sinPitch <= -kGimbalLockSinThreshold) {
             pitch = -90.0f;
-            yaw = std::atan2(2.0f * (x * z + w * y), 1.0f - 2.0f * (x * x + y * y)) * kRadToDeg;
+            yaw = std::atan2(-2.0f * (x * y - w * z), 1.0f - 2.0f * (y * y + z * z)) * kRadToDeg;
             roll = 0.0f;
         } else {
             pitch = std::asin(sinPitch) * kRadToDeg;

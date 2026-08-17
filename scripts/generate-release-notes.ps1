@@ -24,9 +24,32 @@ Import-Module (Join-Path $scriptDir "..\powershell\ReleaseWorkflow.psm1") -Force
 # Manual override takes priority
 if (Test-Path "RELEASE_NOTES.md") {
     Write-Host "Using RELEASE_NOTES.md override" -ForegroundColor Cyan
-    Copy-Item "RELEASE_NOTES.md" $OutputFile
+    # Re-written rather than copied. A byte-for-byte Copy-Item preserves whatever
+    # encoding the hand-authored file has, and a UTF-8 BOM here publishes straight into
+    # the release body - this is the likeliest path to carry one, because it is the only
+    # file a human edits in an editor. Every Update-VendoredLoader README in the fleet
+    # opens with a BOM, so the assumption that local files are BOM-less does not hold.
+    Write-NotesFile -Path $OutputFile -Text (Get-Content -Raw -LiteralPath "RELEASE_NOTES.md")
     Get-Content $OutputFile
     exit 0
+}
+
+function Write-NotesFile {
+    param([string]$Path, [string]$Text)
+
+    # Written through .NET rather than Out-File/Set-Content because neither gives
+    # BOM-less UTF-8 on Windows PowerShell 5.1: -Encoding utf8 there means UTF-8
+    # WITH a BOM, and the notes file is handed straight to `gh release create
+    # --notes-file`, so the BOM renders as a literal "" at the top of the
+    # published release body. Set-Content with no -Encoding is worse - it writes
+    # the system ANSI codepage, mangling any non-ASCII character in a commit
+    # subject.
+    #
+    # The path is resolved through the provider: [IO.File] resolves a relative
+    # path against [Environment]::CurrentDirectory, which does not follow
+    # Set-Location.
+    $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    [System.IO.File]::WriteAllText($full, $Text, (New-Object System.Text.UTF8Encoding $false))
 }
 
 # Check for previous tag
@@ -43,7 +66,7 @@ $previousTag = git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>$null
 $ErrorActionPreference = $prevPref
 if ($LASTEXITCODE -ne 0) {
     # First release - use all commits
-    "First release." | Set-Content $OutputFile
+    Write-NotesFile -Path $OutputFile -Text "First release."
     Write-Host "First release - no previous tags found" -ForegroundColor Cyan
     Get-Content $OutputFile
     exit 0
@@ -54,6 +77,9 @@ Write-Host "Generating changelog from $previousTag to HEAD" -ForegroundColor Cya
 Write-Host "Artifact paths: $($ArtifactPaths -join ', ')" -ForegroundColor Gray
 
 $commits = git log "$previousTag..HEAD" --pretty=format:"- %s" --no-merges -- $ArtifactPaths
+if ($LASTEXITCODE -ne 0) {
+    throw "git log $previousTag..HEAD failed with exit code $LASTEXITCODE. See the git error above."
+}
 
 if (-not $commits) {
     # An empty match means a bad/stale -ArtifactPaths, never a core-only
@@ -79,6 +105,6 @@ if ($filtered.Count -eq 0) {
 $commitList = $filtered -join "`n"
 $notes = "## What's Changed in v$Version`n`n$commitList"
 
-$notes | Out-File -FilePath $OutputFile -Encoding utf8
+Write-NotesFile -Path $OutputFile -Text $notes
 Write-Host "`nRelease notes:" -ForegroundColor Green
 Get-Content $OutputFile

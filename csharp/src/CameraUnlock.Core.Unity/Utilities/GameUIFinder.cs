@@ -73,6 +73,12 @@ namespace CameraUnlock.Core.Unity.Utilities
         {
             if (keywords == null || keywords.Length == 0) return null;
 
+            // Lowered once. Doing it inside the per-object loop allocated a string per
+            // object per keyword on top of a whole-scene scan, and mods poll this every
+            // frame until the HUD exists - tens of thousands of allocations per frame in
+            // any scene where the reticle is absent.
+            string[] loweredKeywords = LowerKeywords(keywords);
+
             #pragma warning disable CS0618 // FindObjectsByType unavailable in older Unity versions
             GameObject[] allObjects = UnityEngine.Object.FindObjectsOfType<GameObject>();
             #pragma warning restore CS0618
@@ -81,10 +87,10 @@ namespace CameraUnlock.Core.Unity.Utilities
                 if (obj == null) continue;
                 string objName = obj.name.ToLowerInvariant();
 
-                foreach (string keyword in keywords)
+                foreach (string keyword in loweredKeywords)
                 {
-                    if (string.IsNullOrEmpty(keyword)) continue;
-                    if (objName.Contains(keyword.ToLowerInvariant()))
+                    if (keyword == null) continue;
+                    if (objName.Contains(keyword))
                     {
                         return obj;
                     }
@@ -95,7 +101,6 @@ namespace CameraUnlock.Core.Unity.Utilities
 
         /// <summary>
         /// Searches all Canvas children for UI elements matching the keywords.
-        /// Uses reflection to avoid hard dependency on UnityEngine.UI.
         /// </summary>
         /// <param name="keywords">Keywords to search for (case-insensitive).</param>
         /// <returns>The first matching GameObject, or null if not found.</returns>
@@ -103,35 +108,42 @@ namespace CameraUnlock.Core.Unity.Utilities
         {
             if (keywords == null || keywords.Length == 0) return null;
 
-            Type canvasType = Type.GetType("UnityEngine.Canvas, UnityEngine") ??
-                              Type.GetType("UnityEngine.Canvas, UnityEngine.UIModule");
-
-            if (canvasType == null) return null;
+            string[] loweredKeywords = LowerKeywords(keywords);
 
             #pragma warning disable CS0618 // FindObjectsByType unavailable in older Unity versions
-            UnityEngine.Object[] canvases = UnityEngine.Object.FindObjectsOfType(canvasType);
+            Canvas[] canvases = UnityEngine.Object.FindObjectsOfType<Canvas>();
             #pragma warning restore CS0618
-            foreach (UnityEngine.Object canvasObj in canvases)
+            foreach (Canvas canvas in canvases)
             {
-                Component canvas = canvasObj as Component;
                 if (canvas == null) continue;
 
-                Transform[] children = canvas.GetComponentsInChildren<Transform>(true);
-                foreach (Transform child in children)
-                {
-                    if (child == null) continue;
-                    string childName = child.name.ToLowerInvariant();
+                // Walked rather than GetComponentsInChildren<Transform>(true), which allocates
+                // a full array of every Transform under the canvas on every call.
+                GameObject match = FindInChildren(canvas.transform, loweredKeywords);
+                if (match != null) return match;
+            }
+            return null;
+        }
 
-                    foreach (string keyword in keywords)
-                    {
-                        if (string.IsNullOrEmpty(keyword)) continue;
-                        if (childName.Contains(keyword.ToLowerInvariant()))
-                        {
-                            return child.gameObject;
-                        }
-                    }
+        private static GameObject FindInChildren(Transform parent, string[] loweredKeywords)
+        {
+            string name = parent.name;
+            foreach (string keyword in loweredKeywords)
+            {
+                if (keyword == null) continue;
+                if (name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return parent.gameObject;
                 }
             }
+
+            int childCount = parent.childCount;
+            for (int i = 0; i < childCount; i++)
+            {
+                GameObject match = FindInChildren(parent.GetChild(i), loweredKeywords);
+                if (match != null) return match;
+            }
+
             return null;
         }
 
@@ -215,6 +227,18 @@ namespace CameraUnlock.Core.Unity.Utilities
             }
 
             return current.gameObject;
+        }
+
+        // Null entries mark keywords the caller left empty, so the scan loops can skip
+        // them with a reference test instead of re-checking IsNullOrEmpty per object.
+        private static string[] LowerKeywords(string[] keywords)
+        {
+            var lowered = new string[keywords.Length];
+            for (int i = 0; i < keywords.Length; i++)
+            {
+                lowered[i] = string.IsNullOrEmpty(keywords[i]) ? null : keywords[i].ToLowerInvariant();
+            }
+            return lowered;
         }
     }
 }

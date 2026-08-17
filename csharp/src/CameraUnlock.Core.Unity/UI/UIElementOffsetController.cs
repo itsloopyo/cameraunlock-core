@@ -126,10 +126,24 @@ namespace CameraUnlock.Core.Unity.UI
         /// </summary>
         protected virtual void OnDestroy()
         {
-            if (_originalStateCaptured)
+            if (_originalStateCaptured && IsTargetValid())
             {
                 RestoreOriginalState();
             }
+        }
+
+        /// <summary>
+        /// Whether the cached target is still usable. Override and return false once the
+        /// cached reference has been destroyed (a scene change destroys and recreates the
+        /// game's HUD), so the controller drops it and re-acquires instead of writing to a
+        /// destroyed RectTransform forever while the new element sits at screen centre.
+        ///
+        /// The default returns true, preserving the acquire-once behaviour for controllers
+        /// that have not implemented it yet.
+        /// </summary>
+        protected virtual bool IsTargetValid()
+        {
+            return true;
         }
 
         /// <summary>
@@ -137,6 +151,15 @@ namespace CameraUnlock.Core.Unity.UI
         /// </summary>
         private bool EnsureTarget()
         {
+            if (_targetAcquired && !IsTargetValid())
+            {
+                ClearReferences();
+                _targetAcquired = false;
+                _originalStateCaptured = false;
+                _wasDecoupled = false;
+                LogMessage("Target went stale, re-acquiring");
+            }
+
             if (!_targetAcquired)
             {
                 if (!TryAcquireTarget())

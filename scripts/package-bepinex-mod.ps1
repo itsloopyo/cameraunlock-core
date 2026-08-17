@@ -84,10 +84,15 @@ Write-Host "Staging release files..." -ForegroundColor Cyan
 # Copy install/uninstall scripts
 foreach ($script in @("install.cmd", "uninstall.cmd")) {
     $scriptPath = Join-Path $scriptsDir $script
-    if (Test-Path $scriptPath) {
-        Copy-Item $scriptPath -Destination $stagingDir -Force
-        Write-Host "  $script" -ForegroundColor Green
+    # Fatal, not skipped. A repo that moves or renames install.cmd otherwise packaged
+    # and published a release ZIP with no installer in it, and users on the legacy
+    # (non-manifest) path had nothing to run. The manifest check further down already
+    # throws for its missing input; this is the same contract.
+    if (-not (Test-Path $scriptPath)) {
+        throw "Required script not found: $scriptPath"
     }
+    Copy-Item $scriptPath -Destination $stagingDir -Force
+    Write-Host "  $script" -ForegroundColor Green
 }
 
 # install.cmd / uninstall.cmd resolve the game via shared/find-game.ps1.
@@ -176,8 +181,7 @@ Write-Host ""
 Write-Host "Release archive: $zipPath" -ForegroundColor Green
 Write-Host ("Size: {0:N1} KB" -f $zipSize) -ForegroundColor White
 
-# Output zip path for CI capture
-Write-Output $zipPath
+$nexusZipPath = $null
 
 if ($CreateNexusZip) {
     Write-Host ""
@@ -223,7 +227,12 @@ if ($CreateNexusZip) {
     Write-Host ""
     Write-Host "NexusMods archive: $nexusZipPath" -ForegroundColor Green
     Write-Host ("Size: {0:N1} KB" -f $nexusZipSize) -ForegroundColor White
+}
 
-    # Output nexus zip path for CI capture
-    Write-Output $nexusZipPath
+# One object on the success stream, read by property name. The caller used to
+# take $output[0] and $output[1], so anything that ever leaked onto the stream
+# would shift the indices and hand CI a garbage path with no error.
+[PSCustomObject]@{
+    GithubZip = $zipPath
+    NexusZip  = $nexusZipPath
 }

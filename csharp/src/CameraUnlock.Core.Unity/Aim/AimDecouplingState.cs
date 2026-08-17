@@ -23,6 +23,18 @@ namespace CameraUnlock.Core.Unity.Aim
     /// }
     /// </code>
     /// </example>
+    ///
+    /// ASSUMES THE TRANSFORM-MODIFICATION APPROACH. <see cref="GetAimDirection"/> and
+    /// <see cref="GetScreenOffset"/> undo the tracking rotation off camera.transform.rotation,
+    /// which is only correct when the tracking was written INTO the transform.
+    ///
+    /// Under the view-matrix approach - the primary technique for this library - the transform
+    /// still holds the clean base rotation and worldToCameraMatrix holds base*track, so
+    /// WorldToScreenPoint applies the inverse a second time and the reticle lands at twice the
+    /// true offset. Use <see cref="GetAimDirectionForViewMatrix"/> /
+    /// <see cref="GetScreenOffsetForViewMatrix"/> there, or
+    /// <c>ViewMatrixTrackingController.TryGetAimNdcOffset</c>, which does the projection from
+    /// the controller's own composition.
     /// </summary>
     public class AimDecouplingState
     {
@@ -141,6 +153,11 @@ namespace CameraUnlock.Core.Unity.Aim
         /// <summary>
         /// Computes the aim direction in world space.
         /// This is where the player's aim should go (opposite of head movement).
+        ///
+        /// TRANSFORM-MODIFICATION APPROACH ONLY: it undoes the tracking rotation off
+        /// camera.transform.rotation, so the transform must be the one carrying the tracking.
+        /// If tracking lives in worldToCameraMatrix instead, use
+        /// <see cref="GetAimDirectionForViewMatrix"/>.
         /// </summary>
         /// <param name="camera">The camera to use for world space transformation.</param>
         /// <returns>World-space direction vector for aiming.</returns>
@@ -159,8 +176,28 @@ namespace CameraUnlock.Core.Unity.Aim
         }
 
         /// <summary>
+        /// The aim direction for the VIEW-MATRIX approach, where camera.transform still holds
+        /// the game's clean rotation and only worldToCameraMatrix carries the head tracking.
+        /// The transform's own forward IS the aim direction; undoing the tracking rotation
+        /// again (as <see cref="GetAimDirection"/> does) doubles the offset.
+        /// </summary>
+        /// <param name="camera">The camera to use for world space transformation.</param>
+        /// <returns>World-space direction vector for aiming.</returns>
+        public Vector3 GetAimDirectionForViewMatrix(Camera camera)
+        {
+            if (camera == null)
+            {
+                return Vector3.forward;
+            }
+
+            return camera.transform.rotation * Vector3.forward;
+        }
+
+        /// <summary>
         /// Computes screen offset in pixels from screen center for aim UI positioning.
         /// Handles the case where aim direction is behind the camera by clamping to edge.
+        ///
+        /// TRANSFORM-MODIFICATION APPROACH ONLY - see <see cref="GetAimDirection"/>.
         /// </summary>
         /// <param name="camera">The camera to use for projection.</param>
         /// <returns>Offset in pixels from screen center.</returns>
@@ -171,8 +208,28 @@ namespace CameraUnlock.Core.Unity.Aim
                 return Vector2.zero;
             }
 
-            Vector3 aimDirection = GetAimDirection(camera);
+            return ProjectAimDirection(camera, GetAimDirection(camera));
+        }
 
+        /// <summary>
+        /// Screen offset for the VIEW-MATRIX approach: projects the transform's clean forward
+        /// through the head-tracked view matrix, which is exactly where the aim point lands
+        /// on screen.
+        /// </summary>
+        /// <param name="camera">The camera to use for projection.</param>
+        /// <returns>Offset in pixels from screen center.</returns>
+        public Vector2 GetScreenOffsetForViewMatrix(Camera camera)
+        {
+            if (camera == null)
+            {
+                return Vector2.zero;
+            }
+
+            return ProjectAimDirection(camera, GetAimDirectionForViewMatrix(camera));
+        }
+
+        private static Vector2 ProjectAimDirection(Camera camera, Vector3 aimDirection)
+        {
             // Project aim point onto screen
             Vector3 aimWorldPoint = camera.transform.position + aimDirection * 10f;
             Vector3 screenPoint = camera.WorldToScreenPoint(aimWorldPoint);

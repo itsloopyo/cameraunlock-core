@@ -106,6 +106,17 @@ bool LooksLikePointer(std::uintptr_t v) {
     return true;
 }
 
+// A uint16 read of the last ANSI character touches entry + 2 + len, one byte
+// past the name. When the name ends on the last byte of a committed page that
+// faults, the loop breaks and the name comes back one character short - so
+// "PlayerCameraManager" is compared as "PlayerCameraManage" and matches
+// nothing. ASLR-dependent, so it presents as head tracking intermittently not
+// starting.
+static bool SafeReadU8(std::uintptr_t addr, std::uint8_t& out) {
+    __try { out = *reinterpret_cast<const std::uint8_t*>(addr); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
 // FNamePool layout (UE5): Blocks[] at pool + kFNamePoolBlocks, block stride 2,
 // entry header uint16 (Len = header>>6, bIsWide = bit0), chars at +2.
 std::string ResolveFName(std::uint32_t id) {
@@ -126,9 +137,9 @@ std::string ResolveFName(std::uint32_t id) {
     out.reserve(len);
     if (!isWide) {
         for (int i = 0; i < len; ++i) {
-            std::uint16_t b = 0;
-            if (!SafeReadU16(entry + 2 + i, b)) break;  // overlapping read ok
-            out.push_back(static_cast<char>(b & 0xff));
+            std::uint8_t b = 0;
+            if (!SafeReadU8(entry + 2 + i, b)) break;
+            out.push_back(static_cast<char>(b));
         }
     } else {
         for (int i = 0; i < len; ++i) {

@@ -23,7 +23,7 @@
 // Scans sibling repos of the cameraunlock-core checkout (../*-headtracking and
 // ../*-head-tracking). Pass explicit repo paths as args to limit the scan.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, basename } from 'node:path';
@@ -83,8 +83,33 @@ function findReleaseWorkflows(repoPath) {
     .filter((wf) => /tags:/.test(wf.text));
 }
 
+// Resolved once, before any workflow is touched. A missing interpreter or a
+// missing PyYAML used to surface from validateYaml as an ordinary exception,
+// indistinguishable from a genuine parse error: --apply then reverted every
+// file it had just written and reported YAML_INVALID_REVERTED for the whole
+// fleet. Neither python nor pyyaml is in pixi.toml, so this is the common case
+// on a clean environment.
+function resolveYamlValidator() {
+  for (const exe of ['python', 'python3']) {
+    try {
+      execFileSync(exe, ['-c', 'import yaml'], { stdio: 'pipe' });
+      return exe;
+    } catch (e) {
+      if (e.code === 'ENOENT') continue;
+      throw new Error(
+        `\`${exe}\` is on PATH but cannot import PyYAML, which this script needs to validate every workflow it writes. Install it (\`pip install pyyaml\`) and re-run.\n${String(e.stderr || e)}`,
+      );
+    }
+  }
+  throw new Error(
+    'No python interpreter found on PATH. This script validates every workflow it writes with python + PyYAML, neither of which is a declared dependency in pixi.toml. Install python and PyYAML, then re-run.',
+  );
+}
+
+const pythonExe = resolveYamlValidator();
+
 function validateYaml(path) {
-  execFileSync('python', ['-c', 'import sys,yaml; yaml.safe_load(open(sys.argv[1],encoding="utf-8"))', path], {
+  execFileSync(pythonExe, ['-c', 'import sys,yaml; yaml.safe_load(open(sys.argv[1],encoding="utf-8"))', path], {
     stdio: 'pipe',
   });
 }
@@ -249,8 +274,9 @@ function processWorkflowFile(repoName, wf) {
   } catch (e) {
     yamlOk = false;
     yamlErr = String(e.stderr || e);
+  } finally {
+    unlinkSync(tmp);
   }
-  execFileSync('node', ['-e', `require('fs').unlinkSync(${JSON.stringify(tmp)})`]);
   return { name, status: yamlOk ? 'WOULD_PATCH' : 'WOULD_FAIL_YAML', ops: opsLabel, error: yamlErr, wf: wf.path };
 }
 
@@ -286,3 +312,31 @@ for (const status of Object.keys(byStatus).sort()) {
   }
   console.log('');
 }
+
+// The script previously always exited 0, so a run across the fleet that failed to patch
+// several repos reported success to whatever invoked it - and those mods then shipped
+// releases with no Discord announcement, the exact failure the webhook check exists to
+// prevent. REUSABLE_CALLER is not a failure: those repos get the step from the shared
+// workflow. NO_STEPS_KEY / NO_RELEASE_STEP / NO_RELEASE_WF mean the repo was not
+// reconciled and needs a look.
+const FAILING = new Set([
+  'NO_RELEASE_WF',
+  'NO_RELEASE_STEP',
+  'NO_STEPS',
+  'NO_STEPS_KEY',
+  'YAML_INVALID_REVERTED',
+  'WOULD_FAIL_YAML',
+  // WOULD_PATCH is a dry run saying "this repo is not reconciled yet". Leaving it
+  // out made the dry run - the only mode safe to wire into CI as a drift check -
+  // exit 0 while reporting a dozen unreconciled repos, which is precisely the
+  // state the gate is supposed to catch. It cannot occur in APPLY mode: a repo
+  // that needed patching there comes back PATCHED.
+  'WOULD_PATCH',
+]);
+
+const failed = results.filter((r) => FAILING.has(r.status));
+if (failed.length > 0) {
+  console.log(`${failed.length} repo(s) need attention: ${failed.map((r) => r.name).join(', ')}`);
+  process.exit(1);
+}
+

@@ -36,13 +36,30 @@ namespace CameraUnlock.Core.Config.Profiles
             try
             {
                 result = (T)Enum.Parse(typeof(T), value, true);
-                return true;
             }
             catch (ArgumentException)
             {
                 // Value is not a valid member of the enum - expected TryParse behavior
                 return false;
             }
+
+            // Enum.Parse does not throw for a bare number ("99") or a comma list
+            // ("Yaw,Pitch", which it ORs into an unrelated member), so a corrupt file
+            // would otherwise assign an out-of-range Source and silently kill the axis.
+            return Enum.IsDefined(typeof(T), result);
+        }
+
+        // A key or value carrying a CR/LF would split into extra key=value lines on the
+        // way back in, silently truncating the field and letting a setting value inject
+        // metadata (a "Note" holding "x\nIsReadOnly=True" comes back read-only, which
+        // makes the profile permanently unsaveable). Flattening to a space keeps the
+        // whole text and needs no matching unescape, so files written by older versions
+        // still read back byte-identically.
+        private static string Flatten(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            if (value.IndexOf('\r') < 0 && value.IndexOf('\n') < 0) return value;
+            return value.Replace('\r', ' ').Replace('\n', ' ');
         }
 
         /// <summary>
@@ -66,9 +83,9 @@ namespace CameraUnlock.Core.Config.Profiles
             sb.AppendLine();
 
             // Metadata
-            sb.AppendLine("Name=" + (profile.Name ?? ""));
-            sb.AppendLine("Description=" + (profile.Description ?? ""));
-            sb.AppendLine("GameName=" + (profile.GameName ?? "General"));
+            sb.AppendLine("Name=" + Flatten(profile.Name ?? ""));
+            sb.AppendLine("Description=" + Flatten(profile.Description ?? ""));
+            sb.AppendLine("GameName=" + Flatten(profile.GameName ?? "General"));
             sb.AppendLine("CreatedDate=" + profile.CreatedDate.ToString(DateFormat, CultureInfo.InvariantCulture));
             sb.AppendLine("ModifiedDate=" + profile.ModifiedDate.ToString(DateFormat, CultureInfo.InvariantCulture));
             sb.AppendLine("IsDefault=" + profile.IsDefault.ToString());
@@ -82,7 +99,7 @@ namespace CameraUnlock.Core.Config.Profiles
                 foreach (var kvp in profile.Settings)
                 {
                     string valueStr = SerializeValue(kvp.Value);
-                    sb.AppendLine("Setting." + kvp.Key + "=" + valueStr);
+                    sb.AppendLine("Setting." + Flatten(kvp.Key) + "=" + Flatten(valueStr));
                 }
                 sb.AppendLine();
             }
@@ -117,7 +134,38 @@ namespace CameraUnlock.Core.Config.Profiles
             }
 
             string content = Serialize(profile);
-            File.WriteAllText(filePath, content, Encoding.UTF8);
+
+            // Write-then-replace. A direct WriteAllText truncates in place, so a crash
+            // mid-write leaves a half-file that Deserialize happily accepts (it skips
+            // unparseable lines and never throws), silently replacing the user's tuned
+            // profile with constructor defaults that still load clean.
+            //
+            // File.Replace, not Delete-then-Move: it is one MoveFileEx with
+            // REPLACE_EXISTING, so the destination is never absent. Delete-then-Move
+            // leaves NO file at all if the Move fails (an antivirus scanner holding the
+            // freshly-closed temp file is enough) or if the process dies between the two
+            // - which is strictly worse than the partial file this is meant to prevent.
+            string tempPath = filePath + ".tmp";
+            File.WriteAllText(tempPath, content, Encoding.UTF8);
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    File.Replace(tempPath, filePath, null);
+                }
+                else
+                {
+                    File.Move(tempPath, filePath);
+                }
+            }
+            catch
+            {
+                // Don't strand the temp file in the profiles directory on a failed swap.
+                // The original is still intact either way; the exception propagates.
+                try { File.Delete(tempPath); }
+                catch (IOException) { }
+                throw;
+            }
         }
 
         /// <summary>
@@ -195,6 +243,7 @@ namespace CameraUnlock.Core.Config.Profiles
             sb.AppendLine(prefix + "EnableLimits=" + config.EnableLimits);
             sb.AppendLine(prefix + "SensitivityCurve=" + config.SensitivityCurve);
             sb.AppendLine(prefix + "CurveStrength=" + config.CurveStrength.ToString("F4", CultureInfo.InvariantCulture));
+            sb.AppendLine(prefix + "MaxInputRange=" + config.MaxInputRange.ToString("F4", CultureInfo.InvariantCulture));
         }
 
         private static string SerializeValue(object value)
@@ -204,6 +253,11 @@ namespace CameraUnlock.Core.Config.Profiles
             if (value is double d) return d.ToString("F6", CultureInfo.InvariantCulture);
             if (value is bool b) return b.ToString();
             if (value is Enum e) return e.ToString();
+            // ParseValue reads back with InvariantCulture, so anything formattable has to
+            // be written that way too or a profile stops round-tripping on a locale whose
+            // negative sign or decimal separator differs (int -5 writes as U+2212 5 under
+            // ICU, comes back as a string, and GetSetting<int> then throws).
+            if (value is IFormattable formattable) return formattable.ToString(null, CultureInfo.InvariantCulture);
             return value.ToString();
         }
 
@@ -338,6 +392,10 @@ namespace CameraUnlock.Core.Config.Profiles
                 case "CurveStrength":
                     if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
                         config.CurveStrength = floatTemp;
+                    break;
+                case "MaxInputRange":
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
+                        config.MaxInputRange = floatTemp;
                     break;
             }
         }

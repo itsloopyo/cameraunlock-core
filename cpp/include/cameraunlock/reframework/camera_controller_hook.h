@@ -42,6 +42,11 @@ public:
           m_preHook(preHook),
           m_postHook(postHook) {}
 
+    // Removes the managed hook if one is installed. Without this a REFramework
+    // plugin reload leaves the game calling preHook at an address in freed
+    // memory.
+    ~CameraControllerHooker() { Unhook(); }
+
     CameraControllerHooker(const CameraControllerHooker&) = delete;
     CameraControllerHooker& operator=(const CameraControllerHooker&) = delete;
 
@@ -51,6 +56,10 @@ public:
     // Returns true once hooked; further calls after success are no-ops
     // returning true.
     bool TryHook(void* cameraTransform);
+
+    // Remove the installed hook. Safe to call when nothing is hooked; after it
+    // returns, TryHook() will search again.
+    void Unhook();
 
     bool IsHooked() const { return m_hooked; }
     int AttemptCount() const { return m_attempts; }
@@ -64,6 +73,8 @@ private:
     int m_candidateTypeCount;
     REFPreHookFn m_preHook;
     REFPostHookFn m_postHook;
+    ::reframework::API::Method* m_hookedMethod = nullptr;
+    unsigned int m_hookId = 0;
     bool m_hooked = false;
     int m_attempts = 0;
 };

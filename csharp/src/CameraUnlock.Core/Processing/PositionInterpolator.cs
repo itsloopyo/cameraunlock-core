@@ -67,14 +67,22 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public PositionData Update(PositionData rawPosition, float deltaTime)
         {
+            return Update(rawPosition, rawPosition.TimestampTicks != _lastTimestampTicks, deltaTime);
+        }
+
+        /// <summary>
+        /// Update with an explicit new-sample flag. See
+        /// <see cref="PoseInterpolator.Update(Data.TrackingPose, bool, float)"/> for why the
+        /// timestamp alone is not enough. Matches PositionInterpolator::Update in C++.
+        /// </summary>
+        public PositionData Update(PositionData rawPosition, bool isNewSample, float deltaTime)
+        {
             if (!rawPosition.IsValid)
             {
                 return rawPosition;
             }
 
             _timeSinceLastNewSample += deltaTime;
-
-            bool isNewSample = rawPosition.TimestampTicks != _lastTimestampTicks;
 
             if (isNewSample)
             {
@@ -93,6 +101,7 @@ namespace CameraUnlock.Core.Processing
                     return rawPosition;
                 }
 
+                // See PoseInterpolator for why this is NOT gated on <= MaxSampleInterval.
                 if (_timeSinceLastNewSample > MinSampleInterval)
                 {
                     if (!_hasSecondSample)

@@ -25,7 +25,6 @@ namespace CameraUnlock.Core.Tests.Processing.AxisTransform
             var config = new MappingConfig();
 
             Assert.Equal(AxisSource.Yaw, config.YawConfig.Source);
-            Assert.Equal(TargetAxis.Yaw, config.YawConfig.Target);
         }
 
         [Fact]
@@ -34,7 +33,6 @@ namespace CameraUnlock.Core.Tests.Processing.AxisTransform
             var config = new MappingConfig();
 
             Assert.Equal(AxisSource.Pitch, config.PitchConfig.Source);
-            Assert.Equal(TargetAxis.Pitch, config.PitchConfig.Target);
         }
 
         [Fact]
@@ -43,7 +41,6 @@ namespace CameraUnlock.Core.Tests.Processing.AxisTransform
             var config = new MappingConfig();
 
             Assert.Equal(AxisSource.Roll, config.RollConfig.Source);
-            Assert.Equal(TargetAxis.Roll, config.RollConfig.Target);
         }
 
         [Fact]

@@ -74,7 +74,10 @@ namespace CameraUnlock.Core.Aim
             // ±90°, and tanHalf* -> 0 when FOV is degenerate (e.g. zoomed-out menu cam).
             // In either case the projection is undefined; emit zero offset so the
             // reticle stays centred instead of jumping to ±Infinity / NaN on screen.
-            if (System.Math.Abs(az) < ProjectionEpsilon ||
+            // az < 0 is the half-space behind the camera plane: dividing by it mirrors
+            // the offset, so a 100° yaw would report a reticle just right of centre
+            // while the aim is actually behind the player. Rejected, not clamped.
+            if (az < ProjectionEpsilon ||
                 System.Math.Abs(tanHalfFovX) < ProjectionEpsilon ||
                 System.Math.Abs(tanHalfFovY) < ProjectionEpsilon)
             {
@@ -162,9 +165,10 @@ namespace CameraUnlock.Core.Aim
 
             ApplyRollRotation(ax, ay, rollDegrees, out ax, out ay);
 
-            // See Calculate(): clamp to zero offset when the projection is singular
-            // so callers don't propagate ±Infinity / NaN into the reticle UI.
-            if (System.Math.Abs(az) < ProjectionEpsilon ||
+            // See Calculate(): clamp to zero offset when the projection is singular or
+            // behind the camera plane, so callers don't propagate ±Infinity / NaN or a
+            // mirrored offset into the reticle UI.
+            if (az < ProjectionEpsilon ||
                 System.Math.Abs(tanHalfFovX) < ProjectionEpsilon ||
                 System.Math.Abs(tanHalfFovY) < ProjectionEpsilon)
             {

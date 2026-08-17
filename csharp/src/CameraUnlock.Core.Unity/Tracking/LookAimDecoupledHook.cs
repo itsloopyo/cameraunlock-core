@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 
 namespace CameraUnlock.Core.Unity.Tracking
@@ -24,12 +23,18 @@ namespace CameraUnlock.Core.Unity.Tracking
     /// 3. Override ShouldApplyTracking() to control when tracking is active
     /// 4. Optionally override OnPreCullComplete() and OnPostRenderComplete() for additional work
     /// 5. Attach to the main camera GameObject
+    ///
+    /// LEGACY PIPELINE ONLY. OnPreCull/OnPostRender are built-in-pipeline magic methods; URP
+    /// and HDRP never invoke them, so on an SRP game this component applies nothing at all and
+    /// does so silently. Use ViewMatrixTrackingController (which subscribes to both
+    /// Camera.onPreCull and RenderPipelineManager.beginCameraRendering) for SRP titles.
     /// </summary>
     public abstract class LookAimDecoupledHook : MonoBehaviour
     {
         private Camera _camera;
         private Quaternion _preTrackingRotation;
         private bool _trackingAppliedThisFrame;
+        private bool _transformDirty;
         private bool _isEnabled = true;
 
         /// <summary>
@@ -105,35 +110,39 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         private void OnPreCull()
         {
+            // Still dirty on entry means OnPostRender never ran for the previous cull - the
+            // camera was disabled between cull and render, or something called Camera.Render()
+            // directly. The transform is therefore still at LOOK, and capturing it below as the
+            // AIM direction would compound tracking on itself every frame.
+            if (_transformDirty && _camera != null)
+            {
+                _camera.transform.rotation = _preTrackingRotation;
+                _transformDirty = false;
+            }
+
             _trackingAppliedThisFrame = false;
 
-            try
+            if (!_isEnabled || _camera == null)
             {
-                if (!_isEnabled || _camera == null)
-                {
-                    return;
-                }
-
-                if (!ShouldApplyTracking())
-                {
-                    return;
-                }
-
-                // Store the pre-tracking rotation (this is the AIM direction)
-                _preTrackingRotation = _camera.transform.rotation;
-                _trackingAppliedThisFrame = true;
-
-                // Compute and apply head tracking (this is the LOOK direction)
-                Quaternion trackedRotation = ComputeTrackedRotation(_preTrackingRotation);
-                _camera.transform.rotation = trackedRotation;
-
-                // Notify subclass
-                OnPreCullComplete(_preTrackingRotation, trackedRotation);
+                return;
             }
-            catch (Exception ex)
+
+            if (!ShouldApplyTracking())
             {
-                Debug.LogError($"[LookAimDecoupledHook] OnPreCull error: {ex.Message}");
+                return;
             }
+
+            // Store the pre-tracking rotation (this is the AIM direction)
+            _preTrackingRotation = _camera.transform.rotation;
+            _trackingAppliedThisFrame = true;
+
+            // Compute and apply head tracking (this is the LOOK direction)
+            Quaternion trackedRotation = ComputeTrackedRotation(_preTrackingRotation);
+            _camera.transform.rotation = trackedRotation;
+            _transformDirty = true;
+
+            // Notify subclass
+            OnPreCullComplete(_preTrackingRotation, trackedRotation);
         }
 
         /// <summary>
@@ -148,21 +157,15 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            try
+            if (_camera != null)
             {
-                if (_camera != null)
-                {
-                    // Restore the AIM direction for game logic
-                    _camera.transform.rotation = _preTrackingRotation;
-                }
+                // Restore the AIM direction for game logic
+                _camera.transform.rotation = _preTrackingRotation;
+                _transformDirty = false;
+            }
 
-                // Notify subclass
-                OnPostRenderComplete();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[LookAimDecoupledHook] OnPostRender error: {ex.Message}");
-            }
+            // Notify subclass
+            OnPostRenderComplete();
         }
     }
 }

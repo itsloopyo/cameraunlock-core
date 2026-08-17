@@ -23,9 +23,20 @@ public:
     HotkeyPoller(const HotkeyPoller&) = delete;
     HotkeyPoller& operator=(const HotkeyPoller&) = delete;
 
-    // Move-only
-    HotkeyPoller(HotkeyPoller&& other) noexcept;
-    HotkeyPoller& operator=(HotkeyPoller&& other) noexcept;
+    // Move-only. A running poller keeps polling after a move: the thread is
+    // bound to the source's this-pointer, so it is stopped there and a fresh
+    // one is started here. Key edge states reset in the process, so a key held
+    // down across the move fires again on its next press, not immediately.
+    //
+    // Deliberately NOT noexcept. Restarting the thread constructs a
+    // std::thread, which throws std::system_error when the process cannot spawn
+    // one, and throwing out of a noexcept function calls std::terminate - the
+    // game dies outright with no diagnostic. Moving a poller is not on any hot
+    // path, so propagating is strictly better than terminating. Both stay
+    // usable for std::vector: move_if_noexcept picks the move anyway, because
+    // the type is non-copyable.
+    HotkeyPoller(HotkeyPoller&& other);
+    HotkeyPoller& operator=(HotkeyPoller&& other);
 
     // Set the toggle key and callback
     // vkCode: Windows virtual key code (e.g., VK_F10 = 0x79)
@@ -65,8 +76,10 @@ public:
 
 private:
     void PollLoop();
-    void CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
-                  bool allowFire);
+    // Edge-detects and appends the callback to fire rather than invoking it, so Poll()
+    // can release its locks before running user code. See the note in Poll().
+    void CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
+                    bool allowFire, std::vector<HotkeyCallback>& toFire);
 
     std::thread m_thread;
     std::atomic<bool> m_stopFlag{false};

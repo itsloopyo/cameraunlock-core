@@ -101,6 +101,11 @@ void ForEachUObject(Fn&& visit) {
     if (!SafeReadPtr(objArr, chunks) || !chunks) return;
     if (!SafeReadU32(objArr + off.kObjObjects_Num, num)) return;
     if (num == 0 || num > 0x4000000) return;
+    // Both are divisors below. The layout is a plain aggregate the consumer fills from
+    // its per-build offset profile and SetRuntime validates nothing, so a profile that
+    // misses one field leaves it zero and the loop faults with an integer divide by zero
+    // outside every SafeRead guard - a hard crash on the first camera lookup.
+    if (off.kChunkNumElems == 0 || off.kFUObjectItemSize == 0) return;
     for (std::uint32_t i = 0; i < num; ++i) {
         std::uintptr_t chunk = 0;
         if (!SafeReadPtr(chunks + (static_cast<std::uintptr_t>(

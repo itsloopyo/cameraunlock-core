@@ -1,3 +1,4 @@
+using System;
 using Xunit;
 using UnityEngine;
 using CameraUnlock.Core.Math;
@@ -206,6 +207,87 @@ namespace CameraUnlock.Core.Unity.Tests
             Frame();
             Assert.Equal(0.95f, SmoothingUtils.GetEffectiveSmoothing(
                 _processor.LocalSmoothing, _processor.RemoteSmoothing, _processor.IsRemoteConnection));
+        }
+
+        // worldToCameraMatrix is a sticky override, so the controller has to remember WHICH
+        // camera it wrote to. Resetting whatever the resolver returns now leaves the previous
+        // camera permanently head-rotated the moment the game switches cameras, and a recenter
+        // cannot clear it because that only changes the delta.
+        private ViewMatrixTrackingController NewController(Func<Camera> resolver)
+        {
+            return new ViewMatrixTrackingController(
+                _source, _processor, _interpolator, _positionProcessor, _positionInterpolator, resolver);
+        }
+
+        private void ApplyFrameTo(ViewMatrixTrackingController controller, Camera cam)
+        {
+            _source.NewSample();
+            Time.AdvanceFrame();
+            controller.ProcessFrame(true);
+            Camera.onPreCull(cam);
+        }
+
+        [Fact]
+        public void CameraSwitch_ResetsTheCameraTheMatrixWasActuallyWrittenTo()
+        {
+            var gameplayCam = new Camera();
+            var cutsceneCam = new Camera();
+            Camera resolved = gameplayCam;
+
+            _source.Yaw = 20f;
+            var controller = NewController(() => resolved);
+            controller.Enable();
+            try
+            {
+                ApplyFrameTo(controller, gameplayCam);
+                Assert.Equal(0, gameplayCam.ResetWorldToCameraMatrixCalls);
+
+                resolved = cutsceneCam;
+                ApplyFrameTo(controller, cutsceneCam);
+
+                Assert.Equal(1, gameplayCam.ResetWorldToCameraMatrixCalls);
+                Assert.Equal(0, cutsceneCam.ResetWorldToCameraMatrixCalls);
+            }
+            finally
+            {
+                controller.Disable();
+            }
+        }
+
+        [Fact]
+        public void Disable_ResetsTheAppliedCameraNotTheCurrentlyResolvedOne()
+        {
+            var gameplayCam = new Camera();
+            var menuCam = new Camera();
+            Camera resolved = gameplayCam;
+
+            _source.Yaw = 20f;
+            var controller = NewController(() => resolved);
+            controller.Enable();
+            ApplyFrameTo(controller, gameplayCam);
+
+            resolved = menuCam;
+            Time.AdvanceFrame();
+            controller.Disable();
+
+            Assert.Equal(1, gameplayCam.ResetWorldToCameraMatrixCalls);
+            Assert.Equal(0, menuCam.ResetWorldToCameraMatrixCalls);
+        }
+
+        [Fact]
+        public void Disable_AppliedCameraWasDestroyed_DoesNotTouchIt()
+        {
+            var gameplayCam = new Camera();
+
+            _source.Yaw = 20f;
+            var controller = NewController(() => gameplayCam);
+            controller.Enable();
+            ApplyFrameTo(controller, gameplayCam);
+
+            gameplayCam.MarkDestroyed();
+            controller.Disable();
+
+            Assert.Equal(0, gameplayCam.ResetWorldToCameraMatrixCalls);
         }
 
         [Fact]

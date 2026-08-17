@@ -45,7 +45,8 @@ function Test-JsonProp {
     Load and cache the canonical games.json. Returns a hashtable
     keyed by game-id (hyphen-lowercase), each value normalised to the
     field names the rest of this module expects (EnvVar, SteamFolder,
-    Executable, GogGameIds, EpicPaths, XboxPaths, DataFolder, UsesOWML).
+    Executable, GogGameIds, EpicPaths, EaPaths, XboxPaths, DataFolder,
+    UsesOWML).
 .OUTPUTS
     System.Collections.Hashtable
 #>
@@ -66,8 +67,10 @@ function Get-GameConfigs {
     # (e.g. the trademark sign in the PixelJunk Monsters 2 steam_folder). Windows
     # PowerShell 5.1 defaults Get-Content to the ANSI codepage, which mojibakes
     # those bytes and breaks steam_folder matching for unicode-named games.
-    $raw = Get-Content -Raw -Encoding UTF8 -Path $Script:GamesFilePath | ConvertFrom-Json
-    if (-not $raw.games) {
+    $raw = Get-Content -Raw -Encoding UTF8 -LiteralPath $Script:GamesFilePath | ConvertFrom-Json
+    # Strict mode turns a missing property into a terminating error, so the
+    # malformed-file message below is only reachable behind an existence check.
+    if ($null -eq $raw -or -not (Test-JsonProp $raw 'games') -or -not $raw.games) {
         throw "games.json at $($Script:GamesFilePath) is malformed: missing top-level .games object"
     }
 
@@ -99,6 +102,9 @@ function Get-GameConfigs {
         }
         if (Test-JsonProp $src 'epic_search_paths') {
             if ($src.epic_search_paths.Count -gt 0) { $cfg.EpicPaths = @($src.epic_search_paths) }
+        }
+        if (Test-JsonProp $src 'ea_search_paths') {
+            if ($src.ea_search_paths.Count -gt 0) { $cfg.EaPaths = @($src.ea_search_paths) }
         }
         if (Test-JsonProp $src 'xbox_paths') {
             if ($src.xbox_paths.Count -gt 0) { $cfg.XboxPaths = @($src.xbox_paths) }
@@ -140,21 +146,18 @@ function Find-SteamLibraries {
     # Find Steam installation from registry
     $steamPath = $null
 
-    # Try registry (64-bit)
-    $regPath64 = 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam'
-    if (Test-Path $regPath64) {
-        $steamPath = (Get-ItemProperty -Path $regPath64 -ErrorAction Stop).InstallPath
+    # A key can exist with the value missing (a partial uninstall, a
+    # policy-written stub). Strict mode makes the bare property read a
+    # terminating error, so every registry read is guarded.
+    foreach ($regPath in @('HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam')) {
+        if (-not (Test-Path $regPath)) { continue }
+        $props = Get-ItemProperty -Path $regPath -ErrorAction Stop
+        if (-not $props.PSObject.Properties['InstallPath']) { continue }
+        $steamPath = $props.InstallPath
+        if ($steamPath) { break }
     }
 
-    # Try registry (32-bit)
-    if (-not $steamPath) {
-        $regPath32 = 'HKLM:\SOFTWARE\Valve\Steam'
-        if (Test-Path $regPath32) {
-            $steamPath = (Get-ItemProperty -Path $regPath32 -ErrorAction Stop).InstallPath
-        }
-    }
-
-    if (-not $steamPath -or -not (Test-Path $steamPath)) {
+    if (-not $steamPath -or -not (Test-Path -LiteralPath $steamPath)) {
         return @()
     }
 
@@ -163,13 +166,13 @@ function Find-SteamLibraries {
     # Parse libraryfolders.vdf to find all Steam library paths
     $vdfPath = Join-Path $steamPath 'steamapps\libraryfolders.vdf'
 
-    if (Test-Path $vdfPath) {
-        $content = Get-Content $vdfPath -Raw
+    if (Test-Path -LiteralPath $vdfPath) {
+        $content = Get-Content -LiteralPath $vdfPath -Raw
         # Match path entries in VDF format
         $pathMatches = [regex]::Matches($content, '"path"\s+"([^"]+)"')
         foreach ($match in $pathMatches) {
             $path = $match.Groups[1].Value -replace '\\\\', '\'
-            if ($path -and (Test-Path $path) -and -not $libraries.Contains($path)) {
+            if ($path -and (Test-Path -LiteralPath $path) -and -not $libraries.Contains($path)) {
                 $libraries.Add($path)
             }
         }
@@ -206,11 +209,12 @@ function Find-GogGamePath {
         )
 
         foreach ($key in $gogKeys) {
-            if (Test-Path $key) {
-                $gamePath = (Get-ItemProperty -Path $key -ErrorAction Stop).path
-                if ($gamePath -and (Test-Path (Join-Path $gamePath $Executable))) {
-                    return $gamePath
-                }
+            if (-not (Test-Path $key)) { continue }
+            $props = Get-ItemProperty -Path $key -ErrorAction Stop
+            if (-not $props.PSObject.Properties['path']) { continue }
+            $gamePath = $props.path
+            if ($gamePath -and (Test-Path -LiteralPath (Join-Path $gamePath $Executable))) {
+                return $gamePath
             }
         }
     }
@@ -246,13 +250,14 @@ function Find-UbisoftGamePath {
         )
 
         foreach ($key in $ubiKeys) {
-            if (Test-Path $key) {
-                $installDir = (Get-ItemProperty -Path $key -ErrorAction Stop).InstallDir
-                if ($installDir) {
-                    $gamePath = $installDir.TrimEnd('/', '\')
-                    if (Test-GameInstallation -Path $gamePath -Executable $Executable) {
-                        return $gamePath
-                    }
+            if (-not (Test-Path $key)) { continue }
+            $props = Get-ItemProperty -Path $key -ErrorAction Stop
+            if (-not $props.PSObject.Properties['InstallDir']) { continue }
+            $installDir = $props.InstallDir
+            if ($installDir) {
+                $gamePath = $installDir.TrimEnd('/', '\')
+                if (Test-GameInstallation -Path $gamePath -Executable $Executable) {
+                    return $gamePath
                 }
             }
         }
@@ -331,12 +336,15 @@ function Test-GameInstallation {
         [string]$Executable
     )
 
-    if (-not (Test-Path $Path)) {
+    # -LiteralPath throughout: a path like 'D:\Games\Prey [2017]' is a wildcard
+    # character class to Test-Path, so the verification gate every detection
+    # strategy runs through would report a game that plainly exists as missing.
+    if (-not (Test-Path -LiteralPath $Path)) {
         return $false
     }
 
     $exePath = Join-Path $Path $Executable
-    return (Test-Path $exePath)
+    return (Test-Path -LiteralPath $exePath)
 }
 
 <#
@@ -374,14 +382,14 @@ function Find-SteamGameByAppId {
     $libraries = Find-SteamLibraries
     foreach ($library in $libraries) {
         $manifest = Join-Path $library "steamapps\appmanifest_$AppId.acf"
-        if (-not (Test-Path $manifest)) {
+        if (-not (Test-Path -LiteralPath $manifest)) {
             continue
         }
         # ACF is Valve's simple VDF: quoted key/value pairs. We only
         # need `installdir`. A one-line regex is safer than pulling in
         # a VDF parser; `installdir` is always a simple "key" "value"
         # on its own line.
-        $content = Get-Content -Raw -Path $manifest
+        $content = Get-Content -Raw -LiteralPath $manifest
         if ($content -match '"installdir"\s+"([^"]+)"') {
             $installDir = $matches[1]
             $gamePath = Join-Path $library "steamapps\common\$installDir"
@@ -421,7 +429,8 @@ function Find-OWMLPath {
     3. GOG registry
     4. Ubisoft Connect registry
     5. Epic Games paths
-    6. Xbox/Microsoft Store paths
+    6. EA App / Origin paths
+    7. Xbox/Microsoft Store paths
 .PARAMETER GameId
     The game identifier (key in $GameConfigs).
 .PARAMETER Config
@@ -451,13 +460,16 @@ function Find-GamePath {
         }
     }
 
-    $executable = $Config.Executable
-    if (-not $executable) {
+    # Strict mode makes a missing hashtable key a terminating error, and both
+    # env_var-only games (no steam_folder) and caller-supplied configs hit that,
+    # so every optional key is read behind ContainsKey.
+    if (-not $Config.ContainsKey('Executable') -or -not $Config.Executable) {
         throw "Config must include 'Executable'"
     }
+    $executable = $Config.Executable
 
     # Priority 1: Environment variable
-    if ($Config.EnvVar) {
+    if ($Config.ContainsKey('EnvVar') -and $Config.EnvVar) {
         $envPath = [Environment]::GetEnvironmentVariable($Config.EnvVar)
         if ($envPath -and (Test-GameInstallation -Path $envPath -Executable $executable)) {
             return $envPath
@@ -488,7 +500,7 @@ function Find-GamePath {
     # Priority 3b: Steam via folder name. Fallback for games we haven't
     # recorded a steam_app_id for (non-Steam or pre-release titles
     # with a Steam entry but no published app_id in our catalog).
-    if ($Config.SteamFolder) {
+    if ($Config.ContainsKey('SteamFolder') -and $Config.SteamFolder) {
         $libraries = Find-SteamLibraries
         foreach ($library in $libraries) {
             $gamePath = Join-Path $library "steamapps\common\$($Config.SteamFolder)"
@@ -523,7 +535,16 @@ function Find-GamePath {
         }
     }
 
-    # Priority 7: Xbox/Microsoft Store paths
+    # Priority 7: EA App / Origin paths
+    if ($Config.ContainsKey('EaPaths') -and $Config.EaPaths) {
+        foreach ($path in $Config.EaPaths) {
+            if (Test-GameInstallation -Path $path -Executable $executable) {
+                return $path
+            }
+        }
+    }
+
+    # Priority 8: Xbox/Microsoft Store paths
     if ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths) {
         # GDK builds may live under a different exe name than the Steam exe
         # (Foo-WinGDK-Shipping.exe vs Foo-Win64-Shipping.exe), so prefer

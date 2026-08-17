@@ -218,6 +218,15 @@ void UdpReceiver::Recenter() {
     }
 }
 
+void UdpReceiver::ResetOffset() {
+    m_yawOffset.store(0.0f, std::memory_order_relaxed);
+    m_pitchOffset.store(0.0f, std::memory_order_relaxed);
+    m_rollOffset.store(0.0f, std::memory_order_relaxed);
+    m_posXOffset.store(0.0f, std::memory_order_relaxed);
+    m_posYOffset.store(0.0f, std::memory_order_relaxed);
+    m_posZOffset.store(0.0f, std::memory_order_relaxed);
+}
+
 namespace {
 
 /// "ip:port" for a source packed as (s_addr << 16) | port.
@@ -525,7 +534,7 @@ void UdpReceiver::ReceiverThread() {
             // the old session would swallow the first CENTER press of the new
             // one.
             int64_t prevTs = m_lastReceiveTimestamp.load(std::memory_order_relaxed);
-            if (prevTs != 0 && (nowUs - prevTs) / 1000 >= kConnectionTimeoutMs) {
+            if (prevTs != 0 && (nowUs - prevTs) / 1000 >= kRecenterRearmMs) {
                 m_hasRecenterCounter = false;
             }
 

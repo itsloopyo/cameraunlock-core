@@ -159,13 +159,14 @@ void TestPositionSettingsSmoothingFields() {
     // Distinct sentinel per slot so a one-argument shift shows up as a failure
     // rather than as a plausible-looking number.
     cameraunlock::PositionSettings s(1.01f, 1.02f, 1.03f,
-                                     2.01f, 2.02f, 2.04f, 2.05f,
+                                     2.01f, 2.02f, 2.03f, 2.04f, 2.05f,
                                      3.01f, 3.02f,
                                      true, false, true);
     Check(NearEqual(s.sensitivity_x, 1.01f) && NearEqual(s.sensitivity_y, 1.02f) &&
               NearEqual(s.sensitivity_z, 1.03f),
           "sensitivity slots map to their own fields");
     Check(NearEqual(s.limit_x, 2.01f) && NearEqual(s.limit_y, 2.02f) &&
+              NearEqual(s.limit_y_down, 2.03f) &&
               NearEqual(s.limit_z, 2.04f) && NearEqual(s.limit_z_back, 2.05f),
           "limit slots map to their own fields");
     Check(NearEqual(s.local_smoothing, 3.01f) && NearEqual(s.remote_smoothing, 3.02f),
@@ -177,9 +178,10 @@ void TestPositionProcessorSmoothingSelection() {
     std::cout << "PositionProcessor smoothing selection:\n";
 
     const float dt = 1.0f / 60.0f;
-    cameraunlock::PositionSettings settings(1.0f, 1.0f, 1.0f,
-                                            1.0f, 1.0f, 1.0f, 1.0f,
-                                            0.0f, 0.95f);
+    cameraunlock::PositionSettings settings = cameraunlock::PositionSettings::Symmetric(
+        1.0f, 1.0f, 1.0f,
+        1.0f, 1.0f, 1.0f, 1.0f,
+        0.0f, 0.95f);
 
     auto step = [&](bool is_remote) {
         cameraunlock::PositionProcessor proc;
@@ -209,9 +211,10 @@ void TestZClampAsymmetry() {
     // A transposed pair gives forward lean the tight backward budget, which reads
     // as "6DOF barely works" rather than as a bug.
     const float dt = 1.0f / 60.0f;
-    cameraunlock::PositionSettings settings(1.0f, 1.0f, 1.0f,
-                                            0.30f, 0.20f, 0.40f, 0.10f,
-                                            0.0f, 0.0f);
+    cameraunlock::PositionSettings settings = cameraunlock::PositionSettings::Symmetric(
+        1.0f, 1.0f, 1.0f,
+        0.30f, 0.20f, 0.40f, 0.10f,
+        0.0f, 0.0f);
 
     cameraunlock::PositionProcessor proc;
     proc.SetSettings(settings);

@@ -1,4 +1,5 @@
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 
 namespace CameraUnlock.Core.Processing
 {
@@ -106,14 +107,28 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public TrackingPose Update(TrackingPose rawPose, float deltaTime)
         {
+            return Update(rawPose, rawPose.TimestampTicks != _lastTimestampTicks, deltaTime);
+        }
+
+        /// <summary>
+        /// Update with an explicit new-sample flag.
+        /// <para>
+        /// Prefer this where the caller can tell a genuinely new SAMPLE from a merely new
+        /// PACKET. A phone app resending at 60Hz off a 30Hz sensor advances the receive
+        /// timestamp on every datagram, so the timestamp-only form estimates a 16.7ms
+        /// interval for a 33ms source: the segment reaches progress 1.0 halfway through
+        /// each real sample period and then sits pinned at the extrapolation cap for the
+        /// rest of it. Matches PoseInterpolator::Update in the C++ port.
+        /// </para>
+        /// </summary>
+        public TrackingPose Update(TrackingPose rawPose, bool isNewSample, float deltaTime)
+        {
             if (!rawPose.IsValid)
             {
                 return rawPose;
             }
 
             _timeSinceLastNewSample += deltaTime;
-
-            bool isNewSample = rawPose.TimestampTicks != _lastTimestampTicks;
 
             if (isNewSample)
             {
@@ -133,7 +148,18 @@ namespace CameraUnlock.Core.Processing
                     return rawPose;
                 }
 
-                // Update sample interval estimate (EMA)
+                // Update sample interval estimate (EMA).
+                //
+                // A packet-loss gap does get folded in here and transiently inflates the
+                // estimate, which costs a few hundred ms of extra smoothing after a
+                // dropout. Do NOT "fix" that by gating the observation on
+                // <= MaxSampleInterval: _hasSecondSample is only set inside this block,
+                // so any tracker whose genuine interval exceeds MaxSampleInterval (a
+                // throttled phone below 5Hz) would then never update the estimate at all
+                // and would sit permanently at the default, extrapolating to the cap for
+                // most of every sample period. Telling a one-off gap from a genuinely slow
+                // source needs a consistency check across several samples, not a
+                // single-observation bound.
                 if (_timeSinceLastNewSample > MinSampleInterval)
                 {
                     if (!_hasSecondSample)
@@ -151,10 +177,14 @@ namespace CameraUnlock.Core.Processing
                 }
 
                 // Capture current interpolated (possibly extrapolated) position as new start point
+                // Yaw and roll are (-180, 180] and can step across the seam, so the segment
+                // is traversed along the shortest arc; a plain (to - from) turns a 1° move
+                // from 179.5 to -179.5 into a -359° sweep the long way round. Pitch is
+                // bounded to ±90 by asin and never wraps.
                 float t = SegmentPosition(_progress, _timeSinceLastNewSample);
-                _fromYaw = _fromYaw + (_toYaw - _fromYaw) * t;
+                _fromYaw = AngleUtils.NormalizeAngle(_fromYaw + AngleUtils.ShortestAngleDelta(_fromYaw, _toYaw) * t);
                 _fromPitch = _fromPitch + (_toPitch - _fromPitch) * t;
-                _fromRoll = _fromRoll + (_toRoll - _fromRoll) * t;
+                _fromRoll = AngleUtils.NormalizeAngle(_fromRoll + AngleUtils.ShortestAngleDelta(_fromRoll, _toRoll) * t);
 
                 // New sample becomes the target
                 _toYaw = rawPose.Yaw;
@@ -173,9 +203,9 @@ namespace CameraUnlock.Core.Processing
             // bounded to avoid runaway prediction on direction reversals.
             float pt = SegmentPosition(_progress, _timeSinceLastNewSample);
 
-            float outYaw = _fromYaw + (_toYaw - _fromYaw) * pt;
+            float outYaw = AngleUtils.NormalizeAngle(_fromYaw + AngleUtils.ShortestAngleDelta(_fromYaw, _toYaw) * pt);
             float outPitch = _fromPitch + (_toPitch - _fromPitch) * pt;
-            float outRoll = _fromRoll + (_toRoll - _fromRoll) * pt;
+            float outRoll = AngleUtils.NormalizeAngle(_fromRoll + AngleUtils.ShortestAngleDelta(_fromRoll, _toRoll) * pt);
 
             return new TrackingPose(outYaw, outPitch, outRoll, rawPose.TimestampTicks);
         }

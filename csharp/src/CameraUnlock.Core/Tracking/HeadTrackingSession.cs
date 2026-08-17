@@ -228,6 +228,17 @@ namespace CameraUnlock.Core.Tracking
                 }
 
                 TrackingPose rawPose = _receiver.GetLatestPose();
+
+                // Timestamp-only new-sample detection, NOT the value-change filter the C++
+                // session uses. That is a deliberate consequence of where each port
+                // centres: C++ centres at the RECEIVER, so a recenter changes the raw
+                // values it reports and the interpolator re-seeds on the next packet. This
+                // port centres at the PROCESSOR, so the raw stream is untouched by a
+                // recenter - and a value-change filter would then stall a re-Reset
+                // interpolator indefinitely for a user holding perfectly still, because no
+                // value ever changes to re-seed it. Both PoseInterpolator and
+                // PositionInterpolator expose an explicit is-new-sample overload for
+                // callers whose plumbing does make the filter safe.
                 TrackingPose interpolated = _poseInterpolator.Update(rawPose, deltaTime);
                 TrackingPose rotation = _processor.Process(interpolated, deltaTime);
 
@@ -236,8 +247,17 @@ namespace CameraUnlock.Core.Tracking
                 {
                     PositionData rawPosition = _receiver.GetLatestPosition();
                     PositionData interpolatedPosition = _positionInterpolator.Update(rawPosition, deltaTime);
-                    Quat4 rotationQ = QuaternionUtils.FromYawPitchRoll(rotation.Yaw, rotation.Pitch, rotation.Roll);
-                    positionOffset = _positionProcessor.Process(interpolatedPosition, rotationQ, deltaTime);
+
+                    // The PHYSICAL head rotation, not `rotation` - that one has per-axis
+                    // sensitivity and inversion applied. The pivot artifact is a property
+                    // of where the tracker's face point sits relative to the neck, so a
+                    // 2x sensitivity would have the compensation remove twice the arc that
+                    // is actually present, and an inverted axis would remove it backwards.
+                    float physYaw, physPitch, physRoll;
+                    _processor.GetSmoothedRotation(out physYaw, out physPitch, out physRoll);
+                    Quat4 physicalRotationQ = QuaternionUtils.FromYawPitchRoll(physYaw, physPitch, physRoll);
+
+                    positionOffset = _positionProcessor.Process(interpolatedPosition, physicalRotationQ, deltaTime);
                 }
 
                 Rotation = rotation;

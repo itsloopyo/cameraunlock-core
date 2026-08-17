@@ -47,6 +47,20 @@ namespace CameraUnlock.Core.Unity.Tracking
         {
             if (_lastStoredFrame != frameCount)
             {
+                // Still marked modified on a new frame means the end-render callback never
+                // ran (camera culled but not rendered, a manual Camera.Render, a render
+                // texture pass short-circuiting). Capturing the transform as-is would fold
+                // last frame's tracking into this frame's clean base and compound from there.
+                if (_rotationModified)
+                {
+                    transform.rotation = _storedRotation;
+                }
+
+                if (_positionModified)
+                {
+                    transform.position = _storedPosition;
+                }
+
                 _storedRotation = transform.rotation;
                 _storedPosition = transform.position;
                 _lastStoredFrame = frameCount;

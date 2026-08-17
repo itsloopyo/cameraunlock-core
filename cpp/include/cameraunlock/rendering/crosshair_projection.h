@@ -105,8 +105,23 @@ inline ScreenPosition ProjectCrosshair(const CrosshairProjectionParams& params) 
     float bUp    = newUp[0];
     float bLeft  = newLeft[0];
 
-    // Prevent division by zero (body aim behind camera)
-    if (bDepth < 0.01f) bDepth = 0.01f;
+    // Body aim at or behind the camera plane. Clamping bDepth to +0.01f here flipped
+    // the sign of the perspective divide for negative depth, so past ~90 degrees of head
+    // turn the marker did not disappear - it teleported to the opposite edge and pinned
+    // there, pointing the player away from where their shots actually go.
+    //
+    // Reported as invalid, matching ProjectAimQuatHorPlus, which applies the identical
+    // depth test and documents inFront=false as "hide the reticle instead of drawing
+    // it". Behind-camera is a reachable half-space, not a measure-zero singularity like
+    // the degenerate paths above, so a valid centre would claim the body aim is dead
+    // ahead while it is 100 degrees away. Centre coordinates are still written, so a
+    // consumer that ignores the flag lands on centre rather than on stale values.
+    if (bDepth < 0.01f) {
+        result.x = params.screenWidth / 2.0f;
+        result.y = params.screenHeight / 2.0f;
+        result.valid = false;
+        return result;
+    }
 
     // NaN check
     if (bDepth != bDepth || bUp != bUp || bLeft != bLeft) {

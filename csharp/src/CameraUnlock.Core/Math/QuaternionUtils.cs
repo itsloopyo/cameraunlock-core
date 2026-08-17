@@ -22,6 +22,10 @@ namespace CameraUnlock.Core.Math
         // Minimum length for quaternion normalization
         private const float NormalizationEpsilon = 0.0001f;
 
+        // |sin(pitch)| at or above this is treated as gimbal lock. sin(89.9 deg) is
+        // 0.9999985, so the general branch retains everything up to ~89.94 degrees.
+        private const float GimbalLockSinThreshold = 0.9999995f;
+
         /// <summary>
         /// Creates a quaternion from yaw, pitch, roll angles using the standard head tracking order.
         /// Order: yaw (around Y/up) -> pitch (around X/right) -> roll (around Z/forward).
@@ -230,19 +234,41 @@ namespace CameraUnlock.Core.Math
             // sinPitch = 2(wx - yz) for YXZ order
             float sinPitch = 2f * (q.W * q.X - q.Y * q.Z);
 
-            // Clamp to [-1, 1] to handle numerical drift
-            if (sinPitch >= 1f)
+            // Switched to the lock branch slightly BEFORE the exact singularity. At
+            // pitch = 90 the general formula's two atan2 arguments are identically zero
+            // for every yaw - 2(xz + wy) and 1 - 2(x^2 + y^2) both cancel exactly - so it
+            // returns atan2(0, 0) = 0 and discards the rotation. Testing sinPitch >= 1
+            // never caught it either: for a quaternion built at exactly 90 degrees the
+            // measured sinPitch is 0.99999982 - 1.0 depending on yaw and roll, so the
+            // comparison usually failed and the degenerate general branch ran anyway.
+            // The threshold sits between sin(89.9 deg) = 0.9999985 and that measured
+            // range, so the general branch keeps every angle where it is still
+            // well-conditioned and the lock branch reliably takes the singularity.
+            //
+            // Trade-off: in the narrow band above the threshold the lock branch forces
+            // roll to 0, which is the correct ROTATION but a different Euler triple - and
+            // TrackingProcessor scales each axis independently, so a mod with a non-unit
+            // yaw sensitivity sees a step there. That band is ~0.04 degrees wide at the
+            // top of a human pitch range, versus the old behaviour of discarding the yaw
+            // entirely above it.
+            if (sinPitch >= GimbalLockSinThreshold)
             {
-                // Gimbal lock: pitch = +90°
+                // Gimbal lock: pitch = +90 degrees.
+                // The general-case yaw formula CANNOT be reused here: at exact lock both
+                // of its atan2 arguments are identically zero, so it returns atan2(0,0) =
+                // 0 and the whole rotation is silently discarded - the doc promises the
+                // opposite, that roll goes to 0 and the rotation is attributed to yaw.
+                // The row-0 form stays well-conditioned at the singularity.
                 pitch = 90f;
-                yaw = (float)(System.Math.Atan2(2f * (q.X * q.Z + q.W * q.Y), 1f - 2f * (q.X * q.X + q.Y * q.Y)) * MathConstants.RadToDeg);
+                yaw = (float)(System.Math.Atan2(2f * (q.X * q.Y - q.W * q.Z), 1f - 2f * (q.Y * q.Y + q.Z * q.Z)) * MathConstants.RadToDeg);
                 roll = 0f;
             }
-            else if (sinPitch <= -1f)
+            else if (sinPitch <= -GimbalLockSinThreshold)
             {
-                // Gimbal lock: pitch = -90°
+                // Gimbal lock: pitch = -90 degrees. Same reasoning; the sign of the
+                // numerator flips with the direction of the lock.
                 pitch = -90f;
-                yaw = (float)(System.Math.Atan2(2f * (q.X * q.Z + q.W * q.Y), 1f - 2f * (q.X * q.X + q.Y * q.Y)) * MathConstants.RadToDeg);
+                yaw = (float)(System.Math.Atan2(-2f * (q.X * q.Y - q.W * q.Z), 1f - 2f * (q.Y * q.Y + q.Z * q.Z)) * MathConstants.RadToDeg);
                 roll = 0f;
             }
             else

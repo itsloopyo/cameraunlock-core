@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cctype>
+#include <clocale>
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -12,6 +13,18 @@
 namespace cameraunlock {
 
 constexpr size_t kMaxIniValueLength = 1024;
+
+#ifdef _MSC_VER
+// One "C" locale shared by the read and the write side. Both strtod and printf's %g
+// follow LC_NUMERIC, and a consumer built /MD shares the game's CRT - so a title that
+// calls setlocale(LC_ALL, "") on a German install would otherwise turn Sensitivity=2.5
+// into 2.0 on read, or write it back as "2,5". Pinning only one side leaves the round
+// trip broken in the other direction.
+static _locale_t CNumericLocale() {
+    static const _locale_t loc = _create_locale(LC_NUMERIC, "C");
+    return loc;
+}
+#endif
 
 bool IniReader::Open(const std::string& path) {
     if (path.empty()) {
@@ -52,28 +65,14 @@ bool IniReader::HasChanged() const {
     }
 
 #ifdef _WIN32
-    HANDLE hFile = CreateFileA(
-        m_path.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-
-    if (hFile == INVALID_HANDLE_VALUE) {
+    // Attribute query rather than open/query/close: this is polled every frame
+    // by hot-reload consumers.
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+    if (!GetFileAttributesExA(m_path.c_str(), GetFileExInfoStandard, &attrs)) {
         return false;
     }
 
-    FILETIME currentModTime;
-    BOOL success = GetFileTime(hFile, nullptr, nullptr, &currentModTime);
-    CloseHandle(hFile);
-
-    if (!success) {
-        return false;
-    }
-
-    return CompareFileTime(&m_lastModTime, &currentModTime) != 0;
+    return CompareFileTime(&m_lastModTime, &attrs.ftLastWriteTime) != 0;
 #else
     struct stat st;
     if (stat(m_path.c_str(), &st) != 0) {
@@ -89,18 +88,9 @@ void IniReader::RefreshModTime() {
     }
 
 #ifdef _WIN32
-    HANDLE hFile = CreateFileA(
-        m_path.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-
-    if (hFile != INVALID_HANDLE_VALUE) {
-        GetFileTime(hFile, nullptr, nullptr, &m_lastModTime);
-        CloseHandle(hFile);
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+    if (GetFileAttributesExA(m_path.c_str(), GetFileExInfoStandard, &attrs)) {
+        m_lastModTime = attrs.ftLastWriteTime;
     }
 #else
     struct stat st;
@@ -231,7 +221,11 @@ double IniReader::ReadDouble(const char* section, const char* key, double defaul
     if (str.empty()) return defaultValue;
 
     char* end;
+#ifdef _MSC_VER
+    double value = _strtod_l(str.c_str(), &end, CNumericLocale());
+#else
     double value = strtod(str.c_str(), &end);
+#endif
     if (end == str.c_str()) return defaultValue;
     return value;
 }
@@ -360,7 +354,16 @@ void IniWriter::WriteInt(const char* key, int value) {
 
 void IniWriter::WriteDouble(const char* key, double value) {
     if (!m_file) return;
+    // Formatted through the SAME "C" locale the reader parses with. printf's %g follows
+    // LC_NUMERIC, so pinning only ReadDouble left the round trip broken in the opposite
+    // direction: a consumer building /MD inside a game that calls setlocale(LC_ALL, "")
+    // on a German install wrote Sensitivity=2,5 and then read it back as 2.0 - a value
+    // that survived the round trip before the read side was pinned at all.
+#ifdef _MSC_VER
+    _fprintf_l(static_cast<FILE*>(m_file), "%s=%.6g\n", CNumericLocale(), key, value);
+#else
     fprintf(static_cast<FILE*>(m_file), "%s=%.6g\n", key, value);
+#endif
 }
 
 void IniWriter::WriteBool(const char* key, bool value) {

@@ -25,19 +25,6 @@ namespace CameraUnlock.Core.Processing.AxisTransform
     }
 
     /// <summary>
-    /// Target output axis.
-    /// </summary>
-    public enum TargetAxis
-    {
-        /// <summary>Output to yaw control.</summary>
-        Yaw,
-        /// <summary>Output to pitch control.</summary>
-        Pitch,
-        /// <summary>Output to roll control.</summary>
-        Roll
-    }
-
-    /// <summary>
     /// Configuration for transforming a single tracking axis.
     /// Applies deadzone, sensitivity curve, sensitivity multiplier, inversion, and limits.
     ///
@@ -50,10 +37,6 @@ namespace CameraUnlock.Core.Processing.AxisTransform
         /// </summary>
         public AxisSource Source { get; set; } = AxisSource.Yaw;
 
-        /// <summary>
-        /// Which output axis this maps to.
-        /// </summary>
-        public TargetAxis Target { get; set; } = TargetAxis.Yaw;
 
         /// <summary>
         /// Sensitivity multiplier. 1.0 = normal, &gt;1 = more sensitive, &lt;1 = less sensitive.
@@ -112,10 +95,40 @@ namespace CameraUnlock.Core.Processing.AxisTransform
 #endif
 
         /// <summary>
-        /// Maximum input range for normalization (in degrees). Default is 180.
-        /// Used to normalize input for curve application.
+        /// Input magnitude (degrees) that maps to the top of the sensitivity curve.
+        /// <para>
+        /// Defaults to 45, not 180. Head-tracking input lives within roughly +/-30
+        /// degrees, so normalising against a half-turn pinned every non-linear curve to
+        /// its near-zero end and the curve never reached full gain in the usable range at
+        /// all: the shipped Competitive preset advertises "fast yaw" with Sensitivity 1.2
+        /// and a quadratic curve, yet at a 10 degree input the multiplier collapsed to
+        /// 0.50, making it 0.60x overall.
+        /// </para>
+        /// <para>
+        /// To be clear about what this does and does not fix: an acceleration curve is
+        /// SUPPOSED to be gentle at small angles, so Competitive is still below Default
+        /// near centre (0.63x at 10 degrees) and only overtakes it past roughly 40
+        /// degrees of yaw. What changed is that the curve now reaches full gain within a
+        /// range a head can actually turn through, instead of being pinned near zero
+        /// everywhere.
+        /// </para>
+        /// <para>
+        /// Values at or below zero are rejected on assignment: 0 made the normalisation
+        /// 0/0 = NaN for an at-rest axis, and NaN survives both Min and Max clamps
+        /// (every comparison against it is false), so a single at-rest frame poisoned
+        /// the axis permanently.
+        /// </para>
         /// </summary>
-        public float MaxInputRange { get; set; } = 180f;
+        public float MaxInputRange
+        {
+            get { return _maxInputRange; }
+            set { _maxInputRange = value > 0f ? value : DefaultMaxInputRange; }
+        }
+
+        /// <summary>Default for <see cref="MaxInputRange"/>.</summary>
+        public const float DefaultMaxInputRange = 45f;
+
+        private float _maxInputRange = DefaultMaxInputRange;
 
         /// <summary>
         /// Applies all transformations to the input value.
@@ -171,15 +184,27 @@ namespace CameraUnlock.Core.Processing.AxisTransform
                 return 0f;
             }
 
-            // If smooth deadzone is configured (max > min), apply smooth scaling
-            if (DeadzoneMax > DeadzoneMin && absInput < DeadzoneMax)
+            // ONE model, everywhere: the deadzone removes DeadzoneMin from the magnitude,
+            // and the optional band between DeadzoneMin and DeadzoneMax only shapes how
+            // the output ramps in. Output is 0 at DeadzoneMin, (DeadzoneMax - DeadzoneMin)
+            // at DeadzoneMax, and (|input| - DeadzoneMin) above - continuous at both ends,
+            // and the same form DeadzoneUtils.Apply uses.
+            //
+            // Previously the no-band case returned `input` untouched, which put a hard step
+            // at the threshold: with DeadzoneMin = 5, an input of 4.99 gave 0 and 5.01 gave
+            // 5.01, so a 0.02 degree head movement popped the camera 5 degrees. Fixing only
+            // that case would have left the band case scaling to DeadzoneMax and then
+            // passing input straight through, so widening DeadzoneMax from 5 to 10 would
+            // have made the SAME head angle produce a 5 degree larger output - two
+            // incompatible deadzone models in one method.
+            float deadzoneRange = DeadzoneMax - DeadzoneMin;
+            if (deadzoneRange > 0f && absInput < DeadzoneMax)
             {
-                float deadzoneRange = DeadzoneMax - DeadzoneMin;
                 float normalizedInput = (absInput - DeadzoneMin) / deadzoneRange;
-                return sign * normalizedInput * DeadzoneMax;
+                return sign * normalizedInput * deadzoneRange;
             }
 
-            return input;
+            return sign * (absInput - DeadzoneMin);
         }
 
         /// <summary>
@@ -207,7 +232,6 @@ namespace CameraUnlock.Core.Processing.AxisTransform
             return new AxisConfig
             {
                 Source = Source,
-                Target = Target,
                 Sensitivity = Sensitivity,
                 Inverted = Inverted,
                 DeadzoneMin = DeadzoneMin,

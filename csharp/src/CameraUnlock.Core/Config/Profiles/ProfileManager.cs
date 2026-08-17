@@ -113,6 +113,12 @@ namespace CameraUnlock.Core.Config.Profiles
             {
                 string profileName = Path.GetFileNameWithoutExtension(file);
                 var profile = ProfileSerializer.ReadFromFile(file);
+
+                // The filename is the identifier the dictionary is keyed on, and SaveProfile
+                // writes back to GetProfilePath(profile.Name). If a user renames the file on
+                // disk the two disagree, and the next save forks the profile into a second
+                // list entry backed by the original filename.
+                profile.Name = profileName;
                 _profiles[profileName] = profile;
             }
         }
@@ -180,6 +186,8 @@ namespace CameraUnlock.Core.Config.Profiles
                 throw new InvalidOperationException("Cannot save read-only profile: " + profile.Name);
             }
 
+            ValidateProfileName(profile.Name);
+
             profile.ModifiedDate = DateTime.Now;
             string filePath = GetProfilePath(profile.Name);
             ProfileSerializer.WriteToFile(profile, filePath);
@@ -198,6 +206,8 @@ namespace CameraUnlock.Core.Config.Profiles
         /// <exception cref="InvalidOperationException">Thrown if profile already exists.</exception>
         public ConfigProfile CreateProfile(string name, string description, string gameName = "General")
         {
+            ValidateProfileName(name);
+
             if (_profiles.ContainsKey(name))
             {
                 throw new InvalidOperationException("Profile already exists: " + name);
@@ -268,6 +278,8 @@ namespace CameraUnlock.Core.Config.Profiles
         /// <exception cref="InvalidOperationException">Thrown if target profile already exists.</exception>
         public ConfigProfile DuplicateProfile(string sourceName, string newName)
         {
+            ValidateProfileName(newName);
+
             if (!_profiles.TryGetValue(sourceName, out var source))
             {
                 throw new KeyNotFoundException("Source profile not found: " + sourceName);
@@ -366,6 +378,38 @@ namespace CameraUnlock.Core.Config.Profiles
         private string GetProfilePath(string profileName)
         {
             return Path.Combine(_profilesDirectory, profileName + ProfileExtension);
+        }
+
+        // The profile name IS the filename, so it is a path component built from caller
+        // input. Without this, "../../BepInEx/config/BepInEx" writes outside the profiles
+        // directory and then vanishes from the listing, and a name holding ':' or '*'
+        // throws out of File.WriteAllText only after the in-memory dictionary has already
+        // been mutated, leaving a profile that ProfileExists reports but no file backs.
+        private static void ValidateProfileName(string profileName)
+        {
+            if (string.IsNullOrEmpty(profileName) || profileName.Trim().Length == 0)
+            {
+                throw new ArgumentException("Profile name must not be empty", nameof(profileName));
+            }
+
+            char[] invalid = Path.GetInvalidFileNameChars();
+            for (int i = 0; i < profileName.Length; i++)
+            {
+                for (int j = 0; j < invalid.Length; j++)
+                {
+                    if (profileName[i] == invalid[j])
+                    {
+                        throw new ArgumentException(
+                            "Profile name contains an invalid filename character: " + profileName,
+                            nameof(profileName));
+                    }
+                }
+            }
+
+            if (profileName == "." || profileName == "..")
+            {
+                throw new ArgumentException("Profile name must not be a directory reference", nameof(profileName));
+            }
         }
     }
 }

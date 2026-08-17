@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
@@ -13,6 +12,15 @@ namespace CameraUnlock.Core.Unity.Utilities
     /// </summary>
     public static class CrosshairUtility
     {
+        // Guarded by _typeCacheLock. FindTypeByName touches no Unity API - only AppDomain,
+        // Assembly and Type - so a mod is free to call it from a config loader, an async
+        // init task or a Harmony patch on a worker thread, and nothing here makes the main
+        // thread a guarantee. A torn Dictionary write is not an exception, it is a corrupt
+        // bucket chain and a 100% CPU spin with no diagnostic.
+        private static readonly Dictionary<string, Type> _typeCache =
+            new Dictionary<string, Type>(StringComparer.Ordinal);
+        private static readonly object _typeCacheLock = new object();
+
         /// <summary>
         /// Searches all loaded Image components for ones likely to be crosshairs.
         /// Returns candidates matching common crosshair naming patterns.
@@ -21,30 +29,7 @@ namespace CameraUnlock.Core.Unity.Utilities
         /// <returns>List of potential crosshair Image components.</returns>
         public static List<Image> FindCrosshairCandidates(bool searchInactive = true)
         {
-            var candidates = new List<Image>();
-            var images = searchInactive
-                ? Resources.FindObjectsOfTypeAll<Image>()
-                #pragma warning disable CS0618 // FindObjectsByType unavailable in older Unity versions
-                : UnityEngine.Object.FindObjectsOfType<Image>();
-                #pragma warning restore CS0618
-
-            foreach (var image in images)
-            {
-                if (image == null) continue;
-
-                string name = image.name.ToLowerInvariant();
-                string goName = image.gameObject.name.ToLowerInvariant();
-
-                if (name.Contains("crosshair") || name.Contains("reticle") ||
-                    name.Contains("reticule") || name.Contains("aim") ||
-                    goName.Contains("crosshair") || goName.Contains("reticle") ||
-                    goName.Contains("reticule"))
-                {
-                    candidates.Add(image);
-                }
-            }
-
-            return candidates;
+            return FindCandidates<Image>(searchInactive);
         }
 
         /// <summary>
@@ -52,51 +37,122 @@ namespace CameraUnlock.Core.Unity.Utilities
         /// </summary>
         public static List<RawImage> FindRawImageCrosshairCandidates(bool searchInactive = true)
         {
-            var candidates = new List<RawImage>();
-            var images = searchInactive
-                ? Resources.FindObjectsOfTypeAll<RawImage>()
+            return FindCandidates<RawImage>(searchInactive);
+        }
+
+        private static List<T> FindCandidates<T>(bool searchInactive) where T : Component
+        {
+            var candidates = new List<T>();
+            var components = searchInactive
+                ? Resources.FindObjectsOfTypeAll<T>()
                 #pragma warning disable CS0618 // FindObjectsByType unavailable in older Unity versions
-                : UnityEngine.Object.FindObjectsOfType<RawImage>();
+                : UnityEngine.Object.FindObjectsOfType<T>();
                 #pragma warning restore CS0618
 
-            foreach (var image in images)
+            foreach (var component in components)
             {
-                if (image == null) continue;
+                if (component == null) continue;
 
-                string name = image.name.ToLowerInvariant();
-                string goName = image.gameObject.name.ToLowerInvariant();
-
-                if (name.Contains("crosshair") || name.Contains("reticle") ||
-                    name.Contains("reticule") || name.Contains("aim") ||
-                    goName.Contains("crosshair") || goName.Contains("reticle") ||
-                    goName.Contains("reticule"))
+                // Component.name forwards to gameObject.name, so one check covers both.
+                if (IsCrosshairName(component.name))
                 {
-                    candidates.Add(image);
+                    candidates.Add(component);
                 }
             }
 
             return candidates;
         }
 
+        private static bool IsCrosshairName(string name)
+        {
+            return ContainsIgnoreCase(name, "crosshair")
+                || ContainsIgnoreCase(name, "reticle")
+                || ContainsIgnoreCase(name, "reticule")
+                || ContainsIgnoreCase(name, "aim");
+        }
+
+        private static bool ContainsIgnoreCase(string haystack, string needle)
+        {
+            return haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         /// <summary>
         /// Finds a type by name across all loaded assemblies.
         /// Useful for finding game HUD classes like "HUDCrosshair", "NGUI_HUD", etc.
         /// </summary>
-        /// <param name="typeName">Simple type name (e.g., "HUDCrosshair").</param>
+        /// <param name="typeName">Simple type name (e.g., "HUDCrosshair") or namespace-qualified name.</param>
         /// <returns>The Type if found, null otherwise.</returns>
         public static Type FindTypeByName(string typeName)
         {
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            if (string.IsNullOrEmpty(typeName)) return null;
+
+            // Cached because the documented usage is polling for a game HUD type from a
+            // per-frame path, and the simple-name sweep below materialises every type in
+            // every loaded assembly - in a BepInEx process that is a full GetTypes() of
+            // ~120 assemblies, every frame, forever, even after it has already succeeded.
+            // Only successful resolutions are cached: a negative would latch a failure
+            // across the assembly load that would have satisfied it.
+            //
+            // The key is the caller's own argument, so the two lookups below cannot
+            // contaminate each other - a query resolved by qualified name and a query
+            // resolved by simple name are different keys by construction.
+            Type cached;
+            lock (_typeCacheLock)
             {
+                if (_typeCache.TryGetValue(typeName, out cached)) return cached;
+            }
+
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+
+            foreach (var assembly in assemblies)
+            {
+                // Deliberately unguarded. Assembly.GetType(String) only throws for an
+                // assembly-qualified or generic name it has to resolve elsewhere, and this
+                // overload is documented as taking a plain name, so a throw here means the
+                // caller passed something malformed and should hear about it. Catching it
+                // would be a fallback for a case that cannot arise from correct use - and
+                // 0e54911 already removed one such catch on purpose.
+                Type type = assembly.GetType(typeName);
+                if (type != null) return Remember(typeName, type);
+            }
+
+            // Assembly.GetType only matches the namespace-qualified name, so the documented
+            // simple-name lookup missed every game type that lives in a namespace - and the
+            // caller's crosshair-hiding path then silently never engaged.
+            foreach (var assembly in assemblies)
+            {
+                Type[] types;
                 try
                 {
-                    var type = assembly.GetType(typeName);
-                    if (type != null) return type;
+                    types = assembly.GetTypes();
                 }
-                catch (ReflectionTypeLoadException) { }
-                catch (FileNotFoundException) { }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    // An assembly with unresolvable references still yields every type that
+                    // did load, and ex.Types is that partial result. Skipping the assembly
+                    // outright is what hid the failure.
+                    types = ex.Types;
+                }
+
+                for (int i = 0; i < types.Length; i++)
+                {
+                    if (types[i] != null && types[i].Name == typeName)
+                    {
+                        return Remember(typeName, types[i]);
+                    }
+                }
             }
+
             return null;
+        }
+
+        private static Type Remember(string typeName, Type type)
+        {
+            lock (_typeCacheLock)
+            {
+                _typeCache[typeName] = type;
+            }
+            return type;
         }
 
         /// <summary>
@@ -104,6 +160,7 @@ namespace CameraUnlock.Core.Unity.Utilities
         /// </summary>
         /// <param name="rectTransform">The RectTransform to offset.</param>
         /// <param name="screenOffset">Offset in screen pixels.</param>
+        [Obsolete("Assigns anchoredPosition instead of offsetting it, discarding the element's authored position - a crosshair authored at (0,-40) jumps 40px on the first call with a zero head offset and can never be restored. Use the overload taking the original anchoredPosition.")]
         public static void OffsetByScreenPixels(RectTransform rectTransform, Vector2 screenOffset)
         {
             if (rectTransform == null) return;
@@ -117,6 +174,32 @@ namespace CameraUnlock.Core.Unity.Utilities
             rectTransform.anchoredPosition = new Vector2(
                 screenOffset.x / scaleX,
                 screenOffset.y / scaleY
+            );
+        }
+
+        /// <summary>
+        /// Offsets a UI RectTransform from its authored anchoredPosition by screen pixels,
+        /// accounting for canvas scale. Always writes original + offset, so repeated per-frame
+        /// calls neither accumulate nor lose the authored position.
+        /// </summary>
+        /// <param name="rectTransform">The RectTransform to offset.</param>
+        /// <param name="originalAnchoredPosition">The element's authored anchoredPosition, captured
+        /// once by the caller before any offset was applied.</param>
+        /// <param name="screenOffset">Offset in screen pixels.</param>
+        public static void OffsetByScreenPixels(
+            RectTransform rectTransform,
+            Vector2 originalAnchoredPosition,
+            Vector2 screenOffset)
+        {
+            if (rectTransform == null) return;
+
+            var lossyScale = rectTransform.lossyScale;
+            var scaleX = lossyScale.x > 0.001f ? lossyScale.x : 1f;
+            var scaleY = lossyScale.y > 0.001f ? lossyScale.y : 1f;
+
+            rectTransform.anchoredPosition = new Vector2(
+                originalAnchoredPosition.x + screenOffset.x / scaleX,
+                originalAnchoredPosition.y + screenOffset.y / scaleY
             );
         }
 

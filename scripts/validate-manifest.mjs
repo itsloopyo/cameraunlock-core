@@ -62,7 +62,12 @@ if (failures > 0) {
 console.log("\nall packages valid.");
 
 function validate(label, zip) {
-  const entries = new Set(listZip(zip).map((e) => e.replace(/\\/g, "/")));
+  // PowerShell 5.1's Compress-Archive writes backslash separators, and the
+  // launcher deploys on Windows where casing does not decide a match, so both
+  // are normalised away before comparing. Casing differences are still worth
+  // reporting: they break any consumer that reads the zip case-sensitively.
+  const entries = listZip(zip).map((e) => e.replace(/\\/g, "/"));
+  const entryByLower = new Map(entries.map((e) => [e.toLowerCase(), e]));
   const manifestRaw = readEntry(zip, "launcher-manifest.json");
   if (manifestRaw === null) throw new Error("no launcher-manifest.json in zip");
   const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
@@ -75,9 +80,32 @@ function validate(label, zip) {
   // A fetched loader archive carries no in-zip source - its bytes are
   // downloaded + hash-verified at install time - so only check bundled ones.
   for (const a of man.loader?.archives ?? []) if (a.source) sources.push(a.source);
-  for (const f of man.files ?? []) sources.push(f.source);
+  // Guarded like the archives line above. An entry missing `source` otherwise pushed
+  // undefined, which threw a bare TypeError from the replace() below - reported as the
+  // failure reason with neither the file nor the entry named - and counted toward the
+  // length check, defeating it.
+  for (const f of man.files ?? []) {
+    if (!f.source) throw new Error(`manifest files[] entry has no "source": ${JSON.stringify(f)}`);
+    sources.push(f.source);
+  }
 
-  const missing = sources.filter((s) => !entries.has(s.replace(/\\/g, "/")));
+  // A manifest that declares nothing passed the "everything declared is present"
+  // check vacuously and printed OK. That is the worst outcome for a gate whose whole
+  // job is catching a package that would deploy nothing - the manifest is round-tripped
+  // through ConvertFrom-Json/ConvertTo-Json during stamping, so a depth overflow or a
+  // renamed key silently empties it and CI publishes happily.
+  if (sources.length === 0) {
+    throw new Error("manifest declares no bundled sources - nothing would be deployed");
+  }
+
+  const missing = [];
+  const miscased = [];
+  for (const source of sources) {
+    const declared = source.replace(/\\/g, "/");
+    const entry = entryByLower.get(declared.toLowerCase());
+    if (entry === undefined) missing.push(declared);
+    else if (entry !== declared) miscased.push(`${declared} (zip has "${entry}")`);
+  }
   if (missing.length > 0) {
     throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
   }
@@ -87,6 +115,11 @@ function validate(label, zip) {
   console.log(
     `OK   ${label}: ${path.basename(zip)} — ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)`,
   );
+  if (miscased.length > 0) {
+    console.log(
+      `WARN ${label}: manifest source(s) matched the zip only after ignoring case, fix the manifest casing: ${miscased.join(", ")}`,
+    );
+  }
 }
 
 function resolveZip(token) {

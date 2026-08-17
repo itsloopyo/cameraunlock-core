@@ -106,6 +106,8 @@ private:
 #include <Windows.h>
 #include <cstring>
 #include <cmath>
+#include <memory>
+#include <mutex>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -192,15 +194,43 @@ struct OverlayState {
     ID3D11InputLayout*      inputLayout     = nullptr;
     ID3D11Buffer*           vb              = nullptr;
     UINT                    vbCapacity      = 0;
+    ID3D11Buffer*           cb              = nullptr;
+    UINT                    cbW             = 0;   // viewport the cb currently holds
+    UINT                    cbH             = 0;
     ID3D11BlendState*       blendState      = nullptr;
     ID3D11RasterizerState*  rasterState     = nullptr;
     ID3D11DepthStencilState* depthState     = nullptr;
     UINT                    backbufferW     = 0;
     UINT                    backbufferH     = 0;
 
-    DX11RenderCallback callback;
+    // The callback is assigned from the mod thread and invoked from the render
+    // thread; a settings hot-reload that re-registers it would otherwise tear
+    // the std::function under RenderFrame.
+    // Held by shared_ptr so RenderFrame copies a refcount rather than the functor.
+    // Copying a std::function allocates whenever its target exceeds the small-object
+    // buffer, which any lambda capturing more than a pointer or two does - that was a
+    // heap allocation per frame on the render thread, inside a hooked Present.
+    // Replacing the pointer keeps an in-flight invocation's target alive, which is one
+    // of the two things the copy was doing.
+    //
+    // The other is a deliberate behaviour change: the per-frame copy also gave each
+    // invocation a PRIVATE target, so a mutable lambda's captured state was rebuilt
+    // from the master every frame and every mutation thrown away. Invocations now
+    // share one target, so a `[n = 0](...) mutable` counter actually advances. That is
+    // almost certainly what anyone writing one intended, but it is a change.
+    std::shared_ptr<const DX11RenderCallback> callback;
+    std::mutex         callbackMutex;
     DX11LogFn          logFn = nullptr;
     bool               firstPresentLogged = false;
+};
+
+// Viewport half-extents for the vertex shader. 16 bytes, the constant-buffer
+// alignment unit.
+struct OverlayCB {
+    float invHalfW;
+    float invHalfH;
+    float pad0;
+    float pad1;
 };
 
 inline OverlayState& State() {
@@ -310,6 +340,20 @@ inline bool InitDeviceResources(IDXGISwapChain* swap) {
         ReleaseDeviceResources(); return false;
     }
 
+    // One dynamic constant buffer for the lifetime of the device resources. The
+    // previous per-frame IMMUTABLE buffer was a driver allocation on the hot path.
+    D3D11_BUFFER_DESC cbd = {};
+    cbd.Usage          = D3D11_USAGE_DYNAMIC;
+    cbd.ByteWidth      = sizeof(OverlayCB);
+    cbd.BindFlags      = D3D11_BIND_CONSTANT_BUFFER;
+    cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(s.device->CreateBuffer(&cbd, nullptr, &s.cb))) {
+        Log("dx11_overlay: constant-buffer create failed");
+        ReleaseDeviceResources(); return false;
+    }
+    s.cbW = 0;
+    s.cbH = 0;
+
     // Standard alpha-blended state
     D3D11_BLEND_DESC blend = {};
     blend.RenderTarget[0].BlendEnable           = TRUE;
@@ -352,6 +396,7 @@ inline void ReleaseDeviceResources() {
     if (s.depthState)   { s.depthState->Release();   s.depthState = nullptr; }
     if (s.rasterState)  { s.rasterState->Release();  s.rasterState = nullptr; }
     if (s.blendState)   { s.blendState->Release();   s.blendState = nullptr; }
+    if (s.cb)           { s.cb->Release();           s.cb = nullptr; }
     if (s.vb)           { s.vb->Release();           s.vb = nullptr; }
     if (s.inputLayout)  { s.inputLayout->Release();  s.inputLayout = nullptr; }
     if (s.ps)           { s.ps->Release();           s.ps = nullptr; }
@@ -429,11 +474,18 @@ struct ContextStateScope {
 
 inline void RenderFrame() {
     auto& s = State();
-    if (!s.initialized || !s.callback) return;
+    if (!s.initialized) return;
     if (s.backbufferW == 0 || s.backbufferH == 0) return;
 
+    std::shared_ptr<const DX11RenderCallback> callback;
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        callback = s.callback;
+    }
+    if (!callback || !*callback) return;
+
     DX11DrawContext dc(static_cast<float>(s.backbufferW), static_cast<float>(s.backbufferH));
-    s.callback(dc);
+    (*callback)(dc);
     const auto& verts = dc.TriVerts();
     if (verts.empty()) return;
 
@@ -457,18 +509,16 @@ inline void RenderFrame() {
     std::memcpy(mapped.pData, verts.data(), sizeof(DX11OverlayVertex) * needed);
     s.context->Unmap(s.vb, 0);
 
-    // Build viewport-cb data on the stack each frame so resize is automatic.
-    struct CB { float invHalfW; float invHalfH; float pad0; float pad1; };
-    CB cbData = { 2.0f / s.backbufferW, 2.0f / s.backbufferH, 0, 0 };
-
-    // One transient CB per frame avoids carrying around state for resizes.
-    ID3D11Buffer* cb = nullptr;
-    D3D11_BUFFER_DESC cbDesc = {};
-    cbDesc.Usage          = D3D11_USAGE_IMMUTABLE;
-    cbDesc.ByteWidth      = sizeof(CB);
-    cbDesc.BindFlags      = D3D11_BIND_CONSTANT_BUFFER;
-    D3D11_SUBRESOURCE_DATA cbInit = { &cbData, 0, 0 };
-    if (FAILED(s.device->CreateBuffer(&cbDesc, &cbInit, &cb))) return;
+    // Refresh the viewport constants only when the backbuffer actually changes.
+    if (s.cbW != s.backbufferW || s.cbH != s.backbufferH) {
+        D3D11_MAPPED_SUBRESOURCE cbMapped = {};
+        if (FAILED(s.context->Map(s.cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &cbMapped))) return;
+        OverlayCB cbData = { 2.0f / s.backbufferW, 2.0f / s.backbufferH, 0, 0 };
+        std::memcpy(cbMapped.pData, &cbData, sizeof(cbData));
+        s.context->Unmap(s.cb, 0);
+        s.cbW = s.backbufferW;
+        s.cbH = s.backbufferH;
+    }
 
     {
         ContextStateScope save(s.context);
@@ -487,7 +537,7 @@ inline void RenderFrame() {
         s.context->IASetVertexBuffers(0, 1, &s.vb, &stride, &offset);
         s.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         s.context->VSSetShader(s.vs, nullptr, 0);
-        s.context->VSSetConstantBuffers(0, 1, &cb);
+        s.context->VSSetConstantBuffers(0, 1, &s.cb);
         s.context->PSSetShader(s.ps, nullptr, 0);
         s.context->RSSetState(s.rasterState);
         FLOAT bf[4] = {0,0,0,0};
@@ -496,12 +546,19 @@ inline void RenderFrame() {
 
         s.context->Draw(needed, 0);
     }
-
-    cb->Release();
 }
 
 inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT flags) {
     auto& s = State();
+    // REACHABLE. MH_DisableHook restores the original bytes, but it does not drain
+    // threads already inside this detour - it relocates instruction pointers only
+    // within the target and trampoline regions, and this function is not in either.
+    // A thread that entered before Remove() and reaches here afterwards finds the
+    // trampoline nulled, which is the point: the alternative is calling through
+    // memory MH_RemoveHook has already returned to MinHook's pool. Returning an
+    // error is correct - the frame genuinely was not presented.
+    auto orig = s.origPresent;
+    if (!orig) return DXGI_ERROR_INVALID_CALL;
     if (!s.firstPresentLogged) {
         s.firstPresentLogged = true;
         Log("dx11_overlay: Present hook fired (first invocation)");
@@ -512,18 +569,23 @@ inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT fla
     if (s.initialized) {
         RenderFrame();
     }
-    return s.origPresent(swap, sync, flags);
+    return orig(swap, sync, flags);
 }
 
 inline HRESULT __stdcall HookedResizeBuffers(IDXGISwapChain* swap, UINT bufferCount, UINT width, UINT height,
                                              DXGI_FORMAT format, UINT swapChainFlags) {
     auto& s = State();
+    // See HookedPresent. Returning S_OK here would be the worse lie of the two: the
+    // engine would believe the swap chain resized and go on to use buffers that are
+    // still the old size.
+    auto orig = s.origResize;
+    if (!orig) return DXGI_ERROR_INVALID_CALL;
     if (s.initialized) {
         // Drop view + remaining device-bound buffers; they'll be recreated on next Present.
         if (s.rtv) { s.rtv->Release(); s.rtv = nullptr; }
         s.initialized = false;
     }
-    return s.origResize(swap, bufferCount, width, height, format, swapChainFlags);
+    return orig(swap, bufferCount, width, height, format, swapChainFlags);
 }
 
 // Get the IDXGISwapChain vtable by spawning a tiny temp swap chain.
@@ -582,7 +644,24 @@ inline void SetDX11OverlayLogger(DX11LogFn fn) { detail::State().logFn = fn; }
 
 inline bool DX11Overlay::Install() {
     auto& s = detail::State();
-    if (s.hookInstalled) return true;
+
+    // Idempotent for the instance that already owns the hooks. Both earlier versions
+    // returned true here, and a consumer doing lazy-retry init or re-installing on a
+    // config reload would otherwise disable its own working HUD on the second call -
+    // while IsInstalled() kept reporting true, so the two accessors disagreed.
+    if (m_hookInstalled) return true;
+
+    if (s.hookInstalled) {
+        // Refused, not silently taken over. The hooks and the callback slot are
+        // process-wide but there is exactly one of each, so a second instance
+        // claiming them evicts the first: the live overlay stops rendering, and
+        // whichever instance is destroyed FIRST tears down the hooks and D3D
+        // resources out from under the other. Returning true here also told the
+        // caller it had a working overlay when it had stolen someone else's.
+        detail::Log("dx11_overlay: Install refused, another DX11Overlay in this "
+                    "module already owns the hooks");
+        return false;
+    }
 
     void** vtable = nullptr;
     if (!detail::GetSwapChainVTable(vtable)) {
@@ -614,7 +693,10 @@ inline bool DX11Overlay::Install() {
         return false;
     }
 
-    s.callback     = m_callback;
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        s.callback = std::make_shared<const DX11RenderCallback>(m_callback);
+    }
     s.hookInstalled = true;
     m_hookInstalled = true;
     detail::Log("dx11_overlay: hooks enabled");
@@ -622,16 +704,44 @@ inline bool DX11Overlay::Install() {
 }
 
 inline void DX11Overlay::Remove() {
-    auto& s = detail::State();
-    if (!s.hookInstalled) return;
+    // Keyed on this instance, not the shared state: an instance that never
+    // installed anything must not tear down the live overlay's hooks and
+    // release its D3D resources when it goes out of scope.
+    if (!m_hookInstalled) return;
 
-    MH_DisableHook(s.presentTarget);
-    MH_DisableHook(s.resizeBuffersTarget);
-    MH_RemoveHook(s.presentTarget);
-    MH_RemoveHook(s.resizeBuffersTarget);
+    auto& s = detail::State();
+    // NULL-GUARDED. MH_ALL_HOOKS is defined as NULL, so passing a null target here
+    // disables and removes EVERY MinHook hook in the process - the camera hook, the
+    // discovery probes, other mods' hooks. That is reachable with two overlay
+    // instances: the first Remove() nulls the shared targets, the second passes null.
+    // dx9_overlay.h has always guarded these; this side did not.
+    if (s.presentTarget) {
+        MH_DisableHook(s.presentTarget);
+        MH_RemoveHook(s.presentTarget);
+    }
+    if (s.resizeBuffersTarget) {
+        MH_DisableHook(s.resizeBuffersTarget);
+        MH_RemoveHook(s.resizeBuffersTarget);
+    }
 
     detail::ReleaseDeviceResources();
-    s.callback = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(s.callbackMutex);
+        s.callback = nullptr;
+    }
+    // BOTH the targets and the trampolines are cleared. The targets so a second
+    // Remove() cannot pass null to MinHook (above), and the trampolines because
+    // MH_DisableHook does NOT drain threads out of the user detour first - it freezes
+    // threads and relocates instruction pointers only within the target and trampoline
+    // regions, and HookedPresent is arbitrary code MinHook has never heard of, so a
+    // thread inside it is invisible. MH_RemoveHook then returns the trampoline to
+    // MinHook's pool for the next MH_CreateHook to reuse. A straggler that skips the
+    // null check therefore calls through freed, likely recycled memory; the detours'
+    // null branch is the only thing standing between that and a crash.
+    s.presentTarget = nullptr;
+    s.resizeBuffersTarget = nullptr;
+    s.origPresent = nullptr;
+    s.origResize = nullptr;
     s.hookInstalled = false;
     m_hookInstalled = false;
 }
@@ -639,9 +749,21 @@ inline void DX11Overlay::Remove() {
 // Update the cached callback whenever consumer changes it after Install.
 // (m_callback is the source of truth on the public object, but RenderFrame
 // reads the State() copy to avoid touching this-pointer in a free function.)
+//
+// The shared slot is only written when this instance owns the hooks, or when nobody
+// does. Refusing a second Install() was not enough on its own: the documented usage
+// order is SetRenderCallback() then Install(), so instance B evicted A's callback
+// BEFORE it was ever told no, and A's overlay went blank while both objects still
+// reported success.
 inline void DX11Overlay::SetRenderCallback(DX11RenderCallback cb) {
     m_callback = cb;
-    detail::State().callback = std::move(cb);
+    auto& s = detail::State();
+    if (s.hookInstalled && !m_hookInstalled) {
+        detail::Log("dx11_overlay: SetRenderCallback ignored, another overlay owns the hooks");
+        return;
+    }
+    std::lock_guard<std::mutex> lock(s.callbackMutex);
+    s.callback = std::make_shared<const DX11RenderCallback>(std::move(cb));
 }
 
 #endif // CAMERAUNLOCK_DX11_OVERLAY_IMPLEMENTATION

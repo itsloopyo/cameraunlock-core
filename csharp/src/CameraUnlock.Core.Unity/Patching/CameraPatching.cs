@@ -90,15 +90,20 @@ namespace CameraUnlock.Core.Unity.Patching
             Quaternion localOffset = pitch * roll;
             Quaternion worldYaw = yaw;
 
-            // Apply world yaw by rotating around world up
-            cameraTransform.rotation = worldYaw * cameraTransform.rotation;
+            // The world yaw is converted into the camera's own space and applied on the RIGHT,
+            // like the pitch/roll offset, because that is the only form RemoveHeadTrackingOffset
+            // can undo: it right-multiplies the stored inverse. Left-multiplying the yaw and
+            // right-multiplying its inverse yields Qy*R*Qy^-1, which equals R only when the
+            // camera's rotation commutes with the yaw - i.e. only when it is level. The
+            // conjugation also carries the parent's rotation, so this is correct on a parented
+            // camera, where writing .rotation directly was not.
+            Quaternion worldRotation = cameraTransform.rotation;
+            Quaternion localYaw = Quaternion.Inverse(worldRotation) * worldYaw * worldRotation;
+            Quaternion applied = localYaw * localOffset;
 
-            // Apply local pitch/roll
-            cameraTransform.localRotation = cameraTransform.localRotation * localOffset;
+            cameraTransform.localRotation = cameraTransform.localRotation * applied;
 
-            // Calculate combined inverse for removal
-            // The removal needs to undo both operations
-            appliedInverse = Quaternion.Inverse(worldYaw * localOffset);
+            appliedInverse = Quaternion.Inverse(applied);
         }
 
         /// <summary>

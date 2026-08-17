@@ -313,11 +313,43 @@ public:
             float rawX, rawY, rawZ;
             if (m_receiver.GetPosition(rawX, rawY, rawZ)) {
                 PositionData rawPos(rawX, rawY, rawZ, receiveTs);
-                PositionData interpolatedPos = m_positionInterpolator.Update(rawPos, deltaTime);
 
-                math::Quat4 headRotQ = math::Quat4::FromYawPitchRoll(m_yaw, m_pitch, m_roll);
+                // Same duplicate-sample filter the rotation path here uses. receiveTs
+                // advances on every datagram, so a phone resending at 60Hz off a 30Hz
+                // sensor made the position interpolator estimate half the true sample
+                // interval while rotation estimated it correctly - position then reached
+                // the extrapolation cap halfway through every sample period and wobbled at
+                // 30Hz while the head rotation stayed smooth.
+                //
+                // This is one place the two ports deliberately DIVERGE, and the reason is
+                // where each centres. This port centres at the RECEIVER, so a recenter
+                // changes the raw values it reports and a Reset interpolator re-seeds on
+                // the next packet. The C# port centres at the PROCESSOR, leaving the raw
+                // stream untouched by a recenter - so the same filter would stall a
+                // re-Reset interpolator indefinitely for a user holding perfectly still,
+                // because no value would ever change to re-seed it. C# therefore keeps
+                // timestamp-only detection on both channels.
+                bool isNewPosSample = isNewPacket &&
+                    (rawX != m_lastRawPosX || rawY != m_lastRawPosY || rawZ != m_lastRawPosZ);
+                if (isNewPacket) {
+                    m_lastRawPosX = rawX;
+                    m_lastRawPosY = rawY;
+                    m_lastRawPosZ = rawZ;
+                }
 
-                math::Vec3 offset = m_positionProcessor.Process(interpolatedPos, headRotQ, deltaTime);
+                PositionData interpolatedPos =
+                    m_positionInterpolator.Update(rawPos, isNewPosSample, deltaTime);
+
+                // The PHYSICAL head rotation, taken from the processor's smoothed state
+                // rather than from m_yaw/m_pitch/m_roll. Those carry per-axis sensitivity
+                // and inversion, and in PositionOnly mode they are forced to zero - so the
+                // pivot quaternion became identity and no compensation was applied at all,
+                // while the C# port applied the full term. Matches HeadTrackingSession.cs.
+                float physYaw, physPitch, physRoll;
+                m_processor.GetSmoothedRotation(physYaw, physPitch, physRoll);
+                math::Quat4 physicalRotQ = math::Quat4::FromYawPitchRoll(physYaw, physPitch, physRoll);
+
+                math::Vec3 offset = m_positionProcessor.Process(interpolatedPos, physicalRotQ, deltaTime);
                 m_posX = offset.x;
                 m_posY = offset.y;
                 m_posZ = offset.z;
@@ -344,7 +376,15 @@ public:
     void Recenter() {
         m_hasCentered = true;
         m_receiver.Recenter();
-        m_processor.Reset();
+
+        // ResetSmoothing, not Reset. Reset() also clears the processor's centre offset,
+        // so any mod-configured correction applied through
+        // GetProcessor().GetCenterManager().SetCenter(...) - the documented way to trim a
+        // phone sitting a few degrees off-axis - was wiped by every automatic and remote
+        // recenter, and the player had to re-apply it each time the tracker fired
+        // DEVICE_MOVED. Centring here happens at the receiver level, so the processor
+        // only needs its transient smoothing cleared.
+        m_processor.ResetSmoothing();
         m_poseInterpolator.Reset();
 
         float px, py, pz;
@@ -426,6 +466,9 @@ private:
     float m_lastRawYaw = 0.0f;
     float m_lastRawPitch = 0.0f;
     float m_lastRawRoll = 0.0f;
+    float m_lastRawPosX = 0.0f;
+    float m_lastRawPosY = 0.0f;
+    float m_lastRawPosZ = 0.0f;
 
     float m_yaw = 0.0f, m_pitch = 0.0f, m_roll = 0.0f;
     bool m_rotationValid = false;

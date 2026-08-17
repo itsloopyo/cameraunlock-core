@@ -102,15 +102,32 @@ namespace CameraUnlock.Core.Tests.Protocol
         }
 
         [Fact]
-        public void InfiniteSampleWouldPoisonSmoothing_DemonstratesWhyTheGuardExists()
+        public void InfiniteSampleIsBoundedByTheClamp_NotPropagated()
         {
-            // Fed directly (bypassing the parser) an infinite sample still ruins the
-            // processor - which is why the packet boundary, not the processor, is the
-            // place that rejects it.
+            // Fed directly, bypassing the parser. The pre-smoothing clamp bounds an
+            // infinite sample to the axis limit, so it no longer reaches the smoothing
+            // state and the next good sample is unaffected.
             var processor = new PositionProcessor { TrackerPivotForward = 0f };
             var identity = Quat4.Identity;
 
             processor.Process(new PositionData(float.PositiveInfinity, 0f, 0f), identity, 0.016f);
+            Vec3 result = processor.Process(new PositionData(0.05f, 0f, 0f), identity, 0.016f);
+
+            Assert.False(float.IsNaN(result.X));
+            Assert.InRange(result.X, -PositionSettings.Default.LimitX, PositionSettings.Default.LimitX);
+        }
+
+        [Fact]
+        public void NaNSampleStillPoisonsSmoothing_DemonstratesWhyTheGuardExists()
+        {
+            // NaN is the case the clamp CANNOT catch: every comparison against NaN is
+            // false, so both bounds fall through and it reaches the smoothing state,
+            // where it is permanent. That is why the packet boundary, not the processor,
+            // is the place that rejects non-finite input.
+            var processor = new PositionProcessor { TrackerPivotForward = 0f };
+            var identity = Quat4.Identity;
+
+            processor.Process(new PositionData(float.NaN, 0f, 0f), identity, 0.016f);
             Vec3 result = processor.Process(new PositionData(0.05f, 0f, 0f), identity, 0.016f);
 
             Assert.True(float.IsNaN(result.X));

@@ -100,7 +100,11 @@ namespace CameraUnlock.Core.Config
                 result = 0;
                 return false;
             }
-            return int.TryParse(value.Trim(), out result);
+            // Pinned like TryParseFloat above. The default overload resolves the
+            // negative sign and the accepted whitespace from CurrentCulture, so on a
+            // locale whose NegativeSign is not U+002D a leading "-" stops parsing. This
+            // is the untrusted-input boundary and must not vary by locale.
+            return int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
         }
 
         /// <summary>
@@ -156,6 +160,13 @@ namespace CameraUnlock.Core.Config
                 string key = trimmed.Substring(0, eqIndex).Trim();
                 string value = trimmed.Substring(eqIndex + 1).Trim();
 
+                // Inline comments. "Port = 5555   ; OpenTrack output port" is a near
+                // universal INI convention, and taking the whole remainder made the value
+                // unparseable - so the key was silently discarded, the default stayed, and
+                // the log still said "Config loaded successfully". Only stripped OUTSIDE a
+                // quoted value, so a legitimate ';' or '#' inside quotes survives.
+                value = StripInlineComment(value);
+
                 // Remove surrounding quotes if present
                 if (value.Length >= 2 &&
                     ((value.StartsWith("\"") && value.EndsWith("\"")) ||
@@ -168,6 +179,33 @@ namespace CameraUnlock.Core.Config
             }
 
             return result;
+        }
+
+        // Truncates at the first ';' or '#' that is not inside a quoted section.
+        private static string StripInlineComment(string value)
+        {
+            bool inQuotes = false;
+            char quote = '\0';
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (inQuotes)
+                {
+                    if (c == quote) inQuotes = false;
+                    continue;
+                }
+                if (c == '"' || c == '\'')
+                {
+                    inQuotes = true;
+                    quote = c;
+                    continue;
+                }
+                if (c == ';' || c == '#')
+                {
+                    return value.Substring(0, i).TrimEnd();
+                }
+            }
+            return value;
         }
 
         /// <summary>

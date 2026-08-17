@@ -18,8 +18,44 @@
 
 using System;
 
+// The stubs below are process-wide mutable state (Time, Screen, Camera.main,
+// Camera.onPreCull, and CameraCallbackLifecycle's own statics on top of them). Running test
+// classes in parallel would have them stomping each other.
+[assembly: Xunit.CollectionBehavior(DisableTestParallelization = true)]
+
 namespace UnityEngine
 {
+    /// Base for the Unity object model, and the reason it exists here: Unity overloads == so a
+    /// DESTROYED object compares equal to null while the managed reference is still alive.
+    /// Modelling that faithfully is what makes the destroyed-object defect class - a UI target
+    /// destroyed by a scene change, a render callback whose owning MonoBehaviour went away -
+    /// reachable from a test at all. With plain ReferenceEquals it is structurally invisible.
+    public class Object
+    {
+        private bool _destroyed;
+
+        /// Stands in for Unity destroying the native half of the object.
+        public void MarkDestroyed()
+        {
+            _destroyed = true;
+        }
+
+        public static bool operator ==(Object a, Object b)
+        {
+            bool aNull = ReferenceEquals(a, null) || a._destroyed;
+            bool bNull = ReferenceEquals(b, null) || b._destroyed;
+            if (aNull || bNull) return aNull && bNull;
+            return ReferenceEquals(a, b);
+        }
+
+        public static bool operator !=(Object a, Object b) => !(a == b);
+
+        public override bool Equals(object obj) => ReferenceEquals(this, obj);
+
+        public override int GetHashCode() =>
+            System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
+    }
+
     public struct Vector2
     {
         public float x;
@@ -435,6 +471,12 @@ namespace UnityEngine
     public static class Time
     {
         public static float deltaTime = 1f / 60f;
+
+        // Separate from deltaTime so a test can model a paused game (timeScale 0), where
+        // Unity zeroes deltaTime but keeps unscaledDeltaTime advancing. Anything that
+        // must keep running while paused - the view-matrix transitions, hotkey cooldowns -
+        // is only testable against that split.
+        public static float unscaledDeltaTime = 1f / 60f;
         public static int frameCount = 1;
 
         public static void AdvanceFrame()
@@ -445,6 +487,7 @@ namespace UnityEngine
         public static void Reset()
         {
             deltaTime = 1f / 60f;
+            unscaledDeltaTime = 1f / 60f;
             frameCount = 1;
         }
     }
@@ -459,12 +502,30 @@ namespace UnityEngine
     {
         public Quaternion rotation = Quaternion.identity;
         public Vector3 position = Vector3.zero;
+        public Quaternion localRotation = Quaternion.identity;
+        public Vector3 localPosition = Vector3.zero;
+        public string name = string.Empty;
+        public Transform parent;
 
         public Matrix4x4 localToWorldMatrix => Matrix4x4.TRS(position, rotation, Vector3.one);
         public Matrix4x4 worldToLocalMatrix => localToWorldMatrix.inverse;
     }
 
-    public class Camera
+    public class Canvas : Object
+    {
+        public static Action willRenderCanvases;
+    }
+
+    public enum CameraType
+    {
+        Game = 1,
+        SceneView = 2,
+        Preview = 4,
+        VR = 8,
+        Reflection = 16,
+    }
+
+    public class Camera : Object
     {
         public delegate void CameraCallback(Camera cam);
 
@@ -474,9 +535,17 @@ namespace UnityEngine
 
         public static Camera main;
 
+        /// Assigned directly by tests; Unity populates it from the live scene.
+        public static Camera[] allCameras = new Camera[0];
+
         public Transform transform = new Transform();
+        public string name = string.Empty;
         public float fieldOfView = 60f;
         public float aspect = 16f / 9f;
+        public float depth;
+        public bool enabled = true;
+        public CameraType cameraType = CameraType.Game;
+        public object targetTexture;
 
         public Matrix4x4 worldToCameraMatrix = Matrix4x4.identity;
 
@@ -488,10 +557,5 @@ namespace UnityEngine
             ResetWorldToCameraMatrixCalls++;
             worldToCameraMatrix = Matrix4x4.identity;
         }
-
-        public static bool operator ==(Camera a, Camera b) => ReferenceEquals(a, b);
-        public static bool operator !=(Camera a, Camera b) => !ReferenceEquals(a, b);
-        public override bool Equals(object obj) => ReferenceEquals(this, obj);
-        public override int GetHashCode() => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
     }
 }

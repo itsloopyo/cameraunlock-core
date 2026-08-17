@@ -36,12 +36,25 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
             public readonly Camera Camera;
             public Vector3 AppliedLocalDelta;
             public bool HasWrite;
+            public bool HasMatrixWrite;
         }
+
+        private static readonly string[] ExcludedTokens = { "ui", "inventory", "overlay" };
 
         private readonly List<TrackedCamera> _targets = new List<TrackedCamera>();
 
+        private int _lastRefreshFrame = -1;
+        private bool _loggedEmptyScan;
+
         /// <summary>Frames between target-set rebuilds.</summary>
         public int RefreshInterval { get; set; } = 60;
+
+        /// <summary>
+        /// Minimum frames between rebuild attempts while nothing matches. Without it, every
+        /// loading screen, menu and name-filtered-out scene ran the full Camera.allCameras scan
+        /// plus a fresh list and a per-camera string every single frame.
+        /// </summary>
+        public int EmptyRetryInterval { get; set; } = 10;
 
         /// <summary>Diagnostic logging callback (target-set changes).</summary>
         public Action<string>? Log { get; set; }
@@ -56,11 +69,16 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
         /// </summary>
         public void RefreshTargetsIfDue()
         {
-            bool due = _targets.Count == 0 || Time.frameCount % RefreshInterval == 0;
+            bool due = _targets.Count == 0
+                ? _lastRefreshFrame < 0 || Time.frameCount - _lastRefreshFrame >= EmptyRetryInterval
+                : Time.frameCount % RefreshInterval == 0;
             if (!due) return;
+
+            _lastRefreshFrame = Time.frameCount;
 
             var all = Camera.allCameras;
             var fresh = new List<Camera>();
+            List<string>? excluded = Log != null ? new List<string>() : null;
             for (int i = 0; i < all.Length; i++)
             {
                 Camera cam = all[i];
@@ -68,8 +86,12 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 if (cam.cameraType != CameraType.Game) continue;
                 if (cam.targetTexture != null) continue;
 
-                string lower = cam.name.ToLowerInvariant();
-                if (lower.Contains("ui") || lower.Contains("inventory") || lower.Contains("overlay")) continue;
+                string? matchedToken = MatchExcludedToken(cam.name);
+                if (matchedToken != null)
+                {
+                    excluded?.Add($"  excluded '{cam.name}' (matched token '{matchedToken}')");
+                    continue;
+                }
 
                 fresh.Add(cam);
             }
@@ -82,6 +104,19 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                     if (fresh[i] != _targets[i].Camera) { changed = true; break; }
                 }
             }
+            // Also logged when the scan finds nothing at all, which the changed check alone
+            // would swallow - the exact case where a wrongly excluded main camera has to be
+            // visible in the log.
+            if (excluded != null && excluded.Count > 0 && (changed || (fresh.Count == 0 && !_loggedEmptyScan)))
+            {
+                Log?.Invoke($"=== Excluded cameras ({excluded.Count}) ===");
+                for (int i = 0; i < excluded.Count; i++)
+                {
+                    Log?.Invoke(excluded[i]);
+                }
+            }
+            _loggedEmptyScan = fresh.Count == 0;
+
             if (!changed) return;
 
             ResetAll();
@@ -96,6 +131,96 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 Log?.Invoke($"  '{cam.name}' depth={cam.depth} fov={cam.fieldOfView:F1} path={HierarchyPath(cam.transform)}{flags}");
                 _targets.Add(new TrackedCamera(cam));
             }
+        }
+
+        /// <summary>
+        /// Returns the exclusion token the camera name matches as a WORD, or null.
+        /// A plain substring test on "ui" excluded BuildCam, GuideCamera and FluidCam - the
+        /// game's own main camera, silently and with no diagnostic.
+        /// </summary>
+        private static string? MatchExcludedToken(string name)
+        {
+            for (int i = 0; i < ExcludedTokens.Length; i++)
+            {
+                if (ContainsToken(name, ExcludedTokens[i])) return ExcludedTokens[i];
+            }
+            return null;
+        }
+
+        private static bool ContainsToken(string name, string token)
+        {
+            int index = 0;
+            while (index <= name.Length - token.Length)
+            {
+                index = name.IndexOf(token, index, StringComparison.OrdinalIgnoreCase);
+                if (index < 0) return false;
+
+                int end = index + token.Length;
+                if (IsTokenStart(name, index) && IsTokenEnd(name, end)) return true;
+                index = end;
+            }
+            return false;
+        }
+
+        // A token starts at the string start, after a separator, or at a camel-case hump
+        // ("hudUI"). An uppercase run does NOT start one, so "GUICamera" never matches "ui".
+        //
+        // A lowercase predecessor only counts at a GENUINE hump, which means the token's
+        // own first character has to be uppercase. Accepting any lowercase predecessor let
+        // a plain letter act as a separator, so "yuicamera" matched "ui" and lost head
+        // tracking - and Yui, Rui, Sui, Gui are ordinary romanised names. "EquiviewCamera"
+        // was the same fault mid-word.
+        private static bool IsTokenStart(string name, int index)
+        {
+            if (index == 0) return true;
+            char previous = name[index - 1];
+            if (!char.IsLetterOrDigit(previous)) return true;
+            return char.IsLower(previous) && char.IsUpper(name[index]);
+        }
+
+        // Words a token may run straight into in an all-lowercase name. "uicam" has no
+        // separator and no camel hump, so the character-level rules cannot see the join -
+        // yet it is obviously a UI camera and must stay excluded.
+        private static readonly string[] TokenTailWords =
+        {
+            "cam", "camera", "canvas", "overlay", "layer", "view", "root"
+        };
+
+        // A token ends at the string end, before a separator, before the next camel-case
+        // hump ("UICamera"), or immediately before one of the tail words above.
+        private static bool IsTokenEnd(string name, int end)
+        {
+            if (end >= name.Length) return true;
+            char next = name[end];
+            if (!char.IsLetterOrDigit(next) || char.IsUpper(next) || char.IsDigit(next))
+            {
+                return true;
+            }
+
+            return IsTailWordAt(name, end);
+        }
+
+        // The tail has to run to a boundary itself. A bare prefix test would let any word
+        // merely STARTING with a tail word close the token - "cam" would match camp, camo,
+        // campaign and camshaft; "root" would match rooted; "layer" would match layers -
+        // which is exactly the "swallows an unrelated word" failure the list is meant to
+        // avoid. It is also what keeps "camera" in the list doing work: "uicamera" ends
+        // "cam" at a lowercase 'e', so only the longer entry reaches the end of the string.
+        private static bool IsTailWordAt(string name, int start)
+        {
+            for (int i = 0; i < TokenTailWords.Length; i++)
+            {
+                string tail = TokenTailWords[i];
+                int end = start + tail.Length;
+                if (end > name.Length) continue;
+                if (string.Compare(name, start, tail, 0, tail.Length,
+                                   StringComparison.OrdinalIgnoreCase) != 0) continue;
+                if (end == name.Length) return true;
+
+                char after = name[end];
+                if (!char.IsLetterOrDigit(after) || char.IsUpper(after)) return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -136,6 +261,16 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 {
                     Quaternion finalWorld = ComposeRotation(baseWorld, yaw, pitch, roll, worldSpaceYaw);
                     cam.worldToCameraMatrix = BuildViewMatrix(finalWorld, finalPosition);
+                    t.HasMatrixWrite = true;
+                }
+                else if (t.HasMatrixWrite)
+                {
+                    // worldToCameraMatrix is a sticky override: without this the view freezes
+                    // at the last head rotation when rotation tracking is turned off, and the
+                    // position offset still being written above becomes invisible because the
+                    // manual matrix overrides the transform.
+                    cam.ResetWorldToCameraMatrix();
+                    t.HasMatrixWrite = false;
                 }
             }
         }
@@ -167,8 +302,10 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
         {
             for (int i = 0; i < _targets.Count; i++)
             {
-                if (_targets[i].Camera == null) continue;
-                _targets[i].Camera.ResetWorldToCameraMatrix();
+                var t = _targets[i];
+                t.HasMatrixWrite = false;
+                if (t.Camera == null) continue;
+                t.Camera.ResetWorldToCameraMatrix();
             }
         }
 

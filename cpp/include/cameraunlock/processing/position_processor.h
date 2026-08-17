@@ -32,7 +32,11 @@ public:
     bool IsRemoteConnection() const { return m_isRemoteConnection; }
 
     /// Processes a raw position through the full pipeline.
-    math::Vec3 Process(const PositionData& raw, const math::Quat4& processed_rotation_q,
+    /// physical_rotation_q is the centered head rotation BEFORE per-axis sensitivity
+    /// and inversion. The pivot artifact is a physical property of where the tracker's
+    /// face point sits relative to the neck, so scaling the angle first over-corrects
+    /// by the sensitivity factor and inverting it drives the correction backwards.
+    math::Vec3 Process(const PositionData& raw, const math::Quat4& physical_rotation_q,
                        float delta_time) {
         if (!raw.IsValid()) {
             return math::Vec3::Zero();
@@ -41,10 +45,15 @@ public:
         // Step 1: Center subtraction
         math::Vec3 pos = raw.ToVec3() - m_center;
 
-        // Step 1.5: Subtract tracker pivot rotation artifact
+        // Step 1.5: Subtract tracker pivot rotation artifact.
+        // The pivot vector is -z, not +z: negative z is forward throughout this library
+        // and the Headcam trackers pin the same convention with a test ("wire +Z out the
+        // back of the head"). Rotation is linear, so R(-v) - (-v) == -(R(v) - v): a +z
+        // pivot computed the exact NEGATION of the real artifact and the subtraction then
+        // DOUBLED the phantom translation it was supposed to remove.
         if (m_trackerPivotForward > 0.0f) {
-            math::Vec3 pivot(0.0f, 0.0f, m_trackerPivotForward);
-            math::Vec3 artifact = processed_rotation_q.Rotate(pivot) - pivot;
+            math::Vec3 pivot(0.0f, 0.0f, -m_trackerPivotForward);
+            math::Vec3 artifact = physical_rotation_q.Rotate(pivot) - pivot;
             pos = pos - artifact;
         }
 
@@ -57,7 +66,12 @@ public:
         if (m_settings.invert_y) y = -y;
         if (m_settings.invert_z) z = -z;
 
-        math::Vec3 scaled(x, y, z);
+        // Clamped BEFORE smoothing as well as after: the smoothing state used to track
+        // the unclamped input, so a high sensitivity drove it far outside the limits and
+        // it then sat saturated on the way back, pinning the output at the limit for
+        // hundreds of milliseconds after the head had returned. Clamping a bounded input
+        // is a no-op, so nothing changes for the common case.
+        math::Vec3 scaled = ClampToLimits(math::Vec3(x, y, z));
 
         // Step 3: Exponential smoothing on tracker position
         float effective_smoothing = static_cast<float>(
@@ -78,15 +92,18 @@ public:
         }
 
         // Step 4: Box clamp position against limits
-        // Z uses asymmetric limits: positive Z = backward lean (restricted),
-        // negative Z = forward lean (generous)
-        math::Vec3 clamped(
-            math::Clamp(m_smoothedPosition.x, -m_settings.limit_x, m_settings.limit_x),
-            math::Clamp(m_smoothedPosition.y, -m_settings.limit_y, m_settings.limit_y),
-            math::Clamp(m_smoothedPosition.z, -m_settings.limit_z, m_settings.limit_z_back)
-        );
+        return ClampToLimits(m_smoothedPosition);
+    }
 
-        return clamped;
+    /// Y and Z are asymmetric: positive Z = backward lean (restricted), negative Z =
+    /// forward lean (generous); positive Y = up (generous), negative Y = down
+    /// (restricted, to avoid clipping into the player body).
+    math::Vec3 ClampToLimits(const math::Vec3& value) const {
+        return math::Vec3(
+            math::Clamp(value.x, -m_settings.limit_x, m_settings.limit_x),
+            math::Clamp(value.y, -m_settings.limit_y_down, m_settings.limit_y),
+            math::Clamp(value.z, -m_settings.limit_z, m_settings.limit_z_back)
+        );
     }
 
     /// Sets the center offset for recentering.
@@ -109,7 +126,13 @@ public:
 
 private:
     PositionSettings m_settings;
-    float m_trackerPivotForward = 0.15f;
+    /// Defaults to 0 - compensation OFF - and must be measured per tracker app, because
+    /// the correct arm length is not a property of this library: the Headcam Android app
+    /// already applies its own eye-anchor offset while iOS applies none, so one shared
+    /// constant is wrong for at least one of them. The previous defaults (0.15 here,
+    /// 0.01 in C#) were both chosen while the compensation was inverted and doubling the
+    /// artifact it removed, so neither carries over. Matches C# PositionProcessor.
+    float m_trackerPivotForward = 0.0f;
     bool m_isRemoteConnection = false;
 
     math::Vec3 m_center;

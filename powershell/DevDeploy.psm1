@@ -58,11 +58,11 @@ function Assert-DevBuildArtifact {
         [Parameter(Mandatory)][string]$BuildOutputPath,
         [Parameter(Mandatory)][string]$FileName
     )
-    if (-not (Test-Path $BuildOutputPath)) {
+    if (-not (Test-Path -LiteralPath $BuildOutputPath)) {
         throw "Build output directory not found: $BuildOutputPath. Run 'pixi run build' first."
     }
     $sourceFile = Join-Path $BuildOutputPath $FileName
-    if (-not (Test-Path $sourceFile)) {
+    if (-not (Test-Path -LiteralPath $sourceFile)) {
         throw "Built file not found at: $sourceFile. Run 'pixi run build' first."
     }
 }
@@ -77,7 +77,7 @@ function Resolve-DevExeDir {
     )
     $gameExeRelpath = (Get-GameConfig -GameId $GameId).Executable
     $exeDir = Split-Path -Parent (Join-Path $GamePath $gameExeRelpath)
-    if (-not (Test-Path $exeDir)) {
+    if (-not (Test-Path -LiteralPath $exeDir)) {
         throw "Exe directory not found: $exeDir (derived from $gameExeRelpath)"
     }
     return $exeDir
@@ -122,6 +122,24 @@ function Assert-DevGameNotRunning {
 .OUTPUTS
     Hashtable: @{ GamePath; ManagedPath; DeployedDllPath }
 #>
+# True when a patcher's return value reports failure, whatever shape it arrived in.
+#
+# Three shapes are all in use and none of the obvious tests covers them: `-is [hashtable]`
+# is FALSE for an [ordered] dictionary (that is an OrderedDictionary) and for a
+# [pscustomobject], while PSObject.Properties does not see a Hashtable's KEYS at all - they
+# come through the dictionary adapter. Getting this wrong fails OPEN: the failure check is
+# skipped and a failed patch reports deployment success.
+function Test-PatchResultFailure {
+    param($Result)
+
+    if ($null -eq $Result) { return $false }
+    if ($Result -is [System.Collections.IDictionary]) {
+        return $Result.Contains('Success') -and -not $Result['Success']
+    }
+    $property = $Result.PSObject.Properties['Success']
+    return ($null -ne $property) -and (-not $property.Value)
+}
+
 function Invoke-DevDeployCecil {
     [CmdletBinding()]
     param(
@@ -142,18 +160,25 @@ function Invoke-DevDeployCecil {
         # Optional: [scriptblock] called with one positional arg ($assemblyPath)
         # to reverse the patch in place. Enables self-heal of an already-patched
         # source when no pristine backup exists.
-        [scriptblock]$Unpatcher = $null
+        [scriptblock]$Unpatcher = $null,
+        # Delete leftover doorstop files (winhttp.dll, version.dll,
+        # doorstop_config.ini, .doorstop_version) from the game root. Off by
+        # default: those names belong to BepInEx 5 and Ultimate ASI Loader, so a
+        # Cecil deploy that removes them silently stops another mod's loader.
+        # Even when set, Remove-OldDoorstopFiles only deletes what the state
+        # file records as ours.
+        [switch]$CleanDoorstop
     )
 
     Assert-DevBuildArtifact -BuildOutputPath $BuildOutputPath -FileName $ModDllName
 
     $gamePath = Resolve-DevGamePath -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
     $managedPath = Join-Path $gamePath $ManagedSubfolder
-    if (-not (Test-Path $managedPath)) {
+    if (-not (Test-Path -LiteralPath $managedPath)) {
         throw "Managed folder not found at: $managedPath"
     }
     $assemblyPath = Join-Path $managedPath $AssemblyDll
-    if (-not (Test-Path $assemblyPath)) {
+    if (-not (Test-Path -LiteralPath $assemblyPath)) {
         throw "$AssemblyDll not found at: $assemblyPath"
     }
 
@@ -178,11 +203,11 @@ function Invoke-DevDeployCecil {
     # tell patched from clean; with an unpatcher we repair in place.
     if ($PatchMarker) {
         $backupFile = "$assemblyPath.original"
-        if (Test-Path $backupFile) {
+        if (Test-Path -LiteralPath $backupFile) {
             if (Test-FileContainsMarker -FilePath $backupFile -Marker $PatchMarker) {
                 if ($Unpatcher) {
                     Write-Host "  Existing .original is patched (corrupt backup) - repairing via unpatch..." -ForegroundColor Yellow
-                    & $Unpatcher $backupFile
+                    & $Unpatcher $backupFile | Out-Null
                     if (Test-FileContainsMarker -FilePath $backupFile -Marker $PatchMarker) {
                         throw "Unpatch did not clean $AssemblyDll.original; refusing to keep a corrupt backup. Verify game files via Steam."
                     }
@@ -193,7 +218,7 @@ function Invoke-DevDeployCecil {
         } elseif (Test-FileContainsMarker -FilePath $assemblyPath -Marker $PatchMarker) {
             if ($Unpatcher) {
                 Write-Host "  $AssemblyDll is patched but has no .original - reconstructing a clean baseline via unpatch..." -ForegroundColor Yellow
-                & $Unpatcher $assemblyPath
+                & $Unpatcher $assemblyPath | Out-Null
                 if (Test-FileContainsMarker -FilePath $assemblyPath -Marker $PatchMarker) {
                     throw "Unpatch did not clean $AssemblyDll; cannot establish a pristine baseline. Verify game files via Steam."
                 }
@@ -204,15 +229,36 @@ function Invoke-DevDeployCecil {
     }
 
     $backupPath = New-FileBackup -FilePath $assemblyPath
-    if ($backupPath -and (Test-Path $backupPath)) {
+    if ($backupPath -and (Test-Path -LiteralPath $backupPath)) {
         Restore-FileFromBackup -FilePath $assemblyPath | Out-Null
     }
 
-    & $Patcher $assemblyPath
+    # Captured, not discarded and not left to leak. Leaking it joins this function's
+    # output stream and the documented Hashtable return becomes a 2-element array, so
+    # $result.Count and $result.Keys report on the array rather than the hashtable.
+    #
+    # Discarding it is just as wrong: Invoke-HeadTrackingPatch signals a patch failure by
+    # RETURNING @{ Success = $false; Errors = @(...) }, not by throwing (it does throw for
+    # a patcher compile failure - see CHANGELOG - but not for the patch itself). Piping to
+    # Out-Null would swallow that and report deployment success after a failed patch.
+    #
+    # Matched on shape rather than on type. A patcher's result may arrive alongside stray
+    # pipeline output (a Copy-Item -PassThru, a New-Item), and it may be a hashtable, a
+    # [pscustomobject] or an [ordered] dictionary - and `-is [hashtable]` is FALSE for the
+    # latter two, so a type test silently skipped the failure check for both. Anything
+    # carrying a falsey Success is treated as a failure, which is the direction that must
+    # not fail open.
+    $patchOutput = @(& $Patcher $assemblyPath)
+    $patchFailure = $patchOutput | Where-Object { Test-PatchResultFailure $_ } | Select-Object -First 1
+    if ($patchFailure) {
+        throw "Patcher reported failure for ${assemblyPath}: $($patchFailure.Errors -join '; ')"
+    }
 
-    $removedFiles = @(Remove-OldDoorstopFiles -GamePath $gamePath)
-    if ($removedFiles.Count -gt 0) {
-        Write-Host "  Cleaned up $($removedFiles.Count) old doorstop file(s)" -ForegroundColor Gray
+    if ($CleanDoorstop) {
+        $removedFiles = @(Remove-OldDoorstopFiles -GamePath $gamePath)
+        if ($removedFiles.Count -gt 0) {
+            Write-Host "  Cleaned up $($removedFiles.Count) old doorstop file(s)" -ForegroundColor Gray
+        }
     }
 
     return @{
@@ -266,7 +312,7 @@ function Invoke-DevDeployBepInEx {
 
     $pluginsPath = Get-BepInExPluginsPath -GamePath $gamePath
     if ($PluginSubfolder) { $pluginsPath = Join-Path $pluginsPath $PluginSubfolder }
-    if (-not (Test-Path $pluginsPath)) { New-Item -ItemType Directory -Path $pluginsPath -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $pluginsPath)) { New-Item -ItemType Directory -Path $pluginsPath -Force | Out-Null }
 
     Write-Host ""
     Write-Host "Deploying mod files..." -ForegroundColor Yellow
@@ -325,7 +371,7 @@ function Invoke-DevDeployMelonLoader {
     }
 
     $modsPath = Get-MelonLoaderModsPath -GamePath $gamePath
-    if (-not (Test-Path $modsPath)) { New-Item -ItemType Directory -Path $modsPath -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $modsPath)) { New-Item -ItemType Directory -Path $modsPath -Force | Out-Null }
 
     Write-Host ""
     Write-Host "Deploying mod files..." -ForegroundColor Yellow
@@ -391,7 +437,7 @@ function Invoke-DevDeployASILoader {
     )
 
     Assert-DevBuildArtifact -BuildOutputPath $BuildOutputPath -FileName $ModDllName
-    if ($ConfigFile -and -not (Test-Path $ConfigFile)) {
+    if ($ConfigFile -and -not (Test-Path -LiteralPath $ConfigFile)) {
         throw "ConfigFile not found at: $ConfigFile"
     }
 
@@ -400,16 +446,16 @@ function Invoke-DevDeployASILoader {
     $exeDir   = Resolve-DevExeDir -GamePath $gamePath -GameId $GameId
     if ($ExeSubDir) {
         $exeDir = Join-Path $exeDir $ExeSubDir
-        if (-not (Test-Path $exeDir)) { New-Item -ItemType Directory -Path $exeDir -Force | Out-Null }
+        if (-not (Test-Path -LiteralPath $exeDir)) { New-Item -ItemType Directory -Path $exeDir -Force | Out-Null }
     }
 
     $loaderTarget = Join-Path $exeDir $AsiLoaderName
-    if (-not (Test-Path $loaderTarget)) {
+    if (-not (Test-Path -LiteralPath $loaderTarget)) {
         if ($VendorLoaderDll) {
-            if (-not (Test-Path $VendorLoaderDll)) {
+            if (-not (Test-Path -LiteralPath $VendorLoaderDll)) {
                 throw "VendorLoaderDll not found at: $VendorLoaderDll"
             }
-            Copy-Item -Path $VendorLoaderDll -Destination $loaderTarget -Force
+            Copy-Item -LiteralPath $VendorLoaderDll -Destination $loaderTarget -Force
             Write-Host "Installed ASI loader as $AsiLoaderName" -ForegroundColor Green
         } else {
             throw "ASI loader $AsiLoaderName not present at $exeDir. Run install.cmd to install the loader first, or pass -VendorLoaderDll."
@@ -430,7 +476,7 @@ function Invoke-DevDeployASILoader {
 
     if ($ConfigFile) {
         $configLeaf = Split-Path -Leaf $ConfigFile
-        Copy-Item -Path $ConfigFile -Destination (Join-Path $exeDir $configLeaf) -Force
+        Copy-Item -LiteralPath $ConfigFile -Destination (Join-Path $exeDir $configLeaf) -Force
         Write-Host "Deployed $configLeaf" -ForegroundColor Green
     }
 
@@ -471,21 +517,21 @@ function Invoke-DevDeployREFramework {
     )
 
     Assert-DevBuildArtifact -BuildOutputPath $BuildOutputPath -FileName $ModDllName
-    if ($ConfigFile -and -not (Test-Path $ConfigFile)) {
+    if ($ConfigFile -and -not (Test-Path -LiteralPath $ConfigFile)) {
         throw "ConfigFile not found at: $ConfigFile"
     }
 
     $gamePath = Resolve-DevGamePath -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
 
     $loaderDll = Join-Path $gamePath 'dinput8.dll'
-    if (-not (Test-Path $loaderDll)) {
+    if (-not (Test-Path -LiteralPath $loaderDll)) {
         if ($VendorReframeworkZip) {
-            if (-not (Test-Path $VendorReframeworkZip)) {
+            if (-not (Test-Path -LiteralPath $VendorReframeworkZip)) {
                 throw "VendorReframeworkZip not found at: $VendorReframeworkZip"
             }
             Write-Host "REFramework not found. Extracting bundled copy..." -ForegroundColor Yellow
-            Expand-Archive -Path $VendorReframeworkZip -DestinationPath $gamePath -Force
-            if (-not (Test-Path $loaderDll)) {
+            Expand-Archive -LiteralPath $VendorReframeworkZip -DestinationPath $gamePath -Force
+            if (-not (Test-Path -LiteralPath $loaderDll)) {
                 throw "REFramework install failed: dinput8.dll not found after extraction of $VendorReframeworkZip."
             }
             Write-Host "  Installed REFramework from $VendorReframeworkZip" -ForegroundColor Green
@@ -495,7 +541,7 @@ function Invoke-DevDeployREFramework {
     }
 
     $pluginsPath = Join-Path $gamePath 'reframework\plugins'
-    if (-not (Test-Path $pluginsPath)) { New-Item -ItemType Directory -Path $pluginsPath -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $pluginsPath)) { New-Item -ItemType Directory -Path $pluginsPath -Force | Out-Null }
 
     Write-Host ""
     Write-Host "Deploying mod files to: $pluginsPath" -ForegroundColor Yellow
@@ -511,7 +557,7 @@ function Invoke-DevDeployREFramework {
 
     if ($ConfigFile) {
         $configLeaf = Split-Path -Leaf $ConfigFile
-        Copy-Item -Path $ConfigFile -Destination (Join-Path $pluginsPath $configLeaf) -Force
+        Copy-Item -LiteralPath $ConfigFile -Destination (Join-Path $pluginsPath $configLeaf) -Force
         Write-Host "Deployed $configLeaf" -ForegroundColor Green
     }
 
@@ -528,9 +574,12 @@ function Invoke-DevDeployREFramework {
     exe directory, with first-install backup of any pre-existing file.
 .DESCRIPTION
     Shim mods replace a system DLL the game loads at startup
-    (xinput1_3.dll / dxgi.dll / winmm.dll / etc.). On first deploy, if
-    the target name already exists in the exe dir, back it up to
-    <name>.backup so uninstall can restore it.
+    (xinput1_3.dll / dxgi.dll / winmm.dll / etc.). If the target name
+    already exists in the exe dir and its bytes DIFFER from the shim about
+    to be written, it is the game's own file and is backed up to
+    <name>.backup so uninstall can restore it. If the bytes match, it is
+    this mod's shim from an earlier deploy and is left alone rather than
+    enshrined as "the original".
 
     For builds that emit a different filename than the deployed name
     (Rust/cargo crates often produce `<crate_name>.dll`, not the system
@@ -561,12 +610,44 @@ function Invoke-DevDeployShim {
 
     # Backup-on-first-deploy. .backup is the user's pre-mod state and
     # never gets clobbered.
+    #
+    # When the game ships no file of that name - the common case for a
+    # dxgi/winmm/xinput proxy - the ABSENCE is the pre-mod state, and it has to
+    # be recorded too. Without the sentinel, deploy 1 writes no backup (nothing
+    # to back up), deploy 2 sees the target present (it is OUR shim) with no
+    # backup and copies the shim to <name>.backup; uninstall then "restores the
+    # original", reinstalling the mod permanently and reporting success.
+    # Decided PER FILE by CONTENT, matching scripts/install-body-shim.cmd. The question
+    # that actually matters is "is the file already sitting there ours?", and comparing
+    # the bytes answers it directly - no sentinel to go stale.
+    #
+    # A sentinel file was tried and removed: nothing read or deleted it, so after a
+    # deploy/uninstall cycle it survived with the shim gone. If the user then installed
+    # something that legitimately owns that name (ReShade's dxgi.dll), the next deploy
+    # saw the stale sentinel, skipped the backup, and overwrote it with no way back.
     $allFiles = @($ModDllName) + $ExtraDlls
     foreach ($f in $allFiles) {
         $target = Join-Path $exeDir $f
         $backup = "$target.backup"
-        if ((Test-Path $target) -and -not (Test-Path $backup)) {
-            Copy-Item -Path $target -Destination $backup -Force
+
+        if (Test-Path -LiteralPath $backup) { continue }
+        if (-not (Test-Path -LiteralPath $target)) { continue }
+
+        # The source this deploy is about to write. $ModDllName is renamed from
+        # $SourceDllName; the extras keep their own names.
+        $sourceName = if ($f -eq $ModDllName) { $SourceDllName } else { $f }
+        $source = Join-Path $BuildOutputPath $sourceName
+
+        $isOurs = $false
+        if (Test-Path -LiteralPath $source) {
+            $isOurs = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -eq
+                      (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        }
+
+        if ($isOurs) {
+            Write-Host "  $f is already this mod's shim - not capturing it as an original" -ForegroundColor Gray
+        } else {
+            Copy-Item -LiteralPath $target -Destination $backup -Force
             Write-Host "  Backed up original $f to $f.backup" -ForegroundColor Gray
         }
     }
@@ -578,15 +659,15 @@ function Invoke-DevDeployShim {
     # with rename; can't use Copy-ModFiles which assumes source==dest.
     $sourceFile = Join-Path $BuildOutputPath $SourceDllName
     $targetFile = Join-Path $exeDir $ModDllName
-    Copy-Item -Path $sourceFile -Destination $targetFile -Force
+    Copy-Item -LiteralPath $sourceFile -Destination $targetFile -Force
     Write-Host "Deployed $ModDllName" -ForegroundColor Green
 
     foreach ($extra in $ExtraDlls) {
         $extraSrc = Join-Path $BuildOutputPath $extra
-        if (-not (Test-Path $extraSrc)) {
+        if (-not (Test-Path -LiteralPath $extraSrc)) {
             throw "Required extra file not found: $extraSrc"
         }
-        Copy-Item -Path $extraSrc -Destination (Join-Path $exeDir $extra) -Force
+        Copy-Item -LiteralPath $extraSrc -Destination (Join-Path $exeDir $extra) -Force
         Write-Host "Deployed $extra" -ForegroundColor Green
     }
 

@@ -1,5 +1,7 @@
 #include <cameraunlock/input/hotkey_poller.h>
 
+#include <vector>
+
 #ifdef _WIN32
 #include <Windows.h>
 #endif
@@ -12,35 +14,50 @@ HotkeyPoller::~HotkeyPoller() {
     Stop();
 }
 
-HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) noexcept {
-    // Stop the other's thread first
+// The polling thread captures a this-pointer, so the running thread cannot be
+// handed over: it is stopped on the source and restarted on the destination.
+// Without the restart, a poller moved into a container silently stopped firing
+// hotkeys.
+HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) {
+    const bool wasRunning = other.m_running.load();
+    const int interval = other.m_pollInterval.load();
     other.Stop();
 
     m_toggleKey.store(other.m_toggleKey.load());
     m_recenterKey.store(other.m_recenterKey.load());
-    m_pollInterval.store(other.m_pollInterval.load());
+    m_pollInterval.store(interval);
     m_toggleCallback = std::move(other.m_toggleCallback);
     m_recenterCallback = std::move(other.m_recenterCallback);
 
-    std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
-    m_hotkeys = std::move(other.m_hotkeys);
-    m_nextHotkeyId = other.m_nextHotkeyId;
+    {
+        std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
+        m_hotkeys = std::move(other.m_hotkeys);
+        m_nextHotkeyId = other.m_nextHotkeyId;
+    }
+
+    if (wasRunning) Start(interval);
 }
 
-HotkeyPoller& HotkeyPoller::operator=(HotkeyPoller&& other) noexcept {
+HotkeyPoller& HotkeyPoller::operator=(HotkeyPoller&& other) {
     if (this != &other) {
+        const bool wasRunning = other.m_running.load();
+        const int interval = other.m_pollInterval.load();
         Stop();
         other.Stop();
 
         m_toggleKey.store(other.m_toggleKey.load());
         m_recenterKey.store(other.m_recenterKey.load());
-        m_pollInterval.store(other.m_pollInterval.load());
+        m_pollInterval.store(interval);
         m_toggleCallback = std::move(other.m_toggleCallback);
         m_recenterCallback = std::move(other.m_recenterCallback);
 
-        std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
-        m_hotkeys = std::move(other.m_hotkeys);
-        m_nextHotkeyId = other.m_nextHotkeyId;
+        {
+            std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
+            m_hotkeys = std::move(other.m_hotkeys);
+            m_nextHotkeyId = other.m_nextHotkeyId;
+        }
+
+        if (wasRunning) Start(interval);
     }
     return *this;
 }
@@ -80,7 +97,6 @@ bool HotkeyPoller::Start(int pollIntervalMs) {
 
     m_pollInterval.store(pollIntervalMs);
     m_stopFlag.store(false);
-    m_running.store(true);
 
     // Reset key states
     m_toggleKeyDown.store(false);
@@ -92,7 +108,19 @@ bool HotkeyPoller::Start(int pollIntervalMs) {
         }
     }
 
-    m_thread = std::thread(&HotkeyPoller::PollLoop, this);
+    // m_running is set AFTER the thread exists, and rolled back if it does not.
+    // Setting it first meant a std::thread constructor that threw left m_running
+    // true with no thread behind it: Start() then returned true immediately on
+    // every subsequent call and IsRunning() reported healthy, so the mod's hotkeys
+    // were permanently dead while every API insisted they were fine. That is the
+    // silent failure the throw is supposed to replace, not accompany.
+    try {
+        m_thread = std::thread(&HotkeyPoller::PollLoop, this);
+    } catch (...) {
+        m_stopFlag.store(true);
+        throw;
+    }
+    m_running.store(true);
     return true;
 }
 
@@ -118,18 +146,20 @@ void HotkeyPoller::SetRecenterKeyCode(int vkCode) {
     m_recenterKey.store(vkCode);
 }
 
-void HotkeyPoller::CheckKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
-                            bool allowFire) {
+void HotkeyPoller::CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
+                              bool allowFire, std::vector<HotkeyCallback>& toFire) {
     if (vkCode == 0 || !callback) return;
 
 #ifdef _WIN32
     bool pressed = (GetAsyncKeyState(vkCode) & kKeyPressedMask) != 0;
     if (pressed && !keyDown.load()) {
         keyDown.store(true);
-        if (allowFire) callback();
+        if (allowFire) toFire.push_back(callback);
     } else if (!pressed && keyDown.load()) {
         keyDown.store(false);
     }
+#else
+    (void)keyDown; (void)allowFire; (void)toFire;
 #endif
 }
 
@@ -163,11 +193,18 @@ void HotkeyPoller::Poll() {
     const bool allowFire = true;
 #endif
 
-    // Check built-in keys under callback lock (avoids copying std::function)
+    // Edge detection happens under the lock; the callbacks themselves are collected and
+    // invoked after it is released. Firing in place deadlocked the polling thread against
+    // itself for any callback that rebinds a key, since AddHotkey / RemoveHotkey /
+    // SetToggleKey / SetRecenterKey all take one of these two (non-recursive) mutexes -
+    // and "re-register bindings on config reload, triggered by a hotkey" is a normal
+    // shape for a mod.
+    std::vector<HotkeyCallback> toFire;
+
     {
         std::lock_guard<std::mutex> lock(m_callbackMutex);
-        CheckKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback, allowFire);
-        CheckKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback, allowFire);
+        CollectKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback, allowFire, toFire);
+        CollectKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback, allowFire, toFire);
     }
 
     // Check generic hotkeys
@@ -180,12 +217,16 @@ void HotkeyPoller::Poll() {
             bool pressed = (GetAsyncKeyState(entry.vkCode) & kKeyPressedMask) != 0;
             if (pressed && !entry.keyDown) {
                 entry.keyDown = true;
-                if (allowFire) entry.callback();
+                if (allowFire) toFire.push_back(entry.callback);
             } else if (!pressed && entry.keyDown) {
                 entry.keyDown = false;
             }
 #endif
         }
+    }
+
+    for (auto& callback : toFire) {
+        callback();
     }
 }
 
@@ -293,6 +334,16 @@ bool IsValidHotkeyCode(int vkCode) {
     if (vkCode == 0x23) return true;  // End
     if (vkCode == 0x2D) return true;  // Insert
     if (vkCode == 0x2E) return true;  // Delete
+
+    if (vkCode == 0x1B) return true;  // Escape
+    if (vkCode == 0x20) return true;  // Space
+
+    // Letters and digits. chord_hotkeys.h documents Ctrl+Shift+<letter> as the binding
+    // convention every mod registers, and VirtualKeyToString already names all 26 - so
+    // a mod validating a user's INI rebind through this function rejected the very keys
+    // the library tells it to use, and silently fell back to its default.
+    if (vkCode >= 0x30 && vkCode <= 0x39) return true;  // 0-9
+    if (vkCode >= 0x41 && vkCode <= 0x5A) return true;  // A-Z
 
     return false;
 }

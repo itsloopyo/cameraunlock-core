@@ -1,4 +1,5 @@
 using UnityEngine;
+using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 
 namespace CameraUnlock.Core.Unity.Tracking
@@ -75,8 +76,12 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            float deltaX = degreesX - _lastDegreesX;
-            float deltaY = degreesY - _lastDegreesY;
+            // Game yaw fields are commonly 0..360, so a plain subtraction reads a turn
+            // past the wrap point as a 359°/frame slew and clamps influence to its floor
+            // for that frame - a visible lurch every time the player rotates past north.
+            // UpdateFromRotation already measures this correctly via Quaternion.Angle.
+            float deltaX = AngleUtils.ShortestAngleDelta(_lastDegreesX, degreesX);
+            float deltaY = AngleUtils.ShortestAngleDelta(_lastDegreesY, degreesY);
             _currentSpeed = Mathf.Sqrt(deltaX * deltaX + deltaY * deltaY);
 
             _lastDegreesX = degreesX;
