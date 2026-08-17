@@ -12,6 +12,18 @@
 // The launcher (lopari) owns the manifest SCHEMA; this validator is the
 // mod-side gate for it, the same split as the install.cmd contract.
 //
+// launcher-manifest.json is the ONLY manifest. An earlier parallel format,
+// mod.json (manifestVersion: 1, camelCase runtimeRequirements, loader.type, no
+// delivery_mode), was never read by lopari or lopari.app - lopari's own
+// audit-loaders.py classes a repo carrying only mod.json as LEGACY - and has
+// been removed fleet-wide. If you are adding manifest support to a mod, this
+// file's schema is the one; do not reintroduce the other. The install/uninstall
+// .cmd scripts are a separate, non-manifest delivery path and stay.
+//
+// A manifest is only warranted where lopari actually deploys the mod, i.e. it
+// is in the catalog. It has to name the real shipped paths, so an invented one
+// for a pre-release repo fails on a user's machine rather than at build time.
+//
 //   node scripts/validate-manifest.mjs                 # this repo's own zip
 //   node scripts/validate-manifest.mjs <repo-or-zip> [...]
 //
