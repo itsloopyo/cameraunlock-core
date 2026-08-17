@@ -206,12 +206,18 @@ struct OverlayState {
     // The callback is assigned from the mod thread and invoked from the render
     // thread; a settings hot-reload that re-registers it would otherwise tear
     // the std::function under RenderFrame.
-    // Held by shared_ptr so RenderFrame copies a refcount rather than the
-    // functor. Copying a std::function allocates whenever its target exceeds the
-    // small-object buffer, which any lambda capturing more than a pointer or two
-    // does - that was a heap allocation per frame on the render thread, inside a
-    // hooked Present. Replacing the pointer also keeps an in-flight invocation's
-    // target alive, which is what the copy was really for.
+    // Held by shared_ptr so RenderFrame copies a refcount rather than the functor.
+    // Copying a std::function allocates whenever its target exceeds the small-object
+    // buffer, which any lambda capturing more than a pointer or two does - that was a
+    // heap allocation per frame on the render thread, inside a hooked Present.
+    // Replacing the pointer keeps an in-flight invocation's target alive, which is one
+    // of the two things the copy was doing.
+    //
+    // The other is a deliberate behaviour change: the per-frame copy also gave each
+    // invocation a PRIVATE target, so a mutable lambda's captured state was rebuilt
+    // from the master every frame and every mutation thrown away. Invocations now
+    // share one target, so a `[n = 0](...) mutable` counter actually advances. That is
+    // almost certainly what anyone writing one intended, but it is a change.
     std::shared_ptr<const DX11RenderCallback> callback;
     std::mutex         callbackMutex;
     DX11LogFn          logFn = nullptr;
@@ -544,9 +550,13 @@ inline void RenderFrame() {
 
 inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT flags) {
     auto& s = State();
-    // Unreachable in practice: MH_DisableHook restores the original bytes before it
-    // returns, so the detour cannot be entered after Remove(). Kept as cheap insurance
-    // against a MinHook failure, and it must not pretend the frame was presented.
+    // REACHABLE. MH_DisableHook restores the original bytes, but it does not drain
+    // threads already inside this detour - it relocates instruction pointers only
+    // within the target and trampoline regions, and this function is not in either.
+    // A thread that entered before Remove() and reaches here afterwards finds the
+    // trampoline nulled, which is the point: the alternative is calling through
+    // memory MH_RemoveHook has already returned to MinHook's pool. Returning an
+    // error is correct - the frame genuinely was not presented.
     auto orig = s.origPresent;
     if (!orig) return DXGI_ERROR_INVALID_CALL;
     if (!s.firstPresentLogged) {
@@ -634,6 +644,13 @@ inline void SetDX11OverlayLogger(DX11LogFn fn) { detail::State().logFn = fn; }
 
 inline bool DX11Overlay::Install() {
     auto& s = detail::State();
+
+    // Idempotent for the instance that already owns the hooks. Both earlier versions
+    // returned true here, and a consumer doing lazy-retry init or re-installing on a
+    // config reload would otherwise disable its own working HUD on the second call -
+    // while IsInstalled() kept reporting true, so the two accessors disagreed.
+    if (m_hookInstalled) return true;
+
     if (s.hookInstalled) {
         // Refused, not silently taken over. The hooks and the callback slot are
         // process-wide but there is exactly one of each, so a second instance
@@ -712,15 +729,19 @@ inline void DX11Overlay::Remove() {
         std::lock_guard<std::mutex> lock(s.callbackMutex);
         s.callback = nullptr;
     }
-    // The TARGETS are cleared so a second Remove() cannot pass null to MinHook (above).
-    // The TRAMPOLINES deliberately are not: MH_DisableHook does not return until no
-    // thread is executing the detour, so nothing can enter it afterwards, while a
-    // thread already inside has copied the pointer into a local before this runs.
-    // Nulling them only affected threads that cannot exist, and made the detours'
-    // defensive branch reachable in the one case where it lies to the engine - see
-    // HookedResizeBuffers.
+    // BOTH the targets and the trampolines are cleared. The targets so a second
+    // Remove() cannot pass null to MinHook (above), and the trampolines because
+    // MH_DisableHook does NOT drain threads out of the user detour first - it freezes
+    // threads and relocates instruction pointers only within the target and trampoline
+    // regions, and HookedPresent is arbitrary code MinHook has never heard of, so a
+    // thread inside it is invisible. MH_RemoveHook then returns the trampoline to
+    // MinHook's pool for the next MH_CreateHook to reuse. A straggler that skips the
+    // null check therefore calls through freed, likely recycled memory; the detours'
+    // null branch is the only thing standing between that and a crash.
     s.presentTarget = nullptr;
     s.resizeBuffersTarget = nullptr;
+    s.origPresent = nullptr;
+    s.origResize = nullptr;
     s.hookInstalled = false;
     m_hookInstalled = false;
 }
@@ -728,9 +749,19 @@ inline void DX11Overlay::Remove() {
 // Update the cached callback whenever consumer changes it after Install.
 // (m_callback is the source of truth on the public object, but RenderFrame
 // reads the State() copy to avoid touching this-pointer in a free function.)
+//
+// The shared slot is only written when this instance owns the hooks, or when nobody
+// does. Refusing a second Install() was not enough on its own: the documented usage
+// order is SetRenderCallback() then Install(), so instance B evicted A's callback
+// BEFORE it was ever told no, and A's overlay went blank while both objects still
+// reported success.
 inline void DX11Overlay::SetRenderCallback(DX11RenderCallback cb) {
     m_callback = cb;
     auto& s = detail::State();
+    if (s.hookInstalled && !m_hookInstalled) {
+        detail::Log("dx11_overlay: SetRenderCallback ignored, another overlay owns the hooks");
+        return;
+    }
     std::lock_guard<std::mutex> lock(s.callbackMutex);
     s.callback = std::make_shared<const DX11RenderCallback>(std::move(cb));
 }

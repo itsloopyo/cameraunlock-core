@@ -97,7 +97,6 @@ bool HotkeyPoller::Start(int pollIntervalMs) {
 
     m_pollInterval.store(pollIntervalMs);
     m_stopFlag.store(false);
-    m_running.store(true);
 
     // Reset key states
     m_toggleKeyDown.store(false);
@@ -109,7 +108,19 @@ bool HotkeyPoller::Start(int pollIntervalMs) {
         }
     }
 
-    m_thread = std::thread(&HotkeyPoller::PollLoop, this);
+    // m_running is set AFTER the thread exists, and rolled back if it does not.
+    // Setting it first meant a std::thread constructor that threw left m_running
+    // true with no thread behind it: Start() then returned true immediately on
+    // every subsequent call and IsRunning() reported healthy, so the mod's hotkeys
+    // were permanently dead while every API insisted they were fine. That is the
+    // silent failure the throw is supposed to replace, not accompany.
+    try {
+        m_thread = std::thread(&HotkeyPoller::PollLoop, this);
+    } catch (...) {
+        m_stopFlag.store(true);
+        throw;
+    }
+    m_running.store(true);
     return true;
 }
 

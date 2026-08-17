@@ -199,12 +199,18 @@ struct DX9State {
     // The callback is assigned from the mod thread and invoked from the render
     // thread; a settings hot-reload that re-registers it would otherwise tear
     // the std::function under RenderFrame.
-    // Held by shared_ptr so RenderFrame copies a refcount rather than the
-    // functor. Copying a std::function allocates whenever its target exceeds the
-    // small-object buffer, which any lambda capturing more than a pointer or two
-    // does - that was a heap allocation per frame on the render thread, inside a
-    // hooked Present. Replacing the pointer also keeps an in-flight invocation's
-    // target alive, which is what the copy was really for.
+    // Held by shared_ptr so RenderFrame copies a refcount rather than the functor.
+    // Copying a std::function allocates whenever its target exceeds the small-object
+    // buffer, which any lambda capturing more than a pointer or two does - that was a
+    // heap allocation per frame on the render thread, inside a hooked Present.
+    // Replacing the pointer keeps an in-flight invocation's target alive, which is one
+    // of the two things the copy was doing.
+    //
+    // The other is a deliberate behaviour change: the per-frame copy also gave each
+    // invocation a PRIVATE target, so a mutable lambda's captured state was rebuilt
+    // from the master every frame and every mutation thrown away. Invocations now
+    // share one target, so a `[n = 0](...) mutable` counter actually advances. That is
+    // almost certainly what anyone writing one intended, but it is a change.
     std::shared_ptr<const DX9RenderCallback> callback;
     std::mutex        callbackMutex;
     DX9LogFn          logFn = nullptr;
@@ -287,9 +293,13 @@ inline HRESULT __stdcall HookedPresent(IDirect3DDevice9* dev, const RECT* src, c
     // Remove() nulls this; a thread that entered just before it ran has no
     // trampoline left to forward to.
     auto orig = s.origPresent;
-    // Unreachable in practice: MH_DisableHook restores the original bytes before it
-    // returns, so the detour cannot be entered after Remove(). Must not claim the frame
-    // was presented.
+    // REACHABLE. MH_DisableHook restores the original bytes, but it does not drain
+    // threads already inside this detour - it relocates instruction pointers only
+    // within the target and trampoline regions, and this function is not in either.
+    // A thread that entered before Remove() and reaches here afterwards finds the
+    // trampoline nulled, which is the point: the alternative is calling through
+    // memory MH_RemoveHook has already returned to MinHook's pool. Returning an
+    // error is correct - the frame genuinely was not presented.
     if (!orig) return D3DERR_INVALIDCALL;
     if (!s.firstPresentLogged) {
         s.firstPresentLogged = true;
@@ -392,20 +402,26 @@ inline void DX9Overlay::Remove() {
     if (!m_hookInstalled) return;
 
     auto& s = detail::State();
+    // Targets AND trampolines are cleared. MH_DisableHook does NOT drain threads out
+    // of the user detour first - it freezes threads and relocates instruction pointers
+    // only within the target and trampoline regions, and HookedPresent is arbitrary
+    // code MinHook has never heard of, so a thread inside it is invisible.
+    // MH_RemoveHook then returns the trampoline to MinHook's pool for the next
+    // MH_CreateHook to reuse, so a straggler that skips the null check calls through
+    // freed, likely recycled memory. The detours' null branch is the only thing
+    // standing between that and a crash.
     if (s.presentHooked) {
         MH_DisableHook(s.presentTarget);
         MH_RemoveHook(s.presentTarget);
         s.presentHooked = false;
-        // Trampoline deliberately NOT nulled - see the note on the CreateDevice path.
         s.presentTarget = nullptr;
+        s.origPresent = nullptr;
     }
     if (s.createDeviceTarget) {
         MH_DisableHook(s.createDeviceTarget);
         MH_RemoveHook(s.createDeviceTarget);
-        // Trampoline deliberately NOT nulled - MH_DisableHook has already ensured
-        // no thread is in the detour, and clearing it only makes the detour's
-        // defensive branch reachable, where it would fail a legitimate call.
         s.createDeviceTarget = nullptr;
+        s.origCreateDevice = nullptr;
     }
     {
         std::lock_guard<std::mutex> lock(s.callbackMutex);
@@ -416,9 +432,18 @@ inline void DX9Overlay::Remove() {
     m_hookInstalled = false;
 }
 
+// The shared slot is only written when this instance owns the hooks, or when nobody
+// does. Refusing a second Install() was not enough on its own: the documented usage
+// order is SetRenderCallback() then Install(), so instance B evicted A's callback
+// BEFORE it was ever told no, and A's overlay went blank while both objects still
+// reported success.
 inline void DX9Overlay::SetRenderCallback(DX9RenderCallback cb) {
     m_callback = cb;
     auto& s = detail::State();
+    if (s.hookInstalled && !m_hookInstalled) {
+        detail::Log("dx9_overlay: SetRenderCallback ignored, another overlay owns the hooks");
+        return;
+    }
     std::lock_guard<std::mutex> lock(s.callbackMutex);
     s.callback = std::make_shared<const DX9RenderCallback>(std::move(cb));
 }

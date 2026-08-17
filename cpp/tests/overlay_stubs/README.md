@@ -7,13 +7,34 @@ dependencies (ImGui, kiero, MinHook) are vendored per mod, not here, so nothing
 in this repo ever compiled the bodies. Everything outside the `#ifdef` was the
 only part any build had ever seen.
 
-That is not a theoretical gap. It is how `MH_DisableHook(nullptr)` (which
-disables *every* hook in the process, including other mods') and the DX12 fence
-race shipped: neither is reachable by any test, and neither is visible to a
-compiler that never expands the block.
+`cameraunlock_overlay_compile` expands each implementation block so it is
+typechecked.
 
-These stubs exist purely so `cameraunlock_overlay_compile` can expand each
-implementation block and typecheck it. They are:
+## What this catches, and what it does not
+
+It catches syntax errors, type errors, and signature drift against the stub
+surface. That is all a compiler can do here.
+
+It would **not** have caught the two worst defects these headers have shipped:
+`MH_DisableHook(nullptr)` (which disables every MinHook hook in the process,
+other mods' included) is a well-typed call, and the DX12 fence race is
+well-typed code. Both are logic bugs. The value of this target is that a header
+nobody compiles rots freely and cannot be refactored with any confidence - not
+that it substitutes for review or for tests.
+
+Known gaps in the stubs themselves:
+
+- `MH_CreateHook` and `kiero::bind` are stubbed as **templates accepting any
+  callable**, because the real signatures take `void*` and MSVC permits
+  function-pointer-to-`void*` as an extension while gcc does not. The cost is
+  that a `__stdcall`/`__cdecl` mismatch or a wrong detour signature - a genuine,
+  compiler-catchable class of bug in exactly this code - compiles clean here.
+- The target is guarded on `if(WIN32)` and this repo has no C++ CI, so it runs
+  only when a developer runs `pixi run build-cpp` on Windows.
+
+## About the stubs
+
+They are:
 
 - **Not** a functional test. Every stub returns success and does nothing. The
   target links nothing and runs nothing; it is `add_library(... OBJECT)` on
