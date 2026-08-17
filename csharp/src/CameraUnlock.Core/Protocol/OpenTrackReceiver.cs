@@ -79,6 +79,10 @@ namespace CameraUnlock.Core.Protocol
         private float _offsetZ;
         private readonly object _offsetLock = new object();
 
+        // Serialises Stop() against RetryLoop publishing a newly-bound socket, so a retry
+        // that succeeds concurrently with a shutdown cannot leave _isRunning set.
+        private readonly object _lifecycleLock = new object();
+
         // Optional coordinate transformer
 #if NULLABLE_ENABLED
         private readonly CoordinateTransformer? _transformer;
@@ -141,13 +145,18 @@ namespace CameraUnlock.Core.Protocol
         public bool Start(int port = DefaultPort)
         {
             if (_disposed) return false;
-            if (_isRunning) return true;
+            // Already-running is only success if it is running on the port asked for.
+            // Reporting true for a different port left a mod that rebinds its UDP port
+            // from config listening on the old one with IsFailed clear and every status
+            // surface claiming healthy.
+            if (_isRunning) return port == _port;
             if (_retrying) return false;
             IsFailed = false;
             _port = port;
             _hasRecenterCounter = false;
             _isRemoteConnection = false;
             Interlocked.Exchange(ref _recenterRequested, 0);
+            Interlocked.Exchange(ref _timestampTicks, 0L);
 
             try
             {
@@ -216,17 +225,33 @@ namespace CameraUnlock.Core.Protocol
                         return;
                     }
 
-                    _udpClient = client;
-                    IsFailed = false;
-                    _retrying = false;
-
-                    _isRunning = true;
-                    _receiveThread = new Thread(ReceiveLoop)
+                    // Stop() can land between the check above and publication here. It
+                    // clears _isRunning and joins whatever _receiveThread it can see, so a
+                    // receiver published afterwards survives with _isRunning true: the next
+                    // Start() then short-circuits on "already running" and tracking is dead
+                    // for the process lifetime with IsFailed clear. Publish under the lock
+                    // Stop() takes, and unwind if it already ran.
+                    lock (_lifecycleLock)
                     {
-                        Name = "CameraUnlock-OpenTrackReceiver",
-                        IsBackground = true
-                    };
-                    _receiveThread.Start();
+                        if (!_retrying || _disposed)
+                        {
+                            try { client.Close(); }
+                            catch (SocketException) { }
+                            return;
+                        }
+
+                        _udpClient = client;
+                        IsFailed = false;
+                        _retrying = false;
+
+                        _isRunning = true;
+                        _receiveThread = new Thread(ReceiveLoop)
+                        {
+                            Name = "CameraUnlock-OpenTrackReceiver",
+                            IsBackground = true
+                        };
+                        _receiveThread.Start();
+                    }
 
                     Log?.Invoke(string.Format("UDP port {0} freed up - now listening (waited {1}s)", _port, attempts * RetryIntervalMs / 1000));
                     return;
@@ -243,8 +268,14 @@ namespace CameraUnlock.Core.Protocol
 
         public void Stop()
         {
-            _isRunning = false;
-            _retrying = false;
+            // Only the flag writes are serialised against RetryLoop's publication. The
+            // joins below must stay outside the lock: RetryLoop takes it, and joining a
+            // thread that is blocked on a lock this one holds is a deadlock.
+            lock (_lifecycleLock)
+            {
+                _isRunning = false;
+                _retrying = false;
+            }
 
             var retryThread = _retryThread;
             _retryThread = null;
@@ -268,6 +299,11 @@ namespace CameraUnlock.Core.Protocol
             // Locality belongs to the connection that is ending. Left set, the next
             // session reports the previous sender's locality until its first packet.
             _isRemoteConnection = false;
+            // Freshness is derived purely from this timestamp, so leaving the dead
+            // session's value makes IsDataFresh() report true on a closed socket. A
+            // stop/start toggle inside the freshness window then runs the whole
+            // per-frame pipeline - including the auto-recenter - against no stream.
+            Interlocked.Exchange(ref _timestampTicks, 0L);
         }
 
         /// <summary>
@@ -438,18 +474,24 @@ namespace CameraUnlock.Core.Protocol
             {
                 try
                 {
-                    if (_udpClient == null) break;
+                    // Snapshot the field: Stop() nulls it, and re-reading it for the
+                    // Receive call would dereference null on the receive thread - an
+                    // unhandled background-thread exception, which kills the process on
+                    // .NET Framework rather than just ending tracking.
+                    var client = _udpClient;
+                    if (client == null) break;
 
-                    byte[] data = _udpClient.Receive(ref remoteEndpoint);
+                    byte[] data = client.Receive(ref remoteEndpoint);
 
                     if (data.Length >= OpenTrackPacket.MinPacketSize)
                     {
-                        if (OpenTrackPacket.TryParse(data, out TrackingPose parsed))
+                        bool poseValid = OpenTrackPacket.TryParse(data, out TrackingPose parsed);
+
+                        if (poseValid)
                         {
                             _rotationYaw = parsed.Yaw;
                             _rotationPitch = parsed.Pitch;
                             _rotationRoll = parsed.Roll;
-                            Interlocked.Exchange(ref _timestampTicks, Stopwatch.GetTimestamp());
 
                             // Classify only packets that survived validation. A malformed
                             // datagram is discarded, so letting it set the flag would let
@@ -457,27 +499,45 @@ namespace CameraUnlock.Core.Protocol
                             // sending 48 bytes of garbage at the port.
                             //
                             _isRemoteConnection = IsRemoteAddress(remoteEndpoint.Address);
+
+                            if (OpenTrackPacket.TryParsePosition(data, out PositionData positionParsed))
+                            {
+                                _positionX = positionParsed.X;
+                                _positionY = positionParsed.Y;
+                                _positionZ = positionParsed.Z;
+                            }
+
+                            // Published last of the pose data, and with a full fence, so a
+                            // reader that observes this timestamp is guaranteed to see the
+                            // rotation AND position that came with it. Publishing it right
+                            // after the rotation let GetLatestPosition pair a new timestamp
+                            // with the previous packet's position, which the interpolator
+                            // reads as a new sample and latches one sample behind.
+                            Interlocked.Exchange(ref _timestampTicks, Stopwatch.GetTimestamp());
+
+                            // Same-connection liveness, for validated traffic only. Set for
+                            // any 48-byte datagram, a LAN host streaming garbage would hold
+                            // IsReceiving true and pin _consecutiveTimeouts at 0 forever,
+                            // so the tracker-restart re-arm below could never fire.
+                            _isConnected = true;
+                            _consecutiveTimeouts = 0;
                         }
 
-                        if (OpenTrackPacket.TryParsePosition(data, out PositionData positionParsed))
-                        {
-                            _positionX = positionParsed.X;
-                            _positionY = positionParsed.Y;
-                            _positionZ = positionParsed.Z;
-                        }
-
-                        if (OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
+                        // The trailer only means anything alongside the zeroed pose it rides
+                        // with. Honouring it on a packet whose pose failed validation centres
+                        // on the PREVIOUS pose - the pre-press drift the tracker just cleared -
+                        // which is the double-subtract failure reached through another door.
+                        if (poseValid && OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
                         {
                             if (!_hasRecenterCounter || recenterCounter != _lastRecenterCounter)
                             {
+                                // Exchanged after the pose and timestamp so a consumer that
+                                // sees the request is guaranteed to read the pose that carried it.
                                 Interlocked.Exchange(ref _recenterRequested, 1);
                             }
                             _lastRecenterCounter = recenterCounter;
                             _hasRecenterCounter = true;
                         }
-
-                        _isConnected = true;
-                        _consecutiveTimeouts = 0;
                     }
                 }
                 catch (SocketException ex)
