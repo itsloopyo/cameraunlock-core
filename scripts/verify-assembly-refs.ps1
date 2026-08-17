@@ -140,6 +140,15 @@ if (-not $Assembly) {
 }
 if (-not $Assembly) { Write-Host "No assemblies to check." -ForegroundColor Yellow; exit 0 }
 
+# A multi-targeted project leaves one output per TFM. Checking them all compares
+# a net48 build against a net35 game and reports half of BCL as missing, so name
+# the framework the mod actually ships.
+$tfms = $Assembly | ForEach-Object { Split-Path -Leaf (Split-Path -Parent $_) } |
+        Where-Object { $_ -match '^net(standard)?[0-9]' } | Select-Object -Unique
+if ($tfms.Count -gt 1) {
+    Write-Host ("WARNING: -BuildDir spans several target frameworks ({0}). Point it at the one you ship, e.g. -BuildDir '{1}\{2}'." -f ($tfms -join ', '), $BuildDir, $tfms[0]) -ForegroundColor Yellow
+}
+
 # --- index the real assemblies --------------------------------------------
 # A deployed mod puts our own DLLs in the same folder, and that copy is whatever
 # was installed last. Indexing it would compare this build against a stale one
@@ -149,11 +158,25 @@ $ours = @{}
 foreach ($a in $Assembly) { $ours[(Split-Path -Leaf $a)] = $true }
 
 $real = @{}
+# assembly simple name -> set of type names it DEFINES or TYPE-FORWARDS. A
+# reference names both a type and the assembly it expects to find it in, and the
+# runtime honours that: UnityEngine.dll forwards the engine module types, so
+# stubbing Camera there resolves, but uGUI has no forwarder, so a reference to
+# [UnityEngine]UnityEngine.UI.Image resolves nowhere and throws TypeLoadException.
+$provides = @{}
 foreach ($f in Get-ChildItem -Path $RealAsmDir -Filter *.dll) {
     if ($ours.ContainsKey($f.Name)) { continue }
     try {
         $m = [Mono.Cecil.ModuleDefinition]::ReadModule($f.FullName)
-        foreach ($t in $m.GetTypes()) { if (-not $real.ContainsKey($t.FullName)) { $real[$t.FullName] = $t } }
+        $asmName = $m.Assembly.Name.Name
+        if (-not $provides.ContainsKey($asmName)) { $provides[$asmName] = @{} }
+        foreach ($t in $m.GetTypes()) {
+            if (-not $real.ContainsKey($t.FullName)) { $real[$t.FullName] = $t }
+            $provides[$asmName][$t.FullName] = $true
+        }
+        foreach ($e in $m.ExportedTypes) {
+            if ($e.IsForwarder) { $provides[$asmName][$e.FullName] = $true }
+        }
     } catch { }
 }
 Write-Host ("Indexed {0} types from {1}" -f $real.Count, $RealAsmDir)
@@ -164,11 +187,49 @@ foreach ($path in $Assembly) {
     $mod = [Mono.Cecil.ModuleDefinition]::ReadModule($path)
     $name = Split-Path -Leaf $path
 
+    # Type references first. A type can be referenced without any member being
+    # touched (a cast, a field type, a signature), and that reference still names
+    # the assembly it expects to find the type in.
+    foreach ($tr in $mod.GetTypeReferences()) {
+        $tn = ($tr.FullName -replace '<.*$', '') -replace '\[\]$', ''
+        if ($NamespaceFilter -and $tn -notlike "$NamespaceFilter*") { continue }
+        $scopeKey = if ($tn.Contains('/')) { $tn.Split('/')[0] } else { $tn }
+        if (-not $real.ContainsKey($scopeKey)) { continue }
+        $scope = $tr.Scope
+        if (-not $scope -or $scope.GetType().Name -ne 'AssemblyNameReference') { continue }
+        $wanted = $scope.Name
+        if ($provides.ContainsKey($wanted) -and -not $provides[$wanted].ContainsKey($scopeKey)) {
+            $actual = ($provides.Keys | Where-Object { $provides[$_].ContainsKey($scopeKey) } | Select-Object -First 1)
+            $problems += [pscustomobject]@{
+                Assembly = $name; Kind = 'TYPEREF'; Member = "[$wanted]$scopeKey"
+                Detail = "$wanted neither defines nor forwards this type$(if ($actual) { "; it lives in $actual - compile the stub into $actual" }). Throws TypeLoadException."
+            }
+        }
+    }
+
     foreach ($r in $mod.GetMemberReferences()) {
         $declaring = $r.DeclaringType.FullName
         if ($NamespaceFilter -and $declaring -notlike "$NamespaceFilter*") { continue }
         $key = ($declaring -replace '<.*$', '') -replace '\[\]$', ''
         if (-not $real.ContainsKey($key)) { continue }   # type lives elsewhere; not ours to judge
+
+        # Does the assembly the reference names actually provide this type?
+        $scope = $r.DeclaringType.Scope
+        if ($scope -and $scope.GetType().Name -eq 'AssemblyNameReference') {
+            $wanted = $scope.Name
+            # A nested type is reached through its declaring type, and a forwarder
+            # for the outer type carries the nested ones with it, so judge the
+            # outer type or every nested reference reads as unresolvable.
+            $scopeKey = if ($key.Contains('/')) { $key.Split('/')[0] } else { $key }
+            if ($provides.ContainsKey($wanted) -and -not $provides[$wanted].ContainsKey($scopeKey)) {
+                $actual = ($provides.Keys | Where-Object { $provides[$_].ContainsKey($scopeKey) } | Select-Object -First 1)
+                $problems += [pscustomobject]@{
+                    Assembly = $name; Kind = 'TYPEREF'; Member = "[$wanted]$scopeKey"
+                    Detail = "$wanted neither defines nor forwards this type$(if ($actual) { "; it lives in $actual - compile the stub into $actual" }). Throws TypeLoadException."
+                }
+                continue
+            }
+        }
 
         # The runtime resolves a reference by walking the base-type chain, so a
         # reference emitted against a derived type still binds to a member the
