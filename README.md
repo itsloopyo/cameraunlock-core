@@ -22,7 +22,8 @@ cameraunlock-core/
 │   │   ├── CameraUnlock.Core.Unity/              # Unity extensions
 │   │   ├── CameraUnlock.Core.Unity.BepInEx/      # BepInEx integration
 │   │   ├── CameraUnlock.Core.Unity.Harmony/      # Harmony IL patching utilities
-│   │   └── CameraUnlock.Core.Tests/              # xUnit tests (net6.0)
+│   │   ├── CameraUnlock.Core.Tests/              # xUnit tests (net8.0)
+│   │   └── CameraUnlock.Core.Unity.Tests/        # xUnit tests for the Unity half (net8.0)
 │   ├── il2cpp/                                   # Source-shared helpers for IL2CPP mods (see its README.md)
 │   └── CameraUnlock.Core.sln
 ├── cpp/
@@ -313,7 +314,8 @@ ctest --test-dir build
 | CameraUnlock.Core.Unity | net35, net472, net48 | Unity 2018+ Mono compatibility |
 | CameraUnlock.Core.Unity.BepInEx | net472, net48 | BepInEx requires .NET 4.x |
 | CameraUnlock.Core.Unity.Harmony | net35, net472, net48 | Harmony IL patching (via Lib.Harmony 2.2.2) |
-| CameraUnlock.Core.Tests | net6.0 | A passing test here does not prove Unity Mono compatibility - build the full solution |
+| CameraUnlock.Core.Tests | net8.0 | A passing test here does not prove Unity Mono compatibility - build the full solution |
+| CameraUnlock.Core.Unity.Tests | net8.0 | Compiles the Unity classes under test from source against `UnityStubs.cs`; the shipped UnityEngine assemblies cannot be loaded in a test host |
 
 ### Framework Notes
 
