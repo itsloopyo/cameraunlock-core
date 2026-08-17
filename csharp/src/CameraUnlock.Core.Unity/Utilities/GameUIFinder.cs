@@ -73,6 +73,12 @@ namespace CameraUnlock.Core.Unity.Utilities
         {
             if (keywords == null || keywords.Length == 0) return null;
 
+            // Lowered once. Doing it inside the per-object loop allocated a string per
+            // object per keyword on top of a whole-scene scan, and mods poll this every
+            // frame until the HUD exists - tens of thousands of allocations per frame in
+            // any scene where the reticle is absent.
+            string[] loweredKeywords = LowerKeywords(keywords);
+
             #pragma warning disable CS0618 // FindObjectsByType unavailable in older Unity versions
             GameObject[] allObjects = UnityEngine.Object.FindObjectsOfType<GameObject>();
             #pragma warning restore CS0618
@@ -81,10 +87,10 @@ namespace CameraUnlock.Core.Unity.Utilities
                 if (obj == null) continue;
                 string objName = obj.name.ToLowerInvariant();
 
-                foreach (string keyword in keywords)
+                foreach (string keyword in loweredKeywords)
                 {
-                    if (string.IsNullOrEmpty(keyword)) continue;
-                    if (objName.Contains(keyword.ToLowerInvariant()))
+                    if (keyword == null) continue;
+                    if (objName.Contains(keyword))
                     {
                         return obj;
                     }
@@ -108,6 +114,8 @@ namespace CameraUnlock.Core.Unity.Utilities
 
             if (canvasType == null) return null;
 
+            string[] loweredKeywords = LowerKeywords(keywords);
+
             #pragma warning disable CS0618 // FindObjectsByType unavailable in older Unity versions
             UnityEngine.Object[] canvases = UnityEngine.Object.FindObjectsOfType(canvasType);
             #pragma warning restore CS0618
@@ -122,10 +130,10 @@ namespace CameraUnlock.Core.Unity.Utilities
                     if (child == null) continue;
                     string childName = child.name.ToLowerInvariant();
 
-                    foreach (string keyword in keywords)
+                    foreach (string keyword in loweredKeywords)
                     {
-                        if (string.IsNullOrEmpty(keyword)) continue;
-                        if (childName.Contains(keyword.ToLowerInvariant()))
+                        if (keyword == null) continue;
+                        if (childName.Contains(keyword))
                         {
                             return child.gameObject;
                         }
@@ -215,6 +223,18 @@ namespace CameraUnlock.Core.Unity.Utilities
             }
 
             return current.gameObject;
+        }
+
+        // Null entries mark keywords the caller left empty, so the scan loops can skip
+        // them with a reference test instead of re-checking IsNullOrEmpty per object.
+        private static string[] LowerKeywords(string[] keywords)
+        {
+            var lowered = new string[keywords.Length];
+            for (int i = 0; i < keywords.Length; i++)
+            {
+                lowered[i] = string.IsNullOrEmpty(keywords[i]) ? null : keywords[i].ToLowerInvariant();
+            }
+            return lowered;
         }
     }
 }

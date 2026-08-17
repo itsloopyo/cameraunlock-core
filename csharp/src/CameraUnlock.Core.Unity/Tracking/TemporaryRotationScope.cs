@@ -76,7 +76,7 @@ namespace CameraUnlock.Core.Unity.Tracking
             }
 
             // Skip if no valid base rotation or no head tracking applied
-            if (baseRotation == default || headTrackingRotation == Quaternion.identity)
+            if (IsUnset(baseRotation) || headTrackingRotation == Quaternion.identity)
             {
                 return null;
             }
@@ -101,7 +101,7 @@ namespace CameraUnlock.Core.Unity.Tracking
             Transform cameraTransform,
             Quaternion baseRotation)
         {
-            if (cameraTransform == null || baseRotation == default)
+            if (cameraTransform == null || IsUnset(baseRotation))
             {
                 return null;
             }
@@ -129,6 +129,16 @@ namespace CameraUnlock.Core.Unity.Tracking
             _isActive = false;
             _transform = null;
             _savedRotation = Quaternion.identity;
+        }
+
+        // Unity overloads Quaternion.operator== as Dot(a, b) > 0.999999f, and the dot of
+        // any quaternion with the all-zero default is 0 - so "q == default" is false even
+        // for default itself. The guard it was written as never fired, letting an unset
+        // base rotation through to be written to the transform as the zero quaternion,
+        // which Unity rejects with "Quaternion To Matrix conversion failed".
+        private static bool IsUnset(Quaternion rotation)
+        {
+            return rotation.x == 0f && rotation.y == 0f && rotation.z == 0f && rotation.w == 0f;
         }
     }
 
@@ -188,7 +198,7 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return null;
             }
 
-            if (baseRotation == default || headTrackingRotation == Quaternion.identity)
+            if (IsUnset(baseRotation) || headTrackingRotation == Quaternion.identity)
             {
                 return null;
             }
@@ -212,5 +222,15 @@ namespace CameraUnlock.Core.Unity.Tracking
             _transform = null;
             _savedRotation = Quaternion.identity;
         }
-    }
+    
+        // Unity overloads Quaternion.operator== as Dot(a, b) > 0.999999f, and the dot of
+        // any quaternion with the all-zero default is 0 - so "q == default" is false even
+        // for default itself. The guard it was written as never fired, letting an unset
+        // base rotation through to be written to the transform as the zero quaternion,
+        // which Unity rejects with "Quaternion To Matrix conversion failed".
+        private static bool IsUnset(Quaternion rotation)
+        {
+            return rotation.x == 0f && rotation.y == 0f && rotation.z == 0f && rotation.w == 0f;
+        }
+}
 }

@@ -146,13 +146,13 @@ namespace CameraUnlock.Core.Unity.Tracking
         {
             if (_trackedCamera != null)
             {
-                // Only log once when camera is first lost
-                float now = Time.unscaledTime;
-                if (_logInterval <= 0 || now - _lastLogTime > _logInterval)
-                {
-                    OnCameraLost();
-                    _lastLogTime = now;
-                }
+                // The _trackedCamera null check already makes this fire exactly once per
+                // loss, so the interval could only ever suppress a real notification.
+                // Gating it here meant a second camera loss within LogInterval skipped the
+                // subclass's cleanup entirely - reticle left drawn over the menu, view
+                // matrix never reset - on a gameplay/menu round trip inside 5 seconds.
+                _lastLogTime = Time.unscaledTime;
+                OnCameraLost();
 
                 // Clear references but don't destroy hook - it will be destroyed with camera
                 _trackedCamera = null;
