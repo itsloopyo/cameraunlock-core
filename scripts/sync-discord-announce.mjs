@@ -286,3 +286,25 @@ for (const status of Object.keys(byStatus).sort()) {
   }
   console.log('');
 }
+
+// The script previously always exited 0, so a run across the fleet that failed to patch
+// several repos reported success to whatever invoked it - and those mods then shipped
+// releases with no Discord announcement, the exact failure the webhook check exists to
+// prevent. REUSABLE_CALLER is not a failure: those repos get the step from the shared
+// workflow. NO_STEPS_KEY / NO_RELEASE_STEP / NO_RELEASE_WF mean the repo was not
+// reconciled and needs a look.
+const FAILING = new Set([
+  'NO_RELEASE_WF',
+  'NO_RELEASE_STEP',
+  'NO_STEPS',
+  'NO_STEPS_KEY',
+  'YAML_INVALID_REVERTED',
+  'WOULD_FAIL_YAML',
+]);
+
+const failed = results.filter((r) => FAILING.has(r.status));
+if (failed.length > 0) {
+  console.log(`${failed.length} repo(s) need attention: ${failed.map((r) => r.name).join(', ')}`);
+  process.exit(1);
+}
+

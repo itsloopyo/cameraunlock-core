@@ -77,6 +77,15 @@ function validate(label, zip) {
   for (const a of man.loader?.archives ?? []) if (a.source) sources.push(a.source);
   for (const f of man.files ?? []) sources.push(f.source);
 
+  // A manifest that declares nothing passed the "everything declared is present"
+  // check vacuously and printed OK. That is the worst outcome for a gate whose whole
+  // job is catching a package that would deploy nothing - the manifest is round-tripped
+  // through ConvertFrom-Json/ConvertTo-Json during stamping, so a depth overflow or a
+  // renamed key silently empties it and CI publishes happily.
+  if (sources.length === 0) {
+    throw new Error("manifest declares no bundled sources - nothing would be deployed");
+  }
+
   const missing = sources.filter((s) => !entries.has(s.replace(/\\/g, "/")));
   if (missing.length > 0) {
     throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
