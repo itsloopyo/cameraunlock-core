@@ -156,9 +156,22 @@ namespace CameraUnlock.Core.Protocol
             if (_disposed) return false;
             // Already-running is only success if it is running on the port asked for.
             // Reporting true for a different port left a mod that rebinds its UDP port
-            // from config listening on the old one with IsFailed clear and every status
-            // surface claiming healthy.
-            if (_isRunning) return port == _port;
+            // from config listening on the old one while believing the rebind took.
+            //
+            // IsFailed is deliberately NOT set here: the receiver is healthy, just bound
+            // elsewhere, and a mod polling IsFailed as a health light should not see a
+            // fault. The mismatch is reported through the return value and the log, so
+            // call Stop() before Start() on a new port.
+            if (_isRunning)
+            {
+                if (port != _port)
+                {
+                    Log?.Invoke(string.Format(
+                        "Start({0}) ignored - already listening on port {1}. Stop() first to rebind.",
+                        port, _port));
+                }
+                return port == _port;
+            }
             if (_retrying) return false;
             IsFailed = false;
             _port = port;
@@ -671,11 +684,17 @@ namespace CameraUnlock.Core.Protocol
                     }
 
                     // Re-armed on a WALL CLOCK rather than on a count of consecutive recv
-                    // timeouts. The count only approximates 5s while the socket is
-                    // COMPLETELY silent, and it is reset by any datagram from any source -
-                    // so a second tracker (or an opentrack instance sharing port 4242)
-                    // held it at zero indefinitely and a genuine tracker restart behind
-                    // that noise had its first CENTER press swallowed.
+                    // timeouts, which only approximated 5s and was reset by any datagram
+                    // large enough to reach the parser - so a stream of rejected garbage
+                    // from a LAN host held the count at zero indefinitely.
+                    //
+                    // This does NOT cover a second VALID sender (a co-running opentrack on
+                    // the same port). That keeps Receive() returning, so no
+                    // SocketException is raised and this is never reached; and it keeps
+                    // _timestampTicks current, so the elapsed test would fail anyway.
+                    // Telling our tracker's restart from another sender's traffic needs
+                    // per-source state, which is what the C++ UdpReceiver's source-locking
+                    // does and this port does not have.
                     MaybeRearmRecenterFirstSighting();
                 }
                 catch (ObjectDisposedException)

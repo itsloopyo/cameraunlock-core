@@ -99,10 +99,18 @@ namespace CameraUnlock.Core.Processing.AxisTransform
         /// <para>
         /// Defaults to 45, not 180. Head-tracking input lives within roughly +/-30
         /// degrees, so normalising against a half-turn pinned every non-linear curve to
-        /// its near-zero end: the shipped Competitive preset advertises "fast yaw" with
-        /// Sensitivity 1.2 and a quadratic curve, and at a 10 degree input the curve
-        /// multiplier collapsed to 0.50, making it 0.60x overall - slower than the
-        /// Default preset it claims to beat.
+        /// its near-zero end and the curve never reached full gain in the usable range at
+        /// all: the shipped Competitive preset advertises "fast yaw" with Sensitivity 1.2
+        /// and a quadratic curve, yet at a 10 degree input the multiplier collapsed to
+        /// 0.50, making it 0.60x overall.
+        /// </para>
+        /// <para>
+        /// To be clear about what this does and does not fix: an acceleration curve is
+        /// SUPPOSED to be gentle at small angles, so Competitive is still below Default
+        /// near centre (0.63x at 10 degrees) and only overtakes it past roughly 40
+        /// degrees of yaw. What changed is that the curve now reaches full gain within a
+        /// range a head can actually turn through, instead of being pinned near zero
+        /// everywhere.
         /// </para>
         /// <para>
         /// Values at or below zero are rejected on assignment: 0 made the normalisation
