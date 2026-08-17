@@ -80,10 +80,15 @@ struct Quat4 {
     /// Creates a quaternion from YXZ Euler angles (yaw, pitch, roll in degrees).
     /// Matches C# QuaternionUtils.FromYawPitchRoll.
     static Quat4 FromYawPitchRoll(float yawDeg, float pitchDeg, float rollDeg) {
-        constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
-        float halfYaw = yawDeg * kDegToRad * 0.5f;
-        float halfPitch = pitchDeg * kDegToRad * 0.5f;
-        float halfRoll = rollDeg * kDegToRad * 0.5f;
+        // Suffixed, NOT named kDegToRad. This header lives in cameraunlock::math, the
+        // same namespace as angle_utils.h's double constants, so a local of that name
+        // shadows one - which is C4459 and a hard build failure for the several mods
+        // that compile with /W4 /WX. Single precision is deliberate: the surrounding
+        // arithmetic is float, and promoting to double only to narrow again is noise.
+        constexpr float kDegToRadF = 3.14159265358979323846f / 180.0f;
+        float halfYaw = yawDeg * kDegToRadF * 0.5f;
+        float halfPitch = pitchDeg * kDegToRadF * 0.5f;
+        float halfRoll = rollDeg * kDegToRadF * 0.5f;
 
         float sy = std::sin(halfYaw);
         float cy = std::cos(halfYaw);
@@ -103,7 +108,8 @@ struct Quat4 {
     /// Decomposes this quaternion into YXZ Euler angles (yaw, pitch, roll in degrees).
     /// Matches C# QuaternionUtils.ToEulerYXZ. Handles gimbal lock at ±90° pitch.
     void ToEulerYXZ(float& yaw, float& pitch, float& roll) const {
-        constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
+        // Suffixed for the same reason as kDegToRadF above.
+        constexpr float kRadToDegF = 180.0f / 3.14159265358979323846f;
         // sin(89.9 deg) is 0.9999985, so the general branch keeps every angle where it
         // is still well-conditioned.
         constexpr float kGimbalLockSinThreshold = 0.9999995f;
@@ -119,16 +125,16 @@ struct Quat4 {
         // general branch ran anyway. Matches QuaternionUtils.ToEulerYXZ in C#.
         if (sinPitch >= kGimbalLockSinThreshold) {
             pitch = 90.0f;
-            yaw = std::atan2(2.0f * (x * y - w * z), 1.0f - 2.0f * (y * y + z * z)) * kRadToDeg;
+            yaw = std::atan2(2.0f * (x * y - w * z), 1.0f - 2.0f * (y * y + z * z)) * kRadToDegF;
             roll = 0.0f;
         } else if (sinPitch <= -kGimbalLockSinThreshold) {
             pitch = -90.0f;
-            yaw = std::atan2(-2.0f * (x * y - w * z), 1.0f - 2.0f * (y * y + z * z)) * kRadToDeg;
+            yaw = std::atan2(-2.0f * (x * y - w * z), 1.0f - 2.0f * (y * y + z * z)) * kRadToDegF;
             roll = 0.0f;
         } else {
-            pitch = std::asin(sinPitch) * kRadToDeg;
-            yaw = std::atan2(2.0f * (x * z + w * y), 1.0f - 2.0f * (x * x + y * y)) * kRadToDeg;
-            roll = std::atan2(2.0f * (x * y + w * z), 1.0f - 2.0f * (x * x + z * z)) * kRadToDeg;
+            pitch = std::asin(sinPitch) * kRadToDegF;
+            yaw = std::atan2(2.0f * (x * z + w * y), 1.0f - 2.0f * (x * x + y * y)) * kRadToDegF;
+            roll = std::atan2(2.0f * (x * y + w * z), 1.0f - 2.0f * (x * x + z * z)) * kRadToDegF;
         }
     }
 

@@ -19,6 +19,23 @@ target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)
 
 add_test(NAME cameraunlock_tests COMMAND cameraunlock_tests)
 
+# Compile-only, and STRICT. Every public header in one TU at the warning level the
+# fleet's own mods use, because a problem that only appears when two headers meet is
+# invisible to any build that includes them separately - which is every build here.
+# `/WX` is deliberately NOT put on the `cameraunlock` library target: mods build the
+# core from source via add_subdirectory, and forcing warnings-as-errors on them would
+# turn any future compiler's new warning into a fleet-wide outage. This target carries
+# the strictness instead. See cpp/tests/headers_strict.cpp for what it caught.
+add_library(cameraunlock_headers_strict OBJECT headers_strict.cpp)
+target_include_directories(cameraunlock_headers_strict PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+if(MSVC)
+    target_compile_options(cameraunlock_headers_strict PRIVATE /W4 /WX)
+else()
+    # -Wshadow is deliberately absent: gcc flags a constructor parameter shadowing a
+    # member, which is idiomatic here and is NOT what MSVC's C4459 reports.
+    target_compile_options(cameraunlock_headers_strict PRIVATE -Wall -Wextra -Werror)
+endif()
+
 # Compile-only. The overlay headers are header-only templates whose bodies live
 # behind CAMERAUNLOCK_DX*_OVERLAY_IMPLEMENTATION, so until this target existed
 # nothing in this repo ever expanded them and a syntax or type error only
