@@ -527,10 +527,20 @@ if exist "!DEPLOY_DIR!\" (
 )
 set "MODS_TXT=!UE4_BINARIES_DIR!\Mods\mods.txt"
 if not exist "!MODS_TXT!" exit /b 0
-findstr /b /c:"%MOD_INTERNAL_NAME% " "!MODS_TXT!" >nul
+:: Matched as "NAME :" rather than "NAME ". A bare trailing space also matches a
+:: LONGER name that merely starts the same way, so uninstalling "HeadTracking"
+:: would have deregistered "HeadTracking Extras" as well - and UE4SS mod names
+:: come from folder names, which may contain spaces.
+findstr /b /c:"%MOD_INTERNAL_NAME% :" "!MODS_TXT!" >nul
+:: 1 = not present (nothing to do). 2+ = the file could not be READ, which is
+:: not the same thing and must not be reported as a clean deregistration.
+if errorlevel 2 (
+    echo   ERROR: could not read !MODS_TXT! to deregister %MOD_INTERNAL_NAME%.
+    exit /b 1
+)
 if errorlevel 1 exit /b 0
 set "_MODS_TMP=%TEMP%\cul-modstxt-%RANDOM%-%RANDOM%.txt"
-findstr /v /b /c:"%MOD_INTERNAL_NAME% " "!MODS_TXT!" > "!_MODS_TMP!"
+findstr /v /b /c:"%MOD_INTERNAL_NAME% :" "!MODS_TXT!" > "!_MODS_TMP!"
 :: findstr /v returns 1 when it filtered every line out, which is a normal
 :: result here (our entry was the only one). Only 2+ is a read failure.
 if errorlevel 2 (
@@ -553,11 +563,23 @@ exit /b 0
 :: Lua mods.
 :: ============================================
 :remove_UE4SS
-for %%f in (UE4SS.dll dwmapi.dll) do (
+:: Every top-level file the vendored UE4SS zip lays down, not just the two
+:: DLLs. Removing a subset left the game folder littered with a settings
+:: file and docs while reporting "Uninstall Complete", and the bespoke
+:: uninstaller this shared path replaces removed four of them.
+for %%f in (UE4SS.dll dwmapi.dll UE4SS-settings.ini Changelog.md README.md) do (
     if exist "!UE4_BINARIES_DIR!\%%f" (
         del "!UE4_BINARIES_DIR!\%%f"
         echo   Removed: %%f
     )
+)
+:: The Mods\ tree is deliberately left alone. It holds UE4SS's own built-in
+:: Lua mods AND anything else the user installed, and there is no record of
+:: which subfolders arrived with the loader - so deleting the tree would take
+:: the user's other mods with it. Our own entry is removed by
+:: :remove_ue4ss_mod before this runs.
+if exist "!UE4_BINARIES_DIR!\Mods" (
+    echo   Left in place: Mods\ ^(UE4SS built-in Lua mods and any you added^)
 )
 exit /b 0
 

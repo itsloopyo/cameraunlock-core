@@ -114,11 +114,14 @@ function Select-SoakedReleases {
 function Get-ReleaseVersionKey {
     param([string]$Tag)
 
-    if ($Tag -match '(\d+(?:\.\d+){0,3})') {
-        $text = $matches[1]
-        if ($text -notmatch '\.') { $text = "$text.0" }
+    # Anchored, and requires at least one dot. An unanchored bare-digit match takes the
+    # FIRST digit run anywhere in the tag, so 'BepInEx_x64_5.4.22.0' scored 64.0 and
+    # 'UE4SS_v3.0.1' scored 4.0 - both outranking every real 5.4.x. That is bounded today
+    # only because -VersionPrefix usually makes each candidate set homogeneous, and it
+    # defaults to empty.
+    if ($Tag -match '(?:^|[^0-9.])v?(\d+(?:\.\d+){1,3})') {
         $parsed = [version]'0.0'
-        if ([version]::TryParse($text, [ref]$parsed)) { return $parsed }
+        if ([version]::TryParse($matches[1], [ref]$parsed)) { return $parsed }
     }
     return [version]'0.0'
 }
@@ -1280,7 +1283,10 @@ function Update-VendoredLoader {
         # so the derived asset name is "5.4.2100": the vendored file lands with
         # no extension, the zip LICENSE extraction below is skipped, and the
         # name install.cmd hardcodes is missing from the tree.
-        if (-not [IO.Path]::GetExtension($meta.AssetName)) {
+        # NOTE the version-like test: [IO.Path]::GetExtension('5.4.2100') returns
+        # '.2100', so an extension check ALONE never fires for exactly the Thunderstore
+        # URL described above - which is the case this guard exists for.
+        if ((-not [IO.Path]::GetExtension($meta.AssetName)) -or ($meta.AssetName -match '^[0-9]+(\.[0-9]+)*$')) {
             throw "Cannot derive a vendored filename from '$($meta.AssetUrl)' - the URL's last segment ('$($meta.AssetName)') has no extension. Pass -OutputFileName with the name install.cmd expects."
         }
         $OutputFileName = $meta.AssetName

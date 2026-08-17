@@ -222,8 +222,14 @@ function Invoke-DevDeployCecil {
     # Discarding it is just as wrong: Invoke-HeadTrackingPatch, the canonical patcher
     # here, never throws - it returns @{ Success = $false; Errors = @(...) }. Piping to
     # Out-Null would swallow that and return deployment success after a failed patch.
-    $patchResult = & $Patcher $assemblyPath
-    if ($patchResult -is [hashtable] -and -not $patchResult.Success) {
+    # The patcher's return value may arrive alongside stray pipeline output (a
+    # Copy-Item -PassThru, a New-Item), in which case it is an array rather than the
+    # hashtable. Sniffing the whole stream for [hashtable] silently SKIPPED the failure
+    # check in exactly that case, so a failed patch reported deployment success. Pick the
+    # result object out of whatever came back instead.
+    $patchOutput = @(& $Patcher $assemblyPath)
+    $patchResult = $patchOutput | Where-Object { $_ -is [hashtable] -and $_.ContainsKey('Success') } | Select-Object -Last 1
+    if ($patchResult -and -not $patchResult.Success) {
         throw "Patcher reported failure for ${assemblyPath}: $($patchResult.Errors -join '; ')"
     }
 

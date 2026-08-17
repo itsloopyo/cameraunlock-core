@@ -137,8 +137,16 @@ function Resolve-TargetUnderGame {
         return $null
     }
 
-    $rootFull   = [System.IO.Path]::GetFullPath($gameDir).TrimEnd('\')
-    $targetFull = [System.IO.Path]::GetFullPath((Join-Path $gameDir $Relpath)).TrimEnd('\')
+    # Resolved through the PROVIDER, not [System.IO.Path]::GetFullPath. GetFullPath
+    # resolves a relative path against [Environment]::CurrentDirectory, which does NOT
+    # track Set-Location - so `cd D:\Games\MyGame; .\uninstall.ps1 -GamePath .` had
+    # Find-GameInstallation validate D:\Games\MyGame (Test-Path uses the provider) while
+    # this resolved "." to the shell's start directory. Root and target then resolved
+    # consistently WRONG, so the containment check below passed and the
+    # Remove-Item -Recurse -Force was aimed at a tree that was never the game.
+    $resolver   = $ExecutionContext.SessionState.Path
+    $rootFull   = $resolver.GetUnresolvedProviderPathFromPSPath($gameDir).TrimEnd('\')
+    $targetFull = $resolver.GetUnresolvedProviderPathFromPSPath((Join-Path $gameDir $Relpath)).TrimEnd('\')
 
     if (-not $targetFull.StartsWith($rootFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
         Write-Fail "$Label resolves outside the game folder and will not be removed: $targetFull"

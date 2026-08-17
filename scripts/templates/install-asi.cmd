@@ -32,6 +32,14 @@ set "MOD_CONTROLS="
 :: --- END CONFIG BLOCK ---
 
 call :detect_yes_flag %*
+:: :detect_yes_flag and the arg parser both break if the shell left delayed
+:: expansion on - cmd /V:ON, or DelayedExpansion=1 under
+:: HKCU\Software\Microsoft\Command Processor. Under either, a "!" in the game
+:: path is eaten out of the expanded line before the parser ever compares it, and
+:: a real directory is rejected as a malformed argument. Moving the enable to
+:: after :args_done is not enough on its own; the default has to be pinned OFF.
+setlocal disabledelayedexpansion
+
 call :main %*
 set "_EC=%errorlevel%"
 if not defined YES_FLAG ( echo. & pause )
