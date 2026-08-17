@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 
@@ -36,7 +37,7 @@ namespace CameraUnlock.Core.Unity.Utilities
                 return false;
             }
 
-            FieldInfo field = type.GetField(fieldName, StaticFieldFlags);
+            FieldInfo field = ResolveField(type, fieldName, StaticFieldFlags);
             if (field == null)
             {
                 return false;
@@ -81,7 +82,7 @@ namespace CameraUnlock.Core.Unity.Utilities
                 throw new InvalidOperationException($"Type '{typeName}' not found in assembly '{assemblyName}'");
             }
 
-            FieldInfo field = type.GetField(fieldName, StaticFieldFlags);
+            FieldInfo field = ResolveField(type, fieldName, StaticFieldFlags);
             if (field == null)
             {
                 throw new InvalidOperationException($"Static field '{fieldName}' not found on type '{typeName}'");
@@ -116,7 +117,7 @@ namespace CameraUnlock.Core.Unity.Utilities
                 return false;
             }
 
-            FieldInfo field = type.GetField(fieldName, StaticFieldFlags);
+            FieldInfo field = ResolveField(type, fieldName, StaticFieldFlags);
             if (field == null)
             {
                 return false;
@@ -172,7 +173,7 @@ namespace CameraUnlock.Core.Unity.Utilities
                 throw new InvalidOperationException($"Type '{singletonTypeName}' not found");
             }
 
-            FieldInfo singletonField = type.GetField(singletonFieldName, StaticFieldFlags);
+            FieldInfo singletonField = ResolveField(type, singletonFieldName, StaticFieldFlags);
             if (singletonField == null)
             {
                 throw new InvalidOperationException($"Static field '{singletonFieldName}' not found on type '{singletonTypeName}'");
@@ -190,7 +191,7 @@ namespace CameraUnlock.Core.Unity.Utilities
                 throw new InvalidOperationException($"Singleton '{singletonTypeName}.{singletonFieldName}' is destroyed");
             }
 
-            FieldInfo instanceField = type.GetField(instanceFieldName, InstanceFieldFlags);
+            FieldInfo instanceField = ResolveField(type, instanceFieldName, InstanceFieldFlags);
             if (instanceField == null)
             {
                 throw new InvalidOperationException($"Instance field '{instanceFieldName}' not found on type '{singletonTypeName}'");
@@ -235,7 +236,7 @@ namespace CameraUnlock.Core.Unity.Utilities
                 return false;
             }
 
-            FieldInfo singletonField = type.GetField(singletonFieldName, StaticFieldFlags);
+            FieldInfo singletonField = ResolveField(type, singletonFieldName, StaticFieldFlags);
             if (singletonField == null)
             {
                 return false;
@@ -253,7 +254,7 @@ namespace CameraUnlock.Core.Unity.Utilities
                 return false;
             }
 
-            FieldInfo instanceField = type.GetField(instanceFieldName, InstanceFieldFlags);
+            FieldInfo instanceField = ResolveField(type, instanceFieldName, InstanceFieldFlags);
             if (instanceField == null)
             {
                 return false;
@@ -287,7 +288,35 @@ namespace CameraUnlock.Core.Unity.Utilities
             return component != null && component.gameObject.activeInHierarchy;
         }
 
+        // Exists/TryGetValue are exactly what a mod's per-frame ShouldApplyTracking() calls, and
+        // an uncached miss allocated an assembly-qualified name string and a fresh ~100-entry
+        // array from AppDomain.GetAssemblies() every frame.
+        //
+        // Only successful resolutions are cached. Caching a miss would latch the failure for
+        // the process even after the game assembly that owns the type finishes loading.
+        private static readonly Dictionary<TypeKey, Type> TypeCache = new Dictionary<TypeKey, Type>();
+
+        // A loaded Type's member set is immutable, so misses are safe to cache here.
+        private static readonly Dictionary<FieldKey, FieldInfo> FieldCache = new Dictionary<FieldKey, FieldInfo>();
+
         private static Type ResolveType(string typeName, string assemblyName)
+        {
+            var key = new TypeKey(typeName, assemblyName);
+            Type cached;
+            if (TypeCache.TryGetValue(key, out cached))
+            {
+                return cached;
+            }
+
+            Type type = Resolve(typeName, assemblyName);
+            if (type != null)
+            {
+                TypeCache[key] = type;
+            }
+            return type;
+        }
+
+        private static Type Resolve(string typeName, string assemblyName)
         {
             // Try fully qualified name first
             Type type = Type.GetType($"{typeName}, {assemblyName}");
@@ -314,6 +343,79 @@ namespace CameraUnlock.Core.Unity.Utilities
             }
 
             return null;
+        }
+
+        private static FieldInfo ResolveField(Type type, string fieldName, BindingFlags flags)
+        {
+            var key = new FieldKey(type, fieldName, flags);
+            FieldInfo cached;
+            if (FieldCache.TryGetValue(key, out cached))
+            {
+                return cached;
+            }
+
+            FieldInfo field = type.GetField(fieldName, flags);
+            FieldCache[key] = field;
+            return field;
+        }
+
+        private struct TypeKey : IEquatable<TypeKey>
+        {
+            private readonly string _typeName;
+            private readonly string _assemblyName;
+
+            public TypeKey(string typeName, string assemblyName)
+            {
+                _typeName = typeName;
+                _assemblyName = assemblyName;
+            }
+
+            public bool Equals(TypeKey other)
+            {
+                return _typeName == other._typeName && _assemblyName == other._assemblyName;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is TypeKey && Equals((TypeKey)obj);
+            }
+
+            public override int GetHashCode()
+            {
+                int hash = _typeName != null ? _typeName.GetHashCode() : 0;
+                return (hash * 397) ^ (_assemblyName != null ? _assemblyName.GetHashCode() : 0);
+            }
+        }
+
+        private struct FieldKey : IEquatable<FieldKey>
+        {
+            private readonly Type _type;
+            private readonly string _fieldName;
+            private readonly BindingFlags _flags;
+
+            public FieldKey(Type type, string fieldName, BindingFlags flags)
+            {
+                _type = type;
+                _fieldName = fieldName;
+                _flags = flags;
+            }
+
+            public bool Equals(FieldKey other)
+            {
+                return _type == other._type && _fieldName == other._fieldName && _flags == other._flags;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is FieldKey && Equals((FieldKey)obj);
+            }
+
+            public override int GetHashCode()
+            {
+                int hash = _type != null ? _type.GetHashCode() : 0;
+                hash = (hash * 397) ^ (_fieldName != null ? _fieldName.GetHashCode() : 0);
+                return (hash * 397) ^ (int)_flags;
+            }
         }
     }
 }

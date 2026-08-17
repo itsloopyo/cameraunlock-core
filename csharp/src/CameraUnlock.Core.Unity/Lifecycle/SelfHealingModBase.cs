@@ -14,6 +14,7 @@ namespace CameraUnlock.Core.Unity.Lifecycle
     public abstract class SelfHealingModBase : MonoBehaviour
     {
         private static GameObject _modObject;
+        private static GameObject _recreatorObject;
         private static SelfHealingModBase _instance;
         private static bool _recreateScheduled;
         private static Type _modType;
@@ -53,13 +54,27 @@ namespace CameraUnlock.Core.Unity.Lifecycle
             }
 
             _modType = typeof(T);
-            _modObject = new GameObject(name);
-            UnityEngine.Object.DontDestroyOnLoad(_modObject);
+
+            // Reuse the host when only the component was destroyed. Allocating unconditionally
+            // left the old GameObject behind with its own recreator still running Update, so a
+            // session accumulated one leaked per-frame callback per heal.
+            if (_modObject == null)
+            {
+                _modObject = new GameObject(name);
+                UnityEngine.Object.DontDestroyOnLoad(_modObject);
+            }
+
             _instance = _modObject.AddComponent<T>();
 
-            // Create recreator helper
-            var recreator = _modObject.AddComponent<ModRecreator>();
-            recreator.SetModType<T>(name);
+            // The recreator lives on its OWN object, not the mod's. Hosted on the mod object it
+            // died with it, and a destroyed mod GameObject then left _recreateScheduled true
+            // with nothing left to act on it - head tracking permanently dead, silently.
+            if (_recreatorObject == null)
+            {
+                _recreatorObject = new GameObject(name + "Recreator");
+                UnityEngine.Object.DontDestroyOnLoad(_recreatorObject);
+                _recreatorObject.AddComponent<ModRecreator>().SetModType<T>(name);
+            }
 
             return (T)_instance;
         }
@@ -79,8 +94,11 @@ namespace CameraUnlock.Core.Unity.Lifecycle
         {
             OnModDestroyed();
             _instance = null;
-            _modObject = null;
             _recreateScheduled = true;
+
+            // _modObject is deliberately left set. If only this component was destroyed the
+            // host is still alive and gets reused; if the host itself went, Unity's fake null
+            // makes the reuse check in CreateMod see it as gone and allocate a fresh one.
         }
 
         /// <summary>
@@ -116,7 +134,6 @@ namespace CameraUnlock.Core.Unity.Lifecycle
             {
                 // Cache the delegate once to avoid per-frame reflection
                 _checkRecreateAction = () => CheckRecreate<T>(name);
-                DontDestroyOnLoad(gameObject);
             }
 
             private void Update()

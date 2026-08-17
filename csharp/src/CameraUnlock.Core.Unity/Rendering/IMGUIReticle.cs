@@ -47,6 +47,12 @@ namespace CameraUnlock.Core.Unity.Rendering
         private bool _isVisible = true;
         private ReticleStyle _style = ReticleStyle.Dot;
 
+        // Per-frame position, shared across this frame's multiple OnGUI passes.
+        private int _lastPositionFrame = -1;
+        private bool _shouldDraw;
+        private float _providedScreenX;
+        private float _providedScreenY;
+
         /// <summary>
         /// Gets or sets the base size of the reticle at 1080p resolution.
         /// Actual size scales with screen height.
@@ -352,19 +358,24 @@ namespace CameraUnlock.Core.Unity.Rendering
         {
             if (!_isVisible || _positionProvider == null) return;
 
-            // Check for resolution change
-            UpdateTextureForResolution();
-
-            if (_reticleTexture == null) return;
-
-            // Get position from provider
-            if (!_positionProvider(out float screenX, out float screenY))
+            // OnGUI runs several times per frame (Layout, Repaint, once per input event). The
+            // resolution check and the position provider - which for a
+            // ViewMatrixTrackingController consumer performs a full projection - only need to
+            // run once, so they are gated to the frame's first pass and reused for the rest.
+            // GUI.DrawTexture is itself a no-op outside the repaint pass.
+            if (_lastPositionFrame != Time.frameCount)
             {
-                return; // Provider says don't draw
+                _lastPositionFrame = Time.frameCount;
+                UpdateTextureForResolution();
+                _shouldDraw = _positionProvider(out _providedScreenX, out _providedScreenY);
             }
 
+            if (!_shouldDraw || _reticleTexture == null) return;
+
+            float screenX = _providedScreenX;
+
             // Convert to GUI coordinates (GUI Y is inverted - origin at top-left)
-            float guiY = Screen.height - screenY;
+            float guiY = Screen.height - _providedScreenY;
 
             int size = _currentTextureSize;
             Rect reticleRect = new Rect(

@@ -18,8 +18,44 @@
 
 using System;
 
+// The stubs below are process-wide mutable state (Time, Screen, Camera.main,
+// Camera.onPreCull, and CameraCallbackLifecycle's own statics on top of them). Running test
+// classes in parallel would have them stomping each other.
+[assembly: Xunit.CollectionBehavior(DisableTestParallelization = true)]
+
 namespace UnityEngine
 {
+    /// Base for the Unity object model, and the reason it exists here: Unity overloads == so a
+    /// DESTROYED object compares equal to null while the managed reference is still alive.
+    /// Modelling that faithfully is what makes the destroyed-object defect class - a UI target
+    /// destroyed by a scene change, a render callback whose owning MonoBehaviour went away -
+    /// reachable from a test at all. With plain ReferenceEquals it is structurally invisible.
+    public class Object
+    {
+        private bool _destroyed;
+
+        /// Stands in for Unity destroying the native half of the object.
+        public void MarkDestroyed()
+        {
+            _destroyed = true;
+        }
+
+        public static bool operator ==(Object a, Object b)
+        {
+            bool aNull = ReferenceEquals(a, null) || a._destroyed;
+            bool bNull = ReferenceEquals(b, null) || b._destroyed;
+            if (aNull || bNull) return aNull && bNull;
+            return ReferenceEquals(a, b);
+        }
+
+        public static bool operator !=(Object a, Object b) => !(a == b);
+
+        public override bool Equals(object obj) => ReferenceEquals(this, obj);
+
+        public override int GetHashCode() =>
+            System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
+    }
+
     public struct Vector2
     {
         public float x;
@@ -471,7 +507,12 @@ namespace UnityEngine
         public Matrix4x4 worldToLocalMatrix => localToWorldMatrix.inverse;
     }
 
-    public class Camera
+    public class Canvas : Object
+    {
+        public static Action willRenderCanvases;
+    }
+
+    public class Camera : Object
     {
         public delegate void CameraCallback(Camera cam);
 
@@ -495,10 +536,5 @@ namespace UnityEngine
             ResetWorldToCameraMatrixCalls++;
             worldToCameraMatrix = Matrix4x4.identity;
         }
-
-        public static bool operator ==(Camera a, Camera b) => ReferenceEquals(a, b);
-        public static bool operator !=(Camera a, Camera b) => !ReferenceEquals(a, b);
-        public override bool Equals(object obj) => ReferenceEquals(this, obj);
-        public override int GetHashCode() => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
     }
 }

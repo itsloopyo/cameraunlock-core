@@ -1,3 +1,5 @@
+using System;
+using CameraUnlock.Core.Math;
 using UnityEngine;
 
 namespace CameraUnlock.Core.Unity.Tracking
@@ -18,6 +20,12 @@ namespace CameraUnlock.Core.Unity.Tracking
     /// 2. Apply tracking yaw to camera's local rotation (child of player body)
     /// 3. Keep player body at pure aim yaw (what movement system reads)
     /// 4. Apply tracking pitch/roll to player body (they don't affect horizontal movement)
+    ///
+    /// Prefer the overloads that take the camera's clean local rotation. The others read
+    /// <c>localEulerAngles</c>, substitute the yaw component and write it back, and Unity's
+    /// Euler getter is not round-trip stable: near a vertical look it can return (91, 180, 180)
+    /// for the rotation that read as (89, 0, 0) a frame earlier, and writing that back with a
+    /// new yaw snaps the camera through a 180 degree roll it can then latch in.
     /// </summary>
     public static class DecoupledMovementHelper
     {
@@ -31,6 +39,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <param name="trackingPitch">Head tracking pitch in degrees.</param>
         /// <param name="trackingRoll">Head tracking roll in degrees.</param>
         /// <param name="invertPitch">Whether to invert pitch for natural head movement (default: true).</param>
+        [Obsolete("Round-trips the camera's localEulerAngles, which Unity does not guarantee to be stable and which flips representation near a vertical look. Use the overload taking the camera's clean local rotation.")]
         public static void ApplyDecoupled(
             Transform playerBodyTransform,
             Transform cameraTransform,
@@ -45,14 +54,7 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            // === PLAYER BODY TRANSFORM ===
-            // Keep yaw at pure aim only (this is what movement systems read)
-            // Apply pitch and roll here (they don't affect horizontal movement direction)
-            float bodyYaw = NormalizeAngle(pureAimYaw);
-            float bodyPitch = invertPitch ? -trackingPitch : trackingPitch;
-            float bodyRoll = trackingRoll;
-
-            playerBodyTransform.localEulerAngles = new Vector3(bodyPitch, bodyYaw, bodyRoll);
+            ApplyBodyRotation(playerBodyTransform, pureAimYaw, trackingPitch, trackingRoll, invertPitch);
 
             // === CAMERA TRANSFORM ===
             // Apply tracking yaw as local rotation offset on camera
@@ -66,6 +68,39 @@ namespace CameraUnlock.Core.Unity.Tracking
         }
 
         /// <summary>
+        /// Applies head tracking in decoupled mode, composing the camera's yaw offset with
+        /// quaternions against a caller-held clean rotation instead of round-tripping Euler.
+        /// </summary>
+        /// <param name="playerBodyTransform">The player body transform (parent, controls movement direction).</param>
+        /// <param name="cameraTransform">The camera transform (child, controls view direction).</param>
+        /// <param name="cleanCameraLocalRotation">The camera's local rotation with no tracking yaw
+        /// applied - what the game's own pitch system produced this frame.</param>
+        /// <param name="pureAimYaw">The pure aim yaw from mouse/gamepad input (degrees, 0-360).</param>
+        /// <param name="trackingYaw">Head tracking yaw in degrees.</param>
+        /// <param name="trackingPitch">Head tracking pitch in degrees.</param>
+        /// <param name="trackingRoll">Head tracking roll in degrees.</param>
+        /// <param name="invertPitch">Whether to invert pitch for natural head movement (default: true).</param>
+        public static void ApplyDecoupled(
+            Transform playerBodyTransform,
+            Transform cameraTransform,
+            Quaternion cleanCameraLocalRotation,
+            float pureAimYaw,
+            float trackingYaw,
+            float trackingPitch,
+            float trackingRoll,
+            bool invertPitch = true)
+        {
+            if (playerBodyTransform == null)
+            {
+                return;
+            }
+
+            ApplyBodyRotation(playerBodyTransform, pureAimYaw, trackingPitch, trackingRoll, invertPitch);
+
+            SetCameraYaw(cameraTransform, playerBodyTransform, cleanCameraLocalRotation, trackingYaw);
+        }
+
+        /// <summary>
         /// Fades out head tracking smoothly while maintaining decoupled mode.
         /// </summary>
         /// <param name="playerBodyTransform">The player body transform.</param>
@@ -76,6 +111,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <param name="lastTrackingRoll">The last tracking roll that was applied.</param>
         /// <param name="fadeProgress">Fade progress from 0 (full tracking) to 1 (no tracking).</param>
         /// <param name="invertPitch">Whether pitch was inverted during tracking.</param>
+        [Obsolete("Round-trips the camera's localEulerAngles, which Unity does not guarantee to be stable and which flips representation near a vertical look. Use the overload taking the camera's clean local rotation.")]
         public static void ApplyDecoupledFadeOut(
             Transform playerBodyTransform,
             Transform cameraTransform,
@@ -91,16 +127,11 @@ namespace CameraUnlock.Core.Unity.Tracking
                 return;
             }
 
-            // Fade all tracking values toward zero
             float fadedYaw = Mathf.Lerp(lastTrackingYaw, 0f, fadeProgress);
             float fadedPitch = Mathf.Lerp(lastTrackingPitch, 0f, fadeProgress);
             float fadedRoll = Mathf.Lerp(lastTrackingRoll, 0f, fadeProgress);
 
-            // === PLAYER BODY TRANSFORM ===
-            float bodyYaw = NormalizeAngle(pureAimYaw);
-            float bodyPitch = invertPitch ? -fadedPitch : fadedPitch;
-
-            playerBodyTransform.localEulerAngles = new Vector3(bodyPitch, bodyYaw, fadedRoll);
+            ApplyBodyRotation(playerBodyTransform, pureAimYaw, fadedPitch, fadedRoll, invertPitch);
 
             // === CAMERA TRANSFORM ===
             if (cameraTransform != null && cameraTransform != playerBodyTransform)
@@ -111,10 +142,49 @@ namespace CameraUnlock.Core.Unity.Tracking
         }
 
         /// <summary>
+        /// Fades out head tracking smoothly while maintaining decoupled mode, composing the
+        /// camera's yaw offset against a caller-held clean rotation.
+        /// </summary>
+        /// <param name="playerBodyTransform">The player body transform.</param>
+        /// <param name="cameraTransform">The camera transform.</param>
+        /// <param name="cleanCameraLocalRotation">The camera's local rotation with no tracking yaw applied.</param>
+        /// <param name="pureAimYaw">The pure aim yaw from mouse/gamepad input (degrees, 0-360).</param>
+        /// <param name="lastTrackingYaw">The last tracking yaw that was applied.</param>
+        /// <param name="lastTrackingPitch">The last tracking pitch that was applied.</param>
+        /// <param name="lastTrackingRoll">The last tracking roll that was applied.</param>
+        /// <param name="fadeProgress">Fade progress from 0 (full tracking) to 1 (no tracking).</param>
+        /// <param name="invertPitch">Whether pitch was inverted during tracking.</param>
+        public static void ApplyDecoupledFadeOut(
+            Transform playerBodyTransform,
+            Transform cameraTransform,
+            Quaternion cleanCameraLocalRotation,
+            float pureAimYaw,
+            float lastTrackingYaw,
+            float lastTrackingPitch,
+            float lastTrackingRoll,
+            float fadeProgress,
+            bool invertPitch = true)
+        {
+            if (playerBodyTransform == null)
+            {
+                return;
+            }
+
+            float fadedYaw = Mathf.Lerp(lastTrackingYaw, 0f, fadeProgress);
+            float fadedPitch = Mathf.Lerp(lastTrackingPitch, 0f, fadeProgress);
+            float fadedRoll = Mathf.Lerp(lastTrackingRoll, 0f, fadeProgress);
+
+            ApplyBodyRotation(playerBodyTransform, pureAimYaw, fadedPitch, fadedRoll, invertPitch);
+
+            SetCameraYaw(cameraTransform, playerBodyTransform, cleanCameraLocalRotation, fadedYaw);
+        }
+
+        /// <summary>
         /// Resets the camera's local yaw offset to zero (used when tracking ends).
         /// </summary>
         /// <param name="cameraTransform">The camera transform.</param>
         /// <param name="playerBodyTransform">The player body transform (to ensure camera is different).</param>
+        [Obsolete("Round-trips the camera's localEulerAngles, which Unity does not guarantee to be stable and which flips representation near a vertical look. Use the overload taking the camera's clean local rotation.")]
         public static void ResetCameraYawOffset(Transform cameraTransform, Transform playerBodyTransform)
         {
             if (cameraTransform != null && cameraTransform != playerBodyTransform)
@@ -125,13 +195,63 @@ namespace CameraUnlock.Core.Unity.Tracking
         }
 
         /// <summary>
+        /// Resets the camera's local yaw offset to zero by restoring the clean local rotation.
+        /// </summary>
+        /// <param name="cameraTransform">The camera transform.</param>
+        /// <param name="playerBodyTransform">The player body transform (to ensure camera is different).</param>
+        /// <param name="cleanCameraLocalRotation">The camera's local rotation with no tracking yaw applied.</param>
+        public static void ResetCameraYawOffset(
+            Transform cameraTransform,
+            Transform playerBodyTransform,
+            Quaternion cleanCameraLocalRotation)
+        {
+            SetCameraYaw(cameraTransform, playerBodyTransform, cleanCameraLocalRotation, 0f);
+        }
+
+        private static void ApplyBodyRotation(
+            Transform playerBodyTransform,
+            float pureAimYaw,
+            float pitch,
+            float roll,
+            bool invertPitch)
+        {
+            // === PLAYER BODY TRANSFORM ===
+            // Keep yaw at pure aim only (this is what movement systems read)
+            // Apply pitch and roll here (they don't affect horizontal movement direction)
+            float bodyYaw = NormalizeAngle(pureAimYaw);
+            float bodyPitch = invertPitch ? -pitch : pitch;
+
+            playerBodyTransform.localRotation = Quaternion.Euler(bodyPitch, bodyYaw, roll);
+        }
+
+        private static void SetCameraYaw(
+            Transform cameraTransform,
+            Transform playerBodyTransform,
+            Quaternion cleanCameraLocalRotation,
+            float yaw)
+        {
+            if (cameraTransform == null || cameraTransform == playerBodyTransform)
+            {
+                return;
+            }
+
+            // Unity's Euler(x, y, z) is Qy * Qx * Qz, so replacing the yaw component of a
+            // pitch/roll rotation is a LEFT multiplication by the yaw - the same result the
+            // Euler substitution produced, without ever reading a rotation back as Euler.
+            cameraTransform.localRotation =
+                Quaternion.AngleAxis(yaw, Vector3.up) * cleanCameraLocalRotation;
+        }
+
+        /// <summary>
         /// Normalizes an angle to the 0-360 range.
         /// </summary>
         private static float NormalizeAngle(float angle)
         {
-            while (angle < 0f) angle += 360f;
-            while (angle >= 360f) angle -= 360f;
-            return angle;
+            // Modulo rather than a subtract loop: a non-finite angle (reachable from a
+            // reflected game field during a scene transition) never decreases and hung the
+            // game at 100% CPU.
+            float normalized = AngleUtils.NormalizeAngle(angle);
+            return normalized < 0f ? normalized + 360f : normalized;
         }
 
         /// <summary>

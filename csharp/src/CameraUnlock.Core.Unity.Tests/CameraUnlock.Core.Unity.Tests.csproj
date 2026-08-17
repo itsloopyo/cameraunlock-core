@@ -57,5 +57,11 @@
     <Compile Include="..\CameraUnlock.Core.Unity\Rendering\RenderPipelineHelper.cs">
       <Link>UnderTest\RenderPipelineHelper.cs</Link>
     </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Tracking\TransformFrameState.cs">
+      <Link>UnderTest\TransformFrameState.cs</Link>
+    </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Tracking\CameraCallbackLifecycle.cs">
+      <Link>UnderTest\CameraCallbackLifecycle.cs</Link>
+    </Compile>
   </ItemGroup>
 </Project>

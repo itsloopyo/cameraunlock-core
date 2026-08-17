@@ -11,6 +11,11 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <summary>
         /// Composes a rotation by applying head tracking additively on top of the game's rotation.
         /// This is the most common pattern: yaw in world space, pitch/roll in local space.
+        ///
+        /// PITCH SIGN: positive headPitch looks UP. The negation below is what establishes that,
+        /// because a positive rotation about Unity's +X pitches the nose DOWN. Pair this with
+        /// <see cref="GetTrackingOnlyRotationMatchingAdditive"/>, NOT with
+        /// <see cref="GetTrackingOnlyRotation"/>, which uses the opposite pitch sign.
         /// </summary>
         /// <param name="gameRotation">The game's current camera rotation.</param>
         /// <param name="headYaw">Head tracking yaw in degrees.</param>
@@ -106,7 +111,13 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         /// <summary>
         /// Extracts the tracking-only rotation (without game rotation contribution).
-        /// Useful for aim decoupling calculations.
+        ///
+        /// PITCH SIGN: this uses the RAW pitch sign, matching <see cref="ComposeYXZ"/> and
+        /// <see cref="ComposeYXZClamped"/>, where positive pitch looks DOWN. It is the opposite
+        /// of <see cref="ComposeAdditive"/>. Deriving a reticle from this while composing the
+        /// view with ComposeAdditive gives a reticle that travels down as the view goes up, at
+        /// twice the true rate on the vertical axis - use
+        /// <see cref="GetTrackingOnlyRotationMatchingAdditive"/> for that pairing.
         /// </summary>
         /// <param name="trackYaw">Head tracking yaw in degrees.</param>
         /// <param name="trackPitch">Head tracking pitch in degrees.</param>
@@ -121,6 +132,24 @@ namespace CameraUnlock.Core.Unity.Tracking
             Quaternion pitchQ = Quaternion.AngleAxis(trackPitch, Vector3.right);
             Quaternion rollQ = Quaternion.AngleAxis(trackRoll, Vector3.forward);
             return yawQ * pitchQ * rollQ;
+        }
+
+        /// <summary>
+        /// The tracking-only rotation that pairs with <see cref="ComposeAdditive"/> - the same
+        /// composition with an identity game rotation, negated pitch included. Use this when
+        /// the view is composed with ComposeAdditive and the reticle/aim offset is derived from
+        /// the tracking rotation alone.
+        /// </summary>
+        /// <param name="trackYaw">Head tracking yaw in degrees.</param>
+        /// <param name="trackPitch">Head tracking pitch in degrees (positive looks up).</param>
+        /// <param name="trackRoll">Head tracking roll in degrees.</param>
+        /// <returns>Quaternion representing only the tracking rotation.</returns>
+        public static Quaternion GetTrackingOnlyRotationMatchingAdditive(
+            float trackYaw,
+            float trackPitch,
+            float trackRoll)
+        {
+            return ComposeAdditive(Quaternion.identity, trackYaw, trackPitch, trackRoll);
         }
 
         /// <summary>

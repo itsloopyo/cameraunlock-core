@@ -22,6 +22,10 @@ namespace CameraUnlock.Core.Unity.Tracking
         // Throttle logging to avoid spam
         private float _lastLogTime;
         private float _logInterval = 5f;
+        private bool _hasLogged;
+
+        private float _lastCameraCheckTime;
+        private bool _hasCheckedCamera;
 
         /// <summary>
         /// The currently tracked camera, if any.
@@ -44,8 +48,12 @@ namespace CameraUnlock.Core.Unity.Tracking
         public bool IsHookAttached => _trackingHook != null && _trackingHook.gameObject != null;
 
         /// <summary>
-        /// Interval in seconds between log messages when camera is lost.
+        /// Minimum interval in seconds between <see cref="ShouldLogNow"/> returning true.
         /// Set to 0 to disable throttling.
+        ///
+        /// It gates the LOG LINE only. OnCameraLost/OnCameraFound are never throttled: they
+        /// perform the subclass's cleanup, and suppressing one left a reticle drawn over the
+        /// menu and a view matrix never reset on a gameplay/menu round trip.
         /// </summary>
         public float LogInterval
         {
@@ -54,11 +62,47 @@ namespace CameraUnlock.Core.Unity.Tracking
         }
 
         /// <summary>
+        /// Minimum seconds between <see cref="FindCamera"/> calls. Zero (the default) checks
+        /// every frame. The documented FindCamera implementations are Camera.main and
+        /// FindObjectOfType, both whole-scene scans in these Unity versions, so a mod that does
+        /// not need frame-exact camera switching should raise this.
+        /// </summary>
+        public float CameraRecheckInterval { get; set; }
+
+        /// <summary>
+        /// Returns true at most once per <see cref="LogInterval"/> seconds. Gate log lines in
+        /// OnCameraLost/OnCameraFound on this so a camera that flickers (disabled and
+        /// re-enabled per frame in a cinematic) cannot spam the loader's log.
+        /// </summary>
+        protected bool ShouldLogNow()
+        {
+            if (_logInterval <= 0f)
+            {
+                return true;
+            }
+
+            float now = Time.unscaledTime;
+            if (_hasLogged && now - _lastLogTime < _logInterval)
+            {
+                return false;
+            }
+
+            _hasLogged = true;
+            _lastLogTime = now;
+            return true;
+        }
+
+        /// <summary>
         /// Called by Unity each frame after Update.
         /// Override and call base if you need to add additional per-frame logic.
         /// </summary>
         protected virtual void LateUpdate()
         {
+            if (!IsCameraCheckDue())
+            {
+                return;
+            }
+
             Camera camera = FindCamera();
 
             if (camera == null)
@@ -72,6 +116,24 @@ namespace CameraUnlock.Core.Unity.Tracking
             {
                 AttachHook(camera);
             }
+        }
+
+        private bool IsCameraCheckDue()
+        {
+            if (CameraRecheckInterval <= 0f)
+            {
+                return true;
+            }
+
+            float now = Time.unscaledTime;
+            if (_hasCheckedCamera && now - _lastCameraCheckTime < CameraRecheckInterval)
+            {
+                return false;
+            }
+
+            _hasCheckedCamera = true;
+            _lastCameraCheckTime = now;
+            return true;
         }
 
         /// <summary>
@@ -151,7 +213,7 @@ namespace CameraUnlock.Core.Unity.Tracking
                 // Gating it here meant a second camera loss within LogInterval skipped the
                 // subclass's cleanup entirely - reticle left drawn over the menu, view
                 // matrix never reset - on a gameplay/menu round trip inside 5 seconds.
-                _lastLogTime = Time.unscaledTime;
+                // Subclasses throttle their own log line with ShouldLogNow().
                 OnCameraLost();
 
                 // Clear references but don't destroy hook - it will be destroyed with camera
@@ -168,6 +230,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         {
             _trackedCamera = null;
             _trackingHook = null;
+            _hasCheckedCamera = false;
         }
 
         /// <summary>
