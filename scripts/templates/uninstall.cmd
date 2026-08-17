@@ -15,6 +15,8 @@
 ::   MonoCecil    - restores Assembly-CSharp.dll from .original backup
 ::   ASILoader    - removes <exe-dir>/winmm.dll (or dinput8.dll)
 ::   REFramework  - removes <game>/dinput8.dll and <game>/reframework/
+::   UE4SS        - removes <win64>/Mods/<ModName>/ and its mods.txt entry;
+::                  UE4SS.dll + dwmapi.dll only if we installed the loader
 ::   None         - shim-only; restores shim DLLs from .backup if present
 ::
 :: Launcher CLI: uninstall.cmd [GAME_PATH] [/y] [/force]
@@ -44,6 +46,9 @@ set "PATCH_MARKER="
 set "MANAGED_EXTRAS="
 :: ASILoader: filename the ASI DLL was renamed to. Defaults to winmm.dll.
 set "ASI_LOADER_NAME=winmm.dll"
+:: UE4SS REQUIRED: path under GAME_PATH holding the shipping exe. MUST match
+:: install.cmd's UE4_BINARIES_RELDIR. Mods live in its Mods\ subfolder.
+set "UE4_BINARIES_RELDIR="
 :: --- END CONFIG BLOCK ---
 
 call :detect_yes_flag %*
@@ -74,7 +79,6 @@ shift
 goto :detect_yes_flag
 
 :main
-setlocal enabledelayedexpansion
 
 :: Capture script dir BEFORE the arg parser runs. Inside `call :main`,
 :: `shift` rotates %0 too, so %~dp0 read after shifts resolves to the
@@ -82,26 +86,45 @@ setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 
 :: -------- Arg parser (canonical, do not modify) --------
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
+:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
+:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
+:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
+:: fails, and a valid directory is rejected as a malformed argument.
 set "YES_FLAG="
 set "FORCE_FLAG="
 set "_GIVEN_PATH="
 :parse_args
 if "%~1"=="" goto :args_done
 set "_ARG=%~1"
-if /i "!_ARG!"=="/y"      ( set "YES_FLAG=1"   & shift & goto :parse_args )
-if /i "!_ARG!"=="-y"      ( set "YES_FLAG=1"   & shift & goto :parse_args )
-if /i "!_ARG!"=="--yes"   ( set "YES_FLAG=1"   & shift & goto :parse_args )
-if /i "!_ARG!"=="/force"  ( set "FORCE_FLAG=1" & shift & goto :parse_args )
-if /i "!_ARG!"=="--force" ( set "FORCE_FLAG=1" & shift & goto :parse_args )
-if "!_ARG:~0,2!"=="--" ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
-if "!_ARG:~0,1!"=="/"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
-if "!_ARG:~0,1!"=="-"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
+if /i "%_ARG%"=="/y"      ( set "YES_FLAG=1"   & shift & goto :parse_args )
+if /i "%_ARG%"=="-y"      ( set "YES_FLAG=1"   & shift & goto :parse_args )
+if /i "%_ARG%"=="--yes"   ( set "YES_FLAG=1"   & shift & goto :parse_args )
+if /i "%_ARG%"=="/force"  ( set "FORCE_FLAG=1" & shift & goto :parse_args )
+if /i "%_ARG%"=="--force" ( set "FORCE_FLAG=1" & shift & goto :parse_args )
+if "%_ARG:~0,2%"=="--" ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
+if "%_ARG:~0,1%"=="/"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
+if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
-    if exist "!_ARG!\" ( set "_GIVEN_PATH=!_ARG!" & shift & goto :parse_args )
+    if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
-echo ERROR: unrecognised argument "!_ARG!"
+echo ERROR: unrecognised argument "%_ARG%"
 exit /b 2
 :args_done
+set "_ARG="
+
+setlocal enabledelayedexpansion
+
+:: -------- Validate CONFIG BLOCK --------
+:: Every name below is interpolated straight into a path that gets written,
+:: deleted or recursively removed. A blank one does not fail - it silently
+:: retargets the operation at the parent directory, which is the game folder.
+for %%v in (GAME_ID MOD_DISPLAY_NAME STATE_FILE FRAMEWORK_TYPE) do (
+    if not defined %%v (
+        echo ERROR: %%v is not set in this script's CONFIG BLOCK.
+        exit /b 1
+    )
+)
 
 echo.
 echo === %MOD_DISPLAY_NAME% - Uninstall ===
@@ -151,8 +174,13 @@ if errorlevel 1 exit /b 1
 :: -------- Remove mod files (framework-aware) --------
 if /i "%FRAMEWORK_TYPE%"=="None" (
     call :remove_shim_files
+) else if /i "%FRAMEWORK_TYPE%"=="UE4SS" (
+    rem The mod folder and its mods.txt line are ours whoever installed the
+    rem loader, so they come off here, not in the installed_by_us-gated step.
+    call :remove_ue4ss_mod
+    if errorlevel 1 exit /b 1
 ) else if /i "%FRAMEWORK_TYPE%"=="MonoCecil" (
-    :: Cecil: restore backup THEN remove our DLLs from Managed/.
+    rem Cecil: restore backup THEN remove our DLLs from Managed/.
     call :remove_MonoCecil
     if errorlevel 1 exit /b 1
     call :remove_mod_files_plain
@@ -172,10 +200,10 @@ if "!REMOVE_LOADER!"=="0" (
 )
 
 if /i "%FRAMEWORK_TYPE%"=="None" (
-    :: Shim-only: already handled in :remove_shim_files above (restores .backup).
+    rem Shim-only: already handled in :remove_shim_files above (restores .backup).
     rem
 ) else if /i "%FRAMEWORK_TYPE%"=="MonoCecil" (
-    :: Cecil: the backup restore IS the loader removal. Already done.
+    rem Cecil: the backup restore IS the loader removal. Already done.
     rem
 ) else (
     if "!REMOVE_LOADER!"=="1" (
@@ -219,6 +247,21 @@ if /i "%FRAMEWORK_TYPE%"=="MelonLoader" (
 )
 if /i "%FRAMEWORK_TYPE%"=="REFramework" (
     set "DEPLOY_DIR=%GAME_PATH%\reframework\plugins"
+    exit /b 0
+)
+if /i "%FRAMEWORK_TYPE%"=="UE4SS" (
+    if not defined UE4_BINARIES_RELDIR (
+        echo ERROR: UE4_BINARIES_RELDIR is not set in the uninstall CONFIG BLOCK.
+        echo It must match the value install.cmd used.
+        exit /b 1
+    )
+    if not defined MOD_INTERNAL_NAME (
+        echo ERROR: MOD_INTERNAL_NAME is not set in the uninstall CONFIG BLOCK.
+        echo Without it the mod folder path resolves to the whole Mods\ tree.
+        exit /b 1
+    )
+    set "UE4_BINARIES_DIR=%GAME_PATH%\%UE4_BINARIES_RELDIR%"
+    set "DEPLOY_DIR=%GAME_PATH%\%UE4_BINARIES_RELDIR%\Mods\%MOD_INTERNAL_NAME%"
     exit /b 0
 )
 if /i "%FRAMEWORK_TYPE%"=="MonoCecil" (
@@ -437,6 +480,55 @@ if exist "%GAME_PATH%\reframework" (
 for %%f in (reframework_revision.txt openvr_api.dll openxr_loader.dll DELETE_OPENVR_API_DLL_IF_YOU_WANT_TO_USE_OPENXR) do (
     if exist "%GAME_PATH%\%%f" (
         del /q "%GAME_PATH%\%%f" >nul 2>&1
+        echo   Removed: %%f
+    )
+)
+exit /b 0
+
+:: ============================================
+:: Remove the UE4SS Lua mod: its folder under Win64\Mods\ and its line in
+:: Win64\Mods\mods.txt. Runs regardless of who installed the loader - only
+:: the loader DLLs themselves are gated on installed_by_us.
+:: ============================================
+:remove_ue4ss_mod
+echo Removing mod files...
+if exist "!DEPLOY_DIR!\" (
+    rmdir /s /q "!DEPLOY_DIR!"
+    echo   Removed: Mods\%MOD_INTERNAL_NAME%\
+) else (
+    echo   No mod folder found
+)
+set "MODS_TXT=!UE4_BINARIES_DIR!\Mods\mods.txt"
+if not exist "!MODS_TXT!" exit /b 0
+findstr /b /c:"%MOD_INTERNAL_NAME% " "!MODS_TXT!" >nul
+if errorlevel 1 exit /b 0
+set "_MODS_TMP=%TEMP%\cul-modstxt-%RANDOM%-%RANDOM%.txt"
+findstr /v /b /c:"%MOD_INTERNAL_NAME% " "!MODS_TXT!" > "!_MODS_TMP!"
+:: findstr /v returns 1 when it filtered every line out, which is a normal
+:: result here (our entry was the only one). Only 2+ is a read failure.
+if errorlevel 2 (
+    del "!_MODS_TMP!" 2>nul
+    echo   ERROR: could not read !MODS_TXT! to deregister %MOD_INTERNAL_NAME%.
+    exit /b 1
+)
+move /y "!_MODS_TMP!" "!MODS_TXT!" >nul
+if errorlevel 1 (
+    del "!_MODS_TMP!" 2>nul
+    echo   ERROR: could not rewrite !MODS_TXT!.
+    exit /b 1
+)
+echo   Deregistered %MOD_INTERNAL_NAME% from mods.txt
+exit /b 0
+
+:: ============================================
+:: Remove the UE4SS loader itself. Only the two files install.cmd's vendored
+:: zip lays down as the loader - never Mods\, which holds the user's other
+:: Lua mods.
+:: ============================================
+:remove_UE4SS
+for %%f in (UE4SS.dll dwmapi.dll) do (
+    if exist "!UE4_BINARIES_DIR!\%%f" (
+        del "!UE4_BINARIES_DIR!\%%f"
         echo   Removed: %%f
     )
 )

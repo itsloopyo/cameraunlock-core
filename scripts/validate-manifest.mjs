@@ -62,7 +62,12 @@ if (failures > 0) {
 console.log("\nall packages valid.");
 
 function validate(label, zip) {
-  const entries = new Set(listZip(zip).map((e) => e.replace(/\\/g, "/")));
+  // PowerShell 5.1's Compress-Archive writes backslash separators, and the
+  // launcher deploys on Windows where casing does not decide a match, so both
+  // are normalised away before comparing. Casing differences are still worth
+  // reporting: they break any consumer that reads the zip case-sensitively.
+  const entries = listZip(zip).map((e) => e.replace(/\\/g, "/"));
+  const entryByLower = new Map(entries.map((e) => [e.toLowerCase(), e]));
   const manifestRaw = readEntry(zip, "launcher-manifest.json");
   if (manifestRaw === null) throw new Error("no launcher-manifest.json in zip");
   const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
@@ -93,7 +98,14 @@ function validate(label, zip) {
     throw new Error("manifest declares no bundled sources - nothing would be deployed");
   }
 
-  const missing = sources.filter((s) => !entries.has(s.replace(/\\/g, "/")));
+  const missing = [];
+  const miscased = [];
+  for (const source of sources) {
+    const declared = source.replace(/\\/g, "/");
+    const entry = entryByLower.get(declared.toLowerCase());
+    if (entry === undefined) missing.push(declared);
+    else if (entry !== declared) miscased.push(`${declared} (zip has "${entry}")`);
+  }
   if (missing.length > 0) {
     throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
   }
@@ -103,6 +115,11 @@ function validate(label, zip) {
   console.log(
     `OK   ${label}: ${path.basename(zip)} — ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)`,
   );
+  if (miscased.length > 0) {
+    console.log(
+      `WARN ${label}: manifest source(s) matched the zip only after ignoring case, fix the manifest casing: ${miscased.join(", ")}`,
+    );
+  }
 }
 
 function resolveZip(token) {

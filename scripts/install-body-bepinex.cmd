@@ -37,6 +37,10 @@
 :: Launcher CLI (passed through %*): [GAME_PATH] [/y]
 :: ============================================
 
+:: :detect_yes_flag and the arg parser below both break if the wrapper left
+:: delayed expansion on (see :parse_args), so pin it off for the whole body.
+setlocal disabledelayedexpansion
+
 call :detect_yes_flag %*
 call :main %*
 set "_EC=%errorlevel%"
@@ -59,30 +63,48 @@ shift
 goto :detect_yes_flag
 
 :main
-setlocal enabledelayedexpansion
 
 :: WRAPPER_DIR is the wrapper's %~dp0 (release-zip root or <mod>/scripts/).
 :: Resolved here as SCRIPT_DIR so the rest of the body reads naturally.
 if defined WRAPPER_DIR ( set "SCRIPT_DIR=%WRAPPER_DIR%" ) else ( set "SCRIPT_DIR=%~dp0" )
 
 :: -------- Arg parser (canonical, do not modify) --------
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
+:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
+:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
+:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
+:: fails, and a valid directory is rejected as a malformed argument.
 set "YES_FLAG="
 set "_GIVEN_PATH="
 :parse_args
 if "%~1"=="" goto :args_done
 set "_ARG=%~1"
-if /i "!_ARG!"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
-if /i "!_ARG!"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
-if /i "!_ARG!"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
-if "!_ARG:~0,2!"=="--" ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
-if "!_ARG:~0,1!"=="/"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
-if "!_ARG:~0,1!"=="-"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
+if /i "%_ARG%"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
+if /i "%_ARG%"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
+if /i "%_ARG%"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
+if "%_ARG:~0,2%"=="--" ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
+if "%_ARG:~0,1%"=="/"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
+if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
-    if exist "!_ARG!\" ( set "_GIVEN_PATH=!_ARG!" & shift & goto :parse_args )
+    if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
-echo ERROR: unrecognised argument "!_ARG!"
+echo ERROR: unrecognised argument "%_ARG%"
 exit /b 2
 :args_done
+set "_ARG="
+
+setlocal enabledelayedexpansion
+
+:: -------- Validate CONFIG BLOCK --------
+:: Every name below is interpolated straight into a path that gets written,
+:: deleted or recursively removed. A blank one does not fail - it silently
+:: retargets the operation at the parent directory, which is the game folder.
+for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS) do (
+    if not defined %%v (
+        echo ERROR: %%v is not set in this script's CONFIG BLOCK.
+        exit /b 1
+    )
+)
 
 echo.
 echo === %MOD_DISPLAY_NAME% - Install ===
@@ -113,7 +135,7 @@ if not "!_PS_EC!"=="0" (
 call "!_SHIM_OUT!"
 del "!_SHIM_OUT!" 2>nul
 
-echo Game found: %GAME_PATH%
+echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
@@ -160,8 +182,18 @@ goto :after_loader
 echo Existing BepInEx is the wrong architecture for this game ^(expected %BEPINEX_ARCH%^).
 echo This usually means another mod manager ^(Thunderstore Mod Manager,
 echo r2modman, ...^) installed the wrong BepInExPack first.
-echo Replacing it with the matching %BEPINEX_ARCH% loader...
+echo The loader core will be replaced with the matching %BEPINEX_ARCH% build.
+echo Your BepInEx\plugins\ and BepInEx\config\ are set aside and put back.
+if not defined YES_FLAG (
+    echo.
+    set /p "_REPLY=Replace the wrong-architecture BepInEx? [y/N] "
+    if /i not "!_REPLY!"=="y" (
+        echo Aborted - nothing was changed.
+        exit /b 1
+    )
+)
 call :wipe_existing_bepinex
+if errorlevel 1 exit /b 1
 goto :do_install_loader
 
 :install_loader
@@ -170,6 +202,8 @@ echo BepInEx not found. Installing...
 :do_install_loader
 echo.
 call :install_bepinex
+if errorlevel 1 exit /b 1
+call :restore_bepinex_stash
 if errorlevel 1 exit /b 1
 set "WE_INSTALLED=true"
 echo.
@@ -209,7 +243,12 @@ set "DEPLOY_FAILED=0"
 for %%f in (%MOD_DLLS%) do (
     if exist "%DLL_DIR%\%%f" (
         copy /y "%DLL_DIR%\%%f" "!DEPLOY_PATH!\" >nul
-        echo   Deployed %%f
+        if errorlevel 1 (
+            echo   ERROR: Failed to copy %%f - is the game folder writable?
+            set "DEPLOY_FAILED=1"
+        ) else (
+            echo   Deployed %%f
+        )
     ) else (
         echo   ERROR: %%f not found in plugins folder
         set "DEPLOY_FAILED=1"
@@ -234,7 +273,7 @@ echo   Deployment Complete!
 echo ========================================
 echo.
 echo %MOD_DISPLAY_NAME% has been deployed to:
-echo   %PLUGINS_PATH%
+echo   !PLUGINS_PATH!
 echo.
 echo Start the game to use the mod!
 :: Percent-expansion splits MOD_CONTROLS on its embedded &echo separators;
@@ -269,17 +308,66 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%_ARCH_SHIM%" -Path "%GAME_
 exit /b %errorlevel%
 
 :: ============================================
-:: Wipe an existing wrong-arch BepInEx loader so :install_bepinex can
-:: lay down our matching one. Removes the same set of files uninstall-
-:: body.cmd would for a BepInEx framework type.
+:: Wipe an existing wrong-arch BepInEx loader so :install_bepinex can lay
+:: down our matching one. The loader core is ours to replace, but
+:: BepInEx\plugins\ and BepInEx\config\ are NOT - a Thunderstore user can
+:: easily have five other plugins and their configs under there, and
+:: rmdir /s on BepInEx\ took the lot. Move both aside first;
+:: :restore_bepinex_stash puts them back once the new core is extracted.
 :: ============================================
 :wipe_existing_bepinex
-echo   Removing wrong-arch BepInEx files...
+echo   Replacing the wrong-architecture BepInEx core...
+set "_BEP_STASH="
+if exist "%GAME_PATH%\BepInEx\plugins" set "_BEP_STASH=%TEMP%\cul-bepinex-stash-%RANDOM%-%RANDOM%"
+if exist "%GAME_PATH%\BepInEx\config" if not defined _BEP_STASH set "_BEP_STASH=%TEMP%\cul-bepinex-stash-%RANDOM%-%RANDOM%"
+if defined _BEP_STASH (
+    mkdir "!_BEP_STASH!"
+    if errorlevel 1 (
+        echo   ERROR: could not create a staging folder under %%TEMP%%.
+        exit /b 1
+    )
+)
+if exist "%GAME_PATH%\BepInEx\plugins" (
+    move "%GAME_PATH%\BepInEx\plugins" "!_BEP_STASH!\plugins" >nul
+    if errorlevel 1 (
+        echo   ERROR: could not set aside BepInEx\plugins\ - refusing to delete it.
+        exit /b 1
+    )
+    echo   Set aside your BepInEx\plugins\
+)
+if exist "%GAME_PATH%\BepInEx\config" (
+    move "%GAME_PATH%\BepInEx\config" "!_BEP_STASH!\config" >nul
+    if errorlevel 1 (
+        echo   ERROR: could not set aside BepInEx\config\ - refusing to delete it.
+        exit /b 1
+    )
+    echo   Set aside your BepInEx\config\
+)
 if exist "%GAME_PATH%\BepInEx" rmdir /s /q "%GAME_PATH%\BepInEx"
 if exist "%GAME_PATH%\winhttp.dll" del /f /q "%GAME_PATH%\winhttp.dll"
 if exist "%GAME_PATH%\doorstop_config.ini" del /f /q "%GAME_PATH%\doorstop_config.ini"
 if exist "%GAME_PATH%\.doorstop_version" del /f /q "%GAME_PATH%\.doorstop_version"
 if exist "%GAME_PATH%\changelog.txt" del /f /q "%GAME_PATH%\changelog.txt"
+exit /b 0
+
+:: ============================================
+:: Put the plugins/ and config/ trees :wipe_existing_bepinex set aside back
+:: over the freshly extracted loader. No-op on a first install, where nothing
+:: was stashed. robocopy is used rather than xcopy because it reports success
+:: for an empty source tree; its exit codes below 8 are all success.
+:: ============================================
+:restore_bepinex_stash
+if not defined _BEP_STASH exit /b 0
+if not exist "!_BEP_STASH!" exit /b 0
+robocopy "!_BEP_STASH!" "%GAME_PATH%\BepInEx" /e /njh /njs /ndl /nfl /nc /ns >nul
+if errorlevel 8 (
+    echo   ERROR: failed to restore your BepInEx plugins/config from:
+    echo     !_BEP_STASH!
+    echo   They are still in that folder - move them back by hand.
+    exit /b 1
+)
+rmdir /s /q "!_BEP_STASH!"
+echo   Restored your BepInEx\plugins\ and BepInEx\config\
 exit /b 0
 
 :: ============================================
@@ -309,8 +397,7 @@ if not exist "!VENDOR_ZIP!" (
 echo   Extracting bundled BepInEx to game directory...
 if defined BEPINEX_SUBFOLDER (
     rem Thunderstore BepInExPack: extract to temp, flatten wrapper into GAME_PATH.
-    set "BEP_TEMP=%TEMP%\BepInEx_extract"
-    if exist "!BEP_TEMP!" rmdir /s /q "!BEP_TEMP!"
+    set "BEP_TEMP=%TEMP%\cul-bepinex-extract-%RANDOM%-%RANDOM%"
     mkdir "!BEP_TEMP!"
     "%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "!BEP_TEMP!"
     if errorlevel 1 (
@@ -319,7 +406,13 @@ if defined BEPINEX_SUBFOLDER (
         exit /b 1
     )
     xcopy /s /e /y /q "!BEP_TEMP!\%BEPINEX_SUBFOLDER%\*" "%GAME_PATH%\" >nul
+    set "_XCOPY_EC=!errorlevel!"
     rmdir /s /q "!BEP_TEMP!"
+    if not "!_XCOPY_EC!"=="0" (
+        echo   ERROR: Failed to copy BepInEx into the game folder ^(xcopy exit code !_XCOPY_EC!^).
+        echo   Check the game directory is writable.
+        exit /b 1
+    )
 ) else (
     "%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "%GAME_PATH%"
     if errorlevel 1 (

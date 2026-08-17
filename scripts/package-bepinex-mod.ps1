@@ -181,8 +181,7 @@ Write-Host ""
 Write-Host "Release archive: $zipPath" -ForegroundColor Green
 Write-Host ("Size: {0:N1} KB" -f $zipSize) -ForegroundColor White
 
-# Output zip path for CI capture
-Write-Output $zipPath
+$nexusZipPath = $null
 
 if ($CreateNexusZip) {
     Write-Host ""
@@ -228,7 +227,12 @@ if ($CreateNexusZip) {
     Write-Host ""
     Write-Host "NexusMods archive: $nexusZipPath" -ForegroundColor Green
     Write-Host ("Size: {0:N1} KB" -f $nexusZipSize) -ForegroundColor White
+}
 
-    # Output nexus zip path for CI capture
-    Write-Output $nexusZipPath
+# One object on the success stream, read by property name. The caller used to
+# take $output[0] and $output[1], so anything that ever leaked onto the stream
+# would shift the indices and hand CI a garbage path with no error.
+[PSCustomObject]@{
+    GithubZip = $zipPath
+    NexusZip  = $nexusZipPath
 }

@@ -54,6 +54,9 @@ Write-Host "Generating changelog from $previousTag to HEAD" -ForegroundColor Cya
 Write-Host "Artifact paths: $($ArtifactPaths -join ', ')" -ForegroundColor Gray
 
 $commits = git log "$previousTag..HEAD" --pretty=format:"- %s" --no-merges -- $ArtifactPaths
+if ($LASTEXITCODE -ne 0) {
+    throw "git log $previousTag..HEAD failed with exit code $LASTEXITCODE. See the git error above."
+}
 
 if (-not $commits) {
     # An empty match means a bad/stale -ArtifactPaths, never a core-only

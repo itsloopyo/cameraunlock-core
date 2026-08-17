@@ -23,7 +23,7 @@
 // Scans sibling repos of the cameraunlock-core checkout (../*-headtracking and
 // ../*-head-tracking). Pass explicit repo paths as args to limit the scan.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, basename } from 'node:path';
@@ -83,8 +83,33 @@ function findReleaseWorkflows(repoPath) {
     .filter((wf) => /tags:/.test(wf.text));
 }
 
+// Resolved once, before any workflow is touched. A missing interpreter or a
+// missing PyYAML used to surface from validateYaml as an ordinary exception,
+// indistinguishable from a genuine parse error: --apply then reverted every
+// file it had just written and reported YAML_INVALID_REVERTED for the whole
+// fleet. Neither python nor pyyaml is in pixi.toml, so this is the common case
+// on a clean environment.
+function resolveYamlValidator() {
+  for (const exe of ['python', 'python3']) {
+    try {
+      execFileSync(exe, ['-c', 'import yaml'], { stdio: 'pipe' });
+      return exe;
+    } catch (e) {
+      if (e.code === 'ENOENT') continue;
+      throw new Error(
+        `\`${exe}\` is on PATH but cannot import PyYAML, which this script needs to validate every workflow it writes. Install it (\`pip install pyyaml\`) and re-run.\n${String(e.stderr || e)}`,
+      );
+    }
+  }
+  throw new Error(
+    'No python interpreter found on PATH. This script validates every workflow it writes with python + PyYAML, neither of which is a declared dependency in pixi.toml. Install python and PyYAML, then re-run.',
+  );
+}
+
+const pythonExe = resolveYamlValidator();
+
 function validateYaml(path) {
-  execFileSync('python', ['-c', 'import sys,yaml; yaml.safe_load(open(sys.argv[1],encoding="utf-8"))', path], {
+  execFileSync(pythonExe, ['-c', 'import sys,yaml; yaml.safe_load(open(sys.argv[1],encoding="utf-8"))', path], {
     stdio: 'pipe',
   });
 }
@@ -249,8 +274,9 @@ function processWorkflowFile(repoName, wf) {
   } catch (e) {
     yamlOk = false;
     yamlErr = String(e.stderr || e);
+  } finally {
+    unlinkSync(tmp);
   }
-  execFileSync('node', ['-e', `require('fs').unlinkSync(${JSON.stringify(tmp)})`]);
   return { name, status: yamlOk ? 'WOULD_PATCH' : 'WOULD_FAIL_YAML', ops: opsLabel, error: yamlErr, wf: wf.path };
 }
 

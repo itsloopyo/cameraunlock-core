@@ -123,32 +123,56 @@ if (-not $gameDir) {
 }
 Write-Info "Found $ModDisplayName at: $gameDir"
 
-$modDir  = Join-Path $gameDir $ModFolderRelpath
-$dllPath = Join-Path $gameDir $PluginFileRelpath
+# The CONFIG BLOCK paths are author-edited and documented as optional, but
+# `Join-Path $gameDir ''` returns "$gameDir\" and Test-Path on that is TRUE.
+# A blank $ModFolderRelpath therefore aimed the Remove-Item -Recurse -Force
+# below at the entire game install and reported it as a successful uninstall.
+# Blank means "not configured"; anything that resolves to or above $gameDir is
+# a config error, not something to delete.
+function Resolve-TargetUnderGame {
+    param([string]$Relpath, [string]$Label)
+
+    if ([string]::IsNullOrWhiteSpace($Relpath)) {
+        Write-Info "$Label is not configured - skipping."
+        return $null
+    }
+
+    $rootFull   = [System.IO.Path]::GetFullPath($gameDir).TrimEnd('\')
+    $targetFull = [System.IO.Path]::GetFullPath((Join-Path $gameDir $Relpath)).TrimEnd('\')
+
+    if (-not $targetFull.StartsWith($rootFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Fail "$Label resolves outside the game folder and will not be removed: $targetFull"
+        exit 1
+    }
+    return $targetFull
+}
+
+$modDir  = Resolve-TargetUnderGame -Relpath $ModFolderRelpath  -Label 'Mod folder'
+$dllPath = Resolve-TargetUnderGame -Relpath $PluginFileRelpath -Label 'Plugin file'
 
 $removedSomething = $false
 
-if (Test-Path $modDir) {
+if ($modDir -and (Test-Path -LiteralPath $modDir)) {
     if ($KeepConfig) {
         $cfgSrc = Join-Path $modDir $ConfigFilename
-        if (Test-Path $cfgSrc) {
+        if (Test-Path -LiteralPath $cfgSrc) {
             $backup = Join-Path $env:TEMP $ConfigBackupName
-            Copy-Item -Path $cfgSrc -Destination $backup -Force
+            Copy-Item -LiteralPath $cfgSrc -Destination $backup -Force
             Write-Info "Backed up $ConfigFilename to: $backup"
         }
     }
-    Remove-Item -Path $modDir -Recurse -Force
+    Remove-Item -LiteralPath $modDir -Recurse -Force
     Write-Info "Removed mod folder: $modDir"
     $removedSomething = $true
-} else {
+} elseif ($modDir) {
     Write-Info "Mod folder not present (already removed?)"
 }
 
-if (Test-Path $dllPath) {
-    Remove-Item -Path $dllPath -Force
+if ($dllPath -and (Test-Path -LiteralPath $dllPath)) {
+    Remove-Item -LiteralPath $dllPath -Force
     Write-Info "Removed plugin: $dllPath"
     $removedSomething = $true
-} else {
+} elseif ($dllPath) {
     Write-Info "Plugin not present (already removed or never installed)"
 }
 

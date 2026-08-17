@@ -68,7 +68,6 @@ shift
 goto :detect_yes_flag
 
 :main
-setlocal enabledelayedexpansion
 
 :: Capture script dir BEFORE the arg parser runs. Inside `call :main`,
 :: `shift` rotates %0 too, so %~dp0 read after shifts resolves to the
@@ -76,23 +75,42 @@ setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 
 :: -------- Arg parser (canonical, do not modify) --------
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
+:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
+:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
+:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
+:: fails, and a valid directory is rejected as a malformed argument.
 set "YES_FLAG="
 set "_GIVEN_PATH="
 :parse_args
 if "%~1"=="" goto :args_done
 set "_ARG=%~1"
-if /i "!_ARG!"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
-if /i "!_ARG!"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
-if /i "!_ARG!"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
-if "!_ARG:~0,2!"=="--" ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
-if "!_ARG:~0,1!"=="/"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
-if "!_ARG:~0,1!"=="-"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
+if /i "%_ARG%"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
+if /i "%_ARG%"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
+if /i "%_ARG%"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
+if "%_ARG:~0,2%"=="--" ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
+if "%_ARG:~0,1%"=="/"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
+if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
-    if exist "!_ARG!\" ( set "_GIVEN_PATH=!_ARG!" & shift & goto :parse_args )
+    if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
-echo ERROR: unrecognised argument "!_ARG!"
+echo ERROR: unrecognised argument "%_ARG%"
 exit /b 2
 :args_done
+set "_ARG="
+
+setlocal enabledelayedexpansion
+
+:: -------- Validate CONFIG BLOCK --------
+:: Every name below is interpolated straight into a path that gets written,
+:: deleted or recursively removed. A blank one does not fail - it silently
+:: retargets the operation at the parent directory, which is the game folder.
+for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS MANAGED_SUBFOLDER ASSEMBLY_DLL PATCHER_FILE) do (
+    if not defined %%v (
+        echo ERROR: %%v is not set in this script's CONFIG BLOCK.
+        exit /b 1
+    )
+)
 
 echo.
 echo === %MOD_DISPLAY_NAME% - Install ===
@@ -123,7 +141,7 @@ if not "!_PS_EC!"=="0" (
 call "!_SHIM_OUT!"
 del "!_SHIM_OUT!" 2>nul
 
-echo Game found: %GAME_PATH%
+echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
@@ -208,8 +226,8 @@ if not exist "%BACKUP_PATH%" (
     if errorlevel 1 exit /b 1
     echo   Backup verified clean, restoring before re-patch...
     copy /y "%BACKUP_PATH%" "%ASSEMBLY_PATH%" >nul
-    :: WE_INSTALLED stays whatever it was - we backed up on the first install,
-    :: and that entitlement doesn't regress just because we're re-running.
+    rem WE_INSTALLED stays whatever it was - we backed up on the first install,
+    rem and that entitlement doesn't regress just because we're re-running.
 )
 echo.
 
@@ -235,9 +253,13 @@ if "!DEPLOY_FAILED!"=="1" (
 )
 echo.
 
-:: Unblock DLLs (Windows SmartScreen MOTW)
-powershell -ExecutionPolicy Bypass -Command ^
-    "Get-ChildItem '%MANAGED_PATH%\*.dll' | Unblock-File -ErrorAction SilentlyContinue"
+:: Unblock DLLs (Windows SmartScreen MOTW).
+:: Paths travel by environment variable, never interpolated into the PowerShell
+:: source: a game folder with an apostrophe in it (C:\Games\Mike's Games\...)
+:: closes a single-quoted literal early and the command dies on a parse error.
+set "CUL_MANAGED_PATH=%MANAGED_PATH%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Get-ChildItem -LiteralPath $env:CUL_MANAGED_PATH -Filter *.dll | Unblock-File"
 
 :: -------- Patch Assembly DLL --------
 echo Patching %ASSEMBLY_DLL%...
@@ -245,17 +267,20 @@ echo Patching %ASSEMBLY_DLL%...
 set "CECIL_PATH=%MANAGED_PATH%\Mono.Cecil.dll"
 set "PATCHER_PATH=%MOD_DIR%\%PATCHER_FILE%"
 
-powershell -ExecutionPolicy Bypass -Command ^
-    "Add-Type -Path '%CECIL_PATH%'; " ^
-    "$code = Get-Content '%PATCHER_PATH%' -Raw; " ^
+set "CUL_CECIL_PATH=%CECIL_PATH%"
+set "CUL_PATCHER_PATH=%PATCHER_PATH%"
+set "CUL_ASSEMBLY_PATH=%ASSEMBLY_PATH%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Add-Type -LiteralPath $env:CUL_CECIL_PATH; " ^
+    "$code = Get-Content -LiteralPath $env:CUL_PATCHER_PATH -Raw; " ^
     "$cp = New-Object System.CodeDom.Compiler.CompilerParameters; " ^
-    "$cp.ReferencedAssemblies.Add('%CECIL_PATH%'); " ^
+    "$cp.ReferencedAssemblies.Add($env:CUL_CECIL_PATH); " ^
     "$cp.ReferencedAssemblies.Add('System.dll'); " ^
     "$cp.ReferencedAssemblies.Add('System.Core.dll'); " ^
     "$cp.CompilerOptions = '/nowarn:1668 /warn:0'; " ^
     "$cp.TreatWarningsAsErrors = $false; " ^
     "Add-Type -TypeDefinition $code -CompilerParameters $cp; " ^
-    "if (-not [BootstrapPatcher]::PatchAssembly('%ASSEMBLY_PATH%')) { exit 1 }"
+    "if (-not [BootstrapPatcher]::PatchAssembly($env:CUL_ASSEMBLY_PATH)) { exit 1 }"
 
 if errorlevel 1 (
     echo.
@@ -274,7 +299,7 @@ echo   Installation Complete!
 echo ========================================
 echo.
 echo %MOD_DISPLAY_NAME% has been installed to:
-echo   %MANAGED_PATH%
+echo   !MANAGED_PATH!
 echo.
 echo Start the game to use the mod!
 :: Percent-expansion splits MOD_CONTROLS on its embedded &echo separators;
