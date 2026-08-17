@@ -9,7 +9,230 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Security
+### BREAKING - tracker pivot compensation was inverted, and is now opt-in
+
+`PositionProcessor` built its pivot vector as `+z`, but negative z is forward
+throughout this library. Rotation is linear, so `R(-v) - (-v) == -(R(v) - v)`: the
+computed artifact was the exact negation of the real one, and `pos - artifact`
+therefore **added** it, doubling the phantom translation it was written to remove.
+Confirmed from both ends of the wire - the Headcam trackers pin the same convention
+with a unit test ("wire +Z out the back of the head").
+
+- `TrackerPivotForward` now defaults to **0** (compensation off) in BOTH ports,
+  replacing `0.01f` in C# and `0.15f` in C++. That 15x split existed because the C#
+  value had been lowered to mask this very bug and was never ported back. The correct
+  arm length is not a property of this library: the Headcam Android app already
+  applies its own eye-anchor offset (3.5cm up, 2.5cm forward) while iOS applies none.
+  It must be measured per tracker app.
+- **Migration**: a mod that set `TrackerPivotForward` explicitly still compiles, but the
+  value now *subtracts* the arc rather than adding it and needs re-tuning. A mod on the
+  default now gets no compensation at all - 6DOF will feel cleaner, because the phantom
+  translation that accompanied head rotation is gone, but it will feel different.
+- `PositionProcessor.Process`'s second parameter is renamed `physicalRotationQ` /
+  `physical_rotation_q` and **must** now be the centered rotation from BEFORE per-axis
+  sensitivity and inversion. Both `HeadTrackingSession` ports and
+  `ViewMatrixTrackingController` do this internally. A mod calling `Process` directly
+  should pass `TrackingProcessor.GetSmoothedRotation(...)`.
+- Both ports now clamp before smoothing as well as after, so the smoothing state can no
+  longer wind up outside the limits and pin the output at a limit for hundreds of ms
+  after the head has returned.
+
+### BREAKING - the C++ pipeline now matches the C# one
+
+The two ports disagreed on both the centring and the smoothing, so the same tracker
+produced different camera motion in a native mod and a Unity mod - and each port's
+comment asserted the opposite rationale to the other's.
+
+- Centring moved from component-wise Euler subtraction to quaternion composition.
+  `CenterOffsetManager` gains `ApplyOffsetQuat` and `ComposeAdditionalOffset` (the C#
+  names). The Euler `ApplyOffset` remains for callers that genuinely want per-axis trim
+  and now documents that it is **not** equivalent for a compound centre.
+- Smoothing moved from quaternion SLERP to per-axis Euler. Slerp follows the great
+  circle, and that arc's Euler decomposition carries a roll term for compound movement -
+  diagonal head motion rolled the horizon in native mods and produced exactly zero roll
+  in Unity mods.
+- Added `math::SmoothAngle` and a `float` overload of `ShortestAngleDelta`, matching C#.
+- **Added** `TrackingProcessor::ResetSmoothing()`, `UdpReceiver::ResetOffset()`.
+- **Migration**: `HeadTrackingSession::Recenter()` now calls `ResetSmoothing()` instead
+  of `Reset()`, so a mod-configured centre offset survives a recenter. A mod that called
+  `Reset()` purely to clear smoothing should switch to `ResetSmoothing()`.
+
+### BREAKING - `PositionSettings` (C++) gained `limit_y_down`
+
+C# has always had an asymmetric vertical limit; C++ could not express one, so a config
+ported across silently widened the downward budget into player-body clipping. The
+constructor is now the full asymmetric form with a `Symmetric()` factory, mirroring what
+C# did and for the same reason: two adjacent arities let a stale positional call rebind a
+slot with no compiler signal.
+
+```cpp
+// was: 9 required floats
+PositionSettings(sx, sy, sz, limX, limY, limZ, limZBack, local, remote, [inverts]);
+// now: 10 required floats, limitYDown inserted after limitY
+PositionSettings(sx, sy, sz, limX, limY, limYDown, limZ, limZBack, local, remote, [inverts]);
+// or, exactly the old argument list:
+PositionSettings::Symmetric(sx, sy, sz, limX, limY, limZ, limZBack, local, remote, [inverts]);
+```
+
+- **Migration**: change `PositionSettings foo(...)` to
+  `PositionSettings foo = PositionSettings::Symmetric(...)`. Affects
+  abzu, prey, assetto-corsa-rally, assetto-corsa-evo, assassins-creed-unity, mixtape and
+  witcher-3.
+
+### BREAKING - camera-discovery calibration removed
+
+The whole path was dead: `Advance()` had no `Phase::Calibrating` case, so
+`RunCalibrating` was unreachable, `m_calibPulsing` was never set, and
+`GetCalibrationPulse()` always returned inactive. Removed `CalibrationPulse`,
+`GetCalibrationPulse()`, `Phase::Calibrating` (remaining enumerators renumber), the
+`s_calib*` statics, and `DiscoveryConfig::calibration_deg` / `pulse_frames` /
+`settle_frames`.
+
+- **Migration**: witcher-3 is the only consumer; delete those three config assignments.
+
+### BREAKING - `AxisConfig.Target` and `TargetAxis` removed
+
+Nothing read `Target` - `MappingConfig` routes by `Source` - it was not serialised, and a
+fleet grep found no mod referencing it outside vendored copies of this repo.
+
+### BREAKING - install/uninstall templates
+
+Every mod must re-sync `install.cmd` and `uninstall.cmd`: the `:parse_args` block
+changed in all 15 scripts, and it is contractually byte-identical across them.
+
+- A game path containing `!` was mangled and rejected with **exit 2**, which a launcher
+  reads as an unrecoverable malformed argument. The cause is delayed expansion stripping
+  `!` from the expanded text of the whole line - `%~1` included, so testing `%~1` instead
+  is not a fix. `:parse_args` now runs with delayed expansion off.
+- UE4SS mods were **permanently uninstallable** (no handler existed at all). They now
+  work, but `uninstall.cmd`'s CONFIG BLOCK needs `UE4_BINARIES_RELDIR` set to the same
+  value `install.cmd` uses.
+- A blank required CONFIG BLOCK name is now a hard exit 1 at install time, because a
+  blank one could resolve `rmdir /s /q` to the whole UE4SS `Mods` tree and
+  `Remove-Item -Recurse` to the game root.
+- BepInEx wrong-arch replacement now prompts unless `/y`. Automation must pass `/y`.
+- `package-bepinex-mod.ps1` returns one object with `GithubZip` / `NexusZip` instead of
+  bare stdout lines. Any mod-side `release.ps1` capturing its stdout must be updated.
+
+### BREAKING - PowerShell
+
+- `Remove-OldDoorstopFiles` no longer deletes anything unless the state file records
+  `framework.installed_by_us`. It was removing `winhttp.dll` and `version.dll` - BepInEx
+  5's own proxy and Ultimate ASI Loader's - so installing a Cecil mod alongside a BepInEx
+  mod stopped BepInEx loading entirely. `-Force` restores the old behaviour.
+- `Invoke-DevDeployCecil` gained `-CleanDoorstop` (default off); doorstop cleanup no
+  longer runs by default.
+- `Invoke-HeadTrackingPatch` now throws on a patcher compile failure instead of returning
+  `Success = $false`.
+- `New-ScreenCenterPatcher` emits `ScreenCenterPatcher_<marker>`; a mod hardcoding
+  `[ScreenCenterPatcher]::...` after calling it will break.
+- `Get-BepInExPluginsPath` / `Get-MelonLoaderModsPath` are re-homed to
+  `GamePathDetection.psm1` and re-exported from `ModLoaderSetup.psm1`, so no import
+  changes - but the separator is now consistently `\`.
+
+### BREAKING - Unity (source-compatible, binary-breaking: recompile)
+
+`CameraCallbackLifecycle.RegisterPreCull` / `RegisterPreRender` /
+`RegisterWillRenderCanvases` gained an optional `UnityEngine.Object owner = null`. Mods
+should start passing their plugin MonoBehaviour: without an owner, a destroyed
+subscriber's throw aborts Unity's multicast invocation and silently stops **every later
+subscriber** on `Camera.onPreCull`, including other mods' hooks.
+
+Newly `[Obsolete]`, each with a correct replacement:
+`CanvasCompensation.RepositionChildren` / `RepositionElement(7-arg)`,
+`CrosshairUtility.OffsetByScreenPixels(2-arg)`,
+`DecoupledMovementHelper.ApplyDecoupled` / `ApplyDecoupledFadeOut` /
+`ResetCameraYawOffset` (Euler forms),
+`OpenTrackReceiver.GetLatestPoseTransformed`.
+
+### Fixed
+
+- **The coordinate transformer was never applied.** `OpenTrackReceiver`'s class doc says
+  it transforms at receive time, but the only consumer was `GetLatestPoseTransformed()`,
+  which is not on `ITrackingDataSource` and was called from nowhere in the library. A mod
+  that passed one got `HasTransformer == true`, a camera yawing the wrong way, and no
+  error. `GetLatestPose()` now applies it.
+- **Gimbal lock discarded the rotation.** `ToEulerYXZ`'s lock branches reused the general
+  yaw formula, whose two `atan2` arguments are identically zero at exactly 90 degrees of
+  pitch - so it returned `atan2(0, 0) = 0`. Testing `sinPitch >= 1` also never fired,
+  because float error leaves it a shade under 1 even for a quaternion built at exactly 90
+  (measured 0.9998), so the degenerate branch ran anyway. Both the formula and the
+  threshold are fixed, in both ports.
+- **Pose, position and timestamp are published atomically.** Each field was individually
+  volatile but the group was not, so a reader could pair packet N's timestamp with packet
+  N-1's position - which the interpolator reads as a new sample, latches one behind, then
+  skips the real value because it arrives on an unchanged timestamp.
+- **`AxisConfig.MaxInputRange` defaulted to 180** while head-tracking input lives within
+  roughly +/-30 degrees, pinning every non-linear curve to its near-zero end: the shipped
+  `Competitive` preset was 0.60x overall, *slower* than the `Default` it claims to beat.
+  Now 45, and values at or below zero are rejected (0 made the normalisation `0/0`, and
+  NaN survives both clamps, so one at-rest frame poisoned the axis permanently).
+- **`ApplyDeadzone` had a hard step** whenever `DeadzoneMax <= DeadzoneMin`, which is the
+  default: with `DeadzoneMin = 5`, an input of 4.99 gave 0 and 5.01 gave 5.01, so a 0.02
+  degree movement popped the camera 5 degrees.
+- **Harmony transpilers silently disabled every patch in the mod.** Replacing a matched
+  instruction with a new `CodeInstruction` dropped its labels, and an unresolvable label
+  aborts the whole `PatchAll` - so the camera hook never applied either. Operands were
+  also compared by reference, which Mono does not guarantee across modules.
+- **The HUD marched off screen.** `CanvasCompensation.RepositionChildren` was a
+  read-modify-write with no stored original, so a per-frame call accumulated without
+  bound; with any roll it compounded into a full revolution every 72 frames.
+- **A skipped `OnPostRender` compounded forever.** `LookAimDecoupledHook` mutated the
+  camera transform in `OnPreCull` and restored only in `OnPostRender`, which does not run
+  when a camera culls without rendering - one skip made the tracked rotation the next
+  frame's clean base.
+- **Pattern scanning crashed on packed games.** Every scan walked the full `SizeOfImage`
+  with raw dereferences and no `VirtualQuery` or SEH; Denuvo/VMProtect titles map sections
+  `PAGE_NOACCESS` until first execution, so the game closed to desktop during the loading
+  screen with no log line.
+- **The crash handler could deadlock the game.** It called loader-lock APIs once per stack
+  frame, so a crash that already held that lock froze the process with no dump - strictly
+  worse than the crash it replaced. It also could not report `STACK_OVERFLOW`, the one
+  case it explicitly enumerated, because it put ~2.5KB on an exhausted stack.
+- **A crash report could be written into the player's save file.** `file_log` read the
+  handle outside its mutex, and Win32 recycles handle values.
+- **The DX12 overlay had four independent faults**, including resetting a command
+  allocator every `Present` with no fence anywhere (explicit UB, presenting as
+  intermittent driver TDRs) and leaking a device reference plus two heaps per presented
+  frame on any initialisation failure.
+- **Silent install failures.** Every deploy `copy` discarded its exit status and printed
+  "Deployed" regardless, with `>nul` hiding "Access is denied" - so an unelevated install
+  into Program Files reported success and exited 0.
+- **`ConvertFrom-Json -AsHashtable` does not exist on PowerShell 5.1**, which is what
+  every install-time entry point runs. `Get-ModLoaderState` was unusable for any installed
+  game, and the binding error was re-reported as "State file is corrupt: delete it
+  manually" - pointing users at a valid file.
+- Plus: the shim installer enshrining its own DLL as the user's backup; the ASI uninstall
+  deleting ReShade's proxy DLLs; `Update-VendoredLoader` silently downgrading on a
+  back-ported release; `ea_search_paths` being dead data (100% detection failure for
+  Dragon Age Inquisition); `-LiteralPath` throughout (a game path containing `[` reported
+  as not installed); a BOM breaking UE4SS's `mods.txt` parser; tag-name script injection
+  in the release workflow; and three CI gates that could pass while failing.
+
+### Added
+
+- `SmoothingUtils.SmoothAngle` (C#) and `math::SmoothAngle` (C++) - wrap-aware angle
+  smoothing around the +/-180 seam.
+- `UI/CanvasChildrenCompensator` - the stateful replacement for
+  `CanvasCompensation.RepositionChildren`.
+- `CameraLifecycleManager.ShouldLogNow()` and `CameraRecheckInterval`.
+- `AimDecouplingState.GetAimDirectionForViewMatrix` / `GetScreenOffsetForViewMatrix`, and
+  `CameraRotationComposer.GetTrackingOnlyRotationMatchingAdditive`, so view-matrix mods
+  and the additive composer each have a correctly-named counterpart.
+- `PositionInterpolator::Update(raw, is_new_sample, delta_time)` (C++), mirroring
+  `PoseInterpolator` - the position path was using the raw receive timestamp and so
+  estimated half the true sample interval for a phone resending at 60Hz off a 30Hz sensor.
+- Test coverage for the pivot path (which had none in either port, in any test, which is
+  why the sign error survived) and for gimbal lock, plus fake-null modelling in the Unity
+  stubs so the destroyed-object defect class is reachable from a test at all.
+
+### Earlier in this cycle
+
+The first pass of the same review, already on this branch. Kept separate because the
+entries above supersede several of its notes - in particular the pivot defect it
+recorded as *Known* is now fixed.
+
+#### Security
 
 - **The reusable release workflow no longer interpolates the git tag into a shell.**
   `${{ github.ref_name }}` was substituted textually into three `run:` blocks before
@@ -28,7 +251,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sent their PAT to Thunderstore; and a `browser_download_url` redirects to a presigned
   S3 URL that answers 400 when a second auth mechanism rides along.
 
-### Fixed
+#### Fixed
 
 No public signature or default constant changes. Behaviour changes are called out
 individually.
@@ -129,36 +352,20 @@ individually.
   `install.cmd` and published a ZIP with no installer; `sync-discord-announce.mjs` always
   exited 0, including on `YAML_INVALID_REVERTED`.
 
-### Added
+#### Added
 
 - `SmoothingUtils.SmoothAngle(current, target, smoothing, deltaTime)` - wrap-aware angle
   smoothing. Purely additive.
 - `CameraUnlock.Core.Tests/Regressions/ReviewRegressionTests.cs` - 31 tests, each
   verified to fail against the pre-fix code.
 
-### Known - tracker pivot compensation is inverted (NOT fixed here)
+#### Known - tracker pivot compensation is inverted
 
-`PositionProcessor` builds its pivot as `new Vec3(0, 0, +TrackerPivotForward)`, but this
-library's convention is that **negative z is forward**, so the vector points at the back
-of the head. Since rotation is linear, `R(-v) - (-v) = -(R(v) - v)`: the computed
-artifact is the exact negation of the real one, and `pos - artifact` therefore **doubles**
-the phantom translation it is meant to remove. The Headcam trackers pin the same
-convention with a test ("wire +Z out the back of the head"), so the receiver and the
-tracker disagree.
-
-Not fixed in this release because the correct minimal fix depends on the wire's lateral
-polarity, which is contested in the tracker code and pinned by no test on either side. If
-`+x` is the user's right, only the depth term is wrong; if it is the user's left,
-everything doubles. The deciding test is physical: run a 6DOF mod, lean right, and see
-which way the camera goes.
-
-Related and unfixed: the C# default `TrackerPivotForward = 0.01f` and the C++
-`m_trackerPivotForward = 0.15f` are a 15x unintended divergence (a commit that lowered
-the C# value to mask this very bug was never ported), and
-`ViewMatrixTrackingController.cs` passes `-interpolated.Pitch` where every other call
-site passes `+`. No test in either suite exercises a non-identity rotation with a
-non-zero pivot.
-
+Recorded here when it was still unfixed. **Now fixed** - see the pivot entry at the
+top of this release. Kept only so the reasoning trail is intact: the defect was found
+by review, deliberately deferred once because the correct fix depended on a wire
+convention that no test pinned on either side, then confirmed from the tracker repos
+and fixed.
 
 ### BREAKING - smoothing is now two user parameters
 
