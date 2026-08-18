@@ -9,6 +9,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - every Unity position boundary now takes the offset in the pipeline's own convention
+
+`PositionProcessor` has always treated NEGATIVE z as the forward lean, and its
+asymmetric clamp is built on that: `[-LimitZ, +LimitZBack]` puts the generous
+0.40m on the forward side. The Unity helpers that hand that offset to a camera
+did not agree with it, or with each other:
+
+- `ViewMatrixModifier.ApplyHeadRotation(..., positionOffset)` composes in view
+  space, where Unity looks down -z, so it already matched the pipeline.
+- `ViewMatrixModifier.ApplyHeadRotationDecomposed(..., positionOffset)` places
+  the camera through `transform.rotation`, where +z is forward, so the same
+  offset moved the camera the OTHER way.
+- `PositionApplicator.ToCameraLocalWorld` / `ToHorizonLockedWorld` project into
+  world space and had the same +z-forward reading.
+
+So a mod that toggled `WorldSpaceYaw` at runtime flipped its lean direction
+mid-session, and mods compensated by setting `PositionSettings.InvertZ = true`.
+That inverts in step 2 of the processor, ahead of the clamp, which transposes the
+asymmetric budget: the forward lean gets the 0.10m backward allowance and the
+backward lean gets the 0.40m forward one. Direction still looks right, so it
+survives testing - the symptom is only that leaning in barely moves while pulling
+back moves a lot.
+
+The flip now happens once, inside the decomposed path and inside
+`PositionApplicator`, where the pipeline meets the engine. Every offset-taking
+Unity API takes the offset exactly as `PositionProcessor.Process` returns it.
+
+- **Migration**: a mod feeding these APIs must stop pre-flipping z.
+  - Passing `invertZ: true` to `PositionSettings` purely to correct the
+    direction: change it to `false`. That also restores the intended
+    forward/backward travel, which was mirrored before.
+  - Negating z by hand after `Process` (Green Hell does this at the
+    `ToHorizonLockedWorld` call): drop the negation. An `-X` negation beside it
+    is unrelated and stays.
+  - Mods that never set `invertZ` and compose the view matrix themselves in view
+    space (peak, subnautica) were already correct and need no change.
+  - A mod whose `InvertPositionZ` is a persisted user setting defaulting to
+    `true` (firewatch, gone-home, eternal-afternoon) needs the key re-defaulted
+    AND renamed, or every existing config file keeps the old value and inverts.
+- `InvertZ` keeps its real meaning: a tracker whose z runs the other way.
+- Regression coverage lands with it in `PositionOffsetConventionTests`: the two
+  apply paths must place the camera at the same world point for the same offset.
+
 ### BREAKING - `Copy-SharedBundle` no longer moves your submodule pointer
 
 `Copy-SharedBundle` fast-forwarded `cameraunlock-core` to `origin/main` on every

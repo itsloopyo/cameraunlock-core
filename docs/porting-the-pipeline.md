@@ -204,3 +204,29 @@ and recenters on drifted pose.
 Also: publish the recenter request **after** the pose it belongs to, and only for
 a packet you actually accepted. Publishing first, or publishing for a packet then
 discarded as non-finite, makes the recenter capture the previous pose.
+
+## 10. The engine boundary owns the z flip, never `InvertZ`
+
+Reference: `PositionApplicator`, `ViewMatrixModifier`, `PositionSettings.InvertZ`.
+
+Negative z is the forward lean everywhere inside the pipeline, and the asymmetric
+clamp is built on that: `[-LimitZ, +LimitZBack]` puts the generous 0.40m budget on
+the negative side. Most engines call +z forward, so exactly one flip is needed,
+and it belongs in the code that hands the offset to the engine.
+
+`InvertZ` cannot do that job. It is applied in step 2 of the processor, *before*
+the clamp, so a mod that flips there clamps an already-flipped axis: the forward
+lean gets the 0.10m backward allowance and the backward lean gets the 0.40m
+forward one. The direction looks right, which is why this survives testing - only
+the travel is wrong, and it has been found in production more than once. `InvertZ`
+is for a tracker whose z genuinely runs the other way, nothing else. The same
+applies to `InvertY` against a y-down engine.
+
+Beware a port that offers two apply paths. Ours does - a view-space matrix
+composition and a transform-space decomposition - and Unity's view space looks
+down -z while its transforms call +z forward, so one path needed the flip and the
+other did not. They disagreed, one mode leaned forward and the other backward, and
+the runtime yaw-mode toggle switched between them mid-session.
+
+**Check.** Feed the same forward-lean offset through every apply path with a
+rotated game camera and assert they place the camera at the same world point.

@@ -45,6 +45,9 @@
     <Compile Include="..\CameraUnlock.Core.Unity\Tracking\ViewMatrixModifier.cs">
       <Link>UnderTest\ViewMatrixModifier.cs</Link>
     </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Tracking\PositionApplicator.cs">
+      <Link>UnderTest\PositionApplicator.cs</Link>
+    </Compile>
     <Compile Include="..\CameraUnlock.Core.Unity\Tracking\SmoothedRotationState.cs">
       <Link>UnderTest\SmoothedRotationState.cs</Link>
     </Compile>

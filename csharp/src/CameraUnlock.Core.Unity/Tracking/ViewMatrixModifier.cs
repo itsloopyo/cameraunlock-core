@@ -11,6 +11,15 @@ namespace CameraUnlock.Core.Unity.Tracking
     /// - The camera transform remains unchanged (game logic uses transform)
     /// - Only the worldToCameraMatrix is modified (rendering uses this)
     /// - Result: you can look around with your head while the game aims where it always did
+    ///
+    /// Every overload taking a positional offset takes it in the library's convention,
+    /// straight off <see cref="CameraUnlock.Core.Processing.PositionProcessor"/>: NEGATIVE
+    /// z is the forward lean. The two paths reach the camera through different spaces -
+    /// view space for the matrix-composed overloads, transform space for the decomposed
+    /// ones - so only one of them needs a flip, and it is applied here rather than by the
+    /// caller. A mod that pre-flips with PositionSettings.InvertZ inverts ahead of the
+    /// processor's clamp, which transposes the asymmetric z budget and leaves the forward
+    /// lean with the 0.10m backward allowance.
     /// </summary>
     public static class ViewMatrixModifier
     {
@@ -90,7 +99,8 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         /// <param name="cam">The camera to modify.</param>
         /// <param name="headRotation">The head tracking rotation quaternion.</param>
-        /// <param name="positionOffset">Positional offset in meters (X = right, Y = up, Z = forward).</param>
+        /// <param name="positionOffset">Positional offset in meters, in the processor's
+        /// convention (X = right, Y = up, NEGATIVE Z = forward). See the class remarks.</param>
         /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
         public static void ApplyHeadRotation(Camera cam, Quaternion headRotation, Vector3 positionOffset)
         {
@@ -102,6 +112,10 @@ namespace CameraUnlock.Core.Unity.Tracking
             cam.ResetWorldToCameraMatrix();
             Matrix4x4 gameViewMatrix = cam.worldToCameraMatrix;
 
+            // Unity's view space is right-handed with the camera looking down -z, so
+            // translating the world by -positionOffset moves the camera by +positionOffset
+            // along the VIEW axes: a negative z lands the camera further forward, which is
+            // already the processor's convention. Nothing to flip on this path.
 #if NET35
             Matrix4x4 headRotMatrix = RotateMatrix(headRotation);
             Matrix4x4 offsetMatrix = TranslateMatrix(-positionOffset);
@@ -121,7 +135,8 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
         /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
         /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
-        /// <param name="positionOffset">Positional offset in meters (X = right, Y = up, Z = forward).</param>
+        /// <param name="positionOffset">Positional offset in meters, in the processor's
+        /// convention (X = right, Y = up, NEGATIVE Z = forward). See the class remarks.</param>
         /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
         public static void ApplyHeadRotation(Camera cam, float yaw, float pitch, float roll, Vector3 positionOffset)
         {
@@ -192,7 +207,8 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
         /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
         /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
-        /// <param name="positionOffset">Positional offset in meters (X = right, Y = up, Z = forward).</param>
+        /// <param name="positionOffset">Positional offset in meters, in the processor's
+        /// convention (X = right, Y = up, NEGATIVE Z = forward). See the class remarks.</param>
         /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
         public static void ApplyHeadRotationDecomposed(Camera cam, float yaw, float pitch, float roll, Vector3 positionOffset)
         {
@@ -206,7 +222,12 @@ namespace CameraUnlock.Core.Unity.Tracking
             Quaternion baseRotation = cam.transform.rotation;
             Quaternion finalRotation = worldYaw * baseRotation * localPitchRoll;
 
-            Vector3 cameraPosition = cam.transform.position + baseRotation * positionOffset;
+            // Transform space, not view space: the camera's own +z IS forward here, the
+            // opposite of the processor's convention, so z flips at this boundary. Doing it
+            // in the mod with InvertZ instead lands ahead of the processor's clamp and
+            // transposes the asymmetric forward/backward budget.
+            Vector3 offsetInCameraSpace = new Vector3(positionOffset.x, positionOffset.y, -positionOffset.z);
+            Vector3 cameraPosition = cam.transform.position + baseRotation * offsetInCameraSpace;
 
 #if NET35
             Matrix4x4 rotationMatrix = RotateMatrix(Quaternion.Inverse(finalRotation));

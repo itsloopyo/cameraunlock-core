@@ -113,6 +113,8 @@ namespace UnityEngine
         public static Vector3 operator *(Vector3 a, float s) => new Vector3(a.x * s, a.y * s, a.z * s);
         public static Vector3 operator *(float s, Vector3 a) => a * s;
 
+        public static Vector3 operator /(Vector3 a, float s) => new Vector3(a.x / s, a.y / s, a.z / s);
+
         public static float Dot(Vector3 a, Vector3 b) => a.x * b.x + a.y * b.y + a.z * b.z;
 
         public static Vector3 Cross(Vector3 a, Vector3 b)
@@ -552,10 +554,23 @@ namespace UnityEngine
         /// Counts calls so a test can assert the sticky-override reset actually fired.
         public int ResetWorldToCameraMatrixCalls { get; private set; }
 
+        /// Rebuilds the view matrix from the transform exactly as Unity does: the inverse
+        /// of the camera's world transform with the z row negated, because Unity's camera
+        /// space is right-handed and looks down -z. A plain identity here would make view
+        /// space equal world space and quietly hide every handedness bug the offset paths
+        /// can have.
         public void ResetWorldToCameraMatrix()
         {
             ResetWorldToCameraMatrixCalls++;
-            worldToCameraMatrix = Matrix4x4.identity;
+
+            Matrix4x4 view = Matrix4x4.Rotate(Quaternion.Inverse(transform.rotation))
+                           * Matrix4x4.Translate(new Vector3(
+                               -transform.position.x, -transform.position.y, -transform.position.z));
+            view.m20 = -view.m20;
+            view.m21 = -view.m21;
+            view.m22 = -view.m22;
+            view.m23 = -view.m23;
+            worldToCameraMatrix = view;
         }
     }
 }
