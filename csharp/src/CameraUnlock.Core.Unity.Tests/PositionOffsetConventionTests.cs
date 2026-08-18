@@ -81,6 +81,28 @@ namespace CameraUnlock.Core.Unity.Tests
         }
 
         [Fact]
+        public void SplitInjectionTracker_MovesTheCameraForwardOnNegativeZ()
+        {
+            // Ships to IL2CPP mods as source and writes transform.position directly, so it
+            // is the third boundary that has to read the offset the same way as the two
+            // ViewMatrixModifier paths.
+            Time.Reset();
+            var cam = new Camera { name = "MainCamera" };
+            Camera.allCameras = new[] { cam };
+
+            var tracker = new CameraUnlock.Core.Unity.Il2Cpp.SplitInjectionCameraTracker();
+            tracker.RefreshTargetsIfDue();
+            Assert.Equal(1, tracker.TargetCount);
+
+            tracker.Apply(0f, 0f, 0f, new Vector3(0f, 0f, ForwardLean),
+                rotationActive: false, positionActive: true, worldSpaceYaw: false);
+
+            Assert.Equal(0.4f, cam.transform.position.z, 4);
+
+            Camera.allCameras = new Camera[0];
+        }
+
+        [Fact]
         public void PositionApplicator_ProjectsNegativeZAsForward()
         {
             var forwardLean = new Vec3(0f, 0f, ForwardLean);

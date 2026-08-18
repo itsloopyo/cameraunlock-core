@@ -227,9 +227,13 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
         /// Applies the head pose to every tracked camera. The caller must have called
         /// <see cref="RestorePositions"/> earlier this frame so the cameras are clean.
         /// </summary>
-        /// <param name="positionOffset">Head position offset in meters, applied in the
-        /// camera's clean orientation basis (before head rotation) so leaning follows
-        /// the body, not the head-rotated view.</param>
+        /// <param name="positionOffset">Head position offset in meters, in the pipeline's
+        /// convention straight off PositionProcessor (X = right, Y = up, NEGATIVE Z =
+        /// forward). Applied in the camera's clean orientation basis (before head rotation)
+        /// so leaning follows the body, not the head-rotated view. The flip to Unity's
+        /// +z-forward transform space happens here; a caller that pre-flips with
+        /// PositionSettings.InvertZ inverts ahead of the processor's clamp and transposes
+        /// the asymmetric forward/backward budget.</param>
         /// <param name="worldSpaceYaw">True = yaw around world up (horizon-locked,
         /// prevents leaning artifacts at extreme angles); false = full YPR in the
         /// camera's own space.</param>
@@ -251,7 +255,9 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 if (positionActive)
                 {
                     Vector3 cleanLocalPosition = cam.transform.localPosition;
-                    finalPosition = basePosition + baseWorld * positionOffset;
+                    Vector3 offsetInCameraSpace = new Vector3(
+                        positionOffset.x, positionOffset.y, -positionOffset.z);
+                    finalPosition = basePosition + baseWorld * offsetInCameraSpace;
                     cam.transform.position = finalPosition;
                     t.AppliedLocalDelta = cam.transform.localPosition - cleanLocalPosition;
                     t.HasWrite = true;

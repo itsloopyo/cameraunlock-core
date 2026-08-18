@@ -23,6 +23,9 @@ did not agree with it, or with each other:
   offset moved the camera the OTHER way.
 - `PositionApplicator.ToCameraLocalWorld` / `ToHorizonLockedWorld` project into
   world space and had the same +z-forward reading.
+- `SplitInjectionCameraTracker.Apply` (shipped to IL2CPP mods as source) writes
+  `transform.position` through the camera's own basis, so it read +z as forward
+  too.
 
 So a mod that toggled `WorldSpaceYaw` at runtime flipped its lean direction
 mid-session, and mods compensated by setting `PositionSettings.InvertZ = true`.
@@ -45,6 +48,8 @@ Unity API takes the offset exactly as `PositionProcessor.Process` returns it.
     is unrelated and stays.
   - Mods that never set `invertZ` and compose the view matrix themselves in view
     space (peak, subnautica) were already correct and need no change.
+  - IL2CPP mods driving `SplitInjectionCameraTracker` (sons-of-the-forest) take
+    the source change on their next build, so the same `invertZ` flip applies.
   - A mod whose `InvertPositionZ` is a persisted user setting defaulting to
     `true` (firewatch, gone-home, eternal-afternoon) needs the key re-defaulted
     AND renamed, or every existing config file keeps the old value and inverts.
