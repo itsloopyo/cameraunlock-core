@@ -21,19 +21,6 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Import-Module (Join-Path $scriptDir "..\powershell\ReleaseWorkflow.psm1") -Force
 
-# Manual override takes priority
-if (Test-Path "RELEASE_NOTES.md") {
-    Write-Host "Using RELEASE_NOTES.md override" -ForegroundColor Cyan
-    # Re-written rather than copied. A byte-for-byte Copy-Item preserves whatever
-    # encoding the hand-authored file has, and a UTF-8 BOM here publishes straight into
-    # the release body - this is the likeliest path to carry one, because it is the only
-    # file a human edits in an editor. Every Update-VendoredLoader README in the fleet
-    # opens with a BOM, so the assumption that local files are BOM-less does not hold.
-    Write-NotesFile -Path $OutputFile -Text (Get-Content -Raw -LiteralPath "RELEASE_NOTES.md")
-    Get-Content $OutputFile
-    exit 0
-}
-
 function Write-NotesFile {
     param([string]$Path, [string]$Text)
 
@@ -50,6 +37,19 @@ function Write-NotesFile {
     # Set-Location.
     $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     [System.IO.File]::WriteAllText($full, $Text, (New-Object System.Text.UTF8Encoding $false))
+}
+
+# Manual override takes priority
+if (Test-Path "RELEASE_NOTES.md") {
+    Write-Host "Using RELEASE_NOTES.md override" -ForegroundColor Cyan
+    # Re-written rather than copied. A byte-for-byte Copy-Item preserves whatever
+    # encoding the hand-authored file has, and a UTF-8 BOM here publishes straight into
+    # the release body - this is the likeliest path to carry one, because it is the only
+    # file a human edits in an editor. Every Update-VendoredLoader README in the fleet
+    # opens with a BOM, so the assumption that local files are BOM-less does not hold.
+    Write-NotesFile -Path $OutputFile -Text (Get-Content -Raw -LiteralPath "RELEASE_NOTES.md")
+    Get-Content $OutputFile
+    exit 0
 }
 
 # Check for previous tag
