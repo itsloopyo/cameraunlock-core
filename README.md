@@ -101,7 +101,7 @@ var aimDirection = AimDecoupler.ComputeAimDirectionLocal(trackingRotation);
 
 | Type | Description |
 |------|-------------|
-| `HeadTrackingSession` | Per-frame pipeline (receiver → interpolators → processors) with auto-recenter, tracking-loss hold, and mode cycling |
+| `HeadTrackingSession` | Per-frame pipeline (receiver → interpolators → processors) with tracking-loss hold and mode cycling |
 | `MultiPlayerTrackingManager` | One `HeadTrackingSession` per local player, each with its own UDP port (split-screen multiplayer) |
 | `StaticHeadTrackingCore` | Static receiver + processor core that survives Unity lifecycle events |
 | `CenterOffsetManager` | Recentering state |

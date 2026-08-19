@@ -9,6 +9,15 @@ datagram.
 Supersedes the 54-byte HCAM trailer. The trailer stays supported until the mod
 fleet has re-synced (see Migration).
 
+
+> **Superseded in part.** This document was written when the mod captured a
+> centre on tracker connection. That capture is now opt-in and off by default
+> (`AutoRecenterOnConnect`), so the races argued about below do not arise in a
+> default build, and every source line number cited is pre-change. The reasoning
+> is kept because it still applies to a mod that opts back in, and because
+> clearing-on-identification remains the cheaper rule than enumerating every
+> site.
+
 ## Problem
 
 The trailer only works when the receiver is already running at the moment the
@@ -250,8 +259,8 @@ its `TrackingProcessor` centre manager overwrites rather than composes
 all while its sibling `PollingUdpReceiver` does. See Implementation notes.
 
 **Identification clears existing offsets, it does not merely suppress future
-ones.** This matters because several auto-recenter sites fire before
-identification can complete. `StaticHeadTrackingCore.cs:149-154` centres on the
+ones.** This mattered because several auto-recenter sites fired before
+identification could complete. `StaticHeadTrackingCore.cs:149-154` centres on the
 first frame `IsReceiving` is true, and `IsReceiving` goes true after one packet
 (`OpenTrackReceiver.cs:447`), which is before a 30-packet identification window
 can close. `ViewMatrixTrackingController` centres on session start
@@ -296,9 +305,9 @@ On a press: reset the pose and position interpolators and the processor
 smoothing so the view snaps rather than blending from the pre-press drift, set
 both centre levels to identity, then notify (`OnRemoteRecenter`).
 
-While NEUTRAL_PENDING is set: do not fire the connection auto-recenter (one is
-coming), and hold the current centre. Adopt identity when the flag clears with
-the accompanying counter change.
+While NEUTRAL_PENDING is set: do not fire the connection auto-recenter where a
+mod has opted back into it (one is coming), and hold the current centre. Adopt
+identity when the flag clears with the accompanying counter change.
 
 The counter is advisory *for centring*: the centre is identity whether or not any
 particular press was observed, so a missed press costs an interpolator reset
@@ -459,8 +468,9 @@ decide it rather than letting it happen.
   because opentrack resamples every axis through a 16384-bucket integer-indexed
   spline LUT and clamps the result, so the output is a function of LUT samples
   rather than of the input's low bits. There is no bypass configuration. The mod
-  treats it as unidentified and falls back to its own auto-recenter, which is
-  today's behaviour for that chain.
+  treats it as unidentified and, where a mod has opted back into it, falls back
+  to its own auto-recenter. That was the behaviour for that chain before the
+  auto-recenter became opt-in.
 - A **pure byte relay** (socat, a fan-out forwarder, a router hairpin) preserves
   the marker exactly, so identification and remote recenter do survive one. The
   mod identifies the relay's endpoint. Several phones behind one relay collapse

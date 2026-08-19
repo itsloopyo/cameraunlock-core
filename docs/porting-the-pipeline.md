@@ -182,8 +182,8 @@ pre-press drift:
 | 240 | 8.000 |
 
 Key the reset off the "capture armed" state rather than the keypress, so it
-covers every path that recenters - the hotkey, a remote HCAM press, and any
-automatic recenter on tracker connect. Wiring it to the hotkey misses the others.
+covers every path that recenters - the hotkey and a remote HCAM press. Wiring it
+to the hotkey misses the other.
 
 **Check.** Arm a recenter at several render rates above the tracker rate and
 assert the captured neutral equals the raw pose the tracker reported, exactly.
@@ -205,7 +205,34 @@ Also: publish the recenter request **after** the pose it belongs to, and only fo
 a packet you actually accepted. Publishing first, or publishing for a packet then
 discarded as non-finite, makes the recenter capture the previous pose.
 
-## 10. The engine boundary owns the z flip, never `InvertZ`
+## 10. The mod-side center starts at identity
+
+The pipeline consumes the tracker's pose as absolute, the way TrackIR does: the
+driver owns the center and the game does not keep one of its own until the player
+asks. Headcam zeroes at tracking start and on every CENTER press, opentrack
+centers on its own Center bind, so the stream arriving at a port is already
+centered.
+
+A port that captures the incoming pose as a center when the connection comes up
+puts a SECOND center in series with that one, and the two drift apart because
+each side recenters at moments the other cannot see. At startup both are near
+zero and it looks fine. The symptom shows up later: the player presses Center on
+a tracker that sends no HCAM trailer, the tracker's output drops to zero, the
+port keeps subtracting the pose it captured at session start, and the view parks
+at the negated drift until the player also presses the mod's hotkey. Two presses
+for one recenter.
+
+So the center is identity until the recenter hotkey or an HCAM trailer press sets
+one. This is the mistake most likely to be carried across from an older port: it
+was `cameraunlock-core`'s own behaviour until the CHANGELOG entry "the session no
+longer captures a center on connect", and every full local port copied it.
+
+**Check.** Feed an uncentered stream (yaw 40) for a few hundred frames, then drop
+the stream to zero with no trailer, and assert the output lands at zero rather
+than -40. Run it for position as well as rotation: the position center is captured
+separately and a rotation-only test passes with the position half broken.
+
+## 11. The engine boundary owns the z flip, never `InvertZ`
 
 Reference: `PositionApplicator`, `ViewMatrixModifier`, `PositionSettings.InvertZ`.
 

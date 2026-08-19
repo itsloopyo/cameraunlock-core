@@ -138,10 +138,7 @@ namespace CameraUnlock.Core.Tests.Protocol
         public void Session_CounterChange_RecentersToCurrentPose()
         {
             _receiver = StartReceiver();
-            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor())
-            {
-                StabilizationFrames = int.MaxValue
-            };
+            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
 
             Send(BuildPacket(45, 30, 15, recenterCounter: 1));
             Thread.Sleep(100);
@@ -157,13 +154,39 @@ namespace CameraUnlock.Core.Tests.Protocol
         }
 
         [Fact]
+        public void Session_CounterChange_ClearsAnEarlierPositionCentre()
+        {
+            // The trailer branch centers rotation AND position. With no prior centre the
+            // position half is a no-op, so the case that exercises it is a hotkey recenter
+            // first: that installs a position centre, and the press must replace it with
+            // the zeroed pose the app is now sending. Left stale, it is subtracted from an
+            // already-zeroed stream and the lean parks mirrored.
+            _receiver = StartReceiver();
+            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
+
+            // Leaned 10cm right, 8cm forward on the wire, and recentred there by hand.
+            Send(BuildPacket(0, 0, 0, x: 10.0, y: 5.0, z: -8.0));
+            Thread.Sleep(100);
+            for (int i = 0; i < 60; i++) session.Update(1f / 60f);
+            session.Recenter();
+            for (int i = 0; i < 60; i++) session.Update(1f / 60f);
+
+            // CENTER press on the tracker: it zeroes its own output and signals.
+            Send(BuildPacket(0, 0, 0, recenterCounter: 1, x: 0.0, y: 0.0, z: 0.0));
+            Thread.Sleep(100);
+            for (int i = 0; i < 60; i++) session.Update(1f / 60f);
+
+            Assert.True(System.Math.Abs(session.PositionOffset.X) < 0.005f,
+                $"x parked at the mirrored lean, got {session.PositionOffset.X}");
+            Assert.True(System.Math.Abs(session.PositionOffset.Z) < 0.005f,
+                $"z parked at the mirrored lean, got {session.PositionOffset.Z}");
+        }
+
+        [Fact]
         public void Session_TrackerZeroesStreamBeforeSignaling_DoesNotDoubleSubtract()
         {
             _receiver = StartReceiver();
-            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor())
-            {
-                StabilizationFrames = int.MaxValue
-            };
+            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
 
             // Drifted steady state: plain packets, smoothing settles on the pose.
             Send(BuildPacket(45, 30, 15));
@@ -192,7 +215,8 @@ namespace CameraUnlock.Core.Tests.Protocol
             _receiver = StartReceiver();
             var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor())
             {
-                StabilizationFrames = 3
+                StabilizationFrames = 3,
+                AutoRecenterOnConnect = true
             };
             var logs = new System.Collections.Generic.List<string>();
             session.Log = logs.Add;
@@ -215,7 +239,8 @@ namespace CameraUnlock.Core.Tests.Protocol
             _receiver = StartReceiver();
             var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor())
             {
-                StabilizationFrames = 3
+                StabilizationFrames = 3,
+                AutoRecenterOnConnect = true
             };
             var logs = new System.Collections.Generic.List<string>();
             session.Log = logs.Add;
@@ -299,10 +324,14 @@ namespace CameraUnlock.Core.Tests.Protocol
             }
         }
 
-        private static byte[] BuildPacket(double yaw, double pitch, double roll, byte? recenterCounter = null)
+        private static byte[] BuildPacket(double yaw, double pitch, double roll, byte? recenterCounter = null,
+            double x = 0.0, double y = 0.0, double z = 0.0)
         {
             byte[] packet = new byte[recenterCounter.HasValue ? OpenTrackPacket.PacketSizeWithTrailer : OpenTrackPacket.MinPacketSize];
 
+            Array.Copy(BitConverter.GetBytes(x), 0, packet, 0, 8);
+            Array.Copy(BitConverter.GetBytes(y), 0, packet, 8, 8);
+            Array.Copy(BitConverter.GetBytes(z), 0, packet, 16, 8);
             Array.Copy(BitConverter.GetBytes(yaw), 0, packet, OpenTrackPacket.YawOffset, 8);
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, OpenTrackPacket.PitchOffset, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, OpenTrackPacket.RollOffset, 8);

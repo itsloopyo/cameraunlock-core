@@ -21,8 +21,62 @@ namespace CameraUnlock.Core.Tests.Tracking
 
         public void Dispose()
         {
-            // Ensure clean state between tests
+            // Ensure clean state between tests. AutoRecenterOnConnect deliberately
+            // survives Shutdown(), so it has to be cleared here by hand.
             StaticHeadTrackingCore.Shutdown();
+            StaticHeadTrackingCore.AutoRecenterOnConnect = false;
+        }
+
+        [Fact]
+        public void Update_DoesNotAutoRecenter_ByDefault()
+        {
+            _config.UdpPort = 14276;
+            _config.LocalSmoothing = 0f;
+            StaticHeadTrackingCore.Initialize(_config);
+            SendPacket(14276, yaw: 40.0);
+            WaitUntilReceiving();
+
+            float settled = SettleYaw();
+            Assert.True(System.Math.Abs(settled - 40f) < 1f,
+                $"Expected the incoming pose to pass through uncentered, got {settled}");
+        }
+
+        [Fact]
+        public void Update_AutoRecenterOnConnect_CapturesTheCenter()
+        {
+            _config.UdpPort = 14277;
+            _config.LocalSmoothing = 0f;
+            StaticHeadTrackingCore.AutoRecenterOnConnect = true;
+            StaticHeadTrackingCore.Initialize(_config);
+            SendPacket(14277, yaw: 40.0);
+            WaitUntilReceiving();
+
+            float centered = SettleYaw();
+            Assert.True(System.Math.Abs(centered) < 1f,
+                $"Expected the first-connection pose to become the center, got {centered}");
+
+            // Pin the captured centre itself: 20 degrees further must read as 20.
+            SendPacket(14277, yaw: 60.0);
+            WaitUntilReceiving();
+            float residual = SettleYaw();
+            Assert.True(System.Math.Abs(residual - 20f) < 1f,
+                $"Expected 20 relative to a centre of 40, got {residual}");
+        }
+
+        [Fact]
+        public void AutoRecenterOnConnect_SurvivesShutdown()
+        {
+            // Deliberately asymmetric with the smoothing values, which Shutdown() does
+            // reset: those are overwritten from config by the next Initialize(), so a
+            // stale read is a real hazard there. This has no config source, so resetting
+            // it would leave nothing to restore it and a mod that sets it once at plugin
+            // load would silently lose it on the next Initialize().
+            StaticHeadTrackingCore.Initialize(_config);
+            StaticHeadTrackingCore.AutoRecenterOnConnect = true;
+
+            StaticHeadTrackingCore.Shutdown();
+
+            Assert.True(StaticHeadTrackingCore.AutoRecenterOnConnect);
         }
 
         [Fact]
@@ -354,9 +408,44 @@ namespace CameraUnlock.Core.Tests.Tracking
         /// <summary>
         /// Test configuration implementation for unit tests.
         /// </summary>
+        private const float FrameTime = 1f / 60f;
+
+        private static float SettleYaw()
+        {
+            float yaw = 0f;
+            for (int i = 0; i < 120; i++)
+            {
+                StaticHeadTrackingCore.Update(FrameTime);
+                yaw = StaticHeadTrackingCore.GetProcessedPose(FrameTime).Yaw;
+            }
+            return yaw;
+        }
+
+        private static void WaitUntilReceiving()
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                if (StaticHeadTrackingCore.IsReceiving) return;
+                System.Threading.Thread.Sleep(10);
+            }
+            Assert.Fail("Receiver never reported a connection");
+        }
+
+        private static void SendPacket(int port, double yaw)
+        {
+            byte[] packet = new byte[48];
+            Array.Copy(BitConverter.GetBytes(yaw), 0, packet, 24, 8);
+
+            using (var client = new System.Net.Sockets.UdpClient())
+            {
+                client.Send(packet, packet.Length,
+                    new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port));
+            }
+        }
+
         private class TestConfig : IHeadTrackingConfig
         {
-            public int UdpPort { get; set; } = 4242;
+            public int UdpPort { get; set; } = 14275;
             public bool EnableOnStartup { get; set; } = true;
             public SensitivitySettings Sensitivity { get; set; } = SensitivitySettings.Default;
             public string RecenterKeyName { get; set; } = "Home";

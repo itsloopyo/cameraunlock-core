@@ -74,6 +74,25 @@ namespace CameraUnlock.Core.Tracking
         }
 
         /// <summary>
+        /// Whether to capture the incoming pose as the center on the first connection.
+        /// Off by default; see <see cref="HeadTrackingSession.AutoRecenterOnConnect"/> for
+        /// why, which applies here unchanged.
+        /// <para>
+        /// This port has NO settle window, unlike the other three: it captures on the
+        /// first frame <see cref="IsReceiving"/> is true, which is one packet after the
+        /// tracker connects. Enabling it here therefore bakes in whatever pose the player
+        /// holds during the intro screens, where <see cref="HeadTrackingSession"/> waits
+        /// ten fresh frames and the C++ session waits for a pose held still.
+        /// </para>
+        /// <para>
+        /// Unlike the smoothing properties this is a mod-level policy, not session state
+        /// read from config, so <see cref="Shutdown"/> leaves it alone: a mod that sets it
+        /// once at startup keeps it across an Initialize/Shutdown cycle.
+        /// </para>
+        /// </summary>
+        public static bool AutoRecenterOnConnect { get; set; }
+
+        /// <summary>
         /// Whether tracking data is being received.
         /// </summary>
         public static bool IsReceiving
@@ -202,7 +221,7 @@ namespace CameraUnlock.Core.Tracking
             RefreshConnectionFlag();
 
             // Auto-recenter on first connection
-            if (!_hasAutoRecentered)
+            if (AutoRecenterOnConnect && !_hasAutoRecentered)
             {
                 _hasAutoRecentered = true;
                 _receiver.Recenter();
@@ -344,7 +363,7 @@ namespace CameraUnlock.Core.Tracking
         /// this, so re-arming meant the next Update() captured a fresh centre on the very
         /// first frame packets resumed - and this class has NO settling delay at all (the
         /// stabilization countdown lives in <see cref="HeadTrackingSession"/>, not here),
-        /// so the capture is immediate and unconditional. Toggling the mod off and on
+        /// so the capture is immediate. Toggling the mod off and on
         /// while leaning forward to read something therefore discarded the centre the user
         /// had chosen and replaced it with the leaning pose. Call <see cref="Shutdown"/>
         /// or <see cref="Recenter"/> to deliberately re-centre.

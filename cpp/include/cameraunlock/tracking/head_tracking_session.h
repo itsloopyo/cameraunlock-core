@@ -174,8 +174,24 @@ public:
 
     /// Consecutive settled packets required before the automatic
     /// first-connection recenter fires, giving phone trackers time to settle.
+    /// Only consulted when SetAutoRecenterOnConnect(true) is in effect.
     void SetStabilizationFrames(int frames) { m_stabilizationFrames = frames; }
     int GetStabilizationFrames() const { return m_stabilizationFrames; }
+
+    /// Whether a settled first connection captures the incoming pose as the
+    /// center. Off by default: every tracker in use centers itself (Headcam
+    /// zeroes at tracking start and on CENTER, opentrack has its own Center
+    /// bind), so a first-connection capture adds a SECOND center in series with
+    /// the tracker's. The two then disagree, and a Center press in the tracker
+    /// app leaves the view parked at the negated captured center until the user
+    /// also hits the mod's recenter hotkey. Identity by default means one press
+    /// anywhere is enough, which is how TrackIR and every native implementation
+    /// behaves.
+    ///
+    /// Enable only for a tracker whose origin is arbitrary at startup and which
+    /// cannot zero itself. Doing so reintroduces the double-center for that mod.
+    void SetAutoRecenterOnConnect(bool enabled) { m_autoRecenterOnConnect = enabled; }
+    bool IsAutoRecenterOnConnect() const { return m_autoRecenterOnConnect; }
 
     /// How far past the latest sample the interpolators may continue the last
     /// velocity, as a fraction of the estimated sample interval. Applies to
@@ -196,7 +212,12 @@ public:
         return m_poseInterpolator.max_extrapolation_fraction;
     }
 
-    /// True once a center has been captured, automatically or on request.
+    /// True once a center has been captured: by the user's recenter, by a
+    /// tracker-app CENTER press, or by the settle-window capture when
+    /// SetAutoRecenterOnConnect(true) is in effect. With the default opt-in off
+    /// there is no automatic capture, so this stays false until the player or
+    /// the tracker asks for one. A mod gating "tracking is ready" on it will
+    /// wait forever - gate on GetRotation() succeeding instead.
     bool HasCentered() const { return m_hasCentered; }
 
     /// How many times the tracker app has recentered us through the packet
@@ -237,6 +258,9 @@ public:
         // Auto-recenter once, on the first pose the player HOLDS still after the
         // first connection.
         //
+        // Off unless SetAutoRecenterOnConnect(true) was called; see that setter for
+        // why capturing here is wrong for a tracker that centers itself.
+        //
         // Elapsed frames alone say nothing about whether the player is in
         // position: a mod starts tracking while the game is still on its intro
         // screens, so a plain countdown captures whatever pose they happened to
@@ -249,7 +273,7 @@ public:
         // sending reads as a perfectly still head - the one state that must
         // never be mistaken for a settled player.
         bool recentered = false;
-        if (!m_hasCentered && isNewPacket) {
+        if (m_autoRecenterOnConnect && !m_hasCentered && isNewPacket) {
             if (!m_hasSettleAnchor || fabsf(rawYaw - m_settleYaw) > kSettleDegrees ||
                 fabsf(rawPitch - m_settlePitch) > kSettleDegrees ||
                 fabsf(rawRoll - m_settleRoll) > kSettleDegrees) {
@@ -368,7 +392,8 @@ public:
     /// Sets the current head pose and position as the new center and resets
     /// transient interpolation/smoothing state.
     ///
-    /// Also disarms the automatic recenter. A deliberate recenter is the
+    /// Also disarms the settle-window capture, which matters only while
+    /// SetAutoRecenterOnConnect(true) is in effect. A deliberate recenter is the
     /// definitive answer to where centre is, and leaving the automatic one armed
     /// means it fires the moment the player next holds still for long enough and
     /// silently replaces the centre they just chose - the same trap the remote
@@ -451,6 +476,7 @@ private:
     // mouse or glancing at the keyboard restarts the window.
     static constexpr float kSettleDegrees = 1.5f;
 
+    bool m_autoRecenterOnConnect = false;
     int m_stabilizationFrames = 30;
     int m_stabilizationCount = 0;
     float m_settleYaw = 0.0f, m_settlePitch = 0.0f, m_settleRoll = 0.0f;

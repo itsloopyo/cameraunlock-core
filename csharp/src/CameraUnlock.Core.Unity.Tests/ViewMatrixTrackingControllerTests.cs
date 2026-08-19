@@ -49,8 +49,10 @@ namespace CameraUnlock.Core.Unity.Tests
             // The receive thread raises the request whenever a trailer press lands, whether
             // or not the mod is applying tracking. Only the applying branch consumed it, so a
             // press made with tracking OFF stayed latched and fired on the first frame of the
-            // next session - cancelling the stabilise-then-recenter that session had just
-            // armed, and anchoring it to whichever raw pose arrived first.
+            // next session, anchoring it to whichever raw pose arrived first.
+            //
+            // Consuming it clears the mod-side centre to identity, matching the zeroed
+            // stream the app is now sending. See StalePress_ClearsAnEarlierHotkeyCentre.
             _source.RecenterRequested = true;
 
             Time.AdvanceFrame();
@@ -58,14 +60,77 @@ namespace CameraUnlock.Core.Unity.Tests
 
             Assert.False(_source.RecenterRequested);
 
-            int callsBefore = _source.RecenterCalls;
             _source.Yaw = 30f;
-            Time.AdvanceFrame();
-            _controller.ProcessFrame(true);
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
 
-            // The session's own centring is the only thing that ran; the stale press did not
-            // add a second one.
-            Assert.Equal(callsBefore, _source.RecenterCalls);
+            // The stale press must not have installed a centre: 30 degrees in still reads
+            // as 30 degrees out.
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw - 30f) < 1f,
+                "a stale press centred the view, got " + _controller.LastTrackingYaw);
+        }
+
+        [Fact]
+        public void StalePress_ClearsAnEarlierHotkeyCentre()
+        {
+            // Hotkey recenter installs a centre at 40. The player then presses CENTER on
+            // the tracker while the mod is not applying tracking: the app zeroes its own
+            // output, so the stream restarts at 0. Left installed, the 40 centre would be
+            // subtracted from that zeroed stream and park the view at -40.
+            _source.Yaw = 40f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+            _controller.Recenter();
+
+            _source.Yaw = 0f;
+            _source.RecenterRequested = true;
+            Time.AdvanceFrame();
+            _controller.ProcessFrame(false);
+
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw) < 1f,
+                "a stale hotkey centre survived the press, got " + _controller.LastTrackingYaw);
+        }
+
+        [Fact]
+        public void Recenter_ZeroesTheAppliedPosition()
+        {
+            _source.PositionX = 0.10f;
+            _source.PositionY = 0.05f;
+            _source.PositionZ = -0.08f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            // 6DOF only engages once a non-zero position sample has arrived, so the
+            // uncentred offset must be visible before the recenter means anything.
+            Assert.True(System.Math.Abs(_controller.LastTrackingPosition.X - 0.10f) < 0.005f,
+                "position never reached the camera, got " + _controller.LastTrackingPosition.X);
+
+            _controller.Recenter();
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingPosition.X) < 0.005f,
+                "x did not centre, got " + _controller.LastTrackingPosition.X);
+            Assert.True(System.Math.Abs(_controller.LastTrackingPosition.Z) < 0.005f,
+                "z did not centre, got " + _controller.LastTrackingPosition.Z);
         }
 
         [Fact]
@@ -104,6 +169,152 @@ namespace CameraUnlock.Core.Unity.Tests
         {
             Time.AdvanceFrame();
             _controller.ProcessFrame(true);
+        }
+
+        [Fact]
+        public void ProcessFrame_DoesNotCaptureCenter_ByDefault()
+        {
+            _source.Yaw = 40f;
+
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw - 40f) < 1f,
+                "the incoming pose should pass through uncentered, got " + _controller.LastTrackingYaw);
+        }
+
+        [Fact]
+        public void TrackerSideCenter_WithoutTrailer_LandsAtZero()
+        {
+            // The opentrack case. opentrack has its own Center bind and sends no HCAM
+            // trailer, so all the controller sees is the stream dropping to zero. A
+            // session-start center capture would still be subtracting the pre-press pose,
+            // parking the view at the negated drift until the player also hits the mod's
+            // recenter hotkey.
+            _source.Yaw = 40f;
+            _source.Pitch = 20f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            _source.Yaw = 0f;
+            _source.Pitch = 0f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw) < 1f,
+                "expected yaw 0 after the tracker centered itself, got " + _controller.LastTrackingYaw);
+            Assert.True(System.Math.Abs(_controller.LastTrackingPitch) < 1f,
+                "expected pitch 0 after the tracker centered itself, got " + _controller.LastTrackingPitch);
+        }
+
+        [Fact]
+        public void ProcessFrame_AutoRecenterOnConnect_CapturesTheCenter()
+        {
+            _controller.AutoRecenterOnConnect = true;
+            _source.Yaw = 40f;
+
+            // Move mid-ramp. BeginTrackingSession captures 40, then the transition-in
+            // completing re-captures on the settled pose, so the second capture is the
+            // one that must win.
+            for (int i = 0; i < 10; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+            _source.Yaw = 55f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw) < 1f,
+                "the settled pose should have become the centre, got " + _controller.LastTrackingYaw);
+
+            _source.Yaw = 75f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw - 20f) < 1f,
+                "the captured centre should be 55, got a residual of " + _controller.LastTrackingYaw);
+        }
+
+        [Fact]
+        public void Recenter_ZeroesTheViewAndPinsTheCentre()
+        {
+            // With no capture on connect, the hotkey is the only thing that creates a
+            // mod-side centre at all.
+            _source.Yaw = 40f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            _controller.Recenter();
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw) < 1f,
+                "the hotkey recenter did not zero the view, got " + _controller.LastTrackingYaw);
+
+            _source.Yaw = 60f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw - 20f) < 1f,
+                "the captured centre should be 40, got a residual of " + _controller.LastTrackingYaw);
+        }
+
+        [Fact]
+        public void TrailerPress_CentersTheView_WithTheOptInOff()
+        {
+            // The trailer is the other surviving centring path and it must work on its
+            // own, not because a session-start capture happened to run first.
+            _source.Yaw = 40f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            _source.RecenterRequested = true;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw) < 1f,
+                "the trailer press did not centre the view, got " + _controller.LastTrackingYaw);
+
+            _source.Yaw = 60f;
+            for (int i = 0; i < 120; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+
+            Assert.True(System.Math.Abs(_controller.LastTrackingYaw - 20f) < 1f,
+                "the captured centre should be 40, got a residual of " + _controller.LastTrackingYaw);
         }
 
         [Fact]

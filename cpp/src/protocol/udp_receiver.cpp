@@ -578,6 +578,15 @@ void UdpReceiver::ReceiverThread() {
                 // Holding it back would leave Recenter() to capture the
                 // PRE-press pose as the new centre, baking in the very offset
                 // the player just cleared.
+                //
+                // A tracker that centres itself WITHOUT the trailer (opentrack's
+                // Center bind) gets no such bypass, because from here that press
+                // is indistinguishable from the head being lost - both are a
+                // large jump followed by a pose that stops moving, which is the
+                // whole reason this gate exists. It costs one held packet, and
+                // if the tracker then repeats bit-identical values the hold
+                // persists until the pose changes again. Telling the two apart
+                // needs the announcement, which is what the trailer is for.
                 if (pressed) {
                     SeedPoseGate(pose);
                 } else if (!AcceptPose(pose, repeatsPrevious)) {

@@ -297,12 +297,27 @@ namespace CameraUnlock.Core.Tracking
             }
         }
 
-        /// <summary>Applies the post-connection stabilization frame count to every session.</summary>
+        /// <summary>
+        /// Applies the post-connection stabilization frame count to every session. Only
+        /// consulted while <see cref="HeadTrackingSession.AutoRecenterOnConnect"/> is on.
+        /// </summary>
         public void ApplyStabilizationFrames(int frames)
         {
             for (int i = 0; i < _sessions.Length; i++)
             {
                 _sessions[i].StabilizationFrames = frames;
+            }
+        }
+
+        /// <summary>
+        /// Applies <see cref="HeadTrackingSession.AutoRecenterOnConnect"/> to every session.
+        /// Off by default there, and the reasoning applies per player unchanged.
+        /// </summary>
+        public void ApplyAutoRecenterOnConnect(bool enabled)
+        {
+            for (int i = 0; i < _sessions.Length; i++)
+            {
+                _sessions[i].AutoRecenterOnConnect = enabled;
             }
         }
 

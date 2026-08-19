@@ -22,10 +22,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             TrackingProcessor processor,
             PositionProcessor positionProcessor)
         {
-            return new HeadTrackingSession(source, processor, positionProcessor)
-            {
-                StabilizationFrames = int.MaxValue
-            };
+            return new HeadTrackingSession(source, processor, positionProcessor);
         }
 
         [Fact]

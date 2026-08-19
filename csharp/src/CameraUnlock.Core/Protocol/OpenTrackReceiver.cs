@@ -335,7 +335,7 @@ namespace CameraUnlock.Core.Protocol
             // Freshness is derived purely from this timestamp, so leaving the dead
             // session's value makes IsDataFresh() report true on a closed socket. A
             // stop/start toggle inside the freshness window then runs the whole
-            // per-frame pipeline - including the auto-recenter - against no stream.
+            // per-frame pipeline against no stream.
             Interlocked.Exchange(ref _timestampTicks, 0L);
         }
 

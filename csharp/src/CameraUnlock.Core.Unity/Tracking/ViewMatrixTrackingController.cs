@@ -60,11 +60,11 @@ namespace CameraUnlock.Core.Unity.Tracking
         // so 3DOF-only users don't get a position offset before recentering.
         private bool _detected6DOF;
 
-        // Centering fires once per enable, not on every IsReceiving resume:
-        // the tracker app stops sending while the face is lost, so capturing
-        // a center when packets resume bakes in whatever pose the user holds
-        // while sitting back down. Re-acquisition recentering is the app's
-        // decision, signaled through the packet trailer.
+        // Only consulted while AutoRecenterOnConnect is on. Centering then fires once
+        // per enable, not on every IsReceiving resume: the tracker app stops sending
+        // while the face is lost, so capturing a center when packets resume bakes in
+        // whatever pose the user holds while sitting back down. Re-acquisition
+        // recentering is the app's decision, signaled through the packet trailer.
         private bool _hasCentered;
         private bool _recenterOnStabilize;
 
@@ -84,6 +84,14 @@ namespace CameraUnlock.Core.Unity.Tracking
         public bool PositionEnabled { get; set; }
         public bool RotationEnabled { get; set; }
         public bool WorldSpaceYaw { get; set; }
+
+        /// <summary>
+        /// Whether starting a tracking session captures the incoming pose as the center.
+        /// Off by default; see
+        /// <see cref="CameraUnlock.Core.Tracking.HeadTrackingSession.AutoRecenterOnConnect"/>
+        /// for why, which applies here unchanged.
+        /// </summary>
+        public bool AutoRecenterOnConnect { get; set; }
 
         /// <summary>
         /// Invoked after the controller consumes a tracker-app recenter request
@@ -126,6 +134,12 @@ namespace CameraUnlock.Core.Unity.Tracking
         public float LastTrackingRoll
         {
             get { return _lastRoll; }
+        }
+
+        /// <summary>Position offset applied on the previous frame, in meters.</summary>
+        public Vec3 LastTrackingPosition
+        {
+            get { return _lastPosition; }
         }
 
         /// <summary>
@@ -248,9 +262,19 @@ namespace CameraUnlock.Core.Unity.Tracking
             // the first frame of the NEXT session - where it cancelled the
             // stabilise-then-recenter BeginTrackingSession had just armed (Recenter clears
             // _recenterOnStabilize) and anchored the session to whichever raw pose happened
-            // to arrive first. A press made while nothing is being tracked has no meaningful
-            // target, and a fresh session recenters on stabilise regardless.
-            _receiver.TryConsumeRecenterRequest();
+            // to arrive first.
+            //
+            // Consumed here rather than capturing a centre: the app zeroed its own output
+            // at the press, so the centre that matches it is identity. Capturing the
+            // latest pose would anchor to wherever the head drifted since. Discarding the
+            // press outright would leave a centre installed by an earlier hotkey press
+            // subtracting from an already-zeroed stream, parking the view at the negated
+            // drift on the next session.
+            if (_receiver.TryConsumeRecenterRequest())
+            {
+                _processor.CenterManager.Reset();
+                _positionProcessor.SetCenter(default(PositionData));
+            }
 
             if (_isTransitioningOut)
             {
@@ -332,7 +356,8 @@ namespace CameraUnlock.Core.Unity.Tracking
             ResetSmoothingState();
             ResetInterpolators();
             _isTransitioningOut = false;
-            // A deliberate user re-enable recaptures the center; data gaps do not.
+            // Re-arms the opt-in capture for the next session. A deliberate user
+            // re-enable recaptures the center; data gaps do not.
             _hasCentered = false;
         }
 
@@ -382,7 +407,7 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         private void BeginTrackingSession()
         {
-            if (!_hasCentered)
+            if (AutoRecenterOnConnect && !_hasCentered)
             {
                 RecenterToLatest();
                 _hasCentered = true;
@@ -420,9 +445,10 @@ namespace CameraUnlock.Core.Unity.Tracking
 
             // Scaled, unlike AdvanceTransitionOut. This ramp only runs alongside the
             // interpolator and processor, which are driven by Time.deltaTime - so on
-            // unscaled time at timeScale 0 it would fade in a frozen, stale head offset,
-            // and its completion fires RecenterToLatest(), capturing the centre on
-            // whatever pose the user happens to hold while the game is paused.
+            // unscaled time at timeScale 0 it would fade in a frozen, stale head offset.
+            // Under AutoRecenterOnConnect its completion also fires RecenterToLatest(),
+            // capturing the centre on whatever pose the user happens to hold while the
+            // game is paused.
             _transitionInProgress += Time.deltaTime / TransitionInDuration;
             if (_transitionInProgress >= 1f)
             {

@@ -7,8 +7,8 @@ using CameraUnlock.Core.Protocol;
 namespace CameraUnlock.Core.Tracking
 {
     /// <summary>
-    /// Complete per-frame head tracking pipeline with connection auto-recenter,
-    /// tracking-loss hold, and tracking-mode cycling:
+    /// Complete per-frame head tracking pipeline with tracking-loss hold and
+    /// tracking-mode cycling:
     ///
     ///   rotation: ITrackingDataSource -> PoseInterpolator -> TrackingProcessor
     ///   position: ITrackingDataSource -> PositionInterpolator -> PositionProcessor
@@ -96,9 +96,34 @@ namespace CameraUnlock.Core.Tracking
         /// <summary>
         /// Consecutive fresh frames required after the first connection before the
         /// automatic recenter fires, giving phone trackers time to settle. Fires once
-        /// per session; later tracking-loss gaps do not re-arm it.
+        /// per session; later tracking-loss gaps do not re-arm it. Only consulted when
+        /// <see cref="AutoRecenterOnConnect"/> is enabled.
         /// </summary>
         public int StabilizationFrames { get; set; } = 10;
+
+        /// <summary>
+        /// Whether to capture the incoming pose as the center once the connection
+        /// stabilizes. Off by default.
+        /// <para>
+        /// The pipeline assumes the tracker's stream is already centered, which is how
+        /// TrackIR and every native implementation works: the driver owns the center and
+        /// the game consumes the pose as absolute. Headcam zeroes at tracking start and
+        /// on every CENTER press; opentrack centers on its own Center bind.
+        /// </para>
+        /// <para>
+        /// Capturing here as well puts a SECOND center in series with the tracker's, and
+        /// the two drift apart because each side recenters at moments the other cannot
+        /// see. A CENTER press on a tracker that sends no HCAM trailer then leaves the
+        /// view parked at the negated drift until the user also hits the mod's recenter
+        /// hotkey - two presses for one recenter.
+        /// </para>
+        /// <para>
+        /// Enable only for a tracker whose origin is arbitrary at startup and which
+        /// cannot zero itself. The recenter hotkey and the HCAM trailer are unaffected
+        /// either way.
+        /// </para>
+        /// </summary>
+        public bool AutoRecenterOnConnect { get; set; }
 
         /// <summary>
         /// User smoothing applied when the tracker runs on this machine (loopback).
@@ -304,11 +329,12 @@ namespace CameraUnlock.Core.Tracking
         /// </summary>
         public void Recenter()
         {
-            // Disarms the automatic recenter. A deliberate recenter is the
-            // definitive answer to where centre is, and leaving the automatic one
-            // armed means it fires the moment the player next holds still for
-            // long enough and silently replaces the centre they just chose - the
-            // same trap the remote recenter path above already guards against.
+            // Disarms the settle-window capture, which matters only while
+            // AutoRecenterOnConnect is set. A deliberate recenter is the definitive
+            // answer to where centre is, and leaving the automatic one armed means it
+            // fires the moment the player next holds still for long enough and
+            // silently replaces the centre they just chose - the same trap the remote
+            // recenter path above already guards against.
             _hasCentered = true;
             _processor.Recenter();
             _poseInterpolator.Reset();
@@ -331,15 +357,15 @@ namespace CameraUnlock.Core.Tracking
             IsHolding = false;
         }
 
-        // Fires once per session. Deliberately NOT re-armed by tracking-loss
-        // gaps: the tracker app stops sending while the face is lost, and
-        // recentering on packet resumption would capture whatever pose the
-        // user happens to hold while sitting back down. Re-acquisition
-        // recentering is the app's decision - it signals through the packet
-        // trailer after walking the user through its hold-still flow.
+        // Off unless AutoRecenterOnConnect is set. When on it fires once per session
+        // and is deliberately NOT re-armed by tracking-loss gaps: the tracker app
+        // stops sending while the face is lost, and recentering on packet resumption
+        // would capture whatever pose the user happens to hold while sitting back
+        // down. Re-acquisition recentering is the app's decision - it signals through
+        // the packet trailer after walking the user through its hold-still flow.
         private void HandleConnectionRecenter()
         {
-            if (_hasCentered) return;
+            if (!AutoRecenterOnConnect || _hasCentered) return;
 
             if (!_wasFresh)
             {

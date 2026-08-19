@@ -95,7 +95,6 @@ namespace CameraUnlock.Core.Tests.Tracking
         [Fact]
         public void Start_OnlyPlayerOneSendsData_OnlyPlayerOneHasPose()
         {
-            _manager.ApplyStabilizationFrames(int.MaxValue);
             _manager.Start();
             SendTestPacket(BasePort, yaw: 30.0, pitch: 10.0, roll: 0.0);
             WaitForData(0);
@@ -114,7 +113,6 @@ namespace CameraUnlock.Core.Tests.Tracking
         [Fact]
         public void Reset_ClearsPoses()
         {
-            _manager.ApplyStabilizationFrames(int.MaxValue);
             _manager.Start();
             SendTestPacket(BasePort, yaw: 30.0, pitch: 0.0, roll: 0.0);
             WaitForData(0);
@@ -128,7 +126,6 @@ namespace CameraUnlock.Core.Tests.Tracking
         [Fact]
         public void ApplySensitivity_ScalesProcessedRotation()
         {
-            _manager.ApplyStabilizationFrames(int.MaxValue);
             _manager.ApplySmoothing(0f, 0f);
             _manager.Start();
             SendTestPacket(BasePort, yaw: 20.0, pitch: 0.0, roll: 0.0);
@@ -137,6 +134,8 @@ namespace CameraUnlock.Core.Tests.Tracking
             // Settle smoothing at sensitivity 1, capture yaw, then double sensitivity.
             for (int i = 0; i < 60; i++) _manager.Update(FrameTime);
             float baseYaw = _manager.GetSession(0).Rotation.Yaw;
+            Assert.True(System.Math.Abs(baseYaw - 20f) < 1f,
+                $"Baseline never reached the pose, got {baseYaw} - the ratio check below would pass on 0 == 2*0");
 
             _manager.ApplySensitivity(new SensitivitySettings(2f, 2f, 2f));
             SendTestPacket(BasePort, yaw: 20.0, pitch: 0.0, roll: 0.0);
@@ -146,6 +145,38 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             Assert.True(System.Math.Abs(scaledYaw - 2f * baseYaw) < 1f,
                 $"Expected ~{2f * baseYaw}, got {scaledYaw}");
+        }
+
+        [Fact]
+        public void ApplyStabilizationFrames_ReachesEverySession()
+        {
+            _manager.ApplyStabilizationFrames(42);
+
+            for (int i = 0; i < _manager.PlayerCount; i++)
+            {
+                Assert.Equal(42, _manager.GetSession(i).StabilizationFrames);
+            }
+        }
+
+        [Fact]
+        public void ApplyAutoRecenterOnConnect_ReachesEverySession()
+        {
+            for (int i = 0; i < _manager.PlayerCount; i++)
+            {
+                Assert.False(_manager.GetSession(i).AutoRecenterOnConnect);
+            }
+
+            _manager.ApplyAutoRecenterOnConnect(true);
+            for (int i = 0; i < _manager.PlayerCount; i++)
+            {
+                Assert.True(_manager.GetSession(i).AutoRecenterOnConnect);
+            }
+
+            _manager.ApplyAutoRecenterOnConnect(false);
+            for (int i = 0; i < _manager.PlayerCount; i++)
+            {
+                Assert.False(_manager.GetSession(i).AutoRecenterOnConnect);
+            }
         }
 
         [Fact]
@@ -222,7 +253,6 @@ namespace CameraUnlock.Core.Tests.Tracking
             // Only player 1 gets data, and it arrives over loopback. Player 1 must
             // report a local connection; player 2, which never received anything,
             // must not have been touched by player 1's flag.
-            _manager.ApplyStabilizationFrames(int.MaxValue);
             _manager.Start();
             SendTestPacket(BasePort, yaw: 5.0, pitch: 0.0, roll: 0.0);
             WaitForData(0);

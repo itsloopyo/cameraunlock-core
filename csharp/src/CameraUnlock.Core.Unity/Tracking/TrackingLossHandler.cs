@@ -26,8 +26,9 @@ namespace CameraUnlock.Core.Unity.Tracking
         public float FadeSpeed { get; set; } = 2.0f;
 
         /// <summary>
-        /// Number of frames to wait after tracking resumes before recentering.
-        /// Allows phone tracking apps to stabilize their readings.
+        /// Number of frames to wait after tracking resumes before recentering. Allows
+        /// phone tracking apps to stabilize their readings. Only reached when
+        /// <see cref="RecenterThresholdFrames"/> is above its default of 0.
         /// </summary>
         public int StabilizationFrames { get; set; } = 10;
 
@@ -37,8 +38,14 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// face is lost, so a mod-side recenter on resumption captures whatever
         /// pose the user holds while sitting back down. Re-acquisition
         /// recentering is the tracker app's decision, signaled through the
-        /// packet trailer after its hold-still flow. Set above 0 only for
-        /// sources that cannot signal (plain OpenTrack).
+        /// packet trailer after its hold-still flow.
+        /// <para>
+        /// Leave it at 0 for plain OpenTrack too. That sender centers itself on its
+        /// own Center bind, so a mod-side recenter on resumption is the same
+        /// double-center described on
+        /// <see cref="CameraUnlock.Core.Tracking.HeadTrackingSession.AutoRecenterOnConnect"/>.
+        /// Raise it only for a source that neither signals nor centers itself.
+        /// </para>
         /// </summary>
         public int RecenterThresholdFrames { get; set; } = 0;
 

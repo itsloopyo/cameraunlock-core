@@ -30,13 +30,15 @@ struct FakeReceiver {
     float posX = 0.f, posY = 0.f, posZ = 0.f;
     int64_t timestamp = 0;
     int recenterCalls = 0;
-    // Emulate the real receivers' offset capture: after Recenter() the
-    // reported rotation reads as zero.
+    // Emulate the real receivers' offset capture: Recenter() stores the current
+    // pose and GetRotation reports the difference, so the raw pose keeps moving
+    // underneath a captured center the way a real tracker's does.
     bool zeroOnRecenter = false;
+    float offYaw = 0.f, offPitch = 0.f, offRoll = 0.f;
 
     bool GetRotation(float& y, float& p, float& r) const {
         if (!hasRotation) return false;
-        y = yaw; p = pitch; r = roll;
+        y = yaw - offYaw; p = pitch - offPitch; r = roll - offRoll;
         return true;
     }
     bool GetPosition(float& x, float& y, float& z) const {
@@ -48,7 +50,7 @@ struct FakeReceiver {
     void Recenter() {
         recenterCalls++;
         if (zeroOnRecenter) {
-            yaw = pitch = roll = 0.f;
+            offYaw = yaw; offPitch = pitch; offRoll = roll;
         }
     }
 
@@ -154,7 +156,6 @@ void TestRotationFlowsThrough() {
     rx.timestamp = 1;
 
     Session session(rx);
-    session.SetStabilizationFrames(1000);  // keep auto-recenter out of this test
 
     // Smoothing needs several frames to converge on the target.
     bool updated = false;
@@ -178,6 +179,7 @@ void TestStabilizationRecenter() {
     rx.timestamp = 1;
 
     Session session(rx);
+    session.SetAutoRecenterOnConnect(true);
     session.SetStabilizationFrames(5);
 
     for (int i = 0; i < 5; i++) {
@@ -205,6 +207,7 @@ void TestAutoRecenterWaitsForSettle() {
     rx.timestamp = 1;
 
     Session session(rx);
+    session.SetAutoRecenterOnConnect(true);
     session.SetStabilizationFrames(5);
 
     // A player still moving their head never fills the window.
@@ -231,6 +234,76 @@ void TestAutoRecenterWaitsForSettle() {
     Check(session.HasCentered(), "session reports it has centered");
 }
 
+void TestAutoRecenterOnConnectIsOffByDefault() {
+    std::cout << "Auto-recenter on connect defaults off:\n";
+
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.yaw = 40.f;
+    rx.timestamp = 1;
+
+    Session session(rx);
+    session.SetStabilizationFrames(5);
+
+    // A pose held perfectly still for far longer than the settle window is
+    // exactly what used to arm the capture. Every tracker in use centers itself,
+    // so a session-start capture only adds a second center in series with the
+    // tracker's - and a Center press in the tracker app then parks the view at
+    // the negated drift until the player also hits the mod's hotkey.
+    for (int i = 0; i < 200; i++) {
+        rx.timestamp++;
+        session.Update(0.016f);
+    }
+
+    Check(rx.recenterCalls == 0, "no center is captured on connect by default");
+    Check(!session.HasCentered(), "session reports it has not centered");
+
+    float y = 9.f, p = 9.f, r = 9.f;
+    Check(session.GetRotation(y, p, r) && NearEqual(y, 40.f, 0.5f),
+          "the incoming pose passes through uncentered");
+}
+
+void TestTrackerSideCenterLandsAtZero() {
+    std::cout << "Tracker-side center without a trailer:\n";
+
+    // The opentrack case. opentrack has its own Center bind and sends no HCAM
+    // trailer, so all the session sees is the stream dropping to zero. A
+    // session-start capture would still be subtracting the pre-press pose,
+    // parking the view at the negated drift until the player also hits the
+    // mod's recenter hotkey.
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    // The C++ port centres at the RECEIVER, so the fake has to apply an offset or a
+    // wrongly-fired capture would not move the output and this test could not see it.
+    rx.zeroOnRecenter = true;
+    rx.yaw = 40.f; rx.pitch = 20.f; rx.roll = 10.f;
+    rx.timestamp = 1;
+
+    Session session(rx);
+
+    for (int i = 0; i < 200; i++) { rx.timestamp++; session.Update(0.016f); }
+
+    float uy = 9.f, up = 9.f, ur = 9.f;
+    session.GetRotation(uy, up, ur);
+    Check(NearEqual(uy, 40.f, 0.5f),
+          "the drifted pose reaches the output uncentred, so the check below is not trivial");
+
+    // The tracker subtracts its own neutral and the stream goes to zero.
+    rx.yaw = 0.f; rx.pitch = 0.f; rx.roll = 0.f;
+    for (int i = 0; i < 300; i++) { rx.timestamp++; session.Update(0.016f); }
+
+    float y = 9.f, p = 9.f, r = 9.f;
+    session.GetRotation(y, p, r);
+    Check(NearEqual(y, 0.f, 0.05f) && NearEqual(p, 0.f, 0.05f) && NearEqual(r, 0.f, 0.05f),
+          "view lands at zero on a tracker-side center, not the negated drift");
+
+    // And the centre really is identity, not merely cancelling this pose.
+    rx.yaw = 20.f;
+    for (int i = 0; i < 300; i++) { rx.timestamp++; session.Update(0.016f); }
+    session.GetRotation(y, p, r);
+    Check(NearEqual(y, 20.f, 0.1f), "20 degrees off the tracker's neutral reads as 20");
+}
+
 void TestModeCycling() {
     std::cout << "Mode cycling:\n";
 
@@ -242,7 +315,6 @@ void TestModeCycling() {
     rx.timestamp = 1;
 
     Session session(rx);
-    session.SetStabilizationFrames(1000);
 
     Check(session.GetMode() == TrackingMode::RotationAndPosition, "starts in 6DOF mode");
     Check(session.IsRotationActive() && session.IsPositionActive(), "both axes active in 6DOF");
@@ -272,7 +344,6 @@ void TestDuplicatePacketFiltering() {
     rx.timestamp = 1;
 
     Session session(rx);
-    session.SetStabilizationFrames(1000);
 
     session.Update(0.016f);
     Check(session.WasNewSample(), "first packet counts as a new sample");
@@ -298,10 +369,12 @@ void TestManualRecenterDisarmsTheAutomaticOne() {
 
     FakeReceiver rx;
     rx.hasRotation = true;
+    rx.zeroOnRecenter = true;
     rx.yaw = 0.f; rx.pitch = 0.f;
     rx.timestamp = 1;
 
     Session session(rx);
+    session.SetAutoRecenterOnConnect(true);
     session.SetStabilizationFrames(10);
 
     // Recenter deliberately, before the automatic one has had its chance.
@@ -317,6 +390,11 @@ void TestManualRecenterDisarmsTheAutomaticOne() {
 
     Check(rx.recenterCalls == 1,
           "holding still after a manual recenter does not recenter again");
+
+    float y = 9.f, p = 9.f, r = 9.f;
+    session.GetRotation(y, p, r);
+    Check(NearEqual(y, 25.f, 0.1f),
+          "the pose held after the manual recenter still reads 25, not 0");
 }
 
 void TestRecenterZeroesPose() {
@@ -329,16 +407,14 @@ void TestRecenterZeroesPose() {
     rx.posX = 0.2f; rx.posY = 0.1f; rx.posZ = -0.05f;
     rx.timestamp = 1;
 
+    rx.zeroOnRecenter = true;
+
     Session session(rx);
-    session.SetStabilizationFrames(1000);
 
     for (int i = 0; i < 300; i++) { rx.timestamp++; session.Update(0.016f); }
 
     session.Recenter();
     Check(rx.recenterCalls == 1, "receiver-level recenter invoked");
-
-    // The fake receiver does not subtract its own offset, so emulate it.
-    rx.yaw = 0.f; rx.pitch = 0.f; rx.roll = 0.f;
 
     for (int i = 0; i < 300; i++) { rx.timestamp++; session.Update(0.016f); }
 
@@ -350,6 +426,12 @@ void TestRecenterZeroesPose() {
     session.GetPositionOffset(x, py, z);
     Check(NearEqual(x, 0.f, 0.005f) && NearEqual(py, 0.f, 0.005f) && NearEqual(z, 0.f, 0.005f),
           "position offset settles at zero after recenter (center captured)");
+
+    // Pin the captured centre: 20 degrees past a centre of 30 reads as 20.
+    rx.yaw = 50.f;
+    for (int i = 0; i < 300; i++) { rx.timestamp++; session.Update(0.016f); }
+    session.GetRotation(y, p, r);
+    Check(NearEqual(y, 20.f, 0.1f), "rotation is measured from the captured centre");
 }
 
 void TestRemoteRecenterRequest() {
@@ -361,6 +443,7 @@ void TestRemoteRecenterRequest() {
     rx.timestamp = 1;
 
     Session session(rx);
+    session.SetAutoRecenterOnConnect(true);
     session.SetStabilizationFrames(5);
 
     session.Update(0.016f);
@@ -398,7 +481,6 @@ void TestRecenterSeedsCurrentFrameWithCenteredPose() {
     rx.zeroOnRecenter = true;
 
     Session session(rx);
-    session.SetStabilizationFrames(1000);
 
     session.Update(0.016f);
 
@@ -420,7 +502,6 @@ void TestConnectionFlagReachesBothProcessors() {
     RemoteAwareReceiver rx;
     rx.isRemote = true;
     RemoteSession session(rx);
-    session.SetStabilizationFrames(1000);
 
     // Pre-poison both processors so a session that simply leaves them alone fails.
     session.GetProcessor().SetIsRemoteConnection(false);
@@ -437,7 +518,6 @@ void TestConnectionFlagReachesBothProcessors() {
     RemoteAwareReceiver localRx;
     localRx.isRemote = false;
     RemoteSession localSession(localRx);
-    localSession.SetStabilizationFrames(1000);
     localSession.GetProcessor().SetIsRemoteConnection(true);
     localSession.GetPositionProcessor().SetIsRemoteConnection(true);
 
@@ -456,7 +536,6 @@ void TestLiveConnectionSwitch() {
     RemoteAwareReceiver rx;
     rx.isRemote = false;
     RemoteSession session(rx);
-    session.SetStabilizationFrames(1000);
 
     session.Update(0.016f);
     Check(!session.IsRemoteConnection(), "starts local");
@@ -488,7 +567,6 @@ void TestSmoothingSelectionFollowsTheConnection() {
         RemoteAwareReceiver rx;
         rx.isRemote = isRemote;
         RemoteSession session(rx);
-        session.SetStabilizationFrames(100000);
         session.SetLocalSmoothing(0.0f);
         session.SetRemoteSmoothing(0.95f);
         session.SetMaxExtrapolationFraction(0.0f);
@@ -532,7 +610,6 @@ void TestNonConstIsRemoteConnectionIsDetected() {
     NonConstRemoteReceiver rx;
     rx.isRemote = true;
     NonConstSession session(rx);
-    session.SetStabilizationFrames(1000);
 
     session.Update(0.016f);
 
@@ -556,7 +633,6 @@ void TestGracefulDegradation() {
 
     MinimalReceiver rx;
     MinimalSession session(rx);
-    session.SetStabilizationFrames(1000);
 
     Check(session.Update(0.016f), "a receiver without the method still updates");
     Check(!session.IsRemoteConnection(),
@@ -620,7 +696,6 @@ void TestSmoothingSurvivesSettingsAssignmentInBothOrders() {
     {
         RemoteAwareReceiver rx;
         RemoteSession session(rx);
-        session.SetStabilizationFrames(1000);
         session.SetLocalSmoothing(0.25f);
         session.SetRemoteSmoothing(0.75f);
         session.GetPositionProcessor().SetSettings(probe);
@@ -666,6 +741,8 @@ int RunSessionTests() {
     TestRotationFlowsThrough();
     TestStabilizationRecenter();
     TestAutoRecenterWaitsForSettle();
+    TestAutoRecenterOnConnectIsOffByDefault();
+    TestTrackerSideCenterLandsAtZero();
     TestModeCycling();
     TestDuplicatePacketFiltering();
     TestRecenterZeroesPose();

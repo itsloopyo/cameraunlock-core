@@ -9,6 +9,104 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - the session no longer captures a center on connect
+
+Every entry point that ran head tracking captured the incoming pose as a center
+offset shortly after packets started arriving: `HeadTrackingSession` after
+`StabilizationFrames` fresh frames, `ViewMatrixTrackingController` on
+`BeginTrackingSession` (and again when the transition-in completed),
+`StaticHeadTrackingCore` on the first connection, and the C++
+`HeadTrackingSession` once the pose had been held still.
+
+That put a SECOND center in series with the tracker's own, and the two drift
+apart because each side recenters at moments the other cannot see. The cost lands
+on the user:
+
+- **opentrack, AITrack, any sender with its own Center bind and no HCAM trailer.**
+  The user presses Center, the sender's output drops to zero, and the mod is
+  still subtracting the pose it captured at session start - so the view parks at
+  the negated drift and the user has to hit the mod's recenter hotkey as well.
+  Two presses for one recenter, and no signal exists that would let the mod
+  collapse its center on its own.
+- **Headcam.** The trailer already re-syncs the two centers, so this was
+  invisible there. It was insurance against a tracker whose origin is arbitrary
+  at startup, and Headcam zeroes at tracking start, so the insurance was being
+  paid for by every other sender.
+
+Native head tracking does not work this way: with TrackIR the driver owns the
+center and the game consumes the pose as absolute. The pipeline now matches that.
+The center is identity until something asks for one - the user's hotkey, or a
+tracker-app CENTER press arriving through the HCAM trailer.
+
+The trailer is unaffected and still does the work no pose value can express:
+resetting the interpolators so the view snaps rather than slewing across the
+step, clearing smoothing history, and driving the notification.
+
+- **Migration**: nothing to change to keep building. A mod that genuinely needs
+  the old behaviour - a tracker with an arbitrary startup origin that cannot zero
+  itself - opts back in:
+  - `HeadTrackingSession.AutoRecenterOnConnect = true`
+  - `ViewMatrixTrackingController.AutoRecenterOnConnect = true`
+  - `StaticHeadTrackingCore.AutoRecenterOnConnect = true`
+  - C++ `HeadTrackingSession::SetAutoRecenterOnConnect(true)`
+  - `MultiPlayerTrackingManager.ApplyAutoRecenterOnConnect(true)` for every player
+
+  Opting in reintroduces the double-center for that mod. The four sites are NOT
+  interchangeable: `StaticHeadTrackingCore` has no settle window and captures on
+  the first frame `IsReceiving` is true, so opting in there bakes in whatever pose
+  the player holds during the intro screens.
+- `HeadTrackingSession.StabilizationFrames`,
+  `MultiPlayerTrackingManager.ApplyStabilizationFrames` and C++
+  `SetStabilizationFrames` are unchanged but are only consulted while the opt-in
+  is on. `TrackingLossHandler.StabilizationFrames` is a different property on the
+  tracking-loss path and is unaffected.
+- **C++ `HeadTrackingSession::HasCentered()` changes meaning by default.** It used
+  to become true a second or so into every session; it now stays false until the
+  player or the tracker asks for a center. A mod gating "tracking is ready" on it
+  waits forever, with no compile error. Gate on `GetRotation()` succeeding instead.
+- **Known limitation on the C++ `UdpReceiver`.** Its jump-confirm gate
+  (`cpp/src/protocol/udp_receiver.cpp:275`) exists because a recenter and a tracker
+  losing the head look identical from outside: both are a large jump followed by a
+  pose that stops moving. The gate is bypassed for HCAM-trailered packets and only
+  those, so an untrailered tracker-side center is held back one packet, and if the
+  tracker then repeats bit-identical values it stays held until the pose changes
+  again. Headcam is unaffected because it sends the trailer. This is pre-existing
+  and is not addressed here.
+- **This fix does not reach a mod that implements the capture itself.** Fifteen
+  repos carry their own auto-recenter on top of core: `cyberpunk-2077`,
+  `witcher-3`, `dorfromantik`, `subnautica`, `green-hell`, `peak`, `firewatch`,
+  `gone-home`, `obra-dinn`, `eternal-afternoon`, `the-painscreek-killings`,
+  `prey`, `fallout-new-vegas`, `minecraft-head-tracking` and
+  `minecraft-bedrock-edition-headtracking`. Three more carry a full local port
+  with the capture built in: `headlook` (C#), `fusion-360-headtracking` (Python)
+  and `minecraft-java-edition-headtracking` (Java). Each needs the capture
+  deleted in its own tree - there is nothing to opt into, because the correct
+  behaviour is no capture at all. `fallout-new-vegas` is the worst of them: it
+  captures on the very first valid packet with no settle window.
+- **A drained CENTER press no longer strands an earlier hotkey centre.**
+  `ViewMatrixTrackingController` discards a trailer press that lands while it is
+  not applying tracking, because a latched one would anchor the next session to an
+  arbitrary first packet. With a hotkey centre installed that discard left the
+  centre subtracting from an already-zeroed stream and parked the view at the
+  negated drift on the next session. Consuming the press now clears the centre to
+  identity, which is what matches the stream the app is sending.
+- New API: `HeadTrackingSession.AutoRecenterOnConnect`,
+  `ViewMatrixTrackingController.AutoRecenterOnConnect`,
+  `ViewMatrixTrackingController.LastTrackingPosition`,
+  `StaticHeadTrackingCore.AutoRecenterOnConnect`,
+  `MultiPlayerTrackingManager.ApplyAutoRecenterOnConnect(bool)`, and C++
+  `HeadTrackingSession::SetAutoRecenterOnConnect` / `IsAutoRecenterOnConnect`.
+- Regression coverage: the opentrack sequence (uncentred stream, then the stream
+  drops to zero with no trailer) runs end to end in `HeadTrackingSessionTests`
+  for rotation and position, in `ViewMatrixTrackingControllerTests`, and as
+  `TestTrackerSideCenterLandsAtZero` in `session_tests.cpp`. Default-off and
+  opt-in tests cover all four sites, including `StaticHeadTrackingCore`, which
+  had no behavioural coverage of its own before. The hotkey and trailer paths,
+  now the only ways a centre is ever created, gained assertions that they move
+  the view and that the captured centre is where it should be, rather than only
+  that a flag was drained.
+
+
 ### BREAKING - every Unity position boundary now takes the offset in the pipeline's own convention
 
 `PositionProcessor` has always treated NEGATIVE z as the forward lean, and its

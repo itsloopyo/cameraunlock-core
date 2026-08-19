@@ -28,12 +28,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             _receiver = new OpenTrackReceiver();
             _processor = new TrackingProcessor();
             _positionProcessor = new PositionProcessor();
-            _session = new HeadTrackingSession(_receiver, _processor, _positionProcessor)
-            {
-                // Tests drive single packets; don't let the post-connection auto-recenter
-                // zero out the pose under us unless a test asks for it.
-                StabilizationFrames = int.MaxValue
-            };
+            _session = new HeadTrackingSession(_receiver, _processor, _positionProcessor);
         }
 
         public void Dispose()
@@ -154,6 +149,7 @@ namespace CameraUnlock.Core.Tests.Tracking
         public void Update_AutoRecenters_AfterStabilizationFrames()
         {
             _session.StabilizationFrames = 5;
+            _session.AutoRecenterOnConnect = true;
             _session.Log = _ => { };
             StartReceiverAndSend(yaw: 40.0, pitch: 0.0, roll: 0.0);
 
@@ -169,6 +165,123 @@ namespace CameraUnlock.Core.Tests.Tracking
         }
 
         [Fact]
+        public void Update_DoesNotAutoRecenter_ByDefault()
+        {
+            _session.Log = _ => { };
+            StartReceiverAndSend(yaw: 40.0, pitch: 0.0, roll: 0.0);
+
+            for (int i = 0; i < 60; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            Assert.True(System.Math.Abs(_session.Rotation.Yaw - 40f) < 1f,
+                $"Expected the incoming pose to pass through uncentered, got {_session.Rotation.Yaw}");
+        }
+
+        [Fact]
+        public void TrackerSideCenter_WithoutTrailer_LandsAtZero()
+        {
+            // The opentrack case. opentrack has its own Center bind and no HCAM
+            // trailer, so the only thing the session sees is the stream dropping to
+            // zero. A session-start center capture would still be subtracting the
+            // pre-press pose, parking the view at the negated drift and forcing the
+            // player to hit the mod's hotkey as well. Identity by default means the
+            // one press in opentrack is enough.
+            _session.Log = _ => { };
+            StartReceiverAndSend(yaw: 40.0, pitch: 20.0, roll: 10.0);
+            for (int i = 0; i < 60; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            SendTestPacket(TestPort, 0.0, 0.0, 0.0);
+            WaitForData();
+            for (int i = 0; i < 60; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            Assert.True(System.Math.Abs(_session.Rotation.Yaw) < 1f,
+                $"Expected yaw 0 after the tracker centered itself, got {_session.Rotation.Yaw}");
+            Assert.True(System.Math.Abs(_session.Rotation.Pitch) < 1f,
+                $"Expected pitch 0 after the tracker centered itself, got {_session.Rotation.Pitch}");
+            Assert.True(System.Math.Abs(_session.Rotation.Roll) < 1f,
+                $"Expected roll 0 after the tracker centered itself, got {_session.Rotation.Roll}");
+        }
+
+        [Fact]
+        public void TrackerSideCenter_WithoutTrailer_LandsAtZeroInPosition()
+        {
+            // Recenter() centers rotation AND position. Rotation landing at zero says
+            // nothing about the position center, which is captured separately through
+            // PositionProcessor.SetCenter.
+            _session.Log = _ => { };
+            StartReceiverAndSend(yaw: 0.0, pitch: 0.0, roll: 0.0, x: 10.0, y: 5.0, z: -8.0);
+            for (int i = 0; i < 60; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            float uncentered = _session.PositionOffset.X;
+
+            SendTestPacket(TestPort, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            WaitForData();
+            for (int i = 0; i < 120; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            Assert.True(System.Math.Abs(_session.PositionOffset.X) < 0.005f,
+                $"Expected x 0 after the tracker centered itself, got {_session.PositionOffset.X}");
+            Assert.True(uncentered > 0.09f && uncentered < 0.11f,
+                $"The lean never reached the pipeline, so the assertions above are trivial: {uncentered}");
+            Assert.True(System.Math.Abs(_session.PositionOffset.Y) < 0.005f,
+                $"Expected y 0 after the tracker centered itself, got {_session.PositionOffset.Y}");
+            Assert.True(System.Math.Abs(_session.PositionOffset.Z) < 0.005f,
+                $"Expected z 0 after the tracker centered itself, got {_session.PositionOffset.Z}");
+        }
+
+        [Fact]
+        public void Recenter_ZeroesTheCurrentPoseAndPosition()
+        {
+            // With no capture on connect, the hotkey is the only thing that creates a
+            // mod-side center at all. Gutting Recenter() must not go unnoticed.
+            // Pure yaw: centering is quaternion composition, so with pitch and roll
+            // also offset the residual does not decompose into an independent yaw
+            // delta and the second assertion below would be measuring the wrong thing.
+            _session.Log = _ => { };
+            StartReceiverAndSend(yaw: 40.0, pitch: 0.0, roll: 0.0, x: 10.0, y: 5.0, z: -8.0);
+            for (int i = 0; i < 60; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            _session.Recenter();
+            for (int i = 0; i < 60; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            Assert.True(System.Math.Abs(_session.Rotation.Yaw) < 1f,
+                $"Expected yaw 0 after the hotkey recenter, got {_session.Rotation.Yaw}");
+            Assert.True(System.Math.Abs(_session.PositionOffset.Z) < 0.005f,
+                $"Expected z 0 after the hotkey recenter, got {_session.PositionOffset.Z}");
+
+            // Pin the captured centre itself, not just "output happens to be zero":
+            // a further 20 degrees of yaw must read as 20, not 60.
+            SendTestPacket(TestPort, 60.0, 0.0, 0.0, 10.0, 5.0, -8.0);
+            WaitForData();
+            for (int i = 0; i < 60; i++)
+            {
+                _session.Update(FrameTime);
+            }
+
+            Assert.True(System.Math.Abs(_session.Rotation.Yaw - 20f) < 1f,
+                $"Expected yaw 20 relative to the captured centre, got {_session.Rotation.Yaw}");
+        }
+
+        [Fact]
         public void Recenter_DisarmsTheAutomaticRecenter()
         {
             // A deliberate recenter is the definitive answer to where centre is.
@@ -178,6 +291,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             // way Update_AutoRecenters_AfterStabilizationFrames expects when no
             // one has recentered by hand.
             _session.StabilizationFrames = 5;
+            _session.AutoRecenterOnConnect = true;
             _session.Log = _ => { };
             StartReceiverAndSend(yaw: 0.0, pitch: 0.0, roll: 0.0);
             _session.Update(FrameTime);
@@ -326,10 +440,11 @@ namespace CameraUnlock.Core.Tests.Tracking
             Assert.False(result);
         }
 
-        private void StartReceiverAndSend(double yaw, double pitch, double roll)
+        private void StartReceiverAndSend(double yaw, double pitch, double roll,
+            double x = 0.0, double y = 0.0, double z = 0.0)
         {
             Assert.True(_receiver.Start(TestPort), $"Failed to bind test UDP port {TestPort}");
-            SendTestPacket(TestPort, yaw, pitch, roll);
+            SendTestPacket(TestPort, yaw, pitch, roll, x, y, z);
             WaitForData();
         }
 
@@ -346,13 +461,14 @@ namespace CameraUnlock.Core.Tests.Tracking
         /// <summary>
         /// Sends a test OpenTrack packet (48 bytes, 6 doubles: x, y, z, yaw, pitch, roll).
         /// </summary>
-        private static void SendTestPacket(int port, double yaw, double pitch, double roll)
+        private static void SendTestPacket(int port, double yaw, double pitch, double roll,
+            double x = 0.0, double y = 0.0, double z = 0.0)
         {
             byte[] packet = new byte[48];
 
-            Array.Copy(BitConverter.GetBytes(0.0), 0, packet, 0, 8);
-            Array.Copy(BitConverter.GetBytes(0.0), 0, packet, 8, 8);
-            Array.Copy(BitConverter.GetBytes(0.0), 0, packet, 16, 8);
+            Array.Copy(BitConverter.GetBytes(x), 0, packet, 0, 8);
+            Array.Copy(BitConverter.GetBytes(y), 0, packet, 8, 8);
+            Array.Copy(BitConverter.GetBytes(z), 0, packet, 16, 8);
             Array.Copy(BitConverter.GetBytes(yaw), 0, packet, 24, 8);
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, 32, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, 40, 8);
