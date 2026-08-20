@@ -431,10 +431,16 @@ function New-ChangelogFromCommits {
     }
 
     # Get commits since last tag
+    # Match version tags only. The nightly publisher moves the rolling `dev` tag
+    # to the tip on every build, so an unfiltered describe resolves to `dev`
+    # sitting at or just behind HEAD: a first release never reaches the
+    # first-release branch below, and a later one diffs against last night's
+    # build instead of the previous version. Both surface as the empty-range
+    # throw further down. generate-release-notes.ps1 already filters this way.
     # Temporarily allow errors so git describe doesn't throw when there are no tags
     $prevPref = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $lastTag = git describe --tags --abbrev=0 2>$null
+    $lastTag = git describe --tags --abbrev=0 --match 'v[0-9]*' 2>$null
     $ErrorActionPreference = $prevPref
     if ($LASTEXITCODE -ne 0) {
         # First release - use all commits
