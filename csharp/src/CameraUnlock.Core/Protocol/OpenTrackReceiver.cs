@@ -509,11 +509,10 @@ namespace CameraUnlock.Core.Protocol
         }
 
         /// <summary>
-        /// Returns true once per recenter request signaled by the tracker app
-        /// through the packet trailer (e.g. the user pressing CENTER in Headcam).
-        /// The caller routes it into its own recenter path - the receiver never
-        /// applies it, because session-based pipelines center in the processor
-        /// and centering at both levels double-subtracts.
+        /// Always false. The HCAM trailer is still parsed, but it no longer raises a
+        /// recenter request: Headcam zeroes its own output on CENTER and the pipeline's
+        /// centre is identity, so the zeroed stream is already correct. Kept on the API
+        /// because mods call it; they simply never see a press.
         /// </summary>
         public bool TryConsumeRecenterRequest()
         {
@@ -631,18 +630,13 @@ namespace CameraUnlock.Core.Protocol
                             _consecutiveTimeouts = 0;
                         }
 
-                        // The trailer only means anything alongside the zeroed pose it rides
-                        // with. Honouring it on a packet whose pose failed validation centres
-                        // on the PREVIOUS pose - the pre-press drift the tracker just cleared -
-                        // which is the double-subtract failure reached through another door.
+                        // The trailer is parsed but no longer raises a recenter request.
+                        // Headcam owns centring: it zeroes its own output on CENTER, and
+                        // the pipeline's centre is identity by default, so the zeroed
+                        // stream is already correct without the mod doing anything. An
+                        // older app that still sends the trailer is simply ignored.
                         if (poseValid && OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
                         {
-                            if (!_hasRecenterCounter || recenterCounter != _lastRecenterCounter)
-                            {
-                                // Exchanged after the pose and timestamp so a consumer that
-                                // sees the request is guaranteed to read the pose that carried it.
-                                Interlocked.Exchange(ref _recenterRequested, 1);
-                            }
                             _lastRecenterCounter = recenterCounter;
                             _hasRecenterCounter = true;
                         }

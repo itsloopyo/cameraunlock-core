@@ -89,148 +89,82 @@ namespace CameraUnlock.Core.Tests.Protocol
         }
 
         [Fact]
-        public void Receiver_FirstTrailerSighting_TriggersRecenterRequest()
+        public void Receiver_Trailer_NeverRaisesARecenterRequest()
         {
-            // The trailer only rides the post-press burst, so a receiver that
-            // starts mid-session sees its first trailer BECAUSE of a press.
+            // Headcam owns centring: it zeroes its own output on CENTER, and the
+            // pipeline's centre is identity, so the zeroed stream is already
+            // correct. An older app that still sends the trailer is ignored
+            // rather than acted on.
             _receiver = StartReceiver();
 
-            Send(BuildPacket(10, 20, 30, recenterCounter: 5));
+            Send(BuildPacket(10, 20, 30, recenterCounter: 1));
             Thread.Sleep(100);
+            Assert.False(_receiver.TryConsumeRecenterRequest());
 
-            Assert.True(_receiver.TryConsumeRecenterRequest());
+            Send(BuildPacket(10, 20, 30, recenterCounter: 2));
+            Thread.Sleep(100);
+            Assert.False(_receiver.TryConsumeRecenterRequest());
+
+            Send(BuildPacket(10, 20, 30, recenterCounter: 2));
+            Thread.Sleep(100);
             Assert.False(_receiver.TryConsumeRecenterRequest());
         }
 
         [Fact]
-        public void Receiver_CounterChange_TriggersRecenterRequestOnce()
+        public void Receiver_Trailer_StillDeliversThePose()
         {
+            // Parsing stays: a trailered packet is a normal 54-byte datagram and
+            // its pose must still reach the consumer.
             _receiver = StartReceiver();
 
-            Send(BuildPacket(10, 20, 30, recenterCounter: 5));
-            Thread.Sleep(100);
-            Send(BuildPacket(10, 20, 30, recenterCounter: 6));
+            Send(BuildPacket(10, 20, 30, recenterCounter: 1));
             Thread.Sleep(100);
 
-            Assert.True(_receiver.TryConsumeRecenterRequest());
-            Assert.False(_receiver.TryConsumeRecenterRequest());
+            TrackingPose pose = _receiver.GetLatestPose();
+            Assert.Equal(10f, pose.Yaw, precision: 3);
+            Assert.Equal(20f, pose.Pitch, precision: 3);
+            Assert.Equal(30f, pose.Roll, precision: 3);
         }
 
         [Fact]
-        public void Receiver_RepeatedCounter_DoesNotRetrigger()
-        {
-            _receiver = StartReceiver();
-
-            Send(BuildPacket(10, 20, 30, recenterCounter: 5));
-            Thread.Sleep(100);
-            Send(BuildPacket(10, 20, 30, recenterCounter: 6));
-            Thread.Sleep(100);
-
-            Assert.True(_receiver.TryConsumeRecenterRequest());
-
-            Send(BuildPacket(11, 21, 31, recenterCounter: 6));
-            Thread.Sleep(100);
-
-            Assert.False(_receiver.TryConsumeRecenterRequest());
-        }
-
-        [Fact]
-        public void Session_CounterChange_RecentersToCurrentPose()
+        public void Session_Trailer_DoesNotMoveTheView()
         {
             _receiver = StartReceiver();
             var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
+
+            Send(BuildPacket(45, 30, 15));
+            Thread.Sleep(100);
+            for (int i = 0; i < 60; i++) session.Update(1f / 60f);
+            float before = session.Rotation.Yaw;
 
             Send(BuildPacket(45, 30, 15, recenterCounter: 1));
             Thread.Sleep(100);
-            session.Update(1f / 60f);
+            for (int i = 0; i < 60; i++) session.Update(1f / 60f);
 
-            Send(BuildPacket(45, 30, 15, recenterCounter: 2));
-            Thread.Sleep(100);
-            session.Update(1f / 60f);
-
-            Assert.Equal(0f, session.Rotation.Yaw, precision: 0);
-            Assert.Equal(0f, session.Rotation.Pitch, precision: 0);
-            Assert.Equal(0f, session.Rotation.Roll, precision: 0);
+            Assert.Equal(before, session.Rotation.Yaw, precision: 2);
         }
 
         [Fact]
-        public void Session_CounterChange_ClearsAnEarlierPositionCentre()
+        public void Session_Trailer_LeavesAHotkeyCentreAlone()
         {
-            // The trailer branch centers rotation AND position. With no prior centre the
-            // position half is a no-op, so the case that exercises it is a hotkey recenter
-            // first: that installs a position centre, and the press must replace it with
-            // the zeroed pose the app is now sending. Left stale, it is subtracted from an
-            // already-zeroed stream and the lean parks mirrored.
+            // The trailer used to clear a hotkey-set centre. It no longer does, so
+            // a centre the player chose survives whatever the tracker signals.
             _receiver = StartReceiver();
             var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
 
-            // Leaned 10cm right, 8cm forward on the wire, and recentred there by hand.
-            Send(BuildPacket(0, 0, 0, x: 10.0, y: 5.0, z: -8.0));
+            Send(BuildPacket(40, 0, 0));
             Thread.Sleep(100);
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
             session.Recenter();
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
+            Assert.True(System.Math.Abs(session.Rotation.Yaw) < 1f);
 
-            // CENTER press on the tracker: it zeroes its own output and signals.
-            Send(BuildPacket(0, 0, 0, recenterCounter: 1, x: 0.0, y: 0.0, z: 0.0));
+            Send(BuildPacket(60, 0, 0, recenterCounter: 1));
             Thread.Sleep(100);
             for (int i = 0; i < 60; i++) session.Update(1f / 60f);
 
-            Assert.True(System.Math.Abs(session.PositionOffset.X) < 0.005f,
-                $"x parked at the mirrored lean, got {session.PositionOffset.X}");
-            Assert.True(System.Math.Abs(session.PositionOffset.Z) < 0.005f,
-                $"z parked at the mirrored lean, got {session.PositionOffset.Z}");
-        }
-
-        [Fact]
-        public void Session_TrackerZeroesStreamBeforeSignaling_DoesNotDoubleSubtract()
-        {
-            _receiver = StartReceiver();
-            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor());
-
-            // Drifted steady state: plain packets, smoothing settles on the pose.
-            Send(BuildPacket(45, 30, 15));
-            Thread.Sleep(100);
-            for (int i = 0; i < 30; i++)
-            {
-                session.Update(1f / 60f);
-            }
-
-            // CENTER press: the tracker subtracts the pose at its end and the
-            // trailer rides the first packets of the zeroed stream. Folding the
-            // old smoothed pose into the center as well lands the view at the
-            // mirrored drift instead of zero.
-            Send(BuildPacket(0, 0, 0, recenterCounter: 1));
-            Thread.Sleep(100);
-            session.Update(1f / 60f);
-
-            Assert.Equal(0f, session.Rotation.Yaw, precision: 0);
-            Assert.Equal(0f, session.Rotation.Pitch, precision: 0);
-            Assert.Equal(0f, session.Rotation.Roll, precision: 0);
-        }
-
-        [Fact]
-        public void Session_RemoteRecenter_SuppressesStabilizationAutoRecenter()
-        {
-            _receiver = StartReceiver();
-            var session = new HeadTrackingSession(_receiver, new TrackingProcessor(), new PositionProcessor())
-            {
-                StabilizationFrames = 3,
-                AutoRecenterOnConnect = true
-            };
-            var logs = new System.Collections.Generic.List<string>();
-            session.Log = logs.Add;
-
-            Send(BuildPacket(45, 30, 15, recenterCounter: 1));
-            Thread.Sleep(100);
-
-            for (int i = 0; i < 10; i++)
-            {
-                session.Update(1f / 60f);
-            }
-
-            Assert.Contains("Recentered by tracker app", logs);
-            Assert.DoesNotContain("Auto-recentered on tracker connection", logs);
+            Assert.True(System.Math.Abs(session.Rotation.Yaw - 20f) < 1f,
+                $"the hotkey centre should still be 40, got a residual of {session.Rotation.Yaw}");
         }
 
         [Fact]
@@ -281,32 +215,22 @@ namespace CameraUnlock.Core.Tests.Protocol
         }
 
         [Fact]
-        public void RemoteRecenter_TrackerZeroesStreamBeforeSignaling_DoesNotDoubleSubtract()
+        public void RemoteRecenter_Trailer_NeverConsumesARequest()
         {
+            // RemoteRecenter still pushes the connection flag onto the processors
+            // every frame, which is its other job and the reason hand-wired
+            // pipelines call it. It just never reports a press any more.
             _receiver = StartReceiver();
             var processor = new TrackingProcessor();
-            var poseInterpolator = new PoseInterpolator();
             var positionProcessor = new PositionProcessor();
-            var positionInterpolator = new PositionInterpolator();
-
-            Send(BuildPacket(45, 30, 15));
-            Thread.Sleep(100);
-            for (int i = 0; i < 30; i++)
-            {
-                processor.Process(_receiver.GetLatestPose(), 1f / 60f);
-            }
 
             Send(BuildPacket(0, 0, 0, recenterCounter: 1));
             Thread.Sleep(100);
 
-            Assert.True(RemoteRecenter.TryConsume(
-                _receiver, processor, poseInterpolator, positionProcessor, positionInterpolator));
-            Assert.False(RemoteRecenter.TryConsume(_receiver, processor));
-
-            TrackingPose rotation = processor.Process(_receiver.GetLatestPose(), 1f / 60f);
-            Assert.Equal(0f, rotation.Yaw, precision: 0);
-            Assert.Equal(0f, rotation.Pitch, precision: 0);
-            Assert.Equal(0f, rotation.Roll, precision: 0);
+            Assert.False(RemoteRecenter.TryConsume(
+                _receiver, processor, new PoseInterpolator(), positionProcessor, new PositionInterpolator()));
+            Assert.False(processor.IsRemoteConnection);
+            Assert.False(positionProcessor.IsRemoteConnection);
         }
 
         private static OpenTrackReceiver StartReceiver()

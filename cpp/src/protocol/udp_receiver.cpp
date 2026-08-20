@@ -550,6 +550,10 @@ void UdpReceiver::ReceiverThread() {
             uint8_t recenterCounter;
             const bool hasTrailer =
                 OpenTrackPacket::TryParseRecenterCounter(buffer, bytesReceived, recenterCounter);
+            // The trailer is parsed but no longer raises a recenter request.
+            // Headcam owns centring: it zeroes its own output on CENTER, and the
+            // pipeline's centre is identity by default, so the zeroed stream is
+            // already correct without the mod doing anything.
             const bool pressed = hasTrailer &&
                 (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter);
             if (hasTrailer) {
@@ -575,9 +579,9 @@ void UdpReceiver::ReceiverThread() {
 
                 // A press is the one discontinuity the tracker announces, so the
                 // gate has nothing left to decide - take the pose it carries.
-                // Holding it back would leave Recenter() to capture the
-                // PRE-press pose as the new centre, baking in the very offset
-                // the player just cleared.
+                // The trailer no longer drives a recenter, but it still marks the
+                // jump to the app's new neutral as real, which is exactly what the
+                // gate needs to know.
                 //
                 // A tracker that centres itself WITHOUT the trailer (opentrack's
                 // Center bind) gets no such bypass, because from here that press
@@ -603,12 +607,6 @@ void UdpReceiver::ReceiverThread() {
                 m_isRemoteConnection.store(IsRemoteAddress(senderAddr), std::memory_order_relaxed);
 
                 m_lastReceiveTimestamp.store(nowUs, std::memory_order_release);
-            }
-
-            // Published after the pose, so a consumer that observes the request
-            // reads the pose the app zeroed rather than the one before it.
-            if (pressed) {
-                m_recenterRequested.store(true, std::memory_order_release);
             }
         }
     }

@@ -226,16 +226,12 @@ bool PollingUdpReceiver::ParsePacket(const char* buffer, int bytesReceived) {
         return false;
     }
 
-    // Checked per datagram, not just on the one Poll() keeps: a whole recenter burst can
-    // land inside a single game frame. Gated on the parse above, because the trailer only
-    // means anything alongside the zeroed pose it rides with - honouring it on a packet
-    // whose pose was rejected centres on the PREVIOUS pose, i.e. the pre-press drift the
-    // tracker just cleared, which is the double-subtract failure by another route.
+    // The trailer is parsed but no longer raises a recenter request. Headcam owns
+    // centring: it zeroes its own output on CENTER, and the pipeline's centre is
+    // identity by default, so the zeroed stream is already correct without the mod
+    // doing anything. An older app that still sends the trailer is simply ignored.
     uint8_t recenterCounter;
     if (OpenTrackPacket::TryParseRecenterCounter(buffer, static_cast<size_t>(bytesReceived), recenterCounter)) {
-        if (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter) {
-            m_recenterRequested = true;
-        }
         m_lastRecenterCounter = recenterCounter;
         m_hasRecenterCounter = true;
     }

@@ -124,9 +124,10 @@ public:
     /// absence here was a public-API asymmetry between two receivers of one protocol.
     void ResetOffset();
 
-    /// True once per recenter request signaled by the tracker app through
-    /// the packet trailer (e.g. the user pressing CENTER in Headcam). The
-    /// caller routes it into its own recenter path.
+    /// Always false. The HCAM trailer is still parsed, but it no longer raises a
+    /// recenter request: Headcam zeroes its own output on CENTER and the pipeline's
+    /// centre is identity, so the zeroed stream is already correct. Kept on the API
+    /// because mods call it; they simply never see a press.
     bool TryConsumeRecenterRequest() {
         return m_recenterRequested.exchange(false, std::memory_order_acq_rel);
     }

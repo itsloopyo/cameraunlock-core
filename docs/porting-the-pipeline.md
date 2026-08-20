@@ -190,20 +190,25 @@ assert the captured neutral equals the raw pose the tracker reported, exactly.
 Cover a press while the head is *moving*, which is the local-hotkey form of the
 same defect.
 
-## 9. HCAM re-arm is ~5 seconds
+## 9. The HCAM trailer does not recenter
 
-Full contract in `hcam-inband-protocol.md`; this is the one ports get wrong after
-implementing everything else correctly.
+A port must **parse** a 54-byte datagram - bytes 0-47 are the pose and it has to
+reach the pipeline like any other packet - and must **not** recenter on it.
 
-The first-sighting re-arm exists because a tracker restart resets its counter. It
-must be ~5s of packet silence (`kRecenterRearmMs`). A 500 ms window is short
-enough that an ordinary Wi-Fi loss burst *inside* a recenter burst re-arms it, so
-the tail of the same burst - carrying the same counter - reads as a second press
-and recenters on drifted pose.
+Headcam owns centring: it zeroes its own output when the player presses CENTER.
+With the mod-side centre at identity (invariant 10) that zeroed stream is already
+correct, so there is nothing left for the mod to do. Acting on the trailer as
+well is the double-centre this doctrine exists to prevent, reached through
+another door.
 
-Also: publish the recenter request **after** the pose it belongs to, and only for
-a packet you actually accepted. Publishing first, or publishing for a packet then
-discarded as non-finite, makes the recenter capture the previous pose.
+Older Headcam builds still send the trailer, so ignoring it is a positive
+requirement, not an absence. Keep any `TryConsumeRecenterRequest`-shaped accessor
+you already expose and have it report nothing, rather than deleting it and
+breaking callers.
+
+**Check.** Send a trailered packet and assert two things: the pose it carried
+reaches the output, and no recenter happened. Then set a centre with the hotkey,
+send a trailered packet, and assert the hotkey centre survives.
 
 ## 10. The mod-side center starts at identity
 

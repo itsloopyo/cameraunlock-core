@@ -9,6 +9,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - the HCAM trailer no longer recenters
+
+A CENTER press signalled through the 54-byte packet trailer used to recenter the
+pipeline. It no longer does anything. The trailer is still parsed, its counter is
+still tracked, and `TryConsumeRecenterRequest()` / `RemoteRecenter.TryConsume()`
+are still on the API - they just always report nothing.
+
+This follows from the centre being identity by default. Headcam zeroes its own
+output when the player presses CENTER, so the stream arriving at the mod is
+already centred and there is nothing left for the mod to do. Acting on the
+trailer as well was a second centre in series with the app's, which is the same
+defect the connect-time capture had.
+
+Ignoring the trailer is a positive requirement rather than an absence: older
+Headcam builds still send it, and the receivers must not act on those either.
+
+- **Migration**: nothing to change to keep building. Every trailer-related member
+  stays: `OpenTrackPacket.TryParseRecenterCounter`,
+  `OpenTrackReceiver.TryConsumeRecenterRequest`, `RemoteRecenter.TryConsume`,
+  `ViewMatrixTrackingController.OnRemoteRecenter`, and C++
+  `UdpReceiver` / `PollingUdpReceiver::TryConsumeRecenterRequest`,
+  `HeadTrackingSession::GetRemoteRecenterCount` and `kHasRemoteRecenter`.
+- **What a user loses.** A centre set with the mod's recenter hotkey is no longer
+  cleared when the app re-zeroes, so after using the hotkey the player recentres
+  with the hotkey rather than on the phone. A trailered press also no longer
+  resets the interpolator, so the step is smoothed rather than snapped; at
+  `RemoteSmoothing = 0.15` that is a few hundred ms on a phone over wifi.
+- The consumption sites in `HeadTrackingSession`, `ViewMatrixTrackingController`,
+  `StaticHeadTrackingCore` and the C++ session are left in place. They are the
+  mechanism, and a mod supplying its own `ITrackingDataSource` can still raise a
+  request; the shipped receivers simply never do.
+- `UdpReceiver` still uses a trailer sighting to seed its jump-confirm gate. The
+  trailer no longer recentres, but it still marks the jump to the app's new
+  neutral as real, which is what that gate needs to know.
+- Regression coverage: `Receiver_Trailer_NeverRaisesARecenterRequest`,
+  `Receiver_Trailer_StillDeliversThePose`, `Session_Trailer_DoesNotMoveTheView`,
+  `Session_Trailer_LeavesAHotkeyCentreAlone`,
+  `RemoteRecenter_Trailer_NeverConsumesARequest`, and the C++ receiver tests.
+  Re-arming the raise in `OpenTrackReceiver` fails four of them.
+
+
 ### BREAKING - the session no longer captures a center on connect
 
 Every entry point that ran head tracking captured the incoming pose as a center

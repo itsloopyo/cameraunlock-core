@@ -120,17 +120,6 @@ bool WaitForPacketAfter(cameraunlock::UdpReceiver& rx, int64_t sinceUs,
     return rx.GetLastReceiveTimestamp() > sinceUs;
 }
 
-/// True once the threaded receiver has raised a recenter request, within
-/// `timeoutMs`. The packet is sent once: a burst that has to be repeated to
-/// land is a burst whose first packets were dropped.
-bool WaitForRecenter(cameraunlock::UdpReceiver& rx, int timeoutMs) {
-    for (int elapsed = 0; elapsed < timeoutMs; elapsed += 10) {
-        if (rx.TryConsumeRecenterRequest()) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    return rx.TryConsumeRecenterRequest();
-}
-
 bool WaitUntilRunning(cameraunlock::UdpReceiver& rx, int timeoutMs) {
     for (int elapsed = 0; elapsed < timeoutMs; elapsed += 25) {
         if (rx.IsRunning()) return true;
@@ -149,6 +138,18 @@ bool PollUntilReceived(cameraunlock::PollingUdpReceiver& rx) {
 
 bool NearEqual(float a, float b, float eps = 1e-4f) {
     return std::fabs(a - b) <= eps;
+}
+
+/// True once the threaded receiver has published `expectedYaw`, within
+/// `timeoutMs`. The packet is sent once: a burst that has to be repeated to
+/// land is a burst whose first packets were dropped.
+bool WaitForRotation(cameraunlock::UdpReceiver& rx, float expectedYaw, int timeoutMs) {
+    float yaw, pitch, roll;
+    for (int elapsed = 0; elapsed < timeoutMs; elapsed += 10) {
+        if (rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, expectedYaw)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, expectedYaw);
 }
 
 }  // namespace
@@ -182,23 +183,22 @@ int RunReceiverTests() {
     Check(rx.GetPosition(x, y, z) && NearEqual(x, 1.0f) && NearEqual(y, 0.5f) && NearEqual(z, -0.25f),
           "position decoded without offset");
 
-    // First trailer sighting is a press: the trailer only rides the
-    // post-press burst.
+    // The trailer is still parsed but never raises a request: Headcam owns
+    // centring, and the pipeline's centre is identity, so the zeroed stream it
+    // sends is already correct. An older app still sending the trailer is
+    // ignored rather than acted on.
     uint8_t counter = 7;
     len = BuildPacket(pkt, 100.0, 50.0, -25.0, 10.0, 5.0, -2.0, &counter);
     Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "trailered packet received");
-    Check(rx.TryConsumeRecenterRequest(), "first trailer sighting requests recenter");
-    Check(!rx.TryConsumeRecenterRequest(), "request is consumed exactly once");
+    Check(!rx.TryConsumeRecenterRequest(), "first trailer sighting requests no recenter");
 
-    // Same counter again (rest of the burst): no new request.
     Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "repeat-counter packet received");
-    Check(!rx.TryConsumeRecenterRequest(), "repeated counter does not retrigger");
+    Check(!rx.TryConsumeRecenterRequest(), "repeated counter requests no recenter");
 
-    // Counter change: new request.
     counter = 8;
     len = BuildPacket(pkt, 100.0, 50.0, -25.0, 10.0, 5.0, -2.0, &counter);
     Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "new-counter packet received");
-    Check(rx.TryConsumeRecenterRequest(), "counter change requests recenter");
+    Check(!rx.TryConsumeRecenterRequest(), "counter change requests no recenter");
 
     // Recenter captures rotation AND position; the next reads are deltas.
     rx.Recenter();
@@ -315,10 +315,9 @@ int RunReceiverTests() {
     uint8_t pressCounter = 1;
     len = BuildPacket(pkt, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &pressCounter);
     Check(SendToPort(pressSender, kPressPort, pkt, len), "press packet sent");
-    Check(WaitForRecenter(pressRx, 1000),
-          "a press is read even though its pose jumps past the freeze gate");
-    Check(pressRx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 0.f),
-          "the pose the press carried is published, so Recenter centres on it");
+    Check(WaitForRotation(pressRx, 0.f, 1000),
+          "the trailered pose jumps past the freeze gate in one packet");
+    Check(!pressRx.TryConsumeRecenterRequest(), "and still asks for no recenter");
 
     pressRx.Stop();
     pressSender.Close();
