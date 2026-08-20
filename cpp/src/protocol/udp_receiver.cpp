@@ -1,4 +1,5 @@
 #include "cameraunlock/protocol/udp_receiver.h"
+#include "cameraunlock/logging/file_log.h"
 #include "cameraunlock/protocol/opentrack_packet.h"
 #include "cameraunlock/data/position_data.h"
 #include <chrono>
@@ -6,6 +7,12 @@
 #include <string>
 
 namespace cameraunlock {
+
+std::function<void(const std::string&)> DefaultLogSink() {
+    return [](const std::string& message) {
+        logging::Line("%s", message.c_str());
+    };
+}
 
 namespace {
 

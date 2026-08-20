@@ -50,7 +50,7 @@ namespace CameraUnlock.Core.Tests.Processing
             // First call establishes the sample
             interp.Update(pose, DeltaTime);
 
-            // Second call with same timestamp — from=to, so output stays the same
+            // Second call with same timestamp - from=to, so output stays the same
             var result = interp.Update(pose, DeltaTime);
 
             Assert.Equal(10f, result.Yaw, precision: 4);
@@ -77,7 +77,7 @@ namespace CameraUnlock.Core.Tests.Processing
             var pose2 = MakePose(10f, 0f, 0f, 2000);
             interp.Update(pose2, DeltaTime);
 
-            // Next frame — should be interpolating between pose1 and pose2
+            // Next frame - should be interpolating between pose1 and pose2
             var result = interp.Update(pose2, DeltaTime);
 
             Assert.True(result.Yaw > 0f && result.Yaw < 10f,
@@ -100,7 +100,7 @@ namespace CameraUnlock.Core.Tests.Processing
             var pose2 = MakePose(10f, 0f, 0f, 2000);
             interp.Update(pose2, DeltaTime);
 
-            // Run many frames without new sample — should extrapolate then cap
+            // Run many frames without new sample - should extrapolate then cap
             // A short gap - a dropped packet or a Wi-Fi burst - is still a live
             // feed: extrapolate half a sample period past the target, then hold
             // there (from + (to - from) * 1.5).
@@ -140,7 +140,7 @@ namespace CameraUnlock.Core.Tests.Processing
             var pose2 = MakePose(10f, 0f, 0f, 2000);
             interp.Update(pose2, DeltaTime);
 
-            // Run many frames without new sample — should hold at target
+            // Run many frames without new sample - should hold at target
             float lastYaw = 0f;
             for (int i = 0; i < 100; i++)
             {
@@ -212,13 +212,13 @@ namespace CameraUnlock.Core.Tests.Processing
             for (int i = 0; i < 3; i++)
                 interp.Update(MakePose(0f, 0f, 0f, 1000), DeltaTime);
 
-            // Second sample at yaw=10 — establishes interval
+            // Second sample at yaw=10 - establishes interval
             interp.Update(MakePose(10f, 0f, 0f, 2000), DeltaTime);
             // 3 stale frames (interpolating toward 10)
             for (int i = 0; i < 3; i++)
                 interp.Update(MakePose(10f, 0f, 0f, 2000), DeltaTime);
 
-            // Third sample at yaw=20 — now we can check linearity
+            // Third sample at yaw=20 - now we can check linearity
             // Collect 4 frames (isNewSample + 3 stale) and verify constant frame-to-frame deltas
             var values = new float[4];
             values[0] = interp.Update(MakePose(20f, 0f, 0f, 3000), DeltaTime).Yaw;

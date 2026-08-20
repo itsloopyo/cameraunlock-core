@@ -450,7 +450,7 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <summary>
         /// Calculates the screen offset for a known world-space point, projected through
         /// the camera's current view matrix. Use this for parallax-correct reticle positioning
-        /// when position tracking is active — pass the actual aim hit point for exact results.
+        /// when position tracking is active - pass the actual aim hit point for exact results.
         /// </summary>
         /// <param name="cam">The camera (with head tracking already applied to the view matrix).</param>
         /// <param name="worldPoint">The world-space point to project (e.g., a raycast hit point).</param>
@@ -468,7 +468,7 @@ namespace CameraUnlock.Core.Unity.Extensions
 
             if (screenPoint.z <= 0)
             {
-                // Point is behind the modified camera — fall back to direction-based edge clamp
+                // Point is behind the modified camera - fall back to direction-based edge clamp
                 Vector3 dirToPoint = (worldPoint - cam.transform.position).normalized;
                 float halfWidth = Screen.width * 0.5f;
                 float halfHeight = Screen.height * 0.5f;

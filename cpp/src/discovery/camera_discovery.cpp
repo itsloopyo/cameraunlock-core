@@ -47,7 +47,7 @@ bool SafeReadFloat(uintptr_t addr, float& out) {
 
 }  // namespace
 
-// Probe detour instantiations — need unique function addresses for MinHook
+// Probe detour instantiations - need unique function addresses for MinHook
 // We generate 32 slots (4 candidates × 8 vfuncs)
 using ProbeFn = uintptr_t(__fastcall*)(void*, void*, void*, void*);
 
@@ -163,7 +163,7 @@ Phase CameraDiscovery::RunFindVtables() {
     }
 
     if (m_candidates.empty()) {
-        Log("DISC: No camera classes found — failed");
+        Log("DISC: No camera classes found - failed");
         return Phase::Failed;
     }
 
@@ -241,7 +241,7 @@ Phase CameraDiscovery::RunProbing() {
     }
 
     if (sel.decision == ProbeDecision::Failed) {
-        Log("DISC: No vfuncs called during probe period — failed");
+        Log("DISC: No vfuncs called during probe period - failed");
         RemoveProbeHooks();
         return Phase::Failed;
     }
@@ -286,7 +286,7 @@ Phase CameraDiscovery::RunProbing() {
 Phase CameraDiscovery::RunAnalyzeLayout() {
     uintptr_t inst = m_instance.load();
     if (inst == 0) {
-        Log("DISC: No instance pointer — failed");
+        Log("DISC: No instance pointer - failed");
         return Phase::Failed;
     }
 
@@ -299,7 +299,7 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     if (analyzeSize <= 0) analyzeSize = 256;
 
     if (!SafeClassify(inst + skipBytes, static_cast<size_t>(analyzeSize), m_layout)) {
-        Log("DISC: Instance at %p faulted during layout analysis — failed",
+        Log("DISC: Instance at %p faulted during layout analysis - failed",
             reinterpret_cast<void*>(inst));
         return Phase::Failed;
     }
@@ -346,7 +346,7 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     }
 
     if (m_candidateAngleOffsets.empty()) {
-        Log("DISC: No angle candidates found — failed");
+        Log("DISC: No angle candidates found - failed");
         return Phase::Failed;
     }
 
@@ -356,7 +356,7 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     for (size_t off : m_candidateAngleOffsets) {
         float val = 0.0f;
         if (!SafeReadFloat(inst + off, val)) {
-            Log("DISC: Instance at %p faulted reading +0x%X — failed",
+            Log("DISC: Instance at %p faulted reading +0x%X - failed",
                 reinterpret_cast<void*>(inst), (int)off);
             return Phase::Failed;
         }
@@ -387,7 +387,7 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     }
 
     if (!foundYaw) {
-        Log("DISC: Could not identify yaw — failed");
+        Log("DISC: Could not identify yaw - failed");
         return Phase::Failed;
     }
 
@@ -399,7 +399,7 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     // out the next virtual call on the camera object. Below 8 it underflows outright and
     // the write lands at inst-4.
     if (yawOff < 2 * sizeof(float) + 8) {
-        Log("DISC: Yaw offset +0x%X too low to carry a preceding pitch/roll pair — failed",
+        Log("DISC: Yaw offset +0x%X too low to carry a preceding pitch/roll pair - failed",
             (int)yawOff);
         return Phase::Failed;
     }
@@ -412,7 +412,7 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
     if (!SafeReadFloat(inst + yawOff, yawVal) ||
         !SafeReadFloat(inst + pitchOff, pitchVal) ||
         !SafeReadFloat(inst + rollOff, rollVal)) {
-        Log("DISC: Instance at %p faulted reading the angle triple — failed",
+        Log("DISC: Instance at %p faulted reading the angle triple - failed",
             reinterpret_cast<void*>(inst));
         return Phase::Failed;
     }

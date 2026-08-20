@@ -226,7 +226,7 @@ namespace CameraUnlock.Core.Tests.Processing
             processor.CenterManager.SetCenter(80f, 0f, 0f);
 
             long timestamp = Stopwatch.GetTimestamp();
-            // Input at 80° yaw + 15° pitch — relative is ~15° pitch only
+            // Input at 80° yaw + 15° pitch - relative is ~15° pitch only
             var pose = new TrackingPose(80f, 15f, 0f, timestamp);
 
             TrackingPose result = processor.Process(pose, DeltaTime);

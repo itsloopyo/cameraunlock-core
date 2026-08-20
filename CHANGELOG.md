@@ -9,6 +9,83 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the C# receiver reports its first accepted packet
+
+`OpenTrackReceiver` now emits one latched `First tracker packet accepted from
+<endpoint> (local|remote source)` through its `Log` callback, re-armed on
+Start/Stop.
+
+Its callback previously only fired for port contention and socket errors, so a
+managed mod's log showed the port bound and then nothing. Every consumer had
+invented its own answer to "did packets arrive" - polling `IsReceiving`, latching
+inside a property getter, or in two cases nothing at all.
+
+### Changed - receiver diagnostics default to the shared log instead of nowhere
+
+`UdpReceiver` and `PollingUdpReceiver` now default their log sink to
+`logging::Line` rather than to an empty `std::function`. Mods with their own
+logger still override it via `SetLog`; mods that never open a core log get a
+no-op.
+
+Forgetting `SetLog` silently discarded the bind result and the latched
+first-packet line - the two lines a "no head tracking" report turns on. Two of
+five repos in one sample had missed it, with nothing to indicate the diagnostics
+were going into a void.
+
+Its first-packet line is emitted only for a packet that PARSES, and says
+"First tracker packet accepted", matching the C# receiver. The latch is one-shot,
+so reporting before validation let a stray keepalive or a LAN broadcast consume
+it and the real tracker packet then never reported - the exact false split the
+line exists to prevent.
+
+`PollingUdpReceiver`'s bind-failure line is latched, cleared when a bind
+succeeds. `Initialize()` is caller-driven and a mod that retries a busy port
+calls it on a timer, so without the latch the new default sink turned a silent
+retry loop into one repeated line every few seconds for the whole session.
+
+### Fixed - em-dashes removed from source and log strings
+
+`camera_discovery.cpp` wrote em-dashes into user-facing log lines ("... - failed"),
+and 17 other files carried them in comments. Forty in total, now plain hyphens.
+The house rule is fleet-wide, and the discovery ones were reaching end-user logs.
+
+### Added - PollingUdpReceiver can report whether packets arrived
+
+`PollingUdpReceiver` now has `SetLog()`, matching `UdpReceiver`. It logs the
+bind result on `Initialize()` and one latched `First UDP packet received` line.
+
+The threaded receiver has had both for a long time; the polling one had neither,
+so a mod built on it could not answer "did a tracker packet ever reach the game"
+from its log, and every such mod had to hand-roll the line. Set the sink before
+`Initialize()` so the bind result is captured.
+
+### Fixed - the log's previous session survives a relaunch
+
+`logging::Open()` truncates (`CREATE_ALWAYS`), so a mod's log has always started
+fresh per run. It now renames the outgoing file to `<name>.prev.log` first.
+
+This matters because `EmergencyLine` and `crash_handler` write the unhandled
+exception report - faulting module, address, stack frames - into that same file.
+A player who crashes and relaunches to reproduce it destroyed the report before
+they ever thought to send it. Consuming mods get this automatically; the only
+visible change is one extra `.prev.log` beside the existing log, worth adding to
+a mod's documented uninstall file list.
+
+A rename that fails is reported in the freshly opened log rather than dropped:
+`CREATE_ALWAYS` has already truncated the file by then, so a silent failure
+leaves `.prev.log` holding an arbitrarily old session while the docs tell the
+reader it is the previous launch. A first-ever launch has nothing to rotate and
+stays quiet.
+
+The rotation happens once per process, not once per `Open()`. A mod that honours
+a "log to file" setting closes and can reopen the log inside the same run, and
+rotating there would file the run in progress away as the previous generation.
+
+Several mods added the same `MoveFileExW` immediately before `Open()` before this
+landed. Those are harmless (the second rename finds no source file and the target
+name is identical), so they can come out whenever the mod next bumps its
+submodule rather than urgently.
+
 ### BREAKING - the HCAM trailer no longer recenters
 
 A CENTER press signalled through the 54-byte packet trailer used to recenter the

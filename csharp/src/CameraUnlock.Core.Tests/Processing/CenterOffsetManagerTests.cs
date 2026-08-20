@@ -122,7 +122,7 @@ namespace CameraUnlock.Core.Tests.Processing
             Quat4 input = QuaternionUtils.FromYawPitchRoll(30f, 20f, 10f);
             Quat4 result = manager.ApplyOffsetQuat(input);
 
-            // Should be identical — no center set
+            // Should be identical - no center set
             Assert.Equal(input.X, result.X, precision: 5);
             Assert.Equal(input.Y, result.Y, precision: 5);
             Assert.Equal(input.Z, result.Z, precision: 5);

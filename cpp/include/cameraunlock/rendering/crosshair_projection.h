@@ -64,7 +64,7 @@ inline ScreenPosition ProjectCrosshair(const CrosshairProjectionParams& params) 
     float rollRad = params.rollOffset * kDegToRad;
 
     // Camera space before head tracking: fwd=(1,0,0), up=(0,1,0), right=(0,0,-1)
-    // Construct forward from spherical coordinates — matches ApplyHeadTrackingRotation.
+    // Construct forward from spherical coordinates - matches ApplyHeadTrackingRotation.
     // This ensures yaw and pitch are independent (no arc artifacts).
     float cosY = std::cos(yawRad), sinY = std::sin(yawRad);
     float cosP = std::cos(pitchRad), sinP = std::sin(pitchRad);

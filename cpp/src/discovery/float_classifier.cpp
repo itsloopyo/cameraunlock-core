@@ -102,7 +102,7 @@ LayoutReport ClassifyMemoryRegion(const void* region, size_t size) {
                 break;
             }
         }
-        if (allTrivial) continue;  // skip — this is a matrix row, not angles
+        if (allTrivial) continue;  // skip - this is a matrix row, not angles
 
         bool looksLikeAngle = (std::fabsf(a) > 0.5f || std::fabsf(b) > 0.5f || std::fabsf(c) > 0.5f)
                            && (std::fabsf(a) < 360.0f && std::fabsf(b) < 360.0f && std::fabsf(c) < 360.0f);

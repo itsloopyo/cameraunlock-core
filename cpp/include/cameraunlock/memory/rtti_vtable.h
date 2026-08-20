@@ -18,7 +18,7 @@ struct VtableInfo {
 
 // Find vtable from RTTI class name.
 // module: game module handle (e.g., GetModuleHandleA(nullptr))
-// class_name: undecorated name (e.g., "CCustomCamera") — will be searched as substring
+// class_name: undecorated name (e.g., "CCustomCamera") - will be searched as substring
 // info: populated on success
 // max_vfuncs: how many vtable entries to read (capped at kMaxVfuncEntries)
 // Returns true if vtable found.

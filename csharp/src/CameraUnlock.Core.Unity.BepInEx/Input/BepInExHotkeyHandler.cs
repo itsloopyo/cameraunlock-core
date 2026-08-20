@@ -51,18 +51,34 @@ namespace CameraUnlock.Core.Unity.BepInEx.Input
         /// <summary>
         /// Initializes the hotkey handler with ConfigEntry bindings.
         /// </summary>
-        /// <param name="recenterKey">ConfigEntry for recenter hotkey</param>
+        /// <param name="recenterKey">
+        /// ConfigEntry for the recenter hotkey, or null for a mod that has none.
+        /// The tracker owns the centre, so a mod that keeps no centre of its own has
+        /// nothing to bind; passing null leaves the recenter key unbound and
+        /// <see cref="OnRecenter"/> never fires.
+        /// </param>
         /// <param name="toggleKey">ConfigEntry for toggle hotkey</param>
         public void Initialize(ConfigEntry<KeyCode> recenterKey, ConfigEntry<KeyCode> toggleKey)
         {
-            _recenterKey = recenterKey ?? throw new ArgumentNullException(nameof(recenterKey));
+            _recenterKey = recenterKey;
             _toggleKey = toggleKey ?? throw new ArgumentNullException(nameof(toggleKey));
 
             CacheHotkeys();
 
             // Subscribe to config changes
-            _recenterKey.SettingChanged += HandleSettingChanged;
+            if (_recenterKey != null)
+            {
+                _recenterKey.SettingChanged += HandleSettingChanged;
+            }
             _toggleKey.SettingChanged += HandleSettingChanged;
+        }
+
+        /// <summary>
+        /// Initializes with only a toggle binding, for a mod with no recenter hotkey.
+        /// </summary>
+        public void Initialize(ConfigEntry<KeyCode> toggleKey)
+        {
+            Initialize(null, toggleKey);
         }
 
         /// <summary>

@@ -10,6 +10,10 @@ namespace cameraunlock::logging {
 // survives a hard process kill - that is what makes it usable as the crash
 // reporter's output channel.
 
+// Name Open() rotates the outgoing generation to: "HeadTracking.log" becomes
+// "HeadTracking.prev.log". Exposed for tests; callers do not need it.
+std::wstring PreviousGenerationPath(const std::wstring& filename);
+
 void Open(const std::wstring& filename);
 void Close();
 

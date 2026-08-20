@@ -27,14 +27,14 @@ struct GuiMarkerInput {
 
     // Camera vertical field of view (degrees). Read live from
     // via.Camera.get_FOV each frame. RE Engine returns this as a double
-    // despite the TDB declaring it as Single — use ReadFovFromInvokeRet
+    // despite the TDB declaring it as Single - use ReadFovFromInvokeRet
     // to handle both representations transparently.
     float fovDegY = 46.f;
 
     // Native screen position of the marker (pixels relative to screen
     // center). If the engine exposes the marker's global position, use
     // it here for off-center correction. If not (common in RE Engine
-    // where get_GlobalPosition returns 0), pass (0, 0) — the
+    // where get_GlobalPosition returns 0), pass (0, 0) - the
     // compensation still works but has a minor U-shape artifact at
     // extreme yaw for off-center targets.
     float gxNative = 0.f;

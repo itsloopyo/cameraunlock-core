@@ -134,7 +134,7 @@ namespace CameraUnlock.Core.Processing
             {
                 if (!_hasFirstSample)
                 {
-                    // Very first sample — park at this position
+                    // Very first sample - park at this position
                     _fromYaw = rawPose.Yaw;
                     _fromPitch = rawPose.Pitch;
                     _fromRoll = rawPose.Roll;

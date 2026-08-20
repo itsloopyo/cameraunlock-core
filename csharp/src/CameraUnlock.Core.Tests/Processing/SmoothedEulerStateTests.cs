@@ -138,7 +138,7 @@ namespace CameraUnlock.Core.Tests.Processing
             state.Update(0f, 0f, 0f, 0.5f, DeltaTime,
                 out _, out _, out _);
 
-            // Single step toward 30° yaw — should be between 0 and 30
+            // Single step toward 30° yaw - should be between 0 and 30
             state.Update(30f, 0f, 0f, 0.5f, DeltaTime,
                 out float yaw, out _, out _);
 

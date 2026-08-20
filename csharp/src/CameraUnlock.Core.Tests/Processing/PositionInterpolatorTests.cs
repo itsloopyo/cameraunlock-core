@@ -73,7 +73,7 @@ namespace CameraUnlock.Core.Tests.Processing
             var pos2 = MakePos(0.1f, 0f, 0f, 2000);
             interp.Update(pos2, DeltaTime);
 
-            // Next frame — should be interpolating between pos1 and pos2
+            // Next frame - should be interpolating between pos1 and pos2
             var result = interp.Update(pos2, DeltaTime);
 
             Assert.True(result.X > 0f && result.X < 0.1f,

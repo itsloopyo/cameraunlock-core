@@ -22,7 +22,7 @@ void SetNamespaceCandidates(const char* const* candidates, int count);
     ::reframework::API::TDB* tdb, const char* baseName);
 
 // Try to find a managed singleton across namespace candidates.
-// Returns pointer to a static buffer — valid until next call.
+// Returns pointer to a static buffer - valid until next call.
 const char* FindSingleton(const ::reframework::API* api, const char* baseName);
 
 // Try to find a method on a type, trying multiple name variants.
@@ -43,7 +43,7 @@ bool ProbeManager(
 // SEH-protected method invocation helpers.
 // InvokeBool: returns the bool result (false if method missing/crashed).
 // InvokeInt:  returns the uint32 result (0 if missing/crashed).
-// InvokePointer: returns the pointer result ((void*)1 if missing/crashed — non-null sentinel).
+// InvokePointer: returns the pointer result ((void*)1 if missing/crashed - non-null sentinel).
 bool InvokeBool(const ::reframework::API* api, void* vmCtx,
                 MethodCheck& check, bool diag, const char* label);
 uint32_t InvokeInt(const ::reframework::API* api, void* vmCtx,

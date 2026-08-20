@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <chrono>
+#include <string>
 
 namespace cameraunlock {
 
@@ -18,10 +19,21 @@ bool PollingUdpReceiver::Initialize(uint16_t port) {
     }
 
     if (!m_socket.Open(port)) {
+        if (m_log && !m_bindFailureLogged) {
+            m_bindFailureLogged = true;
+            m_log("Failed to bind UDP port " + std::to_string(port) +
+                  " (another application is holding it)");
+        }
         return false;
     }
 
+    if (m_log) {
+        m_log("UDP receiver listening on port " + std::to_string(port));
+    }
+    m_bindFailureLogged = false;
+
     m_initialized = true;
+    m_firstPacketLogged = false;
     m_lastReceiveTimeMs = 0;
     m_packetsReceived = 0;
     m_bytesReceived = 0;
@@ -117,6 +129,16 @@ bool PollingUdpReceiver::Poll() {
             receivedAny = true;
 
             m_isRemoteConnection = IsRemoteAddress(senderAddr);
+
+            // Latched on an ACCEPTED packet, not on any datagram. The latch is
+            // one-shot, so logging before validation lets a stray keepalive or a
+            // LAN broadcast consume it and the real tracker packet then never
+            // reports - the exact false split this line exists to prevent.
+            if (!m_firstPacketLogged && m_log) {
+                m_firstPacketLogged = true;
+                m_log("First tracker packet accepted: " + std::to_string(bytesReceived) +
+                      " bytes");
+            }
         }
     }
 

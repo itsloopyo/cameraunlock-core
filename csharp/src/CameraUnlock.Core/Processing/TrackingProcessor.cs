@@ -11,7 +11,7 @@ namespace CameraUnlock.Core.Processing
     {
         private readonly CenterOffsetManager _centerManager = new CenterOffsetManager();
 
-        // Per-axis smoothed Euler angles (no quaternion SLERP — prevents phantom roll)
+        // Per-axis smoothed Euler angles (no quaternion SLERP - prevents phantom roll)
         private float _smoothedYaw;
         private float _smoothedPitch;
         private float _smoothedRoll;
@@ -98,7 +98,7 @@ namespace CameraUnlock.Core.Processing
             pitch = (float)DeadzoneUtils.Apply(pitch, Deadzone.Pitch);
             roll = (float)DeadzoneUtils.Apply(roll, Deadzone.Roll);
 
-            // Step 3: Per-axis Euler smoothing (no quaternion SLERP — prevents phantom roll)
+            // Step 3: Per-axis Euler smoothing (no quaternion SLERP - prevents phantom roll)
             float effectiveSmoothing = SmoothingUtils.GetEffectiveSmoothing(
                 LocalSmoothing, RemoteSmoothing, IsRemoteConnection);
 

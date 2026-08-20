@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include "cameraunlock/data/tracking_pose.h"
 #include "cameraunlock/protocol/socket_types.h"
 #include "cameraunlock/protocol/udp_socket.h"
+#include "cameraunlock/protocol/udp_receiver.h"
 
 namespace cameraunlock {
 
@@ -36,6 +39,10 @@ public:
     PollingUdpReceiver& operator=(const PollingUdpReceiver&) = delete;
     PollingUdpReceiver(PollingUdpReceiver&&) = delete;
     PollingUdpReceiver& operator=(PollingUdpReceiver&&) = delete;
+
+    /// Diagnostic sink, mirroring UdpReceiver::SetLog. Defaults to the shared
+    /// file log. Set it BEFORE Initialize so the bind result is captured.
+    void SetLog(std::function<void(const std::string&)> log) { m_log = std::move(log); }
 
     /// Initializes the UDP socket on the specified port.
     /// @param port The UDP port to listen on.
@@ -103,6 +110,16 @@ private:
 
     UdpSocket m_socket;
     bool m_initialized = false;
+
+    std::function<void(const std::string&)> m_log = DefaultLogSink();
+    bool m_firstPacketLogged = false;
+
+    // Initialize() is caller-driven, and a mod that retries a busy port calls it
+    // on a timer for as long as the bind keeps failing. The threaded receiver
+    // rate-limits its equivalent line inside its own supervisor loop; this one
+    // has no loop to hang a timer on, so it reports the failure once per run of
+    // failures and stays quiet until the port actually comes back.
+    bool m_bindFailureLogged = false;
 
     // Latest received data (rotation in degrees)
     float m_yaw = 0.0f;

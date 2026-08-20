@@ -10,6 +10,7 @@ int RunUnrealMathTests();
 int RunProjectionTests();
 int RunInterpolatorTests();
 int RunProbeSelectionTests();
+int RunFileLogTests();
 
 // Simple test runner - expand with a proper framework if needed
 int main() {
@@ -27,6 +28,7 @@ int main() {
     failures += RunProjectionTests();
     failures += RunInterpolatorTests();
     failures += RunProbeSelectionTests();
+    failures += RunFileLogTests();
 
     if (failures == 0) {
         std::cout << "All tests passed!\n";

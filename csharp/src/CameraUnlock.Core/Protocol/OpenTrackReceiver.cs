@@ -64,6 +64,7 @@ namespace CameraUnlock.Core.Protocol
         private volatile float _rotationRoll;
         private long _timestampTicks;
         private volatile bool _isRemoteConnection;
+        private volatile bool _firstPacketLogged;
 
         // Position data (meters)
         private volatile float _positionX;
@@ -177,6 +178,7 @@ namespace CameraUnlock.Core.Protocol
             _port = port;
             _hasRecenterCounter = false;
             _isRemoteConnection = false;
+            _firstPacketLogged = false;
             Interlocked.Exchange(ref _recenterRequested, 0);
             Interlocked.Exchange(ref _timestampTicks, 0L);
 
@@ -332,6 +334,7 @@ namespace CameraUnlock.Core.Protocol
             // Locality belongs to the connection that is ending. Left set, the next
             // session reports the previous sender's locality until its first packet.
             _isRemoteConnection = false;
+            _firstPacketLogged = false;
             // Freshness is derived purely from this timestamp, so leaving the dead
             // session's value makes IsDataFresh() report true on a closed socket. A
             // stop/start toggle inside the freshness window then runs the whole
@@ -606,6 +609,21 @@ namespace CameraUnlock.Core.Protocol
                             // sending 48 bytes of garbage at the port.
                             //
                             _isRemoteConnection = IsRemoteAddress(remoteEndpoint.Address);
+
+                            // Latched once per session. Without it a mod's log shows the
+                            // port bound and then nothing, so "no head tracking" cannot be
+                            // split into "the tracker never sent" and "it sent and the
+                            // camera path dropped it" without asking the player to test
+                            // again. Placed after validation so a garbage datagram cannot
+                            // claim the tracker arrived.
+                            if (!_firstPacketLogged)
+                            {
+                                _firstPacketLogged = true;
+                                Log?.Invoke(string.Format(
+                                    "First tracker packet accepted from {0} ({1} source)",
+                                    remoteEndpoint,
+                                    _isRemoteConnection ? "remote" : "local"));
+                            }
 
                             _positionX = positionParsed.X;
                             _positionY = positionParsed.Y;

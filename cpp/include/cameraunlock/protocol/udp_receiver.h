@@ -11,6 +11,11 @@
 #include "cameraunlock/protocol/udp_socket.h"
 
 namespace cameraunlock {
+/// Routes receiver diagnostics to cameraunlock::logging by default.
+std::function<void(const std::string&)> DefaultLogSink();
+}  // namespace cameraunlock
+
+namespace cameraunlock {
 
 /// UDP receiver for OpenTrack protocol.
 /// Thread-safe with lock-free reads on the game thread.
@@ -87,6 +92,11 @@ public:
     /// Optional logging callback for bind failures and retry messages.
     /// Must be thread-safe: invoked from Start (caller thread) and from the
     /// background retry thread.
+    /// Diagnostic sink. Defaults to the shared file log rather than to nothing:
+    /// forgetting this call used to silently discard the bind result and the
+    /// latched first-packet line, which are the two the "no head tracking"
+    /// reports turn on. Mods with their own logger override it here; mods that
+    /// never open a core log get a no-op.
     void SetLog(std::function<void(const std::string&)> log) { m_log = std::move(log); }
 
     /// True if the receive thread is running.
@@ -179,7 +189,7 @@ private:
     /// bound and permanently deaf.
     std::atomic<bool> m_receiveFailed{false};
     uint16_t m_port{kDefaultPort};
-    std::function<void(const std::string&)> m_log;
+    std::function<void(const std::string&)> m_log = DefaultLogSink();
 
     // Offset for recentering
     std::atomic<float> m_yawOffset{0.0f};

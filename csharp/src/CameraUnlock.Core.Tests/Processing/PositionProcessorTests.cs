@@ -323,7 +323,7 @@ namespace CameraUnlock.Core.Tests.Processing
 
             proc.Reset();
 
-            // After reset, center should be zero — same input should give raw values
+            // After reset, center should be zero - same input should give raw values
             Vec3 result = proc.Process(MakePos(0.10f, 0.10f, 0.10f), Quat4.Identity, DeltaTime);
             Assert.Equal(0.10f, result.X, precision: 4);
             Assert.Equal(0.10f, result.Y, precision: 4);

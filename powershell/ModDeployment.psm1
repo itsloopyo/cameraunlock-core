@@ -369,14 +369,16 @@ function Test-ModDeployment {
 .PARAMETER DeployPath
     Path where the mod was deployed.
 .PARAMETER RecenterKey
-    Key for recentering (default: "Home"). Used only when -Controls is not supplied.
+    DEPRECATED and ignored. Mods keep no centre of their own, so there is no
+    recenter hotkey to advertise. Kept so existing callers still bind; remove the
+    argument from your deploy script. See the Centering doctrine.
 .PARAMETER ToggleKey
     Key for toggling (default: "End"). Used only when -Controls is not supplied.
 .PARAMETER Controls
     Full list of control lines to print under "Controls:", e.g.
-    @("Home      - Recenter", "End       - Toggle tracking"). When supplied, this
-    overrides RecenterKey/ToggleKey so mods with more than two hotkeys can show them
-    all. Pre-align the descriptions yourself. Omit it for the legacy two-line output.
+    @("End       - Toggle tracking", "Page Up   - Cycle mode"). When supplied, this
+    overrides ToggleKey so mods with more than one hotkey can show them all.
+    Pre-align the descriptions yourself. Omit it for the default single-line output.
 #>
 function Write-DeploymentSuccess {
     [CmdletBinding()]
@@ -387,8 +389,9 @@ function Write-DeploymentSuccess {
         [Parameter(Mandatory=$true)]
         [string]$DeployPath,
 
+        # Deprecated and ignored; see the parameter documentation above.
         [Parameter(Mandatory=$false)]
-        [string]$RecenterKey = "Home",
+        [string]$RecenterKey,
 
         [Parameter(Mandatory=$false)]
         [string]$ToggleKey = "End",
@@ -413,8 +416,8 @@ function Write-DeploymentSuccess {
             Write-Host "  $line" -ForegroundColor Gray
         }
     } else {
-        Write-Host "  $RecenterKey - Recenter head tracking" -ForegroundColor Gray
         Write-Host "  $ToggleKey  - Toggle head tracking on/off" -ForegroundColor Gray
+        Write-Host "  Centre the view in your tracker app." -ForegroundColor Gray
     }
     Write-Host ""
 }

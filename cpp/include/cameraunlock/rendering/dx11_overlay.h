@@ -97,7 +97,7 @@ private:
 // Implementation
 // ============================================================================
 
-} // namespace cameraunlock::rendering — re-opened after includes
+} // namespace cameraunlock::rendering - re-opened after includes
 
 #include <d3d11.h>
 #include <dxgi.h>
@@ -172,7 +172,7 @@ inline void DX11DrawContext::DrawCross(float cx, float cy, float arm, Rgba color
 //
 // Singleton-by-design: the Present hook is a free function, so we keep one
 // active overlay at a time. If a future mod needs multiple, this can grow into
-// a registry — but every mod we ship has exactly one HUD.
+// a registry - but every mod we ship has exactly one HUD.
 
 namespace detail {
 
@@ -294,7 +294,7 @@ inline void ReleaseDeviceResources();  // forward decl
 
 inline bool InitDeviceResources(IDXGISwapChain* swap) {
     auto& s = State();
-    // Always start clean — a previous partial init may have left COM objects behind.
+    // Always start clean - a previous partial init may have left COM objects behind.
     ReleaseDeviceResources();
 
     HRESULT hr = swap->GetDevice(__uuidof(ID3D11Device), reinterpret_cast<void**>(&s.device));

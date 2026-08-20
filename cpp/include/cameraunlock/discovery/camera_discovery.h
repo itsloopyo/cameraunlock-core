@@ -85,7 +85,7 @@ public:
     Phase Advance();
     Phase GetPhase() const { return m_phase; }
 
-    // Vfunc probe callback — each probe detour calls this
+    // Vfunc probe callback - each probe detour calls this
     void ReportVfuncCall(int slot, void* this_ptr);
 
     void SetInstancePointer(void* ptr);
@@ -99,7 +99,7 @@ public:
     void SetLogCallback(LogFn fn) { m_log = fn; }
     void Cleanup();
 
-    // Probe detour originals — public so template detours can access them
+    // Probe detour originals - public so template detours can access them
     static uintptr_t(__fastcall* s_originals[kMaxProbeSlots])(void*, void*, void*, void*);
     static std::atomic<int> s_callCounts[kMaxProbeSlots];
     static std::atomic<uintptr_t> s_lastThis[kMaxProbeSlots];
@@ -141,7 +141,7 @@ private:
     CameraOffsets m_offsets{};
 };
 
-// Template probe detours — each slot gets a unique function address.
+// Template probe detours - each slot gets a unique function address.
 template<int Slot>
 static uintptr_t __fastcall ProbeDetour(void* thisPtr, void* a2, void* a3, void* a4) {
     CameraDiscovery::s_callCounts[Slot].fetch_add(1, std::memory_order_relaxed);

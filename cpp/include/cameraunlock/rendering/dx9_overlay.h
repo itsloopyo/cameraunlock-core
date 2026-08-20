@@ -109,7 +109,7 @@ private:
 // Implementation
 // ============================================================================
 
-} // namespace cameraunlock::rendering — re-opened after includes
+} // namespace cameraunlock::rendering - re-opened after includes
 
 #include <d3d9.h>
 #include <MinHook.h>

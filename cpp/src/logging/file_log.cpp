@@ -32,6 +32,12 @@ constexpr intptr_t kNoHandle = -1;  // INVALID_HANDLE_VALUE, as a constant initi
 std::atomic<intptr_t> g_handle{kNoHandle};
 std::mutex g_mutex;
 
+// One rotation per process, not per Open(). A mod that honours a "log to file"
+// setting closes the log and can reopen it later in the same run; rotating a
+// second time would file the run still in progress away as the previous
+// generation, losing the launch the player actually wants to send.
+bool g_rotated = false;
+
 HANDLE CurrentHandle() {
     return reinterpret_cast<HANDLE>(g_handle.load(std::memory_order_acquire));
 }
@@ -58,9 +64,46 @@ void WriteTimestampedLocked(const char* msg, size_t len) {
 
 }  // namespace
 
+// Rotated name for the outgoing generation: "HeadTracking.log" becomes
+// "HeadTracking.prev.log", so the kept copy is still a .log a player can open.
+// The separator check keeps a dot in a directory name (a real shape in game
+// install paths) from being mistaken for the file extension.
+std::wstring PreviousGenerationPath(const std::wstring& filename) {
+    const size_t dot = filename.find_last_of(L'.');
+    const size_t sep = filename.find_last_of(L"\\/");
+    if (dot == std::wstring::npos || (sep != std::wstring::npos && dot < sep)) {
+        return filename + L".prev";
+    }
+    return filename.substr(0, dot) + L".prev" + filename.substr(dot);
+}
+
 void Open(const std::wstring& filename) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (CurrentHandle() != INVALID_HANDLE_VALUE) return;
+
+    // Keep exactly one generation. CREATE_ALWAYS below truncates, and
+    // EmergencyLine writes the crash report into this same file, so without
+    // this the report is destroyed the moment the player relaunches to
+    // reproduce the crash - which is the first thing they do.
+    bool rotationFailed = false;
+    DWORD rotationError = 0;
+    if (!g_rotated) {
+        g_rotated = true;
+        // Only a rename over an existing log can fail in a way worth reporting;
+        // a first-ever launch has nothing to rotate and must stay quiet.
+        const bool hadPriorLog =
+            GetFileAttributesW(filename.c_str()) != INVALID_FILE_ATTRIBUTES;
+        // Named, not a temporary in the call: a temporary's destructor would run
+        // between MoveFileExW and GetLastError and the deallocation can overwrite
+        // the thread's last-error value.
+        const std::wstring previous = PreviousGenerationPath(filename);
+        const bool rotated =
+            MoveFileExW(filename.c_str(), previous.c_str(),
+                        MOVEFILE_REPLACE_EXISTING) != FALSE;
+        rotationError = GetLastError();
+        rotationFailed = hadPriorLog && !rotated;
+    }
+
     const HANDLE handle = CreateFileW(
         filename.c_str(),
         GENERIC_WRITE,
@@ -70,6 +113,24 @@ void Open(const std::wstring& filename) {
         FILE_ATTRIBUTE_NORMAL,
         nullptr);
     g_handle.store(reinterpret_cast<intptr_t>(handle), std::memory_order_release);
+
+    // Said here rather than dropped: CREATE_ALWAYS has just truncated the file,
+    // so a failed rename means the previous session is gone and whatever sits in
+    // .prev.log is older than the reader will assume. Written through the locked
+    // helper because Line() would take the mutex this function already holds.
+    if (rotationFailed && handle != INVALID_HANDLE_VALUE) {
+        char msg[192];
+        const int n = std::snprintf(msg, sizeof(msg),
+            "WARN: could not rotate the previous log (error %lu); any .prev.log "
+            "beside this one is from an older session",
+            static_cast<unsigned long>(rotationError));
+        if (n > 0) {
+            const size_t len = (static_cast<size_t>(n) >= sizeof(msg))
+                ? sizeof(msg) - 1
+                : static_cast<size_t>(n);
+            WriteTimestampedLocked(msg, len);
+        }
+    }
 }
 
 void Close() {
