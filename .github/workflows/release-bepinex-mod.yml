@@ -245,14 +245,19 @@ jobs:
             Write-Host "Catalog already pins $version."
             exit 0
           }
-          Invoke-RestMethod -Method Post `
-            -Uri 'https://api.github.com/repos/itsloopyo/lopari.app/actions/workflows/update-pins.yml/dispatches' `
-            -Headers @{ Authorization = "Bearer $env:LOPARI_APP_ACTIONS_TOKEN"; Accept = 'application/vnd.github+json' } `
-            -ContentType 'application/json' -Body '{"ref":"main"}'
+          function Request-Repin {
+            Invoke-RestMethod -Method Post `
+              -Uri 'https://api.github.com/repos/itsloopyo/lopari.app/actions/workflows/update-pins.yml/dispatches' `
+              -Headers @{ Authorization = "Bearer $env:LOPARI_APP_ACTIONS_TOKEN"; Accept = 'application/vnd.github+json' } `
+              -ContentType 'application/json' -Body '{"ref":"main"}'
+          }
+          Request-Repin
           Write-Host "Requested lopari.app catalog re-pin; waiting for $version to go live..."
           $deadline = [DateTime]::UtcNow.AddMinutes(10)
+          $tick = 0
           while ([DateTime]::UtcNow -lt $deadline) {
             Start-Sleep -Seconds 15
+            $tick++
             try {
               $state = Get-PinnedVersion
             } catch {
@@ -265,6 +270,13 @@ jobs:
               exit 0
             }
             Write-Host "  still pinned at $($state.pinned)..."
+            # Two releases dispatching within a minute of each other put two pin
+            # runs on the same base commit; the loser's push is rejected and
+            # nothing retries it before the hourly schedule. Ask again.
+            if ($tick % 5 -eq 0) {
+              Write-Host "  re-requesting the catalog re-pin..."
+              Request-Repin
+            }
           }
           Write-Host "::error::Timed out waiting for lopari.app to pin $version (still $($state.pinned)). Check https://github.com/itsloopyo/lopari.app/actions, then re-run this job - the release exists; only the pin sync and announcement are pending."
           exit 1
