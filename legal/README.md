@@ -38,16 +38,31 @@ which is easy to forget because it holds nothing but the payload subtree.
 | `dear-imgui.txt` | Dear ImGui | MIT |
 | `fabric-loader.txt` | Fabric Loader | Apache-2.0 |
 | `glm.txt` | OpenGL Mathematics | MIT / Happy Bunny |
+| `harmonyx.txt` | HarmonyX | MIT |
 | `inih.txt` | inih | BSD-3-Clause |
 | `kiero.txt` | Kiero | MIT |
 | `melonloader.txt` | MelonLoader | Apache-2.0 |
 | `minhook.txt` | MinHook, incl. HDE32/HDE64 | BSD-2-Clause |
 | `mono-cecil.txt` | Mono.Cecil | MIT |
+| `monomod.txt` | MonoMod | MIT |
 | `red4ext.txt` | RED4ext | MIT |
 | `reframework.txt` | REFramework | MIT |
 | `tweakxl.txt` | TweakXL | MIT |
 | `ue4ss.txt` | UE4SS | MIT |
 | `ultimate-asi-loader.txt` | Ultimate ASI Loader | MIT |
+| `unity-doorstop.txt` | UnityDoorstop | LGPL-2.1 |
+
+A loader archive is not one component. The BepInEx `win_x64` zip we vendor
+carries UnityDoorstop (`winhttp.dll`), HarmonyX (`0Harmony.dll`), Mono.Cecil
+and MonoMod alongside BepInEx itself. Shipping that zip redistributes all of
+them, so each needs its own entry here and its own block in the mod's notices.
+Reading only the loader's headline licence drops four rights holders.
+
+`bepinex.txt` and `unity-doorstop.txt` are both LGPL-2.1 and their operative
+terms are byte-identical; they differ only in what each upstream appended after
+"END OF TERMS AND CONDITIONS" (BepInEx a project NOTICE, Doorstop the standard
+"How to Apply These Terms" appendix). A notices file may reproduce the licence
+body once and name both components against it.
 
 OpenTrack is deliberately absent. The mods implement its UDP wire format and
 link none of its code, so its ISC licence triggers no notice obligation. It is

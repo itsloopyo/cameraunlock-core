@@ -232,6 +232,20 @@ function Copy-LicenceNotices {
         Copy-Item $src -Destination $StagingDir -Force
         Write-Host "  $doc" -ForegroundColor Green
     }
+
+    # cameraunlock-core is MIT under a different copyright holder from the
+    # mod's own LICENSE, and it is compiled into the shipped DLLs, so MIT wants
+    # its notice in this distribution too. "It is our own code" is not an
+    # exemption: the test is whose name is on the LICENSE file, not who wrote
+    # it.
+    $coreLicence = Join-Path $PSScriptRoot '..\LICENSE'
+    if (-not (Test-Path $coreLicence)) {
+        throw "cameraunlock-core/LICENSE not found at $coreLicence. It is compiled into the shipped DLLs and its notice must travel with them."
+    }
+    $licencesDir = Join-Path $StagingDir 'licenses'
+    New-Item -ItemType Directory -Path $licencesDir -Force | Out-Null
+    Copy-Item $coreLicence -Destination (Join-Path $licencesDir 'cameraunlock-core-LICENSE.txt') -Force
+    Write-Host "  licenses/cameraunlock-core-LICENSE.txt" -ForegroundColor Green
 }
 
 function Test-SemanticVersion {
