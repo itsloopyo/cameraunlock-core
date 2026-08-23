@@ -688,6 +688,13 @@
       "steam_app_id": 379430,
       "steam_folder": "KingdomComeDeliverance",
       "executable_relpath": "Bin\\Win64\\KingdomCome.exe"
+    },
+    "kingdom-come-deliverance-2": {
+      "display_name": "Kingdom Come: Deliverance II",
+      "env_var": "KINGDOM_COME_DELIVERANCE_2_PATH",
+      "steam_app_id": 1771300,
+      "steam_folder": "KingdomComeDeliverance2",
+      "executable_relpath": "Bin\\Win64MasterMasterSteamPGO\\KingdomCome.exe"
     }
   }
 }
