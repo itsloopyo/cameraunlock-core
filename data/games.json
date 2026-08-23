@@ -681,6 +681,13 @@
       "steam_app_id": 2328760,
       "steam_folder": "Pinball FX",
       "executable_relpath": "PinballFX\\Binaries\\Win64\\PinballFX-Win64-Shipping.exe"
+    },
+    "kingdom-come-deliverance": {
+      "display_name": "Kingdom Come: Deliverance",
+      "env_var": "KINGDOM_COME_DELIVERANCE_PATH",
+      "steam_app_id": 379430,
+      "steam_folder": "KingdomComeDeliverance",
+      "executable_relpath": "Bin\\Win64\\KingdomCome.exe"
     }
   }
 }
