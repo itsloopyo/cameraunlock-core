@@ -198,6 +198,42 @@ function Copy-SharedBundle {
 .OUTPUTS
     Boolean indicating if the version is valid.
 #>
+function Copy-LicenceNotices {
+    <#
+    .SYNOPSIS
+        Stage the licence notices that must accompany a binary distribution.
+    .DESCRIPTION
+        MIT, BSD-2-Clause and BSD-3-Clause all require the copyright notice,
+        the conditions and the disclaimer to travel with the binary, not just
+        with the source. Every ZIP we publish is a binary distribution, so
+        LICENSE and THIRD-PARTY-NOTICES.md belong at the root of each one -
+        the Nexus ZIP as much as the installer ZIP.
+
+        A missing notice is a licence violation, so this throws rather than
+        skipping. A silent skip turns a compliance failure into a green build.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$StagingDir,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot,
+        # Extra repo-root documents to stage alongside the notices.
+        [string[]]$Additional = @()
+    )
+
+    if (-not (Test-Path $StagingDir)) {
+        throw "Copy-LicenceNotices: staging directory does not exist: $StagingDir"
+    }
+
+    foreach ($doc in (@('LICENSE', 'THIRD-PARTY-NOTICES.md') + $Additional)) {
+        $src = Join-Path $ProjectRoot $doc
+        if (-not (Test-Path $src)) {
+            throw "Required notice file not found: $doc. Every published ZIP is a binary distribution and must carry it."
+        }
+        Copy-Item $src -Destination $StagingDir -Force
+        Write-Host "  $doc" -ForegroundColor Green
+    }
+}
+
 function Test-SemanticVersion {
     param(
         [Parameter(Mandatory=$true)]
@@ -753,6 +789,7 @@ Export-ModuleMember -Function @(
     'Update-CameraUnlockCoreToRemoteTip',
     'Write-CoreBundleProvenance',
     'Copy-SharedBundle',
+    'Copy-LicenceNotices',
     'Test-SemanticVersion',
     'Step-SemanticVersion',
     'Resolve-ReleaseVersion',

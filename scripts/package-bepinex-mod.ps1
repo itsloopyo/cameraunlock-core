@@ -121,15 +121,17 @@ foreach ($dll in $ModDlls) {
     Write-Host "  plugins/$dll" -ForegroundColor Green
 }
 
-# Copy documentation
-$docFiles = @("README.md", "LICENSE", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md", "THIRD-PARTY-NOTICES.txt")
-foreach ($doc in $docFiles) {
+# Copy documentation. LICENSE and THIRD-PARTY-NOTICES.md are not documentation
+# in the optional sense - the licences of everything we bundle or link require
+# them to accompany the binary - so Copy-LicenceNotices throws when one is
+# absent instead of warning and shipping anyway.
+Copy-LicenceNotices -StagingDir $stagingDir -ProjectRoot $ProjectRoot
+
+foreach ($doc in @("README.md", "CHANGELOG.md")) {
     $docPath = Join-Path $ProjectRoot $doc
     if (Test-Path $docPath) {
         Copy-Item $docPath -Destination $stagingDir -Force
         Write-Host "  $doc" -ForegroundColor Green
-    } elseif ($doc -eq "LICENSE") {
-        Write-Host "  WARNING: $doc not found" -ForegroundColor Yellow
     }
 }
 
@@ -201,6 +203,11 @@ if ($CreateNexusZip) {
         Copy-Item $dllPath -Destination $nexusPluginsDir -Force
         Write-Host "  BepInEx/plugins/$dll" -ForegroundColor Green
     }
+
+    # The Nexus ZIP carries the same notice obligations as the installer ZIP:
+    # it is a binary distribution too, and shipping the DLLs without the
+    # licences they are distributed under is a violation, not a packaging nit.
+    Copy-LicenceNotices -StagingDir $nexusStagingDir -ProjectRoot $ProjectRoot -Additional @("README.md")
 
     $nexusZipName = "$ModName-v$version-nexus.zip"
     $nexusZipPath = Join-Path $releaseDir $nexusZipName
