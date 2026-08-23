@@ -44,6 +44,14 @@ pack = "dotnet pack csharp -c Release -o dist"
 #   pixi run validate-manifest path/to/Mod-v1.0.0-installer.zip
 validate-manifest = "node scripts/validate-manifest.mjs"
 
+# Check THIRD-PARTY-NOTICES.md actually reproduces the licence of everything
+# compiled into the binary. Copy-LicenceNotices covers whether the file ships;
+# this covers whether its contents discharge the obligation.
+# No args: validates the host repo. Or pass repo tokens to sweep a checkout:
+#   pixi run validate-notices
+#   pixi run validate-notices witcher-3 subnautica-2
+validate-notices = "node scripts/validate-notices.mjs"
+
 # Development workflow
 check = { depends-on = ["build-debug", "test-quick", "test-cpp"] }
 
