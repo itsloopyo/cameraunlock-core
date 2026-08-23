@@ -674,6 +674,13 @@
       "steam_app_id": 480490,
       "steam_folder": "Prey",
       "executable_relpath": "Binaries\\Danielle\\x64\\Release\\Prey.exe"
+    },
+    "pinball-fx": {
+      "display_name": "Pinball FX",
+      "env_var": "PINBALL_FX_PATH",
+      "steam_app_id": 2328760,
+      "steam_folder": "Pinball FX",
+      "executable_relpath": "PinballFX\\Binaries\\Win64\\PinballFX-Win64-Shipping.exe"
     }
   }
 }
