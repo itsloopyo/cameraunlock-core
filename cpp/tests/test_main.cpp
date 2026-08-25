@@ -1,5 +1,6 @@
 #include <iostream>
 
+int RunAdsTests();
 int RunProtocolTests();
 int RunReceiverTests();
 int RunMathTests();
@@ -18,6 +19,7 @@ int main() {
     std::cout << "=====================\n";
 
     int failures = 0;
+    failures += RunAdsTests();
     failures += RunProtocolTests();
     failures += RunReceiverTests();
     failures += RunMathTests();

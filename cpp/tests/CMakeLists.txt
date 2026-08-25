@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # Simple test executable
 add_executable(cameraunlock_tests
     test_main.cpp
+    ads_tests.cpp
     math_tests.cpp
     protocol_tests.cpp
     receiver_tests.cpp
@@ -47,6 +48,7 @@ if(WIN32)
         overlay_stubs/overlay_compile_dx9.cpp
         overlay_stubs/overlay_compile_dx11.cpp
         overlay_stubs/overlay_compile_dx12.cpp
+        overlay_stubs/overlay_compile_aim_marker_dx11.cpp
     )
     target_include_directories(cameraunlock_overlay_compile PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/overlay_stubs

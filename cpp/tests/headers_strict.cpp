@@ -15,6 +15,7 @@
 //   cameraunlock/reframework/game_state_probing.h  external dep: reframework/
 //   cameraunlock/reframework/managed_utils.h       external dep: reframework/
 //   cameraunlock/reframework/tdb_inspector.h       external dep: reframework/
+//   cameraunlock/rendering/aim_marker_dx11.h       overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx11_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx12_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx9_overlay.h           overlay: covered by cameraunlock_overlay_compile
@@ -23,6 +24,9 @@
 #include <windows.h>
 #endif
 
+#include "cameraunlock/ads/ads_fade.h"
+#include "cameraunlock/ads/ads_mode.h"
+#include "cameraunlock/ads/entry_pose.h"
 #include "cameraunlock/config/ini_reader.h"
 #include "cameraunlock/data/position_data.h"
 #include "cameraunlock/data/position_settings.h"
