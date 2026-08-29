@@ -14,9 +14,11 @@ struct FVector  { double X, Y, Z; };
 struct FRotator { double Pitch, Yaw, Roll; };
 struct FQuat4d  { double X, Y, Z, W; };
 
-// UE5 FRotator::Quaternion() reference implementation, byte-for-byte.
-// Inputs are an FRotator (Pitch around Y, Yaw around Z, Roll around X)
-// in degrees. See Engine/Source/Runtime/Core/Public/Math/Rotator.h.
+// Rotator to quaternion, in UE5's rotator convention: Pitch about Y, Yaw
+// about Z, Roll about X, in degrees, with UE's handedness and sign for each.
+// The convention is what the engine's own values are expressed in, so a hook
+// that reads or writes an FRotator has to match it exactly or the camera it
+// hands back is not the one the game asked for.
 inline FQuat4d QuatFromEulerDeg(double pitchDeg, double yawDeg, double rollDeg) {
     constexpr double kPi = 3.14159265358979323846;
     const double half = kPi / 360.0;  // (PI/180)/2
@@ -44,9 +46,10 @@ inline FQuat4d QuatInv(const FQuat4d& q) {
     return FQuat4d{-q.X, -q.Y, -q.Z, q.W};
 }
 
-// UE5 FQuat::Rotator() reference implementation. Matches
-// Engine/Source/Runtime/Core/Public/Math/QuatRotationTranslationMatrix.h
-// singularity handling (gimbal at +/-90 pitch).
+// The inverse, in the same convention, including the clamp UE applies near
+// the +/-90 degree pitch singularity where yaw and roll stop being separable.
+// Round-tripping a rotator through QuatFromEulerDeg and back has to land on
+// the value the engine would have produced, so the threshold matches.
 inline FRotator QuatToRotator(const FQuat4d& q) {
     constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
     const double SingularityTest = q.Z*q.X - q.W*q.Y;

@@ -1,8 +1,8 @@
 // Tests for the UE5 LWC math helpers (cameraunlock/unreal/ue_math.h) and the
 // pure-logic helpers in ue_runtime.h.
 //
-// The conversions are byte-for-byte ports of UE5's FRotator::Quaternion() and
-// FQuat::Rotator(); these tests pin the conventions (axis order, signs,
+// The conversions follow UE5's rotator convention, which is the one the
+// engine's own values arrive in; these tests pin it (axis order, signs,
 // singularity handling) so a future "simplification" can't silently flip a
 // sign and rotate every UE mod's camera the wrong way.
 //
