@@ -1242,6 +1242,17 @@
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/minecraft-java-edition-headtracking",
       "catalog_status": "absent"
+    },
+    "sleeping-dogs": {
+      "display_name": "Sleeping Dogs: Definitive Edition",
+      "env_var": "SLEEPING_DOGS_PATH",
+      "steam_app_id": 307690,
+      "steam_folder": "SleepingDogsDefinitiveEdition",
+      "executable_relpath": "sdhdship.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/sleeping-dogs-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
