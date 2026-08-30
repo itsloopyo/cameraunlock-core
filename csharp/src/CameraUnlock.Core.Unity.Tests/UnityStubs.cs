@@ -1,3 +1,15 @@
+// NOT the shared reference stubs. csharp/stubs/UnityStubs.cs is a REFERENCE assembly - every
+// body is empty, because its only job is to make the compiler emit the right member
+// references for a mod that will meet the real Unity at runtime.
+//
+// This file is the opposite: a working fake. The types here implement real maths and model
+// UnityEngine.Object's destroyed-object equality, because the classes under test are
+// compiled from source and EXECUTED against them. Pointing this project at the shared
+// reference stubs would compile and then return zero from every operation.
+//
+// Keep the two apart. A member added here needs a body that behaves; a member added there
+// must not have one.
+
 // Minimal managed stand-ins for the UnityEngine types CameraUnlock.Core.Unity touches.
 //
 // The real UnityEngine assemblies cannot be used here: almost every member on

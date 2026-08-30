@@ -30,8 +30,28 @@
     <ProjectReference Include="..\CameraUnlock.Core\CameraUnlock.Core.csproj" />
   </ItemGroup>
 
-  <!-- Unity stub references - consuming projects should provide actual DLLs -->
-  <ItemGroup>
+  <!-- With no UnityEnginePath supplied, build against the reference stubs this repo owns
+       rather than a sibling mod checkout's libs directory. That default was
+       gone-home-headtracking's libs, so this repo could not build from a clean clone and
+       broke outright the day gone-home's generated UnityEngine.UI.dll stopped carrying
+       Image/RawImage/Graphic. A mod still passes UnityEnginePath=<its libs> and gets its
+       own game DLLs; nothing below fires then. -->
+  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
+    <UseCameraUnlockUnityStubs>true</UseCameraUnlockUnityStubs>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' == 'true'">
+    <!-- PrivateAssets stops the stub flowing transitively into .BepInEx and .Harmony,
+         which resolve their own Unity references and would otherwise import a second
+         assembly named UnityEngine (CS1704). -->
+    <ProjectReference Include="..\..\stubs\UnityEngine\Stubs.UnityEngine.csproj" Private="false"
+                      PrivateAssets="all" />
+    <ProjectReference Include="..\..\stubs\UnityEngine.UI\Stubs.UnityEngine.UI.csproj" Private="false"
+                      PrivateAssets="all" Condition="'$(TargetFramework)' != 'net35'" />
+  </ItemGroup>
+
+  <!-- Unity references from the game install a consuming project points us at. -->
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' != 'true'">
     <Reference Include="UnityEngine">
       <HintPath>$(UnityEnginePath)\UnityEngine.dll</HintPath>
       <Private>false</Private>
@@ -68,20 +88,16 @@
   </ItemGroup>
 
   <!-- UnityEngine.UI only for modern frameworks (not available/used in net35) -->
-  <ItemGroup Condition="'$(TargetFramework)' != 'net35'">
+  <ItemGroup Condition="'$(TargetFramework)' != 'net35' And '$(UseCameraUnlockUnityStubs)' != 'true'">
     <Reference Include="UnityEngine.UI">
       <HintPath>$(UnityEnginePath)\UnityEngine.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
 
-  <!-- Default Unity path if not specified - Gone Home's pre-2017.3 Unity DLLs work for net35 -->
-  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
-    <UnityEnginePath>$(MSBuildThisFileDirectory)..\..\..\..\gone-home-headtracking\src\GoneHomeHeadTracking\libs</UnityEnginePath>
-  </PropertyGroup>
-
-  <!-- Consuming projects must provide Unity DLLs (usually via Directory.Build.props) -->
-  <Target Name="ValidateUnityEnginePath" BeforeTargets="ResolveAssemblyReferences">
+  <!-- A consuming project that DOES pass UnityEnginePath must pass one that exists. -->
+  <Target Name="ValidateUnityEnginePath" BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(UseCameraUnlockUnityStubs)' != 'true'">
     <Error Condition="!Exists('$(UnityEnginePath)')" Text="UnityEnginePath '$(UnityEnginePath)' does not exist. Pass it via -p:UnityEnginePath=path/to/unity/dlls" />
   </Target>
 </Project>

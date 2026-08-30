@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reference-only stub for UnityEngine.dll, so this repo builds with no game and no
+       sibling mod checkout. Referenced by CameraUnlock.Core.Unity and .Harmony whenever
+       UnityEnginePath is not supplied; a mod passes its own libs directory instead and
+       this project is not built. AGENTS.md: build dependencies must be game-independent.
+
+       AssemblyVersion 0.0.0.0 matches what shipped Unity assemblies carry, so a mod
+       compiled against this stub names a version the loaded assembly really has.
+
+       LangVersion 7.3 because net35 (pre-2017.3 Unity) cannot go higher. -->
+
+  <PropertyGroup>
+    <TargetFrameworks>net35;net472;net48</TargetFrameworks>
+    <AssemblyName>UnityEngine</AssemblyName>
+    <RootNamespace>UnityEngine</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyVersion>0.0.0.0</AssemblyVersion>
+    <IsPackable>false</IsPackable>
+    <DebugType>none</DebugType>
+    <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\UnityStubs.cs" />
+  </ItemGroup>
+
+  <!-- Explicit so a machine with no .NET Framework targeting packs installed can still
+       build this repo. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

@@ -17,6 +17,38 @@
     "Adding a concept or an alias is safe. Removing one, or moving an alias between",
     "concepts, is a breaking change for every config file already on a user's disk."
   ],
+  "deliberately_unaliased": [
+    {
+      "spellings": ["Yaw", "Pitch", "Roll"],
+      "reason": "AMBIGUOUS UNDER SECTION-LESS MATCHING. 13 repos ship these under [Sensitivity] meaning a sensitivity multiplier, 4 ship them under [Deadzone] meaning degrees of deadzone, and black-and-white, fallout-new-vegas, dorfromantik and subnautica ship BOTH sections in one file. Normalisation throws the section away, so aliasing the bare names onto either concept would read one of them as the other. Anyone adding a Deadzone concept later must keep these out of it too."
+    },
+    {
+      "spellings": ["Position"],
+      "reason": "4 repos use [Hotkeys] Position for the position toggle key, but the bare word is too generic to claim section-lessly. PositionToggleKey, TogglePositionKey and PositionKey are aliased instead."
+    },
+    {
+      "spellings": ["Amount", "Factor", "Scale", "Limit", "Enabled"],
+      "reason": "Bare nouns whose meaning comes entirely from their section. Enabled is the one exception: it is aliased onto EnableOnStartup because that is what all 25 repos using it mean, and the 39 repos writing [Position] Enabled spell the concept PositionEnabled in code."
+    },
+    {
+      "spellings": ["PositionSmoothing"],
+      "reason": "4 repos smooth position independently of rotation. This schema deliberately shares one smoothing pair between the two, so there is nothing to bind PositionSmoothing to. Adding a separate position smoothing pair is a schema change, not an alias."
+    },
+    {
+      "spellings": ["ChordToggle", "ChordYawMode", "ChordPosition", "ChordCycleMode", "ChordToggleKey"],
+      "reason": "Chord modifiers, not key names. A different concept from the *Key entries."
+    },
+    {
+      "spellings": ["BindAddress", "DataFreshnessMs", "DeadzoneDeg", "DeadzoneYaw", "CyclePort", "AdsMode", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
+      "reason": "Real cross-repo concepts with no field in HeadTrackingConfigData or its C++ twin to bind to. Aliasing a key onto nothing would advertise a setting that does not work. Each needs a concept and a field before it gets an alias."
+    }
+  ],
+  "default_conflicts": [
+    {
+      "concept": "WorldSpaceYaw",
+      "note": "The schema default is true, matching ~44 repos. Four disagree and default it FALSE: dying-light-2 and dishonored-2 (both [Rotation] WorldLockedYaw), quake-ii-rtx ([General] WorldSpaceYaw) and sleeping-dogs ([general] world_space_yaw). WorldLockedYaw is aliased because it is genuinely the same concept with the same polarity, but a mod that adopts this schema's DEFAULT in place of its own flips behaviour for its existing users. Check the mod's own default before wiring the table in."
+    }
+  ],
   "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle"],
   "concepts": [
     {
@@ -34,7 +66,7 @@
       "key": "EnableOnStartup",
       "type": "bool",
       "default": true,
-      "aliases": ["Enabled", "Enable", "EnableAtStartup", "EnabledOnStartup", "StartEnabled", "EnableHeadTracking"],
+      "aliases": ["Enabled", "Enable", "EnableAtStartup", "EnabledOnStartup", "StartEnabled", "EnableHeadTracking", "AutoEnable"],
       "doc": "Whether head tracking is active when the game loads."
     },
     {
@@ -133,7 +165,7 @@
       "key": "ShowReticle",
       "type": "bool",
       "default": true,
-      "aliases": ["ShowDecoupledReticle", "ShowCrosshair", "ShowDecoupledCrosshair", "ReticleEnabled", "DrawReticle"],
+      "aliases": ["ShowDecoupledReticle", "ShowCrosshair", "ShowDecoupledCrosshair", "ReticleEnabled", "DrawReticle", "MoveCrosshair", "CompensateCrosshair", "CompensateReticle"],
       "doc": "Draw the decoupled aim reticle."
     },
     {
@@ -214,7 +246,7 @@
       "key": "PositionLimitZ",
       "type": "float",
       "default": 0.40,
-      "aliases": ["LimitZ", "MaxZ", "PositionMaxZ", "LimitZForward", "PositionLimitZForward"],
+      "aliases": ["LimitZ", "MaxZ", "PositionMaxZ", "LimitZForward", "PositionLimitZForward", "PositionLimitZFwd", "LimitZFwd"],
       "doc": "Maximum FORWARD displacement in metres. Negative z is forward, so this is the lower bound of the z clamp."
     },
     {
@@ -259,7 +291,7 @@
       "key": "TrackerPivotForward",
       "type": "float",
       "default": 0.0,
-      "aliases": ["PivotForward", "NeckPivotForward", "PivotArm", "TrackerPivot"],
+      "aliases": ["PivotForward", "NeckPivotForward", "PivotArm", "TrackerPivot", "NeckModelForward"],
       "doc": "Metres from the neck pivot forward to the point the tracker watches. 0 disables pivot compensation."
     },
     {
@@ -268,7 +300,7 @@
       "key": "TrackerPivotUp",
       "type": "float",
       "default": 0.0,
-      "aliases": ["PivotUp", "NeckPivotUp"],
+      "aliases": ["PivotUp", "NeckPivotUp", "NeckModelHeight"],
       "doc": "Metres from the neck pivot up to the point the tracker watches."
     },
     {
@@ -277,7 +309,7 @@
       "key": "ToggleKey",
       "type": "string",
       "default": "End",
-      "aliases": ["ToggleTrackingKey", "TrackingToggleKey", "EnableKey"],
+      "aliases": ["ToggleTrackingKey", "TrackingToggleKey", "EnableKey", "Toggle", "ToggleTracking", "KeyToggle"],
       "doc": "Key that toggles head tracking on and off."
     },
     {
@@ -295,7 +327,7 @@
       "key": "ReticleToggleKey",
       "type": "string",
       "default": "Insert",
-      "aliases": ["ToggleReticleKey", "ReticleKey", "CrosshairToggleKey", "ToggleCrosshairKey"],
+      "aliases": ["ToggleReticleKey", "ReticleKey", "CrosshairToggleKey", "ToggleCrosshairKey", "ReticleToggle"],
       "doc": "Key that toggles the decoupled aim reticle."
     },
     {
@@ -304,7 +336,7 @@
       "key": "CycleTrackingModeKey",
       "type": "string",
       "default": "",
-      "aliases": ["TrackingModeKey", "CycleModeKey", "ModeKey", "CycleTrackingMode"],
+      "aliases": ["TrackingModeKey", "CycleModeKey", "ModeKey", "CycleTrackingMode", "CycleMode", "ModeCycle", "KeyCycleMode"],
       "doc": "Key that cycles the tracking mode. Empty leaves it unbound."
     },
     {
@@ -313,7 +345,7 @@
       "key": "YawModeKey",
       "type": "string",
       "default": "PageDown",
-      "aliases": ["ToggleYawModeKey", "WorldYawKey"],
+      "aliases": ["ToggleYawModeKey", "WorldYawKey", "YawMode", "ToggleYawMode", "KeyYawMode", "ToggleYawKey"],
       "doc": "Key that toggles world-locked versus camera-local yaw."
     },
     {

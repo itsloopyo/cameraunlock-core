@@ -28,8 +28,22 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Unity stub references - consuming projects should provide actual DLLs -->
-  <ItemGroup>
+  <!-- With no UnityEnginePath supplied, build against the reference stubs this repo owns.
+       The valheim-checkout default this used to carry was also silently BROKEN on net472:
+       valheim's generated UnityEngine.dll is net48, so MSBuild dropped the reference as
+       too new, and this project only compiled because it picked UnityEngine up
+       transitively through CameraUnlock.Core.Unity. -->
+  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
+    <UseCameraUnlockUnityStubs>true</UseCameraUnlockUnityStubs>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' == 'true'">
+    <ProjectReference Include="..\..\stubs\UnityEngine\Stubs.UnityEngine.csproj" Private="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Unity references from the game install a consuming project points us at. -->
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' != 'true'">
     <Reference Include="UnityEngine">
       <HintPath>$(UnityEnginePath)\UnityEngine.dll</HintPath>
       <Private>false</Private>
@@ -44,11 +58,10 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Default paths if not specified - use Valheim libs as fallback (has BepInEx + Unity) -->
+  <!-- BepInEx.dll itself is still resolved from a sibling valheim checkout when the
+       consumer passes no BepInExPath. This repo vendors no BepInEx, so unlike the Unity
+       references there is nothing here to point at. -->
   <PropertyGroup Condition="'$(BepInExPath)' == ''">
     <BepInExPath>$(MSBuildThisFileDirectory)..\..\..\..\valheim-headtracking\src\ValheimHeadTracking\libs</BepInExPath>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
-    <UnityEnginePath>$(MSBuildThisFileDirectory)..\..\..\..\valheim-headtracking\src\ValheimHeadTracking\libs</UnityEnginePath>
   </PropertyGroup>
 </Project>

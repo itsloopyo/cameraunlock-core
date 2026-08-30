@@ -27,8 +27,19 @@
     <PackageReference Include="Lib.Harmony" Version="2.2.2" />
   </ItemGroup>
 
-  <!-- Unity stub references -->
-  <ItemGroup>
+  <!-- With no UnityEnginePath supplied, build against the reference stubs this repo owns
+       rather than a sibling mod checkout's libs directory. A mod passes its own libs and
+       gets its game DLLs; the ItemGroup below fires then instead. -->
+  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
+    <UseCameraUnlockUnityStubs>true</UseCameraUnlockUnityStubs>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' == 'true'">
+    <ProjectReference Include="..\..\stubs\UnityEngine\Stubs.UnityEngine.csproj" Private="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockUnityStubs)' != 'true'">
     <Reference Include="UnityEngine">
       <HintPath>$(UnityEnginePath)\UnityEngine.dll</HintPath>
       <Private>false</Private>
@@ -38,9 +49,4 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
-
-  <!-- Default Unity path if not specified - Gone Home's pre-2017.3 Unity DLLs work for net35 -->
-  <PropertyGroup Condition="'$(UnityEnginePath)' == ''">
-    <UnityEnginePath>$(MSBuildThisFileDirectory)..\..\..\..\gone-home-headtracking\src\GoneHomeHeadTracking\libs</UnityEnginePath>
-  </PropertyGroup>
 </Project>
