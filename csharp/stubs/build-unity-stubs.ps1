@@ -40,7 +40,9 @@
 
 .PARAMETER EmptyModule
     Module assemblies produced with no types. Defaults to the set core's own projects and
-    the fleet's csprojs reference.
+    the fleet's csprojs reference, minus UnityEngine.InputLegacyModule on net35 - that
+    module does not exist before Unity 2017.3, and producing it makes the mod emit
+    [UnityEngine.InputLegacyModule]Input against a game that cannot resolve it.
 
 .PARAMETER SkipUI
     Do not build UnityEngine.UI.dll. For net35 mods on a Unity that predates uGUI.
@@ -61,21 +63,31 @@ param(
 
     [string[]]$ExtraAssembly = @(),
 
-    [string[]]$EmptyModule = @(
-        'UnityEngine.CoreModule',
-        'UnityEngine.IMGUIModule',
-        'UnityEngine.UIModule',
-        'UnityEngine.InputLegacyModule',
-        'UnityEngine.TextRenderingModule',
-        'UnityEngine.AnimationModule',
-        'UnityEngine.PhysicsModule'
-    ),
+    [string[]]$EmptyModule,
 
     [switch]$SkipUI
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if (-not $PSBoundParameters.ContainsKey('EmptyModule')) {
+    $EmptyModule = @(
+        'UnityEngine.CoreModule',
+        'UnityEngine.IMGUIModule',
+        'UnityEngine.UIModule',
+        'UnityEngine.TextRenderingModule',
+        'UnityEngine.AnimationModule',
+        'UnityEngine.PhysicsModule'
+    )
+    # UnityEngine.InputLegacyModule exists only from Unity 2017.3. Before that, Input lives
+    # in UnityEngine.dll. Producing the module here would satisfy the Exists() condition on
+    # CameraUnlock.Core.Unity's reference to it, and the mod would then emit
+    # [UnityEngine.InputLegacyModule]Input against a game that has no such assembly.
+    if ($TargetFramework -ne 'net35') {
+        $EmptyModule += 'UnityEngine.InputLegacyModule'
+    }
+}
 
 $stubsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $unityStubs = Join-Path $stubsDir 'UnityStubs.cs'
