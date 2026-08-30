@@ -453,7 +453,10 @@ function Test-TaskIsReferenced {
     $needle = "pixi run $Task"
     foreach ($file in @(Get-ChildItem -Path (Join-Path $Root 'scripts') -File -ErrorAction SilentlyContinue) + @(Get-Item -Path (Join-Path $Root 'README.md') -ErrorAction SilentlyContinue)) {
         if ($file.Extension -notin '.ps1', '.cmd', '.md', '.mjs', '.js', '.py') { continue }
-        if ((Read-TextFile $file.FullName) -like "*$needle*") { return $true }
+        $text = Read-TextFile $file.FullName
+        # Strip line comments first: the task name inside a comment is not a caller.
+        $live = ($text -split "`n" | ForEach-Object { $_ -replace '^\s*(#|::|//|REM\s).*$', '' }) -join "`n"
+        if ($live -like "*$needle*") { return $true }
     }
     return $false
 }
@@ -621,10 +624,28 @@ function Test-CorePin {
     }
 }
 
+# git writes to stderr on a non-repo, and under PS 5.1 with ErrorActionPreference
+# Stop that becomes a terminating NativeCommandError. Same trap as Get-PinnedCoreCommit.
+function Test-GitTracked {
+    param([string]$Root, [string]$RelPath)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & git -C $Root ls-files --error-unmatch -- $RelPath 2>$null | Out-Null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 function Test-Manifest {
     param([string]$Name, [string]$Root)
 
     $path = Join-Path $Root 'launcher-manifest.json'
+    if ((Test-Path $path) -and -not (Test-GitTracked $Root 'launcher-manifest.json')) {
+        Add-Finding $Name 'manifest' 'FAIL' 'launcher-manifest.json is on disk but untracked, so a clean clone does not have it; a packager that reads it fails in CI while passing locally'
+        return
+    }
     if (-not (Test-Path $path)) {
         # A manifest has to name real shipped paths, so authoring one for a repo
         # lopari does not list is a guess that fails on a user's machine rather
@@ -740,7 +761,12 @@ function Test-ModVersion {
     }
     $source = & $readInput 'version-source'
     $path = & $readInput 'version-path'
-    if (-not $source -or -not $path) { return }
+    if (-not $source -or -not $path) {
+        # A silent return is indistinguishable from a pass in the output, which is
+        # how two repos sat unchecked while printing ok.
+        Add-Finding $Name 'mod-version' 'WARN' 'scripts/install.cmd sets MOD_VERSION but release.yml declares no version-source, so nothing compares them and no tag check runs'
+        return
+    }
 
     $full = Join-Path $Root $path
     try {
@@ -794,6 +820,11 @@ function Test-License {
     $body = { param($t) ($t -replace '(?m)^Copyright \(c\).+$', '').Trim() }
     if (-not (& $body $mine).StartsWith((& $body $theirs))) {
         Add-Finding $Name 'license' 'FAIL' "LICENSE does not reproduce core's MIT text intact; it says '$holder', core says '$want'"
+        return
+    }
+    if ($holder -eq $want) {
+        # Identical holder and an intact body: the difference is the appended
+        # scope note described above, which is deliberate. Nothing to report.
         return
     }
     Add-Finding $Name 'license' 'WARN' "LICENSE names '$holder', core names '$want'; the MIT body is identical"
