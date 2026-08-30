@@ -8,7 +8,10 @@
 // every port is then checked by the same code.
 //
 // Harness protocol (one command per line):
-//   unit <name>              select the unit under test and reset its state
+//   unit <name> <vector-id>  select the unit under test and reset its state. The
+//                            vector id lets a harness skip one specific vector -
+//                            e.g. a port that never inspects the HCAM trailer can
+//                            still run the packet unit.
 //   cfg <key> <value>        set one configuration value (floats; bools as 0/1)
 //   begin                    configuration is complete; the harness answers with
 //                            one line, either "ok" or "skip <reason>". A harness
@@ -179,7 +182,7 @@ function buildScript(vectors) {
     const plan = [];
     for (const v of vectors) {
         const { expanded, labels } = expandSteps(v);
-        lines.push(`unit ${v.unit}`);
+        lines.push(`unit ${v.unit} ${v.id}`);
         for (const [k, val] of Object.entries(v.config ?? {})) lines.push(`cfg ${k} ${num(val)}`);
         lines.push('begin');
         for (const step of expanded) lines.push(encodeStep(v.unit, step));
@@ -329,7 +332,10 @@ function runHarness(commandLine, script) {
             const m = /^(\S+)([\s\S]*)$/.exec(commandLine);
             command = m[1].replace(/\//g, '\\') + m[2];
         }
-        const child = spawn(command, { shell: true, cwd: repoRoot });
+        // The harness runs in the CALLER's directory, not this script's: a port
+        // invokes the runner out of the cameraunlock-core submodule and its own
+        // harness path is relative to its own repo root.
+        const child = spawn(command, { shell: true });
         let stdout = '', stderr = '';
         child.stdout.on('data', (d) => { stdout += d; });
         child.stderr.on('data', (d) => { stderr += d; });
