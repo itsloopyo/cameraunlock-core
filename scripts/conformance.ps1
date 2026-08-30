@@ -55,7 +55,7 @@ Import-Module (Join-Path $CoreRoot 'powershell/ReleaseWorkflow.psm1') -Force
 $ACTION_PINS = (Get-Content -LiteralPath (Join-Path $CoreRoot 'scripts/templates/action-pins.json') -Raw | ConvertFrom-Json).pins
 
 $CHECK_IDS = @(
-    'install-wrapper', 'delayed-expansion', 'arg-parser', 'cmd-crlf', 'pixi-tasks',
+    'install-wrapper', 'delayed-expansion', 'arg-parser', 'config-block', 'cmd-crlf', 'pixi-tasks',
     'action-pins', 'workflow-ref', 'workflow-build', 'core-pin', 'manifest',
     'manifest-seed', 'stray-manifest', 'license', 'readme'
 )
@@ -275,6 +275,58 @@ function Test-ArgParser {
         }
         if ($text -notmatch 'exit /b 2') {
             Add-Finding $Name 'arg-parser' 'FAIL' "scripts/$script never exits 2, so an unknown argument is indistinguishable from a user-fixable failure"
+        }
+    }
+}
+
+# The shared bodies expand the CONFIG BLOCK with %VAR%, so whatever a mod puts
+# there is handed back to cmd.exe's parser. `abzu-headtracking` separated its
+# MOD_CONTROLS lines with " | " instead of "&echo "; the install ran to
+# completion, then cmd tried to pipe the banner into a program called PageUp and
+# the script returned 255, which lopari reads as a failed install.
+#
+# MOD_CONTROLS is printed outside any ( ) block, so a literal ) in it is safe and
+# "&echo " is the intended separator. Everything else that reaches the parser is
+# a live metacharacter.
+$CONFIG_METACHARS = @{ '|' = 'a pipe'; '<' = 'a redirect'; '>' = 'a redirect'; '&' = 'a command separator' }
+
+# Values the state-file heredoc echoes from inside `> "..." ( ... )`, where a
+# parenthesis closes the block early and the rest of the JSON runs as commands.
+$CONFIG_IN_BLOCK = @('GAME_ID', 'MOD_INTERNAL_NAME', 'MOD_VERSION', 'FRAMEWORK_TYPE')
+
+function Test-ConfigBlock {
+    param([string]$Name, [string]$Root)
+
+    foreach ($script in @('install.cmd', 'uninstall.cmd')) {
+        $path = Join-Path $Root "scripts/$script"
+        if (-not (Test-Path $path)) { continue }
+        $lines = ((Read-TextFile $path) -replace "`r`n", "`n") -split "`n"
+
+        $inBlock = $false
+        foreach ($line in $lines) {
+            if ($line -match 'END CONFIG BLOCK') { break }
+            if ($line -match '--- CONFIG BLOCK ---') { $inBlock = $true; continue }
+            if (-not $inBlock) { continue }
+            if ($line -notmatch '^\s*set\s+"([A-Za-z_][A-Za-z0-9_]*)=(.*)"\s*$') { continue }
+            $var = $Matches[1]
+            $value = $Matches[2]
+
+            # ^X is escaped and prints literally; drop those before looking.
+            $bare = $value -replace '\^.', ''
+            if ($var -eq 'MOD_CONTROLS') { $bare = $bare -replace '&echo[ .]', '' }
+
+            foreach ($char in $CONFIG_METACHARS.Keys) {
+                if (-not $bare.Contains($char)) { continue }
+                $fix = if ($var -eq 'MOD_CONTROLS' -and $char -eq '&') {
+                    'use "&echo " to start each further line'
+                } else {
+                    "escape it as ^$char"
+                }
+                Add-Finding $Name 'config-block' 'FAIL' "scripts/$script sets $var with an unescaped $char ($($CONFIG_METACHARS[$char])); the shared body expands it with %$var% and cmd.exe runs it - $fix"
+            }
+            if ($var -in $CONFIG_IN_BLOCK -and $bare -match '[()]') {
+                Add-Finding $Name 'config-block' 'FAIL' "scripts/$script sets $var with a parenthesis; it is echoed inside the state-file ( ) block, which it closes early"
+            }
         }
     }
 }
@@ -607,6 +659,7 @@ $CHECK_TABLE = [ordered]@{
     'install-wrapper'   = ${function:Test-InstallWrapper}
     'delayed-expansion' = ${function:Test-DelayedExpansion}
     'arg-parser'        = ${function:Test-ArgParser}
+    'config-block'      = ${function:Test-ConfigBlock}
     'cmd-crlf'          = ${function:Test-CmdCrlf}
     'pixi-tasks'        = ${function:Test-PixiTasks}
     'action-pins'       = ${function:Test-ActionPins}
