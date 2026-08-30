@@ -44,6 +44,11 @@
     module does not exist before Unity 2017.3, and producing it makes the mod emit
     [UnityEngine.InputLegacyModule]Input against a game that cannot resolve it.
 
+    Invoke this script with `powershell -Command "& path	ouild-unity-stubs.ps1 ..."`,
+    NOT with `powershell -File`. Under -File every remaining argument is a literal string,
+    so `-EmptyModule A,B,C` binds as ONE element and produces a single assembly named
+    "A,B,C". The check below turns that into an error rather than a wrongly named DLL.
+
 .PARAMETER SkipUI
     Do not build UnityEngine.UI.dll. For net35 mods on a Unity that predates uGUI.
 
@@ -86,6 +91,15 @@ if (-not $PSBoundParameters.ContainsKey('EmptyModule')) {
     # [UnityEngine.InputLegacyModule]Input against a game that has no such assembly.
     if ($TargetFramework -ne 'net35') {
         $EmptyModule += 'UnityEngine.InputLegacyModule'
+    }
+}
+
+foreach ($moduleName in $EmptyModule) {
+    if ($moduleName -like '*,*') {
+        throw ("EmptyModule element '$moduleName' contains a comma, so the list arrived as " +
+               "one string. Launching with 'powershell -File' passes every argument as a " +
+               "literal and would produce a single assembly with that name. Launch with " +
+               "'powershell -Command' and the call operator instead.")
     }
 }
 
