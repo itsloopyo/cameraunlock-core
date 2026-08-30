@@ -296,13 +296,21 @@ cd csharp
 dotnet build CameraUnlock.Core.sln
 ```
 
-The Unity-coupled projects compile against Unity/BepInEx reference DLLs they do
-not vendor. Consuming mod repos provide them by setting `UnityEnginePath` /
-`BepInExPath` (usually in a `Directory.Build.props`). When building this repo
-standalone, the projects fall back to sibling checkouts of
-`gone-home-headtracking` (pre-2017.3 Unity DLLs, needed for net35) and
-`valheim-headtracking` (modern Unity + BepInEx); override with
-`-p:UnityEnginePath=...` / `-p:BepInExPath=...` if those aren't present.
+The Unity-coupled projects compile against Unity reference DLLs. A consuming mod
+repo provides its own by setting `UnityEnginePath` (usually in a
+`Directory.Build.props`), and gets its game's real assemblies. With no
+`UnityEnginePath`, the projects build against the reference stubs in
+`csharp/stubs/`, so this repo builds from a clean checkout with no game and no
+sibling mod repo installed.
+
+`csharp/stubs/UnityStubs.cs` and `UnityUIStubs.cs` are the canonical stub sources
+for the whole fleet; `csharp/stubs/build-unity-stubs.ps1` compiles them into a
+mod's `libs/` directory. Which assembly a type lands in is part of the contract -
+the file's header explains why - so add a type there rather than in a mod.
+
+`CameraUnlock.Core.Unity.BepInEx` still resolves `BepInEx.dll` from a sibling
+`valheim-headtracking` checkout when no `BepInExPath` is given; this repo vendors
+no BepInEx.
 
 ### C++ (CMake)
 
@@ -322,7 +330,7 @@ ctest --test-dir build
 | CameraUnlock.Core.Unity.BepInEx | net472, net48 | BepInEx requires .NET 4.x |
 | CameraUnlock.Core.Unity.Harmony | net35, net472, net48 | Harmony IL patching (via Lib.Harmony 2.2.2) |
 | CameraUnlock.Core.Tests | net8.0 | A passing test here does not prove Unity Mono compatibility - build the full solution |
-| CameraUnlock.Core.Unity.Tests | net8.0 | Compiles the Unity classes under test from source against `UnityStubs.cs`; the shipped UnityEngine assemblies cannot be loaded in a test host |
+| CameraUnlock.Core.Unity.Tests | net8.0 | Compiles the Unity classes under test from source against its OWN `UnityStubs.cs` - a working fake with real maths, not the reference stubs in `csharp/stubs/`; the shipped UnityEngine assemblies cannot be loaded in a test host |
 
 ### Framework Notes
 
