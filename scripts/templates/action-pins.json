@@ -1,0 +1,14 @@
+{
+  "_comment": "Canonical GitHub Actions pins for the head-tracking fleet. scripts/sync-templates.ps1 rewrites every mod's `uses:` to these; scripts/conformance.ps1 reports a repo that has drifted off one. Each entry is a commit SHA (tags are mutable) plus the version it corresponds to, which becomes the trailing comment. Bumping a pin is a deliberate edit to this file and nothing else: the same rule vendoring already follows, where update-deps is manual and CI consumes what is committed. Before bumping, check the release is at least two weeks old and that its action runtime targets the Node version GitHub currently supports - a release bundling an older runtime emits a deprecation warning in every repo this file reaches. upload-artifact and download-artifact must move together (v7 pairs with v8). An action with no entry here is left alone and reported, rather than pinned to a SHA nobody verified.",
+  "pins": {
+    "actions/checkout": { "sha": "d23441a48e516b6c34aea4fa41551a30e30af803", "version": "v6.1.0" },
+    "actions/setup-dotnet": { "sha": "26b0ec14cb23fa6904739307f278c14f94c95bf1", "version": "v5.4.0" },
+    "actions/upload-artifact": { "sha": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "version": "v7.0.1" },
+    "actions/download-artifact": { "sha": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", "version": "v8.0.1" },
+    "actions/github-script": { "sha": "ed597411d8f924073f98dfc5c65a23a2325f34cd", "version": "v8.0.0" },
+    "microsoft/setup-msbuild": { "sha": "30375c66a4eea26614e0d39710365f22f8b0af57", "version": "v3.0.0" },
+    "prefix-dev/setup-pixi": { "sha": "5185adfbffb4bd703da3010310260805d89ebb11", "version": "v0.9.6" },
+    "softprops/action-gh-release": { "sha": "3d0d9888cb7fd7b750713d6e236d1fcb99157228", "version": "v3.0.2" },
+    "peter-evans/repository-dispatch": { "sha": "28959ce8df70de7be546dd1250a005dd32156697", "version": "v4.0.1" }
+  }
+}

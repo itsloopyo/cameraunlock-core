@@ -50,6 +50,10 @@ $CoreRoot = Split-Path -Parent $PSScriptRoot
 $ReposRoot = Split-Path -Parent $CoreRoot
 Import-Module (Join-Path $CoreRoot 'powershell/ReleaseWorkflow.psm1') -Force
 
+# The one SHA the fleet is meant to agree on per action. Bumping is a deliberate
+# edit to that file; sync-templates.ps1 is what pushes it out.
+$ACTION_PINS = (Get-Content -LiteralPath (Join-Path $CoreRoot 'scripts/templates/action-pins.json') -Raw | ConvertFrom-Json).pins
+
 $CHECK_IDS = @(
     'install-wrapper', 'delayed-expansion', 'arg-parser', 'cmd-crlf', 'pixi-tasks',
     'action-pins', 'workflow-ref', 'workflow-build', 'core-pin', 'manifest',
@@ -294,6 +298,18 @@ function Test-CmdCrlf {
     }
 }
 
+# Does anything in the repo instruct a user to run this task? Only scripts/ and
+# the README, so a task named in passing inside the vendored core does not count.
+function Test-TaskIsReferenced {
+    param([string]$Root, [string]$Task)
+    $needle = "pixi run $Task"
+    foreach ($file in @(Get-ChildItem -Path (Join-Path $Root 'scripts') -File -ErrorAction SilentlyContinue) + @(Get-Item -Path (Join-Path $Root 'README.md') -ErrorAction SilentlyContinue)) {
+        if ($file.Extension -notin '.ps1', '.cmd', '.md', '.mjs', '.js', '.py') { continue }
+        if ((Read-TextFile $file.FullName) -like "*$needle*") { return $true }
+    }
+    return $false
+}
+
 function Test-PixiTasks {
     param([string]$Name, [string]$Root)
 
@@ -304,8 +320,23 @@ function Test-PixiTasks {
     }
     $tasks = Get-PixiTaskNames $pixi
     $absent = @($CANONICAL_TASKS | Where-Object { -not $tasks.Contains($_) })
-    if ($absent.Count -gt 0) {
-        Add-Finding $Name 'pixi-tasks' 'FAIL' "pixi.toml has no $($absent -join ', ') task$(if ($absent.Count -gt 1) { 's' }); a documented no-op stub beats absence"
+    if ($absent.Count -eq 0) { return }
+
+    # A declared task counts however it is written, including a documented no-op:
+    # rv-there-yet's update-deps explains that a shim-only mod vendors no loader,
+    # so there is nothing to fetch, and that is conformant rather than a gap.
+    #
+    # Absence only breaks something today when the repo's own scripts tell a user
+    # to run the task that is not there. Every update-deps.ps1 throws with "Run
+    # 'pixi run sync'", so a repo with no sync task prints a recovery instruction
+    # that fails. The rest is a gap to fill, not a defect to fix.
+    $breaks = @($absent | Where-Object { Test-TaskIsReferenced -Root $Root -Task $_ })
+    $rest = @($absent | Where-Object { $_ -notin $breaks })
+    if ($breaks.Count -gt 0) {
+        Add-Finding $Name 'pixi-tasks' 'FAIL' "pixi.toml has no $($breaks -join ', ') task$(if ($breaks.Count -gt 1) { 's' }), and this repo's own scripts tell the user to run $(if ($breaks.Count -gt 1) { 'them' } else { 'it' })"
+    }
+    if ($rest.Count -gt 0) {
+        Add-Finding $Name 'pixi-tasks' 'WARN' "pixi.toml declares no $($rest -join ', ') task$(if ($rest.Count -gt 1) { 's' }); a documented no-op stub beats absence"
     }
 }
 
@@ -331,6 +362,15 @@ function Test-ActionPins {
             }
             if ($line -notmatch '#\s*v?\d') {
                 Add-Finding $Name 'action-pins' 'WARN' "$($wf.Name):$n pins a SHA with no trailing # vX.Y.Z comment, so nobody can tell what version it is"
+            }
+            # Pinned, but to a different commit from the rest of the fleet. Not
+            # broken - a repo can be deliberately ahead - but unmanaged: three
+            # SHAs were in use for actions/checkout v6 when this was written, so
+            # a security bump reaches whichever third someone remembers.
+            $action = $ref -replace '@.*$', ''
+            $canonical = $ACTION_PINS.PSObject.Properties | Where-Object { $_.Name -eq $action } | Select-Object -First 1
+            if ($canonical -and $at -ne $canonical.Value.sha) {
+                Add-Finding $Name 'action-pins' 'WARN' "$($wf.Name):$n pins $action to $($at.Substring(0, 8)); scripts/templates/action-pins.json records $($canonical.Value.sha.Substring(0, 8)) # $($canonical.Value.version)"
             }
         }
     }
@@ -432,21 +472,16 @@ function Test-Manifest {
     }
 }
 
+# Only mod.json. A root manifest.json is NOT a dead file and is deliberately not
+# flagged: OWML and Thunderstore each read one, and in dying-light-2 and
+# skyrim-special-edition it is the canonical version source - release.ps1 writes
+# it, package-release.ps1 and validate-release.ps1 read it, and release.yml
+# validates the pushed tag against it. Deleting those breaks the release.
 function Test-StrayManifest {
     param([string]$Name, [string]$Root)
 
     if (Test-Path (Join-Path $Root 'mod.json')) {
         Add-Finding $Name 'stray-manifest' 'FAIL' 'mod.json is the dead parallel manifest format; nothing in lopari has ever read it, and audit-loaders.py classes a repo carrying it as LEGACY'
-    }
-    $stray = Join-Path $Root 'manifest.json'
-    if (Test-Path $stray) {
-        # Two root manifest.json files have a real reader: OWML's, keyed by
-        # uniqueName, and Thunderstore's, keyed by version_number. Anything else
-        # is the descriptive file that got written once and read never.
-        $text = Read-TextFile $stray
-        if ($text -notmatch '"uniqueName"' -and $text -notmatch '"version_number"') {
-            Add-Finding $Name 'stray-manifest' 'FAIL' 'a root manifest.json that is neither an OWML nor a Thunderstore manifest, so nothing reads it; launcher-manifest.json is the only manifest we own'
-        }
     }
 }
 
@@ -464,7 +499,19 @@ function Test-License {
 
     $holder = if ($mine -match '(?m)^Copyright \(c\) (.+)$') { $Matches[1] } else { '(no copyright line)' }
     $want = if ($theirs -match '(?m)^Copyright \(c\) (.+)$') { $Matches[1] } else { '' }
-    Add-Finding $Name 'license' 'FAIL' "LICENSE differs from core's; it says '$holder', core says '$want'"
+    # The permission text and disclaimer are what MIT actually requires to
+    # travel; the copyright line is whose name goes on it, and a repo naming a
+    # different holder is an editorial inconsistency, not an altered licence.
+    # Text APPENDED after the MIT body is also fine and several repos have it -
+    # a scope note saying the licence does not cover the game footage in their
+    # README clip or the game's trademarks. Only a body that is not reproduced
+    # intact fails.
+    $body = { param($t) ($t -replace '(?m)^Copyright \(c\).+$', '').Trim() }
+    if (-not (& $body $mine).StartsWith((& $body $theirs))) {
+        Add-Finding $Name 'license' 'FAIL' "LICENSE does not reproduce core's MIT text intact; it says '$holder', core says '$want'"
+        return
+    }
+    Add-Finding $Name 'license' 'WARN' "LICENSE names '$holder', core names '$want'; the MIT body is identical"
 }
 
 function Test-Readme {
