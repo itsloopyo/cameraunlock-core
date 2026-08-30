@@ -140,9 +140,14 @@ function Get-LauncherManifest {
     try { return (Read-TextFile $path).TrimStart([char]0xFEFF) | ConvertFrom-Json } catch { return $null }
 }
 
+# Anchored to the `set "_BODY=..."` dispatch line rather than to any mention of
+# a body filename. sync-templates.ps1 decides from the same answer whether to
+# replace a script's entire tail, so a comment that happens to name a body must
+# not make a bespoke installer look like a wrapper - that reads as a one-line
+# audit tweak and lands as a deleted installer.
 function Get-WrapperBodyName {
     param([string]$Text)
-    if ($Text -match '((?:un)?install-body[a-z0-9-]*\.cmd)') { return $Matches[1] }
+    if ($Text -match '(?m)^\s*set "_BODY=[^"]*?((?:un)?install-body[a-z0-9-]*\.cmd)"') { return $Matches[1] }
     return $null
 }
 

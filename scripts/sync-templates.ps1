@@ -138,7 +138,11 @@ function Sync-Wrappers {
             continue
         }
         $text = Read-TextFile $path
-        if ($text -notmatch '((?:un)?install-body[a-z0-9-]*\.cmd)') {
+        # Anchored to the `set "_BODY=..."` dispatch line, not to any mention of
+        # a body filename. Everything below END CONFIG BLOCK is replaced on the
+        # strength of this match, so a bespoke installer that merely names a body
+        # in a comment would have its whole body deleted.
+        if ($text -notmatch '(?m)^\s*set "_BODY=[^"]*?((?:un)?install-body[a-z0-9-]*\.cmd)"') {
             Add-Result $Name 'wrappers' 'report' "scripts/$script is a legacy in-tree body; converting it to a wrapper needs a CONFIG BLOCK written by hand, then scripts/templates/install-wrapper-*.cmd for the rest"
             continue
         }
