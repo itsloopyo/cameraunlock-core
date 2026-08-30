@@ -162,6 +162,8 @@ namespace CameraUnlock.Core.Config
             float limitX = Position.LimitX;
             float limitY = Position.LimitY;
             float limitYDown = Position.LimitYDown;
+            bool sawLimitY = false;
+            bool sawLimitYDown = false;
             float limitZ = Position.LimitZ;
             float limitZBack = Position.LimitZBack;
             bool invertPosX = Position.InvertX;
@@ -338,12 +340,18 @@ namespace CameraUnlock.Core.Config
 
                     case ConfigKeySchema.Keys.PositionLimitY:
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
                             limitY = floatVal;
+                            sawLimitY = true;
+                        }
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitYDown:
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
                             limitYDown = floatVal;
+                            sawLimitYDown = true;
+                        }
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitZ:
@@ -385,6 +393,16 @@ namespace CameraUnlock.Core.Config
                         WarnRetiredSmoothingKey(log, kvp.Key);
                         break;
                 }
+            }
+
+            // A file that names one vertical limit means one vertical limit. The clamp is
+            // [-LimitYDown, +LimitY], so leaving the down side at its default silently caps a
+            // raised LimitY at 0.20m downward - the exact bug ~47 mod repos carry today, each
+            // of which hand-mirrors the key or does not. Decided after the loop, so dictionary
+            // order cannot change the outcome, and an explicit LimitYDown always wins.
+            if (sawLimitY && !sawLimitYDown)
+            {
+                limitYDown = limitY;
             }
 
             Sensitivity = new SensitivitySettings(yawSens, pitchSens, rollSens, invertYaw, invertPitch, invertRoll);

@@ -106,6 +106,19 @@ void TestPositionValues() {
     Check(NearEq(config.tracker_pivot_up, 0.03f), "PivotUp");
 }
 
+void TestVerticalLimitMirroring() {
+    auto only_up = Apply({{"LimitY", "0.40"}});
+    Check(NearEq(only_up.position.limit_y, 0.40f), "LimitY alone sets the up limit");
+    Check(NearEq(only_up.position.limit_y_down, 0.40f), "LimitY alone mirrors into the down limit");
+
+    auto both = Apply({{"LimitY", "0.40"}, {"LimitYDown", "0.05"}});
+    Check(NearEq(both.position.limit_y, 0.40f), "explicit LimitY");
+    Check(NearEq(both.position.limit_y_down, 0.05f), "explicit LimitYDown wins over the mirror");
+
+    auto reversed = Apply({{"LimitYDown", "0.05"}, {"LimitY", "0.40"}});
+    Check(NearEq(reversed.position.limit_y_down, 0.05f), "order does not change the outcome");
+}
+
 void TestSmoothingComposition() {
     auto config = Apply({{"LocalSmoothing", "0.2"}, {"RemoteSmoothing", "0.4"}});
     Check(NearEq(config.local_smoothing, 0.2f), "LocalSmoothing");
@@ -172,6 +185,7 @@ int RunConfigSchemaTests() {
     TestNormalization();
     TestRotationValues();
     TestPositionValues();
+    TestVerticalLimitMirroring();
     TestSmoothingComposition();
     TestRejectedValues();
     TestHotkeys();

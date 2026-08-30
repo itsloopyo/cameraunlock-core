@@ -82,15 +82,30 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(0.03f, config.TrackerPivotUp);
         }
 
-        // LimitY and LimitYDown are independent, and a file that sets only the upward one
-        // must not silently widen the downward budget into player-body clipping.
+        // A file that names one vertical limit means one vertical limit. Leaving the down
+        // side at its default caps a raised LimitY at 0.20m downward, which is the bug ~47
+        // mod repos carry.
         [Fact]
-        public void PositionLimitY_DoesNotMirrorIntoLimitYDown()
+        public void PositionLimitY_MirrorsIntoLimitYDownWhenThatKeyIsAbsent()
         {
             var config = Apply(new Dictionary<string, string> { { "LimitY", "0.40" } });
 
             Assert.Equal(0.40f, config.Position.LimitY);
-            Assert.Equal(0.20f, config.Position.LimitYDown);
+            Assert.Equal(0.40f, config.Position.LimitYDown);
+        }
+
+        // An explicit downward limit wins, whatever order the two keys arrive in.
+        [Fact]
+        public void PositionLimitYDown_SurvivesAnExplicitLimitY()
+        {
+            var config = Apply(new Dictionary<string, string>
+            {
+                { "LimitY", "0.40" },
+                { "LimitYDown", "0.05" },
+            });
+
+            Assert.Equal(0.40f, config.Position.LimitY);
+            Assert.Equal(0.05f, config.Position.LimitYDown);
         }
 
         [Fact]

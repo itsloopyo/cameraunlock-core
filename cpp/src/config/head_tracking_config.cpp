@@ -194,6 +194,9 @@ void HeadTrackingConfig::ApplyValues(
     // a file watcher, and repeating this every reload buries it.
     static bool warned_retired_smoothing = false;
 
+    bool saw_limit_y = false;
+    bool saw_limit_y_down = false;
+
     for (const auto& entry : values) {
         const char* key = ResolveConfigKey(entry.first);
         if (key == nullptr) continue;
@@ -273,9 +276,15 @@ void HeadTrackingConfig::ApplyValues(
         } else if (canonical == config_keys::kPositionLimitX) {
             if (TryParseConfigFloat(value, float_val)) position.limit_x = float_val;
         } else if (canonical == config_keys::kPositionLimitY) {
-            if (TryParseConfigFloat(value, float_val)) position.limit_y = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                position.limit_y = float_val;
+                saw_limit_y = true;
+            }
         } else if (canonical == config_keys::kPositionLimitYDown) {
-            if (TryParseConfigFloat(value, float_val)) position.limit_y_down = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                position.limit_y_down = float_val;
+                saw_limit_y_down = true;
+            }
         } else if (canonical == config_keys::kPositionLimitZ) {
             if (TryParseConfigFloat(value, float_val)) position.limit_z = float_val;
         } else if (canonical == config_keys::kPositionLimitZBack) {
@@ -317,6 +326,15 @@ void HeadTrackingConfig::ApplyValues(
                 }
             }
         }
+    }
+
+    // A file that names one vertical limit means one vertical limit. The clamp is
+    // [-limit_y_down, +limit_y], so leaving the down side at its struct default silently caps
+    // a raised limit_y at 0.20m downward - the exact bug ~47 mod repos carry today, each of
+    // which hand-mirrors the key or does not. Decided after the loop, so entry order cannot
+    // change the outcome, and an explicit LimitYDown always wins.
+    if (saw_limit_y && !saw_limit_y_down) {
+        position.limit_y_down = position.limit_y;
     }
 
     position.local_smoothing = local_smoothing;

@@ -238,7 +238,7 @@
       "type": "float",
       "default": 0.20,
       "aliases": ["LimitYDown", "MaxYDown", "PositionMaxYDown", "LimitDown"],
-      "doc": "Maximum DOWNWARD displacement in metres. Usually tighter than the upward limit so the camera does not clip into the player body."
+      "doc": "Maximum DOWNWARD displacement in metres. Usually tighter than the upward limit so the camera does not clip into the player body. When a file names PositionLimitY and NOT this key, the up limit is mirrored into it: one vertical limit in the file means one vertical limit in the clamp. Leaving the down side at its default is what caps a raised LimitY at 0.20m downward."
     },
     {
       "id": "PositionLimitZ",
