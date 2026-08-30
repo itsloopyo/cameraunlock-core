@@ -26,8 +26,16 @@
 //   end                      unit run complete
 //   bye                      terminate
 //
+// A skip is never free. By default NO vector may be skipped, so a harness that
+// answers "skip" to everything fails the run rather than reporting 0/0 and
+// exiting 0. An implementation that genuinely cannot expose a unit declares
+// exactly which vectors it does not implement with --expect-skips, and that
+// declaration is checked in both directions: an undeclared skip fails, and a
+// declared vector the harness turns out to run fails too, so the list cannot
+// rot into a permanent excuse. A run that executed nothing fails outright.
+//
 // Usage: node scripts/pipeline-vectors/run-vectors.mjs --harness "<command line>"
-//        [--vectors <path>] [--only <id,id>] [--verbose]
+//        [--vectors <path>] [--only <id,id>] [--expect-skips <id,id>] [--verbose]
 
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -37,12 +45,19 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function parseArgs(argv) {
-    const out = { harness: null, vectors: resolve(repoRoot, 'data', 'pipeline-conformance.json'), only: null, verbose: false };
+    const out = {
+        harness: null,
+        vectors: resolve(repoRoot, 'data', 'pipeline-conformance.json'),
+        only: null,
+        expectSkips: new Set(),
+        verbose: false,
+    };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--harness') out.harness = argv[++i];
         else if (a === '--vectors') out.vectors = resolve(argv[++i]);
         else if (a === '--only') out.only = new Set(argv[++i].split(',').map((s) => s.trim()));
+        else if (a === '--expect-skips') out.expectSkips = new Set(argv[++i].split(',').map((s) => s.trim()).filter((s) => s.length > 0 && s !== 'none'));
         else if (a === '--verbose') out.verbose = true;
         else throw new Error(`unknown argument: ${a}`);
     }
@@ -69,7 +84,7 @@ const UNIT_OUT_FIELDS = {
     tracking_processor: ['yaw', 'pitch', 'roll'],
     position_processor: ['x', 'y', 'z'],
     euler_roundtrip: ['yaw', 'pitch', 'roll'],
-    packet: ['ok', 'yaw', 'pitch', 'roll', 'x', 'y', 'z', 'trailer_present', 'recenter_counter'],
+    packet: ['ok', 'yaw', 'pitch', 'roll', 'x', 'y', 'z', 'trailer_present', 'recenter_counter', 'ok_rotation', 'ok_position'],
     session_rot: ['yaw', 'pitch', 'roll'],
     session_pos: ['x', 'y', 'z'],
 };
@@ -441,10 +456,35 @@ if (failures.length > 0) {
     }
 }
 
+// A skip is a declared gap, not a shrug: it has to have been declared up front,
+// and a declaration the harness no longer needs has to be withdrawn.
+const skipProblems = [];
+for (const { vector, reason } of skipped) {
+    if (!args.expectSkips.has(vector.id)) {
+        skipProblems.push(`${vector.id} was skipped without being declared in --expect-skips (${reason})`);
+    }
+}
+const ranIds = new Set(plan.map((p) => p.vector.id).filter((id) => !skipped.some((s) => s.vector.id === id)));
+for (const id of args.expectSkips) {
+    if (!doc.vectors.some((v) => v.id === id)) {
+        console.error(`--expect-skips names "${id}", which is not a vector in ${args.vectors}`);
+        process.exit(2);
+    }
+    if (ranIds.has(id)) {
+        skipProblems.push(`${id} is declared in --expect-skips but the harness ran it; drop it from the declaration`);
+    }
+}
+
 if (skipped.length > 0) {
     console.log('');
     console.log('Skipped by the harness:');
     for (const { vector, reason } of skipped) console.log(`  ${vector.id}: ${reason}`);
+    console.log('');
+}
+
+if (skipProblems.length > 0) {
+    console.log('');
+    for (const p of skipProblems) console.log(`  ! ${p}`);
     console.log('');
 }
 
@@ -457,4 +497,10 @@ const total = plan.length;
 const ran = total - skipped.length;
 console.log(`${ran - failed}/${ran} conformance vectors passed`
     + (skipped.length > 0 ? `, ${skipped.length} skipped` : ''));
-process.exit(failed === 0 ? 0 : 1);
+
+if (ran === 0) {
+    console.log('the harness executed no vector at all, so this run proves nothing');
+    process.exit(1);
+}
+
+process.exit(failed === 0 && skipProblems.length === 0 ? 0 : 1);

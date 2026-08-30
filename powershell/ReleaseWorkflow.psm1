@@ -101,16 +101,34 @@ function Write-CoreBundleProvenance {
     [CmdletBinding()]
     param([Parameter(Mandatory=$true)][string]$CoreRoot)
 
-    $head = & git -C $CoreRoot rev-parse --short HEAD 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $head) {
+    # `2>$null` on its own is a trap: in Windows PowerShell 5.1 a native
+    # command's stderr becomes a NativeCommandError, and 30 of the fleet's
+    # package-release.ps1 scripts set $ErrorActionPreference = 'Stop', so
+    # `pixi run package` died with a stack trace instead of taking the
+    # "commit unknown" branch below. Both calls fail for ordinary reasons: a
+    # source tarball is not a git checkout, and a shallow submodule, an
+    # exported tree or a fork with another default branch has no origin/main.
+    # Drop to Continue for the calls and gate on $LASTEXITCODE, which is the
+    # real success signal for a native exe.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $head = & git -C $CoreRoot rev-parse --short HEAD 2>$null
+        $headOk = ($LASTEXITCODE -eq 0 -and $head)
+        # No fetch: report against whatever origin/main this checkout already knows.
+        $behind = if ($headOk) { & git -C $CoreRoot rev-list --count "HEAD..origin/main" 2>$null } else { $null }
+        $behindOk = ($LASTEXITCODE -eq 0 -and $behind)
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
+
+    if (-not $headOk) {
         Write-Host "  Shared bundle: cameraunlock-core commit unknown (not a git checkout)." -ForegroundColor DarkYellow
         return
     }
     Write-Host "  Shared bundle from cameraunlock-core $head" -ForegroundColor Gray
 
-    # No fetch: report against whatever origin/main this checkout already knows.
-    $behind = & git -C $CoreRoot rev-list --count "HEAD..origin/main" 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $behind) { return }
+    if (-not $behindOk) { return }
     if ([int]$behind -gt 0) {
         Write-Warning "cameraunlock-core is $behind commit(s) behind the origin/main it last saw, so this release ships an older shared bundle (install/uninstall bodies, find-game.ps1, games.json). If that is not deliberate, bump the submodule and commit the pointer before releasing."
     }
@@ -343,7 +361,13 @@ function Resolve-ReleaseVersion {
     Boolean indicating if the working directory is clean.
 #>
 function Test-CleanGitStatus {
+    # Continue for the call, or the module's own 'Stop' turns git's stderr into
+    # a NativeCommandError and the "Not a git repository" diagnostic below is
+    # unreachable.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $gitStatus = git status --porcelain 2>$null
+    $ErrorActionPreference = $prevPref
     if ($LASTEXITCODE -ne 0) {
         throw "Not a git repository"
     }
@@ -364,7 +388,10 @@ function Test-GitTagExists {
         [string]$Tag
     )
 
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $tagExists = git tag -l $Tag 2>$null
+    $ErrorActionPreference = $prevPref
     return ($LASTEXITCODE -eq 0 -and $tagExists)
 }
 
@@ -926,13 +953,22 @@ function Set-CsprojVersion {
         throw "csproj not found: $CsprojPath"
     }
 
-    $content = Get-Content $CsprojPath -Raw
+    # A .csproj is UTF-8. Windows PowerShell 5.1 reads with the ANSI codepage
+    # and Set-Content writes with it, so a project carrying an accented
+    # <Authors> or a non-ASCII <Description> came back mojibaked and was written
+    # back that way - and the BOM, which MSBuild and every editor here expect,
+    # was dropped. Read and write explicitly, and keep the file's own BOM state.
+    $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CsprojPath)
+    $bytes = [System.IO.File]::ReadAllBytes($full)
+    $hadBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $content = [System.IO.File]::ReadAllText($full)
+
     if ($content -notmatch '<Version>[^<]+</Version>') {
         throw "No <Version> element found in $CsprojPath"
     }
 
     $content = $content -replace '<Version>[^<]+</Version>', "<Version>$Version</Version>"
-    $content | Set-Content $CsprojPath -NoNewline
+    [System.IO.File]::WriteAllText($full, $content, (New-Object System.Text.UTF8Encoding($hadBom)))
 }
 
 <#
@@ -1036,7 +1072,28 @@ function Sync-CoreCommitInNotices {
         if ($line -match '^#{1,6}\s') {
             $inCoreSection = $line -match '^#{1,6}\s+cameraunlock[- ]core\b'
         }
-        if (-not ($inCoreSection -or $line -match 'cameraunlock[- ]core')) { continue }
+
+        # Which lines may carry OUR hash. Anything looser rewrites another
+        # dependency's commit into core's, silently, in the one file whose whole
+        # job is attribution - and core vendoring MinHook makes that a real
+        # shape rather than a hypothetical one.
+        #
+        #   - a table row, only when its first cell names cameraunlock-core, so
+        #     `| MinHook | abc1234 | MIT | vendored beside cameraunlock-core |`
+        #     is left alone;
+        #   - any other line that names cameraunlock-core;
+        #   - inside the `## cameraunlock-core` section, a bullet whose label is
+        #     the commit itself (`- Pinned commit:`, `- **Version:** commit`),
+        #     which is every shape the fleet writes. A bullet that names another
+        #     project first is that project's.
+        $eligible = if ($line -match '^\s*\|') {
+            $line -match '^\s*\|\s*`?\s*cameraunlock[- ]core\b'
+        } elseif ($line -match 'cameraunlock[- ]core') {
+            $true
+        } else {
+            $inCoreSection -and $line -match '(?i)^\s*[-*+]\s*\**\s*(pinned\s+)?(commit|version|revision|sha)\b'
+        }
+        if (-not $eligible) { continue }
 
         # A hash needs a digit to be a hash. Without that, ordinary words
         # spelled from a-f ("acceded", "defaced") match the character class

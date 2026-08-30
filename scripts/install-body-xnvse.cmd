@@ -32,7 +32,7 @@
 ::   STATE_FILE               state file basename
 ::   FRAMEWORK_TYPE           always "xNVSE"
 ::   XNVSE_VERSION            pinned upstream release tag (status text)
-::   XNVSE_URL                pinned release asset URL, a .zip tar.exe can read
+::   XNVSE_URL                pinned release asset URL, a .zip
 ::   XNVSE_SHA256             lowercase hex SHA-256 the download must match
 ::   MOD_SEED_FILES           optional files copied only when not already
 ::                            present, so an upgrade keeps whatever the user
@@ -50,14 +50,30 @@ setlocal disabledelayedexpansion
 call :detect_yes_flag %*
 call :main %*
 set "_EC=%errorlevel%"
-if not defined YES_FLAG ( echo. & pause )
+if not defined _NO_PAUSE ( echo. & pause )
 exit /b %_EC%
 
+:: ============================================
+:: Pre-scan args at outer scope and record the pause decision in _NO_PAUSE,
+:: which :main never writes. :main's own parser re-derives YES_FLAG as it goes
+:: and only reaches the /y token after the path, so a pause keyed off that
+:: variable sat there forever whenever parsing failed on an earlier argument -
+:: which is `install.cmd "<path>" /y`, lopari's exact call shape.
+::
+:: `if [%1]==[]` and not `if "%~1"==""`: %~1 strips the quotes off an empty
+:: argument, which makes `install.cmd "" /y` indistinguishable from no
+:: arguments at all and swallows the /y behind it. The bracket form keeps the
+:: launcher's quotes, so a path with whitespace stays one token. The
+:: comparisons below still use the quoted-string form - bracket form
+:: `if [%~1]==[/y]` does NOT quote, so a path arg containing whitespace
+:: ("C:\...\Gone Home") splits across the brackets and crashes cmd with
+:: "[Home]==[/y] was unexpected at this time".
+:: ============================================
 :detect_yes_flag
-if "%~1"=="" exit /b 0
-if /i "%~1"=="/y"    set "YES_FLAG=1"
-if /i "%~1"=="-y"    set "YES_FLAG=1"
-if /i "%~1"=="--yes" set "YES_FLAG=1"
+if [%1]==[] exit /b 0
+if /i "%~1"=="/y"    set "_NO_PAUSE=1"
+if /i "%~1"=="-y"    set "_NO_PAUSE=1"
+if /i "%~1"=="--yes" set "_NO_PAUSE=1"
 shift
 goto :detect_yes_flag
 
@@ -74,8 +90,18 @@ if defined WRAPPER_DIR ( set "SCRIPT_DIR=%WRAPPER_DIR%" ) else ( set "SCRIPT_DIR
 set "YES_FLAG="
 set "_GIVEN_PATH="
 :parse_args
-if "%~1"=="" goto :args_done
+if [%1]==[] goto :args_done
 set "_ARG=%~1"
+:: An argument that is there but empty is not "no arguments": a launcher that
+:: expanded a variable it never filled in reaches here, and treating it as the
+:: end of the list both loses the flags behind it and silently falls back to
+:: detection, installing into whichever copy of the game happens to be on the
+:: machine rather than the one the caller named.
+if not defined _ARG (
+    echo ERROR: empty path argument.
+    echo Pass the game folder, or pass no argument at all to let detection find it.
+    exit /b 2
+)
 if /i "%_ARG%"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
 if /i "%_ARG%"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
 if /i "%_ARG%"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
@@ -101,6 +127,25 @@ echo drops the second. Run without a path so detection finds the game instead.
 exit /b 2
 :args_done
 set "_ARG="
+
+:: The path cannot keep a trailing backslash: `-GivenPath "%_GIVEN_PATH%"`
+:: would hand CommandLineToArgvW a `\"`, which is an escaped quote, and
+:: PowerShell receives the path with a `"` stuck on the end - Test-Path then
+:: throws "Illegal characters in path" and the run dies on a stack trace.
+:: `%~1` strips the launcher's own quotes, so `C:\Games\Foo\` passes the
+:: `if exist` above and gets that far.
+:strip_given_slash
+if not defined _GIVEN_PATH goto :given_normalised
+if not "%_GIVEN_PATH:~-1%"=="\" goto :given_normalised
+if "%_GIVEN_PATH:~-2%"==":\" (
+    rem A drive root has no backslash to spare, so end the value on a `.`
+    rem instead: same directory, and it no longer escapes the closing quote.
+    set "_GIVEN_PATH=%_GIVEN_PATH%."
+    goto :given_normalised
+)
+set "_GIVEN_PATH=%_GIVEN_PATH:~0,-1%"
+goto :strip_given_slash
+:given_normalised
 
 :: -------- Validate CONFIG BLOCK --------
 :: Every name below is interpolated straight into a path that gets written,
@@ -160,7 +205,12 @@ echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
-tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i "!GAME_EXE!" >nul 2>&1
+:: /c: or findstr reads the exe name as a space-separated list of terms and
+:: matches on ANY of them. With nothing running tasklist prints "INFO: No tasks
+:: are running which match the specified criteria.", so an exe whose name
+:: contains one of those words - "South Park - The Stick of Truth.exe" - matched
+:: that line, and the install refused to run on every machine, forever.
+tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i /c:"!GAME_EXE!" >nul 2>&1
 if not errorlevel 1 (
     echo ERROR: !GAME_DISPLAY_NAME! is currently running.
     echo Please close the game before installing.
@@ -244,24 +294,26 @@ for %%f in (%MOD_DLLS%) do (
 if "!DEPLOY_FAILED!"=="1" (
     echo.
     echo ========================================
-    echo   Deployment Failed!
+    echo   Deployment Failed^^!
     echo ========================================
     echo.
     exit /b 1
 )
 
 :: -------- Write state file --------
+call :stamp_installed_at
+if errorlevel 1 exit /b 1
 call :write_state_file
 
 echo.
 echo ========================================
-echo   Deployment Complete!
+echo   Deployment Complete^^!
 echo ========================================
 echo.
 echo %MOD_DISPLAY_NAME% has been deployed to:
 echo   !PLUGINS_PATH!
 echo.
-echo Launch the game via nvse_loader.exe to use the mod!
+echo Launch the game via nvse_loader.exe to use the mod^^!
 :: Percent-expansion splits MOD_CONTROLS on its embedded &echo separators;
 :: delayed expansion prints them literally. Kept outside a ( ) block so a
 :: literal ) in the controls text cannot close the block.
@@ -292,16 +344,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "XNVSE_DL_SHA="
-for /f "delims=" %%H in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-FileHash -Path '!XNVSE_DL!' -Algorithm SHA256).Hash.ToLower()"') do set "XNVSE_DL_SHA=%%H"
-if /i not "!XNVSE_DL_SHA!"=="%XNVSE_SHA256%" (
-    echo   ERROR: the xNVSE download failed its integrity check.
-    echo     expected %XNVSE_SHA256%
-    echo     got      !XNVSE_DL_SHA!
-    del "!XNVSE_DL!" 2>nul
-    exit /b 1
-)
-
 echo   Extracting xNVSE...
 set "XNVSE_EXTRACT=!TEMP!\cul-xnvse-extract-%RANDOM%-%RANDOM%"
 mkdir "!XNVSE_EXTRACT!"
@@ -311,14 +353,30 @@ if errorlevel 1 (
     exit /b 1
 )
 
-"%SystemRoot%\System32\tar.exe" -xf "!XNVSE_DL!" -C "!XNVSE_EXTRACT!"
-if errorlevel 1 (
-    echo   ERROR: Extraction failed.
-    del "!XNVSE_DL!" 2>nul
+:: Hashed and unpacked through ONE handle, opened FileShare.Read so nothing
+:: else can write to or delete the file while it is held. Hashing the download
+:: and then handing the path to tar.exe re-opens it, and the archive that gets
+:: unpacked is then not provably the one that was checked - the download lands
+:: in TEMP, which every process running as this user can write.
+:: Paths travel by environment variable: a TEMP path with an apostrophe in it
+:: would close a single-quoted literal early and fail to parse.
+set "CUL_XNVSE_ZIP=!XNVSE_DL!"
+set "CUL_XNVSE_SHA=%XNVSE_SHA256%"
+set "CUL_XNVSE_DIR=!XNVSE_EXTRACT!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ErrorActionPreference = 'Stop'; try { Add-Type -AssemblyName System.IO.Compression; Add-Type -AssemblyName System.IO.Compression.FileSystem; $fs = [IO.File]::Open($env:CUL_XNVSE_ZIP, 'Open', 'Read', 'Read'); try { $sha = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($fs)).Replace('-', '').ToLower(); if ($sha -ne $env:CUL_XNVSE_SHA.ToLower()) { Write-Host ('    expected ' + $env:CUL_XNVSE_SHA); Write-Host ('    got      ' + $sha); exit 2 }; $fs.Position = 0; $zip = New-Object System.IO.Compression.ZipArchive($fs); [System.IO.Compression.ZipFileExtensions]::ExtractToDirectory($zip, $env:CUL_XNVSE_DIR) } finally { $fs.Dispose() } } catch { Write-Host $_.Exception.Message; exit 1 }"
+set "_XNVSE_EC=!errorlevel!"
+del "!XNVSE_DL!" 2>nul
+if "!_XNVSE_EC!"=="2" (
+    echo   ERROR: the xNVSE download failed its integrity check.
     rmdir /s /q "!XNVSE_EXTRACT!" 2>nul
     exit /b 1
 )
-del "!XNVSE_DL!" 2>nul
+if not "!_XNVSE_EC!"=="0" (
+    echo   ERROR: Extraction failed.
+    rmdir /s /q "!XNVSE_EXTRACT!" 2>nul
+    exit /b 1
+)
 
 :: Both loops below walk the extraction folder from `.` rather than from
 :: "!XNVSE_EXTRACT!". FOR /R resolves its root at parse time, before delayed
@@ -366,13 +424,33 @@ if not exist "!GAME_PATH!\nvse_loader.exe" (
     exit /b 1
 )
 
-echo   xNVSE installed successfully!
+echo   xNVSE installed successfully^^!
 exit /b 0
 
 :: ============================================
 :: Write the canonical state file.
 :: Schema version 1. Preserves WE_INSTALLED which may have been
 :: already-true from a prior install.
+:: ============================================
+:: UTC ISO-8601, read through PowerShell: %DATE% is whatever the user's regional
+:: settings say and is not parseable, and WMIC is gone from current Windows 11.
+:: PowerShell already resolved the game path above, so a failure here is a real
+:: one and is reported rather than papered over with a placeholder date.
+:stamp_installed_at
+set "INSTALLED_AT="
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')"`) do set "INSTALLED_AT=%%I"
+if not defined INSTALLED_AT (
+    echo ERROR: could not read the current UTC time from PowerShell.
+    exit /b 1
+)
+exit /b 0
+
+:: ============================================
+:: Write the canonical state file. Schema version 1: schema_version,
+:: framework.type, framework.installed_by_us, mod.id, mod.name, mod.version and
+:: mod.installed_at are written by every body; framework.version is the single
+:: optional field, emitted only where the CONFIG BLOCK names a loader version.
+:: WE_INSTALLED may be already-true from a prior install and is preserved.
 :: ============================================
 :write_state_file
 > "!GAME_PATH!\%STATE_FILE%" (
@@ -385,7 +463,8 @@ exit /b 0
     echo   "mod": {
     echo     "id": "!GAME_ID!",
     echo     "name": "!MOD_INTERNAL_NAME!",
-    echo     "version": "!MOD_VERSION!"
+    echo     "version": "!MOD_VERSION!",
+    echo     "installed_at": "!INSTALLED_AT!"
     echo   }
     echo }
 )

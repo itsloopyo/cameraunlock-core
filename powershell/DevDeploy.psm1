@@ -34,6 +34,44 @@ Import-Module (Join-Path $PSScriptRoot 'ModLoaderSetup.psm1')
 # passes one), else fall back to Find-GamePath against games.json. Throws
 # with a clear diagnostic on miss so every orchestrator's "not found"
 # error matches the install.cmd template's wording.
+# Every install of the game on this machine, highest priority first. A caller
+# supplied path still wins outright and stays a single target - the launcher
+# passes one and means it.
+#
+# Dev deploys go to ALL of them. Owning a game on two stores is ordinary, and a
+# deploy that silently picks one leaves the other running whatever build was last
+# dropped in it; the symptom is a fix that "did not work" because the copy that
+# got launched was never updated.
+function Resolve-DevGamePaths {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [string]$GivenPath
+    )
+    if ($GivenPath) {
+        Write-Host "Using launcher-provided game path: $GivenPath" -ForegroundColor Green
+        return @($GivenPath)
+    }
+    $paths = @(Find-AllGamePaths -GameId $GameId)
+    if ($paths.Count -eq 0) {
+        $config = Get-GameConfig -GameId $GameId
+        Write-GameNotFoundError `
+            -GameName $GameDisplayName `
+            -EnvVar $config.EnvVar `
+            -SteamFolder $config.SteamFolder
+        throw "Game not found: $GameDisplayName"
+    }
+    if ($paths.Count -eq 1) {
+        Write-Host "Found game installation at: $($paths[0])" -ForegroundColor Green
+    } else {
+        Write-Host "Found $($paths.Count) installations of ${GameDisplayName}:" -ForegroundColor Cyan
+        $paths | ForEach-Object { Write-Host "  $_" -ForegroundColor Cyan }
+    }
+    return $paths
+}
+
 function Resolve-DevGamePath {
     [CmdletBinding()]
     param(
@@ -42,7 +80,10 @@ function Resolve-DevGamePath {
         [string]$GivenPath
     )
     if ($GivenPath) {
-        Write-Host "Using launcher-provided game path: $GivenPath" -ForegroundColor Green
+        # Not necessarily the launcher's: Invoke-DevDeploy* resolves every install
+        # itself and then feeds them through here one at a time, so a wording that
+        # names the launcher would be a lie on the common dev path.
+        Write-Host "Target install: $GivenPath" -ForegroundColor Green
         return $GivenPath
     }
     $gamePath = Find-GamePath -GameId $GameId
@@ -148,7 +189,7 @@ function Test-PatchResultFailure {
     return ($null -ne $property) -and (-not $property.Value)
 }
 
-function Invoke-DevDeployCecil {
+function Invoke-DevDeployCecilToPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$GameId,
@@ -276,6 +317,53 @@ function Invoke-DevDeployCecil {
     }
 }
 
+# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
+# result for the last install written, which is what the single-install callers
+# have always been handed.
+function Invoke-DevDeployCecil {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [Parameter(Mandatory)][string]$BuildOutputPath,
+        [Parameter(Mandatory)][string]$ModDllName,
+        [Parameter(Mandatory)][string]$ManagedSubfolder,
+        [string]$AssemblyDll = 'Assembly-CSharp.dll',
+        [string[]]$ExtraDlls = @(),
+        [string]$GivenPath,
+        [Parameter(Mandatory)][scriptblock]$Patcher,
+        # Optional: the additive patch marker. When set, the backup is
+        # guaranteed pristine - a patched assembly is never captured as the
+        # .original. With $Unpatcher we self-heal a patched source; without it
+        # we fail fast rather than enshrine a corrupt backup.
+        [string]$PatchMarker = '',
+        # Optional: [scriptblock] called with one positional arg ($assemblyPath)
+        # to reverse the patch in place. Enables self-heal of an already-patched
+        # source when no pristine backup exists.
+        [scriptblock]$Unpatcher = $null,
+        # Delete leftover doorstop files (winhttp.dll, version.dll,
+        # doorstop_config.ini, .doorstop_version) from the game root. Off by
+        # default: those names belong to BepInEx 5 and Ultimate ASI Loader, so a
+        # Cecil deploy that removes them silently stops another mod's loader.
+        # Even when set, Remove-OldDoorstopFiles only deletes what the state
+        # file records as ours.
+        [switch]$CleanDoorstop
+    )
+
+    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    $result = $null
+    foreach ($target in $targets) {
+        if ($targets.Count -gt 1) {
+            Write-Host ""
+            Write-Host "--- $target" -ForegroundColor Cyan
+        }
+        $forward = @{} + $PSBoundParameters
+        $forward['GivenPath'] = $target
+        $result = Invoke-DevDeployCecilToPath @forward
+    }
+    return $result
+}
+
 <#
 .SYNOPSIS
     Dev-deploy a BepInEx mod to <game>/BepInEx/plugins/.
@@ -284,7 +372,7 @@ function Invoke-DevDeployCecil {
     is set. Copies the freshly-built mod DLL + extras from BuildOutputPath
     into BepInEx/plugins/.
 #>
-function Invoke-DevDeployBepInEx {
+function Invoke-DevDeployBepInExToPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$GameId,
@@ -341,6 +429,39 @@ function Invoke-DevDeployBepInEx {
     }
 }
 
+# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
+# result for the last install written, which is what the single-install callers
+# have always been handed.
+function Invoke-DevDeployBepInEx {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [Parameter(Mandatory)][string]$BuildOutputPath,
+        [Parameter(Mandatory)][string]$ModDllName,
+        [string[]]$ExtraDlls = @(),
+        [string]$GivenPath,
+        [switch]$EnsureLoader,
+        [ValidateSet(5,6)][int]$MajorVersion = 5,
+        [ValidateSet('x64','x86')][string]$Architecture = 'x64',
+        [string]$VendorZip,
+        [string]$PluginSubfolder
+    )
+
+    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    $result = $null
+    foreach ($target in $targets) {
+        if ($targets.Count -gt 1) {
+            Write-Host ""
+            Write-Host "--- $target" -ForegroundColor Cyan
+        }
+        $forward = @{} + $PSBoundParameters
+        $forward['GivenPath'] = $target
+        $result = Invoke-DevDeployBepInExToPath @forward
+    }
+    return $result
+}
+
 <#
 .SYNOPSIS
     Dev-deploy a MelonLoader mod to <game>/Mods/.
@@ -350,7 +471,7 @@ function Invoke-DevDeployBepInEx {
     (Firewatch needs 0.5.7 to avoid the RegexOptions crash on Unity 2017
     Mono) - pass it via -Version.
 #>
-function Invoke-DevDeployMelonLoader {
+function Invoke-DevDeployMelonLoaderToPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$GameId,
@@ -400,6 +521,37 @@ function Invoke-DevDeployMelonLoader {
     }
 }
 
+# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
+# result for the last install written, which is what the single-install callers
+# have always been handed.
+function Invoke-DevDeployMelonLoader {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [Parameter(Mandatory)][string]$BuildOutputPath,
+        [Parameter(Mandatory)][string]$ModDllName,
+        [string[]]$ExtraDlls = @(),
+        [string]$GivenPath,
+        [switch]$EnsureLoader,
+        [ValidateSet('x64','x86')][string]$Architecture = 'x64',
+        [string]$Version
+    )
+
+    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    $result = $null
+    foreach ($target in $targets) {
+        if ($targets.Count -gt 1) {
+            Write-Host ""
+            Write-Host "--- $target" -ForegroundColor Cyan
+        }
+        $forward = @{} + $PSBoundParameters
+        $forward['GivenPath'] = $target
+        $result = Invoke-DevDeployMelonLoaderToPath @forward
+    }
+    return $result
+}
+
 <#
 .SYNOPSIS
     Dev-deploy an Ultimate ASI Loader mod to the game's exe directory.
@@ -429,7 +581,7 @@ function Invoke-DevDeployMelonLoader {
     from <game>\bin with an altered search path, so the proxy + .asi must
     live there (Portal 2 passes 'bin'). Created if absent.
 #>
-function Invoke-DevDeployASILoader {
+function Invoke-DevDeployASILoaderToPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$GameId,
@@ -495,6 +647,38 @@ function Invoke-DevDeployASILoader {
     }
 }
 
+# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
+# result for the last install written, which is what the single-install callers
+# have always been handed.
+function Invoke-DevDeployASILoader {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [Parameter(Mandatory)][string]$BuildOutputPath,
+        [Parameter(Mandatory)][string]$ModDllName,
+        [string]$ConfigFile,
+        [string]$VendorLoaderDll,
+        [string]$AsiLoaderName = 'winmm.dll',
+        [string[]]$ExtraDlls = @(),
+        [string]$GivenPath,
+        [string]$ExeSubDir
+    )
+
+    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    $result = $null
+    foreach ($target in $targets) {
+        if ($targets.Count -gt 1) {
+            Write-Host ""
+            Write-Host "--- $target" -ForegroundColor Cyan
+        }
+        $forward = @{} + $PSBoundParameters
+        $forward['GivenPath'] = $target
+        $result = Invoke-DevDeployASILoaderToPath @forward
+    }
+    return $result
+}
+
 <#
 .SYNOPSIS
     Dev-deploy a REFramework mod to <game>/reframework/plugins/.
@@ -511,7 +695,7 @@ function Invoke-DevDeployASILoader {
     Optional absolute path to a sibling config file (typically
     HeadTracking.ini at the project root) to deploy alongside the DLL.
 #>
-function Invoke-DevDeployREFramework {
+function Invoke-DevDeployREFrameworkToPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$GameId,
@@ -576,6 +760,36 @@ function Invoke-DevDeployREFramework {
     }
 }
 
+# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
+# result for the last install written, which is what the single-install callers
+# have always been handed.
+function Invoke-DevDeployREFramework {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [Parameter(Mandatory)][string]$BuildOutputPath,
+        [Parameter(Mandatory)][string]$ModDllName,
+        [string]$ConfigFile,
+        [string]$VendorReframeworkZip,
+        [string[]]$ExtraDlls = @(),
+        [string]$GivenPath
+    )
+
+    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    $result = $null
+    foreach ($target in $targets) {
+        if ($targets.Count -gt 1) {
+            Write-Host ""
+            Write-Host "--- $target" -ForegroundColor Cyan
+        }
+        $forward = @{} + $PSBoundParameters
+        $forward['GivenPath'] = $target
+        $result = Invoke-DevDeployREFrameworkToPath @forward
+    }
+    return $result
+}
+
 <#
 .SYNOPSIS
     Dev-deploy a shim-only mod (system-DLL replacement) to the game's
@@ -598,7 +812,7 @@ function Invoke-DevDeployREFramework {
     to ModDllName if the build produces a file with the deployed name
     directly.
 #>
-function Invoke-DevDeployShim {
+function Invoke-DevDeployShimToPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$GameId,
@@ -689,6 +903,40 @@ function Invoke-DevDeployShim {
         ExeDir          = $exeDir
         DeployedDllPath = (Join-Path $exeDir $ModDllName)
     }
+}
+
+# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
+# result for the last install written, which is what the single-install callers
+# have always been handed.
+function Invoke-DevDeployShim {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [Parameter(Mandatory)][string]$BuildOutputPath,
+        [Parameter(Mandatory)][string]$ModDllName,
+        [string]$SourceDllName,
+        [string[]]$ExtraDlls = @(),
+        [string]$GivenPath,
+        # A byte sequence present in EVERY build of this mod's shim, used to answer
+        # "is the file already sitting there ours?" independently of build config.
+        # Required, and deliberately not defaulted - see the backup block below for
+        # what guessing costs.
+        [Parameter(Mandatory)][string]$ShimMarker
+    )
+
+    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    $result = $null
+    foreach ($target in $targets) {
+        if ($targets.Count -gt 1) {
+            Write-Host ""
+            Write-Host "--- $target" -ForegroundColor Cyan
+        }
+        $forward = @{} + $PSBoundParameters
+        $forward['GivenPath'] = $target
+        $result = Invoke-DevDeployShimToPath @forward
+    }
+    return $result
 }
 
 Export-ModuleMember -Function @(

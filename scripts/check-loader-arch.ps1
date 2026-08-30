@@ -24,6 +24,11 @@
 .PARAMETER ExpectedArch
     Either 'x86' or 'x64'.
 
+    The exit code is the whole answer. stdout stays empty: install.cmd calls
+    this mid-install and prints its own explanation afterwards, so anything
+    written here lands ahead of that text and reads like the installer's own
+    output. A failure reason goes to stderr; a match says nothing.
+
 .EXITCODE
     0 - PE machine matches ExpectedArch
     1 - mismatch (PE is a different arch)
@@ -39,20 +44,20 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-    Write-Host "PE file not found: $Path"
+    [Console]::Error.WriteLine("PE file not found: $Path")
     exit 2
 }
 
 $bytes = [System.IO.File]::ReadAllBytes($Path)
 if ($bytes.Length -lt 0x40 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
-    Write-Host "Not a PE file (no MZ signature): $Path"
+    [Console]::Error.WriteLine("Not a PE file (no MZ signature): $Path")
     exit 3
 }
 
 $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
 if ($peOff -lt 0 -or ($peOff + 6) -gt $bytes.Length -or
     $bytes[$peOff] -ne 0x50 -or $bytes[$peOff + 1] -ne 0x45) {
-    Write-Host "Invalid PE header in $Path"
+    [Console]::Error.WriteLine("Invalid PE header in $Path")
     exit 3
 }
 
@@ -64,7 +69,7 @@ $actual = switch ($machine) {
     default { 'unknown' }
 }
 
-Write-Host ("PE machine 0x{0:X4} ({1}); expected {2}" -f $machine, $actual, $ExpectedArch)
-
 if ($actual -eq $ExpectedArch) { exit 0 }
+
+[Console]::Error.WriteLine(("PE machine 0x{0:X4} ({1}); expected {2}" -f $machine, $actual, $ExpectedArch))
 exit 1

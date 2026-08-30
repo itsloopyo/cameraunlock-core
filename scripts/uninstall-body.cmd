@@ -13,7 +13,8 @@
 ::   ASILoader    - removes <exe-dir>/winmm.dll (or dinput8.dll)
 ::   REFramework  - removes <game>/dinput8.dll and <game>/reframework/
 ::   UE4SS        - removes <win64>/Mods/<ModName>/ and its mods.txt entry;
-::                  UE4SS.dll + dwmapi.dll only if we installed the loader
+::                  every file the vendored UE4SS.zip lays down, Mods\ tree
+::                  included, only if we installed the loader
 ::   xNVSE        - removes the plugin from <game>/Data/NVSE/Plugins; the
 ::                  loader itself is shared with every other New Vegas script
 ::                  mod and is never removed, /force included
@@ -28,6 +29,8 @@
 ::   STATE_FILE         - state file basename
 ::   FRAMEWORK_TYPE     - dispatch key (see list above)
 ::   LEGACY_DLLS        - optional extra DLLs from older versions to clean up
+::   MOD_SEED_FILES     - optional config files install.cmd seeded write-if-
+::                        absent; must match install.cmd's list
 ::   MANAGED_SUBFOLDER  - MonoCecil only: path under GAME_PATH containing
 ::                        Assembly-CSharp.dll
 ::   ASSEMBLY_DLL       - MonoCecil only: assembly to restore from .original
@@ -56,27 +59,30 @@ setlocal disabledelayedexpansion
 call :detect_yes_flag %*
 call :main %*
 set "_EC=%errorlevel%"
-if not defined YES_FLAG ( echo. & pause )
+if not defined _NO_PAUSE ( echo. & pause )
 exit /b %_EC%
 
 :: ============================================
-:: Pre-scan args at outer scope so YES_FLAG propagates to the post-:main
-:: pause check. :main's arg parser sets its own (local) YES_FLAG too, but
-:: cmd.exe discards local vars when setlocal pops on `exit /b`, so without
-:: this pre-scan the post-:main `if not defined YES_FLAG` always pauses
-:: and /y can't make the script headless. Quoted-string form is required
-:: here - bracket form `if [%~1]==[/y]` does NOT quote, so a path arg
-:: containing whitespace ("C:\...\Gone Home") splits across the brackets
-:: and crashes cmd with "[Home]==[/y] was unexpected at this time". The
-:: trailing-backslash hazard the bracket form was working around is moot
-:: with `%~1`: it strips the launcher's surrounding quotes before the
-:: comparison, so a value like `C:\foo\` can't escape the closing `"`.
+:: Pre-scan args at outer scope and record the pause decision in _NO_PAUSE,
+:: which :main never writes. :main's own parser re-derives YES_FLAG as it goes
+:: and only reaches the /y token after the path, so a pause keyed off that
+:: variable sat there forever whenever parsing failed on an earlier argument -
+:: which is `install.cmd "<path>" /y`, lopari's exact call shape.
+::
+:: `if [%1]==[]` and not `if "%~1"==""`: %~1 strips the quotes off an empty
+:: argument, which makes `install.cmd "" /y` indistinguishable from no
+:: arguments at all and swallows the /y behind it. The bracket form keeps the
+:: launcher's quotes, so a path with whitespace stays one token. The
+:: comparisons below still use the quoted-string form - bracket form
+:: `if [%~1]==[/y]` does NOT quote, so a path arg containing whitespace
+:: ("C:\...\Gone Home") splits across the brackets and crashes cmd with
+:: "[Home]==[/y] was unexpected at this time".
 :: ============================================
 :detect_yes_flag
-if "%~1"=="" exit /b 0
-if /i "%~1"=="/y"    set "YES_FLAG=1"
-if /i "%~1"=="-y"    set "YES_FLAG=1"
-if /i "%~1"=="--yes" set "YES_FLAG=1"
+if [%1]==[] exit /b 0
+if /i "%~1"=="/y"    set "_NO_PAUSE=1"
+if /i "%~1"=="-y"    set "_NO_PAUSE=1"
+if /i "%~1"=="--yes" set "_NO_PAUSE=1"
 shift
 goto :detect_yes_flag
 
@@ -96,8 +102,18 @@ set "YES_FLAG="
 set "FORCE_FLAG="
 set "_GIVEN_PATH="
 :parse_args
-if "%~1"=="" goto :args_done
+if [%1]==[] goto :args_done
 set "_ARG=%~1"
+:: An argument that is there but empty is not "no arguments": a launcher that
+:: expanded a variable it never filled in reaches here, and treating it as the
+:: end of the list both loses the flags behind it and silently falls back to
+:: detection, installing into whichever copy of the game happens to be on the
+:: machine rather than the one the caller named.
+if not defined _ARG (
+    echo ERROR: empty path argument.
+    echo Pass the game folder, or pass no argument at all to let detection find it.
+    exit /b 2
+)
 if /i "%_ARG%"=="/y"      ( set "YES_FLAG=1"   & shift & goto :parse_args )
 if /i "%_ARG%"=="-y"      ( set "YES_FLAG=1"   & shift & goto :parse_args )
 if /i "%_ARG%"=="--yes"   ( set "YES_FLAG=1"   & shift & goto :parse_args )
@@ -121,6 +137,25 @@ echo drops the second. Run without a path so detection finds the game instead.
 exit /b 2
 :args_done
 set "_ARG="
+
+:: The path cannot keep a trailing backslash: `-GivenPath "%_GIVEN_PATH%"`
+:: would hand CommandLineToArgvW a `\"`, which is an escaped quote, and
+:: PowerShell receives the path with a `"` stuck on the end - Test-Path then
+:: throws "Illegal characters in path" and the run dies on a stack trace.
+:: `%~1` strips the launcher's own quotes, so `C:\Games\Foo\` passes the
+:: `if exist` above and gets that far.
+:strip_given_slash
+if not defined _GIVEN_PATH goto :given_normalised
+if not "%_GIVEN_PATH:~-1%"=="\" goto :given_normalised
+if "%_GIVEN_PATH:~-2%"==":\" (
+    rem A drive root has no backslash to spare, so end the value on a `.`
+    rem instead: same directory, and it no longer escapes the closing quote.
+    set "_GIVEN_PATH=%_GIVEN_PATH%."
+    goto :given_normalised
+)
+set "_GIVEN_PATH=%_GIVEN_PATH:~0,-1%"
+goto :strip_given_slash
+:given_normalised
 
 :: -------- Validate CONFIG BLOCK --------
 :: Every name below is interpolated straight into a path that gets written,
@@ -191,13 +226,25 @@ echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
-tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i "!GAME_EXE!" >nul 2>&1
+:: /c: or findstr reads the exe name as a space-separated list of terms and
+:: matches on ANY of them. With nothing running tasklist prints "INFO: No tasks
+:: are running which match the specified criteria.", so an exe whose name
+:: contains one of those words - "South Park - The Stick of Truth.exe" - matched
+:: that line, and the install refused to run on every machine, forever.
+tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i /c:"!GAME_EXE!" >nul 2>&1
 if not errorlevel 1 (
     echo ERROR: !GAME_DISPLAY_NAME! is currently running.
     echo Please close the game before uninstalling.
     echo.
     exit /b 1
 )
+
+:: -------- Validate the CONFIG BLOCK name lists --------
+:: Checked as one string: the test is per character, so which of the six a bad
+:: entry came from does not change the answer, and the message names all six.
+set "_LIST=!MOD_DLLS! !LEGACY_DLLS! !MOD_SEED_FILES! !MOD_LEFTOVERS! !ROOT_EXTRAS! !MANAGED_EXTRAS!"
+call :assert_safe_list
+if errorlevel 1 exit /b 1
 
 :: -------- Compute DEPLOY_DIR per FRAMEWORK_TYPE --------
 call :compute_deploy_dir
@@ -224,6 +271,8 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
 ) else (
     call :remove_mod_files_plain
 )
+call :remove_mod_seed_files
+if errorlevel 1 exit /b 1
 call :remove_mod_leftovers
 call :remove_root_extras
 
@@ -237,43 +286,120 @@ if "!REMOVE_LOADER!"=="0" (
     )
 )
 
-if /i "%FRAMEWORK_TYPE%"=="None" (
-    rem Shim-only: already handled in :remove_shim_files above (restores .backup).
-    rem
-) else if /i "%FRAMEWORK_TYPE%"=="MonoCecil" (
-    rem Cecil: the backup restore IS the loader removal. Already done.
-    rem
-) else if /i "%FRAMEWORK_TYPE%"=="xNVSE" (
+:: Shim-only is already handled in :remove_shim_files above (it restores the
+:: .backup), and for Cecil the backup restore IS the loader removal.
+:: Written as gotos rather than an if/else chain so `call :remove_<type>` sits
+:: at the top level, where its exit code can be read - inside a parenthesised
+:: block a failing loader removal ran on into "Uninstall Complete".
+if /i "%FRAMEWORK_TYPE%"=="None"      goto :loader_done
+if /i "%FRAMEWORK_TYPE%"=="MonoCecil" goto :loader_done
+if /i "%FRAMEWORK_TYPE%"=="xNVSE" (
     rem xNVSE is a shared modding framework: every other New Vegas script mod
     rem binds to the same loader, so it is not ours to take away. /force does
     rem not reach it either.
     echo.
     echo xNVSE was left intact - other mods may depend on it.
-) else (
-    if "!REMOVE_LOADER!"=="1" (
-        echo.
-        if "!FORCE_FLAG!"=="1" (
-            echo Removing %FRAMEWORK_TYPE% ^(/force^)...
-        ) else (
-            echo Removing %FRAMEWORK_TYPE% ^(installed by this mod^)...
-        )
-        call :remove_%FRAMEWORK_TYPE%
-    ) else (
-        echo.
-        echo %FRAMEWORK_TYPE% was not installed by this mod - leaving intact. Use /force to remove anyway.
-    )
+    goto :loader_done
 )
+if not "!REMOVE_LOADER!"=="1" (
+    echo.
+    echo %FRAMEWORK_TYPE% was not installed by this mod - leaving intact. Use /force to remove anyway.
+    goto :loader_done
+)
+echo.
+if "!FORCE_FLAG!"=="1" (
+    echo Removing %FRAMEWORK_TYPE% ^(/force^)...
+) else (
+    echo Removing %FRAMEWORK_TYPE% ^(installed by this mod^)...
+)
+call :remove_%FRAMEWORK_TYPE%
+if errorlevel 1 exit /b 1
+:loader_done
 
 :: -------- Remove state file --------
-if exist "!GAME_PATH!\%STATE_FILE%" (
-    del "!GAME_PATH!\%STATE_FILE%"
-    echo   Removed: state file
-)
+:: Only once the tree is actually clean. Deleting it after a failed removal
+:: throws away installed_by_us, and the retry then reads the missing file as
+:: "someone else installed the loader" and refuses to touch it without /force.
+if defined _REMOVE_FAILED goto :uninstall_incomplete
+set "_DEL_PATH=!GAME_PATH!\%STATE_FILE%"
+set "_DEL_LABEL=state file"
+call :del_one
+if defined _REMOVE_FAILED goto :uninstall_incomplete
 
 echo.
 echo === Uninstall Complete ===
 echo.
 exit /b 0
+
+:uninstall_incomplete
+echo.
+echo === Uninstall Incomplete ===
+echo.
+echo Some files are still in the game folder - see the errors above. Close the
+echo game, and any launcher or overlay that may be holding its files open, then
+echo run this uninstaller again.
+echo The state file was left in place so the retry still knows what to remove.
+echo.
+exit /b 1
+
+:: ============================================
+:: Delete one file and report what actually happened. _DEL_PATH is the full
+:: path, _DEL_LABEL what to print. They travel in variables rather than as
+:: arguments because `%~1` is substituted before cmd.exe scans for `!`, so a
+:: game folder with a `!` in it would arrive here already truncated.
+::
+:: Existence after the attempt is the test: `del` reports a failure on stderr
+:: and leaves errorlevel alone, which is how "Removed: X" came to be printed
+:: for a file that is still sitting there. Raises _REMOVE_FAILED instead of
+:: exiting so one locked file does not hide the state of the rest of the tree.
+:: ============================================
+:del_one
+if not exist "!_DEL_PATH!" exit /b 0
+del /f /q "!_DEL_PATH!" >nul 2>&1
+if exist "!_DEL_PATH!" (
+    echo   ERROR: could not remove !_DEL_LABEL!
+    set "_REMOVE_FAILED=1"
+    exit /b 1
+)
+echo   Removed: !_DEL_LABEL!
+exit /b 0
+
+:: ============================================
+:: Same contract as :del_one for a whole directory tree.
+:: ============================================
+:rmtree_one
+if not exist "!_DEL_PATH!\" exit /b 0
+rmdir /s /q "!_DEL_PATH!" >nul 2>&1
+if exist "!_DEL_PATH!\" (
+    echo   ERROR: could not remove !_DEL_LABEL!
+    set "_REMOVE_FAILED=1"
+    exit /b 1
+)
+echo   Removed: !_DEL_LABEL!
+exit /b 0
+
+:: ============================================
+:: A CONFIG BLOCK name list is expanded by FOR, which globs its items against
+:: the CURRENT directory rather than the game folder, and each item is then
+:: pasted into a `del`. A wildcard, a `..`, a drive letter or a path separator
+:: therefore reaches outside the folder this uninstall owns. _LIST = the value.
+:: ============================================
+:assert_safe_list
+set "_BAD="
+if not "!_LIST!"=="!_LIST:**=!" set "_BAD=a wildcard"
+if not "!_LIST!"=="!_LIST:?=!"  set "_BAD=a wildcard"
+if not "!_LIST!"=="!_LIST:..=!" set "_BAD=a .."
+if not "!_LIST!"=="!_LIST::=!"  set "_BAD=a drive letter"
+if not "!_LIST!"=="!_LIST:/=!"  set "_BAD=a path separator"
+if not "!_LIST!"=="!_LIST:\=!"  set "_BAD=a path separator"
+if not defined _BAD exit /b 0
+echo ERROR: one of MOD_DLLS, LEGACY_DLLS, MOD_SEED_FILES, MOD_LEFTOVERS,
+echo ROOT_EXTRAS or MANAGED_EXTRAS in the uninstall.cmd CONFIG BLOCK contains
+echo !_BAD!:
+echo   !_LIST!
+echo Each entry is removed from the folder the mod was deployed into, so only
+echo plain filenames belong in those lists.
+exit /b 1
 
 :: ============================================
 :: compute_deploy_dir: set DEPLOY_DIR based on FRAMEWORK_TYPE.
@@ -339,16 +465,18 @@ echo Removing mod files...
 set "REMOVED=0"
 for %%f in (%MOD_DLLS%) do (
     if exist "!DEPLOY_DIR!\%%f" (
-        del "!DEPLOY_DIR!\%%f"
-        echo   Removed: %%f
+        set "_DEL_PATH=!DEPLOY_DIR!\%%f"
+        set "_DEL_LABEL=%%f"
+        call :del_one
         set /a REMOVED+=1
     )
 )
 if defined LEGACY_DLLS (
     for %%f in (%LEGACY_DLLS%) do (
         if exist "!DEPLOY_DIR!\%%f" (
-            del "!DEPLOY_DIR!\%%f"
-            echo   Removed: %%f ^(legacy^)
+            set "_DEL_PATH=!DEPLOY_DIR!\%%f"
+            set "_DEL_LABEL=%%f (legacy)"
+            call :del_one
             set /a REMOVED+=1
         )
     )
@@ -356,20 +484,24 @@ if defined LEGACY_DLLS (
 if /i "%FRAMEWORK_TYPE%"=="BepInEx" if defined PLUGIN_SUBFOLDER (
     for %%f in (%MOD_DLLS%) do (
         if exist "!GAME_PATH!\BepInEx\plugins\%%f" (
-            del "!GAME_PATH!\BepInEx\plugins\%%f"
-            echo   Removed: %%f ^(flat-laid duplicate^)
+            set "_DEL_PATH=!GAME_PATH!\BepInEx\plugins\%%f"
+            set "_DEL_LABEL=%%f (flat-laid duplicate)"
+            call :del_one
             set /a REMOVED+=1
         )
     )
     if defined LEGACY_DLLS (
         for %%f in (%LEGACY_DLLS%) do (
             if exist "!GAME_PATH!\BepInEx\plugins\%%f" (
-                del "!GAME_PATH!\BepInEx\plugins\%%f"
-                echo   Removed: %%f ^(legacy, flat-laid^)
+                set "_DEL_PATH=!GAME_PATH!\BepInEx\plugins\%%f"
+                set "_DEL_LABEL=%%f (legacy, flat-laid)"
+                call :del_one
                 set /a REMOVED+=1
             )
         )
     )
+    rem Only if the mod's own subfolder came out empty; a plugin someone else
+    rem put there keeps it, and rmdir without /s refuses to take it.
     rmdir "!DEPLOY_DIR!" >nul 2>&1
 )
 if "!REMOVED!"=="0" echo   No mod files found
@@ -383,10 +515,22 @@ exit /b 0
 :remove_mod_leftovers
 if not defined MOD_LEFTOVERS exit /b 0
 for %%f in (%MOD_LEFTOVERS%) do (
-    if exist "!DEPLOY_DIR!\%%f" (
-        del "!DEPLOY_DIR!\%%f"
-        echo   Removed: %%f
-    )
+    set "_DEL_PATH=!DEPLOY_DIR!\%%f"
+    set "_DEL_LABEL=%%f"
+    call :del_one
+)
+exit /b 0
+
+:: ============================================
+:: Remove the files install.cmd seeded write-if-absent. They are the mod's own
+:: config, deployed into the same folder as its DLLs, so they come off with it.
+:: ============================================
+:remove_mod_seed_files
+if not defined MOD_SEED_FILES exit /b 0
+for %%f in (%MOD_SEED_FILES%) do (
+    set "_DEL_PATH=!DEPLOY_DIR!\%%f"
+    set "_DEL_LABEL=%%f"
+    call :del_one
 )
 exit /b 0
 
@@ -398,10 +542,9 @@ exit /b 0
 :remove_root_extras
 if not defined ROOT_EXTRAS exit /b 0
 for %%f in (%ROOT_EXTRAS%) do (
-    if exist "!GAME_PATH!\%%f" (
-        del "!GAME_PATH!\%%f"
-        echo   Removed: %%f
-    )
+    set "_DEL_PATH=!GAME_PATH!\%%f"
+    set "_DEL_LABEL=%%f"
+    call :del_one
 )
 exit /b 0
 
@@ -411,10 +554,9 @@ exit /b 0
 :remove_managed_extras
 if not defined MANAGED_EXTRAS exit /b 0
 for %%f in (%MANAGED_EXTRAS%) do (
-    if exist "!DEPLOY_DIR!\%%f" (
-        del "!DEPLOY_DIR!\%%f"
-        echo   Removed: %%f
-    )
+    set "_DEL_PATH=!DEPLOY_DIR!\%%f"
+    set "_DEL_LABEL=%%f"
+    call :del_one
 )
 exit /b 0
 
@@ -427,14 +569,26 @@ echo Removing shim files...
 set "REMOVED=0"
 for %%f in (%MOD_DLLS%) do (
     if exist "!DEPLOY_DIR!\%%f.backup" (
-        if exist "!DEPLOY_DIR!\%%f" del /q "!DEPLOY_DIR!\%%f" >nul 2>&1
-        move /y "!DEPLOY_DIR!\%%f.backup" "!DEPLOY_DIR!\%%f" >nul
-        echo   Restored original %%f from backup
+        set "_DEL_PATH=!DEPLOY_DIR!\%%f"
+        set "_DEL_LABEL=%%f"
+        call :del_one >nul
+        if exist "!DEPLOY_DIR!\%%f" (
+            echo   ERROR: could not remove %%f, so the original cannot be put back.
+        ) else (
+            move /y "!DEPLOY_DIR!\%%f.backup" "!DEPLOY_DIR!\%%f" >nul
+            if errorlevel 1 (
+                echo   ERROR: could not restore the original %%f from %%f.backup.
+                set "_REMOVE_FAILED=1"
+            ) else (
+                echo   Restored original %%f from backup
+            )
+        )
         set /a REMOVED+=1
     ) else (
         if exist "!DEPLOY_DIR!\%%f" (
-            del "!DEPLOY_DIR!\%%f"
-            echo   Removed: %%f ^(no backup was present^)
+            set "_DEL_PATH=!DEPLOY_DIR!\%%f"
+            set "_DEL_LABEL=%%f (no backup was present)"
+            call :del_one
             set /a REMOVED+=1
         )
     )
@@ -442,8 +596,9 @@ for %%f in (%MOD_DLLS%) do (
 if defined LEGACY_DLLS (
     for %%f in (%LEGACY_DLLS%) do (
         if exist "!DEPLOY_DIR!\%%f" (
-            del "!DEPLOY_DIR!\%%f"
-            echo   Removed: %%f ^(legacy^)
+            set "_DEL_PATH=!DEPLOY_DIR!\%%f"
+            set "_DEL_LABEL=%%f (legacy)"
+            call :del_one
             set /a REMOVED+=1
         )
     )
@@ -455,15 +610,13 @@ exit /b 0
 :: Remove BepInEx (regular and BepInExPack both land in the same layout).
 :: ============================================
 :remove_BepInEx
-if exist "!GAME_PATH!\BepInEx" (
-    rmdir /s /q "!GAME_PATH!\BepInEx"
-    echo   Removed: BepInEx folder
-)
+set "_DEL_PATH=!GAME_PATH!\BepInEx"
+set "_DEL_LABEL=BepInEx folder"
+call :rmtree_one
 for %%f in (winhttp.dll doorstop_config.ini .doorstop_version changelog.txt) do (
-    if exist "!GAME_PATH!\%%f" (
-        del "!GAME_PATH!\%%f"
-        echo   Removed: %%f
-    )
+    set "_DEL_PATH=!GAME_PATH!\%%f"
+    set "_DEL_LABEL=%%f"
+    call :del_one
 )
 exit /b 0
 
@@ -473,15 +626,13 @@ exit /b 0
 :: melon mods installed keep their data).
 :: ============================================
 :remove_MelonLoader
-if exist "!GAME_PATH!\MelonLoader" (
-    rmdir /s /q "!GAME_PATH!\MelonLoader"
-    echo   Removed: MelonLoader folder
-)
+set "_DEL_PATH=!GAME_PATH!\MelonLoader"
+set "_DEL_LABEL=MelonLoader folder"
+call :rmtree_one
 for %%f in (version.dll dobby.dll NOTICE.txt) do (
-    if exist "!GAME_PATH!\%%f" (
-        del "!GAME_PATH!\%%f"
-        echo   Removed: %%f
-    )
+    set "_DEL_PATH=!GAME_PATH!\%%f"
+    set "_DEL_LABEL=%%f"
+    call :del_one
 )
 for %%d in (Mods UserLibs UserData) do (
     if exist "!GAME_PATH!\%%d" (
@@ -530,8 +681,16 @@ echo   Delete it and run Steam "Verify integrity of game files" to restore a cle
 exit /b 1
 :_cecil_restore
 copy /y "!BACKUP_PATH!" "!ASSEMBLY_PATH!" >nul
-del "!BACKUP_PATH!"
+if errorlevel 1 (
+    echo   ERROR: could not restore %ASSEMBLY_DLL% from its .original backup.
+    echo   The backup is untouched. Close the game, check the folder is
+    echo   writable, and run this uninstaller again.
+    exit /b 1
+)
 echo   Restored: %ASSEMBLY_DLL% from backup
+set "_DEL_PATH=!BACKUP_PATH!"
+set "_DEL_LABEL=%ASSEMBLY_DLL%.original"
+call :del_one
 exit /b 0
 
 :: ============================================
@@ -568,32 +727,29 @@ if not defined ASI_LOADER_NAME (
     echo   Cannot tell which proxy DLL belongs to this mod; refusing to guess.
     exit /b 1
 )
-if exist "!EXE_DIR!\%ASI_LOADER_NAME%" (
-    del "!EXE_DIR!\%ASI_LOADER_NAME%"
-    echo   Removed: %ASI_LOADER_NAME%
-)
+set "_DEL_PATH=!EXE_DIR!\%ASI_LOADER_NAME%"
+set "_DEL_LABEL=%ASI_LOADER_NAME%"
+call :del_one
 exit /b 0
 
 :: ============================================
 :: Remove REFramework.
 :: ============================================
 :remove_REFramework
-if exist "!GAME_PATH!\dinput8.dll" (
-    del "!GAME_PATH!\dinput8.dll"
-    echo   Removed: dinput8.dll
-)
-if exist "!GAME_PATH!\reframework" (
-    rmdir /s /q "!GAME_PATH!\reframework"
-    echo   Removed: reframework/
-)
-:: Loose files REFramework's zip drops at the game root: the revision marker,
-:: plus VR runtime DLLs the install stripped for flatscreen mode (clean up any
-:: an older install left behind) so uninstall returns the game to vanilla.
-for %%f in (reframework_revision.txt openvr_api.dll openxr_loader.dll DELETE_OPENVR_API_DLL_IF_YOU_WANT_TO_USE_OPENXR) do (
-    if exist "!GAME_PATH!\%%f" (
-        del /q "!GAME_PATH!\%%f" >nul 2>&1
-        echo   Removed: %%f
-    )
+set "_DEL_PATH=!GAME_PATH!\dinput8.dll"
+set "_DEL_LABEL=dinput8.dll"
+call :del_one
+set "_DEL_PATH=!GAME_PATH!\reframework"
+set "_DEL_LABEL=reframework/"
+call :rmtree_one
+:: Loose files REFramework's zip drops at the game root. openvr_api.dll and
+:: openxr_loader.dll are NOT in this list: install strips the copies the zip
+:: laid down and puts back any the game or another mod already had, so one
+:: sitting here at uninstall time belongs to someone else.
+for %%f in (reframework_revision.txt DELETE_OPENVR_API_DLL_IF_YOU_WANT_TO_USE_OPENXR) do (
+    set "_DEL_PATH=!GAME_PATH!\%%f"
+    set "_DEL_LABEL=%%f"
+    call :del_one
 )
 exit /b 0
 
@@ -605,8 +761,9 @@ exit /b 0
 :remove_ue4ss_mod
 echo Removing mod files...
 if exist "!DEPLOY_DIR!\" (
-    rmdir /s /q "!DEPLOY_DIR!"
-    echo   Removed: Mods\%MOD_INTERNAL_NAME%\
+    set "_DEL_PATH=!DEPLOY_DIR!"
+    set "_DEL_LABEL=Mods\%MOD_INTERNAL_NAME%\"
+    call :rmtree_one
 ) else (
     echo   No mod folder found
 )
@@ -643,29 +800,71 @@ echo   Deregistered %MOD_INTERNAL_NAME% from mods.txt
 exit /b 0
 
 :: ============================================
-:: Remove the UE4SS loader itself. Only the two files install.cmd's vendored
-:: zip lays down as the loader - never Mods\, which holds the user's other
-:: Lua mods.
+:: Remove the UE4SS loader itself: every file the vendored zip lays down, read
+:: off the zip's own listing. That listing is the record of what arrived with
+:: the loader, so it also covers Mods\ - the ten built-in Lua mods, Mods\shared\
+:: and mods.txt - which a hand-written list of top-level files left behind.
+:: Anything under Mods\ that the listing does not name is the user's and stays,
+:: and so does any directory it left something in.
+::
+:: Only reached when the state file says this mod installed the loader, or
+:: under /force. Our own mod folder and its mods.txt line came off earlier in
+:: :remove_ue4ss_mod, which runs whoever installed the loader.
 :: ============================================
 :remove_UE4SS
-:: Every top-level file the vendored UE4SS zip lays down, not just the two
-:: DLLs. Removing a subset left the game folder littered with a settings
-:: file and docs while reporting "Uninstall Complete", and the bespoke
-:: uninstaller this shared path replaces removed four of them.
-for %%f in (UE4SS.dll dwmapi.dll UE4SS-settings.ini Changelog.md README.md) do (
-    if exist "!UE4_BINARIES_DIR!\%%f" (
-        del "!UE4_BINARIES_DIR!\%%f"
-        echo   Removed: %%f
-    )
+set "VENDOR_DIR=!SCRIPT_DIR!vendor\ue4ss"
+if not exist "!VENDOR_DIR!" set "VENDOR_DIR=!SCRIPT_DIR!..\vendor\ue4ss"
+set "VENDOR_ZIP=!VENDOR_DIR!\UE4SS.zip"
+if not exist "!VENDOR_ZIP!" (
+    echo   ERROR: the bundled UE4SS.zip is not in this package:
+    echo     !VENDOR_ZIP!
+    echo   Without it there is no record of which files arrived with the loader,
+    echo   and guessing would take the user's own Lua mods with it.
+    echo   Re-download the release ZIP and run this uninstaller from it.
+    exit /b 1
 )
-:: The Mods\ tree is deliberately left alone. It holds UE4SS's own built-in
-:: Lua mods AND anything else the user installed, and there is no record of
-:: which subfolders arrived with the loader - so deleting the tree would take
-:: the user's other mods with it. Our own entry is removed by
-:: :remove_ue4ss_mod before this runs.
-if exist "!UE4_BINARIES_DIR!\Mods" (
-    echo   Left in place: Mods\ ^(UE4SS built-in Lua mods and any you added^)
+set "_ZIP_LIST=!TEMP!\cul-ue4ss-list-%RANDOM%-%RANDOM%.txt"
+"%SystemRoot%\System32\tar.exe" -tf "!VENDOR_ZIP!" > "!_ZIP_LIST!"
+if errorlevel 1 (
+    del "!_ZIP_LIST!" 2>nul
+    echo   ERROR: could not list the bundled UE4SS zip:
+    echo     !VENDOR_ZIP!
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
 )
+for /f "usebackq delims=" %%e in ("!_ZIP_LIST!") do (
+    set "_ENTRY=%%e"
+    call :remove_ue4ss_entry
+)
+:: A directory only becomes empty once its children are gone, so the prune
+:: repeats until a pass removes nothing.
+:ue4ss_prune
+set "_PRUNED="
+for /f "usebackq delims=" %%e in ("!_ZIP_LIST!") do (
+    set "_ENTRY=%%e"
+    call :prune_ue4ss_dir
+)
+if defined _PRUNED goto :ue4ss_prune
+del "!_ZIP_LIST!" 2>nul
+exit /b 0
+
+:remove_ue4ss_entry
+if "!_ENTRY:~-1!"=="/" exit /b 0
+set "_ENTRY=!_ENTRY:/=\!"
+set "_DEL_PATH=!UE4_BINARIES_DIR!\!_ENTRY!"
+set "_DEL_LABEL=!_ENTRY!"
+call :del_one
+exit /b 0
+
+:prune_ue4ss_dir
+if not "!_ENTRY:~-1!"=="/" exit /b 0
+set "_ENTRY=!_ENTRY:~0,-1!"
+set "_ENTRY=!_ENTRY:/=\!"
+if not exist "!UE4_BINARIES_DIR!\!_ENTRY!\" exit /b 0
+rmdir "!UE4_BINARIES_DIR!\!_ENTRY!" 2>nul
+if exist "!UE4_BINARIES_DIR!\!_ENTRY!\" exit /b 0
+set "_PRUNED=1"
+echo   Removed: !_ENTRY!\
 exit /b 0
 
 :: ============================================

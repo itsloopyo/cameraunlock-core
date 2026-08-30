@@ -14,6 +14,7 @@
 #include "cameraunlock/processing/position_processor.h"
 #include "cameraunlock/processing/tracking_processor.h"
 #include "cameraunlock/protocol/opentrack_packet.h"
+#include "cameraunlock/tracking/head_tracking_session.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -21,6 +22,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -50,25 +52,12 @@ void Emit(std::initializer_list<double> values) {
     std::cout << line.str() << '\n';
 }
 
-/// Per-frame wiring shared by session_rot and session_pos, mirroring
-/// HeadTrackingSession: the duplicate-sample filter gates the interpolator on
-/// changed VALUES, not on the arrival of a datagram, and nothing anywhere
-/// recenters - the trailer is parsed and dropped.
-struct Session {
-    PoseInterpolator poseInterp;
-    TrackingProcessor processor;
-    PositionInterpolator posInterp;
-    PositionProcessor posProcessor;
-
-    float rawYaw = 0.0f, rawPitch = 0.0f, rawRoll = 0.0f;
-    float rawX = 0.0f, rawY = 0.0f, rawZ = 0.0f;
-    float lastYaw = 0.0f, lastPitch = 0.0f, lastRoll = 0.0f;
-    float lastX = 0.0f, lastY = 0.0f, lastZ = 0.0f;
-    bool seeded = false;
-    int64_t timestamp = 0;
-
-    bool newPacket = false;
-
+/// The tracking source the shipped HeadTrackingSession is driven by here: the
+/// datagram bytes a vector supplies, decoded by the shipped packet parser and
+/// offset the way UdpReceiver offsets its own output. Nothing in the session
+/// pipeline is reimplemented, so a change to HeadTrackingSession fails here.
+class VectorReceiver {
+public:
     void Feed(const std::vector<uint8_t>& datagram) {
         TrackingPose pose;
         PositionData position;
@@ -82,51 +71,65 @@ struct Session {
         uint8_t counter = 0;
         (void)OpenTrackPacket::TryParseRecenterCounter(datagram.data(), datagram.size(), counter);
 
-        rawYaw = pose.yaw;
-        rawPitch = pose.pitch;
-        rawRoll = pose.roll;
-        rawX = position.x;
-        rawY = position.y;
-        rawZ = position.z;
-        newPacket = true;
-        ++timestamp;
+        m_yaw = pose.yaw;
+        m_pitch = pose.pitch;
+        m_roll = pose.roll;
+        m_x = position.x;
+        m_y = position.y;
+        m_z = position.z;
+        m_hasData = true;
+        ++m_timestamp;
     }
 
-    TrackingPose outRotation;
-    math::Vec3 outPosition;
+    void SetRemoteConnection(bool remote) { m_remote = remote; }
 
-    /// One render frame, both halves, in the order HeadTrackingSession runs
-    /// them: the position pivot term needs the rotation processor's smoothed
-    /// state from this same frame.
-    void Step(float dt) {
-        const bool newRotSample = newPacket && (!seeded || rawYaw != lastYaw ||
-                                                rawPitch != lastPitch || rawRoll != lastRoll);
-        const bool newPosSample =
-            newPacket && (!seeded || rawX != lastX || rawY != lastY || rawZ != lastZ);
-        if (newPacket) {
-            lastYaw = rawYaw;
-            lastPitch = rawPitch;
-            lastRoll = rawRoll;
-            lastX = rawX;
-            lastY = rawY;
-            lastZ = rawZ;
-            seeded = true;
-        }
-        newPacket = false;
-
-        InterpolatedPose interp = poseInterp.Update(rawYaw, rawPitch, rawRoll, newRotSample, dt);
-        outRotation = processor.Process(interp.yaw, interp.pitch, interp.roll, dt);
-
-        PositionData raw(rawX, rawY, rawZ, timestamp == 0 ? 1 : timestamp);
-        PositionData interpPos = posInterp.Update(raw, newPosSample, dt);
-
-        float physYaw, physPitch, physRoll;
-        processor.GetSmoothedRotation(physYaw, physPitch, physRoll);
-        math::Quat4 physQ = math::Quat4::FromYawPitchRoll(physYaw, physPitch, physRoll);
-
-        outPosition = posProcessor.Process(interpPos, physQ, dt);
+    bool GetRotation(float& yaw, float& pitch, float& roll) const {
+        if (!m_hasData) return false;
+        yaw = m_yaw - m_offsetYaw;
+        pitch = m_pitch - m_offsetPitch;
+        roll = m_roll - m_offsetRoll;
+        return true;
     }
+
+    bool GetPosition(float& x, float& y, float& z) const {
+        if (!m_hasData) return false;
+        x = m_x - m_offsetX;
+        y = m_y - m_offsetY;
+        z = m_z - m_offsetZ;
+        return true;
+    }
+
+    int64_t GetLastReceiveTimestamp() const { return m_timestamp; }
+
+    void Recenter() {
+        m_offsetYaw = m_yaw;
+        m_offsetPitch = m_pitch;
+        m_offsetRoll = m_roll;
+        m_offsetX = m_x;
+        m_offsetY = m_y;
+        m_offsetZ = m_z;
+    }
+
+    /// Always false, matching UdpReceiver. Present so the session instantiates the
+    /// same way it does in a mod - detection failing would compile the remote
+    /// branch away and hide a change to it.
+    bool TryConsumeRecenterRequest() { return false; }
+
+    bool IsRemoteConnection() const { return m_remote; }
+
+private:
+    float m_yaw = 0.0f, m_pitch = 0.0f, m_roll = 0.0f;
+    float m_x = 0.0f, m_y = 0.0f, m_z = 0.0f;
+    float m_offsetYaw = 0.0f, m_offsetPitch = 0.0f, m_offsetRoll = 0.0f;
+    float m_offsetX = 0.0f, m_offsetY = 0.0f, m_offsetZ = 0.0f;
+    bool m_hasData = false;
+    bool m_remote = false;
+    int64_t m_timestamp = 0;
 };
+
+using VectorSession = HeadTrackingSession<VectorReceiver>;
+static_assert(VectorSession::kHasRemoteRecenter, "the session must see the receiver's trailer accessor");
+static_assert(VectorSession::kHasRemoteConnection, "the session must select smoothing from the receiver");
 
 class Harness {
 public:
@@ -181,7 +184,8 @@ private:
     PositionInterpolator m_posInterp;
     TrackingProcessor m_processor;
     PositionProcessor m_posProcessor;
-    Session m_session;
+    VectorReceiver m_receiver;
+    std::unique_ptr<VectorSession> m_session;
     int64_t m_ts = 0;
 
     void Reset() {
@@ -190,7 +194,8 @@ private:
         m_posInterp = PositionInterpolator();
         m_processor = TrackingProcessor();
         m_posProcessor = PositionProcessor();
-        m_session = Session();
+        m_receiver = VectorReceiver();
+        m_session = std::make_unique<VectorSession>(m_receiver);
         m_ts = 0;
         m_consumed.clear();
         m_skipping = false;
@@ -211,11 +216,7 @@ private:
     /// Every configuration key is optional and an absent key leaves the
     /// implementation's own default in place. That is deliberate: it is how the
     /// pivot-defaults-off vector reads the default rather than restating it.
-    void ConfigureTrackingProcessor(TrackingProcessor& p) {
-        p.SetLocalSmoothing(Cfg("local_smoothing", p.GetLocalSmoothing()));
-        p.SetRemoteSmoothing(Cfg("remote_smoothing", p.GetRemoteSmoothing()));
-        p.SetIsRemoteConnection(CfgFlag("is_remote"));
-
+    void ApplyRotationKeys(TrackingProcessor& p) {
         SensitivitySettings s = p.GetSensitivity();
         s.yaw = Cfg("sens_yaw", s.yaw);
         s.pitch = Cfg("sens_pitch", s.pitch);
@@ -232,9 +233,7 @@ private:
         p.SetDeadzone(d);
     }
 
-    void ConfigurePositionProcessor(PositionProcessor& p) {
-        p.SetTrackerPivotForward(Cfg("pivot", p.GetTrackerPivotForward()));
-        PositionSettings s = p.GetSettings();
+    void ApplyPositionKeys(PositionSettings& s) {
         s.sensitivity_x = Cfg("sens_x", s.sensitivity_x);
         s.sensitivity_y = Cfg("sens_y", s.sensitivity_y);
         s.sensitivity_z = Cfg("sens_z", s.sensitivity_z);
@@ -246,10 +245,44 @@ private:
         s.limit_y_down = Cfg("limit_y_down", s.limit_y_down);
         s.limit_z = Cfg("limit_z", s.limit_z);
         s.limit_z_back = Cfg("limit_z_back", s.limit_z_back);
+    }
+
+    void ConfigureTrackingProcessor(TrackingProcessor& p) {
+        p.SetLocalSmoothing(Cfg("local_smoothing", p.GetLocalSmoothing()));
+        p.SetRemoteSmoothing(Cfg("remote_smoothing", p.GetRemoteSmoothing()));
+        p.SetIsRemoteConnection(CfgFlag("is_remote"));
+        ApplyRotationKeys(p);
+    }
+
+    void ConfigurePositionProcessor(PositionProcessor& p) {
+        p.SetTrackerPivotForward(Cfg("pivot", p.GetTrackerPivotForward()));
+        p.SetTrackerPivotUp(Cfg("pivot_up", p.GetTrackerPivotUp()));
+        PositionSettings s = p.GetSettings();
+        ApplyPositionKeys(s);
         s.local_smoothing = Cfg("local_smoothing", s.local_smoothing);
         s.remote_smoothing = Cfg("remote_smoothing", s.remote_smoothing);
         p.SetSettings(s);
         p.SetIsRemoteConnection(CfgFlag("is_remote"));
+    }
+
+    /// The session owns the two smoothing values and re-asserts them on every
+    /// Update, and it reads the connection kind off the receiver, so those three
+    /// keys go to the session rather than straight to a processor.
+    void ConfigureSession() {
+        m_session->SetLocalSmoothing(Cfg("local_smoothing", m_session->GetLocalSmoothing()));
+        m_session->SetRemoteSmoothing(Cfg("remote_smoothing", m_session->GetRemoteSmoothing()));
+        m_receiver.SetRemoteConnection(CfgFlag("is_remote"));
+        m_session->SetMaxExtrapolationFraction(
+            Cfg("max_extrapolation_fraction", m_session->GetMaxExtrapolationFraction()));
+
+        ApplyRotationKeys(m_session->GetProcessor());
+
+        PositionProcessor& pp = m_session->GetPositionProcessor();
+        pp.SetTrackerPivotForward(Cfg("pivot", pp.GetTrackerPivotForward()));
+        pp.SetTrackerPivotUp(Cfg("pivot_up", pp.GetTrackerPivotUp()));
+        PositionSettings ps = pp.GetSettings();
+        ApplyPositionKeys(ps);
+        m_session->SetPositionSettings(ps);
     }
 
     void Configure() {
@@ -263,11 +296,8 @@ private:
             ConfigureTrackingProcessor(m_processor);
         } else if (m_unit == "position_processor") {
             ConfigurePositionProcessor(m_posProcessor);
-        } else if (m_unit == "session_rot") {
-            ConfigureTrackingProcessor(m_session.processor);
-        } else if (m_unit == "session_pos") {
-            ConfigureTrackingProcessor(m_session.processor);
-            ConfigurePositionProcessor(m_session.posProcessor);
+        } else if (m_unit == "session_rot" || m_unit == "session_pos") {
+            ConfigureSession();
         } else if (m_unit != "packet" && m_unit != "euler_roundtrip") {
             std::cout << "skip C++ harness does not implement unit " << m_unit << '\n';
             m_skipping = true;
@@ -329,9 +359,18 @@ private:
         in >> hex;
         std::vector<uint8_t> bytes = FromHex(hex);
 
+        // All three entry points, not just the combined one. TryParse, TryParsePosition
+        // and TryParseAll each carry their own length and finiteness guards, so a harness
+        // that exercises one of them leaves two sets of guards untested.
         TrackingPose pose;
         PositionData position;
-        const bool ok = OpenTrackPacket::TryParseAll(bytes.data(), bytes.size(), pose, position);
+        TrackingPose posePart;
+        PositionData positionPart;
+        const bool okAll = OpenTrackPacket::TryParseAll(bytes.data(), bytes.size(), pose, position);
+        const bool okPose = OpenTrackPacket::TryParse(bytes.data(), bytes.size(), posePart);
+        const bool okPosition =
+            OpenTrackPacket::TryParsePosition(bytes.data(), bytes.size(), positionPart);
+        const bool ok = okAll;
 
         uint8_t counter = 0;
         const bool trailer =
@@ -339,7 +378,8 @@ private:
 
         Emit({ok ? 1.0 : 0.0, ok ? pose.yaw : 0.0f, ok ? pose.pitch : 0.0f, ok ? pose.roll : 0.0f,
               ok ? position.x : 0.0f, ok ? position.y : 0.0f, ok ? position.z : 0.0f,
-              trailer ? 1.0 : 0.0, static_cast<double>(counter)});
+              trailer ? 1.0 : 0.0, static_cast<double>(counter),
+              okPose ? 1.0 : 0.0, okPosition ? 1.0 : 0.0});
     }
 
     void SessionFrame(bool hasPacket, std::istringstream& in) {
@@ -347,16 +387,20 @@ private:
         if (hasPacket) {
             std::string hex;
             in >> hex >> dt;
-            m_session.Feed(FromHex(hex));
+            m_receiver.Feed(FromHex(hex));
         } else {
             in >> dt;
         }
 
-        m_session.Step(dt);
+        m_session->Update(dt);
         if (m_unit == "session_rot") {
-            Emit({m_session.outRotation.yaw, m_session.outRotation.pitch, m_session.outRotation.roll});
+            float yaw, pitch, roll;
+            m_session->GetRotation(yaw, pitch, roll);
+            Emit({yaw, pitch, roll});
         } else {
-            Emit({m_session.outPosition.x, m_session.outPosition.y, m_session.outPosition.z});
+            float x, y, z;
+            m_session->GetPositionOffset(x, y, z);
+            Emit({x, y, z});
         }
     }
 };

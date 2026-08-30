@@ -13,6 +13,7 @@ using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 using CameraUnlock.Core.Protocol;
+using CameraUnlock.Core.Tracking;
 
 internal static class Program
 {
@@ -25,7 +26,11 @@ internal static class Program
     private static PositionInterpolator _posInterp = new PositionInterpolator();
     private static TrackingProcessor _processor = new TrackingProcessor();
     private static PositionProcessor _posProcessor = new PositionProcessor();
-    private static Session _session = new Session();
+    private static VectorSource _source = new VectorSource();
+    private static TrackingProcessor _sessionProcessor = new TrackingProcessor();
+    private static PositionProcessor _sessionPosProcessor = new PositionProcessor();
+    private static HeadTrackingSession _session =
+        new HeadTrackingSession(_source, _sessionProcessor, _sessionPosProcessor);
     private static long _ts;
 
     /// Config keys the selected unit understood. A key left over after Configure()
@@ -90,7 +95,10 @@ internal static class Program
         _posInterp = new PositionInterpolator();
         _processor = new TrackingProcessor();
         _posProcessor = new PositionProcessor();
-        _session = new Session();
+        _source = new VectorSource();
+        _sessionProcessor = new TrackingProcessor();
+        _sessionPosProcessor = new PositionProcessor();
+        _session = new HeadTrackingSession(_source, _sessionProcessor, _sessionPosProcessor);
         _ts = 0;
         Consumed.Clear();
         _skipping = false;
@@ -113,11 +121,8 @@ internal static class Program
         return Config.TryGetValue(key, out double v) && v != 0.0;
     }
 
-    private static void ConfigureTracking(TrackingProcessor p)
+    private static void ApplyRotationKeys(TrackingProcessor p)
     {
-        p.LocalSmoothing = Cfg("local_smoothing", p.LocalSmoothing);
-        p.RemoteSmoothing = Cfg("remote_smoothing", p.RemoteSmoothing);
-        p.IsRemoteConnection = Flag("is_remote");
         p.Sensitivity = new SensitivitySettings(
             Cfg("sens_yaw", p.Sensitivity.Yaw),
             Cfg("sens_pitch", p.Sensitivity.Pitch),
@@ -129,17 +134,49 @@ internal static class Program
             Cfg("dz_roll", p.Deadzone.Roll));
     }
 
-    private static void ConfigurePosition(PositionProcessor p)
+    private static PositionSettings ApplyPositionKeys(PositionSettings s, float localSmoothing, float remoteSmoothing)
     {
-        p.TrackerPivotForward = Cfg("pivot", p.TrackerPivotForward);
-        PositionSettings s = p.Settings;
-        p.Settings = new PositionSettings(
+        return new PositionSettings(
             Cfg("sens_x", s.SensitivityX), Cfg("sens_y", s.SensitivityY), Cfg("sens_z", s.SensitivityZ),
             Cfg("limit_x", s.LimitX), Cfg("limit_y", s.LimitY), Cfg("limit_y_down", s.LimitYDown),
             Cfg("limit_z", s.LimitZ), Cfg("limit_z_back", s.LimitZBack),
-            Cfg("local_smoothing", s.LocalSmoothing), Cfg("remote_smoothing", s.RemoteSmoothing),
+            localSmoothing, remoteSmoothing,
             Flag("invert_x"), Flag("invert_y"), Flag("invert_z"));
+    }
+
+    private static void ConfigureTracking(TrackingProcessor p)
+    {
+        p.LocalSmoothing = Cfg("local_smoothing", p.LocalSmoothing);
+        p.RemoteSmoothing = Cfg("remote_smoothing", p.RemoteSmoothing);
         p.IsRemoteConnection = Flag("is_remote");
+        ApplyRotationKeys(p);
+    }
+
+    private static void ConfigurePosition(PositionProcessor p)
+    {
+        p.TrackerPivotForward = Cfg("pivot", p.TrackerPivotForward);
+        p.TrackerPivotUp = Cfg("pivot_up", p.TrackerPivotUp);
+        PositionSettings s = p.Settings;
+        p.Settings = ApplyPositionKeys(s,
+            Cfg("local_smoothing", s.LocalSmoothing), Cfg("remote_smoothing", s.RemoteSmoothing));
+        p.IsRemoteConnection = Flag("is_remote");
+    }
+
+    /// The session owns the two smoothing values and re-asserts them on every
+    /// Update, and it reads the connection kind off the source, so those three
+    /// keys go to the session rather than straight to a processor.
+    private static void ConfigureSession()
+    {
+        _session.LocalSmoothing = Cfg("local_smoothing", _session.LocalSmoothing);
+        _session.RemoteSmoothing = Cfg("remote_smoothing", _session.RemoteSmoothing);
+        _source.IsRemoteConnection = Flag("is_remote");
+
+        ApplyRotationKeys(_sessionProcessor);
+
+        _sessionPosProcessor.TrackerPivotForward = Cfg("pivot", _sessionPosProcessor.TrackerPivotForward);
+        _sessionPosProcessor.TrackerPivotUp = Cfg("pivot_up", _sessionPosProcessor.TrackerPivotUp);
+        PositionSettings ps = _session.PositionSettings;
+        _session.PositionSettings = ApplyPositionKeys(ps, ps.LocalSmoothing, ps.RemoteSmoothing);
     }
 
     private static void Configure(TextWriter w)
@@ -161,11 +198,8 @@ internal static class Program
                 ConfigurePosition(_posProcessor);
                 break;
             case "session_rot":
-                ConfigureTracking(_session.Processor);
-                break;
             case "session_pos":
-                ConfigureTracking(_session.Processor);
-                ConfigurePosition(_session.PosProcessor);
+                ConfigureSession();
                 break;
             case "packet":
             case "euler_roundtrip":
@@ -265,7 +299,8 @@ internal static class Program
             ok ? 1 : 0,
             ok ? pose.Yaw : 0f, ok ? pose.Pitch : 0f, ok ? pose.Roll : 0f,
             ok ? position.X : 0f, ok ? position.Y : 0f, ok ? position.Z : 0f,
-            trailer ? 1 : 0, counter);
+            trailer ? 1 : 0, counter,
+            okPose ? 1 : 0, okPos ? 1 : 0);
     }
 
     private static void SessionFrame(string[] t, TextWriter w)
@@ -273,7 +308,7 @@ internal static class Program
         float dt;
         if (t[0] == "p")
         {
-            _session.Feed(FromHex(t[1]));
+            _source.Feed(FromHex(t[1]));
             dt = F(t[2]);
         }
         else
@@ -281,36 +316,33 @@ internal static class Program
             dt = F(t[1]);
         }
 
-        _session.Step(dt);
+        _session.Update(dt);
         if (_unit == "session_rot")
         {
-            Emit(w, _session.OutRotation.Yaw, _session.OutRotation.Pitch, _session.OutRotation.Roll);
+            Emit(w, _session.Rotation.Yaw, _session.Rotation.Pitch, _session.Rotation.Roll);
         }
         else
         {
-            Emit(w, _session.OutPosition.X, _session.OutPosition.Y, _session.OutPosition.Z);
+            Emit(w, _session.PositionOffset.X, _session.PositionOffset.Y, _session.PositionOffset.Z);
         }
     }
 
-    /// Per-frame wiring shared by session_rot and session_pos, mirroring
-    /// HeadTrackingSession: the duplicate-sample filter gates the interpolator on
-    /// changed VALUES, not on the arrival of a datagram, and nothing anywhere
-    /// recenters - the trailer is parsed and dropped.
-    private sealed class Session
+    /// The tracking source the shipped HeadTrackingSession is driven by here: the
+    /// datagram bytes a vector supplies, decoded by the shipped packet parser and
+    /// offset the way OpenTrackReceiver offsets its own output. Nothing in the
+    /// session pipeline is reimplemented, so a change to HeadTrackingSession fails
+    /// here.
+    private sealed class VectorSource : ITrackingDataSource
     {
-        public readonly PoseInterpolator PoseInterp = new PoseInterpolator();
-        public readonly TrackingProcessor Processor = new TrackingProcessor();
-        public readonly PositionInterpolator PosInterp = new PositionInterpolator();
-        public readonly PositionProcessor PosProcessor = new PositionProcessor();
-
-        public TrackingPose OutRotation;
-        public Vec3 OutPosition;
-
-        private float _rawYaw, _rawPitch, _rawRoll, _rawX, _rawY, _rawZ;
-        private float _lastYaw, _lastPitch, _lastRoll, _lastX, _lastY, _lastZ;
-        private bool _seeded;
-        private bool _newPacket;
+        private float _yaw, _pitch, _roll, _x, _y, _z;
+        private float _offsetYaw, _offsetPitch, _offsetRoll, _offsetX, _offsetY, _offsetZ;
         private long _timestamp;
+
+        public bool IsReceiving => _timestamp != 0;
+        public bool IsRemoteConnection { get; set; }
+        public bool IsFailed => false;
+
+        public bool IsDataFresh(int maxAgeMs = OpenTrackReceiver.DefaultMaxDataAgeMs) => _timestamp != 0;
 
         public void Feed(byte[] datagram)
         {
@@ -323,42 +355,40 @@ internal static class Program
             // series with the tracker's own.
             OpenTrackPacket.TryParseRecenterCounter(datagram, out byte _);
 
-            _rawYaw = pose.Yaw;
-            _rawPitch = pose.Pitch;
-            _rawRoll = pose.Roll;
-            _rawX = position.X;
-            _rawY = position.Y;
-            _rawZ = position.Z;
-            _newPacket = true;
+            _yaw = pose.Yaw;
+            _pitch = pose.Pitch;
+            _roll = pose.Roll;
+            _x = position.X;
+            _y = position.Y;
+            _z = position.Z;
             _timestamp++;
         }
 
-        public void Step(float dt)
+        public TrackingPose GetLatestPose() =>
+            new TrackingPose(_yaw - _offsetYaw, _pitch - _offsetPitch, _roll - _offsetRoll, _timestamp);
+
+        public PositionData GetLatestPosition() =>
+            new PositionData(_x - _offsetX, _y - _offsetY, _z - _offsetZ, _timestamp);
+
+        public void GetRawRotation(out float yaw, out float pitch, out float roll)
         {
-            bool newRot = _newPacket && (!_seeded || _rawYaw != _lastYaw ||
-                                         _rawPitch != _lastPitch || _rawRoll != _lastRoll);
-            bool newPos = _newPacket && (!_seeded || _rawX != _lastX || _rawY != _lastY || _rawZ != _lastZ);
-            if (_newPacket)
-            {
-                _lastYaw = _rawYaw;
-                _lastPitch = _rawPitch;
-                _lastRoll = _rawRoll;
-                _lastX = _rawX;
-                _lastY = _rawY;
-                _lastZ = _rawZ;
-                _seeded = true;
-            }
-            _newPacket = false;
+            yaw = _yaw;
+            pitch = _pitch;
+            roll = _roll;
+        }
 
-            TrackingPose interp = PoseInterp.Update(
-                new TrackingPose(_rawYaw, _rawPitch, _rawRoll), newRot, dt);
-            OutRotation = Processor.Process(interp, dt);
+        /// Always false, matching OpenTrackReceiver: the trailer is parsed and not
+        /// acted on.
+        public bool TryConsumeRecenterRequest() => false;
 
-            PositionData interpPos = PosInterp.Update(
-                new PositionData(_rawX, _rawY, _rawZ, _timestamp == 0 ? 1 : _timestamp), newPos, dt);
-
-            Processor.GetSmoothedRotation(out float py, out float pp, out float pr);
-            OutPosition = PosProcessor.Process(interpPos, QuaternionUtils.FromYawPitchRoll(py, pp, pr), dt);
+        public void Recenter()
+        {
+            _offsetYaw = _yaw;
+            _offsetPitch = _pitch;
+            _offsetRoll = _roll;
+            _offsetX = _x;
+            _offsetY = _y;
+            _offsetZ = _z;
         }
     }
 }

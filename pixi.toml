@@ -128,8 +128,17 @@ validate-games-fleet = "node scripts/validate-games.mjs --fleet"
 #   node scripts/generate-config-schema.mjs   regenerates both
 check-config-schema = "node scripts/generate-config-schema.mjs --check"
 
-# Development workflow
-check = { depends-on = ["build-debug", "test-quick", "test-cpp", "vectors", "check-config-schema", "validate-games"] }
+# Development workflow.
+#
+# Ordered cheapest and most deterministic first, because pixi aborts on the first
+# failing dependency and the order decides how long a developer (and CI) waits to
+# find out. The two pure-node gates need no compiler and finish in under a second;
+# they used to sit at the END, behind a full C# build and both test suites, so a
+# stale generated alias table cost several minutes to discover. The vectors come
+# next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
+# so a syntax error in either surfaces here rather than in the slower full builds
+# below.
+check = { depends-on = ["check-config-schema", "validate-games", "vectors", "build-debug", "test-quick", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

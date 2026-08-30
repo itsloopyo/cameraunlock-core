@@ -55,9 +55,9 @@ Import-Module (Join-Path $CoreRoot 'powershell/ReleaseWorkflow.psm1') -Force
 $ACTION_PINS = (Get-Content -LiteralPath (Join-Path $CoreRoot 'scripts/templates/action-pins.json') -Raw | ConvertFrom-Json).pins
 
 $CHECK_IDS = @(
-    'install-wrapper', 'delayed-expansion', 'arg-parser', 'config-block', 'cmd-crlf', 'pixi-tasks',
-    'action-pins', 'workflow-ref', 'workflow-build', 'core-pin', 'manifest',
-    'manifest-seed', 'stray-manifest', 'license', 'readme'
+    'install-wrapper', 'delayed-expansion', 'arg-parser', 'config-block', 'config-pairing',
+    'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
+    'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -295,9 +295,38 @@ function Test-ArgParser {
 # a live metacharacter.
 $CONFIG_METACHARS = @{ '|' = 'a pipe'; '<' = 'a redirect'; '>' = 'a redirect'; '&' = 'a command separator' }
 
-# Values the state-file heredoc echoes from inside `> "..." ( ... )`, where a
-# parenthesis closes the block early and the rest of the JSON runs as commands.
-$CONFIG_IN_BLOCK = @('GAME_ID', 'MOD_INTERNAL_NAME', 'MOD_VERSION', 'FRAMEWORK_TYPE')
+# Values that reach cmd.exe from inside a parenthesised block, where a `)` in
+# the value closes the block early and the rest of it runs as commands. The
+# state-file heredoc echoes the first four out of `> "..." ( ... )`; the rest
+# are expanded inside `if defined ... ( ... )` / `if /i "%FRAMEWORK_TYPE%"==...`
+# blocks in install-body-bepinex.cmd, install-body-cecil.cmd,
+# install-body-ue4ss.cmd and uninstall-body.cmd.
+$CONFIG_IN_BLOCK = @(
+    'GAME_ID', 'MOD_INTERNAL_NAME', 'MOD_VERSION', 'FRAMEWORK_TYPE',
+    'PLUGIN_SUBFOLDER', 'BEPINEX_SUBFOLDER', 'BEPINEX_VENDOR_ZIP_NAME',
+    'MANAGED_SUBFOLDER', 'UE4_BINARIES_RELDIR'
+)
+
+# The CONFIG BLOCK as name -> value. Both spellings are parsed: cmd.exe accepts
+# `set "NAME=value"` and bare `set NAME=value`, and the bare form is exactly
+# where an unescaped metacharacter is most likely to be written, so reading only
+# the quoted form let the whole class of defect this check exists for through.
+function Get-ConfigBlockVars {
+    param([string]$Text)
+    $vars = [ordered]@{}
+    $inBlock = $false
+    foreach ($line in (($Text -replace "`r`n", "`n") -split "`n")) {
+        if ($line -match 'END CONFIG BLOCK') { break }
+        if ($line -match '--- CONFIG BLOCK ---') { $inBlock = $true; continue }
+        if (-not $inBlock) { continue }
+        if ($line -match '^\s*set\s+"([A-Za-z_][A-Za-z0-9_]*)=(.*)"\s*$') {
+            $vars[$Matches[1]] = $Matches[2]
+        } elseif ($line -match '^\s*set\s+([A-Za-z_][A-Za-z0-9_]*)=(.*?)\s*$') {
+            $vars[$Matches[1]] = $Matches[2]
+        }
+    }
+    return $vars
+}
 
 function Test-ConfigBlock {
     param([string]$Name, [string]$Root)
@@ -305,20 +334,16 @@ function Test-ConfigBlock {
     foreach ($script in @('install.cmd', 'uninstall.cmd')) {
         $path = Join-Path $Root "scripts/$script"
         if (-not (Test-Path $path)) { continue }
-        $lines = ((Read-TextFile $path) -replace "`r`n", "`n") -split "`n"
+        $vars = Get-ConfigBlockVars (Read-TextFile $path)
 
-        $inBlock = $false
-        foreach ($line in $lines) {
-            if ($line -match 'END CONFIG BLOCK') { break }
-            if ($line -match '--- CONFIG BLOCK ---') { $inBlock = $true; continue }
-            if (-not $inBlock) { continue }
-            if ($line -notmatch '^\s*set\s+"([A-Za-z_][A-Za-z0-9_]*)=(.*)"\s*$') { continue }
-            $var = $Matches[1]
-            $value = $Matches[2]
+        foreach ($var in $vars.Keys) {
+            $value = $vars[$var]
 
             # ^X is escaped and prints literally; drop those before looking.
             $bare = $value -replace '\^.', ''
-            if ($var -eq 'MOD_CONTROLS') { $bare = $bare -replace '&echo[ .]', '' }
+            # `&echo ` and `& echo ` both work as the separator, so both are the
+            # intended spelling rather than an unescaped &.
+            if ($var -eq 'MOD_CONTROLS') { $bare = $bare -replace '&\s*echo[ .]', '' }
 
             foreach ($char in $CONFIG_METACHARS.Keys) {
                 if (-not $bare.Contains($char)) { continue }
@@ -330,8 +355,61 @@ function Test-ConfigBlock {
                 Add-Finding $Name 'config-block' 'FAIL' "scripts/$script sets $var with an unescaped $char ($($CONFIG_METACHARS[$char])); the shared body expands it with %$var% and cmd.exe runs it - $fix"
             }
             if ($var -in $CONFIG_IN_BLOCK -and $bare -match '[()]') {
-                Add-Finding $Name 'config-block' 'FAIL' "scripts/$script sets $var with a parenthesis; it is echoed inside the state-file ( ) block, which it closes early"
+                Add-Finding $Name 'config-block' 'FAIL' "scripts/$script sets $var with a parenthesis; the shared body expands it inside a ( ) block, which it closes early"
             }
+        }
+    }
+}
+
+# install.cmd and uninstall.cmd are two files a mod hand-fills, and the second
+# has to undo what the first did. The proxy-DLL incident that motivated the
+# wrapper conversion was ASI_LOADER_NAME disagreeing between them: install
+# dropped the payload as one filename, uninstall deleted another, and the game
+# kept loading the mod after the user removed it. Every name here is one the
+# uninstall body uses to find what the install body wrote.
+$CONFIG_PAIRED = @(
+    'GAME_ID', 'MOD_DISPLAY_NAME', 'MOD_INTERNAL_NAME', 'STATE_FILE', 'FRAMEWORK_TYPE',
+    'PLUGIN_SUBFOLDER', 'MANAGED_SUBFOLDER', 'ASSEMBLY_DLL',
+    'ASI_LOADER_NAME', 'ASI_SUBDIR', 'UE4_BINARIES_RELDIR'
+)
+
+function Test-ConfigPairing {
+    param([string]$Name, [string]$Root)
+
+    $installPath = Join-Path $Root 'scripts/install.cmd'
+    $uninstallPath = Join-Path $Root 'scripts/uninstall.cmd'
+    if (-not (Test-Path $installPath) -or -not (Test-Path $uninstallPath)) { return }
+
+    $installText = Read-TextFile $installPath
+    $uninstallText = Read-TextFile $uninstallPath
+    # A legacy in-tree body carries its own config in its own shape; there is no
+    # CONFIG BLOCK contract to hold it to. Test-InstallWrapper already reports it.
+    if (-not (Get-WrapperBodyName $installText) -or -not (Get-WrapperBodyName $uninstallText)) { return }
+
+    $install = Get-ConfigBlockVars $installText
+    $uninstall = Get-ConfigBlockVars $uninstallText
+
+    foreach ($var in $CONFIG_PAIRED) {
+        # Only names both files declare. A name absent from one is that loader's
+        # config not applying there, which the bodies themselves check for.
+        if (-not $install.Contains($var) -or -not $uninstall.Contains($var)) { continue }
+        if ($install[$var] -eq $uninstall[$var]) { continue }
+        Add-Finding $Name 'config-pairing' 'FAIL' "install.cmd sets $var to '$($install[$var])' and uninstall.cmd to '$($uninstall[$var])'; uninstall uses it to find what install wrote, so it looks in the wrong place and leaves the mod loaded"
+    }
+
+    # MOD_DLLS and MOD_SEED_FILES are not compared for equality: uninstall.cmd's
+    # MOD_DLLS is deliberately a superset across the fleet, listing the logs and
+    # config the mod writes at runtime as well as what was installed. What has to
+    # hold is that nothing installed is left behind.
+    $removed = @()
+    foreach ($var in @('MOD_DLLS', 'LEGACY_DLLS', 'MOD_SEED_FILES', 'MOD_LEFTOVERS', 'ROOT_EXTRAS', 'MANAGED_EXTRAS')) {
+        if ($uninstall.Contains($var)) { $removed += @($uninstall[$var] -split '\s+' | Where-Object { $_ }) }
+    }
+    foreach ($var in @('MOD_DLLS', 'MOD_SEED_FILES')) {
+        if (-not $install.Contains($var)) { continue }
+        foreach ($file in @($install[$var] -split '\s+' | Where-Object { $_ })) {
+            if ($file -in $removed) { continue }
+            Add-Finding $Name 'config-pairing' 'FAIL' "install.cmd's $var installs $file and uninstall.cmd removes nothing by that name; it is left in the game folder after an uninstall"
         }
     }
 }
@@ -346,11 +424,24 @@ function Test-CmdCrlf {
         Add-Finding $Name 'cmd-crlf' 'FAIL' '.gitattributes does not pin `*.cmd text eol=crlf`'
     }
 
+    # `2>$null` on its own is a trap under $ErrorActionPreference = 'Stop': in
+    # Windows PowerShell 5.1 a native command's stderr becomes a
+    # NativeCommandError, which terminates the whole run before the
+    # $LASTEXITCODE guard below is ever read. A path that is not a git work
+    # tree is an ordinary answer here, so drop to Continue for the call and
+    # gate on the exit code, which is the real success signal for a native exe.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $eol = & git -C $Root ls-files --eol -- '*.cmd' 2>$null
+    $ErrorActionPreference = $prevPref
     if ($LASTEXITCODE -ne 0) { return }
     foreach ($line in @($eol)) {
-        if ($line -match '^\S*\s+w/lf\s+.*?\t(.+)$') {
-            Add-Finding $Name 'cmd-crlf' 'FAIL' "$($Matches[1]) is LF in the working tree; cmd.exe fails on it silently"
+        # w/mixed as well as w/lf: a file whose endings were half-converted has
+        # LF lines in it, and cmd.exe fails on those the same way it fails on a
+        # wholly-LF file. `none` is an empty file and has nothing to get wrong.
+        if ($line -match '^\S*\s+w/(lf|mixed)\s+.*?\t(.+)$') {
+            $how = if ($Matches[1] -eq 'lf') { 'is LF' } else { 'has mixed line endings' }
+            Add-Finding $Name 'cmd-crlf' 'FAIL' "$($Matches[2]) $how in the working tree; cmd.exe fails on it silently"
         }
     }
 }
@@ -473,7 +564,10 @@ function Test-WorkflowBuild {
             if ($line -notmatch '^\s*(-\s+)?(run:\s*)?\|?\s*([a-z][^#]*)$') { continue }
             $cmd = $Matches[3].Trim()
             if ($cmd -match '^(pixi|npm|pnpm|yarn)\s') { continue }
-            if ($cmd -match "^($INLINE_BUILD_TOOLS)\b") {
+            # `(?![-\w])`, not `\b`: a word boundary sits between the `e` and the
+            # `-` of a YAML key like `cmake-version:`, so `\b` failed the
+            # workflow of anyone who pinned a cmake version in a `with:` block.
+            if ($cmd -match "^($INLINE_BUILD_TOOLS)(?![-\w])") {
                 Add-Finding $Name 'workflow-build' 'FAIL' "$($wf.Name):$n builds inline (``$($cmd.Substring(0, [Math]::Min(60, $cmd.Length)))``); CI must go through the same ``pixi run`` a developer runs or the two builds drift"
             }
         }
@@ -510,7 +604,13 @@ function Test-CorePin {
         Add-Finding $Name 'core-pin' 'FAIL' 'scripts/release.ps1 never re-syncs THIRD-PARTY-NOTICES.md against the pinned cameraunlock-core commit, so the next submodule bump breaks the release'
     }
 
+    # Same NativeCommandError trap as Test-CmdCrlf, and this one is on the
+    # documented path: `show` fails exactly when the pinned commit is missing
+    # from this checkout, which is the WARN below.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $when = & git -C $CoreRoot show -s --format=%cI $pin 2>$null
+    $ErrorActionPreference = $prevPref
     if ($LASTEXITCODE -ne 0 -or -not $when) {
         Add-Finding $Name 'core-pin' 'WARN' "the pinned core commit $($pin.Substring(0, 8)) is not in this core checkout, so its age cannot be read"
         return
@@ -606,6 +706,57 @@ function Test-ManifestSeed {
     }
 }
 
+# release-mod.yml gates the pushed git tag against the version source and
+# nothing else, so MOD_VERSION - which the install body writes into
+# .headtracking-state.json as `mod.version`, the field lopari reads to decide
+# whether an install is out of date - is free to say something else entirely.
+# It did, in eight repos: a v1.4.0 Subnautica install was writing "1.0.0".
+#
+# The fleet's own fix is already in ~30 release.ps1 scripts, which rewrite
+# `set "MOD_VERSION=..."` from the canonical version at release time. Stamping
+# it at package time instead would leave the committed installer wrong while
+# the ZIP was right - the same trade Assert-ManifestSeedsMatchShipped refuses,
+# and worse here because `pixi run install` runs the committed file directly.
+function Test-ModVersion {
+    param([string]$Name, [string]$Root)
+
+    $install = Join-Path $Root 'scripts/install.cmd'
+    $workflow = Join-Path $Root '.github/workflows/release.yml'
+    if (-not (Test-Path $install) -or -not (Test-Path $workflow)) { return }
+
+    $vars = Get-ConfigBlockVars (Read-TextFile $install)
+    if (-not $vars.Contains('MOD_VERSION')) { return }
+
+    # The same four values release-mod.yml is called with. A mod that declares
+    # no version-source does not run that workflow, so there is no authority to
+    # compare against.
+    $yaml = Read-TextFile $workflow
+    $readInput = {
+        param($key)
+        if ($yaml -notmatch "(?m)^\s*$([regex]::Escape($key)):\s*(.+?)\s*$") { return $null }
+        $v = $Matches[1]
+        if ($v -match "^'(.*)'$" -or $v -match '^"(.*)"$') { return $Matches[1] }
+        return $v
+    }
+    $source = & $readInput 'version-source'
+    $path = & $readInput 'version-path'
+    if (-not $source -or -not $path) { return }
+
+    $full = Join-Path $Root $path
+    try {
+        $key = & $readInput 'version-key'
+        $pattern = & $readInput 'version-pattern'
+        $fileVersion = Get-ProjectVersion -Source $source -Path $full `
+            -Key $(if ($key) { $key } else { 'version' }) -Pattern $(if ($pattern) { $pattern } else { '' })
+    } catch {
+        Add-Finding $Name 'mod-version' 'FAIL' "release.yml declares version-source $source at $path, and reading it fails: $($_.Exception.Message). The tag check in release-mod.yml runs this same read, so no release can be cut"
+        return
+    }
+
+    if ($fileVersion -eq $vars['MOD_VERSION']) { return }
+    Add-Finding $Name 'mod-version' 'FAIL' "$path has $fileVersion but scripts/install.cmd sets MOD_VERSION=$($vars['MOD_VERSION']); the installer writes that into .headtracking-state.json as mod.version, which is what lopari reads to decide upgrades"
+}
+
 # Only mod.json. A root manifest.json is NOT a dead file and is deliberately not
 # flagged: OWML and Thunderstore each read one, and in dying-light-2 and
 # skyrim-special-edition it is the canonical version source - release.ps1 writes
@@ -677,6 +828,7 @@ $CHECK_TABLE = [ordered]@{
     'delayed-expansion' = ${function:Test-DelayedExpansion}
     'arg-parser'        = ${function:Test-ArgParser}
     'config-block'      = ${function:Test-ConfigBlock}
+    'config-pairing'    = ${function:Test-ConfigPairing}
     'cmd-crlf'          = ${function:Test-CmdCrlf}
     'pixi-tasks'        = ${function:Test-PixiTasks}
     'action-pins'       = ${function:Test-ActionPins}
@@ -685,6 +837,7 @@ $CHECK_TABLE = [ordered]@{
     'core-pin'          = ${function:Test-CorePin}
     'manifest'          = ${function:Test-Manifest}
     'manifest-seed'     = ${function:Test-ManifestSeed}
+    'mod-version'       = ${function:Test-ModVersion}
     'stray-manifest'    = ${function:Test-StrayManifest}
     'license'           = ${function:Test-License}
     'readme'            = ${function:Test-Readme}
@@ -710,13 +863,19 @@ foreach ($id in $selected) {
 
 if ($All) {
     if ($Repo) { throw '-All and -Repo are mutually exclusive.' }
-    # A mod repo, not every sibling checkout: named for the fleet convention and
-    # actually vendoring this core. lopari, headcam and quickfeed all have
-    # scripts/ and a pixi.toml and none of these invariants apply to them.
+    # A mod repo, not every sibling checkout: a git checkout that actually
+    # vendors this core. lopari, headcam and quickfeed all have scripts/ and a
+    # pixi.toml, none of them vendors core, and none of these invariants applies
+    # to them.
+    #
+    # Vendoring is the whole test. The `-headtracking` naming convention used to
+    # be an extra requirement here and in sync-templates.ps1, and it silently
+    # excluded homeworld-remastered-collection and kingdom-come-deliverance-2,
+    # which pin core and ship the shared install bodies like everything else.
+    # sync-core-notices.ps1 selected on a third rule again; all three now agree.
     $roots = @(Get-ChildItem -Path $ReposRoot -Directory |
         Where-Object {
             $_.FullName -ne $CoreRoot -and
-            $_.Name -match '-(headtracking|head-tracking)$' -and
             (Test-Path (Join-Path $_.FullName '.git')) -and
             (Test-Path (Join-Path $_.FullName 'cameraunlock-core'))
         } |

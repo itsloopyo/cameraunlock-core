@@ -622,6 +622,120 @@ function Find-GamePath {
 
 <#
 .SYNOPSIS
+    Find EVERY installation of a game on this machine, not just the first.
+.DESCRIPTION
+    Find-GamePath returns the highest-priority hit and stops, which is what a
+    player-facing install wants: one copy, one deployment. Dev tooling wants the
+    opposite. Owning the game on two stores is normal - a Steam copy and a GOG
+    copy of Fallout 4, say - and with `pixi run install` deploying to whichever
+    store happens to sort first, the other copy silently keeps whatever build was
+    last dropped into it. The failure is quiet in the worst way: you test a fix,
+    it does not appear, and the reason is that you launched the copy that was
+    never updated.
+
+    Same sources and same order as Find-GamePath, but every source is collected
+    rather than returned from, each candidate is validated with
+    Test-GameInstallation, and the result is de-duplicated on the full path (the
+    Steam app-manifest and steam_folder lookups routinely find the same install
+    twice).
+.PARAMETER GameId
+    The game identifier (key in games.json).
+.PARAMETER Config
+    Optional custom configuration hashtable (overrides GameId lookup).
+.OUTPUTS
+    System.String[] - zero or more install paths, highest priority first.
+#>
+function Find-AllGamePaths {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$GameId,
+
+        [Parameter(Mandatory = $false)]
+        [hashtable]$Config
+    )
+
+    if (-not $Config) {
+        if (-not $GameId) {
+            throw "Either GameId or Config must be provided"
+        }
+        $configs = Get-GameConfigs
+        $Config = $configs[$GameId]
+        if (-not $Config) {
+            throw "Unknown game: $GameId. Available games: $($configs.Keys -join ', ')"
+        }
+    }
+
+    if (-not $Config.ContainsKey('Executable') -or -not $Config.Executable) {
+        throw "Config must include 'Executable'"
+    }
+    $executable = $Config.Executable
+
+    # Every key is read behind ContainsKey: strict mode makes a missing hashtable
+    # key a terminating error, and most games define only a few of these.
+    $candidates = [System.Collections.Generic.List[object]]::new()
+
+    if ($Config.ContainsKey('EnvVar') -and $Config.EnvVar) {
+        $candidates.Add([Environment]::GetEnvironmentVariable($Config.EnvVar))
+    }
+    if ($Config.ContainsKey('RegistryPaths') -and $Config.RegistryPaths) {
+        $candidates.Add((Find-RegistryGamePath -RegistryPaths $Config.RegistryPaths -Executable $executable))
+    }
+    if ($Config.ContainsKey('SteamAppId') -and $Config.SteamAppId) {
+        $candidates.Add((Find-SteamGameByAppId -AppId $Config.SteamAppId -Executable $executable))
+    }
+    if ($Config.ContainsKey('SteamFolder') -and $Config.SteamFolder) {
+        foreach ($library in Find-SteamLibraries) {
+            $candidates.Add((Join-Path $library "steamapps\common\$($Config.SteamFolder)"))
+        }
+    }
+    if ($Config.ContainsKey('GogGameIds') -and $Config.GogGameIds) {
+        $candidates.Add((Find-GogGamePath -GogGameIds $Config.GogGameIds -Executable $executable))
+    }
+    if ($Config.ContainsKey('UbisoftAppIds') -and $Config.UbisoftAppIds) {
+        $candidates.Add((Find-UbisoftGamePath -UbisoftAppIds $Config.UbisoftAppIds -Executable $executable))
+    }
+    foreach ($key in @('EpicPaths', 'EaPaths')) {
+        if ($Config.ContainsKey($key) -and $Config.$key) {
+            foreach ($path in $Config.$key) { $candidates.Add($path) }
+        }
+    }
+    if ($Config.ContainsKey('MsixIdentityName') -and $Config.MsixIdentityName) {
+        $candidates.Add((Find-MsixGamePath -IdentityName $Config.MsixIdentityName -Executable $executable))
+    }
+
+    $found = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidate in $candidates) {
+        if (-not $candidate) { continue }
+        if (-not (Test-GameInstallation -Path $candidate -Executable $executable)) { continue }
+        $full = ([System.IO.Path]::GetFullPath($candidate)).TrimEnd('/', '\')
+        if ($found -contains $full) { continue }
+        $found.Add($full)
+    }
+
+    # Xbox last and checked separately: a GDK build can ship the exe under a
+    # different name, so it needs its own existence check rather than the one
+    # every other source shares.
+    if ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths) {
+        $xboxExecutable = if ($Config.ContainsKey('XboxExecutable') -and $Config.XboxExecutable) {
+            $Config.XboxExecutable
+        } else {
+            $executable
+        }
+        foreach ($path in $Config.XboxPaths) {
+            if (-not (Test-GameInstallation -Path $path -Executable $xboxExecutable)) { continue }
+            $full = ([System.IO.Path]::GetFullPath($path)).TrimEnd('/', '\')
+            if ($found -contains $full) { continue }
+            $found.Add($full)
+        }
+    }
+
+    return $found.ToArray()
+}
+
+<#
+.SYNOPSIS
     Test whether a resolved game path is one of the configured Xbox paths
     for that game. Used by callers that need to know which platform a
     given install came from (e.g. to pick the correct executable name
@@ -801,6 +915,7 @@ Export-ModuleMember -Function @(
     'Find-RegistryGamePath',
     'Find-MsixGamePath',
     'Find-GamePath',
+    'Find-AllGamePaths',
     'Test-IsXboxPath',
     'Find-OWMLPath',
     'Test-GameInstallation',

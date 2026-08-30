@@ -172,7 +172,12 @@ function Sync-Wrappers {
             Add-Result $Name 'wrappers' 'drift' "scripts/$script tail differs from templates/$templateName"
             continue
         }
-        Write-TextFile -Path $path -Crlf -Text ((@($mine.Head) + @($wantedTail)) -join "`n")
+        # Trailing newline: the tails are compared TrimEnd'd, because git and
+        # editors touch that byte and cmd.exe does not care about it. Writing
+        # the trimmed form back is what put 64 of 85 fleet install.cmd files one
+        # byte short of their template, so every later diff of them carried a
+        # `\ No newline at end of file` nobody meant.
+        Write-TextFile -Path $path -Crlf -Text (((@($mine.Head) + @($wantedTail)) -join "`n") + "`n")
         Add-Result $Name 'wrappers' 'written' "scripts/$script tail restored from templates/$templateName"
     }
 }
@@ -327,10 +332,12 @@ function Resolve-RepoPath {
 
 if ($All) {
     if ($Repo) { throw '-All and -Repo are mutually exclusive.' }
+    # Same selection as conformance.ps1 and sync-core-notices.ps1: a git
+    # checkout that vendors this core. The `-headtracking` naming convention is
+    # not part of it - two mod repos do not follow it and were silently skipped.
     $roots = @(Get-ChildItem -Path $ReposRoot -Directory |
         Where-Object {
             $_.FullName -ne $CoreRoot -and
-            $_.Name -match '-(headtracking|head-tracking)$' -and
             (Test-Path (Join-Path $_.FullName '.git')) -and
             (Test-Path (Join-Path $_.FullName 'cameraunlock-core'))
         } |

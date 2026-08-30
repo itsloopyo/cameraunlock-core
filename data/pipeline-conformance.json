@@ -27,8 +27,8 @@
     },
     "packet": {
       "step": ["bytes_hex"],
-      "out": ["ok", "yaw", "pitch", "roll", "x", "y", "z", "trailer_present", "recenter_counter"],
-      "note": "ok=0 means the datagram was rejected; every other field is then meaningless."
+      "out": ["ok", "yaw", "pitch", "roll", "x", "y", "z", "trailer_present", "recenter_counter", "ok_rotation", "ok_position"],
+      "note": "ok=0 means the datagram was rejected as a complete pose+position sample; the pose and position fields are then meaningless. ok_rotation and ok_position are the verdicts of the rotation-only and position-only entry points, which carry their own length and finiteness guards - a single ok cannot show a guard missing from one of them, because the other two still reject."
     },
     "session_rot": {
       "step": ["bytes_hex_or_none", "dt_s"],
@@ -237,10 +237,57 @@
       ]
     },
     {
+      "id": "sample-interval-estimate-resists-packet-jitter",
+      "section": 2,
+      "title": "A jittery packet clock must not turn steady head motion into judder",
+      "catches": "An interval estimate that tracks the last observed gap instead of an EMA over several (kIntervalBlend raised towards 1). The head here turns at a constant 0.25 degrees per frame and the samples arrive alternately 2 and 6 frames apart, which is what a relay does under load. Blended, the estimate stays near the mean and the output advances at a near-constant rate. Tracking the last gap makes the segment finish in two frames and then sit dead for four, so the same steady turn renders as a 0.56 degree lurch followed by three frames of nothing.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "ramp", "label": "warmup", "dt": 0.0078125, "count": 32, "new_every": 4, "from": { "yaw": 0.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 1.0 } },
+        { "op": "step", "yaw": 8.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 8.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "yaw": 8.5, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 8.5, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "yaw": 10.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 10.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "yaw": 10.5, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 10.5, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "yaw": 12.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 12.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "yaw": 12.5, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 12.5, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "yaw": 14.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 14.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "yaw": 14.5, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 14.5, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "label": "settled", "yaw": 16.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 16.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "yaw": 16.5, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 16.5, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "yaw": 18.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 18.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "yaw": 18.5, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 18.5, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "yaw": 20.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 20.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "yaw": 20.5, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 20.5, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "yaw": 22.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 22.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "yaw": 22.5, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "label": "tail", "yaw": 22.5, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 }
+      ],
+      "assert": [
+        { "kind": "min_step", "from": "settled", "to": "tail:last", "field": "yaw", "value": 0.10 },
+        { "kind": "max_step", "from": "settled", "to": "tail:last", "field": "yaw", "value": 0.35 }
+      ]
+    },
+    {
       "id": "cold-start-32hz-no-jolt",
       "section": 3,
       "title": "A tracker feed from cold produces no step larger than one inter-sample delta",
-      "catches": "A default sample interval of 1/60 for a ~30 Hz tracker, and equally a port with no first-sample park: either makes the first segment reach progress 1.0 in half a sample period, extrapolate to the cap and come back. Native mods had that first-second jolt and Unity mods did not.",
+      "catches": "A default sample interval of 1/60 for a ~30 Hz tracker, and equally a port with no first-sample park: either makes the first segment reach progress 1.0 in half a sample period, extrapolate to the cap and come back. Native mods had that first-second jolt and Unity mods did not. The floor under the per-frame movement is what stops an all-zero output and a raw passthrough - neither of which interpolates anything - from passing on the upper bounds alone.",
       "unit": "pose_interpolator",
       "config": {},
       "steps": [
@@ -248,7 +295,132 @@
       ],
       "assert": [
         { "kind": "max_step", "from": "cold", "to": "cold:last", "field": "yaw", "value": 2.0 },
-        { "kind": "abs_at_most", "from": "cold", "to": "cold:last", "field": "yaw", "value": 62.0 }
+        { "kind": "abs_at_most", "from": "cold", "to": "cold:last", "field": "yaw", "value": 62.0 },
+        { "kind": "min_step", "from": 4, "to": "cold:last", "field": "yaw", "value": 0.49 },
+        { "kind": "max_step", "from": 4, "to": "cold:last", "field": "yaw", "value": 0.51 },
+        { "kind": "equals", "at": "cold:last", "field": "yaw", "value": 62.0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "id": "default-sample-interval-is-one-thirtieth",
+      "section": 3,
+      "title": "The interval estimate starts at 1/30 s, not 1/60",
+      "catches": "A default sample interval of 1/60. The default is only ever read before a measurable gap between two samples replaces it, and the first sample parks the segment, so the ONE window in which it is observable is a second sample that arrives closer than kMinSampleInterval (1 ms) - the estimate is left at the default and the segment it advances is a real one. Half an inter-sample period is exactly how far ahead of the truth a 1/60 guess runs, so the frame that should read 2.49 reads 4.99 and the segment reaches the extrapolation cap in half the time.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "first", "yaw": 0.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0005 },
+        { "op": "step", "label": "second", "yaw": 10.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0005 },
+        { "op": "step", "label": "advance", "yaw": 10.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 8 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "advance", "field": "yaw", "value": 2.49375, "tolerance": 0.01 },
+        { "kind": "equals", "at": 3, "field": "yaw", "value": 4.8375, "tolerance": 0.01 },
+        { "kind": "equals", "at": "advance:last", "field": "yaw", "value": 15.0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "id": "position-interpolator-fills-frames-between-samples",
+      "section": 3,
+      "title": "The position interpolator generates the frames between samples, like the rotation one",
+      "catches": "A position interpolator that hands the raw sample straight back. The rotation half has vectors of its own and the position half had none, so an interpolator reduced to `return raw` scored a clean sheet. A 32 Hz source driving 128 fps must produce four evenly spaced frames per sample, not one step and three flat ones.",
+      "unit": "position_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "ramp", "label": "cold", "dt": 0.0078125, "count": 128, "new_every": 4, "from": { "x": 0.0, "y": 0.0, "z": 0.0 }, "per_sample": { "x": 0.02 } }
+      ],
+      "assert": [
+        { "kind": "min_step", "from": 4, "to": "cold:last", "field": "x", "value": 0.0049 },
+        { "kind": "max_step", "from": 4, "to": "cold:last", "field": "x", "value": 0.0051 },
+        { "kind": "equals", "at": "cold:last", "field": "x", "value": 0.62, "tolerance": 1e-4 },
+        { "kind": "abs_at_most", "from": "cold", "to": "cold:last", "field": "y", "value": 1e-6 },
+        { "kind": "abs_at_most", "from": "cold", "to": "cold:last", "field": "z", "value": 1e-6 }
+      ]
+    },
+    {
+      "id": "position-interpolator-extrapolation-expires-on-stall",
+      "section": 2,
+      "title": "Position extrapolation expires on the same wall clock as rotation",
+      "catches": "The position half of the held-forever extrapolation. Rotation and position run separate copies of the same segment maths, so fixing one and leaving the other parks the camera 5 cm forward of where the head actually is whenever the samples stop, while the head rotation settles correctly. Frames are 1/128 s so the 0.25 s hold boundary lands on an exactly representable accumulated time.",
+      "unit": "position_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "first", "x": 0.0, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.0, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 3 },
+        { "op": "step", "label": "lean", "x": 0.10, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "label": "hold", "x": 0.10, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 32 },
+        { "op": "step", "label": "decay", "x": 0.10, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 45 },
+        { "op": "step", "label": "settled", "x": 0.10, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 43 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "hold:last", "field": "x", "value": 0.15, "tolerance": 1e-4 },
+        { "kind": "equals", "at": "settled", "field": "x", "value": 0.10, "tolerance": 1e-4 },
+        { "kind": "constant", "from": "settled", "to": "settled:last", "field": "x", "tolerance": 1e-5 }
+      ]
+    },
+    {
+      "id": "position-interpolator-resists-packet-jitter",
+      "section": 2,
+      "title": "The position interval estimate is blended too",
+      "catches": "An interval estimate in the position half that tracks the last observed gap. The two interpolators carry kIntervalBlend separately, so the rotation vector cannot see a position-side regression - and this is the axis where it shows worst, because a lurch-then-freeze in position reads as the camera physically jumping rather than as a slightly uneven turn. Same shape as sample-interval-estimate-resists-packet-jitter: a constant 2.5 mm per frame of lean with samples arriving alternately 2 and 6 frames apart.",
+      "unit": "position_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "ramp", "label": "warmup", "dt": 0.0078125, "count": 32, "new_every": 4, "from": { "x": 0.0, "y": 0.0, "z": 0.0 }, "per_sample": { "x": 0.01 } },
+        { "op": "step", "x": 0.080, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.080, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "x": 0.085, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.085, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "x": 0.100, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.100, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "x": 0.105, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.105, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "x": 0.120, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.120, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "x": 0.125, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.125, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "x": 0.140, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.140, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "x": 0.145, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.145, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "label": "settled", "x": 0.160, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.160, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "x": 0.165, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.165, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "x": 0.180, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.180, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "x": 0.185, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.185, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "x": 0.200, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.200, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "x": 0.205, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.205, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 },
+        { "op": "step", "x": 0.220, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "x": 0.220, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125 },
+        { "op": "step", "x": 0.225, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "label": "tail", "x": 0.225, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 5 }
+      ],
+      "assert": [
+        { "kind": "min_step", "from": "settled", "to": "tail:last", "field": "x", "value": 0.0010 },
+        { "kind": "max_step", "from": "settled", "to": "tail:last", "field": "x", "value": 0.0035 }
+      ]
+    },
+    {
+      "id": "position-interpolator-default-sample-interval-is-one-thirtieth",
+      "section": 3,
+      "title": "The position interpolator starts from the same 1/30 s guess",
+      "catches": "A 1/60 default in the position half only. The two interpolators carry the constant separately, so a port that fixes one leaves the other reaching the extrapolation cap in half a sample period - a position wobble at the tracker rate while the head rotation is smooth, which is exactly how the rotation-side bug was first described.",
+      "unit": "position_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "first", "x": 0.0, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0005 },
+        { "op": "step", "label": "second", "x": 0.10, "y": 0.0, "z": 0.0, "new": true, "dt": 0.0005 },
+        { "op": "step", "label": "advance", "x": 0.10, "y": 0.0, "z": 0.0, "new": false, "dt": 0.0078125, "repeat": 8 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "advance", "field": "x", "value": 0.0249375, "tolerance": 1e-4 },
+        { "kind": "equals", "at": 3, "field": "x", "value": 0.048375, "tolerance": 1e-4 },
+        { "kind": "equals", "at": "advance:last", "field": "x", "value": 0.15, "tolerance": 1e-4 }
       ]
     },
     {
@@ -291,17 +463,35 @@
       ]
     },
     {
+      "id": "vertical-limits-are-independent",
+      "section": 4,
+      "title": "The up and down vertical budgets are two separate numbers",
+      "catches": "Transposing the two arguments of the vertical clamp. With the shipped defaults limit_y and limit_y_down are both 0.20, so a swap is invisible; this vector sets them apart (0.20 up, 0.05 down) and reads each direction. A transposed clamp gives 0.05 up and -0.20 down - the head that leans down clips into the player body and the head that looks up barely moves.",
+      "unit": "position_processor",
+      "config": { "limit_y": 0.20, "limit_y_down": 0.05 },
+      "steps": [
+        { "op": "step", "label": "up", "x": 0.0, "y": 10.0, "z": 0.0, "rot_yaw": 0.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625 },
+        { "op": "step", "label": "down", "x": 0.0, "y": -10.0, "z": 0.0, "rot_yaw": 0.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 40 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "up", "field": "y", "value": 0.20, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "down:last", "field": "y", "value": -0.05, "tolerance": 1e-5 }
+      ]
+    },
+    {
       "id": "gimbal-lock-at-exactly-90",
       "section": 5,
       "title": "Decomposing at exactly +/-90 degrees of pitch keeps the heading",
-      "catches": "Both halves of the gimbal bug. Reusing the general yaw formula in the lock branch returns atan2(0, 0) = 0 and discards the rotation; testing sinPitch >= 1.0 never fires because float error leaves it a shade under 1, so the degenerate general branch runs anyway.",
+      "catches": "Both halves of the gimbal bug. Reusing the general yaw formula in the lock branch returns atan2(0, 0) = 0 and discards the rotation; testing sinPitch >= 1.0 never fires because float error leaves it a shade under 1, so the degenerate general branch runs anyway. The last two steps carry roll INTO the pole, where the yaw and roll axes coincide and the decomposition has to fold one into the other: 30 of yaw with 40 of roll comes back as -10 with no roll. An implementation that hands the input triple back unchanged fails there, and the orientation comparison alone cannot catch it because both triples name the same orientation.",
       "unit": "euler_roundtrip",
       "config": {},
       "steps": [
         { "op": "step", "label": "up_30", "yaw": 30.0, "pitch": 90.0, "roll": 0.0 },
         { "op": "step", "label": "up_m120", "yaw": -120.0, "pitch": 90.0, "roll": 0.0 },
         { "op": "step", "label": "down_45", "yaw": 45.0, "pitch": -90.0, "roll": 0.0 },
-        { "op": "step", "label": "near_up", "yaw": 30.0, "pitch": 89.9, "roll": 0.0 }
+        { "op": "step", "label": "near_up", "yaw": 30.0, "pitch": 89.9, "roll": 0.0 },
+        { "op": "step", "label": "pole_roll_up", "yaw": 30.0, "pitch": 90.0, "roll": 40.0 },
+        { "op": "step", "label": "pole_roll_down", "yaw": 45.0, "pitch": -90.0, "roll": -25.0 }
       ],
       "assert": [
         { "kind": "equals", "at": "up_30", "field": "pitch", "value": 90.0, "tolerance": 0.05 },
@@ -311,6 +501,10 @@
         { "kind": "equals", "at": "down_45", "field": "yaw", "value": 45.0, "tolerance": 0.05 },
         { "kind": "equals", "at": "near_up", "field": "yaw", "value": 30.0, "tolerance": 0.05 },
         { "kind": "equals", "at": "near_up", "field": "pitch", "value": 89.9, "tolerance": 0.05 },
+        { "kind": "equals", "at": "pole_roll_up", "field": "yaw", "value": -10.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "pole_roll_up", "field": "roll", "value": 0.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "pole_roll_down", "field": "yaw", "value": 20.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "pole_roll_down", "field": "roll", "value": 0.0, "tolerance": 0.05 },
         { "kind": "orientation_roundtrip_max_error", "value": 0.05 }
       ]
     },
@@ -318,19 +512,45 @@
       "id": "euler-roundtrip-sweep",
       "section": 5,
       "title": "Worst-case round-trip error over a full orientation sweep stays at the precision floor",
-      "catches": "A gimbal branch error anywhere in the range, including in ports with no quaternion type - a matrix-to-Euler decomposition has exactly the same degenerate case. One Rust port concluded 'not applicable, no quaternion conversion' and had a worst-case error of 1.5708 radians, a full right angle silently dropped. The comparison is between ORIENTATIONS, because at the poles the Euler triple is not unique.",
+      "catches": "A gimbal branch error anywhere in the range, including in ports with no quaternion type - a matrix-to-Euler decomposition has exactly the same degenerate case. One Rust port concluded 'not applicable, no quaternion conversion' and had a worst-case error of 1.5708 radians, a full right angle silently dropped. The comparison is between ORIENTATIONS, because at the poles the Euler triple is not unique - which on its own is also satisfied by handing the input straight back, so the sweep runs past a full turn on yaw and roll and bounds the OUTPUT to the canonical range every stage downstream assumes: yaw and roll within 180, pitch within 90.",
       "unit": "euler_roundtrip",
       "config": {},
       "steps": [
         {
           "op": "grid",
           "label": "sweep",
-          "yaw": { "from": -180.0, "to": 180.0, "step": 15.0 },
+          "yaw": { "from": -345.0, "to": 345.0, "step": 15.0 },
           "pitch": { "from": -90.0, "to": 90.0, "step": 5.0 },
-          "roll": { "from": -180.0, "to": 180.0, "step": 30.0 }
+          "roll": { "from": -330.0, "to": 330.0, "step": 30.0 }
         }
       ],
       "assert": [
+        { "kind": "orientation_roundtrip_max_error", "value": 0.05 },
+        { "kind": "abs_at_most", "from": "sweep", "to": "sweep:last", "field": "yaw", "value": 180.05 },
+        { "kind": "abs_at_most", "from": "sweep", "to": "sweep:last", "field": "pitch", "value": 90.05 },
+        { "kind": "abs_at_most", "from": "sweep", "to": "sweep:last", "field": "roll", "value": 180.05 }
+      ]
+    },
+    {
+      "id": "euler-decomposition-returns-canonical-angles",
+      "section": 5,
+      "title": "Decomposition returns the canonical triple, not the one it was handed",
+      "catches": "A decomposition that is not one - a harness or a port that echoes the Euler angles it was given. Comparing orientations cannot see that, because the echoed triple names the same orientation by construction. These inputs sit outside the canonical range every stage downstream assumes, so the correct output differs from the input: 200 of yaw comes back as -160, and -350 of roll as 10. A port whose interpolator then lerps 200 towards -160 travels the long way round the seam.",
+      "unit": "euler_roundtrip",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "yaw_over", "yaw": 200.0, "pitch": 0.0, "roll": 0.0 },
+        { "op": "step", "label": "yaw_under", "yaw": -200.0, "pitch": 0.0, "roll": 0.0 },
+        { "op": "step", "label": "roll_over", "yaw": 0.0, "pitch": 0.0, "roll": -350.0 },
+        { "op": "step", "label": "compound", "yaw": 190.0, "pitch": 10.0, "roll": -190.0 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "yaw_over", "field": "yaw", "value": -160.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "yaw_under", "field": "yaw", "value": 160.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "roll_over", "field": "roll", "value": 10.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "compound", "field": "yaw", "value": -170.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "compound", "field": "pitch", "value": 10.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "compound", "field": "roll", "value": 170.0, "tolerance": 0.01 },
         { "kind": "orientation_roundtrip_max_error", "value": 0.05 }
       ]
     },
@@ -338,17 +558,21 @@
       "id": "pivot-compensation-cancels-a-pure-head-turn",
       "section": 6,
       "title": "With pivot compensation on, a pure head turn produces zero pan",
-      "catches": "A +z pivot vector. Rotation is linear, so R(-v) - (-v) == -(R(v) - v): building the pivot as +z computes the exact negation of the real artifact and subtracting it DOUBLES the phantom translation. The input here is exactly the artifact a 0.10 m pivot produces at 30 degrees of yaw, so the correct output is zero and a +z port outputs twice the artifact.",
+      "catches": "A +z pivot vector. Rotation is linear, so R(-v) - (-v) == -(R(v) - v): building the pivot as +z computes the exact negation of the real artifact and subtracting it DOUBLES the phantom translation. The input here is exactly the artifact a 0.10 m pivot produces at 30 degrees of yaw, so the correct output is zero and a +z port outputs twice the artifact. The trailing phase rides a real 0.06 m lean on top of that same artifact and asserts it arrives, so a pipeline whose output is zero because nothing reaches it fails where a working one reports the lean.",
       "unit": "position_processor",
       "config": { "pivot": 0.10 },
       "steps": [
         { "op": "step", "label": "turn", "x": -0.05, "y": 0.0, "z": 0.01339746, "rot_yaw": 30.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625 },
-        { "op": "step", "label": "hold", "x": -0.05, "y": 0.0, "z": 0.01339746, "rot_yaw": 30.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 20 }
+        { "op": "step", "label": "hold", "x": -0.05, "y": 0.0, "z": 0.01339746, "rot_yaw": 30.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 20 },
+        { "op": "step", "label": "lean", "x": 0.01, "y": 0.0, "z": 0.01339746, "rot_yaw": 30.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 20 }
       ],
       "assert": [
         { "kind": "abs_at_most", "from": "turn", "to": "hold:last", "field": "x", "value": 1e-5 },
         { "kind": "abs_at_most", "from": "turn", "to": "hold:last", "field": "y", "value": 1e-5 },
-        { "kind": "abs_at_most", "from": "turn", "to": "hold:last", "field": "z", "value": 1e-5 }
+        { "kind": "abs_at_most", "from": "turn", "to": "hold:last", "field": "z", "value": 1e-5 },
+        { "kind": "equals", "at": "lean:last", "field": "x", "value": 0.06, "tolerance": 1e-4 },
+        { "kind": "equals", "at": "lean:last", "field": "y", "value": 0.0, "tolerance": 1e-4 },
+        { "kind": "equals", "at": "lean:last", "field": "z", "value": 0.0, "tolerance": 1e-4 }
       ]
     },
     {
@@ -368,34 +592,60 @@
       ]
     },
     {
+      "id": "pivot-compensation-covers-pitch-and-the-up-arm",
+      "section": 6,
+      "title": "The pivot artifact is three-dimensional: pitch swings the head through both arms",
+      "catches": "A compensation built on yaw alone, and one that ignores the upward arm. A tracker watching the eyes sees a point both ahead of and above the neck, so pitching the head moves it through an arc in the y-z plane that a yaw-only term leaves entirely uncorrected. The input here is exactly the artifact that a 0.10 m forward and 0.05 m upward pivot produces at 20 degrees of pitch, so the correct output is zero; a yaw-only implementation reports the whole 3.1 cm of phantom rise, and one that drops the upward arm reports what is left of it.",
+      "unit": "position_processor",
+      "config": { "pivot": 0.10, "pivot_up": 0.05 },
+      "steps": [
+        { "op": "step", "label": "pitched", "x": 0.0, "y": 0.031186645, "z": 0.023131745, "rot_yaw": 0.0, "rot_pitch": 20.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 8 }
+      ],
+      "assert": [
+        { "kind": "abs_at_most", "from": "pitched", "to": "pitched:last", "field": "x", "value": 1e-5 },
+        { "kind": "abs_at_most", "from": "pitched", "to": "pitched:last", "field": "y", "value": 1e-5 },
+        { "kind": "abs_at_most", "from": "pitched", "to": "pitched:last", "field": "z", "value": 1e-5 }
+      ]
+    },
+    {
       "id": "deadzone-is-continuous-at-its-edge",
       "section": 7,
       "title": "Deadzone subtracts in the input's direction rather than gating on it",
-      "catches": "Gating. With a deadzone of 5, an input of 4.99 gives 0 and 5.01 gives 5.01, so a 0.02 degree movement pops the camera 5 degrees. The correct output for 5.01 is 0.01.",
+      "catches": "Gating. With a deadzone of 5, an input of 4.99 gives 0 and 5.01 gives 5.01, so a 0.02 degree movement pops the camera 5 degrees. The correct output for 5.01 is 0.01. All three axes carry the same input because pitch and roll have their own deadzone call sites, and a gate left in either of them is invisible to a yaw-only vector.",
       "unit": "tracking_processor",
-      "config": { "dz_yaw": 5.0 },
+      "config": { "dz_yaw": 5.0, "dz_pitch": 5.0, "dz_roll": 5.0 },
       "steps": [
-        { "op": "step", "label": "inside", "yaw": 4.99, "pitch": 0.0, "roll": 0.0, "dt": 0.015625 },
-        { "op": "step", "label": "outside", "yaw": 5.01, "pitch": 0.0, "roll": 0.0, "dt": 0.015625, "repeat": 60 }
+        { "op": "step", "label": "inside", "yaw": 4.99, "pitch": 4.99, "roll": 4.99, "dt": 0.015625 },
+        { "op": "step", "label": "outside", "yaw": 5.01, "pitch": 5.01, "roll": 5.01, "dt": 0.015625, "repeat": 60 }
       ],
       "assert": [
         { "kind": "equals", "at": "inside", "field": "yaw", "value": 0.0, "tolerance": 1e-5 },
         { "kind": "equals", "at": "outside:last", "field": "yaw", "value": 0.01, "tolerance": 0.002 },
-        { "kind": "abs_at_most", "from": "inside", "to": "outside:last", "field": "yaw", "value": 0.05 }
+        { "kind": "abs_at_most", "from": "inside", "to": "outside:last", "field": "yaw", "value": 0.05 },
+        { "kind": "equals", "at": "inside", "field": "pitch", "value": 0.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "outside:last", "field": "pitch", "value": 0.01, "tolerance": 0.002 },
+        { "kind": "abs_at_most", "from": "inside", "to": "outside:last", "field": "pitch", "value": 0.05 },
+        { "kind": "equals", "at": "inside", "field": "roll", "value": 0.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "outside:last", "field": "roll", "value": 0.01, "tolerance": 0.002 },
+        { "kind": "abs_at_most", "from": "inside", "to": "outside:last", "field": "roll", "value": 0.05 }
       ]
     },
     {
       "id": "diagonal-motion-keeps-roll-at-zero",
       "section": 8,
       "title": "Diagonal head motion introduces no roll",
-      "catches": "Quaternion SLERP substituted for per-axis Euler smoothing. Slerp follows the great circle between two orientations and that arc's Euler decomposition carries a non-zero roll term for compound movement, so diagonal head motion rolls the horizon. Remote smoothing is on so the smoother is genuinely lagging the input across the sweep.",
+      "catches": "Quaternion SLERP substituted for per-axis Euler smoothing. Slerp follows the great circle between two orientations and that arc's Euler decomposition carries a non-zero roll term for compound movement, so diagonal head motion rolls the horizon. Remote smoothing is on so the smoother is genuinely lagging the input across the sweep. The per-frame floors on yaw and pitch are what stop a dead pipeline passing: a bound on roll alone is satisfied by an output that never moves at all.",
       "unit": "tracking_processor",
       "config": { "is_remote": 1, "remote_smoothing": 0.15 },
       "steps": [
         { "op": "ramp", "label": "sweep", "dt": 0.015625, "count": 64, "from": { "yaw": 0.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 0.8, "pitch": 0.6 } }
       ],
       "assert": [
-        { "kind": "abs_at_most", "from": "sweep", "to": "sweep:last", "field": "roll", "value": 0.005 }
+        { "kind": "abs_at_most", "from": "sweep", "to": "sweep:last", "field": "roll", "value": 0.005 },
+        { "kind": "min_step", "from": 8, "to": "sweep:last", "field": "yaw", "value": 0.79 },
+        { "kind": "max_step", "from": 8, "to": "sweep:last", "field": "yaw", "value": 0.81 },
+        { "kind": "min_step", "from": 8, "to": "sweep:last", "field": "pitch", "value": 0.59 },
+        { "kind": "max_step", "from": 8, "to": "sweep:last", "field": "pitch", "value": 0.61 }
       ]
     },
     {
@@ -457,6 +707,75 @@
         { "kind": "equals", "at": "t", "field": "roll", "value": -3.0, "tolerance": 1e-5 },
         { "kind": "equals", "at": "t", "field": "trailer_present", "value": 1, "tolerance": 0 },
         { "kind": "equals", "at": "t", "field": "recenter_counter", "value": 7, "tolerance": 0 }
+      ]
+    },
+    {
+      "id": "packet-rejects-a-short-datagram",
+      "section": 9,
+      "title": "A datagram shorter than the pose is rejected, not read past",
+      "catches": "A missing length guard. The socket binds INADDR_ANY, so any host on the network can send a 24-byte datagram; without the check the parser reads 24 bytes past the end of the buffer and reports whatever was there as a head pose. Every entry point needs its own guard - the rotation parse, the position parse and the combined one are three separate functions and a port that guards one of them has two holes left.",
+      "unit": "packet",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "half", "bytes": "000000000000284000000000000010c00000000000001840" },
+        { "op": "step", "label": "one_short", "bytes": "000000000000284000000000000010c000000000000018400000000000003440000000000000244000000000000008" },
+        { "op": "step", "label": "exact", "bytes": "000000000000284000000000000010c000000000000018400000000000003440000000000000244000000000000008c0" }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "half", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "half", "field": "ok_rotation", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "half", "field": "ok_position", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "one_short", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "one_short", "field": "ok_rotation", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "one_short", "field": "ok_position", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "exact", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "exact", "field": "yaw", "value": 20.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "exact", "field": "x", "value": 0.12, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "exact", "field": "ok_rotation", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "exact", "field": "ok_position", "value": 1, "tolerance": 0 }
+      ]
+    },
+    {
+      "id": "packet-accepts-a-longer-datagram-without-inventing-a-trailer",
+      "section": 9,
+      "title": "Extra bytes past the pose are not a Headcam trailer",
+      "catches": "Reading the trailer off length alone. Plain OpenTrack sends 56 bytes when it appends its frame counter, and byte 52 of that counter is not a version number - a parser that skips the magic check reports a trailer, latches a counter out of the middle of a double, and a port that ever acts on that recenters at random. The magic has to be checked, and a datagram carrying a truncated trailer (53 bytes) has to report no trailer while still delivering its pose.",
+      "unit": "packet",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "frame_counter", "bytes": "000000000000284000000000000010c000000000000018400000000000003440000000000000244000000000000008c000000000801cc840" },
+        { "op": "step", "label": "wrong_magic", "bytes": "000000000000284000000000000010c000000000000018400000000000003440000000000000244000000000000008c05843414d0109" },
+        { "op": "step", "label": "truncated", "bytes": "000000000000284000000000000010c000000000000018400000000000003440000000000000244000000000000008c04843414d01" }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "frame_counter", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "frame_counter", "field": "yaw", "value": 20.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "frame_counter", "field": "trailer_present", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "wrong_magic", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "wrong_magic", "field": "trailer_present", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "truncated", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "truncated", "field": "pitch", "value": 10.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "truncated", "field": "trailer_present", "value": 0, "tolerance": 0 }
+      ]
+    },
+    {
+      "id": "hcam-trailer-version-is-forward-compatible",
+      "section": 9,
+      "title": "A later trailer version still parses; version 0 does not",
+      "catches": "Comparing the version byte with == instead of >=. The trailer is wire protocol and the version byte exists so a later Headcam build can add to it; an equality test makes every future version invisible to every already-shipped mod, which is the whole failure the version byte was added to avoid. Version 0 is not a trailer and must be rejected from the other side.",
+      "unit": "packet",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "v2", "bytes": "000000000000284000000000000010c000000000000018400000000000003440000000000000244000000000000008c04843414d02c8" },
+        { "op": "step", "label": "v0", "bytes": "000000000000284000000000000010c000000000000018400000000000003440000000000000244000000000000008c04843414d0005" }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "v2", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "v2", "field": "roll", "value": -3.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "v2", "field": "trailer_present", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "v2", "field": "recenter_counter", "value": 200, "tolerance": 0 },
+        { "kind": "equals", "at": "v0", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "v0", "field": "trailer_present", "value": 0, "tolerance": 0 }
       ]
     },
     {

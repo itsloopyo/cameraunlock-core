@@ -1,0 +1,61 @@
+# The gate for this repo's own code.
+#
+# Everything else under .github/workflows/ is a reusable workflow the ~19 mod
+# repos call; none of them ran on a change to core itself. Until this file
+# existed, the staleness check, the C# and C++ suites and the pipeline
+# conformance vectors were all developer discipline, and a change that broke
+# any of them merged green.
+#
+# Orchestration only, per AGENTS.md: checkout, toolchains, then the SAME
+# `pixi run check` a developer types. No build step lives here - if CI needs
+# something the local command does not do, it belongs in the pixi task chain,
+# or the two drift and only one of them is ever right.
+#
+# Windows because the build is: the C# side multi-targets net35 through net48
+# and the C++ side builds with MSVC. Nothing here needs a game installed - the
+# Unity and BepInEx references come from the reference stubs under csharp/stubs
+# and MinHook and the REFramework SDK are vendored under vendor/ - so this runs
+# from a pristine clone.
+name: check
+
+on:
+  # Work lands directly on main here, and a pull request is checked on its own
+  # merge ref, so between them nothing reaches main unchecked.
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: '8.0.x'
+
+      # The restore is the slowest cold step and the one least likely to change,
+      # so a run that only touches source skips it entirely.
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'nuget.config') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          cache: true
+
+      # check runs cheapest-first and pixi aborts on the first failure, so a
+      # stale generated file or a broken conformance vector reports in seconds
+      # rather than behind a full build. See pixi.toml.
+      - run: pixi run check

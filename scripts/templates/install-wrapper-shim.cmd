@@ -25,6 +25,11 @@ set "MOD_INTERNAL_NAME=<Mod>HeadTracking"
 set "MOD_VERSION=0.0.0"
 set "STATE_FILE=.headtracking-state.json"
 set "FRAMEWORK_TYPE=None"
+:: Files copied only when they are not already there, so an upgrade keeps
+:: whatever the user tuned. Listing an .ini in MOD_DLLS instead puts it through
+:: the unconditional copy and the shim byte compare, which resets every key on
+:: every update and then records the tuned file as the game original.
+set "MOD_SEED_FILES="
 :: Post-install help text. `&echo ` starts each further line.
 set "MOD_CONTROLS=Controls:&echo   End      - Toggle head tracking on/off&echo   Page Up  - Toggle position tracking on/off&echo   Page Down - Toggle yaw mode (world-locked / camera-local)"
 :: --- END CONFIG BLOCK ---

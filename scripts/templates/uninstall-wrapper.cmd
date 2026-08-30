@@ -27,6 +27,9 @@ set "FRAMEWORK_TYPE=None"
 set "LEGACY_DLLS="
 :: BepInEx: subfolder under BepInEx\plugins\ the DLLs were deployed into.
 set "PLUGIN_SUBFOLDER="
+:: Files install.cmd seeded write-if-absent. MUST list the same names as
+:: install.cmd's MOD_SEED_FILES, or an uninstall leaves the mod's config behind.
+set "MOD_SEED_FILES="
 :: Config and log files the mod writes at runtime, removed from wherever the
 :: DLLs were deployed.
 set "MOD_LEFTOVERS="
