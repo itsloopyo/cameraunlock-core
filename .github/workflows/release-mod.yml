@@ -1,74 +1,101 @@
 # ============================================================================
-# Release BepInEx Mod - the PREBUILT-ARTIFACT release path
+# Release Mod - the fleet's one release workflow
 # ============================================================================
-# Superseded for every mod that can build on a CI runner: use
-# release-mod.yml, which drives the build through `pixi run package` the way
-# AGENTS.md requires. This file packages committed prebuilt DLLs instead, and
-# survives for the one case release-mod.yml cannot serve.
+# Called via `workflow_call` from every head-tracking mod's release.yml. The
+# caller owns three things: the tag trigger, the values below, and `secrets:
+# inherit`. Everything else - what gets built, how, and what is announced -
+# lives here so that a fix lands once instead of in fifty hand-maintained
+# copies that were already 190-of-250 lines identical when this was written.
 #
-# That case is real, not hypothetical. Its only caller,
-# sons-of-the-forest-headtracking, resolves its compile references by copying
-# Il2CppInterop proxy assemblies out of the user's own game install
-# (scripts/setup-libs.ps1: "The game must have been launched at least once
-# with BepInEx installed"). A CI runner owns no copy of the game, so
-# `pixi run package` cannot succeed there and no amount of workflow
-# consolidation changes that - the repo's build dependencies are
-# game-dependent, which is the trap AGENTS.md names explicitly.
+# Keyed on VERSION SOURCE, not on toolchain. The only step that cares whether a
+# mod is BepInEx C#, an ASI built with CMake, a Rust cdylib or a Lua drop-in is
+# the tag-vs-file version check; everything downstream of it is loader-agnostic
+# because `pixi run package` is what produces the artifact in all of them.
 #
-# So this is not kept for API-stability decoration. Deleting it or turning it
-# into a forwarder to release-mod.yml would break that repo's releases today.
-# The real fix is in the mod: make its references game-independent (vendored
-# interop assemblies or a checked-in stub source), at which point it moves to
-# release-mod.yml and this file has no callers left and can be retired.
+# The build is deliberately one line. Per AGENTS.md, CI must go through the
+# same `pixi run` a developer runs, so there is no dotnet/msbuild/cmake/cargo
+# invocation anywhere in this file - if a mod needs a compiler set up, it asks
+# for it with `dotnet-version` / `setup-msbuild` and puts the build itself in
+# its own pixi task chain.
 #
-# Do not add callers. A mod that CAN build on CI belongs on release-mod.yml.
+# Callers MUST pin this workflow to a commit SHA, not @main: the job holds
+# contents:write, DISCORD_RELEASE_WEBHOOK and LOPARI_APP_ACTIONS_TOKEN, and at
+# @main whatever lands on core's default branch runs with all three.
+# scripts/conformance.ps1's `workflow-ref` check fails a caller that does not.
+#
+# The three announcement steps (pre-flight, catalog pin, Discord) are the
+# canonical text from scripts/templates/*.yml and are reconciled in place by
+# scripts/sync-discord-announce.mjs, which now treats this file as one more
+# target. Do not hand-edit them here; edit the template and re-run that script.
 # ============================================================================
 
-name: Release BepInEx Mod
+name: Release Mod
 
 on:
   workflow_call:
     inputs:
-      csproj-path:
-        description: "Path to .csproj file (version source)"
-        required: true
-        type: string
       project-name:
-        description: "Display name for the GitHub release title"
+        description: "Human-readable name for the release title and notes (e.g. 'Head Tracking for Valheim')"
         required: true
         type: string
-      build-output-dir:
-        description: "Directory containing compiled DLLs"
+      version-source:
+        description: "Where this mod's authoritative version lives: csproj | cmake | cargo | pixi | manifest"
         required: true
         type: string
-      mod-name:
-        description: "Mod name (used in ZIP filename)"
+      version-path:
+        description: "Path to the file named by version-source (e.g. src/ValheimHeadTracking/ValheimHeadTracking.csproj)"
         required: true
         type: string
-      mod-dlls:
-        description: "Space-separated list of DLL filenames to include"
-        required: true
+      version-key:
+        description: "manifest only: dotted path to the version property (launcher-manifest.json nests it at mod_info.version)"
+        required: false
         type: string
-      artifact-paths:
-        description: "Space-separated list of paths for release note generation"
-        required: true
-        type: string
-      prebuilt-dir:
-        description: "Directory with prebuilt DLLs (empty = skip prebuilt step)"
+        default: "version"
+      version-pattern:
+        description: "regex only: pattern capturing the version. Several capture groups are joined with '.', for headers that split MAJOR/MINOR/PATCH"
         required: false
         type: string
         default: ""
-      create-nexus-zip:
-        description: "Create a NexusMods-compatible ZIP with BepInEx/plugins/ structure"
+      artifact-paths:
+        description: "Whitespace-separated paths whose history feeds the generated release notes"
+        required: true
+        type: string
+      package-task:
+        description: "pixi task that builds and packages the release ZIP"
         required: false
         type: string
-        default: "false"
+        default: "package"
+      pixi-environment:
+        description: "pixi environment to run the package task in (empty = default environment)"
+        required: false
+        type: string
+        default: ""
+      dotnet-version:
+        description: "Set up this .NET SDK before packaging (empty = no .NET toolchain needed)"
+        required: false
+        type: string
+        default: ""
+      setup-msbuild:
+        description: "Add MSBuild to PATH before packaging"
+        required: false
+        type: boolean
+        default: false
+      runs-on:
+        description: "Runner label for the release job"
+        required: false
+        type: string
+        default: "windows-latest"
+      timeout-minutes:
+        description: "Job timeout. The catalog pin sync alone can wait 10 minutes, so leave headroom above the build"
+        required: false
+        type: number
+        default: 30
 
 jobs:
   release:
-    name: Create Release
-    runs-on: windows-latest
-    timeout-minutes: 30
+    name: Build and Release
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: write
 
@@ -108,6 +135,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          # Full history: generate-release-notes.ps1 reads the commit range
+          # since the previous tag, and a shallow clone has no previous tag.
           fetch-depth: 0
           submodules: recursive
 
@@ -133,105 +162,111 @@ jobs:
           echo "tag=$tag" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $version"
 
-      - name: Validate version matches csproj
+      - name: Validate version matches source
         shell: pwsh
+        env:
+          VERSION_SOURCE: ${{ inputs.version-source }}
+          VERSION_PATH: ${{ inputs.version-path }}
+          VERSION_KEY: ${{ inputs.version-key }}
+          VERSION_PATTERN: ${{ inputs.version-pattern }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         run: |
           Import-Module ./cameraunlock-core/powershell/ReleaseWorkflow.psm1 -Force
-          $csprojVersion = Get-CsprojVersion "${{ inputs.csproj-path }}"
-          $tagVersion = "${{ steps.version.outputs.version }}"
+          $fileVersion = Get-ProjectVersion -Source $env:VERSION_SOURCE -Path $env:VERSION_PATH -Key $env:VERSION_KEY -Pattern $env:VERSION_PATTERN
 
-          Write-Host "csproj version: $csprojVersion"
-          Write-Host "Tag version: $tagVersion"
+          Write-Host "$($env:VERSION_PATH) version: $fileVersion"
+          Write-Host "Tag version: $($env:TAG_VERSION)"
 
-          if ($csprojVersion -ne $tagVersion) {
-            Write-Host "::error::Version mismatch! Tag is v$tagVersion but csproj has $csprojVersion"
+          if ($fileVersion -ne $env:TAG_VERSION) {
+            Write-Host "::error::Version mismatch! Tag is v$($env:TAG_VERSION) but $($env:VERSION_PATH) has $fileVersion"
             exit 1
           }
 
-          Write-Host "Version matches!" -ForegroundColor Green
+          Write-Host "Version matches."
 
-      - name: Copy prebuilt DLLs
-        if: inputs.prebuilt-dir != ''
+      - name: Setup .NET
+        if: inputs.dotnet-version != ''
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Setup MSBuild
+        if: inputs.setup-msbuild
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3.0.0
+
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        with:
+          run-install: false
+
+      - name: Build and package
         shell: pwsh
+        env:
+          PACKAGE_TASK: ${{ inputs.package-task }}
+          PIXI_ENVIRONMENT: ${{ inputs.pixi-environment }}
         run: |
-          Write-Host "Using prebuilt DLLs..." -ForegroundColor Cyan
-
-          $buildOutput = "${{ inputs.build-output-dir }}"
-          New-Item -ItemType Directory -Path $buildOutput -Force | Out-Null
-
-          Copy-Item "${{ inputs.prebuilt-dir }}/*.dll" $buildOutput -Force
-
-          Write-Host "Prebuilt DLLs copied to build output:" -ForegroundColor Green
-          Get-ChildItem $buildOutput -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
-
-      - name: Package release
-        id: package
-        shell: pwsh
-        run: |
-          $dlls = "${{ inputs.mod-dlls }}" -split '\s+'
-          $createNexus = "${{ inputs.create-nexus-zip }}" -eq "true"
-
-          $params = @{
-            ModName = "${{ inputs.mod-name }}"
-            CsprojPath = "${{ inputs.csproj-path }}"
-            BuildOutputDir = "${{ inputs.build-output-dir }}"
-            ModDlls = $dlls
+          # The only build command in this file, and it is the same one a
+          # developer runs. Anything the mod needs doing first belongs in that
+          # task's depends-on chain, not in a step here.
+          if ($env:PIXI_ENVIRONMENT) {
+            pixi run -e $env:PIXI_ENVIRONMENT $env:PACKAGE_TASK
+          } else {
+            pixi run $env:PACKAGE_TASK
           }
-          if ($createNexus) {
-            $params.CreateNexusZip = $true
-          }
-
-          # The script returns one object; read the paths by property name so a
-          # future stray write to the success stream cannot shift an index and
-          # silently make zip_path a garbage value.
-          $result = & cameraunlock-core/scripts/package-bepinex-mod.ps1 @params
-
-          $githubZip = $result.GithubZip
-          if (-not (Test-Path -LiteralPath $githubZip)) {
-            Write-Host "::error::package-bepinex-mod.ps1 did not report a readable installer ZIP (got '$githubZip')."
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::'pixi run $($env:PACKAGE_TASK)' failed."
             exit 1
-          }
-          echo "zip_path=$githubZip" >> $env:GITHUB_OUTPUT
-          Write-Host "GitHub package: $githubZip" -ForegroundColor Green
-
-          if ($createNexus) {
-            $nexusZip = $result.NexusZip
-            if (-not (Test-Path -LiteralPath $nexusZip)) {
-              Write-Host "::error::create-nexus-zip was requested but no NexusMods ZIP was produced (got '$nexusZip')."
-              exit 1
-            }
-            echo "nexus_zip_path=$nexusZip" >> $env:GITHUB_OUTPUT
-            Write-Host "NexusMods package: $nexusZip" -ForegroundColor Green
           }
 
       - name: Generate release notes
         shell: pwsh
+        env:
+          ARTIFACT_PATHS: ${{ inputs.artifact-paths }}
+          PROJECT_NAME: ${{ inputs.project-name }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $artifactPaths = "${{ inputs.artifact-paths }}" -split '\s+'
+          $artifactPaths = $env:ARTIFACT_PATHS -split '\s+' | Where-Object { $_ }
 
           & cameraunlock-core/scripts/generate-release-notes.ps1 `
-            -Version "${{ steps.version.outputs.version }}" `
+            -Version $env:RELEASE_VERSION `
             -ArtifactPaths $artifactPaths `
-            -ProjectName "${{ inputs.project-name }}"
+            -ProjectName $env:PROJECT_NAME
+
+      - name: Find release ZIPs
+        id: find_zips
+        shell: pwsh
+        run: |
+          # Every mod's package task writes release/<Name>-v<version>-installer.zip;
+          # the NexusMods variant is optional and only some mods produce it.
+          $installerZip = Get-ChildItem release/*-installer.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          $nexusZip = Get-ChildItem release/*-nexus.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if (-not $installerZip) {
+            Write-Host "::error::No release/*-installer.zip after 'pixi run ${{ inputs.package-task }}'. The package task must write the installer ZIP into release/."
+            exit 1
+          }
+
+          echo "installer_zip=$($installerZip.FullName)" >> $env:GITHUB_OUTPUT
+          Write-Host "Installer: $($installerZip.Name)"
+          if ($nexusZip) {
+            echo "nexus_zip=$($nexusZip.FullName)" >> $env:GITHUB_OUTPUT
+            Write-Host "NexusMods: $($nexusZip.Name)"
+          }
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          PROJECT_NAME: ${{ inputs.project-name }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         shell: pwsh
         run: |
-          $tag = "${{ steps.version.outputs.tag }}"
-          $zipPath = "${{ steps.package.outputs.zip_path }}"
-          $nexusZipPath = "${{ steps.package.outputs.nexus_zip_path }}"
+          $installerZip = "${{ steps.find_zips.outputs.installer_zip }}"
+          $nexusZip = "${{ steps.find_zips.outputs.nexus_zip }}"
+          $assets = @($installerZip)
+          if ($nexusZip) { $assets += $nexusZip }
 
-          $assets = @($zipPath)
-          if ($nexusZipPath) {
-            $assets += $nexusZipPath
-          }
-
-          Write-Host "Creating GitHub Release for $tag..." -ForegroundColor Cyan
-
-          gh release create $tag `
-            --title "${{ inputs.project-name }} $tag" `
+          gh release create $env:RELEASE_TAG `
+            --title "$($env:PROJECT_NAME) $($env:RELEASE_TAG)" `
             --notes-file "release-notes.txt" `
             @assets
 
@@ -240,8 +275,7 @@ jobs:
             exit 1
           }
 
-          Write-Host "Release created successfully!" -ForegroundColor Green
-          Write-Host "   View at: https://github.com/${{ github.repository }}/releases/tag/$tag" -ForegroundColor Cyan
+          Write-Host "Released: https://github.com/${{ github.repository }}/releases/tag/$($env:RELEASE_TAG)"
 
       - name: Sync Lopari catalog pin
         shell: pwsh

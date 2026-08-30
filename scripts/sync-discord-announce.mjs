@@ -80,7 +80,12 @@ function findReleaseWorkflows(repoPath) {
     .filter((f) => /\.ya?ml$/i.test(f) && /release|publish/i.test(f))
     .map((f) => join(wfDir, f))
     .map((p) => ({ path: p, text: readFileSync(p, 'utf8') }))
-    .filter((wf) => /tags:/.test(wf.text));
+    // `tags:` finds a mod's own release.yml; `workflow_call:` finds core's
+    // reusable release-mod.yml, which has no trigger of its own but carries the
+    // same three steps and was the one copy nothing reconciled. Leaving it out
+    // is how the shared workflow becomes the drifting copy of the templates it
+    // exists to spare 88 repos from maintaining.
+    .filter((wf) => /tags:/.test(wf.text) || /workflow_call:/.test(wf.text));
 }
 
 // Resolved once, before any workflow is touched. A missing interpreter or a
@@ -282,7 +287,7 @@ function processWorkflowFile(repoName, wf) {
 
 function discoverRepos() {
   if (explicitRepos.length) return explicitRepos.map((p) => resolve(p));
-  return readdirSync(siblingsRoot)
+  const mods = readdirSync(siblingsRoot)
     .filter((d) => /-head-?tracking$/.test(d))
     .map((d) => join(siblingsRoot, d))
     .filter((p) => {
@@ -292,6 +297,9 @@ function discoverRepos() {
         return false;
       }
     });
+  // Core last, so its own reusable workflow is reconciled in the same pass as
+  // the mods that call it rather than being the one file exempt from the sync.
+  return [...mods, coreRoot];
 }
 
 const repos = discoverRepos();

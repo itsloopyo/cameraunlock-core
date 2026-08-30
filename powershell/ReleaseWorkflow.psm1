@@ -787,6 +787,135 @@ function Get-CsprojVersion {
 
 <#
 .SYNOPSIS
+    Reads the authoritative version out of whichever file a mod keeps it in.
+.DESCRIPTION
+    The fleet keeps its version in whichever file its toolchain already had:
+    a .csproj <Version>, a CMakeLists project(... VERSION ...), Cargo.toml,
+    pixi.toml, a JSON manifest, or - for the largest group, the ASI mods - a
+    plain C++ header. Everything downstream of the tag-vs-file check is
+    loader-agnostic, so the reusable release workflow parameterises just this
+    one read rather than shipping a workflow per toolchain.
+
+    'regex' is the deliberate escape hatch for the last of those. A version in
+    src/version.h, gradle.properties or install.cmd's `set "MOD_VERSION=..."`
+    has no schema to parse, only a line to match, and enumerating a named
+    Source per spelling would mean editing this module every time a mod picks
+    a new macro name. Multiple capture groups are joined with '.', which is
+    what the VERSION_MAJOR / VERSION_MINOR / VERSION_PATCH headers need.
+
+    This lives here, not in workflow YAML, for the same reason the build does:
+    a developer running the release script and CI validating the tag have to
+    read the version the same way or the check passes locally and fails on the
+    tag push.
+.PARAMETER Source
+    csproj | cmake | cargo | pixi | manifest | regex
+.PARAMETER Path
+    Path to the file holding the version.
+.PARAMETER Key
+    Manifest only. Dotted path to the version property, for manifests that nest
+    it (launcher-manifest.json keeps it at mod_info.version). Defaults to
+    'version'.
+.PARAMETER Pattern
+    Regex only, and required there. Must capture the version; if it captures
+    several groups they are joined with '.'.
+.OUTPUTS
+    String containing the version.
+#>
+function Get-ProjectVersion {
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateSet('csproj', 'cmake', 'cargo', 'pixi', 'manifest', 'regex')]
+        [string]$Source,
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [string]$Key = 'version',
+        [string]$Pattern
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Version source not found: $Path (source type '$Source')"
+    }
+
+    switch ($Source) {
+        'csproj' { return Get-CsprojVersion $Path }
+
+        'cmake' {
+            $content = Get-Content -LiteralPath $Path -Raw
+            # project(Name VERSION x.y.z LANGUAGES ...). CMake allows up to four
+            # components; the tag check wants exactly what is written here, so the
+            # capture is left as-is rather than normalised to three.
+            if ($content -match '(?is)\bproject\s*\([^)]*?\bVERSION\s+([0-9]+(?:\.[0-9]+)*)') {
+                return $matches[1]
+            }
+            throw "No project(... VERSION ...) found in $Path"
+        }
+
+        'cargo' { return Get-TomlTableVersion -Path $Path -Tables @('package') }
+
+        # 'project' is the deprecated spelling of pixi's workspace table. Both are
+        # still on disk across the fleet, so both are accepted here.
+        'pixi' { return Get-TomlTableVersion -Path $Path -Tables @('workspace', 'project') }
+
+        'manifest' {
+            $json = (Get-Content -LiteralPath $Path -Raw).TrimStart([char]0xFEFF) | ConvertFrom-Json
+            $node = $json
+            foreach ($segment in ($Key -split '\.')) {
+                if ($null -eq $node -or -not $node.PSObject.Properties[$segment]) {
+                    throw "No '$Key' property in $Path (stopped at '$segment')"
+                }
+                $node = $node.$segment
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$node)) {
+                throw "Property '$Key' in $Path is empty"
+            }
+            return [string]$node
+        }
+
+        'regex' {
+            if ([string]::IsNullOrWhiteSpace($Pattern)) {
+                throw "Source 'regex' needs -Pattern; there is nothing to match in $Path without one."
+            }
+            $content = Get-Content -LiteralPath $Path -Raw
+            $match = [regex]::Match($content, $Pattern)
+            if (-not $match.Success) {
+                throw "Pattern '$Pattern' did not match anything in $Path"
+            }
+            $groups = @($match.Groups | Select-Object -Skip 1 | Where-Object { $_.Success })
+            if ($groups.Count -eq 0) {
+                throw "Pattern '$Pattern' matched in $Path but captured no group, so there is no version to read."
+            }
+            return (($groups | ForEach-Object { $_.Value.Trim() }) -join '.')
+        }
+    }
+}
+
+# Narrow TOML read: walk table headers and return `version` from the first of
+# $Tables that has one. Deliberately not a TOML parser - a `version = ` under
+# [dependencies] is the failure mode this exists to avoid, and scoping to a
+# named table is all that takes.
+function Get-TomlTableVersion {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string[]]$Tables
+    )
+
+    $current = ''
+    $found = @{}
+    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\[\[?([^\]]+)\]\]?') { $current = $matches[1].Trim(); continue }
+        if ($current -notin $Tables) { continue }
+        if ($trimmed -match '^version\s*=\s*"([^"]+)"') { $found[$current] = $matches[1] }
+    }
+
+    foreach ($table in $Tables) {
+        if ($found.ContainsKey($table)) { return $found[$table] }
+    }
+    throw "No version under [$($Tables -join '] or [')] in $Path"
+}
+
+<#
+.SYNOPSIS
     Sets the version in a .csproj file.
 .PARAMETER CsprojPath
     Path to the .csproj file.
@@ -1004,5 +1133,6 @@ Export-ModuleMember -Function @(
     'Invoke-VersionCommit',
     'New-ReleaseTag',
     'Get-CsprojVersion',
-    'Set-CsprojVersion'
+    'Set-CsprojVersion',
+    'Get-ProjectVersion'
 )
