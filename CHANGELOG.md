@@ -9,6 +9,77 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - the bare `Enabled` / `Enable` config keys no longer resolve
+
+`data/config-schema.json` no longer aliases the bare spellings `Enabled` and
+`Enable` onto `EnableOnStartup`, in either language.
+
+Key matching is section-less by design, so the `[Position] Enabled` line that 28
+mod repos ship in their `HeadTracking.ini` resolved to the master head-tracking
+switch. `[Position] Enabled=false` - the documented way to turn 6DOF off - turned
+the whole mod off instead, left position tracking enabled underneath, changed
+outcome with line order when a file carried both keys, and logged "Config loaded
+successfully" either way. `[Flashlight] Enabled`, `[Reticle] Enabled` and
+`[Discovery] Enabled` collided the same way. Exactly one repo ships
+`[General] Enabled`, and it now falls back to the shipped default (on).
+
+To change in consuming repos: a mod whose INI names the master switch as a bare
+`Enabled` must spell it `EnableOnStartup`, `AutoEnable`, `StartEnabled`,
+`EnableAtStartup`, `EnabledOnStartup` or `EnableHeadTracking` - all still
+accepted. Position tracking is `PositionEnabled` and its aliases. A bare
+`Enabled` is now ignored, whatever section it sits in.
+
+### Fixed - the RE Engine boundary negates z, so the forward lean leans forward
+
+`reframework::ApplyViewSpacePositionOffset` passed the pipeline's z straight into
+the camera's forward axis. Negative z is the forward lean everywhere inside the
+pipeline and RE Engine's camera-local +z is forward, so a forward lean moved the
+camera BACKWARDS - and onto the wrong budget, taking the generous 0.40m forward
+allowance for backward travel and leaving the forward lean 0.10m.
+
+Only the RE Engine plugins are affected; no other engine boundary goes through
+this function.
+
+### Fixed - the C++ config and memory guards
+
+- `PluginConfig::Load` reads every number through `config::ReadFloatChecked`
+  instead of `IniReader::ReadFloat`. `LocalSmoothing=0,15` read as 0.0 and passed
+  every range check silently; it is now refused with a diagnostic naming the key.
+  Hotkeys go through `config::IsBindableVirtualKey`, so `ToggleKey=0x230` no
+  longer registers a binding `GetAsyncKeyState` can never report.
+- Rotation and position sensitivity now floor at 0 rather than 0.1, so any single
+  axis can be pinned. Roll could already be zeroed; yaw and pitch could not.
+- `memory::SafeRead` stages through a local, so a read that faults part way
+  across a page boundary leaves the destination untouched instead of half
+  overwritten. `SafeWrite` cannot offer the same guarantee and now says so.
+- `config::ParseFloatStrict` rejects hexadecimal and leading whitespace, which
+  `TryParseConfigFloat` in the same library already did.
+
+### Fixed - RE Engine gameplay probing
+
+- The input-block probe bound both polarities of the same question to one check,
+  so a title exposing only `get_isPlayerControllable` suppressed tracking exactly
+  while the player had control. Split into separate blocked- and enabled-polarity
+  checks.
+- `GameFlowManager.Status` suppressed tracking on an invoke that never happened -
+  an absent singleton and a faulted call both returned 0, and 0 reads as a boot
+  flow state. `TryInvokeBool` / `TryInvokeInt` distinguish the two.
+- `GetRenderFrame()` counts every render callback, not only gameplay ones. It
+  froze the moment the gameplay gate closed, so `GetMarkerFocalLengths` served a
+  menu the last gameplay frame's focal lengths for the rest of the session.
+  `FrameProjection`'s validity flags now clear when no frame was projected.
+
+### Changed - the C++ optional modules are compiled by `pixi run check`
+
+`build-cpp` turns on `CAMERAUNLOCK_BUILD_HOOKS`, `_DISCOVERY`, `_UNREAL` and
+`_REFRAMEWORK`. None of them were configured, so none were compiled, and a
+compile error in the RE Engine driver reached a mod repo instead of this one.
+praydog/REFramework plugin API 1.15.0 is vendored under `vendor/reframework/`
+with its MIT notice so the driver builds from a clean checkout with no game and
+nothing off the network; a consumer that vendors its own SDK still overrides with
+`CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR`.
+
+
 ### BREAKING - dev pre-releases now publish the Nexus ZIP as well
 
 `Publish-NightlyBuild` attaches both `<ModName>-dev-installer.zip` and
