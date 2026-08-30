@@ -9,8 +9,9 @@
        AssemblyName BepInEx because BepInEx 5.x declares BepInEx.Configuration.* there, and
        the compiler bakes that assembly identity into every reference it emits.
 
-       AssemblyVersion 0.0.0.0 so the reference names no version the loaded BepInEx does
-       not have, the same reason the Unity stubs beside this one pin it.
+       AssemblyVersion is left at csc's 0.0.0.0 default so the reference names no version
+       the loaded BepInEx does not have, the same as the Unity stubs beside this one. An
+       <AssemblyVersion> property would do nothing here: GenerateAssemblyInfo is off.
 
        LangVersion 7.3 to match the consumer, which is 7.3 for its net472 target. -->
 
@@ -23,7 +24,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <AssemblyVersion>0.0.0.0</AssemblyVersion>
     <IsPackable>false</IsPackable>
     <DebugType>none</DebugType>
     <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114</NoWarn>

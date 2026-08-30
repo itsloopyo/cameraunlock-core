@@ -5,8 +5,12 @@
        UnityEnginePath is not supplied; a mod passes its own libs directory instead and
        this project is not built. AGENTS.md: build dependencies must be game-independent.
 
-       AssemblyVersion 0.0.0.0 matches what shipped Unity assemblies carry, so a mod
-       compiled against this stub names a version the loaded assembly really has.
+       AssemblyVersion is left at csc's 0.0.0.0 default, which is what shipped
+       UnityEngine.dll and the module assemblies really carry, so a mod compiled against
+       this stub names a version the loaded assembly has. No <AssemblyVersion> property:
+       GenerateAssemblyInfo is off, and with it off the property emits no attribute and is
+       silently ignored. UnityUIStubs.cs sets its 1.0.0.0 with an assembly attribute for
+       exactly that reason.
 
        LangVersion 7.3 because net35 (pre-2017.3 Unity) cannot go higher. -->
 
@@ -19,7 +23,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <AssemblyVersion>0.0.0.0</AssemblyVersion>
     <IsPackable>false</IsPackable>
     <DebugType>none</DebugType>
     <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114</NoWarn>

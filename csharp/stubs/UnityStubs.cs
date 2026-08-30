@@ -32,6 +32,28 @@
 //      - a const is inlined into the calling assembly, so its VALUE is part of the
 //        contract. Physics.DefaultRaycastLayers below is read from a shipped
 //        UnityEngine.PhysicsModule.dll, not guessed.
+//      - an enum MEMBER is a const too. TextureFormat and RuntimePlatform were both
+//        written here as bare 0..n sequences and both were wrong in every member; the
+//        built CameraUnlock.Core.Unity.dll shipped ldc.i4.4 for TextureFormat.ARGB32,
+//        which is RGBA32 in every Unity that ships. Read the numbers out of the enum,
+//        never renumber them, and give every member an explicit value so a later edit
+//        cannot shift the ones below it.
+//      - class vs struct is in every signature blob. LayerMask and Mathf are structs in
+//        the shipped engine. A stub class emits `call class LayerMask op_Implicit(int32)`
+//        and fails to bind at run.
+//
+// 4. A TYPE THE GAME DOES NOT DECLARE IS WORSE THAN A MISSING ONE. It compiles, and then
+//    the reference fails to resolve inside the game. Half the fleet targets a Unity that
+//    predates parts of this file, so anything added here has to be checked against the
+//    ExportedType tables of the OLDEST shipped game that will compile against it, not
+//    against the newest. Verified absences are marked at each declaration below; the two
+//    that no TargetFramework can express are:
+//      - the UnityEngine.Rendering SRP types are absent from Tacoma (Unity 2017.2), which
+//        builds net472 like every modern game.
+//      - MotionVectorGenerationMode is absent from Dorfromantik's shipped CoreModule.
+//        Managed code stripping removes an unused type from a module assembly even on a
+//        current Unity, so "the engine version has it" is not the same as "the game
+//        ships it".
 //
 // LangVersion is 7.3, because net35 mods (pre-2017.3 Unity) cannot go higher and one file
 // has to serve every target. That rules out auto-properties on a struct that the
@@ -54,7 +76,9 @@ namespace UnityEngine {
         public static bool operator !=(Object x, Object y) => !ReferenceEquals(x, y);
         public override bool Equals(object other) => ReferenceEquals(this, other);
         public override int GetHashCode() => base.GetHashCode();
+#if !NET35
         public static T[] FindObjectsByType<T>(FindObjectsSortMode sortMode) where T : Object => new T[0];
+#endif
         public static T FindObjectOfType<T>() where T : Object => default;
         public static T FindObjectOfType<T>(bool includeInactive) where T : Object => default;
         public static T[] FindObjectsOfType<T>() where T : Object => new T[0];
@@ -62,6 +86,7 @@ namespace UnityEngine {
         public static Object FindObjectOfType(System.Type type) => default;
         public static Object[] FindObjectsOfType(System.Type type) => new Object[0];
     }
+    public class ScriptableObject : Object { }
     public class Component : Object {
         public Transform transform { get; }
         public GameObject gameObject { get; }
@@ -89,7 +114,13 @@ namespace UnityEngine {
     public class YieldInstruction { }
     public class Coroutine : YieldInstruction { }
     public class WaitForSeconds : YieldInstruction { public WaitForSeconds(float seconds) { } }
-    public enum FindObjectsSortMode { None, InstanceID }
+#if !NET35
+    // Unity 2022.2 and later. ABSENT from Painscreek, Crawl, Tacoma, Subnautica, Outer Wilds
+    // and Hardspace Shipbreaker; only Dorfromantik and Valheim of the eight games checked
+    // declare it. Object.FindObjectsByType is gated with it, since a mod that calls it on
+    // an older game gets MissingMethodException whether or not the enum resolves.
+    public enum FindObjectsSortMode { None = 0, InstanceID = 1 }
+#endif
     public class Transform : Component {
         public Transform parent { get; set; }
         public Quaternion localRotation { get; set; }
@@ -167,6 +198,9 @@ namespace UnityEngine {
         public void ResetProjectionMatrix() { }
     }
     public enum CameraClearFlags { Skybox = 1, Color = 2, SolidColor = 2, Depth = 3, Nothing = 4 }
+    // VR and Reflection arrived in Unity 5.4; Painscreek and Crawl declare only the first
+    // three. An enum member is a literal at the use site, so naming one costs nothing at
+    // run - the comparison simply never matches on those games.
     public enum CameraType { Game = 1, SceneView = 2, Preview = 4, VR = 8, Reflection = 16 }
     public class RenderTexture : Object { }
     public struct Matrix4x4 {
@@ -311,7 +345,10 @@ namespace UnityEngine {
         public static bool visible { get; set; }
     }
     public enum CursorLockMode { None, Locked, Confined }
-    public static class Mathf {
+    // A struct in the shipped engine, like LayerMask. Every member is static and no
+    // signature anywhere mentions the type, so the old `static class` bound correctly;
+    // it is a struct here so the file has one rule for class-vs-struct rather than two.
+    public struct Mathf {
         public const float PI = 3.14159274f;
         public const float Deg2Rad = 0.0174532924f;
         public const float Rad2Deg = 57.29578f;
@@ -431,7 +468,14 @@ namespace UnityEngine {
         public void Apply() { }
         public static Texture2D whiteTexture { get; }
     }
-    public enum TextureFormat { Alpha8, ARGB4444, RGB24, RGBA32, ARGB32, RGB565, R16, DXT1, DXT5 }
+    // Read out of the shipped enum, unanimous across eight games from Unity 5.3 (Crawl,
+    // Painscreek) to Unity 6 (Valheim). The numbering is NOT sequential and never was: the
+    // bare 0..8 that stood here shipped ARGB32 as 4, which the engine reads as RGBA32, and
+    // would have baked RGB24 as ARGB4444 and DXT5 as RGB565.
+    public enum TextureFormat {
+        Alpha8 = 1, ARGB4444 = 2, RGB24 = 3, RGBA32 = 4, ARGB32 = 5, RGB565 = 7,
+        R16 = 9, DXT1 = 10, DXT5 = 12
+    }
     public enum FilterMode { Point, Bilinear, Trilinear }
     public enum ScaleMode { StretchToFill, ScaleAndCrop, ScaleToFit }
     // x/y/width/height are PROPERTIES in the real UnityEngine, not fields.
@@ -517,7 +561,13 @@ namespace UnityEngine {
         public static bool runInBackground { get; set; }
         public static void Quit() { }
     }
-    public enum RuntimePlatform { WindowsEditor, WindowsPlayer, OSXEditor, OSXPlayer, LinuxPlayer, Android, IPhonePlayer, WebGLPlayer }
+    // Same eight games, same unanimity. The bare 0..7 that stood here made
+    // `Application.platform == RuntimePlatform.WindowsPlayer` compile to a comparison
+    // against 1, which is OSXPlayer, so the Windows branch never ran on Windows.
+    public enum RuntimePlatform {
+        OSXEditor = 0, OSXPlayer = 1, WindowsPlayer = 2, WindowsEditor = 7,
+        IPhonePlayer = 8, Android = 11, LinuxPlayer = 13, WebGLPlayer = 17
+    }
     public static class PlayerPrefs {
         public static void SetFloat(string key, float value) { }
         public static float GetFloat(string key, float defaultValue = 0) => defaultValue;
@@ -593,7 +643,10 @@ namespace UnityEngine {
         public static T[] FindObjectsOfTypeAll<T>() where T : Object => new T[0];
         public static Object[] FindObjectsOfTypeAll(System.Type type) => new Object[0];
     }
-    public sealed class LayerMask {
+    // A STRUCT in the shipped engine, verified on Unity 5.3 and Unity 6. Declared as a class
+    // here, `LayerMask m = 8;` emitted `call class LayerMask op_Implicit(int32)` and the
+    // reference did not bind at run.
+    public struct LayerMask {
         public int value { get; set; }
         public static int NameToLayer(string layerName) => 0;
         public static string LayerToName(int layer) => "";
@@ -629,10 +682,18 @@ namespace UnityEngine {
     public static class ColorUtility {
         public static bool TryParseHtmlString(string htmlString, out Color color) { color = default; return false; }
     }
+#if !NET35
+    // ABSENT from Painscreek and Crawl (pre-2017.3) and from Dorfromantik, whose shipped
+    // CoreModule declares neither this enum nor Renderer.motionVectorGenerationMode -
+    // managed code stripping drops an unused type even on a current Unity. Reach it by
+    // reflection on a game that may have been stripped.
     public enum MotionVectorGenerationMode { Camera = 0, Object = 1, ForceNoMotion = 2 }
+#endif
     public class Renderer : Component {
         public UnityEngine.Rendering.ShadowCastingMode shadowCastingMode { get; set; }
+#if !NET35
         public MotionVectorGenerationMode motionVectorGenerationMode { get; set; }
+#endif
         public bool enabled { get; set; }
         public Material material { get; set; }
         public Material[] materials { get; set; }
@@ -655,7 +716,12 @@ namespace UnityEngine {
         public void Encapsulate(Vector3 point) { }
         public void Encapsulate(Bounds bounds) { }
     }
+#if !NET35
+    // Unity 2017.3 and later. ABSENT from Painscreek and Crawl. Applying an attribute the
+    // game does not declare fails to resolve when the type is loaded, so this one cannot
+    // be reached by reflection as a fallback - a net35 mod goes without it.
     [System.AttributeUsage(System.AttributeTargets.Class)] public class DefaultExecutionOrder : System.Attribute { public DefaultExecutionOrder(int order) { } }
+#endif
     [System.AttributeUsage(System.AttributeTargets.Field)] public class SerializeField : System.Attribute { }
     [System.AttributeUsage(System.AttributeTargets.Field)] public class HideInInspector : System.Attribute { }
     [System.AttributeUsage(System.AttributeTargets.Field)] public class HeaderAttribute : System.Attribute { public HeaderAttribute(string header) { } }
@@ -664,8 +730,18 @@ namespace UnityEngine {
 }
 namespace UnityEngine.Rendering {
     public enum ShadowCastingMode { Off = 0, On = 1, TwoSided = 2, ShadowsOnly = 3 }
-    public enum RenderPipelineAsset { }
-    public static class GraphicsSettings { public static UnityEngine.Object currentRenderPipeline { get; } }
+#if !NET35
+    // Scriptable Render Pipelines arrived in Unity 2018. ABSENT from Painscreek and Crawl
+    // (pre-2017.3, the net35 targets) and from Tacoma (Unity 2017.2), which builds net472
+    // like every modern game - no TargetFramework can express that one, so a mod on a
+    // 2017-era game must reach these by reflection the way RenderPipelineHelper does.
+    //
+    // RenderPipelineAsset is an abstract ScriptableObject, not an enum. A property's type
+    // is part of its signature, so GraphicsSettings.currentRenderPipeline declared as
+    // UnityEngine.Object emitted a getter returning Object and threw MissingMethodException
+    // on a direct call.
+    public abstract class RenderPipelineAsset : UnityEngine.ScriptableObject { }
+    public static class GraphicsSettings { public static RenderPipelineAsset currentRenderPipeline { get; } }
     public abstract class RenderPipeline { }
     public struct ScriptableRenderContext { }
     public static class RenderPipelineManager {
@@ -674,6 +750,7 @@ namespace UnityEngine.Rendering {
         public static event System.Action<ScriptableRenderContext, UnityEngine.Camera[]> beginFrameRendering;
         public static event System.Action<ScriptableRenderContext, UnityEngine.Camera[]> endFrameRendering;
     }
+#endif
 }
 namespace UnityEngine.SceneManagement {
     public struct Scene {

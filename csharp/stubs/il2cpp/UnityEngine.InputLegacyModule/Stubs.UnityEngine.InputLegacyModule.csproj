@@ -12,7 +12,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <AssemblyVersion>0.0.0.0</AssemblyVersion>
     <IsPackable>false</IsPackable>
     <DebugType>none</DebugType>
     <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114;MSB3277</NoWarn>

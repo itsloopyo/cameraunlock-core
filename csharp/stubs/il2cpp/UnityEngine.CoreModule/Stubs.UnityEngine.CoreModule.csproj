@@ -8,8 +8,10 @@
        Not in CameraUnlock.Core.sln: nothing core builds compiles against IL2CPP proxies.
        A mod's scripts/setup-libs.ps1 builds this project and copies the output into libs/.
 
-       AssemblyVersion 0.0.0.0 matches what the shipped interop assemblies carry, so a mod
-       compiled against this stub names a version the loaded assembly really has.
+       AssemblyVersion is left at csc's 0.0.0.0 default, which is what the shipped interop
+       assemblies really carry (read off Sons of the Forest's BepInEx/interop), so a mod
+       compiled against this stub names a version the loaded assembly has. An
+       <AssemblyVersion> property would do nothing here: GenerateAssemblyInfo is off.
 
        Il2CppInterop.Runtime is pinned to the version BepInEx 6.0.0-be.785 ships, which is
        what the fleet's IL2CPP mods vendor. Il2CppInterop.ReferenceLibs supplies
@@ -24,7 +26,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <AssemblyVersion>0.0.0.0</AssemblyVersion>
     <IsPackable>false</IsPackable>
     <DebugType>none</DebugType>
     <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114;MSB3277</NoWarn>

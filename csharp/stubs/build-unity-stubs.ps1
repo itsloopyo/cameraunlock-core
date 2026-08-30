@@ -76,6 +76,26 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Every assembly name this script can ever write into $OutputPath. A previous run with
+# different arguments leaves its output behind, so the cleanup at the end deletes the ones
+# this run does not produce. Only these names - anything else in the directory is the mod's
+# loader or game DLLs and is not ours to remove.
+#
+# These nine names are stub-owned in $OutputPath. A normal run overwrites whatever sits
+# under them, and the EmptyModule guard below already refuses to let a caller reuse one, so
+# deleting a leftover is no more destructive than the build itself.
+$knownStubAssemblies = @(
+    'UnityEngine',
+    'UnityEngine.UI',
+    'UnityEngine.CoreModule',
+    'UnityEngine.IMGUIModule',
+    'UnityEngine.UIModule',
+    'UnityEngine.TextRenderingModule',
+    'UnityEngine.AnimationModule',
+    'UnityEngine.PhysicsModule',
+    'UnityEngine.InputLegacyModule'
+)
+
 if (-not $PSBoundParameters.ContainsKey('EmptyModule')) {
     $EmptyModule = @(
         'UnityEngine.CoreModule',
@@ -156,12 +176,12 @@ function Build-Stub {
     <AssemblyName>$AssemblyName</AssemblyName>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <AssemblyVersion>0.0.0.0</AssemblyVersion>
     <DebugType>none</DebugType>
-    <!-- Shipped Unity and game assemblies are AssemblyVersion 0.0.0.0 (verified against
-         UnityEngine.PhysicsModule.dll and a game's Assembly-CSharp.dll). Mono's binder
-         rejects a plugin whose reference names a version the loaded assembly does not
-         have, so a stub built at 1.0.0.0 produces a mod that will not load. -->
+    <!-- No <AssemblyVersion> here. GenerateAssemblyInfo is off, and with it off the property
+         emits no attribute and csc falls back to 0.0.0.0 - which is what UnityEngine.dll,
+         the module assemblies and a game's Assembly-CSharp.dll really carry, read off eight
+         shipped games. UnityEngine.UI.dll is the one that differs (1.0.0.0), and it sets its
+         own [assembly: AssemblyVersion] in UnityUIStubs.cs so both build paths agree. -->
     <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114</NoWarn>
   </PropertyGroup>
   <ItemGroup>
@@ -218,6 +238,20 @@ try {
         $refs = @('UnityEngine')
         if ($uiBuilt) { $refs += 'UnityEngine.UI' }
         Build-Stub -AssemblyName $name -Sources @($source) -References $refs
+    }
+
+    # A stub this run did not build but a previous one did is still sitting in $OutputPath,
+    # and a reference that probes for the file still finds it. That is how a net35 libs
+    # directory keeps emitting [UnityEngine.InputLegacyModule]Input against a game with no
+    # such assembly: the module is excluded on net35, but a net472 run before it left one.
+    $produced = @('UnityEngine') + $EmptyModule
+    if ($uiBuilt) { $produced += 'UnityEngine.UI' }
+    foreach ($stale in $knownStubAssemblies | Where-Object { $produced -notcontains $_ }) {
+        $stalePath = Join-Path $OutputPath ($stale + '.dll')
+        if (Test-Path $stalePath) {
+            Remove-Item $stalePath -Force
+            Write-Host "  removed stale $stale.dll" -ForegroundColor Yellow
+        }
     }
 
     Get-ChildItem -Path $OutputPath -Filter '*.deps.json' -ErrorAction SilentlyContinue | Remove-Item -Force

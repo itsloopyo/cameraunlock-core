@@ -36,6 +36,12 @@ namespace CameraUnlock.Core.Tracking
         private Vec3 _heldPositionOffset;
         private bool _hasPose;
 
+        private long _lastPacketTicks;
+        private bool _poseSeeded;
+        private bool _positionSeeded;
+        private float _lastRawYaw, _lastRawPitch, _lastRawRoll;
+        private float _lastRawX, _lastRawY, _lastRawZ;
+
         // The session, not PositionSettings, is the owner of the two smoothing values.
         // They still LIVE in PositionSettings (that is the shape mods are wired to), but
         // a settings struct is assigned wholesale, so an ApplyPositionSettings after an
@@ -77,6 +83,7 @@ namespace CameraUnlock.Core.Tracking
                 {
                     _positionProcessor.ResetSmoothing();
                     _positionInterpolator.Reset();
+                    _positionSeeded = false;
                 }
             }
         }
@@ -168,6 +175,29 @@ namespace CameraUnlock.Core.Tracking
             set { _positionProcessor.Settings = value.WithSmoothing(_localSmoothing, _remoteSmoothing); }
         }
 
+        /// <summary>
+        /// Forward distance in metres from the neck pivot to the point the tracker
+        /// watches, forwarded to the position processor. See
+        /// <see cref="PositionProcessor.TrackerPivotForward"/> for what the value means and
+        /// why it defaults to 0.
+        /// </summary>
+        public float TrackerPivotForward
+        {
+            get { return _positionProcessor.TrackerPivotForward; }
+            set { _positionProcessor.TrackerPivotForward = value; }
+        }
+
+        /// <summary>
+        /// Upward distance in metres from the neck pivot to the point the tracker watches,
+        /// forwarded to the position processor. See
+        /// <see cref="PositionProcessor.TrackerPivotUp"/>.
+        /// </summary>
+        public float TrackerPivotUp
+        {
+            get { return _positionProcessor.TrackerPivotUp; }
+            set { _positionProcessor.TrackerPivotUp = value; }
+        }
+
         private void PushSmoothing()
         {
             _processor.LocalSmoothing = _localSmoothing;
@@ -249,29 +279,66 @@ namespace CameraUnlock.Core.Tracking
                     _poseInterpolator.Reset();
                     _positionProcessor.SetCenter(_receiver.GetLatestPosition());
                     _positionInterpolator.Reset();
+                    _poseSeeded = false;
+                    _positionSeeded = false;
                     Log?.Invoke("Recentered by tracker app");
                 }
 
                 TrackingPose rawPose = _receiver.GetLatestPose();
+                PositionData rawPosition = _receiver.GetLatestPosition();
 
-                // Timestamp-only new-sample detection, NOT the value-change filter the C++
-                // session uses. That is a deliberate consequence of where each port
-                // centres: C++ centres at the RECEIVER, so a recenter changes the raw
-                // values it reports and the interpolator re-seeds on the next packet. This
-                // port centres at the PROCESSOR, so the raw stream is untouched by a
-                // recenter - and a value-change filter would then stall a re-Reset
-                // interpolator indefinitely for a user holding perfectly still, because no
-                // value ever changes to re-seed it. Both PoseInterpolator and
-                // PositionInterpolator expose an explicit is-new-sample overload for
-                // callers whose plumbing does make the filter safe.
-                TrackingPose interpolated = _poseInterpolator.Update(rawPose, deltaTime);
+                // New DATA, not merely a new packet. OpenTrack relays at ~250 Hz whatever
+                // the source rate is, so deriving this from the receive timestamp alone
+                // collapses the interpolator's interval estimate onto the packet rate:
+                // every segment finishes within a frame or two of the sample that started
+                // it and the inter-sample frames the interpolator exists to generate become
+                // flat spots. docs/porting-the-pipeline.md section 2, and the
+                // duplicate-packets-track-the-source-rate conformance vector.
+                //
+                // The seed flags are what makes the filter safe in this port. Centering
+                // here happens at the PROCESSOR, so a recenter leaves the raw stream
+                // untouched: with no flag, a user holding perfectly still would never
+                // change a value, the interpolator that the recenter just Reset would never
+                // re-seed, and the output would sit at zero until they moved. Every path
+                // that Resets an interpolator clears the matching flag, and an unseeded
+                // interpolator re-seeds from the current pose on the very next frame -
+                // no new packet required, because a recenter can land between two of them.
+                bool isNewPacket = rawPose.TimestampTicks != _lastPacketTicks;
+                _lastPacketTicks = rawPose.TimestampTicks;
+
+                bool isNewSample = !_poseSeeded || (isNewPacket &&
+                    (rawPose.Yaw != _lastRawYaw || rawPose.Pitch != _lastRawPitch || rawPose.Roll != _lastRawRoll));
+                bool isNewPositionSample = !_positionSeeded || (isNewPacket &&
+                    (rawPosition.X != _lastRawX || rawPosition.Y != _lastRawY || rawPosition.Z != _lastRawZ));
+
+                if (isNewSample)
+                {
+                    _lastRawYaw = rawPose.Yaw;
+                    _lastRawPitch = rawPose.Pitch;
+                    _lastRawRoll = rawPose.Roll;
+                    _poseSeeded = true;
+                }
+
+                TrackingPose interpolated = _poseInterpolator.Update(rawPose, isNewSample, deltaTime);
                 TrackingPose rotation = _processor.Process(interpolated, deltaTime);
 
                 Vec3 positionOffset = Vec3.Zero;
                 if (PositionActive)
                 {
-                    PositionData rawPosition = _receiver.GetLatestPosition();
-                    PositionData interpolatedPosition = _positionInterpolator.Update(rawPosition, deltaTime);
+                    // Committed here rather than beside the rotation half: the position
+                    // interpolator only runs in a mode that has position, so marking it
+                    // seeded on a frame it never saw would leave it holding zero the next
+                    // time the mode comes back and the head happens to be still.
+                    if (isNewPositionSample)
+                    {
+                        _lastRawX = rawPosition.X;
+                        _lastRawY = rawPosition.Y;
+                        _lastRawZ = rawPosition.Z;
+                        _positionSeeded = true;
+                    }
+
+                    PositionData interpolatedPosition =
+                        _positionInterpolator.Update(rawPosition, isNewPositionSample, deltaTime);
 
                     // The PHYSICAL head rotation, not `rotation` - that one has per-axis
                     // sensitivity and inversion applied. The pivot artifact is a property
@@ -340,6 +407,8 @@ namespace CameraUnlock.Core.Tracking
             _poseInterpolator.Reset();
             _positionProcessor.SetCenter(_receiver.GetLatestPosition());
             _positionInterpolator.Reset();
+            _poseSeeded = false;
+            _positionSeeded = false;
         }
 
         /// <summary>
@@ -353,6 +422,8 @@ namespace CameraUnlock.Core.Tracking
             _processor.ResetSmoothing();
             _positionInterpolator.Reset();
             _positionProcessor.ResetSmoothing();
+            _poseSeeded = false;
+            _positionSeeded = false;
             _hasPose = false;
             IsHolding = false;
         }

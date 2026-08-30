@@ -42,6 +42,18 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Null(ConfigKeySchema.Resolve("NotAKeyAnyoneUses"));
         }
 
+        // Regression: Normalize used ToLowerInvariant, whose full Unicode case folding maps
+        // U+212A KELVIN SIGN onto 'k', so a key spelling ToggleKey with one bound here and
+        // was ignored by the C++ table, which folds A-Z and nothing else. Every spelling in
+        // the schema is ASCII, so the narrow fold is the one both halves can implement.
+        [Fact]
+        public void Normalize_FoldsAsciiOnly()
+        {
+            Assert.Equal("toggle\u212Aey", ConfigKeySchema.Normalize("Toggle\u212Aey"));
+            Assert.Null(ConfigKeySchema.Resolve("Toggle\u212Aey"));
+            Assert.Equal("togglekey", ConfigKeySchema.Resolve("ToggleKey"));
+        }
+
         [Fact]
         public void Retired_IsMarkedOnTheRetiredConceptOnly()
         {

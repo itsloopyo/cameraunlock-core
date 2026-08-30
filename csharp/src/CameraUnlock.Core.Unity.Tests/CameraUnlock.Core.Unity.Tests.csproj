@@ -74,5 +74,11 @@
     <Compile Include="..\..\il2cpp\SplitInjectionCameraTracker.cs">
       <Link>UnderTest\SplitInjectionCameraTracker.cs</Link>
     </Compile>
+    <!-- Same reasoning one project over: the shared BepInEx reference stubs throw from every
+         body, so ConfigFile.Bind cannot be executed against them. BepInExStubs.cs beside
+         this project's UnityStubs.cs is the working fake this compiles against. -->
+    <Compile Include="..\CameraUnlock.Core.Unity.BepInEx\Config\HeadTrackingConfigBase.cs">
+      <Link>UnderTest\HeadTrackingConfigBase.cs</Link>
+    </Compile>
   </ItemGroup>
 </Project>

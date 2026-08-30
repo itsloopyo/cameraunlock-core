@@ -164,16 +164,30 @@ namespace CameraUnlock.Core.Config
             float limitYDown = Position.LimitYDown;
             bool sawLimitY = false;
             bool sawLimitYDown = false;
+            string limitYSpelling = string.Empty;
+            bool verticalLimitsWereSymmetric = Position.LimitY == Position.LimitYDown;
             float limitZ = Position.LimitZ;
             float limitZBack = Position.LimitZBack;
             bool invertPosX = Position.InvertX;
             bool invertPosY = Position.InvertY;
             bool invertPosZ = Position.InvertZ;
 
+            var firstSpellingOf = new Dictionary<string, string>();
+
             foreach (var kvp in values)
             {
                 string key = ConfigKeySchema.Resolve(kvp.Key);
                 if (key == null) continue;
+
+                string firstSpelling;
+                if (firstSpellingOf.TryGetValue(key, out firstSpelling))
+                {
+                    WarnDuplicateConcept(log, firstSpelling, kvp.Key);
+                }
+                else
+                {
+                    firstSpellingOf[key] = kvp.Key;
+                }
 
                 string value = kvp.Value;
 
@@ -215,17 +229,17 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.YawSensitivity:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, yawSens, out floatVal))
                             yawSens = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PitchSensitivity:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, pitchSens, out floatVal))
                             pitchSens = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.RollSensitivity:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, rollSens, out floatVal))
                             rollSens = floatVal;
                         break;
 
@@ -319,35 +333,36 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.PositionSensitivityX:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensX, out floatVal))
                             posSensX = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionSensitivityY:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensY, out floatVal))
                             posSensY = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionSensitivityZ:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensZ, out floatVal))
                             posSensZ = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitX:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitX, out floatVal))
                             limitX = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitY:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitY, out floatVal))
                         {
                             limitY = floatVal;
                             sawLimitY = true;
+                            limitYSpelling = kvp.Key;
                         }
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitYDown:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitYDown, out floatVal))
                         {
                             limitYDown = floatVal;
                             sawLimitYDown = true;
@@ -355,12 +370,12 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitZ:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitZ, out floatVal))
                             limitZ = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitZBack:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitZBack, out floatVal))
                             limitZBack = floatVal;
                         break;
 
@@ -380,12 +395,12 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.TrackerPivotForward:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotForward, out floatVal))
                             TrackerPivotForward = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.TrackerPivotUp:
-                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotUp, out floatVal))
                             TrackerPivotUp = floatVal;
                         break;
 
@@ -399,10 +414,27 @@ namespace CameraUnlock.Core.Config
             // [-LimitYDown, +LimitY], so leaving the down side at its default silently caps a
             // raised LimitY at 0.20m downward - the exact bug ~47 mod repos carry today, each
             // of which hand-mirrors the key or does not. Decided after the loop, so dictionary
-            // order cannot change the outcome, and an explicit LimitYDown always wins.
+            // order cannot change the outcome, and an explicit LimitYDown in the same
+            // dictionary always wins.
+            //
+            // The mirror only fires when the vertical limits were already symmetric. A caller
+            // that built PositionSettings with limitYDown != limitY picked that asymmetry to
+            // keep the camera out of the player body, and mirroring would throw it away
+            // without the file ever naming the down side.
             if (sawLimitY && !sawLimitYDown)
             {
-                limitYDown = limitY;
+                if (verticalLimitsWereSymmetric)
+                {
+                    limitYDown = limitY;
+                }
+                else
+                {
+                    log?.Invoke(string.Format(
+                        "Config key '{0}' set the upward limit to {1}; the downward limit stays at {2} because this config was built with an asymmetric vertical limit. Name LimitYDown to change it.",
+                        limitYSpelling,
+                        limitY.ToString(CultureInfo.InvariantCulture),
+                        limitYDown.ToString(CultureInfo.InvariantCulture)));
+                }
             }
 
             Sensitivity = new SensitivitySettings(yawSens, pitchSens, rollSens, invertYaw, invertPitch, invertRoll);
@@ -411,6 +443,52 @@ namespace CameraUnlock.Core.Config
                 limitX, limitY, limitYDown, limitZ, limitZBack,
                 LocalSmoothing, RemoteSmoothing,
                 invertPosX, invertPosY, invertPosZ);
+        }
+
+        // Limits, sensitivities and tracker-pivot distances are magnitudes. A negative one
+        // is not a smaller value, it is a broken one: ClampToLimits calls
+        // Clamp(y, -LimitYDown, LimitY), so a negative LimitY puts min above max and every
+        // input on that axis comes back pinned to the bound, whatever the head does. Axis
+        // direction has its own keys (InvertYaw/InvertPositionY/...), so nothing legitimate
+        // is expressed by a minus sign here.
+        //
+        // Zero passes on purpose. A zero limit clamps the axis to [0, 0], which is a real
+        // request to lock that axis, and a zero sensitivity is a real request to disable it.
+        // Rejected values are reported and the previous value stands - clamping a negative
+        // to zero would silently lock an axis the user meant to widen.
+#if NULLABLE_ENABLED
+        private static bool TryParseMagnitude(Action<string>? log, string key, string value, float current, out float result)
+#else
+        private static bool TryParseMagnitude(Action<string> log, string key, string value, float current, out float result)
+#endif
+        {
+            if (!ConfigParsingUtils.TryParseFloat(value, out result))
+            {
+                result = current;
+                return false;
+            }
+
+            if (result < 0f)
+            {
+                log?.Invoke(string.Format(
+                    "Config key '{0}' has a negative value '{1}' - limits, sensitivities and tracker pivot distances must be zero or greater. Rejected, keeping {2}.",
+                    key, value, current.ToString(CultureInfo.InvariantCulture)));
+                result = current;
+                return false;
+            }
+
+            return true;
+        }
+
+#if NULLABLE_ENABLED
+        private static void WarnDuplicateConcept(Action<string>? log, string firstSpelling, string secondSpelling)
+#else
+        private static void WarnDuplicateConcept(Action<string> log, string firstSpelling, string secondSpelling)
+#endif
+        {
+            log?.Invoke(string.Format(
+                "Config keys '{0}' and '{1}' are two spellings of the same setting. Only one takes effect and which one is not defined - remove one.",
+                firstSpelling, secondSpelling));
         }
 
 #if NULLABLE_ENABLED

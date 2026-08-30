@@ -6,7 +6,12 @@
        UnityEngine.dll produce typerefs nothing can resolve at runtime.
 
        net35 is absent because CameraUnlock.Core.Unity removes CrosshairUtility.cs, its
-       only uGUI consumer, on that target. -->
+       only uGUI consumer, on that target.
+
+       AssemblyVersion 1.0.0.0, not the 0.0.0.0 the Unity stub beside this one carries. It
+       is set by an [assembly: AssemblyVersion] in UnityUIStubs.cs, not here: with
+       GenerateAssemblyInfo=false an <AssemblyVersion> property emits no attribute at all
+       and csc falls back to 0.0.0.0. See the comment on the attribute. -->
 
   <PropertyGroup>
     <TargetFrameworks>net472;net48</TargetFrameworks>
@@ -17,7 +22,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <AssemblyVersion>0.0.0.0</AssemblyVersion>
     <IsPackable>false</IsPackable>
     <DebugType>none</DebugType>
     <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114</NoWarn>

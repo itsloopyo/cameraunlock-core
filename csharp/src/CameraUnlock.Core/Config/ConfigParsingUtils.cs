@@ -131,10 +131,24 @@ namespace CameraUnlock.Core.Config
         }
 
         /// <summary>
-        /// Parses an INI-style configuration file into a dictionary.
+        /// Parses an INI-style configuration file into a dictionary keyed
+        /// case-insensitively.
+        /// <para>
+        /// Every character test here is ordinal, matching the C++ twin's
+        /// <c>trimmed[0]</c> / <c>front()</c> / <c>back()</c> comparisons. The
+        /// culture-sensitive <c>StartsWith(string)</c> overload treats an ignorable
+        /// leading character as absent, so a line beginning U+00AD SOFT HYPHEN read as a
+        /// section header on this side and as a key line on the C++ side.
+        /// </para>
         /// </summary>
         /// <param name="filePath">Path to the config file.</param>
-        /// <returns>Dictionary of key-value pairs (keys are lowercased).</returns>
+        /// <returns>Dictionary of key-value pairs.</returns>
+        /// <exception cref="FormatException">
+        /// The file sets the same key twice. Keys match case-insensitively, so one of the
+        /// two values would have to be discarded, and discarding it silently is how
+        /// <c>UdpPort = 5555</c> followed by <c>udpport = seventy</c> ended up on the
+        /// default port with nothing in the log.
+        /// </exception>
         public static Dictionary<string, string> ParseIniFile(string filePath)
         {
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -142,15 +156,17 @@ namespace CameraUnlock.Core.Config
             if (!File.Exists(filePath))
                 return result;
 
-            foreach (string line in File.ReadAllLines(filePath))
-            {
-                string trimmed = line.Trim();
+            var firstSeenOnLine = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            string[] lines = File.ReadAllLines(filePath);
 
-                // Skip empty lines and comments
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string trimmed = lines[i].Trim();
+
                 if (string.IsNullOrEmpty(trimmed) ||
-                    trimmed.StartsWith("#") ||
-                    trimmed.StartsWith(";") ||
-                    trimmed.StartsWith("["))
+                    trimmed[0] == '#' ||
+                    trimmed[0] == ';' ||
+                    trimmed[0] == '[')
                     continue;
 
                 int eqIndex = trimmed.IndexOf('=');
@@ -167,14 +183,24 @@ namespace CameraUnlock.Core.Config
                 // quoted value, so a legitimate ';' or '#' inside quotes survives.
                 value = StripInlineComment(value);
 
-                // Remove surrounding quotes if present
                 if (value.Length >= 2 &&
-                    ((value.StartsWith("\"") && value.EndsWith("\"")) ||
-                     (value.StartsWith("'") && value.EndsWith("'"))))
+                    ((value[0] == '"' && value[value.Length - 1] == '"') ||
+                     (value[0] == '\'' && value[value.Length - 1] == '\'')))
                 {
                     value = value.Substring(1, value.Length - 2);
                 }
 
+                int firstLine;
+                if (firstSeenOnLine.TryGetValue(key, out firstLine))
+                {
+                    throw new FormatException(string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Duplicate config key '{0}' in {1}: line {2} sets a key already set on line {3}. " +
+                        "Keys match case-insensitively, so only one of the two values can apply. Delete one.",
+                        key, filePath, i + 1, firstLine));
+                }
+
+                firstSeenOnLine[key] = i + 1;
                 result[key] = value;
             }
 

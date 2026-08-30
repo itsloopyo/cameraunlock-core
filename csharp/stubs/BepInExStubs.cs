@@ -21,6 +21,11 @@
 //   - Value and SettingChanged are declared on ConfigEntry<T>, NOT on ConfigEntryBase.
 //   - ConfigDescription's constructor really is (string, AcceptableValueBase = null,
 //     params object[]), so a one-argument call at a use site stays valid.
+//   - both ConfigDescription-taking Bind overloads default that parameter to null, so
+//     config.Bind("General", "Enabled", true) is a legal three-argument call. Dropping
+//     the default here compiled for a dev with a real BepInEx.dll and failed CS1501 on
+//     a clean clone. An optional parameter is baked in at the CALL site, so a stub has
+//     to reproduce the defaults as well as the parameter list.
 //   - AcceptableValueRange<T> derives from AcceptableValueBase and constrains T to
 //     IComparable.
 //
@@ -106,7 +111,7 @@ namespace BepInEx.Configuration
 
     public class ConfigFile
     {
-        public ConfigEntry<T> Bind<T>(string section, string key, T defaultValue, ConfigDescription configDescription)
+        public ConfigEntry<T> Bind<T>(string section, string key, T defaultValue, ConfigDescription configDescription = null)
         {
             throw new NotImplementedException();
         }
@@ -116,7 +121,7 @@ namespace BepInEx.Configuration
             throw new NotImplementedException();
         }
 
-        public ConfigEntry<T> Bind<T>(ConfigDefinition configDefinition, T defaultValue, ConfigDescription configDescription)
+        public ConfigEntry<T> Bind<T>(ConfigDefinition configDefinition, T defaultValue, ConfigDescription configDescription = null)
         {
             throw new NotImplementedException();
         }
