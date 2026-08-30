@@ -76,11 +76,11 @@ goto :detect_yes_flag
 if defined WRAPPER_DIR ( set "SCRIPT_DIR=%WRAPPER_DIR%" ) else ( set "SCRIPT_DIR=%~dp0" )
 
 :: -------- Arg parser (canonical, do not modify) --------
-:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
-:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
-:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
-:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
-:: fails, and a valid directory is rejected as a malformed argument.
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion` comes
+:: much further down, after the game path has been resolved. With it on, cmd
+:: strips `!` out of the expanded text of `set "_ARG=%~1"` - and out of `%~1`
+:: itself - so a real game path like C:\Games\Oh! My Game silently loses the
+:: `!`, `if exist` fails, and a valid directory is rejected as malformed.
 set "YES_FLAG="
 set "FORCE_FLAG="
 set "_GIVEN_PATH="
@@ -98,12 +98,18 @@ if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
     if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
+:: Two characters never survive the trip into a batch file's arguments: every
+:: `call` in the chain doubles a `^`, and the extra expansion round `call` runs
+:: eats a lone `%`. Both are already gone by the time this parser compares the
+:: string, so name them rather than leave the user guessing why a folder that
+:: plainly exists came back "unrecognised". Detection reaches those folders
+:: fine - it is only the argument that cannot carry them.
 echo ERROR: unrecognised argument "%_ARG%"
+echo A path argument cannot carry a ^^ or a %% - cmd.exe doubles the first and
+echo drops the second. Run without a path so detection finds the game instead.
 exit /b 2
 :args_done
 set "_ARG="
-
-setlocal enabledelayedexpansion
 
 :: -------- Validate CONFIG BLOCK --------
 :: Every name below is interpolated straight into a path that gets written,
@@ -130,28 +136,48 @@ if not exist "%_SHIM%" (
     exit /b 1
 )
 set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
-set "_GIVEN_ARG="
-if defined _GIVEN_PATH set "_GIVEN_ARG=-GivenPath "!_GIVEN_PATH!""
-powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "!_SHIM_OUT!" !_GIVEN_ARG!
-set "_PS_EC=!errorlevel!"
-if not "!_PS_EC!"=="0" (
+:: -GivenPath is spelled out in both branches rather than built into one
+:: variable and expanded unquoted: the quotes are what keep a `&`, `^` or `)`
+:: in the user's path from being parsed as syntax.
+if defined _GIVEN_PATH (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%" -GivenPath "%_GIVEN_PATH%"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%"
+)
+set "_PS_EC=%errorlevel%"
+if not "%_PS_EC%"=="0" (
     echo.
-    echo ERROR: Could not resolve game install path ^(shim exit code !_PS_EC!^).
+    echo ERROR: Could not resolve game install path ^(shim exit code %_PS_EC%^).
     echo Pass a path explicitly: uninstall.cmd "C:\path\to\game"
     echo.
-    del "!_SHIM_OUT!" 2>nul
+    del "%_SHIM_OUT%" 2>nul
     exit /b 1
 )
-call "!_SHIM_OUT!"
-del "!_SHIM_OUT!" 2>nul
+call "%_SHIM_OUT%"
+del "%_SHIM_OUT%" 2>nul
+
+:: Derive EXE_DIR from GAME_PATH + GAME_EXE_RELPATH, still with expansion off:
+:: a FOR variable is substituted before the `!` scan, so `set "EXE_DIR=%%~dpi"`
+:: would drop a `!` from the path if this ran below.
+for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "EXE_DIR=%%~dpi"
+if "%EXE_DIR:~-1%"=="\" set "EXE_DIR=%EXE_DIR:~0,-1%"
+
+:: Delayed expansion is enabled HERE and not one line earlier. Everything the
+:: shim resolved is already in the environment, and `!VAR!` hands the value back
+:: byte-for-byte: it is substituted after cmd.exe has finished looking for `!`,
+:: `&`, `^` and `)`, so a path like C:\Games\Oh! My Game survives. `%VAR%` is
+:: substituted before that scan and would lose the `!`. Every path below is
+:: therefore `!`-expanded; the arg parser, the shim call and the EXE_DIR
+:: derivation above all run with expansion off for the same reason.
+setlocal enabledelayedexpansion
 
 echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
-tasklist /fi "imagename eq %GAME_EXE%" 2>nul | findstr /i "%GAME_EXE%" >nul 2>&1
+tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i "!GAME_EXE!" >nul 2>&1
 if not errorlevel 1 (
-    echo ERROR: %GAME_DISPLAY_NAME% is currently running.
+    echo ERROR: !GAME_DISPLAY_NAME! is currently running.
     echo Please close the game before uninstalling.
     echo.
     exit /b 1
@@ -187,8 +213,8 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
 set "REMOVE_LOADER=0"
 if "!FORCE_FLAG!"=="1" set "REMOVE_LOADER=1"
 if "!REMOVE_LOADER!"=="0" (
-    if exist "%GAME_PATH%\%STATE_FILE%" (
-        findstr /c:"installed_by_us" "%GAME_PATH%\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
+    if exist "!GAME_PATH!\%STATE_FILE%" (
+        findstr /c:"installed_by_us" "!GAME_PATH!\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
         if not errorlevel 1 set "REMOVE_LOADER=1"
     )
 )
@@ -215,8 +241,8 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
 )
 
 :: -------- Remove state file --------
-if exist "%GAME_PATH%\%STATE_FILE%" (
-    del "%GAME_PATH%\%STATE_FILE%"
+if exist "!GAME_PATH!\%STATE_FILE%" (
+    del "!GAME_PATH!\%STATE_FILE%"
     echo   Removed: state file
 )
 
@@ -227,24 +253,24 @@ exit /b 0
 
 :: ============================================
 :: compute_deploy_dir: set DEPLOY_DIR based on FRAMEWORK_TYPE.
-:: For ASILoader and None, DEPLOY_DIR is derived from the shim's
+:: For ASILoader and None, DEPLOY_DIR is EXE_DIR, derived above from the shim's
 :: GAME_EXE_RELPATH (so nested-exe games like DL2 work).
 :: ============================================
 :compute_deploy_dir
 if /i "%FRAMEWORK_TYPE%"=="BepInEx" (
     if defined PLUGIN_SUBFOLDER (
-        set "DEPLOY_DIR=%GAME_PATH%\BepInEx\plugins\%PLUGIN_SUBFOLDER%"
+        set "DEPLOY_DIR=!GAME_PATH!\BepInEx\plugins\%PLUGIN_SUBFOLDER%"
     ) else (
-        set "DEPLOY_DIR=%GAME_PATH%\BepInEx\plugins"
+        set "DEPLOY_DIR=!GAME_PATH!\BepInEx\plugins"
     )
     exit /b 0
 )
 if /i "%FRAMEWORK_TYPE%"=="MelonLoader" (
-    set "DEPLOY_DIR=%GAME_PATH%\Mods"
+    set "DEPLOY_DIR=!GAME_PATH!\Mods"
     exit /b 0
 )
 if /i "%FRAMEWORK_TYPE%"=="REFramework" (
-    set "DEPLOY_DIR=%GAME_PATH%\reframework\plugins"
+    set "DEPLOY_DIR=!GAME_PATH!\reframework\plugins"
     exit /b 0
 )
 if /i "%FRAMEWORK_TYPE%"=="UE4SS" (
@@ -258,22 +284,20 @@ if /i "%FRAMEWORK_TYPE%"=="UE4SS" (
         echo Without it the mod folder path resolves to the whole Mods\ tree.
         exit /b 1
     )
-    set "UE4_BINARIES_DIR=%GAME_PATH%\%UE4_BINARIES_RELDIR%"
-    set "DEPLOY_DIR=%GAME_PATH%\%UE4_BINARIES_RELDIR%\Mods\%MOD_INTERNAL_NAME%"
+    set "UE4_BINARIES_DIR=!GAME_PATH!\%UE4_BINARIES_RELDIR%"
+    set "DEPLOY_DIR=!GAME_PATH!\%UE4_BINARIES_RELDIR%\Mods\%MOD_INTERNAL_NAME%"
     exit /b 0
 )
 if /i "%FRAMEWORK_TYPE%"=="MonoCecil" (
-    set "DEPLOY_DIR=%GAME_PATH%\%MANAGED_SUBFOLDER%"
+    set "DEPLOY_DIR=!GAME_PATH!\%MANAGED_SUBFOLDER%"
     exit /b 0
 )
 if /i "%FRAMEWORK_TYPE%"=="ASILoader" (
-    for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "DEPLOY_DIR=%%~dpi"
-    if "!DEPLOY_DIR:~-1!"=="\" set "DEPLOY_DIR=!DEPLOY_DIR:~0,-1!"
+    set "DEPLOY_DIR=!EXE_DIR!"
     exit /b 0
 )
 if /i "%FRAMEWORK_TYPE%"=="None" (
-    for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "DEPLOY_DIR=%%~dpi"
-    if "!DEPLOY_DIR:~-1!"=="\" set "DEPLOY_DIR=!DEPLOY_DIR:~0,-1!"
+    set "DEPLOY_DIR=!EXE_DIR!"
     exit /b 0
 )
 echo ERROR: Unknown FRAMEWORK_TYPE "%FRAMEWORK_TYPE%" in uninstall CONFIG BLOCK.
@@ -303,16 +327,16 @@ if defined LEGACY_DLLS (
 )
 if /i "%FRAMEWORK_TYPE%"=="BepInEx" if defined PLUGIN_SUBFOLDER (
     for %%f in (%MOD_DLLS%) do (
-        if exist "%GAME_PATH%\BepInEx\plugins\%%f" (
-            del "%GAME_PATH%\BepInEx\plugins\%%f"
+        if exist "!GAME_PATH!\BepInEx\plugins\%%f" (
+            del "!GAME_PATH!\BepInEx\plugins\%%f"
             echo   Removed: %%f ^(flat-laid duplicate^)
             set /a REMOVED+=1
         )
     )
     if defined LEGACY_DLLS (
         for %%f in (%LEGACY_DLLS%) do (
-            if exist "%GAME_PATH%\BepInEx\plugins\%%f" (
-                del "%GAME_PATH%\BepInEx\plugins\%%f"
+            if exist "!GAME_PATH!\BepInEx\plugins\%%f" (
+                del "!GAME_PATH!\BepInEx\plugins\%%f"
                 echo   Removed: %%f ^(legacy, flat-laid^)
                 set /a REMOVED+=1
             )
@@ -373,13 +397,13 @@ exit /b 0
 :: Remove BepInEx (regular and BepInExPack both land in the same layout).
 :: ============================================
 :remove_BepInEx
-if exist "%GAME_PATH%\BepInEx" (
-    rmdir /s /q "%GAME_PATH%\BepInEx"
+if exist "!GAME_PATH!\BepInEx" (
+    rmdir /s /q "!GAME_PATH!\BepInEx"
     echo   Removed: BepInEx folder
 )
 for %%f in (winhttp.dll doorstop_config.ini .doorstop_version changelog.txt) do (
-    if exist "%GAME_PATH%\%%f" (
-        del "%GAME_PATH%\%%f"
+    if exist "!GAME_PATH!\%%f" (
+        del "!GAME_PATH!\%%f"
         echo   Removed: %%f
     )
 )
@@ -391,22 +415,22 @@ exit /b 0
 :: melon mods installed keep their data).
 :: ============================================
 :remove_MelonLoader
-if exist "%GAME_PATH%\MelonLoader" (
-    rmdir /s /q "%GAME_PATH%\MelonLoader"
+if exist "!GAME_PATH!\MelonLoader" (
+    rmdir /s /q "!GAME_PATH!\MelonLoader"
     echo   Removed: MelonLoader folder
 )
 for %%f in (version.dll dobby.dll NOTICE.txt) do (
-    if exist "%GAME_PATH%\%%f" (
-        del "%GAME_PATH%\%%f"
+    if exist "!GAME_PATH!\%%f" (
+        del "!GAME_PATH!\%%f"
         echo   Removed: %%f
     )
 )
 for %%d in (Mods UserLibs UserData) do (
-    if exist "%GAME_PATH%\%%d" (
-        dir /b /a "%GAME_PATH%\%%d" 2>nul | findstr /r /v "^$" >nul
+    if exist "!GAME_PATH!\%%d" (
+        dir /b /a "!GAME_PATH!\%%d" 2>nul | findstr /r /v "^$" >nul
         if errorlevel 1 (
-            rmdir "%GAME_PATH%\%%d" 2>nul
-            if not exist "%GAME_PATH%\%%d" echo   Removed: %%d\ ^(empty^)
+            rmdir "!GAME_PATH!\%%d" 2>nul
+            if not exist "!GAME_PATH!\%%d" echo   Removed: %%d\ ^(empty^)
         )
     )
 )
@@ -417,9 +441,9 @@ exit /b 0
 :: The mod DLLs in Managed/ are cleaned up separately by the plain loop.
 :: ============================================
 :remove_MonoCecil
-set "MANAGED_PATH=%GAME_PATH%\%MANAGED_SUBFOLDER%"
-set "ASSEMBLY_PATH=%MANAGED_PATH%\%ASSEMBLY_DLL%"
-set "BACKUP_PATH=%ASSEMBLY_PATH%.original"
+set "MANAGED_PATH=!GAME_PATH!\%MANAGED_SUBFOLDER%"
+set "ASSEMBLY_PATH=!MANAGED_PATH!\%ASSEMBLY_DLL%"
+set "BACKUP_PATH=!ASSEMBLY_PATH!.original"
 :: The .original must be pristine: never restore a patched backup over the
 :: game assembly, and never strip the mod DLLs while leaving a patched
 :: assembly that can no longer find them. PATCH_MARKER drives the check.
@@ -428,47 +452,50 @@ if not defined PATCH_MARKER (
     echo   Cannot verify assembly patch state; aborting.
     exit /b 1
 )
-if not exist "%BACKUP_PATH%" (
+if not exist "!BACKUP_PATH!" (
     rem No backup. Safe only if the live assembly is already clean; otherwise
     rem removing the mod DLLs would orphan a patched assembly.
-    call :cecil_marker_state "%ASSEMBLY_PATH%"
+    set "_MARKER_PATH=!ASSEMBLY_PATH!"
+    call :cecil_marker_state
     if errorlevel 2 ( echo   ERROR: could not verify %ASSEMBLY_DLL% patch state. & exit /b 1 )
     if errorlevel 1 ( echo   No backup, and %ASSEMBLY_DLL% is already clean - nothing to restore. & exit /b 0 )
     echo   ERROR: %ASSEMBLY_DLL% is patched but no .original backup exists.
     echo   Run Steam "Verify integrity of game files" to restore a clean assembly, then re-run uninstall.
     exit /b 1
 )
-call :cecil_marker_state "%BACKUP_PATH%"
+set "_MARKER_PATH=!BACKUP_PATH!"
+call :cecil_marker_state
 if errorlevel 2 ( echo   ERROR: could not read %ASSEMBLY_DLL%.original to verify it is pristine. & exit /b 1 )
 if errorlevel 1 goto :_cecil_restore
 echo   ERROR: %ASSEMBLY_DLL%.original is patched - corrupt backup, not restoring.
 echo   Delete it and run Steam "Verify integrity of game files" to restore a clean %ASSEMBLY_DLL%.
 exit /b 1
 :_cecil_restore
-copy /y "%BACKUP_PATH%" "%ASSEMBLY_PATH%" >nul
-del "%BACKUP_PATH%"
+copy /y "!BACKUP_PATH!" "!ASSEMBLY_PATH!" >nul
+del "!BACKUP_PATH!"
 echo   Restored: %ASSEMBLY_DLL% from backup
 exit /b 0
 
 :: ============================================
-:: Resolve the marker-check helper and report whether %~1 is patched.
+:: Resolve the marker-check helper and report whether _MARKER_PATH is patched.
+:: The path travels in a variable rather than as an argument because `%~1` is
+:: substituted before cmd.exe scans for `!`, so a game folder with a `!` in it
+:: would arrive here already truncated.
 :: Returns errorlevel 0 = patched, 1 = pristine, 2 = error. Requires
 :: PATCH_MARKER. Kept as its own routine so the errorlevel reads stay outside
 :: parenthesised blocks where %errorlevel% would expand too early.
 :: ============================================
 :cecil_marker_state
-set "_MARKER_CHECK=%SCRIPT_DIR%shared\cecil-marker-check.ps1"
-if not exist "%_MARKER_CHECK%" set "_MARKER_CHECK=%SCRIPT_DIR%..\cameraunlock-core\scripts\cecil-marker-check.ps1"
-if not exist "%_MARKER_CHECK%" exit /b 2
-powershell -NoProfile -ExecutionPolicy Bypass -File "%_MARKER_CHECK%" -AssemblyPath "%~1" -Marker "%PATCH_MARKER%"
+set "_MARKER_CHECK=!SCRIPT_DIR!shared\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=!SCRIPT_DIR!..\cameraunlock-core\scripts\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" exit /b 2
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_MARKER_PATH!" -Marker "%PATCH_MARKER%"
 exit /b %errorlevel%
 
 :: ============================================
 :: Remove Ultimate ASI Loader from EXE_DIR.
 :: ============================================
 :remove_ASILoader
-for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "EXE_DIR=%%~dpi"
-if "!EXE_DIR:~-1!"=="\" set "EXE_DIR=!EXE_DIR:~0,-1!"
 :: Only the proxy this package actually installed. Sweeping the other common
 :: ASI names off the disk deletes OTHER software's loader: winmm.dll and
 :: dinput8.dll are what ReShade and most other ASI mods proxy through, so
@@ -493,20 +520,20 @@ exit /b 0
 :: Remove REFramework.
 :: ============================================
 :remove_REFramework
-if exist "%GAME_PATH%\dinput8.dll" (
-    del "%GAME_PATH%\dinput8.dll"
+if exist "!GAME_PATH!\dinput8.dll" (
+    del "!GAME_PATH!\dinput8.dll"
     echo   Removed: dinput8.dll
 )
-if exist "%GAME_PATH%\reframework" (
-    rmdir /s /q "%GAME_PATH%\reframework"
+if exist "!GAME_PATH!\reframework" (
+    rmdir /s /q "!GAME_PATH!\reframework"
     echo   Removed: reframework/
 )
 :: Loose files REFramework's zip drops at the game root: the revision marker,
 :: plus VR runtime DLLs the install stripped for flatscreen mode (clean up any
 :: an older install left behind) so uninstall returns the game to vanilla.
 for %%f in (reframework_revision.txt openvr_api.dll openxr_loader.dll DELETE_OPENVR_API_DLL_IF_YOU_WANT_TO_USE_OPENXR) do (
-    if exist "%GAME_PATH%\%%f" (
-        del /q "%GAME_PATH%\%%f" >nul 2>&1
+    if exist "!GAME_PATH!\%%f" (
+        del /q "!GAME_PATH!\%%f" >nul 2>&1
         echo   Removed: %%f
     )
 )
@@ -539,7 +566,7 @@ if errorlevel 2 (
     exit /b 1
 )
 if errorlevel 1 exit /b 0
-set "_MODS_TMP=%TEMP%\cul-modstxt-%RANDOM%-%RANDOM%.txt"
+set "_MODS_TMP=!TEMP!\cul-modstxt-%RANDOM%-%RANDOM%.txt"
 findstr /v /b /c:"%MOD_INTERNAL_NAME% :" "!MODS_TXT!" > "!_MODS_TMP!"
 :: findstr /v returns 1 when it filtered every line out, which is a normal
 :: result here (our entry was the only one). Only 2+ is a read failure.

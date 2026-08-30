@@ -119,21 +119,37 @@ if (-not $gamePath) {
 # `.cmd` extension trips Windows Defender's script-scan, which briefly
 # locks the freshly-created file. Out-File's longer write window
 # races with that scan and intermittently throws a sharing violation.
-function ConvertTo-BatchSetValue {
-    param([Parameter(Mandatory = $true)][string]$Value)
+#
+# The stub is `call`ed by the install/uninstall body with delayed expansion
+# OFF, which is what lets a value keep its `!` (and its `^`). Inside the
+# `set "NAME=..."` quotes cmd.exe treats `&`, `^`, `(`, `)`, `<`, `>` and `|`
+# as literal text, so only three characters are genuinely unrepresentable:
+# a double quote ends the `set` early, and CR/LF end the line.
+$UNSAFE_CHARS = [ordered]@{
+    '"'    = 'a double quote'
+    "`r"   = 'a carriage return'
+    "`n"   = 'a line feed'
+}
 
-    if ($Value.IndexOfAny([char[]]@("`r", "`n", '"', '!')) -ge 0) {
-        throw "Resolved game metadata contains characters that cannot be safely emitted to cmd.exe."
+function ConvertTo-BatchSetValue {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value,
+        [Parameter(Mandatory = $true)][string]$Name)
+
+    foreach ($char in $UNSAFE_CHARS.Keys) {
+        if ($Value.Contains($char)) {
+            throw "$Name contains $($UNSAFE_CHARS[$char]), which cannot be passed to cmd.exe: $Value"
+        }
     }
 
     return $Value -replace '%', '%%'
 }
 
-$gamePathCmd = ConvertTo-BatchSetValue $gamePath
-$exeLeafCmd = ConvertTo-BatchSetValue $exeLeaf
-$exeRelPathCmd = ConvertTo-BatchSetValue $exeRelPath
-$displayNameCmd = (ConvertTo-BatchSetValue $displayName) -replace '&', '^&'
-$envVarNameCmd = ConvertTo-BatchSetValue $envVarName
+$gamePathCmd = ConvertTo-BatchSetValue $gamePath 'The game install path'
+$exeLeafCmd = ConvertTo-BatchSetValue $exeLeaf 'The game executable name'
+$exeRelPathCmd = ConvertTo-BatchSetValue $exeRelPath 'The game executable path'
+$displayNameCmd = ConvertTo-BatchSetValue $displayName 'The game display name'
+$envVarNameCmd = ConvertTo-BatchSetValue $envVarName 'The override env var name'
 
 $lines = @(
     "set `"GAME_PATH=$gamePathCmd`""

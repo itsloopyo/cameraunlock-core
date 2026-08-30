@@ -71,11 +71,11 @@ goto :detect_yes_flag
 if defined WRAPPER_DIR ( set "SCRIPT_DIR=%WRAPPER_DIR%" ) else ( set "SCRIPT_DIR=%~dp0" )
 
 :: -------- Arg parser (canonical, do not modify) --------
-:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
-:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
-:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
-:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
-:: fails, and a valid directory is rejected as a malformed argument.
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion` comes
+:: much further down, after the game path has been resolved. With it on, cmd
+:: strips `!` out of the expanded text of `set "_ARG=%~1"` - and out of `%~1`
+:: itself - so a real game path like C:\Games\Oh! My Game silently loses the
+:: `!`, `if exist` fails, and a valid directory is rejected as malformed.
 set "YES_FLAG="
 set "_GIVEN_PATH="
 :parse_args
@@ -90,12 +90,18 @@ if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
     if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
+:: Two characters never survive the trip into a batch file's arguments: every
+:: `call` in the chain doubles a `^`, and the extra expansion round `call` runs
+:: eats a lone `%`. Both are already gone by the time this parser compares the
+:: string, so name them rather than leave the user guessing why a folder that
+:: plainly exists came back "unrecognised". Detection reaches those folders
+:: fine - it is only the argument that cannot carry them.
 echo ERROR: unrecognised argument "%_ARG%"
+echo A path argument cannot carry a ^^ or a %% - cmd.exe doubles the first and
+echo drops the second. Run without a path so detection finds the game instead.
 exit /b 2
 :args_done
 set "_ARG="
-
-setlocal enabledelayedexpansion
 
 :: -------- Validate CONFIG BLOCK --------
 :: Every name below is interpolated straight into a path that gets written,
@@ -122,46 +128,60 @@ if not exist "%_SHIM%" (
     exit /b 1
 )
 set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
-set "_GIVEN_ARG="
-if defined _GIVEN_PATH set "_GIVEN_ARG=-GivenPath "!_GIVEN_PATH!""
-powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "!_SHIM_OUT!" !_GIVEN_ARG!
-set "_PS_EC=!errorlevel!"
-if not "!_PS_EC!"=="0" (
+:: -GivenPath is spelled out in both branches rather than built into one
+:: variable and expanded unquoted: the quotes are what keep a `&`, `^` or `)`
+:: in the user's path from being parsed as syntax.
+if defined _GIVEN_PATH (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%" -GivenPath "%_GIVEN_PATH%"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%"
+)
+set "_PS_EC=%errorlevel%"
+if not "%_PS_EC%"=="0" (
     echo.
-    echo ERROR: Could not resolve game install path ^(shim exit code !_PS_EC!^).
+    echo ERROR: Could not resolve game install path ^(shim exit code %_PS_EC%^).
     echo Pass a path explicitly: install.cmd "C:\path\to\game"
     echo.
-    del "!_SHIM_OUT!" 2>nul
+    del "%_SHIM_OUT%" 2>nul
     exit /b 1
 )
-call "!_SHIM_OUT!"
-del "!_SHIM_OUT!" 2>nul
+call "%_SHIM_OUT%"
+del "%_SHIM_OUT%" 2>nul
+
+:: Delayed expansion is enabled HERE and not one line earlier. Everything the
+:: shim resolved is already in the environment, and `!VAR!` hands the value back
+:: byte-for-byte: it is substituted after cmd.exe has finished looking for `!`,
+:: `&`, `^` and `)`, so a path like C:\Games\Oh! My Game survives. `%VAR%` is
+:: substituted before that scan and would lose the `!`. Every path below is
+:: therefore `!`-expanded; the arg parser, the shim call and the EXE_DIR
+:: derivation above all run with expansion off for the same reason.
+setlocal enabledelayedexpansion
 
 echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
-tasklist /fi "imagename eq %GAME_EXE%" 2>nul | findstr /i "%GAME_EXE%" >nul 2>&1
+tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i "!GAME_EXE!" >nul 2>&1
 if not errorlevel 1 (
-    echo ERROR: %GAME_DISPLAY_NAME% is currently running.
+    echo ERROR: !GAME_DISPLAY_NAME! is currently running.
     echo Please close the game before installing.
     echo.
     exit /b 1
 )
 
-set "MANAGED_PATH=%GAME_PATH%\%MANAGED_SUBFOLDER%"
-set "ASSEMBLY_PATH=%MANAGED_PATH%\%ASSEMBLY_DLL%"
-set "BACKUP_PATH=%MANAGED_PATH%\%ASSEMBLY_DLL%.original"
-set "MOD_DIR=%SCRIPT_DIR%mod"
+set "MANAGED_PATH=!GAME_PATH!\%MANAGED_SUBFOLDER%"
+set "ASSEMBLY_PATH=!MANAGED_PATH!\%ASSEMBLY_DLL%"
+set "BACKUP_PATH=!MANAGED_PATH!\%ASSEMBLY_DLL%.original"
+set "MOD_DIR=!SCRIPT_DIR!mod"
 
-if not exist "%MANAGED_PATH%" (
+if not exist "!MANAGED_PATH!" (
     echo ERROR: %MANAGED_SUBFOLDER% folder not found.
     echo   Expected at: !MANAGED_PATH!
     echo.
     exit /b 1
 )
 
-if not exist "%ASSEMBLY_PATH%" (
+if not exist "!ASSEMBLY_PATH!" (
     echo ERROR: %ASSEMBLY_DLL% not found.
     echo   Expected at: !ASSEMBLY_PATH!
     echo.
@@ -169,7 +189,7 @@ if not exist "%ASSEMBLY_PATH%" (
 )
 
 for %%f in (%MOD_DLLS%) do (
-    if not exist "%MOD_DIR%\%%f" (
+    if not exist "!MOD_DIR!\%%f" (
         echo ERROR: %%f not found in mod folder.
         echo   Make sure all files from the release package are intact.
         echo.
@@ -177,7 +197,7 @@ for %%f in (%MOD_DLLS%) do (
     )
 )
 
-if not exist "%MOD_DIR%\%PATCHER_FILE%" (
+if not exist "!MOD_DIR!\%PATCHER_FILE%" (
     echo ERROR: %PATCHER_FILE% not found in mod folder.
     echo   Make sure all files from the release package are intact.
     echo.
@@ -186,8 +206,8 @@ if not exist "%MOD_DIR%\%PATCHER_FILE%" (
 
 :: -------- Prior state --------
 set "WE_INSTALLED=false"
-if exist "%GAME_PATH%\%STATE_FILE%" (
-    findstr /c:"installed_by_us" "%GAME_PATH%\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
+if exist "!GAME_PATH!\%STATE_FILE%" (
+    findstr /c:"installed_by_us" "!GAME_PATH!\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
     if not errorlevel 1 set "WE_INSTALLED=true"
 )
 
@@ -202,8 +222,8 @@ if not defined PATCH_MARKER (
     echo This is required to protect the pristine %ASSEMBLY_DLL% backup.
     exit /b 1
 )
-set "_MARKER_CHECK=%SCRIPT_DIR%shared\cecil-marker-check.ps1"
-if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=%SCRIPT_DIR%..\cameraunlock-core\scripts\cecil-marker-check.ps1"
+set "_MARKER_CHECK=!SCRIPT_DIR!shared\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=!SCRIPT_DIR!..\cameraunlock-core\scripts\cecil-marker-check.ps1"
 if not exist "!_MARKER_CHECK!" (
     echo ERROR: cecil-marker-check.ps1 not found in shared\ or ..\cameraunlock-core\scripts\.
     echo If this is a release ZIP, re-download it from GitHub ^(corrupt installer^).
@@ -211,17 +231,19 @@ if not exist "!_MARKER_CHECK!" (
 )
 
 echo Backing up %ASSEMBLY_DLL%...
-if not exist "%BACKUP_PATH%" (
-    call :assert_pristine "!ASSEMBLY_PATH!" "%ASSEMBLY_DLL% is already patched but no .original backup exists"
+if not exist "!BACKUP_PATH!" (
+    set "_PRISTINE_PATH=!ASSEMBLY_PATH!"
+    call :assert_pristine "%ASSEMBLY_DLL% is already patched but no .original backup exists"
     if errorlevel 1 exit /b 1
-    copy /y "%ASSEMBLY_PATH%" "%BACKUP_PATH%" >nul
+    copy /y "!ASSEMBLY_PATH!" "!BACKUP_PATH!" >nul
     echo   Created: %ASSEMBLY_DLL%.original
     set "WE_INSTALLED=true"
 ) else (
-    call :assert_pristine "!BACKUP_PATH!" "%ASSEMBLY_DLL%.original is itself patched - corrupt backup"
+    set "_PRISTINE_PATH=!BACKUP_PATH!"
+    call :assert_pristine "%ASSEMBLY_DLL%.original is itself patched - corrupt backup"
     if errorlevel 1 exit /b 1
     echo   Backup verified clean, restoring before re-patch...
-    copy /y "%BACKUP_PATH%" "%ASSEMBLY_PATH%" >nul
+    copy /y "!BACKUP_PATH!" "!ASSEMBLY_PATH!" >nul
     rem WE_INSTALLED stays whatever it was - we backed up on the first install,
     rem and that entitlement doesn't regress just because we're re-running.
 )
@@ -232,7 +254,7 @@ echo Deploying mod files...
 
 set "DEPLOY_FAILED=0"
 for %%f in (%MOD_DLLS%) do (
-    copy /y "%MOD_DIR%\%%f" "%MANAGED_PATH%\" >nul
+    copy /y "!MOD_DIR!\%%f" "!MANAGED_PATH!\" >nul
     if errorlevel 1 (
         echo   ERROR: Failed to copy %%f
         set "DEPLOY_FAILED=1"
@@ -253,19 +275,19 @@ echo.
 :: Paths travel by environment variable, never interpolated into the PowerShell
 :: source: a game folder with an apostrophe in it (C:\Games\Mike's Games\...)
 :: closes a single-quoted literal early and the command dies on a parse error.
-set "CUL_MANAGED_PATH=%MANAGED_PATH%"
+set "CUL_MANAGED_PATH=!MANAGED_PATH!"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Get-ChildItem -LiteralPath $env:CUL_MANAGED_PATH -Filter *.dll | Unblock-File"
 
 :: -------- Patch Assembly DLL --------
 echo Patching %ASSEMBLY_DLL%...
 
-set "CECIL_PATH=%MANAGED_PATH%\Mono.Cecil.dll"
-set "PATCHER_PATH=%MOD_DIR%\%PATCHER_FILE%"
+set "CECIL_PATH=!MANAGED_PATH!\Mono.Cecil.dll"
+set "PATCHER_PATH=!MOD_DIR!\%PATCHER_FILE%"
 
-set "CUL_CECIL_PATH=%CECIL_PATH%"
-set "CUL_PATCHER_PATH=%PATCHER_PATH%"
-set "CUL_ASSEMBLY_PATH=%ASSEMBLY_PATH%"
+set "CUL_CECIL_PATH=!CECIL_PATH!"
+set "CUL_PATCHER_PATH=!PATCHER_PATH!"
+set "CUL_ASSEMBLY_PATH=!ASSEMBLY_PATH!"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Add-Type -LiteralPath $env:CUL_CECIL_PATH; " ^
     "$code = Get-Content -LiteralPath $env:CUL_PATCHER_PATH -Raw; " ^
@@ -312,7 +334,7 @@ exit /b 0
 :: Write the canonical state file.
 :: ============================================
 :write_state_file
-> "%GAME_PATH%\%STATE_FILE%" (
+> "!GAME_PATH!\%STATE_FILE%" (
     echo {
     echo   "schema_version": 1,
     echo   "framework": {
@@ -331,14 +353,17 @@ exit /b 0
 :: ============================================
 :: Assert an assembly is pristine (no PATCH_MARKER) before we trust it as the
 :: clean baseline. Returns errorlevel 0 if clean, 1 if patched or unreadable
-:: (caller aborts). %~1 = assembly path, %~2 = human-readable failure context.
+:: (caller aborts). _PRISTINE_PATH = assembly to check, %~1 = human-readable
+:: failure context. The path travels in a variable rather than as an argument
+:: because `%~1` is substituted before cmd.exe scans for `!`, so a game folder
+:: with a `!` in it would arrive here already truncated.
 :: ============================================
 :assert_pristine
-powershell -NoProfile -ExecutionPolicy Bypass -File "%_MARKER_CHECK%" -AssemblyPath "%~1" -Marker "%PATCH_MARKER%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_PRISTINE_PATH!" -Marker "%PATCH_MARKER%"
 set "_MK_EC=%errorlevel%"
 if "%_MK_EC%"=="1" exit /b 0
 if "%_MK_EC%"=="0" (
-    echo   ERROR: %~2.
+    echo   ERROR: %~1.
     echo   A clean state cannot be established from a modified file.
     echo   Verify the game files through Steam, which restores the original, then re-run.
     exit /b 1

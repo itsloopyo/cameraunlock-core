@@ -48,11 +48,11 @@ goto :detect_yes_flag
 if defined WRAPPER_DIR ( set "SCRIPT_DIR=%WRAPPER_DIR%" ) else ( set "SCRIPT_DIR=%~dp0" )
 
 :: -------- Arg parser (canonical, do not modify) --------
-:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
-:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
-:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
-:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
-:: fails, and a valid directory is rejected as a malformed argument.
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion` comes
+:: much further down, after the game path has been resolved. With it on, cmd
+:: strips `!` out of the expanded text of `set "_ARG=%~1"` - and out of `%~1`
+:: itself - so a real game path like C:\Games\Oh! My Game silently loses the
+:: `!`, `if exist` fails, and a valid directory is rejected as malformed.
 set "YES_FLAG="
 set "_GIVEN_PATH="
 :parse_args
@@ -67,12 +67,18 @@ if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
     if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
+:: Two characters never survive the trip into a batch file's arguments: every
+:: `call` in the chain doubles a `^`, and the extra expansion round `call` runs
+:: eats a lone `%`. Both are already gone by the time this parser compares the
+:: string, so name them rather than leave the user guessing why a folder that
+:: plainly exists came back "unrecognised". Detection reaches those folders
+:: fine - it is only the argument that cannot carry them.
 echo ERROR: unrecognised argument "%_ARG%"
+echo A path argument cannot carry a ^^ or a %% - cmd.exe doubles the first and
+echo drops the second. Run without a path so detection finds the game instead.
 exit /b 2
 :args_done
 set "_ARG="
-
-setlocal enabledelayedexpansion
 
 :: -------- Validate CONFIG BLOCK --------
 :: Every name below is interpolated straight into a path that gets written,
@@ -99,28 +105,42 @@ if not exist "%_SHIM%" (
     exit /b 1
 )
 set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
-set "_GIVEN_ARG="
-if defined _GIVEN_PATH set "_GIVEN_ARG=-GivenPath "!_GIVEN_PATH!""
-powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "!_SHIM_OUT!" !_GIVEN_ARG!
-set "_PS_EC=!errorlevel!"
-if not "!_PS_EC!"=="0" (
+:: -GivenPath is spelled out in both branches rather than built into one
+:: variable and expanded unquoted: the quotes are what keep a `&`, `^` or `)`
+:: in the user's path from being parsed as syntax.
+if defined _GIVEN_PATH (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%" -GivenPath "%_GIVEN_PATH%"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%"
+)
+set "_PS_EC=%errorlevel%"
+if not "%_PS_EC%"=="0" (
     echo.
-    echo ERROR: Could not resolve game install path ^(shim exit code !_PS_EC!^).
+    echo ERROR: Could not resolve game install path ^(shim exit code %_PS_EC%^).
     echo Pass a path explicitly: install.cmd "C:\path\to\game"
     echo.
-    del "!_SHIM_OUT!" 2>nul
+    del "%_SHIM_OUT%" 2>nul
     exit /b 1
 )
-call "!_SHIM_OUT!"
-del "!_SHIM_OUT!" 2>nul
+call "%_SHIM_OUT%"
+del "%_SHIM_OUT%" 2>nul
+
+:: Delayed expansion is enabled HERE and not one line earlier. Everything the
+:: shim resolved is already in the environment, and `!VAR!` hands the value back
+:: byte-for-byte: it is substituted after cmd.exe has finished looking for `!`,
+:: `&`, `^` and `)`, so a path like C:\Games\Oh! My Game survives. `%VAR%` is
+:: substituted before that scan and would lose the `!`. Every path below is
+:: therefore `!`-expanded; the arg parser, the shim call and the EXE_DIR
+:: derivation above all run with expansion off for the same reason.
+setlocal enabledelayedexpansion
 
 echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
-tasklist /fi "imagename eq %GAME_EXE%" 2>nul | findstr /i "%GAME_EXE%" >nul 2>&1
+tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i "!GAME_EXE!" >nul 2>&1
 if not errorlevel 1 (
-    echo ERROR: %GAME_DISPLAY_NAME% is currently running.
+    echo ERROR: !GAME_DISPLAY_NAME! is currently running.
     echo Please close the game before installing.
     echo.
     exit /b 1
@@ -128,13 +148,13 @@ if not errorlevel 1 (
 
 :: -------- Prior state --------
 set "WE_INSTALLED=false"
-if exist "%GAME_PATH%\%STATE_FILE%" (
-    findstr /c:"installed_by_us" "%GAME_PATH%\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
+if exist "!GAME_PATH!\%STATE_FILE%" (
+    findstr /c:"installed_by_us" "!GAME_PATH!\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
     if not errorlevel 1 set "WE_INSTALLED=true"
 )
 
 :: -------- Ensure REFramework --------
-if not exist "%GAME_PATH%\dinput8.dll" (
+if not exist "!GAME_PATH!\dinput8.dll" (
     echo REFramework not found. Installing...
     echo.
     call :install_reframework
@@ -147,24 +167,24 @@ if not exist "%GAME_PATH%\dinput8.dll" (
 )
 
 :: -------- Deploy mod files --------
-set "PLUGINS_DIR=%GAME_PATH%\reframework\plugins"
-if not exist "%PLUGINS_DIR%" mkdir "%PLUGINS_DIR%"
+set "PLUGINS_DIR=!GAME_PATH!\reframework\plugins"
+if not exist "!PLUGINS_DIR!" mkdir "!PLUGINS_DIR!"
 
 echo.
 echo Deploying mod files...
 
 set "DEPLOY_FAILED=0"
 for %%f in (%MOD_DLLS%) do (
-    if exist "%SCRIPT_DIR%plugins\%%f" (
-        copy /y "%SCRIPT_DIR%plugins\%%f" "%PLUGINS_DIR%\%%f" >nul
+    if exist "!SCRIPT_DIR!plugins\%%f" (
+        copy /y "!SCRIPT_DIR!plugins\%%f" "!PLUGINS_DIR!\%%f" >nul
         if errorlevel 1 (
             echo   ERROR: Failed to copy %%f - is the game folder writable?
             set "DEPLOY_FAILED=1"
         ) else (
             echo   Deployed: %%f
         )
-    ) else if exist "%SCRIPT_DIR%%%f" (
-        copy /y "%SCRIPT_DIR%%%f" "%PLUGINS_DIR%\%%f" >nul
+    ) else if exist "!SCRIPT_DIR!%%f" (
+        copy /y "!SCRIPT_DIR!%%f" "!PLUGINS_DIR!\%%f" >nul
         if errorlevel 1 (
             echo   ERROR: Failed to copy %%f - is the game folder writable?
             set "DEPLOY_FAILED=1"
@@ -207,10 +227,10 @@ echo.
 exit /b 0
 
 :install_reframework
-set "VENDOR_DIR=%SCRIPT_DIR%vendor\reframework"
-set "VENDOR_ZIP=%VENDOR_DIR%\%REFRAMEWORK_VENDOR_ZIP_NAME%"
+set "VENDOR_DIR=!SCRIPT_DIR!vendor\reframework"
+set "VENDOR_ZIP=!VENDOR_DIR!\%REFRAMEWORK_VENDOR_ZIP_NAME%"
 
-if not exist "%VENDOR_ZIP%" (
+if not exist "!VENDOR_ZIP!" (
     echo   ERROR: Bundled REFramework not found at:
     echo     !VENDOR_ZIP!
     echo   The installer ZIP is corrupt. Re-download the release.
@@ -220,12 +240,12 @@ if not exist "%VENDOR_ZIP%" (
 echo   Extracting bundled REFramework...
 :: Paths travel by environment variable - a game folder with an apostrophe in
 :: it would close the single-quoted literal early and fail to parse.
-set "CUL_VENDOR_ZIP=%VENDOR_ZIP%"
-set "CUL_GAME_PATH=%GAME_PATH%"
+set "CUL_VENDOR_ZIP=!VENDOR_ZIP!"
+set "CUL_GAME_PATH=!GAME_PATH!"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Expand-Archive -LiteralPath $env:CUL_VENDOR_ZIP -DestinationPath $env:CUL_GAME_PATH -Force"
 
-if not exist "%GAME_PATH%\dinput8.dll" (
+if not exist "!GAME_PATH!\dinput8.dll" (
     echo   ERROR: REFramework installation failed.
     exit /b 1
 )
@@ -236,8 +256,8 @@ if not exist "%GAME_PATH%\dinput8.dll" (
 :: rendering, which fights our flat head-tracking. Strip them so REFramework
 :: stays flatscreen. See https://cursey.github.io/reframework-book/ VR notes.
 for %%f in (openvr_api.dll openxr_loader.dll DELETE_OPENVR_API_DLL_IF_YOU_WANT_TO_USE_OPENXR) do (
-    if exist "%GAME_PATH%\%%f" (
-        del /q "%GAME_PATH%\%%f" >nul 2>&1
+    if exist "!GAME_PATH!\%%f" (
+        del /q "!GAME_PATH!\%%f" >nul 2>&1
         echo   Removed VR runtime file: %%f ^(flatscreen install^)
     )
 )
@@ -245,7 +265,7 @@ for %%f in (openvr_api.dll openxr_loader.dll DELETE_OPENVR_API_DLL_IF_YOU_WANT_T
 exit /b 0
 
 :write_state_file
-> "%GAME_PATH%\%STATE_FILE%" (
+> "!GAME_PATH!\%STATE_FILE%" (
     echo {
     echo   "schema_version": 1,
     echo   "framework": {

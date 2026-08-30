@@ -69,11 +69,11 @@ goto :detect_yes_flag
 if defined WRAPPER_DIR ( set "SCRIPT_DIR=%WRAPPER_DIR%" ) else ( set "SCRIPT_DIR=%~dp0" )
 
 :: -------- Arg parser (canonical, do not modify) --------
-:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
-:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
-:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
-:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
-:: fails, and a valid directory is rejected as a malformed argument.
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion` comes
+:: much further down, after the game path has been resolved. With it on, cmd
+:: strips `!` out of the expanded text of `set "_ARG=%~1"` - and out of `%~1`
+:: itself - so a real game path like C:\Games\Oh! My Game silently loses the
+:: `!`, `if exist` fails, and a valid directory is rejected as malformed.
 set "YES_FLAG="
 set "_GIVEN_PATH="
 :parse_args
@@ -88,12 +88,18 @@ if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
     if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
+:: Two characters never survive the trip into a batch file's arguments: every
+:: `call` in the chain doubles a `^`, and the extra expansion round `call` runs
+:: eats a lone `%`. Both are already gone by the time this parser compares the
+:: string, so name them rather than leave the user guessing why a folder that
+:: plainly exists came back "unrecognised". Detection reaches those folders
+:: fine - it is only the argument that cannot carry them.
 echo ERROR: unrecognised argument "%_ARG%"
+echo A path argument cannot carry a ^^ or a %% - cmd.exe doubles the first and
+echo drops the second. Run without a path so detection finds the game instead.
 exit /b 2
 :args_done
 set "_ARG="
-
-setlocal enabledelayedexpansion
 
 :: -------- Validate CONFIG BLOCK --------
 :: Every name below is interpolated straight into a path that gets written,
@@ -120,28 +126,42 @@ if not exist "%_SHIM%" (
     exit /b 1
 )
 set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
-set "_GIVEN_ARG="
-if defined _GIVEN_PATH set "_GIVEN_ARG=-GivenPath "!_GIVEN_PATH!""
-powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "!_SHIM_OUT!" !_GIVEN_ARG!
-set "_PS_EC=!errorlevel!"
-if not "!_PS_EC!"=="0" (
+:: -GivenPath is spelled out in both branches rather than built into one
+:: variable and expanded unquoted: the quotes are what keep a `&`, `^` or `)`
+:: in the user's path from being parsed as syntax.
+if defined _GIVEN_PATH (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%" -GivenPath "%_GIVEN_PATH%"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%"
+)
+set "_PS_EC=%errorlevel%"
+if not "%_PS_EC%"=="0" (
     echo.
-    echo ERROR: Could not resolve game install path ^(shim exit code !_PS_EC!^).
+    echo ERROR: Could not resolve game install path ^(shim exit code %_PS_EC%^).
     echo Pass a path explicitly: install.cmd "C:\path\to\game"
     echo.
-    del "!_SHIM_OUT!" 2>nul
+    del "%_SHIM_OUT%" 2>nul
     exit /b 1
 )
-call "!_SHIM_OUT!"
-del "!_SHIM_OUT!" 2>nul
+call "%_SHIM_OUT%"
+del "%_SHIM_OUT%" 2>nul
+
+:: Delayed expansion is enabled HERE and not one line earlier. Everything the
+:: shim resolved is already in the environment, and `!VAR!` hands the value back
+:: byte-for-byte: it is substituted after cmd.exe has finished looking for `!`,
+:: `&`, `^` and `)`, so a path like C:\Games\Oh! My Game survives. `%VAR%` is
+:: substituted before that scan and would lose the `!`. Every path below is
+:: therefore `!`-expanded; the arg parser, the shim call and the EXE_DIR
+:: derivation above all run with expansion off for the same reason.
+setlocal enabledelayedexpansion
 
 echo Game found: !GAME_PATH!
 echo.
 
 :: -------- Game-running check --------
-tasklist /fi "imagename eq %GAME_EXE%" 2>nul | findstr /i "%GAME_EXE%" >nul 2>&1
+tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i "!GAME_EXE!" >nul 2>&1
 if not errorlevel 1 (
-    echo ERROR: %GAME_DISPLAY_NAME% is currently running.
+    echo ERROR: !GAME_DISPLAY_NAME! is currently running.
     echo Please close the game before installing.
     echo.
     exit /b 1
@@ -149,8 +169,8 @@ if not errorlevel 1 (
 
 :: -------- Prior state: preserve installed_by_us=true across re-installs --------
 set "WE_INSTALLED=false"
-if exist "%GAME_PATH%\%STATE_FILE%" (
-    findstr /c:"installed_by_us" "%GAME_PATH%\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
+if exist "!GAME_PATH!\%STATE_FILE%" (
+    findstr /c:"installed_by_us" "!GAME_PATH!\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
     if not errorlevel 1 set "WE_INSTALLED=true"
 )
 
@@ -164,8 +184,8 @@ if exist "%GAME_PATH%\%STATE_FILE%" (
 :: (32-bit process can't load 64-bit DLL). Without this gate we deploy
 :: plugins onto a dead loader and the game launches vanilla.
 set "_LOADER_PRESENT="
-if exist "%GAME_PATH%\BepInEx\core\BepInEx.dll"      set "_LOADER_PRESENT=1"
-if exist "%GAME_PATH%\BepInEx\core\BepInEx.Core.dll" set "_LOADER_PRESENT=1"
+if exist "!GAME_PATH!\BepInEx\core\BepInEx.dll"      set "_LOADER_PRESENT=1"
+if exist "!GAME_PATH!\BepInEx\core\BepInEx.Core.dll" set "_LOADER_PRESENT=1"
 
 set "_LOADER_BAD="
 if defined _LOADER_PRESENT (
@@ -224,21 +244,21 @@ echo.
 :: -------- Deploy mod files --------
 echo Deploying mod files...
 
-set "PLUGINS_PATH=%GAME_PATH%\BepInEx\plugins"
-set "DLL_DIR=%SCRIPT_DIR%plugins"
+set "PLUGINS_PATH=!GAME_PATH!\BepInEx\plugins"
+set "DLL_DIR=!SCRIPT_DIR!plugins"
 if defined PLUGIN_SUBFOLDER (
-    set "DEPLOY_PATH=%PLUGINS_PATH%\%PLUGIN_SUBFOLDER%"
+    set "DEPLOY_PATH=!PLUGINS_PATH!\%PLUGIN_SUBFOLDER%"
 ) else (
-    set "DEPLOY_PATH=%PLUGINS_PATH%"
+    set "DEPLOY_PATH=!PLUGINS_PATH!"
 )
 
-if not exist "%PLUGINS_PATH%" mkdir "%PLUGINS_PATH%"
+if not exist "!PLUGINS_PATH!" mkdir "!PLUGINS_PATH!"
 if not exist "!DEPLOY_PATH!" mkdir "!DEPLOY_PATH!"
 
 if defined PLUGIN_SUBFOLDER (
     for %%f in (%MOD_DLLS%) do (
-        if exist "%PLUGINS_PATH%\%%f" (
-            del /q "%PLUGINS_PATH%\%%f" >nul 2>&1
+        if exist "!PLUGINS_PATH!\%%f" (
+            del /q "!PLUGINS_PATH!\%%f" >nul 2>&1
             echo   Removed flat-laid %%f from plugins\ ^(superseded by %PLUGIN_SUBFOLDER%\^)
         )
     )
@@ -246,8 +266,8 @@ if defined PLUGIN_SUBFOLDER (
 
 set "DEPLOY_FAILED=0"
 for %%f in (%MOD_DLLS%) do (
-    if exist "%DLL_DIR%\%%f" (
-        copy /y "%DLL_DIR%\%%f" "!DEPLOY_PATH!\" >nul
+    if exist "!DLL_DIR!\%%f" (
+        copy /y "!DLL_DIR!\%%f" "!DEPLOY_PATH!\" >nul
         if errorlevel 1 (
             echo   ERROR: Failed to copy %%f - is the game folder writable?
             set "DEPLOY_FAILED=1"
@@ -300,16 +320,16 @@ exit /b 0
 :: ============================================
 :verify_loader_arch
 :: BepInEx.dll without winhttp.dll = broken loader stack regardless of arch.
-if not exist "%GAME_PATH%\winhttp.dll" exit /b 1
-set "_ARCH_SHIM=%SCRIPT_DIR%shared\check-loader-arch.ps1"
-if not exist "%_ARCH_SHIM%" set "_ARCH_SHIM=%SCRIPT_DIR%..\cameraunlock-core\scripts\check-loader-arch.ps1"
-if not exist "%_ARCH_SHIM%" (
+if not exist "!GAME_PATH!\winhttp.dll" exit /b 1
+set "_ARCH_SHIM=!SCRIPT_DIR!shared\check-loader-arch.ps1"
+if not exist "!_ARCH_SHIM!" set "_ARCH_SHIM=!SCRIPT_DIR!..\cameraunlock-core\scripts\check-loader-arch.ps1"
+if not exist "!_ARCH_SHIM!" (
     echo   ERROR: check-loader-arch.ps1 not found in shared\ or ..\cameraunlock-core\scripts\.
     echo   If this is a release ZIP, re-download it from GitHub ^(corrupt installer^).
     echo   If this is the dev tree, make sure the cameraunlock-core submodule is checked out.
     exit /b 1
 )
-powershell -NoProfile -ExecutionPolicy Bypass -File "%_ARCH_SHIM%" -Path "%GAME_PATH%\winhttp.dll" -ExpectedArch %BEPINEX_ARCH%
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_ARCH_SHIM!" -Path "!GAME_PATH!\winhttp.dll" -ExpectedArch %BEPINEX_ARCH%
 exit /b %errorlevel%
 
 :: ============================================
@@ -322,14 +342,14 @@ exit /b %errorlevel%
 :: ============================================
 :wipe_existing_bepinex
 echo   Replacing the wrong-architecture BepInEx core...
-:: Staged INSIDE the game folder under a fixed name, not %%TEMP%% under a
+:: Staged INSIDE the game folder under a fixed name, not %!TEMP!% under a
 :: random one. The old form was unrecoverable: :restore_bepinex_stash only
 :: ran on the success path, so any loader-install failure (missing vendored
 :: zip, extraction error, xcopy error) - or a Ctrl+C - deleted BepInEx\ from
 :: the game and left the user's other mods' plugins and every plugin config
-:: in a %%TEMP%% folder whose randomised name was never printed. Same volume
+:: in a %!TEMP!% folder whose randomised name was never printed. Same volume
 :: also makes the move atomic rather than a copy.
-set "_BEP_STASH=%GAME_PATH%\BepInEx-cul-stash"
+set "_BEP_STASH=!GAME_PATH!\BepInEx-cul-stash"
 :: A stash already here means a previous run died between the move and the
 :: restore. Put it back before doing anything else, or this run overwrites
 :: the only copy of the user's data.
@@ -339,8 +359,8 @@ if exist "!_BEP_STASH!" (
     if errorlevel 1 exit /b 1
 )
 set "_BEP_STASH="
-if exist "%GAME_PATH%\BepInEx\plugins" set "_BEP_STASH=%GAME_PATH%\BepInEx-cul-stash"
-if exist "%GAME_PATH%\BepInEx\config" if not defined _BEP_STASH set "_BEP_STASH=%GAME_PATH%\BepInEx-cul-stash"
+if exist "!GAME_PATH!\BepInEx\plugins" set "_BEP_STASH=!GAME_PATH!\BepInEx-cul-stash"
+if exist "!GAME_PATH!\BepInEx\config" if not defined _BEP_STASH set "_BEP_STASH=!GAME_PATH!\BepInEx-cul-stash"
 if defined _BEP_STASH (
     mkdir "!_BEP_STASH!"
     if errorlevel 1 (
@@ -349,27 +369,27 @@ if defined _BEP_STASH (
         exit /b 1
     )
 )
-if exist "%GAME_PATH%\BepInEx\plugins" (
-    move "%GAME_PATH%\BepInEx\plugins" "!_BEP_STASH!\plugins" >nul
+if exist "!GAME_PATH!\BepInEx\plugins" (
+    move "!GAME_PATH!\BepInEx\plugins" "!_BEP_STASH!\plugins" >nul
     if errorlevel 1 (
         echo   ERROR: could not set aside BepInEx\plugins\ - refusing to delete it.
         exit /b 1
     )
     echo   Set aside your BepInEx\plugins\
 )
-if exist "%GAME_PATH%\BepInEx\config" (
-    move "%GAME_PATH%\BepInEx\config" "!_BEP_STASH!\config" >nul
+if exist "!GAME_PATH!\BepInEx\config" (
+    move "!GAME_PATH!\BepInEx\config" "!_BEP_STASH!\config" >nul
     if errorlevel 1 (
         echo   ERROR: could not set aside BepInEx\config\ - refusing to delete it.
         exit /b 1
     )
     echo   Set aside your BepInEx\config\
 )
-if exist "%GAME_PATH%\BepInEx" rmdir /s /q "%GAME_PATH%\BepInEx"
-if exist "%GAME_PATH%\winhttp.dll" del /f /q "%GAME_PATH%\winhttp.dll"
-if exist "%GAME_PATH%\doorstop_config.ini" del /f /q "%GAME_PATH%\doorstop_config.ini"
-if exist "%GAME_PATH%\.doorstop_version" del /f /q "%GAME_PATH%\.doorstop_version"
-if exist "%GAME_PATH%\changelog.txt" del /f /q "%GAME_PATH%\changelog.txt"
+if exist "!GAME_PATH!\BepInEx" rmdir /s /q "!GAME_PATH!\BepInEx"
+if exist "!GAME_PATH!\winhttp.dll" del /f /q "!GAME_PATH!\winhttp.dll"
+if exist "!GAME_PATH!\doorstop_config.ini" del /f /q "!GAME_PATH!\doorstop_config.ini"
+if exist "!GAME_PATH!\.doorstop_version" del /f /q "!GAME_PATH!\.doorstop_version"
+if exist "!GAME_PATH!\changelog.txt" del /f /q "!GAME_PATH!\changelog.txt"
 exit /b 0
 
 :: ============================================
@@ -381,9 +401,9 @@ exit /b 0
 :restore_bepinex_stash
 :: Resolve from the fixed path rather than the variable, so this still works
 :: on a later run whose _BEP_STASH was never set.
-set "_BEP_STASH=%GAME_PATH%\BepInEx-cul-stash"
+set "_BEP_STASH=!GAME_PATH!\BepInEx-cul-stash"
 if not exist "!_BEP_STASH!" exit /b 0
-robocopy "!_BEP_STASH!" "%GAME_PATH%\BepInEx" /e /njh /njs /ndl /nfl /nc /ns >nul
+robocopy "!_BEP_STASH!" "!GAME_PATH!\BepInEx" /e /njh /njs /ndl /nfl /nc /ns >nul
 if errorlevel 8 (
     echo   ERROR: failed to restore your BepInEx plugins/config from:
     echo     !_BEP_STASH!
@@ -403,12 +423,12 @@ exit /b 0
 :: Release ZIP layout has vendor/ flat next to install.cmd; the dev tree
 :: has install.cmd in <repo>/scripts/ and vendor/ at <repo>/vendor/. Try
 :: the release-zip layout first, then fall back to the dev-tree parent.
-set "VENDOR_DIR=%SCRIPT_DIR%vendor\bepinex"
-if not exist "%VENDOR_DIR%" set "VENDOR_DIR=%SCRIPT_DIR%..\vendor\bepinex"
+set "VENDOR_DIR=!SCRIPT_DIR!vendor\bepinex"
+if not exist "!VENDOR_DIR!" set "VENDOR_DIR=!SCRIPT_DIR!..\vendor\bepinex"
 if defined BEPINEX_VENDOR_ZIP_NAME (
-    set "VENDOR_ZIP=%VENDOR_DIR%\%BEPINEX_VENDOR_ZIP_NAME%"
+    set "VENDOR_ZIP=!VENDOR_DIR!\%BEPINEX_VENDOR_ZIP_NAME%"
 ) else (
-    set "VENDOR_ZIP=%VENDOR_DIR%\BepInEx_win_%BEPINEX_ARCH%.zip"
+    set "VENDOR_ZIP=!VENDOR_DIR!\BepInEx_win_%BEPINEX_ARCH%.zip"
 )
 
 if not exist "!VENDOR_ZIP!" (
@@ -421,7 +441,7 @@ if not exist "!VENDOR_ZIP!" (
 echo   Extracting bundled BepInEx to game directory...
 if defined BEPINEX_SUBFOLDER (
     rem Thunderstore BepInExPack: extract to temp, flatten wrapper into GAME_PATH.
-    set "BEP_TEMP=%TEMP%\cul-bepinex-extract-%RANDOM%-%RANDOM%"
+    set "BEP_TEMP=!TEMP!\cul-bepinex-extract-%RANDOM%-%RANDOM%"
     mkdir "!BEP_TEMP!"
     "%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "!BEP_TEMP!"
     if errorlevel 1 (
@@ -429,7 +449,7 @@ if defined BEPINEX_SUBFOLDER (
         rmdir /s /q "!BEP_TEMP!" 2>nul
         exit /b 1
     )
-    xcopy /s /e /y /q "!BEP_TEMP!\%BEPINEX_SUBFOLDER%\*" "%GAME_PATH%\" >nul
+    xcopy /s /e /y /q "!BEP_TEMP!\%BEPINEX_SUBFOLDER%\*" "!GAME_PATH!\" >nul
     set "_XCOPY_EC=!errorlevel!"
     rmdir /s /q "!BEP_TEMP!"
     if not "!_XCOPY_EC!"=="0" (
@@ -438,20 +458,20 @@ if defined BEPINEX_SUBFOLDER (
         exit /b 1
     )
 ) else (
-    "%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "%GAME_PATH%"
+    "%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "!GAME_PATH!"
     if errorlevel 1 (
         echo   ERROR: Extraction failed.
         exit /b 1
     )
 )
 
-if not exist "%GAME_PATH%\BepInEx\plugins" mkdir "%GAME_PATH%\BepInEx\plugins"
+if not exist "!GAME_PATH!\BepInEx\plugins" mkdir "!GAME_PATH!\BepInEx\plugins"
 
 :: Enable console + disk logging. Skip if BepInEx.cfg already exists
 :: (Thunderstore packs ship preconfigured; don't clobber).
-if not exist "%GAME_PATH%\BepInEx\config\BepInEx.cfg" (
-    if not exist "%GAME_PATH%\BepInEx\config" mkdir "%GAME_PATH%\BepInEx\config"
-    > "%GAME_PATH%\BepInEx\config\BepInEx.cfg" (
+if not exist "!GAME_PATH!\BepInEx\config\BepInEx.cfg" (
+    if not exist "!GAME_PATH!\BepInEx\config" mkdir "!GAME_PATH!\BepInEx\config"
+    > "!GAME_PATH!\BepInEx\config\BepInEx.cfg" (
         echo [Logging.Console]
         echo Enabled = true
         echo.
@@ -469,7 +489,7 @@ exit /b 0
 :: already-true from a prior install.
 :: ============================================
 :write_state_file
-> "%GAME_PATH%\%STATE_FILE%" (
+> "!GAME_PATH!\%STATE_FILE%" (
     echo {
     echo   "schema_version": 1,
     echo   "framework": {

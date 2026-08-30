@@ -46,11 +46,11 @@ goto :detect_yes_flag
 if defined WRAPPER_DIR ( set "SCRIPT_DIR=%WRAPPER_DIR%" ) else ( set "SCRIPT_DIR=%~dp0" )
 
 :: -------- Arg parser (canonical, do not modify) --------
-:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion`
-:: deliberately comes after :args_done. With it on, cmd strips `!` out of the
-:: expanded text of `set "_ARG=%~1"` - and out of `%~1` itself - so a real
-:: game path like C:\Games\Oh! My Game silently loses the `!`, `if exist`
-:: fails, and a valid directory is rejected as a malformed argument.
+:: Parsed with delayed expansion OFF; `setlocal enabledelayedexpansion` comes
+:: much further down, after the game path has been resolved. With it on, cmd
+:: strips `!` out of the expanded text of `set "_ARG=%~1"` - and out of `%~1`
+:: itself - so a real game path like C:\Games\Oh! My Game silently loses the
+:: `!`, `if exist` fails, and a valid directory is rejected as malformed.
 set "YES_FLAG="
 set "_GIVEN_PATH="
 :parse_args
@@ -65,12 +65,18 @@ if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if not defined _GIVEN_PATH (
     if exist "%_ARG%\" ( set "_GIVEN_PATH=%_ARG%" & shift & goto :parse_args )
 )
+:: Two characters never survive the trip into a batch file's arguments: every
+:: `call` in the chain doubles a `^`, and the extra expansion round `call` runs
+:: eats a lone `%`. Both are already gone by the time this parser compares the
+:: string, so name them rather than leave the user guessing why a folder that
+:: plainly exists came back "unrecognised". Detection reaches those folders
+:: fine - it is only the argument that cannot carry them.
 echo ERROR: unrecognised argument "%_ARG%"
+echo A path argument cannot carry a ^^ or a %% - cmd.exe doubles the first and
+echo drops the second. Run without a path so detection finds the game instead.
 exit /b 2
 :args_done
 set "_ARG="
-
-setlocal enabledelayedexpansion
 
 :: -------- Validate CONFIG BLOCK --------
 :: Every name below is interpolated straight into a path that gets written,
@@ -97,33 +103,50 @@ if not exist "%_SHIM%" (
     exit /b 1
 )
 set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
-set "_GIVEN_ARG="
-if defined _GIVEN_PATH set "_GIVEN_ARG=-GivenPath "!_GIVEN_PATH!""
-powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "!_SHIM_OUT!" !_GIVEN_ARG!
-set "_PS_EC=!errorlevel!"
-if not "!_PS_EC!"=="0" (
+:: -GivenPath is spelled out in both branches rather than built into one
+:: variable and expanded unquoted: the quotes are what keep a `&`, `^` or `)`
+:: in the user's path from being parsed as syntax.
+if defined _GIVEN_PATH (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%" -GivenPath "%_GIVEN_PATH%"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%"
+)
+set "_PS_EC=%errorlevel%"
+if not "%_PS_EC%"=="0" (
     echo.
-    echo ERROR: Could not resolve game install path ^(shim exit code !_PS_EC!^).
+    echo ERROR: Could not resolve game install path ^(shim exit code %_PS_EC%^).
     echo Pass a path explicitly: install.cmd "C:\path\to\game"
     echo.
-    del "!_SHIM_OUT!" 2>nul
+    del "%_SHIM_OUT%" 2>nul
     exit /b 1
 )
-call "!_SHIM_OUT!"
-del "!_SHIM_OUT!" 2>nul
+call "%_SHIM_OUT%"
+del "%_SHIM_OUT%" 2>nul
+
+:: Derive EXE_DIR from GAME_PATH + GAME_EXE_RELPATH, still with expansion off:
+:: a FOR variable is substituted before the `!` scan, so `set "EXE_DIR=%%~dpi"`
+:: would drop a `!` from the path if this ran below.
+for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "EXE_DIR=%%~dpi"
+if "%EXE_DIR:~-1%"=="\" set "EXE_DIR=%EXE_DIR:~0,-1%"
+
+:: Delayed expansion is enabled HERE and not one line earlier. Everything the
+:: shim resolved is already in the environment, and `!VAR!` hands the value back
+:: byte-for-byte: it is substituted after cmd.exe has finished looking for `!`,
+:: `&`, `^` and `)`, so a path like C:\Games\Oh! My Game survives. `%VAR%` is
+:: substituted before that scan and would lose the `!`. Every path below is
+:: therefore `!`-expanded; the arg parser, the shim call and the EXE_DIR
+:: derivation above all run with expansion off for the same reason.
+setlocal enabledelayedexpansion
 
 echo Game found: !GAME_PATH!
 
-:: Derive EXE_DIR (where .asi plugins land) from GAME_PATH + GAME_EXE_RELPATH.
-for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "EXE_DIR=%%~dpi"
-if "!EXE_DIR:~-1!"=="\" set "EXE_DIR=!EXE_DIR:~0,-1!"
 echo Exe dir : !EXE_DIR!
 echo.
 
 :: -------- Game-running check --------
-tasklist /fi "imagename eq %GAME_EXE%" 2>nul | findstr /i "%GAME_EXE%" >nul 2>&1
+tasklist /fi "imagename eq !GAME_EXE!" 2>nul | findstr /i "!GAME_EXE!" >nul 2>&1
 if not errorlevel 1 (
-    echo ERROR: %GAME_DISPLAY_NAME% is currently running.
+    echo ERROR: !GAME_DISPLAY_NAME! is currently running.
     echo Please close the game before installing.
     echo.
     exit /b 1
@@ -131,13 +154,13 @@ if not errorlevel 1 (
 
 :: -------- Prior state --------
 set "WE_INSTALLED=false"
-if exist "%GAME_PATH%\%STATE_FILE%" (
-    findstr /c:"installed_by_us" "%GAME_PATH%\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
+if exist "!GAME_PATH!\%STATE_FILE%" (
+    findstr /c:"installed_by_us" "!GAME_PATH!\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
     if not errorlevel 1 set "WE_INSTALLED=true"
 )
 
 :: -------- Ensure ASI Loader --------
-if not exist "%EXE_DIR%\%ASI_LOADER_NAME%" (
+if not exist "!EXE_DIR!\%ASI_LOADER_NAME%" (
     echo ASI Loader not found. Installing...
     echo.
     call :install_asi_loader
@@ -151,7 +174,7 @@ echo.
 :: -------- Deploy mod files --------
 echo Deploying mod files...
 
-set "FILES_DIR=%SCRIPT_DIR%plugins"
+set "FILES_DIR=!SCRIPT_DIR!plugins"
 
 set "DEPLOY_FAILED=0"
 for %%f in (%MOD_DLLS%) do (
@@ -201,8 +224,8 @@ echo.
 exit /b 0
 
 :install_asi_loader
-set "VENDOR_DIR=%SCRIPT_DIR%vendor\ultimate-asi-loader"
-set "VENDOR_DLL=%VENDOR_DIR%\dinput8.dll"
+set "VENDOR_DIR=!SCRIPT_DIR!vendor\ultimate-asi-loader"
+set "VENDOR_DLL=!VENDOR_DIR!\dinput8.dll"
 
 if not exist "!VENDOR_DLL!" (
     echo   ERROR: Bundled Ultimate ASI Loader not found at:
