@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reference-only stub for the Il2CppInterop-generated UnityEngine.InputLegacyModule.
+       See ..\UnityEngine.CoreModule\Stubs.UnityEngine.CoreModule.csproj for the shared
+       reasoning. -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>UnityEngine.InputLegacyModule</AssemblyName>
+    <RootNamespace>UnityEngine</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyVersion>0.0.0.0</AssemblyVersion>
+    <IsPackable>false</IsPackable>
+    <DebugType>none</DebugType>
+    <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114;MSB3277</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\UnityEngineInputLegacyModuleStubs.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UnityEngine.CoreModule\Stubs.UnityEngine.CoreModule.csproj" Private="false" />
+  </ItemGroup>
+
+  <!-- Il2CppInterop.ReferenceLibs also ships UnityEngine.CoreModule-nstrip.dll, whose
+       assembly name is UnityEngine.CoreModule - the very name this project produces, so
+       consuming the package's assets makes every type here ambiguous (CS0436, and CS0433 at
+       a consumer). Take the one assembly that is wanted, Il2Cppmscorlib, by path instead. -->
+  <ItemGroup>
+    <PackageReference Include="Il2CppInterop.ReferenceLibs" Version="1.0.0"
+                      GeneratePathProperty="true" ExcludeAssets="all" />
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(PkgIl2CppInterop_ReferenceLibs)\lib\net6.0\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

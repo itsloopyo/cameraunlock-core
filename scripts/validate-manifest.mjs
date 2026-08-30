@@ -286,6 +286,8 @@ function scriptDependencies(text) {
 //   a seed target               loader.seed writes the file from content_b64,
 //                               so the copy in the ZIP is a reference the
 //                               engine does not need a files[] row for
+//   the profile/ tree           deployed by the launcher's own AsiLoader
+//                               strategy rather than from files[], see below
 //
 // Declared inside the function, not at module scope: this file runs its job
 // loop at the top and declares its helpers below, so a top-level `const` here

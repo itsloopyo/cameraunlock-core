@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reference-only stub for BepInEx.dll, so this repo builds with no game, no loader
+       download and no sibling mod checkout. Referenced by CameraUnlock.Core.Unity.BepInEx
+       whenever BepInExPath is not supplied; a mod passes its own libs directory instead
+       and this project is not built. AGENTS.md: build dependencies must be
+       game-independent, and this repo vendors no BepInEx.
+
+       AssemblyName BepInEx because BepInEx 5.x declares BepInEx.Configuration.* there, and
+       the compiler bakes that assembly identity into every reference it emits.
+
+       AssemblyVersion 0.0.0.0 so the reference names no version the loaded BepInEx does
+       not have, the same reason the Unity stubs beside this one pin it.
+
+       LangVersion 7.3 to match the consumer, which is 7.3 for its net472 target. -->
+
+  <PropertyGroup>
+    <TargetFrameworks>net472;net48</TargetFrameworks>
+    <AssemblyName>BepInEx</AssemblyName>
+    <RootNamespace>BepInEx</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyVersion>0.0.0.0</AssemblyVersion>
+    <IsPackable>false</IsPackable>
+    <DebugType>none</DebugType>
+    <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\BepInExStubs.cs" />
+  </ItemGroup>
+
+  <!-- Explicit so a machine with no .NET Framework targeting packs installed can still
+       build this repo. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reference-only stub for the Il2CppInterop-generated UnityEngine.CoreModule, so an
+       IL2CPP mod builds with no game installed. NuGet cannot supply this one:
+       unityengine.modules ships the real Mono reference assemblies, whose shape the interop
+       proxies do not share. See ..\UnityEngineCoreModuleStubs.cs.
+
+       Not in CameraUnlock.Core.sln: nothing core builds compiles against IL2CPP proxies.
+       A mod's scripts/setup-libs.ps1 builds this project and copies the output into libs/.
+
+       AssemblyVersion 0.0.0.0 matches what the shipped interop assemblies carry, so a mod
+       compiled against this stub names a version the loaded assembly really has.
+
+       Il2CppInterop.Runtime is pinned to the version BepInEx 6.0.0-be.785 ships, which is
+       what the fleet's IL2CPP mods vendor. Il2CppInterop.ReferenceLibs supplies
+       Il2Cppmscorlib, the Il2CppSystem.Object every proxy type derives from; it is published
+       only on nuget.bepinex.dev. -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>UnityEngine.CoreModule</AssemblyName>
+    <RootNamespace>UnityEngine</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyVersion>0.0.0.0</AssemblyVersion>
+    <IsPackable>false</IsPackable>
+    <DebugType>none</DebugType>
+    <NoWarn>CS0169;CS0649;CS0067;CS0660;CS0661;CS0108;CS0114;MSB3277</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\UnityEngineCoreModuleStubs.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Il2CppInterop.Runtime" Version="1.5.3" />
+  </ItemGroup>
+
+  <!-- Il2CppInterop.ReferenceLibs also ships UnityEngine.CoreModule-nstrip.dll, whose
+       assembly name is UnityEngine.CoreModule - the very name this project produces, so
+       consuming the package's assets makes every type here ambiguous (CS0436, and CS0433 at
+       a consumer). Take the one assembly that is wanted, Il2Cppmscorlib, by path instead. -->
+  <ItemGroup>
+    <PackageReference Include="Il2CppInterop.ReferenceLibs" Version="1.0.0"
+                      GeneratePathProperty="true" ExcludeAssets="all" />
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(PkgIl2CppInterop_ReferenceLibs)\lib\net6.0\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
