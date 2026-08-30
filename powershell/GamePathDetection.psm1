@@ -109,6 +109,9 @@ function Get-GameConfigs {
         if (Test-JsonProp $src 'xbox_paths') {
             if ($src.xbox_paths.Count -gt 0) { $cfg.XboxPaths = @($src.xbox_paths) }
         }
+        if (Test-JsonProp $src 'msix_identity_name') {
+            $cfg.MsixIdentityName = $src.msix_identity_name
+        }
         # Optional override used by titles whose Xbox/GDK build ships under a
         # different executable name + relpath than their Steam build (e.g.
         # UE5 GDK games: Foo-WinGDK-Shipping.exe under Binaries\WinGDK\
@@ -403,6 +406,46 @@ function Find-SteamGameByAppId {
 
 <#
 .SYNOPSIS
+    Finds a Microsoft Store (MSIX/UWP) title by its package identity name.
+.DESCRIPTION
+    A Store-packaged game has no stable install path: the directory under
+    WindowsApps carries the package version, so it changes with every game
+    update. The package identity name (e.g. Microsoft.MinecraftUWP) is the
+    stable handle, and the package manager resolves it to wherever the
+    current version lives.
+.PARAMETER IdentityName
+    Package identity name, as recorded in games.json's msix_identity_name.
+.PARAMETER Executable
+    Executable name to verify the installation.
+.OUTPUTS
+    System.String or $null
+#>
+function Find-MsixGamePath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$IdentityName,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Executable
+    )
+
+    # A package that is registered for another user, or staged but not
+    # registered for this one, is not an install this machine can launch.
+    $package = Get-AppxPackage -Name $IdentityName | Select-Object -First 1
+    if (-not $package -or -not $package.InstallLocation) {
+        return $null
+    }
+    if (Test-GameInstallation -Path $package.InstallLocation -Executable $Executable) {
+        return $package.InstallLocation
+    }
+
+    return $null
+}
+
+<#
+.SYNOPSIS
     Finds the OWML mods path for Outer Wilds.
 .OUTPUTS
     System.String or $null
@@ -431,6 +474,7 @@ function Find-OWMLPath {
     5. Epic Games paths
     6. EA App / Origin paths
     7. Xbox/Microsoft Store paths
+    8. Microsoft Store MSIX package identity
 .PARAMETER GameId
     The game identifier (key in $GameConfigs).
 .PARAMETER Config
@@ -558,6 +602,18 @@ function Find-GamePath {
             if (Test-GameInstallation -Path $path -Executable $xboxExecutable) {
                 return $path
             }
+        }
+    }
+
+    # Priority 9: Microsoft Store MSIX/UWP package identity. Distinct from
+    # the Xbox app, which unpacks Game Pass titles into a writable folder
+    # at a path we can list; a Store package lives under WindowsApps in a
+    # directory named for the current version, so only the package manager
+    # knows where it is right now.
+    if ($Config.ContainsKey('MsixIdentityName') -and $Config.MsixIdentityName) {
+        $msixPath = Find-MsixGamePath -IdentityName $Config.MsixIdentityName -Executable $executable
+        if ($msixPath) {
+            return $msixPath
         }
     }
 
@@ -743,6 +799,7 @@ Export-ModuleMember -Function @(
     'Find-GogGamePath',
     'Find-UbisoftGamePath',
     'Find-RegistryGamePath',
+    'Find-MsixGamePath',
     'Find-GamePath',
     'Test-IsXboxPath',
     'Find-OWMLPath',
