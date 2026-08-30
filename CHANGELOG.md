@@ -277,12 +277,13 @@ step, clearing smoothing history, and driving the notification.
   tracker then repeats bit-identical values it stays held until the pose changes
   again. Headcam is unaffected because it sends the trailer. This is pre-existing
   and is not addressed here.
-- **This fix does not reach a mod that implements the capture itself.** Fifteen
+- **This fix does not reach a mod that implements the capture itself.** Fourteen
   repos carry their own auto-recenter on top of core: `cyberpunk-2077`,
   `witcher-3`, `dorfromantik`, `subnautica`, `green-hell`, `peak`, `firewatch`,
   `gone-home`, `obra-dinn`, `eternal-afternoon`, `the-painscreek-killings`,
-  `prey`, `fallout-new-vegas`, `minecraft-head-tracking` and
-  `minecraft-bedrock-edition-headtracking`. Three more carry a full local port
+  `prey`, `fallout-new-vegas` and `minecraft-bedrock-edition-headtracking`.
+  (This list previously counted `minecraft-head-tracking` separately; it is the
+  pre-rename name of the same repository, not a second one.) Three more carry a full local port
   with the capture built in: `headlook` (C#), `fusion-360-headtracking` (Python)
   and `minecraft-java-edition-headtracking` (Java). Each needs the capture
   deleted in its own tree - there is nothing to opt into, because the correct
