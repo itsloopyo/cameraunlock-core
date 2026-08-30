@@ -142,7 +142,7 @@ function Get-LauncherManifest {
 
 function Get-WrapperBodyName {
     param([string]$Text)
-    if ($Text -match '((?:un)?install-body[a-z-]*\.cmd)') { return $Matches[1] }
+    if ($Text -match '((?:un)?install-body[a-z0-9-]*\.cmd)') { return $Matches[1] }
     return $null
 }
 

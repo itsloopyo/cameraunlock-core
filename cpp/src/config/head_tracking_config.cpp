@@ -330,9 +330,10 @@ void HeadTrackingConfig::ApplyValues(
 
     // A file that names one vertical limit means one vertical limit. The clamp is
     // [-limit_y_down, +limit_y], so leaving the down side at its struct default silently caps
-    // a raised limit_y at 0.20m downward - the exact bug ~47 mod repos carry today, each of
-    // which hand-mirrors the key or does not. Decided after the loop, so entry order cannot
-    // change the outcome, and an explicit LimitYDown always wins.
+    // a raised limit_y at 0.20m downward. Mods that build PositionSettings in code rather
+    // than through this reader each have to hand-mirror the key, and 28 of them did not.
+    // Decided after the loop, so entry order cannot change the outcome, and an explicit
+    // LimitYDown always wins.
     if (saw_limit_y && !saw_limit_y_down) {
         position.limit_y_down = position.limit_y;
     }

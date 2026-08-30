@@ -145,6 +145,14 @@ $manifestSource = Join-Path $ProjectRoot "launcher-manifest.json"
 if (-not (Test-Path $manifestSource)) {
     throw "launcher-manifest.json not found at project root ($manifestSource)"
 }
+
+# The seeded config the launcher writes on install comes out of the committed
+# manifest unchanged - only mod_info.version is stamped below. Refreshing the
+# blob from disk here would produce a correct ZIP over a stale committed file,
+# leaving every review of it reading the wrong defaults, so drift fails the
+# build instead.
+Assert-ManifestSeedsMatchShipped -ManifestPath $manifestSource -ProjectRoot $ProjectRoot
+
 $manifestJson = Get-Content $manifestSource -Raw | ConvertFrom-Json
 $manifestJson.mod_info.version = $version
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false

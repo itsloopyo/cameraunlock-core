@@ -34,7 +34,8 @@
 ::                            duplicate-load conflicts.
 ::   MOD_CONTROLS             optional post-install help text
 ::
-:: Launcher CLI (passed through %*): [GAME_PATH] [/y]
+:: Launcher CLI (passed through %*): [GAME_PATH] [/y] [/force]
+::   /force is accepted and ignored - it only means something to uninstall.
 :: ============================================
 
 :: :detect_yes_flag and the arg parser below both break if the wrapper left
@@ -82,6 +83,10 @@ set "_ARG=%~1"
 if /i "%_ARG%"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
 if /i "%_ARG%"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
 if /i "%_ARG%"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
+:: /force is an uninstall flag. Install accepts and ignores it so that a
+:: launcher passing one flag set to both scripts does not get exit 2 here.
+if /i "%_ARG%"=="/force"  ( shift & goto :parse_args )
+if /i "%_ARG%"=="--force" ( shift & goto :parse_args )
 if "%_ARG:~0,2%"=="--" ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if "%_ARG:~0,1%"=="/"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
@@ -195,7 +200,38 @@ if defined _LOADER_PRESENT (
 
 if not defined _LOADER_PRESENT goto :install_loader
 if defined _LOADER_BAD goto :replace_loader
-echo Existing BepInEx detected, skipping loader install, deploying plugin only.
+
+:: Right arch, right marker file - but a marker check alone still calls a
+:: half-deleted BepInEx "installed". core\BepInEx.dll survives while
+:: doorstop_config.ini and the Cecil/MonoMod assemblies go missing, Doorstop
+:: loads with no target assembly, the chainloader never runs, and the broken
+:: install survives a reinstall as "the mod just stopped working".
+call :check_bepinex_health
+if errorlevel 1 exit /b 1
+if defined _LOADER_FOREIGN (
+    echo Existing BepInEx is a different edition to the bundled one, skipping loader install, deploying plugin only.
+    goto :after_loader
+)
+if "!_LOADER_MISSING!"=="0" (
+    echo Existing BepInEx detected, skipping loader install, deploying plugin only.
+    goto :after_loader
+)
+
+:repair_loader
+echo Existing BepInEx is incomplete - !_LOADER_MISSING! of its files are missing. Repairing from the bundled copy.
+echo.
+call :install_bepinex
+if errorlevel 1 exit /b 1
+call :check_bepinex_health
+if errorlevel 1 exit /b 1
+if not "!_LOADER_MISSING!"=="0" (
+    echo   ERROR: BepInEx is still incomplete after extraction.
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
+)
+:: A repair does not transfer ownership: WE_INSTALLED keeps whatever the prior
+:: state file said, so uninstall still leaves a loader the user installed
+:: themselves intact.
 goto :after_loader
 
 :replace_loader
@@ -333,6 +369,95 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "!_ARCH_SHIM!" -Path "!GAME_
 exit /b %errorlevel%
 
 :: ============================================
+:: Compare the installed loader against the bundled zip's own file list, and
+:: report through _LOADER_MISSING (a count) and _LOADER_FOREIGN.
+::
+:: Only .dll and .ini entries count. The XML doc files and changelog.txt in the
+:: zip are not load-bearing, and a user who cleaned them out does not need a
+:: repair. _LOADER_FOREIGN guards the other direction: an install that does not
+:: carry the same core assembly the bundled zip does is a different BepInEx
+:: edition, belonging to someone else's setup, and extracting our core over it
+:: would break theirs.
+:: ============================================
+:check_bepinex_health
+set "_LOADER_MISSING=0"
+set "_LOADER_FOREIGN="
+call :resolve_vendor_zip
+if not exist "!VENDOR_ZIP!" (
+    echo   ERROR: Bundled BepInEx not found at:
+    echo     !VENDOR_ZIP!
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
+)
+
+set "_ZIP_LIST=!TEMP!\cul-bepinex-list-%RANDOM%-%RANDOM%.txt"
+"%SystemRoot%\System32\tar.exe" -tf "!VENDOR_ZIP!" > "!_ZIP_LIST!"
+if errorlevel 1 (
+    del "!_ZIP_LIST!" 2>nul
+    echo   ERROR: could not list the bundled BepInEx zip:
+    echo     !VENDOR_ZIP!
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
+)
+
+:: BepInEx 5 ships core\BepInEx.dll; BepInEx 6 (IL2CPP) renamed it to
+:: BepInEx.Core.dll. Whichever the bundled zip carries is the one to compare
+:: against, so read it off the listing rather than assuming an edition.
+set "_VENDOR_MARKER="
+for /f "usebackq delims=" %%e in ("!_ZIP_LIST!") do (
+    call :normalize_zip_entry "%%e"
+    if /i "!_ENTRY!"=="BepInEx\core\BepInEx.dll"      set "_VENDOR_MARKER=!_ENTRY!"
+    if /i "!_ENTRY!"=="BepInEx\core\BepInEx.Core.dll" set "_VENDOR_MARKER=!_ENTRY!"
+)
+if not defined _VENDOR_MARKER (
+    del "!_ZIP_LIST!" 2>nul
+    echo   ERROR: the bundled zip carries no BepInEx\core\BepInEx.dll, so it is
+    echo   not a BepInEx package: !VENDOR_ZIP!
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
+)
+
+if not exist "!GAME_PATH!\!_VENDOR_MARKER!" (
+    set "_LOADER_FOREIGN=1"
+    del "!_ZIP_LIST!" 2>nul
+    exit /b 0
+)
+
+for /f "usebackq delims=" %%e in ("!_ZIP_LIST!") do (
+    call :normalize_zip_entry "%%e"
+    set "_WANT="
+    if /i "!_ENTRY:~-4!"==".dll" set "_WANT=1"
+    if /i "!_ENTRY:~-4!"==".ini" set "_WANT=1"
+    if defined _WANT if not exist "!GAME_PATH!\!_ENTRY!" set /a _LOADER_MISSING+=1
+)
+
+del "!_ZIP_LIST!" 2>nul
+exit /b 0
+
+:: Turn one zip entry into a game-relative path: drop the Thunderstore wrapper
+:: directory :install_bepinex flattens away, and swap the separators.
+:normalize_zip_entry
+set "_ENTRY=%~1"
+if defined BEPINEX_SUBFOLDER set "_ENTRY=!_ENTRY:*%BEPINEX_SUBFOLDER%/=!"
+set "_ENTRY=!_ENTRY:/=\!"
+exit /b 0
+
+:: ============================================
+:: Resolve the bundled loader zip into VENDOR_ZIP. Release ZIP layout has
+:: vendor/ flat next to install.cmd; the dev tree has install.cmd in
+:: <repo>/scripts/ and vendor/ at <repo>/vendor/.
+:: ============================================
+:resolve_vendor_zip
+set "VENDOR_DIR=!SCRIPT_DIR!vendor\bepinex"
+if not exist "!VENDOR_DIR!" set "VENDOR_DIR=!SCRIPT_DIR!..\vendor\bepinex"
+if defined BEPINEX_VENDOR_ZIP_NAME (
+    set "VENDOR_ZIP=!VENDOR_DIR!\%BEPINEX_VENDOR_ZIP_NAME%"
+) else (
+    set "VENDOR_ZIP=!VENDOR_DIR!\BepInEx_win_%BEPINEX_ARCH%.zip"
+)
+exit /b 0
+
+:: ============================================
 :: Wipe an existing wrong-arch BepInEx loader so :install_bepinex can lay
 :: down our matching one. The loader core is ours to replace, but
 :: BepInEx\plugins\ and BepInEx\config\ are NOT - a Thunderstore user can
@@ -420,16 +545,7 @@ exit /b 0
 :: bundled version, run `pixi run update-deps` in the mod repo and commit.
 :: ============================================
 :install_bepinex
-:: Release ZIP layout has vendor/ flat next to install.cmd; the dev tree
-:: has install.cmd in <repo>/scripts/ and vendor/ at <repo>/vendor/. Try
-:: the release-zip layout first, then fall back to the dev-tree parent.
-set "VENDOR_DIR=!SCRIPT_DIR!vendor\bepinex"
-if not exist "!VENDOR_DIR!" set "VENDOR_DIR=!SCRIPT_DIR!..\vendor\bepinex"
-if defined BEPINEX_VENDOR_ZIP_NAME (
-    set "VENDOR_ZIP=!VENDOR_DIR!\%BEPINEX_VENDOR_ZIP_NAME%"
-) else (
-    set "VENDOR_ZIP=!VENDOR_DIR!\BepInEx_win_%BEPINEX_ARCH%.zip"
-)
+call :resolve_vendor_zip
 
 if not exist "!VENDOR_ZIP!" (
     echo   ERROR: Bundled BepInEx not found at:

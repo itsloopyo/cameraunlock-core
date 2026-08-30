@@ -1233,6 +1233,15 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/minecraft-bedrock-edition-headtracking",
       "catalog_status": "released"
+    },
+    "minecraft-java-edition": {
+      "display_name": "Minecraft: Java Edition",
+      "env_var": "MINECRAFT_PATH",
+      "executable_relpath": "versions",
+      "loader": "Fabric",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/minecraft-java-edition-headtracking",
+      "catalog_status": "absent"
     }
   }
 }

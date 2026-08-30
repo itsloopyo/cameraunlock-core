@@ -19,13 +19,21 @@ set "MOD_DISPLAY_NAME=<Game Name> Head Tracking"
 set "MOD_DLLS=<Mod>HeadTracking.dll"
 set "MOD_INTERNAL_NAME=<Mod>HeadTracking"
 set "STATE_FILE=.headtracking-state.json"
-:: BepInEx | MelonLoader | MonoCecil | ASILoader | REFramework | UE4SS | None
+:: BepInEx | MelonLoader | MonoCecil | ASILoader | REFramework | UE4SS | xNVSE
+:: | None
 set "FRAMEWORK_TYPE=None"
 :: DLL names shipped by older versions of this mod, removed too so an upgrade
 :: does not leave a second copy for the loader to bind.
 set "LEGACY_DLLS="
 :: BepInEx: subfolder under BepInEx\plugins\ the DLLs were deployed into.
 set "PLUGIN_SUBFOLDER="
+:: Config and log files the mod writes at runtime, removed from wherever the
+:: DLLs were deployed.
+set "MOD_LEFTOVERS="
+:: Files to remove from the game root. Only needed by a mod deployed BELOW the
+:: root (see ASI_SUBDIR) that still resolves its config and log from the exe's
+:: own directory.
+set "ROOT_EXTRAS="
 
 :: --- Loader-specific config (leave the ones that don't apply blank) ---
 :: MonoCecil: used to find + restore the original Assembly-CSharp.dll.
@@ -39,7 +47,21 @@ set "PATCH_MARKER="
 set "MANAGED_EXTRAS="
 :: ASILoader: filename the ASI DLL was renamed to. Defaults to winmm.dll.
 set "ASI_LOADER_NAME=winmm.dll"
+:: ASILoader: subdirectory below the exe directory the payload went into. MUST
+:: match install.cmd's value, or uninstall looks in the wrong folder.
+set "ASI_SUBDIR="
+:: UE4SS: path under GAME_PATH holding the shipping exe. MUST match
+:: install.cmd's value.
+set "UE4_BINARIES_RELDIR="
 :: --- END CONFIG BLOCK ---
+
+:: Pin delayed expansion off before `%*` is expanded on the `call` below.
+:: Under `cmd /V:ON`, or with DelayedExpansion=1 in
+:: HKCU\Software\Microsoft\Command Processor, cmd.exe eats a `!` out of the
+:: expanded line, and a real game path like C:\Games\Oh! My Game reaches the
+:: body already mangled. The body pins expansion off at its own outer scope
+:: too, but that is one `call` too late to save the argument it was handed.
+setlocal disabledelayedexpansion
 
 set "WRAPPER_DIR=%~dp0"
 set "_BODY=%WRAPPER_DIR%shared\uninstall-body.cmd"

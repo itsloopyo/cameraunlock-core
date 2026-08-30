@@ -14,6 +14,9 @@
 ::   REFramework  - removes <game>/dinput8.dll and <game>/reframework/
 ::   UE4SS        - removes <win64>/Mods/<ModName>/ and its mods.txt entry;
 ::                  UE4SS.dll + dwmapi.dll only if we installed the loader
+::   xNVSE        - removes the plugin from <game>/Data/NVSE/Plugins; the
+::                  loader itself is shared with every other New Vegas script
+::                  mod and is never removed, /force included
 ::   None         - shim-only; restores shim DLLs from .backup if present
 ::
 :: Required env from the wrapper:
@@ -30,6 +33,14 @@
 ::   ASSEMBLY_DLL       - MonoCecil only: assembly to restore from .original
 ::   MANAGED_EXTRAS     - MonoCecil only: extra files (configs, logs) to wipe
 ::   ASI_LOADER_NAME    - ASILoader only: DLL filename (default winmm.dll)
+::   ASI_SUBDIR         - ASILoader only: subdirectory below the exe directory
+::                        the payload was deployed into; must match
+::                        install.cmd's value
+::   MOD_LEFTOVERS      - optional extra files to remove from DEPLOY_DIR (logs
+::                        and configs the mod itself writes at runtime)
+::   ROOT_EXTRAS        - optional extra files to remove from GAME_PATH, for
+::                        mods that deploy below the game root but write their
+::                        config and log at it
 ::   UE4_BINARIES_RELDIR - UE4SS only: path under GAME_PATH holding the
 ::                        shipping exe; must match install.cmd's value
 ::
@@ -161,6 +172,11 @@ del "%_SHIM_OUT%" 2>nul
 :: would drop a `!` from the path if this ran below.
 for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "EXE_DIR=%%~dpi"
 if "%EXE_DIR:~-1%"=="\" set "EXE_DIR=%EXE_DIR:~0,-1%"
+:: Percent-expanded like the two lines above and for the same reason: delayed
+:: expansion is still off here, so a `!` in the game path survives. Shifting
+:: EXE_DIR once covers both DEPLOY_DIR and the loader proxy, which install.cmd
+:: put in the same subdirectory.
+if defined ASI_SUBDIR set "EXE_DIR=%EXE_DIR%\%ASI_SUBDIR%"
 
 :: Delayed expansion is enabled HERE and not one line earlier. Everything the
 :: shim resolved is already in the environment, and `!VAR!` hands the value back
@@ -208,6 +224,8 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
 ) else (
     call :remove_mod_files_plain
 )
+call :remove_mod_leftovers
+call :remove_root_extras
 
 :: -------- Decide whether to remove loader --------
 set "REMOVE_LOADER=0"
@@ -225,6 +243,12 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
 ) else if /i "%FRAMEWORK_TYPE%"=="MonoCecil" (
     rem Cecil: the backup restore IS the loader removal. Already done.
     rem
+) else if /i "%FRAMEWORK_TYPE%"=="xNVSE" (
+    rem xNVSE is a shared modding framework: every other New Vegas script mod
+    rem binds to the same loader, so it is not ours to take away. /force does
+    rem not reach it either.
+    echo.
+    echo xNVSE was left intact - other mods may depend on it.
 ) else (
     if "!REMOVE_LOADER!"=="1" (
         echo.
@@ -296,6 +320,10 @@ if /i "%FRAMEWORK_TYPE%"=="ASILoader" (
     set "DEPLOY_DIR=!EXE_DIR!"
     exit /b 0
 )
+if /i "%FRAMEWORK_TYPE%"=="xNVSE" (
+    set "DEPLOY_DIR=!GAME_PATH!\Data\NVSE\Plugins"
+    exit /b 0
+)
 if /i "%FRAMEWORK_TYPE%"=="None" (
     set "DEPLOY_DIR=!EXE_DIR!"
     exit /b 0
@@ -345,6 +373,36 @@ if /i "%FRAMEWORK_TYPE%"=="BepInEx" if defined PLUGIN_SUBFOLDER (
     rmdir "!DEPLOY_DIR!" >nul 2>&1
 )
 if "!REMOVED!"=="0" echo   No mod files found
+exit /b 0
+
+:: ============================================
+:: Remove the config and log files the mod writes at runtime, wherever it was
+:: deployed. Its own routine rather than a tail on :remove_mod_files_plain so a
+:: shim-only mod, which takes :remove_shim_files instead, gets them too.
+:: ============================================
+:remove_mod_leftovers
+if not defined MOD_LEFTOVERS exit /b 0
+for %%f in (%MOD_LEFTOVERS%) do (
+    if exist "!DEPLOY_DIR!\%%f" (
+        del "!DEPLOY_DIR!\%%f"
+        echo   Removed: %%f
+    )
+)
+exit /b 0
+
+:: ============================================
+:: Remove files the mod leaves at the game root. A mod deployed below the root
+:: (Source engine's bin\, say) still resolves its config and log from the exe's
+:: own directory, so those do not sit in DEPLOY_DIR.
+:: ============================================
+:remove_root_extras
+if not defined ROOT_EXTRAS exit /b 0
+for %%f in (%ROOT_EXTRAS%) do (
+    if exist "!GAME_PATH!\%%f" (
+        del "!GAME_PATH!\%%f"
+        echo   Removed: %%f
+    )
+)
 exit /b 0
 
 :: ============================================

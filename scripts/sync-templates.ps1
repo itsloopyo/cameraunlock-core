@@ -138,7 +138,7 @@ function Sync-Wrappers {
             continue
         }
         $text = Read-TextFile $path
-        if ($text -notmatch '((?:un)?install-body[a-z-]*\.cmd)') {
+        if ($text -notmatch '((?:un)?install-body[a-z0-9-]*\.cmd)') {
             Add-Result $Name 'wrappers' 'report' "scripts/$script is a legacy in-tree body; converting it to a wrapper needs a CONFIG BLOCK written by hand, then scripts/templates/install-wrapper-*.cmd for the rest"
             continue
         }

@@ -28,9 +28,30 @@ set "FRAMEWORK_TYPE=ASILoader"
 :: Filename the ASI loader DLL is renamed to: the import the game exe already
 :: has. winmm.dll, dinput8.dll, dxgi.dll and xinput1_3.dll are the common ones.
 set "ASI_LOADER_NAME=winmm.dll"
+:: Subdirectory below the exe directory to deploy into, for engines that load
+:: their proxy DLL from somewhere other than beside the exe. Source engine wants
+:: bin\; a copy next to the exe is never loaded. Leave empty for everything
+:: else, and set the same value in uninstall.cmd.
+set "ASI_SUBDIR="
+:: Files copied only when they are not already there, so an upgrade keeps
+:: whatever the user tuned. Listing an .ini in MOD_DLLS instead puts it through
+:: the unconditional copy and resets every key on every update.
+set "MOD_SEED_FILES="
+:: Version of the vendored Ultimate ASI Loader, recorded in the state file so
+:: the launcher can tell which loader build it is looking at. Leave empty to
+:: omit the field. Bump alongside vendor/ via `pixi run update-deps`.
+set "ASI_LOADER_VERSION="
 :: Post-install help text. `&echo ` starts each further line.
 set "MOD_CONTROLS=Controls:&echo   End      - Toggle head tracking on/off&echo   Page Up  - Toggle position tracking on/off&echo   Page Down - Toggle yaw mode (world-locked / camera-local)"
 :: --- END CONFIG BLOCK ---
+
+:: Pin delayed expansion off before `%*` is expanded on the `call` below.
+:: Under `cmd /V:ON`, or with DelayedExpansion=1 in
+:: HKCU\Software\Microsoft\Command Processor, cmd.exe eats a `!` out of the
+:: expanded line, and a real game path like C:\Games\Oh! My Game reaches the
+:: body already mangled. The body pins expansion off at its own outer scope
+:: too, but that is one `call` too late to save the argument it was handed.
+setlocal disabledelayedexpansion
 
 set "WRAPPER_DIR=%~dp0"
 set "_BODY=%WRAPPER_DIR%shared\install-body-asi.cmd"

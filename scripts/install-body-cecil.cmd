@@ -27,7 +27,8 @@
 ::   PATCHER_FILE       - C# patcher source filename in mod/
 ::   MOD_CONTROLS       - optional post-install help text (hotkeys etc.)
 ::
-:: Launcher CLI (passed through %*): [GAME_PATH] [/y]
+:: Launcher CLI (passed through %*): [GAME_PATH] [/y] [/force]
+::   /force is accepted and ignored - it only means something to uninstall.
 :: ============================================
 
 :: :detect_yes_flag and the arg parser below both break if the wrapper left
@@ -84,6 +85,10 @@ set "_ARG=%~1"
 if /i "%_ARG%"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
 if /i "%_ARG%"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
 if /i "%_ARG%"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
+:: /force is an uninstall flag. Install accepts and ignores it so that a
+:: launcher passing one flag set to both scripts does not get exit 2 here.
+if /i "%_ARG%"=="/force"  ( shift & goto :parse_args )
+if /i "%_ARG%"=="--force" ( shift & goto :parse_args )
 if "%_ARG:~0,2%"=="--" ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if "%_ARG:~0,1%"=="/"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )

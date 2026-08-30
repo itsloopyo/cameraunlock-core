@@ -20,8 +20,21 @@
     <ProjectReference Include="..\CameraUnlock.Core.Unity\CameraUnlock.Core.Unity.csproj" />
   </ItemGroup>
 
-  <!-- BepInEx reference - consuming projects should provide actual DLL -->
-  <ItemGroup>
+  <!-- With no BepInExPath supplied, build against the reference stub this repo owns.
+       This used to point at a sibling valheim-headtracking checkout, which meant a clean
+       clone of core did not build - the exact game-install dependency AGENTS.md forbids,
+       one checkout removed. -->
+  <PropertyGroup Condition="'$(BepInExPath)' == ''">
+    <UseCameraUnlockBepInExStub>true</UseCameraUnlockBepInExStub>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseCameraUnlockBepInExStub)' == 'true'">
+    <ProjectReference Include="..\..\stubs\BepInEx\Stubs.BepInEx.csproj" Private="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- BepInEx from the loader install a consuming mod points us at. -->
+  <ItemGroup Condition="'$(UseCameraUnlockBepInExStub)' != 'true'">
     <Reference Include="BepInEx">
       <HintPath>$(BepInExPath)\BepInEx.dll</HintPath>
       <Private>false</Private>
@@ -57,11 +70,4 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
-
-  <!-- BepInEx.dll itself is still resolved from a sibling valheim checkout when the
-       consumer passes no BepInExPath. This repo vendors no BepInEx, so unlike the Unity
-       references there is nothing here to point at. -->
-  <PropertyGroup Condition="'$(BepInExPath)' == ''">
-    <BepInExPath>$(MSBuildThisFileDirectory)..\..\..\..\valheim-headtracking\src\ValheimHeadTracking\libs</BepInExPath>
-  </PropertyGroup>
 </Project>

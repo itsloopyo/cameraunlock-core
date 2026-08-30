@@ -18,9 +18,19 @@
 ::   STATE_FILE, FRAMEWORK_TYPE (always "ASILoader")
 ::   ASI_LOADER_NAME          filename the ASI DLL is renamed to
 ::                            (winmm.dll / dinput8.dll / xinput1_3.dll)
+::   ASI_SUBDIR               optional subdirectory below the exe directory to
+::                            deploy into instead. Source engine loads its proxy
+::                            DLL only out of bin\, so a copy next to the exe is
+::                            never loaded.
+::   MOD_SEED_FILES           optional files copied only when not already
+::                            present, so an upgrade keeps whatever the user
+::                            tuned in an .ini the mod ships a default for.
+::   ASI_LOADER_VERSION       optional vendored-loader version, recorded in the
+::                            state file's framework object.
 ::   MOD_CONTROLS             optional post-install help text
 ::
-:: Launcher CLI (passed through %*): [GAME_PATH] [/y]
+:: Launcher CLI (passed through %*): [GAME_PATH] [/y] [/force]
+::   /force is accepted and ignored - it only means something to uninstall.
 :: ============================================
 
 :: :detect_yes_flag and the arg parser below both break if the wrapper left
@@ -59,6 +69,10 @@ set "_ARG=%~1"
 if /i "%_ARG%"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
 if /i "%_ARG%"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
 if /i "%_ARG%"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
+:: /force is an uninstall flag. Install accepts and ignores it so that a
+:: launcher passing one flag set to both scripts does not get exit 2 here.
+if /i "%_ARG%"=="/force"  ( shift & goto :parse_args )
+if /i "%_ARG%"=="--force" ( shift & goto :parse_args )
 if "%_ARG:~0,2%"=="--" ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if "%_ARG:~0,1%"=="/"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
 if "%_ARG:~0,1%"=="-"  ( echo ERROR: unknown flag "%_ARG%" & exit /b 2 )
@@ -128,6 +142,9 @@ del "%_SHIM_OUT%" 2>nul
 :: would drop a `!` from the path if this ran below.
 for %%i in ("%GAME_PATH%\%GAME_EXE_RELPATH%") do set "EXE_DIR=%%~dpi"
 if "%EXE_DIR:~-1%"=="\" set "EXE_DIR=%EXE_DIR:~0,-1%"
+:: Percent-expanded like the two lines above and for the same reason: delayed
+:: expansion is still off here, so a `!` in the game path survives.
+if defined ASI_SUBDIR set "EXE_DIR=%EXE_DIR%\%ASI_SUBDIR%"
 
 :: Delayed expansion is enabled HERE and not one line earlier. Everything the
 :: shim resolved is already in the environment, and `!VAR!` hands the value back
@@ -139,6 +156,17 @@ if "%EXE_DIR:~-1%"=="\" set "EXE_DIR=%EXE_DIR:~0,-1%"
 setlocal enabledelayedexpansion
 
 echo Game found: !GAME_PATH!
+
+:: A missing ASI_SUBDIR is a wrong CONFIG BLOCK, not an unwritable game folder,
+:: which is what the copy failure it used to produce reported.
+if defined ASI_SUBDIR if not exist "!EXE_DIR!\" (
+    echo ERROR: ASI_SUBDIR is set to "%ASI_SUBDIR%", but that folder is not in
+    echo this install:
+    echo   !EXE_DIR!
+    echo Check the ASI_SUBDIR value in this script's CONFIG BLOCK.
+    echo.
+    exit /b 1
+)
 
 echo Exe dir : !EXE_DIR!
 echo.
@@ -175,8 +203,36 @@ echo.
 echo Deploying mod files...
 
 set "FILES_DIR=!SCRIPT_DIR!plugins"
+:: Release ZIP layout has plugins/ next to install.cmd; the dev tree has
+:: install.cmd in <repo>/scripts/ and the freshly built .asi in
+:: <repo>/build/Release, which is where `pixi run install` deploys from in the
+:: repos that point it straight at scripts/install.cmd.
+if not exist "!FILES_DIR!" set "FILES_DIR=!SCRIPT_DIR!..\build\Release"
 
 set "DEPLOY_FAILED=0"
+:: Seeded before the mod DLLs, and copied only when absent: an upgrade has to
+:: keep the values the user tuned. launcher-manifest.json delivers the same
+:: files through its write-if-absent loader.seed block, so the two paths agree.
+if defined MOD_SEED_FILES (
+    for %%f in (%MOD_SEED_FILES%) do (
+        if exist "!FILES_DIR!\%%f" (
+            if exist "!EXE_DIR!\%%f" (
+                echo   Kept your existing %%f
+            ) else (
+                copy /y "!FILES_DIR!\%%f" "!EXE_DIR!\" >nul
+                if errorlevel 1 (
+                    echo   ERROR: Failed to copy %%f - is the game folder writable?
+                    set "DEPLOY_FAILED=1"
+                ) else (
+                    echo   Deployed default %%f
+                )
+            )
+        ) else (
+            echo   ERROR: %%f not found in plugins folder
+            set "DEPLOY_FAILED=1"
+        )
+    )
+)
 for %%f in (%MOD_DLLS%) do (
     if exist "!FILES_DIR!\%%f" (
         copy /y "!FILES_DIR!\%%f" "!EXE_DIR!\" >nul
@@ -202,6 +258,8 @@ if "!DEPLOY_FAILED!"=="1" (
 )
 
 :: -------- Write state file --------
+call :stamp_installed_at
+if errorlevel 1 exit /b 1
 call :write_state_file
 
 echo.
@@ -225,6 +283,9 @@ exit /b 0
 
 :install_asi_loader
 set "VENDOR_DIR=!SCRIPT_DIR!vendor\ultimate-asi-loader"
+:: Release ZIP has vendor/ next to install.cmd; the dev tree has it at
+:: <repo>/vendor/ with install.cmd one level down in scripts/.
+if not exist "!VENDOR_DIR!\dinput8.dll" set "VENDOR_DIR=!SCRIPT_DIR!..\vendor\ultimate-asi-loader"
 set "VENDOR_DLL=!VENDOR_DIR!\dinput8.dll"
 
 if not exist "!VENDOR_DLL!" (
@@ -244,18 +305,35 @@ if errorlevel 1 (
 echo   Ultimate ASI Loader installed successfully!
 exit /b 0
 
+:: UTC ISO-8601, read through PowerShell: %DATE% is whatever the user's regional
+:: settings say and is not parseable, and WMIC is gone from current Windows 11.
+:: PowerShell already resolved the game path above, so a failure here is a real
+:: one and is reported rather than papered over with a placeholder date.
+:stamp_installed_at
+set "INSTALLED_AT="
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')"`) do set "INSTALLED_AT=%%I"
+if not defined INSTALLED_AT (
+    echo ERROR: could not read the current UTC time from PowerShell.
+    exit /b 1
+)
+exit /b 0
+
 :write_state_file
+set "_FW_COMMA="
+if defined ASI_LOADER_VERSION set "_FW_COMMA=,"
 > "!GAME_PATH!\%STATE_FILE%" (
     echo {
     echo   "schema_version": 1,
     echo   "framework": {
     echo     "type": "!FRAMEWORK_TYPE!",
-    echo     "installed_by_us": !WE_INSTALLED!
+    echo     "installed_by_us": !WE_INSTALLED!!_FW_COMMA!
+    if defined ASI_LOADER_VERSION echo     "version": "!ASI_LOADER_VERSION!"
     echo   },
     echo   "mod": {
     echo     "id": "!GAME_ID!",
     echo     "name": "!MOD_INTERNAL_NAME!",
-    echo     "version": "!MOD_VERSION!"
+    echo     "version": "!MOD_VERSION!",
+    echo     "installed_at": "!INSTALLED_AT!"
     echo   }
     echo }
 )

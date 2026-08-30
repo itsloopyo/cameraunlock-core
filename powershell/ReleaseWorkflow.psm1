@@ -165,9 +165,10 @@ function Copy-SharedBundle {
     # mod ships every body in shared/; the wrapper picks the one matching
     # its FRAMEWORK_TYPE. Cheap (each body is ~10KB), and it means a mod
     # changing strategy across versions doesn't require a release-tooling
-    # change. Bodies that haven't been ported from the templates/ shape
-    # yet are skipped silently when missing - the mod is still on the old
-    # in-tree copy and doesn't need them.
+    # change. Enumerated rather than listed, so a body added to core reaches
+    # the fleet's release ZIPs without a second edit here - a list is one more
+    # place to forget, and the mod that forgot ships a wrapper whose body is
+    # not in the ZIP.
     $sources = @(
         @{ Src = 'data\games.json';                   Dest = 'games.json' }
         @{ Src = 'powershell\GamePathDetection.psm1'; Dest = 'GamePathDetection.psm1' }
@@ -175,20 +176,11 @@ function Copy-SharedBundle {
         @{ Src = 'scripts\check-loader-arch.ps1';     Dest = 'check-loader-arch.ps1' }
         @{ Src = 'scripts\cecil-marker-check.ps1';    Dest = 'cecil-marker-check.ps1' }
     )
-    $optionalBodies = @(
-        'install-body-cecil.cmd'
-        'install-body-asi.cmd'
-        'install-body-melonloader.cmd'
-        'install-body-reframework.cmd'
-        'install-body-shim.cmd'
-        'install-body-bepinex.cmd'
-        'uninstall-body.cmd'
-    )
-    foreach ($body in $optionalBodies) {
-        $srcPath = Join-Path $CoreRoot (Join-Path 'scripts' $body)
-        if (Test-Path $srcPath) {
-            $sources += @{ Src = "scripts\$body"; Dest = $body }
-        }
+    $bodyDir = Join-Path $CoreRoot 'scripts'
+    $bodies = @(Get-ChildItem -Path $bodyDir -File -Filter 'install-body-*.cmd' | Select-Object -ExpandProperty Name)
+    $bodies += 'uninstall-body.cmd'
+    foreach ($body in $bodies) {
+        $sources += @{ Src = "scripts\$body"; Dest = $body }
     }
 
     $sharedDir = Join-Path $StagingDir 'shared'
@@ -1112,6 +1104,81 @@ function Assert-CoreCommitInNotices {
     }
 }
 
+<#
+.SYNOPSIS
+    Fails packaging when a launcher-manifest.json seed no longer matches the file it seeds.
+.DESCRIPTION
+    A manifest seed carries a base64 copy of a config file that the launcher writes
+    into the game directory on install. The committed manifest is the authoritative
+    copy: it is reviewable, diffable and in git, where the blob inside a release ZIP
+    is a build product. So packaging ships the committed blob unchanged, and this is
+    the gate that keeps the committed blob honest.
+
+    Refreshing the blob from disk at package time instead would hide the drift: the
+    ZIP would be right, the committed manifest would stay wrong, every review of it
+    would read a stale config, and scripts/conformance.ps1's manifest-seed check
+    would go on reporting a failure nobody could reproduce from a build.
+
+    The rule for pairing a seed with a file is the same one conformance.ps1 uses -
+    the single file under the repo whose leaf name matches the seed target - so the
+    two cannot disagree about what a seed is meant to match. A seed with no
+    counterpart is the loader's own config (BepInEx writes BepInEx.cfg; we ship no
+    copy of it) and there is nothing to check it against.
+.PARAMETER ManifestPath
+    Path to the committed launcher-manifest.json.
+.PARAMETER ProjectRoot
+    Repo root the shipped config files are searched under.
+#>
+function Assert-ManifestSeedsMatchShipped {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$ManifestPath,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot
+    )
+
+    if (-not (Test-Path $ManifestPath)) { throw "Manifest file not found: $ManifestPath" }
+
+    $manifest = [System.IO.File]::ReadAllText($ManifestPath).TrimStart([char]0xFEFF) | ConvertFrom-Json
+
+    $seeds = New-Object System.Collections.Generic.List[object]
+    if ($manifest.PSObject.Properties.Name -contains 'loader' -and $manifest.loader -and
+        $manifest.loader.PSObject.Properties.Name -contains 'seed') {
+        foreach ($s in @($manifest.loader.seed)) { if ($s) { $seeds.Add($s) } }
+    }
+    if ($manifest.PSObject.Properties.Name -contains 'seed') {
+        foreach ($s in @($manifest.seed)) { if ($s) { $seeds.Add($s) } }
+    }
+
+    $root = (Resolve-Path $ProjectRoot).ProviderPath
+    $normalise = { param($t) (($t -replace "^$([char]0xFEFF)", '') -replace "`r`n", "`n").TrimEnd() }
+
+    foreach ($seed in $seeds) {
+        if ($seed.PSObject.Properties.Name -notcontains 'content_b64') { continue }
+        if ($seed.PSObject.Properties.Name -notcontains 'target') { continue }
+        $leaf = ($seed.target -split '[\\/]')[-1]
+
+        $shipped = @(Get-ChildItem -LiteralPath $root -File -Filter $leaf -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '(?i)\\(\.git|\.pixi|\.lab|\.vs|cameraunlock-core|vendor|node_modules|obj|bin|build|release|dist)\\' })
+
+        if ($shipped.Count -eq 0) { continue }
+        if ($shipped.Count -gt 1) {
+            throw "launcher-manifest.json seeds $($seed.target) and this repo holds $($shipped.Count) files named $leaf, so nothing says which one the blob is meant to match. Rename or relocate the duplicates, then re-run."
+        }
+
+        try {
+            $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($seed.content_b64))
+        } catch {
+            throw "launcher-manifest.json content_b64 for $($seed.target) is not valid base64: $($_.Exception.Message)"
+        }
+
+        $file = $shipped[0].FullName
+        if ((& $normalise $decoded) -eq (& $normalise ([System.IO.File]::ReadAllText($file)))) { continue }
+
+        $rel = $file.Substring($root.Length).TrimStart('\') -replace '\\', '/'
+        throw "launcher-manifest.json seeds $($seed.target) from a base64 blob that no longer matches $rel, so installing would write the stale copy over the defaults this mod ships. The committed manifest is the authoritative copy: re-stamp its content_b64 from $rel and commit that, then re-run."
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Update-CameraUnlockCoreToRemoteTip',
@@ -1128,6 +1195,7 @@ Export-ModuleMember -Function @(
     'Test-GitTagExists',
     'Test-NoiseCommit',
     'Update-ManifestVersion',
+    'Assert-ManifestSeedsMatchShipped',
     'New-ChangelogFromCommits',
     'Get-ChangelogSection',
     'Invoke-VersionCommit',

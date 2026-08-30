@@ -11,6 +11,13 @@
 //                not in the package") so a broken manifest is caught at build
 //                time, before a user ever downloads it.
 //
+//                And the converse, which is the half that used to be silent: a
+//                payload file that is IN the ZIP but on neither list is never
+//                deployed. Add a DLL to packaging staging, forget the manifest
+//                row, and the package installs an incomplete mod while passing
+//                every gate, because everything declared is still present. See
+//                undeclaredPayload() for what does not count as payload.
+//
 //   install_cmd  The launcher shells out to install.cmd instead. Some mods
 //                cannot be expressed as a manifest at all - rv-there-yet
 //                deploys to a Steam and an Xbox/Game Pass install in the same
@@ -111,6 +118,8 @@ function validate(label, zip) {
   if (manifestRaw === null) throw new Error("no launcher-manifest.json in zip");
   const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
 
+  assertVersionMatchesZipName(man, zip);
+
   const mode = man.delivery_mode;
   if (mode === "install_cmd") return validateInstallCmd(label, zip, man, entries, entryByLower);
   if (mode === "external") return validateExternal(label, zip, man, entryByLower);
@@ -147,12 +156,25 @@ function validate(label, zip) {
     throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
   }
 
+  // The converse, which is the half that used to be silent. Everything the
+  // engine deploys comes off loader.archives[] and files[]; a payload file that
+  // is in the ZIP but on neither list is simply never written to the game. That
+  // ships an installer which succeeds and leaves the mod incomplete, and the
+  // forward check above passes it, because everything declared is still there.
+  const undeclared = undeclaredPayload(entries, sources, man);
+  if (undeclared.fatal.length > 0) {
+    throw new Error(
+      `zip carries binaries no manifest row deploys, so a launcher install would leave them out and the mod would not run: ${undeclared.fatal.join(", ")}. Add a files[] row for each, or drop it from packaging staging.`,
+    );
+  }
+
   const seeds = (man.loader?.seed ?? []).length;
   const rt = (man.runtime_requirements ?? []).length;
   console.log(
     `OK   ${label}: ${path.basename(zip)} — manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)`,
   );
   warnMiscased(label, miscased);
+  warnUndeployed(label, undeclared.cosmetic);
 }
 
 // install_cmd: the scripts ARE the delivery mechanism, so the gate is that
@@ -228,11 +250,114 @@ function validateExternal(label, zip, man, entryByLower) {
 // deploys to two game installs in one run.
 function scriptDependencies(text) {
   const deps = new Set();
+  // Comments first. A .cmd that explains why it does NOT use the shared bundle names
+  // the path it is not using, and scanning the raw text read that as a dependency and
+  // failed a package that was correct - minecraft-java-edition, whose install.cmd says
+  // it resolves %APPDATA%\.minecraft directly rather than through find-game.ps1.
+  text = text
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(::|@?rem\b)/i.test(line))
+    .join("\n");
   for (const m of text.matchAll(/shared[\\/]((?:un)?install-body[a-z-]*\.cmd|find-game\.ps1)/gi)) {
     deps.add(`shared/${m[1]}`);
   }
   for (const m of text.matchAll(/%(?:SCRIPT_DIR%|~dp0)([A-Za-z0-9_.-]+\.ps1)/g)) deps.add(m[1]);
   return deps;
+}
+
+// Which ZIP entries the engine would never deploy from files[], and so are not
+// evidence of a forgotten manifest row. Each of these earns its place:
+//
+//   the manifest itself         read by the engine, not written to the game
+//   docs and licence texts      README/CHANGELOG/LICENSE/notices, and the whole
+//                               licenses/ tree, ship to discharge the licences
+//                               of what is compiled in; none is deployed
+//   install/uninstall scripts   the non-manifest delivery path, plus everything
+//                               they reach for - the shared/ bundle
+//                               (find-game.ps1, games.json, the
+//                               install-body-*.cmd files) and any scripts/ tree
+//                               a repo stages beside them
+//   vendored loader provenance  the LICENSE/README/nupkg that accompany
+//                               vendor/<loader>/. The loader payload itself is
+//                               NOT exempt: it is deployed, via
+//                               loader.archives[] or a files[] row, so an
+//                               undeclared binary or archive under vendor/ is
+//                               the same bug as anywhere else
+//   a seed target               loader.seed writes the file from content_b64,
+//                               so the copy in the ZIP is a reference the
+//                               engine does not need a files[] row for
+//
+// Declared inside the function, not at module scope: this file runs its job
+// loop at the top and declares its helpers below, so a top-level `const` here
+// is still in the temporal dead zone when the first package is validated.
+function undeclaredPayload(entries, sources, man) {
+  // profile/ is the launcher's own staging convention rather than a files[] target:
+  // its AsiLoader strategy reads `<profile>/asi/*` out of the package, so a DLL mirrored
+  // there is deployed by the launcher without a manifest row naming it. See
+  // bioshock-remastered-headtracking/scripts/package.ps1, which stages it deliberately.
+  const exemptDirs = /^(shared|scripts|licenses|profile)\//i;
+  const exemptDocs =
+    /^(readme|changelog|licence|license|notice|third[-_]party[-_a-z]*)\.(md|txt)$|^(licence|license|notice)$/i;
+  const installScripts = /^(un)?install[a-z0-9._-]*\.(cmd|ps1|bat|sh)$/i;
+  const vendorProvenance = /^vendor\/[^/]+\/(licence|license|notice|readme)[^/]*$|\.nupkg$/i;
+
+  const declared = new Set(sources.map((s) => s.replace(/\\/g, "/").toLowerCase()));
+  // Seed targets name the path in the GAME directory, not in the ZIP, so the
+  // two only ever agree on the leaf.
+  const seeded = new Set(
+    (man.loader?.seed ?? [])
+      .map((s) => s?.target)
+      .filter(Boolean)
+      .map((t) => t.split(/[\\/]/).pop().toLowerCase()),
+  );
+
+  // The split is by what an undeclared entry costs. A binary the mod needs in
+  // order to run is inert to the engine, so a manifest install produces a mod
+  // that does not work - fatal. Anything else undeclared is a file the launcher
+  // path silently does without: usually the commented default config that
+  // install.cmd copies and the mod regenerates for itself when absent
+  // (Config::LoadOrCreateDefault and friends), so a launcher user gets the
+  // generated one instead of the documented one. Worth saying, not worth
+  // refusing a package that installs and runs.
+  const payloadExt = /\.(dll|asi|exe|so|dylib|jar|pyd|node|zip|7z|rar|tar|gz)$/i;
+
+  const fatal = [];
+  const cosmetic = [];
+  for (const entry of entries) {
+    if (entry.endsWith("/")) continue;
+    if (declared.has(entry.toLowerCase())) continue;
+    const base = entry.split("/").pop();
+    if (entry.toLowerCase() === "launcher-manifest.json") continue;
+    if (exemptDirs.test(entry)) continue;
+    if (exemptDocs.test(base)) continue;
+    if (installScripts.test(base)) continue;
+    if (vendorProvenance.test(entry)) continue;
+    if (seeded.has(base.toLowerCase())) continue;
+    (payloadExt.test(base) ? fatal : cosmetic).push(entry);
+  }
+  return { fatal, cosmetic };
+}
+
+// mod_info.version lands in the launcher's install receipt and drives version
+// badging, and the ZIP filename is what a user downloads and what the release
+// is tagged from. Nothing else compares the two, so a packager that stamps one
+// and not the other ships a package the launcher reports under the wrong
+// version. Only asserted when the name actually carries a version: the nightly
+// ZIPs are named `-dev-` on purpose.
+function assertVersionMatchesZipName(man, zip) {
+  const named = /-v(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)-/.exec(path.basename(zip));
+  if (!named) return;
+  const declared = man.mod_info?.version;
+  if (!declared) {
+    throw new Error(
+      `zip is named for version ${named[1]} but the manifest has no mod_info.version, so the launcher receipt would record none`,
+    );
+  }
+  if (declared !== named[1]) {
+    throw new Error(
+      `mod_info.version is ${declared} but the zip is named for ${named[1]}; the launcher records the manifest value, so the receipt and the download would disagree`,
+    );
+  }
 }
 
 function resolveSources(sources, entryByLower) {
@@ -245,6 +370,18 @@ function resolveSources(sources, entryByLower) {
     else if (entry !== declared) miscased.push(`${declared} (zip has "${entry}")`);
   }
   return { missing, miscased };
+}
+
+// A non-binary file in the ZIP that no manifest row deploys. install.cmd copies
+// it and the launcher does not, so the two delivery paths leave the game in
+// different states. For a config the mod regenerates that is cosmetic; the fix
+// where it matters is a loader.seed entry, which writes the file once and does
+// not clobber a config the user has since edited.
+function warnUndeployed(label, entries) {
+  if (entries.length === 0) return;
+  console.log(
+    `WARN ${label}: zip carries file(s) no manifest row deploys, so a launcher install does without them where install.cmd copies them: ${entries.join(", ")}`,
+  );
 }
 
 function warnMiscased(label, miscased) {
