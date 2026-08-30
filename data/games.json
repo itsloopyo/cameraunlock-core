@@ -1226,6 +1226,7 @@
     },
     "minecraft": {
       "display_name": "Minecraft: Bedrock Edition",
+      "env_var": "MINECRAFT_BEDROCK_PATH",
       "msix_identity_name": "Microsoft.MinecraftUWP",
       "executable_relpath": "Minecraft.Windows.exe",
       "modded_executable_relpath": "MinecraftHeadTrackingLauncher.exe",
