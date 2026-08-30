@@ -14,6 +14,7 @@ struct MethodCheck {
 
 // Set the namespace candidates used by FindType/FindSingleton.
 // Default: "app", "app.gui", "app.ropeway", "app.ropeway.gui",
+//          "offline", "offline.gui",
 //          "requiem", "requiem.gui", "chainsaw", "chainsaw.gui"
 void SetNamespaceCandidates(const char* const* candidates, int count);
 

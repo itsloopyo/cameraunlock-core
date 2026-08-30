@@ -181,9 +181,10 @@ inline bool ProjectCleanRayToHeadGui(const float cleanToHead[3][3], float rollRa
 
 // Project the clean camera's forward direction through the head-tracked
 // rotation basis, ignoring translation entirely. Yields the rotation-only
-// screen tangents used for world-anchored GUI marker compensation when
-// translation parallax is already handled by the engine (e.g. a render-phase
-// hook that restores clean rotation but keeps the head-tracked position).
+// screen tangents used for world-anchored GUI marker compensation. Every
+// caller restores the clean camera transform in full at its render-phase hook,
+// position row included, so head translation never reaches the matrix the
+// renderer consumes and must not reach the GUI offset either.
 // Depth-independent: when the head has not rotated, the tangents collapse to
 // zero regardless of head translation. Returns false when the clean forward
 // direction lands behind the head-tracked view.

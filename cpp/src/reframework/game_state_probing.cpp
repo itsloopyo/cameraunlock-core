@@ -11,9 +11,11 @@
 
 namespace cameraunlock::reframework {
 
-// Default namespace candidates covering RE2 through RE9
+// Default namespace candidates covering RE2 through RE9. RE3 Remake roots its
+// game code at `offline`, so a lookup by base name misses without it.
 static const char* s_defaultCandidates[] = {
     "app", "app.gui", "app.ropeway", "app.ropeway.gui",
+    "offline", "offline.gui",
     "requiem", "requiem.gui", "chainsaw", "chainsaw.gui",
 };
 static const char* const* s_candidates = s_defaultCandidates;

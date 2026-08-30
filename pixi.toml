@@ -81,6 +81,16 @@ validate-notices = "node scripts/validate-notices.mjs"
 #   pixi run conformance -Repo valheim -Check install-wrapper,action-pins
 conformance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/conformance.ps1"
 
+# Render the README sections core owns (the OpenTrack setup block, including the
+# Centring paragraph, and Community & Support) and report where a repo's copy
+# has drifted. Everything else in a README is hand-written on purpose; see
+# scripts/templates/readme.md for which section is whose and why.
+#   pixi run readme                        # check this repo
+#   pixi run readme --all
+#   pixi run readme --all --write
+#   pixi run readme --print opentrack
+readme = "node scripts/generate-readme.mjs"
+
 # Push core's templates back out across the fleet: install/uninstall wrapper
 # tails, the mechanical half of update-deps.ps1, GitHub Actions pins from
 # scripts/templates/action-pins.json, and the `sync` pixi task. Reports by

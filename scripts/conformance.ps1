@@ -57,7 +57,7 @@ $ACTION_PINS = (Get-Content -LiteralPath (Join-Path $CoreRoot 'scripts/templates
 $CHECK_IDS = @(
     'install-wrapper', 'delayed-expansion', 'arg-parser', 'cmd-crlf', 'pixi-tasks',
     'action-pins', 'workflow-ref', 'workflow-build', 'core-pin', 'manifest',
-    'stray-manifest', 'license', 'readme'
+    'manifest-seed', 'stray-manifest', 'license', 'readme'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -479,6 +479,64 @@ function Test-Manifest {
     }
 }
 
+# A manifest that seeds a config file carries it as a base64 blob, and nothing
+# regenerates that blob when the shipped file changes. The drift is invisible
+# until it reaches a user, where lopari writes the stale copy over the defaults
+# the mod ships. resident-evil-requiem's blob was seeding position sensitivities
+# of 2.0 against a mod that ships 1.0, no [Flashlight] section, and a
+# ReticleToggleKey that mod has never had.
+function Test-ManifestSeed {
+    param([string]$Name, [string]$Root)
+
+    $path = Join-Path $Root 'launcher-manifest.json'
+    if (-not (Test-Path $path)) { return }
+    try {
+        $man = (Read-TextFile $path).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    } catch {
+        # Test-Manifest already reports unparseable JSON.
+        return
+    }
+
+    $seeds = New-Object System.Collections.Generic.List[object]
+    if ($man.PSObject.Properties.Name -contains 'loader' -and $man.loader -and
+        $man.loader.PSObject.Properties.Name -contains 'seed') {
+        foreach ($s in @($man.loader.seed)) { if ($s) { $seeds.Add($s) } }
+    }
+    if ($man.PSObject.Properties.Name -contains 'seed') {
+        foreach ($s in @($man.seed)) { if ($s) { $seeds.Add($s) } }
+    }
+
+    foreach ($seed in $seeds) {
+        if ($seed.PSObject.Properties.Name -notcontains 'content_b64') { continue }
+        if ($seed.PSObject.Properties.Name -notcontains 'target') { continue }
+        $leaf = ($seed.target -split '[\\/]')[-1]
+
+        # Only the mod's own files. A seed with no counterpart in the repo is the
+        # loader's config rather than ours: BepInEx writes BepInEx.cfg, we do not
+        # ship one, and there is nothing to compare it against.
+        $shipped = @(Get-ChildItem -LiteralPath $Root -File -Filter $leaf -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '(?i)\\(\.git|\.pixi|\.lab|\.vs|cameraunlock-core|vendor|node_modules|obj|bin|build|release|dist)\\' })
+        if ($shipped.Count -eq 0) { continue }
+        if ($shipped.Count -gt 1) {
+            Add-Finding $Name 'manifest-seed' 'WARN' "seeds $($seed.target) and the repo holds $($shipped.Count) files named $leaf, so nothing says which one the blob is meant to match"
+            continue
+        }
+
+        try {
+            $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($seed.content_b64))
+        } catch {
+            Add-Finding $Name 'manifest-seed' 'FAIL' "the content_b64 for $($seed.target) is not valid base64: $($_.Exception.Message)"
+            continue
+        }
+
+        $normalise = { param($t) (($t -replace "^$([char]0xFEFF)", '') -replace "`r`n", "`n").TrimEnd() }
+        if ((& $normalise $decoded) -eq (& $normalise (Read-TextFile $shipped[0].FullName))) { continue }
+
+        $rel = $shipped[0].FullName.Substring($Root.Length).TrimStart('\\') -replace '\\', '/'
+        Add-Finding $Name 'manifest-seed' 'FAIL' "launcher-manifest.json seeds $($seed.target) from a base64 blob that no longer matches $rel; installing writes the stale copy over the defaults the mod ships"
+    }
+}
+
 # Only mod.json. A root manifest.json is NOT a dead file and is deliberately not
 # flagged: OWML and Thunderstore each read one, and in dying-light-2 and
 # skyrim-special-edition it is the canonical version source - release.ps1 writes
@@ -556,6 +614,7 @@ $CHECK_TABLE = [ordered]@{
     'workflow-build'    = ${function:Test-WorkflowBuild}
     'core-pin'          = ${function:Test-CorePin}
     'manifest'          = ${function:Test-Manifest}
+    'manifest-seed'     = ${function:Test-ManifestSeed}
     'stray-manifest'    = ${function:Test-StrayManifest}
     'license'           = ${function:Test-License}
     'readme'            = ${function:Test-Readme}
