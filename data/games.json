@@ -294,7 +294,10 @@
       "env_var": "FALLOUT_4_PATH",
       "steam_app_id": 377160,
       "steam_folder": "Fallout 4",
-      "executable_relpath": "Fallout4.exe"
+      "executable_relpath": "Fallout4.exe",
+      "gog_ids": [
+        "1998527297"
+      ]
     },
     "fallout-new-vegas": {
       "display_name": "Fallout: New Vegas",
