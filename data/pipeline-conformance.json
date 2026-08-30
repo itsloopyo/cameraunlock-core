@@ -1,0 +1,536 @@
+{
+  "schema_version": 1,
+  "title": "cameraunlock pipeline conformance vectors",
+  "purpose": "Executable form of the 'Check.' paragraphs in docs/porting-the-pipeline.md. A port runs these instead of re-deriving the numbers, and cameraunlock-core runs them against its own C++ and C# implementations so a change that moves a constant or reorders a step fails in core first.",
+  "units": {
+    "pose_interpolator": {
+      "step": ["yaw_deg", "pitch_deg", "roll_deg", "is_new_sample", "dt_s"],
+      "out": ["yaw", "pitch", "roll"]
+    },
+    "position_interpolator": {
+      "step": ["x_m", "y_m", "z_m", "is_new_sample", "dt_s"],
+      "out": ["x", "y", "z"]
+    },
+    "tracking_processor": {
+      "step": ["yaw_deg", "pitch_deg", "roll_deg", "dt_s"],
+      "out": ["yaw", "pitch", "roll"]
+    },
+    "position_processor": {
+      "step": ["x_m", "y_m", "z_m", "rot_yaw_deg", "rot_pitch_deg", "rot_roll_deg", "dt_s"],
+      "out": ["x", "y", "z"],
+      "note": "rot_* is the CENTERED, SMOOTHED physical head rotation before per-axis sensitivity and inversion, exactly what HeadTrackingSession feeds the pivot term."
+    },
+    "euler_roundtrip": {
+      "step": ["yaw_deg", "pitch_deg", "roll_deg"],
+      "out": ["yaw", "pitch", "roll"],
+      "note": "Build an orientation from YXZ Euler, decompose it back. A port with no quaternion type substitutes its own compose/decompose pair; the singularity is in the decomposition, not in the representation."
+    },
+    "packet": {
+      "step": ["bytes_hex"],
+      "out": ["ok", "yaw", "pitch", "roll", "x", "y", "z", "trailer_present", "recenter_counter"],
+      "note": "ok=0 means the datagram was rejected; every other field is then meaningless."
+    },
+    "session_rot": {
+      "step": ["bytes_hex_or_none", "dt_s"],
+      "out": ["yaw", "pitch", "roll"],
+      "note": "Datagram -> duplicate-sample filter -> PoseInterpolator -> TrackingProcessor. No recenter is wired: the tracker owns the centre."
+    },
+    "session_pos": {
+      "step": ["bytes_hex_or_none", "dt_s"],
+      "out": ["x", "y", "z"],
+      "note": "Datagram -> duplicate-sample filter -> PositionInterpolator -> PositionProcessor. No recenter is wired."
+    }
+  },
+  "step_ops": {
+    "step": "One frame. Fields are the unit's step fields, plus optional 'repeat' (default 1), 'label', 'new' (interpolator units), 'bytes' (session units, omit for a frame with no datagram).",
+    "ramp": "Generator. Fields: dt, count, new_every (default 1), from {}, per_sample {}. Expands to 'count' steps where value = from + per_sample * floor(i / new_every) and is_new = (i % new_every == 0). Session units deliver a datagram on EVERY expanded step regardless of new_every, which is how a 250 Hz relay of a 30 Hz source is expressed.",
+    "grid": "Generator, euler_roundtrip only. Fields: yaw/pitch/roll each {from, to, step}. Expands to the full cartesian product."
+  },
+  "step_refs": "An assertion's 'at' / 'from' / 'to' is either an integer index into the EXPANDED step list, a step's 'label' (its first expanded index), or '<label>:last' (its last expanded index).",
+  "assertions": {
+    "equals": "|out[at].field - value| <= tolerance",
+    "abs_at_most": "|out[i].field| <= value for every i in [from, to]",
+    "abs_at_least": "|out[i].field| >= value for every i in [from, to]",
+    "max_step": "|out[i].field - out[i-1].field| <= value for every i in (from, to]",
+    "min_step": "|out[i].field - out[i-1].field| >= value for every i in (from, to]. A floor on movement, which is how a flat spot is detected.",
+    "angular_travel_at_most": "sum of |shortest_angle_delta(out[i-1].field, out[i].field)| over (from, to] <= value",
+    "constant": "max(out[from..to].field) - min(out[from..to].field) <= tolerance",
+    "orientation_roundtrip_max_error": "For every step, the angle in degrees between the orientation built from the input Euler and the orientation built from the output Euler is <= value. Compares ORIENTATIONS, not Euler triples: at the poles the decomposition is not unique and comparing triples is wrong."
+  },
+
+  "constants": {
+    "_note": "Single source of truth. Changing any of these is a breaking change to every consumer; add a new field instead. Each entry names the C++ and C# symbol so a port can be traced back.",
+    "local_smoothing_default": {
+      "value": 0.0,
+      "cpp": "math::kDefaultLocalSmoothing",
+      "csharp": "SmoothingUtils.DefaultLocalSmoothing"
+    },
+    "remote_smoothing_default": {
+      "value": 0.15,
+      "cpp": "math::kDefaultRemoteSmoothing",
+      "csharp": "SmoothingUtils.DefaultRemoteSmoothing"
+    },
+    "frame_interpolation_speed": {
+      "value": 50.0,
+      "cpp": "math::kFrameInterpolationSpeed",
+      "note": "Smoothing speed at smoothing=0. factor = 1 - exp(-speed * dt)."
+    },
+    "max_smoothing_speed": {
+      "value": 0.1,
+      "cpp": "math::kMaxSmoothingSpeed",
+      "note": "Smoothing speed at smoothing=1. speed = 50 - (50 - 0.1) * smoothing, clamped to [0.1, 50]."
+    },
+    "interval_blend": {
+      "value": 0.3,
+      "cpp": "PoseInterpolator::kIntervalBlend",
+      "note": "EMA blend for the sample-interval estimate."
+    },
+    "max_extrapolation_fraction": {
+      "value": 0.5,
+      "cpp": "PoseInterpolator::max_extrapolation_fraction"
+    },
+    "default_sample_interval": {
+      "value": 0.03333333333333333,
+      "cpp": "PoseInterpolator::kDefaultSampleInterval",
+      "note": "1/30, NOT 1/60. Used until the second sample establishes a measured interval."
+    },
+    "min_sample_interval": { "value": 0.001, "cpp": "PoseInterpolator::kMinSampleInterval" },
+    "max_sample_interval": { "value": 0.2, "cpp": "PoseInterpolator::kMaxSampleInterval" },
+    "extrapolation_hold_seconds": {
+      "value": 0.25,
+      "cpp": "PoseInterpolator::kExtrapolationHoldSeconds",
+      "note": "Wall clock, not progress."
+    },
+    "extrapolation_decay_seconds": {
+      "value": 0.35,
+      "cpp": "PoseInterpolator::kExtrapolationDecaySeconds",
+      "note": "Smoothstep ease from the capped segment position back to 1.0."
+    },
+    "limit_x": { "value": 0.30, "cpp": "PositionSettings::limit_x", "unit": "m" },
+    "limit_y": { "value": 0.20, "cpp": "PositionSettings::limit_y", "unit": "m", "note": "upward" },
+    "limit_y_down": { "value": 0.20, "cpp": "PositionSettings::limit_y_down", "unit": "m", "note": "downward; a config exposing one vertical limit must mirror it into both" },
+    "limit_z": { "value": 0.40, "cpp": "PositionSettings::limit_z", "unit": "m", "note": "FORWARD lean, clamped as -limit_z" },
+    "limit_z_back": { "value": 0.10, "cpp": "PositionSettings::limit_z_back", "unit": "m", "note": "backward lean, clamped as +limit_z_back" },
+    "gimbal_lock_sin_threshold": {
+      "value": 0.9999995,
+      "cpp": "Quat4::ToEulerYXZ kGimbalLockSinThreshold",
+      "note": "NOT 1.0. sin(89.9 deg) is 0.9999985 so the general branch keeps everything still well conditioned, while a quaternion built at exactly 90 deg measures ~0.9999998 and takes the lock branch."
+    },
+    "tracker_pivot_forward_default": {
+      "value": 0.0,
+      "cpp": "PositionProcessor::m_trackerPivotForward",
+      "note": "Compensation OFF by default. When enabled the pivot vector is (0, 0, -TrackerPivotForward)."
+    },
+    "cm_to_meters": {
+      "value": 0.01,
+      "cpp": "kCmToMeters in opentrack_packet.cpp",
+      "note": "OpenTrack position fields are centimetres on the wire."
+    },
+    "packet_size": { "value": 48, "cpp": "OpenTrackPacket::kMinPacketSize" },
+    "packet_size_with_trailer": { "value": 54, "cpp": "OpenTrackPacket::kPacketSizeWithTrailer" },
+    "trailer_magic": { "value": "HCAM", "offset": 48 },
+    "trailer_version_offset": { "value": 52, "note": "byte >= 1 is valid; compare with >=, not ==, so a later version still parses" },
+    "trailer_counter_offset": { "value": 53, "note": "u8, wraps" }
+  },
+
+  "vectors": [
+    {
+      "id": "yaw-seam-forward",
+      "section": 1,
+      "title": "Yaw crossing +180 traverses the shortest arc",
+      "catches": "A plain lerp between two samples straddling the seam. A real Lua port produced 87.5 at quarter-way instead of 177.5, and travelled 350 degrees instead of 10.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "first", "yaw": 175.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 175.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 3 },
+        { "op": "step", "label": "cross", "yaw": -175.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "label": "tail", "yaw": -175.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 3 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "cross", "field": "yaw", "value": 177.5, "tolerance": 0.01 },
+        { "kind": "abs_at_least", "from": "cross", "to": "tail:last", "field": "yaw", "value": 175.0 },
+        { "kind": "angular_travel_at_most", "from": "first", "to": "tail:last", "field": "yaw", "value": 10.05 },
+        { "kind": "equals", "at": "tail:last", "field": "yaw", "value": -175.0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "id": "yaw-seam-reverse",
+      "section": 1,
+      "title": "Yaw crossing -180 traverses the shortest arc",
+      "catches": "A sign error in the delta: it passes one direction and fails the other, so both directions have to be run.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "first", "yaw": -175.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": -175.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 3 },
+        { "op": "step", "label": "cross", "yaw": 175.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "label": "tail", "yaw": 175.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 3 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "cross", "field": "yaw", "value": -177.5, "tolerance": 0.01 },
+        { "kind": "abs_at_least", "from": "cross", "to": "tail:last", "field": "yaw", "value": 175.0 },
+        { "kind": "angular_travel_at_most", "from": "first", "to": "tail:last", "field": "yaw", "value": 10.05 },
+        { "kind": "equals", "at": "tail:last", "field": "yaw", "value": 175.0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "id": "roll-seam-forward",
+      "section": 1,
+      "title": "Roll crosses the seam too, and pitch must not",
+      "catches": "A port that applies the shortest-arc treatment to yaw only. Roll wraps for the same reason yaw does; pitch comes from asin, is bounded to +/-90, and giving it the same treatment is wrong.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "first", "yaw": 0.0, "pitch": 40.0, "roll": 175.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 0.0, "pitch": 40.0, "roll": 175.0, "new": false, "dt": 0.0078125, "repeat": 3 },
+        { "op": "step", "label": "cross", "yaw": 0.0, "pitch": -40.0, "roll": -175.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "label": "tail", "yaw": 0.0, "pitch": -40.0, "roll": -175.0, "new": false, "dt": 0.0078125, "repeat": 3 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "cross", "field": "roll", "value": 177.5, "tolerance": 0.01 },
+        { "kind": "abs_at_least", "from": "cross", "to": "tail:last", "field": "roll", "value": 175.0 },
+        { "kind": "equals", "at": "cross", "field": "pitch", "value": 20.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "tail:last", "field": "pitch", "value": -40.0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "id": "extrapolation-expires-on-stall",
+      "section": 2,
+      "title": "When samples stop, the output settles on the last REPORTED pose",
+      "catches": "Clamping the segment position to 1 + max_extrapolation_fraction and then holding it. A 25 degree head turn renders as 37.5 and stays there forever. Frames are 1/128 s so the 0.25 s hold boundary lands on an exactly representable accumulated time.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "first", "yaw": 0.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 0.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 3 },
+        { "op": "step", "label": "turn", "yaw": 25.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "label": "hold", "yaw": 25.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 32 },
+        { "op": "step", "label": "decay", "yaw": 25.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 45 },
+        { "op": "step", "label": "settled", "yaw": 25.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 43 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "hold:last", "field": "yaw", "value": 37.5, "tolerance": 0.02 },
+        { "kind": "equals", "at": "settled", "field": "yaw", "value": 25.0, "tolerance": 0.02 },
+        { "kind": "constant", "from": "settled", "to": "settled:last", "field": "yaw", "tolerance": 0.001 },
+        { "kind": "abs_at_most", "from": "settled", "to": "settled:last", "field": "yaw", "value": 25.02 }
+      ]
+    },
+    {
+      "id": "extrapolation-survives-short-dropout",
+      "section": 2,
+      "title": "A dropout shorter than the hold still reaches and keeps the 1.5x cap",
+      "catches": "Trading the anti-judder behaviour away when fixing the stall. A dropped packet or two is still a live feed: retreating there pulls the camera backwards against a head that is still turning.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "first", "yaw": 0.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "yaw": 0.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 3 },
+        { "op": "step", "label": "turn", "yaw": 25.0, "pitch": 0.0, "roll": 0.0, "new": true, "dt": 0.0078125 },
+        { "op": "step", "label": "gap", "yaw": 25.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 6 },
+        { "op": "step", "label": "capped", "yaw": 25.0, "pitch": 0.0, "roll": 0.0, "new": false, "dt": 0.0078125, "repeat": 18 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "gap:last", "field": "yaw", "value": 37.5, "tolerance": 0.02 },
+        { "kind": "constant", "from": "gap:last", "to": "capped:last", "field": "yaw", "tolerance": 0.001 },
+        { "kind": "equals", "at": "capped:last", "field": "yaw", "value": 37.5, "tolerance": 0.02 }
+      ]
+    },
+    {
+      "id": "cold-start-32hz-no-jolt",
+      "section": 3,
+      "title": "A tracker feed from cold produces no step larger than one inter-sample delta",
+      "catches": "A default sample interval of 1/60 for a ~30 Hz tracker, and equally a port with no first-sample park: either makes the first segment reach progress 1.0 in half a sample period, extrapolate to the cap and come back. Native mods had that first-second jolt and Unity mods did not.",
+      "unit": "pose_interpolator",
+      "config": {},
+      "steps": [
+        { "op": "ramp", "label": "cold", "dt": 0.0078125, "count": 128, "new_every": 4, "from": { "yaw": 0.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 2.0 } }
+      ],
+      "assert": [
+        { "kind": "max_step", "from": "cold", "to": "cold:last", "field": "yaw", "value": 2.0 },
+        { "kind": "abs_at_most", "from": "cold", "to": "cold:last", "field": "yaw", "value": 62.0 }
+      ]
+    },
+    {
+      "id": "position-clamp-before-smoothing",
+      "section": 4,
+      "title": "Position clamps before AND after smoothing, so nothing pins after the head returns",
+      "catches": "Clamping only the output. The smoothing state winds up far outside the limits and the output then sits pinned at the limit for hundreds of milliseconds after the head has come back. Sensitivity 10 drives the raw input to 5.0 m; with the pre-clamp the smoothing state can never exceed 0.30.",
+      "unit": "position_processor",
+      "config": { "sens_x": 10.0, "is_remote": 1, "remote_smoothing": 0.15 },
+      "steps": [
+        { "op": "step", "label": "push", "x": 0.5, "y": 0.0, "z": 0.0, "rot_yaw": 0.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 60 },
+        { "op": "step", "label": "back", "x": 0.005, "y": 0.0, "z": 0.0, "rot_yaw": 0.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625 },
+        { "op": "step", "label": "settle", "x": 0.005, "y": 0.0, "z": 0.0, "rot_yaw": 0.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 10 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "push:last", "field": "x", "value": 0.30, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "back", "field": "x", "value": 0.1786615, "tolerance": 0.002 },
+        { "kind": "abs_at_most", "from": "back", "to": "settle:last", "field": "x", "value": 0.29 },
+        { "kind": "equals", "at": "settle:last", "field": "x", "value": 0.05, "tolerance": 0.002 }
+      ]
+    },
+    {
+      "id": "position-clamp-is-asymmetric",
+      "section": 4,
+      "title": "Z and Y clamp asymmetrically, and the first sample snaps",
+      "catches": "Two things at once. A symmetric z clamp (negative z is the FORWARD lean and gets the generous 0.40 m budget; +z backward gets 0.10 m), and a missing first-sample snap - without it the first frame blends up from zero instead of landing on the clamped input.",
+      "unit": "position_processor",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "snap_pos", "x": 10.0, "y": 10.0, "z": 10.0, "rot_yaw": 0.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625 },
+        { "op": "step", "label": "neg", "x": -10.0, "y": -10.0, "z": -10.0, "rot_yaw": 0.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 40 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "snap_pos", "field": "x", "value": 0.30, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "snap_pos", "field": "y", "value": 0.20, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "snap_pos", "field": "z", "value": 0.10, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "neg:last", "field": "x", "value": -0.30, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "neg:last", "field": "y", "value": -0.20, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "neg:last", "field": "z", "value": -0.40, "tolerance": 1e-5 }
+      ]
+    },
+    {
+      "id": "gimbal-lock-at-exactly-90",
+      "section": 5,
+      "title": "Decomposing at exactly +/-90 degrees of pitch keeps the heading",
+      "catches": "Both halves of the gimbal bug. Reusing the general yaw formula in the lock branch returns atan2(0, 0) = 0 and discards the rotation; testing sinPitch >= 1.0 never fires because float error leaves it a shade under 1, so the degenerate general branch runs anyway.",
+      "unit": "euler_roundtrip",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "up_30", "yaw": 30.0, "pitch": 90.0, "roll": 0.0 },
+        { "op": "step", "label": "up_m120", "yaw": -120.0, "pitch": 90.0, "roll": 0.0 },
+        { "op": "step", "label": "down_45", "yaw": 45.0, "pitch": -90.0, "roll": 0.0 },
+        { "op": "step", "label": "near_up", "yaw": 30.0, "pitch": 89.9, "roll": 0.0 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "up_30", "field": "pitch", "value": 90.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "up_30", "field": "yaw", "value": 30.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "up_m120", "field": "yaw", "value": -120.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "down_45", "field": "pitch", "value": -90.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "down_45", "field": "yaw", "value": 45.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "near_up", "field": "yaw", "value": 30.0, "tolerance": 0.05 },
+        { "kind": "equals", "at": "near_up", "field": "pitch", "value": 89.9, "tolerance": 0.05 },
+        { "kind": "orientation_roundtrip_max_error", "value": 0.05 }
+      ]
+    },
+    {
+      "id": "euler-roundtrip-sweep",
+      "section": 5,
+      "title": "Worst-case round-trip error over a full orientation sweep stays at the precision floor",
+      "catches": "A gimbal branch error anywhere in the range, including in ports with no quaternion type - a matrix-to-Euler decomposition has exactly the same degenerate case. One Rust port concluded 'not applicable, no quaternion conversion' and had a worst-case error of 1.5708 radians, a full right angle silently dropped. The comparison is between ORIENTATIONS, because at the poles the Euler triple is not unique.",
+      "unit": "euler_roundtrip",
+      "config": {},
+      "steps": [
+        {
+          "op": "grid",
+          "label": "sweep",
+          "yaw": { "from": -180.0, "to": 180.0, "step": 15.0 },
+          "pitch": { "from": -90.0, "to": 90.0, "step": 5.0 },
+          "roll": { "from": -180.0, "to": 180.0, "step": 30.0 }
+        }
+      ],
+      "assert": [
+        { "kind": "orientation_roundtrip_max_error", "value": 0.05 }
+      ]
+    },
+    {
+      "id": "pivot-compensation-cancels-a-pure-head-turn",
+      "section": 6,
+      "title": "With pivot compensation on, a pure head turn produces zero pan",
+      "catches": "A +z pivot vector. Rotation is linear, so R(-v) - (-v) == -(R(v) - v): building the pivot as +z computes the exact negation of the real artifact and subtracting it DOUBLES the phantom translation. The input here is exactly the artifact a 0.10 m pivot produces at 30 degrees of yaw, so the correct output is zero and a +z port outputs twice the artifact.",
+      "unit": "position_processor",
+      "config": { "pivot": 0.10 },
+      "steps": [
+        { "op": "step", "label": "turn", "x": -0.05, "y": 0.0, "z": 0.01339746, "rot_yaw": 30.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625 },
+        { "op": "step", "label": "hold", "x": -0.05, "y": 0.0, "z": 0.01339746, "rot_yaw": 30.0, "rot_pitch": 0.0, "rot_roll": 0.0, "dt": 0.015625, "repeat": 20 }
+      ],
+      "assert": [
+        { "kind": "abs_at_most", "from": "turn", "to": "hold:last", "field": "x", "value": 1e-5 },
+        { "kind": "abs_at_most", "from": "turn", "to": "hold:last", "field": "y", "value": 1e-5 },
+        { "kind": "abs_at_most", "from": "turn", "to": "hold:last", "field": "z", "value": 1e-5 }
+      ]
+    },
+    {
+      "id": "pivot-compensation-defaults-off",
+      "section": 6,
+      "title": "Pivot compensation is off unless the mod turns it on",
+      "catches": "A port that ships a non-zero default. The correct arm length is a property of the tracker app, not of this library - the Headcam Android app already applies its own eye-anchor offset while iOS applies none. This vector sets no pivot at all, so it reads the implementation's own default: the raw offset must pass through untouched even with the head rotated.",
+      "unit": "position_processor",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "turned", "x": 0.02, "y": 0.01, "z": -0.03, "rot_yaw": 30.0, "rot_pitch": 15.0, "rot_roll": 0.0, "dt": 0.015625 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "turned", "field": "x", "value": 0.02, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "turned", "field": "y", "value": 0.01, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "turned", "field": "z", "value": -0.03, "tolerance": 1e-6 }
+      ]
+    },
+    {
+      "id": "deadzone-is-continuous-at-its-edge",
+      "section": 7,
+      "title": "Deadzone subtracts in the input's direction rather than gating on it",
+      "catches": "Gating. With a deadzone of 5, an input of 4.99 gives 0 and 5.01 gives 5.01, so a 0.02 degree movement pops the camera 5 degrees. The correct output for 5.01 is 0.01.",
+      "unit": "tracking_processor",
+      "config": { "dz_yaw": 5.0 },
+      "steps": [
+        { "op": "step", "label": "inside", "yaw": 4.99, "pitch": 0.0, "roll": 0.0, "dt": 0.015625 },
+        { "op": "step", "label": "outside", "yaw": 5.01, "pitch": 0.0, "roll": 0.0, "dt": 0.015625, "repeat": 60 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "inside", "field": "yaw", "value": 0.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "outside:last", "field": "yaw", "value": 0.01, "tolerance": 0.002 },
+        { "kind": "abs_at_most", "from": "inside", "to": "outside:last", "field": "yaw", "value": 0.05 }
+      ]
+    },
+    {
+      "id": "diagonal-motion-keeps-roll-at-zero",
+      "section": 8,
+      "title": "Diagonal head motion introduces no roll",
+      "catches": "Quaternion SLERP substituted for per-axis Euler smoothing. Slerp follows the great circle between two orientations and that arc's Euler decomposition carries a non-zero roll term for compound movement, so diagonal head motion rolls the horizon. Remote smoothing is on so the smoother is genuinely lagging the input across the sweep.",
+      "unit": "tracking_processor",
+      "config": { "is_remote": 1, "remote_smoothing": 0.15 },
+      "steps": [
+        { "op": "ramp", "label": "sweep", "dt": 0.015625, "count": 64, "from": { "yaw": 0.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 0.8, "pitch": 0.6 } }
+      ],
+      "assert": [
+        { "kind": "abs_at_most", "from": "sweep", "to": "sweep:last", "field": "roll", "value": 0.005 }
+      ]
+    },
+    {
+      "id": "wire-position-is-centimetres",
+      "section": 4,
+      "title": "40.0 on the wire is 0.40 m out",
+      "catches": "A missing cm-to-m conversion. Every position limit in this library is metric, so without the 0.01 factor a 4 mm lean saturates limit_z and position tracking degenerates into a three-axis on/off switch. Rotation fields are degrees on the wire and are NOT scaled.",
+      "unit": "packet",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "p", "bytes": "0000000000004440000000000000344000000000000024c00000000000002e4000000000000014c00000000000000000" }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "p", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "p", "field": "x", "value": 0.40, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "p", "field": "y", "value": 0.20, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "p", "field": "z", "value": -0.10, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "p", "field": "yaw", "value": 15.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "p", "field": "pitch", "value": -5.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "p", "field": "roll", "value": 0.0, "tolerance": 1e-6 },
+        { "kind": "equals", "at": "p", "field": "trailer_present", "value": 0, "tolerance": 0 }
+      ]
+    },
+    {
+      "id": "wire-rejects-finite-double-infinite-float",
+      "section": 9,
+      "title": "Finiteness is checked AFTER narrowing to 32-bit float",
+      "catches": "Validating the raw double only. A finite double can exceed the float range (1e300), and the narrowing cast then produces infinity, which poisons every downstream sin/cos and view-matrix computation with NaN. The socket binds INADDR_ANY, so any host on the network can send this.",
+      "unit": "packet",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "big_pos", "bytes": "9c7500883ce4377e00000000000000000000000000000000000000000000000000000000000000000000000000000000" },
+        { "op": "step", "label": "big_yaw", "bytes": "0000000000000000000000000000000000000000000000009c7500883ce4377e00000000000000000000000000000000" },
+        { "op": "step", "label": "nan_yaw", "bytes": "000000000000000000000000000000000000000000000000000000000000f87f00000000000000000000000000000000" },
+        { "op": "step", "label": "sane", "bytes": "000000000000000000000000000000000000000000000000000000000000444000000000000000000000000000000000" }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "big_pos", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "big_yaw", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "nan_yaw", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "sane", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "sane", "field": "yaw", "value": 40.0, "tolerance": 1e-5 }
+      ]
+    },
+    {
+      "id": "hcam-trailer-parses",
+      "section": 9,
+      "title": "A 54-byte trailered datagram delivers its pose like any other",
+      "catches": "Rejecting the datagram on length, or reading the pose from the wrong offsets once a trailer is present. Bytes 0-47 are standard OpenTrack; the trailer is magic 'HCAM', a version byte compared with >= so a later version still parses, and a wrapping u8 counter.",
+      "unit": "packet",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "t", "bytes": "0000000000000000000000000000000000000000000000000000000000003440000000000000244000000000000008c04843414d0107" }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "t", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "t", "field": "yaw", "value": 20.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "t", "field": "pitch", "value": 10.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "t", "field": "roll", "value": -3.0, "tolerance": 1e-5 },
+        { "kind": "equals", "at": "t", "field": "trailer_present", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "t", "field": "recenter_counter", "value": 7, "tolerance": 0 }
+      ]
+    },
+    {
+      "id": "hcam-trailer-does-not-recenter",
+      "section": 9,
+      "title": "The trailer is parsed and then not acted on",
+      "catches": "Acting on the trailer. The tracker owns the centre: it zeroes its own output before signalling, so with the mod-side centre at identity the zeroed stream is already correct. A port that recenters on the trailer captures (20, 10, -3) as a centre, and when the tracker's stream then drops to zero the output parks at the negated, mirrored centre instead of zero.",
+      "unit": "session_rot",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "press", "bytes": "0000000000000000000000000000000000000000000000000000000000003440000000000000244000000000000008c04843414d0107", "dt": 0.015625 },
+        { "op": "step", "label": "trailered", "bytes": "0000000000000000000000000000000000000000000000000000000000003440000000000000244000000000000008c04843414d0108", "dt": 0.015625, "repeat": 200 },
+        { "op": "step", "label": "zeroed", "bytes": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", "dt": 0.015625, "repeat": 200 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "trailered:last", "field": "yaw", "value": 20.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "trailered:last", "field": "pitch", "value": 10.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "trailered:last", "field": "roll", "value": -3.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "zeroed:last", "field": "yaw", "value": 0.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "zeroed:last", "field": "pitch", "value": 0.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "zeroed:last", "field": "roll", "value": 0.0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "id": "no-center-captured-on-connect-rotation",
+      "section": 10,
+      "title": "An uncentered rotation stream that drops to zero lands at zero, not at the negated offset",
+      "catches": "Capturing the incoming pose as a centre when the connection comes up. That puts a SECOND centre in series with the tracker's own, and the two drift apart because each recenters at moments the other cannot see. At startup both are near zero and it looks fine; the symptom is the player pressing Center on a tracker that sends no trailer, the stream dropping to zero, and the view parking at the negated drift until they also press the mod's hotkey.",
+      "unit": "session_rot",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "uncentered", "bytes": "000000000000000000000000000000000000000000000000000000000000444000000000000000000000000000000000", "dt": 0.015625, "repeat": 300 },
+        { "op": "step", "label": "zeroed", "bytes": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", "dt": 0.015625, "repeat": 200 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "uncentered:last", "field": "yaw", "value": 40.0, "tolerance": 0.01 },
+        { "kind": "equals", "at": "zeroed:last", "field": "yaw", "value": 0.0, "tolerance": 0.01 }
+      ]
+    },
+    {
+      "id": "no-center-captured-on-connect-position",
+      "section": 10,
+      "title": "The same, for position - it is captured separately and a rotation-only test passes with this half broken",
+      "catches": "A position centre captured on connect. 20.0 cm on the wire is 0.20 m, inside limit_x, so a port that subtracts a captured centre outputs -0.20 here rather than 0.",
+      "unit": "session_pos",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "uncentered", "bytes": "000000000000344000000000000000000000000000000000000000000000000000000000000000000000000000000000", "dt": 0.015625, "repeat": 300 },
+        { "op": "step", "label": "zeroed", "bytes": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", "dt": 0.015625, "repeat": 200 }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "uncentered:last", "field": "x", "value": 0.20, "tolerance": 0.001 },
+        { "kind": "equals", "at": "zeroed:last", "field": "x", "value": 0.0, "tolerance": 0.001 },
+        { "kind": "equals", "at": "zeroed:last", "field": "y", "value": 0.0, "tolerance": 0.001 },
+        { "kind": "equals", "at": "zeroed:last", "field": "z", "value": 0.0, "tolerance": 0.001 }
+      ]
+    },
+    {
+      "id": "duplicate-packets-track-the-source-rate",
+      "section": 2,
+      "title": "The estimated sample interval follows the SOURCE rate, not the packet rate",
+      "catches": "Deriving 'is this a new sample' from a packet counter or a receive timestamp alone, with no comparison of the pose values. OpenTrack relays at ~250 Hz regardless of source rate, so the interval EMA collapses to the packet interval, each segment finishes within a frame or two of the sample that started it, and the inter-sample frames the interpolator exists to generate collapse into flat spots. Here 256 datagrams per second carry a value that changes only every 8th one, a 32 Hz source. With the filter the output climbs steadily at ~1 degree per frame all the way across each source period; without it it lurches on the frame the value changes and then crawls, so the floor on the per-frame movement is what separates them.",
+      "unit": "session_rot",
+      "config": {},
+      "steps": [
+        { "op": "ramp", "label": "warmup", "dt": 0.00390625, "count": 32, "new_every": 8, "from": { "yaw": 0.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 8.0 } },
+        { "op": "ramp", "label": "steady", "dt": 0.00390625, "count": 96, "new_every": 8, "from": { "yaw": 32.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": { "yaw": 8.0 } },
+        { "op": "ramp", "label": "tail", "dt": 0.00390625, "count": 256, "new_every": 256, "from": { "yaw": 120.0, "pitch": 0.0, "roll": 0.0 }, "per_sample": {} }
+      ],
+      "assert": [
+        { "kind": "min_step", "from": "steady", "to": "steady:last", "field": "yaw", "value": 0.85 },
+        { "kind": "max_step", "from": "steady", "to": "steady:last", "field": "yaw", "value": 1.25 },
+        { "kind": "equals", "at": "tail:last", "field": "yaw", "value": 120.0, "tolerance": 0.05 }
+      ]
+    }
+  ]
+}

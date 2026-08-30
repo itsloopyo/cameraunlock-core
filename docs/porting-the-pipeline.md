@@ -12,9 +12,61 @@ difference is that HCAM has `hcam-inband-protocol.md` with a conformance vector
 and the pipeline had nothing. Each section below therefore ends with a check that
 fails on the wrong implementation, with the numbers a real port actually produced.
 
-Ports found: `cyberpunk-2077-headtracking` (Lua), `the-pathless-headtracking`
-(Lua), `bioshock-infinite-headtracking` and `bioshock-remastered-headtracking`
-(Rust), `fusion-360-headtracking` (Python).
+## Before porting: if you can link the core, link it
+
+A port is only warranted where the host forbids native code. **If the mod already
+loads a native DLL of its own, link `cameraunlock` and do not port** - not the
+packet layer, not the interpolators, not the processors. A mod that has an ASI, a
+RED4ext plugin, a UE4SS C++ module or any other DLL of its own has already paid
+the cost that a port exists to avoid.
+
+The evidence is in the audit. Every port that hand-wrote the packet layer has a
+defect in it; the one port with a zero-defect packet layer is the one that did not
+write it. `cyberpunk-2077-headtracking` is Lua on top of a native DLL, and that
+DLL links the core (`native/CMakeLists.txt` links `cameraunlock`,
+`native/src/UdpReceiver.cpp` instantiates `cameraunlock::UdpReceiver`), so the
+finiteness gate, the cm-to-metres conversion and the trailer parse are the ones
+this library ships and fixes. Its remaining defects are all in the Lua half - the
+part it genuinely had to port.
+
+The same reasoning applies inside a port. Draw the native/scripted boundary as
+low as you can: everything below it is shared and maintained, everything above it
+is yours to re-test forever.
+
+## Conformance vectors
+
+`data/pipeline-conformance.json` is the executable form of the checks below -
+input sequence, expected output, tolerance - together with the constants block, so
+there is one source rather than a number restated in six repos. Run it instead of
+re-deriving the numbers:
+
+    node scripts/pipeline-vectors/run-vectors.mjs --harness "<your harness>"
+
+The runner owns every assertion; a port supplies only a small executor that reads
+a line-oriented command stream and prints one line of numbers per step (see the
+protocol comment at the top of `run-vectors.mjs`, and the C++ and C# harnesses in
+`scripts/pipeline-vectors/harness/` for two worked examples). `pixi run vectors`
+runs them against both of core's own implementations, so a change here fails in
+core before it reaches a mod. Every vector carries the `section` number of the
+invariant below that it comes from, so a failure names the paragraph that explains
+it.
+
+Where a local test and a vector disagree, the vector is right. Several ports'
+hand-written tests encode the defect rather than catching it: one asserts the
+held-forever extrapolation value exactly, one builds its expected pivot input with
+the same wrong sign as the implementation so it passes either way, and one asserts
+only that the output is finite.
+
+## Ports found
+
+| Repo | Language | Notes |
+|---|---|---|
+| `cyberpunk-2077-headtracking` | Lua over a native DLL | Links the core for the packet layer; only the Lua half is a port |
+| `the-pathless-headtracking` | Lua (UE4SS) | 3DOF only - no position processor and no interpolator |
+| `bioshock-infinite-headtracking` | Rust | |
+| `bioshock-remastered-headtracking` | Rust | |
+| `minecraft-java-edition-headtracking` | Java | 15 hand-written classes under `core/src/main/java/com/cameraunlock/core/`; the submodule is present but the Gradle build compiles nothing from it |
+| `fusion-360-headtracking` | Python | |
 
 ## 1. Yaw and roll traverse the shortest arc
 

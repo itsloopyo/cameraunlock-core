@@ -18,6 +18,23 @@ test-coverage = "dotnet test csharp --collect:\"XPlat Code Coverage\""
 test-cpp = { cmd = "ctest --test-dir cpp/build-test -C Release --output-on-failure", depends-on = ["build-cpp"] }
 build-cpp = "cmake -S cpp -B cpp/build-test -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build-test --config Release"
 
+# Pipeline conformance vectors. data/pipeline-conformance.json is the executable
+# form of the "Check." paragraphs in docs/porting-the-pipeline.md, and the
+# language ports that reimplement the pipeline run the SAME file. Running it here
+# against both of our own implementations is what makes core the place a moved
+# constant or a reordered step fails first, rather than a mod repo six weeks
+# later. The two harnesses hold no assertion logic - run-vectors.mjs owns that,
+# so every implementation is checked by the same code.
+# (Distinct from `conformance` below, which lints mod REPOS against the
+# packaging invariants. This one checks the maths.)
+build-vectors-cpp = "cmake -S scripts/pipeline-vectors/harness/cpp -B scripts/pipeline-vectors/harness/cpp/build && cmake --build scripts/pipeline-vectors/harness/cpp/build --config Release"
+vectors-cpp = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/cpp/build/Release/conformance_harness.exe", depends-on = ["build-vectors-cpp"] }
+
+build-vectors-csharp = "dotnet build scripts/pipeline-vectors/harness/csharp/ConformanceHarness.csproj -c Release --nologo -v quiet"
+vectors-csharp = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/csharp/bin/Release/net8.0/ConformanceHarness.exe", depends-on = ["build-vectors-csharp"] }
+
+vectors = { depends-on = ["vectors-cpp", "vectors-csharp"] }
+
 # Windows-only: the powershell/ modules are a Windows surface, so this is not
 # part of `check`. Covers the vendoring soak that keeps update-deps off
 # freshly-published upstream releases.
@@ -65,7 +82,7 @@ validate-notices = "node scripts/validate-notices.mjs"
 conformance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/conformance.ps1"
 
 # Development workflow
-check = { depends-on = ["build-debug", "test-quick", "test-cpp"] }
+check = { depends-on = ["build-debug", "test-quick", "test-cpp", "vectors"] }
 
 # Documentation
 # doc = "docfx docfx.json"
