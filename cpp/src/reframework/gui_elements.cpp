@@ -111,19 +111,23 @@ void SetTransformPosition(::reframework::API::ManagedObject* transform, float x,
     InvokeMethodWithArg(g_gui.setPosition, transform, (void*)&pos[0]);
 }
 
+// Both position reads go through TryInvoke rather than Method::invoke. A read
+// that failed at the SDK level comes back zero-filled with exception_thrown
+// clear, and (0, 0) is a position a GUI element genuinely holds - so without the
+// SDK's own result there is nothing to tell a broken read from the canvas
+// origin, and a caller offsetting from it would move the element to a place it
+// was never at.
 bool GetTransformPosition(::reframework::API::ManagedObject* transform, float& x, float& y) {
-    if (!transform || !g_gui.getPosition) return false;
-    auto ret = g_gui.getPosition->invoke(transform, EmptyArgs());
-    if (ret.exception_thrown) return false;
+    ::reframework::InvokeRet ret;
+    if (!TryInvoke(g_gui.getPosition, transform, ret)) return false;
     x = *reinterpret_cast<const float*>(&ret.bytes[0]);
     y = *reinterpret_cast<const float*>(&ret.bytes[4]);
     return true;
 }
 
 bool GetTransformGlobalPosition(::reframework::API::ManagedObject* transform, float& x, float& y) {
-    if (!transform || !g_gui.getGlobalPosition) return false;
-    auto ret = g_gui.getGlobalPosition->invoke(transform, EmptyArgs());
-    if (ret.exception_thrown) return false;
+    ::reframework::InvokeRet ret;
+    if (!TryInvoke(g_gui.getGlobalPosition, transform, ret)) return false;
     x = *reinterpret_cast<const float*>(&ret.bytes[0]);
     y = *reinterpret_cast<const float*>(&ret.bytes[4]);
     return true;
@@ -143,8 +147,8 @@ bool GetElementCanvasSize(::reframework::API::ManagedObject* element,
     auto view = GetElementView(element);
     if (!view) return false;
 
-    auto sizeRet = g_gui.viewGetScreenSize->invoke(view, EmptyArgs());
-    if (sizeRet.exception_thrown) return false;
+    ::reframework::InvokeRet sizeRet;
+    if (!TryInvoke(g_gui.viewGetScreenSize, view, sizeRet)) return false;
 
     canvasW = *reinterpret_cast<const float*>(&sizeRet.bytes[0]);
     canvasH = *reinterpret_cast<const float*>(&sizeRet.bytes[4]);

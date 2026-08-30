@@ -327,12 +327,17 @@ bool ManagerProbeGameplayCheck(void* primaryCamera, bool diag, const char** reas
         bool blocked = false;
         __try {
             void* guiMgr = api->get_managed_singleton(g_state.guiSingletonName);
-            if (guiMgr) {
-                auto ocd = g_state.guiOpenClose.method->invoke(
-                    reinterpret_cast<::reframework::API::ManagedObject*>(guiMgr), EmptyArgs());
-                if (ocd.ptr) {
-                    auto lvl = g_state.inputLevel.method->invoke(
-                        reinterpret_cast<::reframework::API::ManagedObject*>(ocd.ptr), EmptyArgs());
+            // Both reads go through TryInvoke. A failed invoke hands back a
+            // zero-filled InvokeRet with exception_thrown clear, so an unchecked
+            // read of lvl.dword reports whatever the slot happened to hold and
+            // suppresses tracking for as long as the failure repeats.
+            ::reframework::InvokeRet ocd;
+            if (guiMgr && TryInvoke(g_state.guiOpenClose.method,
+                                    reinterpret_cast<::reframework::API::ManagedObject*>(guiMgr),
+                                    ocd) && ocd.ptr) {
+                ::reframework::InvokeRet lvl;
+                if (TryInvoke(g_state.inputLevel.method,
+                              reinterpret_cast<::reframework::API::ManagedObject*>(ocd.ptr), lvl)) {
                     if (diag) LogInfo("Diag: inputLevel=%u", lvl.dword);
                     blocked = lvl.dword > 0;
                 }

@@ -58,6 +58,19 @@ void* CallMethodArg(::reframework::API::Method* method, void* obj, void* arg) {
     return method->invoke(obj, std::span<void*>(args, 1));
 }
 
+bool TryInvoke(::reframework::API::Method* method, ::reframework::API::ManagedObject* obj,
+               ::reframework::InvokeRet& out) {
+    out = ::reframework::InvokeRet{};
+    if (!method || !obj) return false;
+
+    const auto& api = ::reframework::API::get();
+    const auto invoke = api->sdk()->method->invoke;
+    if (invoke(*method, obj, nullptr, 0, &out, sizeof(out)) != REFRAMEWORK_ERROR_NONE) {
+        return false;
+    }
+    return !out.exception_thrown;
+}
+
 ::reframework::InvokeRet CachedGetter::Invoke(::reframework::API::ManagedObject* obj) {
     auto t = obj->get_type_definition();
     if (!t) return {};

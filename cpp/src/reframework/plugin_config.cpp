@@ -172,15 +172,14 @@ bool ApplyIniEdits(const char* path, const std::vector<IniEdit>& edits, std::str
     return true;
 }
 
-// A shipped default that changed belongs to one game, not to the RE Engine, and
-// PluginConfigSchema carries no mod identifier, so the title each mod builds its
-// schema with is what names the mod here.
-constexpr const char* kRe8Title = "RE8 Head Tracking";
+// A shipped default that changed belongs to one game, not to the RE Engine, so
+// a migration is keyed on the schema's mod id.
+constexpr const char* kRe8ModId = "re8";
 
 void MigrateToCurrentVersion(const char* path, const PluginConfigSchema& schema,
                              PluginConfig& config) {
     if (config.configVersion >= kPluginConfigVersion) return;
-    if (std::strcmp(schema.title, kRe8Title) != 0) return;
+    if (std::strcmp(schema.modId, kRe8ModId) != 0) return;
 
     std::vector<IniEdit> edits;
     edits.push_back({"General", "ConfigVersion", std::to_string(kPluginConfigVersion)});

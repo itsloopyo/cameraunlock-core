@@ -42,16 +42,18 @@ const PluginConfigSchema kRe8Schema{
     /*flashlight*/ false,
     /*diagnosticMarkerKey*/ true,
     /*positionSensitivity*/ 1.0f,
+    /*modId*/ "re8",
 };
 
-// RE4's, which differs only in the title and the two keys that follow it. Stands
-// in for the other five RE mods, whose shipped values did not change.
+// RE4's. Stands in for the other five RE mods, whose shipped values did not
+// change, so no migration is keyed on their mod id.
 const PluginConfigSchema kRe4Schema{
     /*title*/ "RE4 Head Tracking",
     /*positionInvertKeys*/ true,
     /*flashlight*/ false,
     /*diagnosticMarkerKey*/ false,
     /*positionSensitivity*/ 2.0f,
+    /*modId*/ "re4",
 };
 
 // Absolute, because IniReader is GetPrivateProfileStringA on Windows and that

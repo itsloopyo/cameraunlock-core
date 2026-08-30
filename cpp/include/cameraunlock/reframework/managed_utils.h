@@ -36,6 +36,19 @@ void* CallMethodArg(::reframework::API::Method* method, void* obj, void* arg);
 ::reframework::InvokeRet InvokeMethodWithArg(
     ::reframework::API::Method* method, ::reframework::API::ManagedObject* obj, void* arg);
 
+// Invoke a no-argument method and report whether the call actually ran.
+//
+// InvokeRet::exception_thrown covers a MANAGED exception only. The SDK's own
+// REFrameworkResult - which is what reports a bad object or an argument-size
+// mismatch - is discarded by Method::invoke unless REFRAMEWORK_API_EXCEPTIONS is
+// defined, and on that path the caller gets a zero-filled InvokeRet with the
+// flag clear. A caller reading a float out of bytes[] then cannot tell a failed
+// call from an element genuinely sitting at the origin. This calls the SDK entry
+// point directly and returns false unless the invocation succeeded and no
+// managed exception was raised.
+bool TryInvoke(::reframework::API::Method* method, ::reframework::API::ManagedObject* obj,
+               ::reframework::InvokeRet& out);
+
 // No-arg getter whose resolved Method* is cached against the object's concrete
 // type, re-resolving when the type changes. Per-frame loops over objects of
 // varying runtime types (e.g. GUI draw elements) turn a per-call string method

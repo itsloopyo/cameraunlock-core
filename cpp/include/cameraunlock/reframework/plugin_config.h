@@ -58,6 +58,13 @@ struct PluginConfigSchema {
 
     // Default for [Position] SensitivityX/Y/Z.
     float positionSensitivity = 1.0f;
+
+    // Stable identity for the config migrations in Load(), separate from
+    // `title` because that is display text and gets reworded. A migration that
+    // has to correct one game's shipped value keys on this; an empty id matches
+    // no migration. Keep it last - every mod's schema is initialised
+    // positionally, so a field inserted above silently rebinds the rest.
+    const char* modId = "";
 };
 
 struct PluginConfig {
