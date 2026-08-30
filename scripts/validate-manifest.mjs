@@ -1,11 +1,36 @@
 #!/usr/bin/env node
 //
-// Validate that a built installer ZIP is a coherent manifest-mode package:
-// delivery_mode is "manifest", and every path the launcher's deploy engine
-// will read (loader.archives[].source, files[].source) actually exists
-// inside the ZIP. This mirrors the engine's hard requirement ("manifest
-// lists file X but it is not in the package") so a broken manifest is caught
-// at build time, before a user ever downloads it.
+// Validate that a built release ZIP is a coherent package for the delivery
+// mode its launcher-manifest.json declares. There are three, and each is
+// checked on its own terms:
+//
+//   manifest     The launcher's deploy engine reads the package directly, so
+//                every path it will read (loader.archives[].source,
+//                files[].source) must exist inside the ZIP. This mirrors the
+//                engine's hard requirement ("manifest lists file X but it is
+//                not in the package") so a broken manifest is caught at build
+//                time, before a user ever downloads it.
+//
+//   install_cmd  The launcher shells out to install.cmd instead. Some mods
+//                cannot be expressed as a manifest at all - rv-there-yet
+//                deploys to a Steam and an Xbox/Game Pass install in the same
+//                run, and control-ultimate-edition provisions its loader by
+//                copying one raw DLL under a new name, neither of which the
+//                engine's extract-an-archive model covers. What must hold is
+//                that the scripts are in the ZIP and everything they call is
+//                too: a thin wrapper whose shared body was never staged still
+//                leaves a ZIP that looks complete, and fails on the user's
+//                machine with "install-body-bepinex.cmd not found".
+//
+//   external     A third-party mod manager owns deployment (Outer Wilds via
+//                OWML). Nothing in the package provisions anything, so the
+//                check is that it says where to send the user and declares no
+//                loader it has no way to install.
+//
+// In manifest mode a declared source that is absent is fatal - the engine
+// deploys from that list. In the other two the lists are descriptive, ingested
+// for display and audit, so a missing source is reported as a warning rather
+// than failing a package that installs correctly.
 //
 // cameraunlock-core is vendored (git submodule) into every mod repo, so this
 // is the single home for the check that every mod's release pipeline can run.
@@ -30,7 +55,9 @@
 // With no args it validates the host repo's newest release/*-installer.zip
 // (run it right after packaging). A bare repo token (e.g. dying-light-2, or
 // dying-light-2-headtracking) resolves to a sibling repo's newest
-// release/*-installer.zip, for validating across a full checkout.
+// release/*-installer.zip, for validating across a full checkout. A repo that
+// publishes no installer at all - external delivery hands a manager-consumable
+// ZIP straight to the user - falls back to its newest non-Nexus release ZIP.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -84,8 +111,13 @@ function validate(label, zip) {
   if (manifestRaw === null) throw new Error("no launcher-manifest.json in zip");
   const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
 
-  if (man.delivery_mode !== "manifest") {
-    throw new Error(`delivery_mode is "${man.delivery_mode}", expected "manifest"`);
+  const mode = man.delivery_mode;
+  if (mode === "install_cmd") return validateInstallCmd(label, zip, man, entries, entryByLower);
+  if (mode === "external") return validateExternal(label, zip, man, entryByLower);
+  if (mode !== "manifest") {
+    throw new Error(
+      `delivery_mode is "${mode}", expected one of "manifest", "install_cmd", "external"`,
+    );
   }
 
   const sources = [];
@@ -110,6 +142,100 @@ function validate(label, zip) {
     throw new Error("manifest declares no bundled sources - nothing would be deployed");
   }
 
+  const { missing, miscased } = resolveSources(sources, entryByLower);
+  if (missing.length > 0) {
+    throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
+  }
+
+  const seeds = (man.loader?.seed ?? []).length;
+  const rt = (man.runtime_requirements ?? []).length;
+  console.log(
+    `OK   ${label}: ${path.basename(zip)} — manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)`,
+  );
+  warnMiscased(label, miscased);
+}
+
+// install_cmd: the scripts ARE the delivery mechanism, so the gate is that
+// they and everything they reach for are in the package.
+function validateInstallCmd(label, zip, man, entries, entryByLower) {
+  const scripts = [man.install_script ?? "install.cmd", man.uninstall_script ?? "uninstall.cmd"];
+  const problems = [];
+  let checked = 0;
+
+  for (const script of scripts) {
+    const declared = script.replace(/\\/g, "/");
+    const entry = entryByLower.get(declared.toLowerCase());
+    if (entry === undefined) {
+      problems.push(`${declared} is not in the zip`);
+      continue;
+    }
+    const body = readEntry(zip, entry);
+    if (body === null) {
+      problems.push(`${declared} is listed in the zip but could not be read`);
+      continue;
+    }
+    checked += 1;
+    for (const dep of scriptDependencies(body)) {
+      if (!entryByLower.has(dep.toLowerCase())) {
+        problems.push(`${declared} calls ${dep}, which is not in the zip`);
+      }
+    }
+  }
+
+  if (problems.length > 0) throw new Error(problems.join("; "));
+
+  const sources = (man.files ?? []).map((f) => f.source).filter(Boolean);
+  const { missing, miscased } = resolveSources(sources, entryByLower);
+  console.log(
+    `OK   ${label}: ${path.basename(zip)} — install_cmd, ${checked} script(s), ${entries.length} entries`,
+  );
+  warnDescriptive(label, missing);
+  warnMiscased(label, miscased);
+}
+
+// external: a third-party manager deploys this, so there is nothing here to
+// provision and nothing to check against the engine. What the package still
+// owes the user is a route to that manager.
+function validateExternal(label, zip, man, entryByLower) {
+  const ext = man.external;
+  if (!ext) throw new Error('delivery_mode is "external" but there is no "external" block');
+  for (const key of ["manager_name", "manager_url"]) {
+    if (!ext[key]) {
+      throw new Error(`external block has no "${key}" - nothing tells the user where to go`);
+    }
+  }
+  if ((man.loader?.archives ?? []).length > 0) {
+    throw new Error(
+      'delivery_mode is "external" but loader.archives is non-empty - nothing in the package provisions it',
+    );
+  }
+
+  const sources = (man.files ?? []).map((f) => f.source).filter(Boolean);
+  if (sources.length === 0) {
+    throw new Error("manifest declares no files - nothing describes what ships");
+  }
+  const { missing, miscased } = resolveSources(sources, entryByLower);
+  console.log(
+    `OK   ${label}: ${path.basename(zip)} — external via ${ext.manager_name}, ${sources.length} file(s)`,
+  );
+  warnDescriptive(label, missing);
+  warnMiscased(label, miscased);
+}
+
+// What a .cmd in the package hands off to. Both forms are real: the thin
+// wrappers `call` a shared body staged by Copy-SharedBundle, and
+// rv-there-yet's install.cmd dispatches to a sibling install.ps1 because it
+// deploys to two game installs in one run.
+function scriptDependencies(text) {
+  const deps = new Set();
+  for (const m of text.matchAll(/shared[\\/]((?:un)?install-body[a-z-]*\.cmd|find-game\.ps1)/gi)) {
+    deps.add(`shared/${m[1]}`);
+  }
+  for (const m of text.matchAll(/%(?:SCRIPT_DIR%|~dp0)([A-Za-z0-9_.-]+\.ps1)/g)) deps.add(m[1]);
+  return deps;
+}
+
+function resolveSources(sources, entryByLower) {
   const missing = [];
   const miscased = [];
   for (const source of sources) {
@@ -118,20 +244,24 @@ function validate(label, zip) {
     if (entry === undefined) missing.push(declared);
     else if (entry !== declared) miscased.push(`${declared} (zip has "${entry}")`);
   }
-  if (missing.length > 0) {
-    throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
-  }
+  return { missing, miscased };
+}
 
-  const seeds = (man.loader?.seed ?? []).length;
-  const rt = (man.runtime_requirements ?? []).length;
+function warnMiscased(label, miscased) {
+  if (miscased.length === 0) return;
   console.log(
-    `OK   ${label}: ${path.basename(zip)} — ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)`,
+    `WARN ${label}: manifest source(s) matched the zip only after ignoring case, fix the manifest casing: ${miscased.join(", ")}`,
   );
-  if (miscased.length > 0) {
-    console.log(
-      `WARN ${label}: manifest source(s) matched the zip only after ignoring case, fix the manifest casing: ${miscased.join(", ")}`,
-    );
-  }
+}
+
+// Outside manifest mode the file list does not drive deployment, so a stale
+// entry cannot break an install - but the launcher ingests it to describe the
+// mod, and a path that names nothing describes nothing.
+function warnDescriptive(label, missing) {
+  if (missing.length === 0) return;
+  console.log(
+    `WARN ${label}: manifest describes file(s) the zip does not contain: ${missing.join(", ")}`,
+  );
 }
 
 function resolveZip(token) {
@@ -145,14 +275,17 @@ function resolveZip(token) {
   return null;
 }
 
+// Newest installer ZIP, or - for a mod that publishes none because a third
+// party manager consumes the package directly - the newest release ZIP that is
+// not the Nexus payload-only variant. Still returns null on an empty release
+// directory, so a repo that never packaged is reported rather than skipped.
 function newestInstaller(dir) {
   if (!fs.existsSync(dir)) return null;
-  const zips = fs
-    .readdirSync(dir)
-    .filter((n) => n.endsWith("-installer.zip"))
-    .map((n) => path.join(dir, n))
-    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-  return zips[0] ?? null;
+  const byNewest = (a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+  const names = fs.readdirSync(dir).filter((n) => n.toLowerCase().endsWith(".zip"));
+  const installers = names.filter((n) => n.endsWith("-installer.zip"));
+  const pool = installers.length ? installers : names.filter((n) => !n.endsWith("-nexus.zip"));
+  return pool.map((n) => path.join(dir, n)).sort(byNewest)[0] ?? null;
 }
 
 function systemTar() {
