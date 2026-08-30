@@ -163,6 +163,25 @@ namespace CameraUnlock.Core.Tests.Processing
             Assert.Equal(settings.LimitY, settings.LimitYDown);
         }
 
+        // The shipped defaults are what every mod that has never touched LimitYDown
+        // gets, so the vertical envelope has to stay symmetric there. The C++ suite
+        // asserts the same numbers in TestYClampAsymmetry.
+        [Fact]
+        public void BoxClamp_Defaults_AreVerticallySymmetric()
+        {
+            Assert.Equal(0.20f, PositionSettings.Default.LimitY);
+            Assert.Equal(PositionSettings.Default.LimitY, PositionSettings.Default.LimitYDown);
+
+            var proc = new PositionProcessor { Settings = PositionSettings.Default };
+
+            Vec3 up = proc.Process(MakePos(0f, 5f, 0f), Quat4.Identity, DeltaTime);
+            Assert.Equal(0.20f, up.Y, precision: 5);
+
+            proc.ResetSmoothing();
+            Vec3 down = proc.Process(MakePos(0f, -5f, 0f), Quat4.Identity, DeltaTime);
+            Assert.Equal(-0.20f, down.Y, precision: 5);
+        }
+
         [Fact]
         public void Smoothing_ConvergesToTarget()
         {

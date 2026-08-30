@@ -26,6 +26,9 @@ set(CAMERAUNLOCK_SOURCES
     src/processing/center_offset_manager.cpp
     src/processing/tracking_processor.cpp
     src/config/ini_reader.cpp
+    src/config/value_guards.cpp
+    src/os/module_paths.cpp
+    src/os/game_window.cpp
     src/discovery/probe_selection.cpp
     src/memory/pattern_scanner.cpp
     src/memory/pe_fingerprint.cpp
@@ -64,10 +67,26 @@ if(WIN32)
 endif()
 
 # Optional hook manager module (requires MinHook)
-option(CAMERAUNLOCK_BUILD_HOOKS "Build hook manager (requires MinHook)" OFF)
+option(CAMERAUNLOCK_BUILD_HOOKS "Build hook manager (uses the vendored MinHook unless the consumer supplies one)" OFF)
 if(CAMERAUNLOCK_BUILD_HOOKS)
+    # A consumer that already defines a `minhook` target keeps it - several mods
+    # add their own before this point and must not be broken. Everyone else gets
+    # the copy vendored here. Before that copy existed, the fleet provisioned
+    # MinHook five incompatible ways across three versions, half of them
+    # FetchContent calls that hit the network on every clean configure including
+    # the release job, and one pinned to a MUTABLE TAG.
     if(NOT TARGET minhook)
-        message(FATAL_ERROR "CAMERAUNLOCK_BUILD_HOOKS requires MinHook target. Please add MinHook before including cameraunlock-core.")
+        set(CAMERAUNLOCK_MINHOOK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/minhook")
+        if(NOT EXISTS "${CAMERAUNLOCK_MINHOOK_DIR}/CMakeLists.txt")
+            message(FATAL_ERROR "CAMERAUNLOCK_BUILD_HOOKS: no `minhook` target was supplied and the vendored copy is missing from ${CAMERAUNLOCK_MINHOOK_DIR}.")
+        endif()
+        # MinHook 1.3.4 declares `cmake_minimum_required(VERSION 3.0...3.5)`, and
+        # CMake 4 removed compatibility with anything below 3.5. This is the
+        # documented escape hatch, scoped to the add_subdirectory so it cannot
+        # relax policies for the consumer's own tree.
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+        add_subdirectory("${CAMERAUNLOCK_MINHOOK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/minhook")
+        unset(CMAKE_POLICY_VERSION_MINIMUM)
     endif()
 
     add_library(cameraunlock_hooks STATIC src/hooks/hook_manager.cpp)
@@ -167,6 +186,10 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
             ${CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR}
         )
     endif()
+
+    # game_window.cpp forwards to cameraunlock::os::CenterGameWindowOnce, which
+    # lives in the always-on target.
+    target_link_libraries(cameraunlock_reframework PUBLIC cameraunlock)
 
     if(MSVC)
         target_compile_options(cameraunlock_reframework PRIVATE

@@ -230,6 +230,63 @@ void TestZClampAsymmetry() {
     Check(NearEqual(backward.z, 0.10f, 1e-5), "backward lean clamps to +limit_z_back (0.10)");
 }
 
+void TestYClampAsymmetry() {
+    std::cout << "Position Y box clamp asymmetry:\n";
+
+    // Five mods carried a PositionLimitYDown concept and clamped it OUTSIDE
+    // PositionProcessor because the field did not exist here. It does now, and
+    // the two halves of that have to be proved separately: the symmetric
+    // factory must leave existing behaviour exactly as it was, and the
+    // asymmetric constructor must actually produce a lopsided envelope.
+    const float dt = 1.0f / 60.0f;
+
+    cameraunlock::PositionSettings symmetric = cameraunlock::PositionSettings::Symmetric(
+        1.0f, 1.0f, 1.0f,
+        0.30f, 0.20f, 0.40f, 0.10f,
+        0.0f, 0.0f);
+    Check(NearEqual(symmetric.limit_y_down, symmetric.limit_y),
+          "Symmetric() mirrors limit_y into limit_y_down");
+    Check(NearEqual(cameraunlock::PositionSettings().limit_y_down,
+                    cameraunlock::PositionSettings().limit_y),
+          "a default-constructed PositionSettings is vertically symmetric");
+    Check(NearEqual(cameraunlock::PositionSettings::Default().limit_y_down, 0.20f),
+          "Default() keeps the shipped 0.20 downward budget");
+
+    cameraunlock::PositionProcessor sym;
+    sym.SetSettings(symmetric);
+    sym.SetTrackerPivotForward(0.0f);
+
+    cameraunlock::math::Vec3 up = sym.Process(
+        cameraunlock::PositionData(0.0f, 5.0f, 0.0f, 1), cameraunlock::math::Quat4(), dt);
+    Check(NearEqual(up.y, 0.20f, 1e-5), "symmetric: up clamps to +limit_y");
+
+    sym.ResetSmoothing();
+    cameraunlock::math::Vec3 down = sym.Process(
+        cameraunlock::PositionData(0.0f, -5.0f, 0.0f, 2), cameraunlock::math::Quat4(), dt);
+    Check(NearEqual(down.y, -0.20f, 1e-5), "symmetric: down clamps to the same magnitude");
+
+    // Crouching range is usually tighter than standing range, to stop the
+    // camera clipping into the player body.
+    cameraunlock::PositionSettings asymmetric(
+        1.0f, 1.0f, 1.0f,
+        0.30f, 0.20f, 0.05f, 0.40f, 0.10f,
+        0.0f, 0.0f);
+
+    cameraunlock::PositionProcessor asym;
+    asym.SetSettings(asymmetric);
+    asym.SetTrackerPivotForward(0.0f);
+
+    cameraunlock::math::Vec3 asymUp = asym.Process(
+        cameraunlock::PositionData(0.0f, 5.0f, 0.0f, 1), cameraunlock::math::Quat4(), dt);
+    Check(NearEqual(asymUp.y, 0.20f, 1e-5), "asymmetric: up still clamps to +limit_y");
+
+    asym.ResetSmoothing();
+    cameraunlock::math::Vec3 asymDown = asym.Process(
+        cameraunlock::PositionData(0.0f, -5.0f, 0.0f, 2), cameraunlock::math::Quat4(), dt);
+    Check(NearEqual(asymDown.y, -0.05f, 1e-5),
+          "asymmetric: down clamps to -limit_y_down, not -limit_y");
+}
+
 sockaddr_in MakeAddr(const char* dotted) {
     sockaddr_in addr;
     std::memset(&addr, 0, sizeof(addr));
@@ -275,6 +332,7 @@ int RunSmoothingTests() {
     TestPositionSettingsSmoothingFields();
     TestPositionProcessorSmoothingSelection();
     TestZClampAsymmetry();
+    TestYClampAsymmetry();
     TestLoopbackClassification();
 
     if (g_failures == 0) {

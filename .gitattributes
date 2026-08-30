@@ -97,3 +97,9 @@ docker-compose*.yml text eol=lf
 *.jar binary
 *.war binary
 *.ear binary
+
+# Vendored third-party source. vendor/minhook is a verbatim mirror of the
+# upstream commit named in cpp/CMakeLists.txt, so it must NOT be line-ending
+# normalised: a normalised copy no longer hashes to the upstream tree, and
+# comparing against upstream is the only way to audit what we compile in.
+vendor/** -text

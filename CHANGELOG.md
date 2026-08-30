@@ -1018,3 +1018,86 @@ correct, so the two languages disagreed.
   The old value carried a hidden `0.15` floor, so the number in an existing config does not
   mean what it used to and copying it across would be a guess. It now emits a one-time
   warning naming both replacements instead of vanishing silently.
+
+### Added - `cameraunlock::os` module and EXE path resolution
+
+`cameraunlock/os/module_paths.h` provides `SelfModuleDirectory(HMODULE = nullptr)`,
+`HostExeDirectory()`, their `Narrow` (ANSI) counterparts, and the two testable
+primitives underneath them, `DirectoryOf` and `NarrowToAnsi`.
+
+Every C++ mod hand-rolled `GetModuleFileName` plus a last-separator split, at
+eight different correctness levels. Three failures are handled here once:
+the buffer grows until the name fits (a fixed `MAX_PATH` turns a deep install
+path into a dormant mod), a separator-less path is refused rather than becoming
+`\HeadTracking.ini` at the root of the current drive, and ANSI narrowing refuses
+best-fit mapping rather than naming a different directory that exists.
+
+To change in consuming repos: nothing. Replacing a local copy is optional.
+
+### Added - `cameraunlock::config` value guards
+
+`cameraunlock/config/value_guards.h` provides `SanitizeSmoothing`,
+`SanitizeSensitivity`, `SanitizePositionLimit`, `IsBindableVirtualKey`,
+`ParseFloatStrict`, `ReadRawValue`, `ReadFloatChecked` and
+`WarnRetiredSmoothingKey`. Each takes the mod's own printf-style log sink, so
+the diagnostic keeps the mod's prefix; a null sink still corrects the value.
+
+`ReadRawValue` strips inline comments before parsing and `ParseFloatStrict`
+requires the whole token, which is what catches `LocalSmoothing=0,15` - a
+European decimal comma that `strtod` reads as a valid `0.0`. The retired
+`Smoothing` warning was copy-pasted into 56 repos; it is one function now.
+
+They build on `math::SanitizeFinite` rather than reimplementing it.
+
+### Added - `cameraunlock::memory::SafeRead` / `SafeWrite`
+
+`cameraunlock/memory/safe_memory.h` provides SEH-guarded `SafeRead<T>`,
+`SafeWrite<T>`, `SafeReadU8`, `AccessViolationFilter`, and counting overloads
+that take the call site's own `std::atomic<uint64_t>` fault counter.
+
+Only `EXCEPTION_ACCESS_VIOLATION` is handled - a breakpoint, a stack overflow
+or a C++ exception travelling through keeps unwinding to whoever owns it. That
+is what separates these from a blanket swallow. The core's only previous
+guarded reads were UE-shaped and lived in `unreal/ue_runtime.h`, so every
+non-Unreal mod wrote its own, and none had an 8-bit read.
+
+Windows-only: the header `#error`s elsewhere rather than degrading.
+
+### Added - game-window discovery outside the REFramework target
+
+`cameraunlock/os/game_window.h` provides `FindGameWindow()` and
+`CenterGameWindowOnce(WindowLogFn)` in the always-on `cameraunlock` target.
+The routine is the one that already lived in `src/reframework/game_window.cpp`
+(pid filter, `IsWindowVisible`, `GW_OWNER`, a 200px floor,
+`MONITOR_DEFAULTTONEAREST`, `rcWork` centring); it was unusable by the seven
+non-REFramework mods that re-implemented it only because it sat behind
+`CAMERAUNLOCK_BUILD_REFRAMEWORK` and logged through `reframework::Log`.
+
+`reframework::CenterGameWindowOnce()` keeps its name and behaviour and is now a
+forwarder. `cameraunlock_reframework` links `cameraunlock`.
+
+To change in consuming repos: nothing.
+
+### Added - MinHook is vendored
+
+`vendor/minhook` is a verbatim mirror of MinHook `c3fcafdc10146beb5919319d0683e44e3c30d537`
+(v1.3.4, 2025-03-28). `CAMERAUNLOCK_BUILD_HOOKS=ON` now provides the `minhook`
+target itself when the consumer has not already defined one; a consumer that
+defines its own still wins, unchanged.
+
+The fleet provisioned MinHook five incompatible ways across three versions. Six
+of eleven repos in one group hit the network at CMake configure time, including
+on the release job; one pinned a mutable tag. `portal-2-headtracking` already
+preferred a `cameraunlock-core/vendor/minhook` directory that did not exist, so
+its branch never fired.
+
+MinHook declares `cmake_minimum_required(VERSION 3.0...3.5)` and CMake 4 removed
+compatibility below 3.5, so the `add_subdirectory` is wrapped in a scoped
+`CMAKE_POLICY_VERSION_MINIMUM 3.5`.
+
+### Added - `input::VK::PageUp` / `input::VK::PageDown`
+
+`0x21` and `0x22` were missing from the `input::VK` table and from
+`VirtualKeyToString`, while `IsValidHotkeyCode` already accepted them. Two of
+the three fleet-standard nav-cluster bindings were therefore only expressible as
+raw numbers, and a config dump printed `Unknown` for a key the user had pressed.

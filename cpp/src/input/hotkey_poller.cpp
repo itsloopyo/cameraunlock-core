@@ -246,6 +246,8 @@ const char* VirtualKeyToString(int vkCode) {
         case 0x7B: return "F12";
         case 0x1B: return "Escape";
         case 0x20: return "Space";
+        case 0x21: return "PageUp";
+        case 0x22: return "PageDown";
         case 0x24: return "Home";
         case 0x23: return "End";
         case 0x2D: return "Insert";

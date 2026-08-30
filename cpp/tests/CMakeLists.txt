@@ -15,6 +15,10 @@ add_executable(cameraunlock_tests
     interpolator_tests.cpp
     probe_selection_tests.cpp
     file_log_tests.cpp
+    hotkey_tests.cpp
+    os_tests.cpp
+    value_guard_tests.cpp
+    safe_memory_tests.cpp
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)

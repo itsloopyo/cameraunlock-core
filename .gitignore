@@ -50,3 +50,10 @@ CLAUDE.md
 # OS
 .DS_Store
 Thumbs.db
+
+# Vendored third-party source. vendor/minhook is a verbatim mirror of the
+# upstream commit named in cpp/CMakeLists.txt so it can be diffed against it,
+# which means the build-output patterns above must not eat MinHook's own
+# build/ directory of legacy per-VS-version project files.
+!vendor/minhook/build/
+!vendor/minhook/build/**

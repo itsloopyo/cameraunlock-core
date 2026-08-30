@@ -123,6 +123,8 @@ namespace VK {
     constexpr int F12 = 0x7B;
     constexpr int Escape = 0x1B;
     constexpr int Space = 0x20;
+    constexpr int PageUp = 0x21;
+    constexpr int PageDown = 0x22;
     constexpr int Home = 0x24;
     constexpr int End = 0x23;
     constexpr int Insert = 0x2D;

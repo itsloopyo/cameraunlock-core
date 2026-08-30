@@ -26,7 +26,10 @@ which is easy to forget because it holds nothing but the payload subtree.
    Patkov) below Tsuda Kageyu's. Attributing only the headline project drops a
    rights holder.
 3. Record the version the mod actually builds against, not the tag you
-   remember. For a submodule, `git submodule status` is the authority.
+   remember. For a submodule, `git submodule status` is the authority. A mod
+   that takes MinHook from `cameraunlock-core/vendor/minhook` builds against
+   v1.3.4 (commit `c3fcafdc10146beb5919319d0683e44e3c30d537`); one that still
+   supplies its own target builds against whatever that target pins.
 
 ## Files
 

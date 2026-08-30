@@ -28,6 +28,7 @@
 #include "cameraunlock/ads/ads_mode.h"
 #include "cameraunlock/ads/entry_pose.h"
 #include "cameraunlock/config/ini_reader.h"
+#include "cameraunlock/config/value_guards.h"
 #include "cameraunlock/data/position_data.h"
 #include "cameraunlock/data/position_settings.h"
 #include "cameraunlock/data/tracking_pose.h"
@@ -50,6 +51,12 @@
 #include "cameraunlock/memory/pattern_scanner.h"
 #include "cameraunlock/memory/pe_fingerprint.h"
 #include "cameraunlock/memory/rtti_vtable.h"
+#ifdef _WIN32
+// SEH-only, so it #errors rather than degrading on a non-Windows build.
+#include "cameraunlock/memory/safe_memory.h"
+#endif
+#include "cameraunlock/os/game_window.h"
+#include "cameraunlock/os/module_paths.h"
 #include "cameraunlock/processing/center_offset_manager.h"
 #include "cameraunlock/processing/pose_interpolator.h"
 #include "cameraunlock/processing/position_interpolator.h"
