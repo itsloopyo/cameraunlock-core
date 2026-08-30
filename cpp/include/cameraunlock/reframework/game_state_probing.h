@@ -26,9 +26,13 @@ void SetNamespaceCandidates(const char* const* candidates, int count);
 // Returns pointer to a static buffer - valid until next call.
 const char* FindSingleton(const ::reframework::API* api, const char* baseName);
 
-// Try to find a method on a type, trying multiple name variants.
+// Try to find a method on a type, trying multiple name variants. `boundName`,
+// when given, receives the entry of `names` that actually resolved - the log
+// line used to name names[0] whichever variant bound, so a title exposing only
+// the third spelling was reported as exposing the first.
 ::reframework::API::Method* FindMethod(
-    ::reframework::API::TypeDefinition* type, const char* names[], int count);
+    ::reframework::API::TypeDefinition* type, const char* names[], int count,
+    const char** boundName = nullptr);
 
 // Probe a manager: find type, find method, find singleton.
 // On success, populates `out` and returns true.
@@ -51,5 +55,19 @@ uint32_t InvokeInt(const ::reframework::API* api, void* vmCtx,
                    MethodCheck& check, bool diag, const char* label);
 void* InvokePointer(const ::reframework::API* api, void* vmCtx,
                     MethodCheck& check, bool diag, const char* label);
+
+// The same two calls, reporting whether the call happened at all. Return false
+// when the method never resolved, has already been disabled by a fault, the
+// singleton is momentarily absent, or the invoke raised; `out` is untouched then.
+//
+// A check whose SUPPRESSING answer is the falsy one needs these. InvokeBool
+// returns false both for "the game says false" and "the call could not be made",
+// and InvokeInt returns 0 for both - so a loading screen with no singleton yet
+// reads as "the player has no control" or "game flow is 0" and suppresses
+// tracking for a reason that was never measured.
+bool TryInvokeBool(const ::reframework::API* api, void* vmCtx,
+                   MethodCheck& check, bool diag, const char* label, bool& out);
+bool TryInvokeInt(const ::reframework::API* api, void* vmCtx,
+                  MethodCheck& check, bool diag, const char* label, uint32_t& out);
 
 } // namespace cameraunlock::reframework

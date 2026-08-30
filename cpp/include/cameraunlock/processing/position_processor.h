@@ -69,6 +69,13 @@ public:
         float y = pos.y * m_settings.sensitivity_y;
         float z = pos.z * m_settings.sensitivity_z;
 
+        // Inversion is a TRACKER-axis correction and belongs here, ahead of the
+        // clamp: it puts a stream whose axis runs the other way back into the
+        // pipeline's convention, and the clamp below is written in that
+        // convention. An engine whose camera-local +z is forward must NOT be
+        // handled with invert_z - the flip belongs in the code that hands the
+        // offset to the engine, after the clamp, or the forward lean is clamped
+        // on the backward budget. docs/porting-the-pipeline.md section 11.
         if (m_settings.invert_x) x = -x;
         if (m_settings.invert_y) y = -y;
         if (m_settings.invert_z) z = -z;

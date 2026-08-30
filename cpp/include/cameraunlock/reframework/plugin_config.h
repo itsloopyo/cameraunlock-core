@@ -11,6 +11,31 @@ inline constexpr int kDefaultPositionToggleKey = 0x21;    // VK_PRIOR (Page Up)
 inline constexpr int kDefaultYawModeKey = 0x22;           // VK_NEXT (Page Down)
 inline constexpr int kDefaultDiagnosticMarkerKey = 0x78;  // VK_F9
 
+// Accepted ranges for the tunable numbers, applied identically whether a value
+// arrives from the INI or is set in code. Tighter than the library-wide guards
+// in config/value_guards.h on purpose: those bound what cannot reach the camera
+// matrix as garbage (a sensitivity of 100, a travel limit of 10 metres), these
+// bound what is usable in an RE Engine title. The floor is 0 on every axis - a
+// user pinning one axis is asking for exactly what a 0 multiplier does.
+inline constexpr float kMinSensitivity = 0.0f;
+inline constexpr float kMaxRotationSensitivity = 5.0f;
+inline constexpr float kMaxPositionSensitivity = 10.0f;
+inline constexpr float kMinPositionLimit = 0.0f;
+inline constexpr float kMaxPositionLimit = 2.0f;
+inline constexpr float kMaxFlashlightMultiplier = 5.0f;
+
+// Format version of a written config. Bumped when a shipped default changes to
+// a value an INI already on disk has to adopt, because Load only writes the
+// file when it could not read one - without a version there is nothing to tell
+// a stale shipped value apart from a value the user chose.
+//
+// Load migrates a config stamped below this and stamps it; a config already at
+// this version is never rewritten, which is what makes an edit the user makes
+// after the migration theirs to keep.
+//
+// 1: RE8 [Position] InvertX, which shipped true and mirrored the lateral lean.
+inline constexpr int kPluginConfigVersion = 1;
+
 // Which optional INI keys a given game's config carries.
 //
 // PluginConfig declares every field for every game; the schema decides which
@@ -78,6 +103,12 @@ struct PluginConfig {
     // General
     bool autoEnable = true;
     bool worldSpaceYaw = true;
+
+    // [General] ConfigVersion as it stood on disk. 0 is a file written before
+    // the stamp existed, so nothing in it can be told apart from a shipped
+    // default. Load raises it to kPluginConfigVersion once it has migrated the
+    // file, and leaves it alone when the rewrite failed.
+    int configVersion = 0;
 
     bool Load(const char* path, const PluginConfigSchema& schema);
     bool Save(const char* path, const PluginConfigSchema& schema) const;

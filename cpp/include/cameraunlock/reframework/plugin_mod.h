@@ -30,7 +30,11 @@ class PluginMod {
 public:
     static PluginMod& Instance();
 
-    bool Initialize(const PluginModDescriptor& descriptor);
+    // Void, not bool. Nothing in here is fatal: a missing config file writes
+    // defaults and carries on, and a busy UDP port is retried in the background
+    // by the receiver's own supervisor thread. Returning a status the caller was
+    // expected to act on gave the bootstrap an error branch that could not run.
+    void Initialize(const PluginModDescriptor& descriptor);
     void Shutdown();
 
     bool IsEnabled() const { return m_enabled.load(); }

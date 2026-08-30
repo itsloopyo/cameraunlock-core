@@ -130,12 +130,26 @@ inline void ApplyCameraLocalHeadRotation(Matrix4x4f& worldMat, float yawRad, flo
 
 // Translate the camera in the body-oriented basis captured before head
 // rotation, so the offset follows body orientation rather than the head-turned
-// view. Offsets are in meters; X is inverted to match RE Engine handedness.
+// view. Offsets are in meters, in the pipeline's own convention.
+//
+// This is the engine boundary, and the boundary is where the z flip belongs.
+// Negative z is the forward lean everywhere inside the pipeline and the
+// asymmetric clamp is built on it - [-limit_z, +limit_z_back] puts the generous
+// 0.40m budget on the negative side. RE Engine stores its basis axes in rows and
+// row 2 is camera FORWARD (ProjectAimToViewTangents walks the aim point out
+// along clean.m[2]), so pz multiplies a forward axis and the incoming z has to
+// be negated to reach it. Without that negation a forward lean drove the camera
+// backwards on the 0.40m budget and a backward lean forwards on 0.10m.
+//
+// X is negated here as well, to match RE Engine handedness. Doing either flip
+// with the invert_x / invert_z config flags instead is the documented mistake:
+// those land BEFORE the processor's clamp, so the lean comes out on the wrong
+// budget. See docs/porting-the-pipeline.md section 11.
 inline void ApplyViewSpacePositionOffset(Matrix4x4f& worldMat, const Matrix4x4f& preRotationAxes,
                                          float offsetX, float offsetY, float offsetZ) {
     float px = -offsetX;
     float py = offsetY;
-    float pz = offsetZ;
+    float pz = -offsetZ;
     const Matrix4x4f& gm = preRotationAxes;
     worldMat.m[3][0] += px * gm.m[0][0] + py * gm.m[1][0] + pz * gm.m[2][0];
     worldMat.m[3][1] += px * gm.m[0][1] + py * gm.m[1][1] + pz * gm.m[2][1];
@@ -143,8 +157,16 @@ inline void ApplyViewSpacePositionOffset(Matrix4x4f& worldMat, const Matrix4x4f&
 }
 
 // Express the head-tracked camera's translation relative to the clean camera
-// in the clean camera's local axes. World-anchored GUI compensation adds this
-// delta to anchor rays so markers stay pinned under 6DOF head translation.
+// in the clean camera's local axes.
+//
+// World-anchored GUI compensation SUBTRACTS this from a depth-scaled anchor ray
+// before projecting it, which is what pins a marker under 6DOF head translation:
+// an anchor at depth d along the clean-view ray (tanRight, tanUp, 1) is
+// (d*tanRight, d*tanUp, d) in clean-local axes, and the same point in head-local
+// axes is that minus this delta, rotated by ComputeCleanToHeadRotation. The
+// depth is what makes the term per-marker - the screen shift is lean/depth, so a
+// caller with one write for markers at several depths has no single right value
+// and must leave the term out.
 inline void ComputeCleanLocalPositionDelta(const Matrix4x4f& clean, const Matrix4x4f& head, float out[3]) {
     float dwx = head.m[3][0] - clean.m[3][0];
     float dwy = head.m[3][1] - clean.m[3][1];
@@ -180,14 +202,21 @@ inline bool ProjectCleanRayToHeadGui(const float cleanToHead[3][3], float rollRa
 }
 
 // Project the clean camera's forward direction through the head-tracked
-// rotation basis, ignoring translation entirely. Yields the rotation-only
-// screen tangents used for world-anchored GUI marker compensation. Every
-// caller restores the clean camera transform in full at its render-phase hook,
-// position row included, so head translation never reaches the matrix the
-// renderer consumes and must not reach the GUI offset either.
-// Depth-independent: when the head has not rotated, the tangents collapse to
-// zero regardless of head translation. Returns false when the clean forward
-// direction lands behind the head-tracked view.
+// rotation basis, ignoring translation entirely. Yields the rotation half of
+// the clean-view-to-head-view difference, as screen tangents.
+//
+// That difference has a translation half too. The post-render hook restores the
+// clean camera in full, position row included, so the frame is drawn from the
+// leaned eye while the GUI projects its world anchors from the un-leaned one,
+// and the leftover is lean/depth. These tangents carry none of it: they are
+// depth-independent, and a caller that shifts markers sitting at several depths
+// with one write cannot express a per-depth value anyway. A caller holding one
+// marker at a known depth adds the translation half itself, by subtracting
+// ComputeCleanLocalPositionDelta from a depth-scaled ray and projecting that
+// through ProjectCleanRayToHeadGui.
+//
+// Returns false when the clean forward direction lands behind the head-tracked
+// view.
 inline bool ProjectForwardToViewTangents(const Matrix4x4f& clean, const Matrix4x4f& head,
                                          float& tanRight, float& tanUp) {
     float dx = clean.m[2][0];

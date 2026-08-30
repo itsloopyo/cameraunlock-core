@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace {
 
@@ -105,6 +106,46 @@ void TestFaultsAreAbsorbed() {
     // test would corrupt the process it is meant to be checking.
 }
 
+// The struct that faults PART WAY THROUGH. A 64-byte read starting 32 bytes
+// before a decommitted page copies 32 bytes and then raises, so a SafeRead that
+// assigned straight into the caller's object returned false having already
+// overwritten half of it - and false is exactly when the caller keeps what it
+// had.
+void TestAPartialFaultLeavesTheDestinationAlone() {
+    using cameraunlock::memory::SafeRead;
+    std::cout << "page-straddling fault:\n";
+
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    const SIZE_T pageSize = info.dwPageSize;
+
+    auto* base = static_cast<unsigned char*>(
+        VirtualAlloc(nullptr, pageSize * 2, MEM_RESERVE, PAGE_NOACCESS));
+    Check(base != nullptr, "two pages reserved");
+    if (base == nullptr) return;
+
+    // Only the first page is committed, so a read that runs off its end faults
+    // at a known offset rather than a hopeful one.
+    VirtualAlloc(base, pageSize, MEM_COMMIT, PAGE_READWRITE);
+    memset(base, 0xAA, pageSize);
+
+    struct Wide { unsigned char bytes[64]; };
+    const auto straddle = reinterpret_cast<std::uintptr_t>(base + pageSize - 32);
+
+    Wide out;
+    memset(&out, 0x11, sizeof(out));
+    const bool ok = SafeRead(straddle, out);
+
+    int modified = 0;
+    for (unsigned char b : out.bytes) {
+        if (b != 0x11) ++modified;
+    }
+    Check(!ok, "a read that runs into an unmapped page returns false");
+    Check(modified == 0, "and leaves every byte of the destination untouched");
+
+    VirtualFree(base, 0, MEM_RELEASE);
+}
+
 void TestFaultCounter() {
     using cameraunlock::memory::SafeRead;
     using cameraunlock::memory::SafeWrite;
@@ -135,6 +176,7 @@ int RunSafeMemoryTests() {
     TestFilter();
     TestReadWrite();
     TestFaultsAreAbsorbed();
+    TestAPartialFaultLeavesTheDestinationAlone();
     TestFaultCounter();
     return g_failures;
 #else

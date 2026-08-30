@@ -186,14 +186,29 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
     )
-    # REFramework headers (reframework/API.hpp) must be provided by the consumer
-    # via CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR or by adding include dirs after
-    # add_subdirectory.
-    if(CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR)
-        target_include_directories(cameraunlock_reframework PRIVATE
-            ${CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR}
-        )
+    # REFramework's plugin SDK headers (reframework/API.hpp, reframework/API.h).
+    # A consumer that already vendors its own points CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR
+    # at it and keeps that copy; everyone else gets the one vendored here, which is
+    # praydog/REFramework plugin API 1.15.0 verbatim (MIT, vendor/reframework/LICENSE).
+    #
+    # Vendored rather than left to the consumer because until it was, nothing in this
+    # repo could compile a single line of the RE Engine driver: the target could not
+    # configure without headers it did not have, so `pixi run check` built none of it
+    # and a compile error here reached the fleet.
+    #
+    # PUBLIC, not PRIVATE: the public headers under include/cameraunlock/reframework/
+    # include <reframework/API.hpp> themselves, so a consumer of this target needs the
+    # same include path to use them at all.
+    if(NOT CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR)
+        set(CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR
+            "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/reframework/include")
     endif()
+    if(NOT EXISTS "${CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR}/reframework/API.hpp")
+        message(FATAL_ERROR "CAMERAUNLOCK_BUILD_REFRAMEWORK: no reframework/API.hpp under ${CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR}.")
+    endif()
+    target_include_directories(cameraunlock_reframework PUBLIC
+        ${CAMERAUNLOCK_REFRAMEWORK_INCLUDE_DIR}
+    )
 
     # game_window.cpp forwards to cameraunlock::os::CenterGameWindowOnce, which
     # lives in the always-on target.

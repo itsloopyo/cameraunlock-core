@@ -25,8 +25,9 @@ struct FrameProjection {
     // Rotation-only tangents of the clean view forward under head rotation.
     // Carry no lean term: parallax is lean/depth, a marker sits at its own
     // depth, and one write to a marker's container cannot express a per-depth
-    // value. What that leaves uncorrected fades with distance, and markers are
-    // mostly distant.
+    // value. A consumer holding a single marker whose depth it can name adds
+    // the lean itself from cleanLocalPositionDelta below; one shifting several
+    // markers at once has no right value and correctly leaves it out.
     float markerTanRight = 0.f;
     float markerTanUp = 0.f;
     bool markerValid = false;
@@ -45,6 +46,12 @@ struct FrameProjection {
     // head camera space.
     float cleanToHead[3][3] = {};
     bool cleanToHeadValid = false;
+
+    // The head's translation away from the clean camera, in metres, in the clean
+    // camera's own axes. Subtract it from a depth-scaled anchor ray before
+    // projecting through cleanToHead to pin a world anchor under a lean. Valid
+    // whenever cleanToHeadValid; zero when position tracking is off.
+    float cleanLocalPositionDelta[3] = {};
 };
 
 struct CameraPipelineDescriptor {
@@ -98,8 +105,9 @@ void CameraPipelinePostRender();
 
 const FrameProjection& GetFrameProjection();
 
-// Bumped once per processed render frame. GUI draw callbacks fire during that
-// same frame, so this is the key per-frame memos invalidate on.
+// Bumped once per render callback, before the enable and gameplay gates. GUI
+// draw callbacks fire during that same frame - including in a menu, where no
+// tracking is applied - so this is the key per-frame memos invalidate on.
 uint64_t GetRenderFrame();
 
 // The clean camera matrix saved before head tracking was applied this frame.

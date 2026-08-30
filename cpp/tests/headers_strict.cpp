@@ -10,15 +10,24 @@
 // already pulled the change.
 //
 // Adding a public header means adding it here. Excluded, and why:
-//   cameraunlock/reframework/camera_chain.h        external dep: reframework/
-//   cameraunlock/reframework/camera_controller_hook.h external dep: reframework/
-//   cameraunlock/reframework/game_state_probing.h  external dep: reframework/
-//   cameraunlock/reframework/managed_utils.h       external dep: reframework/
-//   cameraunlock/reframework/tdb_inspector.h       external dep: reframework/
+//   cameraunlock/reframework/camera_chain.h        external dep: reframework/API.hpp
+//   cameraunlock/reframework/camera_controller_hook.h external dep: reframework/API.hpp
+//   cameraunlock/reframework/camera_pipeline.h     external dep: via camera_chain.h
+//   cameraunlock/reframework/game_state_probing.h  external dep: reframework/API.hpp
+//   cameraunlock/reframework/gameplay_gate.h       external dep: reframework/API.hpp
+//   cameraunlock/reframework/gui_elements.h        external dep: reframework/API.hpp
+//   cameraunlock/reframework/managed_utils.h       external dep: reframework/API.hpp
+//   cameraunlock/reframework/plugin_bootstrap.h    external dep: reframework/API.hpp
+//   cameraunlock/reframework/tdb_inspector.h       external dep: reframework/API.hpp
 //   cameraunlock/rendering/aim_marker_dx11.h       overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx11_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx12_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx9_overlay.h           overlay: covered by cameraunlock_overlay_compile
+//
+// This target's include path is the public include/ directory alone, so the
+// REFramework plugin SDK is not reachable from it. That is what "external dep"
+// above means, and it is why a reframework/ header that reaches API.hpp - at
+// any depth - is excluded while the three that do not are compiled below.
 
 #ifdef _WIN32
 #include <windows.h>
@@ -72,6 +81,9 @@
 #include "cameraunlock/protocol/udp_socket.h"
 #include "cameraunlock/reframework/game_window.h"
 #include "cameraunlock/reframework/log_callback.h"
+#include "cameraunlock/reframework/manager_probe_checks.h"
+#include "cameraunlock/reframework/plugin_config.h"
+#include "cameraunlock/reframework/plugin_mod.h"
 #include "cameraunlock/reframework/re_math.h"
 #include "cameraunlock/rendering/aim_quat_projection.h"
 #include "cameraunlock/rendering/crosshair_projection.h"

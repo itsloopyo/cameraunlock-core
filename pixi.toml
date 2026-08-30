@@ -16,7 +16,14 @@ test-coverage = "dotnet test csharp --collect:\"XPlat Code Coverage\""
 # the C# port, and a C++-only regression (the two interpolators, the projection
 # maths, the receivers) reaches every native mod ungated.
 test-cpp = { cmd = "ctest --test-dir cpp/build-test -C Release --output-on-failure", depends-on = ["build-cpp"] }
-build-cpp = "cmake -S cpp -B cpp/build-test -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build-test --config Release"
+# Every optional module ON. They default OFF for a consumer that does not want them,
+# but a module nothing here configures is a module nothing here compiles: with the
+# defaults, `pixi run check` built none of the RE Engine driver, none of the Unreal
+# runtime helpers, and neither the hook manager nor camera discovery, so a compile
+# error in any of them reached a mod repo instead of this one. MinHook and the
+# REFramework SDK headers are both vendored, so this needs nothing off the network
+# and nothing from a game install.
+build-cpp = "cmake -S cpp -B cpp/build-test -DCMAKE_BUILD_TYPE=Release -DCAMERAUNLOCK_BUILD_HOOKS=ON -DCAMERAUNLOCK_BUILD_DISCOVERY=ON -DCAMERAUNLOCK_BUILD_UNREAL=ON -DCAMERAUNLOCK_BUILD_REFRAMEWORK=ON && cmake --build cpp/build-test --config Release"
 
 # Pipeline conformance vectors. data/pipeline-conformance.json is the executable
 # form of the "Check." paragraphs in docs/porting-the-pipeline.md, and the
@@ -37,8 +44,11 @@ vectors = { depends-on = ["vectors-cpp", "vectors-csharp"] }
 
 # Windows-only: the powershell/ modules are a Windows surface, so this is not
 # part of `check`. Covers the vendoring soak that keeps update-deps off
-# freshly-published upstream releases.
-test-powershell = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/ModLoaderSetup.Soak.Tests.ps1"
+# freshly-published upstream releases, and ReleaseWorkflow.psm1's release-path
+# behaviour that only misbehaves under Windows PowerShell 5.1.
+test-powershell-soak = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/ModLoaderSetup.Soak.Tests.ps1"
+test-powershell-release = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/ReleaseWorkflow.Tests.ps1"
+test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release"] }
 
 # Building
 build = "dotnet build csharp -c Release"
@@ -100,6 +110,18 @@ readme = "node scripts/generate-readme.mjs"
 #   pixi run sync-templates -Repo valheim -Only action-pins
 sync-templates = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-templates.ps1"
 
+# Schema gate for data/games.json. Nothing checked this file until now, which
+# is how a schema-v1 required key (`env_var`) went missing from an entry with
+# every test still green. Default run reads only data/games.json, so it is
+# safe in a clean CI checkout; -fleet adds the sibling-repo cross-checks
+# (launcher-manifest game_ids, repo ownership) that need the mods beside it.
+#
+# Belongs in conformance.ps1 as a rule once that file settles - it is the
+# same class of invariant as the rest of `pixi run conformance`, and lives
+# here separately only to keep out of a concurrent edit of that script.
+validate-games = "node scripts/validate-games.mjs"
+validate-games-fleet = "node scripts/validate-games.mjs --fleet"
+
 # data/config-schema.json is the single description of the config vocabulary; the C#
 # and C++ alias tables are generated from it. This fails when either generated file is
 # stale, which is the gate that stops the two languages drifting apart again.
@@ -107,7 +129,7 @@ sync-templates = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sy
 check-config-schema = "node scripts/generate-config-schema.mjs --check"
 
 # Development workflow
-check = { depends-on = ["build-debug", "test-quick", "test-cpp", "vectors", "check-config-schema"] }
+check = { depends-on = ["build-debug", "test-quick", "test-cpp", "vectors", "check-config-schema", "validate-games"] }
 
 # Documentation
 # doc = "docfx docfx.json"

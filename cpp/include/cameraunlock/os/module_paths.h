@@ -16,9 +16,12 @@
 //     size rather than the required one, so a MAX_PATH buffer turns a game
 //     installed under a long path into a dormant mod on a machine where
 //     nothing is wrong. The buffer grows until the name fits.
-//   - substr(0, npos) on a path with no separator yields the whole path, and a
-//     "directory" of "" then turns the INI path into "\HeadTracking.ini",
-//     which is the root of the current drive. DirectoryOf refuses instead.
+//   - substr(0, npos) on a path with no separator yields the WHOLE path, so a
+//     module name with no directory in it became its own directory and the INI
+//     landed inside a path that is really a file. DirectoryOf refuses that.
+//     A path whose only separator is the leading one is a different case and
+//     is NOT refused: it reports an empty directory and true, because that is
+//     the honest answer, and GetModuleFileNameW never returns such a path.
 //   - ANSI narrowing best-fit maps by default: a character the code page
 //     cannot encode is quietly replaced by one that looks similar, so a
 //     directory can narrow to the name of a DIFFERENT directory that exists,

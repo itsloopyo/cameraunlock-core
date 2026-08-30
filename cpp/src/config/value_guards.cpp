@@ -2,6 +2,7 @@
 
 #include <cameraunlock/math/finite_utils.h>
 
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -48,6 +49,14 @@ bool IsBindableVirtualKey(int vk) {
 
 bool ParseFloatStrict(const std::string& text, float& out) {
     if (text.empty()) return false;
+
+    // strtod skips leading whitespace and accepts hexadecimal - "0x10" parses as
+    // 16, " 1.5" as 1.5 - and TryParseConfigFloat, the other half of this
+    // library's config parsing, rejects both. A number the two halves read
+    // differently is the drift the shared schema exists to prevent, so they are
+    // refused here rather than silently accepted.
+    if (std::isspace(static_cast<unsigned char>(text.front()))) return false;
+    if (text.find_first_of("xX") != std::string::npos) return false;
 
     char* end = nullptr;
     const double parsed = std::strtod(text.c_str(), &end);

@@ -1,4 +1,5 @@
 #include <cameraunlock/reframework/manager_probe_checks.h>
+#include <cameraunlock/memory/safe_memory.h>
 
 #include <cameraunlock/reframework/game_state_probing.h>
 #include <cameraunlock/reframework/log_callback.h>
@@ -31,7 +32,14 @@ static struct {
     MethodCheck isTransition;
     MethodCheck isEventPlaying;
     MethodCheck isMoviePlaying;
+    // Two checks, not one, because the spellings RE Engine titles use for this
+    // come in both polarities: isInputBlocked / isLocked are true OUTSIDE
+    // gameplay, isPlayerControllable / isEnableInput are true DURING it. Bound to
+    // one MethodCheck they were all read as "true means suppress", so a title
+    // exposing only an enabled-polarity spelling suppressed tracking exactly
+    // while the player had control and tracked in the menus.
     MethodCheck isInputBlocked;
+    MethodCheck isInputEnabled;
     MethodCheck isCutscene;
     MethodCheck situationType;
 
@@ -57,17 +65,9 @@ static struct {
     MethodCheck inputLevel;
     const char* guiSingletonName = nullptr;
 
-    // Camera identity tracking for cinematic detection
+    // Camera identity, for the per-transition diagnostic burst: a cinematic that
+    // swaps the primary camera shows up as a different pointer.
     ::reframework::API::Method* getGameObject = nullptr;
-    void* gameplayCameraGO = nullptr;
-    bool gameplayCameraLocked = false;
-
-    // Cursor visibility debounce (diagnostic only - not suppressing)
-    int cursorVisibleCount = 0;
-    int cursorHiddenCount = 0;
-    bool cursorSuppressing = false;
-    static constexpr int CURSOR_SUPPRESS_THRESHOLD = 3;
-    static constexpr int CURSOR_RESUME_THRESHOLD = 15;
 } g_state;
 
 void DiscoverManagerProbes() {
@@ -155,17 +155,28 @@ void DiscoverManagerProbes() {
       if (!ProbeManager(tdb, api, "MovieManager", methods, 4, g_state.isMoviePlaying, "MovieManager.isPlaying"))
           ProbeManager(tdb, api, "CinematicManager", methods, 4, g_state.isMoviePlaying, "CinematicManager.isPlaying"); }
 
-    // InputManager / PlayerManager
+    // InputManager / PlayerManager. Blocked-polarity spellings are probed first
+    // and win outright, so a title exposing both is read on the one whose true
+    // means "not gameplay" and the two can never disagree.
     { const char* types[] = {"InputManager", "InputSystem", "PlayerInputManager", "PlayerManager"};
-      const char* methods[] = {
+      const char* blockedMethods[] = {
           "get_isInputBlocked", "get_IsInputBlocked", "get_isBlocked",
-          "get_isLocked", "get_IsLocked", "get_isPlayerControllable",
-          "get_IsPlayerControllable", "get_isEnableInput", "get_IsEnableInput",
+          "get_isLocked", "get_IsLocked",
           "get_isDisableInput", "get_IsDisableInput",
+      };
+      const char* enabledMethods[] = {
+          "get_isPlayerControllable", "get_IsPlayerControllable",
+          "get_isEnableInput", "get_IsEnableInput",
       };
       for (auto tn : types) {
           if (g_state.isInputBlocked.method) break;
-          ProbeManager(tdb, api, tn, methods, 11, g_state.isInputBlocked, "InputBlock");
+          ProbeManager(tdb, api, tn, blockedMethods, 7, g_state.isInputBlocked, "InputBlocked");
+      }
+      if (!g_state.isInputBlocked.method) {
+          for (auto tn : types) {
+              if (g_state.isInputEnabled.method) break;
+              ProbeManager(tdb, api, tn, enabledMethods, 4, g_state.isInputEnabled, "InputEnabled");
+          }
       }
     }
 
@@ -230,34 +241,6 @@ void DiscoverManagerProbes() {
     LogInfo("=== End type/method discovery ===");
 }
 
-// The cursor debounce is diagnostic only. It used to suppress tracking, and the
-// suppression fired on the cursor flicker every RE Engine title emits during
-// normal play, so tracking dropped out mid-fight. The counters stay because the
-// diagnostic line is what identified that; nothing reads cursorSuppressing.
-static void RefreshCursorDiagnostic(bool diag) {
-    CURSORINFO ci = {};
-    ci.cbSize = sizeof(ci);
-    if (!GetCursorInfo(&ci)) return;
-
-    bool cursorVisible = (ci.flags & CURSOR_SHOWING) != 0;
-    if (cursorVisible) {
-        g_state.cursorVisibleCount++;
-        g_state.cursorHiddenCount = 0;
-    } else {
-        g_state.cursorHiddenCount++;
-        if (g_state.cursorHiddenCount >= g_state.CURSOR_RESUME_THRESHOLD) {
-            g_state.cursorVisibleCount = 0;
-            g_state.cursorSuppressing = false;
-        }
-    }
-    if (g_state.cursorVisibleCount >= g_state.CURSOR_SUPPRESS_THRESHOLD) {
-        g_state.cursorSuppressing = true;
-    }
-    if (diag) LogInfo("Diag: cursor=%d vis=%d hid=%d suppress=%d (NOT SUPPRESSING)",
-        cursorVisible ? 1 : 0, g_state.cursorVisibleCount,
-        g_state.cursorHiddenCount, g_state.cursorSuppressing ? 1 : 0);
-}
-
 bool ManagerProbeGameplayCheck(void* primaryCamera, bool diag, const char** reason) {
     const auto api = ::reframework::API::get().get();
     auto vmCtx = api->get_vm_context();
@@ -265,9 +248,8 @@ bool ManagerProbeGameplayCheck(void* primaryCamera, bool diag, const char** reas
     if (diag && g_state.getGameObject) {
         __try {
             auto camGO = g_state.getGameObject->call<void*>(vmCtx, primaryCamera);
-            LogInfo("Diag: cameraGO=%p (gameplay=%p, locked=%d)",
-                camGO, g_state.gameplayCameraGO, g_state.gameplayCameraLocked ? 1 : 0);
-        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            LogInfo("Diag: cameraGO=%p", camGO);
+        } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {}
     }
 
     if (g_state.getGlobalSpeed) {
@@ -278,7 +260,7 @@ bool ManagerProbeGameplayCheck(void* primaryCamera, bool diag, const char** reas
                 if (diag) LogInfo("Diag: GlobalSpeed=%.3f", speed);
                 if (speed <= 0.001f) { *reason = "time stopped"; return false; }
             }
-        } __except(EXCEPTION_EXECUTE_HANDLER) {
+        } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {
             g_state.getGlobalSpeed = nullptr;
         }
     }
@@ -293,7 +275,7 @@ bool ManagerProbeGameplayCheck(void* primaryCamera, bool diag, const char** reas
                 int32_t sitType = static_cast<int32_t>(ret.dword);
                 if (diag) LogInfo("Diag: situationType=%d", sitType);
                 if (sitType >= 0) { *reason = "situation type"; return false; }
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
+            } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {
                 g_state.situationType.failed = true;
             }
         }
@@ -309,13 +291,30 @@ bool ManagerProbeGameplayCheck(void* primaryCamera, bool diag, const char** reas
     if (InvokeBool(api, vmCtx, g_state.isEventPlaying, diag, "isEventPlaying")) { *reason = "event playing"; return false; }
     if (InvokeBool(api, vmCtx, g_state.isMoviePlaying, diag, "isMoviePlaying")) { *reason = "movie playing"; return false; }
     if (InvokeBool(api, vmCtx, g_state.isInputBlocked, diag, "isInputBlocked")) { *reason = "input blocked"; return false; }
+    // Enabled polarity: FALSE is the suppressing answer here, so an unanswered
+    // call must not be read as one. TryInvokeBool is what tells the two apart.
+    {
+        bool inputEnabled = false;
+        if (TryInvokeBool(api, vmCtx, g_state.isInputEnabled, diag, "isInputEnabled", inputEnabled) &&
+            !inputEnabled) {
+            *reason = "input disabled";
+            return false;
+        }
+    }
     if (InvokeBool(api, vmCtx, g_state.isCutscene, diag, "isCutscene")) { *reason = "cutscene"; return false; }
 
     if (InvokeInt(api, vmCtx, g_state.pauseBits, diag, "pauseBits") != 0) { *reason = "paused"; return false; }
 
-    if (g_state.flowStatus.method && !g_state.flowStatus.failed) {
-        uint32_t status = InvokeInt(api, vmCtx, g_state.flowStatus, diag, "flowStatus");
-        if (g_state.flowStatus.method && status < 2) { *reason = "game flow"; return false; }
+    // Status below 2 is a boot/load/title flow state. Only a status the game
+    // actually answered with counts: InvokeInt returns 0 for an absent singleton
+    // and for a faulted invoke alike, and 0 < 2, so the old form suppressed
+    // tracking with reason "game flow" on a measurement that never happened.
+    {
+        uint32_t status = 0;
+        if (TryInvokeInt(api, vmCtx, g_state.flowStatus, diag, "flowStatus", status) && status < 2) {
+            *reason = "game flow";
+            return false;
+        }
     }
 
     if (!InvokePointer(api, vmCtx, g_state.playerContext, diag, "playerCtx")) {
@@ -338,14 +337,12 @@ bool ManagerProbeGameplayCheck(void* primaryCamera, bool diag, const char** reas
                     blocked = lvl.dword > 0;
                 }
             }
-        } __except(EXCEPTION_EXECUTE_HANDLER) {
+        } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {
             g_state.guiOpenClose.failed = true;
             LogWarning("GuiOpenCloseData chain crashed, disabling");
         }
         if (blocked) { *reason = "menu input level"; return false; }
     }
-
-    RefreshCursorDiagnostic(diag);
 
     if (diag && g_state.guiManagerSingleton && g_state.guiProbeCount > 0) {
         void* guiMgr = api->get_managed_singleton(g_state.guiManagerSingleton);
@@ -355,23 +352,9 @@ bool ManagerProbeGameplayCheck(void* primaryCamera, bool diag, const char** reas
                     auto ret = g_state.guiProbes[i].method->invoke(
                         reinterpret_cast<::reframework::API::ManagedObject*>(guiMgr), EmptyArgs());
                     LogInfo("Diag: %s = %u", g_state.guiProbes[i].name, ret.dword);
-                } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {}
             }
         }
-    }
-
-    // Latch the GameObject the gameplay camera hangs off, once. Diagnostic: a
-    // cinematic that swaps the primary camera shows up as a different pointer
-    // in the per-transition diag burst above.
-    if (g_state.getGameObject && !g_state.gameplayCameraLocked) {
-        __try {
-            auto go = g_state.getGameObject->call<void*>(vmCtx, primaryCamera);
-            if (go) {
-                g_state.gameplayCameraGO = go;
-                g_state.gameplayCameraLocked = true;
-                LogInfo("Gameplay camera locked: GO=%p", go);
-            }
-        } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
 
     return true;

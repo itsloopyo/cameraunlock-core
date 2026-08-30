@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <type_traits>
 
 #include <Windows.h>
@@ -43,19 +44,38 @@ inline int AccessViolationFilter(DWORD code) {
 
 /// Copies a trivially-copyable value out of `addr`. False on access violation,
 /// with `out` left untouched.
+///
+/// The copy lands in a local first because a struct wider than the distance to
+/// the end of a committed page faults PART WAY THROUGH: a 64-byte read starting
+/// 32 bytes before a decommitted page copied 32 bytes and then raised, so
+/// assigning straight into `out` returned false having already overwritten half
+/// of it. The caller's usual response to false is to keep the value it had, and
+/// half of it was gone.
 template <typename T>
 bool SafeRead(std::uintptr_t addr, T& out) {
     static_assert(std::is_trivially_copyable<T>::value,
                   "SafeRead target must be trivially copyable");
+    alignas(T) unsigned char staging[sizeof(T)];
     __try {
-        out = *reinterpret_cast<const T*>(addr);
-        return true;
+        std::memcpy(staging, reinterpret_cast<const void*>(addr), sizeof(T));
     } __except (AccessViolationFilter(GetExceptionCode())) {
         return false;
     }
+    std::memcpy(&out, staging, sizeof(T));
+    return true;
 }
 
 /// Writes a trivially-copyable value to `addr`. False on access violation.
+///
+/// False does NOT mean nothing was written. A naturally-aligned scalar of at
+/// most a pointer's width is all-or-nothing - the store either retires or
+/// faults - but an aggregate that straddles the end of a committed page is
+/// copied until it reaches the unmapped one, and a 64-byte struct starting 32
+/// bytes short of that boundary leaves 32 bytes of the engine's memory already
+/// overwritten. There is no fix for that here: the fault is what tells us the
+/// range is bad, and by then the prefix is written. A caller that must not
+/// leave a half-updated engine struct behind has to write field-sized values
+/// itself and treat a mid-sequence false as "partially applied".
 template <typename T>
 bool SafeWrite(std::uintptr_t addr, const T& in) {
     static_assert(std::is_trivially_copyable<T>::value,

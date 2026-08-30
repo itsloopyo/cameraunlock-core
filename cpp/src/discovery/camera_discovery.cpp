@@ -1,6 +1,7 @@
 #include <cameraunlock/discovery/camera_discovery.h>
 #include <cameraunlock/discovery/probe_selection.h>
 #include <cameraunlock/hooks/hook_manager.h>
+#include <cameraunlock/memory/safe_memory.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -27,22 +28,21 @@ namespace {
 // between frees the object, so every read of it carries its own SEH frame
 // (which is also why these are free functions - MSVC rejects __try in a
 // function that needs C++ object unwinding).
+// ClassifyMemoryRegion walks the region itself, so this cannot go through
+// SafeRead - it is a call, not a dereference. The filter is still narrowed to
+// an access violation: a stack overflow or a C++ exception raised inside the
+// classifier belongs to whoever owns it.
 bool SafeClassify(uintptr_t addr, size_t size, LayoutReport& out) {
     __try {
         out = ClassifyMemoryRegion(reinterpret_cast<const void*>(addr), size);
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (memory::AccessViolationFilter(GetExceptionCode())) {
         return false;
     }
 }
 
 bool SafeReadFloat(uintptr_t addr, float& out) {
-    __try {
-        out = *reinterpret_cast<const float*>(addr);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    return memory::SafeRead(addr, out);
 }
 
 }  // namespace

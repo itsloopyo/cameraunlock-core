@@ -1,4 +1,5 @@
 #include <cameraunlock/reframework/camera_chain.h>
+#include <cameraunlock/memory/safe_memory.h>
 #include <cameraunlock/reframework/managed_utils.h>
 #include <cameraunlock/rendering/gui_marker_compensation.h>
 
@@ -47,7 +48,7 @@ void* CameraTransformResolver::ResolveCamera() {
         auto mv = CallMethod(m_getMainView, sm);
         if (!mv) return nullptr;
         return CallMethod(m_getPrimaryCamera, mv);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {
         return nullptr;
     }
 }
@@ -62,7 +63,7 @@ float CameraTransformResolver::ResolveFovDegrees(void* camera) {
             reinterpret_cast<::reframework::API::ManagedObject*>(cam), EmptyArgs());
         if (ret.exception_thrown) return 0.f;
         return rendering::ReadFovFromInvokeRet(ret.f, ret.d);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {
         return 0.f;
     }
 }
@@ -87,7 +88,7 @@ void* CameraTransformResolver::ResolveTransform(void** outCamera) {
         void* transform = CallMethod(m_getTransform, go);
         if (transform && outCamera) *outCamera = cam;
         return transform;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {
         return nullptr;
     }
 }

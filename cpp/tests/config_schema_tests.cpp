@@ -54,6 +54,20 @@ void TestNormalization() {
     Check(std::string(ResolveConfigKey("InvertTrackerZ")) == "invertpositionz", "InvertTrackerZ alias");
     Check(std::string(ResolveConfigKey("PivotUp")) == "trackerpivotup", "PivotUp alias");
 
+    // The bare section-dependent nouns. Matching throws the section away, so
+    // aliasing "Enabled" onto EnableOnStartup meant a file carrying [Position]
+    // Enabled=false - which 39 repos write - turned the whole mod off while
+    // leaving position tracking on, and said nothing. Resolving to nothing is
+    // the only answer this table can give without the section.
+    Check(ResolveConfigKey("Enabled") == nullptr, "a bare Enabled belongs to no concept");
+    Check(ResolveConfigKey("Enable") == nullptr, "nor does a bare Enable");
+    Check(std::string(ResolveConfigKey("EnableOnStartup")) == "enableonstartup",
+          "the master switch still has its own name");
+    Check(std::string(ResolveConfigKey("AutoEnable")) == "enableonstartup",
+          "and its unambiguous aliases");
+    Check(std::string(ResolveConfigKey("PositionEnabled")) == "positionenabled",
+          "and position tracking has its own");
+
     Check(cameraunlock::IsRetiredConfigKey(cameraunlock::config_keys::kSmoothing),
           "Smoothing is marked retired");
     Check(!cameraunlock::IsRetiredConfigKey(cameraunlock::config_keys::kLocalSmoothing),
@@ -62,7 +76,7 @@ void TestNormalization() {
 
 void TestRotationValues() {
     auto config = Apply({{"Port", "5555"},
-                         {"Enabled", "false"},
+                         {"AutoEnable", "false"},
                          {"yaw_sens", "1.5"},
                          {"PitchSensitivity", "0.5"},
                          {"SensitivityRoll", "2"},
@@ -70,7 +84,7 @@ void TestRotationValues() {
                          {"WorldLockedYaw", "false"}});
 
     Check(config.udp_port == 5555, "Port sets udp_port");
-    Check(!config.enable_on_startup, "Enabled=false clears enable_on_startup");
+    Check(!config.enable_on_startup, "AutoEnable=false clears enable_on_startup");
     Check(NearEq(config.yaw_sensitivity, 1.5f), "yaw_sens sets yaw sensitivity");
     Check(NearEq(config.pitch_sensitivity, 0.5f), "PitchSensitivity sets pitch sensitivity");
     Check(NearEq(config.roll_sensitivity, 2.0f), "SensitivityRoll sets roll sensitivity");
@@ -104,6 +118,15 @@ void TestPositionValues() {
     Check(config.position.invert_z, "InvertZ");
     Check(NearEq(config.tracker_pivot_forward, 0.08f), "PivotForward");
     Check(NearEq(config.tracker_pivot_up, 0.03f), "PivotUp");
+}
+
+// The one line that used to kill a whole mod. Every RE Engine plugin's shipped
+// HeadTracking.ini carries [Position] Enabled, and section-less matching read it
+// as the master switch.
+void TestAmbiguousEnabledIsIgnored() {
+    auto config = Apply({{"Enabled", "false"}});
+    Check(config.enable_on_startup, "a bare Enabled=false does not turn head tracking off");
+    Check(config.position_enabled, "and does not silently mean position tracking either");
 }
 
 void TestVerticalLimitMirroring() {
@@ -185,6 +208,7 @@ int RunConfigSchemaTests() {
     TestNormalization();
     TestRotationValues();
     TestPositionValues();
+    TestAmbiguousEnabledIsIgnored();
     TestVerticalLimitMirroring();
     TestSmoothingComposition();
     TestRejectedValues();

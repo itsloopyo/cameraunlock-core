@@ -9,6 +9,7 @@ int RunSessionTests();
 int RunSmoothingTests();
 int RunUnrealMathTests();
 int RunProjectionTests();
+int RunReMathTests();
 int RunInterpolatorTests();
 int RunProbeSelectionTests();
 int RunFileLogTests();
@@ -17,6 +18,9 @@ int RunOsTests();
 int RunValueGuardTests();
 int RunConfigSchemaTests();
 int RunSafeMemoryTests();
+#ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
+int RunPluginConfigMigrationTests();
+#endif
 
 // Simple test runner - expand with a proper framework if needed
 int main() {
@@ -33,6 +37,7 @@ int main() {
     failures += RunSmoothingTests();
     failures += RunUnrealMathTests();
     failures += RunProjectionTests();
+    failures += RunReMathTests();
     failures += RunInterpolatorTests();
     failures += RunProbeSelectionTests();
     failures += RunFileLogTests();
@@ -41,6 +46,9 @@ int main() {
     failures += RunValueGuardTests();
     failures += RunConfigSchemaTests();
     failures += RunSafeMemoryTests();
+#ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
+    failures += RunPluginConfigMigrationTests();
+#endif
 
     if (failures == 0) {
         std::cout << "All tests passed!\n";

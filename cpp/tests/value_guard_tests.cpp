@@ -193,6 +193,16 @@ void TestParseFloatStrict() {
     value = -1.0f;
     Check(!ParseFloatStrict("", value), "empty text is rejected");
 
+    // The two strtod behaviours TryParseConfigFloat, the other half of this
+    // library's config parsing, does not have. A number the two halves read
+    // differently is precisely the drift the shared schema exists to stop.
+    value = -1.0f;
+    Check(!ParseFloatStrict("0x10", value), "hexadecimal is rejected, not read as 16");
+    value = -1.0f;
+    Check(!ParseFloatStrict("0x1p3", value), "a hex float is rejected too");
+    value = -1.0f;
+    Check(!ParseFloatStrict(" 1.5", value), "leading whitespace is rejected");
+
     // Left for SanitizeFinite: these parse WHOLE, so the parser has no grounds
     // to refuse them and the range guard is where they are caught.
     value = 0.0f;

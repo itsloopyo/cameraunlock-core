@@ -8,16 +8,10 @@
 
 namespace cameraunlock::reframework {
 
-// Cap on distinct GUI element names recorded during discovery logging, so a
-// busy HUD cannot flood the log.
-constexpr size_t kMaxLoggedGuiNames = 200;
-
 static GuiMethods g_gui;
-static bool g_guiResolved = false;
 
 const GuiMethods& InitGuiMethods() {
-    if (g_guiResolved) return g_gui;
-    g_guiResolved = true;
+    if (g_gui.ready) return g_gui;
 
     const auto& api = ::reframework::API::get();
 
@@ -35,20 +29,36 @@ const GuiMethods& InitGuiMethods() {
 
     g_gui.ready = g_gui.findObjectsByType && g_gui.setPosition && g_gui.playObjectType;
 
-    LogInfo("GUI compensation methods: findObjects(Type)=%p setPos=%p getPos=%p globalPos=%p "
-            "setRot=%p screenSize=%p playObjType=%p",
-            (void*)g_gui.findObjectsByType, (void*)g_gui.setPosition, (void*)g_gui.getPosition,
-            (void*)g_gui.getGlobalPosition, (void*)g_gui.setRotation,
-            (void*)g_gui.viewGetScreenSize, g_gui.playObjectType);
-
-    if (!g_gui.ready) {
-        LogWarning("GUI compensation: findObjects / set_Position / PlayObject type missing - "
-                   "marker and reticle compensation are inert this session");
+    // Bounded to two lines for the process: the first attempt, which records
+    // what was missing, and the attempt that succeeds. Everything between is
+    // silent, so retrying every frame cannot bury the rest of the log.
+    static bool s_loggedAttempt = false;
+    if (g_gui.ready || !s_loggedAttempt) {
+        LogInfo("GUI compensation methods: findObjects(Type)=%p setPos=%p getPos=%p globalPos=%p "
+                "setRot=%p screenSize=%p playObjType=%p",
+                (void*)g_gui.findObjectsByType, (void*)g_gui.setPosition, (void*)g_gui.getPosition,
+                (void*)g_gui.getGlobalPosition, (void*)g_gui.setRotation,
+                (void*)g_gui.viewGetScreenSize, g_gui.playObjectType);
     }
+    if (!g_gui.ready && !s_loggedAttempt) {
+        LogWarning("GUI compensation: findObjects / set_Position / PlayObject type missing - "
+                   "retrying until the GUI system resolves");
+    }
+    s_loggedAttempt = true;
+
     return g_gui;
 }
 
-const GuiMethods& GetGuiMethods() { return g_gui; }
+// Resolution is latched on success only, and retried from here - the accessor
+// every GUI draw callback goes through - until it succeeds. The first attempt
+// now happens at the first BeginRendering, ahead of any GUI element being
+// drawn, and a title whose via.gui types are not populated by then would
+// otherwise be left with marker and reticle compensation inert for the whole
+// session off one early miss. Retried for the session rather than capped, for
+// the same reason the camera controller hook is: a cap turns a GUI system that
+// appears late into one that can never be found. Once resolved this is a bool
+// test, so the hot path pays nothing.
+const GuiMethods& GetGuiMethods() { return g_gui.ready ? g_gui : InitGuiMethods(); }
 
 // Instance getters invoked per GUI element per frame. Resolving the Method*
 // once and invoking it directly avoids the per-call get_type_definition() +

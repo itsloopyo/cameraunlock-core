@@ -346,7 +346,15 @@ HeadTrackingConfig HeadTrackingConfig::LoadFromFile(const std::string& path, con
     HeadTrackingConfig config;
     const auto values = ParseIniConfig(path);
     if (values.empty()) {
-        if (log) log("No config file found, using defaults");
+        if (log) {
+            // "No config file found" was printed for a file that exists and holds
+            // nothing this parser recognises - a user who had just written the
+            // file was told it was not there, and went looking in the wrong place.
+            std::ifstream probe(path);
+            log(probe.is_open()
+                    ? "Config file '" + path + "' has no key=value lines, using defaults"
+                    : "No config file at '" + path + "', using defaults");
+        }
         return config;
     }
     config.ApplyValues(values, log);

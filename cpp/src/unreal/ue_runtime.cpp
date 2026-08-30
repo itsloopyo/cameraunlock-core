@@ -1,5 +1,7 @@
 #include <cameraunlock/unreal/ue_runtime.h>
 
+#include <cameraunlock/memory/safe_memory.h>
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -28,73 +30,47 @@ std::uintptr_t ModuleBase() { return g_moduleBase; }
 std::uintptr_t ModuleEnd()  { return g_moduleEnd; }
 const UObjectGlobalsLayout& Layout() { return g_layout; }
 
+// All of these are cameraunlock::memory::SafeRead / SafeWrite under typed
+// names. They used to be hand-rolled __try blocks with a blanket
+// EXCEPTION_EXECUTE_HANDLER filter, which swallowed a stack overflow, a
+// breakpoint and any C++ exception passing through as readily as the access
+// violation they were written for. memory/safe_memory.h filters on
+// EXCEPTION_ACCESS_VIOLATION alone and leaves the destination untouched when a
+// wide read runs off the end of a committed page.
 bool SafeReadPtr(std::uintptr_t addr, std::uintptr_t& out) {
-    __try {
-        out = *reinterpret_cast<const std::uintptr_t*>(addr);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    return memory::SafeRead(addr, out);
 }
 
 bool SafeReadU32(std::uintptr_t addr, std::uint32_t& out) {
-    __try { out = *reinterpret_cast<const std::uint32_t*>(addr); return true; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return memory::SafeRead(addr, out);
 }
 
 bool SafeReadU16(std::uintptr_t addr, std::uint16_t& out) {
-    __try { out = *reinterpret_cast<const std::uint16_t*>(addr); return true; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return memory::SafeRead(addr, out);
 }
 
 bool SafeReadFloat(std::uintptr_t addr, float& out) {
-    __try { out = *reinterpret_cast<const float*>(addr); return true; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return memory::SafeRead(addr, out);
 }
 
 bool SafeWriteFloat(std::uintptr_t addr, float v) {
-    __try { *reinterpret_cast<float*>(addr) = v; return true; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return memory::SafeWrite(addr, v);
 }
 
 bool SafeReadFQuat(std::uintptr_t addr, FQuat4d& out) {
-    __try {
-        out = *reinterpret_cast<const FQuat4d*>(addr);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    return memory::SafeRead(addr, out);
 }
 
 bool SafeReadFVector(std::uintptr_t addr, FVector& out) {
-    __try {
-        out.X = *reinterpret_cast<const double*>(addr + 0);
-        out.Y = *reinterpret_cast<const double*>(addr + 8);
-        out.Z = *reinterpret_cast<const double*>(addr + 16);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    return memory::SafeRead(addr, out);
 }
 
 bool SafeWriteFQuat(std::uintptr_t addr, const FQuat4d& q) {
-    __try {
-        *reinterpret_cast<FQuat4d*>(addr) = q;
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    return memory::SafeWrite(addr, q);
 }
 
 bool SafeWriteFVector(std::uintptr_t addr, const FVector& v) {
-    __try {
-        *reinterpret_cast<double*>(addr + 0)  = v.X;
-        *reinterpret_cast<double*>(addr + 8)  = v.Y;
-        *reinterpret_cast<double*>(addr + 16) = v.Z;
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    return memory::SafeWrite(addr, v);
 }
 
 bool LooksLikePointer(std::uintptr_t v) {
@@ -112,10 +88,7 @@ bool LooksLikePointer(std::uintptr_t v) {
 // "PlayerCameraManager" is compared as "PlayerCameraManage" and matches
 // nothing. ASLR-dependent, so it presents as head tracking intermittently not
 // starting.
-static bool SafeReadU8(std::uintptr_t addr, std::uint8_t& out) {
-    __try { out = *reinterpret_cast<const std::uint8_t*>(addr); return true; }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
-}
+using memory::SafeReadU8;
 
 // FNamePool layout (UE5): Blocks[] at pool + kFNamePoolBlocks, block stride 2,
 // entry header uint16 (Len = header>>6, bIsWide = bit0), chars at +2.

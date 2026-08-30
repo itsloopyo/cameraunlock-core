@@ -23,18 +23,25 @@ struct GuiMethods {
     bool ready = false;
 };
 
-// Resolve the GUI methods on first call and log what was found. Subsequent
-// calls return the cached result.
+// Resolve the GUI methods and log what was found. A successful resolve is
+// cached and every later call returns it; a failed one is retried, because the
+// first call happens before any GUI element has been drawn.
 const GuiMethods& InitGuiMethods();
+
+// The resolved methods, resolving them first if that has not yet succeeded.
 const GuiMethods& GetGuiMethods();
 
 // Read a draw element's GameObject name. Returns false and leaves `out` empty
 // when the element has no reachable GameObject or name.
 bool ReadGuiElementName(::reframework::API::ManagedObject* element, char* out, size_t outSize);
 
-// Log each distinct GUI element name once, up to a bound. This is the discovery
-// aid every one of these titles' compensated element names came out of, so it
-// stays in the shipped build.
+// Cap on distinct GUI element names LogGuiElementNameOnce records, so a busy
+// HUD cannot flood the log.
+inline constexpr size_t kMaxLoggedGuiNames = 200;
+
+// Log each distinct GUI element name once, up to kMaxLoggedGuiNames. This is
+// the discovery aid every one of these titles' compensated element names came
+// out of, so it stays in the shipped build.
 void LogGuiElementNameOnce(const char* goName);
 
 // element.get_View(), or nullptr.

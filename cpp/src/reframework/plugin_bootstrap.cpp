@@ -7,8 +7,17 @@
 
 namespace cameraunlock::reframework {
 
-static cameraunlock::input::HotkeyPoller g_hotkeyPoller;
 static const PluginBootstrapDescriptor* g_descriptor = nullptr;
+
+// Constructed on first use from inside InitializePlugin, AFTER
+// PluginMod::Instance() has been built, so it is destroyed BEFORE the mod its
+// callbacks reach into. At namespace scope it was constructed first and torn
+// down last, which left the polling thread alive and calling
+// PluginMod::Instance() on an object whose destructor had already run.
+static cameraunlock::input::HotkeyPoller& HotkeyPoller() {
+    static cameraunlock::input::HotkeyPoller poller;
+    return poller;
+}
 
 static void OnPreBeginRendering() {
     if (g_descriptor->centerGameWindow) CenterGameWindowOnce();
@@ -36,10 +45,7 @@ bool InitializePlugin(const REFrameworkPluginInitializeParam* param,
 
     LogInfo("%s v%s - Plugin loaded", descriptor.mod.displayName, descriptor.mod.version);
 
-    if (!PluginMod::Instance().Initialize(descriptor.mod)) {
-        LogError("Mod initialization failed");
-        return false;
-    }
+    PluginMod::Instance().Initialize(descriptor.mod);
 
     InitCameraPipeline(descriptor.camera);
 
@@ -50,6 +56,7 @@ bool InitializePlugin(const REFrameworkPluginInitializeParam* param,
     }
 
     const PluginConfig& config = PluginMod::Instance().GetConfig();
+    auto& g_hotkeyPoller = HotkeyPoller();
     using cameraunlock::input::ChordGuarded;
     using cameraunlock::input::NavGuarded;
 

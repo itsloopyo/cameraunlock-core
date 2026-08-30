@@ -3,6 +3,7 @@
 // fails the build when this file is stale.
 
 using System.Collections.Generic;
+using System.Text;
 
 namespace CameraUnlock.Core.Config
 {
@@ -74,11 +75,9 @@ namespace CameraUnlock.Core.Config
             { "decoupleaim", "aimdecoupling" },
             { "decoupledaim", "aimdecoupling" },
             { "drawreticle", "showreticle" },
-            { "enable", "enableonstartup" },
             { "enable6dof", "positionenabled" },
             { "enableaimdecoupling", "aimdecoupling" },
             { "enableatstartup", "enableonstartup" },
-            { "enabled", "enableonstartup" },
             { "enabledonstartup", "enableonstartup" },
             { "enableheadtracking", "enableonstartup" },
             { "enablekey", "togglekey" },
@@ -238,16 +237,30 @@ namespace CameraUnlock.Core.Config
         private static readonly HashSet<string> Retired = new HashSet<string>
         {
             "smoothing",
-            "smoothing",
         };
 
         /// <summary>
-        /// Lowercases a key and strips '_' and '-'. Applied to both sides of a lookup.
+        /// Strips '_' and '-' and folds ASCII A-Z to lower case. Applied to both sides of a
+        /// lookup.
+        /// <para>
+        /// Deliberately not <c>ToLowerInvariant</c>: full Unicode case folding maps
+        /// U+212A KELVIN SIGN onto 'k', so a key spelled with one bound here and was
+        /// ignored by the C++ table, which folds A-Z and nothing else. Every spelling in
+        /// the schema is ASCII, so nothing accepted by the table needs the wider fold.
+        /// </para>
         /// </summary>
         public static string Normalize(string key)
         {
             if (key == null) return null;
-            return key.ToLowerInvariant().Replace("_", "").Replace("-", "");
+            var normalized = new StringBuilder(key.Length);
+            for (int i = 0; i < key.Length; i++)
+            {
+                char c = key[i];
+                if (c == '_' || c == '-') continue;
+                if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+                normalized.Append(c);
+            }
+            return normalized.ToString();
         }
 
         /// <summary>

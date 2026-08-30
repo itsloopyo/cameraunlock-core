@@ -12,6 +12,7 @@ add_executable(cameraunlock_tests
     smoothing_tests.cpp
     unreal_math_tests.cpp
     projection_tests.cpp
+    re_math_tests.cpp
     interpolator_tests.cpp
     probe_selection_tests.cpp
     file_log_tests.cpp
@@ -23,6 +24,14 @@ add_executable(cameraunlock_tests
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)
+
+# plugin_config.cpp lives in the optional REFramework target, so its tests can
+# only build when that target is configured.
+if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
+    target_sources(cameraunlock_tests PRIVATE plugin_config_migration_tests.cpp)
+    target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_reframework)
+    target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_REFRAMEWORK)
+endif()
 
 add_test(NAME cameraunlock_tests COMMAND cameraunlock_tests)
 

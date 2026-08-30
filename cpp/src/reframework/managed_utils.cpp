@@ -1,4 +1,5 @@
 #include <cameraunlock/reframework/managed_utils.h>
+#include <cameraunlock/memory/safe_memory.h>
 
 #include <windows.h>
 #include <span>
@@ -27,7 +28,7 @@ void ReadManagedString(void* stringPtr, char* out, size_t outSize) {
             out[i] = (c >= 32 && c < 127) ? (char)c : '?';
         }
         out[strLen] = 0;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    } __except(cameraunlock::memory::AccessViolationFilter(GetExceptionCode())) {
         out[0] = 0;
     }
 }

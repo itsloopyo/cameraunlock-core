@@ -345,14 +345,12 @@ public:
                 // the extrapolation cap halfway through every sample period and wobbled at
                 // 30Hz while the head rotation stayed smooth.
                 //
-                // This is one place the two ports deliberately DIVERGE, and the reason is
-                // where each centres. This port centres at the RECEIVER, so a recenter
-                // changes the raw values it reports and a Reset interpolator re-seeds on
-                // the next packet. The C# port centres at the PROCESSOR, leaving the raw
-                // stream untouched by a recenter - so the same filter would stall a
-                // re-Reset interpolator indefinitely for a user holding perfectly still,
-                // because no value would ever change to re-seed it. C# therefore keeps
-                // timestamp-only detection on both channels.
+                // Both ports run this filter; they only differ in how a freshly Reset
+                // interpolator gets re-seeded. This port centres at the RECEIVER, so a
+                // recenter changes the raw values it reports and the next packet re-seeds
+                // on its own. The C# port centres at the PROCESSOR, leaving the raw stream
+                // untouched, and carries a seed flag that each Reset clears so the next
+                // frame re-seeds whether or not a value moved.
                 bool isNewPosSample = isNewPacket &&
                     (rawX != m_lastRawPosX || rawY != m_lastRawPosY || rawZ != m_lastRawPosZ);
                 if (isNewPacket) {

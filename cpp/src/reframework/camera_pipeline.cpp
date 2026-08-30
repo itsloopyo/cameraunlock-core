@@ -1,6 +1,7 @@
 #include <cameraunlock/reframework/camera_pipeline.h>
 
 #include <cameraunlock/math/smoothing_utils.h>
+#include <cameraunlock/memory/safe_memory.h>
 #include <cameraunlock/reframework/camera_controller_hook.h>
 #include <cameraunlock/reframework/log_callback.h>
 #include <cameraunlock/reframework/managed_utils.h>
@@ -122,9 +123,8 @@ static int CameraUpdatePreHook(int argc, void** argv, REFrameworkTypeDefinitionH
 
     // RE Engine transform pointers can go stale across scene transitions; guard
     // the raw write so a torn-down camera never crashes the game.
-    __try {
-        *worldMat = g_saved.gameMatrix;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    cameraunlock::memory::SafeWrite(reinterpret_cast<std::uintptr_t>(worldMat),
+                                    g_saved.gameMatrix);
 
     return REFRAMEWORK_HOOK_CALL_ORIGINAL;
 }
@@ -134,10 +134,11 @@ static void CameraUpdatePostHook(void** ret_val, REFrameworkTypeDefinitionHandle
     Matrix4x4f* worldMat = GetCameraWorldMatrix();
     if (!worldMat) return;
 
-    __try {
-        g_saved.gameMatrix = *worldMat;
-        g_saved.hasGameMatrix = true;
-    } __except(EXCEPTION_EXECUTE_HANDLER) { return; }
+    if (!cameraunlock::memory::SafeRead(reinterpret_cast<std::uintptr_t>(worldMat),
+                                        g_saved.gameMatrix)) {
+        return;
+    }
+    g_saved.hasGameMatrix = true;
 
     static bool s_loggedOnce = false;
     if (!s_loggedOnce) {
@@ -198,6 +199,11 @@ static bool InitCachedFunctions() {
 }
 
 void InitCameraPipeline(const CameraPipelineDescriptor& descriptor) {
+    if (!descriptor.gate) {
+        LogError("CameraPipelineDescriptor::gate is null - the pipeline has no way to tell "
+                 "gameplay from a menu and stays inert");
+        return;
+    }
     g_descriptor = descriptor;
     static CameraControllerHooker hooker{
         g_descriptor.controllerCandidateTypes,
@@ -268,6 +274,7 @@ static void UpdateFrameProjection(const Matrix4x4f& clean, const Matrix4x4f& hea
     const float dt = PluginMod::Instance().GetLastDeltaTime();
 
     ComputeCleanToHeadRotation(clean, head, g_projection.cleanToHead);
+    ComputeCleanLocalPositionDelta(clean, head, g_projection.cleanLocalPositionDelta);
     g_projection.cleanToHeadValid = true;
 
     float rawFov = g_cameraResolver.ResolveFovDegrees(g_cachedCamera);
@@ -326,11 +333,29 @@ void CameraPipelinePreRender() {
     PluginMod::Instance().ProcessDeferredActions();
     if (g_descriptor.onFrameStart) g_descriptor.onFrameStart();
 
-    if (!InitCachedFunctions()) return;
-    if (!PluginMod::Instance().IsEnabled()) return;
-    if (!g_descriptor.gate->IsInGameplay()) return;
-    EnsureCameraControllerHooked();
+    // Null only when InitCameraPipeline refused the descriptor, or was never
+    // called at all - and g_controllerHooker is unset in the same breath, so
+    // this covers the InitCachedFunctions dereference below too.
+    if (!g_descriptor.gate) return;
+
+    // Counted here, ahead of the enable and gameplay gates, because it is what
+    // the per-frame memos below key on and GUI draw callbacks keep firing in a
+    // menu. Bumped only past the gates, the counter froze the moment the gate
+    // closed and GetMarkerFocalLengths then served the last gameplay frame's
+    // focal lengths for the rest of the session.
     ++g_renderFrame;
+
+    if (!InitCachedFunctions()) return;
+    if (!PluginMod::Instance().IsEnabled() || !g_descriptor.gate->IsInGameplay()) {
+        // Nothing was projected this frame, so nothing derived from a projection
+        // is usable. Leaving these true hands a GUI consumer in a menu the last
+        // gameplay frame's offsets.
+        g_projection.markerValid = false;
+        g_projection.aimValid = false;
+        g_projection.cleanToHeadValid = false;
+        return;
+    }
+    EnsureCameraControllerHooked();
 
     // Advance interpolation + smoothing once per render frame. Every
     // downstream consumer (ApplyHeadTracking, the projection below, GUI
@@ -368,22 +393,23 @@ void CameraPipelinePostRender() {
     Matrix4x4f* worldMat = GetCameraWorldMatrix();
     if (!worldMat) return;
 
-    __try {
-        // Restore the clean camera in full - POSITION as well as rotation.
-        //
-        // Keeping the head-tracked translation row left the game aiming off a
-        // leaned eye: the shot converges on the leaned eye's axis while the
-        // round leaves the un-leaned body, so reticle and impact agree at
-        // exactly one range and splay apart either side of it, swapping sides
-        // as the player walks through it. Head tracking must not move where
-        // bullets go.
-        //
-        // The lean still renders. Rotation is written and taken back at the
-        // same two hooks and rotation is what the player sees, so the camera
-        // matrix the renderer consumes is snapshotted between them; the
-        // translation row is in that same matrix.
-        *worldMat = g_cleanCameraMatrix.matrix;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    // Restore the clean camera in full - POSITION as well as rotation.
+    //
+    // Keeping the head-tracked translation row left the game aiming off a
+    // leaned eye: the shot converges on the leaned eye's axis while the round
+    // leaves the un-leaned body, so reticle and impact agree at exactly one
+    // range and splay apart either side of it, swapping sides as the player
+    // walks through it. Head tracking must not move where bullets go.
+    //
+    // The lean renders on the same terms as the rotation does. Both are written
+    // at the BeginRendering pre-callback and taken back at the post-callback,
+    // into the same transform world matrix, and rotation is demonstrably what
+    // the player sees - so whatever the renderer samples between the two hooks
+    // carries the translation row as well. This has not been observed in game;
+    // if the lean turns out not to render, the two hooks are the wrong pair for
+    // position and nothing here can tell us that.
+    cameraunlock::memory::SafeWrite(reinterpret_cast<std::uintptr_t>(worldMat),
+                                    g_cleanCameraMatrix.matrix);
 
     g_cachedTransform = nullptr;
     g_cachedCamera = nullptr;

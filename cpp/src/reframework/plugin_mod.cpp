@@ -20,10 +20,10 @@ PluginMod& PluginMod::Instance() {
     return instance;
 }
 
-bool PluginMod::Initialize(const PluginModDescriptor& descriptor) {
+void PluginMod::Initialize(const PluginModDescriptor& descriptor) {
     if (m_initialized.load()) {
         LogWarning("Mod already initialized");
-        return true;
+        return;
     }
 
     m_descriptor = descriptor;
@@ -70,12 +70,13 @@ bool PluginMod::Initialize(const PluginModDescriptor& descriptor) {
     // the forward range and limit_z_back restricts leaning back into the player.
     posSettings.limit_z = m_config.positionLimitZ;
     posSettings.limit_z_back = m_config.positionLimitZBack;
-    // Protocol-to-engine axis conversion. ApplyViewSpacePositionOffset takes
-    // offsetX and applies -offsetX, so leaving these false makes that single
-    // negation the whole conversion. Setting invert_x true cancels it and
-    // mirrors the lateral lean, which reads as working until something anchored
-    // in the world - a reticle, a marker - has to agree with it. Requiem's
-    // schema drops the INI keys entirely and so always lands here with false.
+    // These are the tracker-axis corrections, NOT the engine conversion. The
+    // protocol-to-engine flips both live in ApplyViewSpacePositionOffset, at the
+    // boundary, because they have to happen AFTER the processor's asymmetric
+    // clamp; setting one here instead lands before it and hands the forward lean
+    // the 0.10m backward budget. Leave them false unless the user's tracker
+    // genuinely reports an axis the other way round. Requiem's schema drops the
+    // INI keys entirely and so always lands here with false.
     posSettings.invert_x = m_config.positionInvertX;
     posSettings.invert_y = m_config.positionInvertY;
     posSettings.invert_z = m_config.positionInvertZ;
@@ -88,11 +89,6 @@ bool PluginMod::Initialize(const PluginModDescriptor& descriptor) {
     m_session.SetLocalSmoothing(m_config.localSmoothing);
     m_session.SetRemoteSmoothing(m_config.remoteSmoothing);
     m_session.SetPositionSettings(posSettings);
-
-    // The previous per-mod pipeline never engaged tracker pivot compensation
-    // (it passed radians to a degrees API, zeroing the artifact). Keep that
-    // tuning until pivot compensation is verified in game.
-    m_session.GetPositionProcessor().SetTrackerPivotForward(0.0f);
 
     LogInfo("Position: %s, sens=%.1f/%.1f/%.1f",
             IsPositionEnabled() ? "6DOF" : "3DOF",
@@ -121,7 +117,6 @@ bool PluginMod::Initialize(const PluginModDescriptor& descriptor) {
 
     m_initialized.store(true);
     LogInfo("Initialization complete");
-    return true;
 }
 
 void PluginMod::Shutdown() {
@@ -165,17 +160,20 @@ void PluginMod::Toggle() {
 }
 
 void PluginMod::CycleTrackingMode() {
-    switch (m_session.CycleMode()) {
-        case TrackingMode::RotationAndPosition:
-            LogInfo("Tracking mode: full (rotation + position)");
-            break;
-        case TrackingMode::RotationOnly:
-            LogInfo("Tracking mode: rotation only (position disabled)");
-            break;
-        case TrackingMode::PositionOnly:
-            LogInfo("Tracking mode: position only (rotation disabled)");
-            break;
-    }
+    // Two states, deliberately not the session's three-state ring. In a ring of
+    // three, one of the two modes a config can start in always has a
+    // rotation-dead successor: a user who set [Position] Enabled=false starts in
+    // RotationOnly, and their first press on a key labelled "toggle position"
+    // landed in PositionOnly and switched head rotation off. Head rotation is
+    // the feature, so PositionOnly is off this key and reachable through
+    // SetMode. A session that reached it another way still leaves by this key.
+    m_session.SetMode(m_session.GetMode() == TrackingMode::RotationAndPosition
+                          ? TrackingMode::RotationOnly
+                          : TrackingMode::RotationAndPosition);
+
+    LogInfo("Tracking mode: %s", m_session.GetMode() == TrackingMode::RotationAndPosition
+                                     ? "full (rotation + position)"
+                                     : "rotation only (position disabled)");
 }
 
 void PluginMod::ProcessDeferredActions() {

@@ -144,7 +144,12 @@ namespace VK {
 // Convert virtual key code to human-readable string
 const char* VirtualKeyToString(int vkCode);
 
-// Check if a virtual key code is valid for hotkey use
+// Whether a virtual key code is one of the keys this library's binding
+// convention uses: function keys, numpad, the nav cluster, Escape, Space,
+// letters and digits. An ALLOW list, and a narrower question than
+// config::IsBindableVirtualKey, which asks only whether GetAsyncKeyState can
+// ever report the key. Every code this admits passes that one too; the reverse
+// does not hold, and the two are meant to disagree.
 bool IsValidHotkeyCode(int vkCode);
 
 } // namespace cameraunlock::input

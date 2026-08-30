@@ -37,8 +37,8 @@ struct PluginBootstrapDescriptor {
 // BeginRendering and GUI callbacks, and bind the hotkeys.
 //
 // The descriptor must outlive the process (its function pointers and strings
-// are retained). Returns false when mod initialization fails, which is what
-// the export should return.
+// are retained). Always returns true - nothing in plugin startup is fatal, and
+// the export needs a bool - so a caller has nothing to branch on.
 bool InitializePlugin(const REFrameworkPluginInitializeParam* param,
                       const PluginBootstrapDescriptor& descriptor);
 

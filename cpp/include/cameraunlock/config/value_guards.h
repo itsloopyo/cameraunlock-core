@@ -67,6 +67,14 @@ float SanitizePositionLimit(const char* key, float value, float fallback, LogSin
 /// only defines 0x01..0xFE, so a typo like ToggleKey=0x230 registers a hotkey
 /// that can never fire and the key silently does nothing.
 ///
+/// Not the same question as input::IsValidHotkeyCode, and the two deliberately
+/// disagree. This one is a DENY list - everything the OS can poll except the
+/// modifiers - and answers "can this binding ever fire", which is what a config
+/// reader needs. IsValidHotkeyCode is an ALLOW list of the keys the fleet's
+/// binding convention actually uses (function keys, numpad, nav cluster,
+/// letters, digits) and answers "is this a sensible thing to offer a user".
+/// Every key the allow list admits passes here; the reverse does not hold.
+///
 /// The modifiers are refused for a second reason: Ctrl and Shift are what the
 /// chord guard tests, so an action bound to one either never fires (a nav
 /// binding is suppressed while the chord is held) or fires on every press of
@@ -74,12 +82,20 @@ float SanitizePositionLimit(const char* key, float value, float fallback, LogSin
 /// binding on it reads as a modifier the user expects to combine, not press.
 bool IsBindableVirtualKey(int vk);
 
-/// True only when the WHOLE of `text` is a number. "0,15" and "1.5 scale" are
-/// rejected; "nan" and "1e400" parse and are left for SanitizeFinite.
+/// True only when the WHOLE of `text` is a decimal number. "0,15", "1.5 scale",
+/// "0x10" and anything with leading whitespace are rejected. "nan", "inf" and
+/// "1e400" DO parse and are left for SanitizeFinite - that is the one point
+/// where this and TryParseConfigFloat differ, and it is deliberate: the guards
+/// want the non-finite value in hand so they can name it in the diagnostic.
 bool ParseFloatStrict(const std::string& text, float& out);
 
-/// The raw text of a key with any inline comment and surrounding whitespace
-/// removed. Empty means the key is absent or holds nothing.
+/// The raw text of a key, truncated at the first ';' or '#' and then trimmed.
+/// Empty means the key is absent, holds nothing, or is entirely a comment.
+///
+/// The truncation is unconditional, so this is a reader for the numeric keys the
+/// guards below parse, not a general string accessor: a path value like
+/// `D:\Games\Half#Life` comes back as `D:\Games\Half`. Read a value that may
+/// legitimately contain ';' or '#' with IniReader::ReadString instead.
 std::string ReadRawValue(const IniReader& ini, const char* section, const char* key);
 
 /// Reads a float that must parse whole, then sanitizes it into [lo, hi] via

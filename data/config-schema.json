@@ -27,8 +27,8 @@
       "reason": "4 repos use [Hotkeys] Position for the position toggle key, but the bare word is too generic to claim section-lessly. PositionToggleKey, TogglePositionKey and PositionKey are aliased instead."
     },
     {
-      "spellings": ["Amount", "Factor", "Scale", "Limit", "Enabled"],
-      "reason": "Bare nouns whose meaning comes entirely from their section. Enabled is the one exception: it is aliased onto EnableOnStartup because that is what all 25 repos using it mean, and the 39 repos writing [Position] Enabled spell the concept PositionEnabled in code."
+      "spellings": ["Amount", "Factor", "Scale", "Limit", "Enabled", "Enable"],
+      "reason": "Bare nouns whose meaning comes entirely from their section. Enabled and Enable were briefly excepted and aliased onto EnableOnStartup, on the grounds that the 39 repos writing [Position] Enabled spell the concept PositionEnabled in code. They do in code; they do not in the FILE, which is what this table reads. Matching is section-less, so a file carrying [Position] Enabled=false resolved it to EnableOnStartup and turned the whole mod off with position tracking left on, silently. [Flashlight] Enabled did the same. Unaliased, that line now resolves to nothing and is ignored, which leaves the master switch on its default - the safe direction, and a mod that wants the [General] key read has EnableOnStartup, AutoEnable, StartEnabled and three more spellings to name it by."
     },
     {
       "spellings": ["PositionSmoothing"],
@@ -66,7 +66,7 @@
       "key": "EnableOnStartup",
       "type": "bool",
       "default": true,
-      "aliases": ["Enabled", "Enable", "EnableAtStartup", "EnabledOnStartup", "StartEnabled", "EnableHeadTracking", "AutoEnable"],
+      "aliases": ["EnableAtStartup", "EnabledOnStartup", "StartEnabled", "EnableHeadTracking", "AutoEnable"],
       "doc": "Whether head tracking is active when the game loads."
     },
     {
