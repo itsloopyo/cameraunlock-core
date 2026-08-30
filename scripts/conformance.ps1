@@ -493,6 +493,18 @@ function Test-CorePin {
         }
     }
 
+    # The release script is where a submodule bump gets its notices correction.
+    # Without that call the FAIL above returns the moment anyone bumps the
+    # pointer, and in CI it lands after the tag has already been pushed.
+    # Read the script's presence from the PINNED commit, not the submodule
+    # working tree: a repo whose bump is still uncommitted would otherwise be
+    # told to call a script nobody who clones it has.
+    $release = Join-Path $Root 'scripts\release.ps1'
+    $pinnedSync = & git -C (Join-Path $Root 'cameraunlock-core') ls-tree --name-only $pin -- scripts/sync-core-notices.ps1
+    if ($pinnedSync -and (Test-Path $release) -and ((Read-TextFile $release) -notmatch 'sync-core-notices')) {
+        Add-Finding $Name 'core-pin' 'FAIL' 'scripts/release.ps1 never re-syncs THIRD-PARTY-NOTICES.md against the pinned cameraunlock-core commit, so the next submodule bump breaks the release'
+    }
+
     $when = & git -C $CoreRoot show -s --format=%cI $pin 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $when) {
         Add-Finding $Name 'core-pin' 'WARN' "the pinned core commit $($pin.Substring(0, 8)) is not in this core checkout, so its age cannot be read"
