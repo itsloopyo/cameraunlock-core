@@ -11,6 +11,13 @@ namespace CameraUnlock.Core.Config
     /// <summary>
     /// Default implementation of IHeadTrackingConfig that can be loaded from an INI file
     /// or configured programmatically.
+    /// <para>
+    /// Key matching runs through <see cref="ConfigKeySchema"/>, which is generated from
+    /// data/config-schema.json together with the C++ table, so both halves of the library
+    /// accept exactly the same spellings. Matching is section-less: a key is lowercased and
+    /// stripped of '_' and '-', so the section a key sits under decides file layout and
+    /// documentation, not parsing.
+    /// </para>
     /// </summary>
     public class HeadTrackingConfigData : IHeadTrackingConfig
     {
@@ -35,6 +42,18 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         public string YawModeKeyName { get; set; } = "PageDown";
 
+        /// <summary>Key name for toggling positional (6DOF) tracking (e.g., "PageUp").</summary>
+        public string PositionToggleKeyName { get; set; } = "PageUp";
+
+        /// <summary>Key name for toggling the decoupled aim reticle (e.g., "Insert").</summary>
+        public string ReticleToggleKeyName { get; set; } = "Insert";
+
+        /// <summary>
+        /// Key name for cycling the tracking mode. Empty by default: a mod that has no mode
+        /// cycle leaves it unbound rather than advertising a key that does nothing.
+        /// </summary>
+        public string CycleTrackingModeKeyName { get; set; } = string.Empty;
+
         /// <summary>
         /// Yaw mode at startup. true = horizon-locked yaw (rotates around world up
         /// regardless of pitch). false = camera-local yaw (rotates around the camera's
@@ -56,6 +75,29 @@ namespace CameraUnlock.Core.Config
 
         /// <inheritdoc />
         public float RemoteSmoothing { get; set; } = SmoothingUtils.DefaultRemoteSmoothing;
+
+        /// <summary>Whether positional (6DOF) tracking is applied.</summary>
+        public bool PositionEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Positional sensitivity, limits and inversion. The smoothing pair on this struct is
+        /// recomposed from <see cref="LocalSmoothing"/> and <see cref="RemoteSmoothing"/> at
+        /// the end of <see cref="ApplyValues"/>, so position and rotation cannot end up on
+        /// different smoothing without a second set of keys nobody asked for.
+        /// </summary>
+        public PositionSettings Position { get; set; } = PositionSettings.Default;
+
+        /// <summary>
+        /// Metres from the neck pivot forward to the point the tracker watches. Feeds
+        /// <see cref="CameraUnlock.Core.Processing.PositionProcessor.TrackerPivotForward"/>.
+        /// </summary>
+        public float TrackerPivotForward { get; set; } = 0.0f;
+
+        /// <summary>
+        /// Metres from the neck pivot up to the point the tracker watches. Feeds
+        /// <see cref="CameraUnlock.Core.Processing.PositionProcessor.TrackerPivotUp"/>.
+        /// </summary>
+        public float TrackerPivotUp { get; set; } = 0.0f;
 
         /// <summary>
         /// Creates a new config with default values.
@@ -114,9 +156,23 @@ namespace CameraUnlock.Core.Config
             bool invertPitch = Sensitivity.InvertPitch;
             bool invertRoll = Sensitivity.InvertRoll;
 
+            float posSensX = Position.SensitivityX;
+            float posSensY = Position.SensitivityY;
+            float posSensZ = Position.SensitivityZ;
+            float limitX = Position.LimitX;
+            float limitY = Position.LimitY;
+            float limitYDown = Position.LimitYDown;
+            float limitZ = Position.LimitZ;
+            float limitZBack = Position.LimitZBack;
+            bool invertPosX = Position.InvertX;
+            bool invertPosY = Position.InvertY;
+            bool invertPosZ = Position.InvertZ;
+
             foreach (var kvp in values)
             {
-                string key = kvp.Key.ToLowerInvariant().Replace("_", "").Replace("-", "");
+                string key = ConfigKeySchema.Resolve(kvp.Key);
+                if (key == null) continue;
+
                 string value = kvp.Value;
 
                 int intVal;
@@ -125,8 +181,7 @@ namespace CameraUnlock.Core.Config
 
                 switch (key)
                 {
-                    case "udpport":
-                    case "port":
+                    case ConfigKeySchema.Keys.UdpPort:
                         // Range-checked here rather than left to the socket. An
                         // out-of-range port reached UdpClient's constructor and threw
                         // ArgumentOutOfRangeException at plugin Awake(), killing the mod
@@ -147,91 +202,92 @@ namespace CameraUnlock.Core.Config
                             {
                                 log?.Invoke(string.Format(
                                     "Config key '{0}' has an out-of-range value '{1}' (expected 1-65535) - using {2}",
-                                    key, value, UdpPort.ToString(CultureInfo.InvariantCulture)));
+                                    kvp.Key, value, UdpPort.ToString(CultureInfo.InvariantCulture)));
                             }
                         }
                         break;
 
-                    case "enableonstartup":
-                    case "enabled":
+                    case ConfigKeySchema.Keys.EnableOnStartup:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             EnableOnStartup = boolVal;
                         break;
 
-                    case "yawsensitivity":
-                    case "yawsens":
+                    case ConfigKeySchema.Keys.YawSensitivity:
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
                             yawSens = floatVal;
                         break;
 
-                    case "pitchsensitivity":
-                    case "pitchsens":
+                    case ConfigKeySchema.Keys.PitchSensitivity:
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
                             pitchSens = floatVal;
                         break;
 
-                    case "rollsensitivity":
-                    case "rollsens":
+                    case ConfigKeySchema.Keys.RollSensitivity:
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
                             rollSens = floatVal;
                         break;
 
-                    case "invertyaw":
+                    case ConfigKeySchema.Keys.InvertYaw:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             invertYaw = boolVal;
                         break;
 
-                    case "invertpitch":
+                    case ConfigKeySchema.Keys.InvertPitch:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             invertPitch = boolVal;
                         break;
 
-                    case "invertroll":
+                    case ConfigKeySchema.Keys.InvertRoll:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             invertRoll = boolVal;
                         break;
 
-                    case "recenterkey":
-                    case "centerkey":
+                    case ConfigKeySchema.Keys.RecenterKey:
                         RecenterKeyName = value;
                         break;
 
-                    case "togglekey":
+                    case ConfigKeySchema.Keys.ToggleKey:
                         ToggleKeyName = value;
                         break;
 
-                    case "yawmodekey":
+                    case ConfigKeySchema.Keys.YawModeKey:
                         YawModeKeyName = value;
                         break;
 
-                    case "worldspaceyaw":
-                    case "horizonlockedyaw":
+                    case ConfigKeySchema.Keys.PositionToggleKey:
+                        PositionToggleKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.ReticleToggleKey:
+                        ReticleToggleKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.CycleTrackingModeKey:
+                        CycleTrackingModeKeyName = value;
+                        break;
+
+                    case ConfigKeySchema.Keys.WorldSpaceYaw:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             WorldSpaceYaw = boolVal;
                         break;
 
-                    case "aimdecoupling":
-                    case "decoupleaim":
-                    case "aimdecouple":
+                    case ConfigKeySchema.Keys.AimDecoupling:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             AimDecouplingEnabled = boolVal;
                         break;
 
-                    case "showreticle":
-                    case "showdecoupledreticle":
-                    case "showcrosshair":
+                    case ConfigKeySchema.Keys.ShowReticle:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             ShowDecoupledReticle = boolVal;
                         break;
 
-                    case "reticlecolor":
-                    case "crosshaircolor":
+                    case ConfigKeySchema.Keys.ReticleColor:
                         float[] color;
                         if (ConfigParsingUtils.TryParseColor(value, out color))
                             ReticleColorRgba = color;
                         break;
 
-                    case "localsmoothing":
+                    case ConfigKeySchema.Keys.LocalSmoothing:
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
                         {
                             LocalSmoothing = MathUtils.Clamp01(floatVal);
@@ -243,7 +299,7 @@ namespace CameraUnlock.Core.Config
                         }
                         break;
 
-                    case "remotesmoothing":
+                    case ConfigKeySchema.Keys.RemoteSmoothing:
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
                         {
                             RemoteSmoothing = MathUtils.Clamp01(floatVal);
@@ -255,14 +311,88 @@ namespace CameraUnlock.Core.Config
                         }
                         break;
 
-                    case "smoothing":
-                    case "smoothingfactor":
+                    case ConfigKeySchema.Keys.PositionEnabled:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            PositionEnabled = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionSensitivityX:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            posSensX = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionSensitivityY:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            posSensY = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionSensitivityZ:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            posSensZ = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitX:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            limitX = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitY:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            limitY = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitYDown:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            limitYDown = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitZ:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            limitZ = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionLimitZBack:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            limitZBack = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertPositionX:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertPosX = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertPositionY:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertPosY = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.InvertPositionZ:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            invertPosZ = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.TrackerPivotForward:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            TrackerPivotForward = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.TrackerPivotUp:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                            TrackerPivotUp = floatVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.Smoothing:
                         WarnRetiredSmoothingKey(log, kvp.Key);
                         break;
                 }
             }
 
             Sensitivity = new SensitivitySettings(yawSens, pitchSens, rollSens, invertYaw, invertPitch, invertRoll);
+            Position = new PositionSettings(
+                posSensX, posSensY, posSensZ,
+                limitX, limitY, limitYDown, limitZ, limitZBack,
+                LocalSmoothing, RemoteSmoothing,
+                invertPosX, invertPosY, invertPosZ);
         }
 
 #if NULLABLE_ENABLED

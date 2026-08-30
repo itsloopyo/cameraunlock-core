@@ -8,7 +8,11 @@
 namespace cameraunlock {
 
 /// OpenTrack packet constants and parsing utilities.
-/// Packet layout: 6 doubles (48 bytes) = X, Y, Z (meters), Yaw, Pitch, Roll (degrees).
+/// Packet layout: 6 doubles (48 bytes) = X, Y, Z, Yaw, Pitch, Roll.
+/// The wire carries position in CENTIMETRES and rotation in degrees. TryParsePosition
+/// multiplies by kCmToMeters, so PositionData comes out in metres; every limit and
+/// sensitivity downstream is metric. A port that reads the wire values as metres is
+/// out by 100x and saturates the limits on a few millimetres of lean.
 struct OpenTrackPacket {
     /// Minimum packet size (6 doubles = 48 bytes).
     static constexpr size_t kMinPacketSize = 48;

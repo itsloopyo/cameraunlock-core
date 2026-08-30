@@ -15,6 +15,7 @@ int RunFileLogTests();
 int RunHotkeyTests();
 int RunOsTests();
 int RunValueGuardTests();
+int RunConfigSchemaTests();
 int RunSafeMemoryTests();
 
 // Simple test runner - expand with a proper framework if needed
@@ -38,6 +39,7 @@ int main() {
     failures += RunHotkeyTests();
     failures += RunOsTests();
     failures += RunValueGuardTests();
+    failures += RunConfigSchemaTests();
     failures += RunSafeMemoryTests();
 
     if (failures == 0) {

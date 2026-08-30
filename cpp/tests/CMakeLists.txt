@@ -18,6 +18,7 @@ add_executable(cameraunlock_tests
     hotkey_tests.cpp
     os_tests.cpp
     value_guard_tests.cpp
+    config_schema_tests.cpp
     safe_memory_tests.cpp
 )
 

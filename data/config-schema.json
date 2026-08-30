@@ -1,0 +1,336 @@
+{
+  "schema_version": 1,
+  "_comment": [
+    "Canonical head-tracking config schema, shared by the C# and C++ halves of the",
+    "library. scripts/generate-config-schema.mjs turns this into",
+    "csharp/src/CameraUnlock.Core/Config/ConfigKeySchema.g.cs and",
+    "cpp/include/cameraunlock/config/config_key_schema.g.h; `pixi run check-config-schema`",
+    "fails when either generated file is stale, which is what stops the two languages",
+    "drifting apart the way the fleet's hand-rolled key spellings did.",
+    "",
+    "Matching is SECTION-LESS and case-insensitive: a key is lowercased and stripped of",
+    "'_' and '-' before lookup, so Network.UDPPort, udp_port and Udp-Port all resolve to",
+    "the same concept. `section` and `key` below therefore describe the FILE LAYOUT and",
+    "the documentation, not the parse. Every spelling under `aliases` keeps working, so",
+    "adding a canonical name never breaks an existing user's config.",
+    "",
+    "Adding a concept or an alias is safe. Removing one, or moving an alias between",
+    "concepts, is a breaking change for every config file already on a user's disk."
+  ],
+  "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle"],
+  "concepts": [
+    {
+      "id": "UdpPort",
+      "section": "Network",
+      "key": "UdpPort",
+      "type": "int",
+      "default": 4242,
+      "aliases": ["Port", "OpenTrackPort", "ListenPort", "TrackingPort"],
+      "doc": "UDP port the OpenTrack receiver binds. 1-65535."
+    },
+    {
+      "id": "EnableOnStartup",
+      "section": "General",
+      "key": "EnableOnStartup",
+      "type": "bool",
+      "default": true,
+      "aliases": ["Enabled", "Enable", "EnableAtStartup", "EnabledOnStartup", "StartEnabled", "EnableHeadTracking"],
+      "doc": "Whether head tracking is active when the game loads."
+    },
+    {
+      "id": "YawSensitivity",
+      "section": "Sensitivity",
+      "key": "YawSensitivity",
+      "type": "float",
+      "default": 1.0,
+      "aliases": ["YawSens", "SensitivityYaw", "YawScale", "YawMultiplier"],
+      "doc": "Yaw (left/right) sensitivity multiplier."
+    },
+    {
+      "id": "PitchSensitivity",
+      "section": "Sensitivity",
+      "key": "PitchSensitivity",
+      "type": "float",
+      "default": 1.0,
+      "aliases": ["PitchSens", "SensitivityPitch", "PitchScale", "PitchMultiplier"],
+      "doc": "Pitch (up/down) sensitivity multiplier."
+    },
+    {
+      "id": "RollSensitivity",
+      "section": "Sensitivity",
+      "key": "RollSensitivity",
+      "type": "float",
+      "default": 1.0,
+      "aliases": ["RollSens", "SensitivityRoll", "RollScale", "RollMultiplier"],
+      "doc": "Roll (tilt) sensitivity multiplier."
+    },
+    {
+      "id": "InvertYaw",
+      "section": "Inversion",
+      "key": "InvertYaw",
+      "type": "bool",
+      "default": false,
+      "aliases": ["YawInvert", "InvertYawAxis"],
+      "doc": "Invert the yaw axis."
+    },
+    {
+      "id": "InvertPitch",
+      "section": "Inversion",
+      "key": "InvertPitch",
+      "type": "bool",
+      "default": false,
+      "aliases": ["PitchInvert", "InvertPitchAxis"],
+      "doc": "Invert the pitch axis."
+    },
+    {
+      "id": "InvertRoll",
+      "section": "Inversion",
+      "key": "InvertRoll",
+      "type": "bool",
+      "default": false,
+      "aliases": ["RollInvert", "InvertRollAxis"],
+      "doc": "Invert the roll axis."
+    },
+    {
+      "id": "LocalSmoothing",
+      "section": "Smoothing",
+      "key": "LocalSmoothing",
+      "type": "float",
+      "default": 0.0,
+      "aliases": ["SmoothingLocal"],
+      "doc": "Smoothing applied when the tracker runs on this machine. 0-1."
+    },
+    {
+      "id": "RemoteSmoothing",
+      "section": "Smoothing",
+      "key": "RemoteSmoothing",
+      "type": "float",
+      "default": 0.15,
+      "aliases": ["SmoothingRemote"],
+      "doc": "Smoothing applied when the tracker is a device on the network. 0-1."
+    },
+    {
+      "id": "WorldSpaceYaw",
+      "section": "General",
+      "key": "WorldSpaceYaw",
+      "type": "bool",
+      "default": true,
+      "aliases": ["HorizonLockedYaw", "WorldLockedYaw", "HorizonLock", "LockHorizon", "WorldYaw"],
+      "doc": "true rotates yaw around world up (horizon locked); false around the camera's own up."
+    },
+    {
+      "id": "AimDecoupling",
+      "section": "General",
+      "key": "AimDecoupling",
+      "type": "bool",
+      "default": true,
+      "aliases": ["DecoupleAim", "AimDecouple", "EnableAimDecoupling", "DecoupledAim"],
+      "doc": "Keep the aim direction on the mouse rather than on the head."
+    },
+    {
+      "id": "ShowReticle",
+      "section": "Reticle",
+      "key": "ShowReticle",
+      "type": "bool",
+      "default": true,
+      "aliases": ["ShowDecoupledReticle", "ShowCrosshair", "ShowDecoupledCrosshair", "ReticleEnabled", "DrawReticle"],
+      "doc": "Draw the decoupled aim reticle."
+    },
+    {
+      "id": "ReticleColor",
+      "section": "Reticle",
+      "key": "ReticleColor",
+      "type": "color",
+      "default": [1.0, 1.0, 1.0, 1.0],
+      "aliases": ["CrosshairColor", "ReticleColour", "CrosshairColour"],
+      "doc": "Reticle RGBA as four 0-1 floats, comma separated."
+    },
+    {
+      "id": "PositionEnabled",
+      "section": "Position",
+      "key": "PositionEnabled",
+      "type": "bool",
+      "default": true,
+      "aliases": ["EnablePosition", "PositionTracking", "EnablePositionTracking", "PositionTrackingEnabled", "Enable6Dof", "SixDofEnabled"],
+      "doc": "Whether positional (6DOF) tracking is applied."
+    },
+    {
+      "id": "PositionSensitivityX",
+      "section": "Position",
+      "key": "PositionSensitivityX",
+      "type": "float",
+      "default": 1.0,
+      "aliases": ["SensitivityX", "SensX", "PositionSensX", "XSensitivity"],
+      "doc": "Lateral position sensitivity multiplier."
+    },
+    {
+      "id": "PositionSensitivityY",
+      "section": "Position",
+      "key": "PositionSensitivityY",
+      "type": "float",
+      "default": 1.0,
+      "aliases": ["SensitivityY", "SensY", "PositionSensY", "YSensitivity"],
+      "doc": "Vertical position sensitivity multiplier."
+    },
+    {
+      "id": "PositionSensitivityZ",
+      "section": "Position",
+      "key": "PositionSensitivityZ",
+      "type": "float",
+      "default": 1.0,
+      "aliases": ["SensitivityZ", "SensZ", "PositionSensZ", "ZSensitivity"],
+      "doc": "Depth position sensitivity multiplier."
+    },
+    {
+      "id": "PositionLimitX",
+      "section": "Position",
+      "key": "PositionLimitX",
+      "type": "float",
+      "default": 0.30,
+      "aliases": ["LimitX", "MaxX", "PositionMaxX"],
+      "doc": "Maximum lateral displacement in metres, applied symmetrically."
+    },
+    {
+      "id": "PositionLimitY",
+      "section": "Position",
+      "key": "PositionLimitY",
+      "type": "float",
+      "default": 0.20,
+      "aliases": ["LimitY", "MaxY", "PositionMaxY", "LimitYUp", "PositionLimitYUp"],
+      "doc": "Maximum UPWARD displacement in metres."
+    },
+    {
+      "id": "PositionLimitYDown",
+      "section": "Position",
+      "key": "PositionLimitYDown",
+      "type": "float",
+      "default": 0.20,
+      "aliases": ["LimitYDown", "MaxYDown", "PositionMaxYDown", "LimitDown"],
+      "doc": "Maximum DOWNWARD displacement in metres. Usually tighter than the upward limit so the camera does not clip into the player body."
+    },
+    {
+      "id": "PositionLimitZ",
+      "section": "Position",
+      "key": "PositionLimitZ",
+      "type": "float",
+      "default": 0.40,
+      "aliases": ["LimitZ", "MaxZ", "PositionMaxZ", "LimitZForward", "PositionLimitZForward"],
+      "doc": "Maximum FORWARD displacement in metres. Negative z is forward, so this is the lower bound of the z clamp."
+    },
+    {
+      "id": "PositionLimitZBack",
+      "section": "Position",
+      "key": "PositionLimitZBack",
+      "type": "float",
+      "default": 0.10,
+      "aliases": ["LimitZBack", "MaxZBack", "PositionMaxZBack", "LimitZBackward", "PositionLimitZBackward"],
+      "doc": "Maximum BACKWARD displacement in metres, the upper bound of the z clamp."
+    },
+    {
+      "id": "InvertPositionX",
+      "section": "Inversion",
+      "key": "InvertPositionX",
+      "type": "bool",
+      "default": false,
+      "aliases": ["InvertX", "PositionInvertX", "InvertTrackerX"],
+      "doc": "Invert the lateral position axis."
+    },
+    {
+      "id": "InvertPositionY",
+      "section": "Inversion",
+      "key": "InvertPositionY",
+      "type": "bool",
+      "default": false,
+      "aliases": ["InvertY", "PositionInvertY", "InvertTrackerY"],
+      "doc": "Invert the vertical position axis."
+    },
+    {
+      "id": "InvertPositionZ",
+      "section": "Inversion",
+      "key": "InvertPositionZ",
+      "type": "bool",
+      "default": false,
+      "aliases": ["InvertZ", "PositionInvertZ", "InvertTrackerZ"],
+      "doc": "Invert the depth position axis. An engine whose camera-local +z is forward negates at the boundary instead of setting this."
+    },
+    {
+      "id": "TrackerPivotForward",
+      "section": "Position",
+      "key": "TrackerPivotForward",
+      "type": "float",
+      "default": 0.0,
+      "aliases": ["PivotForward", "NeckPivotForward", "PivotArm", "TrackerPivot"],
+      "doc": "Metres from the neck pivot forward to the point the tracker watches. 0 disables pivot compensation."
+    },
+    {
+      "id": "TrackerPivotUp",
+      "section": "Position",
+      "key": "TrackerPivotUp",
+      "type": "float",
+      "default": 0.0,
+      "aliases": ["PivotUp", "NeckPivotUp"],
+      "doc": "Metres from the neck pivot up to the point the tracker watches."
+    },
+    {
+      "id": "ToggleKey",
+      "section": "Hotkeys",
+      "key": "ToggleKey",
+      "type": "string",
+      "default": "End",
+      "aliases": ["ToggleTrackingKey", "TrackingToggleKey", "EnableKey"],
+      "doc": "Key that toggles head tracking on and off."
+    },
+    {
+      "id": "PositionToggleKey",
+      "section": "Hotkeys",
+      "key": "PositionToggleKey",
+      "type": "string",
+      "default": "PageUp",
+      "aliases": ["TogglePositionKey", "PositionKey", "SixDofToggleKey"],
+      "doc": "Key that toggles positional (6DOF) tracking on and off."
+    },
+    {
+      "id": "ReticleToggleKey",
+      "section": "Hotkeys",
+      "key": "ReticleToggleKey",
+      "type": "string",
+      "default": "Insert",
+      "aliases": ["ToggleReticleKey", "ReticleKey", "CrosshairToggleKey", "ToggleCrosshairKey"],
+      "doc": "Key that toggles the decoupled aim reticle."
+    },
+    {
+      "id": "CycleTrackingModeKey",
+      "section": "Hotkeys",
+      "key": "CycleTrackingModeKey",
+      "type": "string",
+      "default": "",
+      "aliases": ["TrackingModeKey", "CycleModeKey", "ModeKey", "CycleTrackingMode"],
+      "doc": "Key that cycles the tracking mode. Empty leaves it unbound."
+    },
+    {
+      "id": "YawModeKey",
+      "section": "Hotkeys",
+      "key": "YawModeKey",
+      "type": "string",
+      "default": "PageDown",
+      "aliases": ["ToggleYawModeKey", "WorldYawKey"],
+      "doc": "Key that toggles world-locked versus camera-local yaw."
+    },
+    {
+      "id": "RecenterKey",
+      "section": "Hotkeys",
+      "key": "RecenterKey",
+      "type": "string",
+      "default": "Home",
+      "aliases": ["CenterKey", "CentreKey", "RecentreKey"],
+      "doc": "Retained so existing callers keep parsing. No mod polls it: the tracker app owns the centre."
+    }
+  ],
+  "retired": [
+    {
+      "id": "Smoothing",
+      "aliases": ["Smoothing", "SmoothingFactor"],
+      "doc": "Retired and IGNORED. Replaced by LocalSmoothing and RemoteSmoothing. Not migrated: the old value carried a hidden 0.15 floor, so the number in an existing config does not mean what it used to."
+    }
+  ]
+}

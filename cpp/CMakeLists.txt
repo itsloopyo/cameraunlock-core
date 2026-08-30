@@ -26,6 +26,7 @@ set(CAMERAUNLOCK_SOURCES
     src/processing/center_offset_manager.cpp
     src/processing/tracking_processor.cpp
     src/config/ini_reader.cpp
+    src/config/head_tracking_config.cpp
     src/config/value_guards.cpp
     src/os/module_paths.cpp
     src/os/game_window.cpp

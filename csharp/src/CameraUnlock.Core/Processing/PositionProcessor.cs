@@ -45,6 +45,15 @@ namespace CameraUnlock.Core.Processing
         public float TrackerPivotForward { get; set; } = 0.0f;
 
         /// <summary>
+        /// Upward distance (meters) of the tracker's face tracking point from the
+        /// neck/rotation pivot, the vertical companion to <see cref="TrackerPivotForward"/>.
+        /// A tracker watching the eyes sees a point both ahead of and above the neck, and
+        /// pitching the head swings it through both. Defaults to 0, and compensation stays
+        /// off until one of the two is positive.
+        /// </summary>
+        public float TrackerPivotUp { get; set; } = 0.0f;
+
+        /// <summary>
         /// Processes a raw position through the full pipeline.
         /// </summary>
         /// <param name="raw">Raw position data from the tracker.</param>
@@ -79,9 +88,9 @@ namespace CameraUnlock.Core.Processing
             // R(-v) - (-v) == -(R(v) - v), so a +z pivot computes the exact NEGATION of
             // the real artifact and `pos - artifact` then DOUBLES the phantom translation
             // it was supposed to remove.
-            if (TrackerPivotForward > 0f)
+            if (TrackerPivotForward > 0f || TrackerPivotUp > 0f)
             {
-                Vec3 pivot = new Vec3(0, 0, -TrackerPivotForward);
+                Vec3 pivot = new Vec3(0, TrackerPivotUp, -TrackerPivotForward);
                 Vec3 artifact = physicalRotationQ.Rotate(pivot) - pivot;
                 pos = pos - artifact;
             }

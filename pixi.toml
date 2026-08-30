@@ -90,8 +90,14 @@ conformance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/confo
 #   pixi run sync-templates -Repo valheim -Only action-pins
 sync-templates = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-templates.ps1"
 
+# data/config-schema.json is the single description of the config vocabulary; the C#
+# and C++ alias tables are generated from it. This fails when either generated file is
+# stale, which is the gate that stops the two languages drifting apart again.
+#   node scripts/generate-config-schema.mjs   regenerates both
+check-config-schema = "node scripts/generate-config-schema.mjs --check"
+
 # Development workflow
-check = { depends-on = ["build-debug", "test-quick", "test-cpp", "vectors"] }
+check = { depends-on = ["build-debug", "test-quick", "test-cpp", "vectors", "check-config-schema"] }
 
 # Documentation
 # doc = "docfx docfx.json"

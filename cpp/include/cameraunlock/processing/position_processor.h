@@ -24,6 +24,13 @@ public:
     float GetTrackerPivotForward() const { return m_trackerPivotForward; }
     void SetTrackerPivotForward(float value) { m_trackerPivotForward = value; }
 
+    /// Upward distance from the neck pivot to the point the tracker watches, the vertical
+    /// companion to the forward arm. A tracker watching the eyes sees a point both ahead of
+    /// and above the neck, and pitching the head swings it through both. Defaults to 0, and
+    /// compensation stays off until one of the two is positive.
+    float GetTrackerPivotUp() const { return m_trackerPivotUp; }
+    void SetTrackerPivotUp(float value) { m_trackerPivotUp = value; }
+
     /// Fed from the receiver's IsRemoteConnection() every update so a switch
     /// between a local tracker and a remote one picks up the other parameter
     /// without a restart. Runtime state, deliberately not part of PositionSettings.
@@ -51,8 +58,8 @@ public:
         // back of the head"). Rotation is linear, so R(-v) - (-v) == -(R(v) - v): a +z
         // pivot computed the exact NEGATION of the real artifact and the subtraction then
         // DOUBLED the phantom translation it was supposed to remove.
-        if (m_trackerPivotForward > 0.0f) {
-            math::Vec3 pivot(0.0f, 0.0f, -m_trackerPivotForward);
+        if (m_trackerPivotForward > 0.0f || m_trackerPivotUp > 0.0f) {
+            math::Vec3 pivot(0.0f, m_trackerPivotUp, -m_trackerPivotForward);
             math::Vec3 artifact = physical_rotation_q.Rotate(pivot) - pivot;
             pos = pos - artifact;
         }
@@ -133,6 +140,7 @@ private:
     /// 0.01 in C#) were both chosen while the compensation was inverted and doubling the
     /// artifact it removed, so neither carries over. Matches C# PositionProcessor.
     float m_trackerPivotForward = 0.0f;
+    float m_trackerPivotUp = 0.0f;
     bool m_isRemoteConnection = false;
 
     math::Vec3 m_center;

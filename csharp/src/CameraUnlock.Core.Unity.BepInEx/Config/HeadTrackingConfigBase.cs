@@ -33,6 +33,12 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         public ConfigEntry<bool> InvertRoll { get; private set; }
 
         // Hotkey settings
+
+        /// <summary>
+        /// Only non-null when <see cref="BindRecenterKey"/> is overridden to true. The tracker
+        /// app owns the centre, so no mod polls this and binding it by default put a key in
+        /// every user's .cfg that does nothing.
+        /// </summary>
         public ConfigEntry<KeyCode> RecenterKey { get; private set; }
         public ConfigEntry<KeyCode> ToggleKey { get; private set; }
         public ConfigEntry<KeyCode> PositionToggleKey { get; private set; }
@@ -73,9 +79,18 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         protected virtual float DefaultSensitivity => 1.0f;
 
         /// <summary>
-        /// Default recenter hotkey.
+        /// Default recenter hotkey. Only reached when <see cref="BindRecenterKey"/> is true.
         /// </summary>
         protected virtual KeyCode DefaultRecenterKey => KeyCode.Home;
+
+        /// <summary>
+        /// Whether to bind [Hotkeys] RecenterKey into the mod's config file. Off, because
+        /// centring belongs to the tracker app: a second centre in series with the tracker's
+        /// own drifts apart from it, and there is nothing left in the fleet that polls this
+        /// key. <see cref="RecenterKey"/> stays on the API so existing callers compile, and
+        /// is null while this is false.
+        /// </summary>
+        protected virtual bool BindRecenterKey => false;
 
         /// <summary>
         /// Default toggle hotkey.
@@ -185,12 +200,15 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
             );
 
             // Hotkeys section
-            RecenterKey = config.Bind(
-                "Hotkeys",
-                "RecenterKey",
-                DefaultRecenterKey,
-                "Key to recenter head tracking (set current position as center)"
-            );
+            if (BindRecenterKey)
+            {
+                RecenterKey = config.Bind(
+                    "Hotkeys",
+                    "RecenterKey",
+                    DefaultRecenterKey,
+                    "Key to recenter head tracking (set current position as center)"
+                );
+            }
 
             ToggleKey = config.Bind(
                 "Hotkeys",
@@ -271,7 +289,7 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
             // often, which is what the documentation already promised.
             UdpPort.SettingChanged += HandleSettingChanged;
             EnableOnStartup.SettingChanged += HandleSettingChanged;
-            RecenterKey.SettingChanged += HandleSettingChanged;
+            if (RecenterKey != null) RecenterKey.SettingChanged += HandleSettingChanged;
             ToggleKey.SettingChanged += HandleSettingChanged;
             PositionToggleKey.SettingChanged += HandleSettingChanged;
             ReticleToggleKey.SettingChanged += HandleSettingChanged;
