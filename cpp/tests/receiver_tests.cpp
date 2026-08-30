@@ -28,7 +28,9 @@ void Check(bool cond, const char* name) {
 }
 
 constexpr uint16_t kReceiverPort = 14261;
-constexpr uint16_t kSenderPort = 14262;
+
+/// The port the receiver actually bound, set once the range walk succeeds.
+uint16_t g_receiverPort = kReceiverPort;
 constexpr uint16_t kSupervisedPort = 14263;
 constexpr uint16_t kSupervisedSenderPort = 14264;
 constexpr uint16_t kReusePort = 14265;
@@ -66,7 +68,7 @@ bool SendToPort(cameraunlock::UdpSocket& sender, uint16_t port,
 }
 
 bool SendTo(cameraunlock::UdpSocket& sender, const uint8_t* data, size_t length) {
-    return SendToPort(sender, kReceiverPort, data, length);
+    return SendToPort(sender, g_receiverPort, data, length);
 }
 
 /// Another process competing for the tracker port. Raw winsock because
@@ -161,14 +163,27 @@ int RunReceiverTests() {
     std::cout << "PollingUdpReceiver loopback tests:\n";
     g_failures = 0;
 
+    // Both binds used to be fixed ports, which flakes when a previous run's
+    // socket is still in TIME_WAIT or a real tracker is listening. The receiver
+    // walks a range because SendTo has to know where to aim; the sender takes
+    // an ephemeral port because nothing ever sends to it.
     PollingUdpReceiver rx;
-    if (!rx.Initialize(kReceiverPort)) {
-        Check(false, "receiver binds loopback test port");
+    uint16_t receiverPort = 0;
+    for (uint16_t candidate = kReceiverPort; candidate < kReceiverPort + 32; ++candidate) {
+        if (rx.Initialize(candidate)) {
+            receiverPort = candidate;
+            break;
+        }
+    }
+    if (receiverPort == 0) {
+        Check(false, "receiver binds a loopback test port");
         return g_failures;
     }
+    g_receiverPort = receiverPort;
+
     UdpSocket sender;
-    if (!sender.Open(kSenderPort)) {
-        Check(false, "sender binds loopback test port");
+    if (!sender.Open(0)) {
+        Check(false, "sender opens an ephemeral port");
         return g_failures;
     }
 
