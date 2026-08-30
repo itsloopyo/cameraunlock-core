@@ -351,6 +351,13 @@ function Test-ActionPins {
             $ref = $Matches[2].Trim('"').Trim("'")
             # A path-local composite action carries no version to pin.
             if ($ref.StartsWith('./') -or $ref.StartsWith('docker://')) { continue }
+            # A reusable workflow names a path inside another repo; its ref is a
+            # release decision, not an action pin, and Test-WorkflowRef below is
+            # the check that owns it. Without this, every caller of core's
+            # release-mod.yml also collects an action-pins WARN for having no
+            # `# vX.Y.Z` comment - a version core does not publish for it.
+            # sync-templates.ps1 has always skipped these for the same reason.
+            if ($ref -match '/\.github/workflows/') { continue }
             if ($ref -notmatch '@(.+)$') {
                 Add-Finding $Name 'action-pins' 'FAIL' "$($wf.Name):$n uses $ref with no ref at all"
                 continue

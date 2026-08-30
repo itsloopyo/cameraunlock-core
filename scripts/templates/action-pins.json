@@ -5,6 +5,8 @@
     "actions/setup-dotnet": { "sha": "26b0ec14cb23fa6904739307f278c14f94c95bf1", "version": "v5.4.0" },
     "actions/upload-artifact": { "sha": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "version": "v7.0.1" },
     "actions/download-artifact": { "sha": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", "version": "v8.0.1" },
+    "actions/cache": { "sha": "caa296126883cff596d87d8935842f9db880ef25", "version": "v5.1.0" },
+    "actions/setup-java": { "sha": "b6effb05e454b25005698d916606bdc6ffcbf961", "version": "v5.7.0" },
     "actions/github-script": { "sha": "ed597411d8f924073f98dfc5c65a23a2325f34cd", "version": "v8.0.0" },
     "microsoft/setup-msbuild": { "sha": "30375c66a4eea26614e0d39710365f22f8b0af57", "version": "v3.0.0" },
     "prefix-dev/setup-pixi": { "sha": "5185adfbffb4bd703da3010310260805d89ebb11", "version": "v0.9.6" },
