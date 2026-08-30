@@ -65,6 +65,16 @@ function Update-CameraUnlockCoreToRemoteTip {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to fast-forward cameraunlock-core (git exit $LASTEXITCODE). Resolve local conflicts in cameraunlock-core/ and re-run, or pass -NoRefresh to Copy-SharedBundle to skip."
     }
+
+    # The pointer has moved, so the commit THIRD-PARTY-NOTICES.md names is now
+    # the wrong one. Nothing else in a bump touches that file, which is how the
+    # two drift apart, so they move together here and get committed together.
+    $bumped = (& git -C $CoreRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $bumped) { throw "Could not read the bumped cameraunlock-core commit." }
+    $synced = Sync-CoreCommitInNotices -RepoRoot $modRoot -Commit $bumped
+    if ($synced.Updated) {
+        Write-Host "THIRD-PARTY-NOTICES.md now records cameraunlock-core $bumped - commit it alongside the pointer." -ForegroundColor Yellow
+    }
 }
 
 <#
@@ -143,6 +153,12 @@ function Copy-SharedBundle {
     # is checked out right now, and since that is no longer force-refreshed, the
     # packager is the only place a stale pin can be caught before users get it.
     Write-CoreBundleProvenance -CoreRoot $CoreRoot
+
+    # THIRD-PARTY-NOTICES.md is copied verbatim into the release ZIPs, so the
+    # cameraunlock-core commit it names is the attribution the user receives.
+    # A submodule bump does not touch it, so it is checked here rather than
+    # trusted - a wrong hash reads exactly like a right one.
+    Assert-CoreCommitInNotices -RepoRoot ([System.IO.Path]::GetFullPath((Join-Path $CoreRoot '..')))
 
     # install-body-* and uninstall-body are the per-strategy script bodies
     # used by thin per-mod wrapper install.cmd / uninstall.cmd files. Every
@@ -798,9 +814,177 @@ function Set-CsprojVersion {
     $content | Set-Content $CsprojPath -NoNewline
 }
 
+<#
+.SYNOPSIS
+    Read the cameraunlock-core commit a mod repo has committed as its
+    submodule pointer.
+.DESCRIPTION
+    This is the commit whose source is compiled into the mod binary, which
+    is what THIRD-PARTY-NOTICES.md has to name. It is read from the index
+    entry, not from the submodule working tree, because a working tree that
+    has been moved but not committed is not what a release ships.
+
+    Returns $null for a repo that does not consume core as a submodule -
+    a real layout in this fleet, not an error.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+#>
+function Get-PinnedCoreCommit {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$RepoRoot)
+
+    if (-not (Test-Path (Join-Path $RepoRoot '.gitmodules'))) { return $null }
+
+    $pin = & git -C $RepoRoot rev-parse 'HEAD:cameraunlock-core' 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $pin) { return $null }
+    return $pin.Trim()
+}
+
+<#
+.SYNOPSIS
+    Rewrite the cameraunlock-core commit recorded in a mod's
+    THIRD-PARTY-NOTICES.md so it names the commit the mod actually pins.
+.DESCRIPTION
+    The notices file ships at the root of every release ZIP and is the
+    attribution the user receives, so the commit it names has to be the one
+    compiled into the binary. Nothing about bumping the submodule pointer
+    touches that file, so the two drift apart the moment the pin moves -
+    silently, because a wrong commit hash reads exactly like a right one.
+
+    Rewritten hashes are those on a line that mentions cameraunlock-core, or
+    on any line inside the file's `## cameraunlock-core` section. Length is
+    preserved, so a table cell carrying a short hash keeps its short form.
+    Everything else in the file, including the hashes of other dependencies,
+    is left alone.
+
+    A file that records no cameraunlock-core hash at all is reported through
+    Recorded = 0 and left untouched; where to introduce the record is a
+    judgement about that mod's notices layout, not something to guess at.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+.PARAMETER ReadOnly
+    Report what would change without writing the file.
+.OUTPUTS
+    PSCustomObject with RepoRoot, Pin, Recorded (hashes found), Stale (the
+    distinct wrong hashes found) and Updated (whether the file was written).
+#>
+function Sync-CoreCommitInNotices {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [string]$Commit,
+        [switch]$ReadOnly
+    )
+
+    # $Commit exists for the bump path: immediately after `git submodule
+    # update --remote` the working tree holds the new commit while the index
+    # still holds the old one, so the pointer the notices must name is not yet
+    # readable from HEAD. Both get committed together.
+    $pin = if ($Commit) { $Commit } else { Get-PinnedCoreCommit -RepoRoot $RepoRoot }
+    if (-not $pin) {
+        throw "$RepoRoot does not pin cameraunlock-core as a submodule, so there is no commit to record."
+    }
+
+    $noticesPath = Join-Path $RepoRoot 'THIRD-PARTY-NOTICES.md'
+    if (-not (Test-Path $noticesPath)) {
+        throw "THIRD-PARTY-NOTICES.md not found at $noticesPath. cameraunlock-core is compiled into the mod binary and its notice must travel with it."
+    }
+
+    # Split on `n only, so each element keeps any trailing `r: joining them
+    # back reproduces the file's own line endings rather than normalising a
+    # whole file to CRLF for the sake of one hash.
+    $raw   = Get-Content -LiteralPath $noticesPath -Raw
+    $lines = $raw -split "`n"
+
+    $inCoreSection = $false
+    $recorded = 0
+    $stale    = @()
+    $changed  = $false
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+
+        # Headings and prose both spell it several ways across the fleet -
+        # `## cameraunlock-core`, `### CameraUnlock Core`, `## CameraUnlock-Core
+        # (shared)`. Matching one spelling leaves a stale hash sitting under
+        # the others, which is the failure this function exists to prevent.
+        if ($line -match '^#{1,6}\s') {
+            $inCoreSection = $line -match '^#{1,6}\s+cameraunlock[- ]core\b'
+        }
+        if (-not ($inCoreSection -or $line -match 'cameraunlock[- ]core')) { continue }
+
+        # A hash needs a digit to be a hash. Without that, ordinary words
+        # spelled from a-f ("acceded", "defaced") match the character class
+        # and get rewritten into the middle of a sentence.
+        $hits = @([regex]::Matches($line, '(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])') |
+                  Where-Object { $_.Value -match '[0-9]' })
+        if ($hits.Count -eq 0) { continue }
+
+        $updated = $line
+        for ($j = $hits.Count - 1; $j -ge 0; $j--) {
+            $hit = $hits[$j]
+            $recorded++
+            $want = $pin.Substring(0, $hit.Length)
+            if ($hit.Value -eq $want) { continue }
+            $stale += $hit.Value
+            $updated = $updated.Remove($hit.Index, $hit.Length).Insert($hit.Index, $want)
+        }
+        if ($updated -ne $line) {
+            $lines[$i] = $updated
+            $changed = $true
+        }
+    }
+
+    if ($changed -and -not $ReadOnly) {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($noticesPath, ($lines -join "`n"), $utf8NoBom)
+    }
+
+    return [PSCustomObject]@{
+        RepoRoot = $RepoRoot
+        Pin      = $pin
+        Recorded = $recorded
+        Stale    = @($stale | Select-Object -Unique)
+        Updated  = ($changed -and -not $ReadOnly)
+    }
+}
+
+<#
+.SYNOPSIS
+    Fail packaging when THIRD-PARTY-NOTICES.md names a cameraunlock-core
+    commit other than the one being compiled in.
+.DESCRIPTION
+    Checked rather than trusted: the notices file is copied verbatim into
+    the release ZIPs, so a stale hash is a wrong attribution shipped to
+    every user, and it is invisible on inspection.
+
+    A repo that does not pin cameraunlock-core as a submodule is skipped.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+#>
+function Assert-CoreCommitInNotices {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$RepoRoot)
+
+    if (-not (Get-PinnedCoreCommit -RepoRoot $RepoRoot)) { return }
+
+    $state = Sync-CoreCommitInNotices -RepoRoot $RepoRoot -ReadOnly
+    $fix   = "powershell -ExecutionPolicy Bypass -File cameraunlock-core\scripts\sync-core-notices.ps1 -Repo ."
+
+    if ($state.Recorded -eq 0) {
+        throw "THIRD-PARTY-NOTICES.md records no cameraunlock-core commit, but $($state.Pin) is compiled into this build. Add the pinned commit to the cameraunlock-core entry, then re-run."
+    }
+    if ($state.Stale.Count -gt 0) {
+        throw "THIRD-PARTY-NOTICES.md records cameraunlock-core $($state.Stale -join ', ') but this build compiles $($state.Pin). Run: $fix - then commit the notices and re-run."
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Update-CameraUnlockCoreToRemoteTip',
+    'Get-PinnedCoreCommit',
+    'Sync-CoreCommitInNotices',
+    'Assert-CoreCommitInNotices',
     'Write-CoreBundleProvenance',
     'Copy-SharedBundle',
     'Copy-LicenceNotices',
