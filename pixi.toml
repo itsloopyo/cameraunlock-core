@@ -52,6 +52,18 @@ validate-manifest = "node scripts/validate-manifest.mjs"
 #   pixi run validate-notices witcher-3 subnautica-2
 validate-notices = "node scripts/validate-notices.mjs"
 
+# Lint a mod repo, or the whole fleet, against the invariants core owns: the
+# install/uninstall wrapper tails, the delayed-expansion pin that decides
+# whether a game path containing `!` installs, the arg-parser contract lopari
+# drives, .cmd line endings, the canonical pixi task set, SHA-pinned actions,
+# the notices/submodule core commit, launcher-manifest.json, LICENSE and the
+# README claims AGENTS.md forbids. Reports; sync-templates.ps1 fixes.
+#   pixi run conformance
+#   pixi run conformance -All
+#   pixi run conformance -All -Json
+#   pixi run conformance -Repo valheim -Check install-wrapper,action-pins
+conformance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/conformance.ps1"
+
 # Development workflow
 check = { depends-on = ["build-debug", "test-quick", "test-cpp"] }
 

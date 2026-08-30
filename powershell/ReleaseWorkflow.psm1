@@ -835,7 +835,11 @@ function Get-PinnedCoreCommit {
 
     if (-not (Test-Path (Join-Path $RepoRoot '.gitmodules'))) { return $null }
 
-    $pin = & git -C $RepoRoot rev-parse 'HEAD:cameraunlock-core' 2>$null
+    # --quiet --verify, not `2>$null`: under Windows PowerShell 5.1 a native
+    # command's stderr becomes a NativeCommandError record, which an
+    # $ErrorActionPreference = 'Stop' caller turns into a terminating error. A
+    # repo that vendors no core is an ordinary answer here, not a failure.
+    $pin = & git -C $RepoRoot rev-parse --quiet --verify 'HEAD:cameraunlock-core'
     if ($LASTEXITCODE -ne 0 -or -not $pin) { return $null }
     return $pin.Trim()
 }
