@@ -51,6 +51,11 @@ core before it reaches a mod. Every vector carries the `section` number of the
 invariant below that it comes from, so a failure names the paragraph that explains
 it.
 
+A port whose pipeline does not expose a unit answers `skip <reason>` for it and
+the runner reports it as SKIP rather than passing it silently. A harness must also
+skip on a configuration key it does not recognise: ignoring one would run a
+different test than the vector describes and report a pass.
+
 Where a local test and a vector disagree, the vector is right. Several ports'
 hand-written tests encode the defect rather than catching it: one asserts the
 held-forever extrapolation value exactly, one builds its expected pivot input with

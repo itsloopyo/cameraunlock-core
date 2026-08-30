@@ -10,7 +10,11 @@
 // Harness protocol (one command per line):
 //   unit <name>              select the unit under test and reset its state
 //   cfg <key> <value>        set one configuration value (floats; bools as 0/1)
-//   begin                    configuration is complete
+//   begin                    configuration is complete; the harness answers with
+//                            one line, either "ok" or "skip <reason>". A harness
+//                            skips a unit it does not implement, and MUST skip on
+//                            a cfg key it does not recognise - silently ignoring
+//                            one runs a different test than the vector describes.
 //   s <numbers...>           one step; prints the unit's output fields
 //   q <hex>                  packet unit: parse one datagram
 //   e <yaw> <pitch> <roll>   euler_roundtrip unit: compose then decompose
@@ -363,26 +367,42 @@ if (code !== 0) {
     if (stderr.trim()) console.error(stderr.trim());
     process.exit(2);
 }
-
 const resultLines = stdout.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-const expectedLines = plan.reduce((n, p) => n + p.expanded.length, 0);
-if (resultLines.length !== expectedLines) {
-    console.error(`harness produced ${resultLines.length} result lines, expected ${expectedLines}`);
-    if (stderr.trim()) console.error(stderr.trim());
-    process.exit(2);
-}
 
 let cursor = 0;
 let failed = 0;
 const failures = [];
+const skipped = [];
 
 for (const { vector, expanded, labels } of plan) {
+    const status = resultLines[cursor++];
+    if (status === undefined) {
+        console.error(`harness ended before reporting on ${vector.id}`);
+        if (stderr.trim()) console.error(stderr.trim());
+        process.exit(2);
+    }
+    if (status.startsWith('skip')) {
+        skipped.push({ vector, reason: status.slice(4).trim() || '(no reason given)' });
+        console.log(`  SKIP  ${vector.id}  (section ${vector.section})`);
+        continue;
+    }
+    if (status !== 'ok') {
+        console.error(`${vector.id}: expected "ok" or "skip <reason>" after begin, got "${status}"`);
+        process.exit(2);
+    }
+
     const fields = UNIT_OUT_FIELDS[vector.unit];
     const outputs = [];
     for (let i = 0; i < expanded.length; i++) {
-        const parts = resultLines[cursor++].split(/\s+/).map(Number);
+        const raw = resultLines[cursor++];
+        if (raw === undefined) {
+            console.error(`${vector.id}: harness produced only ${i} of ${expanded.length} result lines`);
+            if (stderr.trim()) console.error(stderr.trim());
+            process.exit(2);
+        }
+        const parts = raw.split(/\s+/).map(Number);
         if (parts.length !== fields.length || parts.some(Number.isNaN)) {
-            console.error(`${vector.id} step ${i}: malformed harness output "${resultLines[cursor - 1]}"`);
+            console.error(`${vector.id} step ${i}: malformed harness output "${raw}"`);
             process.exit(2);
         }
         outputs.push(Object.fromEntries(fields.map((f, k) => [f, parts[k]])));
@@ -415,6 +435,20 @@ if (failures.length > 0) {
     }
 }
 
+if (skipped.length > 0) {
+    console.log('');
+    console.log('Skipped by the harness:');
+    for (const { vector, reason } of skipped) console.log(`  ${vector.id}: ${reason}`);
+    console.log('');
+}
+
+if (cursor !== resultLines.length) {
+    console.error(`harness produced ${resultLines.length - cursor} unread trailing lines`);
+    process.exit(2);
+}
+
 const total = plan.length;
-console.log(`${total - failed}/${total} conformance vectors passed`);
+const ran = total - skipped.length;
+console.log(`${ran - failed}/${ran} conformance vectors passed`
+    + (skipped.length > 0 ? `, ${skipped.length} skipped` : ''));
 process.exit(failed === 0 ? 0 : 1);

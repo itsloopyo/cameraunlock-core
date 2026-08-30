@@ -28,6 +28,13 @@ internal static class Program
     private static Session _session = new Session();
     private static long _ts;
 
+    /// Config keys the selected unit understood. A key left over after Configure()
+    /// means the vector asked for something this implementation does not expose,
+    /// and running it anyway would silently test a different thing - so the run is
+    /// skipped with the key named.
+    private static readonly HashSet<string> Consumed = new HashSet<string>();
+    private static bool _skipping;
+
     private static int Main()
     {
         var output = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = false };
@@ -46,20 +53,20 @@ internal static class Program
                     Config[t[1]] = double.Parse(t[2], Inv);
                     break;
                 case "begin":
-                    Configure();
+                    Configure(output);
                     break;
                 case "s":
-                    Step(t, output);
+                    if (!_skipping) Step(t, output);
                     break;
                 case "e":
-                    EulerRoundtrip(t, output);
+                    if (!_skipping) EulerRoundtrip(t, output);
                     break;
                 case "q":
-                    Packet(t, output);
+                    if (!_skipping) Packet(t, output);
                     break;
                 case "p":
                 case "f":
-                    SessionFrame(t, output);
+                    if (!_skipping) SessionFrame(t, output);
                     break;
                 case "end":
                     break;
@@ -85,6 +92,8 @@ internal static class Program
         _posProcessor = new PositionProcessor();
         _session = new Session();
         _ts = 0;
+        Consumed.Clear();
+        _skipping = false;
     }
 
     private static float F(string s) => (float)double.Parse(s, Inv);
@@ -92,10 +101,17 @@ internal static class Program
     /// Every configuration key is optional and an absent key leaves the
     /// implementation's own default in place. That is deliberate: it is how the
     /// pivot-defaults-off vector reads the default rather than restating it.
-    private static float Cfg(string key, float fallback) =>
-        Config.TryGetValue(key, out double v) ? (float)v : fallback;
+    private static float Cfg(string key, float fallback)
+    {
+        Consumed.Add(key);
+        return Config.TryGetValue(key, out double v) ? (float)v : fallback;
+    }
 
-    private static bool Flag(string key) => Config.TryGetValue(key, out double v) && v != 0.0;
+    private static bool Flag(string key)
+    {
+        Consumed.Add(key);
+        return Config.TryGetValue(key, out double v) && v != 0.0;
+    }
 
     private static void ConfigureTracking(TrackingProcessor p)
     {
@@ -126,7 +142,7 @@ internal static class Program
         p.IsRemoteConnection = Flag("is_remote");
     }
 
-    private static void Configure()
+    private static void Configure(TextWriter w)
     {
         switch (_unit)
         {
@@ -155,8 +171,22 @@ internal static class Program
             case "euler_roundtrip":
                 break;
             default:
-                throw new InvalidOperationException("unknown unit: " + _unit);
+                w.Write("skip C# harness does not implement unit " + _unit + "\n");
+                _skipping = true;
+                return;
         }
+
+        foreach (string key in Config.Keys)
+        {
+            if (!Consumed.Contains(key))
+            {
+                w.Write("skip C# " + _unit + " has no setting for cfg key " + key + "\n");
+                _skipping = true;
+                return;
+            }
+        }
+
+        w.Write("ok\n");
     }
 
     private static void Emit(TextWriter w, params double[] values)

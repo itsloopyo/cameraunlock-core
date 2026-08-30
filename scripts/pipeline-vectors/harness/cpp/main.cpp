@@ -15,6 +15,7 @@
 #include "cameraunlock/processing/tracking_processor.h"
 #include "cameraunlock/protocol/opentrack_packet.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <iomanip>
@@ -148,13 +149,13 @@ public:
             } else if (cmd == "begin") {
                 Configure();
             } else if (cmd == "s") {
-                Step(in);
+                if (!m_skipping) Step(in);
             } else if (cmd == "e") {
-                EulerRoundtrip(in);
+                if (!m_skipping) EulerRoundtrip(in);
             } else if (cmd == "q") {
-                Packet(in);
+                if (!m_skipping) Packet(in);
             } else if (cmd == "p" || cmd == "f") {
-                SessionFrame(cmd == "p", in);
+                if (!m_skipping) SessionFrame(cmd == "p", in);
             } else if (cmd == "end") {
                 // nothing to do; the next `unit` resets
             } else if (cmd == "bye") {
@@ -169,6 +170,12 @@ public:
 private:
     std::string m_unit;
     std::map<std::string, double> m_config;
+    /// Config keys this unit understood. A key left over after Configure() means
+    /// the vector asked for something this implementation does not expose, and
+    /// running it anyway would silently test a different thing - so the run is
+    /// skipped with the key named.
+    std::vector<std::string> m_consumed;
+    bool m_skipping = false;
 
     PoseInterpolator m_poseInterp;
     PositionInterpolator m_posInterp;
@@ -185,14 +192,18 @@ private:
         m_posProcessor = PositionProcessor();
         m_session = Session();
         m_ts = 0;
+        m_consumed.clear();
+        m_skipping = false;
     }
 
-    float Cfg(const char* key, float fallback) const {
+    float Cfg(const char* key, float fallback) {
+        m_consumed.push_back(key);
         auto it = m_config.find(key);
         return it == m_config.end() ? fallback : static_cast<float>(it->second);
     }
 
-    bool CfgFlag(const char* key) const {
+    bool CfgFlag(const char* key) {
+        m_consumed.push_back(key);
         auto it = m_config.find(key);
         return it != m_config.end() && it->second != 0.0;
     }
@@ -258,9 +269,20 @@ private:
             ConfigureTrackingProcessor(m_session.processor);
             ConfigurePositionProcessor(m_session.posProcessor);
         } else if (m_unit != "packet" && m_unit != "euler_roundtrip") {
-            std::cerr << "unknown unit: " << m_unit << '\n';
-            std::exit(2);
+            std::cout << "skip C++ harness does not implement unit " << m_unit << '\n';
+            m_skipping = true;
+            return;
         }
+
+        for (const auto& entry : m_config) {
+            if (std::find(m_consumed.begin(), m_consumed.end(), entry.first) == m_consumed.end()) {
+                std::cout << "skip C++ " << m_unit << " has no setting for cfg key "
+                          << entry.first << '\n';
+                m_skipping = true;
+                return;
+            }
+        }
+        std::cout << "ok\n";
     }
 
     void Step(std::istringstream& in) {
