@@ -1,5 +1,5 @@
 {
-  "$comment": "Canonical per-game detection data for CameraUnlock head-tracking mods. This is the single source of truth for where each supported game lives on disk: env var name, Steam folder, GOG IDs, Epic/Xbox paths, executable relative path, Unity data folder (for Cecil patching). Consumed by cameraunlock-core/powershell/GamePathDetection.psm1 today, and destined to be consumed by install.cmd scripts and the launcher's Rust detect module (see roadmap in the mod-manager repo). Mod-specific fields (which DLLs to deploy, mod version, framework type) do NOT belong here - those live in each mod's install.cmd CONFIG BLOCK and the launcher's catalog/mods.json. Adding a new game: pick a hyphen-lowercase id, fill in at minimum `display_name`, `env_var`, and `executable_relpath`. Any field that's empty for a given game should be omitted rather than set to a null/empty value.",
+  "$comment": "Canonical per-game detection data for CameraUnlock head-tracking mods. This is the single source of truth for where each supported game lives on disk: env var name, Steam folder, GOG IDs, Epic/Xbox paths, executable relative path, Unity data folder (for Cecil patching), and the Microsoft Store package identity for UWP titles. Consumed by cameraunlock-core/powershell/GamePathDetection.psm1 and by lopari, whose catalog/mods.json per-mod `game` block is GENERATED from this file (lopari/scripts/sync-catalog-games.mjs) and must not be hand-edited. Mod-specific fields (which DLLs to deploy, mod version) do NOT belong here - those live in each mod's install.cmd CONFIG BLOCK and launcher-manifest.json. Adding a new game: pick a hyphen-lowercase id, fill in at minimum `display_name`, `env_var` and `executable_relpath`. `env_var` is omitted only for Microsoft Store packaged titles resolved by `msix_identity_name`, which are launched by package identity and have no install path to point an env var at. The per-game mod metadata (`loader`, `engine`, `repo`, `catalog_status`, `delivery_mode`) is optional and describes the head-tracking mod for that game: `loader` and `delivery_mode` are copied from the mod repo's launcher-manifest.json (`strategy` / `delivery_mode`), `repo` is the owner/name of that repo, `catalog_status` is released | prerelease | private | absent per lopari's catalog, and `engine` is the game's engine FAMILY (not version), populated only where it is mechanically verifiable and omitted otherwise. Any field that's empty for a given game should be omitted rather than set to a null/empty value.",
   "schema_version": 1,
   "games": {
     "assetto-corsa-evo": {
@@ -7,35 +7,60 @@
       "env_var": "ASSETTO_CORSA_EVO_PATH",
       "steam_app_id": 3058630,
       "steam_folder": "Assetto Corsa EVO",
-      "executable_relpath": "AssettoCorsaEVO.exe"
+      "executable_relpath": "AssettoCorsaEVO.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/assetto-corsa-evo-headtracking",
+      "catalog_status": "released"
     },
     "assetto-corsa-rally": {
       "display_name": "Assetto Corsa Rally",
       "env_var": "ASSETTO_CORSA_RALLY_PATH",
       "steam_app_id": 3917090,
       "steam_folder": "Assetto Corsa Rally",
-      "executable_relpath": "acr\\Binaries\\Win64\\acr.exe"
+      "executable_relpath": "acr\\Binaries\\Win64\\acr.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/assetto-corsa-rally-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "released"
     },
     "mirrors-edge": {
       "display_name": "Mirror's Edge",
       "env_var": "MIRRORS_EDGE_PATH",
       "steam_app_id": 17410,
       "steam_folder": "mirrors edge",
-      "executable_relpath": "Binaries\\MirrorsEdge.exe"
+      "executable_relpath": "Binaries\\MirrorsEdge.exe",
+      "gog_ids": [
+        "1893001152"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/mirrors-edge-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "prerelease"
     },
     "metaphor": {
       "display_name": "Metaphor: ReFantazio",
       "env_var": "METAPHOR_PATH",
       "steam_app_id": 2679460,
       "steam_folder": "METAPHOR",
-      "executable_relpath": "METAPHOR.exe"
+      "executable_relpath": "METAPHOR.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/metaphor-refantazio-headtracking",
+      "catalog_status": "prerelease"
     },
     "persona-5-royal": {
       "display_name": "Persona 5 Royal",
       "env_var": "PERSONA_5_ROYAL_PATH",
       "steam_app_id": 1687950,
       "steam_folder": "P5R",
-      "executable_relpath": "P5R.exe"
+      "executable_relpath": "P5R.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/persona-5-royal-headtracking",
+      "catalog_status": "absent"
     },
     "repo": {
       "display_name": "R.E.P.O.",
@@ -43,21 +68,41 @@
       "steam_app_id": 3241660,
       "steam_folder": "REPO",
       "executable_relpath": "REPO.exe",
-      "data_folder": "REPO_Data"
+      "data_folder": "REPO_Data",
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/repo-headtracking",
+      "engine": "Unity",
+      "catalog_status": "prerelease"
     },
     "homeworld-remastered-collection": {
       "display_name": "Homeworld: Remastered Collection",
       "env_var": "HOMEWORLD_RM_PATH",
       "steam_app_id": 244160,
       "steam_folder": "Homeworld",
-      "executable_relpath": "HomeworldRM\\bin\\Release\\HomeworldRM.exe"
+      "executable_relpath": "HomeworldRM\\bin\\Release\\HomeworldRM.exe",
+      "gog_ids": [
+        "2114871440"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/homeworld-remastered-collection",
+      "catalog_status": "absent"
     },
     "arkham-city": {
       "display_name": "Batman: Arkham City GOTY",
       "env_var": "ARKHAM_CITY_PATH",
       "steam_app_id": 200260,
       "steam_folder": "Batman Arkham City GOTY",
-      "executable_relpath": "Binaries\\Win32\\BatmanAC.exe"
+      "executable_relpath": "Binaries\\Win32\\BatmanAC.exe",
+      "gog_ids": [
+        "1260066469"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/arkham-city-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "pixeljunk-monsters-2": {
       "display_name": "PixelJunk Monsters 2",
@@ -65,49 +110,90 @@
       "steam_app_id": 749800,
       "steam_folder": "PixelJunk™ Monsters 2",
       "executable_relpath": "PixeljunkMonsters2.exe",
-      "data_folder": "PixeljunkMonsters2_Data"
+      "data_folder": "PixeljunkMonsters2_Data",
+      "repo": "itsloopyo/pixeljunk-monsters-2-headtracking",
+      "engine": "Unity",
+      "catalog_status": "absent"
     },
     "quake-ii-rtx": {
       "display_name": "Quake II RTX",
       "env_var": "QUAKE_II_RTX_PATH",
       "steam_app_id": 1089130,
       "steam_folder": "Quake II RTX",
-      "executable_relpath": "q2rtx.exe"
+      "executable_relpath": "q2rtx.exe",
+      "gog_ids": [
+        "1825786806"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/quake-ii-rtx-headtracking",
+      "catalog_status": "absent"
     },
     "battlefield-bad-company-2": {
       "display_name": "Battlefield: Bad Company 2",
       "env_var": "BFBC2_PATH",
       "steam_app_id": 24960,
       "steam_folder": "Battlefield Bad Company 2",
-      "executable_relpath": "BFBC2Game.exe"
+      "executable_relpath": "BFBC2Game.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/battlefield-bad-company-2-headtracking",
+      "catalog_status": "absent"
     },
     "amnesia-the-dark-descent": {
       "display_name": "Amnesia: The Dark Descent",
       "env_var": "AMNESIA_TDD_PATH",
       "steam_app_id": 57300,
       "steam_folder": "Amnesia The Dark Descent",
-      "executable_relpath": "Amnesia.exe"
+      "executable_relpath": "Amnesia.exe",
+      "gog_ids": [
+        "1207659259"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/amnesia-the-dark-descent-headtracking",
+      "engine": "HPL",
+      "catalog_status": "absent"
     },
     "alien-isolation": {
       "display_name": "Alien: Isolation",
       "env_var": "ALIEN_ISOLATION_PATH",
       "steam_app_id": 214490,
       "steam_folder": "Alien Isolation",
-      "executable_relpath": "AI.exe"
+      "executable_relpath": "AI.exe",
+      "gog_ids": [
+        "1744178250"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/alien-isolation-headtracking",
+      "catalog_status": "prerelease"
     },
     "bully-scholarship-edition": {
       "display_name": "Bully: Scholarship Edition",
       "env_var": "BULLY_PATH",
       "steam_app_id": 12200,
       "steam_folder": "Bully Scholarship Edition",
-      "executable_relpath": "Bully.exe"
+      "executable_relpath": "Bully.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/bully-scholarship-edition-headtracking",
+      "catalog_status": "absent"
     },
     "abzu": {
-      "display_name": "ABZU",
+      "display_name": "ABZÛ",
       "env_var": "ABZU_PATH",
       "steam_app_id": 384190,
       "steam_folder": "ABZU",
-      "executable_relpath": "AbzuGame\\Binaries\\Win64\\AbzuGame-Win64-Shipping.exe"
+      "executable_relpath": "AbzuGame\\Binaries\\Win64\\AbzuGame-Win64-Shipping.exe",
+      "gog_ids": [
+        "1622602219"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/abzu-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "prerelease"
     },
     "obra-dinn": {
       "display_name": "Return of the Obra Dinn",
@@ -115,21 +201,39 @@
       "steam_app_id": 653530,
       "steam_folder": "ObraDinn",
       "executable_relpath": "ObraDinn.exe",
-      "data_folder": "ObraDinn_Data"
+      "data_folder": "ObraDinn_Data",
+      "gog_ids": [
+        "1108393852"
+      ],
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/obra-dinn-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "mixtape": {
       "display_name": "Mixtape",
       "env_var": "MIXTAPE_PATH",
       "steam_app_id": 2582320,
       "steam_folder": "Mixtape",
-      "executable_relpath": "NewMoon\\Binaries\\Win64\\Mixtape-Win64-Shipping.exe"
+      "executable_relpath": "NewMoon\\Binaries\\Win64\\Mixtape-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/mixtape-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "peak": {
       "display_name": "PEAK",
       "env_var": "PEAK_GAME_PATH",
       "steam_app_id": 3527290,
       "steam_folder": "PEAK",
-      "executable_relpath": "Peak.exe"
+      "executable_relpath": "Peak.exe",
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/peak-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "subnautica": {
       "display_name": "Subnautica",
@@ -140,7 +244,12 @@
       "data_folder": "Subnautica_Data",
       "epic_search_paths": [
         "C:\\Program Files\\Epic Games\\Subnautica"
-      ]
+      ],
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/subnautica-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "subnautica-below-zero": {
       "display_name": "Subnautica: Below Zero",
@@ -151,7 +260,10 @@
       "data_folder": "SubnauticaZero_Data",
       "epic_search_paths": [
         "C:\\Program Files\\Epic Games\\SubnauticaZero"
-      ]
+      ],
+      "repo": "itsloopyo/subnautica-below-zero-headtracking",
+      "engine": "Unity",
+      "catalog_status": "private"
     },
     "subnautica-2": {
       "display_name": "Subnautica 2",
@@ -162,7 +274,12 @@
       "xbox_paths": [
         "C:\\XboxGames\\Subnautica 2\\Content"
       ],
-      "xbox_executable_relpath": "Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe"
+      "xbox_executable_relpath": "Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/subnautica-2-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "released"
     },
     "rv-there-yet": {
       "display_name": "RV There Yet?",
@@ -173,7 +290,12 @@
       "xbox_paths": [
         "C:\\XboxGames\\RV There Yet\\Content"
       ],
-      "xbox_executable_relpath": "Ride\\Binaries\\WinGDK\\Ride-WinGDK-Shipping.exe"
+      "xbox_executable_relpath": "Ride\\Binaries\\WinGDK\\Ride-WinGDK-Shipping.exe",
+      "loader": "Shim",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/rv-there-yet-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "released"
     },
     "cyberpunk-2077": {
       "display_name": "Cyberpunk 2077",
@@ -184,87 +306,165 @@
       "gog_ids": [
         "1423049311",
         "1256837418"
-      ]
+      ],
+      "loader": "CET",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/cyberpunk-2077-headtracking",
+      "engine": "REDengine",
+      "catalog_status": "released"
     },
     "control-ultimate-edition": {
       "display_name": "Control: Ultimate Edition",
       "env_var": "CONTROL_PATH",
       "steam_app_id": 870780,
       "steam_folder": "Control",
-      "executable_relpath": "Control_DX12.exe"
+      "executable_relpath": "Control_DX12.exe",
+      "gog_ids": [
+        "2049187585"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/control-ultimate-edition-headtracking",
+      "catalog_status": "prerelease"
     },
     "easy-delivery-co": {
       "display_name": "Easy Delivery Co",
       "env_var": "EASY_DELIVERY_CO_PATH",
+      "steam_app_id": 3293010,
       "steam_folder": "Easy Delivery Co",
       "executable_relpath": "EasyDeliveryCo.exe",
       "data_folder": "EasyDeliveryCo_Data",
       "xbox_paths": [
         "C:\\XboxGames\\Easy Delivery Co\\Content"
-      ]
+      ],
+      "gog_ids": [
+        "1186701134"
+      ],
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/easy-delivery-co-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "eternal-afternoon": {
       "display_name": "Eternal Afternoon",
       "env_var": "ETERNALAFTERNOON_PATH",
+      "steam_app_id": 3924170,
       "steam_folder": "Eternal Afternoon",
       "executable_relpath": "Eternal Afternoon.exe",
-      "data_folder": "Eternal Afternoon_Data"
+      "data_folder": "Eternal Afternoon_Data",
+      "loader": "MonoCecil",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/eternal-afternoon-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "red-eclipse": {
       "display_name": "Red Eclipse",
       "env_var": "RED_ECLIPSE_PATH",
       "steam_app_id": 967460,
       "steam_folder": "Red Eclipse",
-      "executable_relpath": "bin\\amd64\\redeclipse.exe"
+      "executable_relpath": "bin\\amd64\\redeclipse.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/red-eclipse-headtracking",
+      "catalog_status": "released"
     },
     "resident-evil-2": {
       "display_name": "Resident Evil 2",
       "env_var": "RE2_PATH",
       "steam_app_id": 883710,
       "steam_folder": "RESIDENT EVIL 2  BIOHAZARD RE2",
-      "executable_relpath": "re2.exe"
+      "executable_relpath": "re2.exe",
+      "gog_ids": [
+        "1534123252"
+      ],
+      "loader": "REFramework",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/resident-evil-2-headtracking",
+      "engine": "RE Engine",
+      "catalog_status": "prerelease"
     },
     "resident-evil-3": {
       "display_name": "Resident Evil 3",
       "env_var": "RE3_PATH",
       "steam_app_id": 952060,
       "steam_folder": "RE3",
-      "executable_relpath": "re3.exe"
+      "executable_relpath": "re3.exe",
+      "gog_ids": [
+        "1266089300"
+      ],
+      "loader": "REFramework",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/resident-evil-3-headtracking",
+      "engine": "RE Engine",
+      "catalog_status": "prerelease"
     },
     "resident-evil-4": {
       "display_name": "Resident Evil 4",
       "env_var": "RE4_PATH",
       "steam_app_id": 2050650,
       "steam_folder": "RESIDENT EVIL 4  BIOHAZARD RE4",
-      "executable_relpath": "re4.exe"
+      "executable_relpath": "re4.exe",
+      "loader": "REFramework",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/resident-evil-4-headtracking",
+      "engine": "RE Engine",
+      "catalog_status": "prerelease"
     },
     "resident-evil-7": {
       "display_name": "Resident Evil 7 biohazard",
       "env_var": "RE7_PATH",
       "steam_app_id": 418370,
       "steam_folder": "RESIDENT EVIL 7 biohazard",
-      "executable_relpath": "re7.exe"
+      "executable_relpath": "re7.exe",
+      "loader": "REFramework",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/resident-evil-7-headtracking",
+      "engine": "RE Engine",
+      "catalog_status": "prerelease"
     },
     "resident-evil-village": {
       "display_name": "Resident Evil Village",
       "env_var": "RE8_PATH",
       "steam_app_id": 1196590,
       "steam_folder": "Resident Evil Village BIOHAZARD VILLAGE",
-      "executable_relpath": "re8.exe"
+      "executable_relpath": "re8.exe",
+      "loader": "REFramework",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/resident-evil-village-headtracking",
+      "engine": "RE Engine",
+      "catalog_status": "prerelease"
     },
     "skyrim-special-edition": {
       "display_name": "Skyrim Special Edition",
       "env_var": "SKYRIM_SE_PATH",
       "steam_app_id": 489830,
       "steam_folder": "Skyrim Special Edition",
-      "executable_relpath": "SkyrimSE.exe"
+      "executable_relpath": "SkyrimSE.exe",
+      "gog_ids": [
+        "1711230643"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/skyrim-special-edition-headtracking",
+      "catalog_status": "released"
     },
     "witcher-3": {
       "display_name": "The Witcher 3: Wild Hunt",
       "env_var": "WITCHER3_PATH",
       "steam_app_id": 292030,
-      "steam_folder": "The Witcher 3 Wild Hunt",
-      "executable_relpath": "bin\\x64\\witcher3.exe"
+      "steam_folder": "The Witcher 3",
+      "executable_relpath": "bin\\x64_dx12\\witcher3.exe",
+      "gog_ids": [
+        "1207664643",
+        "1495134320"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/witcher-3-headtracking",
+      "engine": "REDengine",
+      "catalog_status": "private"
     },
     "green-hell": {
       "display_name": "Green Hell",
@@ -272,7 +472,12 @@
       "steam_app_id": 815370,
       "steam_folder": "Green Hell",
       "executable_relpath": "GH.exe",
-      "data_folder": "GH_Data"
+      "data_folder": "GH_Data",
+      "loader": "MelonLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/green-hell-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "gone-home": {
       "display_name": "Gone Home",
@@ -280,14 +485,31 @@
       "steam_app_id": 232430,
       "steam_folder": "Gone Home",
       "executable_relpath": "GoneHome.exe",
-      "data_folder": "GoneHome_Data"
+      "data_folder": "GoneHome_Data",
+      "gog_ids": [
+        "1207665163"
+      ],
+      "loader": "MonoCecil",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/gone-home-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "painscreek-killings": {
       "display_name": "The Painscreek Killings",
       "env_var": "PAINSCREEK_PATH",
+      "steam_app_id": 624270,
       "steam_folder": "The Painscreek Killings",
       "executable_relpath": "Painscreek.exe",
-      "data_folder": "Painscreek_Data"
+      "data_folder": "Painscreek_Data",
+      "gog_ids": [
+        "1128731640"
+      ],
+      "loader": "MonoCecil",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/the-painscreek-killings-headtracking",
+      "engine": "Unity",
+      "catalog_status": "prerelease"
     },
     "fallout-4": {
       "display_name": "Fallout 4",
@@ -297,11 +519,16 @@
       "executable_relpath": "Fallout4.exe",
       "gog_ids": [
         "1998527297"
-      ]
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/fallout-4-headtracking",
+      "catalog_status": "prerelease"
     },
     "fallout-new-vegas": {
       "display_name": "Fallout: New Vegas",
       "env_var": "FalloutNVPath",
+      "steam_app_id": 22380,
       "steam_folder": "Fallout New Vegas",
       "executable_relpath": "FalloutNV.exe",
       "gog_ids": [
@@ -311,7 +538,13 @@
         "C:\\Program Files\\Epic Games\\FalloutNewVegas\\Fallout New Vegas English",
         "C:\\Program Files\\Epic Games\\FalloutNewVegas",
         "D:\\Epic Games\\FalloutNewVegas\\Fallout New Vegas English"
-      ]
+      ],
+      "modded_executable_relpath": "nvse_loader.exe",
+      "modded_launcher_hint": "Fallout: New Vegas loads head tracking through xNVSE, but nvse_loader.exe wasn't found next to FalloutNV.exe. Install xNVSE 6.4.1 or newer (github.com/xNVSE/NVSE/releases) into your game folder, then launch again. Strongly recommended: New Vegas Tick Fix / NVTF (nexusmods.com/newvegas/mods/66537) for smooth head-tracked camera motion.",
+      "loader": "xNVSE",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/fallout-new-vegas-headtracking",
+      "catalog_status": "released"
     },
     "outer-wilds": {
       "display_name": "Outer Wilds",
@@ -322,7 +555,12 @@
       "epic_search_paths": [
         "C:\\Program Files\\Epic Games\\OuterWilds"
       ],
-      "uses_owml": true
+      "uses_owml": true,
+      "loader": "OWML",
+      "delivery_mode": "external",
+      "repo": "itsloopyo/outer-wilds-headtracking",
+      "engine": "Unity",
+      "catalog_status": "prerelease"
     },
     "dragon-age-inquisition": {
       "display_name": "Dragon Age: Inquisition",
@@ -333,28 +571,45 @@
         "C:\\Program Files (x86)\\Origin Games\\Dragon Age Inquisition",
         "C:\\Program Files (x86)\\EA Games\\Dragon Age Inquisition",
         "C:\\Program Files\\Origin Games\\Dragon Age Inquisition"
-      ]
+      ],
+      "loader": "Custom",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dragon-age-inquisition-headtracking",
+      "catalog_status": "absent"
     },
     "dying-light-2": {
       "display_name": "Dying Light 2 Stay Human",
       "env_var": "DYING_LIGHT_2_PATH",
       "steam_app_id": 534380,
       "steam_folder": "Dying Light 2",
-      "executable_relpath": "ph\\work\\bin\\x64\\DyingLightGame_x64_rwdi.exe"
+      "executable_relpath": "ph\\work\\bin\\x64\\DyingLightGame_x64_rwdi.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dying-light-2-headtracking",
+      "catalog_status": "released"
     },
     "pacific-drive": {
       "display_name": "Pacific Drive",
       "env_var": "PACIFIC_DRIVE_PATH",
       "steam_app_id": 1458140,
       "steam_folder": "Pacific Drive",
-      "executable_relpath": "PenDriverPro\\Binaries\\Win64\\PenDriverPro-Win64-Shipping.exe"
+      "executable_relpath": "PenDriverPro\\Binaries\\Win64\\PenDriverPro-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/pacific-drive-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "prerelease"
     },
     "burnout-paradise-the-ultimate-box": {
       "display_name": "Burnout Paradise: The Ultimate Box",
       "env_var": "BURNOUT_PARADISE_PATH",
       "steam_app_id": 24740,
       "steam_folder": "Burnout(TM) Paradise The Ultimate Box",
-      "executable_relpath": "BurnoutParadise.exe"
+      "executable_relpath": "BurnoutParadise.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/burnout-paradise-the-ultimate-box-headtracking",
+      "catalog_status": "absent"
     },
     "deus-ex-mankind-divided": {
       "display_name": "Deus Ex: Mankind Divided",
@@ -365,68 +620,131 @@
       "epic_search_paths": [
         "C:\\Program Files\\Epic Games\\DeusExMankindDividedGkfxK",
         "C:\\Program Files\\Epic Games\\DeusExMankindDivided"
-      ]
+      ],
+      "gog_ids": [
+        "1296690054"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/deus-ex-mankind-divided-headtracking",
+      "catalog_status": "absent"
     },
     "dishonored": {
       "display_name": "Dishonored",
       "env_var": "DISHONORED_PATH",
       "steam_app_id": 205100,
       "steam_folder": "Dishonored",
-      "executable_relpath": "Binaries\\Win32\\Dishonored.exe"
+      "executable_relpath": "Binaries\\Win32\\Dishonored.exe",
+      "gog_ids": [
+        "1701063787"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dishonored-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "dead-rising-2": {
       "display_name": "Dead Rising 2",
       "env_var": "DEAD_RISING_2_PATH",
       "steam_app_id": 45740,
       "steam_folder": "Dead Rising 2",
-      "executable_relpath": "deadrising2.exe"
+      "executable_relpath": "deadrising2.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dead-rising-2-headtracking",
+      "catalog_status": "absent"
     },
     "deus-ex-human-revolution": {
       "display_name": "Deus Ex: Human Revolution - Director's Cut",
       "env_var": "DXHR_PATH",
       "steam_app_id": 238010,
       "steam_folder": "Deus Ex Human Revolution Director's Cut",
-      "executable_relpath": "DXHRDC.exe"
+      "executable_relpath": "DXHRDC.exe",
+      "gog_ids": [
+        "1370227705"
+      ],
+      "repo": "itsloopyo/deus-ex-human-revolution-headtracking",
+      "catalog_status": "absent"
     },
     "dishonored-2": {
       "display_name": "Dishonored 2",
       "env_var": "DISHONORED_2_PATH",
       "steam_app_id": 403640,
       "steam_folder": "Dishonored2",
-      "executable_relpath": "Dishonored2.exe"
+      "executable_relpath": "Dishonored2.exe",
+      "gog_ids": [
+        "1431426311"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dishonored-2-headtracking",
+      "catalog_status": "absent"
     },
     "bioshock-infinite": {
       "display_name": "BioShock Infinite",
       "env_var": "BIOSHOCK_INFINITE_PATH",
       "steam_app_id": 8870,
       "steam_folder": "BioShock Infinite",
-      "executable_relpath": "Binaries\\Win32\\BioShockInfinite.exe"
+      "executable_relpath": "Binaries\\Win32\\BioShockInfinite.exe",
+      "gog_ids": [
+        "1752654506"
+      ],
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/bioshock-infinite-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "bioshock-remastered": {
       "display_name": "BioShock Remastered",
       "env_var": "BIOSHOCK_PATH",
       "steam_app_id": 409710,
       "steam_folder": "BioShock Remastered",
-      "executable_relpath": "Build\\Final\\BioshockHD.exe"
+      "executable_relpath": "Build\\Final\\BioshockHD.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/bioshock-remastered-headtracking",
+      "catalog_status": "released"
     },
     "resident-evil-requiem": {
       "display_name": "Resident Evil Requiem",
       "env_var": "RE9_PATH",
+      "steam_app_id": 3764200,
       "steam_folder": "RESIDENT EVIL requiem BIOHAZARD requiem",
-      "executable_relpath": "re9.exe"
+      "executable_relpath": "re9.exe",
+      "loader": "REFramework",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/resident-evil-requiem-headtracking",
+      "engine": "RE Engine",
+      "catalog_status": "released"
     },
     "screencheat": {
       "display_name": "Screencheat",
       "env_var": "SCREENCHEAT_PATH",
       "steam_folder": "Screencheat",
       "executable_relpath": "screencheat.exe",
-      "data_folder": "screencheat_Data"
+      "data_folder": "screencheat_Data",
+      "gog_ids": [
+        "1207666493"
+      ],
+      "engine": "Unity",
+      "catalog_status": "absent"
     },
     "shadows-of-doubt": {
       "display_name": "Shadows of Doubt",
       "env_var": "SHADOWS_OF_DOUBT_PATH",
+      "steam_app_id": 986130,
       "steam_folder": "Shadows of Doubt",
-      "executable_relpath": "Shadows of Doubt.exe"
+      "executable_relpath": "Shadows of Doubt.exe",
+      "gog_ids": [
+        "1755185542"
+      ],
+      "loader": "BepInEx6",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/shadows-of-doubt-headtracking",
+      "engine": "Unity",
+      "catalog_status": "prerelease"
     },
     "sons-of-the-forest": {
       "display_name": "Sons of the Forest",
@@ -434,71 +752,127 @@
       "steam_app_id": 1326470,
       "steam_folder": "Sons Of The Forest",
       "executable_relpath": "SonsOfTheForest.exe",
-      "data_folder": "SonsOfTheForest_Data"
+      "data_folder": "SonsOfTheForest_Data",
+      "loader": "BepInEx6",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/sons-of-the-forest-headtracking",
+      "engine": "Unity",
+      "catalog_status": "prerelease"
     },
     "valheim": {
       "display_name": "Valheim",
       "env_var": "VALHEIM_PATH",
+      "steam_app_id": 892970,
       "steam_folder": "Valheim",
-      "executable_relpath": "valheim.exe"
+      "executable_relpath": "valheim.exe",
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/valheim-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "tacoma": {
       "display_name": "Tacoma",
       "env_var": "TACOMA_PATH",
+      "steam_app_id": 343860,
       "steam_folder": "Tacoma",
       "executable_relpath": "Tacoma.exe",
-      "data_folder": "Tacoma_Data"
+      "data_folder": "Tacoma_Data",
+      "gog_ids": [
+        "1452577588"
+      ],
+      "repo": "itsloopyo/tacoma-headtracking",
+      "engine": "Unity",
+      "catalog_status": "private"
     },
     "wobbly-life": {
       "display_name": "Wobbly Life",
       "env_var": "WOBBLY_LIFE_PATH",
+      "steam_app_id": 1211020,
       "steam_folder": "Wobbly Life",
-      "executable_relpath": "Wobbly Life.exe"
+      "executable_relpath": "Wobbly Life.exe",
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/wobbly-life-headtracking",
+      "engine": "Unity",
+      "catalog_status": "prerelease"
     },
     "zeepkist": {
       "display_name": "Zeepkist",
       "env_var": "ZEEPKIST_PATH",
       "steam_folder": "Zeepkist",
       "executable_relpath": "Zeepkist.exe",
-      "data_folder": "Zeepkist_Data"
+      "data_folder": "Zeepkist_Data",
+      "engine": "Unity",
+      "catalog_status": "absent"
     },
     "firewatch": {
       "display_name": "Firewatch",
       "env_var": "FIREWATCH_PATH",
+      "steam_app_id": 383870,
       "steam_folder": "Firewatch",
       "executable_relpath": "Firewatch.exe",
       "data_folder": "Firewatch_Data",
       "xbox_paths": [
         "C:\\XboxGames\\Firewatch\\Content"
-      ]
+      ],
+      "gog_ids": [
+        "1459256379"
+      ],
+      "loader": "MelonLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/firewatch-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "the-green-light": {
       "display_name": "The Green Light",
       "env_var": "GREENLIGHT_PATH",
       "steam_folder": "The Green Light",
       "executable_relpath": "TheGreenLight.exe",
-      "data_folder": "TheGreenLight_Data"
+      "data_folder": "TheGreenLight_Data",
+      "gog_ids": [
+        "2137859649"
+      ],
+      "engine": "Unity",
+      "catalog_status": "absent"
     },
     "the-pathless": {
       "display_name": "The Pathless",
       "env_var": "THE_PATHLESS_PATH",
       "steam_app_id": 1437350,
       "steam_folder": "The Pathless",
-      "executable_relpath": "Pathless.exe"
+      "executable_relpath": "Pathless.exe",
+      "repo": "itsloopyo/the-pathless-headtracking",
+      "catalog_status": "absent"
     },
     "the-witness": {
       "display_name": "The Witness",
       "env_var": "THE_WITNESS_PATH",
       "steam_app_id": 210970,
       "steam_folder": "The Witness",
-      "executable_relpath": "witness64_d3d11.exe"
+      "executable_relpath": "witness64_d3d11.exe",
+      "gog_ids": [
+        "1461060839"
+      ],
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/the-witness-headtracking",
+      "catalog_status": "absent"
     },
     "mafia-ii-definitive-edition": {
       "display_name": "Mafia II: Definitive Edition",
       "env_var": "MAFIA_II_DE_PATH",
       "steam_app_id": 1030830,
       "steam_folder": "Mafia II Definitive Edition",
-      "executable_relpath": "pc\\Mafia II Definitive Edition.exe"
+      "executable_relpath": "pc\\Mafia II Definitive Edition.exe",
+      "gog_ids": [
+        "1943447848"
+      ],
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/mafia-ii-definitive-edition-headtracking",
+      "catalog_status": "absent"
     },
     "assassins-creed-unity": {
       "display_name": "Assassin's Creed Unity",
@@ -506,30 +880,50 @@
       "steam_app_id": 289650,
       "steam_folder": "Assassin's Creed Unity",
       "ubisoft_app_ids": [
-        720
+        720,
+        526,
+        4915,
+        4917
       ],
-      "executable_relpath": "ACU.exe"
+      "executable_relpath": "ACU.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/assassins-creed-unity-headtracking",
+      "catalog_status": "prerelease"
     },
     "assassins-creed-origins": {
       "display_name": "Assassin's Creed Origins",
       "env_var": "ASSASSINS_CREED_ORIGINS_PATH",
       "steam_app_id": 582160,
       "steam_folder": "Assassins Creed Origins",
-      "executable_relpath": "ACOrigins.exe"
+      "executable_relpath": "ACOrigins.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/assassins-creed-origins-headtracking",
+      "catalog_status": "absent"
     },
     "portal-2": {
       "display_name": "Portal 2",
       "env_var": "PORTAL_2_PATH",
       "steam_app_id": 620,
       "steam_folder": "Portal 2",
-      "executable_relpath": "portal2.exe"
+      "executable_relpath": "portal2.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/portal-2-headtracking",
+      "engine": "Source",
+      "catalog_status": "prerelease"
     },
     "titanfall-2": {
       "display_name": "Titanfall 2",
       "env_var": "TITANFALL_2_PATH",
       "steam_app_id": 1237970,
       "steam_folder": "Titanfall2",
-      "executable_relpath": "Titanfall2.exe"
+      "executable_relpath": "Titanfall2.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/titanfall-2-headtracking",
+      "catalog_status": "prerelease"
     },
     "black-and-white": {
       "display_name": "Black & White",
@@ -541,63 +935,115 @@
           "value": "GameDir"
         }
       ],
-      "executable_relpath": "runblack.exe"
+      "executable_relpath": "runblack.exe",
+      "search_paths": [
+        "C:\\Program Files (x86)\\Lionhead Studios Ltd\\Black & White"
+      ],
+      "modded_executable_relpath": "bw-headtracking-launcher.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/black-and-white-headtracking",
+      "catalog_status": "released"
     },
     "metro-2033-redux": {
       "display_name": "Metro 2033 Redux",
       "env_var": "METRO_2033_REDUX_PATH",
       "steam_app_id": 286690,
       "steam_folder": "Metro 2033 Redux",
-      "executable_relpath": "metro.exe"
+      "executable_relpath": "metro.exe",
+      "gog_ids": [
+        "1436434037"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/metro-2033-redux-headtracking",
+      "catalog_status": "absent"
     },
     "little-nightmares-enhanced-edition": {
       "display_name": "Little Nightmares Enhanced Edition",
       "env_var": "LITTLE_NIGHTMARES_ENHANCED_EDITION_PATH",
       "steam_app_id": 2149010,
       "steam_folder": "Little Nightmares Enhanced Edition",
-      "executable_relpath": "Atlas\\Binaries\\Win64\\Atlas-Win64-Shipping.exe"
+      "executable_relpath": "Atlas\\Binaries\\Win64\\Atlas-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/little-nightmares-enhanced-edition-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "still-wakes-the-deep": {
       "display_name": "Still Wakes the Deep",
       "env_var": "STILL_WAKES_THE_DEEP_PATH",
       "steam_app_id": 1622910,
       "steam_folder": "Still Wakes the Deep",
-      "executable_relpath": "Habitat\\Binaries\\Win64\\StillWakesTheDeep.exe"
+      "executable_relpath": "Habitat\\Binaries\\Win64\\StillWakesTheDeep.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/still-wakes-the-deep-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "released"
     },
     "yapyap": {
       "display_name": "YAPYAP",
       "env_var": "YAPYAP_PATH",
       "steam_app_id": 3834090,
       "steam_folder": "YAPYAP",
-      "executable_relpath": "yapyap.exe"
+      "executable_relpath": "yapyap.exe",
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/yapyap-headtracking",
+      "engine": "Unity",
+      "catalog_status": "released"
     },
     "yakuza-0": {
       "display_name": "Yakuza 0",
       "env_var": "YAKUZA_0_PATH",
       "steam_app_id": 638970,
       "steam_folder": "Yakuza 0",
-      "executable_relpath": "media\\Yakuza0.exe"
+      "executable_relpath": "media\\Yakuza0.exe",
+      "gog_ids": [
+        "1103602225"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/yakuza-0-headtracking",
+      "catalog_status": "prerelease"
     },
     "mass-effect-legendary-edition": {
       "display_name": "Mass Effect Legendary Edition",
       "env_var": "MASS_EFFECT_LE_PATH",
       "steam_app_id": 1328670,
       "steam_folder": "Mass Effect Legendary Edition",
-      "executable_relpath": "Game\\Launcher\\MassEffectLauncher.exe"
+      "executable_relpath": "Game\\Launcher\\MassEffectLauncher.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/mass-effect-legendary-edition-headtracking",
+      "catalog_status": "absent"
     },
     "stormworks": {
       "display_name": "Stormworks: Build and Rescue",
       "env_var": "STORMWORKS_PATH",
       "steam_app_id": 573090,
       "steam_folder": "Stormworks",
-      "executable_relpath": "stormworks64.exe"
+      "executable_relpath": "stormworks64.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/stormworks-headtracking",
+      "catalog_status": "absent"
     },
     "no-mans-sky": {
       "display_name": "No Man's Sky",
       "env_var": "NO_MANS_SKY_PATH",
       "steam_app_id": 275850,
       "steam_folder": "No Man's Sky",
-      "executable_relpath": "Binaries\\NMS.exe"
+      "executable_relpath": "Binaries\\NMS.exe",
+      "gog_ids": [
+        "1446213994"
+      ],
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/no-mans-sky-headtracking",
+      "catalog_status": "absent"
     },
     "trailmakers": {
       "display_name": "Trailmakers",
@@ -605,28 +1051,44 @@
       "steam_app_id": 585420,
       "steam_folder": "Trailmakers",
       "executable_relpath": "Trailmakers.exe",
-      "data_folder": "Trailmakers_Data"
+      "data_folder": "Trailmakers_Data",
+      "engine": "Unity",
+      "catalog_status": "absent"
     },
     "outer-worlds-spacers-choice-edition": {
       "display_name": "The Outer Worlds: Spacer's Choice Edition",
       "env_var": "OUTER_WORLDS_SPACERS_CHOICE_EDITION_PATH",
       "steam_app_id": 1920490,
       "steam_folder": "The Outer Worlds Spacer's Choice",
-      "executable_relpath": "Indiana\\Binaries\\Win64\\Indiana-Win64-Shipping.exe"
+      "executable_relpath": "Indiana\\Binaries\\Win64\\Indiana-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/outer-worlds-spacers-choice-edition-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "sonic-racing-crossworlds": {
       "display_name": "Sonic Racing: CrossWorlds",
       "env_var": "SONIC_RACING_CROSSWORLDS_PATH",
       "steam_app_id": 2486820,
       "steam_folder": "SonicRacingCrossWorlds",
-      "executable_relpath": "UNION\\Binaries\\Win64\\SonicRacingCrossWorldsSteam.exe"
+      "executable_relpath": "UNION\\Binaries\\Win64\\SonicRacingCrossWorldsSteam.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/sonic-racing-crossworlds-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "la-noire": {
       "display_name": "L.A. Noire",
       "env_var": "LA_NOIRE_PATH",
       "steam_app_id": 110800,
       "steam_folder": "L.A.Noire",
-      "executable_relpath": "LANoire.exe"
+      "executable_relpath": "LANoire.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/la-noire-headtracking",
+      "catalog_status": "absent"
     },
     "dorfromantik": {
       "display_name": "Dorfromantik",
@@ -634,70 +1096,144 @@
       "steam_app_id": 1455840,
       "steam_folder": "Dorfromantik",
       "executable_relpath": "Dorfromantik.exe",
-      "data_folder": "Dorfromantik_Data"
+      "data_folder": "Dorfromantik_Data",
+      "gog_ids": [
+        "1721001406"
+      ],
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dorfromantik-headtracking",
+      "engine": "Unity",
+      "catalog_status": "absent"
     },
     "crysis": {
       "display_name": "Crysis",
       "env_var": "CRYSIS_PATH",
       "steam_app_id": 17300,
       "steam_folder": "Crysis",
-      "executable_relpath": "Bin64\\Crysis64.exe"
+      "executable_relpath": "Bin64\\Crysis64.exe",
+      "gog_ids": [
+        "1809223221"
+      ],
+      "engine": "CryEngine",
+      "catalog_status": "absent"
     },
     "spec-ops-the-line": {
       "display_name": "Spec Ops: The Line",
       "env_var": "SPEC_OPS_THE_LINE_PATH",
       "steam_app_id": 50300,
       "steam_folder": "SpecOps_TheLine",
-      "executable_relpath": "Binaries\\Win32\\SpecOpsTheLine.exe"
+      "executable_relpath": "Binaries\\Win32\\SpecOpsTheLine.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/spec-ops-the-line-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "south-park-the-stick-of-truth": {
       "display_name": "South Park: The Stick of Truth",
       "env_var": "SOUTH_PARK_STICK_OF_TRUTH_PATH",
       "steam_app_id": 213670,
       "steam_folder": "South Park - The Stick of Truth",
-      "executable_relpath": "South Park - The Stick of Truth.exe"
+      "executable_relpath": "South Park - The Stick of Truth.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/south-park-the-stick-of-truth-headtracking",
+      "catalog_status": "absent"
     },
     "ethan-carter-redux": {
       "display_name": "The Vanishing of Ethan Carter Redux",
       "env_var": "ETHAN_CARTER_REDUX_PATH",
       "executable_relpath": "EthanCarter\\Binaries\\Win64\\EthanCarter-Win64-Shipping.exe",
       "steam_app_id": 258520,
-      "steam_folder": "The Vanishing of Ethan Carter Redux"
+      "steam_folder": "The Vanishing of Ethan Carter Redux",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/the-vanishing-of-ethan-carter-redux-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     },
     "edith-finch": {
       "display_name": "What Remains of Edith Finch",
       "env_var": "EDITH_FINCH_PATH",
       "executable_relpath": "FinchGame\\Binaries\\Win64\\FinchGame.exe",
       "steam_app_id": 501300,
-      "steam_folder": "EdithFinch"
+      "steam_folder": "EdithFinch",
+      "gog_ids": [
+        "1651927092"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/what-remains-of-edith-finch-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "released"
     },
     "prey": {
       "display_name": "Prey",
       "env_var": "PREY_PATH",
       "steam_app_id": 480490,
       "steam_folder": "Prey",
-      "executable_relpath": "Binaries\\Danielle\\x64\\Release\\Prey.exe"
+      "executable_relpath": "Binaries\\Danielle\\x64\\Release\\Prey.exe",
+      "gog_ids": [
+        "1158493447"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/prey-headtracking",
+      "engine": "CryEngine",
+      "catalog_status": "prerelease"
     },
     "pinball-fx": {
       "display_name": "Pinball FX",
       "env_var": "PINBALL_FX_PATH",
       "steam_app_id": 2328760,
       "steam_folder": "Pinball FX",
-      "executable_relpath": "PinballFX\\Binaries\\Win64\\PinballFX-Win64-Shipping.exe"
+      "executable_relpath": "PinballFX\\Binaries\\Win64\\PinballFX-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/pinball-fx-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "prerelease"
     },
     "kingdom-come-deliverance": {
       "display_name": "Kingdom Come: Deliverance",
       "env_var": "KINGDOM_COME_DELIVERANCE_PATH",
       "steam_app_id": 379430,
       "steam_folder": "KingdomComeDeliverance",
-      "executable_relpath": "Bin\\Win64\\KingdomCome.exe"
+      "executable_relpath": "Bin\\Win64\\KingdomCome.exe",
+      "gog_ids": [
+        "1719198803"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/kingdom-come-deliverance-headtracking",
+      "engine": "CryEngine",
+      "catalog_status": "prerelease"
     },
     "kingdom-come-deliverance-2": {
       "display_name": "Kingdom Come: Deliverance II",
       "env_var": "KINGDOM_COME_DELIVERANCE_2_PATH",
       "steam_app_id": 1771300,
       "steam_folder": "KingdomComeDeliverance2",
-      "executable_relpath": "Bin\\Win64MasterMasterSteamPGO\\KingdomCome.exe"
+      "executable_relpath": "Bin\\Win64MasterMasterSteamPGO\\KingdomCome.exe",
+      "gog_ids": [
+        "1076704248"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/kingdom-come-deliverance-2",
+      "engine": "CryEngine",
+      "catalog_status": "prerelease"
+    },
+    "minecraft": {
+      "display_name": "Minecraft: Bedrock Edition",
+      "msix_identity_name": "Microsoft.MinecraftUWP",
+      "executable_relpath": "Minecraft.Windows.exe",
+      "modded_executable_relpath": "MinecraftHeadTrackingLauncher.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/minecraft-bedrock-edition-headtracking",
+      "catalog_status": "released"
     }
   }
 }
