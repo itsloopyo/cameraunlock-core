@@ -1221,7 +1221,7 @@
       ],
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
-      "repo": "itsloopyo/kingdom-come-deliverance-2",
+      "repo": "itsloopyo/kingdom-come-deliverance-2-headtracking",
       "engine": "CryEngine",
       "catalog_status": "prerelease"
     },
