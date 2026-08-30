@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - dev pre-releases now publish the Nexus ZIP as well
+
+`Publish-NightlyBuild` attaches both `<ModName>-dev-installer.zip` and
+`<ModName>-dev-nexus.zip` to the rolling `dev` pre-release, hashes both, and
+lists both under `SHA-256:` in the release notes. `pixi run package` in nearly
+every mod already writes `release/<ModName>-v<Version>-nexus.zip`; only the
+installer ever went up, so anyone installing by hand or through a mod manager
+was stuck on the last tagged release.
+
+The Nexus ZIP is now required, on the same terms as the installer: missing or
+older than the build start is fatal rather than a silent one-asset publish.
+
+To change in consuming repos: nothing, if `pixi run package` writes the Nexus
+ZIP at the default path. Otherwise pass the new `-NexusZipPath` to point at it,
+or `-NoNexusZip` for a mod that has no extract-to-game-folder layout.
+
 ### Added - the C# receiver reports its first accepted packet
 
 `OpenTrackReceiver` now emits one latched `First tracker packet accepted from

@@ -10,9 +10,14 @@
 #      HEAD is on the remote (the release tags this commit).
 #   2. Run the mod's build + package commands.
 #   3. Stamp a dev version: <version>-nightly.<utc-date>.<sha>.
-#   4. SHA-256 the installer ZIP (surfaced in the release notes).
+#   4. SHA-256 each ZIP (surfaced in the release notes).
 #   5. Replace the `dev` pre-release (delete + recreate at HEAD) with the
-#      fresh ZIP attached as a fixed-named asset.
+#      fresh ZIPs attached as fixed-named assets.
+#
+# Both artifacts `pixi run package` produces go up: the installer ZIP and
+# the Nexus ZIP (the same build laid out to extract straight into the game
+# folder). A dev build that only shipped the installer left everyone who
+# installs by hand or through a mod manager on the last tagged release.
 #
 # Why a rolling pre-release:
 #   - Dev builds are free and open for everyone. A GitHub pre-release is
@@ -27,6 +32,23 @@
 # (needs `contents: write`); locally it's your `gh auth login`.
 # Also requires DISCORD_RELEASE_WEBHOOK in the environment - every dev
 # build is announced, so publishing without it is refused up front.
+
+# release/ keeps the previous run's zips. If the package step didn't actually
+# produce one this time, that stale file is what gets hashed, uploaded as the
+# new dev asset and announced as a fresh build.
+function Assert-FreshArtifact {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][datetime]$BuildStartedAt,
+        [Parameter(Mandatory)][string]$PackageCommand
+    )
+
+    $writtenAt = (Get-Item -LiteralPath $Path).LastWriteTime
+    if ($writtenAt -lt $BuildStartedAt) {
+        throw "$Label ZIP $Path was last written $($writtenAt.ToString('o')), before this build started ($($BuildStartedAt.ToString('o'))). '$PackageCommand' did not produce it - refusing to publish a stale artifact."
+    }
+}
 
 function Publish-NightlyBuild {
     [CmdletBinding()]
@@ -52,6 +74,17 @@ function Publish-NightlyBuild {
         # Override if the packager writes something other than
         # release/<ModName>-v<Version>-installer.zip.
         [string]$InstallerZipPath = $null,
+
+        # Override if the packager writes something other than
+        # release/<ModName>-v<Version>-nexus.zip.
+        [string]$NexusZipPath = $null,
+
+        # Opt out for a mod whose package step produces no Nexus ZIP. The
+        # missing artifact is otherwise fatal: silently publishing a dev
+        # release with one asset when the packager should have made two is
+        # how the Nexus zip went missing from every dev build in the first
+        # place.
+        [switch]$NoNexusZip,
 
         # Git tag for the rolling dev pre-release. One release per repo,
         # replaced on every publish.
@@ -129,38 +162,58 @@ function Publish-NightlyBuild {
     if (-not (Test-Path -LiteralPath $InstallerZipPath)) {
         throw "Expected installer ZIP missing: $InstallerZipPath"
     }
+    Assert-FreshArtifact -Path $InstallerZipPath -Label 'Installer' -BuildStartedAt $buildStartedAt -PackageCommand $PackageCommand
 
-    # release/ keeps the previous run's zip. If the package step didn't actually
-    # produce one this time, that stale file is what gets hashed, uploaded as the
-    # new dev asset and announced as a fresh build.
-    $zipWrittenAt = (Get-Item -LiteralPath $InstallerZipPath).LastWriteTime
-    if ($zipWrittenAt -lt $buildStartedAt) {
-        throw "Installer ZIP $InstallerZipPath was last written $($zipWrittenAt.ToString('o')), before this build started ($($buildStartedAt.ToString('o'))). '$PackageCommand' did not produce it - refusing to publish a stale artifact."
+    if (-not $NoNexusZip) {
+        if (-not $NexusZipPath) {
+            $NexusZipPath = Join-Path $ProjectRoot "release\$ModName-v$Version-nexus.zip"
+        }
+        if (-not (Test-Path -LiteralPath $NexusZipPath)) {
+            throw "Expected Nexus ZIP missing: $NexusZipPath. '$PackageCommand' must produce it alongside the installer; pass -NexusZipPath if it is written elsewhere, or -NoNexusZip if this mod has no Nexus layout."
+        }
+        Assert-FreshArtifact -Path $NexusZipPath -Label 'Nexus' -BuildStartedAt $buildStartedAt -PackageCommand $PackageCommand
     }
 
-    # Fixed asset name -> stable download URL:
+    # Fixed asset names -> stable download URLs:
     # github.com/<owner>/<repo>/releases/download/<DevTag>/<asset>
     $releaseDir = Join-Path $ProjectRoot 'release'
-    $assetName = "$ModName-dev-installer.zip"
-    $assetPath = Join-Path $releaseDir $assetName
-    Copy-Item -LiteralPath $InstallerZipPath -Destination $assetPath -Force
+    $sources = [ordered]@{ "$ModName-dev-installer.zip" = $InstallerZipPath }
+    if (-not $NoNexusZip) {
+        $sources["$ModName-dev-nexus.zip"] = $NexusZipPath
+    }
 
-    $zipBytes = (Get-Item -LiteralPath $assetPath).Length
-    $zipHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $assets = @()
+    foreach ($assetName in $sources.Keys) {
+        $assetPath = Join-Path $releaseDir $assetName
+        Copy-Item -LiteralPath $sources[$assetName] -Destination $assetPath -Force
+        $assets += [PSCustomObject]@{
+            Name = $assetName
+            Path = $assetPath
+            Size = (Get-Item -LiteralPath $assetPath).Length
+            Hash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
 
-    Write-Host "Built : $assetName" -ForegroundColor Green
-    Write-Host "  size   : $zipBytes bytes" -ForegroundColor DarkGray
-    Write-Host "  sha256 : $zipHash" -ForegroundColor DarkGray
+    foreach ($asset in $assets) {
+        Write-Host "Built : $($asset.Name)" -ForegroundColor Green
+        Write-Host "  size   : $($asset.Size) bytes" -ForegroundColor DarkGray
+        Write-Host "  sha256 : $($asset.Hash)" -ForegroundColor DarkGray
+    }
     Write-Host ''
 
     $title = "Development build $nightlyVersion"
+    $installHint = "To install manually: download the installer zip below, extract it, and run install.cmd."
+    if (-not $NoNexusZip) {
+        $installHint += " The nexus zip is the same build laid out to extract straight into the game folder."
+    }
+    $hashLines = ($assets | ForEach-Object { "$($_.Name): $($_.Hash)" }) -join "`n"
     # Plain-text notes (no markdown backticks - backtick is PowerShell's
     # escape char inside double quotes, so `n is a newline here).
     $notes =
         "Development build - buggy but playable, not release-quality. Expect rough edges.`n`n" +
         "Automated build of in-progress work. The mod is open source and free; this prebuilt is a convenience. " +
-        "To install manually: download the zip below, extract it, and run install.cmd.`n`n" +
-        "Version: $nightlyVersion`nCommit: $fullSha`nBuilt (UTC): $builtAt`nSHA-256: $zipHash"
+        "$installHint`n`n" +
+        "Version: $nightlyVersion`nCommit: $fullSha`nBuilt (UTC): $builtAt`n`nSHA-256:`n$hashLines"
 
     Push-Location $ProjectRoot
     # gh writes progress/info to stderr - and "release not found" when the
@@ -184,7 +237,8 @@ function Publish-NightlyBuild {
             throw "gh release delete $DevTag failed (exit $LASTEXITCODE):`n$deleteOutput"
         }
 
-        & gh release create $DevTag $assetPath `
+        $assetPaths = @($assets | ForEach-Object { $_.Path })
+        & gh release create $DevTag @assetPaths `
             --prerelease `
             --target $fullSha `
             --title $title `
@@ -212,7 +266,9 @@ function Publish-NightlyBuild {
     Write-Host ''
     Write-Host "Published dev build $nightlyVersion" -ForegroundColor Green
     Write-Host "  release  : https://github.com/$repo/releases/tag/$DevTag" -ForegroundColor DarkGray
-    Write-Host "  download : https://github.com/$repo/releases/download/$DevTag/$assetName" -ForegroundColor DarkGray
+    foreach ($asset in $assets) {
+        Write-Host "  download : https://github.com/$repo/releases/download/$DevTag/$($asset.Name)" -ForegroundColor DarkGray
+    }
 
     # Mirror the tagged-release Discord announce (scripts/templates/
     # discord-announce-step.yml), reusing the same webhook. The webhook is
