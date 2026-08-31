@@ -196,7 +196,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             }
 
             SendTestPacket(TestPort, 0.0, 0.0, 0.0);
-            WaitForData();
+            WaitForRotation(0f, 0f, 0f);
             for (int i = 0; i < 60; i++)
             {
                 _session.Update(FrameTime);
@@ -226,7 +226,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             float uncentered = _session.PositionOffset.X;
 
             SendTestPacket(TestPort, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-            WaitForData();
+            WaitForRotation(0f, 0f, 0f);
             for (int i = 0; i < 120; i++)
             {
                 _session.Update(FrameTime);
@@ -299,7 +299,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             _session.Recenter();
 
             SendTestPacket(TestPort, 40.0, 0.0, 0.0);
-            WaitForData();
+            WaitForRotation(40f, 0f, 0f);
             for (int i = 0; i < 60; i++)
             {
                 _session.Update(FrameTime);
@@ -456,6 +456,31 @@ namespace CameraUnlock.Core.Tests.Tracking
                 Thread.Sleep(10);
             }
             Assert.Fail("Receiver never reported fresh data");
+        }
+
+        /// <summary>
+        /// Waits until the receiver actually reports the sent rotation, rather than
+        /// merely reporting that some data is fresh. A test that sends a second
+        /// packet cannot use freshness: the first packet's data is still fresh,
+        /// because the Update loop between them costs microseconds of wall time,
+        /// so WaitForData returns before the new datagram has landed and the
+        /// assertions then run against the previous pose.
+        /// </summary>
+        private void WaitForRotation(float expectedYaw, float expectedPitch, float expectedRoll)
+        {
+            for (int i = 0; i < 200; i++)
+            {
+                _receiver.GetRawRotation(out float yaw, out float pitch, out float roll);
+                if (System.Math.Abs(yaw - expectedYaw) < 0.01f &&
+                    System.Math.Abs(pitch - expectedPitch) < 0.01f &&
+                    System.Math.Abs(roll - expectedRoll) < 0.01f)
+                {
+                    return;
+                }
+                Thread.Sleep(5);
+            }
+            _receiver.GetRawRotation(out float lastYaw, out float lastPitch, out float lastRoll);
+            Assert.Fail($"Receiver never reported ({expectedYaw}, {expectedPitch}, {expectedRoll}); last saw ({lastYaw}, {lastPitch}, {lastRoll})");
         }
 
         /// <summary>
