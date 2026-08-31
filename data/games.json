@@ -1265,7 +1265,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/half-life-2-headtracking",
       "engine": "Source",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     }
   }
 }
