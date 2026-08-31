@@ -1254,6 +1254,18 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/sleeping-dogs-headtracking",
       "catalog_status": "absent"
+    },
+    "half-life-2": {
+      "display_name": "Half-Life 2",
+      "env_var": "HALF_LIFE_2_PATH",
+      "steam_app_id": 220,
+      "steam_folder": "Half-Life 2",
+      "executable_relpath": "hl2.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/half-life-2-headtracking",
+      "engine": "Source",
+      "catalog_status": "absent"
     }
   }
 }
