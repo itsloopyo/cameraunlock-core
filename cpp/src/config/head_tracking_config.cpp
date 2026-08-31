@@ -9,6 +9,20 @@ namespace cameraunlock {
 
 namespace {
 
+// ASCII-only case fold, matching the one ads::ParseAdsMode and the config key table
+// both use. Nothing here needs a wider fold and a wider one would disagree with them.
+bool EqualsIgnoreAsciiCase(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        char ca = a[i];
+        if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca - 'A' + 'a');
+        char cb = b[i];
+        if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb - 'A' + 'a');
+        if (ca != cb) return false;
+    }
+    return true;
+}
+
 std::string Trim(const std::string& s) {
     size_t first = s.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return std::string();
@@ -299,6 +313,29 @@ void HeadTrackingConfig::ApplyValues(
             if (TryParseConfigFloat(value, float_val)) tracker_pivot_forward = float_val;
         } else if (canonical == config_keys::kTrackerPivotUp) {
             if (TryParseConfigFloat(value, float_val)) tracker_pivot_up = float_val;
+        } else if (canonical == config_keys::kAdsMode) {
+            ads_mode = ads::ParseAdsMode(value.c_str());
+            // Every neighbouring key reports a value it could not use. Without this, the
+            // one typo the fail-to-default design exists to survive - AdsMode=trakced -
+            // hands the player stock ADS and says nothing, so there is no way to find out
+            // why the setting did nothing.
+            if (log && !EqualsIgnoreAsciiCase(Trim(value), ads::AdsModeValue(ads_mode))) {
+                log("Config key '" + entry.first + "' has an unrecognised value '" + value +
+                    "' - using " + ads::AdsModeValue(ads_mode) +
+                    ". Valid values are paused, marker and tracked.");
+            }
+        } else if (canonical == config_keys::kLightFollowsHead) {
+            if (TryParseConfigBool(value, bool_val)) light.follows_head = bool_val;
+        } else if (canonical == config_keys::kLightMultiplier) {
+            if (TryParseConfigFloat(value, float_val)) {
+                if (float_val >= 0.0f && float_val <= effects::kMaxLightMultiplier) {
+                    light.multiplier = float_val;
+                } else if (log) {
+                    log("Config key '" + entry.first + "' has an out-of-range value '" + value +
+                        "' (expected 0-" + std::to_string(effects::kMaxLightMultiplier) +
+                        ") - using " + std::to_string(light.multiplier));
+                }
+            }
         } else if (canonical == config_keys::kRecenterKey) {
             recenter_key_name = value;
         } else if (canonical == config_keys::kToggleKey) {

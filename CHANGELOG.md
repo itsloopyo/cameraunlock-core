@@ -9,6 +9,107 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a carried light that follows the head
+
+`cameraunlock/effects/head_follow_light.h`, `CameraUnlock.Core.Effects` and
+`CameraUnlock.Core.Unity.Effects` carry the shared half of the head-follow
+light: the multiplier and its bound, the two scaling shapes, and, for Unity, the
+apply-and-restore around the render pass.
+
+Five mods had grown their own copy of this (prey, still-wakes-the-deep, repo,
+resident-evil-requiem, outer-wilds) with five distinct config spellings over two
+concepts - `CompensateFlashlight`, `[Torch] Enabled`, `FlashlightFollowsHead`,
+`FlashlightScale`, `Multiplier` - one hardcoded multiplier that could not be
+tuned, and one mod that never scaled at all. Finding the light stays per game and
+always will; what moved is the number, the reasoning, the bound and the
+arithmetic.
+
+- `effects::kDefaultLightMultiplier` = 1.5, `kMaxLightMultiplier` = 5.0.
+- `effects::ScaleHeadEuler` for a mod that has the pose as angles,
+  `effects::ScaleHeadAngle` / `HeadFollowLightSettings.ScaleRotation` for one
+  that only has the delta between the clean and the drawn basis. These are two
+  different operations, not two spellings of one: they coincide only when a
+  single axis is non-zero. Use whichever matches how the mod already composes
+  the pose onto the camera.
+- `ScaleRotation` folds the negative quaternion hemisphere before taking the
+  half-angle, and derives the axis length from the vector part rather than from
+  `w`. Without the fold, `q` and `-q` - the same rotation - scale to results
+  180 degrees apart, and the output is unit-length and finite either way, so
+  nothing downstream can catch it.
+- `HeadFollowLight` and `HeadFollowLightRenderHook` for Unity.
+- `reframework::kMaxFlashlightMultiplier` is now an alias of
+  `effects::kMaxLightMultiplier` and stays for existing callers.
+
+### Added - the ADS module is complete in both languages
+
+`CameraUnlock.Core.Ads` ports `AdsMode`/`AdsModes`, `AdsFade` and
+`AdsEntryPose` to C#, and `cameraunlock/ads/ads_blend.h` plus
+`AdsPoseBlend` add the blend that was living in titanfall-2-headtracking. The
+blend is the one that keeps ROLL out of the fade in every mode.
+`ads::AdsSuspendsTracking` names the rule that only `paused` closes a mod tracking
+gate.
+
+### Added - two aim projections lifted out of titanfall-2-headtracking
+
+`rendering/aim_ndc_projection.h` (`ProjectAimToNdc`, basis to basis) and
+`rendering/world_reprojection.h` (`FrameCameras`, `ReprojectWorldPoint`). Core
+now carries three projection families and the header comments say which to reach
+for; `ProjectAimToNdc` is the default because it makes the fewest assumptions
+about the engine.
+
+### Added - three config concepts: `AdsMode`, `LightFollowsHead`, `LightMultiplier`
+
+`AdsMode` was already recorded in `data/config-schema.json` under
+`deliberately_unaliased` as a real cross-repo setting with no field to bind to;
+the two light keys had no entry at all. All three now have fields on
+`HeadTrackingConfigData` and `HeadTrackingConfig`.
+
+Aliases are limited to the spellings actually shipped, because an alias is a
+one-way door: removing one breaks every config file already on a user's disk.
+`LightFollowsHead` takes `FlashlightFollowsHead` (repo) and
+`CompensateFlashlight` (prey); `LightMultiplier` takes `FlashlightMultiplier`
+(repo) and `FlashlightScale` (prey); `AdsMode` takes none, since titanfall-2 is
+the only mod shipping the key and it spells it `AdsMode`.
+
+The bare `Enabled` and `Multiplier` that still-wakes-the-deep and
+resident-evil-requiem ship under their own `[Torch]` / `[Flashlight]` section
+stay unaliased and are now recorded as such in `deliberately_unaliased`:
+section-less, `Enabled` resolves to the master head-tracking switch and
+`Multiplier` is as generic as `Scale`. Those two mods read their own keys.
+
+`AdsMode` and `LightMultiplier` now log a value they could not use, matching
+every neighbouring key. An out-of-range multiplier is REJECTED and the previous
+value stands, rather than being clamped: running at 5 when the file says 8 is a
+setting that does not do what it says.
+
+`data/pipeline-conformance.json` gains `ads_fade_lower_ms`, `ads_fade_raise_ms`,
+`light_multiplier_default` and `light_multiplier_max` in its `constants` block,
+so a language port that has to restate them can pin them.
+
+### Fixed - the ADS transition stepped the head pose on any reversal
+
+`AdsFade` started each leg of the transition at that leg's own endpoint rather
+than at the scale the interrupted leg had reached, so reversing direction moved
+the pose by however far it had already travelled - up to the whole of it. The
+worst case was the most common input there is: a tap of the aim button, released
+a frame after it was pressed, removed a fully-applied head pose in one frame.
+That is the jolt the class exists to remove.
+
+A leg now starts from where the transition is and its duration is scaled by the
+distance left, so an interrupted transition is continuous and travels at the same
+rate as a whole one. The case that named this in both test suites could not fail
+for it: it allowed a difference of 0.55 at a point where no implementation
+returning a value in [0,1] can exceed 0.5.
+
+`Elapsed` is also clamped at zero. The subtraction is unsigned, so a clock that
+stepped backwards wrapped to an enormous elapsed and settled the transition on
+the spot.
+
+Consumers: titanfall-2-headtracking gets this on its next core pin bump. No API
+change; `kLowerMs` and `kRaiseMs` are unchanged. `AdsFade.LowerMs` / `RaiseMs`
+moved from `const` to `static readonly` on the C# side so a future retune cannot
+leave an already-built mod on a value baked in at its compile time.
+
 ### BREAKING - the bare `Enabled` / `Enable` config keys no longer resolve
 
 `data/config-schema.json` no longer aliases the bare spellings `Enabled` and

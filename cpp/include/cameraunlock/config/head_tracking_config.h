@@ -5,8 +5,10 @@
 #include <utility>
 #include <vector>
 
+#include "cameraunlock/ads/ads_mode.h"
 #include "cameraunlock/config/config_key_schema.g.h"
 #include "cameraunlock/data/position_settings.h"
+#include "cameraunlock/effects/head_follow_light.h"
 
 namespace cameraunlock {
 
@@ -50,6 +52,24 @@ struct HeadTrackingConfig {
     PositionSettings position = PositionSettings::Default();
     float tracker_pivot_forward = 0.0f;
     float tracker_pivot_up = 0.0f;
+
+    /// What head tracking does while the sights are up. Parsed with `marker`
+    /// ALLOWED, because this struct cannot know whether the mod reading it ships
+    /// two slots or three.
+    ///
+    /// A two-slot mod therefore cannot take this field as it stands: ApplyValues
+    /// consumes the raw string and does not keep it, so there is nothing left to
+    /// re-parse. Such a mod either reads the key itself with
+    /// ads::ParseAdsMode(raw, false) before handing the pairs over, or maps
+    /// AdsMode::Marker onto ads::kDefaultAdsMode after loading. Left alone it
+    /// would hold a mode it does not implement, and AdsSuspendsTracking(Marker)
+    /// is false, so tracking would stay live through ADS with a marker the mod
+    /// never draws.
+    ads::AdsMode ads_mode = ads::kDefaultAdsMode;
+
+    /// A carried light that follows the head rather than the aim. Inert in a mod
+    /// for a game with no carried light; see effects/head_follow_light.h.
+    effects::HeadFollowLightSettings light;
 
     std::string recenter_key_name = "Home";
     std::string toggle_key_name = "End";

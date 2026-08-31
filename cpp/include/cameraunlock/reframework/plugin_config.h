@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cameraunlock/data/position_settings.h"
+#include "cameraunlock/effects/head_follow_light.h"
 #include "cameraunlock/math/smoothing_utils.h"
 
 #include <cstdint>
@@ -25,7 +26,9 @@ inline constexpr float kMaxRotationSensitivity = 5.0f;
 inline constexpr float kMaxPositionSensitivity = 10.0f;
 inline constexpr float kMinPositionLimit = 0.0f;
 inline constexpr float kMaxPositionLimit = 2.0f;
-inline constexpr float kMaxFlashlightMultiplier = 5.0f;
+/// Deprecated spelling of effects::kMaxLightMultiplier, kept so existing
+/// callers keep compiling. New code names the shared constant.
+inline constexpr float kMaxFlashlightMultiplier = effects::kMaxLightMultiplier;
 
 // Format version of a written config. Bumped when a shipped default changes to
 // a value an INI already on disk has to adopt, because Load only writes the
@@ -104,11 +107,13 @@ struct PluginConfig {
     bool positionInvertZ = false;
     bool positionEnabled = true;
 
-    // Flashlight. The beam is rotated by the head pose scaled by
-    // flashlightMultiplier, so it leads the view instead of matching it. This
-    // is a game-specific light-to-view relationship, not tracker pose shaping.
+    // The carried light follows the head rather than the aim: the beam is
+    // rotated by the head pose scaled by flashlightMultiplier, so it leads the
+    // view instead of matching it. See effects/head_follow_light.h for why it
+    // leads, and for what the number is bounded by. This is a light-to-view
+    // relationship, not tracker pose shaping.
     bool flashlightTracking = true;
-    float flashlightMultiplier = 1.5f;
+    float flashlightMultiplier = effects::kDefaultLightMultiplier;
 
     // General
     bool autoEnable = true;

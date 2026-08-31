@@ -130,7 +130,33 @@
     "packet_size_with_trailer": { "value": 54, "cpp": "OpenTrackPacket::kPacketSizeWithTrailer" },
     "trailer_magic": { "value": "HCAM", "offset": 48 },
     "trailer_version_offset": { "value": 52, "note": "byte >= 1 is valid; compare with >=, not ==, so a later version still parses" },
-    "trailer_counter_offset": { "value": 53, "note": "u8, wraps" }
+    "trailer_counter_offset": { "value": 53, "note": "u8, wraps" },
+    "ads_fade_lower_ms": {
+      "value": 150,
+      "cpp": "AdsFade::kLowerMs",
+      "csharp": "AdsFade.LowerMs",
+      "unit": "ms",
+      "note": "The ease onto the aim when the sights start coming up. Short enough to be done before there is a sight picture to look through."
+    },
+    "ads_fade_raise_ms": {
+      "value": 250,
+      "cpp": "AdsFade::kRaiseMs",
+      "csharp": "AdsFade.RaiseMs",
+      "unit": "ms",
+      "note": "And back when they drop. Longer, because nothing is waiting on it."
+    },
+    "light_multiplier_default": {
+      "value": 1.5,
+      "cpp": "effects::kDefaultLightMultiplier",
+      "csharp": "HeadFollowLightSettings.DefaultMultiplier",
+      "note": "How far a carried light turns relative to the head. It LEADS the view: a player who turns their head keeps their eyes on what they turned towards, so a beam matched to the view alone lands short of it."
+    },
+    "light_multiplier_max": {
+      "value": 5.0,
+      "cpp": "effects::kMaxLightMultiplier",
+      "csharp": "HeadFollowLightSettings.MaxMultiplier",
+      "note": "Past this a twenty-degree head turn puts the beam a full quadrant off the view. Config readers clamp to [0, this]."
+    }
   },
 
   "vectors": [

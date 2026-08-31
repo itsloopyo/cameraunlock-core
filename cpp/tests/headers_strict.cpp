@@ -33,6 +33,7 @@
 #include <windows.h>
 #endif
 
+#include "cameraunlock/ads/ads_blend.h"
 #include "cameraunlock/ads/ads_fade.h"
 #include "cameraunlock/ads/ads_mode.h"
 #include "cameraunlock/ads/entry_pose.h"
@@ -47,6 +48,7 @@
 #include "cameraunlock/discovery/camera_discovery.h"
 #include "cameraunlock/discovery/float_classifier.h"
 #include "cameraunlock/discovery/probe_selection.h"
+#include "cameraunlock/effects/head_follow_light.h"
 #include "cameraunlock/hooks/hook_manager.h"
 #include "cameraunlock/input/chord_hotkeys.h"
 #include "cameraunlock/input/deferred_actions.h"
@@ -85,9 +87,11 @@
 #include "cameraunlock/reframework/plugin_config.h"
 #include "cameraunlock/reframework/plugin_mod.h"
 #include "cameraunlock/reframework/re_math.h"
+#include "cameraunlock/rendering/aim_ndc_projection.h"
 #include "cameraunlock/rendering/aim_quat_projection.h"
 #include "cameraunlock/rendering/crosshair_projection.h"
 #include "cameraunlock/rendering/gui_marker_compensation.h"
+#include "cameraunlock/rendering/world_reprojection.h"
 #include "cameraunlock/time/frame_clock.h"
 #include "cameraunlock/time/qpc_clock.h"
 #include "cameraunlock/tracking/head_tracking_session.h"

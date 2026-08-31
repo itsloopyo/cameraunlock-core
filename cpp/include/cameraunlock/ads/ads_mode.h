@@ -92,6 +92,12 @@ inline AdsMode NextAdsModeTwoSlot(AdsMode mode) {
     return mode == AdsMode::Paused ? AdsMode::Tracked : AdsMode::Paused;
 }
 
+// True when this mode stands tracking down for the duration of the aim, which is
+// the one branch that closes a mod's tracking gate on the sights coming up.
+// Named rather than spelled `mode == AdsMode::Paused` in every mod, so the rule
+// has a single definition on both sides of the library.
+inline bool AdsSuspendsTracking(AdsMode mode) { return mode == AdsMode::Paused; }
+
 // Anything that is not one of the three values is the DEFAULT, not whichever
 // branch happens to be last. That covers a typo in a hand-edited file, and it is
 // also the migration path for a mode renamed since an older release wrote the
@@ -103,12 +109,17 @@ inline AdsMode NextAdsModeTwoSlot(AdsMode mode) {
 // release of the same mod, otherwise selects a mode that does not exist.
 inline AdsMode ParseAdsMode(const char* text, bool allowMarker = true) {
     if (!text) return kDefaultAdsMode;
-    while (*text == ' ' || *text == '\t') ++text;
+    // The same set at both ends, and the same set the C# half trims. It used to
+    // be " \t" leading and " \t\r\n" trailing here, against string.Trim() over
+    // there, so one file could give a C# mod `tracked` and a C++ mod `paused`.
+    // ASCII only on purpose: a value carrying a non-breaking space is a file to
+    // fail toward the default on, not one to guess at.
+    const auto isSpace = [](char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
+    };
+    while (isSpace(*text)) ++text;
     size_t len = std::strlen(text);
-    while (len > 0 && (text[len - 1] == ' ' || text[len - 1] == '\t'
-                       || text[len - 1] == '\r' || text[len - 1] == '\n')) {
-        --len;
-    }
+    while (len > 0 && isSpace(text[len - 1])) --len;
     for (const AdsMode mode : { AdsMode::Paused, AdsMode::Marker, AdsMode::Tracked }) {
         if (mode == AdsMode::Marker && !allowMarker) continue;
         const char* value = AdsModeValue(mode);

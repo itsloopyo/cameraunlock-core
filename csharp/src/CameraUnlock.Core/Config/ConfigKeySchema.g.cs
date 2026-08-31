@@ -52,18 +52,23 @@ namespace CameraUnlock.Core.Config
             public const string CycleTrackingModeKey = "cycletrackingmodekey";
             public const string YawModeKey = "yawmodekey";
             public const string RecenterKey = "recenterkey";
+            public const string AdsMode = "adsmode";
+            public const string LightFollowsHead = "lightfollowshead";
+            public const string LightMultiplier = "lightmultiplier";
 
             public const string Smoothing = "smoothing";
         }
 
         private static readonly Dictionary<string, string> Aliases = new Dictionary<string, string>
         {
+            { "adsmode", "adsmode" },
             { "aimdecouple", "aimdecoupling" },
             { "aimdecoupling", "aimdecoupling" },
             { "autoenable", "enableonstartup" },
             { "centerkey", "recenterkey" },
             { "centrekey", "recenterkey" },
             { "compensatecrosshair", "showreticle" },
+            { "compensateflashlight", "lightfollowshead" },
             { "compensatereticle", "showreticle" },
             { "crosshaircolor", "reticlecolor" },
             { "crosshaircolour", "reticlecolor" },
@@ -84,6 +89,9 @@ namespace CameraUnlock.Core.Config
             { "enableonstartup", "enableonstartup" },
             { "enableposition", "positionenabled" },
             { "enablepositiontracking", "positionenabled" },
+            { "flashlightfollowshead", "lightfollowshead" },
+            { "flashlightmultiplier", "lightmultiplier" },
+            { "flashlightscale", "lightmultiplier" },
             { "horizonlock", "worldspaceyaw" },
             { "horizonlockedyaw", "worldspaceyaw" },
             { "invertpitch", "invertpitch" },
@@ -104,6 +112,8 @@ namespace CameraUnlock.Core.Config
             { "keycyclemode", "cycletrackingmodekey" },
             { "keytoggle", "togglekey" },
             { "keyyawmode", "yawmodekey" },
+            { "lightfollowshead", "lightfollowshead" },
+            { "lightmultiplier", "lightmultiplier" },
             { "limitdown", "positionlimitydown" },
             { "limitx", "positionlimitx" },
             { "limity", "positionlimity" },

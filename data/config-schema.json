@@ -27,8 +27,8 @@
       "reason": "4 repos use [Hotkeys] Position for the position toggle key, but the bare word is too generic to claim section-lessly. PositionToggleKey, TogglePositionKey and PositionKey are aliased instead."
     },
     {
-      "spellings": ["Amount", "Factor", "Scale", "Limit", "Enabled", "Enable"],
-      "reason": "Bare nouns whose meaning comes entirely from their section. Enabled and Enable were briefly excepted and aliased onto EnableOnStartup, on the grounds that the 39 repos writing [Position] Enabled spell the concept PositionEnabled in code. They do in code; they do not in the FILE, which is what this table reads. Matching is section-less, so a file carrying [Position] Enabled=false resolved it to EnableOnStartup and turned the whole mod off with position tracking left on, silently. [Flashlight] Enabled did the same. Unaliased, that line now resolves to nothing and is ignored, which leaves the master switch on its default - the safe direction, and a mod that wants the [General] key read has EnableOnStartup, AutoEnable, StartEnabled and three more spellings to name it by."
+      "spellings": ["Amount", "Factor", "Scale", "Limit", "Multiplier", "Enabled", "Enable"],
+      "reason": "Bare nouns whose meaning comes entirely from their section. Enabled and Enable were briefly excepted and aliased onto EnableOnStartup, on the grounds that the 39 repos writing [Position] Enabled spell the concept PositionEnabled in code. They do in code; they do not in the FILE, which is what this table reads. Matching is section-less, so a file carrying [Position] Enabled=false resolved it to EnableOnStartup and turned the whole mod off with position tracking left on, silently. [Flashlight] Enabled did the same. Unaliased, that line now resolves to nothing and is ignored, which leaves the master switch on its default - the safe direction, and a mod that wants the [General] key read has EnableOnStartup, AutoEnable, StartEnabled and three more spellings to name it by. Multiplier is the same shape and is shipped today by still-wakes-the-deep ([Torch] Multiplier) and resident-evil-requiem ([Flashlight] Multiplier): section-less, it is as generic as Scale, so those two read their own key rather than the schema resolving it to LightMultiplier for them."
     },
     {
       "spellings": ["PositionSmoothing"],
@@ -39,7 +39,7 @@
       "reason": "Chord modifiers, not key names. A different concept from the *Key entries."
     },
     {
-      "spellings": ["BindAddress", "DataFreshnessMs", "DeadzoneDeg", "DeadzoneYaw", "CyclePort", "AdsMode", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
+      "spellings": ["BindAddress", "DataFreshnessMs", "DeadzoneDeg", "DeadzoneYaw", "CyclePort", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
       "reason": "Real cross-repo concepts with no field in HeadTrackingConfigData or its C++ twin to bind to. Aliasing a key onto nothing would advertise a setting that does not work. Each needs a concept and a field before it gets an alias."
     }
   ],
@@ -49,7 +49,7 @@
       "note": "The schema default is true, matching ~44 repos. Four disagree and default it FALSE: dying-light-2 and dishonored-2 (both [Rotation] WorldLockedYaw), quake-ii-rtx ([General] WorldSpaceYaw) and sleeping-dogs ([general] world_space_yaw). WorldLockedYaw is aliased because it is genuinely the same concept with the same polarity, but a mod that adopts this schema's DEFAULT in place of its own flips behaviour for its existing users. Check the mod's own default before wiring the table in."
     }
   ],
-  "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle"],
+  "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle", "ADS", "Light"],
   "concepts": [
     {
       "id": "UdpPort",
@@ -356,6 +356,33 @@
       "default": "Home",
       "aliases": ["CenterKey", "CentreKey", "RecentreKey"],
       "doc": "Retained so existing callers keep parsing. No mod polls it: the tracker app owns the centre."
+    },
+    {
+      "id": "AdsMode",
+      "section": "ADS",
+      "key": "AdsMode",
+      "type": "string",
+      "default": "paused",
+      "aliases": [],
+      "doc": "What head tracking does while the sights are up: paused, marker or tracked. Anything else resolves to paused, which is also the migration path for a mode renamed since an older release wrote the file. No aliases: titanfall-2 is the only mod shipping the key and it spells it AdsMode, and an alias is a one-way door because removing one breaks every file already on disk. A two-slot mod cannot use the shared loader's value directly - it re-reads the raw string with allowMarker false; see cameraunlock::ads::ParseAdsMode / AdsModes.Parse."
+    },
+    {
+      "id": "LightFollowsHead",
+      "section": "Light",
+      "key": "LightFollowsHead",
+      "type": "bool",
+      "default": true,
+      "aliases": ["FlashlightFollowsHead", "CompensateFlashlight"],
+      "doc": "Point a carried light where the head is looking rather than where the body is aiming. The two aliases are the spellings actually shipped - repo (FlashlightFollowsHead) and prey (CompensateFlashlight). The bare Enabled that still-wakes-the-deep and resident-evil-requiem ship under their own section stays unmatched on purpose, because section-less it is the master switch; see deliberately_unaliased."
+    },
+    {
+      "id": "LightMultiplier",
+      "section": "Light",
+      "key": "LightMultiplier",
+      "type": "float",
+      "default": 1.5,
+      "aliases": ["FlashlightMultiplier", "FlashlightScale"],
+      "doc": "How far the light turns relative to the head. 1.5 leads the view; 1.0 matches it; 0 pins the beam to the aim. A value outside [0, 5] is rejected with a log line and the previous one stands - not clamped. The two aliases are the spellings actually shipped: repo (FlashlightMultiplier) and prey (FlashlightScale). See cameraunlock::effects::kDefaultLightMultiplier for why it leads."
     }
   ],
   "retired": [

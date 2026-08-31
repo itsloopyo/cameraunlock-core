@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Xunit;
+using CameraUnlock.Core.Ads;
 using CameraUnlock.Core.Config;
 
 namespace CameraUnlock.Core.Tests.Config
@@ -79,6 +80,9 @@ namespace CameraUnlock.Core.Tests.Config
                 { "CycleTrackingModeKey", config.CycleTrackingModeKeyName },
                 { "YawModeKey", config.YawModeKeyName },
                 { "RecenterKey", config.RecenterKeyName },
+                { "AdsMode", AdsModes.Value(config.AdsMode) },
+                { "LightFollowsHead", config.Light.FollowsHead },
+                { "LightMultiplier", config.Light.Multiplier },
             };
         }
 
