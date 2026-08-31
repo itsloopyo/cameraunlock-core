@@ -1,5 +1,8 @@
 #pragma once
 
+#include "cameraunlock/data/position_settings.h"
+#include "cameraunlock/math/smoothing_utils.h"
+
 #include <cstdint>
 
 namespace cameraunlock::reframework {
@@ -79,8 +82,8 @@ struct PluginConfig {
     // Smoothing. Selected per connection from the packet source address: a
     // tracker on this machine (loopback) uses localSmoothing, a remote network
     // device uses remoteSmoothing. Both cover rotation and position.
-    float localSmoothing = 0.0f;
-    float remoteSmoothing = 0.15f;
+    float localSmoothing = static_cast<float>(math::kDefaultLocalSmoothing);
+    float remoteSmoothing = static_cast<float>(math::kDefaultRemoteSmoothing);
 
     // Hotkeys (Virtual Key codes)
     int toggleKey = kDefaultToggleKey;
@@ -92,10 +95,10 @@ struct PluginConfig {
     float positionSensitivityX = 1.0f;
     float positionSensitivityY = 1.0f;
     float positionSensitivityZ = 1.0f;
-    float positionLimitX = 0.30f;
-    float positionLimitY = 0.20f;
-    float positionLimitZ = 0.40f;
-    float positionLimitZBack = 0.10f;
+    float positionLimitX = PositionSettings{}.limit_x;
+    float positionLimitY = PositionSettings{}.limit_y;
+    float positionLimitZ = PositionSettings{}.limit_z;
+    float positionLimitZBack = PositionSettings{}.limit_z_back;
     bool positionInvertX = false;
     bool positionInvertY = false;
     bool positionInvertZ = false;

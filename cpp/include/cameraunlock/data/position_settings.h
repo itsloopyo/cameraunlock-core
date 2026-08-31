@@ -71,11 +71,11 @@ struct PositionSettings {
                                 local_smooth, remote_smooth, inv_x, inv_y, inv_z);
     }
 
-    static PositionSettings Default() {
-        return Symmetric(1.0f, 1.0f, 1.0f, 0.30f, 0.20f, 0.40f, 0.10f,
-                         static_cast<float>(math::kDefaultLocalSmoothing),
-                         static_cast<float>(math::kDefaultRemoteSmoothing));
-    }
+    /// The member initialisers above are the defaults; this is only a name for
+    /// them. Spelling the numbers out again here would give consumers two
+    /// copies to disagree with - and they do consume this: a mod restating
+    /// core's default writes PositionSettings{}.limit_x rather than 0.30f.
+    static PositionSettings Default() { return PositionSettings{}; }
 };
 
 }  // namespace cameraunlock
