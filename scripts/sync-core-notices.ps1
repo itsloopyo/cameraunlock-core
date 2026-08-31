@@ -34,14 +34,17 @@ Import-Module (Join-Path $coreRoot 'powershell/ReleaseWorkflow.psm1') -Force
 if (-not $Repo) {
     # The canonical core checkout sits beside the mod repos it serves. Same
     # selection as conformance.ps1 and sync-templates.ps1: a git checkout that
-    # vendors this core. Selecting on `.gitmodules` alone picked up sibling
-    # repos that consume some other submodule, and only Get-PinnedCoreCommit
-    # returning $null below kept that from mattering.
+    # either vendors this core or is named like a head-tracking mod - vendoring
+    # alone missed homeworld-remastered-collection and kingdom-come-deliverance-2
+    # (no `-headtracking` suffix), and the name check alone misses a mod repo
+    # with no core checkout at all. Get-PinnedCoreCommit returning $null below
+    # already skips any selected repo that has nothing to sync, which is what
+    # makes it safe to widen this filter instead of narrowing it.
     $Repo = Get-ChildItem -Path (Split-Path -Parent $coreRoot) -Directory |
             Where-Object {
                 $_.FullName -ne $coreRoot -and
                 (Test-Path (Join-Path $_.FullName '.git')) -and
-                (Test-Path (Join-Path $_.FullName 'cameraunlock-core'))
+                ((Test-Path (Join-Path $_.FullName 'cameraunlock-core')) -or ($_.Name -match '-head-?tracking$'))
             } |
             Select-Object -ExpandProperty FullName
 }

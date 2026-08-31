@@ -333,13 +333,19 @@ function Resolve-RepoPath {
 if ($All) {
     if ($Repo) { throw '-All and -Repo are mutually exclusive.' }
     # Same selection as conformance.ps1 and sync-core-notices.ps1: a git
-    # checkout that vendors this core. The `-headtracking` naming convention is
-    # not part of it - two mod repos do not follow it and were silently skipped.
+    # checkout that either vendors this core or is named like a head-tracking
+    # mod. Vendoring alone missed homeworld-remastered-collection and
+    # kingdom-come-deliverance-2, which do not carry the `-headtracking`
+    # suffix; the name check alone misses a mod repo with no core checkout at
+    # all (baldurs-gate-3-headtracking and eight more). Each sync unit already
+    # reports/skips gracefully when the file it needs (scripts/*.cmd,
+    # .github/workflows, pixi.toml) is not there, so widening this filter does
+    # not need any unit to change.
     $roots = @(Get-ChildItem -Path $ReposRoot -Directory |
         Where-Object {
             $_.FullName -ne $CoreRoot -and
             (Test-Path (Join-Path $_.FullName '.git')) -and
-            (Test-Path (Join-Path $_.FullName 'cameraunlock-core'))
+            ((Test-Path (Join-Path $_.FullName 'cameraunlock-core')) -or ($_.Name -match '-head-?tracking$'))
         } |
         Select-Object -ExpandProperty FullName)
 } elseif ($Repo) {
