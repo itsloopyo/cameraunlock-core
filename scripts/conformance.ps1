@@ -456,7 +456,9 @@ function Test-TaskIsReferenced {
         $text = Read-TextFile $file.FullName
         # Strip line comments first: the task name inside a comment is not a caller.
         $live = ($text -split "`n" | ForEach-Object { $_ -replace '^\s*(#|::|//|REM\s).*$', '' }) -join "`n"
-        if ($live -like "*$needle*") { return $true }
+        # Anchored on a word boundary: a bare -like match reports `pixi run test`
+        # as referenced by a script that only ever calls `pixi run test-udp`.
+        if ($live -match ("(?m)" + [regex]::Escape($needle) + "(?![-\w])")) { return $true }
     }
     return $false
 }
