@@ -136,7 +136,7 @@ endif()
 # reflection, SEH-guarded memory access). Windows-only.
 option(CAMERAUNLOCK_BUILD_UNREAL "Build Unreal Engine runtime helpers" OFF)
 if(CAMERAUNLOCK_BUILD_UNREAL)
-    add_library(cameraunlock_unreal STATIC src/unreal/ue_runtime.cpp)
+    add_library(cameraunlock_unreal STATIC src/unreal/ue_runtime.cpp src/unreal/umg_reticle.cpp)
     target_include_directories(cameraunlock_unreal
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

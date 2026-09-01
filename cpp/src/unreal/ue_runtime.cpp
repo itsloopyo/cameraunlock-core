@@ -138,10 +138,15 @@ std::string ClassName(std::uintptr_t obj) {
     return ObjectName(cls);
 }
 
-std::string OuterName(std::uintptr_t obj) {
+std::uintptr_t OuterObject(std::uintptr_t obj) {
     std::uintptr_t outer = 0;
-    if (!SafeReadPtr(obj + g_layout.kOuterPrivate, outer) || !outer)
-        return std::string();
+    if (!SafeReadPtr(obj + g_layout.kOuterPrivate, outer)) return 0;
+    return outer;
+}
+
+std::string OuterName(std::uintptr_t obj) {
+    const std::uintptr_t outer = OuterObject(obj);
+    if (!outer) return std::string();
     return ObjectName(outer);
 }
 

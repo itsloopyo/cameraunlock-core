@@ -983,6 +983,17 @@
       "engine": "Unreal Engine",
       "catalog_status": "released"
     },
+    "high-on-life": {
+      "display_name": "High On Life",
+      "env_var": "HIGH_ON_LIFE_PATH",
+      "steam_app_id": 1583230,
+      "steam_folder": "HighOnLife",
+      "executable_relpath": "Oregon\\Binaries\\Win64\\Oregon-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/high-on-life-headtracking",
+      "engine": "Unreal Engine"
+    },
     "yapyap": {
       "display_name": "YAPYAP",
       "env_var": "YAPYAP_PATH",

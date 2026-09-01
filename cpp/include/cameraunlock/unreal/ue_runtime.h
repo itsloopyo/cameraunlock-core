@@ -68,6 +68,13 @@ std::string ObjectName(std::uintptr_t obj);
 std::string ClassName(std::uintptr_t obj);
 std::string OuterName(std::uintptr_t obj);
 
+// The object an object is nested inside, or 0 at the top of the chain. UMG puts
+// a widget's own name on the widget and everything identifying about it further
+// up - an Image called "Crosshair" is only meaningful once you know which widget
+// blueprint's tree it sits in - so walking outward is how a widget is told apart
+// from the identically named one in another HUD.
+std::uintptr_t OuterObject(std::uintptr_t obj);
+
 // Case-insensitive substring test. Folds case in place rather than
 // allocating lowercased copies - this runs once per UObject across
 // full-table enumerations. Semantics match
@@ -88,6 +95,20 @@ inline bool ContainsCI(const std::string& hay, const char* needle) {
         if (j == nlen) return true;
     }
     return false;
+}
+
+// Whole-string case-insensitive compare. A widget is matched on its exact name
+// rather than a substring: "Crosshair" and "CrosshairPanel" are different
+// widgets, and a substring match would take whichever the object table happened
+// to reach first.
+inline bool EqualsCI(const std::string& a, const char* b) {
+    const std::size_t blen = std::strlen(b);
+    if (a.size() != blen) return false;
+    for (std::size_t i = 0; i < blen; ++i) {
+        if (::tolower(static_cast<unsigned char>(a[i])) !=
+            ::tolower(static_cast<unsigned char>(b[i]))) return false;
+    }
+    return true;
 }
 
 // Visit every live UObject. visit(obj) returns true to stop early.
