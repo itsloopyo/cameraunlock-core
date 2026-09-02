@@ -1301,7 +1301,19 @@
       "repo": "itsloopyo/sleeping-dogs-headtracking",
       "catalog_status": "absent"
     },
-    "half-life-2": {
+    "black-mesa": {
+      "display_name": "Black Mesa",
+      "env_var": "BLACK_MESA_PATH",
+      "steam_app_id": 362890,
+      "steam_folder": "Black Mesa",
+      "executable_relpath": "bms.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/black-mesa-headtracking",
+      "engine": "Source",
+      "catalog_status": "absent"
+    },
+  "half-life-2": {
       "display_name": "Half-Life 2",
       "env_var": "HALF_LIFE_2_PATH",
       "steam_app_id": 220,
