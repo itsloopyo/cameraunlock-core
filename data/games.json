@@ -1313,7 +1313,7 @@
       "engine": "Source",
       "catalog_status": "absent"
     },
-  "half-life-2": {
+      "half-life-2": {
       "display_name": "Half-Life 2",
       "env_var": "HALF_LIFE_2_PATH",
       "steam_app_id": 220,
