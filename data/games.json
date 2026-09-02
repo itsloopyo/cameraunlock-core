@@ -155,6 +155,18 @@
       "engine": "HPL",
       "catalog_status": "absent"
     },
+    "soma": {
+      "display_name": "SOMA",
+      "env_var": "SOMA_PATH",
+      "steam_app_id": 282140,
+      "steam_folder": "SOMA",
+      "executable_relpath": "Soma.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/soma-headtracking",
+      "engine": "HPL",
+      "catalog_status": "absent"
+    },
     "alien-isolation": {
       "display_name": "Alien: Isolation",
       "env_var": "ALIEN_ISOLATION_PATH",
@@ -562,6 +574,17 @@
       "engine": "Unity",
       "catalog_status": "prerelease"
     },
+    "outlast": {
+      "display_name": "Outlast",
+      "env_var": "OUTLAST_PATH",
+      "steam_app_id": 238320,
+      "steam_folder": "Outlast",
+      "executable_relpath": "Binaries\\Win64\\OLGame.exe",
+      "loader": "Shim",
+      "repo": "itsloopyo/outlast-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
+    },
     "dragon-age-inquisition": {
       "display_name": "Dragon Age: Inquisition",
       "env_var": "DRAGON_AGE_INQUISITION_PATH",
@@ -957,6 +980,18 @@
       "loader": "AsiLoader",
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/metro-2033-redux-headtracking",
+      "catalog_status": "absent"
+    },
+    "metro-exodus-enhanced-edition": {
+      "display_name": "Metro Exodus Enhanced Edition",
+      "env_var": "METRO_EXODUS_ENHANCED_EDITION_PATH",
+      "steam_app_id": 1449560,
+      "steam_folder": "Metro Exodus Enhanced Edition",
+      "executable_relpath": "MetroExodus.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/metro-exodus-enhanced-edition-headtracking",
+      "engine": "4A Engine",
       "catalog_status": "absent"
     },
     "little-nightmares-enhanced-edition": {
