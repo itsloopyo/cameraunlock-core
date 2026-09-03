@@ -1313,6 +1313,18 @@
       "engine": "Source",
       "catalog_status": "absent"
     },
+    "bodycam": {
+      "display_name": "Bodycam",
+      "env_var": "BODYCAM_PATH",
+      "steam_app_id": 2406770,
+      "steam_folder": "Bodycam",
+      "executable_relpath": "Bodycam\\Binaries\\Win64\\Bodycam-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/bodycam-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
+    },
       "half-life-2": {
       "display_name": "Half-Life 2",
       "env_var": "HALF_LIFE_2_PATH",
