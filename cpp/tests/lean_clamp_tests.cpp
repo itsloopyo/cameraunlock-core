@@ -211,6 +211,48 @@ void TestNeutralPoseClearsTheAllowance() {
     Check(NearEqual(out.x, 0.4f), "the lean after a neutral pose is not rationed by the old wall");
 }
 
+// Regression, found in game rather than here: a lean growing faster than the
+// release rate, through open space, was reported as held off geometry on every
+// frame. Two causes, both worth a test - the ease ran when nothing had ever
+// blocked, and the settle tolerance was absolute so it never arrived in an
+// engine whose units are centimetres.
+void TestGrowingLeanInOpenSpaceNeverReportsContact() {
+    LeanClamp clamp = MakeClamp(10.0f);  // centimetres, as an Unreal mod passes
+    World world;
+    world.blocked = false;
+
+    // A head sweeping out to a 30cm lean over half a second, which is well
+    // inside what a tracker produces and far faster than a 200ms release ease.
+    bool followed = true;
+    bool everInContact = false;
+    for (int frame = 1; frame <= 30; ++frame) {
+        const float reach = 30.0f * (static_cast<float>(frame) / 30.0f);
+        const Vec3 out = clamp.Apply(Vec3::Zero(), Vec3(reach, 0.0f, 0.0f), 0.016f, &Query, &world);
+        if (!NearEqual(out.x, reach, 1e-3f)) followed = false;
+        if (clamp.InContact()) everInContact = true;
+    }
+
+    Check(followed, "a lean growing through open space is never held back");
+    Check(!everInContact, "and is never reported as contact");
+}
+
+// The settle has to arrive in centimetres too, not just in metres.
+void TestReleaseSettlesInEngineUnits() {
+    LeanClamp clamp = MakeClamp(10.0f);
+    World world;
+
+    world.blocked = true;
+    world.distance = 15.0f;
+    clamp.Apply(Vec3::Zero(), Vec3(30.0f, 0.0f, 0.0f), 0.016f, &Query, &world);
+    Check(clamp.InContact(), "a 30cm lean into a wall 15cm away is held back");
+
+    world.blocked = false;
+    for (int frame = 0; frame < 120; ++frame)
+        clamp.Apply(Vec3::Zero(), Vec3(30.0f, 0.0f, 0.0f), 0.016f, &Query, &world);
+
+    Check(!clamp.InContact(), "the release settles within two seconds at centimetre scale");
+}
+
 void TestResetDropsTheAllowance() {
     LeanClamp clamp = MakeClamp(0.10f);
     World world;
@@ -243,6 +285,8 @@ int RunLeanClampTests() {
     TestReleaseIsDamped();
     TestFailedQueryIsReportedNotAbsorbed();
     TestNeutralPoseClearsTheAllowance();
+    TestGrowingLeanInOpenSpaceNeverReportsContact();
+    TestReleaseSettlesInEngineUnits();
     TestResetDropsTheAllowance();
 
     if (g_failures == 0) {

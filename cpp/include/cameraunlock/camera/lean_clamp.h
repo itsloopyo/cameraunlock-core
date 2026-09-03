@@ -131,17 +131,30 @@ public:
 
         if (target < allowed) {
             allowed = target;
-        } else {
+            m_has_allowance = true;
+        } else if (m_has_allowance) {
             allowed += (target - allowed) *
                        math::CalculateSmoothingFactor(m_settings.release_smoothing, delta_time);
-            // The ease approaches asymptotically, so without this the allowance
-            // never quite arrives and the clamp reports contact forever after
-            // one touch.
-            if (desired - allowed <= kSettleEpsilon) allowed = desired;
+            // The ease approaches asymptotically, so without a settle the
+            // allowance never quite arrives and the clamp reports contact
+            // forever after one touch. The tolerance is a FRACTION of the lean
+            // rather than a fixed distance because the caller owns the units:
+            // a threshold sized to settle in metres is a hundred times tighter
+            // in centimetres, which is exactly how this shipped the first time
+            // and why an Unreal mod reported contact continuously.
+            if (desired - allowed <= desired * kSettleFraction) {
+                allowed = desired;
+                m_has_allowance = false;
+            }
+        } else {
+            // Never restricted, so there is nothing to ease away FROM. Easing
+            // here anyway makes a lean that is simply growing faster than the
+            // release rate look like a lean held off a wall, which is both a
+            // lie in the log and a drag on the pose the player asked for.
+            allowed = desired;
         }
 
         m_allowed = allowed;
-        m_has_allowance = true;
         m_contact = allowed < desired;
         return direction * allowed;
     }
@@ -167,10 +180,10 @@ private:
     /// lean is too small to reach anything regardless.
     static constexpr float kMinimumLean = 1e-4f;
 
-    /// How close the release has to get before the allowance is called full.
-    /// Sub-millimetre in metres and invisible in centimetres, so it costs
-    /// nothing either side of the unit boundary.
-    static constexpr float kSettleEpsilon = 1e-4f;
+    /// How close the release has to get, as a fraction of the lean, before the
+    /// allowance is called full. Relative so it means the same thing whatever
+    /// units the caller works in.
+    static constexpr float kSettleFraction = 1e-3f;
 
     LeanClampSettings m_settings{};
     float m_allowed = 0.0f;
