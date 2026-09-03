@@ -43,11 +43,16 @@
 // upstream ships. Failing on it would make the gate permanently red for any
 // mod that legitimately vendors a newer snapshot.
 //
-// Dependencies come from three places:
+// Dependencies come from four places:
 //
 //   - FetchContent_Declare blocks in CMakeLists.txt (native mods).
 //   - Vendored source trees under extern/ | third_party/ | external/.
 //   - vendor/<slug>/ directories holding a redistributed binary payload.
+//   - cameraunlock-core/vendor/minhook, when CMakeLists.txt turns on
+//     CAMERAUNLOCK_BUILD_HOOKS and supplies no minhook target of its own. The
+//     core submodule is not a dependency directory of the mod, so nothing
+//     above sees it, and the MinHook statically linked into every such .asi
+//     was invisible to this check until it was looked for by name.
 //
 // The third is what covers the managed (C#) mods. They compile nothing from
 // source but ship the loader they vendor - BepInEx, MelonLoader, REFramework,
@@ -58,7 +63,16 @@
 //
 // A loader archive is not one component. The BepInEx zips carry UnityDoorstop,
 // HarmonyX, Mono.Cecil and MonoMod alongside BepInEx itself, so vendoring one
-// pulls all five into scope - see legal/README.md.
+// pulls all five into scope - see legal/README.md. Ultimate ASI Loader's
+// dinput8.dll statically links MinHook, injector and miniz, and the 32-bit
+// build also MemoryModule and d3d8to9. Its two release assets unpack to the
+// same filename, so those rules key on the `- Asset:` line update-deps writes
+// into the vendor README rather than on the payload.
+//
+// One obligation a reproduced text cannot discharge: MPL-2.0 section 3.2
+// requires whoever distributes Covered Software in Executable Form to tell
+// recipients how to obtain its Source Code Form. For those components the
+// notices must also name the upstream source, and that is checked too.
 //
 // A dependency with no reference text anywhere FAILS rather than being
 // skipped: a check that passes when it cannot see the licence is worse than
@@ -79,11 +93,35 @@ const VENDORED_BINARY_DIR = "vendor";
 const LICENCE_NAMES = /^(LICENSE|LICENCE|COPYING|NOTICE)(\.(txt|md))?$/i;
 
 // Extra rights holders a vendored loader distribution drags in beyond the one
-// its directory is named for. Keyed on the archive filename because one
-// vendor/<slug>/ can hold several distributions.
+// its directory is named for. `archive` matches a payload filename, because
+// one vendor/<slug>/ can hold several distributions. `asset` matches the
+// `- Asset:` line of the vendor README instead, for loaders whose assets all
+// unpack to the same filename: Ultimate-ASI-Loader.zip (x86) and
+// Ultimate-ASI-Loader_x64.zip both yield dinput8.dll, and only the README
+// records which one was fetched. Component sets per premake5.lua at v9.7.2
+// through v9.7.4: the x64 target compiles MinHook, injector and miniz; the
+// Win32 target compiles those plus MemoryModule and d3d8to9.
 const ARCHIVE_COMPONENTS = [
   { archive: /^BepInEx.*\.zip$/i, components: ["unity-doorstop", "harmonyx", "mono-cecil", "monomod"] },
+  { asset: /^Ultimate-ASI-Loader_x64\.zip$/i, components: ["minhook", "injector", "miniz"] },
+  { asset: /^Ultimate-ASI-Loader\.zip$/i, components: ["minhook", "injector", "miniz", "memorymodule", "d3d8to9"] },
 ];
+
+// Vendor directories whose README must resolve to an `asset` rule above. An
+// unknown asset here means the component set inside the payload is unknown,
+// and passing on the loader's own licence alone would be the false proof the
+// header warns about.
+const ASSET_KEYED_VENDORS = new Set(["ultimate-asi-loader"]);
+
+// Components whose licence obliges a source offer on top of the reproduced
+// text (MPL-2.0 section 3.2). The notices must name a copy of the source WE
+// hold, not only the upstream: the duty to make it available is the
+// distributor's, and an upstream repository can be deleted or made private
+// by someone else. The fork carries every upstream commit, so the pinned one
+// is in it; never delete it while a release ZIP with the component is live.
+const SOURCE_OFFERS = {
+  memorymodule: "https://github.com/itsloopyo/MemoryModule",
+};
 
 // A dependency directory is named for the build, not for the component. Map
 // what CMake and the vendored trees call it onto the legal/ slug.
@@ -150,6 +188,18 @@ for (const token of jobs) {
       }
     }
 
+    const how = dep.carriedBy ? `is redistributed inside ${dep.carriedBy}, but` : "is shipped, but";
+
+    const sourceOffer = SOURCE_OFFERS[dep.slug];
+    if (sourceOffer && !read(noticesPath).includes(sourceOffer)) {
+      repoFailed = true;
+      console.error(
+        `FAIL ${label}: ${dep.name} ${how} THIRD-PARTY-NOTICES.md never says where its ` +
+          `Source Code Form can be obtained. MPL-2.0 section 3.2 requires that of every ` +
+          `binary distribution; name our copy ${sourceOffer} at the commit inside the binary.`,
+      );
+    }
+
     // The version in the binary is the one whose licence has to travel.
     const reference = dep.onDisk ?? dep.canonical;
     const missing = [...normaliseLines(stripGnuHowToApply(read(reference)))].filter(
@@ -161,7 +211,6 @@ for (const token of jobs) {
     const via = dep.onDisk
       ? path.relative(repo, dep.onDisk).replace(/\\/g, "/")
       : `legal/${dep.slug}.txt`;
-    const how = dep.carriedBy ? `is redistributed inside ${dep.carriedBy}, but` : "is shipped, but";
     console.error(
       `FAIL ${label}: ${dep.name} ${how} ${missing.length} line(s) ` +
         `of ${via} are absent from THIRD-PARTY-NOTICES.md`,
@@ -230,6 +279,17 @@ function collect(repo) {
     }
   }
 
+  // cameraunlock-core/cpp builds its vendored MinHook into cameraunlock_hooks
+  // whenever the consumer turns the option on without supplying a `minhook`
+  // target. A mod that does supply one was found above and add() keeps that.
+  const coreMinhook = path.join(repo, "cameraunlock-core", "vendor", "minhook");
+  if (fs.existsSync(cml) && fs.existsSync(coreMinhook)) {
+    const text = read(cml);
+    if (/CAMERAUNLOCK_BUILD_HOOKS\s+ON\b/.test(text) || /cameraunlock-core[\/\\]vendor[\/\\]minhook/.test(text)) {
+      add("minhook", findLicence(coreMinhook));
+    }
+  }
+
   const vendorBase = path.join(repo, VENDORED_BINARY_DIR);
   if (fs.existsSync(vendorBase)) {
     for (const entry of fs.readdirSync(vendorBase, { withFileTypes: true })) {
@@ -240,15 +300,39 @@ function collect(repo) {
       add(entry.name, findLicence(dir));
       for (const file of payload) {
         for (const rule of ARCHIVE_COMPONENTS) {
-          if (!rule.archive.test(file)) continue;
+          if (!rule.archive?.test(file)) continue;
           const carriedBy = `${VENDORED_BINARY_DIR}/${entry.name}/${file}`;
           for (const component of rule.components) add(component, null, carriedBy);
         }
+      }
+
+      const asset = vendoredAsset(dir);
+      const rule = asset && ARCHIVE_COMPONENTS.find((r) => r.asset?.test(asset));
+      if (rule) {
+        const carriedBy = `${VENDORED_BINARY_DIR}/${entry.name}/ (asset ${asset})`;
+        for (const component of rule.components) add(component, null, carriedBy);
+      } else if (ASSET_KEYED_VENDORS.has(toSlug(entry.name))) {
+        problems.push(
+          asset
+            ? `${VENDORED_BINARY_DIR}/${entry.name}/README.md records asset "${asset}", which no ` +
+                `ARCHIVE_COMPONENTS rule covers, so the components inside the payload are unknown`
+            : `${VENDORED_BINARY_DIR}/${entry.name}/README.md has no "- Asset:" line, so which ` +
+                `upstream archive the payload came from, and what is compiled into it, is unknown`,
+        );
       }
     }
   }
 
   return { found, problems };
+}
+
+// The `- Asset: \`<name>\`` line Update-VendoredLoader writes into the vendor
+// README, or null when there is no README or it has no such line.
+function vendoredAsset(dir) {
+  const readme = path.join(dir, "README.md");
+  if (!fs.existsSync(readme)) return null;
+  const m = read(readme).match(/^- Asset:\s*`?([^`\r\n]+?)`?\s*$/m);
+  return m ? m[1] : null;
 }
 
 function toSlug(name) {

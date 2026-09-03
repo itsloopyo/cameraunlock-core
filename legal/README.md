@@ -38,14 +38,18 @@ which is easy to forget because it holds nothing but the payload subtree.
 | `bepinex.txt` | BepInEx | LGPL-2.1 |
 | `cameraunlock-core.txt` | cameraunlock-core | MIT |
 | `cyber-engine-tweaks.txt` | Cyber Engine Tweaks | MIT |
+| `d3d8to9.txt` | d3d8to9 | BSD-2-Clause |
 | `dear-imgui.txt` | Dear ImGui | MIT |
 | `fabric-loader.txt` | Fabric Loader | Apache-2.0 |
 | `glm.txt` | OpenGL Mathematics | MIT / Happy Bunny |
 | `harmonyx.txt` | HarmonyX | MIT |
 | `inih.txt` | inih | BSD-3-Clause |
+| `injector.txt` | injector (ThirteenAG) | zlib |
 | `kiero.txt` | Kiero | MIT |
 | `melonloader.txt` | MelonLoader | Apache-2.0 |
+| `memorymodule.txt` | MemoryModule | MPL-2.0 |
 | `minhook.txt` | MinHook, incl. HDE32/HDE64 | BSD-2-Clause |
+| `miniz.txt` | miniz | MIT |
 | `mono-cecil.txt` | Mono.Cecil | MIT |
 | `monomod.txt` | MonoMod | MIT |
 | `red4ext.txt` | RED4ext | MIT |
@@ -60,6 +64,27 @@ carries UnityDoorstop (`winhttp.dll`), HarmonyX (`0Harmony.dll`), Mono.Cecil
 and MonoMod alongside BepInEx itself. Shipping that zip redistributes all of
 them, so each needs its own entry here and its own block in the mod's notices.
 Reading only the loader's headline licence drops four rights holders.
+
+Ultimate ASI Loader is the same shape, with one more trap: its two release
+assets unpack to the same `dinput8.dll` and are not the same binary. Per
+`premake5.lua` at v9.7.2 through v9.7.4, `Ultimate-ASI-Loader_x64.zip` compiles
+MinHook (via `external/injector/minhook`), injector's `FunctionHookMinHook.cpp`
+and `external/miniz/miniz.c` into the DLL. `Ultimate-ASI-Loader.zip` (32-bit)
+compiles those and also `external/MemoryModule/*.c` and
+`external/d3d8to9/source/*.cpp`. The `- Asset:` line in the mod's vendored
+README says which one it ships; the DLL's filename does not.
+
+MemoryModule is MPL-2.0, and that licence asks for something a reproduced text
+cannot give. Section 3.2 requires whoever distributes Covered Software in
+Executable Form to tell recipients how to obtain its Source Code Form. That duty is
+the distributor's, and pointing only at someone else's repository leaves it
+resting on a copy they can delete. So a mod that ships the 32-bit loader names
+our own fork, https://github.com/itsloopyo/MemoryModule, at the commit the
+loader pins (`5f83e41c3a3e7c6e8284a5c1afa5a38790809461` at every tag above),
+with the upstream repository and the loader's tree as further locations,
+alongside the full licence text. `validate-notices.mjs` checks that the fork
+is named. The fork must stay public for as long as any release ZIP carrying
+the 32-bit loader can be downloaded.
 
 `bepinex.txt` and `unity-doorstop.txt` are both LGPL-2.1 and their operative
 terms are byte-identical; they differ only in what each upstream appended after

@@ -9,6 +9,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the loader components the notices gate could not see
+
+`legal/` gains `miniz.txt`, `injector.txt`, `memorymodule.txt` and
+`d3d8to9.txt`: the third-party sources Ultimate ASI Loader compiles into the
+`dinput8.dll` every ASI mod vendors. The x64 asset carries MinHook, injector and
+miniz; the 32-bit asset carries those plus MemoryModule (MPL-2.0) and d3d8to9.
+None of them was named in `legal/README.md` or in any consuming mod's notices.
+
+`scripts/validate-notices.mjs` now sees them. `ARCHIVE_COMPONENTS` rules can
+key on the `- Asset:` line of the vendor README, because both loader assets
+unpack to the same filename; a `vendor/ultimate-asi-loader/` whose README
+resolves to no rule fails instead of passing on the loader's own MIT text. For
+MPL-2.0 components the gate also requires the notices to name the copy of the
+source we hold (the itsloopyo/MemoryModule fork), which is the section 3.2
+obligation a reproduced text does not discharge. And it now finds the MinHook a mod links out of
+`cameraunlock-core/vendor/minhook` when `CAMERAUNLOCK_BUILD_HOOKS` is on,
+which the scan of the mod's own dependency directories never reached.
+
+Consuming repos: every mod vendoring Ultimate ASI Loader needs sections for
+miniz and injector in `THIRD-PARTY-NOTICES.md`, plus MemoryModule (with the
+source offer) and d3d8to9 where the vendored asset is `Ultimate-ASI-Loader.zip`.
+The gate reports which are missing.
+
 ### Added - a carried light that follows the head
 
 `cameraunlock/effects/head_follow_light.h`, `CameraUnlock.Core.Effects` and
