@@ -1336,6 +1336,17 @@
       "repo": "itsloopyo/half-life-2-headtracking",
       "engine": "Source",
       "catalog_status": "released"
+    },
+    "elite-dangerous": {
+      "display_name": "Elite Dangerous",
+      "env_var": "ELITE_DANGEROUS_PATH",
+      "steam_app_id": 359320,
+      "steam_folder": "Elite Dangerous",
+      "executable_relpath": "Products\\elite-dangerous-odyssey-64\\EliteDangerous64.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/elite-dangerous-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
