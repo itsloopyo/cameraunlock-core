@@ -23,6 +23,27 @@ namespace CameraUnlock.Core.Config
     /// </summary>
     public class HeadTrackingConfigData : IHeadTrackingConfig
     {
+        /// <summary>
+        /// Largest accepted sensitivity, either sign. TrackingProcessor multiplies a
+        /// quaternion decomposition - never more than 180 degrees - by this, so the bound
+        /// keeps that product finite with room to spare while sitting orders of magnitude
+        /// past any usable setting. The documented tuning range is 0.1 to 3.0.
+        /// </summary>
+        /// <remarks>
+        /// The same number as config::kMaxSensitivity in the C++ half
+        /// (cpp/include/cameraunlock/config/value_guards.h). The two must agree: one ini
+        /// file is read by both, so a value one half accepts and the other refuses means
+        /// the same config behaves differently in a Unity mod and a C++ mod.
+        /// </remarks>
+        public const float MaxSensitivity = 100.0f;
+
+        /// <summary>
+        /// Largest accepted travel limit or tracker-pivot distance, in metres. A cockpit
+        /// head has centimetres of travel, so this is generous headroom that still catches
+        /// a mistyped 10000 for 0.10. Matches config::kMaxPositionLimit in the C++ half.
+        /// </summary>
+        public const float MaxDistanceMetres = 10.0f;
+
         /// <inheritdoc />
         public int UdpPort { get; set; } = OpenTrackReceiver.DefaultPort;
 
@@ -254,17 +275,17 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.YawSensitivity:
-                        if (TryParseMagnitude(log, kvp.Key, value, yawSens, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, yawSens, MaxSensitivity, out floatVal))
                             yawSens = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PitchSensitivity:
-                        if (TryParseMagnitude(log, kvp.Key, value, pitchSens, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, pitchSens, MaxSensitivity, out floatVal))
                             pitchSens = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.RollSensitivity:
-                        if (TryParseMagnitude(log, kvp.Key, value, rollSens, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, rollSens, MaxSensitivity, out floatVal))
                             rollSens = floatVal;
                         break;
 
@@ -358,27 +379,27 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.PositionSensitivityX:
-                        if (TryParseMagnitude(log, kvp.Key, value, posSensX, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensX, MaxSensitivity, out floatVal))
                             posSensX = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionSensitivityY:
-                        if (TryParseMagnitude(log, kvp.Key, value, posSensY, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensY, MaxSensitivity, out floatVal))
                             posSensY = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionSensitivityZ:
-                        if (TryParseMagnitude(log, kvp.Key, value, posSensZ, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, posSensZ, MaxSensitivity, out floatVal))
                             posSensZ = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitX:
-                        if (TryParseMagnitude(log, kvp.Key, value, limitX, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitX, MaxDistanceMetres, out floatVal))
                             limitX = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitY:
-                        if (TryParseMagnitude(log, kvp.Key, value, limitY, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitY, MaxDistanceMetres, out floatVal))
                         {
                             limitY = floatVal;
                             sawLimitY = true;
@@ -387,7 +408,7 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitYDown:
-                        if (TryParseMagnitude(log, kvp.Key, value, limitYDown, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitYDown, MaxDistanceMetres, out floatVal))
                         {
                             limitYDown = floatVal;
                             sawLimitYDown = true;
@@ -395,12 +416,12 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitZ:
-                        if (TryParseMagnitude(log, kvp.Key, value, limitZ, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitZ, MaxDistanceMetres, out floatVal))
                             limitZ = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionLimitZBack:
-                        if (TryParseMagnitude(log, kvp.Key, value, limitZBack, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, limitZBack, MaxDistanceMetres, out floatVal))
                             limitZBack = floatVal;
                         break;
 
@@ -420,12 +441,12 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.TrackerPivotForward:
-                        if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotForward, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotForward, MaxDistanceMetres, out floatVal))
                             TrackerPivotForward = floatVal;
                         break;
 
                     case ConfigKeySchema.Keys.TrackerPivotUp:
-                        if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotUp, out floatVal))
+                        if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotUp, MaxDistanceMetres, out floatVal))
                             TrackerPivotUp = floatVal;
                         break;
 
@@ -520,9 +541,9 @@ namespace CameraUnlock.Core.Config
         // Rejected values are reported and the previous value stands - clamping a negative
         // to zero would silently lock an axis the user meant to widen.
 #if NULLABLE_ENABLED
-        private static bool TryParseMagnitude(Action<string>? log, string key, string value, float current, out float result)
+        private static bool TryParseMagnitude(Action<string>? log, string key, string value, float current, float max, out float result)
 #else
-        private static bool TryParseMagnitude(Action<string> log, string key, string value, float current, out float result)
+        private static bool TryParseMagnitude(Action<string> log, string key, string value, float current, float max, out float result)
 #endif
         {
             if (!ConfigParsingUtils.TryParseFloat(value, out result))
@@ -536,6 +557,22 @@ namespace CameraUnlock.Core.Config
                 log?.Invoke(string.Format(
                     "Config key '{0}' has a negative value '{1}' - limits, sensitivities and tracker pivot distances must be zero or greater. Rejected, keeping {2}.",
                     key, value, current.ToString(CultureInfo.InvariantCulture)));
+                result = current;
+                return false;
+            }
+
+            // The upper bound is not a taste judgement, it is the point past which the
+            // value stops being a number the pipeline can carry. A sensitivity multiplies
+            // a decomposition that is never more than 180 degrees, so a large enough one
+            // overflows that product to Infinity and every frame after it is NaN. A
+            // distance in metres is bounded by the room. Both sit orders of magnitude past
+            // any usable setting, so only a typo lands here.
+            if (result > max)
+            {
+                log?.Invoke(string.Format(
+                    "Config key '{0}' has an out-of-range value '{1}' - the maximum is {2}. Rejected, keeping {3}.",
+                    key, value, max.ToString(CultureInfo.InvariantCulture),
+                    current.ToString(CultureInfo.InvariantCulture)));
                 result = current;
                 return false;
             }

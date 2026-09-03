@@ -21,51 +21,22 @@
 //   ...
 //   overlay.Remove();
 
-#include <cstdint>
 #include <functional>
-#include <vector>
+
+#include "cameraunlock/rendering/overlay_draw_list.h"
 
 namespace cameraunlock::rendering {
 
-// 0xAABBGGRR (D3D11 R8G8B8A8_UNORM with little-endian byte order in memory).
-using Rgba = uint32_t;
-
-// Vertex emitted to the GPU. Pixel coords + packed color.
-struct DX11OverlayVertex {
-    float x;
-    float y;
-    Rgba  color;
-};
-
-// Drawing context passed to the render callback. Accumulates primitives into
-// CPU-side vectors; the overlay flushes them once per frame.
-class DX11DrawContext {
-public:
-    DX11DrawContext(float w, float h) : m_width(w), m_height(h) {}
-
-    float Width()  const { return m_width;  }
-    float Height() const { return m_height; }
-
-    void DrawLine(float x1, float y1, float x2, float y2, Rgba color, float thickness = 1.0f);
-    void DrawRect(float x, float y, float w, float h, Rgba color);
-    void DrawDot(float cx, float cy, float radius, Rgba color);
-
-    // Crosshair: 4 line segments centred at (cx, cy), each `arm` long with a
-    // central `gap` left empty.
-    void DrawCross(float cx, float cy, float arm, Rgba color, float thickness = 1.0f, float gap = 0.0f);
-
-    const std::vector<DX11OverlayVertex>& TriVerts()  const { return m_triVerts;  }
-
-private:
-    float m_width;
-    float m_height;
-    std::vector<DX11OverlayVertex> m_triVerts;  // triangle list
-};
+// The primitives and the vertex are shared with the D3D9 and D3D12 backends
+// (overlay_draw_list.h), so a render callback keeps its shape when a mod moves
+// between them. These names are what consumers have always spelled.
+using DX11OverlayVertex = OverlayVertex;
+using DX11DrawContext   = OverlayDrawList;
 
 using DX11RenderCallback = std::function<void(DX11DrawContext&)>;
 
 // Optional diagnostic log sink. Format string is printf-style.
-using DX11LogFn = void (*)(const char* msg);
+using DX11LogFn = OverlayLogFn;
 void SetDX11OverlayLogger(DX11LogFn fn);
 
 class DX11Overlay {
@@ -114,59 +85,6 @@ private:
 #pragma comment(lib, "d3dcompiler.lib")
 
 namespace cameraunlock::rendering {
-
-// ---------- DX11DrawContext ---------------------------------------------------
-
-inline void DX11DrawContext::DrawRect(float x, float y, float w, float h, Rgba color) {
-    // Two triangles (CCW with screen-space y-down would be CW; we disable culling so it doesn't matter).
-    DX11OverlayVertex v0{x,     y,     color};
-    DX11OverlayVertex v1{x + w, y,     color};
-    DX11OverlayVertex v2{x + w, y + h, color};
-    DX11OverlayVertex v3{x,     y + h, color};
-    m_triVerts.push_back(v0); m_triVerts.push_back(v1); m_triVerts.push_back(v2);
-    m_triVerts.push_back(v0); m_triVerts.push_back(v2); m_triVerts.push_back(v3);
-}
-
-inline void DX11DrawContext::DrawLine(float x1, float y1, float x2, float y2, Rgba color, float thickness) {
-    // Render a line as a thin quad so we get reliable thickness without relying on
-    // line-list rasterisation (which is 1-pixel only on most adapters).
-    float dx = x2 - x1, dy = y2 - y1;
-    float len = std::sqrt(dx*dx + dy*dy);
-    if (len < 1e-3f) return;
-    float nx = -dy / len, ny = dx / len;     // perpendicular
-    float t = thickness * 0.5f;
-    float ox = nx * t, oy = ny * t;
-
-    DX11OverlayVertex a{x1 - ox, y1 - oy, color};
-    DX11OverlayVertex b{x2 - ox, y2 - oy, color};
-    DX11OverlayVertex c{x2 + ox, y2 + oy, color};
-    DX11OverlayVertex d{x1 + ox, y1 + oy, color};
-    m_triVerts.push_back(a); m_triVerts.push_back(b); m_triVerts.push_back(c);
-    m_triVerts.push_back(a); m_triVerts.push_back(c); m_triVerts.push_back(d);
-}
-
-inline void DX11DrawContext::DrawDot(float cx, float cy, float radius, Rgba color) {
-    constexpr int kSegments = 16;
-    constexpr float kTau = 6.28318530718f;
-    DX11OverlayVertex centre{cx, cy, color};
-    for (int i = 0; i < kSegments; ++i) {
-        float a0 = (kTau * i) / kSegments;
-        float a1 = (kTau * (i + 1)) / kSegments;
-        DX11OverlayVertex p0{cx + std::cos(a0) * radius, cy + std::sin(a0) * radius, color};
-        DX11OverlayVertex p1{cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color};
-        m_triVerts.push_back(centre);
-        m_triVerts.push_back(p0);
-        m_triVerts.push_back(p1);
-    }
-}
-
-inline void DX11DrawContext::DrawCross(float cx, float cy, float arm, Rgba color, float thickness, float gap) {
-    if (arm <= gap) return;
-    DrawLine(cx - arm, cy, cx - gap, cy, color, thickness);
-    DrawLine(cx + gap, cy, cx + arm, cy, color, thickness);
-    DrawLine(cx, cy - arm, cx, cy - gap, color, thickness);
-    DrawLine(cx, cy + gap, cx, cy + arm, color, thickness);
-}
 
 // ---------- DX11Overlay -------------------------------------------------------
 //
@@ -242,23 +160,6 @@ inline void Log(const char* msg) {
     auto& s = State();
     if (s.logFn) s.logFn(msg);
 }
-
-// Vertex shader: takes pixel coords, viewport size in cb0, outputs NDC.
-// Pixel shader: passthrough vertex color.
-inline const char* kOverlayHLSL = R"(
-cbuffer cb : register(b0) { float2 g_invHalfViewport; float2 _pad; };
-struct VSIn  { float2 pos : POSITION; float4 col : COLOR0; };
-struct VSOut { float4 pos : SV_POSITION; float4 col : COLOR0; };
-VSOut VSMain(VSIn i) {
-    VSOut o;
-    // Pixel (0..W, 0..H) -> NDC (-1..1, 1..-1)
-    o.pos = float4(i.pos.x * g_invHalfViewport.x - 1.0,
-                   1.0 - i.pos.y * g_invHalfViewport.y, 0, 1);
-    o.col = i.col;
-    return o;
-}
-float4 PSMain(VSOut i) : SV_TARGET { return i.col; }
-)";
 
 inline bool CompileShaders(ID3D11Device* dev, ID3D11VertexShader** vs, ID3D11PixelShader** ps, ID3D11InputLayout** layout) {
     ID3DBlob* vsBlob = nullptr;

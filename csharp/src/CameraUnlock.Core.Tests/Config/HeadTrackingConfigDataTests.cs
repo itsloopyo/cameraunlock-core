@@ -192,6 +192,95 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Contains("-2", warning);
         }
 
+        // The other end of the same guard. A sensitivity multiplies a decomposition that
+        // is never more than 180 degrees, so a large enough one overflows that product to
+        // Infinity and every frame after it carries NaN - with the load still reporting
+        // success. The negative case above was already refused; this one was not.
+        [Theory]
+        [InlineData("YawSensitivity")]
+        [InlineData("PitchSensitivity")]
+        [InlineData("RollSensitivity")]
+        [InlineData("PositionSensitivityX")]
+        [InlineData("PositionSensitivityY")]
+        [InlineData("PositionSensitivityZ")]
+        public void Sensitivity_AboveMaximumIsRejectedAndWarns(string key)
+        {
+            var config = Apply(key, "1e30", out List<string> log);
+
+            Assert.Equal(1f, config.Sensitivity.Yaw);
+            Assert.Equal(1f, config.Sensitivity.Pitch);
+            Assert.Equal(1f, config.Sensitivity.Roll);
+            Assert.Equal(1f, config.Position.SensitivityX);
+            Assert.Equal(1f, config.Position.SensitivityY);
+            Assert.Equal(1f, config.Position.SensitivityZ);
+
+            string warning = Assert.Single(log);
+            Assert.Contains(key, warning);
+            Assert.Contains("1e30", warning);
+        }
+
+        // Why the bound sits where it does: the widest angle the processor can hand the
+        // multiply has to survive it.
+        [Fact]
+        public void MaxSensitivity_KeepsAFullRangeAngleFinite()
+        {
+            Assert.True(float.IsFinite(180f * HeadTrackingConfigData.MaxSensitivity));
+        }
+
+        [Theory]
+        [InlineData("LimitX")]
+        [InlineData("LimitZ")]
+        [InlineData("PositionLimitY")]
+        public void Limit_AboveMaximumIsRejectedAndWarns(string key)
+        {
+            var defaults = PositionSettings.Default;
+            var config = Apply(key, "10000", out List<string> log);
+
+            Assert.Equal(defaults.LimitX, config.Position.LimitX);
+            Assert.Equal(defaults.LimitY, config.Position.LimitY);
+            Assert.Equal(defaults.LimitZ, config.Position.LimitZ);
+
+            string warning = Assert.Single(log);
+            Assert.Contains(key, warning);
+        }
+
+        // The bound is inclusive, and the values just inside it still apply. Without this
+        // a tightened guard could quietly refuse everything and the tests above would all
+        // still pass.
+        [Fact]
+        public void ValuesAtAndBelowTheMaximumAreAccepted()
+        {
+            var config = Apply(new Dictionary<string, string>
+            {
+                { "YawSensitivity", "100" },
+                { "PositionLimitX", "10" },
+                { "PositionLimitZ", "0.45" },
+                { "PitchSensitivity", "2.5" },
+            }, out List<string> log);
+
+            Assert.Equal(HeadTrackingConfigData.MaxSensitivity, config.Sensitivity.Yaw);
+            Assert.Equal(HeadTrackingConfigData.MaxDistanceMetres, config.Position.LimitX);
+            Assert.Equal(0.45f, config.Position.LimitZ);
+            Assert.Equal(2.5f, config.Sensitivity.Pitch);
+            Assert.Empty(log);
+        }
+
+        // Zero disables an axis and is a real request, so it must not be swept up by
+        // either end of the guard.
+        [Fact]
+        public void ZeroIsAcceptedAtBothEnds()
+        {
+            var config = Apply(new Dictionary<string, string>
+            {
+                { "PositionLimitZBack", "0" },
+                { "RollSensitivity", "0" },
+            }, out List<string> log);
+
+            Assert.Equal(0f, config.Position.LimitZBack);
+            Assert.Equal(0f, config.Sensitivity.Roll);
+            Assert.Empty(log);
+        }
+
         [Theory]
         [InlineData("TrackerPivotForward")]
         [InlineData("TrackerPivotUp")]

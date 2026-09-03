@@ -19,7 +19,9 @@
 //   cameraunlock/reframework/managed_utils.h       external dep: reframework/API.hpp
 //   cameraunlock/reframework/plugin_bootstrap.h    external dep: reframework/API.hpp
 //   cameraunlock/reframework/tdb_inspector.h       external dep: reframework/API.hpp
+//   cameraunlock/rendering/aim_marker.h            overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/aim_marker_dx11.h       overlay: covered by cameraunlock_overlay_compile
+//   cameraunlock/rendering/aim_marker_dx12.h       overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx11_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx12_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx9_overlay.h           overlay: covered by cameraunlock_overlay_compile
@@ -91,6 +93,7 @@
 #include "cameraunlock/rendering/aim_quat_projection.h"
 #include "cameraunlock/rendering/crosshair_projection.h"
 #include "cameraunlock/rendering/gui_marker_compensation.h"
+#include "cameraunlock/rendering/overlay_draw_list.h"
 #include "cameraunlock/rendering/world_reprojection.h"
 #include "cameraunlock/time/frame_clock.h"
 #include "cameraunlock/time/qpc_clock.h"

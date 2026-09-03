@@ -80,6 +80,17 @@ struct HeadTrackingConfig {
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.
+    ///
+    /// Every numeric key is range-checked here, and a value outside its range is REFUSED -
+    /// reported through @p log, with the field left holding what it had. A mod does not
+    /// need its own guard pass over the result, and the two that matter are not survivable
+    /// downstream: a negative position limit inverts the bounds of
+    /// math::Clamp(v, -limit, limit) and pins the camera at a fixed offset instead of
+    /// freeing it, and a sensitivity past config::kMaxSensitivity multiplies the
+    /// processor's decomposition out to an infinity that reaches the camera.
+    ///
+    /// This does NOT cover a mod that builds PositionSettings in code. The guards in
+    /// config/value_guards.h are the same bounds for that path.
     void ApplyValues(const std::vector<std::pair<std::string, std::string>>& values,
                      const LogFn& log = nullptr);
 

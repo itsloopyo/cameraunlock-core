@@ -1,5 +1,7 @@
 #include "cameraunlock/config/head_tracking_config.h"
 
+#include "cameraunlock/config/value_guards.h"
+
 #include <cmath>
 #include <fstream>
 #include <locale>
@@ -68,6 +70,47 @@ float Clamp01(float v) {
     if (v < 0.0f) return 0.0f;
     if (v > 1.0f) return 1.0f;
     return v;
+}
+
+// Range guard for the numeric keys whose out-of-range values are not survivable
+// downstream. Reports and KEEPS the current value, which is the answer UdpPort
+// and LightMultiplier already give - a refused key leaves the working default in
+// place rather than substituting a number the user never chose.
+//
+// TryParseConfigFloat has already refused NaN and the infinities, so `parsed` is
+// finite here and only the range is left to check.
+bool AcceptInRange(const std::string& key, const std::string& raw, float parsed, float lo,
+                   float hi, const HeadTrackingConfig::LogFn& log, float& out) {
+    if (parsed >= lo && parsed <= hi) {
+        out = parsed;
+        return true;
+    }
+    if (log) {
+        log("Config key '" + key + "' has an out-of-range value '" + raw + "' (expected " +
+            std::to_string(lo) + " to " + std::to_string(hi) + ") - using " +
+            std::to_string(out));
+    }
+    return false;
+}
+
+// Metres, and never negative. PositionProcessor clamps with
+// math::Clamp(v, -limit, limit), and Clamp returns min_val for EVERY input once
+// min_val > max_val - so a negative limit does not narrow the travel, it pins
+// the camera at a fixed offset and reads in game as tracking that has jammed.
+// The ceiling catches a mistyped 10000 for 0.10.
+bool AcceptPositionLimit(const std::string& key, const std::string& raw, float parsed,
+                         const HeadTrackingConfig::LogFn& log, float& out) {
+    return AcceptInRange(key, raw, parsed, 0.0f, config::kMaxPositionLimit, log, out);
+}
+
+// Sign and magnitude are both legitimate tuning choices - a negative sensitivity
+// is how a user inverts an axis without touching the Invert flags - so only the
+// magnitude is bounded. Past this the processor's decomposition, which is never
+// more than 180 degrees, multiplies out to an infinity that reaches the camera.
+bool AcceptSensitivity(const std::string& key, const std::string& raw, float parsed,
+                       const HeadTrackingConfig::LogFn& log, float& out) {
+    return AcceptInRange(key, raw, parsed, -config::kMaxSensitivity, config::kMaxSensitivity, log,
+                         out);
 }
 
 }  // namespace
@@ -237,11 +280,17 @@ void HeadTrackingConfig::ApplyValues(
         } else if (canonical == config_keys::kEnableOnStartup) {
             if (TryParseConfigBool(value, bool_val)) enable_on_startup = bool_val;
         } else if (canonical == config_keys::kYawSensitivity) {
-            if (TryParseConfigFloat(value, float_val)) yaw_sensitivity = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptSensitivity(entry.first, value, float_val, log, yaw_sensitivity);
+            }
         } else if (canonical == config_keys::kPitchSensitivity) {
-            if (TryParseConfigFloat(value, float_val)) pitch_sensitivity = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptSensitivity(entry.first, value, float_val, log, pitch_sensitivity);
+            }
         } else if (canonical == config_keys::kRollSensitivity) {
-            if (TryParseConfigFloat(value, float_val)) roll_sensitivity = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptSensitivity(entry.first, value, float_val, log, roll_sensitivity);
+            }
         } else if (canonical == config_keys::kInvertYaw) {
             if (TryParseConfigBool(value, bool_val)) invert_yaw = bool_val;
         } else if (canonical == config_keys::kInvertPitch) {
@@ -282,27 +331,48 @@ void HeadTrackingConfig::ApplyValues(
         } else if (canonical == config_keys::kPositionEnabled) {
             if (TryParseConfigBool(value, bool_val)) position_enabled = bool_val;
         } else if (canonical == config_keys::kPositionSensitivityX) {
-            if (TryParseConfigFloat(value, float_val)) position.sensitivity_x = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptSensitivity(entry.first, value, float_val, log, position.sensitivity_x);
+            }
         } else if (canonical == config_keys::kPositionSensitivityY) {
-            if (TryParseConfigFloat(value, float_val)) position.sensitivity_y = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptSensitivity(entry.first, value, float_val, log, position.sensitivity_y);
+            }
         } else if (canonical == config_keys::kPositionSensitivityZ) {
-            if (TryParseConfigFloat(value, float_val)) position.sensitivity_z = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptSensitivity(entry.first, value, float_val, log, position.sensitivity_z);
+            }
         } else if (canonical == config_keys::kPositionLimitX) {
-            if (TryParseConfigFloat(value, float_val)) position.limit_x = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptPositionLimit(entry.first, value, float_val, log, position.limit_x);
+            }
         } else if (canonical == config_keys::kPositionLimitY) {
             if (TryParseConfigFloat(value, float_val)) {
-                position.limit_y = float_val;
-                saw_limit_y = true;
+                // Only a value the guard ACCEPTED counts as the file naming a
+                // vertical limit: a refused one leaves limit_y at its default,
+                // and mirroring that into limit_y_down below would say the file
+                // asked for something it did not. Latched rather than assigned,
+                // so a second, refused entry for the same key cannot unsay a
+                // good one earlier in the file.
+                if (AcceptPositionLimit(entry.first, value, float_val, log, position.limit_y)) {
+                    saw_limit_y = true;
+                }
             }
         } else if (canonical == config_keys::kPositionLimitYDown) {
             if (TryParseConfigFloat(value, float_val)) {
-                position.limit_y_down = float_val;
-                saw_limit_y_down = true;
+                if (AcceptPositionLimit(entry.first, value, float_val, log,
+                                        position.limit_y_down)) {
+                    saw_limit_y_down = true;
+                }
             }
         } else if (canonical == config_keys::kPositionLimitZ) {
-            if (TryParseConfigFloat(value, float_val)) position.limit_z = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptPositionLimit(entry.first, value, float_val, log, position.limit_z);
+            }
         } else if (canonical == config_keys::kPositionLimitZBack) {
-            if (TryParseConfigFloat(value, float_val)) position.limit_z_back = float_val;
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptPositionLimit(entry.first, value, float_val, log, position.limit_z_back);
+            }
         } else if (canonical == config_keys::kInvertPositionX) {
             if (TryParseConfigBool(value, bool_val)) position.invert_x = bool_val;
         } else if (canonical == config_keys::kInvertPositionY) {

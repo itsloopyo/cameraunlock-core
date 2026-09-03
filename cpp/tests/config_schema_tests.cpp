@@ -8,6 +8,9 @@
 
 #include <cameraunlock/config/head_tracking_config.h>
 
+#include <cameraunlock/config/value_guards.h>
+
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -166,6 +169,80 @@ void TestRejectedValues() {
     Check(!config.invert_yaw, "unparseable bool leaves the default");
 }
 
+// The range guards on the numeric keys. Both of the values covered here are one
+// character away in a hand-edited ini and neither is survivable downstream: a
+// negative position limit inverts the bounds of math::Clamp(v, -limit, limit),
+// which then returns the same number for every input, and a huge sensitivity
+// multiplies out to an infinity that reaches the camera.
+void TestOutOfRangeNumericValues() {
+    using cameraunlock::config::kMaxPositionLimit;
+    using cameraunlock::config::kMaxSensitivity;
+
+    auto negative = Apply({{"PositionLimitX", "-0.30"},
+                           {"PositionLimitY", "-1.0"},
+                           {"PositionLimitYDown", "-1.0"},
+                           {"PositionLimitZ", "-0.40"},
+                           {"PositionLimitZBack", "-0.10"}});
+
+    Check(negative.position.limit_x >= 0.0f && negative.position.limit_y >= 0.0f &&
+              negative.position.limit_y_down >= 0.0f && negative.position.limit_z >= 0.0f &&
+              negative.position.limit_z_back >= 0.0f,
+          "a negative position limit never reaches PositionSettings");
+
+    const cameraunlock::HeadTrackingConfig defaults;
+    Check(NearEq(negative.position.limit_x, defaults.position.limit_x) &&
+              NearEq(negative.position.limit_z, defaults.position.limit_z),
+          "a refused position limit keeps the working default rather than collapsing to zero");
+
+    auto huge = Apply({{"PositionLimitZ", "10000"}, {"YawSensitivity", "1e30"},
+                       {"PitchSensitivity", "-1e30"}, {"PositionSensitivityZ", "1e30"}});
+    Check(NearEq(huge.position.limit_z, defaults.position.limit_z),
+          "a mistyped 10000 for 0.10 is refused");
+    Check(NearEq(huge.yaw_sensitivity, 1.0f) && NearEq(huge.pitch_sensitivity, 1.0f) &&
+              NearEq(huge.position.sensitivity_z, 1.0f),
+          "a sensitivity past the magnitude bound is refused");
+
+    // The reason the sensitivity bound is where it is: the processor decomposes
+    // to at most 180 degrees, and that product has to stay finite.
+    Check(std::isfinite(180.0f * kMaxSensitivity),
+          "a full-range angle at the largest accepted sensitivity stays finite");
+
+    // Sign is a tuning choice - inverting an axis without the Invert flags - so
+    // only the magnitude is bounded.
+    auto negativeSensitivity = Apply({{"YawSensitivity", "-1.0"},
+                                      {"PositionSensitivityY", "-2.5"}});
+    Check(NearEq(negativeSensitivity.yaw_sensitivity, -1.0f) &&
+              NearEq(negativeSensitivity.position.sensitivity_y, -2.5f),
+          "a negative sensitivity is accepted");
+
+    // The bounds themselves are inclusive, and zero disables an axis rather than
+    // meaning "unset", so it must not be replaced by the default.
+    auto edges = Apply({{"PositionLimitZBack", "0"},
+                        {"PositionLimitX", std::to_string(kMaxPositionLimit)},
+                        {"RollSensitivity", std::to_string(kMaxSensitivity)}});
+    Check(NearEq(edges.position.limit_z_back, 0.0f), "zero is a legitimate position limit");
+    Check(NearEq(edges.position.limit_x, kMaxPositionLimit) &&
+              NearEq(edges.roll_sensitivity, kMaxSensitivity),
+          "the documented maximum is accepted, not refused");
+}
+
+// A refused LimitY must not be mirrored into limit_y_down: the file did not
+// successfully name a vertical limit, so the post-loop mirror has nothing to
+// carry across.
+void TestRefusedVerticalLimitIsNotMirrored() {
+    const cameraunlock::HeadTrackingConfig defaults;
+    auto config = Apply({{"PositionLimitY", "-1.0"}});
+    Check(NearEq(config.position.limit_y, defaults.position.limit_y) &&
+              NearEq(config.position.limit_y_down, defaults.position.limit_y_down),
+          "a refused LimitY leaves both vertical limits at their defaults");
+
+    // A duplicated key whose second entry is refused must not unsay the first.
+    auto duplicated = Apply({{"PositionLimitY", "0.35"}, {"PositionLimitY", "-1.0"}});
+    Check(NearEq(duplicated.position.limit_y, 0.35f) &&
+              NearEq(duplicated.position.limit_y_down, 0.35f),
+          "a later refused entry does not undo an accepted LimitY or its mirror");
+}
+
 void TestHotkeys() {
     auto config = Apply({{"ToggleKey", "F10"},
                          {"TogglePositionKey", "F11"},
@@ -212,6 +289,8 @@ int RunConfigSchemaTests() {
     TestVerticalLimitMirroring();
     TestSmoothingComposition();
     TestRejectedValues();
+    TestOutOfRangeNumericValues();
+    TestRefusedVerticalLimitIsNotMirrored();
     TestHotkeys();
     TestIniParsing();
     return g_failures;
