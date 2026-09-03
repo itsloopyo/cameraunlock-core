@@ -1347,6 +1347,17 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/elite-dangerous-headtracking",
       "catalog_status": "absent"
+    },
+    "wreckfest": {
+      "display_name": "Wreckfest",
+      "env_var": "WRECKFEST_PATH",
+      "steam_app_id": 228380,
+      "steam_folder": "Wreckfest",
+      "executable_relpath": "Wreckfest_x64.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/wreckfest-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
