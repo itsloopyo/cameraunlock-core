@@ -18,6 +18,7 @@ int RunOsTests();
 int RunValueGuardTests();
 int RunConfigSchemaTests();
 int RunSafeMemoryTests();
+int RunLeanClampTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
 int RunPluginConfigMigrationTests();
 #endif
@@ -46,6 +47,7 @@ int main() {
     failures += RunValueGuardTests();
     failures += RunConfigSchemaTests();
     failures += RunSafeMemoryTests();
+    failures += RunLeanClampTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();
 #endif

@@ -21,6 +21,7 @@ add_executable(cameraunlock_tests
     value_guard_tests.cpp
     config_schema_tests.cpp
     safe_memory_tests.cpp
+    lean_clamp_tests.cpp
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)
