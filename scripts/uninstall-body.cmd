@@ -19,6 +19,10 @@
 ::                  loader itself is shared with every other New Vegas script
 ::                  mod and is never removed, /force included
 ::   None         - shim-only; restores shim DLLs from .backup if present
+::   BeamNGUserMods - removes the mod archive from the BeamNG user folder's
+::                  mods\, and USER_FOLDER_EXTRAS from the user folder
+::                  itself; nothing was written to the game folder and there
+::                  is no loader, so there is nothing else to take away
 ::
 :: Required env from the wrapper:
 ::   WRAPPER_DIR        - wrapper's %~dp0 (release-zip root or <mod>/scripts/)
@@ -44,6 +48,9 @@
 ::   ROOT_EXTRAS        - optional extra files to remove from GAME_PATH, for
 ::                        mods that deploy below the game root but write their
 ::                        config and log at it
+::   USER_FOLDER_EXTRAS - BeamNGUserMods only: files the mod writes at runtime
+::                        into the per-user folder rather than into mods\.
+::                        Entries may carry a relative subfolder
 ::   UE4_BINARIES_RELDIR - UE4SS only: path under GAME_PATH holding the
 ::                        shipping exe; must match install.cmd's value
 ::
@@ -246,6 +253,12 @@ set "_LIST=!MOD_DLLS! !LEGACY_DLLS! !MOD_SEED_FILES! !MOD_LEFTOVERS! !ROOT_EXTRA
 call :assert_safe_list
 if errorlevel 1 exit /b 1
 
+:: USER_FOLDER_EXTRAS is checked on its own because it is the one list whose
+:: entries are allowed a relative subfolder - see :assert_safe_user_list.
+set "_LIST=!USER_FOLDER_EXTRAS!"
+call :assert_safe_user_list
+if errorlevel 1 exit /b 1
+
 :: -------- Compute DEPLOY_DIR per FRAMEWORK_TYPE --------
 call :compute_deploy_dir
 if errorlevel 1 exit /b 1
@@ -275,6 +288,8 @@ call :remove_mod_seed_files
 if errorlevel 1 exit /b 1
 call :remove_mod_leftovers
 call :remove_root_extras
+call :remove_user_folder_extras
+if errorlevel 1 exit /b 1
 
 :: -------- Decide whether to remove loader --------
 set "REMOVE_LOADER=0"
@@ -293,6 +308,9 @@ if "!REMOVE_LOADER!"=="0" (
 :: block a failing loader removal ran on into "Uninstall Complete".
 if /i "%FRAMEWORK_TYPE%"=="None"      goto :loader_done
 if /i "%FRAMEWORK_TYPE%"=="MonoCecil" goto :loader_done
+:: BeamNG reads its own mods folder; there was never a loader to install, so
+:: there is none to remove and /force has nothing extra to reach.
+if /i "%FRAMEWORK_TYPE%"=="BeamNGUserMods" goto :loader_done
 if /i "%FRAMEWORK_TYPE%"=="xNVSE" (
     rem xNVSE is a shared modding framework: every other New Vegas script mod
     rem binds to the same loader, so it is not ours to take away. /force does
@@ -402,6 +420,29 @@ echo plain filenames belong in those lists.
 exit /b 1
 
 :: ============================================
+:: USER_FOLDER_EXTRAS names files the mod writes at runtime into the per-user
+:: folder, which is one level above the mods\ folder the payload went into and
+:: has the game's own settings\ tree beside it - so a `\` is the only way to
+:: name them and :assert_safe_list, which forbids one, cannot be reused. What
+:: still has to hold is that no entry can leave the user folder. _LIST = the
+:: value.
+:: ============================================
+:assert_safe_user_list
+set "_BAD="
+if not "!_LIST!"=="!_LIST:**=!" set "_BAD=a wildcard"
+if not "!_LIST!"=="!_LIST:?=!"  set "_BAD=a wildcard"
+if not "!_LIST!"=="!_LIST:..=!" set "_BAD=a .."
+if not "!_LIST!"=="!_LIST::=!"  set "_BAD=a drive letter"
+if not "!_LIST!"=="!_LIST:/=!"  set "_BAD=a forward slash"
+if not defined _BAD exit /b 0
+echo ERROR: USER_FOLDER_EXTRAS in the uninstall.cmd CONFIG BLOCK contains
+echo !_BAD!:
+echo   !_LIST!
+echo Each entry is removed from the BeamNG user folder. A relative backslash
+echo path is allowed; anything that could reach outside that folder is not.
+exit /b 1
+
+:: ============================================
 :: compute_deploy_dir: set DEPLOY_DIR based on FRAMEWORK_TYPE.
 :: For ASILoader and None, DEPLOY_DIR is EXE_DIR, derived above from the shim's
 :: GAME_EXE_RELPATH (so nested-exe games like DL2 work).
@@ -454,8 +495,29 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
     set "DEPLOY_DIR=!EXE_DIR!"
     exit /b 0
 )
+if /i "%FRAMEWORK_TYPE%"=="BeamNGUserMods" (
+    rem Not derivable from GAME_PATH: BeamNG reads mods from the per-user
+    rem folder, which is outside the game install entirely.
+    call :resolve_beamng_user_folder
+    set "DEPLOY_DIR=!USER_FOLDER!\mods"
+    exit /b 0
+)
 echo ERROR: Unknown FRAMEWORK_TYPE "%FRAMEWORK_TYPE%" in uninstall CONFIG BLOCK.
 exit /b 1
+
+:: ============================================
+:: Precedence, not a fallback chain, and the same order install.cmd used:
+:: BEAMNG_USER_FOLDER wins outright, otherwise the folder BeamNG creates by
+:: default. `current` is where it keeps the running version's user data.
+:: ============================================
+:resolve_beamng_user_folder
+if defined BEAMNG_USER_FOLDER (
+    set "USER_FOLDER=!BEAMNG_USER_FOLDER!"
+) else (
+    set "USER_FOLDER=!LOCALAPPDATA!\BeamNG\BeamNG.drive\current"
+)
+if "!USER_FOLDER:~-1!"=="\" set "USER_FOLDER=!USER_FOLDER:~0,-1!"
+exit /b 0
 
 :: ============================================
 :: Remove mod DLLs + legacy DLLs from DEPLOY_DIR (framework-generic).
@@ -543,6 +605,27 @@ exit /b 0
 if not defined ROOT_EXTRAS exit /b 0
 for %%f in (%ROOT_EXTRAS%) do (
     set "_DEL_PATH=!GAME_PATH!\%%f"
+    set "_DEL_LABEL=%%f"
+    call :del_one
+)
+exit /b 0
+
+:: ============================================
+:: Remove what the mod writes at runtime into the per-user folder. BeamNG
+:: hands a mod that folder as its write target, so its log lands beside
+:: beamng.log and its config inside the game's own settings\ tree - neither is
+:: in DEPLOY_DIR, and neither is under GAME_PATH.
+:: ============================================
+:remove_user_folder_extras
+if not defined USER_FOLDER_EXTRAS exit /b 0
+if not defined USER_FOLDER (
+    echo ERROR: USER_FOLDER_EXTRAS is set but FRAMEWORK_TYPE is %FRAMEWORK_TYPE%,
+    echo which has no per-user folder. Every entry would be deleted from the root
+    echo of the current drive instead.
+    exit /b 1
+)
+for %%f in (%USER_FOLDER_EXTRAS%) do (
+    set "_DEL_PATH=!USER_FOLDER!\%%f"
     set "_DEL_LABEL=%%f"
     call :del_one
 )

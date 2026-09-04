@@ -1348,6 +1348,15 @@
       "repo": "itsloopyo/elite-dangerous-headtracking",
       "catalog_status": "absent"
     },
+    "beamng-drive": {
+      "display_name": "BeamNG.drive",
+      "env_var": "BEAMNG_DRIVE_PATH",
+      "steam_app_id": 284160,
+      "steam_folder": "BeamNG.drive",
+      "executable_relpath": "Bin64\\BeamNG.drive.x64.exe",
+      "repo": "itsloopyo/beam-ng",
+      "catalog_status": "absent"
+    },
     "wreckfest": {
       "display_name": "Wreckfest",
       "env_var": "WRECKFEST_PATH",

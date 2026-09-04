@@ -20,7 +20,7 @@ set "MOD_DLLS=<Mod>HeadTracking.dll"
 set "MOD_INTERNAL_NAME=<Mod>HeadTracking"
 set "STATE_FILE=.headtracking-state.json"
 :: BepInEx | MelonLoader | MonoCecil | ASILoader | REFramework | UE4SS | xNVSE
-:: | None
+:: | BeamNGUserMods | None
 set "FRAMEWORK_TYPE=None"
 :: DLL names shipped by older versions of this mod, removed too so an upgrade
 :: does not leave a second copy for the loader to bind.
@@ -37,6 +37,11 @@ set "MOD_LEFTOVERS="
 :: root (see ASI_SUBDIR) that still resolves its config and log from the exe's
 :: own directory.
 set "ROOT_EXTRAS="
+:: BeamNGUserMods: files the mod writes at runtime into the BeamNG user folder
+:: rather than into the mods\ folder the payload went into. Entries may carry a
+:: relative subfolder, since the game's own settings\ tree is one of the places
+:: a mod is handed to write to.
+set "USER_FOLDER_EXTRAS="
 
 :: --- Loader-specific config (leave the ones that don't apply blank) ---
 :: MonoCecil: used to find + restore the original Assembly-CSharp.dll.
