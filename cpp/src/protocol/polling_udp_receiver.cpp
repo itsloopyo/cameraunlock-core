@@ -21,8 +21,8 @@ bool PollingUdpReceiver::Initialize(uint16_t port) {
     if (!m_socket.Open(port)) {
         if (m_log && !m_bindFailureLogged) {
             m_bindFailureLogged = true;
-            m_log("Failed to bind UDP port " + std::to_string(port) +
-                  " (another application is holding it)");
+            m_log("Failed to bind UDP port " + std::to_string(port) + ": " +
+                  m_socket.LastError());
         }
         return false;
     }

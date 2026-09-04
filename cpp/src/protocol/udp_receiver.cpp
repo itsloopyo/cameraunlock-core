@@ -41,10 +41,12 @@ bool UdpReceiver::Start(uint16_t port) {
 
     const bool bound = BindAndReceive();
     if (!bound && m_log) {
-        m_log("Failed to bind UDP port " + std::to_string(port) +
-              " (another app is listening on it -- OpenTrack, or another"
-              " game) -- retrying every " + std::to_string(kRetryIntervalMs) +
-              "ms until it is free");
+        // The OS's own reason, not a guess at one. A bind fails for reasons
+        // other than a port conflict, and a log line that names the wrong one
+        // sends the user looking for an app that is not running.
+        m_log("Failed to bind UDP port " + std::to_string(port) + ": " +
+              m_socket.LastError() + " -- retrying every " +
+              std::to_string(kRetryIntervalMs) + "ms until it succeeds");
     }
 
     m_supervisorThread = std::thread(&UdpReceiver::SupervisorThread, this);
@@ -93,7 +95,8 @@ void UdpReceiver::SupervisorThread() {
                                     static_cast<int64_t>(kRetryLogIntervalMs) * 1000) {
                 lastWaitLogUs = now;
                 m_log("Still waiting for UDP port " + std::to_string(m_port) +
-                      " (" + std::to_string((now - retryingSinceUs) / 1000000) + "s elapsed)");
+                      " (" + std::to_string((now - retryingSinceUs) / 1000000) +
+                      "s elapsed): " + m_socket.LastError());
             }
             continue;
         }
@@ -116,8 +119,9 @@ void UdpReceiver::SupervisorThread() {
             lastWaitLogUs = retryingSinceUs;
             if (m_log) {
                 m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
-                      " and another app has since taken it -- retrying every " +
-                      std::to_string(kRetryIntervalMs) + "ms until it is free");
+                      " and it could not be reopened: " + m_socket.LastError() +
+                      " -- retrying every " + std::to_string(kRetryIntervalMs) +
+                      "ms until it succeeds");
             }
         }
     }

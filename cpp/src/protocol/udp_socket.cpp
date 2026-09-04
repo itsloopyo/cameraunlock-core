@@ -1,11 +1,43 @@
 #include "cameraunlock/protocol/udp_socket.h"
 #include <cstring>
+#include <string>
 
 #ifdef _WIN32
 #pragma comment(lib, "ws2_32.lib")
 #endif
 
 namespace cameraunlock {
+namespace {
+
+/// The OS's own account of a socket failure: the step, the numeric code, and
+/// the system message text. Read the code into a local FIRST, before any
+/// cleanup call runs, because closesocket/WSACleanup overwrite it.
+std::string DescribeFailure(const char* step, int code) {
+    std::string text;
+#ifdef _WIN32
+    char* buffer = nullptr;
+    const DWORD length = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, static_cast<DWORD>(code), 0, reinterpret_cast<char*>(&buffer), 0, nullptr);
+    if (buffer) {
+        text.assign(buffer, length);
+        LocalFree(buffer);
+    }
+#else
+    text = std::strerror(code);
+#endif
+    const size_t lastReal = text.find_last_not_of(" \r\n");
+    text.erase(lastReal == std::string::npos ? 0 : lastReal + 1);
+
+    std::string described = std::string(step) + " failed with error " + std::to_string(code);
+    if (!text.empty()) {
+        described += " (" + text + ")";
+    }
+    return described;
+}
+
+}  // namespace
 
 UdpSocket::~UdpSocket() {
     Close();
@@ -20,6 +52,7 @@ bool UdpSocket::Open(uint16_t port) {
     WSADATA wsaData;
     int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (result != 0) {
+        m_lastError = DescribeFailure("WSAStartup", result);
         return false;
     }
     m_wsaInitialized = true;
@@ -28,6 +61,7 @@ bool UdpSocket::Open(uint16_t port) {
     // Create UDP socket
     m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (m_socket == INVALID_SOCKET) {
+        m_lastError = DescribeFailure("socket creation", LastSocketError());
 #ifdef _WIN32
         WSACleanup();
         m_wsaInitialized = false;
@@ -51,6 +85,7 @@ bool UdpSocket::Open(uint16_t port) {
 #ifdef _WIN32
     u_long mode = 1;
     if (ioctlsocket(m_socket, FIONBIO, &mode) != 0) {
+        m_lastError = DescribeFailure("setting non-blocking mode", LastSocketError());
         closesocket(m_socket);
         m_socket = INVALID_SOCKET;
         WSACleanup();
@@ -72,6 +107,7 @@ bool UdpSocket::Open(uint16_t port) {
 #else
     int flags = fcntl(m_socket, F_GETFL, 0);
     if (flags == -1 || fcntl(m_socket, F_SETFL, flags | O_NONBLOCK) == -1) {
+        m_lastError = DescribeFailure("setting non-blocking mode", LastSocketError());
         close(m_socket);
         m_socket = INVALID_SOCKET;
         return false;
@@ -86,6 +122,7 @@ bool UdpSocket::Open(uint16_t port) {
     addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+        m_lastError = DescribeFailure("bind", LastSocketError());
 #ifdef _WIN32
         closesocket(m_socket);
         WSACleanup();
@@ -97,6 +134,7 @@ bool UdpSocket::Open(uint16_t port) {
         return false;
     }
 
+    m_lastError.clear();
     return true;
 }
 

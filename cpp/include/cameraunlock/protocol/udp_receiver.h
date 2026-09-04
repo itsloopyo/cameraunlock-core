@@ -58,7 +58,7 @@ public:
     /// continuing the movement.
     static constexpr float kConfirmJumpDegrees = 8.0f;
 
-    /// Interval between bind retries when the port is held by another process.
+    /// Interval between bind retries after a failed bind.
     /// Short on purpose: this is the only path that reclaims the port, so it
     /// covers both a slow-exiting previous game instance (sub-second) and a
     /// tracker app the user quits mid-session, which should be picked up
@@ -76,9 +76,10 @@ public:
     UdpReceiver& operator=(const UdpReceiver&) = delete;
 
     /// Starts the UDP receiver on the specified port and a supervisor thread
-    /// that keeps it listening for as long as the receiver lives. If the port
-    /// is already in use, Start returns false and the supervisor retries every
-    /// kRetryIntervalMs until it frees up, with no further action from the
+    /// that keeps it listening for as long as the receiver lives. If the bind
+    /// fails - the port is already in use being the usual reason - Start
+    /// returns false, logs what the OS said, and the supervisor retries every
+    /// kRetryIntervalMs until it succeeds, with no further action from the
     /// caller; once it binds, the receive thread starts and IsRunning becomes
     /// true. The supervisor also re-establishes the socket if the receive
     /// thread dies on a socket error.
@@ -102,7 +103,7 @@ public:
     /// True if the receive thread is running.
     bool IsRunning() const { return m_running.load(std::memory_order_acquire); }
 
-    /// True if the supervisor is retrying the bind (port currently unavailable).
+    /// True if the supervisor is retrying the bind (the last attempt failed).
     bool IsRetrying() const { return m_retrying.load(std::memory_order_acquire); }
 
     /// True if data has been received recently.

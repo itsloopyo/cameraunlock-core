@@ -19,6 +19,16 @@
 
 namespace cameraunlock {
 
+/// The OS error code for the socket call that just failed. Call it before any
+/// cleanup: closesocket/WSACleanup succeed and reset it to 0.
+inline int LastSocketError() {
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
 /// Checks whether a sockaddr_in represents a remote (non-loopback) address.
 ///
 /// Loopback is the whole 127.0.0.0/8 block, not just 127.0.0.1. This must agree with

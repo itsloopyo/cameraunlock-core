@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <string>
 #include <thread>
 
 namespace {
@@ -31,6 +32,14 @@ constexpr uint16_t kReceiverPort = 14261;
 
 /// The port the receiver actually bound, set once the range walk succeeds.
 uint16_t g_receiverPort = kReceiverPort;
+
+// Address-already-in-use, as this platform's sockets report it.
+#ifdef _WIN32
+constexpr int kExpectedInUseError = WSAEADDRINUSE;
+#else
+constexpr int kExpectedInUseError = EADDRINUSE;
+#endif
+
 constexpr uint16_t kSupervisedPort = 14263;
 constexpr uint16_t kSupervisedSenderPort = 14264;
 constexpr uint16_t kReusePort = 14265;
@@ -252,7 +261,17 @@ int RunReceiverTests() {
     Check(occupier != INVALID_SOCKET, "another process holds the tracker port");
 
     UdpReceiver supervised;
+    std::string bindFailureLog;
+    supervised.SetLog([&](const std::string& message) { bindFailureLog += message + "\n"; });
     Check(!supervised.Start(kSupervisedPort), "Start reports the port as unavailable");
+    // The log has to carry what the OS said, because a bind fails for reasons
+    // that are not a port conflict (a reserved port range refuses it with
+    // WSAEACCES while nothing holds the port) and a line naming the wrong
+    // cause sends the user hunting an app that is not running.
+    Check(bindFailureLog.find("bind failed with error") != std::string::npos,
+          "bind failure log names the failing call and the OS error code");
+    Check(bindFailureLog.find(std::to_string(kExpectedInUseError)) != std::string::npos,
+          "bind failure log carries the address-in-use code the OS actually returned");
     Check(supervised.IsRetrying(), "supervisor waits for the port");
     Check(!supervised.IsRunning(), "no receive thread while the port is held");
 
