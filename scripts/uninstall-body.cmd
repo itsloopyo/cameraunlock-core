@@ -428,6 +428,13 @@ exit /b 1
 :: value.
 :: ============================================
 :assert_safe_user_list
+:: An UNSET _LIST is not the same as an empty one here: cmd expands
+:: `!_LIST:x=y!` on an undefined variable to something that never compares
+:: equal to `!_LIST!`, so every test below fires and a mod that leaves
+:: USER_FOLDER_EXTRAS blank - every mod that is not BeamNG - is refused an
+:: uninstall. :assert_safe_list above is immune because its _LIST always
+:: holds the joining spaces.
+if not defined _LIST exit /b 0
 set "_BAD="
 if not "!_LIST!"=="!_LIST:**=!" set "_BAD=a wildcard"
 if not "!_LIST!"=="!_LIST:?=!"  set "_BAD=a wildcard"
