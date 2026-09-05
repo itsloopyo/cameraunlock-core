@@ -319,11 +319,11 @@ inline HRESULT __stdcall HookedPresent(IDirect3DDevice9* dev, const RECT* src, c
 //
 // Every IDirect3DDevice9 handed out by d3d9.dll shares one vtable, so this
 // covers the game's device however long ago it was made - which is the whole
-// point. Waiting for the game's own CreateDevice instead makes the overlay a
-// race against the game's start-up, and it is a race an ASI can lose with no
-// error and no log line: DXHRDC.exe had already created its device 370ms into
-// a mod that armed as the first thing it did, and the overlay simply never
-// drew.
+// point. Waiting for the game's own CreateDevice instead makes Install() an
+// ordering constraint on the consumer: arm it after the game has made its
+// device and the call never comes again, so the overlay never draws, with no
+// error and no log line to say why. This is the same route the DX11 and DX12
+// overlays here already take.
 //
 // The probe is WINDOWED and is released before this returns, so it never takes
 // exclusive mode and never holds an adapter. D3DCREATE_FPU_PRESERVE is not

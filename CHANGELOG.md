@@ -13,11 +13,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 `DX9Overlay::Install()` now reads the shared `IDirect3DDevice9` vtable off a
 windowed probe device it creates and releases on the spot, and hooks Present
-there. Waiting for the game's own `IDirect3D9::CreateDevice` made the overlay a
-race against the game's start-up, and it is a race that fails silently: an ASI
-in Deus Ex: Human Revolution armed the hook as the first thing it did, 370ms
-into the process, and DXHRDC.exe had already created its device. No error, no
-log line, no overlay - the aim marker simply never drew.
+there - the same route the DX11 and DX12 overlays here already take. Waiting for
+the game's own `IDirect3D9::CreateDevice` made `Install()` an ordering
+constraint on the consumer: called after the game has created its device, the
+hook never fires again, and the overlay never draws with no error and no log
+line to say why. An ASI cannot always be sure of arming first, and nothing about
+the old behaviour told it when it had not.
 
 The probe is windowed, is released before `Install()` returns, and passes
 `D3DCREATE_FPU_PRESERVE`, so it takes no exclusive mode, holds no adapter, and
