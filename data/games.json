@@ -948,6 +948,17 @@
       "engine": "Source",
       "catalog_status": "prerelease"
     },
+    "portal-with-rtx": {
+      "display_name": "Portal with RTX",
+      "env_var": "PORTAL_WITH_RTX_PATH",
+      "steam_app_id": 2012840,
+      "steam_folder": "PortalRTX",
+      "executable_relpath": "hl2.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/portal-with-rtx-headtracking",
+      "engine": "Source",
+      "catalog_status": "absent"
+    },
     "titanfall-2": {
       "display_name": "Titanfall 2",
       "env_var": "TITANFALL_2_PATH",
