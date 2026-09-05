@@ -39,6 +39,16 @@ namespace camera {
 /// The factor a translation - a lean - scales by, given the FOV being rendered
 /// now and the game's un-zoomed one, both as tan(fov/2) in the same axis.
 ///
+/// **The same axis is the whole of the difficulty.** An engine will hand you a
+/// vertical FOV through the accessor its projection uses and a horizontal one
+/// wherever its settings are authored, both floats, both radians, and pairing
+/// them is not an error anything can catch: the ratio is merely off by a
+/// constant, so the whole of normal play runs at a fixed fraction of the pose
+/// and head tracking feels weak everywhere rather than wrong anywhere. Carry one
+/// across with the aspect the engine's own projection divides x by -
+/// `tan(h/2) = tan(v/2) * aspect` - and prove it by checking that this returns
+/// 1.0 when the game is not zoomed.
+///
 /// Both must be finite and positive. They come out of game memory, so that is
 /// the mod's boundary check to make, and a mod that cannot read the live FOV
 /// applies no compensation rather than a guessed one.
