@@ -9,6 +9,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the aim marker on Direct3D 9
+
+`rendering/aim_marker_dx9.h` binds `AimMarker<Traits>` to the existing DX9
+overlay, so a D3D9 game gets the same mark, in the same place, as one on D3D11
+or D3D12. `AimMarkerDX9` is the alias to use; define
+`CAMERAUNLOCK_DX9_OVERLAY_IMPLEMENTATION` and
+`CAMERAUNLOCK_AIM_MARKER_DX9_IMPLEMENTATION` in one TU, as with the other two.
+
+Two things a consumer has to know, both documented at the top of the header and
+both forced by how D3D9 is reached rather than chosen: `Ensure()` must be called
+during initialisation and not from the frame that first wants the marker,
+because the overlay arms itself by hooking `IDirect3D9::CreateDevice` and the
+game calls that once, early; and `Ready()` therefore means the hook is armed
+rather than that a device exists. `AimMarkerStyle`'s colours are `0xAABBGGRR`
+while D3DCOLOR is `0xAARRGGBB`, which the shipped white-on-black style is blind
+to and a coloured one would not be.
+
 ### Added - the loader components the notices gate could not see
 
 `legal/` gains `miniz.txt`, `injector.txt`, `memorymodule.txt` and

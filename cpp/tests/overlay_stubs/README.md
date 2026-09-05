@@ -1,7 +1,7 @@
 # Overlay compile stubs
 
 The three overlay headers (`dx9_overlay.h`, `dx11_overlay.h`, `dx12_overlay.h`)
-and the two aim-marker bindings on top of them are header-only, and a consuming
+and the three aim-marker bindings on top of them are header-only, and a consuming
 mod instantiates them in one TU by defining
 `CAMERAUNLOCK_DX{9,11,12}_OVERLAY_IMPLEMENTATION`. Their one real dependency,
 MinHook, is vendored per mod rather than here, so nothing in this repo ever

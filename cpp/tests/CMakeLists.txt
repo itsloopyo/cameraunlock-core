@@ -63,6 +63,7 @@ if(WIN32)
         overlay_stubs/overlay_compile_dx9.cpp
         overlay_stubs/overlay_compile_dx11.cpp
         overlay_stubs/overlay_compile_dx12.cpp
+        overlay_stubs/overlay_compile_aim_marker_dx9.cpp
         overlay_stubs/overlay_compile_aim_marker_dx11.cpp
         overlay_stubs/overlay_compile_aim_marker_dx12.cpp
     )
