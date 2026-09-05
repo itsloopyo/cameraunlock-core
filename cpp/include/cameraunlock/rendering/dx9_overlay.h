@@ -387,9 +387,9 @@ inline bool HookPresentViaProbeDevice() {
 }
 
 // Captures the game's real IDirect3DDevice9 the moment it is created. This is
-// the fallback for a machine where the probe above could not create a device;
-// on every other machine Present is hooked before this ever fires, and all this
-// does is note the device.
+// the fallback for a machine where the probe above could not create a device,
+// and Install() arms it only in that case - the probe creates a device of its
+// own, and an armed hook would catch that one instead.
 inline HRESULT __stdcall HookedCreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE type,
                                             HWND focusWnd, DWORD flags,
                                             D3DPRESENT_PARAMETERS* pp,
@@ -441,28 +441,8 @@ inline bool DX9Overlay::Install() {
         return false;
     }
 
-    // Direct3DCreate9 returns only the IDirect3D9 factory (no device, no adapter
-    // exclusivity), so this always succeeds even while the game is fullscreen.
-    // Its vtable is shared with the game's IDirect3D9, so hooking CreateDevice
-    // here fires when the game creates its device - and we read that device's
-    // real vtable to hook Present.
-    IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    if (!d3d) { detail::Log("dx9_overlay: Direct3DCreate9 failed"); return false; }
-    void** d3dVTable = *reinterpret_cast<void***>(d3d);
-    s.createDeviceTarget = d3dVTable[16];  // IDirect3D9::CreateDevice
-    d3d->Release();
-
-    if (MH_CreateHook(s.createDeviceTarget, &detail::HookedCreateDevice,
-                      reinterpret_cast<LPVOID*>(&s.origCreateDevice)) != MH_OK) {
-        detail::Log("dx9_overlay: MH_CreateHook(CreateDevice) failed");
-        return false;
-    }
-    if (MH_EnableHook(s.createDeviceTarget) != MH_OK) {
-        detail::Log("dx9_overlay: MH_EnableHook(CreateDevice) failed");
-        MH_RemoveHook(s.createDeviceTarget);
-        return false;
-    }
-
+    // Before either hook, so Present cannot fire between being hooked and having
+    // something to draw.
     {
         std::lock_guard<std::mutex> lock(s.callbackMutex);
         s.callback = std::make_shared<const DX9RenderCallback>(m_callback);
@@ -470,13 +450,51 @@ inline bool DX9Overlay::Install() {
     s.hookInstalled = true;
     m_hookInstalled = true;
 
-    // The CreateDevice hook above is armed first so that a game which has not
-    // made its device yet is still noticed, then Present is hooked outright
-    // rather than waited for. Only when the probe cannot make a device does the
-    // overlay fall back to waiting.
-    if (!detail::HookPresentViaProbeDevice()) {
-        detail::Log("dx9_overlay: CreateDevice hook armed (waiting for game device)");
+    // Present outright, off a probe device's vtable. This is the whole path on
+    // any machine that can create a device.
+    if (detail::HookPresentViaProbeDevice()) {
+        return true;
     }
+
+    // Only if it could not. The CreateDevice hook is armed AFTER the probe and
+    // never before it: the probe creates a device of its own, so an armed hook
+    // catches that instead of the game's, reports our own probe as the captured
+    // device, and leaves the probe's own MH_CreateHook failing as
+    // already-created.
+    //
+    // Direct3DCreate9 returns only the IDirect3D9 factory (no device, no adapter
+    // exclusivity), so this succeeds even while the game is fullscreen. Its
+    // vtable is shared with the game's IDirect3D9, so hooking CreateDevice here
+    // fires when the game creates its device.
+    IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    if (!d3d) {
+        detail::Log("dx9_overlay: Direct3DCreate9 failed");
+        s.hookInstalled = false;
+        m_hookInstalled = false;
+        return false;
+    }
+    void** d3dVTable = *reinterpret_cast<void***>(d3d);
+    s.createDeviceTarget = d3dVTable[16];  // IDirect3D9::CreateDevice
+    d3d->Release();
+
+    if (MH_CreateHook(s.createDeviceTarget, &detail::HookedCreateDevice,
+                      reinterpret_cast<LPVOID*>(&s.origCreateDevice)) != MH_OK) {
+        detail::Log("dx9_overlay: MH_CreateHook(CreateDevice) failed");
+        s.createDeviceTarget = nullptr;
+        s.hookInstalled = false;
+        m_hookInstalled = false;
+        return false;
+    }
+    if (MH_EnableHook(s.createDeviceTarget) != MH_OK) {
+        detail::Log("dx9_overlay: MH_EnableHook(CreateDevice) failed");
+        MH_RemoveHook(s.createDeviceTarget);
+        s.createDeviceTarget = nullptr;
+        s.hookInstalled = false;
+        m_hookInstalled = false;
+        return false;
+    }
+
+    detail::Log("dx9_overlay: CreateDevice hook armed (waiting for game device)");
     return true;
 }
 
