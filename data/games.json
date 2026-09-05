@@ -820,6 +820,17 @@
       "engine": "Unity",
       "catalog_status": "prerelease"
     },
+    "wolfenstein-the-new-order": {
+      "display_name": "Wolfenstein: The New Order",
+      "env_var": "WOLFENSTEIN_THE_NEW_ORDER_PATH",
+      "steam_app_id": 201810,
+      "steam_folder": "Wolfenstein.The.New.Order",
+      "executable_relpath": "WolfNewOrder_x64.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/wolfenstein-the-new-order-headtracking",
+      "engine": "id Tech",
+      "catalog_status": "absent"
+    },
     "zeepkist": {
       "display_name": "Zeepkist",
       "env_var": "ZEEPKIST_PATH",
