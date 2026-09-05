@@ -153,7 +153,7 @@
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/amnesia-the-dark-descent-headtracking",
       "engine": "HPL",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "soma": {
       "display_name": "SOMA",
@@ -966,9 +966,10 @@
       "steam_folder": "PortalRTX",
       "executable_relpath": "hl2.exe",
       "loader": "AsiLoader",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/portal-with-rtx-headtracking",
       "engine": "Source",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     },
     "tiny-tinas-wonderlands": {
       "display_name": "Tiny Tina's Wonderlands",
