@@ -959,6 +959,18 @@
       "engine": "Source",
       "catalog_status": "absent"
     },
+    "tiny-tinas-wonderlands": {
+      "display_name": "Tiny Tina's Wonderlands",
+      "env_var": "TINY_TINAS_WONDERLANDS_PATH",
+      "steam_app_id": 1286680,
+      "steam_folder": "Tiny Tina's Wonderlands",
+      "executable_relpath": "OakGame\\Binaries\\Win64\\Wonderlands.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/tiny-tinas-wonderlands-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "prerelease"
+    },
     "titanfall-2": {
       "display_name": "Titanfall 2",
       "env_var": "TITANFALL_2_PATH",
