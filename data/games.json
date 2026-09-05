@@ -665,7 +665,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/dishonored-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "dead-rising-2": {
       "display_name": "Dead Rising 2",
@@ -688,7 +688,7 @@
         "1370227705"
       ],
       "repo": "itsloopyo/deus-ex-human-revolution-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "dishonored-2": {
       "display_name": "Dishonored 2",
@@ -1208,7 +1208,7 @@
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/spec-ops-the-line-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "south-park-the-stick-of-truth": {
       "display_name": "South Park: The Stick of Truth",
@@ -1360,7 +1360,7 @@
       "engine": "Unreal Engine",
       "catalog_status": "absent"
     },
-      "half-life-2": {
+    "half-life-2": {
       "display_name": "Half-Life 2",
       "env_var": "HALF_LIFE_2_PATH",
       "steam_app_id": 220,
