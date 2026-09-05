@@ -1035,10 +1035,10 @@
       "steam_folder": "Metro Exodus Enhanced Edition",
       "executable_relpath": "MetroExodus.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/metro-exodus-enhanced-edition-headtracking",
       "engine": "4A Engine",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "little-nightmares-enhanced-edition": {
       "display_name": "Little Nightmares Enhanced Edition",
