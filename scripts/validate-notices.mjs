@@ -105,6 +105,13 @@ const ARCHIVE_COMPONENTS = [
   { archive: /^BepInEx.*\.zip$/i, components: ["unity-doorstop", "harmonyx", "mono-cecil", "monomod"] },
   { asset: /^Ultimate-ASI-Loader_x64\.zip$/i, components: ["minhook", "injector", "miniz"] },
   { asset: /^Ultimate-ASI-Loader\.zip$/i, components: ["minhook", "injector", "miniz", "memorymodule", "d3d8to9"] },
+  // The x64-latest rolling tag publishes the same x64 build once per proxy
+  // name it can be renamed to - bink2w64-x64.zip, dinput8-x64.zip, winmm-x64.zip
+  // and 21 others. Same binary, same component set as Ultimate-ASI-Loader_x64.zip;
+  // only the exported forwarders and the filename differ. A mod that needs the
+  // loader pre-named (MELE proxies bink2w64.dll) vendors one of these rather
+  // than renaming the generic asset by hand.
+  { asset: /^[A-Za-z0-9_]+-x64\.zip$/i, components: ["minhook", "injector", "miniz"] },
 ];
 
 // Vendor directories whose README must resolve to an `asset` rule above. An
