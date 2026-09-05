@@ -936,6 +936,17 @@
       "repo": "itsloopyo/assassins-creed-origins-headtracking",
       "catalog_status": "absent"
     },
+    "portal": {
+      "display_name": "Portal",
+      "env_var": "PORTAL_PATH",
+      "steam_app_id": 400,
+      "steam_folder": "Portal",
+      "executable_relpath": "hl2.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/portal-headtracking",
+      "engine": "Source",
+      "catalog_status": "absent"
+    },
     "portal-2": {
       "display_name": "Portal 2",
       "env_var": "PORTAL_2_PATH",
