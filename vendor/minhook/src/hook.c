@@ -515,7 +515,9 @@ MH_STATUS WINAPI MH_Initialize(VOID)
 
     if (g_hHeap == NULL)
     {
-        g_hHeap = HeapCreate(0, 0, 0);
+        // Use the process heap rather than standing up a private one. See
+        // ../LOCAL-CHANGES.md.
+        g_hHeap = GetProcessHeap();
         if (g_hHeap != NULL)
         {
             // Initialize the internal function buffer.
@@ -556,7 +558,8 @@ MH_STATUS WINAPI MH_Uninitialize(VOID)
             UninitializeBuffer();
 
             HeapFree(g_hHeap, 0, g_hooks.pItems);
-            HeapDestroy(g_hHeap);
+            // No HeapDestroy: g_hHeap is the process heap, not ours to destroy.
+            // See ../LOCAL-CHANGES.md.
 
             g_hHeap = NULL;
 
