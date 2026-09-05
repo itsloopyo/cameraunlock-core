@@ -1425,6 +1425,17 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/wreckfest-2-headtracking",
       "catalog_status": "released"
+    },
+    "a-plague-tale-innocence": {
+      "display_name": "A Plague Tale: Innocence",
+      "env_var": "A_PLAGUE_TALE_INNOCENCE_PATH",
+      "steam_app_id": 752590,
+      "steam_folder": "A Plague Tale Innocence",
+      "executable_relpath": "APlagueTaleInnocence_x64.exe",
+      "loader": "Shim",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/a-plague-tale-innocence-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
