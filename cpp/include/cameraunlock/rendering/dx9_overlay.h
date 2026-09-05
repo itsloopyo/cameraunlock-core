@@ -3,6 +3,11 @@
 // DX9 Overlay System
 // Minimal-dep DX9 overlay for drawing crosshair-style 2D primitives over a game.
 //
+// Present is hooked on the shared IDirect3DDevice9 vtable, read off a windowed
+// probe device the overlay creates and releases inside Install(). That is what
+// makes Install() work at any point in a game's life rather than only before the
+// game creates its own device.
+//
 // The DX9 analog of dx9_overlay.h's DX11 sibling: fixed-function pipeline,
 // pretransformed (D3DFVF_XYZRHW) vertices drawn with DrawPrimitiveUP, so there
 // are no shaders, no managed resources, and nothing to recreate on device reset.
@@ -309,10 +314,82 @@ inline HRESULT __stdcall HookedPresent(IDirect3DDevice9* dev, const RECT* src, c
     return orig(dev, src, dst, wnd, dirty);
 }
 
-// Captures the game's real IDirect3DDevice9 the moment it is created, so we hook
-// the actual device's Present (no probe device -> no fullscreen-exclusive
-// conflict). The IDirect3DDevice9 vtable is shared across every device from
-// d3d9.dll, so hooking Present here covers the game's device.
+// Hooks Present on the shared IDirect3DDevice9 vtable, read off a device of our
+// own that is released again immediately.
+//
+// Every IDirect3DDevice9 handed out by d3d9.dll shares one vtable, so this
+// covers the game's device however long ago it was made - which is the whole
+// point. Waiting for the game's own CreateDevice instead makes the overlay a
+// race against the game's start-up, and it is a race an ASI can lose with no
+// error and no log line: DXHRDC.exe had already created its device 370ms into
+// a mod that armed as the first thing it did, and the overlay simply never
+// drew.
+//
+// The probe is WINDOWED and is released before this returns, so it never takes
+// exclusive mode and never holds an adapter. D3DCREATE_FPU_PRESERVE is not
+// optional: creating a device without it switches the process FPU to single
+// precision, and the process here is a running game whose float maths we have
+// no business touching.
+inline bool HookPresentViaProbeDevice() {
+    auto& s = State();
+    if (s.presentHooked) return true;
+
+    IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    if (!d3d) return false;
+
+    HWND window = CreateWindowExA(0, "STATIC", "", WS_OVERLAPPED, 0, 0, 1, 1,
+                                  nullptr, nullptr, nullptr, nullptr);
+    if (!window) {
+        d3d->Release();
+        return false;
+    }
+
+    D3DPRESENT_PARAMETERS pp = {};
+    pp.Windowed = TRUE;
+    pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    pp.BackBufferFormat = D3DFMT_UNKNOWN;
+    pp.hDeviceWindow = window;
+
+    IDirect3DDevice9* probe = nullptr;
+    HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
+                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING |
+                                       D3DCREATE_FPU_PRESERVE |
+                                       D3DCREATE_NOWINDOWCHANGES,
+                                   &pp, &probe);
+    if (FAILED(hr) || !probe) {
+        DestroyWindow(window);
+        d3d->Release();
+        Log("dx9_overlay: probe device creation failed; falling back to waiting "
+            "for the game's own CreateDevice");
+        return false;
+    }
+
+    s.deviceVTable = *reinterpret_cast<void***>(probe);
+    s.deviceCaptured = true;
+    s.presentTarget = s.deviceVTable[17];  // IDirect3DDevice9::Present
+
+    probe->Release();
+    DestroyWindow(window);
+    d3d->Release();
+
+    if (MH_CreateHook(s.presentTarget, &HookedPresent,
+                      reinterpret_cast<LPVOID*>(&s.origPresent)) != MH_OK ||
+        MH_EnableHook(s.presentTarget) != MH_OK) {
+        Log("dx9_overlay: Present hook via the probe device failed");
+        s.presentTarget = nullptr;
+        return false;
+    }
+    s.presentHooked = true;
+    Log("dx9_overlay: Present hook enabled via a probe device");
+
+    if (s.deviceReadyFn) s.deviceReadyFn(s.deviceVTable);
+    return true;
+}
+
+// Captures the game's real IDirect3DDevice9 the moment it is created. This is
+// the fallback for a machine where the probe above could not create a device;
+// on every other machine Present is hooked before this ever fires, and all this
+// does is note the device.
 inline HRESULT __stdcall HookedCreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE type,
                                             HWND focusWnd, DWORD flags,
                                             D3DPRESENT_PARAMETERS* pp,
@@ -392,7 +469,14 @@ inline bool DX9Overlay::Install() {
     }
     s.hookInstalled = true;
     m_hookInstalled = true;
-    detail::Log("dx9_overlay: CreateDevice hook armed (waiting for game device)");
+
+    // The CreateDevice hook above is armed first so that a game which has not
+    // made its device yet is still noticed, then Present is hooked outright
+    // rather than waited for. Only when the probe cannot make a device does the
+    // overlay fall back to waiting.
+    if (!detail::HookPresentViaProbeDevice()) {
+        detail::Log("dx9_overlay: CreateDevice hook armed (waiting for game device)");
+    }
     return true;
 }
 
