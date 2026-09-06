@@ -1065,6 +1065,18 @@
       "engine": "Unreal Engine",
       "catalog_status": "absent"
     },
+    "subliminal": {
+      "display_name": "Subliminal",
+      "env_var": "SUBLIMINAL_PATH",
+      "steam_app_id": 2300840,
+      "steam_folder": "Subliminal",
+      "executable_relpath": "Subliminal\\Binaries\\Win64\\Subliminal-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/subliminal-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
+    },
     "still-wakes-the-deep": {
       "display_name": "Still Wakes the Deep",
       "env_var": "STILL_WAKES_THE_DEEP_PATH",
