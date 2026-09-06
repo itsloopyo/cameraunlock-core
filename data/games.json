@@ -108,7 +108,7 @@
       "display_name": "PixelJunk Monsters 2",
       "env_var": "PIXELJUNK_MONSTERS_2_PATH",
       "steam_app_id": 749800,
-      "steam_folder": "PixelJunkâ„¢ Monsters 2",
+      "steam_folder": "PixelJunk™ Monsters 2",
       "executable_relpath": "PixeljunkMonsters2.exe",
       "data_folder": "PixeljunkMonsters2_Data",
       "repo": "itsloopyo/pixeljunk-monsters-2-headtracking",
@@ -193,7 +193,7 @@
       "catalog_status": "absent"
     },
     "abzu": {
-      "display_name": "ABZÃ›",
+      "display_name": "ABZÛ",
       "env_var": "ABZU_PATH",
       "steam_app_id": 384190,
       "steam_folder": "ABZU",
@@ -766,6 +766,19 @@
       "loader": "BepInEx6",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/shadows-of-doubt-headtracking",
+      "engine": "Unity",
+      "catalog_status": "prerelease"
+    },
+    "the-forest": {
+      "display_name": "The Forest",
+      "env_var": "THE_FOREST_PATH",
+      "steam_app_id": 242760,
+      "steam_folder": "The Forest",
+      "executable_relpath": "TheForest.exe",
+      "data_folder": "TheForest_Data",
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/the-forest-headtracking",
       "engine": "Unity",
       "catalog_status": "prerelease"
     },
@@ -1447,6 +1460,29 @@
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/a-plague-tale-innocence-headtracking",
       "catalog_status": "absent"
+    },
+    "snowrunner": {
+      "display_name": "SnowRunner",
+      "env_var": "SNOWRUNNER_PATH",
+      "steam_app_id": 1465360,
+      "steam_folder": "SnowRunner",
+      "executable_relpath": "Sources\\Bin\\SnowRunner.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/snowrunner-headtracking",
+      "catalog_status": "absent"
+    },
+    "thief": {
+      "display_name": "Thief",
+      "env_var": "THIEF_PATH",
+      "steam_app_id": 239160,
+      "steam_folder": "Thief",
+      "executable_relpath": "Binaries2\\Win64\\Shipping-ThiefGame.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/thief-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "prerelease"
     }
   }
 }
