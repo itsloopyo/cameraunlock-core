@@ -1464,6 +1464,19 @@
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/a-plague-tale-innocence-headtracking",
       "catalog_status": "absent"
+    },
+    "superliminal": {
+      "display_name": "Superliminal",
+      "env_var": "SUPERLIMINAL_PATH",
+      "steam_app_id": 1049410,
+      "steam_folder": "Superliminal",
+      "executable_relpath": "SuperliminalSteam.exe",
+      "data_folder": "SuperliminalSteam_Data",
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/superliminal-headtracking",
+      "engine": "Unity",
+      "catalog_status": "prerelease"
     }
   }
 }
