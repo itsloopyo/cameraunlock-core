@@ -192,10 +192,23 @@ namespace CameraUnlock.Core.Protocol
                 client = new UdpClient(new IPEndPoint(IPAddress.Any, port));
                 client.Client.ReceiveTimeout = ReceiveTimeoutMs;
             }
-            catch (SocketException)
+            catch (SocketException ex)
             {
                 IsFailed = true;
-                Log?.Invoke(string.Format("UDP port {0} is in use by another process (another game still running?) -- polling every {1}ms and will start listening as soon as it frees up", port, RetryIntervalMs));
+                // Only AddressAlreadyInUse means another process holds the port. A
+                // port inside a Windows excluded range (Hyper-V, WSL and Docker
+                // reserve them) fails with AccessDenied 10013, and an address the
+                // host does not own fails with AddressNotAvailable 10049 - naming
+                // either of those as a running game sends the player hunting a
+                // process that does not exist, so the hint is gated on the code the
+                // socket actually returned.
+                Log?.Invoke(string.Format(
+                    "UDP port {0} bind failed: {1} ({2}) - {3}{4} Retrying every {5}ms and will start listening as soon as the bind succeeds.",
+                    port, ex.SocketErrorCode, ex.ErrorCode, ex.Message,
+                    ex.SocketErrorCode == SocketError.AddressAlreadyInUse
+                        ? " Another program holds the port - another game still running?"
+                        : string.Empty,
+                    RetryIntervalMs));
                 StartRetryLoop();
                 return false;
             }
@@ -288,14 +301,19 @@ namespace CameraUnlock.Core.Protocol
                         _receiveThread.Start();
                     }
 
-                    Log?.Invoke(string.Format("UDP port {0} freed up - now listening (waited {1}s)", _port, attempts * RetryIntervalMs / 1000));
+                    Log?.Invoke(string.Format("UDP port {0} bind succeeded - now listening (waited {1}s)", _port, attempts * RetryIntervalMs / 1000));
                     return;
                 }
-                catch (SocketException)
+                catch (SocketException ex)
                 {
+                    // Names the error this attempt got, not the one the first bind
+                    // reported: a port can go from AddressAlreadyInUse to AccessDenied
+                    // when a reservation lands on it, and repeating the original cause
+                    // would hide that the fix has changed.
                     if (attempts % attemptsPerLog == 0)
                     {
-                        Log?.Invoke(string.Format("Still waiting for UDP port {0} ({1}s elapsed)", _port, attempts * RetryIntervalMs / 1000));
+                        Log?.Invoke(string.Format("Still waiting for UDP port {0}: {1} ({2}s elapsed)",
+                            _port, ex.SocketErrorCode, attempts * RetryIntervalMs / 1000));
                     }
                 }
             }
