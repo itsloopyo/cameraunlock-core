@@ -108,7 +108,7 @@
       "display_name": "PixelJunk Monsters 2",
       "env_var": "PIXELJUNK_MONSTERS_2_PATH",
       "steam_app_id": 749800,
-      "steam_folder": "PixelJunk™ Monsters 2",
+      "steam_folder": "PixelJunkâ„¢ Monsters 2",
       "executable_relpath": "PixeljunkMonsters2.exe",
       "data_folder": "PixeljunkMonsters2_Data",
       "repo": "itsloopyo/pixeljunk-monsters-2-headtracking",
@@ -193,7 +193,7 @@
       "catalog_status": "absent"
     },
     "abzu": {
-      "display_name": "ABZÛ",
+      "display_name": "ABZÃ›",
       "env_var": "ABZU_PATH",
       "steam_app_id": 384190,
       "steam_folder": "ABZU",
@@ -1123,6 +1123,17 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/stormworks-headtracking",
       "catalog_status": "absent"
+    },
+    "mudrunner": {
+      "display_name": "MudRunner",
+      "env_var": "MUDRUNNER_PATH",
+      "steam_app_id": 675010,
+      "steam_folder": "MudRunner",
+      "executable_relpath": "MudRunner.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/mudrunner-headtracking",
+      "catalog_status": "prerelease"
     },
     "no-mans-sky": {
       "display_name": "No Man's Sky",
