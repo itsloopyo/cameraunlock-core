@@ -1482,7 +1482,7 @@
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/snowrunner-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     },
     "thief": {
       "display_name": "Thief",
