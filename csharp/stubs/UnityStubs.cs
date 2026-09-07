@@ -138,6 +138,10 @@ namespace UnityEngine {
         public Matrix4x4 localToWorldMatrix { get; }
         public Matrix4x4 worldToLocalMatrix { get; }
         public Transform GetChild(int index) => default;
+        // True for the transform itself as well as its descendants, which is what
+        // makes it the whole test for "does this camera render the player's view"
+        // in a rig whose helper cameras hang off the player camera.
+        public bool IsChildOf(Transform parent) => false;
         public Transform Find(string n) => default;
         public void SetParent(Transform parent) { }
         public void SetParent(Transform parent, bool worldPositionStays) { }
@@ -667,6 +671,17 @@ namespace UnityEngine {
         public const int QUADS = 7;
     }
 
+    // A game's animator state layer, for mods that read what the player character is
+    // doing rather than driving it. shortNameHash is the state's own name; fullPathHash
+    // includes the layer and any sub-state machine, so the two differ and a mod that
+    // compares StringToHash("someState") must read the short one.
+    public struct AnimatorStateInfo {
+        public int shortNameHash { get; }
+        public int fullPathHash { get; }
+        public int tagHash { get; }
+        public float normalizedTime { get; }
+        public float length { get; }
+    }
     public class Animator : Behaviour {
         public float GetFloat(string name) => 0;
         public float GetFloat(int id) => 0;
@@ -677,6 +692,10 @@ namespace UnityEngine {
         public int GetInteger(string name) => 0;
         public void SetInteger(string name, int value) { }
         public void SetTrigger(string name) { }
+        public int layerCount { get; }
+        public AnimatorStateInfo GetCurrentAnimatorStateInfo(int layerIndex) => default(AnimatorStateInfo);
+        public AnimatorStateInfo GetNextAnimatorStateInfo(int layerIndex) => default(AnimatorStateInfo);
+        public bool IsInTransition(int layerIndex) => false;
         public static int StringToHash(string name) => 0;
     }
     public static class ColorUtility {
