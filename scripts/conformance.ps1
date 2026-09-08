@@ -80,8 +80,19 @@ $CANONICAL_README_HEADINGS = @(
 # shapes: an assertion about how someone's hardware behaves, and an "all X do Y"
 # generalisation. Both read as authoritative, and both come back as bug reports
 # from the user whose tracker does not do that.
+#
+# One sentence is exempt, and only from the first of these: the opening sentence
+# AGENTS.md mandates ("Every README opens the same way") is a fixed template that
+# contains the phrase verbatim, so without the carve-out no README in the fleet
+# can satisfy both documents at once. The rule still fires on that phrase
+# anywhere else on the page, which is where it was earning its keep.
+#
+# Matched against the whole file rather than one line, and with \s+ for every
+# space in it: repos hard-wrap that sentence at whichever word reaches the
+# margin, so both the line anchoring and the literal spaces have to go, or the
+# exemption only covers the repos that happened not to wrap.
 $README_BANNED = @(
-    @{ Pattern = 'any\s+OpenTrack[- ]compatible'; Why = 'claims every OpenTrack-compatible tracker works; we have tested some' }
+    @{ Pattern = 'any\s+OpenTrack[- ]compatible'; Why = 'claims every OpenTrack-compatible tracker works; we have tested some'; Except = 'An\s+unofficial\s+head\s+tracking\s+mod\s+for\s+[\s\S]{1,200}?driven\s+by\s+a\s+webcam,\s+phone,\s+or\s+any\s+OpenTrack\s+compatible\s+tracker,\s+with\s+no\s+VR\s+headset\s+required\.' }
     @{ Pattern = 'any\s+phone\s+tracker';         Why = 'claims every phone tracker works; phone trackers do not share one protocol' }
     @{ Pattern = 'all\s+\w+\s+(trackers|apps|headsets)\s+(speak|use|support|are|do|send)'; Why = 'an "all X do Y" generalisation about third-party kit' }
     @{ Pattern = 'every\s+(phone|tracker|headset|app)\s+(speaks|uses|supports|sends)';     Why = 'an "all X do Y" generalisation about third-party kit' }
@@ -832,6 +843,28 @@ function Test-License {
     Add-Finding $Name 'license' 'WARN' "LICENSE names '$holder', core names '$want'; the MIT body is identical"
 }
 
+# True when line $Index falls inside a stretch of the file that matches
+# $Pattern. The banned-phrase rules are applied per line, but a sentence a repo
+# has hard-wrapped spans several, so an exemption has to be measured against the
+# joined text and then mapped back to the lines it covers.
+function Test-ExemptLine {
+    param(
+        # No [Parameter(Mandatory)] on $Lines: a mandatory string[] rejects an
+        # empty element, and a README is mostly blank lines.
+        [string[]]$Lines,
+        [Parameter(Mandatory = $true)][int]$Index,
+        [Parameter(Mandatory = $true)][string]$Pattern
+    )
+    $text = $Lines -join "`n"
+    $lineStart = 0
+    for ($i = 0; $i -lt $Index; $i++) { $lineStart += $Lines[$i].Length + 1 }
+    $lineEnd = $lineStart + $Lines[$Index].Length
+    foreach ($m in [regex]::Matches($text, $Pattern)) {
+        if ($m.Index -le $lineEnd -and ($m.Index + $m.Length) -ge $lineStart) { return $true }
+    }
+    return $false
+}
+
 function Test-Readme {
     param([string]$Name, [string]$Root)
 
@@ -851,6 +884,10 @@ function Test-Readme {
     foreach ($rule in $README_BANNED) {
         for ($i = 0; $i -lt $lines.Count; $i++) {
             if ($lines[$i] -notmatch $rule.Pattern) { continue }
+            # Against the whole file, and only for the lines the exempt
+            # sentence actually spans, so a wrapped opener is exempt while the
+            # same phrase elsewhere on the page is not.
+            if ($rule.ContainsKey('Except') -and (Test-ExemptLine $lines $i $rule.Except)) { continue }
             Add-Finding $Name 'readme' 'FAIL' "README.md:$($i + 1) - $($rule.Why): $($lines[$i].Trim())"
         }
     }
