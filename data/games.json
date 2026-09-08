@@ -1508,6 +1508,21 @@
       "repo": "itsloopyo/superliminal-headtracking",
       "engine": "Unity",
       "catalog_status": "prerelease"
+    },
+    "arx-fatalis": {
+      "display_name": "Arx Fatalis",
+      "env_var": "ARX_FATALIS_PATH",
+      "steam_app_id": 1065230,
+      "steam_folder": "Arx Fatalis",
+      "gog_ids": [
+        "1207658680"
+      ],
+      "executable_relpath": "arx.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/arx-fatalis-headtracking",
+      "engine": "Arx",
+      "catalog_status": "prerelease"
     }
   }
 }
