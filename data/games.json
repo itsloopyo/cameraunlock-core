@@ -247,6 +247,22 @@
       "engine": "Unity",
       "catalog_status": "released"
     },
+    "starfield": {
+      "display_name": "Starfield",
+      "env_var": "STARFIELD_PATH",
+      "steam_app_id": 1716740,
+      "steam_folder": "Starfield",
+      "executable_relpath": "Starfield.exe",
+      "xbox_paths": [
+        "C:\\XboxGames\\Starfield\\Content"
+      ],
+      "xbox_executable_relpath": "Starfield.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/starfield-headtracking",
+      "engine": "Creation Engine 2",
+      "catalog_status": "absent"
+    },
     "subnautica": {
       "display_name": "Subnautica",
       "env_var": "SUBNAUTICA_PATH",
