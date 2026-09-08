@@ -1523,6 +1523,18 @@
       "repo": "itsloopyo/arx-fatalis-headtracking",
       "engine": "Arx",
       "catalog_status": "prerelease"
+    },
+    "far-cry-6": {
+      "display_name": "Far Cry 6",
+      "env_var": "FAR_CRY_6_PATH",
+      "ubisoft_app_ids": [
+        5266
+      ],
+      "executable_relpath": "bin\\FarCry6.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/far-cry-6-headtracking",
+      "catalog_status": "prerelease"
     }
   }
 }
