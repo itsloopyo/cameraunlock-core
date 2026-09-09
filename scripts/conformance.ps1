@@ -81,18 +81,26 @@ $CANONICAL_README_HEADINGS = @(
 # generalisation. Both read as authoritative, and both come back as bug reports
 # from the user whose tracker does not do that.
 #
-# One sentence is exempt, and only from the first of these: the opening sentence
-# AGENTS.md mandates ("Every README opens the same way") is a fixed template that
-# contains the phrase verbatim, so without the carve-out no README in the fleet
-# can satisfy both documents at once. The rule still fires on that phrase
-# anywhere else on the page, which is where it was earning its keep.
+# Two sentences are exempt, and only from the first of these, because AGENTS.md
+# mandates both of them verbatim and the phrase is inside each: the opening
+# sentence ("Every README opens the same way") and the Features bullet that
+# names the tracker ("Works with any OpenTrack compatible tracker - free options
+# available for PC, iOS and Android", which ships verbatim on the Nexus page and
+# in the README alike). Without both carve-outs no README in the fleet can
+# satisfy both documents at once - the bullet alone accounted for 118 of the 127
+# repos. The rule still fires on the phrase anywhere else on the page, which is
+# where it was earning its keep.
 #
 # Matched against the whole file rather than one line, and with \s+ for every
-# space in it: repos hard-wrap that sentence at whichever word reaches the
+# space in it: repos hard-wrap those sentences at whichever word reaches the
 # margin, so both the line anchoring and the literal spaces have to go, or the
-# exemption only covers the repos that happened not to wrap.
+# exemption only covers the repos that happened not to wrap. The bullet's `**`
+# emphasis is optional for the same reason - 13 repos ship it unbolded.
 $README_BANNED = @(
-    @{ Pattern = 'any\s+OpenTrack[- ]compatible'; Why = 'claims every OpenTrack-compatible tracker works; we have tested some'; Except = 'An\s+unofficial\s+head\s+tracking\s+mod\s+for\s+[\s\S]{1,200}?driven\s+by\s+a\s+webcam,\s+phone,\s+or\s+any\s+OpenTrack\s+compatible\s+tracker,\s+with\s+no\s+VR\s+headset\s+required\.' }
+    @{ Pattern = 'any\s+OpenTrack[- ]compatible'; Why = 'claims every OpenTrack-compatible tracker works; we have tested some'; Except = @(
+        'An\s+unofficial\s+head\s+tracking\s+mod\s+for\s+[\s\S]{1,200}?driven\s+by\s+a\s+webcam,\s+phone,\s+or\s+any\s+OpenTrack\s+compatible\s+tracker,\s+with\s+no\s+VR\s+headset\s+required\.'
+        '\**Works\s+with\s+any\s+OpenTrack\s+compatible\s+tracker\**\s+-\s+free\s+options\s+available\s+for\s+PC,\s+iOS\s+and\s+Android'
+      ) }
     @{ Pattern = 'any\s+phone\s+tracker';         Why = 'claims every phone tracker works; phone trackers do not share one protocol' }
     @{ Pattern = 'all\s+\w+\s+(trackers|apps|headsets)\s+(speak|use|support|are|do|send)'; Why = 'an "all X do Y" generalisation about third-party kit' }
     @{ Pattern = 'every\s+(phone|tracker|headset|app)\s+(speaks|uses|supports|sends)';     Why = 'an "all X do Y" generalisation about third-party kit' }
@@ -884,10 +892,10 @@ function Test-Readme {
     foreach ($rule in $README_BANNED) {
         for ($i = 0; $i -lt $lines.Count; $i++) {
             if ($lines[$i] -notmatch $rule.Pattern) { continue }
-            # Against the whole file, and only for the lines the exempt
-            # sentence actually spans, so a wrapped opener is exempt while the
-            # same phrase elsewhere on the page is not.
-            if ($rule.ContainsKey('Except') -and (Test-ExemptLine $lines $i $rule.Except)) { continue }
+            # Against the whole file, and only for the lines an exempt
+            # sentence actually spans, so a wrapped opener or Features bullet
+            # is exempt while the same phrase elsewhere on the page is not.
+            if ($rule.ContainsKey('Except') -and (@($rule.Except | Where-Object { Test-ExemptLine $lines $i $_ }).Count -gt 0)) { continue }
             Add-Finding $Name 'readme' 'FAIL' "README.md:$($i + 1) - $($rule.Why): $($lines[$i].Trim())"
         }
     }
