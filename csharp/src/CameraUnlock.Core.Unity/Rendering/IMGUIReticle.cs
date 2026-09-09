@@ -254,14 +254,6 @@ namespace CameraUnlock.Core.Unity.Rendering
             _reticleTexture = new Texture2D(size, size, TextureFormat.ARGB32, false);
             _reticleTexture.filterMode = FilterMode.Bilinear;
 
-            Color transparent = new Color(0, 0, 0, 0);
-            Color[] pixels = new Color[size * size];
-
-            for (int i = 0; i < pixels.Length; i++)
-            {
-                pixels[i] = transparent;
-            }
-
             float center = (size - 1) * 0.5f;
             float radius = size * 0.5f;
 
@@ -269,89 +261,99 @@ namespace CameraUnlock.Core.Unity.Rendering
             float innerRadius = radius - outlineWidth;
             if (innerRadius < 0) innerRadius = 0;
 
-            if (_style == ReticleStyle.Dot)
+            // Written a texel at a time rather than as one SetPixels(Color[]) upload.
+            // Il2CppInterop generates that overload as SetPixels(Il2CppStructArray<Color>),
+            // so a Color[] built against the reference assembly does not resolve and the
+            // call throws MissingMethodException the first time a style or a size is set -
+            // which happens during a plugin's Load(), taking the whole plugin down with it.
+            // SetPixel takes only value types, so it is the same method either side of the
+            // interop boundary. The texture is a few pixels square and is rebuilt only when
+            // the resolution or the style changes, so the per-texel call costs nothing that
+            // matters, and every texel is written because a fresh Texture2D holds
+            // uninitialised memory until it is.
+            for (int y = 0; y < size; y++)
             {
-                for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
                 {
-                    for (int x = 0; x < size; x++)
-                    {
-                        float dx = x - center;
-                        float dy = y - center;
-                        float dist = Mathf.Sqrt(dx * dx + dy * dy);
+                    float dx = x - center;
+                    float dy = y - center;
+                    float dist = Mathf.Sqrt(dx * dx + dy * dy);
 
-                        if (dist > radius) continue;
+                    Color texel = _style == ReticleStyle.Dot
+                        ? DotTexel(dist, radius, innerRadius, outlineWidth)
+                        : CircleTexel(dist, radius, innerRadius, outlineWidth);
 
-                        float outerAlpha = Mathf.Clamp01(radius - dist + 0.5f);
-
-                        if (outlineWidth > 0 && dist > innerRadius)
-                        {
-                            // Outline region: blend from fill to outline at inner edge
-                            float outlineAlpha = Mathf.Clamp01(dist - innerRadius + 0.5f);
-                            Color pixelColor = Color.Lerp(_reticleColor, _outlineColor, outlineAlpha);
-                            pixelColor.a *= outerAlpha;
-                            pixels[y * size + x] = pixelColor;
-                        }
-                        else
-                        {
-                            // Fill region
-                            Color pixelColor = _reticleColor;
-                            pixelColor.a *= outerAlpha;
-                            pixels[y * size + x] = pixelColor;
-                        }
-                    }
-                }
-            }
-            else // Circle style
-            {
-                float ringThickness = _currentThickness;
-                float ringInner = innerRadius - ringThickness;
-                if (ringInner < 0) ringInner = 0;
-
-                for (int y = 0; y < size; y++)
-                {
-                    for (int x = 0; x < size; x++)
-                    {
-                        float dx = x - center;
-                        float dy = y - center;
-                        float dist = Mathf.Sqrt(dx * dx + dy * dy);
-
-                        // Outer outline band
-                        if (outlineWidth > 0 && dist > innerRadius && dist <= radius)
-                        {
-                            float outerAlpha = Mathf.Clamp01(radius - dist + 0.5f);
-                            float blendAlpha = Mathf.Clamp01(dist - innerRadius + 0.5f);
-                            Color pixelColor = Color.Lerp(_reticleColor, _outlineColor, blendAlpha);
-                            pixelColor.a *= outerAlpha;
-                            pixels[y * size + x] = pixelColor;
-                        }
-                        // Ring body
-                        else if (dist >= ringInner && dist <= innerRadius)
-                        {
-                            float outerAlpha = Mathf.Clamp01(innerRadius - dist + 0.5f);
-                            float innerAlpha = Mathf.Clamp01(dist - ringInner + 0.5f);
-                            float alpha = outerAlpha * innerAlpha;
-                            if (alpha > 0)
-                            {
-                                Color pixelColor = _reticleColor;
-                                pixelColor.a *= alpha;
-                                pixels[y * size + x] = pixelColor;
-                            }
-                        }
-                        // Inner outline band
-                        else if (outlineWidth > 0 && dist < ringInner && dist >= ringInner - outlineWidth)
-                        {
-                            float blendAlpha = Mathf.Clamp01(ringInner - dist + 0.5f);
-                            float fadeAlpha = Mathf.Clamp01(dist - (ringInner - outlineWidth) + 0.5f);
-                            Color pixelColor = Color.Lerp(_reticleColor, _outlineColor, blendAlpha);
-                            pixelColor.a *= fadeAlpha;
-                            pixels[y * size + x] = pixelColor;
-                        }
-                    }
+                    _reticleTexture.SetPixel(x, y, texel);
                 }
             }
 
-            _reticleTexture.SetPixels(pixels);
             _reticleTexture.Apply();
+        }
+
+        /// <summary>Fully transparent, and black rather than the reticle colour so a
+        /// bilinear sample at the edge does not pull colour out of an empty texel.</summary>
+        private static readonly Color Transparent = new Color(0, 0, 0, 0);
+
+        private Color DotTexel(float dist, float radius, float innerRadius, float outlineWidth)
+        {
+            if (dist > radius) return Transparent;
+
+            float outerAlpha = Mathf.Clamp01(radius - dist + 0.5f);
+
+            if (outlineWidth > 0 && dist > innerRadius)
+            {
+                // Outline region: blend from fill to outline at inner edge
+                float outlineAlpha = Mathf.Clamp01(dist - innerRadius + 0.5f);
+                Color pixelColor = Color.Lerp(_reticleColor, _outlineColor, outlineAlpha);
+                pixelColor.a *= outerAlpha;
+                return pixelColor;
+            }
+
+            // Fill region
+            Color fill = _reticleColor;
+            fill.a *= outerAlpha;
+            return fill;
+        }
+
+        private Color CircleTexel(float dist, float radius, float innerRadius, float outlineWidth)
+        {
+            float ringInner = innerRadius - _currentThickness;
+            if (ringInner < 0) ringInner = 0;
+
+            // Outer outline band
+            if (outlineWidth > 0 && dist > innerRadius && dist <= radius)
+            {
+                float outerAlpha = Mathf.Clamp01(radius - dist + 0.5f);
+                float blendAlpha = Mathf.Clamp01(dist - innerRadius + 0.5f);
+                Color pixelColor = Color.Lerp(_reticleColor, _outlineColor, blendAlpha);
+                pixelColor.a *= outerAlpha;
+                return pixelColor;
+            }
+
+            // Ring body
+            if (dist >= ringInner && dist <= innerRadius)
+            {
+                float outerAlpha = Mathf.Clamp01(innerRadius - dist + 0.5f);
+                float innerAlpha = Mathf.Clamp01(dist - ringInner + 0.5f);
+                float alpha = outerAlpha * innerAlpha;
+                if (alpha <= 0) return Transparent;
+
+                Color pixelColor = _reticleColor;
+                pixelColor.a *= alpha;
+                return pixelColor;
+            }
+
+            // Inner outline band
+            if (outlineWidth > 0 && dist < ringInner && dist >= ringInner - outlineWidth)
+            {
+                float blendAlpha = Mathf.Clamp01(ringInner - dist + 0.5f);
+                float fadeAlpha = Mathf.Clamp01(dist - (ringInner - outlineWidth) + 0.5f);
+                Color pixelColor = Color.Lerp(_reticleColor, _outlineColor, blendAlpha);
+                pixelColor.a *= fadeAlpha;
+                return pixelColor;
+            }
+
+            return Transparent;
         }
 
         private void OnGUI()
