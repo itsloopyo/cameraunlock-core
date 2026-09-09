@@ -632,6 +632,7 @@
       "steam_app_id": 1458140,
       "steam_folder": "Pacific Drive",
       "executable_relpath": "PenDriverPro\\Binaries\\Win64\\PenDriverPro-Win64-Shipping.exe",
+      "xbox_executable_relpath": "PenDriverPro\\Binaries\\WinGDK\\PenDriverPro-WinGDK-Shipping.exe",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/pacific-drive-headtracking",
@@ -667,13 +668,26 @@
       "repo": "itsloopyo/deus-ex-mankind-divided-headtracking",
       "catalog_status": "absent"
     },
+    "dishonored-definitive-edition": {
+      "display_name": "Dishonored: Definitive Edition",
+      "env_var": "DISHONORED_DEFINITIVE_EDITION_PATH",
+      "executable_relpath": "Binaries\\Win64\\Dishonored.exe",
+      "xbox_paths": [
+        "C:\\XboxGames\\Dishonored- Definitive Edition (PC)\\Content"
+      ],
+      "msix_identity_name": "BethesdaSoftworks.DishonoredDE-PC",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dishonored-definitive-edition-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
+    },
     "dishonored": {
       "display_name": "Dishonored",
       "env_var": "DISHONORED_PATH",
       "steam_app_id": 205100,
       "steam_folder": "Dishonored",
       "executable_relpath": "Binaries\\Win32\\Dishonored.exe",
-      "xbox_executable_relpath": "Binaries\\Win64\\Dishonored.exe",
       "gog_ids": [
         "1701063787"
       ],
@@ -1363,6 +1377,7 @@
       "gog_ids": [
         "1076704248"
       ],
+      "xbox_executable_relpath": "KingdomCome.exe",
       "xbox_identity_name": "DeepSilver.77536C3FE941",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
@@ -1374,6 +1389,7 @@
       "display_name": "Minecraft: Bedrock Edition",
       "env_var": "MINECRAFT_BEDROCK_PATH",
       "msix_identity_name": "Microsoft.MinecraftUWP",
+      "xbox_identity_name": "Microsoft.MinecraftUWP",
       "executable_relpath": "Minecraft.Windows.exe",
       "modded_executable_relpath": "MinecraftHeadTrackingLauncher.exe",
       "loader": "Shim",
@@ -1519,6 +1535,7 @@
       "steam_app_id": 1049410,
       "steam_folder": "Superliminal",
       "executable_relpath": "SuperliminalSteam.exe",
+      "xbox_executable_relpath": "Superliminal.exe",
       "data_folder": "SuperliminalSteam_Data",
       "loader": "BepInEx5",
       "delivery_mode": "manifest",
