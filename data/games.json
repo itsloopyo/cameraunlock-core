@@ -247,6 +247,20 @@
       "engine": "Unity",
       "catalog_status": "released"
     },
+    "blue-prince": {
+      "display_name": "Blue Prince",
+      "env_var": "BLUE_PRINCE_PATH",
+      "executable_relpath": "BLUE PRINCE.exe",
+      "data_folder": "BLUE PRINCE_Data",
+      "xbox_paths": [
+        "C:\\XboxGames\\Blue Prince\\Content"
+      ],
+      "loader": "BepInEx6",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/blue-prince-headtracking",
+      "engine": "Unity",
+      "catalog_status": "absent"
+    },
     "starfield": {
       "display_name": "Starfield",
       "env_var": "STARFIELD_PATH",
