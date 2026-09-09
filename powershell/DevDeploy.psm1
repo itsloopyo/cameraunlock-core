@@ -124,7 +124,19 @@ function Resolve-DevExeDir {
         [Parameter(Mandatory)][string]$GamePath,
         [Parameter(Mandatory)][string]$GameId
     )
-    $gameExeRelpath = (Get-GameConfig -GameId $GameId).Executable
+    $config = Get-GameConfig -GameId $GameId
+    # A GDK build can ship its exe under a different name and a different folder
+    # than the Steam build, which is what xbox_executable_relpath records.
+    # find-game.ps1 already picks between the two for install.cmd; without the
+    # same choice here, `pixi run install` finds the Game Pass copy and then
+    # derives the exe directory from the Steam layout, so it deploys somewhere
+    # the loader is never read from.
+    $gameExeRelpath = $config.Executable
+    if ($config.ContainsKey('XboxExecutable') -and $config.XboxExecutable) {
+        if (Test-IsXboxPath -Config $config -Path $GamePath) {
+            $gameExeRelpath = $config.XboxExecutable
+        }
+    }
     $exeDir = Split-Path -Parent (Join-Path $GamePath $gameExeRelpath)
     if (-not (Test-Path -LiteralPath $exeDir)) {
         throw "Exe directory not found: $exeDir (derived from $gameExeRelpath)"
