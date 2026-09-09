@@ -1,5 +1,5 @@
 {
-  "$comment": "Canonical per-game detection data for CameraUnlock head-tracking mods. This is the single source of truth for where each supported game lives on disk: env var name, Steam folder, GOG IDs, Epic/Xbox paths, executable relative path, Unity data folder (for Cecil patching), and the Microsoft Store package identity for UWP titles. Consumed by cameraunlock-core/powershell/GamePathDetection.psm1 and by lopari, whose catalog/mods.json per-mod `game` block is GENERATED from this file (lopari/scripts/sync-catalog-games.mjs) and must not be hand-edited. Mod-specific fields (which DLLs to deploy, mod version) do NOT belong here - those live in each mod's install.cmd CONFIG BLOCK and launcher-manifest.json. Adding a new game: pick a hyphen-lowercase id, fill in at minimum `display_name`, `env_var` and `executable_relpath`. `env_var` is omitted only for Microsoft Store packaged titles resolved by `msix_identity_name`, which are launched by package identity and have no install path to point an env var at. The per-game mod metadata (`loader`, `engine`, `repo`, `catalog_status`, `delivery_mode`) is optional and describes the head-tracking mod for that game: `loader` and `delivery_mode` are copied from the mod repo's launcher-manifest.json (`strategy` / `delivery_mode`), `repo` is the owner/name of that repo, `catalog_status` is released | prerelease | private | absent per lopari's catalog, and `engine` is the game's engine FAMILY (not version), populated only where it is mechanically verifiable and omitted otherwise. Any field that's empty for a given game should be omitted rather than set to a null/empty value.",
+  "$comment": "Canonical per-game detection data for CameraUnlock head-tracking mods. This is the single source of truth for where each supported game lives on disk: env var name, Steam folder, GOG IDs, Epic/Xbox paths, executable relative path, Unity data folder (for Cecil patching), and the Microsoft Store package identity for UWP titles. `xbox_identity_name` is the GDK package identity from a Game Pass title's MicrosoftGame.config, set only where the executable name alone is ambiguous - Kingdom Come: Deliverance and its sequel both ship `KingdomCome.exe` flat in Content, so without it the Game Pass scan matches either game for the other. Consumed by cameraunlock-core/powershell/GamePathDetection.psm1 and by lopari, whose catalog/mods.json per-mod `game` block is GENERATED from this file (lopari/scripts/sync-catalog-games.mjs) and must not be hand-edited. Mod-specific fields (which DLLs to deploy, mod version) do NOT belong here - those live in each mod's install.cmd CONFIG BLOCK and launcher-manifest.json. Adding a new game: pick a hyphen-lowercase id, fill in at minimum `display_name`, `env_var` and `executable_relpath`. `env_var` is omitted only for Microsoft Store packaged titles resolved by `msix_identity_name`, which are launched by package identity and have no install path to point an env var at. The per-game mod metadata (`loader`, `engine`, `repo`, `catalog_status`, `delivery_mode`) is optional and describes the head-tracking mod for that game: `loader` and `delivery_mode` are copied from the mod repo's launcher-manifest.json (`strategy` / `delivery_mode`), `repo` is the owner/name of that repo, `catalog_status` is released | prerelease | private | absent per lopari's catalog, and `engine` is the game's engine FAMILY (not version), populated only where it is mechanically verifiable and omitted otherwise. Any field that's empty for a given game should be omitted rather than set to a null/empty value.",
   "schema_version": 1,
   "games": {
     "assetto-corsa-evo": {
@@ -252,9 +252,6 @@
       "env_var": "BLUE_PRINCE_PATH",
       "executable_relpath": "BLUE PRINCE.exe",
       "data_folder": "BLUE PRINCE_Data",
-      "xbox_paths": [
-        "C:\\XboxGames\\Blue Prince\\Content"
-      ],
       "loader": "BepInEx6",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/blue-prince-headtracking",
@@ -267,9 +264,6 @@
       "steam_app_id": 1716740,
       "steam_folder": "Starfield",
       "executable_relpath": "Starfield.exe",
-      "xbox_paths": [
-        "C:\\XboxGames\\Starfield\\Content"
-      ],
       "xbox_executable_relpath": "Starfield.exe",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
@@ -313,9 +307,6 @@
       "steam_app_id": 1962700,
       "steam_folder": "Subnautica2",
       "executable_relpath": "Subnautica2\\Binaries\\Win64\\Subnautica2-Win64-Shipping.exe",
-      "xbox_paths": [
-        "C:\\XboxGames\\Subnautica 2\\Content"
-      ],
       "xbox_executable_relpath": "Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe",
       "loader": "Shim",
       "delivery_mode": "manifest",
@@ -329,9 +320,6 @@
       "steam_app_id": 3949040,
       "steam_folder": "Ride",
       "executable_relpath": "Ride\\Binaries\\Win64\\Ride-Win64-Shipping.exe",
-      "xbox_paths": [
-        "C:\\XboxGames\\RV There Yet\\Content"
-      ],
       "xbox_executable_relpath": "Ride\\Binaries\\WinGDK\\Ride-WinGDK-Shipping.exe",
       "loader": "Shim",
       "delivery_mode": "install_cmd",
@@ -376,9 +364,6 @@
       "steam_folder": "Easy Delivery Co",
       "executable_relpath": "EasyDeliveryCo.exe",
       "data_folder": "EasyDeliveryCo_Data",
-      "xbox_paths": [
-        "C:\\XboxGames\\Easy Delivery Co\\Content"
-      ],
       "gog_ids": [
         "1186701134"
       ],
@@ -688,6 +673,7 @@
       "steam_app_id": 205100,
       "steam_folder": "Dishonored",
       "executable_relpath": "Binaries\\Win32\\Dishonored.exe",
+      "xbox_executable_relpath": "Binaries\\Win64\\Dishonored.exe",
       "gog_ids": [
         "1701063787"
       ],
@@ -890,9 +876,6 @@
       "steam_folder": "Firewatch",
       "executable_relpath": "Firewatch.exe",
       "data_folder": "Firewatch_Data",
-      "xbox_paths": [
-        "C:\\XboxGames\\Firewatch\\Content"
-      ],
       "gog_ids": [
         "1459256379"
       ],
@@ -1125,6 +1108,7 @@
       "steam_app_id": 1583230,
       "steam_folder": "HighOnLife",
       "executable_relpath": "Oregon\\Binaries\\Win64\\Oregon-Win64-Shipping.exe",
+      "xbox_executable_relpath": "Oregon\\Binaries\\WinGDK\\Oregon-WinGDK-Shipping.exe",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/high-on-life-headtracking",
@@ -1362,6 +1346,8 @@
       "gog_ids": [
         "1719198803"
       ],
+      "xbox_executable_relpath": "KingdomCome.exe",
+      "xbox_identity_name": "DeepSilver.KingdomComeDeliverance",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/kingdom-come-deliverance-headtracking",
@@ -1377,6 +1363,7 @@
       "gog_ids": [
         "1076704248"
       ],
+      "xbox_identity_name": "DeepSilver.77536C3FE941",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/kingdom-come-deliverance-2-headtracking",

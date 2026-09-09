@@ -47,6 +47,7 @@ const OPTIONAL = {
   data_folder: "string",
   uses_owml: "boolean",
   xbox_executable_relpath: "string",
+  xbox_identity_name: "string",
   modded_executable_relpath: "string",
   modded_launcher_hint: "string",
   engine: "string",

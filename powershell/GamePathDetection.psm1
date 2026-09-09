@@ -120,6 +120,11 @@ function Get-GameConfigs {
         if (Test-JsonProp $src 'xbox_executable_relpath') {
             $cfg.XboxExecutable = $src.xbox_executable_relpath
         }
+        # The GDK package identity, which is what tells two titles apart when
+        # they ship the same executable name - see Find-XboxGamePaths.
+        if (Test-JsonProp $src 'xbox_identity_name') {
+            $cfg.XboxIdentityName = $src.xbox_identity_name
+        }
         if (Test-JsonProp $src 'steam_app_id') {
             if ($null -ne $src.steam_app_id) { $cfg.SteamAppId = [int]$src.steam_app_id }
         }
@@ -406,6 +411,130 @@ function Find-SteamGameByAppId {
 
 <#
 .SYNOPSIS
+    Every installed Game Pass title's Content directory on this machine.
+.DESCRIPTION
+    The Xbox app unpacks a title to `<root>\<Title>\Content`, so one level of
+    listing per root surfaces every install without any game having to declare
+    where it went.
+
+    A directory only counts when it holds `gamelaunchhelper.exe`, the stub
+    Windows registers and actually runs for a GDK title. The Xbox app stages
+    downloads into sibling folders - named for a GUID rather than the game -
+    that carry the game's exe, its appxmanifest and its MicrosoftGame.config,
+    so every other signal says "installed game" for something the user cannot
+    launch. Left in, one is indistinguishable from the real install, and
+    deploying a mod into it puts the files somewhere the Xbox app is free to
+    wipe. The launcher's Rust detector gates on the same file for the same
+    reason (lopari/src-tauri/src/detect/xbox.rs).
+.OUTPUTS
+    System.String[]
+#>
+function Get-XboxContentDirs {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+
+    $dirs = [System.Collections.Generic.List[string]]::new()
+    foreach ($root in Get-XboxGameRoots) {
+        foreach ($child in (Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) {
+            $content = Join-Path $child.FullName 'Content'
+            if (-not (Test-Path -LiteralPath (Join-Path $content 'gamelaunchhelper.exe') -PathType Leaf)) { continue }
+            if (-not $dirs.Contains($content)) { $dirs.Add($content) }
+        }
+    }
+    return $dirs.ToArray()
+}
+
+<#
+.SYNOPSIS
+    Find a Game Pass install of a title by looking for its executable.
+.DESCRIPTION
+    No path, drive letter or folder name is configured anywhere for this: the
+    install roots come off the disk and the title is identified by the
+    executable it ships, which games.json already records for every game.
+
+    That is the whole reason this exists. An `xbox_paths` entry can only name
+    the drive whoever wrote it happened to install on, and the Xbox app asks
+    every user which drive to use - so a hardcoded `C:\XboxGames\...` is a
+    guess that is wrong for everyone who answered differently, and wrong
+    silently, because a Game Pass copy legitimately produces nothing from
+    every other detection source.
+.PARAMETER Executable
+    Executable relpath to look for, e.g. 'Fallout4.exe'. Pass the game's
+    xbox_executable_relpath where it has one - a GDK build can ship under a
+    different name and folder than the Steam build.
+.OUTPUTS
+    System.String[] - every matching Content directory, in root order.
+#>
+function Get-XboxPackageIdentity {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContentDir
+    )
+
+    # Every GDK title ships this file beside its executable, and the Identity
+    # element's Name is the package identity Windows registers it under - the
+    # one value that is unique per title and survives every game update.
+    $config = Get-ChildItem -LiteralPath $ContentDir -Filter 'MicrosoftGame.config' -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $config) { return '' }
+    try {
+        $xml = [xml](Get-Content -Raw -LiteralPath $config.FullName)
+    } catch {
+        # A config the publisher shipped malformed is not a title we can
+        # identify; the executable check still decides on its own.
+        return ''
+    }
+    $identity = $xml.Game.Identity
+    if (-not $identity -or -not $identity.Name) { return '' }
+    return [string]$identity.Name
+}
+
+<#
+.SYNOPSIS
+    Find a Game Pass install of a title among the Content directories on disk.
+.PARAMETER Executable
+    Executable relpath to look for, e.g. 'Fallout4.exe'.
+.PARAMETER IdentityName
+    The title's GDK package identity, from games.json's xbox_identity_name.
+    Optional, and only worth setting where the executable name is ambiguous.
+.OUTPUTS
+    System.String[] - every matching Content directory, in root order.
+#>
+function Find-XboxGamePaths {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+
+        [string]$IdentityName = ''
+    )
+
+    $found = [System.Collections.Generic.List[string]]::new()
+    foreach ($content in Get-XboxContentDirs) {
+        if (-not (Test-GameInstallation -Path $content -Executable $Executable)) { continue }
+        # An executable name is not always unique across a publisher's
+        # catalogue: Kingdom Come: Deliverance and its sequel both ship
+        # `KingdomCome.exe` flat in Content, so the scan matches both for
+        # either game and a mod pinned to one build deploys into the other.
+        # Where the game declares its package identity, that decides.
+        if ($IdentityName) {
+            if (-not [string]::Equals((Get-XboxPackageIdentity -ContentDir $content),
+                                      $IdentityName,
+                                      [System.StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+        }
+        $found.Add($content)
+    }
+    return $found.ToArray()
+}
+
+<#
+.SYNOPSIS
     Finds a Microsoft Store (MSIX/UWP) title by its package identity name.
 .DESCRIPTION
     A Store-packaged game has no stable install path: the directory under
@@ -460,6 +589,117 @@ function Find-OWMLPath {
         return $owmlPath
     }
     return $null
+}
+
+<#
+.SYNOPSIS
+    Every root the Xbox app installs games into on this machine.
+.DESCRIPTION
+    The Xbox app puts a `.GamingRoot` file at the root of each drive it has
+    been asked to install into. It is eight bytes of header ("RGBX" plus a
+    version dword) followed by the folder name as UTF-16LE - "XboxGames" in
+    every case seen so far, but read rather than assumed, since the file
+    exists precisely to record it.
+
+    A game with two drives configured has one of these per drive, and only
+    the drive the user picked holds any given title, so all of them are
+    candidate roots.
+.OUTPUTS
+    System.String[] - e.g. @('C:\XboxGames', 'D:\XboxGames')
+#>
+function Get-XboxGameRoots {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+
+    $roots = [System.Collections.Generic.List[string]]::new()
+    foreach ($drive in [System.IO.DriveInfo]::GetDrives()) {
+        if (-not $drive.IsReady) { continue }
+        $marker = Join-Path $drive.Name '.GamingRoot'
+        if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { continue }
+        try {
+            $bytes = [System.IO.File]::ReadAllBytes($marker)
+        } catch {
+            # A drive that disappears between the test and the read is not an
+            # install location; nothing else can go wrong reading 32 bytes.
+            continue
+        }
+        if ($bytes.Length -le 8) { continue }
+        $folder = [System.Text.Encoding]::Unicode.GetString($bytes, 8, $bytes.Length - 8).TrimEnd([char]0)
+        if (-not $folder) { continue }
+        $root = Join-Path $drive.Name $folder
+        if ((Test-Path -LiteralPath $root -PathType Container) -and -not $roots.Contains($root)) {
+            $roots.Add($root)
+        }
+    }
+
+    # The marker is the Xbox app's own record of the folder it chose, which is
+    # why it is read first - it is the only thing that knows a non-default
+    # name. It is not a guarantee, though, and the launcher's Rust detector
+    # (lopari/src-tauri/src/detect/xbox.rs) scans for the folder itself and has
+    # been right in the field, so take the union rather than letting the two
+    # implementations disagree about what is installed.
+    foreach ($drive in [System.IO.DriveInfo]::GetDrives()) {
+        if (-not $drive.IsReady) { continue }
+        $root = Join-Path $drive.Name 'XboxGames'
+        if ((Test-Path -LiteralPath $root -PathType Container) -and -not $roots.Contains($root)) {
+            $roots.Add($root)
+        }
+    }
+    return $roots.ToArray()
+}
+
+<#
+.SYNOPSIS
+    Expand a game's configured xbox_paths across every Xbox install root on
+    this machine.
+.DESCRIPTION
+    games.json records an Xbox path as a full path, which pins a drive letter
+    the entry's author happened to have. A user who let the Xbox app install to
+    their second drive has the game at the same place under a different root,
+    and the configured path simply does not exist for them.
+
+    So each configured path contributes two things: itself, and its tail below
+    the "XboxGames" element re-anchored onto every root Get-XboxGameRoots
+    finds. `C:\XboxGames\High on Life\Content` therefore also matches
+    `D:\XboxGames\High on Life\Content` without games.json listing a drive it
+    cannot know about.
+
+    A configured path whose shape is not <root>\<title>\... is passed through
+    unchanged rather than guessed at.
+.OUTPUTS
+    System.String[]
+#>
+function Expand-XboxPathCandidates {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$XboxPaths
+    )
+
+    $out = [System.Collections.Generic.List[string]]::new()
+    $roots = Get-XboxGameRoots
+
+    foreach ($configured in $XboxPaths) {
+        if (-not $configured) { continue }
+        if (-not $out.Contains($configured)) { $out.Add($configured) }
+
+        # Drop the drive and the gaming-root folder, keeping the part that is
+        # the same on every machine: 'C:\XboxGames\High on Life\Content'
+        # contributes 'High on Life\Content'.
+        $segments = @(($configured -split '[\\/]+') | Where-Object { $_ -and $_ -notmatch '^[A-Za-z]:$' })
+        if ($segments.Count -lt 2) { continue }
+        $tail = $segments[1..($segments.Count - 1)] -join '\'
+
+        foreach ($root in $roots) {
+            $candidate = Join-Path $root $tail
+            if (-not $out.Contains($candidate)) { $out.Add($candidate) }
+        }
+    }
+
+    return $out.ToArray()
 }
 
 <#
@@ -588,21 +828,33 @@ function Find-GamePath {
         }
     }
 
-    # Priority 8: Xbox/Microsoft Store paths
+    # Priority 8: Xbox / Game Pass.
+    #
+    # GDK builds may live under a different exe name than the Steam exe
+    # (Foo-WinGDK-Shipping.exe vs Foo-Win64-Shipping.exe), so prefer
+    # XboxExecutable for the existence check when it's set.
+    $xboxExecutable = if ($Config.ContainsKey('XboxExecutable') -and $Config.XboxExecutable) {
+        $Config.XboxExecutable
+    } else {
+        $executable
+    }
+    $xboxIdentity = if ($Config.ContainsKey('XboxIdentityName') -and $Config.XboxIdentityName) {
+        $Config.XboxIdentityName
+    } else {
+        ''
+    }
+    # An explicit xbox_paths entry is an override for a layout the scan below
+    # cannot decompose. It is not how a Game Pass copy is normally found, and
+    # no game needs one to be detected.
     if ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths) {
-        # GDK builds may live under a different exe name than the Steam exe
-        # (Foo-WinGDK-Shipping.exe vs Foo-Win64-Shipping.exe), so prefer
-        # XboxExecutable for the existence check when it's set.
-        $xboxExecutable = if ($Config.ContainsKey('XboxExecutable') -and $Config.XboxExecutable) {
-            $Config.XboxExecutable
-        } else {
-            $executable
-        }
-        foreach ($path in $Config.XboxPaths) {
+        foreach ($path in (Expand-XboxPathCandidates -XboxPaths $Config.XboxPaths)) {
             if (Test-GameInstallation -Path $path -Executable $xboxExecutable) {
                 return $path
             }
         }
+    }
+    foreach ($path in (Find-XboxGamePaths -Executable $xboxExecutable -IdentityName $xboxIdentity)) {
+        return $path
     }
 
     # Priority 9: Microsoft Store MSIX/UWP package identity. Distinct from
@@ -717,18 +969,30 @@ function Find-AllGamePaths {
     # Xbox last and checked separately: a GDK build can ship the exe under a
     # different name, so it needs its own existence check rather than the one
     # every other source shares.
+    $xboxExecutable = if ($Config.ContainsKey('XboxExecutable') -and $Config.XboxExecutable) {
+        $Config.XboxExecutable
+    } else {
+        $executable
+    }
+    $xboxIdentity = if ($Config.ContainsKey('XboxIdentityName') -and $Config.XboxIdentityName) {
+        $Config.XboxIdentityName
+    } else {
+        ''
+    }
+    $xboxCandidates = [System.Collections.Generic.List[string]]::new()
     if ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths) {
-        $xboxExecutable = if ($Config.ContainsKey('XboxExecutable') -and $Config.XboxExecutable) {
-            $Config.XboxExecutable
-        } else {
-            $executable
+        foreach ($path in (Expand-XboxPathCandidates -XboxPaths $Config.XboxPaths)) {
+            $xboxCandidates.Add($path)
         }
-        foreach ($path in $Config.XboxPaths) {
-            if (-not (Test-GameInstallation -Path $path -Executable $xboxExecutable)) { continue }
-            $full = ([System.IO.Path]::GetFullPath($path)).TrimEnd('/', '\')
-            if ($found -contains $full) { continue }
-            $found.Add($full)
-        }
+    }
+    foreach ($path in (Find-XboxGamePaths -Executable $xboxExecutable -IdentityName $xboxIdentity)) {
+        $xboxCandidates.Add($path)
+    }
+    foreach ($path in $xboxCandidates) {
+        if (-not (Test-GameInstallation -Path $path -Executable $xboxExecutable)) { continue }
+        $full = ([System.IO.Path]::GetFullPath($path)).TrimEnd('/', '\')
+        if ($found -contains $full) { continue }
+        $found.Add($full)
     }
 
     return $found.ToArray()
@@ -741,6 +1005,19 @@ function Find-AllGamePaths {
     given install came from (e.g. to pick the correct executable name
     when the Xbox build differs from the Steam build).
 #>
+# Resolve-Path returns nothing at all for a path that does not exist, and most
+# expanded Xbox candidates are exactly that - the drives the game is not on. So
+# the caller gets the canonical form where there is one and the input otherwise.
+function Get-ResolvedPathOrSelf {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $resolved = @(Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue)
+    if ($resolved.Count -gt 0) { return $resolved[0].Path }
+    return $Path
+}
+
 function Test-IsXboxPath {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -750,15 +1027,25 @@ function Test-IsXboxPath {
         [Parameter(Mandatory = $true)]
         [string]$Path
     )
+    $normalised = (Get-ResolvedPathOrSelf -Path $Path).TrimEnd('\')
+
+    # An install under one of this machine's Xbox roots is an Xbox install
+    # whatever games.json says. Checking only the configured paths meant a
+    # Game Pass copy found by the scan - which is every one of them, since no
+    # game declares a path - was handed the Steam executable name.
+    foreach ($root in Get-XboxGameRoots) {
+        $rn = (Get-ResolvedPathOrSelf -Path $root).TrimEnd('\')
+        if ($normalised.StartsWith($rn + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
     if (-not ($Config.ContainsKey('XboxPaths') -and $Config.XboxPaths)) {
         return $false
     }
-    $normalised = (Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue).Path
-    if (-not $normalised) { $normalised = $Path }
-    foreach ($candidate in $Config.XboxPaths) {
-        $cn = (Resolve-Path -LiteralPath $candidate -ErrorAction SilentlyContinue).Path
-        if (-not $cn) { $cn = $candidate }
-        if ([string]::Equals($normalised.TrimEnd('\'), $cn.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+    foreach ($candidate in (Expand-XboxPathCandidates -XboxPaths $Config.XboxPaths)) {
+        $cn = (Get-ResolvedPathOrSelf -Path $candidate).TrimEnd('\')
+        if ([string]::Equals($normalised, $cn, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
     }
@@ -914,6 +1201,11 @@ Export-ModuleMember -Function @(
     'Find-UbisoftGamePath',
     'Find-RegistryGamePath',
     'Find-MsixGamePath',
+    'Get-XboxGameRoots',
+    'Get-XboxContentDirs',
+    'Find-XboxGamePaths',
+    'Get-XboxPackageIdentity',
+    'Expand-XboxPathCandidates',
     'Find-GamePath',
     'Find-AllGamePaths',
     'Test-IsXboxPath',
