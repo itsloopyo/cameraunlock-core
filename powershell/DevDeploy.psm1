@@ -116,8 +116,10 @@ function Assert-DevBuildArtifact {
     }
 }
 
-# Internal: derive game-exe directory from games.json relpath. Used by
-# ASI/Shim where plugins land in the same dir as the game's main exe.
+# Derive the game-exe directory from the games.json relpath, choosing
+# xbox_executable_relpath for a Game Pass install. Used by ASI/Shim, where
+# plugins land in the same dir as the game's main exe, and exported so a mod's
+# deploy.ps1 can place a sibling file per install without re-deriving the rule.
 function Resolve-DevExeDir {
     [CmdletBinding()]
     param(
@@ -958,5 +960,6 @@ Export-ModuleMember -Function @(
     'Invoke-DevDeployASILoader',
     'Invoke-DevDeployREFramework',
     'Invoke-DevDeployShim',
-    'Resolve-DevGamePath'
+    'Resolve-DevGamePath',
+    'Resolve-DevExeDir'
 )
