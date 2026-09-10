@@ -127,7 +127,7 @@
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/quake-ii-rtx-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "battlefield-bad-company-2": {
       "display_name": "Battlefield: Bad Company 2",
@@ -165,7 +165,7 @@
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/soma-headtracking",
       "engine": "HPL",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "alien-isolation": {
       "display_name": "Alien: Isolation",
@@ -249,6 +249,7 @@
     },
     "blue-prince": {
       "display_name": "Blue Prince",
+      "steam_app_id": 1569580,
       "env_var": "BLUE_PRINCE_PATH",
       "executable_relpath": "BLUE PRINCE.exe",
       "data_folder": "BLUE PRINCE_Data",
@@ -256,7 +257,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/blue-prince-headtracking",
       "engine": "Unity",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "starfield": {
       "display_name": "Starfield",
@@ -558,6 +559,7 @@
       "steam_app_id": 22380,
       "steam_folder": "Fallout New Vegas",
       "executable_relpath": "FalloutNV.exe",
+      "xbox_executable_relpath": "Fallout New Vegas English\\FalloutNV.exe",
       "gog_ids": [
         "1454587428"
       ],
@@ -566,12 +568,10 @@
         "C:\\Program Files\\Epic Games\\FalloutNewVegas",
         "D:\\Epic Games\\FalloutNewVegas\\Fallout New Vegas English"
       ],
-      "modded_executable_relpath": "nvse_loader.exe",
-      "modded_launcher_hint": "Fallout: New Vegas loads head tracking through xNVSE, but nvse_loader.exe wasn't found next to FalloutNV.exe. Install xNVSE 6.4.1 or newer (github.com/xNVSE/NVSE/releases) into your game folder, then launch again. Strongly recommended: New Vegas Tick Fix / NVTF (nexusmods.com/newvegas/mods/66537) for smooth head-tracked camera motion.",
-      "loader": "xNVSE",
+      "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/fallout-new-vegas-headtracking",
-      "catalog_status": "released"
+      "catalog_status": "prerelease"
     },
     "outer-wilds": {
       "display_name": "Outer Wilds",
@@ -747,7 +747,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/bioshock-infinite-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "bioshock-remastered": {
       "display_name": "BioShock Remastered",
