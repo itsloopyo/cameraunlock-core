@@ -3,7 +3,7 @@
 // DX9 Overlay System
 // Minimal-dep DX9 overlay for drawing crosshair-style 2D primitives over a game.
 //
-// Present is hooked on the shared IDirect3DDevice9 vtable, read off a windowed
+// The Present entry point is read from the vtable of a windowed
 // probe device the overlay creates and releases inside Install(). That is what
 // makes Install() work at any point in a game's life rather than only before the
 // game creates its own device.
@@ -79,9 +79,9 @@ using DX9RenderCallback = std::function<void(DX9DrawContext&)>;
 using DX9LogFn = void (*)(const char* msg);
 void SetDX9OverlayLogger(DX9LogFn fn);
 
-// Called once, on the game thread, when the game's real D3D9 device is captured
-// (via the CreateDevice hook), passing its IDirect3DDevice9 vtable so a consumer
-// can hook additional device methods (e.g. draw-call reticle suppression).
+// Called once when a device table is captured, during Install() for a probe or
+// on the CreateDevice thread for a game device. The table is an overlay-owned
+// copy of the 119 IDirect3DDevice9 entries for hooking additional methods.
 using DX9DeviceReadyFn = void (*)(void** deviceVTable);
 void SetDX9DeviceReadyCallback(DX9DeviceReadyFn fn);
 
@@ -119,6 +119,8 @@ private:
 #include <d3d9.h>
 #include <MinHook.h>
 #include <Windows.h>
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 #include <mutex>
@@ -197,7 +199,8 @@ struct DX9State {
     void* presentTarget = nullptr;
     HRESULT (__stdcall* origPresent)(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*) = nullptr;
 
-    void** deviceVTable = nullptr;  // captured real IDirect3DDevice9 vtable
+    // A device can own its vtable storage, which Release() invalidates.
+    std::array<void*, 119> deviceVTable{};
     bool   deviceCaptured = false;
     bool   presentHooked = false;
 
@@ -314,16 +317,8 @@ inline HRESULT __stdcall HookedPresent(IDirect3DDevice9* dev, const RECT* src, c
     return orig(dev, src, dst, wnd, dirty);
 }
 
-// Hooks Present on the shared IDirect3DDevice9 vtable, read off a device of our
-// own that is released again immediately.
-//
-// Every IDirect3DDevice9 handed out by d3d9.dll shares one vtable, so this
-// covers the game's device however long ago it was made - which is the whole
-// point. Waiting for the game's own CreateDevice instead makes Install() an
-// ordering constraint on the consumer: arm it after the game has made its
-// device and the call never comes again, so the overlay never draws, with no
-// error and no log line to say why. This is the same route the DX11 and DX12
-// overlays here already take.
+// Read the Present entry point from a temporary device so Install() can also
+// hook a game device that was created before the overlay.
 //
 // The probe is WINDOWED and is released before this returns, so it never takes
 // exclusive mode and never holds an adapter. D3DCREATE_FPU_PRESERVE is not
@@ -364,7 +359,8 @@ inline bool HookPresentViaProbeDevice() {
         return false;
     }
 
-    s.deviceVTable = *reinterpret_cast<void***>(probe);
+    std::copy_n(*reinterpret_cast<void***>(probe), s.deviceVTable.size(),
+                s.deviceVTable.begin());
     s.deviceCaptured = true;
     s.presentTarget = s.deviceVTable[17];  // IDirect3DDevice9::Present
 
@@ -382,7 +378,7 @@ inline bool HookPresentViaProbeDevice() {
     s.presentHooked = true;
     Log("dx9_overlay: Present hook enabled via a probe device");
 
-    if (s.deviceReadyFn) s.deviceReadyFn(s.deviceVTable);
+    if (s.deviceReadyFn) s.deviceReadyFn(s.deviceVTable.data());
     return true;
 }
 
@@ -400,7 +396,8 @@ inline HRESULT __stdcall HookedCreateDevice(IDirect3D9* self, UINT adapter, D3DD
     HRESULT hr = orig(self, adapter, type, focusWnd, flags, pp, outDev);
     if (SUCCEEDED(hr) && outDev && *outDev && !s.deviceCaptured) {
         s.deviceCaptured = true;
-        s.deviceVTable = *reinterpret_cast<void***>(*outDev);
+        std::copy_n(*reinterpret_cast<void***>(*outDev), s.deviceVTable.size(),
+                    s.deviceVTable.begin());
         Log("dx9_overlay: captured game device via CreateDevice");
 
         // IDirect3DDevice9::Present is vtable index 17.
@@ -414,7 +411,7 @@ inline HRESULT __stdcall HookedCreateDevice(IDirect3D9* self, UINT adapter, D3DD
             Log("dx9_overlay: Present hook on real device failed");
         }
 
-        if (s.deviceReadyFn) s.deviceReadyFn(s.deviceVTable);
+        if (s.deviceReadyFn) s.deviceReadyFn(s.deviceVTable.data());
     }
     return hr;
 }

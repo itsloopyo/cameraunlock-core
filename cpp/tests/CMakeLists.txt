@@ -60,6 +60,14 @@ endif()
 # surfaced in a consuming mod. Nothing is linked or run - see
 # overlay_stubs/README.md.
 if(WIN32)
+    add_executable(cameraunlock_dx9_device_lifetime_tests dx9_device_lifetime_tests.cpp)
+    target_include_directories(cameraunlock_dx9_device_lifetime_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/overlay_stubs
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
+    target_link_libraries(cameraunlock_dx9_device_lifetime_tests PRIVATE d3d9)
+    add_test(NAME cameraunlock_dx9_device_lifetime_tests COMMAND cameraunlock_dx9_device_lifetime_tests)
+
     add_library(cameraunlock_overlay_compile OBJECT
         overlay_stubs/overlay_compile_dx9.cpp
         overlay_stubs/overlay_compile_dx11.cpp
