@@ -1151,7 +1151,11 @@ function Assert-CoreCommitInNotices {
 
     if (-not (Get-PinnedCoreCommit -RepoRoot $RepoRoot)) { return }
 
-    $state = Sync-CoreCommitInNotices -RepoRoot $RepoRoot -ReadOnly
+    # Packaging consumes the checkout, including a submodule bump waiting for
+    # the parent commit. HEAD:cameraunlock-core still names the previous build.
+    $compiledCommit = & git -C (Join-Path $RepoRoot 'cameraunlock-core') rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw "Cannot read the core checkout at $RepoRoot." }
+    $state = Sync-CoreCommitInNotices -RepoRoot $RepoRoot -Commit $compiledCommit.Trim() -ReadOnly
     $fix   = "powershell -ExecutionPolicy Bypass -File cameraunlock-core\scripts\sync-core-notices.ps1 -Repo ."
 
     if ($state.Recorded -eq 0) {
