@@ -864,7 +864,7 @@
       ],
       "msix_identity_name": "10192RubberBandGames.WobblyLife",
       "loader": "BepInEx5",
-      "delivery_mode": "manifest",
+      "delivery_mode": "manifest_variants",
       "repo": "itsloopyo/wobbly-life-headtracking",
       "engine": "Unity",
       "catalog_status": "prerelease"

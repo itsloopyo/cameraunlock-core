@@ -191,6 +191,7 @@ function Copy-SharedBundle {
         @{ Src = 'data\games.json';                   Dest = 'games.json' }
         @{ Src = 'powershell\GamePathDetection.psm1'; Dest = 'GamePathDetection.psm1' }
         @{ Src = 'scripts\find-game.ps1';             Dest = 'find-game.ps1' }
+        @{ Src = 'scripts\install-all-bepinex.ps1';   Dest = 'install-all-bepinex.ps1' }
         @{ Src = 'scripts\check-loader-arch.ps1';     Dest = 'check-loader-arch.ps1' }
         @{ Src = 'scripts\cecil-marker-check.ps1';    Dest = 'cecil-marker-check.ps1' }
     )
@@ -1204,6 +1205,18 @@ function Assert-ManifestSeedsMatchShipped {
     }
     if ($manifest.PSObject.Properties.Name -contains 'seed') {
         foreach ($s in @($manifest.seed)) { if ($s) { $seeds.Add($s) } }
+    }
+    # A variant package carries no top-level loader, so its seeds live one level
+    # down. Without this the loop below finds nothing to compare and the gate
+    # passes by having stopped looking, which is worse than not having it.
+    if ($manifest.PSObject.Properties.Name -contains 'variants') {
+        foreach ($variant in @($manifest.variants)) {
+            if (-not $variant) { continue }
+            if ($variant.PSObject.Properties.Name -notcontains 'loader') { continue }
+            if (-not $variant.loader) { continue }
+            if ($variant.loader.PSObject.Properties.Name -notcontains 'seed') { continue }
+            foreach ($s in @($variant.loader.seed)) { if ($s) { $seeds.Add($s) } }
+        }
     }
 
     $root = (Resolve-Path $ProjectRoot).ProviderPath

@@ -32,6 +32,17 @@
 ::                            When set, also removes any flat-laid
 ::                            copies of MOD_DLLS in plugins\ to prevent
 ::                            duplicate-load conflicts.
+::   IL2CPP_VENDOR_DIR_NAME   optional. Set all three of these for a game
+::   IL2CPP_VENDOR_ZIP_NAME   that ships as a Mono build on one store and an
+::   IL2CPP_PLUGIN_DIR_NAME   IL2CPP build on another (Wobbly Life is Mono on
+::                            Steam and IL2CPP on Xbox Game Pass). When the
+::                            target install has GameAssembly.dll, the body
+::                            takes the loader from vendor\<dir>\<zip> and the
+::                            DLLs from <dir> instead of the defaults - BepInEx
+::                            5 cannot load an IL2CPP game and BepInEx 6 cannot
+::                            load a Mono one, and getting it wrong installs
+::                            silently and does nothing. Leave all three unset
+::                            and nothing below changes.
 ::   MOD_CONTROLS             optional post-install help text
 ::
 :: Launcher CLI (passed through %*): [GAME_PATH] [/y] [/force]
@@ -143,6 +154,7 @@ if "%_GIVEN_PATH:~-2%"==":\" (
 set "_GIVEN_PATH=%_GIVEN_PATH:~0,-1%"
 goto :strip_given_slash
 :given_normalised
+if not defined _GIVEN_PATH if defined _CUL_INSTALL_GAME_PATH set "_GIVEN_PATH=%_CUL_INSTALL_GAME_PATH%"
 
 :: -------- Validate CONFIG BLOCK --------
 :: Every name below is interpolated straight into a path that gets written,
@@ -158,6 +170,8 @@ for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE
 echo.
 echo === %MOD_DISPLAY_NAME% - Install ===
 echo.
+
+if defined IL2CPP_VENDOR_ZIP_NAME if not defined _GIVEN_PATH goto :install_all_copies
 
 :: -------- Resolve game path via shared shim --------
 set "_SHIM=%SCRIPT_DIR%shared\find-game.ps1"
@@ -201,6 +215,28 @@ setlocal enabledelayedexpansion
 echo Game found: !GAME_PATH!
 echo.
 
+:: -------- Scripting backend --------
+:: Mono keeps its managed assemblies in <Game>_Data\Managed; IL2CPP compiles
+:: them into GameAssembly.dll. Decided from the install rather than from which
+:: store it came from, because it is the backend the loader has to match and a
+:: store can change backend in a patch without its path moving.
+set "_IL2CPP="
+if defined IL2CPP_VENDOR_ZIP_NAME (
+    if not defined IL2CPP_VENDOR_DIR_NAME (
+        echo ERROR: IL2CPP_VENDOR_DIR_NAME is missing from the installer configuration.
+        exit /b 1
+    )
+    if not defined IL2CPP_PLUGIN_DIR_NAME (
+        echo ERROR: IL2CPP_PLUGIN_DIR_NAME is missing from the installer configuration.
+        exit /b 1
+    )
+    if exist "!GAME_PATH!\GameAssembly.dll" (
+        set "_IL2CPP=1"
+        echo This is the IL2CPP build of the game - using the BepInEx 6 payload.
+        echo.
+    )
+)
+
 :: -------- Game-running check --------
 :: /c: or findstr reads the exe name as a space-separated list of terms and
 :: matches on ANY of them. With nothing running tasklist prints "INFO: No tasks
@@ -236,6 +272,21 @@ if exist "!GAME_PATH!\BepInEx\core\BepInEx.dll"      set "_LOADER_PRESENT=1"
 if exist "!GAME_PATH!\BepInEx\core\BepInEx.Core.dll" set "_LOADER_PRESENT=1"
 
 set "_LOADER_BAD="
+if defined IL2CPP_VENDOR_ZIP_NAME (
+    set "_BACKEND_CONFLICT="
+    if defined _IL2CPP (
+        if exist "!GAME_PATH!\BepInEx\core\BepInEx.dll" set "_BACKEND_CONFLICT=1"
+        if exist "!GAME_PATH!\BepInEx\core\BepInEx.Unity.Mono.dll" set "_BACKEND_CONFLICT=1"
+    ) else (
+        if exist "!GAME_PATH!\BepInEx\core\BepInEx.Unity.IL2CPP.dll" set "_BACKEND_CONFLICT=1"
+        if exist "!GAME_PATH!\BepInEx\core\BepInEx.Core.dll" set "_BACKEND_CONFLICT=1"
+    )
+    if defined _BACKEND_CONFLICT (
+        echo ERROR: The existing BepInEx loader does not match this game's scripting backend.
+        echo Remove the incompatible loader with its installer, preserving your plugins and config, then retry.
+        exit /b 1
+    )
+)
 if defined _LOADER_PRESENT (
     call :verify_loader_arch
     if errorlevel 1 set "_LOADER_BAD=1"
@@ -325,6 +376,7 @@ echo Deploying mod files...
 
 set "PLUGINS_PATH=!GAME_PATH!\BepInEx\plugins"
 set "DLL_DIR=!SCRIPT_DIR!plugins"
+if defined _IL2CPP set "DLL_DIR=!SCRIPT_DIR!%IL2CPP_PLUGIN_DIR_NAME%"
 if defined PLUGIN_SUBFOLDER (
     set "DEPLOY_PATH=!PLUGINS_PATH!\%PLUGIN_SUBFOLDER%"
 ) else (
@@ -391,6 +443,20 @@ echo %MOD_CONTROLS%
 :controls_done
 echo.
 exit /b 0
+
+:install_all_copies
+set "_ALL_INSTALLER=%SCRIPT_DIR%shared\install-all-bepinex.ps1"
+if not exist "%_ALL_INSTALLER%" set "_ALL_INSTALLER=%SCRIPT_DIR%..\cameraunlock-core\scripts\install-all-bepinex.ps1"
+if not exist "%_ALL_INSTALLER%" (
+    echo ERROR: install-all-bepinex.ps1 is missing from the installer bundle.
+    exit /b 1
+)
+if defined YES_FLAG (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_ALL_INSTALLER%" -GameId "%GAME_ID%" -InstallerPath "%SCRIPT_DIR%install.cmd" -Yes
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_ALL_INSTALLER%" -GameId "%GAME_ID%" -InstallerPath "%SCRIPT_DIR%install.cmd"
+)
+exit /b %errorlevel%
 
 :: ============================================
 :: Verify the existing loader proxy (winhttp.dll) matches BEPINEX_ARCH.
@@ -493,9 +559,13 @@ exit /b 0
 :: <repo>/scripts/ and vendor/ at <repo>/vendor/.
 :: ============================================
 :resolve_vendor_zip
-set "VENDOR_DIR=!SCRIPT_DIR!vendor\bepinex"
-if not exist "!VENDOR_DIR!" set "VENDOR_DIR=!SCRIPT_DIR!..\vendor\bepinex"
-if defined BEPINEX_VENDOR_ZIP_NAME (
+set "_VENDOR_NAME=bepinex"
+if defined _IL2CPP set "_VENDOR_NAME=%IL2CPP_VENDOR_DIR_NAME%"
+set "VENDOR_DIR=!SCRIPT_DIR!vendor\!_VENDOR_NAME!"
+if not exist "!VENDOR_DIR!" set "VENDOR_DIR=!SCRIPT_DIR!..\vendor\!_VENDOR_NAME!"
+if defined _IL2CPP (
+    set "VENDOR_ZIP=!VENDOR_DIR!\%IL2CPP_VENDOR_ZIP_NAME%"
+) else if defined BEPINEX_VENDOR_ZIP_NAME (
     set "VENDOR_ZIP=!VENDOR_DIR!\%BEPINEX_VENDOR_ZIP_NAME%"
 ) else (
     set "VENDOR_ZIP=!VENDOR_DIR!\BepInEx_win_%BEPINEX_ARCH%.zip"

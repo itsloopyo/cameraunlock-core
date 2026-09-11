@@ -700,6 +700,11 @@ exit /b 0
 :: Remove BepInEx (regular and BepInExPack both land in the same layout).
 :: ============================================
 :remove_BepInEx
+:: Identify the IL2CPP host before deleting it. A game-owned dotnet\ folder
+:: must survive removing a Mono loader.
+set "_BEP6="
+if exist "!GAME_PATH!\BepInEx\core\BepInEx.Unity.IL2CPP.dll" set "_BEP6=1"
+
 set "_DEL_PATH=!GAME_PATH!\BepInEx"
 set "_DEL_LABEL=BepInEx folder"
 call :rmtree_one
@@ -708,17 +713,7 @@ for %%f in (winhttp.dll doorstop_config.ini .doorstop_version changelog.txt) do 
     set "_DEL_LABEL=%%f"
     call :del_one
 )
-:: The IL2CPP distribution also lays down a dotnet\ folder - the CoreCLR runtime
-:: doorstop_config.ini points its coreclr_path at - which the Mono one does not.
-:: Left behind it is ~180 inert files, and an uninstall that says it removed
-:: BepInEx has not.
-::
-:: Gated on coreclr.dll rather than removed outright: dotnet\ is a plausible
-:: enough name for a folder a game ships itself, and this is the only place in
-:: the uninstall that would delete a directory nothing in the install receipt
-:: named. coreclr.dll is the file doorstop loads, so its presence is what makes
-:: the folder ours.
-if exist "!GAME_PATH!\dotnet\coreclr.dll" (
+if defined _BEP6 (
     set "_DEL_PATH=!GAME_PATH!\dotnet"
     set "_DEL_LABEL=dotnet folder (BepInEx IL2CPP runtime)"
     call :rmtree_one

@@ -114,6 +114,9 @@ function validate(label, zip) {
   // reporting: they break any consumer that reads the zip case-sensitively.
   const entries = listZip(zip).map((e) => e.replace(/\\/g, "/"));
   const entryByLower = new Map(entries.map((e) => [e.toLowerCase(), e]));
+  if (entryByLower.size !== entries.length) {
+    throw new Error("ZIP contains duplicate paths after normalizing case and separators");
+  }
   const manifestRaw = readEntry(zip, "launcher-manifest.json");
   if (manifestRaw === null) throw new Error("no launcher-manifest.json in zip");
   const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
@@ -123,23 +126,38 @@ function validate(label, zip) {
   const mode = man.delivery_mode;
   if (mode === "install_cmd") return validateInstallCmd(label, zip, man, entries, entryByLower);
   if (mode === "external") return validateExternal(label, zip, man, entryByLower);
-  if (mode !== "manifest") {
+  if (mode !== "manifest" && mode !== "manifest_variants") {
     throw new Error(
-      `delivery_mode is "${mode}", expected one of "manifest", "install_cmd", "external"`,
+      `delivery_mode is "${mode}", expected one of "manifest", "manifest_variants", "install_cmd", "external"`,
     );
   }
 
+  assertVariantsWellFormed(man);
+  if ((man.variants ?? []).length > 0 && mode !== "manifest_variants") {
+    throw new Error('variants require delivery_mode "manifest_variants" so older launchers use install.cmd');
+  }
+  if (mode === "manifest_variants") {
+    if (!(man.variants ?? []).length) throw new Error('manifest_variants requires at least one variant');
+    validateInstallCmd(label, zip, man, entries, entryByLower);
+  }
+
+  // Every payload in the package, across all variants. Only one variant is
+  // deployed into any given install, but all of them ship in the ZIP and all of
+  // them must resolve: a missing source is a failed install for whoever owns
+  // that build of the game, and the packager cannot know which that is.
   const sources = [];
-  // A fetched loader archive carries no in-zip source - its bytes are
-  // downloaded + hash-verified at install time - so only check bundled ones.
-  for (const a of man.loader?.archives ?? []) if (a.source) sources.push(a.source);
-  // Guarded like the archives line above. An entry missing `source` otherwise pushed
-  // undefined, which threw a bare TypeError from the replace() below - reported as the
-  // failure reason with neither the file nor the entry named - and counted toward the
-  // length check, defeating it.
-  for (const f of man.files ?? []) {
-    if (!f.source) throw new Error(`manifest files[] entry has no "source": ${JSON.stringify(f)}`);
-    sources.push(f.source);
+  for (const payload of payloads(man)) {
+    // A fetched loader archive carries no in-zip source - its bytes are
+    // downloaded + hash-verified at install time - so only check bundled ones.
+    for (const a of payload.loader?.archives ?? []) if (a.source) sources.push(a.source);
+    // Guarded like the archives line above. An entry missing `source` otherwise pushed
+    // undefined, which threw a bare TypeError from the replace() below - reported as the
+    // failure reason with neither the file nor the entry named - and counted toward the
+    // length check, defeating it.
+    for (const f of payload.files ?? []) {
+      if (!f.source) throw new Error(`manifest files[] entry has no "source": ${JSON.stringify(f)}`);
+      sources.push(f.source);
+    }
   }
 
   // A manifest that declares nothing passed the "everything declared is present"
@@ -168,10 +186,13 @@ function validate(label, zip) {
     );
   }
 
-  const seeds = (man.loader?.seed ?? []).length;
+  const seeds = payloads(man).reduce((n, p) => n + (p.loader?.seed ?? []).length, 0);
   const rt = (man.runtime_requirements ?? []).length;
+  const variants = (man.variants ?? []).length
+    ? `, ${man.variants.length} variant(s) (${man.variants.map((v) => v.id).join(", ")})`
+    : "";
   console.log(
-    `OK   ${label}: ${path.basename(zip)} — manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)`,
+    `OK   ${label}: ${path.basename(zip)} — manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${variants}`,
   );
   warnMiscased(label, miscased);
   warnUndeployed(label, undeclared.cosmetic);
@@ -183,9 +204,12 @@ function validateInstallCmd(label, zip, man, entries, entryByLower) {
   const scripts = [man.install_script ?? "install.cmd", man.uninstall_script ?? "uninstall.cmd"];
   const problems = [];
   let checked = 0;
+  const visited = new Set();
 
   for (const script of scripts) {
     const declared = script.replace(/\\/g, "/");
+    if (visited.has(declared.toLowerCase())) continue;
+    visited.add(declared.toLowerCase());
     const entry = entryByLower.get(declared.toLowerCase());
     if (entry === undefined) {
       problems.push(`${declared} is not in the zip`);
@@ -200,6 +224,8 @@ function validateInstallCmd(label, zip, man, entries, entryByLower) {
     for (const dep of scriptDependencies(body)) {
       if (!entryByLower.has(dep.toLowerCase())) {
         problems.push(`${declared} calls ${dep}, which is not in the zip`);
+      } else {
+        scripts.push(dep);
       }
     }
   }
@@ -258,7 +284,7 @@ function scriptDependencies(text) {
     .split(/\r?\n/)
     .filter((line) => !/^\s*(::|@?rem\b)/i.test(line))
     .join("\n");
-  for (const m of text.matchAll(/shared[\\/]((?:un)?install-body[a-z-]*\.cmd|find-game\.ps1)/gi)) {
+  for (const m of text.matchAll(/shared[\\/]((?:un)?install-body[a-z-]*\.cmd|find-game\.ps1|install-all-bepinex\.ps1)/gi)) {
     deps.add(`shared/${m[1]}`);
   }
   for (const m of text.matchAll(/%(?:SCRIPT_DIR%|~dp0)([A-Za-z0-9_.-]+\.ps1)/g)) deps.add(m[1]);
@@ -307,7 +333,8 @@ function undeclaredPayload(entries, sources, man) {
   // Seed targets name the path in the GAME directory, not in the ZIP, so the
   // two only ever agree on the leaf.
   const seeded = new Set(
-    (man.loader?.seed ?? [])
+    payloads(man)
+      .flatMap((p) => p.loader?.seed ?? [])
       .map((s) => s?.target)
       .filter(Boolean)
       .map((t) => t.split(/[\\/]/).pop().toLowerCase()),
@@ -338,6 +365,73 @@ function undeclaredPayload(entries, sources, man) {
     (payloadExt.test(base) ? fatal : cosmetic).push(entry);
   }
   return { fatal, cosmetic };
+}
+
+// The payload(s) a manifest offers: its own loader/files, or one per variant.
+// A variant package ships a different loader and a different plugin for each
+// build of the game it supports - Wobbly Life is Mono on Steam and IL2CPP on
+// Xbox Game Pass, which take BepInEx 5 and BepInEx 6 respectively - and the
+// launcher picks one at install time from a file-presence probe.
+function payloads(man) {
+  const variants = man.variants ?? [];
+  if (variants.length === 0) return [{ loader: man.loader, files: man.files ?? [] }];
+  return variants;
+}
+
+// Structural rules the launcher's resolver depends on. Each is something a
+// packager can get wrong in a way that produces a plausible-looking manifest
+// and a broken install, so it is caught here rather than on a user's machine.
+function assertVariantsWellFormed(man) {
+  const variants = man.variants ?? [];
+  if (!Array.isArray(variants)) throw new Error('manifest "variants" must be an array');
+  if (variants.length === 0) return;
+
+  // Two places to read a payload from is ambiguous, and the engine refuses it.
+  if (man.loader || (man.files ?? []).length > 0) {
+    throw new Error(
+      "manifest declares both variants and top-level loader/files; move them into a variant",
+    );
+  }
+
+  const seen = new Set();
+  for (const v of variants) {
+    if (!v || typeof v.id !== "string" || !v.id.trim()) {
+      throw new Error(`variant has no nonempty string "id": ${JSON.stringify(v)}`);
+    }
+    if (seen.has(v.id)) throw new Error(`two variants share the id "${v.id}"`);
+    seen.add(v.id);
+    if (v.when != null) {
+      const probe = v.when.file_exists;
+      if (Object.keys(v.when).length !== 1 || !probe || typeof probe.path !== "string" || !probe.path.trim()) {
+        throw new Error(`variant "${v.id}" requires a file_exists probe with a nonempty path`);
+      }
+      if (path.win32.isAbsolute(probe.path) || probe.path.includes(":") || probe.path.split(/[\\/]/).includes("..")) {
+        throw new Error(`variant "${v.id}" probe path must stay relative to its anchor`);
+      }
+      if (probe.anchor != null && !["game_root", "exe_dir", "mod_home"].includes(probe.anchor)) {
+        throw new Error(`variant "${v.id}" has an unknown probe anchor: ${probe.anchor}`);
+      }
+    }
+  }
+
+  // Selection stops at the first match, so a variant with no condition ends
+  // the list. Anything after it is unreachable - and the one left unreachable
+  // is exactly the one whose install the author thought they had covered.
+  const catchAll = variants.findIndex((v) => !v.when);
+  if (catchAll !== -1 && catchAll !== variants.length - 1) {
+    const unreachable = variants.slice(catchAll + 1).map((v) => v.id);
+    throw new Error(
+      `variant "${variants[catchAll].id}" has no "when", so it matches every install and nothing after it can ever be selected: ${unreachable.join(", ")}`,
+    );
+  }
+  if (catchAll === -1) {
+    // Not fatal: a package may legitimately support only the builds it probes
+    // for, and the launcher fails loudly on an install that matches none. It
+    // is worth saying out loud, because that failure lands on a user.
+    console.log(
+      `WARN ${man.mod_info?.name ?? "package"}: no variant is unconditional, so an install matching none of ${[...seen].join(", ")} fails to deploy`,
+    );
+  }
 }
 
 // mod_info.version lands in the launcher's install receipt and drives version
