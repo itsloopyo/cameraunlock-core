@@ -1346,7 +1346,7 @@
       ],
       "xbox_executable_relpath": "Binaries\\Danielle\\Gaming.Desktop.x64\\Release\\Prey.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "manifest",
+      "delivery_mode": "install_cmd",
       "repo": "itsloopyo/prey-headtracking",
       "engine": "CryEngine",
       "catalog_status": "prerelease"
