@@ -89,13 +89,12 @@ if ($GivenPath) {
 
 # Pick the executable relpath. GDK / Xbox builds can ship under a different
 # exe name and folder layout than the Steam build (see XboxExecutable in
-# GamePathDetection.psm1). If the resolved path is one of the configured
-# Xbox paths AND the game defines an Xbox-specific relpath, use that.
-$exeRelPath = $cfg.Executable
-if ($gamePath -and $cfg.ContainsKey('XboxExecutable') -and $cfg.XboxExecutable) {
-    if (Test-IsXboxPath -Config $cfg -Path $gamePath) {
-        $exeRelPath = $cfg.XboxExecutable
-    }
+# GamePathDetection.psm1), so the relpath belongs to the resolved install
+# rather than to the game.
+$exeRelPath = if ($gamePath) {
+    Get-GameExecutableRelPath -Config $cfg -Path $gamePath
+} else {
+    $cfg.Executable
 }
 $exeLeaf = Split-Path $exeRelPath -Leaf
 

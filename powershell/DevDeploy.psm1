@@ -126,19 +126,7 @@ function Resolve-DevExeDir {
         [Parameter(Mandatory)][string]$GamePath,
         [Parameter(Mandatory)][string]$GameId
     )
-    $config = Get-GameConfig -GameId $GameId
-    # A GDK build can ship its exe under a different name and a different folder
-    # than the Steam build, which is what xbox_executable_relpath records.
-    # find-game.ps1 already picks between the two for install.cmd; without the
-    # same choice here, `pixi run install` finds the Game Pass copy and then
-    # derives the exe directory from the Steam layout, so it deploys somewhere
-    # the loader is never read from.
-    $gameExeRelpath = $config.Executable
-    if ($config.ContainsKey('XboxExecutable') -and $config.XboxExecutable) {
-        if (Test-IsXboxPath -Config $config -Path $GamePath) {
-            $gameExeRelpath = $config.XboxExecutable
-        }
-    }
+    $gameExeRelpath = Get-GameExecutableRelPath -Config (Get-GameConfig -GameId $GameId) -Path $GamePath
     $exeDir = Split-Path -Parent (Join-Path $GamePath $gameExeRelpath)
     if (-not (Test-Path -LiteralPath $exeDir)) {
         throw "Exe directory not found: $exeDir (derived from $gameExeRelpath)"
@@ -156,10 +144,20 @@ function Assert-DevGameNotRunning {
         [Parameter(Mandatory)][string]$GameId,
         [Parameter(Mandatory)][string]$GameDisplayName
     )
-    $exeLeaf  = Split-Path -Leaf (Get-GameConfig -GameId $GameId).Executable
-    $procName = [IO.Path]::GetFileNameWithoutExtension($exeLeaf)
-    if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
-        throw "$GameDisplayName is running ($exeLeaf). Close it before deploying - the loaded mod locks its files."
+    # Every exe name the game ships under, not just the Steam one: a GDK build
+    # can name its exe differently, and checking only the Steam leaf reports
+    # "not running" for a running Game Pass copy, then fails mid-copy on the
+    # handle the loaded mod holds.
+    $config   = Get-GameConfig -GameId $GameId
+    $relPaths = @($config.Executable)
+    if ($config.ContainsKey('XboxExecutable') -and $config.XboxExecutable) {
+        $relPaths += $config.XboxExecutable
+    }
+    foreach ($exeLeaf in @($relPaths | ForEach-Object { Split-Path -Leaf $_ } | Select-Object -Unique)) {
+        $procName = [IO.Path]::GetFileNameWithoutExtension($exeLeaf)
+        if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
+            throw "$GameDisplayName is running ($exeLeaf). Close it before deploying - the loaded mod locks its files."
+        }
     }
 }
 

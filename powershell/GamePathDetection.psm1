@@ -1131,6 +1131,38 @@ function Test-IsXboxPath {
 
 <#
 .SYNOPSIS
+    The executable relpath that applies to ONE resolved install of a game.
+.DESCRIPTION
+    A GDK / Game Pass build can ship its exe under a different name and a
+    different subtree than the Steam build - Prey's Steam exe is under
+    Binaries\Danielle\x64\Release and its GDK exe under
+    Binaries\Danielle\Gaming.Desktop.x64\Release - so the relpath is a
+    property of the install, not of the game. Every caller that joins a
+    relpath onto a path returned by Find-AllGamePaths goes through here;
+    reading .Executable directly silently resolves a directory that does not
+    exist on the Xbox copy.
+.OUTPUTS
+    System.String
+#>
+function Get-GameExecutableRelPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    if ($Config.ContainsKey('XboxExecutable') -and $Config.XboxExecutable) {
+        if (Test-IsXboxPath -Config $Config -Path $Path) {
+            return $Config.XboxExecutable
+        }
+    }
+    return $Config.Executable
+}
+
+<#
+.SYNOPSIS
     Gets the path to a game's Managed folder containing DLLs.
 .PARAMETER GamePath
     The root game installation path.
@@ -1286,6 +1318,7 @@ Export-ModuleMember -Function @(
     'Find-GamePath',
     'Find-AllGamePaths',
     'Test-IsXboxPath',
+    'Get-GameExecutableRelPath',
     'Find-OWMLPath',
     'Test-GameInstallation',
     'Get-ManagedPath',
