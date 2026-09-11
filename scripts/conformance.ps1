@@ -681,8 +681,8 @@ function Test-Manifest {
         return
     }
     $mode = if ($man.PSObject.Properties.Name -contains 'delivery_mode') { $man.delivery_mode } else { $null }
-    if ($mode -notin @('manifest', 'install_cmd', 'external')) {
-        Add-Finding $Name 'manifest' 'FAIL' "delivery_mode is '$mode'; the deploy engine knows manifest, install_cmd and external"
+    if ($mode -notin @('manifest', 'manifest_variants', 'install_cmd', 'external')) {
+        Add-Finding $Name 'manifest' 'FAIL' "delivery_mode is '$mode'; expected manifest, manifest_variants, install_cmd or external"
     }
     $schema = if ($man.PSObject.Properties.Name -contains 'schema_version') { $man.schema_version } else { $null }
     if ($schema -ne 2) {
