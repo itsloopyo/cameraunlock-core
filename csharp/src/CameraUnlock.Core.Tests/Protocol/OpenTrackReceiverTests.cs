@@ -331,7 +331,9 @@ namespace CameraUnlock.Core.Tests.Protocol
             SendTestPacket(TestPort, 45.0, 30.0, 15.0);
             Thread.Sleep(100);
 
+#pragma warning disable CS0618 // Compatibility coverage for the deprecated public entry point.
             TrackingPose transformed = _receiver.GetLatestPoseTransformed();
+#pragma warning restore CS0618
 
             Assert.Equal(-45f, transformed.Yaw, precision: 1);
             Assert.Equal(30f, transformed.Pitch, precision: 1);
@@ -348,7 +350,9 @@ namespace CameraUnlock.Core.Tests.Protocol
             Thread.Sleep(100);
 
             TrackingPose pose = _receiver.GetLatestPose();
+#pragma warning disable CS0618 // Compatibility coverage for the deprecated public entry point.
             TrackingPose transformed = _receiver.GetLatestPoseTransformed();
+#pragma warning restore CS0618
 
             Assert.Equal(pose.Yaw, transformed.Yaw, precision: 1);
             Assert.Equal(pose.Pitch, transformed.Pitch, precision: 1);

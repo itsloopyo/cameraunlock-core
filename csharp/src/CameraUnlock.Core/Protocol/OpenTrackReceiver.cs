@@ -71,12 +71,7 @@ namespace CameraUnlock.Core.Protocol
         private volatile float _positionY;
         private volatile float _positionZ;
 
-        // Remote recenter (Headcam trailer). The trailer only rides a short
-        // burst of packets right after a CENTER press (steady-state packets
-        // must stay 48 bytes for plain OpenTrack), so the first sighting is
-        // itself a press and must trigger -- latching it silently would
-        // swallow the first press after every receiver start.
-        private bool _hasRecenterCounter;
+        // Trailer counters are latched without centring; the tracker owns centring.
         private byte _lastRecenterCounter;
         private int _recenterRequested;
 
@@ -176,7 +171,6 @@ namespace CameraUnlock.Core.Protocol
             if (_retrying) return false;
             IsFailed = false;
             _port = port;
-            _hasRecenterCounter = false;
             _isRemoteConnection = false;
             _firstPacketLogged = false;
             Interlocked.Exchange(ref _recenterRequested, 0);
@@ -562,25 +556,6 @@ namespace CameraUnlock.Core.Protocol
             }
         }
 
-        // Wall-clock re-arm for trailer first-sighting. Matches the ~5s the wire contract
-        // specifies and the C++ ports' kRecenterRearmMs.
-        private const long RecenterRearmMs = 5000;
-
-        private void MaybeRearmRecenterFirstSighting()
-        {
-            long last = Interlocked.Read(ref _timestampTicks);
-            if (last == 0L) return;
-
-            long elapsedMs = (Stopwatch.GetTimestamp() - last) * 1000L / Stopwatch.Frequency;
-            if (elapsedMs >= RecenterRearmMs)
-            {
-                // The tracker app restarting resets its counter to zero, so a value
-                // latched from the old session would swallow the first CENTER press of
-                // the new one.
-                _hasRecenterCounter = false;
-            }
-        }
-
         private void ReceiveLoop()
         {
             var remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
@@ -674,7 +649,6 @@ namespace CameraUnlock.Core.Protocol
                         if (poseValid && OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
                         {
                             _lastRecenterCounter = recenterCounter;
-                            _hasRecenterCounter = true;
                         }
                     }
                 }
@@ -712,20 +686,6 @@ namespace CameraUnlock.Core.Protocol
                             _isConnected = false;
                         }
                     }
-
-                    // Re-armed on a WALL CLOCK rather than on a count of consecutive recv
-                    // timeouts, which only approximated 5s and was reset by any datagram
-                    // large enough to reach the parser - so a stream of rejected garbage
-                    // from a LAN host held the count at zero indefinitely.
-                    //
-                    // This does NOT cover a second VALID sender (a co-running opentrack on
-                    // the same port). That keeps Receive() returning, so no
-                    // SocketException is raised and this is never reached; and it keeps
-                    // _timestampTicks current, so the elapsed test would fail anyway.
-                    // Telling our tracker's restart from another sender's traffic needs
-                    // per-source state, which is what the C++ UdpReceiver's source-locking
-                    // does and this port does not have.
-                    MaybeRearmRecenterFirstSighting();
                 }
                 catch (ObjectDisposedException)
                 {

@@ -337,7 +337,9 @@ namespace CameraUnlock.Core.Tests.Regressions
                 reloaded.LoadAllProfiles();
                 int before = reloaded.GetProfileNames().Count;
                 reloaded.LoadProfile("Renamed");
-                reloaded.SaveProfile(reloaded.ActiveProfile);
+                var activeProfile = reloaded.ActiveProfile;
+                Assert.NotNull(activeProfile);
+                reloaded.SaveProfile(activeProfile);
 
                 // Before the fix, Name stayed "Original" while the entry was keyed
                 // "Renamed", so saving forked it into a second list entry backed by the

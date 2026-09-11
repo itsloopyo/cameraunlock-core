@@ -113,7 +113,7 @@ namespace CameraUnlock.Core.Tests.Ads
         [InlineData("")]
         [InlineData("snap")]
         [InlineData("trackedish")]
-        public void Parse_FallsBackToTheDefault(string text)
+        public void Parse_FallsBackToTheDefault(string? text)
         {
             Assert.Equal(AdsModes.Default, AdsModes.Parse(text));
         }

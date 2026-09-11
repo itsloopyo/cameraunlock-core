@@ -55,6 +55,7 @@ if(MSVC)
     set_target_properties(cameraunlock PROPERTIES
         STATIC_LIBRARY_OPTIONS "$<$<CONFIG:Release>:/LTCG>"
     )
+    target_link_options(cameraunlock INTERFACE "$<$<CONFIG:Release>:/LTCG>")
 else()
     target_compile_options(cameraunlock PRIVATE
         $<$<CONFIG:Release>:-O3>
@@ -81,11 +82,8 @@ if(CAMERAUNLOCK_BUILD_HOOKS)
         if(NOT EXISTS "${CAMERAUNLOCK_MINHOOK_DIR}/CMakeLists.txt")
             message(FATAL_ERROR "CAMERAUNLOCK_BUILD_HOOKS: no `minhook` target was supplied and the vendored copy is missing from ${CAMERAUNLOCK_MINHOOK_DIR}.")
         endif()
-        # MinHook 1.3.4 declares `cmake_minimum_required(VERSION 3.0...3.5)`, and
-        # CMake 4 removed compatibility with anything below 3.5. This is the
-        # documented escape hatch, scoped to the add_subdirectory so it cannot
-        # relax policies for the consumer's own tree.
-        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+        # Apply current supported policies to the vendored MinHook build only.
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
         add_subdirectory("${CAMERAUNLOCK_MINHOOK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/minhook")
         unset(CMAKE_POLICY_VERSION_MINIMUM)
     endif()
@@ -149,6 +147,7 @@ if(CAMERAUNLOCK_BUILD_UNREAL)
         set_target_properties(cameraunlock_unreal PROPERTIES
             STATIC_LIBRARY_OPTIONS "$<$<CONFIG:Release>:/LTCG>"
         )
+        target_link_options(cameraunlock_unreal INTERFACE "$<$<CONFIG:Release>:/LTCG>")
     endif()
 
     install(TARGETS cameraunlock_unreal
@@ -221,6 +220,7 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
         set_target_properties(cameraunlock_reframework PROPERTIES
             STATIC_LIBRARY_OPTIONS "$<$<CONFIG:Release>:/LTCG>"
         )
+        target_link_options(cameraunlock_reframework INTERFACE "$<$<CONFIG:Release>:/LTCG>")
     endif()
 
     install(TARGETS cameraunlock_reframework

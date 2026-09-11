@@ -23,7 +23,7 @@ test-cpp = { cmd = "ctest --test-dir cpp/build-test -C Release --output-on-failu
 # error in any of them reached a mod repo instead of this one. MinHook and the
 # REFramework SDK headers are both vendored, so this needs nothing off the network
 # and nothing from a game install.
-build-cpp = "cmake -S cpp -B cpp/build-test -DCMAKE_BUILD_TYPE=Release -DCAMERAUNLOCK_BUILD_HOOKS=ON -DCAMERAUNLOCK_BUILD_DISCOVERY=ON -DCAMERAUNLOCK_BUILD_UNREAL=ON -DCAMERAUNLOCK_BUILD_REFRAMEWORK=ON && cmake --build cpp/build-test --config Release"
+build-cpp = { cmd = "cmake -S cpp -B cpp/build-test -DCAMERAUNLOCK_BUILD_HOOKS=ON -DCAMERAUNLOCK_BUILD_DISCOVERY=ON -DCAMERAUNLOCK_BUILD_UNREAL=ON -DCAMERAUNLOCK_BUILD_REFRAMEWORK=ON && cmake --build cpp/build-test --config Release", env = { CMAKE_BUILD_TYPE = "Release" } }
 
 # Pipeline conformance vectors. data/pipeline-conformance.json is the executable
 # form of the "Check." paragraphs in docs/porting-the-pipeline.md, and the
