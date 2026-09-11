@@ -632,6 +632,7 @@
       "steam_app_id": 1458140,
       "steam_folder": "Pacific Drive",
       "executable_relpath": "PenDriverPro\\Binaries\\Win64\\PenDriverPro-Win64-Shipping.exe",
+      "msix_identity_name": "KeplerInteractive.PacificDrive",
       "xbox_executable_relpath": "PenDriverPro\\Binaries\\WinGDK\\PenDriverPro-WinGDK-Shipping.exe",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
@@ -869,6 +870,7 @@
       "steam_app_id": 201810,
       "steam_folder": "Wolfenstein.The.New.Order",
       "executable_relpath": "WolfNewOrder_x64.exe",
+      "msix_identity_name": "BethesdaSoftworks.WolfensteinTNO-PC",
       "loader": "AsiLoader",
       "repo": "itsloopyo/wolfenstein-the-new-order-headtracking",
       "engine": "id Tech",
@@ -1197,6 +1199,7 @@
       "gog_ids": [
         "1446213994"
       ],
+      "xbox_identity_name": "HelloGames.NoMansSky",
       "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/no-mans-sky-headtracking",
