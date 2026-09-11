@@ -861,9 +861,14 @@ function Find-GamePath {
     # the Xbox app, which unpacks Game Pass titles into a writable folder
     # at a path we can list; a Store package lives under WindowsApps in a
     # directory named for the current version, so only the package manager
-    # knows where it is right now.
+    # knows where it is right now. It is still the GDK build, so it is checked
+    # with the Xbox executable like everything else in priority 8 - Pacific
+    # Drive is the case that showed it, shipping
+    # PenDriverPro\Binaries\WinGDK\PenDriverPro-WinGDK-Shipping.exe with no
+    # Win64 directory at all, so the Steam relpath found nothing and the copy
+    # read as not installed.
     if ($Config.ContainsKey('MsixIdentityName') -and $Config.MsixIdentityName) {
-        $msixPath = Find-MsixGamePath -IdentityName $Config.MsixIdentityName -Executable $executable
+        $msixPath = Find-MsixGamePath -IdentityName $Config.MsixIdentityName -Executable $xboxExecutable
         if ($msixPath) {
             return $msixPath
         }
@@ -953,16 +958,18 @@ function Find-AllGamePaths {
             foreach ($path in $Config.$key) { $candidates.Add($path) }
         }
     }
-    if ($Config.ContainsKey('MsixIdentityName') -and $Config.MsixIdentityName) {
-        $candidates.Add((Find-MsixGamePath -IdentityName $Config.MsixIdentityName -Executable $executable))
-    }
-
+    # Two keys per hit: the path the caller gets, and the canonical one the
+    # de-duplication compares, which is the only one that can tell a junction
+    # from a second install.
     $found = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.List[string]]::new()
     foreach ($candidate in $candidates) {
         if (-not $candidate) { continue }
         if (-not (Test-GameInstallation -Path $candidate -Executable $executable)) { continue }
         $full = ([System.IO.Path]::GetFullPath($candidate)).TrimEnd('/', '\')
-        if ($found -contains $full) { continue }
+        $key = Get-CanonicalPath -Path $full
+        if ($seen -contains $key) { continue }
+        $seen.Add($key)
         $found.Add($full)
     }
 
@@ -988,10 +995,18 @@ function Find-AllGamePaths {
     foreach ($path in (Find-XboxGamePaths -Executable $xboxExecutable -IdentityName $xboxIdentity)) {
         $xboxCandidates.Add($path)
     }
+    # A Store package is the same GDK build and belongs in this group rather
+    # than the generic candidate list above, which checks for the Steam exe.
+    if ($Config.ContainsKey('MsixIdentityName') -and $Config.MsixIdentityName) {
+        $msixPath = Find-MsixGamePath -IdentityName $Config.MsixIdentityName -Executable $xboxExecutable
+        if ($msixPath) { $xboxCandidates.Add($msixPath) }
+    }
     foreach ($path in $xboxCandidates) {
         if (-not (Test-GameInstallation -Path $path -Executable $xboxExecutable)) { continue }
         $full = ([System.IO.Path]::GetFullPath($path)).TrimEnd('/', '\')
-        if ($found -contains $full) { continue }
+        $key = Get-CanonicalPath -Path $full
+        if ($seen -contains $key) { continue }
+        $seen.Add($key)
         $found.Add($full)
     }
 
@@ -1018,6 +1033,52 @@ function Get-ResolvedPathOrSelf {
     return $Path
 }
 
+<#
+.SYNOPSIS
+    Resolve a path through junctions and symlinks to the directory it really is.
+.DESCRIPTION
+    Resolve-Path does not follow reparse points, so one install reached by two
+    names compares as two installs. A Game Pass title is exactly that: the Xbox
+    app puts it in `<drive>\XboxGames\<Title>\Content` and the package manager
+    reports it under `C:\Program Files\WindowsApps\<package>`, which is a
+    junction to a junction to that same directory. Find-AllGamePaths promises a
+    de-duplicated list, so the key it compares has to see through them.
+
+    The link can sit at any ancestor rather than on the leaf, so each hop walks
+    up looking for the first reparse point and re-attaches the remainder. The
+    hop limit is there because a junction is allowed to point at its own parent.
+.OUTPUTS
+    System.String
+#>
+function Get-CanonicalPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $current = (Get-ResolvedPathOrSelf -Path $Path).TrimEnd('\')
+    for ($hop = 0; $hop -lt 16; $hop++) {
+        $probe = $current
+        $suffix = ''
+        $followed = $false
+        while ($probe) {
+            $item = Get-Item -Force -LiteralPath $probe -ErrorAction SilentlyContinue
+            if ($item -and $item.Target) {
+                $target = @($item.Target)[0].TrimEnd('\')
+                $current = if ($suffix) { Join-Path $target $suffix } else { $target }
+                $followed = $true
+                break
+            }
+            $parent = Split-Path $probe -Parent
+            if (-not $parent -or $parent -eq $probe) { break }
+            $leaf = Split-Path $probe -Leaf
+            $suffix = if ($suffix) { Join-Path $leaf $suffix } else { $leaf }
+            $probe = $parent
+        }
+        if (-not $followed) { break }
+    }
+    return $current.TrimEnd('\')
+}
+
 function Test-IsXboxPath {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -1037,6 +1098,22 @@ function Test-IsXboxPath {
         $rn = (Get-ResolvedPathOrSelf -Path $root).TrimEnd('\')
         if ($normalised.StartsWith($rn + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
+        }
+    }
+
+    # A Store package is a Game Pass copy that lives under WindowsApps rather
+    # than an Xbox root, in a directory named for the installed package version,
+    # so it matches neither the root scan above nor any configured path. Without
+    # this it reads as a Steam install and install.cmd derives the exe directory
+    # from a Win64 relpath the GDK build does not have.
+    if ($Config.ContainsKey('MsixIdentityName') -and $Config.MsixIdentityName) {
+        $package = Get-AppxPackage -Name $Config.MsixIdentityName -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($package -and $package.InstallLocation) {
+            $pn = (Get-ResolvedPathOrSelf -Path $package.InstallLocation).TrimEnd('\')
+            if ([string]::Equals($normalised, $pn, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
         }
     }
 
