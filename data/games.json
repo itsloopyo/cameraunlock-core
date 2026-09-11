@@ -858,6 +858,11 @@
       "steam_app_id": 1211020,
       "steam_folder": "Wobbly Life",
       "executable_relpath": "Wobbly Life.exe",
+      "xbox_paths": [
+        "C:\\XboxGames\\Wobbly Life\\Content",
+        "D:\\XboxGames\\Wobbly Life\\Content"
+      ],
+      "msix_identity_name": "10192RubberBandGames.WobblyLife",
       "loader": "BepInEx5",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/wobbly-life-headtracking",
@@ -1515,6 +1520,11 @@
       "steam_app_id": 1465360,
       "steam_folder": "SnowRunner",
       "executable_relpath": "Sources\\Bin\\SnowRunner.exe",
+      "xbox_paths": [
+        "C:\\XboxGames\\SnowRunner - Windows10\\Content"
+      ],
+      "xbox_executable_relpath": "SnowRunner.exe",
+      "msix_identity_name": "FocusHomeInteractiveSA.SnowRunnerWindows10",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/snowrunner-headtracking",
