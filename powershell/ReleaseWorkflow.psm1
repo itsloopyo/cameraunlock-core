@@ -1055,7 +1055,14 @@ function Sync-CoreCommitInNotices {
     # Split on `n only, so each element keeps any trailing `r: joining them
     # back reproduces the file's own line endings rather than normalising a
     # whole file to CRLF for the sake of one hash.
-    $raw   = Get-Content -LiteralPath $noticesPath -Raw
+    #
+    # Read and write through the same strict UTF-8 encoding. Windows PowerShell
+    # 5.1's Get-Content decodes a BOM-less file as the ANSI codepage, so each
+    # restamp turned every non-ASCII byte of the file into mojibake and wrote
+    # that back out as UTF-8, compounding on every bump. Strict decoding throws
+    # on a file that is not valid UTF-8 instead of rewriting it.
+    $utf8  = New-Object System.Text.UTF8Encoding($false, $true)
+    $raw   = [System.IO.File]::ReadAllText($noticesPath, $utf8)
     $lines = $raw -split "`n"
 
     $inCoreSection = $false
@@ -1119,8 +1126,7 @@ function Sync-CoreCommitInNotices {
     }
 
     if ($changed -and -not $ReadOnly) {
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($noticesPath, ($lines -join "`n"), $utf8NoBom)
+        [System.IO.File]::WriteAllText($noticesPath, ($lines -join "`n"), $utf8)
     }
 
     return [PSCustomObject]@{

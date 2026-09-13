@@ -99,7 +99,11 @@ Set-Content -LiteralPath (Join-Path $noticesRepo '.gitmodules') -Value @'
 & git -C $noticesRepo -c user.email=t@t -c user.name=t commit -q -m pin
 
 $notices = Join-Path $noticesRepo 'THIRD-PARTY-NOTICES.md'
+# Built from code points so this script's own encoding cannot mask the defect.
+$holder = 'S' + [char]0x0142 + 'awomir B' + [char]0x0142 + 'auciak'
 $body = @"
+Copyright (C) 2009-2025 $holder
+
 | Component | Commit | Licence | Notes |
 | --- | --- | --- | --- |
 | cameraunlock-core | 1111111111111111111111111111111111111111 | MIT | Compiled in |
@@ -126,6 +130,14 @@ Check "a MinHook hash on a row naming cameraunlock-core is left alone" ($written
 Check "a MinHook hash in MinHook's own section is left alone" ($written -match "## MinHook\r?\n\r?\n- Pinned commit: ``$other``") "MinHook section was rewritten"
 Check "a MinHook bullet inside the core section is left alone" ($written -match "- MinHook commit: ``$other``") 'a labelled foreign bullet was rewritten'
 Check 'only the two core hashes were counted' ($state.Recorded -eq 2) "Recorded = $($state.Recorded)"
+Check 'non-ASCII text survives a restamp as UTF-8' ($written.Contains("Copyright (C) 2009-2025 $holder")) 'the copyright holder was re-encoded'
+
+$latin1 = Join-Path $sandbox 'not-utf8'
+New-Item -ItemType Directory -Path $latin1 -Force | Out-Null
+[System.IO.File]::WriteAllBytes((Join-Path $latin1 'THIRD-PARTY-NOTICES.md'), [byte[]](0x42, 0x6A, 0xF6, 0x72, 0x6E, 0x0A))
+$threw = $false
+try { Sync-CoreCommitInNotices -RepoRoot $latin1 -Commit $pin | Out-Null } catch { $threw = $true }
+Check 'a notices file that is not UTF-8 is refused, not rewritten' $threw 'no exception'
 
 # --- Set-CsprojVersion preserves encoding ----------------------------------
 
