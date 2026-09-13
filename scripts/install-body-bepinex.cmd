@@ -44,6 +44,7 @@
 ::                            silently and does nothing. Leave all three unset
 ::                            and nothing below changes.
 ::   MOD_CONTROLS             optional post-install help text
+::   IL2CPP_MOD_DLLS          optional DLL list replacing MOD_DLLS for IL2CPP
 ::
 :: Launcher CLI (passed through %*): [GAME_PATH] [/y] [/force]
 ::   /force is accepted and ignored - it only means something to uninstall.
@@ -232,6 +233,7 @@ if defined IL2CPP_VENDOR_ZIP_NAME (
     )
     if exist "!GAME_PATH!\GameAssembly.dll" (
         set "_IL2CPP=1"
+        if defined IL2CPP_MOD_DLLS set "MOD_DLLS=!IL2CPP_MOD_DLLS!"
         echo This is the IL2CPP build of the game - using the BepInEx 6 payload.
         echo.
     )

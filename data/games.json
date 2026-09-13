@@ -1553,6 +1553,8 @@
       "steam_folder": "Superliminal",
       "executable_relpath": "SuperliminalSteam.exe",
       "xbox_executable_relpath": "Superliminal.exe",
+      "msix_identity_name": "PillowCastle.Superliminal",
+      "xbox_paths": ["C:\\XboxGames\\Superliminal\\Content"],
       "data_folder": "SuperliminalSteam_Data",
       "loader": "BepInEx5",
       "delivery_mode": "manifest",
