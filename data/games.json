@@ -270,7 +270,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/starfield-headtracking",
       "engine": "Creation Engine 2",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "subnautica": {
       "display_name": "Subnautica",
