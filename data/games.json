@@ -1575,6 +1575,19 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/far-cry-6-headtracking",
       "catalog_status": "prerelease"
+    },
+    "viewfinder": {
+      "display_name": "Viewfinder",
+      "env_var": "VIEWFINDER_PATH",
+      "steam_app_id": 1382070,
+      "steam_folder": "Viewfinder",
+      "executable_relpath": "Viewfinder.exe",
+      "data_folder": "Viewfinder_Data",
+      "loader": "BepInEx6",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/viewfinder-headtracking",
+      "engine": "Unity",
+      "catalog_status": "absent"
     }
   }
 }
