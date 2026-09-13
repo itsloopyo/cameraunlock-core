@@ -1560,7 +1560,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/superliminal-headtracking",
       "engine": "Unity",
-      "catalog_status": "prerelease"
+      "catalog_status": "released"
     },
     "arx-fatalis": {
       "display_name": "Arx Fatalis",
