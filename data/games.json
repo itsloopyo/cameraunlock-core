@@ -598,7 +598,7 @@
       "loader": "Shim",
       "repo": "itsloopyo/outlast-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "dragon-age-inquisition": {
       "display_name": "Dragon Age: Inquisition",
@@ -992,7 +992,7 @@
       "loader": "AsiLoader",
       "repo": "itsloopyo/portal-headtracking",
       "engine": "Source",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "portal-2": {
       "display_name": "Portal 2",
@@ -1315,7 +1315,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/the-vanishing-of-ethan-carter-redux-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "edith-finch": {
       "display_name": "What Remains of Edith Finch",
