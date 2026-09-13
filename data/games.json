@@ -1588,6 +1588,18 @@
       "repo": "itsloopyo/viewfinder-headtracking",
       "engine": "Unity",
       "catalog_status": "absent"
+    },
+    "routine": {
+      "display_name": "Routine",
+      "env_var": "ROUTINE_PATH",
+      "steam_app_id": 606160,
+      "steam_folder": "Routine",
+      "executable_relpath": "Routine\\Binaries\\Win64\\Routine-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/routine-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     }
   }
 }
