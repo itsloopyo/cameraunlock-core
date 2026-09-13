@@ -673,9 +673,6 @@
       "display_name": "Dishonored: Definitive Edition",
       "env_var": "DISHONORED_DEFINITIVE_EDITION_PATH",
       "executable_relpath": "Binaries\\Win64\\Dishonored.exe",
-      "xbox_paths": [
-        "C:\\XboxGames\\Dishonored- Definitive Edition (PC)\\Content"
-      ],
       "msix_identity_name": "BethesdaSoftworks.DishonoredDE-PC",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
@@ -858,10 +855,6 @@
       "steam_app_id": 1211020,
       "steam_folder": "Wobbly Life",
       "executable_relpath": "Wobbly Life.exe",
-      "xbox_paths": [
-        "C:\\XboxGames\\Wobbly Life\\Content",
-        "D:\\XboxGames\\Wobbly Life\\Content"
-      ],
       "msix_identity_name": "10192RubberBandGames.WobblyLife",
       "loader": "BepInEx5",
       "delivery_mode": "manifest_variants",
@@ -879,7 +872,7 @@
       "loader": "AsiLoader",
       "repo": "itsloopyo/wolfenstein-the-new-order-headtracking",
       "engine": "id Tech",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "zeepkist": {
       "display_name": "Zeepkist",
@@ -939,7 +932,7 @@
       "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/the-witness-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "mafia-ii-definitive-edition": {
       "display_name": "Mafia II: Definitive Edition",
@@ -1341,9 +1334,6 @@
       "gog_ids": [
         "1158493447"
       ],
-      "xbox_paths": [
-        "C:\\XboxGames\\Prey\\Content"
-      ],
       "xbox_executable_relpath": "Binaries\\Danielle\\Gaming.Desktop.x64\\Release\\Prey.exe",
       "loader": "AsiLoader",
       "delivery_mode": "install_cmd",
@@ -1524,9 +1514,6 @@
       "steam_app_id": 1465360,
       "steam_folder": "SnowRunner",
       "executable_relpath": "Sources\\Bin\\SnowRunner.exe",
-      "xbox_paths": [
-        "C:\\XboxGames\\SnowRunner - Windows10\\Content"
-      ],
       "xbox_executable_relpath": "SnowRunner.exe",
       "msix_identity_name": "FocusHomeInteractiveSA.SnowRunnerWindows10",
       "loader": "AsiLoader",
@@ -1554,7 +1541,6 @@
       "executable_relpath": "SuperliminalSteam.exe",
       "xbox_executable_relpath": "Superliminal.exe",
       "msix_identity_name": "PillowCastle.Superliminal",
-      "xbox_paths": ["C:\\XboxGames\\Superliminal\\Content"],
       "data_folder": "SuperliminalSteam_Data",
       "loader": "BepInEx5",
       "delivery_mode": "manifest",
