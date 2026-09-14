@@ -706,6 +706,20 @@
       "repo": "itsloopyo/dead-rising-2-headtracking",
       "catalog_status": "absent"
     },
+    "dead-space": {
+      "display_name": "Dead Space",
+      "env_var": "DEAD_SPACE_PATH",
+      "steam_app_id": 1693980,
+      "executable_relpath": "Dead Space.exe",
+      "ea_search_paths": [
+        "C:\\Program Files\\EA Games\\Dead Space (2023)"
+      ],
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dead-space-headtracking",
+      "engine": "Frostbite",
+      "catalog_status": "absent"
+    },
     "deus-ex-human-revolution": {
       "display_name": "Deus Ex: Human Revolution - Director's Cut",
       "env_var": "DXHR_PATH",
