@@ -1600,6 +1600,18 @@
       "repo": "itsloopyo/routine-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
+    },
+    "ready-or-not": {
+      "display_name": "Ready or Not",
+      "env_var": "READY_OR_NOT_PATH",
+      "steam_app_id": 1144200,
+      "steam_folder": "Ready Or Not",
+      "executable_relpath": "ReadyOrNot\\Binaries\\Win64\\ReadyOrNotSteam-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/ready-or-not-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     }
   }
 }
