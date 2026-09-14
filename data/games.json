@@ -1612,6 +1612,18 @@
       "repo": "itsloopyo/ready-or-not-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
+    },
+    "sniper-elite-v2-remastered": {
+      "display_name": "Sniper Elite V2 Remastered",
+      "env_var": "SNIPER_ELITE_V2_REMASTERED_PATH",
+      "steam_app_id": 728740,
+      "steam_folder": "Sniper Elite V2 Remastered",
+      "executable_relpath": "bin\\SEV2_Remastered.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/sniper-elite-v2-remastered-headtracking",
+      "engine": "Asura",
+      "catalog_status": "absent"
     }
   }
 }
