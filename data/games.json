@@ -1048,6 +1048,20 @@
       "repo": "itsloopyo/titanfall-2-headtracking",
       "catalog_status": "prerelease"
     },
+    "trepang2": {
+      "display_name": "Trepang2",
+      "env_var": "TREPANG2_PATH",
+      "steam_app_id": 1164940,
+      "steam_folder": "Trepang2",
+      "executable_relpath": "CPPFPS\\Binaries\\Win64\\CPPFPS-Win64-Shipping.exe",
+      "msix_identity_name": "Team17DigitalLimited.Trepang2",
+      "xbox_executable_relpath": "CPPFPS\\Binaries\\WinGDK\\CPPFPS-WinGDK-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/trepang2-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
+    },
     "black-and-white": {
       "display_name": "Black & White",
       "env_var": "BLACK_AND_WHITE_PATH",
