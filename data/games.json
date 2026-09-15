@@ -1652,6 +1652,17 @@
       "repo": "itsloopyo/sniper-elite-v2-remastered-headtracking",
       "engine": "Asura",
       "catalog_status": "absent"
+    },
+    "roadcraft": {
+      "display_name": "RoadCraft",
+      "env_var": "ROADCRAFT_PATH",
+      "steam_app_id": 2104890,
+      "steam_folder": "RoadCraft",
+      "executable_relpath": "root\\bin\\pc\\Roadcraft - Retail.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/roadcraft-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
