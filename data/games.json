@@ -1615,7 +1615,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/viewfinder-headtracking",
       "engine": "Unity",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "routine": {
       "display_name": "Routine",
