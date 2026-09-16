@@ -822,7 +822,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/the-forest-headtracking",
       "engine": "Unity",
-      "catalog_status": "prerelease"
+      "catalog_status": "absent"
     },
     "sons-of-the-forest": {
       "display_name": "Sons of the Forest",
@@ -888,7 +888,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/indiana-jones-and-the-great-circle-headtracking",
       "engine": "id Tech",
-      "catalog_status": "prerelease"
+      "catalog_status": "absent"
     },
     "wolfenstein-the-new-order": {
       "display_name": "Wolfenstein: The New Order",
@@ -1049,7 +1049,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/tiny-tinas-wonderlands-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "prerelease"
+      "catalog_status": "absent"
     },
     "titanfall-2": {
       "display_name": "Titanfall 2",
@@ -1228,7 +1228,7 @@
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/mudrunner-headtracking",
-      "catalog_status": "prerelease"
+      "catalog_status": "absent"
     },
     "no-mans-sky": {
       "display_name": "No Man's Sky",
@@ -1573,7 +1573,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/thief-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "prerelease"
+      "catalog_status": "absent"
     },
     "superliminal": {
       "display_name": "Superliminal",
@@ -1616,7 +1616,7 @@
       "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/far-cry-6-headtracking",
-      "catalog_status": "prerelease"
+      "catalog_status": "absent"
     },
     "viewfinder": {
       "display_name": "Viewfinder",
