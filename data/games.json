@@ -1217,7 +1217,7 @@
       "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/stormworks-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "mudrunner": {
       "display_name": "MudRunner",
