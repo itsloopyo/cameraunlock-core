@@ -1676,7 +1676,7 @@
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/roadcraft-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     }
   }
 }
