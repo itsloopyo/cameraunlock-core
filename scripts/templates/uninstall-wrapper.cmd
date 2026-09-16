@@ -53,6 +53,11 @@ set "PATCH_MARKER="
 :: MonoCecil: extra files to also remove from MANAGED_SUBFOLDER (config/log
 :: files left behind by the mod itself).
 set "MANAGED_EXTRAS="
+:: None (shim): the byte sequence every build of this mod's shim carries. Tells
+:: the mod's own DLL from the user's original, so a <name>.backup that an older
+:: installer captured by comparing bytes is discarded rather than restored into
+:: the game folder. MUST match install.cmd's value.
+set "SHIM_MARKER="
 :: ASILoader: filename the ASI DLL was renamed to. Defaults to winmm.dll.
 set "ASI_LOADER_NAME=winmm.dll"
 :: ASILoader: subdirectory below the exe directory the payload went into. MUST

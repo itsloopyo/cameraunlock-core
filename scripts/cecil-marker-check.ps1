@@ -2,23 +2,28 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Reports whether a Mono.Cecil-patched assembly already carries a patch marker.
+    Reports whether a file carries a marker byte sequence. Named for its first
+    caller; the shim bodies ask the same question of a DLL.
 .DESCRIPTION
-    The cecil install/uninstall bodies must never capture or trust a backup
-    taken from an already-patched Assembly-CSharp.dll - that is how a patched
-    file ends up masquerading as the pristine .original and a later uninstall
-    restores a broken assembly. findstr is unreliable on multi-MB binaries
-    (line-length limits), so this reads the raw bytes and searches for the
-    marker's ASCII byte sequence.
+    Two callers, two questions of the same bytes. The cecil install/uninstall
+    bodies must never capture or trust a backup taken from an already-patched
+    Assembly-CSharp.dll - that is how a patched file ends up masquerading as the
+    pristine .original and a later uninstall restores a broken assembly. The
+    shim bodies ask whether the DLL already sitting at a system DLL's name is
+    one of this mod's own builds, which is what decides whether that file is the
+    user's original and has to be preserved as <name>.backup.
+
+    findstr is unreliable on multi-MB binaries (line-length limits), so this
+    reads the raw bytes and searches for the marker's ASCII byte sequence.
 
     Exit codes:
-      0  marker present (assembly is patched)
-      1  marker absent  (assembly is clean / pristine)
+      0  marker present
+      1  marker absent
       2  error (file missing or unreadable)
 .PARAMETER AssemblyPath
-    Path to the assembly to inspect.
+    Path to the file to inspect.
 .PARAMETER Marker
-    The patch marker string (e.g. HeadTracking_Patched_GoneHome_v4).
+    The marker string (e.g. HeadTracking_Patched_GoneHome_v4).
 #>
 param(
     [Parameter(Mandatory=$true)][string]$AssemblyPath,

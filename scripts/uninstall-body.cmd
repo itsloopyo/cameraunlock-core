@@ -35,6 +35,9 @@
 ::   LEGACY_DLLS        - optional extra DLLs from older versions to clean up
 ::   MOD_SEED_FILES     - optional config files install.cmd seeded write-if-
 ::                        absent; must match install.cmd's list
+::   SHIM_MARKER        - None only: byte sequence every build of this mod's
+::                        shim carries; tells the mod's own DLL from the user's
+::                        original. Must match install.cmd's value
 ::   MANAGED_SUBFOLDER  - MonoCecil only: path under GAME_PATH containing
 ::                        Assembly-CSharp.dll
 ::   ASSEMBLY_DLL       - MonoCecil only: assembly to restore from .original
@@ -265,7 +268,12 @@ if errorlevel 1 exit /b 1
 
 :: -------- Remove mod files (framework-aware) --------
 if /i "%FRAMEWORK_TYPE%"=="None" (
+    rem `if errorlevel` is a live read, not a %errorlevel% expansion, so it
+    rem works inside this block. Without it a shim removal that refused to run
+    rem - no SHIM_MARKER to tell this mod's DLLs from the user's - carried on
+    rem into "Uninstall Complete" and deleted the state file.
     call :remove_shim_files
+    if errorlevel 1 exit /b 1
 ) else if /i "%FRAMEWORK_TYPE%"=="UE4SS" (
     rem The mod folder and its mods.txt line are ours whoever installed the
     rem loader, so they come off here, not in the installed_by_us-gated step.
@@ -653,35 +661,22 @@ exit /b 0
 :: ============================================
 :: Remove shim DLLs - restore <name>.backup if present so the user's
 :: pre-mod state comes back. Also handles any LEGACY_DLLS list entries.
+::
+:: SHIM_MARKER is what tells this mod's own DLLs from the user's. Without it a
+:: .backup cannot be trusted either way, so this refuses to run rather than
+:: guess - the same stance the Cecil path takes on PATCH_MARKER.
 :: ============================================
 :remove_shim_files
 echo Removing shim files...
+if not defined SHIM_MARKER (
+    echo   ERROR: SHIM_MARKER is not set in the uninstall.cmd CONFIG BLOCK.
+    echo   Cannot tell this mod's own DLLs from your originals; aborting.
+    exit /b 1
+)
 set "REMOVED=0"
 for %%f in (%MOD_DLLS%) do (
-    if exist "!DEPLOY_DIR!\%%f.backup" (
-        set "_DEL_PATH=!DEPLOY_DIR!\%%f"
-        set "_DEL_LABEL=%%f"
-        call :del_one >nul
-        if exist "!DEPLOY_DIR!\%%f" (
-            echo   ERROR: could not remove %%f, so the original cannot be put back.
-        ) else (
-            move /y "!DEPLOY_DIR!\%%f.backup" "!DEPLOY_DIR!\%%f" >nul
-            if errorlevel 1 (
-                echo   ERROR: could not restore the original %%f from %%f.backup.
-                set "_REMOVE_FAILED=1"
-            ) else (
-                echo   Restored original %%f from backup
-            )
-        )
-        set /a REMOVED+=1
-    ) else (
-        if exist "!DEPLOY_DIR!\%%f" (
-            set "_DEL_PATH=!DEPLOY_DIR!\%%f"
-            set "_DEL_LABEL=%%f (no backup was present)"
-            call :del_one
-            set /a REMOVED+=1
-        )
-    )
+    set "_SHIM_FILE=%%f"
+    call :remove_one_shim
 )
 if defined LEGACY_DLLS (
     for %%f in (%LEGACY_DLLS%) do (
@@ -694,6 +689,63 @@ if defined LEGACY_DLLS (
     )
 )
 if "!REMOVED!"=="0" echo   No shim files found
+exit /b 0
+
+:: ============================================
+:: Remove one MOD_DLLS entry and put the user's original back if there is a real
+:: one. _SHIM_FILE = the filename; bumps REMOVED.
+::
+:: A <name>.backup carrying SHIM_MARKER is not the user's original at all - it
+:: is a build of this mod that an older installer captured by comparing bytes
+:: against the version it was shipping, which differ on every upgrade. Restoring
+:: one leaves a mod DLL in the game folder after an uninstall that reported
+:: success, and for a forwarding shim the restored proxy forwards into the
+:: SYSTEM_DLL_COPY this same loop deletes, so the game stops launching. Discard
+:: it instead.
+:: ============================================
+:remove_one_shim
+set "_SHIM_SUFFIX= (no backup was present)"
+if not exist "!DEPLOY_DIR!\!_SHIM_FILE!.backup" goto :shim_no_backup
+set "_MARKER_PATH=!DEPLOY_DIR!\!_SHIM_FILE!.backup"
+set "_MARKER_VALUE=!SHIM_MARKER!"
+call :marker_state
+if errorlevel 2 (
+    echo   ERROR: could not read !_SHIM_FILE!.backup to tell whether it is your
+    echo   original. Leaving both files alone.
+    set "_REMOVE_FAILED=1"
+    exit /b 1
+)
+if errorlevel 1 goto :shim_restore
+set "_DEL_PATH=!DEPLOY_DIR!\!_SHIM_FILE!.backup"
+set "_DEL_LABEL=!_SHIM_FILE!.backup (a copy of this mod, not your original)"
+call :del_one
+set "_SHIM_SUFFIX="
+goto :shim_no_backup
+
+:shim_restore
+set "_DEL_PATH=!DEPLOY_DIR!\!_SHIM_FILE!"
+set "_DEL_LABEL=!_SHIM_FILE!"
+call :del_one >nul
+if exist "!DEPLOY_DIR!\!_SHIM_FILE!" (
+    echo   ERROR: could not remove !_SHIM_FILE!, so the original cannot be put back.
+    exit /b 1
+)
+move /y "!DEPLOY_DIR!\!_SHIM_FILE!.backup" "!DEPLOY_DIR!\!_SHIM_FILE!" >nul
+if errorlevel 1 (
+    echo   ERROR: could not restore the original !_SHIM_FILE! from !_SHIM_FILE!.backup.
+    set "_REMOVE_FAILED=1"
+    exit /b 1
+)
+echo   Restored original !_SHIM_FILE! from backup
+set /a REMOVED+=1
+exit /b 0
+
+:shim_no_backup
+if not exist "!DEPLOY_DIR!\!_SHIM_FILE!" exit /b 0
+set "_DEL_PATH=!DEPLOY_DIR!\!_SHIM_FILE!"
+set "_DEL_LABEL=!_SHIM_FILE!!_SHIM_SUFFIX!"
+call :del_one
+set /a REMOVED+=1
 exit /b 0
 
 :: ============================================
@@ -765,7 +817,8 @@ if not exist "!BACKUP_PATH!" (
     rem No backup. Safe only if the live assembly is already clean; otherwise
     rem removing the mod DLLs would orphan a patched assembly.
     set "_MARKER_PATH=!ASSEMBLY_PATH!"
-    call :cecil_marker_state
+    set "_MARKER_VALUE=!PATCH_MARKER!"
+    call :marker_state
     if errorlevel 2 ( echo   ERROR: could not verify %ASSEMBLY_DLL% patch state. & exit /b 1 )
     if errorlevel 1 ( echo   No backup, and %ASSEMBLY_DLL% is already clean - nothing to restore. & exit /b 0 )
     echo   ERROR: %ASSEMBLY_DLL% is patched but no .original backup exists.
@@ -773,7 +826,8 @@ if not exist "!BACKUP_PATH!" (
     exit /b 1
 )
 set "_MARKER_PATH=!BACKUP_PATH!"
-call :cecil_marker_state
+set "_MARKER_VALUE=!PATCH_MARKER!"
+call :marker_state
 if errorlevel 2 ( echo   ERROR: could not read %ASSEMBLY_DLL%.original to verify it is pristine. & exit /b 1 )
 if errorlevel 1 goto :_cecil_restore
 echo   ERROR: %ASSEMBLY_DLL%.original is patched - corrupt backup, not restoring.
@@ -794,19 +848,22 @@ call :del_one
 exit /b 0
 
 :: ============================================
-:: Resolve the marker-check helper and report whether _MARKER_PATH is patched.
-:: The path travels in a variable rather than as an argument because `%~1` is
-:: substituted before cmd.exe scans for `!`, so a game folder with a `!` in it
-:: would arrive here already truncated.
-:: Returns errorlevel 0 = patched, 1 = pristine, 2 = error. Requires
-:: PATCH_MARKER. Kept as its own routine so the errorlevel reads stay outside
-:: parenthesised blocks where %errorlevel% would expand too early.
+:: Resolve the marker-check helper and report whether the file at _MARKER_PATH
+:: carries _MARKER_VALUE. Both travel in variables rather than as arguments
+:: because `%~1` is substituted before cmd.exe scans for `!`, so a game folder
+:: with a `!` in it would arrive here already truncated.
+::
+:: Returns errorlevel 0 = marker present, 1 = absent, 2 = error. Two callers ask
+:: two questions of the same bytes: the Cecil path whether an assembly is
+:: patched, the shim path whether a DLL is one of this mod's own builds. Kept as
+:: its own routine so the errorlevel reads stay outside parenthesised blocks,
+:: where %errorlevel% would expand too early.
 :: ============================================
-:cecil_marker_state
+:marker_state
 set "_MARKER_CHECK=!SCRIPT_DIR!shared\cecil-marker-check.ps1"
 if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=!SCRIPT_DIR!..\cameraunlock-core\scripts\cecil-marker-check.ps1"
 if not exist "!_MARKER_CHECK!" exit /b 2
-powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_MARKER_PATH!" -Marker "%PATCH_MARKER%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_MARKER_PATH!" -Marker "!_MARKER_VALUE!"
 exit /b %errorlevel%
 
 :: ============================================

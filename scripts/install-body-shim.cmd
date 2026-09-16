@@ -19,6 +19,8 @@
 ::   WRAPPER_DIR              wrapper's %~dp0
 ::   GAME_ID, MOD_DISPLAY_NAME, MOD_DLLS, MOD_INTERNAL_NAME, MOD_VERSION
 ::   STATE_FILE, FRAMEWORK_TYPE (always "None")
+::   SHIM_MARKER              byte sequence every build of the shim carries; how
+::                            a file already at that name is told from the user's
 ::   MOD_SEED_FILES           optional config files written only when absent
 ::   MOD_CONTROLS             optional post-install help text
 ::
@@ -134,7 +136,7 @@ goto :strip_given_slash
 :: Every name below is interpolated straight into a path that gets written,
 :: deleted or recursively removed. A blank one does not fail - it silently
 :: retargets the operation at the parent directory, which is the game folder.
-for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS) do (
+for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS SHIM_MARKER) do (
     if not defined %%v (
         echo ERROR: %%v is not set in this script's CONFIG BLOCK.
         exit /b 1
@@ -216,10 +218,10 @@ if not errorlevel 1 (
 ::
 :: MOD_SEED_FILES are the mod's own config, and they go through the loop below
 :: this one instead: written once, never overwritten, never backed up. Listing a
-:: config in MOD_DLLS puts it through the unconditional copy and the byte
-:: compare, and both readings of it are wrong - the copy resets every key the
-:: user tuned, and the compare then records that tuned file as "the game's
-:: original", so uninstall plants a mod file back in the game folder.
+:: config in MOD_DLLS puts it through the unconditional copy and the marker
+:: check, and both readings of it are wrong - the copy resets every key the user
+:: tuned, and the check then records that tuned file as "the game's original",
+:: so uninstall plants a mod file back in the game folder.
 echo Deploying shim files...
 
 set "SRC_DIR=!SCRIPT_DIR!plugins"
@@ -249,44 +251,9 @@ if defined MOD_SEED_FILES (
 )
 
 for %%f in (%MOD_DLLS%) do (
-    if not exist "!SRC_DIR!\%%f" (
-        echo   ERROR: %%f not found in plugins folder
-        set "DEPLOY_FAILED=1"
-    ) else (
-        set "_BACKUP_OK=1"
-        rem Decided PER FILE by CONTENT, not by whether this is the first install.
-        rem Two failure modes have to be avoided at once. Backing up unconditionally
-        rem enshrines OUR shim as "the original" on the second install of a game that
-        rem ships no such DLL, so uninstall reinstalls the mod. Gating the whole backup
-        rem on first-install instead means a DLL newly ADDED to MOD_DLLS in a later mod
-        rem version overwrites the game's real file with no backup at all. Comparing
-        rem the bytes answers the actual question for a BINARY we ship whole and never
-        rem edit: is the file already there ours? It answers it wrongly for anything the
-        rem user or the game writes to, which is why config belongs in MOD_SEED_FILES.
-        if exist "!EXE_DIR!\%%f" if not exist "!EXE_DIR!\%%f.backup" (
-            fc /b "!EXE_DIR!\%%f" "!SRC_DIR!\%%f" >nul 2>&1
-            if errorlevel 1 (
-                copy /y "!EXE_DIR!\%%f" "!EXE_DIR!\%%f.backup" >nul
-                if errorlevel 1 (
-                    set "_BACKUP_OK="
-                ) else (
-                    echo   Backed up original %%f to %%f.backup
-                )
-            )
-        )
-        if defined _BACKUP_OK (
-            copy /y "!SRC_DIR!\%%f" "!EXE_DIR!\%%f" >nul
-            if errorlevel 1 (
-                echo   ERROR: Failed to copy %%f - is the game folder writable?
-                set "DEPLOY_FAILED=1"
-            ) else (
-                echo   Deployed %%f
-            )
-        ) else (
-            echo   ERROR: Failed to back up the existing %%f - not overwriting it.
-            set "DEPLOY_FAILED=1"
-        )
-    )
+    set "_SHIM_FILE=%%f"
+    call :deploy_one_shim
+    if errorlevel 1 set "DEPLOY_FAILED=1"
 )
 
 if "!DEPLOY_FAILED!"=="1" (
@@ -320,6 +287,77 @@ echo %MOD_CONTROLS%
 echo.
 :controls_done
 exit /b 0
+
+:: ============================================
+:: Deploy one MOD_DLLS entry, backing up whatever already sits at that name only
+:: when it is not one of ours. _SHIM_FILE = the filename.
+::
+:: Identity is answered by SHIM_MARKER - a byte sequence every build of this
+:: mod's shim carries - and not by comparing the installed bytes against the
+:: ones about to be written. That compare answers "is this byte-identical to
+:: THIS build", which is a different question. On an upgrade the file sitting
+:: there is the PREVIOUS version's shim, its bytes differ, and it gets copied to
+:: <name>.backup - that is, recorded as the user's pre-mod original. Uninstall
+:: then restores it: for a plain shim that silently reinstalls the mod, and for
+:: a forwarding shim it puts back a proxy whose forwards point at the
+:: SYSTEM_DLL_COPY the same uninstall has just deleted, so the game stops
+:: starting at all.
+::
+:: The two failure modes either side of this still have to be avoided. Backing
+:: up unconditionally enshrines our own shim as "the original" for a game that
+:: ships no file of that name. Gating the backup on first-install instead means
+:: a DLL newly ADDED to MOD_DLLS in a later mod version overwrites the game's
+:: real file with no backup at all.
+:: ============================================
+:deploy_one_shim
+if not exist "!SRC_DIR!\!_SHIM_FILE!" (
+    echo   ERROR: !_SHIM_FILE! not found in plugins folder
+    exit /b 1
+)
+if exist "!EXE_DIR!\!_SHIM_FILE!.backup" goto :shim_deploy
+if not exist "!EXE_DIR!\!_SHIM_FILE!" goto :shim_deploy
+set "_MARKER_PATH=!EXE_DIR!\!_SHIM_FILE!"
+call :marker_state
+if errorlevel 2 (
+    echo   ERROR: could not read !_SHIM_FILE! to tell whether it is this mod's own
+    echo   file. Not overwriting it.
+    exit /b 1
+)
+if errorlevel 1 (
+    copy /y "!EXE_DIR!\!_SHIM_FILE!" "!EXE_DIR!\!_SHIM_FILE!.backup" >nul
+    if errorlevel 1 (
+        echo   ERROR: Failed to back up the existing !_SHIM_FILE! - not overwriting it.
+        exit /b 1
+    )
+    echo   Backed up original !_SHIM_FILE! to !_SHIM_FILE!.backup
+)
+:shim_deploy
+copy /y "!SRC_DIR!\!_SHIM_FILE!" "!EXE_DIR!\!_SHIM_FILE!" >nul
+if errorlevel 1 (
+    echo   ERROR: Failed to copy !_SHIM_FILE! - is the game folder writable?
+    exit /b 1
+)
+echo   Deployed !_SHIM_FILE!
+exit /b 0
+
+:: ============================================
+:: Report whether the file at _MARKER_PATH carries SHIM_MARKER. The path travels
+:: in a variable rather than as an argument because `%~1` is substituted before
+:: cmd.exe scans for `!`, so a game folder with a `!` in it would arrive here
+:: already truncated.
+::
+:: Returns errorlevel 0 = ours, 1 = not ours, 2 = could not tell. The helper is
+:: the one the Cecil path uses to keep a patched assembly out of a pristine
+:: backup; what it answers is "does this file contain these bytes", which is the
+:: question here too. Kept as its own routine so the errorlevel reads stay
+:: outside parenthesised blocks, where %errorlevel% would expand too early.
+:: ============================================
+:marker_state
+set "_MARKER_CHECK=!SCRIPT_DIR!shared\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=!SCRIPT_DIR!..\cameraunlock-core\scripts\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" exit /b 2
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_MARKER_PATH!" -Marker "!SHIM_MARKER!"
+exit /b %errorlevel%
 
 :: UTC ISO-8601, read through PowerShell: %DATE% is whatever the user's regional
 :: settings say and is not parseable, and WMIC is gone from current Windows 11.

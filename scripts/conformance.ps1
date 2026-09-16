@@ -56,7 +56,7 @@ $ACTION_PINS = (Get-Content -LiteralPath (Join-Path $CoreRoot 'scripts/templates
 
 $CHECK_IDS = @(
     'install-wrapper', 'delayed-expansion', 'arg-parser', 'config-block', 'config-pairing',
-    'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
+    'shim-marker', 'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
     'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme'
 )
 
@@ -389,7 +389,7 @@ function Test-ConfigBlock {
 $CONFIG_PAIRED = @(
     'GAME_ID', 'MOD_DISPLAY_NAME', 'MOD_INTERNAL_NAME', 'STATE_FILE', 'FRAMEWORK_TYPE',
     'PLUGIN_SUBFOLDER', 'MANAGED_SUBFOLDER', 'ASSEMBLY_DLL',
-    'ASI_LOADER_NAME', 'ASI_SUBDIR', 'UE4_BINARIES_RELDIR'
+    'ASI_LOADER_NAME', 'ASI_SUBDIR', 'UE4_BINARIES_RELDIR', 'SHIM_MARKER'
 )
 
 function Test-ConfigPairing {
@@ -901,12 +901,36 @@ function Test-Readme {
     }
 }
 
+# SHIM_MARKER is how the shim bodies tell this mod's own DLL from whatever the
+# user already had at that name, and there is no safe default for it: backing up
+# unconditionally records our own shim as the user's original, and skipping the
+# backup unconditionally loses a file that really was theirs. The bodies refuse
+# to run without one, so a shim repo that ships no SHIM_MARKER has an
+# install.cmd that stops at the CONFIG BLOCK check.
+function Test-ShimMarker {
+    param([string]$Name, [string]$Root)
+
+    $installPath = Join-Path $Root 'scripts/install.cmd'
+    if (-not (Test-Path $installPath)) { return }
+    $body = Get-WrapperBodyName (Read-TextFile $installPath)
+    if ($body -notin @('install-body-shim.cmd', 'install-body-shim-forwarder.cmd')) { return }
+
+    foreach ($script in @('install.cmd', 'uninstall.cmd')) {
+        $path = Join-Path $Root "scripts/$script"
+        if (-not (Test-Path $path)) { continue }
+        $vars = Get-ConfigBlockVars (Read-TextFile $path)
+        if ($vars.Contains('SHIM_MARKER') -and $vars['SHIM_MARKER']) { continue }
+        Add-Finding $Name 'shim-marker' 'FAIL' "scripts/$script dispatches to a shim body but sets no SHIM_MARKER; the body refuses to run without one, and a backup taken on upgrade would record this mod's own DLL as the user's original"
+    }
+}
+
 $CHECK_TABLE = [ordered]@{
     'install-wrapper'   = ${function:Test-InstallWrapper}
     'delayed-expansion' = ${function:Test-DelayedExpansion}
     'arg-parser'        = ${function:Test-ArgParser}
     'config-block'      = ${function:Test-ConfigBlock}
     'config-pairing'    = ${function:Test-ConfigPairing}
+    'shim-marker'       = ${function:Test-ShimMarker}
     'cmd-crlf'          = ${function:Test-CmdCrlf}
     'pixi-tasks'        = ${function:Test-PixiTasks}
     'action-pins'       = ${function:Test-ActionPins}

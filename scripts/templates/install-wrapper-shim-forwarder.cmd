@@ -27,6 +27,14 @@ set "MOD_INTERNAL_NAME=<Mod>HeadTracking"
 set "MOD_VERSION=0.0.0"
 set "STATE_FILE=.headtracking-state.json"
 set "FRAMEWORK_TYPE=None"
+:: A byte sequence every build of this mod's shim carries - the mod's own name
+:: in a string literal is the usual choice. It answers "is the DLL already
+:: sitting at that name ours?", which is what decides whether that file is the
+:: user's original and has to be kept as <name>.backup. Comparing bytes against
+:: the build being installed cannot answer it: on an upgrade the installed shim
+:: is the previous version, so the bytes differ and the mod's own DLL gets
+:: recorded as the user's original.
+set "SHIM_MARKER=<string present in every build of the shim>"
 :: The system DLL the shim replaces, the name its forwards point at, and the
 :: game executable's architecture (x64 or x86), which picks the system
 :: directory the copy is taken from.
@@ -35,7 +43,7 @@ set "SYSTEM_DLL_COPY=<system dll name>_real.dll"
 set "SYSTEM_DLL_ARCH=x64"
 :: Files copied only when they are not already there, so an upgrade keeps
 :: whatever the user tuned. Listing an .ini in MOD_DLLS instead puts it through
-:: the unconditional copy and the shim byte compare, which resets every key on
+:: the unconditional copy and the SHIM_MARKER check, which resets every key on
 :: every update and then records the tuned file as the game original.
 set "MOD_SEED_FILES="
 :: Post-install help text. `&echo ` starts each further line.
