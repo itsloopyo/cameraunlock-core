@@ -227,6 +227,16 @@ echo Deploying shim files...
 set "SRC_DIR=!SCRIPT_DIR!plugins"
 set "DEPLOY_FAILED=0"
 
+:: A wrong marker would let the next upgrade back up our own DLL as an original.
+for %%f in (%MOD_DLLS%) do (
+    set "_MARKER_PATH=!SRC_DIR!\%%f"
+    call :marker_state
+    if errorlevel 1 (
+        echo   ERROR: Cannot verify SHIM_MARKER in plugins\%%f. Nothing deployed.
+        exit /b 1
+    )
+)
+
 :: Seeded before the shim DLLs, and copied only when absent: an upgrade has to
 :: keep the values the user tuned.
 if defined MOD_SEED_FILES (
@@ -356,7 +366,7 @@ exit /b 0
 set "_MARKER_CHECK=!SCRIPT_DIR!shared\cecil-marker-check.ps1"
 if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=!SCRIPT_DIR!..\cameraunlock-core\scripts\cecil-marker-check.ps1"
 if not exist "!_MARKER_CHECK!" exit /b 2
-powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_MARKER_PATH!" -Marker "!SHIM_MARKER!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_MARKER_PATH!" -Marker "!SHIM_MARKER!" -AlternateMarker "!SHIM_MARKER_ALT!"
 exit /b %errorlevel%
 
 :: UTC ISO-8601, read through PowerShell: %DATE% is whatever the user's regional

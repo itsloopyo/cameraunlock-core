@@ -58,6 +58,8 @@ set "MANAGED_EXTRAS="
 :: installer captured by comparing bytes is discarded rather than restored into
 :: the game folder. MUST match install.cmd's value.
 set "SHIM_MARKER="
+:: Optional companion identity; MUST match install.cmd when set.
+set "SHIM_MARKER_ALT="
 :: ASILoader: filename the ASI DLL was renamed to. Defaults to winmm.dll.
 set "ASI_LOADER_NAME=winmm.dll"
 :: ASILoader: subdirectory below the exe directory the payload went into. MUST

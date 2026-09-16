@@ -677,6 +677,7 @@ set "REMOVED=0"
 for %%f in (%MOD_DLLS%) do (
     set "_SHIM_FILE=%%f"
     call :remove_one_shim
+    if errorlevel 1 exit /b 1
 )
 if defined LEGACY_DLLS (
     for %%f in (%LEGACY_DLLS%) do (
@@ -708,6 +709,7 @@ set "_SHIM_SUFFIX= (no backup was present)"
 if not exist "!DEPLOY_DIR!\!_SHIM_FILE!.backup" goto :shim_no_backup
 set "_MARKER_PATH=!DEPLOY_DIR!\!_SHIM_FILE!.backup"
 set "_MARKER_VALUE=!SHIM_MARKER!"
+set "_MARKER_ALTERNATE=!SHIM_MARKER_ALT!"
 call :marker_state
 if errorlevel 2 (
     echo   ERROR: could not read !_SHIM_FILE!.backup to tell whether it is your
@@ -719,6 +721,7 @@ if errorlevel 1 goto :shim_restore
 set "_DEL_PATH=!DEPLOY_DIR!\!_SHIM_FILE!.backup"
 set "_DEL_LABEL=!_SHIM_FILE!.backup (a copy of this mod, not your original)"
 call :del_one
+if errorlevel 1 exit /b 1
 set "_SHIM_SUFFIX="
 goto :shim_no_backup
 
@@ -745,6 +748,7 @@ if not exist "!DEPLOY_DIR!\!_SHIM_FILE!" exit /b 0
 set "_DEL_PATH=!DEPLOY_DIR!\!_SHIM_FILE!"
 set "_DEL_LABEL=!_SHIM_FILE!!_SHIM_SUFFIX!"
 call :del_one
+if errorlevel 1 exit /b 1
 set /a REMOVED+=1
 exit /b 0
 
@@ -802,6 +806,7 @@ exit /b 0
 :: The mod DLLs in Managed/ are cleaned up separately by the plain loop.
 :: ============================================
 :remove_MonoCecil
+set "_MARKER_ALTERNATE="
 set "MANAGED_PATH=!GAME_PATH!\%MANAGED_SUBFOLDER%"
 set "ASSEMBLY_PATH=!MANAGED_PATH!\%ASSEMBLY_DLL%"
 set "BACKUP_PATH=!ASSEMBLY_PATH!.original"
@@ -863,7 +868,7 @@ exit /b 0
 set "_MARKER_CHECK=!SCRIPT_DIR!shared\cecil-marker-check.ps1"
 if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=!SCRIPT_DIR!..\cameraunlock-core\scripts\cecil-marker-check.ps1"
 if not exist "!_MARKER_CHECK!" exit /b 2
-powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_MARKER_PATH!" -Marker "!_MARKER_VALUE!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!_MARKER_PATH!" -Marker "!_MARKER_VALUE!" -AlternateMarker "!_MARKER_ALTERNATE!"
 exit /b %errorlevel%
 
 :: ============================================

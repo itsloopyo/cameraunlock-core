@@ -33,6 +33,8 @@ set "FRAMEWORK_TYPE=None"
 :: is the previous version, so the bytes differ and the mod's own DLL gets
 :: recorded as the user's original.
 set "SHIM_MARKER=<string present in every build of the shim>"
+:: Optional second identity for a companion launcher with different strings.
+set "SHIM_MARKER_ALT="
 :: Files copied only when they are not already there, so an upgrade keeps
 :: whatever the user tuned. Listing an .ini in MOD_DLLS instead puts it through
 :: the unconditional copy and the SHIM_MARKER check, which resets every key on

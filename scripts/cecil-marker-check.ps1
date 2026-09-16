@@ -14,7 +14,8 @@
     user's original and has to be preserved as <name>.backup.
 
     findstr is unreliable on multi-MB binaries (line-length limits), so this
-    reads the raw bytes and searches for the marker's ASCII byte sequence.
+    searches for the marker's ASCII or UTF-16LE byte sequence. Native launchers
+    can contain only wide strings, unlike their companion DLLs.
 
     Exit codes:
       0  marker present
@@ -24,10 +25,13 @@
     Path to the file to inspect.
 .PARAMETER Marker
     The marker string (e.g. HeadTracking_Patched_GoneHome_v4).
+.PARAMETER AlternateMarker
+    Optional identity for a companion payload with different embedded strings.
 #>
 param(
     [Parameter(Mandatory=$true)][string]$AssemblyPath,
-    [Parameter(Mandatory=$true)][string]$Marker
+    [Parameter(Mandatory=$true)][string]$Marker,
+    [string]$AlternateMarker = ''
 )
 
 Set-StrictMode -Version Latest
@@ -43,18 +47,20 @@ if (-not (Test-Path -LiteralPath $AssemblyPath)) {
 
 try {
     $bytes = [System.IO.File]::ReadAllBytes($AssemblyPath)
-    $needle = [System.Text.Encoding]::ASCII.GetBytes($Marker)
 } catch {
     [Console]::Error.WriteLine("Failed to read assembly: $($_.Exception.Message)")
     exit 2
 }
 
-$limit = $bytes.Length - $needle.Length
-for ($i = 0; $i -le $limit; $i++) {
-    $match = $true
-    for ($j = 0; $j -lt $needle.Length; $j++) {
-        if ($bytes[$i + $j] -ne $needle[$j]) { $match = $false; break }
+# Latin-1 maps each byte to one character, so ordinal search also finds wide
+# strings at odd offsets without decoding arbitrary binary data as UTF-16.
+$binaryEncoding = [System.Text.Encoding]::GetEncoding(28591)
+$haystack = $binaryEncoding.GetString($bytes)
+foreach ($value in @($Marker, $AlternateMarker)) {
+    if (-not $value) { continue }
+    foreach ($encoding in @([System.Text.Encoding]::ASCII, [System.Text.Encoding]::Unicode)) {
+        $needle = $binaryEncoding.GetString($encoding.GetBytes($value))
+        if ($haystack.IndexOf($needle, [StringComparison]::Ordinal) -ge 0) { exit 0 }
     }
-    if ($match) { exit 0 }
 }
 exit 1

@@ -35,6 +35,8 @@ set "FRAMEWORK_TYPE=None"
 :: is the previous version, so the bytes differ and the mod's own DLL gets
 :: recorded as the user's original.
 set "SHIM_MARKER=<string present in every build of the shim>"
+:: Optional second identity for a companion launcher with different strings.
+set "SHIM_MARKER_ALT="
 :: The system DLL the shim replaces, the name its forwards point at, and the
 :: game executable's architecture (x64 or x86), which picks the system
 :: directory the copy is taken from.
