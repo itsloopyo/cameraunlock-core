@@ -86,7 +86,7 @@
       ],
       "loader": "AsiLoader",
       "delivery_mode": "install_cmd",
-      "repo": "itsloopyo/homeworld-remastered-collection",
+      "repo": "itsloopyo/homeworld-remastered-collection-headtracking",
       "catalog_status": "absent"
     },
     "arkham-city": {
@@ -1514,7 +1514,7 @@
       "steam_app_id": 284160,
       "steam_folder": "BeamNG.drive",
       "executable_relpath": "Bin64\\BeamNG.drive.x64.exe",
-      "repo": "itsloopyo/beam-ng",
+      "repo": "itsloopyo/beamng-drive-headtracking",
       "catalog_status": "absent"
     },
     "wreckfest": {
