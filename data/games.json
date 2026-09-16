@@ -876,6 +876,20 @@
       "engine": "Unity",
       "catalog_status": "prerelease"
     },
+    "indiana-jones-and-the-great-circle": {
+      "display_name": "Indiana Jones and the Great Circle",
+      "env_var": "INDIANA_JONES_AND_THE_GREAT_CIRCLE_PATH",
+      "steam_app_id": 2677660,
+      "steam_folder": "Indiana Jones and the Great Circle",
+      "executable_relpath": "TheGreatCircle.exe",
+      "msix_identity_name": "BethesdaSoftworks.ProjectRelic",
+      "xbox_identity_name": "BethesdaSoftworks.ProjectRelic",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/indiana-jones-and-the-great-circle-headtracking",
+      "engine": "id Tech",
+      "catalog_status": "prerelease"
+    },
     "wolfenstein-the-new-order": {
       "display_name": "Wolfenstein: The New Order",
       "env_var": "WOLFENSTEIN_THE_NEW_ORDER_PATH",
