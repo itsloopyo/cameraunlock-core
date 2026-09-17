@@ -1701,6 +1701,19 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/roadcraft-headtracking",
       "catalog_status": "released"
+    },
+    "pathologic-2": {
+      "display_name": "Pathologic 2",
+      "env_var": "PATHOLOGIC_2_PATH",
+      "steam_app_id": 505230,
+      "steam_folder": "Pathologic",
+      "executable_relpath": "Pathologic.exe",
+      "data_folder": "Pathologic_Data",
+      "loader": "BepInEx5",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/pathalogic-2-headtracking",
+      "engine": "Unity",
+      "catalog_status": "absent"
     }
   }
 }
