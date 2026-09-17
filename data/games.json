@@ -494,6 +494,18 @@
       "engine": "REDengine",
       "catalog_status": "private"
     },
+    "ghostrunner": {
+      "display_name": "Ghostrunner",
+      "env_var": "GHOSTRUNNER_PATH",
+      "steam_app_id": 1139900,
+      "steam_folder": "Ghostrunner",
+      "executable_relpath": "Ghostrunner\\Binaries\\Win64\\Ghostrunner-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/ghostrunner-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
+    },
     "green-hell": {
       "display_name": "Green Hell",
       "env_var": "GREEN_HELL_PATH",
