@@ -41,6 +41,10 @@ namespace CameraUnlock.Core.Config
             public const string PositionLimitYDown = "positionlimitydown";
             public const string PositionLimitZ = "positionlimitz";
             public const string PositionLimitZBack = "positionlimitzback";
+            public const string CollisionEnabled = "collisionenabled";
+            public const string CollisionMargin = "collisionmargin";
+            public const string CollisionChannel = "collisionchannel";
+            public const string CollisionReleaseSmoothing = "collisionreleasesmoothing";
             public const string InvertPositionX = "invertpositionx";
             public const string InvertPositionY = "invertpositiony";
             public const string InvertPositionZ = "invertpositionz";
@@ -65,8 +69,19 @@ namespace CameraUnlock.Core.Config
             { "aimdecouple", "aimdecoupling" },
             { "aimdecoupling", "aimdecoupling" },
             { "autoenable", "enableonstartup" },
+            { "cameracollision", "collisionenabled" },
+            { "cameracollisionradius", "collisionmargin" },
             { "centerkey", "recenterkey" },
             { "centrekey", "recenterkey" },
+            { "clamplean", "collisionenabled" },
+            { "collisionchannel", "collisionchannel" },
+            { "collisionenabled", "collisionenabled" },
+            { "collisionmargin", "collisionmargin" },
+            { "collisionradius", "collisionmargin" },
+            { "collisionrelease", "collisionreleasesmoothing" },
+            { "collisionreleasesmoothing", "collisionreleasesmoothing" },
+            { "collisionskin", "collisionmargin" },
+            { "collisiontracechannel", "collisionchannel" },
             { "compensatecrosshair", "showreticle" },
             { "compensateflashlight", "lightfollowshead" },
             { "compensatereticle", "showreticle" },
@@ -112,6 +127,12 @@ namespace CameraUnlock.Core.Config
             { "keycyclemode", "cycletrackingmodekey" },
             { "keytoggle", "togglekey" },
             { "keyyawmode", "yawmodekey" },
+            { "leanclamprelease", "collisionreleasesmoothing" },
+            { "leancollision", "collisionenabled" },
+            { "leancollisionchannel", "collisionchannel" },
+            { "leancollisionenabled", "collisionenabled" },
+            { "leancollisionmargin", "collisionmargin" },
+            { "leanreleasesmoothing", "collisionreleasesmoothing" },
             { "lightfollowshead", "lightfollowshead" },
             { "lightmultiplier", "lightmultiplier" },
             { "limitdown", "positionlimitydown" },
@@ -221,6 +242,7 @@ namespace CameraUnlock.Core.Config
             { "toggleyawkey", "yawmodekey" },
             { "toggleyawmode", "yawmodekey" },
             { "toggleyawmodekey", "yawmodekey" },
+            { "tracechannel", "collisionchannel" },
             { "trackerpivot", "trackerpivotforward" },
             { "trackerpivotforward", "trackerpivotforward" },
             { "trackerpivotup", "trackerpivotup" },

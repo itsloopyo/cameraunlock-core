@@ -259,6 +259,42 @@
       "doc": "Maximum BACKWARD displacement in metres, the upper bound of the z clamp."
     },
     {
+      "id": "CollisionEnabled",
+      "section": "Position",
+      "key": "CollisionEnabled",
+      "type": "bool",
+      "default": false,
+      "aliases": ["LeanCollision", "LeanCollisionEnabled", "CameraCollision", "ClampLean"],
+      "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. Ships off in a mod whose trace has not been confirmed in game, because an unverified channel either blocks on nothing or blocks on everything; a mod turns it on once its log shows the sweep engaging on real geometry. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice."
+    },
+    {
+      "id": "CollisionMargin",
+      "section": "Position",
+      "key": "CollisionMargin",
+      "type": "float",
+      "default": 0.1,
+      "aliases": ["CollisionRadius", "LeanCollisionMargin", "CollisionSkin", "CameraCollisionRadius"],
+      "doc": "How far off a blocking surface the eye is held, in the engine's own units. It must EXCEED the camera's near clip distance or geometry is culled before the eye reaches it and the wall goes transparent anyway. CollisionRadius is the spelling where the standoff IS a sweep radius; CollisionMargin where the query is a line and the standoff lives in the clamp."
+    },
+    {
+      "id": "CollisionChannel",
+      "section": "Position",
+      "key": "CollisionChannel",
+      "type": "int",
+      "default": 0,
+      "aliases": ["LeanCollisionChannel", "TraceChannel", "CollisionTraceChannel"],
+      "doc": "Which trace channel the sweep runs on, for engines whose query needs one. Which channel a level's geometry blocks is a project setting rather than an engine constant, so it is a value to try and read back out of the log. Omitted by mods whose cast takes no channel."
+    },
+    {
+      "id": "CollisionReleaseSmoothing",
+      "section": "Position",
+      "key": "CollisionReleaseSmoothing",
+      "type": "float",
+      "default": 0.9,
+      "aliases": ["LeanReleaseSmoothing", "CollisionRelease", "LeanClampRelease"],
+      "doc": "How quickly the lean reopens once an obstruction clears, on the same 0-1 scale as every other smoothing value in the fleet. 0.9 is a 200ms time constant. Tightening is never smoothed: easing INTO a smaller allowance leaves the eye inside the geometry for the length of the ease, which is the whole bug."
+    },
+    {
       "id": "InvertPositionX",
       "section": "Inversion",
       "key": "InvertPositionX",

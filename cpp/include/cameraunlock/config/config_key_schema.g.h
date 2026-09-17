@@ -33,6 +33,10 @@ inline constexpr const char* kPositionLimitY = "positionlimity";
 inline constexpr const char* kPositionLimitYDown = "positionlimitydown";
 inline constexpr const char* kPositionLimitZ = "positionlimitz";
 inline constexpr const char* kPositionLimitZBack = "positionlimitzback";
+inline constexpr const char* kCollisionEnabled = "collisionenabled";
+inline constexpr const char* kCollisionMargin = "collisionmargin";
+inline constexpr const char* kCollisionChannel = "collisionchannel";
+inline constexpr const char* kCollisionReleaseSmoothing = "collisionreleasesmoothing";
 inline constexpr const char* kInvertPositionX = "invertpositionx";
 inline constexpr const char* kInvertPositionY = "invertpositiony";
 inline constexpr const char* kInvertPositionZ = "invertpositionz";
@@ -66,8 +70,19 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "aimdecouple", "aimdecoupling", false },
     { "aimdecoupling", "aimdecoupling", false },
     { "autoenable", "enableonstartup", false },
+    { "cameracollision", "collisionenabled", false },
+    { "cameracollisionradius", "collisionmargin", false },
     { "centerkey", "recenterkey", false },
     { "centrekey", "recenterkey", false },
+    { "clamplean", "collisionenabled", false },
+    { "collisionchannel", "collisionchannel", false },
+    { "collisionenabled", "collisionenabled", false },
+    { "collisionmargin", "collisionmargin", false },
+    { "collisionradius", "collisionmargin", false },
+    { "collisionrelease", "collisionreleasesmoothing", false },
+    { "collisionreleasesmoothing", "collisionreleasesmoothing", false },
+    { "collisionskin", "collisionmargin", false },
+    { "collisiontracechannel", "collisionchannel", false },
     { "compensatecrosshair", "showreticle", false },
     { "compensateflashlight", "lightfollowshead", false },
     { "compensatereticle", "showreticle", false },
@@ -113,6 +128,12 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "keycyclemode", "cycletrackingmodekey", false },
     { "keytoggle", "togglekey", false },
     { "keyyawmode", "yawmodekey", false },
+    { "leanclamprelease", "collisionreleasesmoothing", false },
+    { "leancollision", "collisionenabled", false },
+    { "leancollisionchannel", "collisionchannel", false },
+    { "leancollisionenabled", "collisionenabled", false },
+    { "leancollisionmargin", "collisionmargin", false },
+    { "leanreleasesmoothing", "collisionreleasesmoothing", false },
     { "lightfollowshead", "lightfollowshead", false },
     { "lightmultiplier", "lightmultiplier", false },
     { "limitdown", "positionlimitydown", false },
@@ -222,6 +243,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "toggleyawkey", "yawmodekey", false },
     { "toggleyawmode", "yawmodekey", false },
     { "toggleyawmodekey", "yawmodekey", false },
+    { "tracechannel", "collisionchannel", false },
     { "trackerpivot", "trackerpivotforward", false },
     { "trackerpivotforward", "trackerpivotforward", false },
     { "trackerpivotup", "trackerpivotup", false },
