@@ -181,6 +181,12 @@ namespace UnityEngine {
         public static int allCamerasCount { get; }
         public float fieldOfView { get; set; }
         public float aspect { get; set; }
+        // An orthographic camera is a screen-space overlay - a HUD or a map pass -
+        // and a head basis has no meaning for one. It is the general test for
+        // "should this camera be given the head rotation", which a rig full of
+        // helper cameras needs and a culling-mask comparison cannot give.
+        public bool orthographic { get; set; }
+        public float orthographicSize { get; set; }
         public float nearClipPlane { get; set; }
         public float farClipPlane { get; set; }
         public RenderTexture targetTexture { get; set; }
