@@ -744,7 +744,7 @@
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/dishonored-2-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "bioshock-infinite": {
       "display_name": "BioShock Infinite",
@@ -888,7 +888,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/indiana-jones-and-the-great-circle-headtracking",
       "engine": "id Tech",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "wolfenstein-the-new-order": {
       "display_name": "Wolfenstein: The New Order",
@@ -1616,7 +1616,7 @@
       "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/far-cry-6-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "viewfinder": {
       "display_name": "Viewfinder",
