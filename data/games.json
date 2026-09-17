@@ -155,6 +155,18 @@
       "engine": "HPL",
       "catalog_status": "prerelease"
     },
+    "amnesia-rebirth": {
+      "display_name": "Amnesia: Rebirth",
+      "env_var": "AMNESIA_REBIRTH_PATH",
+      "steam_app_id": 999220,
+      "steam_folder": "Amnesia Rebirth",
+      "executable_relpath": "AmnesiaRebirth.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/amnesia-rebirth-headtracking",
+      "engine": "HPL",
+      "catalog_status": "prerelease"
+    },
     "soma": {
       "display_name": "SOMA",
       "env_var": "SOMA_PATH",
