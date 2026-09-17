@@ -1714,6 +1714,17 @@
       "repo": "itsloopyo/pathalogic-2-headtracking",
       "engine": "Unity",
       "catalog_status": "absent"
+    },
+    "stalker-call-of-prypiat-enhanced-edition": {
+      "display_name": "S.T.A.L.K.E.R.: Call of Prypiat - Enhanced Edition",
+      "env_var": "STALKER_COP_EE_PATH",
+      "steam_app_id": 2427430,
+      "steam_folder": "STALKER Call of Prypiat - EE",
+      "executable_relpath": "xrEngine.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/stalker-call-of-prypiat-enhanced-edition-headtracking",
+      "catalog_status": "prerelease"
     }
   }
 }
