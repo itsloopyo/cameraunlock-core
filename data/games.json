@@ -639,6 +639,17 @@
       "repo": "itsloopyo/dragon-age-inquisition-headtracking",
       "catalog_status": "absent"
     },
+    "dying-light": {
+      "display_name": "Dying Light",
+      "env_var": "DYING_LIGHT_PATH",
+      "steam_app_id": 239140,
+      "steam_folder": "Dying Light",
+      "executable_relpath": "DyingLightGame.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/dying-light-headtracking",
+      "catalog_status": "private"
+    },
     "dying-light-2": {
       "display_name": "Dying Light 2 Stay Human",
       "env_var": "DYING_LIGHT_2_PATH",
