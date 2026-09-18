@@ -1757,8 +1757,10 @@
       "steam_app_id": 1924170,
       "steam_folder": "TT3",
       "executable_relpath": "TT3.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/tt-isle-of-man-ride-on-the-edge-3-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     }
   }
 }
