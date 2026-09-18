@@ -1104,6 +1104,9 @@
       "steam_app_id": 1164940,
       "steam_folder": "Trepang2",
       "executable_relpath": "CPPFPS\\Binaries\\Win64\\CPPFPS-Win64-Shipping.exe",
+      "gog_ids": [
+        "1599916752"
+      ],
       "msix_identity_name": "Team17DigitalLimited.Trepang2",
       "xbox_executable_relpath": "CPPFPS\\Binaries\\WinGDK\\CPPFPS-WinGDK-Shipping.exe",
       "loader": "AsiLoader",
