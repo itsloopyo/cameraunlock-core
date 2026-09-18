@@ -42,7 +42,7 @@
 #                 no entry there is reported, never pinned to a SHA nobody
 #                 verified.
 #
-#   pixi-tasks    `sync` is pushed; the rest is reported with the exact line to
+#   pixi-tasks    `sync` and `update-submodule` are pushed; the rest is reported with the exact line to
 #                 add. validate-manifest and validate-notices need `nodejs` in
 #                 the repo's environment, which no mod repo has, so writing the
 #                 task alone would add one that cannot run. The other gaps
@@ -70,7 +70,14 @@ $UNITS = @('wrappers', 'update-deps', 'action-pins', 'pixi-tasks')
 $selected = @($Only | Where-Object { $_ })
 if ($selected.Count -eq 0) { $selected = $UNITS }
 
-$CANONICAL_SYNC_TASK = 'sync = "git submodule update --remote cameraunlock-core"'
+# Written into a repo that lacks them. update-submodule moves the pointer, then
+# runs the committed script from the core it just checked out, which restamps
+# THIRD-PARTY-NOTICES.md and commits both; a bump that committed the pointer
+# alone failed the next package at Assert-CoreCommitInNotices.
+$CANONICAL_TASKS = [ordered]@{
+    'sync'             = @{ Line = 'sync = "git submodule update --remote cameraunlock-core"'; Why = 'every update-deps.ps1 tells the user to run one on failure' }
+    'update-submodule' = @{ Line = 'update-submodule = "git submodule update --remote cameraunlock-core && powershell -NoProfile -ExecutionPolicy Bypass -File cameraunlock-core/scripts/update-submodule.ps1"'; Why = 'bumping the pointer by hand leaves THIRD-PARTY-NOTICES.md naming the old commit' }
+}
 $REPORT_ONLY_TASKS = [ordered]@{
     'validate-manifest' = 'validate-manifest = "node cameraunlock-core/scripts/validate-manifest.mjs"   (also needs nodejs in [dependencies])'
     'validate-notices'  = 'validate-notices = "node cameraunlock-core/scripts/validate-notices.mjs"     (also needs nodejs in [dependencies])'
@@ -299,18 +306,22 @@ function Sync-PixiTasks {
         Add-Result $Name 'pixi-tasks' 'report' "no '$task' task; add: $($REPORT_ONLY_TASKS[$task])"
     }
 
-    if ($declared.Contains('sync')) { return }
+    $missing = @($CANONICAL_TASKS.Keys | Where-Object { -not $declared.Contains($_) })
+    if ($missing.Count -eq 0) { return }
     if ($tasksAt -lt 0) {
-        Add-Result $Name 'pixi-tasks' 'report' "no [tasks] table to add 'sync' to"
+        Add-Result $Name 'pixi-tasks' 'report' "no [tasks] table to add $($missing -join ', ') to"
         return
     }
     if (-not $Apply) {
-        Add-Result $Name 'pixi-tasks' 'drift' "no 'sync' task, and every update-deps.ps1 tells the user to run one on failure"
+        foreach ($task in $missing) {
+            Add-Result $Name 'pixi-tasks' 'drift' "no '$task' task, and $($CANONICAL_TASKS[$task].Why)"
+        }
         return
     }
-    $rebuilt = @($lines[0..$tasksAt]) + @($CANONICAL_SYNC_TASK) + @($lines[($tasksAt + 1)..($lines.Count - 1)])
+    $added = @($missing | ForEach-Object { $CANONICAL_TASKS[$_].Line })
+    $rebuilt = @($lines[0..$tasksAt]) + $added + @($lines[($tasksAt + 1)..($lines.Count - 1)])
     Write-TextFile -Path $path -Text ($rebuilt -join "`n")
-    Add-Result $Name 'pixi-tasks' 'written' "added: $CANONICAL_SYNC_TASK"
+    foreach ($line in $added) { Add-Result $Name 'pixi-tasks' 'written' "added: $line" }
 }
 
 # ---------------------------------------------------------------------------
