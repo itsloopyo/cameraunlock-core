@@ -176,7 +176,9 @@ function Copy-SharedBundle {
     # cameraunlock-core commit it names is the attribution the user receives.
     # A submodule bump does not touch it, so it is checked here rather than
     # trusted - a wrong hash reads exactly like a right one.
-    Assert-CoreCommitInNotices -RepoRoot ([System.IO.Path]::GetFullPath((Join-Path $CoreRoot '..')))
+    $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $CoreRoot '..'))
+    Assert-CoreCommitInNotices -RepoRoot $repoRoot
+    Assert-LauncherManifestDelivery -RepoRoot $repoRoot
 
     # install-body-* and uninstall-body are the per-strategy script bodies
     # used by thin per-mod wrapper install.cmd / uninstall.cmd files. Every
@@ -499,6 +501,13 @@ function New-ChangelogFromCommits {
 
     if (-not (Test-Path -LiteralPath $ChangelogPath)) {
         throw "CHANGELOG.md not found: $ChangelogPath"
+    }
+
+    # The manifest ships at the installer ZIP root and decides how the launcher
+    # deploys the mod, so a manifest-only fix is a release. No caller's list
+    # carried it, and such a fix then hit the empty-range throw below.
+    if ($ArtifactPaths -and ($ArtifactPaths -notcontains 'launcher-manifest.json')) {
+        $ArtifactPaths = @($ArtifactPaths) + 'launcher-manifest.json'
     }
 
     # CHANGELOG.md is UTF-8. Windows PowerShell 5.1 reads with the ANSI codepage
@@ -1259,6 +1268,52 @@ function Assert-ManifestSeedsMatchShipped {
     }
 }
 
+<#
+.SYNOPSIS
+    Fails packaging when launcher-manifest.json would not get native deployment
+    and does not say why.
+.DESCRIPTION
+    Lopari reads every delivery_mode other than manifest / manifest_variants /
+    external as the install.cmd path, without a word: an absent field, a typo
+    and a value it has never heard of all install through the script. Black
+    Mesa shipped "installer" that way and twenty mods sat on "install_cmd"
+    with nobody deciding they should. So install_cmd is allowed only when the
+    manifest names what the deploy engine cannot express, in
+    install_cmd_reason. The launcher ignores that field; it is for the next
+    person to read the manifest.
+
+    Same rule as validate-manifest.mjs, which checks the built ZIP. This runs
+    from Copy-SharedBundle so it holds in every package script, including the
+    ones that never call the validator.
+
+    A repo with no launcher-manifest.json is skipped: the manifest is only
+    warranted once the mod is in the launcher's catalog.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+#>
+function Assert-LauncherManifestDelivery {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][string]$RepoRoot)
+
+    $path = Join-Path $RepoRoot 'launcher-manifest.json'
+    if (-not (Test-Path -LiteralPath $path)) { return }
+
+    $manifest = [System.IO.File]::ReadAllText($path).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    $names = $manifest.PSObject.Properties.Name
+    $mode = if ($names -contains 'delivery_mode') { $manifest.delivery_mode } else { $null }
+
+    if ($mode -in @('manifest', 'manifest_variants', 'external')) { return }
+
+    if ($mode -and $mode -ne 'install_cmd') {
+        throw "launcher-manifest.json has delivery_mode `"$mode`", which the launcher does not know and silently installs through install.cmd. Use `"manifest`" (or `"manifest_variants`" / `"external`") and declare the payload in files / loader."
+    }
+    $shown = if ($mode) { '"install_cmd"' } else { 'absent (the launcher reads that as "install_cmd")' }
+    $reason = if ($names -contains 'install_cmd_reason') { [string]$manifest.install_cmd_reason } else { '' }
+    if (-not $reason.Trim()) {
+        throw "launcher-manifest.json delivery_mode is $shown with no install_cmd_reason. Move the package to `"manifest`" delivery, or, if the deploy engine really cannot express what install.cmd does, set install_cmd_reason to exactly what it cannot express."
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Update-CameraUnlockCoreToRemoteTip',
@@ -1276,6 +1331,7 @@ Export-ModuleMember -Function @(
     'Test-NoiseCommit',
     'Update-ManifestVersion',
     'Assert-ManifestSeedsMatchShipped',
+    'Assert-LauncherManifestDelivery',
     'New-ChangelogFromCommits',
     'Get-ChangelogSection',
     'Invoke-VersionCommit',

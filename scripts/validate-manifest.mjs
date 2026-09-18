@@ -124,7 +124,18 @@ function validate(label, zip) {
   assertVersionMatchesZipName(man, zip);
 
   const mode = man.delivery_mode;
-  if (mode === "install_cmd") return validateInstallCmd(label, zip, man, entries, entryByLower);
+  // Lopari installs an absent mode through install.cmd, so it needs the same
+  // stated reason as an explicit one. Same rule as ReleaseWorkflow.psm1's
+  // Assert-LauncherManifestDelivery, which checks the committed manifest.
+  if (mode === undefined || mode === "install_cmd") {
+    if (typeof man.install_cmd_reason !== "string" || !man.install_cmd_reason.trim()) {
+      const shown = mode === undefined ? 'absent (the launcher reads that as "install_cmd")' : '"install_cmd"';
+      throw new Error(
+        `delivery_mode is ${shown} with no install_cmd_reason. Move the package to "manifest" delivery, or set install_cmd_reason to exactly what the deploy engine cannot express`,
+      );
+    }
+    return validateInstallCmd(label, zip, man, entries, entryByLower);
+  }
   if (mode === "external") return validateExternal(label, zip, man, entryByLower);
   if (mode !== "manifest" && mode !== "manifest_variants") {
     throw new Error(

@@ -156,6 +156,58 @@ foreach ($withBom in @($true, $false)) {
     Check "Set-CsprojVersion keeps the file's BOM state (BOM=$withBom)" ($hasBom -eq $withBom) "BOM is now $hasBom"
 }
 
+# --- Assert-LauncherManifestDelivery ----------------------------------------
+
+function Test-Delivery {
+    param([string]$Name, [string]$Json)
+    $dir = Join-Path $sandbox "delivery-$Name"
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    if ($Json) {
+        [System.IO.File]::WriteAllText((Join-Path $dir 'launcher-manifest.json'), $Json, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    return Get-ThrownId { Assert-LauncherManifestDelivery -RepoRoot $dir }
+}
+
+foreach ($mode in @('manifest', 'manifest_variants', 'external')) {
+    $err = Test-Delivery $mode "{ `"delivery_mode`": `"$mode`" }"
+    Check "delivery_mode $mode passes" ($err -eq '') "threw $err"
+}
+$err = Test-Delivery 'no-manifest' ''
+Check 'a repo with no launcher-manifest.json passes' ($err -eq '') "threw $err"
+
+# Black Mesa shipped this one; the launcher installed it through install.cmd.
+$err = Test-Delivery 'installer' '{ "delivery_mode": "installer" }'
+Check 'an unknown delivery_mode is refused' ($err -match 'does not know') "got '$err'"
+$err = Test-Delivery 'install-cmd-bare' '{ "delivery_mode": "install_cmd" }'
+Check 'install_cmd with no reason is refused' ($err -match 'install_cmd_reason') "got '$err'"
+$err = Test-Delivery 'absent' '{ "schema_version": 2 }'
+Check 'an absent delivery_mode is refused like install_cmd' ($err -match 'absent') "got '$err'"
+$err = Test-Delivery 'install-cmd-blank' '{ "delivery_mode": "install_cmd", "install_cmd_reason": "  " }'
+Check 'a blank install_cmd_reason is refused' ($err -match 'install_cmd_reason') "got '$err'"
+$err = Test-Delivery 'install-cmd-reason' '{ "delivery_mode": "install_cmd", "install_cmd_reason": "writes a registry key" }'
+Check 'install_cmd with a reason passes' ($err -eq '') "threw $err"
+
+# --- New-ChangelogFromCommits counts launcher-manifest.json ----------------
+
+# A manifest-only fix got "No commits found" from every mod whose artifact list
+# left the manifest out, which was all of them.
+$repo = New-GitRepo 'manifest-only-release'
+Set-Content -LiteralPath (Join-Path $repo 'CHANGELOG.md') -Value "# Changelog`n"
+& git -C $repo add -A
+& git -C $repo -c user.email=t@t -c user.name=t commit -q -m 'chore: changelog'
+& git -C $repo tag v0.1.0
+Set-Content -LiteralPath (Join-Path $repo 'launcher-manifest.json') -Value '{ "delivery_mode": "manifest" }'
+& git -C $repo add -A
+& git -C $repo -c user.email=t@t -c user.name=t commit -q -m 'fix: ship a v2 manifest'
+Push-Location $repo
+try {
+    $err = Get-ThrownId { New-ChangelogFromCommits -ChangelogPath (Join-Path $repo 'CHANGELOG.md') -Version '0.1.1' -ArtifactPaths @('src/') }
+} finally {
+    Pop-Location
+}
+Check 'a manifest-only commit counts as releasable' ($err -eq '') "threw $err"
+Check 'the manifest fix reaches the changelog' ((Get-Content -Raw (Join-Path $repo 'CHANGELOG.md')) -match 'ship a v2 manifest') 'entry missing'
+
 # --- cleanup ---------------------------------------------------------------
 
 Remove-Item $sandbox -Recurse -Force -ErrorAction SilentlyContinue
