@@ -745,6 +745,7 @@
       "display_name": "Dead Space",
       "env_var": "DEAD_SPACE_PATH",
       "steam_app_id": 1693980,
+      "steam_folder": "Dead Space (2023)",
       "executable_relpath": "Dead Space.exe",
       "ea_search_paths": [
         "C:\\Program Files\\EA Games\\Dead Space (2023)"
