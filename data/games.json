@@ -1737,6 +1737,17 @@
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/stalker-call-of-prypiat-enhanced-edition-headtracking",
       "catalog_status": "prerelease"
+    },
+    "stalker-shadow-of-chornobyl-enhanced-edition": {
+      "display_name": "S.T.A.L.K.E.R.: Shadow of Chornobyl - Enhanced Edition",
+      "env_var": "STALKER_SOC_EE_PATH",
+      "steam_app_id": 2427410,
+      "steam_folder": "STALKER Shadow of Chornobyl - EE",
+      "executable_relpath": "xrEngine.exe",
+      "loader": "AsiLoader",
+      "delivery_mode": "install_cmd",
+      "repo": "itsloopyo/stalker-shadow-of-chornobyl-enhanced-edition-headtracking",
+      "catalog_status": "prerelease"
     }
   }
 }
