@@ -1510,7 +1510,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/black-mesa-headtracking",
       "engine": "Source",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     },
     "bodycam": {
       "display_name": "Bodycam",
