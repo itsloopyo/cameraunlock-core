@@ -70,7 +70,7 @@ function reindent(stepLines, indent) {
 
 // A release workflow is a release/publish-NAMED yaml that triggers on a tag.
 // Returns every match (a repo can have several, e.g. release.yml + a variant).
-// No fallback to build.yml etc. — an un-anchored build file is not a release.
+// No fallback to build.yml etc. - an un-anchored build file is not a release.
 const ANCHOR_RE = /gh release create|softprops\/action-gh-release|ncipollo\/release-action/;
 
 function findReleaseWorkflows(repoPath) {

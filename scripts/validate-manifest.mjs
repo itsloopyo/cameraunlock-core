@@ -192,7 +192,7 @@ function validate(label, zip) {
     ? `, ${man.variants.length} variant(s) (${man.variants.map((v) => v.id).join(", ")})`
     : "";
   console.log(
-    `OK   ${label}: ${path.basename(zip)} — manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${variants}`,
+    `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${variants}`,
   );
   warnMiscased(label, miscased);
   warnUndeployed(label, undeclared.cosmetic);
@@ -235,7 +235,7 @@ function validateInstallCmd(label, zip, man, entries, entryByLower) {
   const sources = (man.files ?? []).map((f) => f.source).filter(Boolean);
   const { missing, miscased } = resolveSources(sources, entryByLower);
   console.log(
-    `OK   ${label}: ${path.basename(zip)} — install_cmd, ${checked} script(s), ${entries.length} entries`,
+    `OK   ${label}: ${path.basename(zip)} - install_cmd, ${checked} script(s), ${entries.length} entries`,
   );
   warnDescriptive(label, missing);
   warnMiscased(label, miscased);
@@ -264,7 +264,7 @@ function validateExternal(label, zip, man, entryByLower) {
   }
   const { missing, miscased } = resolveSources(sources, entryByLower);
   console.log(
-    `OK   ${label}: ${path.basename(zip)} — external via ${ext.manager_name}, ${sources.length} file(s)`,
+    `OK   ${label}: ${path.basename(zip)} - external via ${ext.manager_name}, ${sources.length} file(s)`,
   );
   warnDescriptive(label, missing);
   warnMiscased(label, miscased);
