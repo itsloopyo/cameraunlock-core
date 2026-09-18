@@ -595,7 +595,7 @@
       "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/fallout-new-vegas-headtracking",
-      "catalog_status": "prerelease"
+      "catalog_status": "released"
     },
     "outer-wilds": {
       "display_name": "Outer Wilds",
@@ -1109,7 +1109,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/trepang2-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     },
     "black-and-white": {
       "display_name": "Black & White",
