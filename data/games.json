@@ -1748,6 +1748,15 @@
       "delivery_mode": "install_cmd",
       "repo": "itsloopyo/stalker-shadow-of-chornobyl-enhanced-edition-headtracking",
       "catalog_status": "prerelease"
+    },
+    "tt-isle-of-man-ride-on-the-edge-3": {
+      "display_name": "TT Isle of Man: Ride on the Edge 3",
+      "env_var": "TT_ISLE_OF_MAN_3_PATH",
+      "steam_app_id": 1924170,
+      "steam_folder": "TT3",
+      "executable_relpath": "TT3.exe",
+      "repo": "itsloopyo/tt-isle-of-man-ride-on-the-edge-3-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
