@@ -19,6 +19,24 @@ Import-Module (Join-Path $PSScriptRoot 'GamePathDetection.psm1')
 
 $Script:StateFileName = ".headtracking-state.json"
 
+# Not Get-FileHash: Windows PowerShell 5.1 autoloads it from a script module,
+# and a powershell.exe started from pwsh (GitHub Actions' shell: pwsh)
+# inherits pwsh's PSModulePath, resolves the Core-only
+# Microsoft.PowerShell.Utility first and reports the cmdlet as not recognized.
+function Get-Sha256Hex {
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$LiteralPath)
+
+    $sha    = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead((Convert-Path -LiteralPath $LiteralPath))
+    try {
+        return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
+
 # The state file is parsed by the Lopari launcher with a strict JSON parser
 # that rejects a UTF-8 BOM (the mod then reads as "not installed"). Windows
 # PowerShell 5.1's `Set-Content -Encoding UTF8` writes one, so all state-file
@@ -1192,7 +1210,7 @@ function Invoke-FetchLatestLoader {
 
     if ($DirectUrl) {
         Invoke-WebRequest -Uri $DirectUrl -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
-        $sha = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash.ToLower()
+        $sha = Get-Sha256Hex -LiteralPath $OutputPath
         return @{
             Tag = ''
             CommitSha = ''
@@ -1247,7 +1265,7 @@ function Invoke-FetchLatestLoader {
 
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
 
-    $sha = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash.ToLower()
+    $sha = Get-Sha256Hex -LiteralPath $OutputPath
 
     $commitSha = ''
     try {
@@ -1348,7 +1366,7 @@ function Update-VendoredLoader {
     # SHA-256, leave the tree alone. Otherwise every run dirties README.md with a new
     # FetchedAt timestamp even when upstream is unchanged.
     if ((Test-Path -LiteralPath $targetPath) -and (Test-Path -LiteralPath $readmePath) -and (Test-Path -LiteralPath $licensePath)) {
-        $existingSha = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash.ToLower()
+        $existingSha = Get-Sha256Hex -LiteralPath $targetPath
         if ($existingSha -eq $meta.Sha256) {
             Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
             Write-Host "    no change (sha256=$($meta.Sha256.Substring(0,12))... matches on-disk vendor copy)" -ForegroundColor DarkGray
