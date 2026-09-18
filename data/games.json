@@ -1645,6 +1645,8 @@
     "far-cry-6": {
       "display_name": "Far Cry 6",
       "env_var": "FAR_CRY_6_PATH",
+      "steam_app_id": 2369390,
+      "steam_folder": "Far Cry 6",
       "ubisoft_app_ids": [
         5266
       ],
