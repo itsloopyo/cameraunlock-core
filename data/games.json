@@ -85,7 +85,7 @@
         "2114871440"
       ],
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/homeworld-remastered-collection-headtracking",
       "catalog_status": "absent"
     },
@@ -136,7 +136,7 @@
       "steam_folder": "Battlefield Bad Company 2",
       "executable_relpath": "BFBC2Game.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/battlefield-bad-company-2-headtracking",
       "catalog_status": "absent"
     },
@@ -150,7 +150,7 @@
         "1207659259"
       ],
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/amnesia-the-dark-descent-headtracking",
       "engine": "HPL",
       "catalog_status": "prerelease"
@@ -200,7 +200,7 @@
       "steam_folder": "Bully Scholarship Edition",
       "executable_relpath": "Bully.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/bully-scholarship-edition-headtracking",
       "catalog_status": "absent"
     },
@@ -335,7 +335,7 @@
       "executable_relpath": "Ride\\Binaries\\Win64\\Ride-Win64-Shipping.exe",
       "xbox_executable_relpath": "Ride\\Binaries\\WinGDK\\Ride-WinGDK-Shipping.exe",
       "loader": "Shim",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/rv-there-yet-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "released"
@@ -366,7 +366,7 @@
         "2049187585"
       ],
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/control-ultimate-edition-headtracking",
       "catalog_status": "prerelease"
     },
@@ -573,7 +573,7 @@
         "1998527297"
       ],
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/fallout-4-headtracking",
       "catalog_status": "prerelease"
     },
@@ -682,7 +682,7 @@
       "steam_folder": "Burnout(TM) Paradise The Ultimate Box",
       "executable_relpath": "BurnoutParadise.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/burnout-paradise-the-ultimate-box-headtracking",
       "catalog_status": "absent"
     },
@@ -700,7 +700,7 @@
         "1296690054"
       ],
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/deus-ex-mankind-divided-headtracking",
       "catalog_status": "absent"
     },
@@ -1145,7 +1145,7 @@
         "1436434037"
       ],
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/metro-2033-redux-headtracking",
       "catalog_status": "absent"
     },
@@ -1168,7 +1168,7 @@
       "steam_folder": "Little Nightmares Enhanced Edition",
       "executable_relpath": "Atlas\\Binaries\\Win64\\Atlas-Win64-Shipping.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/little-nightmares-enhanced-edition-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
@@ -1363,7 +1363,7 @@
       "steam_folder": "SpecOps_TheLine",
       "executable_relpath": "Binaries\\Win32\\SpecOpsTheLine.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/spec-ops-the-line-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "prerelease"
@@ -1401,7 +1401,7 @@
         "1651927092"
       ],
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/what-remains-of-edith-finch-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "released"
@@ -1417,7 +1417,7 @@
       ],
       "xbox_executable_relpath": "Binaries\\Danielle\\Gaming.Desktop.x64\\Release\\Prey.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/prey-headtracking",
       "engine": "CryEngine",
       "catalog_status": "prerelease"
@@ -1640,7 +1640,7 @@
       "executable_relpath": "arx.exe",
       "xbox_executable_relpath": "EN\\arx.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/arx-fatalis-headtracking",
       "engine": "Arx",
       "catalog_status": "prerelease"
