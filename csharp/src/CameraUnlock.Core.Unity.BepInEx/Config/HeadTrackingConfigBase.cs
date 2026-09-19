@@ -33,14 +33,6 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         public ConfigEntry<bool> InvertRoll { get; private set; }
 
         // Hotkey settings
-
-        /// <summary>
-        /// Bound and inert. The tracker app owns the centre, so nothing in core reads this
-        /// and no mod should wire it to a recenter action. It stays bound because consumers
-        /// read <c>RecenterKey.Value</c> after <see cref="Initialize"/>, and because the INI
-        /// path keeps parsing the same key with the same default.
-        /// </summary>
-        public ConfigEntry<KeyCode> RecenterKey { get; private set; }
         public ConfigEntry<KeyCode> ToggleKey { get; private set; }
         public ConfigEntry<KeyCode> PositionToggleKey { get; private set; }
         public ConfigEntry<KeyCode> ReticleToggleKey { get; private set; }
@@ -78,11 +70,6 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         /// Default sensitivity values (1.0 = normal).
         /// </summary>
         protected virtual float DefaultSensitivity => 1.0f;
-
-        /// <summary>
-        /// Default recenter hotkey.
-        /// </summary>
-        protected virtual KeyCode DefaultRecenterKey => KeyCode.Home;
 
         /// <summary>
         /// Default toggle hotkey.
@@ -192,15 +179,6 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
             );
 
             // Hotkeys section
-            RecenterKey = config.Bind(
-                "Hotkeys",
-                "RecenterKey",
-                DefaultRecenterKey,
-                "Recenter key. Retained so existing configs keep parsing. Head tracking does " +
-                "not centre itself: centre in your tracker app instead (opentrack's Center " +
-                "bind, SteamVR, or the phone app's CENTER button)."
-            );
-
             ToggleKey = config.Bind(
                 "Hotkeys",
                 "ToggleKey",
@@ -273,14 +251,13 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
             ShowDecoupledCrosshair.SettingChanged += HandleSettingChanged;
 
             // OnConfigChanged is documented as firing when ANY value changes, but these
-            // six were never wired up. Rebinding a hotkey through ConfigurationManager
+            // five were never wired up. Rebinding a hotkey through ConfigurationManager
             // mid-game fired SettingChanged with nothing listening, so the mod's handler
             // never ran and the new key did nothing until a restart - and any subclass
             // cache keyed off these entries went stale. Additive: the event fires more
             // often, which is what the documentation already promised.
             UdpPort.SettingChanged += HandleSettingChanged;
             EnableOnStartup.SettingChanged += HandleSettingChanged;
-            RecenterKey.SettingChanged += HandleSettingChanged;
             ToggleKey.SettingChanged += HandleSettingChanged;
             PositionToggleKey.SettingChanged += HandleSettingChanged;
             ReticleToggleKey.SettingChanged += HandleSettingChanged;
