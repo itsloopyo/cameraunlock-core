@@ -68,6 +68,13 @@ namespace CameraUnlock.Core.Unity.Tracking
         private bool _hasCentered;
         private bool _recenterOnStabilize;
 
+        // Set by ResetState(false). The next session starts at the full pose instead of
+        // fading in from zero, because the game replaced the view in between (a map, a
+        // dialogue camera) and the player is not watching an untracked view that the
+        // pose would jump away from. A fade there reads as the camera starting off
+        // target and drifting onto where the player is looking.
+        private bool _skipNextTransitionIn;
+
         // worldToCameraMatrix is a sticky override: once set, Unity stops
         // recomputing it from camera.transform each frame. When we stop
         // applying tracking we must call ResetWorldToCameraMatrix() once,
@@ -214,6 +221,11 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// <returns>True when tracking is being applied to the camera this frame.</returns>
         public bool ProcessFrame(bool enabled)
         {
+            // An enabled frame with no tracker data is drawn untracked in front of the
+            // player, so whatever session starts next is one they watch begin.
+            if (enabled && !_receiver.IsReceiving)
+                _skipNextTransitionIn = false;
+
             if (enabled && _receiver.IsReceiving)
             {
                 _isTransitioningOut = false;
@@ -353,6 +365,7 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         public void OnTrackingEnabled()
         {
+            _skipNextTransitionIn = false;
             ResetSmoothingState();
             ResetInterpolators();
             _isTransitioningOut = false;
@@ -384,6 +397,19 @@ namespace CameraUnlock.Core.Unity.Tracking
 
         public void ResetState()
         {
+            ResetState(true);
+        }
+
+        /// <param name="fadeInOnResume">
+        /// False when the game hides or replaces the view for as long as tracking is off
+        /// (a full-screen menu, a dialogue or cutscene camera), so the next session
+        /// starts at the full head pose on its first frame. The skip is dropped if the
+        /// player sees an untracked view first: a hotkey re-enable, or tracking resuming
+        /// with the tracker silent.
+        /// </param>
+        public void ResetState(bool fadeInOnResume)
+        {
+            _skipNextTransitionIn = !fadeInOnResume;
             if (_wasApplyingTracking || _isTransitioningOut)
                 _needsMatrixReset = true;
             _mainCameraCache.Invalidate();
@@ -413,8 +439,9 @@ namespace CameraUnlock.Core.Unity.Tracking
                 _hasCentered = true;
                 _recenterOnStabilize = true;
             }
-            _isTransitioningIn = true;
-            _transitionInProgress = 0f;
+            _isTransitioningIn = !_skipNextTransitionIn;
+            _transitionInProgress = _skipNextTransitionIn ? 1f : 0f;
+            _skipNextTransitionIn = false;
             _detected6DOF = false;
             ResetInterpolators();
             ResetSmoothingState();

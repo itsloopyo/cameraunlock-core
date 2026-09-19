@@ -573,5 +573,84 @@ namespace CameraUnlock.Core.Unity.Tests
             Assert.Equal(0f, _controller.LastTrackingPitch);
             Assert.Equal(0f, _controller.LastTrackingRoll);
         }
+
+        private void RunSession(int frames)
+        {
+            for (int i = 0; i < frames; i++)
+            {
+                _source.NewSample();
+                Frame();
+            }
+        }
+
+        [Fact]
+        public void ResetState_Default_FadesTheNextSessionIn()
+        {
+            _source.Yaw = 20f;
+            RunSession(90);
+
+            _controller.ResetState();
+            _source.NewSample();
+            Frame();
+
+            Assert.True(_controller.LastTrackingYaw < 1f);
+        }
+
+        [Fact]
+        public void ResetState_WithoutFade_ResumesAtTheFullPoseOnTheFirstFrame()
+        {
+            _source.Yaw = 20f;
+            RunSession(90);
+
+            _controller.ResetState(false);
+            Time.AdvanceFrame();
+            _controller.ProcessFrame(false);
+            _source.NewSample();
+            Frame();
+
+            Assert.Equal(20f, _controller.LastTrackingYaw, 3);
+        }
+
+        [Fact]
+        public void ResetState_WithoutFade_OnlyAppliesToTheNextSession()
+        {
+            _source.Yaw = 20f;
+            _controller.ResetState(false);
+            RunSession(90);
+
+            _controller.ResetState();
+            _source.NewSample();
+            Frame();
+
+            Assert.True(_controller.LastTrackingYaw < 1f);
+        }
+
+        [Fact]
+        public void ResetState_WithoutFade_FadesAfterAnEnabledFrameWithNoData()
+        {
+            _source.Yaw = 20f;
+            _controller.ResetState(false);
+
+            _source.IsReceiving = false;
+            Frame();
+            _source.IsReceiving = true;
+            _source.NewSample();
+            Frame();
+
+            Assert.True(_controller.LastTrackingYaw < 1f);
+        }
+
+        [Fact]
+        public void ResetState_WithoutFade_FadesAfterAHotkeyReEnable()
+        {
+            _source.Yaw = 20f;
+            _controller.ResetState(false);
+
+            _controller.OnTrackingEnabled();
+            _source.NewSample();
+            Frame();
+
+            Assert.True(_controller.LastTrackingYaw < 1f);
+        }
     }
 }
