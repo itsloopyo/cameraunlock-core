@@ -1612,7 +1612,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/thief-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "superliminal": {
       "display_name": "Superliminal",
