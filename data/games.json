@@ -1730,7 +1730,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/pathalogic-2-headtracking",
       "engine": "Unity",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "stalker-call-of-prypiat-enhanced-edition": {
       "display_name": "S.T.A.L.K.E.R.: Call of Prypiat - Enhanced Edition",
