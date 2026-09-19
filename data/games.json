@@ -516,7 +516,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/ghostrunner-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "prerelease"
     },
     "green-hell": {
       "display_name": "Green Hell",
@@ -648,7 +648,7 @@
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/dying-light-headtracking",
-      "catalog_status": "private"
+      "catalog_status": "released"
     },
     "dying-light-2": {
       "display_name": "Dying Light 2 Stay Human",
@@ -1304,7 +1304,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/outer-worlds-spacers-choice-edition-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     },
     "sonic-racing-crossworlds": {
       "display_name": "Sonic Racing: CrossWorlds",
