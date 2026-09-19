@@ -67,6 +67,13 @@ public:
 
     // Install the Present/ResizeBuffers/ExecuteCommandLists hooks. Caller must
     // have already initialized MinHook (MH_Initialize). Returns false on failure.
+    //
+    // Call it only once the game has created its own D3D12 device. The vtable
+    // probe creates a throwaway device, and D3D12 hands an existing device back
+    // rather than making a second one for the same adapter. In Far Cry 6's Steam
+    // build, a probe run while the game was still creating its device (no hooks
+    // installed, nothing drawn) left the game rendering posterised with blank UI
+    // textures for the whole session.
     bool Install();
 
     // Tear down hooks and release D3D12 resources.
