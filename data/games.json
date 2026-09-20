@@ -518,6 +518,17 @@
       "engine": "Unreal Engine",
       "catalog_status": "prerelease"
     },
+    "ghostrunner-2": {
+      "display_name": "Ghostrunner 2",
+      "env_var": "GHOSTRUNNER_2_PATH",
+      "steam_app_id": 2144740,
+      "steam_folder": "Ghostrunner 2",
+      "executable_relpath": "Ghostrunner2\\Binaries\\Win64\\Ghostrunner2-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/ghostrunner-2-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
+    },
     "green-hell": {
       "display_name": "Green Hell",
       "env_var": "GREEN_HELL_PATH",
