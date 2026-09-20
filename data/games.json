@@ -1800,6 +1800,17 @@
       "repo": "itsloopyo/system-shock-2-25th-anniversary-remaster-headtracking",
       "engine": "KEX",
       "catalog_status": "absent"
+    },
+    "deep-rock-galactic": {
+      "display_name": "Deep Rock Galactic",
+      "env_var": "DEEP_ROCK_GALACTIC_PATH",
+      "steam_app_id": 548430,
+      "steam_folder": "Deep Rock Galactic",
+      "executable_relpath": "FSD\\Binaries\\Win64\\FSD-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/deep-rock-galactic-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     }
   }
 }
