@@ -525,6 +525,7 @@
       "steam_folder": "Ghostrunner 2",
       "executable_relpath": "Ghostrunner2\\Binaries\\Win64\\Ghostrunner2-Win64-Shipping.exe",
       "loader": "AsiLoader",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/ghostrunner-2-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
@@ -1796,6 +1797,7 @@
       "steam_folder": "System Shock Remake",
       "executable_relpath": "SystemShock\\Binaries\\Win64\\SystemReShock-Win64-Shipping.exe",
       "loader": "AsiLoader",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/system-shock-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
@@ -1819,6 +1821,7 @@
       "steam_folder": "Deep Rock Galactic",
       "executable_relpath": "FSD\\Binaries\\Win64\\FSD-Win64-Shipping.exe",
       "loader": "AsiLoader",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/deep-rock-galactic-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
