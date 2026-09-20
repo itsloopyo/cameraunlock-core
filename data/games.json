@@ -1788,6 +1788,18 @@
       "repo": "itsloopyo/system-shock-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
+    },
+    "system-shock-2-25th-anniversary-remaster": {
+      "display_name": "System Shock 2: 25th Anniversary Remaster",
+      "env_var": "SYSTEM_SHOCK_2_REMASTER_PATH",
+      "steam_app_id": 866570,
+      "steam_folder": "System Shock 2 Remastered",
+      "executable_relpath": "SystemShock2Remastered.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/system-shock-2-25th-anniversary-remaster-headtracking",
+      "engine": "KEX",
+      "catalog_status": "absent"
     }
   }
 }
