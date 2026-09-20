@@ -1764,6 +1764,30 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/tt-isle-of-man-ride-on-the-edge-3-headtracking",
       "catalog_status": "prerelease"
+    },
+    "jump-space": {
+      "display_name": "Jump Space",
+      "env_var": "JUMP_SPACE_PATH",
+      "steam_app_id": 1757300,
+      "steam_folder": "JumpSpace",
+      "executable_relpath": "Jump Space.exe",
+      "data_folder": "Jump Space_Data",
+      "loader": "BepInEx6",
+      "delivery_mode": "manifest",
+      "repo": "itsloopyo/jump-space-headtracking",
+      "engine": "Unity",
+      "catalog_status": "absent"
+    },
+    "system-shock": {
+      "display_name": "System Shock",
+      "env_var": "SYSTEM_SHOCK_PATH",
+      "steam_app_id": 482400,
+      "steam_folder": "System Shock Remake",
+      "executable_relpath": "SystemShock\\Binaries\\Win64\\SystemReShock-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/system-shock-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     }
   }
 }
