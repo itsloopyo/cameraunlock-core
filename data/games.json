@@ -1180,7 +1180,7 @@
       "steam_folder": "Subliminal",
       "executable_relpath": "Subliminal\\Binaries\\Win64\\Subliminal-Win64-Shipping.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/subliminal-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
