@@ -1183,7 +1183,7 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/subliminal-headtracking",
       "engine": "Unreal Engine",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     },
     "still-wakes-the-deep": {
       "display_name": "Still Wakes the Deep",
