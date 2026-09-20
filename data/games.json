@@ -1657,7 +1657,7 @@
       "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/far-cry-6-headtracking",
-      "catalog_status": "prerelease"
+      "catalog_status": "released"
     },
     "viewfinder": {
       "display_name": "Viewfinder",
