@@ -1750,7 +1750,7 @@
       "steam_folder": "STALKER Shadow of Chornobyl - EE",
       "executable_relpath": "xrEngine.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/stalker-shadow-of-chornobyl-enhanced-edition-headtracking",
       "catalog_status": "prerelease"
     },
