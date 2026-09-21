@@ -1825,6 +1825,15 @@
       "repo": "itsloopyo/deep-rock-galactic-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
+    },
+    "voices-of-the-void": {
+      "display_name": "Voices of the Void",
+      "env_var": "VOICES_OF_THE_VOID_PATH",
+      "executable_relpath": "VotV\\Binaries\\Win64\\VotV-Win64-Shipping.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/voices-of-the-void-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     }
   }
 }
