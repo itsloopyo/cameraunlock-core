@@ -1294,7 +1294,7 @@
       "loader": "Shim",
       "delivery_mode": "manifest",
       "repo": "itsloopyo/no-mans-sky-headtracking",
-      "catalog_status": "absent"
+      "catalog_status": "released"
     },
     "trailmakers": {
       "display_name": "Trailmakers",
