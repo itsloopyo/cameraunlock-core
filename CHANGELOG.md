@@ -9,6 +9,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - install.cmd and uninstall.cmd ask for the game folder when detection finds nothing
+
+`find-game.ps1` takes an `-Interactive` switch. With it, a run that detects no
+install stops and asks for the folder instead of failing, re-asking until it is
+given one that holds the executable `games.json` names for that game, or an
+empty line to cancel. It accepts what Explorer's "Copy as path" and a
+drag-and-drop produce - quoted, with a trailing separator - and resolves a
+relative path before anything records it.
+
+Every install body and the uninstall body pass the switch on the no-path branch
+and only when the caller did not pass `/y`. The launcher passes a path and `/y`
+and so never reaches the prompt; a path that was given and did not resolve is
+still a hard error.
+
+This is the only route into a game that publishes nothing to detect: one that
+arrived as a zip from itch.io, Game Jolt or a direct download has no registry
+key, no store manifest and no library folder, so its `games.json` entry carries
+an `env_var` and nothing else, and before this the installer's whole answer was
+to tell the user to re-run it with an argument.
+
+`scripts/test-install-prompt.ps1` drives the cases through a real cmd.exe.
+
+Consuming repos: nothing to change. Bodies ship from here, so a submodule bump
+picks this up.
+
 ### Changed - the DX9 overlay hooks Present outright instead of waiting for the game's device
 
 `DX9Overlay::Install()` now reads the shared `IDirect3DDevice9` vtable off a

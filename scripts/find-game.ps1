@@ -34,6 +34,11 @@
     is an existing directory, it is used verbatim instead of running
     detection.
 
+.PARAMETER Interactive
+    Ask for the game folder when detection finds nothing. The install
+    and uninstall bodies pass this only when the caller did not pass
+    /y, so the launcher is never left waiting on a stdin read.
+
 .EXITCODE
     0 - game resolved, OutFile written
     1 - bad input (unknown game id, missing games.json, OutFile write failed)
@@ -42,7 +47,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$GameId,
     [Parameter(Mandatory = $true)][string]$OutFile,
-    [string]$GivenPath
+    [string]$GivenPath,
+    [switch]$Interactive
 )
 
 Set-StrictMode -Version Latest
@@ -63,6 +69,60 @@ if (-not (Test-Path $modulePath)) {
     exit 1
 }
 Import-Module $modulePath -Force
+
+# Detection reads what a store publishes about itself. A game that arrived as a
+# zip from itch.io, Game Jolt or a direct download publishes nothing at all, so
+# there is no registry key, no manifest and no library folder to read, and the
+# only thing on the machine that knows where it went is the person who
+# extracted it. Asking them is the entire fallback.
+#
+# Returns $null when the user declines, which is the blank line they are told
+# about. A closed or empty stdin reads as that same blank line rather than
+# throwing, so a non-interactive caller that reaches here still terminates.
+function Read-GamePathFromUser {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Config,
+        [Parameter(Mandatory = $true)][string]$DisplayName)
+
+    Write-Host ""
+    Write-Host "Could not work out where $DisplayName is installed."
+    Write-Host "Type or paste the folder you installed it to, or press Enter to cancel."
+    Write-Host ""
+
+    while ($true) {
+        Write-Host "  $DisplayName folder: " -NoNewline
+        $typed = (Read-Host).Trim().Trim('"').Trim()
+        if (-not $typed) { return $null }
+
+        # Never trim past a drive root: "C:" is not "C:\", it is whatever
+        # directory this process happens to be sitting in on C:.
+        while ($typed.EndsWith('\') -and -not $typed.EndsWith(':\')) {
+            $typed = $typed.Substring(0, $typed.Length - 1)
+        }
+
+        if (-not (Test-Path -LiteralPath $typed -PathType Container)) {
+            Write-Host "  There is no folder at: $typed"
+            continue
+        }
+
+        # A relative path works for the install itself and then reads as
+        # nonsense in the log line and the state file, both of which outlive
+        # the working directory that gave it meaning.
+        $typed = (Resolve-Path -LiteralPath $typed).ProviderPath
+
+        # Same check every detection strategy passes through, so a typed path
+        # is held to the standard a detected one is, and the mod cannot be
+        # deployed into a folder the game is not in.
+        $relPath = Get-GameExecutableRelPath -Config $Config -Path $typed
+        if (-not (Test-GameInstallation -Path $typed -Executable $relPath)) {
+            Write-Host "  That folder does not contain $relPath, so it is not the"
+            Write-Host "  folder $DisplayName is installed in."
+            continue
+        }
+
+        return $typed
+    }
+}
 
 $cfg = Get-GameConfig -GameId $GameId
 if (-not $cfg) {
@@ -85,6 +145,17 @@ if ($GivenPath) {
     }
 } else {
     $gamePath = Find-GamePath -GameId $GameId
+    if (-not $gamePath -and $Interactive) {
+        $gamePath = Read-GamePathFromUser -Config $cfg -DisplayName $displayName
+        if (-not $gamePath) {
+            # The prompt has already said what was wanted. Falling through to
+            # the detection error below would follow it with a list of Steam
+            # libraries, which for a direct download is the one place the game
+            # was never going to be.
+            Write-Error "No folder given, so $displayName was not located."
+            exit 2
+        }
+    }
 }
 
 # Pick the executable relpath. GDK / Xbox builds can ship under a different

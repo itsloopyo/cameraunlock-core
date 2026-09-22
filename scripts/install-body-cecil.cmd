@@ -165,13 +165,24 @@ if not exist "%_SHIM%" (
     exit /b 1
 )
 set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
-:: -GivenPath is spelled out in both branches rather than built into one
+:: -GivenPath is spelled out in each branch rather than built into one
 :: variable and expanded unquoted: the quotes are what keep a `&`, `^` or `)`
 :: in the user's path from being parsed as syntax.
+::
+:: -Interactive lets the shim ask for the folder when detection comes up
+:: empty, which is the only route a game that ships as a zip from itch.io or
+:: a direct download has - it publishes no registry key, no store manifest
+:: and no library folder for detection to read. It goes on the no-path branch
+:: only, and only without /y: the launcher passes both, and a prompt under /y
+:: would block it on a stdin read with nobody at the keyboard. A path that
+:: WAS given and did not resolve stays a hard error either way - that caller
+:: has already decided where the game is and was wrong about it.
 if defined _GIVEN_PATH (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%" -GivenPath "%_GIVEN_PATH%"
-) else (
+) else if defined YES_FLAG (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "%_SHIM_OUT%" -Interactive
 )
 set "_PS_EC=%errorlevel%"
 if not "%_PS_EC%"=="0" (

@@ -370,7 +370,8 @@ Located in `powershell/`, imported by every mod repo's `release.ps1` / `update-d
 shim, UE4SS). Templates are copied verbatim into mod repos; only the CONFIG BLOCK
 differs per mod. Supporting scripts:
 
-- `find-game.ps1` - bridges `install.cmd` to `GamePathDetection.psm1`
+- `find-game.ps1` - bridges `install.cmd` to `GamePathDetection.psm1`, and asks
+  for the folder when detection finds nothing and the caller did not pass `/y`
 - `package-bepinex-mod.ps1` - builds the installer ZIP for releases
 - `check-loader-arch.ps1` - detects x86/x64 loader mismatches
 - `generate-release-notes.ps1` - changelog from git history
