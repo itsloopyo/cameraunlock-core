@@ -5,7 +5,6 @@
 #include <cameraunlock/config/ini_reader.h>
 #include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/math/finite_utils.h>
-#include <cameraunlock/os/module_paths.h>
 #include <cameraunlock/protocol/port_utils.h>
 #include <cameraunlock/reframework/log_callback.h>
 
@@ -74,31 +73,74 @@ std::string DescribeRefusal(const cameraunlock::IniEditResult& result) {
     return text + "); the file is unchanged";
 }
 
-std::string DescribeTemporary(const std::wstring& temporary) {
-    std::string narrow;
-    if (cameraunlock::os::NarrowToAnsi(temporary, narrow)) return narrow;
-    return "a temporary beside it whose name has no ANSI form";
+// WriteFileChecked names the temporary "<target>.<32 hex digits>.tmp", so all of it
+// after the target is ASCII.
+std::string DescribeTemporary(const char* path, const std::wstring& temporary) {
+    constexpr size_t kSuffixLength = 1 + 32 + 4;
+    std::string text = path;
+    for (size_t i = temporary.size() - kSuffixLength; i < temporary.size(); ++i) {
+        text += static_cast<char>(temporary[i]);
+    }
+    return text;
 }
 
-std::string DescribeWriteFailure(const cameraunlock::CheckedWriteResult& result) {
+std::string DescribeWriteFailure(const char* path, const cameraunlock::CheckedWriteResult& result) {
+    std::string text;
     if (result.status != cameraunlock::CheckedWriteStatus::Failed) {
-        return std::string("it changed on disk while it was being edited (") +
+        text = std::string("it changed on disk while it was being edited (") +
                cameraunlock::CheckedWriteStatusName(result.status) +
                "), so the edit was dropped and the file left as it now is";
+    } else {
+        text = std::string("the ") + cameraunlock::CheckedWriteStepName(result.failed_step) +
+               " step failed with Windows error " + std::to_string(result.error);
+        if (result.outcome_uncertain) {
+            return text + ". Windows could not finish replacing the file, so it may be missing or "
+                          "renamed; the edited contents are in " +
+                   DescribeTemporary(path, result.temporary_path);
+        }
+        text += "; the file is unchanged";
     }
-    std::string text = std::string("the ") + cameraunlock::CheckedWriteStepName(result.failed_step) +
-                       " step failed with Windows error " + std::to_string(result.error);
-    if (result.outcome_uncertain) {
-        return text + ". Windows could not finish replacing the file, so it may be missing or "
-                      "renamed; the edited contents are in " +
-               DescribeTemporary(result.temporary_path);
-    }
-    text += "; the file is unchanged";
     if (!result.temporary_path.empty() && !result.temporary_removed) {
-        text += ", and " + DescribeTemporary(result.temporary_path) +
+        text += ", and " + DescribeTemporary(path, result.temporary_path) +
                 " could not be removed (Windows error " + std::to_string(result.cleanup_error) + ")";
     }
     return text;
+}
+
+bool EqualsAsciiIgnoreCase(const std::string& a, const char* b) {
+    size_t i = 0;
+    for (; i < a.size(); ++i) {
+        if (b[i] == '\0') return false;
+        char x = a[i];
+        char y = b[i];
+        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
+        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
+        if (x != y) return false;
+    }
+    return b[i] == '\0';
+}
+
+// GetPrivateProfileStringA does not skip a UTF-8 byte order mark, so a section header
+// on the first line of such a file is not a header to it and the keys under it belong
+// to no section. EditIni skips the mark, and would edit or insert where this reader
+// never looks. Returns the edited section named by such a header, or null.
+const char* EditedSectionBehindBom(const std::string& original, const std::vector<IniEdit>& edits) {
+    if (original.compare(0, 3, "\xEF\xBB\xBF") != 0) return nullptr;
+    size_t at = 3;
+    while (at < original.size() && (original[at] == ' ' || original[at] == '\t')) ++at;
+    if (at == original.size() || original[at] != '[') return nullptr;
+    const size_t lineEnd = original.find_first_of("\r\n", at);
+    const size_t close = original.find(']', at + 1);
+    if (close == std::string::npos || close > lineEnd) return nullptr;
+    size_t begin = at + 1;
+    size_t end = close;
+    while (begin < end && (original[begin] == ' ' || original[begin] == '\t')) ++begin;
+    while (end > begin && (original[end - 1] == ' ' || original[end - 1] == '\t')) --end;
+    const std::string name = original.substr(begin, end - begin);
+    for (const IniEdit& edit : edits) {
+        if (EqualsAsciiIgnoreCase(name, edit.section)) return edit.section;
+    }
+    return nullptr;
 }
 
 // Sets the given keys and touches nothing else. Rewriting the whole file through
@@ -126,6 +168,13 @@ bool ApplyIniEdits(const char* path, const std::vector<IniEdit>& edits, std::str
         return false;
     }
 
+    if (const char* section = EditedSectionBehindBom(original, edits)) {
+        error = std::string("its first line is the [") + section +
+                "] header with a UTF-8 byte order mark in front of it, which "
+                "GetPrivateProfileStringA does not read as a header; the file is unchanged";
+        return false;
+    }
+
     std::vector<cameraunlock::IniEdit> batch;
     for (const IniEdit& edit : edits) {
         batch.push_back({edit.section, edit.key, edit.value, true});
@@ -139,7 +188,7 @@ bool ApplyIniEdits(const char* path, const std::vector<IniEdit>& edits, std::str
     const cameraunlock::CheckedWriteResult written =
         cameraunlock::WriteFileChecked(widePath, original, edited.bytes);
     if (!written.Committed()) {
-        error = DescribeWriteFailure(written);
+        error = DescribeWriteFailure(path, written);
         return false;
     }
     return true;

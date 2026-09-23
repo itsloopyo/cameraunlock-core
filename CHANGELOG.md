@@ -37,6 +37,13 @@ signature changed. What a migrated file looks like changes in these cases:
   untouched. In every such case the correction applies for the session only, the stamp
   is not claimed, the error log names the refusal or the failed step and its Windows
   error, and the next launch tries again.
+- A UTF-8 file with a byte order mark whose first line is the `[General]` header is
+  refused the same way. GetPrivateProfileStringA does not read a header with the mark in
+  front of it, so the stamp would land where the mod never reads it, and the migration
+  would run again on every launch and undo a deliberate `InvertX=true` each time. The old
+  code appended a second `[General]` at the end instead, which the mod does read. A file
+  with the mark in front of a comment, a blank line or any other section is migrated as
+  usual.
 - A config deleted between the migration's read and its write is reported and not
   recreated. The old code wrote it back from the copy it had read.
 

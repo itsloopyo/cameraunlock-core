@@ -425,6 +425,76 @@ void TestDeliberateInversionAfterMigrationOnCrlf() {
     Check(ini.Read() == reinstated, "and the file is left exactly as the user wrote it");
 }
 
+// A byte order mark in front of a comment hides nothing from GetPrivateProfileStringA.
+// The mark is kept, the file is migrated once, and a true set back afterwards stays.
+void TestBomFileKeepsADeliberateInversion() {
+    TempIni ini("plugin_config_migration_bom.ini");
+    ini.Write(
+        "\xEF\xBB\xBF; RE8 Head Tracking Configuration\r\n"
+        "\r\n"
+        "[Position]\r\n"
+        "InvertX=true\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "AutoEnable=true\r\n");
+
+    PluginConfig first;
+    first.Load(ini.Path(), kRe8Schema);
+    Check(!first.positionInvertX, "the BOM config is corrected in memory");
+    Check(first.configVersion == kPluginConfigVersion, "and reports the stamp");
+    Check(ini.Read() ==
+              "\xEF\xBB\xBF; RE8 Head Tracking Configuration\r\n"
+              "\r\n"
+              "[Position]\r\n"
+              "InvertX=false\r\n"
+              "\r\n"
+              "[General]\r\n"
+              "AutoEnable=true\r\n"
+              "ConfigVersion=1\r\n",
+          "the BOM config is migrated once, keeping the mark");
+
+    const std::string reinstated =
+        "\xEF\xBB\xBF; RE8 Head Tracking Configuration\r\n"
+        "\r\n"
+        "[Position]\r\n"
+        "InvertX=true\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "AutoEnable=true\r\n"
+        "ConfigVersion=1\r\n";
+    ini.Write(reinstated);
+
+    PluginConfig second;
+    second.Load(ini.Path(), kRe8Schema);
+    Check(second.configVersion == kPluginConfigVersion, "the stamp behind the mark reads back");
+    Check(second.positionInvertX, "the true set back after the migration is in effect");
+    Check(ini.Read() == reinstated, "and the file is left exactly as the user wrote it");
+}
+
+// The mark hides the first header from GetPrivateProfileStringA, but the migration
+// edits neither that section nor anything under it.
+void TestBomBeforeAnUneditedSection() {
+    CheckRe8Migration(
+        "plugin_config_migration_bom_network.ini",
+        "\xEF\xBB\xBF[Network]\n"
+        "UDPPort=5555\n"
+        "\n"
+        "[Position]\n"
+        "InvertX=true\n"
+        "\n"
+        "[General]\n"
+        "AutoEnable=true\n",
+        "\xEF\xBB\xBF[Network]\n"
+        "UDPPort=5555\n"
+        "\n"
+        "[Position]\n"
+        "InvertX=false\n"
+        "\n"
+        "[General]\n"
+        "AutoEnable=true\n"
+        "ConfigVersion=1\n");
+}
+
 // Load returns false on a missing file and the caller writes the defaults; the
 // migration never creates a file of its own.
 void TestMissingFileIsNotCreated() {
@@ -472,6 +542,15 @@ void TestRefusedFilesAreLeftAlone() {
         "[General]\n"
         "AutoEnable=true\n",
         "(DuplicateKey for [Position] InvertX on lines 2, 3)");
+    // GetPrivateProfileStringA reads the byte order mark as part of the first line, so
+    // this [General] is not a header to it and a stamp put under it would never be read.
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_bom_header.ini",
+        "\xEF\xBB\xBF[General]\r\n"
+        "AutoEnable=true\r\n"
+        "[Position]\r\n"
+        "InvertX=true\r\n",
+        "its first line is the [General] header with a UTF-8 byte order mark in front of it");
     const char utf16[] =
         "\xFF\xFE[\0G\0e\0n\0e\0r\0a\0l\0]\0\r\0\n\0A\0u\0t\0o\0E\0n\0a\0b\0l\0e\0=\0t\0r\0u\0e\0\r\0\n\0";
     CheckRefusedFileIsLeftAlone("plugin_config_migration_utf16.ini",
@@ -589,6 +668,8 @@ int RunPluginConfigMigrationTests() {
     TestNoFinalNewlineInsertsOnItsOwnLine();
     TestNoFinalNewlineCrlfWithoutGeneral();
     TestDeliberateInversionAfterMigrationOnCrlf();
+    TestBomFileKeepsADeliberateInversion();
+    TestBomBeforeAnUneditedSection();
     TestMissingFileIsNotCreated();
     TestRefusedFilesAreLeftAlone();
     TestReadOnlyFileIsLeftAlone();
