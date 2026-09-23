@@ -35,6 +35,8 @@ static_assert(static_cast<int>(IniEditRefusal::DuplicateSection) == 5,
               "IniEditRefusal::DuplicateSection");
 static_assert(static_cast<int>(IniEditRefusal::DuplicateKey) == 6, "IniEditRefusal::DuplicateKey");
 static_assert(static_cast<int>(IniEditRefusal::KeyNotFound) == 7, "IniEditRefusal::KeyNotFound");
+static_assert(static_cast<int>(IniEditRefusal::AmbiguousWhitespace) == 8,
+              "IniEditRefusal::AmbiguousWhitespace");
 
 int g_failures = 0;
 
@@ -91,7 +93,7 @@ struct FixtureCase {
     bool has_input = false;
     std::string input;
     std::vector<IniEdit> edits;
-    std::vector<std::pair<std::string, std::string>> reads;
+    std::vector<IniEdit> rejected;
     bool refused = false;
     std::string refusal;
     std::string refused_section;
@@ -113,9 +115,10 @@ FixtureCase LoadCase(const fs::path& dir) {
             const auto f = Split(line, '\t', 4);
             if (f.size() != 4) throw std::runtime_error(c.name + ": malformed edit: " + line);
             c.edits.push_back(IniEdit{f[1], f[2], f[3], directive == "set_or_insert"});
-        } else if (directive == "reads") {
-            const auto f = Split(line, '\t', 3);
-            c.reads.emplace_back(f[1], f[2]);
+        } else if (directive == "rejects") {
+            const auto f = Split(line, '\t', 4);
+            if (f.size() != 4) throw std::runtime_error(c.name + ": malformed rejection: " + line);
+            c.rejected.push_back(IniEdit{f[1], f[2], f[3], true});
         } else if (directive == "flat_duplicate") {
             // The C++ reader returns every occurrence, so the list comparison below
             // already covers a key it sees twice.
@@ -204,16 +207,26 @@ void CheckReadBack(const FixtureCase& c, const std::string& output) {
     Check(before_rest == after_rest, c.name + ": every unedited key reads back unchanged");
 
     for (const IniEdit& edit : c.edits) {
-        std::string value = edit.value;
-        for (const auto& read : c.reads) {
-            if (EqualsAsciiIgnoreCase(read.first, edit.key)) value = read.second;
-        }
-        Check(ReadsBackEdited(ValuesOf(before, edit.key), ValuesOf(after, edit.key), value),
-              c.name + ": " + edit.key + " reads back as '" + value + "'");
+        Check(ReadsBackEdited(ValuesOf(before, edit.key), ValuesOf(after, edit.key), edit.value),
+              c.name + ": " + edit.key + " reads back as '" + edit.value + "'");
     }
 }
 
+bool ThrowsInvalidArgument(const std::string& input, const IniEdit& edit) {
+    try {
+        EditIni(input, {edit});
+    } catch (const std::invalid_argument&) {
+        return true;
+    }
+    return false;
+}
+
 void RunFixture(const FixtureCase& c) {
+    for (const IniEdit& rejected : c.rejected) {
+        Check(ThrowsInvalidArgument(c.input, rejected),
+              c.name + ": [" + rejected.section + "] " + rejected.key + "=" + rejected.value +
+                  " is rejected");
+    }
     const IniEditResult result = EditIni(c.input, c.edits);
     if (c.refused) {
         Check(!result.Succeeded(), c.name + ": refused");
@@ -273,6 +286,48 @@ void TestUnwritableEditsThrow() {
     Check(!Throws({{"General", "A", ""}}), "an empty value is writable");
 }
 
+// Every value either throws or reads back through ParseIniConfig as itself, and editing
+// the output again with the same value changes nothing.
+void TestAcceptedValuesReadBackAndReapplyUnchanged() {
+    std::cout << "EditIni value round trip:\n";
+    const std::vector<std::string> inputs = {"[S]\nKey=1\n", "[S]\nKey = 1 ; comment\n",
+                                             "[S]\nKey=\"a;b\"#c"};
+    const std::vector<std::string> alphabet = {"a", " ", ";", "#", "\"", "'", "=", "\xC2\xA0"};
+    std::vector<std::string> values = {""};
+    for (size_t start = 0, length = 1; length <= 4; ++length) {
+        const size_t end = values.size();
+        for (size_t i = start; i < end; ++i) {
+            for (const std::string& c : alphabet) values.push_back(values[i] + c);
+        }
+        start = end;
+    }
+
+    int accepted = 0;
+    int wrong = 0;
+    for (const std::string& input : inputs) {
+        for (const std::string& value : values) {
+            const std::vector<IniEdit> edit = {{"S", "Key", value, false}};
+            std::string once;
+            try {
+                once = EditIni(input, edit).bytes;
+            } catch (const std::invalid_argument&) {
+                continue;
+            }
+            ++accepted;
+            const auto read = ReadFlat(once, "round_trip");
+            const bool reads_back = read.size() == 1 && read[0].second == value;
+            const bool stable = EditIni(once, edit).bytes == once;
+            if (!reads_back || !stable) {
+                std::cout << "    value '" << value << "' on '" << input << "' gives '" << once
+                          << "'\n";
+                ++wrong;
+            }
+        }
+    }
+    Check(accepted > 100, "more than 100 values accepted (" + std::to_string(accepted) + ")");
+    Check(wrong == 0, "every accepted value reads back as itself and re-applies unchanged");
+}
+
 void TestNoEditsKeepsBytes() {
     std::cout << "EditIni with no edits:\n";
     const std::string original = "\xEF\xBB\xBF[General]\r\nA=1\nB = 2 ; c";
@@ -288,6 +343,7 @@ int RunIniEditorTests() {
     std::cout << "\n=== IniEditor Tests ===\n";
     TestFixtures();
     TestUnwritableEditsThrow();
+    TestAcceptedValuesReadBackAndReapplyUnchanged();
     TestNoEditsKeepsBytes();
     return g_failures;
 }

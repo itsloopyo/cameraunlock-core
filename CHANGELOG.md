@@ -24,8 +24,8 @@ the new bytes back, or a typed refusal and no bytes.
   const std::vector<IniEdit>&)` returning `IniEditResult`, and
   `IniEditRefusalName`.
 - `IniEditRefusal` is `None`, `Utf16`, `InvalidUtf8`, `NulByte`,
-  `LoneCarriageReturn`, `DuplicateSection`, `DuplicateKey` and `KeyNotFound`, with
-  the same numbers in both languages.
+  `LoneCarriageReturn`, `DuplicateSection`, `DuplicateKey`, `KeyNotFound` and
+  `AmbiguousWhitespace`, with the same numbers in both languages.
 
 Sections and keys match ignoring ASCII case, and a replaced line keeps the file's own
 spelling. A replacement changes only the value. The whitespace around `=`, any inline
@@ -33,10 +33,25 @@ comment and the line's own terminator stay as they were. With `insertIfAbsent`, 
 missing key goes after the last non-comment line of its section, and a missing
 section is appended at the end of the file after a blank line. New lines take the
 file's dominant line ending (CRLF on a tie). A file whose last line has no terminator
-still has none afterwards. A UTF-8 BOM is kept. A key that appears twice in the
-edited section is refused, not picked. So is a section header that appears twice.
-Keys above the first header belong to no section and are never matched. Edits that
-cannot be written as one line throw `ArgumentException` / `std::invalid_argument`.
+still has none afterwards. A UTF-8 BOM is kept. Headers that repeat a section's name
+count as one section. A key that appears twice in the edited section, under one header
+or across repeats, is refused, not picked. An insertion into a section whose header
+repeats is refused too, since there is no one place for it. Keys above the first
+header belong to no section and are never matched.
+
+A line that starts with white space other than a space or tab (form feed, no-break
+space and the like), or a key that ends in it, is refused as `AmbiguousWhitespace`:
+`ConfigParsingUtils.ParseIniFile` trims it and `ParseIniConfig` does not, so the two
+read that line differently.
+
+An edit whose key, section or value would not read back as given throws
+`ArgumentException` / `std::invalid_argument`. For a value that means CR, LF or NUL,
+surrounding white space, `;` or `#` outside quotes, a quote left open (a comment
+after it on the line would read as part of the value), or a pair of matching quotes
+around the whole value. Both test suites try every value of up to four characters
+drawn from `a`, space, `;`, `#`, both quotes, `=` and U+00A0, and check that each one
+the editor accepts reads back as itself and that applying the edit again changes
+nothing.
 
 Both implementations run the same byte fixtures in `data/fixtures/ini-editor`
 (`.gitattributes` keeps git off their line endings). Each successful fixture is read

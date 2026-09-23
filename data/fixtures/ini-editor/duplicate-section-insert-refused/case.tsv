@@ -1,0 +1,5 @@
+# An absent key under a repeated header has no one place to go. A refusal anywhere
+# in the batch refuses the batch, including edits before it.
+set	Network	P	2
+set_or_insert	General	C	3
+refused	DuplicateSection	General	C	1,5

@@ -21,16 +21,27 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         LoneCarriageReturn = 4,
 
-        /// <summary>The edit's section header appears more than once.</summary>
+        /// <summary>
+        /// The edit asks for an absent key to be inserted, and its section header appears
+        /// more than once, so there is no one place to put it.
+        /// </summary>
         DuplicateSection = 5,
 
         /// <summary>
-        /// The edit's key appears more than once in its section. Which occurrence counts
-        /// depends on the reader, so the caller decides with its own.
+        /// The edit's key appears more than once in its section, counting every header of
+        /// that name. Which occurrence counts depends on the reader, so the caller decides
+        /// with its own.
         /// </summary>
         DuplicateKey = 6,
 
         /// <summary>The key is absent and the edit did not ask for it to be inserted.</summary>
         KeyNotFound = 7,
+
+        /// <summary>
+        /// A line starts with white space other than a space or tab (a form feed, vertical
+        /// tab, no-break space and the like), or a key ends in it. The C# flat reader trims
+        /// it and the C++ one does not, so the line has no single reading to edit against.
+        /// </summary>
+        AmbiguousWhitespace = 8,
     }
 }

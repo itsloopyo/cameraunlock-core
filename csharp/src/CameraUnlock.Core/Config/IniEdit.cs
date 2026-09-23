@@ -9,7 +9,8 @@ namespace CameraUnlock.Core.Config
     /// Section and key match ASCII case-insensitively, and a replaced line keeps the file's
     /// own spelling. When the key is absent and <see cref="InsertIfAbsent"/> is set, the
     /// line is added as <c>Key=Value</c>, and a missing section as <c>[Section]</c>, spelled
-    /// exactly as given here. The value is written verbatim.
+    /// exactly as given here. The value is written verbatim, so it must be one the flat
+    /// readers read back unchanged (see <see cref="IniEditor.Edit"/>).
     /// </para>
     /// </summary>
     public sealed class IniEdit

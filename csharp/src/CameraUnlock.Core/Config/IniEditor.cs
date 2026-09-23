@@ -28,6 +28,8 @@ namespace CameraUnlock.Core.Config
             public int Begin;
             public int ContentEnd;
             public int End;
+            // The first byte that is not a space or tab.
+            public int First;
             public LineKind Kind = LineKind.Other;
             // A section's name, or a key line's key.
             public int NameBegin;
@@ -78,7 +80,14 @@ namespace CameraUnlock.Core.Config
         /// tabs are ignored; a line starting ';' or '#' is a comment; one starting '[' is a
         /// section header named by the text up to the first ']'; otherwise the first '=' with
         /// text before it makes a key line. Keys before the first header belong to no section
-        /// and are never matched.
+        /// and are never matched. Headers that repeat a section's name make one section: a key
+        /// under any of them is that section's key.
+        /// </para>
+        /// <para>
+        /// The C# flat reader trims every white-space character off a line and its key, the
+        /// C++ one only spaces and tabs. A line that starts with any other white space, or a
+        /// key that ends in it, reads differently in the two, so the document is refused as
+        /// <see cref="IniEditRefusal.AmbiguousWhitespace"/>.
         /// </para>
         /// <para>
         /// A replacement rewrites only the value: the text after '=' and its whitespace, up to
@@ -95,10 +104,12 @@ namespace CameraUnlock.Core.Config
         /// </para>
         /// </summary>
         /// <exception cref="ArgumentException">
-        /// An edit cannot be written as one line: a section or key that is empty, has
-        /// surrounding whitespace or holds CR, LF, NUL or an unpaired surrogate, a section
-        /// holding ']', a key holding '=' or starting '[', ';' or '#', a value holding CR, LF,
-        /// NUL or an unpaired surrogate, or two edits of the same key.
+        /// An edit cannot be written so that it reads back as given: a section or key that is
+        /// empty, has surrounding white space or holds CR, LF, NUL or an unpaired surrogate, a
+        /// section holding ']', a key holding '=' or starting '[', ';' or '#', a value holding
+        /// CR, LF, NUL or an unpaired surrogate, a value a flat reader would read as something
+        /// else (surrounding white space, a ';' or '#' outside quotes, a quote left open, or
+        /// one pair of matching quotes around the whole of it), or two edits of the same key.
         /// </exception>
         public static IniEditResult Edit(byte[] original, IList<IniEdit> edits)
         {
@@ -135,6 +146,7 @@ namespace CameraUnlock.Core.Config
             }
 
             var lines = new List<Line>();
+            var ambiguous = new List<int>();
             int crlfCount = 0;
             int lfCount = 0;
             for (int begin = body; begin < s.Length;)
@@ -161,8 +173,17 @@ namespace CameraUnlock.Core.Config
                     }
                 }
                 ClassifyLine(s, line);
+                if (StartsWithReaderWhitespace(s, line.First, line.ContentEnd) ||
+                    (line.Kind == LineKind.Key && EndsWithReaderWhitespace(s, line.NameBegin, line.NameEnd)))
+                {
+                    ambiguous.Add(lines.Count);
+                }
                 lines.Add(line);
                 begin = line.End;
+            }
+            if (ambiguous.Count > 0)
+            {
+                return Refuse(IniEditRefusal.AmbiguousWhitespace, null, LineNumbers(ambiguous));
             }
             byte[] eol = crlfCount >= lfCount ? new[] { (byte)'\r', (byte)'\n' } : new[] { (byte)'\n' };
 
@@ -190,11 +211,6 @@ namespace CameraUnlock.Core.Config
                         matched.Add(header);
                     }
                 }
-                if (matched.Count > 1)
-                {
-                    return Refuse(IniEditRefusal.DuplicateSection, edit.Edit, LineNumbers(matched));
-                }
-
                 if (matched.Count == 0)
                 {
                     if (!edit.Edit.InsertIfAbsent)
@@ -215,16 +231,18 @@ namespace CameraUnlock.Core.Config
                     continue;
                 }
 
-                int sectionHeader = matched[0];
-                int anchor = sectionHeader;
+                int anchor = matched[0];
                 var keys = new List<int>();
-                for (int i = sectionHeader + 1; i < lines.Count && owner[i] == sectionHeader; i++)
+                foreach (int sectionHeader in matched)
                 {
-                    Line line = lines[i];
-                    if (line.Kind != LineKind.Blank && line.Kind != LineKind.Comment) anchor = i;
-                    if (line.Kind == LineKind.Key && EqualsAsciiIgnoreCase(s, line.NameBegin, line.NameEnd, edit.Key))
+                    for (int i = sectionHeader + 1; i < lines.Count && owner[i] == sectionHeader; i++)
                     {
-                        keys.Add(i);
+                        Line line = lines[i];
+                        if (line.Kind != LineKind.Blank && line.Kind != LineKind.Comment) anchor = i;
+                        if (line.Kind == LineKind.Key && EqualsAsciiIgnoreCase(s, line.NameBegin, line.NameEnd, edit.Key))
+                        {
+                            keys.Add(i);
+                        }
                     }
                 }
                 if (keys.Count > 1)
@@ -239,6 +257,10 @@ namespace CameraUnlock.Core.Config
                 if (!edit.Edit.InsertIfAbsent)
                 {
                     return Refuse(IniEditRefusal.KeyNotFound, edit.Edit, new int[0]);
+                }
+                if (matched.Count > 1)
+                {
+                    return Refuse(IniEditRefusal.DuplicateSection, edit.Edit, LineNumbers(matched));
                 }
                 if (insertions[anchor] == null) insertions[anchor] = new List<byte[]>();
                 insertions[anchor].Add(KeyLine(edit));
@@ -298,7 +320,7 @@ namespace CameraUnlock.Core.Config
 
                 byte[] section = RequireName(edit.Section, "section");
                 byte[] key = RequireName(edit.Key, "key");
-                byte[] value = RequireWritable(edit.Value, "value");
+                byte[] value = RequireValue(edit.Value);
                 if (Array.IndexOf(section, (byte)']') >= 0)
                 {
                     throw new ArgumentException("IniEdit section '" + edit.Section + "' holds ']', which ends a section header");
@@ -347,9 +369,55 @@ namespace CameraUnlock.Core.Config
         {
             byte[] bytes = RequireWritable(text, what);
             if (bytes.Length == 0) throw new ArgumentException("IniEdit " + what + " is empty");
-            if (IsSpaceOrTab(bytes[0]) || IsSpaceOrTab(bytes[bytes.Length - 1]))
+            RequireNoSurroundingWhitespace(bytes, text, what);
+            return bytes;
+        }
+
+        private static void RequireNoSurroundingWhitespace(byte[] bytes, string text, string what)
+        {
+            if (StartsWithReaderWhitespace(bytes, 0, bytes.Length) || EndsWithReaderWhitespace(bytes, 0, bytes.Length))
             {
-                throw new ArgumentException("IniEdit " + what + " '" + text + "' has surrounding whitespace, which a reader trims away");
+                throw new ArgumentException("IniEdit " + what + " '" + text + "' has surrounding white space, which a reader trims away");
+            }
+        }
+
+        // The value lands on a key=value line, perhaps with an inline comment after it. The
+        // flat readers trim, cut the comment off, then take off one pair of surrounding
+        // quotes, so a value any of that would change cannot be written.
+        private static byte[] RequireValue(string text)
+        {
+            byte[] bytes = RequireWritable(text, "value");
+            RequireNoSurroundingWhitespace(bytes, text, "value");
+            bool inQuotes = false;
+            byte quote = 0;
+            foreach (byte c in bytes)
+            {
+                if (inQuotes)
+                {
+                    if (c == quote) inQuotes = false;
+                    continue;
+                }
+                if (c == '"' || c == '\'')
+                {
+                    inQuotes = true;
+                    quote = c;
+                    continue;
+                }
+                if (c == ';' || c == '#')
+                {
+                    throw new ArgumentException("IniEdit value '" + text +
+                        "' holds ';' or '#' outside quotes, which a reader takes as the start of a comment");
+                }
+            }
+            if (inQuotes)
+            {
+                throw new ArgumentException("IniEdit value '" + text +
+                    "' leaves a quote open, so a comment after it on the line would read as part of the value");
+            }
+            byte first = bytes.Length >= 2 ? bytes[0] : (byte)0;
+            if ((first == '"' || first == '\'') && bytes[bytes.Length - 1] == first)
+            {
+                throw new ArgumentException("IniEdit value '" + text + "' is wrapped in quotes, which a reader strips");
             }
             return bytes;
         }
@@ -360,6 +428,7 @@ namespace CameraUnlock.Core.Config
             while (first < line.ContentEnd && IsSpaceOrTab(s[first])) first++;
             int last = line.ContentEnd;
             while (last > first && IsSpaceOrTab(s[last - 1])) last--;
+            line.First = first;
 
             if (first == last)
             {
@@ -504,6 +573,39 @@ namespace CameraUnlock.Core.Config
         private static bool IsSpaceOrTab(byte b)
         {
             return b == ' ' || b == '\t';
+        }
+
+        // Every character some runtime's String.Trim() strips. .NET Framework 3.5 trims a
+        // fixed list that includes U+200B and U+FEFF and leaves out U+180E, U+202F and
+        // U+205F; .NET Framework 4 and later trim char.IsWhiteSpace. This is the union.
+        private static bool IsReaderWhitespace(int c)
+        {
+            return c == ' ' || (c >= 0x09 && c <= 0x0D) || c == 0x85 || c == 0xA0 || c == 0x1680 ||
+                c == 0x180E || (c >= 0x2000 && c <= 0x200B) || c == 0x2028 || c == 0x2029 ||
+                c == 0x202F || c == 0x205F || c == 0x3000 || c == 0xFEFF;
+        }
+
+        // The code point starting at s[i], which must begin well-formed UTF-8.
+        private static int CodePointAt(byte[] s, int i)
+        {
+            int b = s[i];
+            if (b < 0x80) return b;
+            if (b < 0xE0) return ((b & 0x1F) << 6) | (s[i + 1] & 0x3F);
+            if (b < 0xF0) return ((b & 0x0F) << 12) | ((s[i + 1] & 0x3F) << 6) | (s[i + 2] & 0x3F);
+            return ((b & 0x07) << 18) | ((s[i + 1] & 0x3F) << 12) | ((s[i + 2] & 0x3F) << 6) | (s[i + 3] & 0x3F);
+        }
+
+        private static bool StartsWithReaderWhitespace(byte[] s, int begin, int end)
+        {
+            return begin < end && IsReaderWhitespace(CodePointAt(s, begin));
+        }
+
+        private static bool EndsWithReaderWhitespace(byte[] s, int begin, int end)
+        {
+            if (begin >= end) return false;
+            int i = end - 1;
+            while (i > begin && (s[i] & 0xC0) == 0x80) i--;
+            return IsReaderWhitespace(CodePointAt(s, i));
         }
 
         private static byte FoldAscii(byte b)

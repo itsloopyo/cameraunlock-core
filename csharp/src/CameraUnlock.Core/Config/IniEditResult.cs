@@ -69,7 +69,8 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// 1-based line numbers the refusal is about: every occurrence for a duplicate, the
-        /// line holding the first offending byte for an encoding refusal. Empty otherwise.
+        /// line holding the first offending byte for an encoding refusal, every offending line
+        /// for <see cref="IniEditRefusal.AmbiguousWhitespace"/>. Empty otherwise.
         /// </summary>
         public ReadOnlyCollection<int> Lines { get; }
     }

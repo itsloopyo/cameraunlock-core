@@ -85,12 +85,85 @@ void RequireWritable(const std::string& text, const char* what) {
     }
 }
 
+// Every character some runtime's String.Trim() strips, so the C# half and this one
+// refuse the same bytes. .NET Framework 3.5 trims a fixed list that includes U+200B and
+// U+FEFF and leaves out U+180E, U+202F and U+205F; .NET Framework 4 and later trim
+// char.IsWhiteSpace. This is the union.
+bool IsReaderWhitespace(unsigned c) {
+    return c == ' ' || (c >= 0x09 && c <= 0x0D) || c == 0x85 || c == 0xA0 || c == 0x1680 ||
+           c == 0x180E || (c >= 0x2000 && c <= 0x200B) || c == 0x2028 || c == 0x2029 ||
+           c == 0x202F || c == 0x205F || c == 0x3000 || c == 0xFEFF;
+}
+
+// The code point starting at s[i], which must begin well-formed UTF-8.
+unsigned CodePointAt(const std::string& s, size_t i) {
+    auto byte = [&](size_t k) { return static_cast<unsigned>(static_cast<unsigned char>(s[k])); };
+    const unsigned b = byte(i);
+    if (b < 0x80) return b;
+    if (b < 0xE0) return ((b & 0x1F) << 6) | (byte(i + 1) & 0x3F);
+    if (b < 0xF0) return ((b & 0x0F) << 12) | ((byte(i + 1) & 0x3F) << 6) | (byte(i + 2) & 0x3F);
+    return ((b & 0x07) << 18) | ((byte(i + 1) & 0x3F) << 12) | ((byte(i + 2) & 0x3F) << 6) |
+           (byte(i + 3) & 0x3F);
+}
+
+bool StartsWithReaderWhitespace(const std::string& s, size_t begin, size_t end) {
+    return begin < end && IsReaderWhitespace(CodePointAt(s, begin));
+}
+
+bool EndsWithReaderWhitespace(const std::string& s, size_t begin, size_t end) {
+    if (begin >= end) return false;
+    size_t i = end - 1;
+    while (i > begin && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80) --i;
+    return IsReaderWhitespace(CodePointAt(s, i));
+}
+
+void RequireNoSurroundingWhitespace(const std::string& text, const char* what) {
+    if (StartsWithReaderWhitespace(text, 0, text.size()) ||
+        EndsWithReaderWhitespace(text, 0, text.size())) {
+        throw std::invalid_argument(std::string("IniEdit ") + what + " '" + text +
+                                    "' has surrounding white space, which a reader trims away");
+    }
+}
+
 void RequireName(const std::string& text, const char* what) {
     RequireWritable(text, what);
     if (text.empty()) throw std::invalid_argument(std::string("IniEdit ") + what + " is empty");
-    if (IsSpaceOrTab(text.front()) || IsSpaceOrTab(text.back())) {
-        throw std::invalid_argument(std::string("IniEdit ") + what + " '" + text +
-                                    "' has surrounding whitespace, which a reader trims away");
+    RequireNoSurroundingWhitespace(text, what);
+}
+
+// The value lands on a key=value line, perhaps with an inline comment after it. The flat
+// readers trim, cut the comment off, then take off one pair of surrounding quotes, so a
+// value any of that would change cannot be written.
+void RequireValue(const std::string& text) {
+    RequireWritable(text, "value");
+    RequireNoSurroundingWhitespace(text, "value");
+    bool in_quotes = false;
+    char quote = '\0';
+    for (const char c : text) {
+        if (in_quotes) {
+            if (c == quote) in_quotes = false;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            in_quotes = true;
+            quote = c;
+            continue;
+        }
+        if (c == ';' || c == '#') {
+            throw std::invalid_argument("IniEdit value '" + text +
+                                        "' holds ';' or '#' outside quotes, which a reader "
+                                        "takes as the start of a comment");
+        }
+    }
+    if (in_quotes) {
+        throw std::invalid_argument("IniEdit value '" + text +
+                                    "' leaves a quote open, so a comment after it on the line "
+                                    "would read as part of the value");
+    }
+    const char first = text.size() >= 2 ? text.front() : '\0';
+    if ((first == '"' || first == '\'') && text.back() == first) {
+        throw std::invalid_argument("IniEdit value '" + text +
+                                    "' is wrapped in quotes, which a reader strips");
     }
 }
 
@@ -99,7 +172,7 @@ void ValidateEdits(const std::vector<IniEdit>& edits) {
         const IniEdit& edit = edits[i];
         RequireName(edit.section, "section");
         RequireName(edit.key, "key");
-        RequireWritable(edit.value, "value");
+        RequireValue(edit.value);
         if (edit.section.find(']') != kNpos) {
             throw std::invalid_argument("IniEdit section '" + edit.section +
                                         "' holds ']', which ends a section header");
@@ -126,6 +199,8 @@ struct Line {
     size_t begin = 0;
     size_t content_end = 0;
     size_t end = 0;
+    // The first byte that is not a space or tab.
+    size_t first = 0;
     LineKind kind = LineKind::Other;
     // A section's name, or a key line's key.
     size_t name_begin = 0;
@@ -141,6 +216,7 @@ void ClassifyLine(const std::string& s, Line& line) {
     while (first < line.content_end && IsSpaceOrTab(s[first])) ++first;
     size_t last = line.content_end;
     while (last > first && IsSpaceOrTab(s[last - 1])) --last;
+    line.first = first;
 
     if (first == last) {
         line.kind = LineKind::Blank;
@@ -260,6 +336,7 @@ const char* IniEditRefusalName(IniEditRefusal refusal) {
         case IniEditRefusal::DuplicateSection: return "DuplicateSection";
         case IniEditRefusal::DuplicateKey: return "DuplicateKey";
         case IniEditRefusal::KeyNotFound: return "KeyNotFound";
+        case IniEditRefusal::AmbiguousWhitespace: return "AmbiguousWhitespace";
     }
     throw std::invalid_argument("IniEditRefusal " + std::to_string(static_cast<int>(refusal)) +
                                 " has no name");
@@ -296,6 +373,7 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
     }
 
     std::vector<Line> lines;
+    std::vector<int> ambiguous;
     size_t crlf_count = 0;
     size_t lf_count = 0;
     for (size_t begin = body; begin < s.size();) {
@@ -316,9 +394,15 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
             }
         }
         ClassifyLine(s, line);
+        if (StartsWithReaderWhitespace(s, line.first, line.content_end) ||
+            (line.kind == LineKind::Key &&
+             EndsWithReaderWhitespace(s, line.name_begin, line.name_end))) {
+            ambiguous.push_back(static_cast<int>(lines.size()) + 1);
+        }
         lines.push_back(line);
         begin = line.end;
     }
+    if (!ambiguous.empty()) return Refuse(IniEditRefusal::AmbiguousWhitespace, std::move(ambiguous));
     const std::string eol = crlf_count >= lf_count ? "\r\n" : "\n";
 
     // The section each line belongs to, as the index of its header line.
@@ -341,12 +425,6 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
                 matched.push_back(header);
             }
         }
-        if (matched.size() > 1) {
-            std::vector<int> numbers;
-            for (size_t header : matched) numbers.push_back(static_cast<int>(header) + 1);
-            return RefuseEdit(IniEditRefusal::DuplicateSection, edit, std::move(numbers));
-        }
-
         if (matched.empty()) {
             if (!edit.insert_if_absent) return RefuseEdit(IniEditRefusal::KeyNotFound, edit, {});
             NewSection* target = nullptr;
@@ -361,15 +439,16 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
             continue;
         }
 
-        const size_t header = matched.front();
-        size_t anchor = header;
+        size_t anchor = matched.front();
         std::vector<size_t> keys;
-        for (size_t i = header + 1; i < lines.size() && owner[i] == header; ++i) {
-            const Line& line = lines[i];
-            if (line.kind != LineKind::Blank && line.kind != LineKind::Comment) anchor = i;
-            if (line.kind == LineKind::Key &&
-                EqualsAsciiIgnoreCase(s, line.name_begin, line.name_end, edit.key)) {
-                keys.push_back(i);
+        for (size_t header : matched) {
+            for (size_t i = header + 1; i < lines.size() && owner[i] == header; ++i) {
+                const Line& line = lines[i];
+                if (line.kind != LineKind::Blank && line.kind != LineKind::Comment) anchor = i;
+                if (line.kind == LineKind::Key &&
+                    EqualsAsciiIgnoreCase(s, line.name_begin, line.name_end, edit.key)) {
+                    keys.push_back(i);
+                }
             }
         }
         if (keys.size() > 1) {
@@ -382,6 +461,11 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
             continue;
         }
         if (!edit.insert_if_absent) return RefuseEdit(IniEditRefusal::KeyNotFound, edit, {});
+        if (matched.size() > 1) {
+            std::vector<int> numbers;
+            for (size_t header : matched) numbers.push_back(static_cast<int>(header) + 1);
+            return RefuseEdit(IniEditRefusal::DuplicateSection, edit, std::move(numbers));
+        }
         insertions[anchor].push_back(edit.key + "=" + edit.value);
     }
 

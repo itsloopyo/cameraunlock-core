@@ -46,7 +46,7 @@ namespace CameraUnlock.Core.Tests.Config
         {
             public byte[] Input = new byte[0];
             public readonly List<IniEdit> Edits = new List<IniEdit>();
-            public readonly Dictionary<string, string> Reads = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            public readonly List<IniEdit> Rejected = new List<IniEdit>();
             public readonly HashSet<string> FlatDuplicates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             public string[]? Refused;
             public byte[]? Expected;
@@ -72,9 +72,10 @@ namespace CameraUnlock.Core.Tests.Config
                         Assert.Equal(4, e.Length);
                         c.Edits.Add(new IniEdit(e[1], e[2], e[3], directive == "set_or_insert"));
                         break;
-                    case "reads":
-                        string[] r = line.Split(new[] { '\t' }, 3);
-                        c.Reads[r[1]] = r[2];
+                    case "rejects":
+                        string[] r = line.Split(new[] { '\t' }, 4);
+                        Assert.Equal(4, r.Length);
+                        c.Rejected.Add(new IniEdit(r[1], r[2], r[3], true));
                         break;
                     case "flat_duplicate":
                         c.FlatDuplicates.Add(line.Split('\t')[1]);
@@ -96,6 +97,21 @@ namespace CameraUnlock.Core.Tests.Config
         public void Fixture(string name)
         {
             FixtureCase c = Load(name);
+            foreach (IniEdit rejected in c.Rejected)
+            {
+                string shown = "[" + rejected.Section + "] " + rejected.Key + "=" + rejected.Value;
+                ArgumentException? thrown = null;
+                try
+                {
+                    IniEditor.Edit(c.Input, new[] { rejected });
+                }
+                catch (ArgumentException ex)
+                {
+                    thrown = ex;
+                }
+                Assert.True(thrown != null, name + ": " + shown + " was not rejected");
+            }
+
             IniEditResult result = IniEditor.Edit(c.Input, c.Edits);
 
             if (c.Refused != null)
@@ -152,9 +168,8 @@ namespace CameraUnlock.Core.Tests.Config
                 }
                 foreach (IniEdit edit in c.Edits)
                 {
-                    string expected = c.Reads.ContainsKey(edit.Key) ? c.Reads[edit.Key] : edit.Value;
                     Assert.True(after.ContainsKey(edit.Key), edit.Key + " does not read back");
-                    Assert.Equal(expected, after[edit.Key]);
+                    Assert.Equal(edit.Value, after[edit.Key]);
                 }
             }
             finally
@@ -260,6 +275,80 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(5, (int)IniEditRefusal.DuplicateSection);
             Assert.Equal(6, (int)IniEditRefusal.DuplicateKey);
             Assert.Equal(7, (int)IniEditRefusal.KeyNotFound);
+            Assert.Equal(8, (int)IniEditRefusal.AmbiguousWhitespace);
+        }
+
+        // The fixtures pin the white-space set both languages share. This pins it against
+        // the String.Trim the C# flat reader actually calls on this runtime.
+        [Fact]
+        public void EveryCharacterTrimStripsIsRefusedAtATrimBoundary()
+        {
+            int covered = 0;
+            for (int i = 0; i <= 0xFFFF; i++)
+            {
+                char c = (char)i;
+                if (char.IsSurrogate(c) || ("a" + c).Trim() == "a" + c) continue;
+                covered++;
+                string shown = "U+" + i.ToString("X4");
+                Assert.Throws<ArgumentException>(() => EditSample(new IniEdit("General", "A", "x" + c, false)));
+                Assert.Throws<ArgumentException>(() => EditSample(new IniEdit("General", "A" + c, "1", false)));
+                if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+                byte[] document = Encoding.UTF8.GetBytes("[General]\n" + c + "A=1\nB" + c + "=2\n");
+                IniEditResult result = IniEditor.Edit(document, new[] { new IniEdit("General", "C", "3", true) });
+                Assert.True(result.Refusal == IniEditRefusal.AmbiguousWhitespace, shown + " was not refused: " + result.Refusal);
+                Assert.Equal(new[] { 2, 3 }, result.Lines.ToArray());
+            }
+            Assert.True(covered > 20, "String.Trim stripped only " + covered + " characters");
+        }
+
+        // Every value either throws or reads back through ConfigParsingUtils as itself, and
+        // editing the output again with the same value changes nothing.
+        [Fact]
+        public void AcceptedValuesReadBackAndReapplyUnchanged()
+        {
+            string[] inputs = { "[S]\nKey=1\n", "[S]\nKey = 1 ; comment\n", "[S]\nKey=\"a;b\"#c" };
+            char[] alphabet = { 'a', ' ', ';', '#', '"', '\'', '=', ' ' };
+            var values = new List<string> { "" };
+            for (int start = 0, length = 1; length <= 4; length++)
+            {
+                int end = values.Count;
+                for (int i = start; i < end; i++)
+                {
+                    foreach (char c in alphabet) values.Add(values[i] + c);
+                }
+                start = end;
+            }
+
+            string path = Path.GetTempFileName();
+            try
+            {
+                int accepted = 0;
+                foreach (string input in inputs)
+                {
+                    foreach (string value in values)
+                    {
+                        var edit = new[] { new IniEdit("S", "Key", value, false) };
+                        byte[] once;
+                        try
+                        {
+                            once = IniEditor.Edit(Encoding.UTF8.GetBytes(input), edit).Bytes;
+                        }
+                        catch (ArgumentException)
+                        {
+                            continue;
+                        }
+                        accepted++;
+                        File.WriteAllBytes(path, once);
+                        Assert.Equal(value, ConfigParsingUtils.ParseIniFile(path)["Key"]);
+                        Assert.Equal(once, IniEditor.Edit(once, edit).Bytes);
+                    }
+                }
+                Assert.True(accepted > 100, "only " + accepted + " values were accepted");
+            }
+            finally
+            {
+                File.Delete(path);
+            }
         }
     }
 }

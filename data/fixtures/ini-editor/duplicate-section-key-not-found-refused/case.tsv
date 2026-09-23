@@ -1,0 +1,3 @@
+# Without insert, an absent key is not found, however many headers its section has.
+set	General	C	3
+refused	KeyNotFound	General	C	

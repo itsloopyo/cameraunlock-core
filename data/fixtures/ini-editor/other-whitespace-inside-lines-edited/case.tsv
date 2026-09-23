@@ -1,0 +1,5 @@
+# Other white space inside a key, around a value or at the end of a line is not
+# refused. Around a value it is part of what the edit replaces: the C++ reader keeps
+# it in the value, so leaving it would not read back.
+set	General	Name	b
+set	Other	Key	3
