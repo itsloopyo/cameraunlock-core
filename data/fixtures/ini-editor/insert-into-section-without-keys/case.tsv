@@ -1,0 +1,2 @@
+# A section holding only a comment gets the new key straight after its header.
+set_or_insert	General	A	1

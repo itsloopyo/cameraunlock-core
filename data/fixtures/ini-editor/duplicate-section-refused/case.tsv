@@ -1,0 +1,4 @@
+# A refusal anywhere in the batch refuses the batch, including edits before it.
+set	Network	P	2
+set	General	B	3
+refused	DuplicateSection	General	B	1,5

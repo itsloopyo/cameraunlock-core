@@ -24,9 +24,12 @@ add_executable(cameraunlock_tests
     lean_clamp_tests.cpp
     zoom_compensation_tests.cpp
     tracking_mode_tests.cpp
+    ini_editor_tests.cpp
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)
+target_compile_definitions(cameraunlock_tests PRIVATE
+    CAMERAUNLOCK_INI_EDITOR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/ini-editor")
 
 # plugin_config.cpp lives in the optional REFramework target, so its tests can
 # only build when that target is configured.

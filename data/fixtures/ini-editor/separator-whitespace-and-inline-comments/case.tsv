@@ -1,0 +1,9 @@
+# Whitespace around =, inline comments, quoted values holding ; and trailing
+# whitespace all survive; only the value itself changes.
+set	General	EnableOnStartup	false
+set	General	WorldSpaceYaw	false
+set	General	Name	"c;d"
+set	General	Empty	x
+set	General	Blank	y
+set	General	Tabbed	2
+reads	Name	c;d

@@ -1,0 +1,2 @@
+# One LF goes in front of the new line, which is itself left unterminated.
+set_or_insert	General	C	3

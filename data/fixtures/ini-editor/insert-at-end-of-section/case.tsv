@@ -1,0 +1,4 @@
+# Insertion follows the last key of the section, so the comment introducing the next
+# section stays with it. The last section of a terminated file stays terminated.
+set_or_insert	General	RotationEnabled	true
+set_or_insert	Network	BindAddress	0.0.0.0

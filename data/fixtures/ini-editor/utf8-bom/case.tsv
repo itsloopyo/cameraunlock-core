@@ -1,0 +1,3 @@
+# The UTF-8 BOM is kept.
+set	General	A	2
+set_or_insert	General	B	3

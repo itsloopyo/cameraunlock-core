@@ -103,3 +103,7 @@ docker-compose*.yml text eol=lf
 # normalised: a normalised copy no longer hashes to the upstream tree, and
 # comparing against upstream is the only way to audit what we compile in.
 vendor/** -text
+
+# Byte-for-byte INI editor fixtures. Their CRLF/LF mix, missing final newlines,
+# BOMs and deliberately invalid bytes ARE the test, so git must not touch them.
+data/fixtures/** -text

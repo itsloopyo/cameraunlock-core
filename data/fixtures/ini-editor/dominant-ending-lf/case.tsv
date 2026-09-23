@@ -1,0 +1,2 @@
+# Two LF to one CRLF: the new line ends LF.
+set_or_insert	General	C	3

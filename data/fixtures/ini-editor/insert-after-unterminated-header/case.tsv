@@ -1,0 +1,2 @@
+# A lone unterminated header; no line endings at all, so the tie goes to CRLF.
+set_or_insert	General	A	1

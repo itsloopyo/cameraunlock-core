@@ -1,0 +1,3 @@
+# Two spellings of one key in the edited section. Neither is picked.
+set	General	A	9
+refused	DuplicateKey	General	A	2,4

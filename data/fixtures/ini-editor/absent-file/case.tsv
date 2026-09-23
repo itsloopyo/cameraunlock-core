@@ -1,0 +1,2 @@
+# No input.ini: the caller passes no bytes.
+set_or_insert	General	RotationEnabled	true

@@ -1,0 +1,8 @@
+# Replacements and insertions across sections in one pass. An unchanged value
+# rewrites to the same bytes, and new sections appear in the order the batch first
+# names them, a later case variant joining the earlier spelling.
+set_or_insert	General	RotationEnabled	false
+set	Position	PositionEnabled	true
+set_or_insert	Reticle	ShowReticle	false
+set_or_insert	Hotkeys	CycleMode	F9
+set_or_insert	reticle	Color	red

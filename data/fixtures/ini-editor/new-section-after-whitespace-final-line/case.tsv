@@ -1,0 +1,2 @@
+# An unterminated whitespace-only final line counts as blank and stays as it is.
+set_or_insert	B	z	3

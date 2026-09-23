@@ -1,0 +1,2 @@
+# A CRLF file; one value changes and nothing else does.
+set	General	EnableOnStartup	false

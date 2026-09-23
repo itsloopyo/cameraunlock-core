@@ -1,0 +1,3 @@
+# Insertion after an unterminated line never concatenates onto it.
+set_or_insert	Position	PositionEnabled	true
+set_or_insert	General	RotationEnabled	true

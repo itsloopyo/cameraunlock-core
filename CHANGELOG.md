@@ -9,6 +9,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a pure batch INI editor, in C# and C++
+
+Sets values in an INI document's bytes and leaves every other byte where it was. It
+does no file I/O: the caller passes the bytes in (empty for an absent file) and gets
+the new bytes back, or a typed refusal and no bytes.
+
+- C#: `CameraUnlock.Core.Config.IniEditor.Edit(byte[] original, IList<IniEdit> edits)`
+  returning `IniEditResult` (`Succeeded`, `Refusal`, `Bytes`, `Section`, `Key`,
+  `Lines`). `IniEdit(section, key, value, insertIfAbsent)`. `Bytes` throws
+  `InvalidOperationException` on a refused result. Builds on every target, net35
+  included.
+- C++: `cameraunlock/config/ini_editor.h`, with `EditIni(const std::string&,
+  const std::vector<IniEdit>&)` returning `IniEditResult`, and
+  `IniEditRefusalName`.
+- `IniEditRefusal` is `None`, `Utf16`, `InvalidUtf8`, `NulByte`,
+  `LoneCarriageReturn`, `DuplicateSection`, `DuplicateKey` and `KeyNotFound`, with
+  the same numbers in both languages.
+
+Sections and keys match ignoring ASCII case, and a replaced line keeps the file's own
+spelling. A replacement changes only the value. The whitespace around `=`, any inline
+comment and the line's own terminator stay as they were. With `insertIfAbsent`, a
+missing key goes after the last non-comment line of its section, and a missing
+section is appended at the end of the file after a blank line. New lines take the
+file's dominant line ending (CRLF on a tie). A file whose last line has no terminator
+still has none afterwards. A UTF-8 BOM is kept. A key that appears twice in the
+edited section is refused, not picked. So is a section header that appears twice.
+Keys above the first header belong to no section and are never matched. Edits that
+cannot be written as one line throw `ArgumentException` / `std::invalid_argument`.
+
+Both implementations run the same byte fixtures in `data/fixtures/ini-editor`
+(`.gitattributes` keeps git off their line endings). Each successful fixture is read
+back through `ConfigParsingUtils.ParseIniFile` and `ParseIniConfig` as well, to check
+that the edited keys read their new values and every other key reads as before.
+Nothing in core calls the editor yet.
+
 ### Added - the tracking-mode mapping to `RotationEnabled` / `PositionEnabled`
 
 `data/pipeline-conformance.json` gains a top-level `preference_modes` block beside
