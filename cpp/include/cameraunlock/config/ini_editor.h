@@ -44,6 +44,10 @@ enum class IniEditRefusal {
     /// reader trims it and the C++ one does not, so the line has no single reading
     /// to edit against.
     AmbiguousWhitespace = 8,
+    /// A SUB byte (0x1A, Ctrl-Z). ParseIniConfig reads through a text-mode stream, which
+    /// the Microsoft C runtime ends at that byte, and the C# flat reader reads past it, so
+    /// nothing after it has a single reading.
+    SubByte = 9,
 };
 
 /// The spelling the shared fixtures under data/fixtures/ini-editor use, e.g. "DuplicateKey".
@@ -69,8 +73,8 @@ struct IniEditResult {
 /// Pure: no file I/O. An absent file is an empty `original`.
 ///
 /// The document is refused whole, with no bytes produced, when it is UTF-16, invalid
-/// UTF-8, holds a NUL or a lone CR, or when any edit is ambiguous or missing. A UTF-8
-/// byte order mark is kept.
+/// UTF-8, holds a NUL, a SUB (0x1A) or a lone CR, or when any edit is ambiguous or
+/// missing. A UTF-8 byte order mark is kept.
 ///
 /// Lines are read the way the flat readers read them. Leading and trailing spaces and
 /// tabs are ignored; a line starting ';' or '#' is a comment; one starting '[' is a
@@ -97,11 +101,11 @@ struct IniEditResult {
 ///
 /// Throws std::invalid_argument for an edit that cannot be written so that it reads
 /// back as given: a section or key that is empty, has surrounding white space or holds
-/// CR, LF, NUL or invalid UTF-8, a section holding ']', a key holding '=' or starting
-/// '[', ';' or '#', a value holding CR, LF, NUL or invalid UTF-8, a value a flat reader
-/// would read as something else (surrounding white space, a ';' or '#' outside quotes,
-/// a quote left open, or one pair of matching quotes around the whole of it), and two
-/// edits of the same key.
+/// CR, LF, NUL, SUB or invalid UTF-8, a section holding ']', a key holding '=' or
+/// starting '[', ';' or '#', a value holding CR, LF, NUL, SUB or invalid UTF-8, a value
+/// a flat reader would read as something else (surrounding white space, a ';' or '#'
+/// outside quotes, a quote left open, or one pair of matching quotes around the whole
+/// of it), and two edits of the same key.
 IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& edits);
 
 }  // namespace cameraunlock

@@ -203,6 +203,7 @@ namespace CameraUnlock.Core.Tests.Config
         [InlineData("General", "A", "1\n2")]
         [InlineData("General", "A", "1\r")]
         [InlineData("General", "A", "1\02")]
+        [InlineData("General", "A", "1\u001A")]
         public void UnwritableEditThrows(string section, string key, string value)
         {
             Assert.Throws<ArgumentException>(() => EditSample(new IniEdit(section, key, value, true)));
@@ -276,6 +277,7 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(6, (int)IniEditRefusal.DuplicateKey);
             Assert.Equal(7, (int)IniEditRefusal.KeyNotFound);
             Assert.Equal(8, (int)IniEditRefusal.AmbiguousWhitespace);
+            Assert.Equal(9, (int)IniEditRefusal.SubByte);
         }
 
         // The fixtures pin the white-space set both languages share. This pins it against
@@ -307,7 +309,7 @@ namespace CameraUnlock.Core.Tests.Config
         public void AcceptedValuesReadBackAndReapplyUnchanged()
         {
             string[] inputs = { "[S]\nKey=1\n", "[S]\nKey = 1 ; comment\n", "[S]\nKey=\"a;b\"#c" };
-            char[] alphabet = { 'a', ' ', ';', '#', '"', '\'', '=', ' ' };
+            char[] alphabet = { 'a', ' ', ';', '#', '"', '\'', '=', ' ', '\u001A' };
             var values = new List<string> { "" };
             for (int start = 0, length = 1; length <= 4; length++)
             {

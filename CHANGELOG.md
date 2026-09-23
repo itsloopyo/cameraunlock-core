@@ -24,8 +24,8 @@ the new bytes back, or a typed refusal and no bytes.
   const std::vector<IniEdit>&)` returning `IniEditResult`, and
   `IniEditRefusalName`.
 - `IniEditRefusal` is `None`, `Utf16`, `InvalidUtf8`, `NulByte`,
-  `LoneCarriageReturn`, `DuplicateSection`, `DuplicateKey`, `KeyNotFound` and
-  `AmbiguousWhitespace`, with the same numbers in both languages.
+  `LoneCarriageReturn`, `DuplicateSection`, `DuplicateKey`, `KeyNotFound`,
+  `AmbiguousWhitespace` and `SubByte`, with the same numbers in both languages.
 
 Sections and keys match ignoring ASCII case, and a replaced line keeps the file's own
 spelling. A replacement changes only the value. The whitespace around `=`, any inline
@@ -44,14 +44,20 @@ space and the like), or a key that ends in it, is refused as `AmbiguousWhitespac
 `ConfigParsingUtils.ParseIniFile` trims it and `ParseIniConfig` does not, so the two
 read that line differently.
 
+A document holding a SUB byte (0x1A, Ctrl-Z) anywhere is refused as `SubByte`, and a
+section, key or value holding one throws. `ParseIniConfig` reads through a text-mode
+`std::ifstream`, which the Microsoft C runtime ends at that byte, while
+`ConfigParsingUtils.ParseIniFile` reads on past it, so the two disagree about
+everything after it.
+
 An edit whose key, section or value would not read back as given throws
-`ArgumentException` / `std::invalid_argument`. For a value that means CR, LF or NUL,
-surrounding white space, `;` or `#` outside quotes, a quote left open (a comment
+`ArgumentException` / `std::invalid_argument`. For a value that means CR, LF, NUL or
+SUB, surrounding white space, `;` or `#` outside quotes, a quote left open (a comment
 after it on the line would read as part of the value), or a pair of matching quotes
 around the whole value. Both test suites try every value of up to four characters
-drawn from `a`, space, `;`, `#`, both quotes, `=` and U+00A0, and check that each one
-the editor accepts reads back as itself and that applying the edit again changes
-nothing.
+drawn from `a`, space, `;`, `#`, both quotes, `=`, U+00A0 and U+001A, and check that
+each one the editor accepts reads back as itself and that applying the edit again
+changes nothing.
 
 Both implementations run the same byte fixtures in `data/fixtures/ini-editor`
 (`.gitattributes` keeps git off their line endings). Each successful fixture is read

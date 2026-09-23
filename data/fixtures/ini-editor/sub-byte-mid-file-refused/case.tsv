@@ -1,0 +1,3 @@
+# A SUB byte mid-file. The C++ flat reader would stop there and lose B.
+set	General	A	3
+refused	SubByte			2

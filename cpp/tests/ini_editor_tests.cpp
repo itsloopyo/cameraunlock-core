@@ -37,6 +37,7 @@ static_assert(static_cast<int>(IniEditRefusal::DuplicateKey) == 6, "IniEditRefus
 static_assert(static_cast<int>(IniEditRefusal::KeyNotFound) == 7, "IniEditRefusal::KeyNotFound");
 static_assert(static_cast<int>(IniEditRefusal::AmbiguousWhitespace) == 8,
               "IniEditRefusal::AmbiguousWhitespace");
+static_assert(static_cast<int>(IniEditRefusal::SubByte) == 9, "IniEditRefusal::SubByte");
 
 int g_failures = 0;
 
@@ -280,6 +281,7 @@ void TestUnwritableEditsThrow() {
     Check(Throws({{"General", "A", "1\n2"}}), "value holding LF throws");
     Check(Throws({{"General", "A", "1\r"}}), "value holding CR throws");
     Check(Throws({{"General", "A", std::string("1\0", 2)}}), "value holding NUL throws");
+    Check(Throws({{"General", "A", "1\x1A"}}), "value holding SUB throws");
     Check(Throws({{"General", "A", "\xC3"}}), "value holding invalid UTF-8 throws");
     Check(Throws({{"General", "A", "1"}, {"general", "a", "2"}}),
           "two edits of one key throw, whatever their case");
@@ -292,7 +294,8 @@ void TestAcceptedValuesReadBackAndReapplyUnchanged() {
     std::cout << "EditIni value round trip:\n";
     const std::vector<std::string> inputs = {"[S]\nKey=1\n", "[S]\nKey = 1 ; comment\n",
                                              "[S]\nKey=\"a;b\"#c"};
-    const std::vector<std::string> alphabet = {"a", " ", ";", "#", "\"", "'", "=", "\xC2\xA0"};
+    const std::vector<std::string> alphabet = {"a", " ", ";", "#", "\"", "'", "=", "\xC2\xA0",
+                                               "\x1A"};
     std::vector<std::string> values = {""};
     for (size_t start = 0, length = 1; length <= 4; ++length) {
         const size_t end = values.size();

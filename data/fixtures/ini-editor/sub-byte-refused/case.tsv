@@ -1,0 +1,5 @@
+# A SUB byte (0x1A, Ctrl-Z) anywhere in the document. ParseIniConfig reads through a
+# text-mode stream, where the Microsoft C runtime stops at that byte, and
+# ConfigParsingUtils reads past it, so nothing after it has one reading.
+set_or_insert	General	B	2
+refused	SubByte			4

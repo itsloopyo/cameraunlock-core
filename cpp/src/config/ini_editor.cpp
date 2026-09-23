@@ -83,6 +83,10 @@ void RequireWritable(const std::string& text, const char* what) {
         throw std::invalid_argument(std::string("IniEdit ") + what +
                                     " holds a CR, LF or NUL, which cannot be written on one line");
     }
+    if (text.find('\x1A') != kNpos) {
+        throw std::invalid_argument(std::string("IniEdit ") + what +
+                                    " holds a SUB (0x1A), where a text-mode reader stops reading");
+    }
 }
 
 // Every character some runtime's String.Trim() strips, so the C# half and this one
@@ -337,6 +341,7 @@ const char* IniEditRefusalName(IniEditRefusal refusal) {
         case IniEditRefusal::DuplicateKey: return "DuplicateKey";
         case IniEditRefusal::KeyNotFound: return "KeyNotFound";
         case IniEditRefusal::AmbiguousWhitespace: return "AmbiguousWhitespace";
+        case IniEditRefusal::SubByte: return "SubByte";
     }
     throw std::invalid_argument("IniEditRefusal " + std::to_string(static_cast<int>(refusal)) +
                                 " has no name");
@@ -365,6 +370,10 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
     const size_t nul = s.find('\0', body);
     if (nul != kNpos) {
         return Refuse(IniEditRefusal::NulByte, {LineNumberAt(s, body, nul)});
+    }
+    const size_t sub = s.find('\x1A', body);
+    if (sub != kNpos) {
+        return Refuse(IniEditRefusal::SubByte, {LineNumberAt(s, body, sub)});
     }
     for (size_t i = body; i < s.size(); ++i) {
         if (s[i] == '\r' && (i + 1 == s.size() || s[i + 1] != '\n')) {

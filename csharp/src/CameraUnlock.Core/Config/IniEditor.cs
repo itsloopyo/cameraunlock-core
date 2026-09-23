@@ -72,7 +72,7 @@ namespace CameraUnlock.Core.Config
         /// an empty array.
         /// <para>
         /// The document is refused whole, with no bytes produced, when it is UTF-16, invalid
-        /// UTF-8, holds a NUL or a lone CR, or when any edit is ambiguous or missing. A UTF-8
+        /// UTF-8, holds a NUL, a SUB (0x1A) or a lone CR, or when any edit is ambiguous or missing. A UTF-8
         /// byte order mark is kept.
         /// </para>
         /// <para>
@@ -105,9 +105,9 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         /// <exception cref="ArgumentException">
         /// An edit cannot be written so that it reads back as given: a section or key that is
-        /// empty, has surrounding white space or holds CR, LF, NUL or an unpaired surrogate, a
-        /// section holding ']', a key holding '=' or starting '[', ';' or '#', a value holding
-        /// CR, LF, NUL or an unpaired surrogate, a value a flat reader would read as something
+        /// empty, has surrounding white space or holds CR, LF, NUL, SUB or an unpaired
+        /// surrogate, a section holding ']', a key holding '=' or starting '[', ';' or '#', a
+        /// value holding CR, LF, NUL, SUB or an unpaired surrogate, a value a flat reader would read as something
         /// else (surrounding white space, a ';' or '#' outside quotes, a quote left open, or
         /// one pair of matching quotes around the whole of it), or two edits of the same key.
         /// </exception>
@@ -135,6 +135,13 @@ namespace CameraUnlock.Core.Config
                 if (s[i] == 0)
                 {
                     return Refuse(IniEditRefusal.NulByte, null, new[] { LineNumberAt(s, body, i) });
+                }
+            }
+            for (int i = body; i < s.Length; i++)
+            {
+                if (s[i] == 0x1A)
+                {
+                    return Refuse(IniEditRefusal.SubByte, null, new[] { LineNumberAt(s, body, i) });
                 }
             }
             for (int i = body; i < s.Length; i++)
@@ -360,6 +367,10 @@ namespace CameraUnlock.Core.Config
                 if (b == '\r' || b == '\n' || b == 0)
                 {
                     throw new ArgumentException("IniEdit " + what + " holds a CR, LF or NUL, which cannot be written on one line");
+                }
+                if (b == 0x1A)
+                {
+                    throw new ArgumentException("IniEdit " + what + " holds a SUB (0x1A), where a text-mode reader stops reading");
                 }
             }
             return bytes;

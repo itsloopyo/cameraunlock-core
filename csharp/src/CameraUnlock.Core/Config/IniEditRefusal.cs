@@ -43,5 +43,12 @@ namespace CameraUnlock.Core.Config
         /// it and the C++ one does not, so the line has no single reading to edit against.
         /// </summary>
         AmbiguousWhitespace = 8,
+
+        /// <summary>
+        /// A SUB byte (0x1A, Ctrl-Z). The C++ flat reader reads through a text-mode stream,
+        /// which the Microsoft C runtime ends at that byte, and this one reads past it, so
+        /// nothing after it has a single reading.
+        /// </summary>
+        SubByte = 9,
     }
 }
