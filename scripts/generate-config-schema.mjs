@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Emits the C# and C++ alias tables from data/config-schema.json.
+// Emits the C# and C++ alias tables, and the C++ defaults table, from data/config-schema.json.
 //
 //   node scripts/generate-config-schema.mjs            write the generated files
 //   node scripts/generate-config-schema.mjs --check    fail if either is stale
@@ -23,12 +23,17 @@ const identifierPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // Every key and alias is emitted verbatim into a C# and a C++ string literal. Nothing is
 // escaped on the way, so the accepted alphabet is the one that needs no escaping.
 const spellingPattern = /^[A-Za-z0-9_-]+$/;
+// String defaults are emitted into a C++ string literal the same way, so the same rule.
+const stringDefaultPattern = /^[A-Za-z0-9_-]*$/;
 
 const valueTypes = {
-    int: (v) => Number.isInteger(v),
+    // The lower bound is INT_MIN + 1: the literal -2147483648 is unary minus applied to
+    // 2147483648, which does not fit in an int, so it narrows inside the C++ aggregate
+    // initialiser and fails to compile.
+    int: (v) => Number.isInteger(v) && v >= -2147483647 && v <= 2147483647,
     float: (v) => typeof v === 'number' && Number.isFinite(v),
     bool: (v) => typeof v === 'boolean',
-    string: (v) => typeof v === 'string',
+    string: (v) => typeof v === 'string' && stringDefaultPattern.test(v),
     color: (v) => Array.isArray(v) && v.length === 4 &&
         v.every((c) => typeof c === 'number' && Number.isFinite(c) && c >= 0 && c <= 1),
 };
@@ -107,14 +112,18 @@ function validateSchema(schema) {
         // type and default are the only published record of what a key accepts and what it
         // does when absent, and AGENTS.md makes a changed default a breaking change. They
         // are checked here so a malformed one is caught at build time; agreement with the
-        // C# field initialisers is pinned by ConfigSchemaDefaultsTests.
+        // C# field initialisers is pinned by ConfigSchemaDefaultsTests, and with the C++
+        // ones by config_schema_tests.cpp against kConfigConceptDefaults.
         const check = valueTypes[concept.type];
         if (check === undefined) {
             schemaError(where, `type '${concept.type}' is not one of ${Object.keys(valueTypes).join(', ')}`);
         }
         if (!('default' in concept)) schemaError(where, `has no default (type '${concept.type}')`);
         if (!check(concept.default)) {
-            schemaError(where, `default ${JSON.stringify(concept.default)} is not a valid '${concept.type}'`);
+            const alphabet = concept.type === 'string'
+                ? '. String defaults are emitted verbatim into a C++ string literal, so they are limited to [A-Za-z0-9_-]'
+                : '';
+            schemaError(where, `default ${JSON.stringify(concept.default)} is not a valid '${concept.type}'${alphabet}`);
         }
     });
 
@@ -258,10 +267,29 @@ ${retiredRows}
 `;
 }
 
+const cppFloat = (v) => `${Number.isInteger(v) ? v.toFixed(1) : String(v)}f`;
+
+const cppValueTypes = { int: 'kInt', float: 'kFloat', bool: 'kBool', string: 'kString', color: 'kColor' };
+
+function renderCppDefault(concept) {
+    const cells = { int: '0', float: '0.0f', bool: 'false', string: 'nullptr', color: '{0.0f, 0.0f, 0.0f, 0.0f}' };
+    const v = concept.default;
+    switch (concept.type) {
+        case 'int': cells.int = String(v); break;
+        case 'float': cells.float = cppFloat(v); break;
+        case 'bool': cells.bool = String(v); break;
+        case 'string': cells.string = `"${v}"`; break;
+        case 'color': cells.color = `{${v.map(cppFloat).join(', ')}}`; break;
+    }
+    return `    { "${concept.id}", config_keys::k${concept.id}, ConfigValueType::${cppValueTypes[concept.type]}, ` +
+        `${cells.int}, ${cells.float}, ${cells.bool}, ${cells.string}, ${cells.color} },`;
+}
+
 function renderCpp(schema, entries) {
     const rows = entries
         .map((e) => `    { "${e.normalized}", "${e.canonical}", ${e.retired ? 'true' : 'false'} },`)
         .join('\n');
+    const defaultRows = schema.concepts.map(renderCppDefault).join('\n');
     const canonicalConsts = schema.concepts
         .map((c) => `inline constexpr const char* k${c.id} = "${normalize(c.key)}";`)
         .join('\n');
@@ -299,6 +327,29 @@ ${rows}
 };
 
 inline constexpr size_t kConfigKeyAliasCount = sizeof(kConfigKeyAliases) / sizeof(kConfigKeyAliases[0]);
+
+enum class ConfigValueType { kInt, kFloat, kBool, kString, kColor };
+
+/// The default data/config-schema.json declares for one concept: what a key means when a
+/// file leaves it out. Only the member \`type\` names carries the default; the rest are
+/// zero, and \`string_value\` is nullptr unless \`type\` is kString.
+struct ConfigConceptDefault {
+    const char* id;
+    const char* canonical;
+    ConfigValueType type;
+    int int_value;
+    float float_value;
+    bool bool_value;
+    const char* string_value;
+    float color_value[4];
+};
+
+inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
+${defaultRows}
+};
+
+inline constexpr size_t kConfigConceptDefaultCount =
+    sizeof(kConfigConceptDefaults) / sizeof(kConfigConceptDefaults[0]);
 
 /// Lowercases a key and strips '_' and '-'. Applied to both sides of a lookup.
 inline std::string NormalizeConfigKey(const std::string& key) {

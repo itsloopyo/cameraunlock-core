@@ -314,6 +314,8 @@ void HeadTrackingConfig::ApplyValues(
             if (TryParseConfigColor(value, rgba)) {
                 for (int i = 0; i < 4; ++i) reticle_color_rgba[i] = rgba[i];
             }
+        } else if (canonical == config_keys::kRotationEnabled) {
+            if (TryParseConfigBool(value, bool_val)) rotation_enabled = bool_val;
         } else if (canonical == config_keys::kPositionEnabled) {
             if (TryParseConfigBool(value, bool_val)) position_enabled = bool_val;
         } else if (canonical == config_keys::kPositionSensitivityX) {

@@ -48,6 +48,7 @@ struct HeadTrackingConfig {
     bool show_decoupled_reticle = true;
     float reticle_color_rgba[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
+    bool rotation_enabled = true;
     bool position_enabled = true;
     PositionSettings position = PositionSettings::Default();
     float tracker_pivot_forward = 0.0f;

@@ -32,6 +32,7 @@ namespace CameraUnlock.Core.Config
             public const string AimDecoupling = "aimdecoupling";
             public const string ShowReticle = "showreticle";
             public const string ReticleColor = "reticlecolor";
+            public const string RotationEnabled = "rotationenabled";
             public const string PositionEnabled = "positionenabled";
             public const string PositionSensitivityX = "positionsensitivityx";
             public const string PositionSensitivityY = "positionsensitivityy";
@@ -210,6 +211,7 @@ namespace CameraUnlock.Core.Config
             { "rollscale", "rollsensitivity" },
             { "rollsens", "rollsensitivity" },
             { "rollsensitivity", "rollsensitivity" },
+            { "rotationenabled", "rotationenabled" },
             { "sensitivitypitch", "pitchsensitivity" },
             { "sensitivityroll", "rollsensitivity" },
             { "sensitivityx", "positionsensitivityx" },

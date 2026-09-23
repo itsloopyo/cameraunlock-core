@@ -61,6 +61,49 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.False(ConfigKeySchema.IsRetired(ConfigKeySchema.Keys.LocalSmoothing));
         }
 
+        [Theory]
+        [InlineData("RotationEnabled")]
+        [InlineData("rotation_enabled")]
+        [InlineData("Rotation-Enabled")]
+        public void RotationEnabled_LandsOnItsOwnField(string spelling)
+        {
+            var config = Apply(new Dictionary<string, string> { { spelling, "false" } });
+
+            Assert.False(config.RotationEnabled);
+            Assert.True(config.PositionEnabled);
+            Assert.True(config.EnableOnStartup);
+        }
+
+        [Fact]
+        public void RotationEnabled_DefaultsOnWhenTheFileOmitsIt()
+        {
+            var config = Apply(new Dictionary<string, string> { { "PositionEnabled", "false" } });
+
+            Assert.True(config.RotationEnabled);
+            Assert.False(config.PositionEnabled);
+        }
+
+        // Section-less matching throws [General] and [Position] away, so a bare Enabled
+        // cannot say which channel it means and must reach neither.
+        [Fact]
+        public void BareEnabled_DoesNotReachEitherTrackingChannel()
+        {
+            var config = Apply(new Dictionary<string, string> { { "Enabled", "false" } });
+
+            Assert.Null(ConfigKeySchema.Resolve("Enabled"));
+            Assert.True(config.RotationEnabled);
+            Assert.True(config.PositionEnabled);
+            Assert.True(config.EnableOnStartup);
+        }
+
+        [Fact]
+        public void RotationEnabled_UnparseableValueKeepsTheDefault()
+        {
+            var config = Apply(new Dictionary<string, string> { { "RotationEnabled", "maybe" } });
+
+            Assert.True(config.RotationEnabled);
+        }
+
         [Fact]
         public void PositionKeys_LandOnPositionSettings()
         {

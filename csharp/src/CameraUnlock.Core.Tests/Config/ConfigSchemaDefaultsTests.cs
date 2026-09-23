@@ -59,6 +59,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "AimDecoupling", config.AimDecouplingEnabled },
                 { "ShowReticle", config.ShowDecoupledReticle },
                 { "ReticleColor", config.ReticleColorRgba },
+                { "RotationEnabled", config.RotationEnabled },
                 { "PositionEnabled", config.PositionEnabled },
                 { "PositionSensitivityX", config.Position.SensitivityX },
                 { "PositionSensitivityY", config.Position.SensitivityY },

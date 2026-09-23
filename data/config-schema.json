@@ -46,7 +46,7 @@
   "default_conflicts": [
     {
       "concept": "WorldSpaceYaw",
-      "note": "The schema default is true, matching ~44 repos. Four disagree and default it FALSE: dying-light-2 and dishonored-2 (both [Rotation] WorldLockedYaw), quake-ii-rtx ([General] WorldSpaceYaw) and sleeping-dogs ([general] world_space_yaw). WorldLockedYaw is aliased because it is genuinely the same concept with the same polarity, but a mod that adopts this schema's DEFAULT in place of its own flips behaviour for its existing users. Check the mod's own default before wiring the table in."
+      "note": "The schema default is true. A source and INI sweep of the fleet on 2026-09-23 found three repos that start in camera-local yaw: sonic-racing-crossworlds ([Tracking] WorldSpaceYaw, false in code and in the shipped INI, which calls camera-local the recommendation for the game's loops and walls), pixeljunk-monsters-2 (BepInEx [Rotation] WorldSpaceYaw bound with default false, described as suiting the tilted top-down camera) and battlefield-bad-company-2 (no config key at all; it starts camera-local and only the yaw-mode hotkey changes it). dying-light-2 and dishonored-2 ([Rotation] WorldLockedYaw) defaulted false until their commits 0307ede and 8184371 moved the compiled default, the shipped INI and the launcher seed to true; a HeadTracking.ini already on a user's disk keeps the value it names. quake-ii-rtx and sleeping-dogs, once listed here, default true in code and INI. WorldLockedYaw is aliased because it is genuinely the same concept with the same polarity, but a mod that adopts this schema's DEFAULT in place of its own flips behaviour for its existing users. Check the mod's own default before wiring the table in."
     }
   ],
   "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle", "Light"],
@@ -176,6 +176,15 @@
       "default": [1.0, 1.0, 1.0, 1.0],
       "aliases": ["CrosshairColor", "ReticleColour", "CrosshairColour"],
       "doc": "Reticle RGBA as four 0-1 floats, comma separated."
+    },
+    {
+      "id": "RotationEnabled",
+      "section": "General",
+      "key": "RotationEnabled",
+      "type": "bool",
+      "default": true,
+      "aliases": [],
+      "doc": "Whether rotational (yaw, pitch, roll) tracking is applied. Together with PositionEnabled it records the tracking mode. There is no alias: no config in the fleet named a rotation switch when this key was added, and a bare Enabled stays unmatched; see deliberately_unaliased."
     },
     {
       "id": "PositionEnabled",

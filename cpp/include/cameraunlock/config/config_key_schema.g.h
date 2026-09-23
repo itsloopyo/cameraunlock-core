@@ -24,6 +24,7 @@ inline constexpr const char* kWorldSpaceYaw = "worldspaceyaw";
 inline constexpr const char* kAimDecoupling = "aimdecoupling";
 inline constexpr const char* kShowReticle = "showreticle";
 inline constexpr const char* kReticleColor = "reticlecolor";
+inline constexpr const char* kRotationEnabled = "rotationenabled";
 inline constexpr const char* kPositionEnabled = "positionenabled";
 inline constexpr const char* kPositionSensitivityX = "positionsensitivityx";
 inline constexpr const char* kPositionSensitivityY = "positionsensitivityy";
@@ -211,6 +212,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "rollscale", "rollsensitivity", false },
     { "rollsens", "rollsensitivity", false },
     { "rollsensitivity", "rollsensitivity", false },
+    { "rotationenabled", "rotationenabled", false },
     { "sensitivitypitch", "pitchsensitivity", false },
     { "sensitivityroll", "rollsensitivity", false },
     { "sensitivityx", "positionsensitivityx", false },
@@ -266,6 +268,69 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
 };
 
 inline constexpr size_t kConfigKeyAliasCount = sizeof(kConfigKeyAliases) / sizeof(kConfigKeyAliases[0]);
+
+enum class ConfigValueType { kInt, kFloat, kBool, kString, kColor };
+
+/// The default data/config-schema.json declares for one concept: what a key means when a
+/// file leaves it out. Only the member `type` names carries the default; the rest are
+/// zero, and `string_value` is nullptr unless `type` is kString.
+struct ConfigConceptDefault {
+    const char* id;
+    const char* canonical;
+    ConfigValueType type;
+    int int_value;
+    float float_value;
+    bool bool_value;
+    const char* string_value;
+    float color_value[4];
+};
+
+inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
+    { "UdpPort", config_keys::kUdpPort, ConfigValueType::kInt, 4242, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "EnableOnStartup", config_keys::kEnableOnStartup, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "YawSensitivity", config_keys::kYawSensitivity, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PitchSensitivity", config_keys::kPitchSensitivity, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "RollSensitivity", config_keys::kRollSensitivity, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "InvertYaw", config_keys::kInvertYaw, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "InvertPitch", config_keys::kInvertPitch, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "InvertRoll", config_keys::kInvertRoll, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "LocalSmoothing", config_keys::kLocalSmoothing, ConfigValueType::kFloat, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "RemoteSmoothing", config_keys::kRemoteSmoothing, ConfigValueType::kFloat, 0, 0.15f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "WorldSpaceYaw", config_keys::kWorldSpaceYaw, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "AimDecoupling", config_keys::kAimDecoupling, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "ShowReticle", config_keys::kShowReticle, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "ReticleColor", config_keys::kReticleColor, ConfigValueType::kColor, 0, 0.0f, false, nullptr, {1.0f, 1.0f, 1.0f, 1.0f} },
+    { "RotationEnabled", config_keys::kRotationEnabled, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionEnabled", config_keys::kPositionEnabled, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionSensitivityX", config_keys::kPositionSensitivityX, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionSensitivityY", config_keys::kPositionSensitivityY, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionSensitivityZ", config_keys::kPositionSensitivityZ, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionLimitX", config_keys::kPositionLimitX, ConfigValueType::kFloat, 0, 0.3f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionLimitY", config_keys::kPositionLimitY, ConfigValueType::kFloat, 0, 0.2f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionLimitYDown", config_keys::kPositionLimitYDown, ConfigValueType::kFloat, 0, 0.2f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionLimitZ", config_keys::kPositionLimitZ, ConfigValueType::kFloat, 0, 0.4f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionLimitZBack", config_keys::kPositionLimitZBack, ConfigValueType::kFloat, 0, 0.1f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "CollisionEnabled", config_keys::kCollisionEnabled, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "CollisionMargin", config_keys::kCollisionMargin, ConfigValueType::kFloat, 0, 0.1f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "CollisionChannel", config_keys::kCollisionChannel, ConfigValueType::kInt, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "CollisionReleaseSmoothing", config_keys::kCollisionReleaseSmoothing, ConfigValueType::kFloat, 0, 0.9f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "InvertPositionX", config_keys::kInvertPositionX, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "InvertPositionY", config_keys::kInvertPositionY, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "InvertPositionZ", config_keys::kInvertPositionZ, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "TrackerPivotForward", config_keys::kTrackerPivotForward, ConfigValueType::kFloat, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "TrackerPivotUp", config_keys::kTrackerPivotUp, ConfigValueType::kFloat, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "ToggleKey", config_keys::kToggleKey, ConfigValueType::kString, 0, 0.0f, false, "End", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionToggleKey", config_keys::kPositionToggleKey, ConfigValueType::kString, 0, 0.0f, false, "PageUp", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "ReticleToggleKey", config_keys::kReticleToggleKey, ConfigValueType::kString, 0, 0.0f, false, "Insert", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "CycleTrackingModeKey", config_keys::kCycleTrackingModeKey, ConfigValueType::kString, 0, 0.0f, false, "", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "YawModeKey", config_keys::kYawModeKey, ConfigValueType::kString, 0, 0.0f, false, "PageDown", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "RecenterKey", config_keys::kRecenterKey, ConfigValueType::kString, 0, 0.0f, false, "Home", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "LightFollowsHead", config_keys::kLightFollowsHead, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "LightMultiplier", config_keys::kLightMultiplier, ConfigValueType::kFloat, 0, 1.5f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+};
+
+inline constexpr size_t kConfigConceptDefaultCount =
+    sizeof(kConfigConceptDefaults) / sizeof(kConfigConceptDefaults[0]);
 
 /// Lowercases a key and strips '_' and '-'. Applied to both sides of a lookup.
 inline std::string NormalizeConfigKey(const std::string& key) {

@@ -98,6 +98,12 @@ namespace CameraUnlock.Core.Config
         /// <inheritdoc />
         public float RemoteSmoothing { get; set; } = SmoothingUtils.DefaultRemoteSmoothing;
 
+        /// <summary>
+        /// Whether rotational (yaw, pitch, roll) tracking is applied. With
+        /// <see cref="PositionEnabled"/> it records the tracking mode.
+        /// </summary>
+        public bool RotationEnabled { get; set; } = true;
+
         /// <summary>Whether positional (6DOF) tracking is applied.</summary>
         public bool PositionEnabled { get; set; } = true;
 
@@ -379,6 +385,11 @@ namespace CameraUnlock.Core.Config
                             RemoteSmoothing = SmoothingUtils.DefaultRemoteSmoothing;
                             WarnUnusable(log, "RemoteSmoothing", value, RemoteSmoothing);
                         }
+                        break;
+
+                    case ConfigKeySchema.Keys.RotationEnabled:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            RotationEnabled = boolVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionEnabled:

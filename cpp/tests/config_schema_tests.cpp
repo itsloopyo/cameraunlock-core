@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -280,6 +282,167 @@ void TestHotkeys() {
     Check(config.cycle_tracking_mode_key_name == "F9", "CycleTrackingMode alias");
 }
 
+void TestRotationEnabled() {
+    for (const char* spelling : {"RotationEnabled", "rotation_enabled", "Rotation-Enabled"}) {
+        auto config = Apply({{spelling, "false"}});
+        Check(!config.rotation_enabled && config.position_enabled && config.enable_on_startup,
+              (std::string(spelling) + "=false clears rotation_enabled and nothing else").c_str());
+    }
+
+    auto omitted = Apply({{"PositionEnabled", "false"}});
+    Check(omitted.rotation_enabled && !omitted.position_enabled,
+          "a file without RotationEnabled leaves rotation on");
+
+    auto bare = Apply({{"Enabled", "false"}});
+    Check(bare.rotation_enabled && bare.position_enabled,
+          "a bare Enabled=false reaches neither tracking channel");
+
+    auto unparseable = Apply({{"RotationEnabled", "maybe"}});
+    Check(unparseable.rotation_enabled, "an unparseable RotationEnabled keeps the default");
+}
+
+// What a default-constructed field holds, tagged with the type the schema should declare
+// for it. Only the member the tag names is read.
+struct ShippedDefault {
+    cameraunlock::ConfigValueType type;
+    int int_value;
+    float float_value;
+    bool bool_value;
+    std::string string_value;
+    const float* color_value;
+};
+
+ShippedDefault ShippedInt(int v) { return {cameraunlock::ConfigValueType::kInt, v, 0.0f, false, {}, nullptr}; }
+ShippedDefault ShippedFloat(float v) { return {cameraunlock::ConfigValueType::kFloat, 0, v, false, {}, nullptr}; }
+ShippedDefault ShippedBool(bool v) { return {cameraunlock::ConfigValueType::kBool, 0, 0.0f, v, {}, nullptr}; }
+ShippedDefault ShippedString(const std::string& v) {
+    return {cameraunlock::ConfigValueType::kString, 0, 0.0f, false, v, nullptr};
+}
+ShippedDefault ShippedColor(const float* v) { return {cameraunlock::ConfigValueType::kColor, 0, 0.0f, false, {}, v}; }
+
+// Every concept in the schema, bound to the field ApplyValues writes it to. A concept
+// added to the schema without a row here fails the test, which is what stops the C++ half
+// from missing a field the C# half has.
+std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTrackingConfig& c) {
+    return {
+        {"UdpPort", ShippedInt(c.udp_port)},
+        {"EnableOnStartup", ShippedBool(c.enable_on_startup)},
+        {"YawSensitivity", ShippedFloat(c.yaw_sensitivity)},
+        {"PitchSensitivity", ShippedFloat(c.pitch_sensitivity)},
+        {"RollSensitivity", ShippedFloat(c.roll_sensitivity)},
+        {"InvertYaw", ShippedBool(c.invert_yaw)},
+        {"InvertPitch", ShippedBool(c.invert_pitch)},
+        {"InvertRoll", ShippedBool(c.invert_roll)},
+        {"LocalSmoothing", ShippedFloat(c.local_smoothing)},
+        {"RemoteSmoothing", ShippedFloat(c.remote_smoothing)},
+        {"WorldSpaceYaw", ShippedBool(c.world_space_yaw)},
+        {"AimDecoupling", ShippedBool(c.aim_decoupling_enabled)},
+        {"ShowReticle", ShippedBool(c.show_decoupled_reticle)},
+        {"ReticleColor", ShippedColor(c.reticle_color_rgba)},
+        {"RotationEnabled", ShippedBool(c.rotation_enabled)},
+        {"PositionEnabled", ShippedBool(c.position_enabled)},
+        {"PositionSensitivityX", ShippedFloat(c.position.sensitivity_x)},
+        {"PositionSensitivityY", ShippedFloat(c.position.sensitivity_y)},
+        {"PositionSensitivityZ", ShippedFloat(c.position.sensitivity_z)},
+        {"PositionLimitX", ShippedFloat(c.position.limit_x)},
+        {"PositionLimitY", ShippedFloat(c.position.limit_y)},
+        {"PositionLimitYDown", ShippedFloat(c.position.limit_y_down)},
+        {"PositionLimitZ", ShippedFloat(c.position.limit_z)},
+        {"PositionLimitZBack", ShippedFloat(c.position.limit_z_back)},
+        {"CollisionEnabled", ShippedBool(c.collision_enabled)},
+        {"CollisionMargin", ShippedFloat(c.lean_clamp.skin)},
+        {"CollisionChannel", ShippedInt(c.collision_channel)},
+        {"CollisionReleaseSmoothing", ShippedFloat(c.lean_clamp.release_smoothing)},
+        {"InvertPositionX", ShippedBool(c.position.invert_x)},
+        {"InvertPositionY", ShippedBool(c.position.invert_y)},
+        {"InvertPositionZ", ShippedBool(c.position.invert_z)},
+        {"TrackerPivotForward", ShippedFloat(c.tracker_pivot_forward)},
+        {"TrackerPivotUp", ShippedFloat(c.tracker_pivot_up)},
+        {"ToggleKey", ShippedString(c.toggle_key_name)},
+        {"PositionToggleKey", ShippedString(c.position_toggle_key_name)},
+        {"ReticleToggleKey", ShippedString(c.reticle_toggle_key_name)},
+        {"CycleTrackingModeKey", ShippedString(c.cycle_tracking_mode_key_name)},
+        {"YawModeKey", ShippedString(c.yaw_mode_key_name)},
+        {"RecenterKey", ShippedString(c.recenter_key_name)},
+        {"LightFollowsHead", ShippedBool(c.light.follows_head)},
+        {"LightMultiplier", ShippedFloat(c.light.multiplier)},
+    };
+}
+
+std::string Describe(cameraunlock::ConfigValueType type, int int_value, float float_value,
+                     bool bool_value, const char* string_value, const float* color_value) {
+    using cameraunlock::ConfigValueType;
+    std::ostringstream out;
+    out.precision(9);
+    switch (type) {
+        case ConfigValueType::kInt: out << "int " << int_value; break;
+        case ConfigValueType::kFloat: out << "float " << float_value; break;
+        case ConfigValueType::kBool: out << "bool " << (bool_value ? "true" : "false"); break;
+        case ConfigValueType::kString: out << "string \"" << string_value << '"'; break;
+        case ConfigValueType::kColor:
+            out << "color [" << color_value[0] << ", " << color_value[1] << ", " << color_value[2]
+                << ", " << color_value[3] << ']';
+            break;
+    }
+    return out.str();
+}
+
+std::string DescribeDeclared(const cameraunlock::ConfigConceptDefault& d) {
+    return Describe(d.type, d.int_value, d.float_value, d.bool_value, d.string_value, d.color_value);
+}
+
+std::string DescribeShipped(const ShippedDefault& s) {
+    return Describe(s.type, s.int_value, s.float_value, s.bool_value, s.string_value.c_str(),
+                    s.color_value);
+}
+
+bool SameDefault(const cameraunlock::ConfigConceptDefault& d, const ShippedDefault& s) {
+    using cameraunlock::ConfigValueType;
+    if (d.type != s.type) return false;
+    switch (d.type) {
+        case ConfigValueType::kInt: return d.int_value == s.int_value;
+        case ConfigValueType::kFloat: return d.float_value == s.float_value;
+        case ConfigValueType::kBool: return d.bool_value == s.bool_value;
+        case ConfigValueType::kString: return s.string_value == d.string_value;
+        case ConfigValueType::kColor:
+            for (int i = 0; i < 4; ++i) {
+                if (d.color_value[i] != s.color_value[i]) return false;
+            }
+            return true;
+    }
+    return false;
+}
+
+// The C++ twin of ConfigSchemaDefaultsTests. The schema's defaults reach this file through
+// the generated kConfigConceptDefaults, and a changed default is a breaking change for
+// every mod that pins this core, so the field initialisers are held to them exactly.
+void TestSchemaDefaultsMatchTheShippedDefaults() {
+    const cameraunlock::HeadTrackingConfig config;
+    const std::map<std::string, ShippedDefault> shipped = ShippedDefaults(config);
+
+    Check(cameraunlock::kConfigConceptDefaultCount > 0, "the generated defaults table is not empty");
+
+    for (size_t i = 0; i < cameraunlock::kConfigConceptDefaultCount; ++i) {
+        const cameraunlock::ConfigConceptDefault& declared = cameraunlock::kConfigConceptDefaults[i];
+        const auto found = shipped.find(declared.id);
+        if (found == shipped.end()) {
+            Check(false, (std::string("concept '") + declared.id +
+                          "' declares a default in data/config-schema.json but nothing in "
+                          "config_schema_tests.cpp binds it to a HeadTrackingConfig field")
+                             .c_str());
+            continue;
+        }
+        if (!SameDefault(declared, found->second)) {
+            Check(false, (std::string("concept '") + declared.id +
+                          "': data/config-schema.json declares " + DescribeDeclared(declared) +
+                          ", HeadTrackingConfig{} holds " + DescribeShipped(found->second))
+                             .c_str());
+            continue;
+        }
+        Check(true, (std::string("default of ") + declared.id + " matches the schema").c_str());
+    }
+}
+
 void TestIniParsing() {
     const std::string path = "config_schema_tests.ini";
     {
@@ -318,6 +481,8 @@ int RunConfigSchemaTests() {
     TestRefusedVerticalLimitIsNotMirrored();
     TestCollisionValues();
     TestHotkeys();
+    TestRotationEnabled();
+    TestSchemaDefaultsMatchTheShippedDefaults();
     TestIniParsing();
     return g_failures;
 }
