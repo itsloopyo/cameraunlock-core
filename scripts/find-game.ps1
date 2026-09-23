@@ -152,7 +152,11 @@ if ($GivenPath) {
             # the detection error below would follow it with a list of Steam
             # libraries, which for a direct download is the one place the game
             # was never going to be.
-            Write-Error "No folder given, so $displayName was not located."
+            #
+            # Written to stderr directly rather than through Write-Error, which
+            # under this script's Stop preference is a terminating error and
+            # answers a deliberate cancel with a stack trace.
+            [Console]::Error.WriteLine("No folder given, so $displayName was not located.")
             exit 2
         }
     }
