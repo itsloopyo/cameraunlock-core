@@ -28,6 +28,7 @@ set(CAMERAUNLOCK_SOURCES
     src/config/ini_reader.cpp
     src/config/head_tracking_config.cpp
     src/config/ini_editor.cpp
+    src/config/checked_file_writer.cpp
     src/config/value_guards.cpp
     src/os/module_paths.cpp
     src/os/game_window.cpp

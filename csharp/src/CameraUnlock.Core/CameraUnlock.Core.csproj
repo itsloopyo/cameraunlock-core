@@ -38,6 +38,12 @@
     <DefineConstants>$(DefineConstants);NET40</DefineConstants>
   </PropertyGroup>
 
+  <!-- CheckedFileWriter's fault-injection overload is internal, not API. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="CameraUnlock.Core.Tests" />
+    <InternalsVisibleTo Include="CameraUnlock.Core.FrameworkTests" />
+  </ItemGroup>
+
   <!-- net48 for newer Unity games -->
   <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
     <LangVersion>9.0</LangVersion>

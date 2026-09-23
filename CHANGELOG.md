@@ -9,6 +9,65 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a checked file writer, in C# and C++
+
+Writes new bytes over a file only while it still holds the bytes the caller built them
+from. It is the file-system half of saving a preference; the INI editor below produces
+the bytes. Windows only.
+
+- C#: `CameraUnlock.Core.Config.CheckedFileWriter.Write(string path, byte[] expected,
+  byte[] candidate)` returning `CheckedWriteOutcome`. A null `expected` means the file
+  is expected to be absent. A failed step throws `CheckedWriteException`, an
+  `IOException` whose inner exception is the original error, with `Step`, `TargetPath`,
+  `TemporaryPath`, `TemporaryRemoved`, `OutcomeUncertain` and `CleanupError`. Builds on
+  every target, net35 included, and throws `PlatformNotSupportedException` off Windows.
+- C++: `cameraunlock/config/checked_file_writer.h`, with `WriteFileChecked(const
+  std::wstring&, const std::optional<std::string>&, const std::string&)` returning
+  `CheckedWriteResult` (`status`, `failed_step`, `error`, `outcome_uncertain`,
+  `temporary_path`, `temporary_removed`, `cleanup_error`), plus
+  `CheckedWriteStatusName` and `CheckedWriteStepName`.
+- `CheckedWriteOutcome` / `CheckedWriteStatus` are `Committed`, `TargetChanged`,
+  `TargetAppeared`, `TargetMissing` and `TargetReplaced`, with the same numbers in both
+  languages. C++ adds `Failed` where C# throws. `CheckedWriteStep` is `ReadTarget`,
+  `CreateTemporary`, `WriteTemporary`, `FlushTemporary`, `CloseTemporary`,
+  `RecheckTarget`, `Commit` and `RemoveTemporary`, numbered 1 to 8 in both, and C++ adds
+  `None = 0`.
+
+The writer reads the target (bytes, and identity as volume serial plus file index) and
+stops with a conflict unless it matches `expected`. It creates
+`<file name>.<32 hex digits>.tmp` beside the target with CREATE_NEW / `FileMode.CreateNew`,
+writes the candidate, calls FlushFileBuffers and closes it, checking each result. Then it
+reads the target again and goes ahead only if the bytes still match and it is still the
+same file. An existing target is swapped with ReplaceFileW (`File.Replace` in C#, no
+backup file), which keeps its hidden and system attributes. An absent one is created by
+renaming the temporary without replace-existing (`File.Move` in C#,
+MoveFileExW(MOVEFILE_WRITE_THROUGH) in C++), so a file that appeared after the check is
+reported as `TargetAppeared` and left alone.
+
+The target is never opened for writing, truncated or deleted. A read-only target fails
+with Windows' access-denied error and keeps its attribute. After a conflict or a failure
+the writer deletes only the temporary it created, by the exact name it recorded. It
+never deletes by pattern, and it does not count a file already sitting at its chosen name
+as its own. The exception is ReplaceFileW's ERROR_UNABLE_TO_MOVE_REPLACEMENT (and `_2`),
+which Microsoft documents as able to leave the target missing or renamed. That is
+reported as `OutcomeUncertain` and the temporary, which may be the only copy of the new
+contents, is kept. The final check and the swap are two operations, so another program
+writing the file between them is overwritten; this is not compare-and-swap. The caller
+serializes its own saves.
+
+Both test suites run the same scenarios against real files. Every step fails in turn
+through an internal fault hook. The target is edited, swapped for a copy with identical
+bytes, deleted, or created between the two reads, and created again just before the
+rename. They also cover a handle open without FILE_SHARE_DELETE, an exclusive handle, a
+read-only target, hidden and system attributes, a taken temporary name, a removal that
+fails, unrelated `.tmp` and `.bak` files beside the target, and a non-ASCII path. The
+C++ suite, and the new `CameraUnlock.Core.FrameworkTests` console on net35 and net472,
+also kill a child process at the start of each step and check that the target is
+unchanged and at most the child's own temporary is left behind. `pixi run
+test-framework` runs that console on CLR 2.0 and CLR 4. `pixi run check` runs the net472
+half only, because the net35 half needs the Windows .NET 3.5 feature and the CI image
+has not been checked for it. None of this has run under Unity's Mono yet.
+
 ### Added - a pure batch INI editor, in C# and C++
 
 Sets values in an INI document's bytes and leaves every other byte where it was. It

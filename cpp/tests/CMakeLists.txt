@@ -25,6 +25,7 @@ add_executable(cameraunlock_tests
     zoom_compensation_tests.cpp
     tracking_mode_tests.cpp
     ini_editor_tests.cpp
+    checked_file_writer_tests.cpp
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)

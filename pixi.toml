@@ -11,6 +11,16 @@ test = "dotnet test csharp --verbosity normal"
 test-quick = "dotnet test csharp --verbosity quiet"
 test-coverage = "dotnet test csharp --collect:\"XPlat Code Coverage\""
 
+# The xunit suite runs on net8.0 only. CheckedFileWriter is File.Replace and File.Move,
+# and each runtime has its own implementation of those, so its scenarios run again here
+# on the desktop Framework runtimes the library ships for. net472 (CLR 4) is part of
+# `check`. net35 runs on CLR 2.0, which needs the Windows ".NET Framework 3.5" feature;
+# the CI image has not been checked for it, so net35 runs through `test-framework` only.
+build-framework-tests = "dotnet build csharp/src/CameraUnlock.Core.FrameworkTests -c Debug --nologo -v quiet"
+test-framework-net35 = { cmd = "csharp/src/CameraUnlock.Core.FrameworkTests/bin/Debug/net35/CameraUnlock.Core.FrameworkTests.exe", depends-on = ["build-framework-tests"] }
+test-framework-net472 = { cmd = "csharp/src/CameraUnlock.Core.FrameworkTests/bin/Debug/net472/CameraUnlock.Core.FrameworkTests.exe", depends-on = ["build-framework-tests"] }
+test-framework = { depends-on = ["test-framework-net35", "test-framework-net472"] }
+
 # The C++ half of the library has its own suite. It is a separate build system,
 # so it needs its own task - without one `pixi run test` silently covers only
 # the C# port, and a C++-only regression (the two interpolators, the projection
@@ -140,7 +150,7 @@ check-config-schema = "node scripts/generate-config-schema.mjs --check"
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "validate-games", "vectors", "build-debug", "test-quick", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

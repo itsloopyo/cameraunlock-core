@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The xunit suite runs on net8.0 only, so this console runs the file-system
+       scenarios on the desktop Framework runtimes the library ships for: net35 runs on
+       CLR 2.0, net472 on CLR 4. `pixi run test-framework` runs both. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net35;net472</TargetFrameworks>
+    <AssemblyName>CameraUnlock.Core.FrameworkTests</AssemblyName>
+    <RootNamespace>CameraUnlock.Core.Tests</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\CheckedFileWriterScenarios.cs" Link="CheckedFileWriterScenarios.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CameraUnlock.Core\CameraUnlock.Core.csproj" />
+  </ItemGroup>
+</Project>
