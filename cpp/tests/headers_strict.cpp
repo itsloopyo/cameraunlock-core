@@ -97,5 +97,6 @@
 #include "cameraunlock/time/frame_clock.h"
 #include "cameraunlock/time/qpc_clock.h"
 #include "cameraunlock/tracking/head_tracking_session.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 #include "cameraunlock/unreal/ue_math.h"
 #include "cameraunlock/unreal/ue_runtime.h"

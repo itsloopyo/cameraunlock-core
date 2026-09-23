@@ -8,6 +8,7 @@
 #include "cameraunlock/processing/position_interpolator.h"
 #include "cameraunlock/processing/position_processor.h"
 #include "cameraunlock/processing/tracking_processor.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 
 #include <atomic>
 #include <cmath>
@@ -36,13 +37,6 @@ template <typename T>
 struct HasRemoteConnection<T, std::void_t<decltype(std::declval<T&>().IsRemoteConnection())>>
     : std::true_type {};
 }  // namespace detail
-
-/// Active tracking mode for a HeadTrackingSession.
-enum class TrackingMode {
-    RotationAndPosition = 0,
-    RotationOnly = 1,
-    PositionOnly = 2,
-};
 
 /// Complete per-frame head tracking pipeline:
 ///

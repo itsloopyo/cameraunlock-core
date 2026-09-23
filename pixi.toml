@@ -124,8 +124,10 @@ validate-games-fleet = "node scripts/validate-games.mjs --fleet"
 
 # data/config-schema.json is the single description of the config vocabulary; the C#
 # and C++ alias tables are generated from it. This fails when either generated file is
-# stale, which is the gate that stops the two languages drifting apart again.
-#   node scripts/generate-config-schema.mjs   regenerates both
+# stale, which is the gate that stops the two languages drifting apart again. It also
+# covers cpp/tests/preference_modes.g.h, the C++ test's copy of
+# data/pipeline-conformance.json's preference_modes.
+#   node scripts/generate-config-schema.mjs   regenerates all three
 check-config-schema = "node scripts/generate-config-schema.mjs --check"
 
 # Development workflow.

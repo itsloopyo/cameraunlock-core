@@ -70,6 +70,13 @@ held-forever extrapolation value exactly, one builds its expected pivot input wi
 the same wrong sign as the implementation so it passes either way, and one asserts
 only that the output is finite.
 
+The same file's `preference_modes` block is not read by the runner. It records how
+a runtime preference is stored in config: `tracking_mode` gives the
+`RotationEnabled` / `PositionEnabled` pair for each mode, in cycle order, and any
+pair it does not list, false/false included, names no mode. Core's C# and C++
+encode/decode are tested against it. A port that saves or reads the tracking mode
+should pin its own mapping to that block, as it pins the constants.
+
 ## Ports found
 
 | Repo | Language | Notes |

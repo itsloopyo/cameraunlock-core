@@ -159,6 +159,37 @@
     }
   },
 
+  "preference_modes": {
+    "_note": "Runtime preferences that are stored as more than one config key. Each block names the data/config-schema.json concepts it writes and the value every mode writes to each. The C# and C++ encode/decode are hand-written and tested against this block, so a change on either side alone fails a test. Changing a mode's values or removing a mode changes the meaning of configs already on disk.",
+    "tracking_mode": {
+      "channels": ["RotationEnabled", "PositionEnabled"],
+      "modes": [
+        {
+          "name": "both",
+          "RotationEnabled": true,
+          "PositionEnabled": true,
+          "cpp": "TrackingMode::RotationAndPosition",
+          "csharp": "TrackingMode.RotationAndPosition"
+        },
+        {
+          "name": "rotation",
+          "RotationEnabled": true,
+          "PositionEnabled": false,
+          "cpp": "TrackingMode::RotationOnly",
+          "csharp": "TrackingMode.RotationOnly"
+        },
+        {
+          "name": "position",
+          "RotationEnabled": false,
+          "PositionEnabled": true,
+          "cpp": "TrackingMode::PositionOnly",
+          "csharp": "TrackingMode.PositionOnly"
+        }
+      ],
+      "note": "Array order is the cycle order, both -> rotation -> position -> both. That is the order HeadTrackingSession.CycleMode already steps through in both languages (TrackingMode value + 1, mod 3), and the tests hold it to this array. A pair not listed here, false/false included, is unrepresentable: decode reports it and does not repair it. Selecting a mode writes both channels together."
+    }
+  },
+
   "vectors": [
     {
       "id": "yaw-seam-forward",

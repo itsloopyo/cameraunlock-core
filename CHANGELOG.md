@@ -9,6 +9,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the tracking-mode mapping to `RotationEnabled` / `PositionEnabled`
+
+`data/pipeline-conformance.json` gains a top-level `preference_modes` block beside
+`constants`. `preference_modes.tracking_mode` lists the three modes in cycle order
+(`both`, `rotation`, `position`) with the `RotationEnabled` / `PositionEnabled` pair
+each is stored as: true/true, true/false, false/true. Any other pair, false/false
+included, names no mode. The vector runner and `PipelineConstantsTests` read only
+`vectors` and `constants`, so neither sees the new block.
+
+The runtime is hand-written, not generated:
+
+- C#: `CameraUnlock.Core.Tracking.TrackingModeChannels`, with
+  `Encode(TrackingMode, out bool rotationEnabled, out bool positionEnabled)` and
+  `TrackingMode? Decode(bool rotationEnabled, bool positionEnabled)`.
+- C++: `cameraunlock/tracking/tracking_mode.h`, with `TrackingModeChannels`,
+  `EncodeTrackingMode(TrackingMode)` and
+  `std::optional<TrackingMode> DecodeTrackingMode(bool, bool)`.
+
+Decode returns null / `std::nullopt` for a pair no mode writes, and does not map
+it onto a mode. There is no new cycle helper, because `HeadTrackingSession.CycleMode`
+already steps through the modes in this order in both languages. The tests check
+that order against the file.
+
+`TrackingMode` itself is unchanged. In C++ its definition moved from
+`head_tracking_session.h` into `tracking_mode.h`, which `head_tracking_session.h`
+includes, so every existing include still finds it.
+
+`TrackingModeChannelsTests` reads the JSON directly. The C++ test compares against
+`cpp/tests/preference_modes.g.h`, which `scripts/generate-config-schema.mjs` emits
+from the block, and `pixi run check-config-schema` fails when that header is stale.
+Only the tests include the header. Editing the JSON alone, or either language's
+runtime alone, fails a test.
+
 ### Added - the `RotationEnabled` config concept, and a C++ gate on schema defaults
 
 `data/config-schema.json` gains `RotationEnabled`: canonical `[General]
