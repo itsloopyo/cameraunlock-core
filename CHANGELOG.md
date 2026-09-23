@@ -9,6 +9,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - the REFramework config migration edits through the INI editor and checked writer
+
+`PluginConfig::Load`'s ConfigVersion migration (RE8's `[Position] InvertX` correction and
+the `[General] ConfigVersion` stamp) used to rewrite the INI by opening it with
+`std::ios::trunc`. It now builds the new bytes with `EditIni` and commits them with
+`WriteFileChecked`, so the live file is never truncated. The version check, the InvertX
+correction, the stamp and a later deliberate `InvertX=true` behave as before. No public
+signature changed. What a migrated file looks like changes in these cases:
+
+- A replaced line keeps the file's own key spelling, the spacing around `=` and any inline
+  comment. `invertx = true` becomes `invertx = false`, not `InvertX=false`.
+- The stamp is inserted after the section's last setting, not after its last non-blank
+  line, so a comment closing `[General]` stays below it.
+- A file whose last line had no newline got the stamp joined onto that line
+  (`AutoEnable=trueConfigVersion=1`), which left the file unstamped and migrated it again
+  on every launch. The stamp now goes on its own line, and the file still ends without a
+  newline.
+- Inserted lines use the file's dominant line ending, CRLF on a tie. It used to be CRLF
+  whenever the file held any CRLF.
+- A file the editor refuses is left untouched: UTF-16, invalid UTF-8 (an ANSI comment
+  with an accented letter, for one), a NUL, SUB or lone CR byte, a line starting with
+  white space other than a space or tab, `InvertX` or `ConfigVersion` appearing twice in
+  its section, or a repeated `[General]` header when the stamp has to be added. It used
+  to be edited anyway, and a UTF-16 file came out corrupted. A config that is read-only,
+  held open without delete sharing, or changed on disk during the edit is also left
+  untouched. In every such case the correction applies for the session only, the stamp
+  is not claimed, the error log names the refusal or the failed step and its Windows
+  error, and the next launch tries again.
+- A config deleted between the migration's read and its write is reported and not
+  recreated. The old code wrote it back from the copy it had read.
+
 ### Added - a checked file writer, in C# and C++
 
 Writes new bytes over a file only while it still holds the bytes the caller built them

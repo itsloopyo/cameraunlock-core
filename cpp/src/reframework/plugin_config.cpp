@@ -1,90 +1,24 @@
 #include <cameraunlock/reframework/plugin_config.h>
 
+#include <cameraunlock/config/checked_file_writer.h>
+#include <cameraunlock/config/ini_editor.h>
 #include <cameraunlock/config/ini_reader.h>
 #include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/math/finite_utils.h>
+#include <cameraunlock/os/module_paths.h>
 #include <cameraunlock/protocol/port_utils.h>
 #include <cameraunlock/reframework/log_callback.h>
 
-#include <cctype>
+#include <windows.h>
+
 #include <cstring>
 #include <fstream>
 #include <iomanip>
-#include <iterator>
 #include <string>
 #include <vector>
 
 namespace cameraunlock::reframework {
 namespace {
-
-std::string TrimAscii(const std::string& text) {
-    size_t begin = 0;
-    while (begin < text.size() && (text[begin] == ' ' || text[begin] == '\t')) ++begin;
-    size_t end = text.size();
-    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t' || text[end - 1] == '\r')) --end;
-    return text.substr(begin, end - begin);
-}
-
-bool EqualsIgnoreCase(const std::string& value, const char* other) {
-    size_t i = 0;
-    for (; i < value.size(); ++i) {
-        if (other[i] == '\0') return false;
-        if (std::tolower(static_cast<unsigned char>(value[i])) !=
-            std::tolower(static_cast<unsigned char>(other[i]))) {
-            return false;
-        }
-    }
-    return other[i] == '\0';
-}
-
-bool SectionOf(const std::string& line, std::string& out) {
-    const std::string trimmed = TrimAscii(line);
-    if (trimmed.size() < 2 || trimmed.front() != '[' || trimmed.back() != ']') return false;
-    out = TrimAscii(trimmed.substr(1, trimmed.size() - 2));
-    return true;
-}
-
-bool KeyOf(const std::string& line, std::string& out) {
-    const std::string trimmed = TrimAscii(line);
-    if (trimmed.empty() || trimmed[0] == ';' || trimmed[0] == '#') return false;
-    const size_t equals = trimmed.find('=');
-    if (equals == std::string::npos) return false;
-    out = TrimAscii(trimmed.substr(0, equals));
-    return !out.empty();
-}
-
-// A config split so it can be put back together byte for byte. Every line keeps
-// its own terminator, so a file that is LF stays LF and a final line with no
-// newline stays that way.
-struct IniLines {
-    std::vector<std::string> text;
-    std::vector<std::string> ends;
-    std::string eol;
-};
-
-IniLines SplitLines(const std::string& content) {
-    IniLines file;
-    file.eol = content.find("\r\n") == std::string::npos ? "\n" : "\r\n";
-    size_t begin = 0;
-    while (begin < content.size()) {
-        const size_t newline = content.find('\n', begin);
-        if (newline == std::string::npos) {
-            file.text.push_back(content.substr(begin));
-            file.ends.push_back("");
-            break;
-        }
-        size_t end = newline;
-        std::string terminator = "\n";
-        if (end > begin && content[end - 1] == '\r') {
-            --end;
-            terminator = "\r\n";
-        }
-        file.text.push_back(content.substr(begin, end - begin));
-        file.ends.push_back(terminator);
-        begin = newline + 1;
-    }
-    return file;
-}
 
 struct IniEdit {
     const char* section;
@@ -92,81 +26,120 @@ struct IniEdit {
     std::string value;
 };
 
-// Sets one key and touches nothing else. Rewriting the whole file through
-// Save() would keep the values but lose the comments, the ordering and any key
-// this build does not know about, which is most of what a user has actually
-// edited.
-void ApplyEdit(IniLines& file, const IniEdit& edit) {
-    bool inSection = false;
-    bool sectionSeen = false;
-    size_t insertAt = 0;
-
-    for (size_t i = 0; i < file.text.size(); ++i) {
-        std::string section;
-        if (SectionOf(file.text[i], section)) {
-            inSection = EqualsIgnoreCase(section, edit.section);
-            if (inSection) {
-                sectionSeen = true;
-                insertAt = i + 1;
-            }
-            continue;
-        }
-        if (!inSection) continue;
-        if (!TrimAscii(file.text[i]).empty()) insertAt = i + 1;
-        std::string key;
-        if (KeyOf(file.text[i], key) && EqualsIgnoreCase(key, edit.key)) {
-            file.text[i] = std::string(edit.key) + "=" + edit.value;
-            if (file.ends[i].empty()) file.ends[i] = file.eol;
-            return;
+// ANSI, like every other path in this file: IniReader opens it with
+// GetPrivateProfileStringA, and PluginMod narrows it with os::NarrowToAnsi.
+bool WidenAnsiPath(const char* path, std::wstring& wide, std::string& error) {
+    const int length = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, path, -1, nullptr, 0);
+    if (length > 0) {
+        wide.assign(static_cast<size_t>(length), L'\0');
+        if (MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, path, -1, &wide[0], length) == length) {
+            wide.resize(static_cast<size_t>(length) - 1);
+            return true;
         }
     }
-
-    const std::string line = std::string(edit.key) + "=" + edit.value;
-    if (sectionSeen) {
-        file.text.insert(file.text.begin() + static_cast<std::ptrdiff_t>(insertAt), line);
-        file.ends.insert(file.ends.begin() + static_cast<std::ptrdiff_t>(insertAt), file.eol);
-        return;
-    }
-
-    if (!file.text.empty()) {
-        if (file.ends.back().empty()) file.ends.back() = file.eol;
-        if (!TrimAscii(file.text.back()).empty()) {
-            file.text.push_back("");
-            file.ends.push_back(file.eol);
-        }
-    }
-    file.text.push_back(std::string("[") + edit.section + "]");
-    file.ends.push_back(file.eol);
-    file.text.push_back(line);
-    file.ends.push_back(file.eol);
+    error = "its path is not valid in the ANSI code page (Windows error " +
+            std::to_string(GetLastError()) + "); the file is unchanged";
+    return false;
 }
 
+// 0 with the file's bytes in `bytes`, or the Win32 error that stopped the read.
+DWORD ReadWholeFile(const std::wstring& path, std::string& bytes) {
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return GetLastError();
+    DWORD error = 0;
+    char buffer[4096];
+    for (;;) {
+        DWORD read = 0;
+        if (!ReadFile(file, buffer, sizeof(buffer), &read, nullptr)) {
+            error = GetLastError();
+            break;
+        }
+        if (read == 0) break;
+        bytes.append(buffer, read);
+    }
+    if (!CloseHandle(file) && error == 0) error = GetLastError();
+    return error;
+}
+
+std::string DescribeRefusal(const cameraunlock::IniEditResult& result) {
+    std::string text = std::string("it cannot be edited safely (") +
+                       cameraunlock::IniEditRefusalName(result.refusal);
+    if (!result.key.empty()) text += " for [" + result.section + "] " + result.key;
+    for (size_t i = 0; i < result.lines.size(); ++i) {
+        text += (i == 0 ? (result.lines.size() == 1 ? " on line " : " on lines ") : ", ");
+        text += std::to_string(result.lines[i]);
+    }
+    return text + "); the file is unchanged";
+}
+
+std::string DescribeTemporary(const std::wstring& temporary) {
+    std::string narrow;
+    if (cameraunlock::os::NarrowToAnsi(temporary, narrow)) return narrow;
+    return "a temporary beside it whose name has no ANSI form";
+}
+
+std::string DescribeWriteFailure(const cameraunlock::CheckedWriteResult& result) {
+    if (result.status != cameraunlock::CheckedWriteStatus::Failed) {
+        return std::string("it changed on disk while it was being edited (") +
+               cameraunlock::CheckedWriteStatusName(result.status) +
+               "), so the edit was dropped and the file left as it now is";
+    }
+    std::string text = std::string("the ") + cameraunlock::CheckedWriteStepName(result.failed_step) +
+                       " step failed with Windows error " + std::to_string(result.error);
+    if (result.outcome_uncertain) {
+        return text + ". Windows could not finish replacing the file, so it may be missing or "
+                      "renamed; the edited contents are in " +
+               DescribeTemporary(result.temporary_path);
+    }
+    text += "; the file is unchanged";
+    if (!result.temporary_path.empty() && !result.temporary_removed) {
+        text += ", and " + DescribeTemporary(result.temporary_path) +
+                " could not be removed (Windows error " + std::to_string(result.cleanup_error) + ")";
+    }
+    return text;
+}
+
+// Sets the given keys and touches nothing else. Rewriting the whole file through
+// Save() would keep the values but lose the comments, the ordering and any key
+// this build does not know about, which is most of what a user has actually
+// edited. A key that is absent is added, and so is its section.
+//
+// The file is replaced, never opened for writing: WriteFileChecked commits only
+// if it still holds the bytes the edit was made from. A missing file is a
+// failure, not something to create - Load's caller writes a whole default config
+// in that case, and a file holding only these keys would stop it doing so.
 bool ApplyIniEdits(const char* path, const std::vector<IniEdit>& edits, std::string& error) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in.is_open()) {
-        error = "it could not be opened for reading";
+    std::wstring widePath;
+    if (!WidenAnsiPath(path, widePath, error)) return false;
+
+    std::string original;
+    const DWORD readError = ReadWholeFile(widePath, original);
+    if (readError == ERROR_FILE_NOT_FOUND || readError == ERROR_PATH_NOT_FOUND) {
+        error = "it does not exist";
         return false;
     }
-    const std::string content((std::istreambuf_iterator<char>(in)),
-                              std::istreambuf_iterator<char>());
-    in.close();
+    if (readError != 0) {
+        error = "it could not be read (Windows error " + std::to_string(readError) +
+                "); the file is unchanged";
+        return false;
+    }
 
-    IniLines file = SplitLines(content);
+    std::vector<cameraunlock::IniEdit> batch;
     for (const IniEdit& edit : edits) {
-        ApplyEdit(file, edit);
+        batch.push_back({edit.section, edit.key, edit.value, true});
     }
-
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) {
-        error = "it could not be opened for writing";
+    const cameraunlock::IniEditResult edited = cameraunlock::EditIni(original, batch);
+    if (!edited.Succeeded()) {
+        error = DescribeRefusal(edited);
         return false;
     }
-    for (size_t i = 0; i < file.text.size(); ++i) {
-        out << file.text[i] << file.ends[i];
-    }
-    out.flush();
-    if (!out) {
-        error = "the write did not complete";
+
+    const cameraunlock::CheckedWriteResult written =
+        cameraunlock::WriteFileChecked(widePath, original, edited.bytes);
+    if (!written.Committed()) {
+        error = DescribeWriteFailure(written);
         return false;
     }
     return true;
@@ -206,7 +179,7 @@ void MigrateToCurrentVersion(const char* path, const PluginConfigSchema& schema,
     std::string error;
     if (!ApplyIniEdits(path, edits, error)) {
         LogError("Could not migrate %s to ConfigVersion %d because %s. The corrected values "
-                 "are in effect for this session only; the file is unchanged and will be "
+                 "are in effect for this session only, and a file still unstamped is "
                  "migrated again on the next launch.",
                  path, kPluginConfigVersion, error.c_str());
         return;

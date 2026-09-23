@@ -8,6 +8,7 @@
 // sensitivities, limits and hotkeys the user set - which is what most of this
 // file checks.
 
+#include <cameraunlock/reframework/log_callback.h>
 #include <cameraunlock/reframework/plugin_config.h>
 
 #include <cstdio>
@@ -62,8 +63,13 @@ const PluginConfigSchema kRe4Schema{
 class TempIni {
 public:
     explicit TempIni(const char* name)
-        : m_path((std::filesystem::temp_directory_path() / name).string()) {}
-    ~TempIni() { std::remove(m_path.c_str()); }
+        : m_name(name), m_path((std::filesystem::temp_directory_path() / name).string()) {}
+    ~TempIni() {
+        std::error_code ignored;
+        std::filesystem::permissions(m_path, std::filesystem::perms::owner_write,
+                                     std::filesystem::perm_options::add, ignored);
+        std::remove(m_path.c_str());
+    }
 
     TempIni(const TempIni&) = delete;
     TempIni& operator=(const TempIni&) = delete;
@@ -82,7 +88,25 @@ public:
         return buffer.str();
     }
 
+    bool Exists() const { return std::filesystem::exists(m_path); }
+
+    // The checked writer's temporaries are named "<file name>.<32 hex digits>.tmp".
+    int TemporariesBeside() const {
+        int count = 0;
+        const std::string prefix = m_name + ".";
+        for (const auto& entry :
+             std::filesystem::directory_iterator(std::filesystem::temp_directory_path())) {
+            const std::string file = entry.path().filename().string();
+            if (file.size() == prefix.size() + 32 + 4 && file.compare(0, prefix.size(), prefix) == 0 &&
+                file.compare(file.size() - 4, 4, ".tmp") == 0) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
 private:
+    std::string m_name;
     std::string m_path;
 };
 
@@ -139,6 +163,35 @@ bool Contains(const std::string& haystack, const char* needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
+// What the plugin logs at error level while one of these is alive.
+class ErrorLog {
+public:
+    ErrorLog() {
+        Lines().clear();
+        cameraunlock::reframework::SetLogCallback(&Record);
+    }
+    ~ErrorLog() { cameraunlock::reframework::SetLogCallback(nullptr); }
+
+    ErrorLog(const ErrorLog&) = delete;
+    ErrorLog& operator=(const ErrorLog&) = delete;
+
+    bool Has(const char* text) const {
+        for (const std::string& line : Lines()) {
+            if (Contains(line, text)) return true;
+        }
+        return false;
+    }
+
+private:
+    static std::vector<std::string>& Lines() {
+        static std::vector<std::string> lines;
+        return lines;
+    }
+    static void Record(cameraunlock::reframework::LogLevel level, const char* message) {
+        if (level == cameraunlock::reframework::LogLevel::Error) Lines().push_back(message);
+    }
+};
+
 void TestMigratesOnlyTheOneKey() {
     TempIni ini("plugin_config_migration_re8.ini");
     const std::string before = UserEditedRe8Ini();
@@ -189,6 +242,12 @@ void TestMigratesOnlyTheOneKey() {
     Check(after.find("ConfigVersion") > after.find("[General]"),
           "the stamp lands in [General]");
 
+    std::string expected = before;
+    expected.replace(expected.find("InvertX=true\n"), std::string("InvertX=true\n").size(),
+                     "InvertX=false\n");
+    expected += "ConfigVersion=1\n";
+    Check(after == expected, "the migrated file is the original with those two lines, byte for byte");
+
     // The values the migrated file now holds have to read back the same way.
     PluginConfig reloaded;
     reloaded.Load(ini.Path(), kRe8Schema);
@@ -201,17 +260,254 @@ void TestMigratesOnlyTheOneKey() {
 
 void TestStampedConfigKeepsADeliberateTrue() {
     TempIni ini("plugin_config_migration_deliberate.ini");
-    ini.Write(
+    const std::string stamped =
         "[Position]\n"
         "InvertX=true\n"
         "\n"
         "[General]\n"
-        "ConfigVersion=1\n");
+        "ConfigVersion=1\n";
+    ini.Write(stamped);
 
     PluginConfig config;
     config.Load(ini.Path(), kRe8Schema);
     Check(config.positionInvertX, "a stamped config keeps InvertX=true in memory");
-    Check(Contains(ini.Read(), "InvertX=true"), "a stamped config keeps InvertX=true on disk");
+    Check(ini.Read() == stamped, "a stamped config is not rewritten at all");
+}
+
+// Migrates `input` under RE8's schema and checks the whole file it leaves behind,
+// then loads that file again: the stamp has to stick and nothing may move twice.
+void CheckRe8Migration(const char* name, const std::string& input, const std::string& expected) {
+    std::cout << "  -- " << name << "\n";
+    TempIni ini(name);
+    ini.Write(input);
+
+    PluginConfig config;
+    Check(config.Load(ini.Path(), kRe8Schema), "the unstamped config loads");
+    Check(!config.positionInvertX, "InvertX is corrected in memory");
+    Check(config.configVersion == kPluginConfigVersion, "the load reports the new stamp");
+    Check(ini.Read() == expected, "the migrated file is exactly the expected bytes");
+    Check(ini.TemporariesBeside() == 0, "no temporary is left beside it");
+
+    PluginConfig reloaded;
+    reloaded.Load(ini.Path(), kRe8Schema);
+    Check(reloaded.configVersion == kPluginConfigVersion, "the stamp reads back");
+    Check(!reloaded.positionInvertX, "InvertX reads back false");
+    Check(ini.Read() == expected, "a second load leaves the file alone");
+}
+
+// CRLF throughout, as Notepad and the shipped INIs have it. The key keeps the
+// user's spelling and spacing, and the stamp goes after [General]'s last setting
+// rather than below the user's closing comment.
+void TestCrlfFileWithComments() {
+    CheckRe8Migration(
+        "plugin_config_migration_crlf.ini",
+        "; RE8 Head Tracking Configuration\r\n"
+        "; Delete this file to reset to defaults\r\n"
+        "\r\n"
+        "[Position]\r\n"
+        "; Invert position axes\r\n"
+        "invertx = true\r\n"
+        "InvertY=false\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "; Yaw mode: false = camera-local, true = horizon-locked (default)\r\n"
+        "WorldSpaceYaw=true\r\n"
+        "; my note: I turned AutoEnable off once, it was annoying\r\n"
+        "\r\n",
+        "; RE8 Head Tracking Configuration\r\n"
+        "; Delete this file to reset to defaults\r\n"
+        "\r\n"
+        "[Position]\r\n"
+        "; Invert position axes\r\n"
+        "invertx = false\r\n"
+        "InvertY=false\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "; Yaw mode: false = camera-local, true = horizon-locked (default)\r\n"
+        "WorldSpaceYaw=true\r\n"
+        "ConfigVersion=1\r\n"
+        "; my note: I turned AutoEnable off once, it was annoying\r\n"
+        "\r\n");
+}
+
+// GetPrivateProfileIntA reads "0 ; ..." as 0, so a commented stamp is still
+// migrated, and the comment stays on the line.
+void TestInlineCommentOnTheStampSurvives() {
+    CheckRe8Migration(
+        "plugin_config_migration_inline.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "\n"
+        "[General]\n"
+        "ConfigVersion=0 ; I lowered this to get the fix again\n"
+        "AutoEnable=true\n",
+        "[Position]\n"
+        "InvertX=false\n"
+        "\n"
+        "[General]\n"
+        "ConfigVersion=1 ; I lowered this to get the fix again\n"
+        "AutoEnable=true\n");
+}
+
+// The stamp is inserted after a last line that has no newline. It must go on a
+// line of its own, and the file still ends without a newline.
+void TestNoFinalNewlineInsertsOnItsOwnLine() {
+    CheckRe8Migration(
+        "plugin_config_migration_unterminated.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "\n"
+        "[General]\n"
+        "AutoEnable=true",
+        "[Position]\n"
+        "InvertX=false\n"
+        "\n"
+        "[General]\n"
+        "AutoEnable=true\n"
+        "ConfigVersion=1");
+}
+
+// The unterminated last line is the one being corrected, and [General] has to be
+// added after it.
+void TestNoFinalNewlineCrlfWithoutGeneral() {
+    CheckRe8Migration(
+        "plugin_config_migration_unterminated_crlf.ini",
+        "[Network]\r\n"
+        "UDPPort=5555\r\n"
+        "\r\n"
+        "[Position]\r\n"
+        "InvertX=true",
+        "[Network]\r\n"
+        "UDPPort=5555\r\n"
+        "\r\n"
+        "[Position]\r\n"
+        "InvertX=false\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "ConfigVersion=1");
+}
+
+// After the migration a user sets InvertX back to true on the CRLF file. The file
+// is stamped, so that choice is kept and the file is not touched again.
+void TestDeliberateInversionAfterMigrationOnCrlf() {
+    TempIni ini("plugin_config_migration_deliberate_crlf.ini");
+    ini.Write(
+        "[Position]\r\n"
+        "InvertX=true\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "AutoEnable=true\r\n");
+
+    PluginConfig first;
+    first.Load(ini.Path(), kRe8Schema);
+    const std::string migrated =
+        "[Position]\r\n"
+        "InvertX=false\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "AutoEnable=true\r\n"
+        "ConfigVersion=1\r\n";
+    Check(ini.Read() == migrated, "the CRLF config is migrated once");
+
+    const std::string reinstated =
+        "[Position]\r\n"
+        "InvertX=true\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "AutoEnable=true\r\n"
+        "ConfigVersion=1\r\n";
+    ini.Write(reinstated);
+
+    PluginConfig second;
+    second.Load(ini.Path(), kRe8Schema);
+    Check(second.positionInvertX, "the true set back after the migration is in effect");
+    Check(second.configVersion == kPluginConfigVersion, "and the config reads as stamped");
+    Check(ini.Read() == reinstated, "and the file is left exactly as the user wrote it");
+}
+
+// Load returns false on a missing file and the caller writes the defaults; the
+// migration never creates a file of its own.
+void TestMissingFileIsNotCreated() {
+    TempIni ini("plugin_config_migration_missing.ini");
+    PluginConfig config;
+    Check(!config.Load(ini.Path(), kRe8Schema), "a missing config does not load");
+    Check(config.configVersion == 0, "and reports no stamp");
+    Check(!ini.Exists(), "and Load does not create one");
+}
+
+// A file the editor refuses is left byte for byte. The correction still applies
+// for the session, the stamp is not claimed, and the next launch tries again.
+void CheckRefusedFileIsLeftAlone(const char* name, const std::string& input, const char* refusal) {
+    std::cout << "  -- " << name << "\n";
+    TempIni ini(name);
+    ini.Write(input);
+
+    ErrorLog log;
+    PluginConfig config;
+    Check(config.Load(ini.Path(), kRe8Schema), "the config still loads");
+    Check(!config.positionInvertX, "InvertX is false in memory");
+    Check(config.configVersion == 0, "the stamp is not claimed");
+    Check(ini.Read() == input, "the file is untouched");
+    Check(ini.TemporariesBeside() == 0, "no temporary is left beside it");
+    Check(log.Has(refusal) && log.Has("the file is unchanged"),
+          "the error log names the refusal and says the file is unchanged");
+}
+
+void TestRefusedFilesAreLeftAlone() {
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_latin1.ini",
+        "; caf\xE9 settings\n"
+        "[Position]\n"
+        "InvertX=true\n"
+        "\n"
+        "[General]\n"
+        "AutoEnable=true\n",
+        "(InvalidUtf8 on line 1)");
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_duplicate.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "InvertX=false\n"
+        "\n"
+        "[General]\n"
+        "AutoEnable=true\n",
+        "(DuplicateKey for [Position] InvertX on lines 2, 3)");
+    const char utf16[] =
+        "\xFF\xFE[\0G\0e\0n\0e\0r\0a\0l\0]\0\r\0\n\0A\0u\0t\0o\0E\0n\0a\0b\0l\0e\0=\0t\0r\0u\0e\0\r\0\n\0";
+    CheckRefusedFileIsLeftAlone("plugin_config_migration_utf16.ini",
+                                std::string(utf16, sizeof(utf16) - 1), "(Utf16)");
+}
+
+// The checked writer replaces the file rather than opening it for writing, so a
+// read-only config fails the migration without being truncated or losing the
+// attribute.
+void TestReadOnlyFileIsLeftAlone() {
+    TempIni ini("plugin_config_migration_readonly.ini");
+    const std::string input =
+        "[Position]\n"
+        "InvertX=true\n"
+        "\n"
+        "[General]\n"
+        "AutoEnable=true\n";
+    ini.Write(input);
+    // MSVC's std::filesystem sets FILE_ATTRIBUTE_READONLY only once every write bit is gone.
+    std::filesystem::permissions(ini.Path(),
+                                 std::filesystem::perms::owner_write | std::filesystem::perms::group_write |
+                                     std::filesystem::perms::others_write,
+                                 std::filesystem::perm_options::remove);
+
+    ErrorLog log;
+    PluginConfig config;
+    Check(config.Load(ini.Path(), kRe8Schema), "a read-only config loads");
+    Check(!config.positionInvertX, "InvertX is corrected in memory");
+    Check(config.configVersion == 0, "the stamp is not claimed");
+    Check(ini.Read() == input, "the read-only file is untouched");
+    Check((std::filesystem::status(ini.Path()).permissions() & std::filesystem::perms::owner_write) ==
+              std::filesystem::perms::none,
+          "and still read-only");
+    Check(log.Has("the Commit step failed with Windows error 5; the file is unchanged"),
+          "the error log names the failed step and says the file is unchanged");
+    Check(ini.TemporariesBeside() == 0, "no temporary is left beside it");
 }
 
 // The migration is stamped as well as applied, so the flip happens once: a user
@@ -288,5 +584,13 @@ int RunPluginConfigMigrationTests() {
     TestReinstatedTrueSurvivesTheNextLoad();
     TestOtherModsAreNotTouched();
     TestSaveStampsWhatItWrites();
+    TestCrlfFileWithComments();
+    TestInlineCommentOnTheStampSurvives();
+    TestNoFinalNewlineInsertsOnItsOwnLine();
+    TestNoFinalNewlineCrlfWithoutGeneral();
+    TestDeliberateInversionAfterMigrationOnCrlf();
+    TestMissingFileIsNotCreated();
+    TestRefusedFilesAreLeftAlone();
+    TestReadOnlyFileIsLeftAlone();
     return g_failures;
 }
