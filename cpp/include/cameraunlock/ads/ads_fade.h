@@ -2,41 +2,18 @@
 
 namespace cameraunlock::ads {
 
-// The shape of the transition into and out of aiming down sights.
+// The transition a mod rides to ease a positional lean out while the sights are
+// up, and back in when they come down.
 //
-// Head tracking and iron sights want different things from the camera. Tracking
-// says the view is wherever you are looking; a sight picture says the view is
-// down the barrel, because that is the only place the weapon's own reticle means
-// anything. So the moment the sights start coming up the head pose comes off the
-// camera and the frame settles onto the aim - which is where the reticle was
-// already pointing, so the thing the player was about to shoot ends up in the
-// middle of the screen.
+// Head tracking carries straight on through the aim: rotation is never faded,
+// made relative or suspended, because turning the camera about the eye leaves
+// the weapon's sight line through the eye, sights lined up. A lean is different.
+// It translates the eye off that line, so a mod that cannot draw the weapon from
+// the clean eye scales its lean by this fade instead (see the
+// shooter-ads-handling skill).
 //
-// This class owns the SHAPE of that transition and nothing else. It returns a
-// scale, 1 at the hip and 0 with the sights up, and the caller decides what the
-// scale blends between:
-//
-//   AdsMode::Paused    blend the head pose down to nothing and hold it there.
-//   Marker / Tracked   blend the absolute pose into the pose measured from the
-//                      entry frame (entry_pose.h), which is identity at that
-//                      moment.
-//
-// So all three modes make the same swing onto the aim, and differ only in what
-// happens for the rest of the aim.
-//
-// It is a SUSPEND, not a reset. The pose keeps flowing through the pipeline with
-// its smoothing state intact, so lowering the weapon eases the view back to
-// where the head actually is. Resetting instead would swing the view back
-// through the whole head angle on the way out, dozens of times a firefight.
-// Reset stays right for menus, cinematics and the master toggle, which is what
-// Reset() below is for.
-//
-// The tracker's centre is deliberately not moved by any of this. Head centre
-// means "looking down the gun", always. Recentring on the sights coming up - the
-// obvious first idea - makes the pose the player happened to hold when they
-// pressed aim the new neutral, so they have to HOLD their head turned to keep
-// looking where they shot, and every aim press walks the neutral further from
-// where the head actually rests.
+// This class owns the SHAPE of the transition and nothing else. It returns a
+// scale, 1 at the hip and 0 with the sights up.
 //
 // Pure: no clock of its own, no logging, no game. nowMs comes from the caller,
 // which is what lets the whole transition be driven frame by frame in a test.
@@ -45,13 +22,13 @@ public:
     // How long the transition takes when the sights start coming up. Short
     // enough to be done before there is a sight picture to look through - a
     // weapon's own raise animation is around a fifth of a second - and long
-    // enough that the view leans onto the gun rather than snapping to it.
+    // enough that the eye eases onto the sights rather than snapping to them.
     static constexpr unsigned long long kLowerMs = 150;
     // And back when they drop. Longer, because nothing is waiting on it and a
     // slower return is the more comfortable half.
     static constexpr unsigned long long kRaiseMs = 250;
 
-    // Called once per rendered frame, before the head pose is applied. `aiming`
+    // Called once per rendered frame, before the lean is applied. `aiming`
     // is the ADS state for this frame, polled rather than latched. Returns the
     // scale to blend at: 1 at the hip, 0 with the sights up.
     float Update(bool aiming, unsigned long long nowMs) {
@@ -61,10 +38,10 @@ public:
         if (turnDown || turnUp) {
             // A reversal starts from WHERE THE TRANSITION IS, not from the end
             // the interrupted leg would have reached. Starting each leg at its
-            // own endpoint steps the pose by however far the previous one had
+            // own endpoint steps the lean by however far the previous one had
             // travelled, and the worst case is the most common input there is:
             // a tap of the aim button releases a frame after it was pressed, so
-            // the pose is 99.99% applied and the next frame removes all of it.
+            // the lean is 99.99% applied and the next frame removes all of it.
             // That is the jolt this class exists to remove, delivered by the
             // class itself.
             const float from = Current(nowMs);

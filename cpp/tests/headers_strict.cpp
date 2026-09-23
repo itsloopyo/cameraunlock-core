@@ -35,10 +35,7 @@
 #include <windows.h>
 #endif
 
-#include "cameraunlock/ads/ads_blend.h"
 #include "cameraunlock/ads/ads_fade.h"
-#include "cameraunlock/ads/ads_mode.h"
-#include "cameraunlock/ads/entry_pose.h"
 #include "cameraunlock/camera/lean_clamp.h"
 #include "cameraunlock/camera/zoom_compensation.h"
 #include "cameraunlock/config/config_key_schema.g.h"

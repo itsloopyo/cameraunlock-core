@@ -9,6 +9,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed - BREAKING - the aim-down-sights mode cycle
+
+Aiming down sights now has one behaviour across the fleet: head tracking carries
+straight on through the aim and the weapon stays on the aim, with no setting and
+no key (the `shooter-ads-handling` skill). The cycle's shared code is gone:
+`cameraunlock/ads/ads_mode.h`, `entry_pose.h` and `ads_blend.h`, their C# twins
+`AdsMode` / `AdsModes`, `AdsEntryPose`, `AdsPose` and `AdsPoseBlend`, the
+`ads_mode` field on `HeadTrackingConfig` and `AdsMode` on
+`HeadTrackingConfigData`, and the `AdsMode` key (with the `ADS` section) in
+`data/config-schema.json` and the generated key tables. An ini that still carries
+`AdsMode` loads as before; the key resolves to nothing and is ignored.
+
+`AdsFade` stays, re-documented as the transition a mod rides to ease a positional
+lean out while the sights are up. The `AimMarker` renderers stay too: mods draw
+hip-fire reticles with them.
+
+Consuming repos: remove the mode cycle, its `Insert` / `Ctrl+Shift+U` binding,
+the ADS marker, the entry pose and the ADS branch of the tracking gate, per the
+`shooter-ads-handling` prompt. A mod that still references any removed symbol
+stops compiling when it bumps this pin.
+
 ### Added - install.cmd and uninstall.cmd ask for the game folder when detection finds nothing
 
 `find-game.ps1` takes an `-Interactive` switch. With it, a run that detects no

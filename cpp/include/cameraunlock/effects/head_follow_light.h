@@ -25,8 +25,8 @@ namespace cameraunlock::effects {
 // **Roll is scaled with the rest.** A cone beam is rotationally symmetric about
 // its own axis, so scaled roll changes nothing that can be seen; excluding it
 // would be a special case with no observable effect and one more rule to
-// remember. Contrast ads_blend.h, where roll IS excluded, and for a reason that
-// is visible on screen.
+// remember. Contrast zoom compensation, where roll IS excluded, and for a
+// reason that is visible on screen.
 //
 // **The write is undone once the frame is drawn.** Everything except an engine
 // that asks the mod where to aim the light (see below) applies the turn just

@@ -56,7 +56,6 @@ namespace CameraUnlock.Core.Config
             public const string CycleTrackingModeKey = "cycletrackingmodekey";
             public const string YawModeKey = "yawmodekey";
             public const string RecenterKey = "recenterkey";
-            public const string AdsMode = "adsmode";
             public const string LightFollowsHead = "lightfollowshead";
             public const string LightMultiplier = "lightmultiplier";
 
@@ -65,7 +64,6 @@ namespace CameraUnlock.Core.Config
 
         private static readonly Dictionary<string, string> Aliases = new Dictionary<string, string>
         {
-            { "adsmode", "adsmode" },
             { "aimdecouple", "aimdecoupling" },
             { "aimdecoupling", "aimdecoupling" },
             { "autoenable", "enableonstartup" },

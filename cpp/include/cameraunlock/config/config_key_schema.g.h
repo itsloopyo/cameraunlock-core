@@ -48,7 +48,6 @@ inline constexpr const char* kReticleToggleKey = "reticletogglekey";
 inline constexpr const char* kCycleTrackingModeKey = "cycletrackingmodekey";
 inline constexpr const char* kYawModeKey = "yawmodekey";
 inline constexpr const char* kRecenterKey = "recenterkey";
-inline constexpr const char* kAdsMode = "adsmode";
 inline constexpr const char* kLightFollowsHead = "lightfollowshead";
 inline constexpr const char* kLightMultiplier = "lightmultiplier";
 
@@ -66,7 +65,6 @@ struct ConfigKeyAlias {
 };
 
 inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
-    { "adsmode", "adsmode", false },
     { "aimdecouple", "aimdecoupling", false },
     { "aimdecoupling", "aimdecoupling", false },
     { "autoenable", "enableonstartup", false },

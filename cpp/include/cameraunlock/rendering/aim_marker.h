@@ -2,12 +2,11 @@
 
 // The mark that says where the rounds are going, for any overlay backend.
 //
-// AdsMode::Marker exists for games with no aim indicator the mod can move while
-// the sights are up - the sight picture is the weapon's own irons, holo or
-// optic, drawn on the gun, and a scope's reticle is only honest while the eye
-// sits exactly on the optic, which is precisely what head tracking breaks. With
-// tracking live through an aim there is then nothing on screen saying where the
-// shot lands, and the mod owes the player one.
+// For games with no aim indicator the mod can move: head tracking takes the view
+// off the aim, and with no crosshair of the game's own to reposition there is
+// nothing on screen saying where the shot lands, so the mod owes the player one.
+// Not for aiming down sights: there the weapon's own sights stay on the aim and
+// are the indicator (see the shooter-ads-handling skill).
 //
 // This is the drawing half only. The projection is NOT here and must never be
 // re-derived here: the caller hands over the same clean-aim screen position its
@@ -19,17 +18,17 @@
 //     the on/off switch and nothing here earns a config entry),
 //   - the publish/consume handoff between the mod's render hook and Present,
 //   - a staleness cut-off, so a marker cannot sit frozen on a loading screen,
-//   - a lazy one-shot install on a worker thread, so a mod only ever patches the
-//     swap chain for a player who has actually asked for the marker.
+//   - a lazy one-shot install on a worker thread, so a mod only patches the swap
+//     chain once it actually has a marker to draw.
 //
 // It is written once against OverlayDrawList::DrawCross and parameterised on the
 // backend, so a mod running on Direct3D 12 gets the same mark, in the same place,
 // as one running on Direct3D 11. Use the aliases in aim_marker_dx11.h /
 // aim_marker_dx12.h rather than naming the template.
 //
-// Ensure() answers false until the overlay is up, so a mode whose marker never
-// came up behaves exactly like AdsMode::Tracked. That is the honest degradation:
-// a marker that half-draws is worse than no marker.
+// Ensure() answers false until the overlay is up, so a mod whose marker never
+// came up simply draws none. That is the honest degradation: a marker that
+// half-draws is worse than no marker.
 
 #include "cameraunlock/rendering/overlay_draw_list.h"
 

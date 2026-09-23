@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using CameraUnlock.Core.Ads;
 using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Effects;
 using CameraUnlock.Core.Math;
@@ -121,23 +120,6 @@ namespace CameraUnlock.Core.Config
         /// <see cref="CameraUnlock.Core.Processing.PositionProcessor.TrackerPivotUp"/>.
         /// </summary>
         public float TrackerPivotUp { get; set; } = 0.0f;
-
-        /// <summary>
-        /// What head tracking does while the sights are up. Parsed with <c>marker</c>
-        /// ALLOWED, because this type cannot know whether the mod reading it ships two
-        /// slots or three.
-        /// <para>
-        /// A two-slot mod therefore cannot take this field as it stands: the raw string is
-        /// consumed by <c>ApplyValues</c> and not retained, so there is nothing left to
-        /// re-parse. Such a mod either reads the key itself with
-        /// <c>AdsModes.Parse(raw, allowMarker: false)</c> before handing the dictionary
-        /// over, or maps <see cref="Ads.AdsMode.Marker"/> onto
-        /// <see cref="Ads.AdsModes.Default"/> after loading. Left alone it would hold a
-        /// mode it does not implement, and <c>SuspendsTracking(Marker)</c> is false, so
-        /// tracking would stay live through ADS with a marker the mod never draws.
-        /// </para>
-        /// </summary>
-        public AdsMode AdsMode { get; set; } = AdsModes.Default;
 
         /// <summary>
         /// A carried light that follows the head rather than the aim. Inert in a mod for a
@@ -474,21 +456,6 @@ namespace CameraUnlock.Core.Config
                     case ConfigKeySchema.Keys.TrackerPivotUp:
                         if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotUp, MaxDistanceMetres, out floatVal))
                             TrackerPivotUp = floatVal;
-                        break;
-
-                    case ConfigKeySchema.Keys.AdsMode:
-                        AdsMode = AdsModes.Parse(value);
-                        // Every neighbouring key reports a value it could not use. Without
-                        // this, the one typo the fail-to-default design exists to survive
-                        // - AdsMode=trakced - hands the player stock ADS and says nothing,
-                        // so there is no way to find out why the setting did nothing.
-                        if (!string.Equals(value.Trim(), AdsModes.Value(AdsMode),
-                                StringComparison.OrdinalIgnoreCase))
-                        {
-                            log?.Invoke(string.Format(
-                                "Config key '{0}' has an unrecognised value '{1}' - using {2}. Valid values are paused, marker and tracked.",
-                                kvp.Key, value, AdsModes.Value(AdsMode)));
-                        }
                         break;
 
                     case ConfigKeySchema.Keys.LightFollowsHead:

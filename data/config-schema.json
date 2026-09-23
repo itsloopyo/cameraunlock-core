@@ -49,7 +49,7 @@
       "note": "The schema default is true, matching ~44 repos. Four disagree and default it FALSE: dying-light-2 and dishonored-2 (both [Rotation] WorldLockedYaw), quake-ii-rtx ([General] WorldSpaceYaw) and sleeping-dogs ([general] world_space_yaw). WorldLockedYaw is aliased because it is genuinely the same concept with the same polarity, but a mod that adopts this schema's DEFAULT in place of its own flips behaviour for its existing users. Check the mod's own default before wiring the table in."
     }
   ],
-  "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle", "ADS", "Light"],
+  "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle", "Light"],
   "concepts": [
     {
       "id": "UdpPort",
@@ -392,15 +392,6 @@
       "default": "Home",
       "aliases": ["CenterKey", "CentreKey", "RecentreKey"],
       "doc": "Retained so existing callers keep parsing. No mod polls it: the tracker app owns the centre."
-    },
-    {
-      "id": "AdsMode",
-      "section": "ADS",
-      "key": "AdsMode",
-      "type": "string",
-      "default": "paused",
-      "aliases": [],
-      "doc": "What head tracking does while the sights are up: paused, marker or tracked. Anything else resolves to paused, which is also the migration path for a mode renamed since an older release wrote the file. No aliases: titanfall-2 is the only mod shipping the key and it spells it AdsMode, and an alias is a one-way door because removing one breaks every file already on disk. A two-slot mod cannot use the shared loader's value directly - it re-reads the raw string with allowMarker false; see cameraunlock::ads::ParseAdsMode / AdsModes.Parse."
     },
     {
       "id": "LightFollowsHead",

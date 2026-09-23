@@ -14,7 +14,7 @@
 // Usage, once per rendered frame, from wherever the mod already knows the aim:
 //
 //     bool visible = false;
-//     if (aiming && mode == AdsMode::Marker && marker.Ensure()) visible = !offScreen;
+//     if (marker.Ensure()) visible = !offScreen;
 //     marker.Publish(visible, ndcX, ndcY);
 
 #ifdef CAMERAUNLOCK_AIM_MARKER_DX11_IMPLEMENTATION
