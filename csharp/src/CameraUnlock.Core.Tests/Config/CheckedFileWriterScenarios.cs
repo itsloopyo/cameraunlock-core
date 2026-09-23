@@ -3,6 +3,7 @@
 #endif
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -23,6 +24,9 @@ namespace CameraUnlock.Core.Tests.Config
         private const string FileName = "HeadTracking.ini";
         private const int HResultGenFailure = unchecked((int)0x8007001F);
         private const int HResultSharingViolation = unchecked((int)0x80070020);
+        private const int ErrorInvalidHandle = 6;
+        private const int ErrorFileExists = 80;
+        private const uint HandleFlagProtectFromClose = 2;
 
         private static readonly CheckedWriteStep[] StepsBeforeCommit =
         {
@@ -51,6 +55,8 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("target-appeared-after-the-recheck-is-not-overwritten", TargetAppearedAfterTheRecheckIsNotOverwritten),
             Scenario("every-step-failing-over-an-existing-target", EveryStepFailingOverAnExistingTarget),
             Scenario("every-step-failing-over-an-absent-target", EveryStepFailingOverAnAbsentTarget),
+            Scenario("the-write-step-hands-the-bytes-to-windows", TheWriteStepHandsTheBytesToWindows),
+            Scenario("a-failed-close-is-reported-not-hidden", AFailedCloseIsReportedNotHidden),
             Scenario("a-failed-removal-is-reported-not-hidden", AFailedRemovalIsReportedNotHidden),
             Scenario("a-conflict-whose-removal-fails-throws", AConflictWhoseRemovalFailsThrows),
             Scenario("an-unfinished-replacement-keeps-the-temporary", AnUnfinishedReplacementKeepsTheTemporary),
@@ -300,6 +306,60 @@ namespace CameraUnlock.Core.Tests.Config
             }
         }
 
+        // A write the disk refuses must fail as WriteTemporary, as it does in C++, so nothing may
+        // sit in a buffer until the flush step.
+        private static void TheWriteStepHandsTheBytesToWindows(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            File.WriteAllBytes(target, Utf8("a=1"));
+            long lengthAtFlush = -1;
+            Expect(CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=22"), (step, path) =>
+                {
+                    if (step == CheckedWriteStep.FlushTemporary) lengthAtFlush = new FileInfo(path).Length;
+                }) == CheckedWriteOutcome.Committed,
+                "commits");
+            Expect(lengthAtFlush == 4, "the temporary holds all 4 bytes before the flush step, got " + lengthAtFlush);
+            ExpectBytes(target, "a=22");
+            ExpectListing(dir, FileName);
+        }
+
+        // A handle protected from close makes CloseHandle return FALSE while the handle stays
+        // open, so the failure is real and no handle value can be recycled underneath the test.
+        private static void AFailedCloseIsReportedNotHidden(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            File.WriteAllBytes(target, Utf8("a=1"));
+            IntPtr kept = IntPtr.Zero;
+            CheckedWriteException e;
+            try
+            {
+                e = ExpectFailure(() => CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), null, handle =>
+                    {
+                        kept = handle.DangerousGetHandle();
+                        if (!SetHandleInformation(kept, HandleFlagProtectFromClose, HandleFlagProtectFromClose))
+                        {
+                            throw new Win32Exception(Marshal.GetLastWin32Error());
+                        }
+                    }), CheckedWriteStep.CloseTemporary);
+            }
+            finally
+            {
+                if (kept != IntPtr.Zero)
+                {
+                    if (!SetHandleInformation(kept, HandleFlagProtectFromClose, 0)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    if (!CloseHandle(kept)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+            }
+            Expect(e.InnerException is Win32Exception && ((Win32Exception)e.InnerException).NativeErrorCode == ErrorInvalidHandle,
+                "CloseHandle's own error is the inner exception, got " + e.InnerException);
+            Expect(e.TemporaryPath != null && !e.TemporaryRemoved && e.CleanupError is IOException,
+                "the temporary, still held open, could not be removed and says so, got " + e.CleanupError);
+            ExpectBytes(e.TemporaryPath, "a=2");
+            File.Delete(e.TemporaryPath);
+            ExpectBytes(target, "a=1");
+            ExpectListing(dir, FileName);
+        }
+
         private static void AFailedRemovalIsReportedNotHidden(string dir)
         {
             string target = Path.Combine(dir, FileName);
@@ -381,7 +441,8 @@ namespace CameraUnlock.Core.Tests.Config
                     taken = path;
                     File.WriteAllBytes(path, Utf8("not the writer's"));
                 }), CheckedWriteStep.CreateTemporary);
-            Expect(e.InnerException is IOException, "CreateNew refuses the existing name");
+            Expect(e.InnerException is Win32Exception && ((Win32Exception)e.InnerException).NativeErrorCode == ErrorFileExists,
+                "CREATE_NEW refuses the existing name, got " + e.InnerException);
             Expect(e.TemporaryPath == null && !e.TemporaryRemoved, "a file the writer did not create is not its temporary");
             ExpectBytes(taken, "not the writer's");
             ExpectBytes(target, "a=1");
@@ -579,5 +640,13 @@ namespace CameraUnlock.Core.Tests.Config
         {
             return new UTF8Encoding(false).GetBytes(text);
         }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
     }
 }

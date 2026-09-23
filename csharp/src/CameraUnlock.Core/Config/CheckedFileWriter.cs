@@ -16,6 +16,10 @@ namespace CameraUnlock.Core.Config
         private const int HResultAlreadyExists = unchecked((int)0x800700B7);
         private const int HResultUnableToMoveReplacement = unchecked((int)0x80070498);
         private const int HResultUnableToMoveReplacement2 = unchecked((int)0x80070499);
+        private const uint GenericWrite = 0x40000000;
+        private const uint CreateNew = 1;
+        private const uint FileAttributeNormal = 0x80;
+        private const int ErrorWriteFault = 29;
 
         /// <summary>
         /// Writes <paramref name="candidate"/> to <paramref name="path"/> if the file there
@@ -64,20 +68,34 @@ namespace CameraUnlock.Core.Config
         public static CheckedWriteOutcome Write(string path, byte[] expected, byte[] candidate)
 #endif
         {
-            return Write(path, expected, candidate, null);
+            return Write(path, expected, candidate, null, null);
         }
 
-        /// <summary>
-        /// <see cref="Write(string, byte[], byte[])"/> with a hook run before each step, given
-        /// the step and the path it acts on. A test throws from it to fail that step, or
-        /// changes the files to race it.
-        /// </summary>
 #if NULLABLE_ENABLED
         internal static CheckedWriteOutcome Write(
             string path, byte[]? expected, byte[] candidate, Action<CheckedWriteStep, string>? beforeStep)
 #else
         internal static CheckedWriteOutcome Write(
             string path, byte[] expected, byte[] candidate, Action<CheckedWriteStep, string> beforeStep)
+#endif
+        {
+            return Write(path, expected, candidate, beforeStep, null);
+        }
+
+        /// <summary>
+        /// <see cref="Write(string, byte[], byte[])"/> with a hook run before each step, given
+        /// the step and the path it acts on. A test throws from it to fail that step, or
+        /// changes the files to race it. <paramref name="beforeClose"/> is given the temporary's
+        /// handle just before it is closed, so a test can make the close itself fail.
+        /// </summary>
+#if NULLABLE_ENABLED
+        internal static CheckedWriteOutcome Write(
+            string path, byte[]? expected, byte[] candidate, Action<CheckedWriteStep, string>? beforeStep,
+            Action<SafeFileHandle>? beforeClose)
+#else
+        internal static CheckedWriteOutcome Write(
+            string path, byte[] expected, byte[] candidate, Action<CheckedWriteStep, string> beforeStep,
+            Action<SafeFileHandle> beforeClose)
 #endif
         {
             if (path == null) throw new ArgumentNullException(nameof(path));
@@ -97,7 +115,7 @@ namespace CameraUnlock.Core.Config
             }
             string temporary = Path.Combine(directory, name + "." + Guid.NewGuid().ToString("N") + ".tmp");
 
-            return new Attempt(target, temporary, beforeStep).Run(expected, candidate);
+            return new Attempt(target, temporary, beforeStep, beforeClose).Run(expected, candidate);
         }
 
         private struct FileIdentity
@@ -134,22 +152,29 @@ namespace CameraUnlock.Core.Config
             private readonly string _temporary;
 #if NULLABLE_ENABLED
             private readonly Action<CheckedWriteStep, string>? _beforeStep;
-            private FileStream? _stream;
+            private readonly Action<SafeFileHandle>? _beforeClose;
+            private SafeFileHandle? _handle;
 #else
             private readonly Action<CheckedWriteStep, string> _beforeStep;
-            private FileStream _stream;
+            private readonly Action<SafeFileHandle> _beforeClose;
+            private SafeFileHandle _handle;
 #endif
             private bool _created;
 
 #if NULLABLE_ENABLED
-            public Attempt(string target, string temporary, Action<CheckedWriteStep, string>? beforeStep)
+            public Attempt(
+                string target, string temporary, Action<CheckedWriteStep, string>? beforeStep,
+                Action<SafeFileHandle>? beforeClose)
 #else
-            public Attempt(string target, string temporary, Action<CheckedWriteStep, string> beforeStep)
+            public Attempt(
+                string target, string temporary, Action<CheckedWriteStep, string> beforeStep,
+                Action<SafeFileHandle> beforeClose)
 #endif
             {
                 _target = target;
                 _temporary = temporary;
                 _beforeStep = beforeStep;
+                _beforeClose = beforeClose;
             }
 
 #if NULLABLE_ENABLED
@@ -176,23 +201,25 @@ namespace CameraUnlock.Core.Config
                 try
                 {
                     Before(step, _temporary);
-                    FileStream stream = new FileStream(_temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                    _stream = stream;
+                    SafeFileHandle handle = CreateFileW(
+                        _temporary, GenericWrite, 0, IntPtr.Zero, CreateNew, FileAttributeNormal, IntPtr.Zero);
+                    if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    _handle = handle;
                     _created = true;
 
                     step = CheckedWriteStep.WriteTemporary;
                     Before(step, _temporary);
-                    stream.Write(candidate, 0, candidate.Length);
+                    WriteAll(handle, candidate);
 
                     step = CheckedWriteStep.FlushTemporary;
                     Before(step, _temporary);
-                    stream.Flush();
-                    if (!FlushFileBuffers(stream.SafeFileHandle)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    if (!FlushFileBuffers(handle)) throw new Win32Exception(Marshal.GetLastWin32Error());
 
                     step = CheckedWriteStep.CloseTemporary;
                     Before(step, _temporary);
-                    _stream = null;
-                    stream.Dispose();
+                    if (_beforeClose != null) _beforeClose(handle);
+                    _handle = null;
+                    Close(handle);
 
                     step = CheckedWriteStep.RecheckTarget;
                     Snapshot second = Read(step);
@@ -247,6 +274,40 @@ namespace CameraUnlock.Core.Config
             private void Before(CheckedWriteStep step, string path)
             {
                 if (_beforeStep != null) _beforeStep(step, path);
+            }
+
+            private static void WriteAll(SafeFileHandle handle, byte[] bytes)
+            {
+                GCHandle pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+                try
+                {
+                    int offset = 0;
+                    while (offset < bytes.Length)
+                    {
+                        int chunk = System.Math.Min(bytes.Length - offset, 1 << 20);
+                        uint written;
+                        if (!WriteFile(handle, Marshal.UnsafeAddrOfPinnedArrayElement(bytes, offset), (uint)chunk, out written, IntPtr.Zero))
+                        {
+                            throw new Win32Exception(Marshal.GetLastWin32Error());
+                        }
+                        // A synchronous WriteFile to a file either writes everything or fails; a zero
+                        // count here would otherwise loop forever.
+                        if (written == 0) throw new Win32Exception(ErrorWriteFault);
+                        offset += (int)written;
+                    }
+                }
+                finally
+                {
+                    pin.Free();
+                }
+            }
+
+            // SafeHandle drops CloseHandle's result, so the handle is taken out of it and closed here.
+            private static void Close(SafeFileHandle handle)
+            {
+                IntPtr raw = handle.DangerousGetHandle();
+                handle.SetHandleAsInvalid();
+                if (!CloseHandle(raw)) throw new Win32Exception(Marshal.GetLastWin32Error());
             }
 
 #if NULLABLE_ENABLED
@@ -318,13 +379,13 @@ namespace CameraUnlock.Core.Config
                 Exception closeError = null;
                 Exception removeError = null;
 #endif
-                if (_stream != null)
+                if (_handle != null)
                 {
-                    FileStream stream = _stream;
-                    _stream = null;
+                    SafeFileHandle handle = _handle;
+                    _handle = null;
                     try
                     {
-                        stream.Dispose();
+                        Close(handle);
                     }
                     catch (Exception e)
                     {
@@ -405,5 +466,18 @@ namespace CameraUnlock.Core.Config
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool FlushFileBuffers(SafeFileHandle file);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(
+            string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool WriteFile(
+            SafeFileHandle file, IntPtr buffer, uint count, out uint written, IntPtr overlapped);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
     }
 }
