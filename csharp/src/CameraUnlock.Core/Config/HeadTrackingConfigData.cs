@@ -146,6 +146,32 @@ namespace CameraUnlock.Core.Config
         public HeadFollowLightSettings Light { get; set; } = new HeadFollowLightSettings();
 
         /// <summary>
+        /// Whether the mod sweeps the level between the clean eye and the lean target and
+        /// cuts the lean to what the room leaves. Off by default: a mod turns it on once its
+        /// trace has been confirmed against real geometry in game.
+        /// </summary>
+        public bool CollisionEnabled { get; set; } = false;
+
+        /// <summary>
+        /// How far off a blocking surface the eye is held, in the engine's own world units
+        /// (0.10 in a metres engine, 10 in a centimetres one). Must exceed the camera's near
+        /// clip distance or the wall is culled before the eye reaches it.
+        /// </summary>
+        public float CollisionMargin { get; set; } = 0.10f;
+
+        /// <summary>
+        /// The trace channel the sweep runs on, for engines whose query takes one. Passed
+        /// through unchecked because its meaning is the engine's.
+        /// </summary>
+        public int CollisionChannel { get; set; } = 0;
+
+        /// <summary>
+        /// How quickly the lean reopens once an obstruction clears, 0-1 like every other
+        /// smoothing value. Tightening is never smoothed.
+        /// </summary>
+        public float CollisionReleaseSmoothing { get; set; } = 0.9f;
+
+        /// <summary>
         /// Creates a new config with default values.
         /// </summary>
         public HeadTrackingConfigData()
@@ -484,6 +510,51 @@ namespace CameraUnlock.Core.Config
                                     kvp.Key, value,
                                     HeadFollowLightSettings.MaxMultiplier.ToString(CultureInfo.InvariantCulture),
                                     Light.Multiplier.ToString(CultureInfo.InvariantCulture)));
+                            }
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.CollisionEnabled:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            CollisionEnabled = boolVal;
+                        break;
+
+                    // No upper bound: the unit is the engine's, so a ceiling that suits
+                    // metres would refuse an ordinary centimetre margin. Negative would
+                    // hold the eye past the surface instead of short of it.
+                    case ConfigKeySchema.Keys.CollisionMargin:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
+                            if (floatVal >= 0f)
+                            {
+                                CollisionMargin = floatVal;
+                            }
+                            else
+                            {
+                                log?.Invoke(string.Format(
+                                    "Config key '{0}' has a negative value '{1}' - using {2}",
+                                    kvp.Key, value, CollisionMargin.ToString(CultureInfo.InvariantCulture)));
+                            }
+                        }
+                        break;
+
+                    case ConfigKeySchema.Keys.CollisionChannel:
+                        if (ConfigParsingUtils.TryParseInt(value, out intVal))
+                            CollisionChannel = intVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.CollisionReleaseSmoothing:
+                        if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
+                        {
+                            if (floatVal >= 0f && floatVal <= 1f)
+                            {
+                                CollisionReleaseSmoothing = floatVal;
+                            }
+                            else
+                            {
+                                log?.Invoke(string.Format(
+                                    "Config key '{0}' has an out-of-range value '{1}' (expected 0-1) - using {2}",
+                                    kvp.Key, value, CollisionReleaseSmoothing.ToString(CultureInfo.InvariantCulture)));
                             }
                         }
                         break;

@@ -243,6 +243,31 @@ void TestRefusedVerticalLimitIsNotMirrored() {
           "a later refused entry does not undo an accepted LimitY or its mirror");
 }
 
+// amnesia-rebirth's spelling, under its own [Camera] section. Matching is
+// section-less, so a centimetre margin from an Unreal mod has to pass as well.
+void TestCollisionValues() {
+    const cameraunlock::HeadTrackingConfig defaults;
+    const cameraunlock::camera::LeanClampSettings clamp_defaults;
+    Check(!defaults.collision_enabled && defaults.collision_channel == 0 &&
+              NearEq(defaults.lean_clamp.skin, clamp_defaults.skin) &&
+              NearEq(defaults.lean_clamp.release_smoothing, clamp_defaults.release_smoothing),
+          "collision defaults are LeanClampSettings' own");
+
+    auto config = Apply({{"CollisionEnabled", "true"},
+                         {"CollisionRadius", "10"},
+                         {"TraceChannel", "3"},
+                         {"CollisionReleaseSmoothing", "0.5"}});
+    Check(config.collision_enabled, "CollisionEnabled");
+    Check(NearEq(config.lean_clamp.skin, 10.0f), "CollisionRadius alias, centimetre margin accepted");
+    Check(config.collision_channel == 3, "TraceChannel alias");
+    Check(NearEq(config.lean_clamp.release_smoothing, 0.5f), "CollisionReleaseSmoothing");
+
+    auto refused = Apply({{"CollisionMargin", "-0.1"}, {"CollisionReleaseSmoothing", "1.5"}});
+    Check(NearEq(refused.lean_clamp.skin, clamp_defaults.skin), "a negative margin is refused");
+    Check(NearEq(refused.lean_clamp.release_smoothing, clamp_defaults.release_smoothing),
+          "a release smoothing past 1 is refused");
+}
+
 void TestHotkeys() {
     auto config = Apply({{"ToggleKey", "F10"},
                          {"TogglePositionKey", "F11"},
@@ -291,6 +316,7 @@ int RunConfigSchemaTests() {
     TestRejectedValues();
     TestOutOfRangeNumericValues();
     TestRefusedVerticalLimitIsNotMirrored();
+    TestCollisionValues();
     TestHotkeys();
     TestIniParsing();
     return g_failures;

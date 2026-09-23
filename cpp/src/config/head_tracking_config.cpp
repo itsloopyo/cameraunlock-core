@@ -406,6 +406,27 @@ void HeadTrackingConfig::ApplyValues(
                         ") - using " + std::to_string(light.multiplier));
                 }
             }
+        } else if (canonical == config_keys::kCollisionEnabled) {
+            if (TryParseConfigBool(value, bool_val)) collision_enabled = bool_val;
+        } else if (canonical == config_keys::kCollisionMargin) {
+            // No upper bound: the unit is the engine's, so a ceiling that suits metres
+            // would refuse an ordinary centimetre margin. Negative would hold the eye
+            // past the surface instead of short of it.
+            if (TryParseConfigFloat(value, float_val)) {
+                if (float_val >= 0.0f) {
+                    lean_clamp.skin = float_val;
+                } else if (log) {
+                    log("Config key '" + entry.first + "' has a negative value '" + value +
+                        "' - using " + std::to_string(lean_clamp.skin));
+                }
+            }
+        } else if (canonical == config_keys::kCollisionChannel) {
+            if (TryParseConfigInt(value, int_val)) collision_channel = int_val;
+        } else if (canonical == config_keys::kCollisionReleaseSmoothing) {
+            if (TryParseConfigFloat(value, float_val)) {
+                AcceptInRange(entry.first, value, float_val, 0.0f, 1.0f, log,
+                              lean_clamp.release_smoothing);
+            }
         } else if (canonical == config_keys::kRecenterKey) {
             recenter_key_name = value;
         } else if (canonical == config_keys::kToggleKey) {

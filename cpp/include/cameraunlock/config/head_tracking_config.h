@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "cameraunlock/ads/ads_mode.h"
+#include "cameraunlock/camera/lean_clamp.h"
 #include "cameraunlock/config/config_key_schema.g.h"
 #include "cameraunlock/data/position_settings.h"
 #include "cameraunlock/effects/head_follow_light.h"
@@ -70,6 +71,15 @@ struct HeadTrackingConfig {
     /// A carried light that follows the head rather than the aim. Inert in a mod
     /// for a game with no carried light; see effects/head_follow_light.h.
     effects::HeadFollowLightSettings light;
+
+    /// The lean collision clamp. CollisionMargin lands in lean_clamp.skin and
+    /// CollisionReleaseSmoothing in lean_clamp.release_smoothing, so a mod hands
+    /// lean_clamp straight to LeanClamp::SetSettings. Off by default: a mod turns
+    /// it on once its trace has been confirmed against real geometry in game.
+    bool collision_enabled = false;
+    camera::LeanClampSettings lean_clamp;
+    /// Passed through unchecked because its meaning is the engine's.
+    int collision_channel = 0;
 
     std::string recenter_key_name = "Home";
     std::string toggle_key_name = "End";

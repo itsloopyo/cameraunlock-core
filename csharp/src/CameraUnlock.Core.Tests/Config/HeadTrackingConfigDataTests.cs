@@ -419,5 +419,39 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Contains("LimitY", message);
             Assert.Contains("LimitYDown", message);
         }
+
+        // amnesia-rebirth's spelling, under its own [Camera] section. Matching is
+        // section-less, so a centimetre margin from an Unreal mod has to pass as well.
+        [Fact]
+        public void CollisionKeys_LandOnTheirFields()
+        {
+            var config = Apply(new Dictionary<string, string>
+            {
+                { "CollisionEnabled", "true" },
+                { "CollisionRadius", "10" },
+                { "TraceChannel", "3" },
+                { "CollisionReleaseSmoothing", "0.5" },
+            }, out List<string> log);
+
+            Assert.Empty(log);
+            Assert.True(config.CollisionEnabled);
+            Assert.Equal(10f, config.CollisionMargin);
+            Assert.Equal(3, config.CollisionChannel);
+            Assert.Equal(0.5f, config.CollisionReleaseSmoothing);
+        }
+
+        [Fact]
+        public void CollisionKeys_OutOfRangeIsRefusedAndReported()
+        {
+            var config = Apply(new Dictionary<string, string>
+            {
+                { "CollisionMargin", "-0.1" },
+                { "CollisionReleaseSmoothing", "1.5" },
+            }, out List<string> log);
+
+            Assert.Equal(0.10f, config.CollisionMargin);
+            Assert.Equal(0.9f, config.CollisionReleaseSmoothing);
+            Assert.Equal(2, log.Count);
+        }
     }
 }
