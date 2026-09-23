@@ -9,6 +9,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the `RotationEnabled` config concept, and a C++ gate on schema defaults
+
+`data/config-schema.json` gains `RotationEnabled`: canonical `[General]
+RotationEnabled`, bool, default `true`, with no aliases. A bare `Enabled` still
+resolves to nothing. Both config halves parse it the way they parse
+`PositionEnabled`, into `HeadTrackingConfigData.RotationEnabled` and
+`HeadTrackingConfig::rotation_enabled`, and the generated tables gain
+`ConfigKeySchema.Keys.RotationEnabled` and `config_keys::kRotationEnabled`. Core
+only parses the key. Nothing in core reads either field yet, so what it does is
+up to the mod.
+
+A sweep of the sibling repos' INI, cfg and JSON files and the decoded launcher
+manifest seeds found no file naming `RotationEnabled`, so no config already on
+disk changes meaning.
+
+`config_key_schema.g.h` now also carries each concept's declared default as
+`cameraunlock::kConfigConceptDefaults` (with `ConfigConceptDefault`,
+`ConfigValueType` and `kConfigConceptDefaultCount`). `config_schema_tests.cpp`
+holds a default-constructed `HeadTrackingConfig` to that table, which is the C++
+twin of `ConfigSchemaDefaultsTests`. A concept with no C++ field bound in the
+test, or a C++ initialiser that disagrees with the schema, now fails
+`pixi run test-cpp`.
+
+The `WorldSpaceYaw` entry in `default_conflicts` is rewritten to match the
+fleet today: dying-light-2 and dishonored-2 now default to world-locked yaw,
+quake-ii-rtx and sleeping-dogs default true, and sonic-racing-crossworlds,
+pixeljunk-monsters-2 and battlefield-bad-company-2 still start camera-local.
+
 ### Removed - BREAKING - the aim-down-sights mode cycle
 
 Aiming down sights now has one behaviour across the fleet: head tracking carries
