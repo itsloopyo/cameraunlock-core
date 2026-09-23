@@ -56,6 +56,26 @@ void TestEveryModeIsDeclaredOnce() {
     Check(kTrackingModeCount == 3, "preference_modes declares no mode TrackingMode lacks");
 }
 
+// Nothing in core reads the names, but a consumer keying on the file sees them, so a
+// rename in the JSON alone has to fail here.
+const char* PinnedName(TrackingMode mode) {
+    switch (mode) {
+        case TrackingMode::RotationAndPosition: return "both";
+        case TrackingMode::RotationOnly: return "rotation";
+        case TrackingMode::PositionOnly: return "position";
+    }
+    return "";
+}
+
+void TestNamesArePinned() {
+    for (size_t i = 0; i < kTrackingModeCount; ++i) {
+        const auto& declared = kTrackingModes[i];
+        Check(std::string(declared.name) == PinnedName(declared.mode),
+              "preference_modes names " + Describe(declared.mode) + " '" + declared.name +
+                  "', the test pins it as '" + PinnedName(declared.mode) + "'");
+    }
+}
+
 void TestEncode() {
     for (size_t i = 0; i < kTrackingModeCount; ++i) {
         const auto& expected = kTrackingModes[i];
@@ -139,6 +159,7 @@ void TestParsedBothOffStaysOff() {
 int RunTrackingModeTests() {
     std::cout << "\nTracking Mode Tests\n";
     TestEveryModeIsDeclaredOnce();
+    TestNamesArePinned();
     TestEncode();
     TestDecodeEveryPair();
     TestBothOffIsUnrepresentable();

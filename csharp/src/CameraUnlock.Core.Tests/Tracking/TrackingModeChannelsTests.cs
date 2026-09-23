@@ -27,13 +27,16 @@ namespace CameraUnlock.Core.Tests.Tracking
             public bool PositionEnabled;
         }
 
-        // Keyed by the entry's `csharp` symbol, the way PipelineConstantsTests binds.
-        private static readonly Dictionary<string, TrackingMode> Bindings = new Dictionary<string, TrackingMode>
-        {
-            { "TrackingMode.RotationAndPosition", TrackingMode.RotationAndPosition },
-            { "TrackingMode.RotationOnly", TrackingMode.RotationOnly },
-            { "TrackingMode.PositionOnly", TrackingMode.PositionOnly },
-        };
+        // Keyed by the entry's `csharp` symbol, the way PipelineConstantsTests binds. The name
+        // is pinned here because nothing in core reads it, yet it is what a consumer keying on
+        // the file sees, so a rename in the JSON alone has to fail.
+        private static readonly Dictionary<string, (TrackingMode Mode, string Name)> Bindings =
+            new Dictionary<string, (TrackingMode Mode, string Name)>
+            {
+                { "TrackingMode.RotationAndPosition", (TrackingMode.RotationAndPosition, "both") },
+                { "TrackingMode.RotationOnly", (TrackingMode.RotationOnly, "rotation") },
+                { "TrackingMode.PositionOnly", (TrackingMode.PositionOnly, "position") },
+            };
 
         private static string RepoRoot([CallerFilePath] string sourceFile = "")
         {
@@ -68,10 +71,13 @@ namespace CameraUnlock.Core.Tests.Tracking
                     Assert.True(Bindings.ContainsKey(symbol),
                         "preference_modes.tracking_mode '" + name + "' names the C# symbol '" + symbol +
                         "', but TrackingModeChannelsTests binds nothing to it");
+                    Assert.True(Bindings[symbol].Name == name,
+                        "preference_modes.tracking_mode names " + symbol + " '" + name +
+                        "', TrackingModeChannelsTests pins it as '" + Bindings[symbol].Name + "'");
                     modes.Add(new DeclaredMode
                     {
                         Name = name,
-                        Mode = Bindings[symbol],
+                        Mode = Bindings[symbol].Mode,
                         RotationEnabled = entry.GetProperty("RotationEnabled").GetBoolean(),
                         PositionEnabled = entry.GetProperty("PositionEnabled").GetBoolean(),
                     });
