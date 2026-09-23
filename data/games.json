@@ -1740,7 +1740,7 @@
       "data_folder": "Pathologic_Data",
       "loader": "BepInEx5",
       "delivery_mode": "manifest",
-      "repo": "itsloopyo/pathalogic-2-headtracking",
+      "repo": "itsloopyo/pathologic-2-headtracking",
       "engine": "Unity",
       "catalog_status": "prerelease"
     },
