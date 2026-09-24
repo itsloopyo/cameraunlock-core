@@ -108,13 +108,15 @@ validate-notices = "node scripts/validate-notices.mjs"
 conformance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/conformance.ps1"
 
 # Render the README sections core owns (the OpenTrack setup block, including the
-# Centring paragraph, and Community & Support) and report where a repo's copy
-# has drifted. Everything else in a README is hand-written on purpose; see
-# scripts/templates/readme.md for which section is whose and why.
+# Centring paragraph, and Community & Support) and, in a repo converted to the
+# canonical config format, the config block inside Configuration, and report
+# where a repo's copy has drifted. Everything else in a README is hand-written on
+# purpose; see scripts/templates/readme.md for which section is whose and why.
 #   pixi run readme                        # check this repo
 #   pixi run readme --all
 #   pixi run readme --all --write
 #   pixi run readme --print opentrack
+#   pixi run readme --print config         # this repo's config block, for NEXUS_MODS.md
 readme = "node scripts/generate-readme.mjs"
 
 # Push core's templates back out across the fleet: install/uninstall wrapper

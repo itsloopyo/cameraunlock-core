@@ -9,6 +9,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the README config block, rendered from the committed config
+
+A repo converted to the canonical config format documents its config in a block that
+`scripts/generate-readme.mjs` renders inside the hand-written Configuration section, between a
+`<!-- cameraunlock:config -->` line and a `<!-- /cameraunlock:config -->` line
+(`scripts/templates/readme.md`). The block is built from `data/config-format.json` and the committed
+file only, so a converted repo has one and an unconverted repo has none.
+
+- **What it says**: where the file is installed, one path or the list of store layouts, and that
+  the mod creates it when it finds none. For a repo in `legacy`: the one-time conversion at first
+  launch, the original kept as `<file>.pre-canonical` and `<file>.pre-canonical.last` as the file
+  before the most recent conversion, comments and keys the mod never read not carried over, an
+  older version of the mod reading the new layout with its defaults for keys that moved, and
+  copying `.pre-canonical` back restoring the old file. For a BepInEx repo (one whose entry has a
+  `legacy_source`): that ConfigurationManager does not list the settings, and in a `legacy` repo that
+  the settings now live in `BepInEx\config\<GUID>.ini`, the `.cfg` is left as it was and an older
+  version still reads it, and a reset deletes both files. Then the committed file itself in an
+  `ini` code fence, CRLF turned to LF.
+- **`pixi run readme`** checks the block with the other generated sections, and `--write` (which now
+  applies `config` by default beside `opentrack` and `community`) inserts it at the end of
+  Configuration, adds the section after Controls when there is none, keeps it current, and removes
+  one from a repo that is not converted. A converted repo whose block cannot be rendered (a config
+  file unstamped or unrecorded, or markers that do not pair) is reported and exits 1 in both modes.
+  Unconverted repos without a block see no change: `pixi run readme --all` prints the same output as
+  before.
+- **`--print config [repo]`** prints one repo's block for NEXUS_MODS.md, which is untracked and so is
+  updated by hand from it.
+- **`--json --roots-file <file>`** prints each repo's result per section for conformance.
+- **Conformance `readme`** FAILs a converted repo whose README has no config block or one that
+  differs from the rendered block, an unconverted repo whose README has one, and a block that cannot
+  be rendered. It runs `generate-readme.mjs --json --sections config` once for every repo.
+- `scripts/check-canonical-config.mjs --json` now carries each file's `no_installed_reason`.
+
 ### Added - the canonical config lint and three config conformance checks
 
 Conformance now holds each mod repo to the canonical config format. `scripts/conformance.ps1`

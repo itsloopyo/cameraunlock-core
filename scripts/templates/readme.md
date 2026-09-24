@@ -1,6 +1,7 @@
 <!--
 The fleet README skeleton. scripts/generate-readme.mjs renders the two sections
-marked "generated" and leaves every other one to the repo.
+marked "generated", and the config block inside Configuration, and leaves
+everything else to the repo.
 
 A generated section is owned by core. Editing one in a mod repo is drift that
 `node scripts/generate-readme.mjs --all` reports and `--write` reverts, so a
@@ -12,8 +13,9 @@ whoever verified it. That is the whole reason the generated set is two sections
 and not twelve: an OpenTrack setup paragraph is the same everywhere, and an
 Installation section is not.
 
-The generator reads one thing per repo: a shipped HeadTracking.ini, for the UDP
-port the mod actually listens on. It deliberately does not read lopari's
+The generator reads a shipped HeadTracking.ini, for the UDP port the mod
+actually listens on, and for the config block, data/config-format.json and the
+repo's committed canonical config. It deliberately does not read lopari's
 catalog. That was tried for the Controls table, and 46 of the catalog's 54
 entries advertise a Recenter hotkey on Home / Ctrl+Shift+T that no mod in the
 fleet binds.
@@ -41,7 +43,32 @@ alongside the UDP one); --write then leaves the whole section alone and says so.
 Read the bindings out of the repo's own source. They live in C#, C++, Rust, Lua
 and Java across the fleet, and no data file records them correctly.
 
-## Configuration                                   <!-- hand-written -->
+## Configuration                                   <!-- hand-written, with the GENERATED config block -->
+
+Prose about the game's own settings stays hand-written. Once the repo's
+committed config carries the [CameraUnlock] stamp, the section also holds the
+config block, and a README without one fails conformance's `readme` check:
+
+<!-- cameraunlock:config -->
+(rendered, never edited by hand)
+<!-- /cameraunlock:config -->
+
+Each marker is a line of its own, with nothing else on it. The block says where
+the file is installed; for a repo that published a pre-canonical build, the
+one-time conversion, the `<file>.pre-canonical` and `<file>.pre-canonical.last`
+copies, what is not carried over, and what an older version of the mod reads;
+for a BepInEx mod, that ConfigurationManager does not list the settings, and
+where it published a pre-canonical build, the `.ini` beside the untouched
+`.cfg` in place of the copies, and how to reset; then the committed file itself
+in an ini code fence. It replaces any hand-written key
+listing, since the file's own comments describe every key.
+
+`pixi run readme --write --sections config` inserts the block at the end of
+Configuration (or adds the section when there is none) and keeps it current;
+conformance fails a converted repo whose block differs, and an unconverted repo
+that has one. NEXUS_MODS.md is untracked, so nothing checks it: paste the output
+of `node cameraunlock-core/scripts/generate-readme.mjs --print config` into its
+configuration section by hand, in the same change and again at every release.
 
 ## Notes                                           <!-- hand-written, optional -->
 

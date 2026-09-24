@@ -298,6 +298,7 @@ function fileState(root, repo, file) {
     installed: file.installed,
     legacy_source: file.legacy_source,
     dialect: file.dialect,
+    no_installed_reason: file.no_installed_reason ?? null,
     state: "unrecorded",
     problems: [],
   };

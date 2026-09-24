@@ -26,20 +26,32 @@
 //   node scripts/generate-readme.mjs --all --write
 //   node scripts/generate-readme.mjs valheim subnautica
 //   node scripts/generate-readme.mjs --all --sections opentrack
-//   node scripts/generate-readme.mjs --all --print opentrack
+//   node scripts/generate-readme.mjs --print opentrack
+//   node scripts/generate-readme.mjs --print config valheim   # the block for NEXUS_MODS.md
 //   node scripts/generate-readme.mjs --all --write --force
+//   node scripts/generate-readme.mjs --json --sections config --roots-file <file>
 //
 // --write leaves alone any section that has grown a subsection the generator
 // does not render, because that subsection is something a repo verified and
 // nothing else records. --force overwrites it anyway.
 //
-// Exit 0 when every checked section matches, 1 when any differs. --write
-// rewrites the sections in place and always exits 0 on success.
+// The config block is the one piece inside a hand-written section: it sits
+// between CONFIG_START and CONFIG_END in Configuration and is rendered from
+// data/config-format.json and the repo's committed canonical config, so a repo
+// has one once it is converted and none before.
+//
+// Exit 0 when every checked section matches, 1 when any differs or a config
+// block cannot be rendered. --write rewrites the sections in place and exits 0
+// unless a config block could not be rendered. --json prints each repo's result
+// per section for scripts/conformance.ps1 and always exits 0; --roots-file takes
+// the repo paths one per line.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+
+import { repoState } from './check-canonical-config.mjs';
 
 const CORE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const REPOS_ROOT = path.dirname(CORE_ROOT);
@@ -142,18 +154,183 @@ const SECTIONS = {
   community: { heading: 'Community & Support', match: /^community (&|and) support$/i, render: communitySection },
 };
 
+// ---------------------------------------------------------------------------
+// The config block
+//
+// Every sentence is a fact data/config-format.json records or the canonical
+// migration guarantees for every converted mod (design 3.1, 3.3, 4.6, 4.8):
+// the installed path, the one-time conversion of a legacy file, the copies it
+// keeps, what an older build reads, and for BepInEx the .ini beside the .cfg.
+// Nothing here knows which game it is describing.
+// ---------------------------------------------------------------------------
+
+const CONFIG_ID = 'config';
+const CONFIG_START = '<!-- cameraunlock:config -->';
+const CONFIG_END = '<!-- /cameraunlock:config -->';
+const CONFIG_HEADING = 'Configuration';
+const CONFIG_HEADING_RE = /^(\d+\.\s+)?configuration$/i;
+const CONFIG_INSERT_AFTER = ['Controls', OPENTRACK_HEADING, 'Installation'];
+
+const leaf = (p) => p.split(/[\\/]/).pop();
+
+const code = (p) => `\`${p}\``;
+const EDIT = 'Edit it with any text editor.';
+
+// One committed file can stand for several config entries (mass-effect keeps one per game),
+// and each entry lists one installed path per store layout.
+function locationParagraph(entries, name) {
+  if (entries.length === 1) {
+    const [{ installed, no_installed_reason: reason }] = entries;
+    if (installed.length === 0) {
+      return `The mod reads its settings from ${code(name)}. ${reason} It creates the file when it starts and finds none. ${EDIT}`;
+    }
+    if (installed.length === 1) {
+      return `The mod reads its settings from ${code(installed[0])} in the game folder, and creates the file when it starts and finds none. ${EDIT}`;
+    }
+    return [
+      `The mod reads its settings from ${code(name)} in the game folder, at one of these paths depending on the store the game came from:`,
+      '',
+      ...installed.map((p) => `- ${code(p)}`),
+      '',
+      `It creates the file when it starts and finds none. ${EDIT}`,
+    ].join('\n');
+  }
+  if (entries.some((e) => e.installed.length === 0)) {
+    throw new Error(`data/config-format.json gives ${name} several entries, one of them with no installed path; the config block has no wording for that`);
+  }
+  const alternatives = entries.some((e) => e.installed.length > 1);
+  return [
+    `The mod keeps a separate ${code(name)} at each of these paths in the game folder:`,
+    '',
+    ...entries.map((e) => `- ${e.installed.map(code).join(' or ')}`),
+    '',
+    `${alternatives ? 'Where a line names two paths, which one is used depends on the store the game came from. ' : ''}The mod creates each file when it starts and finds none. Edit them with any text editor.`,
+  ].join('\n');
+}
+
+function legacyParagraphs(name) {
+  return [
+    `Earlier versions of the mod used an older layout for this file. The first time this version starts, it converts the file once into the layout below and keeps the file as it was beside it as ${code(`${name}.pre-canonical`)}. Comments, and keys the mod never read, are not carried over. ${code(`${name}.pre-canonical.last`)}, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.`,
+    `An older version of the mod reads the new layout with its own defaults for any key that moved. Copying ${code(`${name}.pre-canonical`)} back over ${code(name)} restores the old file.`,
+  ];
+}
+
+function bepinexParagraphs(cfg, legacy) {
+  if (!legacy) return ["BepInEx's ConfigurationManager does not list these settings."];
+  return [
+    `Earlier versions of the mod kept their settings in ${code(cfg)}. The first time this version starts, it reads your settings from the \`.cfg\` and writes them into the \`.ini\`. Comments, and keys the mod never read, are not carried over. The \`.cfg\` is left as it was, and an older version of the mod still reads it.`,
+    "BepInEx's ConfigurationManager no longer lists these settings.",
+    'Deleting only the `.ini` makes the next start convert the `.cfg` again. To go back to the defaults, delete both files.',
+  ];
+}
+
+function fencedIni(root, committed) {
+  const text = fs.readFileSync(path.join(root, ...committed.split('/')), 'utf8').replace(/\r\n/g, '\n');
+  if (/^```/m.test(text)) throw new Error(`${committed} has a line starting with \`\`\`, which would end the README's code fence`);
+  return ['```ini', text.endsWith('\n') ? text.slice(0, -1) : text, '```'].join('\n');
+}
+
+// The block between the markers, or null for a repo that is not converted. A converted repo
+// whose config cannot be rendered yet (a file unstamped or unrecorded) throws; config-format in
+// conformance reports the same state.
+function configBlock(state) {
+  if (!state.converted) return null;
+  if (state.unrecorded_stamped.length > 0) {
+    throw new Error(`${state.unrecorded_stamped.join(', ')} carries the [CameraUnlock] stamp, and data/config-format.json records no committed file for it`);
+  }
+  const unready = state.files.filter((f) => f.state !== 'stamped');
+  if (unready.length > 0) {
+    throw new Error(`converted, and ${unready.map((f) => f.committed ?? f.installed[0]).join(', ')} is ${unready[0].state}; one conversion switches every config file of a repo`);
+  }
+
+  const legacy = state.listing === 'legacy';
+  const groups = new Map();
+  for (const f of state.files) {
+    if (!groups.has(f.committed)) groups.set(f.committed, []);
+    groups.get(f.committed).push(f);
+  }
+  const parts = [];
+  for (const [committed, entries] of groups) {
+    const names = [...new Set(entries.flatMap((e) => e.installed).map(leaf))];
+    if (names.length > 1) {
+      throw new Error(`data/config-format.json installs ${committed} under ${names.length} file names (${names.join(', ')}); the config block names one`);
+    }
+    const name = names[0] ?? leaf(committed);
+    const cfg = entries[0].legacy_source;
+    if (entries.length > 1 && (legacy || cfg !== null)) {
+      throw new Error(`data/config-format.json gives ${committed} several entries in a legacy or BepInEx repo; the config block has no wording for that`);
+    }
+    parts.push(locationParagraph(entries, name));
+    if (cfg !== null) parts.push(...bepinexParagraphs(cfg, legacy));
+    else if (legacy) parts.push(...legacyParagraphs(name));
+    parts.push('With every setting at its default, the file reads:');
+    parts.push(fencedIni(state.root, committed));
+  }
+  return parts.join('\n\n');
+}
+
+function findConfigMarkers(doc) {
+  const found = [];
+  doc.blocks.forEach((b, blockIndex) => {
+    b.body.forEach((line, lineIndex) => {
+      if (line === CONFIG_START || line === CONFIG_END) found.push({ blockIndex, lineIndex, line });
+    });
+  });
+  return found;
+}
+
+// 'unchanged', 'rewritten', 'inserted' or 'removed'; throws on markers it cannot pair.
+function applyConfigBlock(doc, rendered) {
+  const markers = findConfigMarkers(doc);
+  if (markers.length > 0) {
+    const [start, end] = markers;
+    if (markers.length !== 2 || start.line !== CONFIG_START || end.line !== CONFIG_END || start.blockIndex !== end.blockIndex) {
+      throw new Error(`README.md needs exactly one ${CONFIG_START} line followed by one ${CONFIG_END} line in the same section`);
+    }
+    const body = doc.blocks[start.blockIndex].body;
+    if (rendered === null) {
+      body.splice(start.lineIndex, end.lineIndex - start.lineIndex + 1);
+      return 'removed';
+    }
+    const current = body.slice(start.lineIndex + 1, end.lineIndex).join('\n');
+    if (current === rendered) return 'unchanged';
+    body.splice(start.lineIndex + 1, end.lineIndex - start.lineIndex - 1, ...rendered.split('\n'));
+    return 'rewritten';
+  }
+  if (rendered === null) return 'unchanged';
+
+  const lines = [CONFIG_START, ...rendered.split('\n'), CONFIG_END];
+  const at = doc.blocks.findIndex((b) => CONFIG_HEADING_RE.test(b.heading));
+  if (at >= 0) {
+    const body = doc.blocks[at].body;
+    while (body.length > 0 && body[body.length - 1].trim() === '') body.pop();
+    body.push('', ...lines);
+    return 'inserted';
+  }
+  let insertAt = doc.blocks.length;
+  for (const heading of CONFIG_INSERT_AFTER) {
+    const i = doc.blocks.findIndex((b) => b.heading.toLowerCase() === heading.toLowerCase());
+    if (i >= 0) { insertAt = i + 1; break; }
+  }
+  doc.blocks.splice(insertAt, 0, { heading: CONFIG_HEADING, body: lines });
+  return 'inserted';
+}
+
 // License is deliberately absent. Several repos extend the MIT line with a
 // scope note - that BepInEx and the libraries inside it keep their own
 // licences, that the demo clip at the top of the page is the publisher's
 // footage - and rendering a one-line replacement would delete a true statement
 // about what the licence does not cover.
 
-// The two sections --write applies unless --sections narrows it. Neither
-// carries a per-repo fact, so rendering them can only replace a paraphrase with
-// the canonical wording.
+// What --write applies unless --sections narrows it. The two sections carry no
+// per-repo fact, so rendering them can only replace a paraphrase with the
+// canonical wording. The config block's per-repo facts are the ones
+// data/config-format.json and the committed config record, and the section
+// around it stays hand-written.
 //
-// Controls, Requirements, Installation, Configuration, Updating, Uninstalling,
-// Building from Source, License and Disclaimer are all absent on purpose.
+// Controls, Requirements, Installation, the rest of Configuration, Updating,
+// Uninstalling, Building from Source, License and Disclaimer are all absent on
+// purpose.
 //
 // Controls was tried from lopari's catalog and the catalog turned out to be the
 // thing that was wrong: 46 of its 54 entries advertise a Recenter hotkey on
@@ -165,7 +342,7 @@ const SECTIONS = {
 // bundles the loader, whether uninstall removes it, which build tool the repo
 // uses, which publisher the disclaimer names, and what the licence does not
 // cover. A renderer for them would be a guess with a straight face.
-const DEFAULT_WRITE = ['opentrack', 'community'];
+const DEFAULT_WRITE = ['opentrack', 'community', CONFIG_ID];
 
 // Where a missing section is inserted: after the first of these that exists,
 // else at the top for opentrack and at the end for the rest.
@@ -287,32 +464,40 @@ function applySection(doc, id, rendered, force) {
 // ---------------------------------------------------------------------------
 
 const argv = process.argv.slice(2);
+const VALUE_FLAGS = ['--sections', '--print', '--roots-file'];
 const flags = new Set(argv.filter((a) => a.startsWith('--')));
 const valueOf = (name) => {
   const i = argv.indexOf(`--${name}`);
-  return i >= 0 ? argv[i + 1] : null;
+  if (i < 0) return null;
+  if (argv[i + 1] === undefined || argv[i + 1].startsWith('--')) {
+    console.error(`--${name} takes a value`);
+    process.exit(2);
+  }
+  return argv[i + 1];
 };
-const tokens = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && ['--sections', '--print'].includes(argv[i - 1])));
+const tokens = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && VALUE_FLAGS.includes(argv[i - 1])));
 
+const KNOWN = [...Object.keys(SECTIONS), CONFIG_ID];
 const write = flags.has('--write');
+const json = flags.has('--json');
 const printOnly = valueOf('print');
+const rootsFile = valueOf('roots-file');
 const sectionFilter = valueOf('sections');
 const selected = sectionFilter
   ? sectionFilter.split(',').map((s) => s.trim()).filter(Boolean)
-  : (write ? DEFAULT_WRITE : Object.keys(SECTIONS));
-for (const id of selected) {
-  if (!SECTIONS[id]) {
-    console.error(`Unknown section '${id}'. Known: ${Object.keys(SECTIONS).join(', ')}`);
+  : (write ? DEFAULT_WRITE : KNOWN);
+for (const id of [...selected, ...(printOnly ? [printOnly] : [])]) {
+  if (!KNOWN.includes(id)) {
+    console.error(`Unknown section '${id}'. Known: ${KNOWN.join(', ')}`);
     process.exit(2);
   }
 }
+if (json && write) {
+  console.error('--json reports and does not write');
+  process.exit(2);
+}
 
-
-if (printOnly) {
-  if (!SECTIONS[printOnly]) {
-    console.error(`Unknown section '${printOnly}'. Known: ${Object.keys(SECTIONS).join(', ')}`);
-    process.exit(2);
-  }
+if (printOnly && printOnly !== CONFIG_ID) {
   const ctx = { port: DEFAULT_PORT };
   console.log(`## ${SECTIONS[printOnly].heading}\n\n${SECTIONS[printOnly].render(ctx)}`);
   process.exit(0);
@@ -326,7 +511,13 @@ function resolveRepo(token) {
 }
 
 let roots;
-if (flags.has('--all')) {
+if (rootsFile !== null) {
+  if (flags.has('--all') || tokens.length) {
+    console.error('--roots-file takes the place of --all and repo names');
+    process.exit(2);
+  }
+  roots = fs.readFileSync(rootsFile, 'utf8').split(/\r?\n/).filter((line) => line !== '');
+} else if (flags.has('--all')) {
   roots = fs.readdirSync(REPOS_ROOT, { withFileTypes: true })
     .filter((d) => d.isDirectory() && /-(headtracking|head-tracking)$/.test(d.name))
     .map((d) => path.join(REPOS_ROOT, d.name))
@@ -337,22 +528,63 @@ if (flags.has('--all')) {
   roots = [path.dirname(CORE_ROOT)];
 }
 
+// NEXUS_MODS.md is untracked, so no check reaches it: its config block is pasted from here.
+if (printOnly === CONFIG_ID) {
+  if (roots.length !== 1) {
+    console.error('--print config prints one repo\'s block; name one repo, or run it from the repo');
+    process.exit(2);
+  }
+  const block = configBlock(repoState(roots[0]));
+  if (block === null) {
+    console.error(`${path.basename(roots[0])} is not converted to the canonical config format, so it has no config block`);
+    process.exit(1);
+  }
+  console.log(block);
+  process.exit(0);
+}
+
 let drift = 0;
+let failed = 0;
+const report = [];
 for (const root of roots) {
-  const ctx = repoContext(root);
   const readme = path.join(root, 'README.md');
+  if (!fs.existsSync(readme)) {
+    if (!json) throw new Error(`${root} has no README.md`);
+    report.push({ root, readme: false, sections: {}, error: null });
+    continue;
+  }
+  const ctx = repoContext(root);
   const original = fs.readFileSync(readme, 'utf8');
   const doc = splitSections(original);
   const notes = [];
+  const results = {};
+  let error = null;
 
   for (const id of selected) {
+    if (id === CONFIG_ID) {
+      try {
+        results[id] = applyConfigBlock(doc, configBlock(repoState(root)));
+      } catch (e) {
+        error = e.message;
+        failed++;
+        notes.push(`${id}: cannot render, ${e.message}`);
+        continue;
+      }
+      if (results[id] !== 'unchanged') notes.push(`${id}: ${results[id]}`);
+      continue;
+    }
     const rendered = SECTIONS[id].render(ctx);
     if (rendered === null) {
       if (!write) notes.push(`${id}: no data to render from, left alone`);
       continue;
     }
-    const result = applySection(doc, id, rendered, flags.has('--force'));
-    if (result !== 'unchanged') notes.push(`${id}: ${result}`);
+    results[id] = applySection(doc, id, rendered, flags.has('--force'));
+    if (results[id] !== 'unchanged') notes.push(`${id}: ${results[id]}`);
+  }
+
+  if (json) {
+    report.push({ root, readme: true, sections: results, error });
+    continue;
   }
 
   const updated = joinSections(doc);
@@ -360,9 +592,14 @@ for (const root of roots) {
   if (write && changed) fs.writeFileSync(readme, updated, 'utf8');
   if (changed && !write) drift++;
 
-  const verb = write ? (changed ? 'wrote' : 'ok   ') : (changed ? 'drift' : 'ok   ');
+  const verb = error !== null ? 'fail ' : write ? (changed ? 'wrote' : 'ok   ') : (changed ? 'drift' : 'ok   ');
   if (notes.length || changed) console.log(`${verb} ${ctx.name}${notes.length ? `  (${notes.join('; ')})` : ''}`);
 }
 
+if (json) {
+  console.log(JSON.stringify(report, null, 1));
+  process.exit(0);
+}
 console.log(`\n${roots.length} repos, ${drift} with drift.`);
-process.exit(write ? 0 : (drift > 0 ? 1 : 0));
+if (failed > 0) console.log(`${failed} config block${failed > 1 ? 's' : ''} could not be rendered.`);
+process.exit(failed > 0 || (!write && drift > 0) ? 1 : 0);

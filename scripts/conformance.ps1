@@ -901,6 +901,20 @@ function Test-Readme {
             Add-Finding $Name 'readme' 'FAIL' "README.md:$($i + 1) - $($rule.Why): $($lines[$i].Trim())"
         }
     }
+
+    $config = $ReadmeConfig[$Root]
+    $fix = 'pixi run readme --write --sections config renders it'
+    if ($null -ne $config.error) {
+        Add-Finding $Name 'readme' 'FAIL' "the config block cannot be rendered: $($config.error)"
+        return
+    }
+    switch ($config.sections.config) {
+        'unchanged' { }
+        'rewritten' { Add-Finding $Name 'readme' 'FAIL' "the config block differs from the one rendered from data/config-format.json and the committed config; $fix" }
+        'inserted'  { Add-Finding $Name 'readme' 'FAIL' "converted to the canonical config format, and README.md has no config block; $fix" }
+        'removed'   { Add-Finding $Name 'readme' 'FAIL' 'README.md has a config block, and the repo is not converted to the canonical config format, so there is nothing for it to describe' }
+        default     { throw "scripts/generate-readme.mjs reported config '$($config.sections.config)' for $Root" }
+    }
 }
 
 # SHIM_MARKER is how the shim bodies tell this mod's own DLL from whatever the
@@ -932,6 +946,9 @@ function Test-ShimMarker {
 # converted when one of its committed files carries the stamp: nothing records it separately.
 $CONFIG_CHECK_IDS = @('config-format', 'config-legacy-reader', 'config-preserve')
 $CanonicalConfig = @{}
+# scripts/generate-readme.mjs --json --sections config, per root: whether README.md's config
+# block matches the one rendered from data/config-format.json and the committed config.
+$ReadmeConfig = @{}
 
 # The frozen legacy import lives here and nowhere else (design 4.2): src/legacy_config/ in a
 # C++ repo, a Legacy/ folder in a C# one.
@@ -1182,19 +1199,30 @@ if ($All) {
 
 if ($roots.Count -eq 0) { throw "No repos to check under $ReposRoot." }
 
-if (@($selected | Where-Object { $_ -in $CONFIG_CHECK_IDS }).Count -gt 0) {
-    # A file, not argv: Windows caps a command line at 32767 characters, which a fleet of a few
-    # hundred absolute repo paths passes.
+# One node run over every root, its JSON array read back in root order. The roots go in a file,
+# not argv: Windows caps a command line at 32767 characters, which a fleet of a few hundred
+# absolute repo paths passes.
+function Invoke-NodeOverRoots {
+    param([string]$Script, [string[]]$Arguments, [string[]]$Roots)
     $rootsFile = [System.IO.Path]::GetTempFileName()
     try {
-        [System.IO.File]::WriteAllLines($rootsFile, [string[]]$roots, (New-Object System.Text.UTF8Encoding $false))
-        $out = & node (Join-Path $CoreRoot 'scripts/check-canonical-config.mjs') --json --roots-file $rootsFile
-        if ($LASTEXITCODE -ne 0) { throw "scripts/check-canonical-config.mjs --json failed with exit code $LASTEXITCODE" }
+        [System.IO.File]::WriteAllLines($rootsFile, $Roots, (New-Object System.Text.UTF8Encoding $false))
+        $out = & node (Join-Path $CoreRoot $Script) @Arguments --roots-file $rootsFile
+        if ($LASTEXITCODE -ne 0) { throw "$Script $($Arguments -join ' ') failed with exit code $LASTEXITCODE" }
     } finally {
         Remove-Item -LiteralPath $rootsFile
     }
-    $states = ($out -join "`n") | ConvertFrom-Json
-    for ($i = 0; $i -lt $roots.Count; $i++) { $CanonicalConfig[$roots[$i]] = @($states)[$i] }
+    return @(($out -join "`n") | ConvertFrom-Json)
+}
+
+if (@($selected | Where-Object { $_ -in $CONFIG_CHECK_IDS }).Count -gt 0) {
+    $states = Invoke-NodeOverRoots 'scripts/check-canonical-config.mjs' @('--json') $roots
+    for ($i = 0; $i -lt $roots.Count; $i++) { $CanonicalConfig[$roots[$i]] = $states[$i] }
+}
+
+if ('readme' -in $selected) {
+    $results = Invoke-NodeOverRoots 'scripts/generate-readme.mjs' @('--json', '--sections', 'config') $roots
+    for ($i = 0; $i -lt $roots.Count; $i++) { $ReadmeConfig[$roots[$i]] = $results[$i] }
 }
 
 foreach ($root in $roots) {
