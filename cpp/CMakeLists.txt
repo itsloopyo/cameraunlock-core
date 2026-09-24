@@ -179,6 +179,7 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
         src/reframework/gameplay_gate.cpp
         src/reframework/manager_probe_checks.cpp
         src/reframework/plugin_config.cpp
+        src/reframework/plugin_config_table.cpp
         src/reframework/plugin_mod.cpp
         src/reframework/camera_pipeline.cpp
         src/reframework/gui_elements.cpp

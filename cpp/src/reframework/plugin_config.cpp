@@ -494,14 +494,11 @@ static int ReadHotkey(const cameraunlock::IniReader& reader, const char* key, in
     return fallback;
 }
 
-bool PluginConfig::Load(const char* path, const PluginConfigSchema& schema) {
+bool PluginConfig::Read(const char* path, const PluginConfigSchema& schema) {
     SetDefaults(schema);
 
     cameraunlock::IniReader reader;
-    if (!reader.Open(path)) {
-        LogWarning("Could not load config from %s, using defaults", path);
-        return false;
-    }
+    if (!reader.Open(path)) return false;
 
     int rawPort = reader.ReadInt("Network", "UDPPort", udpPort);
     bool portValid = false;
@@ -562,6 +559,14 @@ bool PluginConfig::Load(const char* path, const PluginConfigSchema& schema) {
     configVersion = reader.ReadInt("General", "ConfigVersion", 0);
 
     Validate(schema);
+    return true;
+}
+
+bool PluginConfig::Load(const char* path, const PluginConfigSchema& schema) {
+    if (!Read(path, schema)) {
+        LogWarning("Could not load config from %s, using defaults", path);
+        return false;
+    }
     LogInfo("Config loaded from %s", path);
     MigrateToCurrentVersion(path, schema, *this);
     return true;

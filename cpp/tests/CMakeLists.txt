@@ -47,9 +47,10 @@ target_compile_definitions(cameraunlock_tests PRIVATE
 # plugin_config.cpp lives in the optional REFramework target, so its tests can
 # only build when that target is configured.
 if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
-    target_sources(cameraunlock_tests PRIVATE plugin_config_migration_tests.cpp)
+    target_sources(cameraunlock_tests PRIVATE plugin_config_migration_tests.cpp plugin_config_canonical_tests.cpp)
     target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_reframework)
-    target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_REFRAMEWORK)
+    target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_REFRAMEWORK
+        CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/reframework-legacy")
 endif()
 
 add_test(NAME cameraunlock_tests COMMAND cameraunlock_tests)

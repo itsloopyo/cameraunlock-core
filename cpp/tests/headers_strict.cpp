@@ -100,6 +100,7 @@
 #include "cameraunlock/reframework/log_callback.h"
 #include "cameraunlock/reframework/manager_probe_checks.h"
 #include "cameraunlock/reframework/plugin_config.h"
+#include "cameraunlock/reframework/plugin_config_table.h"
 #include "cameraunlock/reframework/plugin_mod.h"
 #include "cameraunlock/reframework/re_math.h"
 #include "cameraunlock/rendering/aim_ndc_projection.h"
@@ -128,4 +129,5 @@ template std::string cameraunlock::config::RenderCanonical<cameraunlock::HeadTra
     const cameraunlock::config::RenderHeader&);
 #ifdef _WIN32
 template class cameraunlock::config::ConfigOwner<cameraunlock::HeadTrackingConfig>;
+template class cameraunlock::config::ConfigOwner<cameraunlock::reframework::PluginConfig>;
 #endif

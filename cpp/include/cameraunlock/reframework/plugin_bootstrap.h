@@ -26,7 +26,9 @@ struct PluginBootstrapDescriptor {
     bool centerGameWindow = false;
 
     // Registered after the shared nav-cluster and Ctrl+Shift bindings, for
-    // game-specific keys. Optional.
+    // game-specific keys. Optional. With mod.config.canonicalConfig the int
+    // hotkey codes in `config` are 0: register from the *KeyBindings text with
+    // input::ParseKeyBindings and input::RegisterKeyBindings.
     void (*registerExtraHotkeys)(cameraunlock::input::HotkeyPoller& poller,
                                  const PluginConfig& config) = nullptr;
 };

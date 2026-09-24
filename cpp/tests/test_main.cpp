@@ -39,6 +39,7 @@ int RunLegacyImportTests();
 int RunIniMutationsTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
 int RunPluginConfigMigrationTests();
+int RunPluginConfigCanonicalTests();
 #endif
 
 // Simple test runner - expand with a proper framework if needed
@@ -94,6 +95,7 @@ int main(int argc, char** argv) {
     failures += RunConfigOwnerTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();
+    failures += RunPluginConfigCanonicalTests();
 #endif
 
     if (failures == 0) {

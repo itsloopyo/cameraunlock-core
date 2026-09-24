@@ -7,7 +7,14 @@
 #include <cameraunlock/tracking/head_tracking_session.h>
 
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <string>
+
+namespace cameraunlock::config {
+template <class Config>
+class ConfigOwner;
+}
 
 namespace cameraunlock::reframework {
 
@@ -19,6 +26,9 @@ struct PluginModDescriptor {
     // File name of the INI, resolved beside the plugin DLL.
     const char* configFileName = "HeadTracking.ini";
     PluginConfigSchema config;
+    // The game's name as data/games.json spells it, in printable ASCII, written at the
+    // top of a canonical config. Required with config.canonicalConfig.
+    const char* gameName = nullptr;
 };
 
 // The tracking pipeline every RE Engine head-tracking plugin owns: config load,
@@ -49,7 +59,12 @@ public:
     // processor/interpolator smoothing state owned by the render thread. The
     // hotkey thread only requests the action; ProcessDeferredActions() runs it
     // on the render thread at the start of each frame.
-    void RequestCycleTrackingMode() { m_cycleModeRequested.Request(); }
+    //
+    // With canonicalConfig the request also decides the mode: the one after the
+    // mode the render thread last applied, so two presses before a frame still
+    // move one step. It saves [Position] PositionEnabled for that mode, on the
+    // calling thread, and the frame applies it.
+    void RequestCycleTrackingMode();
     void ProcessDeferredActions();
 
     PluginConfig& GetConfig() { return m_config; }
@@ -80,10 +95,13 @@ public:
     PluginMod& operator=(const PluginMod&) = delete;
 
 private:
-    PluginMod() = default;
-    ~PluginMod() = default;
+    PluginMod();
+    ~PluginMod();
 
     bool LoadConfig();
+    bool LoadCanonicalConfig();
+    void ApplyTrackingMode(cameraunlock::TrackingMode mode);
+    void SaveConfig(const char* row, const std::function<void(PluginConfig&)>& change);
 
     PluginModDescriptor m_descriptor;
 
@@ -98,6 +116,13 @@ private:
     std::atomic<bool> m_worldSpaceYaw{false};
 
     cameraunlock::input::DeferredAction m_cycleModeRequested;
+    // Written on the render thread by ApplyTrackingMode. In canonical mode the
+    // hotkey thread reads the applied mode to compute the desired one.
+    std::atomic<cameraunlock::TrackingMode> m_appliedMode{cameraunlock::TrackingMode::RotationAndPosition};
+    std::atomic<cameraunlock::TrackingMode> m_desiredMode{cameraunlock::TrackingMode::RotationAndPosition};
+
+    // Null unless canonicalConfig, or when the config path could not be resolved.
+    std::unique_ptr<cameraunlock::config::ConfigOwner<PluginConfig>> m_configOwner;
 
     bool m_loggedFirstPose = false;
 

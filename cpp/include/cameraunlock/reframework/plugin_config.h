@@ -1,10 +1,12 @@
 #pragma once
 
+#include "cameraunlock/config/config_concepts.g.h"
 #include "cameraunlock/data/position_settings.h"
 #include "cameraunlock/effects/head_follow_light.h"
 #include "cameraunlock/math/smoothing_utils.h"
 
 #include <cstdint>
+#include <string>
 
 namespace cameraunlock::reframework {
 
@@ -68,9 +70,16 @@ struct PluginConfigSchema {
     // Stable identity for the config migrations in Load(), separate from
     // `title` because that is display text and gets reworded. A migration that
     // has to correct one game's shipped value keys on this; an empty id matches
-    // no migration. Keep it last - every mod's schema is initialised
-    // positionally, so a field inserted above silently rebinds the rest.
+    // no migration.
     const char* modId = "";
+
+    // PluginMod reads and writes the config through config::ConfigOwner in the
+    // canonical format (PluginConfigTable), converting a legacy file once
+    // through PluginConfigLegacyImport. PluginModDescriptor::gameName is then
+    // required. Fields are only ever appended, and this one is last: every
+    // mod's schema is initialised positionally, so a field inserted above
+    // silently rebinds the rest.
+    bool canonicalConfig = false;
 };
 
 struct PluginConfig {
@@ -125,6 +134,23 @@ struct PluginConfig {
     // file, and leaves it alone when the rewrite failed.
     int configVersion = 0;
 
+    // The hotkey lists of a canonical config, as canonical text (config::HotkeyCodec).
+    // With canonicalConfig they replace the int codes above, which PluginMod then sets
+    // to 0 so a callback still reading one registers nothing.
+    std::string toggleKeyBindings =
+        config::schema::ConceptTraits<config::schema::Concept::ToggleKey>::kCanonicalDefault;
+    std::string cycleTrackingModeKeyBindings =
+        config::schema::ConceptTraits<config::schema::Concept::CycleTrackingModeKey>::kCanonicalDefault;
+    std::string yawModeKeyBindings =
+        config::schema::ConceptTraits<config::schema::Concept::YawModeKey>::kCanonicalDefault;
+    std::string diagnosticMarkerKeyBindings = "F9";
+
+    // SetDefaults, then every key the schema names, then Validate: what Load reads,
+    // without Load's log line or its ConfigVersion migration. False, on the defaults,
+    // when there is no file at `path` (an ANSI path). Frozen: it is the legacy import
+    // of every REFramework mod (PluginConfigLegacyImport), so a change here changes
+    // how a user's old file converts.
+    bool Read(const char* path, const PluginConfigSchema& schema);
     bool Load(const char* path, const PluginConfigSchema& schema);
     bool Save(const char* path, const PluginConfigSchema& schema) const;
     void SetDefaults(const PluginConfigSchema& schema);

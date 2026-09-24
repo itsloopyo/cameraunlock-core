@@ -9,6 +9,71 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - REFramework configs on the canonical format, behind `PluginConfigSchema::canonicalConfig`
+
+An RE game converts by setting `canonicalConfig` and `PluginModDescriptor::gameName`. Nothing in
+the fleet sets it yet, and with it unset every RE mod reads, migrates, writes and binds hotkeys
+exactly as before, `ApplyIniEdits` and its RE8 migration included (runbook G7 still applies to
+those builds).
+
+- **`PluginConfigSchema::canonicalConfig`** (bool, default false), appended after `modId`,
+  since every mod initialises the schema positionally. **`PluginModDescriptor::gameName`**: the
+  game's name as data/games.json spells it, written at the top of the canonical file; required
+  with `canonicalConfig`, and `PluginMod::Initialize` throws `std::invalid_argument` without it.
+- **`PluginConfig::Read(path, schema)`**: `SetDefaults`, every read and `Validate`, exactly as
+  `Load` did them, with no log line and no migration; false, on the defaults, when there is no
+  file. `Load` is now `Read`, its two log lines and the RE8 migration, unchanged in behaviour.
+  `Read` is the legacy import of all six RE mods, so it is frozen from here on.
+- **`PluginConfig` hotkey lists**, appended: `toggleKeyBindings` (`End, Ctrl+Shift+Y`),
+  `cycleTrackingModeKeyBindings` (`PageUp, Ctrl+Shift+G`), `yawModeKeyBindings` (`PageDown,
+  Ctrl+Shift+H`) and `diagnosticMarkerKeyBindings` (`F9`), as canonical text. In canonical mode
+  `PluginMod` sets the int codes (`toggleKey`, `positionToggleKey`, `yawModeKey`,
+  `diagnosticMarkerKey`) to 0, so a `registerExtraHotkeys` callback still reading one registers
+  nothing instead of a default over the player's setting. resident-evil-village's F9 callback
+  moves to `diagnosticMarkerKeyBindings` in its own conversion.
+- **`cameraunlock/reframework/plugin_config_table.h`**: `PluginConfigTable(schema)`, the
+  canonical table over `PluginConfig` with defaults from `SetDefaults(schema)`: `[Network]
+  UdpPort`; `[General] EnableOnStartup` and `WorldSpaceYaw` (Writable); `[Smoothing]
+  LocalSmoothing`, `RemoteSmoothing`; `[Position] PositionEnabled` (Writable), `PositionLimitX`,
+  `PositionLimitY`, `PositionLimitZ`, `PositionLimitZBack`; `[Hotkeys] ToggleKey`,
+  `CycleTrackingModeKey` (the legacy `PositionToggleKey`, the PageUp action) and `YawModeKey`,
+  with the local row `DiagnosticMarkerKey` when `schema.diagnosticMarkerKey`; `[Light]
+  LightFollowsHead` and `LightMultiplier` when `schema.flashlight`. No sensitivity or inversion
+  rows (the tracker shapes the pose), so `schema.positionSensitivity` stays each game's constant;
+  no `RotationEnabled` (the mode cycle is two-state), no `PositionLimitYDown` (`PluginMod` mirrors
+  `PositionLimitY` downwards, and the row's comment says so), no `ConfigVersion`.
+  `PluginConfigLegacyImport(schema)`: `Read` on the ANSI path, the in-memory half of the RE8
+  `InvertX` correction, then each field the table carries; each hotkey code becomes a list of that
+  key plus the Ctrl+Shift chord the legacy bootstrap registered beside it (Y, G, H; none for
+  `DiagnosticMarkerKey`), so the chords move into the lists with no change in what fires. A
+  sensitivity or inversion away from its `SetDefaults` value is recorded as dropped
+  (`PoseShaping`). `Imported`, or `Absent` when `Read` finds no file (so a path the ANSI code page
+  cannot hold is `Absent`, as the legacy build found no file there). Writes nothing. `keys` lists
+  every key `Read` reads for the schema. No N1 rule is needed: `Read` refuses any hotkey code
+  outside 0x01-0xFE (and the modifiers) and keeps the default, so every code it gives has a
+  canonical spelling.
+- **`PluginMod` in canonical mode**: `LoadConfig` builds a `ConfigOwner<PluginConfig>` on the wide
+  path beside the plugin DLL with that table and import, so a missing file is the owner's
+  `Created` (the old Save-on-missing) and a legacy file converts once. The owner's log lines are
+  logged at once (logging is up by then), as warnings with the player's reason when the load was
+  not usable. `RequestCycleTrackingMode`, on the hotkey thread, computes the next two-state mode
+  from the mode the render thread last applied, stores it as desired, requests the apply and
+  saves `PositionEnabled`; two presses before a frame still move one step. `ToggleYawMode` saves
+  `WorldSpaceYaw`. The End toggle never saves. A save that is `NotSaved` or `Uncertain` logs its
+  row, reason and the owner's lines, which name the path and the step. `RequestCycleTrackingMode`
+  is now defined out of line, same signature.
+- **`InitializePlugin` in canonical mode** registers Toggle, the mode action and the yaw toggle
+  from the three lists with `input::RegisterKeyBindings`, and no hard-coded chord: the chords are
+  items of the lists, rebindable like any key.
+- **Fixtures**: data/fixtures/reframework-legacy holds the HeadTracking.ini each of
+  resident-evil-2, -3, -4, -7, -village and -requiem shipped at its newest published build, byte
+  for byte, plus the older file Requiem v0.4.0's launcher manifest seeds. The C++ suite runs
+  `PluginConfig::Load` against the import on each and on its whole corpus (about 2,000 inputs a
+  file, floats bitwise), checks the import leaves its copy untouched, converts RE8's and
+  Requiem's corpora through the owner, and converts each shipped file to a canonical file that
+  reads back as imported, keeps `.pre-canonical`, is not rewritten by a second load, and edits
+  one line per `PositionEnabled` or `WorldSpaceYaw` save.
+
 ### Added - the C++ config owner and migration driver
 
 `cameraunlock::config::ConfigOwner<Config>` in `config/config_owner.h` is the C++ twin of the C#

@@ -1,7 +1,12 @@
 #include <cameraunlock/reframework/plugin_mod.h>
 
+#include <cameraunlock/config/config_owner.h>
 #include <cameraunlock/os/module_paths.h>
 #include <cameraunlock/reframework/log_callback.h>
+#include <cameraunlock/reframework/plugin_config_table.h>
+
+#include <stdexcept>
+#include <utility>
 
 namespace cameraunlock::reframework {
 
@@ -14,6 +19,9 @@ using cameraunlock::TrackingMode;
 // silently pin every connection to LocalSmoothing forever.
 static_assert(cameraunlock::HeadTrackingSession<cameraunlock::UdpReceiver>::kHasRemoteConnection,
               "receiver must expose IsRemoteConnection() or remote smoothing never applies");
+
+PluginMod::PluginMod() = default;
+PluginMod::~PluginMod() = default;
 
 PluginMod& PluginMod::Instance() {
     static PluginMod instance;
@@ -46,8 +54,10 @@ void PluginMod::Initialize(const PluginModDescriptor& descriptor) {
     LogInfo("Smoothing: local=%.2f remote=%.2f",
             m_config.localSmoothing, m_config.remoteSmoothing);
 
-    m_session.SetMode(m_config.positionEnabled ? TrackingMode::RotationAndPosition
-                                               : TrackingMode::RotationOnly);
+    const TrackingMode startMode = m_config.positionEnabled ? TrackingMode::RotationAndPosition
+                                                            : TrackingMode::RotationOnly;
+    m_session.SetMode(startMode);
+    m_appliedMode.store(startMode);
     m_worldSpaceYaw.store(m_config.worldSpaceYaw, std::memory_order_relaxed);
 
     // Assigned by name rather than through the positional constructor.
@@ -129,6 +139,8 @@ void PluginMod::Shutdown() {
 }
 
 bool PluginMod::LoadConfig() {
+    if (m_descriptor.config.canonicalConfig) return LoadCanonicalConfig();
+
     // Beside the plugin DLL. SelfModuleDirectory resolves the module from an
     // address inside this static library, which links into the plugin, so this
     // is the plugin's own directory rather than the game EXE's.
@@ -148,6 +160,68 @@ bool PluginMod::LoadConfig() {
     return true;
 }
 
+bool PluginMod::LoadCanonicalConfig() {
+    if (m_descriptor.gameName == nullptr) {
+        throw std::invalid_argument("PluginModDescriptor::gameName is required with canonicalConfig");
+    }
+    m_config.SetDefaults(m_descriptor.config);
+    bool loaded = false;
+
+    const std::wstring directory = cameraunlock::os::SelfModuleDirectory();
+    if (directory.empty()) {
+        LogError("Could not resolve the plugin directory - config not loaded or written");
+    } else {
+        const char* name = m_descriptor.configFileName;
+        const int length = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, name, -1, nullptr, 0);
+        std::wstring wideName(length > 0 ? static_cast<size_t>(length) : 0, L'\0');
+        if (length <= 0 || MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, name, -1, &wideName[0], length) != length) {
+            throw std::invalid_argument(std::string("PluginModDescriptor::configFileName '") + name +
+                                        "' is not valid in the ANSI code page");
+        }
+        wideName.resize(static_cast<size_t>(length) - 1);
+        const std::wstring path = directory + L"\\" + wideName;
+
+        cameraunlock::config::ConfigOwnerOptions<PluginConfig> options;
+        options.path = path;
+        options.table = PluginConfigTable(m_descriptor.config);
+        options.import = PluginConfigLegacyImport(m_descriptor.config);
+        options.header.display_name = m_descriptor.gameName;
+        m_configOwner = std::make_unique<cameraunlock::config::ConfigOwner<PluginConfig>>(std::move(options));
+
+        const cameraunlock::config::ConfigLoadResult<PluginConfig> result = m_configOwner->Load();
+        m_config = result.config;
+        loaded = true;
+
+        const bool usable = result.status == cameraunlock::config::ConfigLoadStatus::Canonical ||
+                            result.status == cameraunlock::config::ConfigLoadStatus::Migrated ||
+                            result.status == cameraunlock::config::ConfigLoadStatus::Created;
+        const LogLevel level = usable ? LogLevel::Info : LogLevel::Warning;
+        for (const std::string& line : result.log) Log(level, "%s", line.c_str());
+        if (!usable) Log(level, "%s", result.reason.c_str());
+        LogInfo("Config %s: %s", cameraunlock::config::ConfigLoadStatusName(result.status),
+                cameraunlock::config::detail::OwnerUtf8(path).c_str());
+    }
+
+    // The canonical hotkey lists replace these. A registerExtraHotkeys callback still reading
+    // one registers nothing, since the poller skips code 0, rather than a default over the
+    // user's setting.
+    m_config.toggleKey = 0;
+    m_config.positionToggleKey = 0;
+    m_config.yawModeKey = 0;
+    m_config.diagnosticMarkerKey = 0;
+    return loaded;
+}
+
+void PluginMod::SaveConfig(const char* row, const std::function<void(PluginConfig&)>& change) {
+    if (!m_configOwner) return;
+    const cameraunlock::config::ConfigSaveResult result = m_configOwner->Save(change);
+    if (result.status == cameraunlock::config::ConfigSaveStatus::Saved) return;
+    const LogLevel level =
+        result.status == cameraunlock::config::ConfigSaveStatus::Uncertain ? LogLevel::Error : LogLevel::Warning;
+    Log(level, "%s %s: %s", row, cameraunlock::config::ConfigSaveStatusName(result.status), result.reason.c_str());
+    for (const std::string& line : result.log) Log(level, "%s", line.c_str());
+}
+
 void PluginMod::SetEnabled(bool enabled) {
     bool wasEnabled = m_enabled.exchange(enabled);
     if (wasEnabled != enabled) {
@@ -159,26 +233,52 @@ void PluginMod::Toggle() {
     SetEnabled(!m_enabled.load());
 }
 
+// Two states, deliberately not the session's three-state ring. In a ring of
+// three, one of the two modes a config can start in always has a
+// rotation-dead successor: a user who set [Position] Enabled=false starts in
+// RotationOnly, and their first press on a key labelled "toggle position"
+// landed in PositionOnly and switched head rotation off. Head rotation is
+// the feature, so PositionOnly is off this key and reachable through
+// SetMode. A session that reached it another way still leaves by this key.
+static TrackingMode NextCycleMode(TrackingMode mode) {
+    return mode == TrackingMode::RotationAndPosition ? TrackingMode::RotationOnly
+                                                    : TrackingMode::RotationAndPosition;
+}
+
 void PluginMod::CycleTrackingMode() {
-    // Two states, deliberately not the session's three-state ring. In a ring of
-    // three, one of the two modes a config can start in always has a
-    // rotation-dead successor: a user who set [Position] Enabled=false starts in
-    // RotationOnly, and their first press on a key labelled "toggle position"
-    // landed in PositionOnly and switched head rotation off. Head rotation is
-    // the feature, so PositionOnly is off this key and reachable through
-    // SetMode. A session that reached it another way still leaves by this key.
-    m_session.SetMode(m_session.GetMode() == TrackingMode::RotationAndPosition
-                          ? TrackingMode::RotationOnly
-                          : TrackingMode::RotationAndPosition);
+    ApplyTrackingMode(NextCycleMode(m_session.GetMode()));
+}
+
+void PluginMod::ApplyTrackingMode(TrackingMode mode) {
+    m_session.SetMode(mode);
+    m_appliedMode.store(mode);
 
     LogInfo("Tracking mode: %s", m_session.GetMode() == TrackingMode::RotationAndPosition
                                      ? "full (rotation + position)"
                                      : "rotation only (position disabled)");
 }
 
+void PluginMod::RequestCycleTrackingMode() {
+    if (!m_descriptor.config.canonicalConfig) {
+        m_cycleModeRequested.Request();
+        return;
+    }
+    const TrackingMode next = NextCycleMode(m_appliedMode.load());
+    m_desiredMode.store(next);
+    m_cycleModeRequested.Request();
+    SaveConfig("[Position] PositionEnabled", [next](PluginConfig& config) {
+        config.positionEnabled = next == TrackingMode::RotationAndPosition;
+    });
+}
+
 void PluginMod::ProcessDeferredActions() {
     if (!m_initialized.load()) return;
-    if (m_cycleModeRequested.Consume()) CycleTrackingMode();
+    if (!m_cycleModeRequested.Consume()) return;
+    if (m_descriptor.config.canonicalConfig) {
+        ApplyTrackingMode(m_desiredMode.load());
+    } else {
+        CycleTrackingMode();
+    }
 }
 
 void PluginMod::TickFrame() {
@@ -213,6 +313,7 @@ void PluginMod::ToggleYawMode() {
     bool now = !m_worldSpaceYaw.load(std::memory_order_relaxed);
     m_worldSpaceYaw.store(now, std::memory_order_relaxed);
     LogInfo("Yaw mode: %s", now ? "world-space (horizon-locked)" : "camera-local");
+    SaveConfig("[General] WorldSpaceYaw", [now](PluginConfig& config) { config.worldSpaceYaw = now; });
 }
 
 } // namespace cameraunlock::reframework
