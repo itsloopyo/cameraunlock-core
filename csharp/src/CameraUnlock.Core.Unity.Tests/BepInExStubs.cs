@@ -16,14 +16,21 @@ using System.Collections.Generic;
 namespace UnityEngine
 {
     /// Values match UnityEngine.KeyCode so a test reading one is reading the number a mod
-    /// would find in its .cfg.
+    /// would find in its .cfg. KeyCodeFakeTests holds them to csharp/stubs/UnityStubs.cs.
     public enum KeyCode
     {
         None = 0,
+        Y = 121,
         Insert = 277,
         Home = 278,
         End = 279,
         PageUp = 280,
+        RightShift = 303,
+        LeftShift = 304,
+        RightControl = 305,
+        LeftControl = 306,
+        RightAlt = 307,
+        LeftAlt = 308,
     }
 }
 

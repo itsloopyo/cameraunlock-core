@@ -1,10 +1,11 @@
 # Canonical INI fixtures
 
-Byte fixtures for the canonical INI format: `reader/` for the reader and `editor/` for the
-editor. Core's C++ suite runs them unchanged (`cpp/tests/canonical_ini_tests.cpp` and
-`cpp/tests/ini_editor_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures` and
-`IniEditorFixtures`, under xunit on net8.0 and in `CameraUnlock.Core.FrameworkTests` on
-.NET Framework 3.5 and 4.7.2). Lopari's Rust codec is to run the same files, so nothing
+Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
+editor and `keys/` for the hotkey binding codec. Core's C++ suite runs them unchanged
+(`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp` and
+`cpp/tests/key_bindings_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures`,
+`IniEditorFixtures` and `KeyBindingFixtures`, under xunit on net8.0 and in
+`CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2). Lopari's Rust codec is to run the same files, so nothing
 here is specific to one language: a reader or editor in any language is held to every case. The expected files are written by hand from the rules, never produced by an
 implementation.
 
@@ -81,3 +82,30 @@ after. Every key the batch did not edit reads as it did, and every line the batc
 replace or insert is the same bytes as before. Without a `_first` directive, each edited key
 reads its new value, and the diagnostics differ only on edited lines. With one, the line
 holding each edited key's new value is the one the batch changed.
+
+## keys/
+
+`cases.tsv` holds hotkey values and what the binding codec reads from them. The key names
+come from `data/keys.json`. It is ASCII with the same note rule as `expected.tsv`, and each
+other line is a row whose fields are separated by one tab:
+
+| Field | Meaning |
+|-------|---------|
+| dialect | `native` for the C++ `ParseKeyBindings`, which reads names with a Windows virtual-key code and `0x` codes; `unity` for the C# `KeyBindings.TryParse`, which reads names with a Unity `KeyCode` value and no codes |
+| input | the value, with the byte escape above; the C# runner decodes it as UTF-8 |
+| result | `canonical` or `invalid` |
+| canonical | only after `canonical`: the text the codec writes for what it read, with the byte escape; empty for an empty list |
+
+The C++ suite runs the `native` rows and the C# suites the `unity` rows. For a `canonical`
+row the codec must read the input, write exactly the canonical text, and read that text
+back as the same bindings. For an `invalid` row it must refuse the input, with an error and
+no bindings.
+
+The syntax both dialects share: a value that is empty after trimming spaces and tabs is an
+empty list, which means unbound. Otherwise it is split at `,` into items, each trimmed and
+non-empty. An item is split at `+` into trimmed tokens: any of `Ctrl`, `Shift` and `Alt`,
+each at most once and in any order, then exactly one key. Names and modifiers read ASCII
+case-insensitively; nothing else is folded. The same binding twice in one list is invalid.
+The canonical text writes the modifiers as `Ctrl+Shift+Alt+` in that order, the key as
+`data/keys.json` spells it (an alias as the key's name), a native code with no name as `0x`
+and upper-case hex without padding, and joins the items with `, `.

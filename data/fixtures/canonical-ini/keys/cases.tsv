@@ -1,0 +1,358 @@
+# Hotkey binding codec cases. See ../README.md, keys/.
+# dialect	input	result	canonical
+
+# Names, case and layout
+native	End	canonical	End
+unity	End	canonical	End
+native	end	canonical	End
+unity	end	canonical	End
+native	END	canonical	End
+unity	END	canonical	End
+native	eNd	canonical	End
+unity	eNd	canonical	End
+native	F9	canonical	F9
+unity	F9	canonical	F9
+native	f12	canonical	F12
+unity	f12	canonical	F12
+native	F15	canonical	F15
+unity	F15	canonical	F15
+native	f16	canonical	F16
+unity	f16	canonical	F16
+native	F24	canonical	F24
+unity	F24	canonical	F24
+native	Alpha1	canonical	Alpha1
+unity	Alpha1	canonical	Alpha1
+native	alpha0	canonical	Alpha0
+unity	alpha0	canonical	Alpha0
+native	Keypad0	canonical	Keypad0
+unity	Keypad0	canonical	Keypad0
+native	keypadplus	canonical	KeypadPlus
+unity	keypadplus	canonical	KeypadPlus
+native	KeypadPeriod	canonical	KeypadPeriod
+unity	KeypadPeriod	canonical	KeypadPeriod
+native	UpArrow	canonical	UpArrow
+unity	UpArrow	canonical	UpArrow
+native	leftarrow	canonical	LeftArrow
+unity	leftarrow	canonical	LeftArrow
+native	a	canonical	A
+unity	a	canonical	A
+native	Z	canonical	Z
+unity	Z	canonical	Z
+native	PageUp	canonical	PageUp
+unity	PageUp	canonical	PageUp
+native	pagedown	canonical	PageDown
+unity	pagedown	canonical	PageDown
+native	Home	canonical	Home
+unity	Home	canonical	Home
+native	Insert	canonical	Insert
+unity	Insert	canonical	Insert
+native	Delete	canonical	Delete
+unity	Delete	canonical	Delete
+native	Backspace	canonical	Backspace
+unity	Backspace	canonical	Backspace
+native	Tab	canonical	Tab
+unity	Tab	canonical	Tab
+native	return	canonical	Return
+unity	return	canonical	Return
+native	Escape	canonical	Escape
+unity	Escape	canonical	Escape
+native	Space	canonical	Space
+unity	Space	canonical	Space
+native	Pause	canonical	Pause
+unity	Pause	canonical	Pause
+native	Print	canonical	Print
+unity	Print	canonical	Print
+native	Menu	canonical	Menu
+unity	Menu	canonical	Menu
+native	NumLock	canonical	Numlock
+unity	NumLock	canonical	Numlock
+native	capslock	canonical	CapsLock
+unity	capslock	canonical	CapsLock
+native	ScrollLock	canonical	ScrollLock
+unity	ScrollLock	canonical	ScrollLock
+native	LeftWindows	canonical	LeftWindows
+unity	LeftWindows	canonical	LeftWindows
+native	RightWindows	canonical	RightWindows
+unity	RightWindows	canonical	RightWindows
+native	LeftControl	canonical	LeftControl
+unity	LeftControl	canonical	LeftControl
+native	rightshift	canonical	RightShift
+unity	rightshift	canonical	RightShift
+native	LeftAlt	canonical	LeftAlt
+unity	LeftAlt	canonical	LeftAlt
+
+# Empty is unbound
+native		canonical	
+unity		canonical	
+native	   	canonical	
+unity	   	canonical	
+native	\x09	canonical	
+unity	\x09	canonical	
+native	 \x09 	canonical	
+unity	 \x09 	canonical	
+
+# Modifiers are written Ctrl+Shift+Alt, whatever order they are read in
+native	ctrl+shift+y	canonical	Ctrl+Shift+Y
+unity	ctrl+shift+y	canonical	Ctrl+Shift+Y
+native	CTRL+SHIFT+Y	canonical	Ctrl+Shift+Y
+unity	CTRL+SHIFT+Y	canonical	Ctrl+Shift+Y
+native	Shift+Ctrl+Y	canonical	Ctrl+Shift+Y
+unity	Shift+Ctrl+Y	canonical	Ctrl+Shift+Y
+native	alt+shift+ctrl+f9	canonical	Ctrl+Shift+Alt+F9
+unity	alt+shift+ctrl+f9	canonical	Ctrl+Shift+Alt+F9
+native	Alt+Ctrl+Delete	canonical	Ctrl+Alt+Delete
+unity	Alt+Ctrl+Delete	canonical	Ctrl+Alt+Delete
+native	Shift+Alt+A	canonical	Shift+Alt+A
+unity	Shift+Alt+A	canonical	Shift+Alt+A
+native	Alt+Home	canonical	Alt+Home
+unity	Alt+Home	canonical	Alt+Home
+native	Shift+End	canonical	Shift+End
+unity	Shift+End	canonical	Shift+End
+native	Ctrl+LeftControl	canonical	Ctrl+LeftControl
+unity	Ctrl+LeftControl	canonical	Ctrl+LeftControl
+
+# Lists keep their order and are joined by comma and space
+native	end,ctrl+shift+y	canonical	End, Ctrl+Shift+Y
+unity	end,ctrl+shift+y	canonical	End, Ctrl+Shift+Y
+native	End, Ctrl+Shift+Y	canonical	End, Ctrl+Shift+Y
+unity	End, Ctrl+Shift+Y	canonical	End, Ctrl+Shift+Y
+native	 End ,  Ctrl + Shift + Y 	canonical	End, Ctrl+Shift+Y
+unity	 End ,  Ctrl + Shift + Y 	canonical	End, Ctrl+Shift+Y
+native	\x09End\x09,\x09Ctrl\x09+\x09Y\x09	canonical	End, Ctrl+Y
+unity	\x09End\x09,\x09Ctrl\x09+\x09Y\x09	canonical	End, Ctrl+Y
+native	PageUp, Ctrl+Shift+G	canonical	PageUp, Ctrl+Shift+G
+unity	PageUp, Ctrl+Shift+G	canonical	PageUp, Ctrl+Shift+G
+native	pagedown,ctrl+shift+h	canonical	PageDown, Ctrl+Shift+H
+unity	pagedown,ctrl+shift+h	canonical	PageDown, Ctrl+Shift+H
+native	Insert,Ctrl+Shift+U	canonical	Insert, Ctrl+Shift+U
+unity	Insert,Ctrl+Shift+U	canonical	Insert, Ctrl+Shift+U
+native	Home, End	canonical	Home, End
+unity	Home, End	canonical	Home, End
+native	End, Home, PageUp, PageDown	canonical	End, Home, PageUp, PageDown
+unity	End, Home, PageUp, PageDown	canonical	End, Home, PageUp, PageDown
+native	Y, Ctrl+Shift+Y	canonical	Y, Ctrl+Shift+Y
+unity	Y, Ctrl+Shift+Y	canonical	Y, Ctrl+Shift+Y
+native	Ctrl+End, End	canonical	Ctrl+End, End
+unity	Ctrl+End, End	canonical	Ctrl+End, End
+native	Ctrl+End, Shift+End, Ctrl+Shift+End	canonical	Ctrl+End, Shift+End, Ctrl+Shift+End
+unity	Ctrl+End, Shift+End, Ctrl+Shift+End	canonical	Ctrl+End, Shift+End, Ctrl+Shift+End
+
+# Native codes: 0x and one or two hex digits, 0x01 to 0xFE; a named code is written as its name
+native	0x23	canonical	End
+native	0X23	canonical	End
+native	0x59	canonical	Y
+native	ctrl+shift+0x59	canonical	Ctrl+Shift+Y
+native	0x30	canonical	Alpha0
+native	0x39	canonical	Alpha9
+native	0x41	canonical	A
+native	0x5a	canonical	Z
+native	0x70	canonical	F1
+native	0x7E	canonical	F15
+native	0x7F	canonical	F16
+native	0x87	canonical	F24
+native	0x60	canonical	Keypad0
+native	0x6A	canonical	KeypadMultiply
+native	0x6B	canonical	KeypadPlus
+native	0x6D	canonical	KeypadMinus
+native	0x6E	canonical	KeypadPeriod
+native	0x6F	canonical	KeypadDivide
+native	0x26	canonical	UpArrow
+native	0x28	canonical	DownArrow
+native	0x25	canonical	LeftArrow
+native	0x27	canonical	RightArrow
+native	0x21	canonical	PageUp
+native	0x22	canonical	PageDown
+native	0x24	canonical	Home
+native	0x2D	canonical	Insert
+native	0x2E	canonical	Delete
+native	0x08	canonical	Backspace
+native	0x09	canonical	Tab
+native	0x0D	canonical	Return
+native	0x13	canonical	Pause
+native	0x14	canonical	CapsLock
+native	0x1B	canonical	Escape
+native	0x20	canonical	Space
+native	0x2c	canonical	Print
+native	0x5B	canonical	LeftWindows
+native	0x5C	canonical	RightWindows
+native	0x5d	canonical	Menu
+native	0x90	canonical	Numlock
+native	0x91	canonical	ScrollLock
+native	0xA0	canonical	LeftShift
+native	0xA1	canonical	RightShift
+native	0xA2	canonical	LeftControl
+native	0xA3	canonical	RightControl
+native	0xA4	canonical	LeftAlt
+native	0xA5	canonical	RightAlt
+
+# Native codes with no name are written in upper-case hex without padding
+native	0x1	canonical	0x1
+native	0x01	canonical	0x1
+native	0x07	canonical	0x7
+native	0x0C	canonical	0xC
+native	0x6C	canonical	0x6C
+native	0xba	canonical	0xBA
+native	0xBA	canonical	0xBA
+native	0xC0	canonical	0xC0
+native	0xDE	canonical	0xDE
+native	0xFE	canonical	0xFE
+native	0x1F	canonical	0x1F
+native	End, 0xBA	canonical	End, 0xBA
+
+# A modifier's own code is a key, written in hex
+native	0x10	canonical	0x10
+native	0x11	canonical	0x11
+native	0x12	canonical	0x12
+native	Ctrl+0x11	canonical	Ctrl+0x11
+
+# Native codes that are not codes
+native	0x0	invalid
+native	0x00	invalid
+native	0xFF	invalid
+native	0xff	invalid
+native	0x100	invalid
+native	0x023	invalid
+native	0x	invalid
+native	0X	invalid
+native	0xG1	invalid
+native	0x 23	invalid
+native	-0x23	invalid
+native	x23	invalid
+native	23	invalid
+native	35	invalid
+
+# Unity mods read names only: a number has no single meaning across the two dialects
+unity	0x23	invalid
+unity	0x7	invalid
+unity	ctrl+shift+0x59	invalid
+unity	279	invalid
+
+# Unity names with no Windows key code
+unity	Mouse0	canonical	Mouse0
+native	Mouse0	invalid
+unity	mouse6	canonical	Mouse6
+unity	JoystickButton0	canonical	JoystickButton0
+native	JoystickButton0	invalid
+unity	Joystick8Button19	canonical	Joystick8Button19
+unity	KeypadEnter	canonical	KeypadEnter
+native	KeypadEnter	invalid
+unity	KeypadEquals	canonical	KeypadEquals
+unity	Clear	canonical	Clear
+native	Clear	invalid
+unity	AltGr	canonical	AltGr
+native	AltGr	invalid
+unity	Semicolon	canonical	Semicolon
+native	Semicolon	invalid
+unity	BackQuote	canonical	BackQuote
+unity	Tilde	canonical	Tilde
+unity	WheelUp	canonical	WheelUp
+unity	Ctrl+Mouse1	canonical	Ctrl+Mouse1
+unity	End, Mouse3	canonical	End, Mouse3
+
+# A second Unity name for one value reads as the key and is written as its name
+unity	LeftCommand	canonical	LeftCommand
+unity	LeftApple	canonical	LeftCommand
+unity	leftmeta	canonical	LeftCommand
+unity	RightApple	canonical	RightCommand
+unity	RightMeta	canonical	RightCommand
+unity	Ctrl+LeftMeta	canonical	Ctrl+LeftCommand
+unity	LeftApple, LeftCommand	invalid
+native	LeftCommand	invalid
+native	LeftApple	invalid
+
+# A binding listed twice
+native	End, end	invalid
+unity	End, end	invalid
+native	End,End	invalid
+unity	End,End	invalid
+native	Ctrl+Shift+Y, Shift+Ctrl+Y	invalid
+unity	Ctrl+Shift+Y, Shift+Ctrl+Y	invalid
+native	Home, End, HOME	invalid
+unity	Home, End, HOME	invalid
+native	End, 0x23	invalid
+native	0x23, end	invalid
+native	0xBA, 0xba	invalid
+
+# Items and tokens
+native	End,	invalid
+unity	End,	invalid
+native	,End	invalid
+unity	,End	invalid
+native	End,,Home	invalid
+unity	End,,Home	invalid
+native	End, ,Home	invalid
+unity	End, ,Home	invalid
+native	,	invalid
+unity	,	invalid
+native	Ctrl	invalid
+unity	Ctrl	invalid
+native	ctrl+shift	invalid
+unity	ctrl+shift	invalid
+native	Shift+	invalid
+unity	Shift+	invalid
+native	+End	invalid
+unity	+End	invalid
+native	Ctrl++End	invalid
+unity	Ctrl++End	invalid
+native	Ctrl+ +End	invalid
+unity	Ctrl+ +End	invalid
+native	Ctrl+Ctrl+End	invalid
+unity	Ctrl+Ctrl+End	invalid
+native	ctrl+CTRL+end	invalid
+unity	ctrl+CTRL+end	invalid
+native	Ctrl+Shift+Ctrl+Y	invalid
+unity	Ctrl+Shift+Ctrl+Y	invalid
+native	End+Ctrl	invalid
+unity	End+Ctrl	invalid
+native	End+Home	invalid
+unity	End+Home	invalid
+native	Control+End	invalid
+unity	Control+End	invalid
+native	LeftControl+End	invalid
+unity	LeftControl+End	invalid
+native	Ctrl-End	invalid
+unity	Ctrl-End	invalid
+native	Ctrl Shift Y	invalid
+unity	Ctrl Shift Y	invalid
+
+# Not key names
+native	None	invalid
+unity	None	invalid
+native	Page Up	invalid
+unity	Page Up	invalid
+native	F0	invalid
+unity	F0	invalid
+native	F25	invalid
+unity	F25	invalid
+native	Alpha10	invalid
+unity	Alpha10	invalid
+native	Keypad	invalid
+unity	Keypad	invalid
+native	1	invalid
+unity	1	invalid
+native	NumPad0	invalid
+unity	NumPad0	invalid
+native	PrintScreen	invalid
+unity	PrintScreen	invalid
+native	Esc	invalid
+unity	Esc	invalid
+native	Enter	invalid
+unity	Enter	invalid
+native	End ; toggle	invalid
+unity	End ; toggle	invalid
+native	"End"	invalid
+unity	"End"	invalid
+native	End\x0B	invalid
+unity	End\x0B	invalid
+native	End\x0D	invalid
+unity	End\x0D	invalid
+
+# Names fold ASCII case only
+native	\xC3\x89nd	invalid
+unity	\xC3\x89nd	invalid
+native	\xE2\x84\xAA	invalid
+unity	\xE2\x84\xAA	invalid
+native	ctrl+shift+\xEF\xBD\x99	invalid
+unity	ctrl+shift+\xEF\xBD\x99	invalid
+native	\xC4\xB0nsert	invalid
+unity	\xC4\xB0nsert	invalid

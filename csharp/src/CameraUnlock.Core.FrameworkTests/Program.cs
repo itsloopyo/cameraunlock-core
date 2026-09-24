@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 using CameraUnlock.Core.Config;
 using CameraUnlock.Core.Tests.Config;
+using CameraUnlock.Core.Tests.Input;
 
 namespace CameraUnlock.Core.Tests
 {
@@ -59,6 +60,12 @@ namespace CameraUnlock.Core.Tests
             foreach (string name in IniEditorFixtures.Cases(fixtures))
             {
                 failures += Report(name, dir => IniEditorFixtures.RunCase(fixtures, name));
+            }
+
+            Console.WriteLine("Key binding fixtures (unity rows)");
+            foreach (string row in KeyBindingFixtures.UnityRows(fixtures))
+            {
+                failures += Report(row.Replace('\t', ' '), dir => KeyBindingFixtures.RunRow(row));
             }
 
             Console.WriteLine(failures == 0 ? "All passed." : failures + " FAILED.");

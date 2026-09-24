@@ -9,6 +9,55 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - key names and the hotkey binding codec, in C# and C++
+
+One vocabulary for hotkey values: `End`, `End, Ctrl+Shift+Y`, or empty for unbound. Nothing
+reads a config through it yet; the canonical config tables will.
+
+- `data/keys.json` (schema_version 1) lists 334 keys by their written name, which is Unity's
+  `KeyCode` member name, with the Windows virtual-key code and the Unity `KeyCode` value
+  each carries. Every `KeyCode` member is there but `None`, Unity's value for no key. The
+  names and values were read off the shipped `UnityEngine` assemblies of 18 games, Unity
+  5.3.4 to 6000.3.15, which agree on every value. `LeftApple` and `LeftMeta` read as
+  `LeftCommand`, and `RightApple` and `RightMeta` as `RightCommand` (one value, three
+  names). A virtual-key code is paired with a name only where both mean the same key on
+  every layout: letters, digits (`Alpha0`-`Alpha9`), `F1`-`F24`, the nav cluster, arrows,
+  keypad digits and operators, `Escape`, `Space`, `Tab`, `Return`, `Backspace`, `Pause`,
+  `Print`, `Numlock`, `CapsLock`, `ScrollLock`, left and right Shift, Control and Alt, the
+  Windows keys and `Menu`. The `VK_OEM_*` punctuation codes have no name.
+  `scripts/generate-config-schema.mjs` validates it and emits
+  `cameraunlock/input/key_names.g.h` and `CameraUnlock.Core.Input.KeyNames` (internal);
+  `pixi run check-config-schema` covers both.
+- C++ (`cameraunlock/input/key_bindings.h`, pure, no `<windows.h>`): `KeyModifiers`
+  (`kCtrl` 1, `kShift` 2, `kAlt` 4, with `|`, `&` and `HasModifiers`), `KeyBinding`
+  (`modifiers`, `vk`), `ParseKeyBindings(std::string_view)` returning
+  `KeyBindingsParseResult` (`bindings`, `error`, `ok()`), `FormatKeyBindings` and
+  `FormatVirtualKey(int)`. Native values also read `0x` and one or two hex digits from
+  0x01 to 0xFE, so every code a legacy file holds can be written; a code with no name is
+  written that way (`0xBA`).
+- C# (`CameraUnlock.Core.Input`): `KeyModifiers` (the same numbers), `KeyBinding`
+  (`Modifiers`, `UnityKeyCode`), `KeyBindings.TryParse(string, out KeyBinding[], out string)`
+  and `KeyBindings.Format(IList<KeyBinding>)`. Unity values read names only: a `KeyCode`
+  value is not a virtual-key code, so a number would mean another key than it does in a
+  native mod.
+- The syntax: items split at `,`, each an optional `Ctrl`, `Shift` and `Alt` in any order,
+  then one key, joined by `+`; ASCII case-insensitive; a binding listed twice is invalid;
+  an error says what was expected. The canonical text writes `Ctrl+Shift+Alt+` in that
+  order, the key's table name and `, ` between items, so `end,shift+ctrl+y` is written
+  `End, Ctrl+Shift+Y`. `Format` and `FormatKeyBindings` throw for what would not read back
+  (a code with no name in C#, a code outside 0x01-0xFE in C++, a repeated binding).
+  `data/fixtures/canonical-ini/keys/cases.tsv` holds both languages to it.
+- Registration. C++ `cameraunlock/input/key_binding_registration.h` (Windows):
+  `RegisterKeyBindings(HotkeyPoller&, const std::vector<KeyBinding>&, std::function<void()>)`
+  adds one hotkey per binding and returns the ids. C# `CameraUnlock.Core.Unity.Extensions.KeyBindingInput.IsTriggered(IList<KeyBinding>)`
+  asks `Input.GetKeyDown` and `Input.GetKey`. Both apply one rule: a binding with modifiers
+  fires when its key goes down while every modifier it names is held, either side; one
+  without does not fire while Ctrl and Shift are both held, which is `NavGuarded`'s rule.
+  Chords are ordinary items of the list, so `ToggleKey=End, Ctrl+Shift+Y` needs no second
+  binding path. `KeyBindingInput.cs` is also in `csharp/il2cpp/CameraUnlock.Core.Unity.Il2Cpp.props`.
+- `csharp/stubs/UnityStubs.cs` declares every `KeyCode` member with an explicit value (the
+  values are unchanged), and a test holds each to `data/keys.json`.
+
 ### Added - the canonical INI reader, in C# and C++
 
 One byte-level reader for the canonical config format, the dialect every converted mod

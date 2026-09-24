@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -219,6 +220,49 @@ namespace CameraUnlock.Core.Tests.Regressions
                 { "None", 0 },
                 { "InstanceID", 1 },
             });
+        }
+
+        /// <summary>
+        /// KeyCode against data/keys.json, the table hotkey values are read and written with.
+        /// Its Unity names and values were read off UnityEngine.KeyCode in the shipped
+        /// assemblies of eighteen games from Unity 5.3.4 to 6000.3.15 (the file's
+        /// unity_sources), which agree on every value. So a stub member that disagrees with the
+        /// table is wrong in one of the two, and a mod compiled against it would poll another key.
+        /// </summary>
+        [Fact]
+        public void KeyCode_MatchesTheKeyTable()
+        {
+            var table = new Dictionary<string, int>();
+            using (JsonDocument keys = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "data", "keys.json"))))
+            {
+                JsonElement unbound = keys.RootElement.GetProperty("unity_unbound");
+                table.Add(unbound.GetProperty("name").GetString()!, unbound.GetProperty("unity").GetInt32());
+                foreach (JsonElement key in keys.RootElement.GetProperty("keys").EnumerateArray())
+                {
+                    if (!key.TryGetProperty("unity", out JsonElement unity)) continue;
+                    table.Add(key.GetProperty("name").GetString()!, unity.GetInt32());
+                    if (!key.TryGetProperty("aliases", out JsonElement aliases)) continue;
+                    foreach (JsonElement alias in aliases.EnumerateArray())
+                    {
+                        table.Add(alias.GetString()!, unity.GetInt32());
+                    }
+                }
+            }
+
+            Dictionary<string, int?> declared = ReadEnum(StubSource(), "KeyCode");
+            Assert.NotEmpty(declared);
+            foreach (KeyValuePair<string, int?> member in declared)
+            {
+                Assert.True(
+                    member.Value.HasValue,
+                    "KeyCode." + member.Key + " has no explicit value. Every member needs one, "
+                        + "or inserting a member above it silently renumbers it.");
+                Assert.True(table.ContainsKey(member.Key), "KeyCode." + member.Key + " is not a name in data/keys.json");
+                Assert.True(
+                    table[member.Key] == member.Value,
+                    "KeyCode." + member.Key + " is " + member.Value + " in the stub and "
+                        + table[member.Key] + " in data/keys.json.");
+            }
         }
 
         /// <summary>

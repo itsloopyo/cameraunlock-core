@@ -33,6 +33,7 @@ In the mod's `.csproj`, after the `CameraUnlock.Core` ProjectReference:
 | `SplitInjectionCameraTracker.cs` | `CameraUnlock.Core.Unity.Il2Cpp` | Multi-camera split injection for camera-relative pipelines (HDRP): rotation via worldToCameraMatrix, position via transform with local-space restore. |
 | `FastBootBehaviour.cs` (opt-in) | `CameraUnlock.Core.Unity.Il2Cpp` | Dev tool: disables splash/intro VideoPlayers on every scene load. |
 | `../src/CameraUnlock.Core.Unity/Extensions/ChordHotkeys.cs` | `CameraUnlock.Core.Unity.Extensions` | Ctrl+Shift+letter chord hotkeys (whitelisted Core.Unity file, proxy-compatible). |
+| `../src/CameraUnlock.Core.Unity/Extensions/KeyBindingInput.cs` | `CameraUnlock.Core.Unity.Extensions` | Checks a hotkey list read by `CameraUnlock.Core.Input.KeyBindings` against Unity's input (whitelisted Core.Unity file, proxy-compatible). |
 
 ## Constraints on files in this folder
 

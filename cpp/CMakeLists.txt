@@ -37,6 +37,7 @@ set(CAMERAUNLOCK_SOURCES
     src/memory/pattern_scanner.cpp
     src/memory/pe_fingerprint.cpp
     src/input/hotkey_poller.cpp
+    src/input/key_bindings.cpp
     src/logging/file_log.cpp
     src/diagnostics/crash_handler.cpp
 )

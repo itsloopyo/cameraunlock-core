@@ -29,6 +29,7 @@
 // This file is compiled ONLY into the test assembly. It never ships.
 
 using System;
+using System.Collections.Generic;
 
 // The stubs below are process-wide mutable state (Time, Screen, Camera.main,
 // Camera.onPreCull, and CameraCallbackLifecycle's own statics on top of them). Running test
@@ -503,6 +504,23 @@ namespace UnityEngine
             deltaTime = 1f / 60f;
             unscaledDeltaTime = 1f / 60f;
             frameCount = 1;
+        }
+    }
+
+    /// Test-controlled keyboard: the test says which keys went down this frame and which are
+    /// held, as Unity's player loop would.
+    public static class Input
+    {
+        public static readonly HashSet<KeyCode> Down = new HashSet<KeyCode>();
+        public static readonly HashSet<KeyCode> Held = new HashSet<KeyCode>();
+
+        public static bool GetKeyDown(KeyCode key) => Down.Contains(key);
+        public static bool GetKey(KeyCode key) => Held.Contains(key);
+
+        public static void Reset()
+        {
+            Down.Clear();
+            Held.Clear();
         }
     }
 

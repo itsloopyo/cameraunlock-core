@@ -19,6 +19,8 @@
              Link="CameraUnlock.Il2Cpp\SplitInjectionCameraTracker.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)..\src\CameraUnlock.Core.Unity\Extensions\ChordHotkeys.cs"
              Link="CameraUnlock.Il2Cpp\ChordHotkeys.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)..\src\CameraUnlock.Core.Unity\Extensions\KeyBindingInput.cs"
+             Link="CameraUnlock.Il2Cpp\KeyBindingInput.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FastBootBehaviour.cs"
              Link="CameraUnlock.Il2Cpp\FastBootBehaviour.cs"
              Condition="'$(CameraUnlockFastBoot)' == 'true'" />

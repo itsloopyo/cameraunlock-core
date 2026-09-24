@@ -69,6 +69,9 @@
     <Compile Include="..\CameraUnlock.Core.Unity\Effects\HeadFollowLight.cs">
       <Link>UnderTest\HeadFollowLight.cs</Link>
     </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Extensions\KeyBindingInput.cs">
+      <Link>UnderTest\KeyBindingInput.cs</Link>
+    </Compile>
     <!-- Ships to IL2CPP mods as SOURCE via csharp/il2cpp/*.props, so it belongs to no
          .csproj here and nothing in this repo compiled it, let alone tested it. Its
          camera-name tokeniser is pure string code with a history of misclassifying real

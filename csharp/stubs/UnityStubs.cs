@@ -341,14 +341,17 @@ namespace UnityEngine {
     }
     public enum KeyCode {
         None = 0, Backspace = 8, Tab = 9, Clear = 12, Return = 13, Pause = 19, Escape = 27, Space = 32,
-        Alpha0 = 48, Alpha1, Alpha2, Alpha3, Alpha4, Alpha5, Alpha6, Alpha7, Alpha8, Alpha9,
-        A = 97, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
-        Delete = 127, Keypad0 = 256, Keypad1, Keypad2, Keypad3, Keypad4, Keypad5, Keypad6, Keypad7, Keypad8, Keypad9,
-        F1 = 282, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15,
-        UpArrow = 273, DownArrow = 274, RightArrow = 275, LeftArrow = 276,
-        Insert = 277, Home = 278, End = 279, PageUp = 280, PageDown = 281,
-        RightShift = 303, LeftShift = 304, RightControl = 305, LeftControl = 306,
-        RightAlt = 307, LeftAlt = 308, Mouse0 = 323, Mouse1, Mouse2
+        Alpha0 = 48, Alpha1 = 49, Alpha2 = 50, Alpha3 = 51, Alpha4 = 52, Alpha5 = 53, Alpha6 = 54,
+        Alpha7 = 55, Alpha8 = 56, Alpha9 = 57, A = 97, B = 98, C = 99, D = 100, E = 101, F = 102, G = 103,
+        H = 104, I = 105, J = 106, K = 107, L = 108, M = 109, N = 110, O = 111, P = 112, Q = 113, R = 114,
+        S = 115, T = 116, U = 117, V = 118, W = 119, X = 120, Y = 121, Z = 122, Delete = 127, Keypad0 = 256,
+        Keypad1 = 257, Keypad2 = 258, Keypad3 = 259, Keypad4 = 260, Keypad5 = 261, Keypad6 = 262,
+        Keypad7 = 263, Keypad8 = 264, Keypad9 = 265, F1 = 282, F2 = 283, F3 = 284, F4 = 285, F5 = 286,
+        F6 = 287, F7 = 288, F8 = 289, F9 = 290, F10 = 291, F11 = 292, F12 = 293, F13 = 294, F14 = 295,
+        F15 = 296, UpArrow = 273, DownArrow = 274, RightArrow = 275, LeftArrow = 276, Insert = 277,
+        Home = 278, End = 279, PageUp = 280, PageDown = 281, RightShift = 303, LeftShift = 304,
+        RightControl = 305, LeftControl = 306, RightAlt = 307, LeftAlt = 308, Mouse0 = 323, Mouse1 = 324,
+        Mouse2 = 325
     }
     public static class Cursor {
         public static CursorLockMode lockState { get; set; }
