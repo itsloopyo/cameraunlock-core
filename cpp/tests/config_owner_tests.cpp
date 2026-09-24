@@ -30,6 +30,17 @@
 #include <utility>
 #include <vector>
 
+namespace cameraunlock::config::detail {
+
+struct ConfigOwnerTestAccess {
+    template <class Config>
+    static std::unique_ptr<ConfigOwner<Config>> Make(ConfigOwnerOptions<Config> options, ConfigOwnerHook hook) {
+        return std::unique_ptr<ConfigOwner<Config>>(new ConfigOwner<Config>(std::move(options), std::move(hook)));
+    }
+};
+
+}  // namespace cameraunlock::config::detail
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -246,9 +257,10 @@ struct Rig {
     }
 
     std::unique_ptr<Owner> Make() {
-        return std::make_unique<Owner>(Options(), [this](const std::string& label, const std::wstring& at) -> std::uint32_t {
-            return hook ? hook(label, at) : 0;
-        });
+        return detail::ConfigOwnerTestAccess::Make(
+            Options(), [this](const std::string& label, const std::wstring& at) -> std::uint32_t {
+                return hook ? hook(label, at) : 0;
+            });
     }
 };
 
@@ -677,6 +689,44 @@ void AFileHeldDenyingReadSharingDefers(const fs::path& dir) {
     ExpectSunkOnce(rig, load.reason);
     ExpectUntouched(rig);
     ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
+}
+
+void AFilePendingDeletionDefers(const fs::path& dir) {
+    Rig rig(dir);
+    WriteBytes(rig.path, kLegacyText);
+    HANDLE doomed = CreateFileW(rig.path.c_str(), DELETE | GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+    struct Release {
+        HANDLE& handle;
+        ~Release() {
+            if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+        }
+    } release{doomed};
+    FILE_DISPOSITION_INFO disposition{TRUE};
+    Check(doomed != INVALID_HANDLE_VALUE &&
+              SetFileInformationByHandle(doomed, FileDispositionInfo, &disposition, sizeof disposition),
+          "another program deletes the file while it holds it open");
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    const bool refused = !GetFileAttributesExW(rig.path.c_str(), GetFileExInfoStandard, &attributes);
+    Check(refused && GetLastError() == ERROR_ACCESS_DENIED, "GetFileAttributesExW refuses the file with access denied");
+
+    const std::unique_ptr<Owner> owner = rig.Make();
+    const Load load = owner->Load();
+    ExpectStatus(load, ConfigLoadStatus::Deferred);
+    Check(Contains(load.reason, kFileNameText + " cannot be read: it could not be read (Windows error 5"s),
+          "the reason says why: " + load.reason);
+    Check(Same(load.config, Defaults()), "the session runs on the defaults");
+    Check(rig.legacy->Runs() == 0, "the import does not run");
+    ExpectSunkOnce(rig, load.reason);
+    Check(!owner->FileChanged(), "FileChanged reads the write time the folder still lists");
+    const Reload reload = owner->Reload();
+    Check(reload.status == ConfigReloadStatus::Unreadable && !reload.config, "Reload is Unreadable: " + reload.reason);
+
+    CloseHandle(doomed);
+    doomed = INVALID_HANDLE_VALUE;
+    Check(!fs::exists(rig.path), "the file is gone once the other program closes it");
+    Check(owner->FileChanged(), "the file going away is a change");
 }
 
 void AnImportThatWritesTheFileDefers(const fs::path& dir) {
@@ -1341,6 +1391,7 @@ int RunConfigOwnerTests() {
     RunScenario("a-read-only-file-defers", AReadOnlyFileDefers);
     RunScenario("a-folder-that-cannot-be-written-defers", AFolderThatCannotBeWrittenDefers);
     RunScenario("a-file-held-denying-read-sharing-defers", AFileHeldDenyingReadSharingDefers);
+    RunScenario("a-file-pending-deletion-defers", AFilePendingDeletionDefers);
     RunScenario("an-import-that-writes-the-file-defers", AnImportThatWritesTheFileDefers);
     RunScenario("a-failed-copy-defers", AFailedCopyDefers);
     RunScenario("a-copy-that-does-not-read-back-defers", ACopyThatDoesNotReadBackDefers);

@@ -188,8 +188,8 @@ public:
     OwnerFileRead Open(const std::wstring& path);
     /// Reads the held file again from its start. Returns the Win32 error, 0 when read.
     std::uint32_t Reread(std::string& bytes);
-    /// Returns the Win32 error from CloseHandle, 0 when closed or never held.
-    std::uint32_t Close();
+    /// Throws std::system_error when CloseHandle fails.
+    void Close();
 
 private:
     void* handle_ = nullptr;
@@ -198,8 +198,10 @@ private:
 // Reads a file shared for read, write and delete.
 OwnerFileRead OwnerReadFile(const std::wstring& path);
 
-// The last write time as a FILETIME count, 0 for a missing file or folder. Throws
-// std::system_error for any other failure of GetFileAttributesExW.
+// The last write time as a FILETIME count, as .NET's File.GetLastWriteTimeUtc reads it:
+// GetFileAttributesExW, then FindFirstFileW when that fails for a file that is not missing (one
+// pending deletion). 0 for a missing file or folder or a drive with no media. Throws
+// std::system_error when both fail otherwise.
 std::uint64_t OwnerLastWriteTime(const std::wstring& path);
 
 // GetFullPathNameW of a fully qualified path. Throws std::invalid_argument naming the option
@@ -248,6 +250,9 @@ OwnerKept OwnerKeepOriginal(const std::wstring& path, const std::string& snapsho
 void OwnerLogNotCarried(const std::string& snapshot, const std::vector<LegacyKey>& keys, const std::string& input,
                         std::vector<std::string>& log);
 
+// Declared only: the test suite defines it to build an owner with a ConfigOwnerHook.
+struct ConfigOwnerTestAccess;
+
 }  // namespace detail
 
 /// The one reader and writer of a game's canonical config file. It converts a legacy file once
@@ -276,31 +281,6 @@ public:
     /// PositionEnabled and marks only one of them Writable, or the table cannot render its
     /// defaults under the header.
     explicit ConfigOwner(ConfigOwnerOptions<Config> options) : ConfigOwner(std::move(options), nullptr) {}
-
-    /// The test seam: the owner with a hook run before each step (detail::ConfigOwnerHook).
-    ConfigOwner(ConfigOwnerOptions<Config> options, detail::ConfigOwnerHook hook)
-        : path_(detail::OwnerFullPath(options.path, "path")),
-          path_text_(detail::OwnerUtf8(path_)),
-          name_(detail::OwnerFileName(path_)),
-          table_(std::move(options.table)),
-          import_(std::move(options.import)),
-          header_(std::move(options.header)),
-          status_sink_(std::move(options.status_sink)),
-          hook_(std::move(hook)) {
-        if (table_.rows_.empty()) throw std::invalid_argument("the options' table has no rows");
-        if (!import_.run && !import_.keys.empty()) {
-            throw std::invalid_argument("the options' import names keys but has no run");
-        }
-        const std::optional<std::size_t> rotation = RowOf(schema::Concept::RotationEnabled);
-        const std::optional<std::size_t> position = RowOf(schema::Concept::PositionEnabled);
-        if (rotation && position && table_.rows_[*rotation].writable != table_.rows_[*position].writable) {
-            const std::size_t writable = table_.rows_[*rotation].writable ? *rotation : *position;
-            const std::size_t other = writable == *rotation ? *position : *rotation;
-            throw std::invalid_argument("the table marks " + RowName(writable) + " Writable but not " +
-                                        RowName(other) + ", and a tracking mode change writes both");
-        }
-        default_bytes_ = RenderCanonical(table_, table_.defaults(), header_);
-    }
 
     ConfigOwner(const ConfigOwner&) = delete;
     ConfigOwner& operator=(const ConfigOwner&) = delete;
@@ -407,12 +387,14 @@ public:
         return result;
     }
 
-    /// True when the file's last write time, read with GetFileAttributesExW, differs from the one
-    /// the owner recorded at its last Load, Reload or committed Save. A missing file counts as
-    /// write time 0, so a file that appears or goes away counts.
+    /// True when the file's last write time differs from the one the owner recorded at its last
+    /// Load, Reload or committed Save. The time is read with GetFileAttributesExW, or from the
+    /// folder's listing with FindFirstFileW when that refuses a file that is there (one pending
+    /// deletion), as .NET reads it. A missing file counts as write time 0, so a file that appears
+    /// or goes away counts.
     ///
-    /// Throws std::logic_error when Load has not run, and std::system_error when Windows cannot
-    /// read the file's attributes for a reason other than its absence.
+    /// Throws std::logic_error when Load has not run, and std::system_error when Windows can read
+    /// the time neither way for a reason other than the file's absence.
     bool FileChanged() {
         std::lock_guard<std::mutex> lock(mutex_);
         RequireLoaded("FileChanged");
@@ -420,6 +402,32 @@ public:
     }
 
 private:
+    friend struct detail::ConfigOwnerTestAccess;
+
+    ConfigOwner(ConfigOwnerOptions<Config> options, detail::ConfigOwnerHook hook)
+        : path_(detail::OwnerFullPath(options.path, "path")),
+          path_text_(detail::OwnerUtf8(path_)),
+          name_(detail::OwnerFileName(path_)),
+          table_(std::move(options.table)),
+          import_(std::move(options.import)),
+          header_(std::move(options.header)),
+          status_sink_(std::move(options.status_sink)),
+          hook_(std::move(hook)) {
+        if (table_.rows_.empty()) throw std::invalid_argument("the options' table has no rows");
+        if (!import_.run && !import_.keys.empty()) {
+            throw std::invalid_argument("the options' import names keys but has no run");
+        }
+        const std::optional<std::size_t> rotation = RowOf(schema::Concept::RotationEnabled);
+        const std::optional<std::size_t> position = RowOf(schema::Concept::PositionEnabled);
+        if (rotation && position && table_.rows_[*rotation].writable != table_.rows_[*position].writable) {
+            const std::size_t writable = table_.rows_[*rotation].writable ? *rotation : *position;
+            const std::size_t other = writable == *rotation ? *position : *rotation;
+            throw std::invalid_argument("the table marks " + RowName(writable) + " Writable but not " +
+                                        RowName(other) + ", and a tracking mode change writes both");
+        }
+        default_bytes_ = RenderCanonical(table_, table_.defaults(), header_);
+    }
+
     static constexpr const char* kChangedWhileRead = "the file was changed by another program while it was read";
 
     ConfigLoadResult<Config> LoadLocked() {
@@ -442,13 +450,7 @@ private:
 
         const bool stamped = HasCanonicalStamp(opened.bytes);
         if (!stamped && import_.run) return Migrate(held, opened.bytes, std::move(log));
-        const std::uint32_t closed = held.Close();
-        if (closed != 0) {
-            log.push_back(path_text_ + ": could not be closed after it was read: " + detail::OwnerErrorText(closed));
-            return LoadResult(ConfigLoadStatus::Deferred, table_.defaults(), {}, std::move(log),
-                              name_ + " cannot be read: " + detail::OwnerReadWhy(path_, closed) +
-                                  ". The mod runs on its default settings this session.");
-        }
+        held.Close();
         return ReadCanonical(opened.bytes, stamped, std::move(log));
     }
 
@@ -510,11 +512,7 @@ private:
         } else if (reread != snapshot) {
             changed_why = kChangedWhileRead;
         }
-        const std::uint32_t closed = held.Close();
-        if (closed != 0 && changed_why.empty()) {
-            changed_why = detail::OwnerReadWhy(path_, closed);
-            log.push_back(path_text_ + ": could not be closed after the import: " + detail::OwnerErrorText(closed));
-        }
+        held.Close();
         if (!changed_why.empty()) return Defer(std::move(imported), std::move(log), changed_why);
 
         if (input.ansi_lossy) {
@@ -801,11 +799,7 @@ private:
         } else if (reread != bytes) {
             changed_why = kChangedWhileRead;
         }
-        const std::uint32_t closed = held.Close();
-        if (closed != 0 && changed_why.empty()) {
-            changed_why = detail::OwnerReadWhy(path_, closed);
-            log.push_back(path_text_ + ": could not be closed after the import: " + detail::OwnerErrorText(closed));
-        }
+        held.Close();
         if (!changed_why.empty()) return NotReloaded(changed_why, changed_why, std::move(log));
 
         switch (legacy.status) {

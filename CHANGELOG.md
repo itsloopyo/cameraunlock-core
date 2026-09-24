@@ -50,7 +50,9 @@ and results compile everywhere; the owner itself is Windows only, as the writer 
 - **`Reload()`** returns `ConfigReloadResult<Config>` (`Unchanged` 0, `Applied` 1,
   `LegacyReadOnly` 2, `Unreadable` 3; `config` is a `std::optional`) and never writes.
   **`FileChanged()`** compares the last write time from `GetFileAttributesExW` with the recorded
-  one; a missing file counts as 0.
+  one; a missing file counts as 0. When `GetFileAttributesExW` refuses a file that is there (one
+  pending deletion refuses it with access denied), the time comes from `FindFirstFileW`, as .NET's
+  `File.GetLastWriteTimeUtc` reads it, so `Load` defers on such a file rather than throwing.
 - One `std::mutex` around `Load`, `Reload`, `Save` and `FileChanged`; the status sink runs after it
   is released. `Save` is synchronous: call it from the HotkeyPoller thread, never per frame.
 - `ConfigLoadStatusName`, `ConfigSaveStatusName` and `ConfigReloadStatusName` give the C#

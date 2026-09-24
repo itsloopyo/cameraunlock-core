@@ -61,6 +61,13 @@ constexpr DWORD kReadChunk = 64 * 1024;
 
 bool IsAbsent(DWORD error) { return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND; }
 
+// The failures .NET's File.GetLastWriteTimeUtc reports as a missing file.
+bool IsAbsentForTime(DWORD error) { return IsAbsent(error) || error == ERROR_NOT_READY; }
+
+std::uint64_t FileTimeCount(const FILETIME& time) {
+    return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+}
+
 bool IsSeparator(wchar_t c) { return c == L'\\' || c == L'/'; }
 
 char FoldAscii(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
@@ -166,11 +173,13 @@ std::uint32_t OwnerHeldFile::Reread(std::string& bytes) {
     return ReadToEnd(handle_, bytes);
 }
 
-std::uint32_t OwnerHeldFile::Close() {
-    if (handle_ == nullptr) return 0;
+void OwnerHeldFile::Close() {
+    if (handle_ == nullptr) return;
     const HANDLE handle = handle_;
     handle_ = nullptr;
-    return CloseHandle(handle) ? 0 : GetLastError();
+    if (!CloseHandle(handle)) {
+        throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "CloseHandle");
+    }
 }
 
 OwnerFileRead OwnerReadFile(const std::wstring& path) {
@@ -179,13 +188,22 @@ OwnerFileRead OwnerReadFile(const std::wstring& path) {
 
 std::uint64_t OwnerLastWriteTime(const std::wstring& path) {
     WIN32_FILE_ATTRIBUTE_DATA data{};
-    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) {
-        const DWORD error = GetLastError();
-        if (IsAbsent(error)) return 0;
-        throw std::system_error(static_cast<int>(error), std::system_category(),
-                                "GetFileAttributesExW " + OwnerUtf8(path));
+    if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return FileTimeCount(data.ftLastWriteTime);
+    DWORD error = GetLastError();
+    if (IsAbsentForTime(error)) return 0;
+    // As .NET does: a file pending deletion refuses GetFileAttributesExW with access denied while
+    // its folder still lists it with its time. FindFirstFileW would read a wildcard as a pattern.
+    if (path.find_first_of(L"*?", path.find_last_of(L"\\/") + 1) == std::wstring::npos) {
+        WIN32_FIND_DATAW found{};
+        const HANDLE search = FindFirstFileW(path.c_str(), &found);
+        if (search != INVALID_HANDLE_VALUE) {
+            FindClose(search);
+            return FileTimeCount(found.ftLastWriteTime);
+        }
+        error = GetLastError();
+        if (IsAbsentForTime(error)) return 0;
     }
-    return (static_cast<std::uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
+    throw std::system_error(static_cast<int>(error), std::system_category(), "GetFileAttributesExW " + OwnerUtf8(path));
 }
 
 std::wstring OwnerFullPath(const std::wstring& path, const char* option) {
