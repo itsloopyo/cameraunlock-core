@@ -24,11 +24,9 @@
 ::                              only when not already present, so an update
 ::                              keeps whatever the user tuned in an .ini the
 ::                              mod ships a default for. The wrapper template
-::                              has no MOD_SEED_FILES line, and a wrapper
-::                              without one inherits the value from the
-::                              console that ran it, which may hold another
-::                              mod's list; a wrapper that seeds nothing sets
-::                              it blank.
+::                              sets it, blank; a wrapper without the line
+::                              inherits the value from the console that ran
+::                              it, which may hold another mod's list.
 ::   MOD_CONTROLS               optional post-install help text
 ::
 :: Launcher CLI (passed through %*): [GAME_PATH] [/y] [/force]

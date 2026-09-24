@@ -24,21 +24,27 @@ The uninstall side is unchanged: `uninstall-body.cmd` already removes `MOD_SEED_
 `reframework\plugins\`, and a path listed in `PRESERVE_FILES` stays through that and through the
 removal of `reframework\`.
 
-The REFramework wrapper template has no `MOD_SEED_FILES` line, and CONFIG BLOCK values carry
-over within one console (see `PRESERVE_FILES` below). An REFramework wrapper without the line,
-run from a console that already ran a wrapper that set it, reads that other mod's list and
-fails with "not found in installer package" unless its own package ships those names.
+`scripts/templates/install-wrapper-reframework.cmd` now sets `MOD_SEED_FILES` in its CONFIG
+BLOCK, blank, as the ASI, BeamNG, shim, shim-forwarder and xNVSE templates do. CONFIG BLOCK
+values carry over within one console (see `PRESERVE_FILES` below), so an REFramework wrapper
+without the line, run from a console that already ran another mod's wrapper that set it, reads
+that mod's list. Unless its own package ships those names, the install then fails with "not
+found in installer package" and exit 1, after REFramework has been extracted and with no state
+file written.
 
 Unset or empty, the install behaves exactly as before. `scripts/test-uninstall-preserve.ps1`
 now also installs, reinstalls, uninstalls and installs again through a real console into
 synthetic REFramework trees, with both the package and the game under a path holding `!`,
 with `installed_by_us` true and with `/force`; given `-ReferenceInstallBody`, it checks the
-install without the list against an older body.
+install without the list against an older body. It also runs the wrapper template itself from a
+console that already holds another mod's `MOD_SEED_FILES`, and expects a clean install.
 
-Consuming repos: nothing to change until an RE repo converts to the canonical config format,
-which moves `HeadTracking.ini` from `MOD_DLLS` to `MOD_SEED_FILES` in its `install.cmd` and, as
-the uninstall template asks, lists it the same way in `uninstall.cmd`. Until then every script
-install overwrites that INI, as it always has.
+Consuming repos: an REFramework repo adds `set "MOD_SEED_FILES="` to the CONFIG BLOCK of its
+`install.cmd` in the same change that moves its core pin past this entry, blank until it
+converts to the canonical config format. The CONFIG BLOCK is per-repo, so `sync-templates.ps1`
+does not carry the line over. The conversion then moves `HeadTracking.ini` from `MOD_DLLS` to
+`MOD_SEED_FILES` in `install.cmd` and, as the uninstall template asks, lists it the same way in
+`uninstall.cmd`. Until then every script install overwrites that INI, as it always has.
 
 ### Added - `PRESERVE_FILES`: uninstall.cmd can keep a mod's config
 

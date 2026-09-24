@@ -572,6 +572,22 @@ if ($ReferenceInstallBody) {
 }
 Write-Host 'PASS reframework without MOD_SEED_FILES: the INI in MOD_DLLS is overwritten on every install, as before'
 
+# The wrapper template itself, run from a console where another mod's wrapper
+# already set MOD_SEED_FILES: its blank line has to win over the inherited list.
+$case = New-InstallCase -Name 're-template' -Install $reInstall -Uninstall $reUninstall -Package $rePackage
+$template = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'templates\install-wrapper-reframework.cmd'))
+foreach ($pair in @(@('<games.json id>', 'fixture'), @('<Game Name> Head Tracking', 'Fixture'), @('<Mod>HeadTracking.dll', 'HeadTracking.dll'),
+        @('<Mod>HeadTracking', 'Fixture'), @('.headtracking-state.json', '.fixture-state.json'), @('REFramework.zip', 'RE.zip'))) {
+    if (-not $template.Contains($pair[0])) { throw "re-template: template no longer contains $($pair[0])" }
+    $template = $template.Replace($pair[0], $pair[1])
+}
+[IO.File]::WriteAllText((Join-Path $case.Root 'install.cmd'), $template)
+$env:MOD_SEED_FILES = 'OtherMod.ini'
+try { $output = Invoke-Install $case 0 } finally { Remove-Item Env:MOD_SEED_FILES }
+if ($output.Contains('OtherMod.ini')) { throw "re-template: the inherited MOD_SEED_FILES reached the body`n$output" }
+Assert-Installed $case (Copy-Map (Copy-Map @{ 'fixture.exe' = 'fixture.exe' } $reLoader) @{ "$p\HeadTracking.dll" = 'dll 1' }) 'true'
+Write-Host 'PASS reframework wrapper template: a MOD_SEED_FILES left in the console by another wrapper is cleared'
+
 $case = New-InstallCase -Name 're-seed-missing' -Install (Copy-Map $reInstall @{ MOD_SEED_FILES = 'HeadTracking.ini Missing.ini' }) -Uninstall $reUninstall -Package $rePackage -GameFiles $preexisting
 $output = Invoke-Install $case 1
 Assert-Output $case $output @('ERROR: Missing.ini not found in installer package', 'Deployment Failed!')

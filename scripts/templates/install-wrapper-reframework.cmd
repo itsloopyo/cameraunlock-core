@@ -26,6 +26,10 @@ set "STATE_FILE=.headtracking-state.json"
 set "FRAMEWORK_TYPE=REFramework"
 :: Per-game vendor zip filename under vendor/reframework/.
 set "REFRAMEWORK_VENDOR_ZIP_NAME=REFramework.zip"
+:: Files copied only when they are not already there, so an upgrade keeps
+:: whatever the user tuned. Listing an .ini in MOD_DLLS instead puts it through
+:: the unconditional copy and resets every key on every update.
+set "MOD_SEED_FILES="
 :: Post-install help text. `&echo ` starts each further line.
 set "MOD_CONTROLS=Controls:&echo   End      - Toggle head tracking on/off&echo   Page Up  - Toggle position tracking on/off&echo   Page Down - Toggle yaw mode (world-locked / camera-local)"
 :: --- END CONFIG BLOCK ---
