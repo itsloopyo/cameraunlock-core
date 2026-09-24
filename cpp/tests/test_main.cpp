@@ -17,6 +17,8 @@ int RunFileLogTests();
 int RunHotkeyTests();
 int RunOsTests();
 int RunValueGuardTests();
+int RunFrozenIniHelperTests();
+int RunWin32ProfileSemanticsTests();
 int RunConfigSchemaTests();
 int RunSafeMemoryTests();
 int RunLeanClampTests();
@@ -62,6 +64,8 @@ int main(int argc, char** argv) {
     failures += RunHotkeyTests();
     failures += RunOsTests();
     failures += RunValueGuardTests();
+    failures += RunFrozenIniHelperTests();
+    failures += RunWin32ProfileSemanticsTests();
     failures += RunConfigSchemaTests();
     failures += RunSafeMemoryTests();
     failures += RunLeanClampTests();

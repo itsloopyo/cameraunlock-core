@@ -345,16 +345,34 @@ void TestWarnRetiredSmoothingKey() {
         Check(g_logCalls == 0, "an absent retired key is silent");
     }
 
-    WriteIni(path, "[Tracking]\r\nSmoothing=0.5\r\n");
+    WriteIni(path, "[Tracking]\r\nSmoothing= ; old value\r\n");
     {
         cameraunlock::IniReader ini;
         ini.Open(path);
         ResetLog();
         WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing", &CapturingLog);
-        Check(g_logCalls == 1, "a present retired key warns");
+        Check(g_logCalls == 0, "a retired key holding only a comment counts as absent");
+    }
+
+    WriteIni(path, "[Tracking]\r\nSmoothing=0.5\r\n");
+    {
+        cameraunlock::IniReader ini;
+        ini.Open(path);
+        WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing", nullptr);
+
+        ResetLog();
+        WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing", &CapturingLog);
+        Check(g_logCalls == 1, "a present retired key warns, and a null sink before it spent nothing");
         Check(g_lastMessage.find("IGNORED") != std::string::npos &&
                   g_lastMessage.find("not migrated") != std::string::npos,
               "the warning says the value is ignored AND not migrated");
+        Check(g_lastMessage ==
+                  "Config key [Tracking] Smoothing has been retired and is IGNORED. Smoothing is now two "
+                  "keys: LocalSmoothing (default 0, applies to a tracker on this machine) and "
+                  "RemoteSmoothing (default 0.15, applies to a tracker on the network). The old value "
+                  "is not migrated because the semantics changed - it carried a hidden 0.15 floor that "
+                  "no longer exists. Set the two new keys.",
+              "the warning text is exactly the frozen one");
 
         // Config is reloadable, and repeating this on every reload buries it.
         ResetLog();
