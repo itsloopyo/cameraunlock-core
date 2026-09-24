@@ -3,7 +3,11 @@ param(
     # An uninstall-body.cmd from before PRESERVE_FILES existed. Given, every case
     # without the list also runs against it and must leave the same tree, exit
     # code and console output.
-    [string]$ReferenceBody = ''
+    [string]$ReferenceBody = '',
+    # An install-body-reframework.cmd from before MOD_SEED_FILES existed. Given,
+    # the REFramework install without the list also runs against it and must
+    # leave the same tree and print the same output.
+    [string]$ReferenceInstallBody = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -116,19 +120,19 @@ function New-Case {
 
 # Each run gets its own cmd.exe and console, hidden, as the launcher's own
 # child would; the pause-on-failure path only exists with one attached.
-function Start-Uninstall($Case, [string]$Flags) {
+function Start-Run($Case, [string]$Flags, [string]$Script = 'uninstall') {
     $Case.Runs++
     $stem = Join-Path $Case.Root ('run{0}' -f $Case.Runs)
     $driver = "$stem.cmd"
     $lines = @('@echo off',
-        ('call "{0}\uninstall.cmd" "{1}" {2} > "{3}.out" 2>&1' -f $Case.Root, $Case.Game, $Flags, $stem),
+        ('call "{0}\{1}.cmd" "{2}" {3} > "{4}.out" 2>&1' -f $Case.Root, $Script, $Case.Game, $Flags, $stem),
         ('> "{0}.exit" echo %errorlevel%' -f $stem))
     [IO.File]::WriteAllText($driver, ($lines -join "`r`n") + "`r`n")
     $process = Start-Process $env:ComSpec -ArgumentList @('/d', '/c', ('""{0}""' -f $driver)) -WindowStyle Hidden -PassThru
     [pscustomobject]@{ Process = $process; Stem = $stem }
 }
 
-function Complete-Uninstall($Run, $Case, [int]$Expected) {
+function Complete-Run($Run, $Case, [int]$Expected) {
     if (-not $Run.Process.WaitForExit(60000)) {
         Stop-Process -Id $Run.Process.Id -Force
         throw "$($Case.Name): timed out"
@@ -140,7 +144,11 @@ function Complete-Uninstall($Run, $Case, [int]$Expected) {
 }
 
 function Invoke-Uninstall($Case, [int]$Expected, [string]$Flags = '/y') {
-    Complete-Uninstall (Start-Uninstall $Case $Flags) $Case $Expected
+    Complete-Run (Start-Run $Case $Flags) $Case $Expected
+}
+
+function Invoke-Install($Case, [int]$Expected, [string]$Flags = '/y') {
+    Complete-Run (Start-Run $Case $Flags 'install') $Case $Expected
 }
 
 function Get-Snapshot([string]$Dir) {
@@ -197,8 +205,8 @@ function Invoke-Unlisted {
     }
 }
 
-function Set-DenyAddSubdirectory([string]$Dir, [switch]$Remove) {
-    $grant = if ($Remove) { @('/remove:d', "*$sid") } else { @('/deny', "*${sid}:(AD)") }
+function Set-Deny([string]$Dir, [switch]$Remove, [string]$Right = 'AD') {
+    $grant = if ($Remove) { @('/remove:d', "*$sid") } else { @('/deny', "*${sid}:($Right)") }
     & icacls.exe $Dir @grant | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Dir" }
 }
@@ -343,19 +351,19 @@ if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'le
 if ($output -notmatch [regex]::Escape("$holding is left over")) { throw "leftover-holding: output does not name the folder`n$output" }
 Write-Host 'PASS leftover holding folder: refused with exit 1 before anything was touched'
 
-$run = Start-Uninstall $case ''
+$run = Start-Run $case ''
 Start-Sleep -Seconds 3
 if ($run.Process.HasExited) { throw 'pause: a failed uninstall without /y did not wait at the console' }
 Send-Enter $run.Process.Id
-$output = Complete-Uninstall $run $case 1
+$output = Complete-Run $run $case 1
 if ($output -notmatch 'Press any key') { throw "pause: no pause prompt`n$output" }
 if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'pause: the game folder changed' }
 Write-Host 'PASS pause: a failed run without /y waits on the console, Enter releases it, exit code stays 1'
 
 $case = New-Case -Name 'set-aside-fails' -Config $bepListed -Files $bepFiles -ExeRelPath 'fixture.exe'
 $before = Get-Snapshot $case.Game
-Set-DenyAddSubdirectory $case.Game
-try { $output = Invoke-Uninstall $case 1 } finally { Set-DenyAddSubdirectory $case.Game -Remove }
+Set-Deny $case.Game
+try { $output = Invoke-Uninstall $case 1 } finally { Set-Deny $case.Game -Remove }
 Assert-Output $case $output @("ERROR: could not set $guid.ini aside, so the folder holding it is left in place.", '=== Uninstall Incomplete ===')
 $after = @(Get-Snapshot $case.Game)
 foreach ($entry in $before) {
@@ -374,7 +382,7 @@ foreach ($rel in $ue.Initial.Keys) { $ueFiles[$rel] = $ue.Initial[$rel] }
 $ueListed = Copy-Map $ue.Config @{ PRESERVE_FILES = $ue.Preserve }
 $case = New-Case -Name 'move-back-fails' -Config $ueListed -Files $ueFiles -ExeRelPath $ue.Exe -InstalledByUs 'false'
 $mods = Join-Path $case.Game 'Game\Binaries\Win64\Mods'
-Set-DenyAddSubdirectory $mods
+Set-Deny $mods
 try {
     $output = Invoke-Uninstall $case 1
     Assert-Output $case $output @('Removed: Mods\HeadTracking\', "ERROR: could not move $($ue.Preserve) back into place.", '=== Uninstall Incomplete ===')
@@ -386,7 +394,7 @@ try {
     $before = Get-Snapshot $case.Game
     $output = Invoke-Uninstall $case 1
     if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'move-back-fails: the rerun touched the game folder' }
-} finally { Set-DenyAddSubdirectory $mods -Remove }
+} finally { Set-Deny $mods -Remove }
 New-Item -ItemType Directory -Path (Join-Path $mods 'HeadTracking') | Out-Null
 foreach ($rel in $ue.Kept) { Move-Item -LiteralPath (Join-Path $case.Game "$holding\$rel") -Destination (Join-Path $case.Game $rel) }
 Remove-Item -LiteralPath (Join-Path $case.Game $holding) -Recurse
@@ -431,5 +439,154 @@ if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'un
 Invoke-Uninstall $case 0 '-y' | Out-Null
 Assert-Files $case (@('fixture.exe', 'user.txt') + $trees[0].Kept)
 Write-Host 'PASS arguments: unknown flag exit 2, -y completes'
+
+# ---------------------------------------------------------------- REFramework install
+# The package folder holds a '!' as well as the game folder: install.cmd reads
+# its payload from its own folder, so both paths go through the body.
+$reZipEntries = @('dinput8.dll', 'reframework_revision.txt', 'reframework/', 'reframework/autorun/', 'reframework/autorun/loader.lua')
+$reLoader = [ordered]@{}
+foreach ($entryName in $reZipEntries) { if (-not $entryName.EndsWith('/')) { $reLoader[$entryName.Replace('/', '\')] = $entryName } }
+
+function New-InstallCase {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][Collections.IDictionary]$Install,
+        [Parameter(Mandatory)][Collections.IDictionary]$Uninstall,
+        [Parameter(Mandatory)][Collections.IDictionary]$Package,
+        [Collections.IDictionary]$GameFiles = @{},
+        [string]$InstallBody = (Join-Path $BodiesRoot 'install-body-reframework.cmd'),
+        [string]$Under = $root
+    )
+    $caseRoot = Join-Path $Under $Name
+    $pkg = Join-Path $caseRoot 'Package ! Folder'
+    $game = Join-Path $caseRoot 'Game ! Folder'
+    $shared = Join-Path $pkg 'shared'
+    $vendor = Join-Path $pkg 'vendor\reframework'
+    New-Item -ItemType Directory -Path $game, $shared, $vendor | Out-Null
+    Copy-Item -LiteralPath $InstallBody -Destination (Join-Path $shared 'install-body-reframework.cmd')
+    Copy-Item -LiteralPath (Join-Path $BodiesRoot 'uninstall-body.cmd') -Destination $shared
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'cecil-marker-check.ps1') -Destination $shared
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'find-game.ps1') -Destination $shared
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../powershell/GamePathDetection.psm1') -Destination $shared
+    $gamesJson = @{ schema_version = 1; games = @{ fixture = @{ display_name = 'Fixture'; env_var = 'CUL_FIXTURE_PATH'; executable_relpath = 'fixture.exe' } } }
+    [IO.File]::WriteAllText((Join-Path $shared 'games.json'), ($gamesJson | ConvertTo-Json -Depth 5))
+    $zip = [IO.Compression.ZipFile]::Open((Join-Path $vendor 'RE.zip'), 'Create')
+    try {
+        foreach ($entryName in $reZipEntries) {
+            $entry = $zip.CreateEntry($entryName)
+            if (-not $entryName.EndsWith('/')) {
+                $writer = New-Object IO.StreamWriter($entry.Open())
+                try { $writer.Write($entryName) } finally { $writer.Dispose() }
+            }
+        }
+    } finally { $zip.Dispose() }
+    foreach ($set in @(@{ Dir = $pkg; Files = $Package }, @{ Dir = $game; Files = (Copy-Map @{ 'fixture.exe' = 'fixture.exe' } $GameFiles) })) {
+        foreach ($rel in $set.Files.Keys) {
+            $path = Join-Path $set.Dir $rel
+            New-Item -ItemType Directory -Force -Path (Split-Path $path) | Out-Null
+            [IO.File]::WriteAllText($path, $set.Files[$rel])
+        }
+    }
+    $head = @('@echo off', 'setlocal disabledelayedexpansion', 'set "WRAPPER_DIR=%~dp0"',
+        'set "GAME_ID=fixture"', 'set "MOD_DISPLAY_NAME=Fixture"', 'set "MOD_INTERNAL_NAME=Fixture"',
+        'set "STATE_FILE=.fixture-state.json"', 'set "FRAMEWORK_TYPE=REFramework"')
+    foreach ($wrapper in @(@{ Name = 'install'; Config = $Install }, @{ Name = 'uninstall'; Config = $Uninstall })) {
+        $lines = $head + @($wrapper.Config.Keys | ForEach-Object { 'set "{0}={1}"' -f $_, $wrapper.Config[$_] })
+        $body = if ($wrapper.Name -eq 'install') { 'install-body-reframework.cmd' } else { 'uninstall-body.cmd' }
+        $lines += @(('call "%~dp0shared\{0}" %*' -f $body), 'exit /b %errorlevel%')
+        [IO.File]::WriteAllText((Join-Path $pkg "$($wrapper.Name).cmd"), ($lines -join "`r`n") + "`r`n")
+    }
+    [pscustomobject]@{ Name = $Name; Root = $pkg; Game = $game; Runs = 0 }
+}
+
+function Get-InstallSnapshot([string]$Dir) {
+    @(Get-Snapshot $Dir | ForEach-Object { $_ -replace '"installed_at": "[^"]*"', '"installed_at": "<time>"' })
+}
+
+function Assert-Installed($Case, [Collections.IDictionary]$Expected, [string]$InstalledByUs) {
+    $state = [IO.File]::ReadAllText((Join-Path $Case.Game '.fixture-state.json'))
+    if ($state -notmatch """installed_by_us"": $InstalledByUs\r?\n") { throw "$($Case.Name): state file does not say installed_by_us $InstalledByUs`n$state" }
+    $want = @($Expected.Keys | ForEach-Object { "$_=$($Expected[$_])" } | Sort-Object)
+    $actual = @(Get-Snapshot $Case.Game | Where-Object { -not $_.EndsWith('\') -and -not $_.StartsWith('.fixture-state.json=') } | Sort-Object)
+    $diff = Compare-Object -CaseSensitive $want $actual
+    if ($diff) { throw "$($Case.Name): unexpected files`n$($diff | Out-String)" }
+}
+
+function Set-GameFile($Case, [string]$Rel, [string]$Content) { [IO.File]::WriteAllText((Join-Path $Case.Game $Rel), $Content) }
+function Set-PackageFile($Case, [string]$Rel, [string]$Content) { [IO.File]::WriteAllText((Join-Path $Case.Root $Rel), $Content) }
+
+$p = 'reframework\plugins'
+$reInstall = [ordered]@{ MOD_DLLS = 'HeadTracking.dll'; MOD_VERSION = '1.0.0'; REFRAMEWORK_VENDOR_ZIP_NAME = 'RE.zip'; MOD_SEED_FILES = 'HeadTracking.ini Extra.ini' }
+$reUninstall = [ordered]@{ MOD_DLLS = 'HeadTracking.dll'; MOD_SEED_FILES = 'HeadTracking.ini Extra.ini'; PRESERVE_FILES = "$p\HeadTracking.ini" }
+# Extra.ini sits at the package root, the fallback MOD_DLLS already use.
+$rePackage = [ordered]@{ 'plugins\HeadTracking.dll' = 'dll 1'; 'plugins\HeadTracking.ini' = 'default 1'; 'Extra.ini' = 'extra default' }
+$preexisting = [ordered]@{ 'dinput8.dll' = 'their dinput8.dll'; 'reframework\autorun\theirs.lua' = 'theirs.lua' }
+
+foreach ($variant in @(@{ By = 'true'; Loader = $reLoader; GameFiles = @{}; Flags = '/y' },
+        @{ By = 'false'; Loader = $preexisting; GameFiles = $preexisting; Flags = '/force /y' })) {
+    $case = New-InstallCase -Name "re-seed-$($variant.By)" -Install $reInstall -Uninstall $reUninstall -Package $rePackage -GameFiles $variant.GameFiles
+    $output = Invoke-Install $case 0
+    Assert-Output $case $output @('Deployed default HeadTracking.ini', 'Deployed default Extra.ini', 'Deployed: HeadTracking.dll')
+    $expected = Copy-Map (Copy-Map @{ 'fixture.exe' = 'fixture.exe' } $variant.Loader) @{
+        "$p\HeadTracking.dll" = 'dll 1'; "$p\HeadTracking.ini" = 'default 1'; "$p\Extra.ini" = 'extra default' }
+    Assert-Installed $case $expected $variant.By
+
+    Set-GameFile $case "$p\HeadTracking.ini" 'tuned by the player'
+    Set-PackageFile $case 'plugins\HeadTracking.dll' 'dll 2'
+    Set-PackageFile $case 'plugins\HeadTracking.ini' 'default 2'
+    $output = Invoke-Install $case 0
+    Assert-Output $case $output @('Existing REFramework detected, skipping loader install, deploying plugin only.',
+        'Kept your existing HeadTracking.ini', 'Kept your existing Extra.ini', 'Deployed: HeadTracking.dll')
+    Assert-Installed $case (Copy-Map $expected @{ "$p\HeadTracking.dll" = 'dll 2'; "$p\HeadTracking.ini" = 'tuned by the player' }) $variant.By
+
+    $output = Invoke-Uninstall $case 0 $variant.Flags
+    Assert-Files $case @('fixture.exe', "$p\HeadTracking.ini") @{ "$p\HeadTracking.ini" = 'tuned by the player' }
+    Assert-KeptLines $case $output @('HeadTracking.ini', "$p\HeadTracking.ini")
+    Assert-Output $case $output @('Removed: Extra.ini', '=== Uninstall Complete ===')
+    Assert-NoHolding $case
+
+    $output = Invoke-Install $case 0
+    Assert-Output $case $output @('Kept your existing HeadTracking.ini', 'Deployed default Extra.ini')
+    Assert-Installed $case (Copy-Map (Copy-Map @{ 'fixture.exe' = 'fixture.exe' } $reLoader) @{
+        "$p\HeadTracking.dll" = 'dll 2'; "$p\HeadTracking.ini" = 'tuned by the player'; "$p\Extra.ini" = 'extra default' }) 'true'
+    Write-Host "PASS reframework seed, installed_by_us $($variant.By) ($($variant.Flags)): fresh install seeds, reinstall keeps an edited seed and replaces the DLL, uninstall keeps the listed seed through the loader removal, the next install keeps it"
+}
+
+# Without the list the INI stays in MOD_DLLS and every install overwrites it.
+$unlistedInstall = Copy-Map $reInstall @{ MOD_DLLS = 'HeadTracking.dll HeadTracking.ini'; MOD_SEED_FILES = '' }
+$bodies = @(@{ Under = $root; Body = (Join-Path $BodiesRoot 'install-body-reframework.cmd') })
+if ($ReferenceInstallBody) { $bodies += @{ Under = (Join-Path $root 'reference'); Body = $ReferenceInstallBody } }
+$results = foreach ($b in $bodies) {
+    $case = New-InstallCase -Name 're-unlisted' -Install $unlistedInstall -Uninstall $reUninstall -Package $rePackage -GameFiles $preexisting -InstallBody $b.Body -Under $b.Under
+    $first = Invoke-Install $case 0
+    Set-GameFile $case "$p\HeadTracking.ini" 'tuned by the player'
+    Set-PackageFile $case 'plugins\HeadTracking.ini' 'default 2'
+    $second = Invoke-Install $case 0
+    Assert-Output $case $second @('Deployed: HeadTracking.ini')
+    Assert-Installed $case (Copy-Map (Copy-Map @{ 'fixture.exe' = 'fixture.exe' } $preexisting) @{ "$p\HeadTracking.dll" = 'dll 1'; "$p\HeadTracking.ini" = 'default 2' }) 'false'
+    [pscustomobject]@{ Case = $case; Output = ($first + $second).Replace($case.Game, '<game>').Replace($case.Root, '<pkg>'); Tree = Get-InstallSnapshot $case.Game }
+}
+if ($ReferenceInstallBody) {
+    if (Compare-Object -CaseSensitive $results[0].Tree $results[1].Tree) { throw 're-unlisted: tree differs from the reference install body' }
+    if ($results[0].Output -cne $results[1].Output) { throw "re-unlisted: output differs from the reference install body`n--- this body`n$($results[0].Output)`n--- reference`n$($results[1].Output)" }
+}
+Write-Host 'PASS reframework without MOD_SEED_FILES: the INI in MOD_DLLS is overwritten on every install, as before'
+
+$case = New-InstallCase -Name 're-seed-missing' -Install (Copy-Map $reInstall @{ MOD_SEED_FILES = 'HeadTracking.ini Missing.ini' }) -Uninstall $reUninstall -Package $rePackage -GameFiles $preexisting
+$output = Invoke-Install $case 1
+Assert-Output $case $output @('ERROR: Missing.ini not found in installer package', 'Deployment Failed!')
+if (Test-Path -LiteralPath (Join-Path $case.Game '.fixture-state.json')) { throw 're-seed-missing: state file written' }
+Write-Host 'PASS reframework seed missing from the package: exit 1, no state file'
+
+# The DLL is already there and overwriting it needs no right on the folder, so
+# the seeds are the only copies that fail.
+$case = New-InstallCase -Name 're-seed-unwritable' -Install $reInstall -Uninstall $reUninstall -Package $rePackage -GameFiles (Copy-Map $preexisting @{ "$p\HeadTracking.dll" = 'dll 0' })
+$plugins = Join-Path $case.Game $p
+Set-Deny $plugins -Right 'WD'
+try { $output = Invoke-Install $case 1 } finally { Set-Deny $plugins -Remove }
+Assert-Output $case $output @('ERROR: Failed to copy HeadTracking.ini - is the game folder writable?', 'ERROR: Failed to copy Extra.ini - is the game folder writable?',
+    'Deployed: HeadTracking.dll', 'Deployment Failed!')
+if (Test-Path -LiteralPath (Join-Path $case.Game '.fixture-state.json')) { throw 're-seed-unwritable: state file written' }
+Write-Host 'PASS reframework seed copy failure: named, exit 1, no state file'
 
 Write-Host "Fixtures retained at $root"

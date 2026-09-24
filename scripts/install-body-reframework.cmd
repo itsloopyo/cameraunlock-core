@@ -20,6 +20,15 @@
 ::   GAME_ID, MOD_DISPLAY_NAME, MOD_DLLS, MOD_INTERNAL_NAME, MOD_VERSION
 ::   STATE_FILE, FRAMEWORK_TYPE (always "REFramework")
 ::   REFRAMEWORK_VENDOR_ZIP_NAME  per-game vendor zip filename
+::   MOD_SEED_FILES             optional files copied into reframework\plugins
+::                              only when not already present, so an update
+::                              keeps whatever the user tuned in an .ini the
+::                              mod ships a default for. The wrapper template
+::                              has no MOD_SEED_FILES line, and a wrapper
+::                              without one inherits the value from the
+::                              console that ran it, which may hold another
+::                              mod's list; a wrapper that seeds nothing sets
+::                              it blank.
 ::   MOD_CONTROLS               optional post-install help text
 ::
 :: Launcher CLI (passed through %*): [GAME_PATH] [/y] [/force]
@@ -240,6 +249,33 @@ echo.
 echo Deploying mod files...
 
 set "DEPLOY_FAILED=0"
+:: Seeded before the mod DLLs, and copied only when absent: an update has to
+:: keep the values the user tuned. launcher-manifest.json delivers the same
+:: files through its write-if-absent loader.seed block, so the two paths agree.
+if defined MOD_SEED_FILES (
+    for %%f in (%MOD_SEED_FILES%) do (
+        set "_SEED_SRC="
+        if exist "!SCRIPT_DIR!plugins\%%f" (
+            set "_SEED_SRC=!SCRIPT_DIR!plugins\%%f"
+        ) else if exist "!SCRIPT_DIR!%%f" (
+            set "_SEED_SRC=!SCRIPT_DIR!%%f"
+        )
+        if not defined _SEED_SRC (
+            echo   ERROR: %%f not found in installer package
+            set "DEPLOY_FAILED=1"
+        ) else if exist "!PLUGINS_DIR!\%%f" (
+            echo   Kept your existing %%f
+        ) else (
+            copy /y "!_SEED_SRC!" "!PLUGINS_DIR!\%%f" >nul
+            if errorlevel 1 (
+                echo   ERROR: Failed to copy %%f - is the game folder writable?
+                set "DEPLOY_FAILED=1"
+            ) else (
+                echo   Deployed default %%f
+            )
+        )
+    )
+)
 for %%f in (%MOD_DLLS%) do (
     if exist "!SCRIPT_DIR!plugins\%%f" (
         copy /y "!SCRIPT_DIR!plugins\%%f" "!PLUGINS_DIR!\%%f" >nul

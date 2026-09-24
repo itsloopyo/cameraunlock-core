@@ -9,6 +9,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `MOD_SEED_FILES` in the REFramework install body
+
+`scripts/install-body-reframework.cmd` reads the optional CONFIG BLOCK list `MOD_SEED_FILES`
+that the ASI, shim, shim-forwarder, xNVSE and BeamNG bodies already read: files copied into
+`reframework\plugins\` only when that folder does not already hold one of the same name, so a
+script install or update keeps the values a player tuned. Each file comes from the package's
+`plugins\` folder, or its root, the same places `MOD_DLLS` come from, and is copied before
+`MOD_DLLS`. The install prints `Deployed default <name>` or `Kept your existing <name>`. A seed
+missing from the package, or one that cannot be copied, fails the install with exit 1 and no
+state file, as a failed `MOD_DLLS` copy does.
+
+The uninstall side is unchanged: `uninstall-body.cmd` already removes `MOD_SEED_FILES` from
+`reframework\plugins\`, and a path listed in `PRESERVE_FILES` stays through that and through the
+removal of `reframework\`.
+
+The REFramework wrapper template has no `MOD_SEED_FILES` line, and CONFIG BLOCK values carry
+over within one console (see `PRESERVE_FILES` below). An REFramework wrapper without the line,
+run from a console that already ran a wrapper that set it, reads that other mod's list and
+fails with "not found in installer package" unless its own package ships those names.
+
+Unset or empty, the install behaves exactly as before. `scripts/test-uninstall-preserve.ps1`
+now also installs, reinstalls, uninstalls and installs again through a real console into
+synthetic REFramework trees, with both the package and the game under a path holding `!`,
+with `installed_by_us` true and with `/force`; given `-ReferenceInstallBody`, it checks the
+install without the list against an older body.
+
+Consuming repos: nothing to change until an RE repo converts to the canonical config format,
+which moves `HeadTracking.ini` from `MOD_DLLS` to `MOD_SEED_FILES` in its `install.cmd` and, as
+the uninstall template asks, lists it the same way in `uninstall.cmd`. Until then every script
+install overwrites that INI, as it always has.
+
 ### Added - `PRESERVE_FILES`: uninstall.cmd can keep a mod's config
 
 `scripts/uninstall-body.cmd` reads a new optional CONFIG BLOCK list, `PRESERVE_FILES`:
