@@ -75,6 +75,12 @@ namespace CameraUnlock.Core.Tests
                 failures += Report(row.Replace('\t', ' '), dir => ValueCodecFixtures.RunRow(row));
             }
 
+            Console.WriteLine("Config table fixtures");
+            foreach (string name in ConfigTableFixtures.Cases(fixtures))
+            {
+                failures += Report(name, dir => ConfigTableFixtures.RunCase(fixtures, name));
+            }
+
             Console.WriteLine("Float and double sweep");
             failures += Report("floats read back from their render", dir => ValueCodecFixtures.SweepFloats(SweepCount));
             failures += Report("doubles read back from their render", dir => ValueCodecFixtures.SweepDoubles(SweepCount));

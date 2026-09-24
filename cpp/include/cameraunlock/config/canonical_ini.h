@@ -52,12 +52,34 @@ enum class CanonicalDiagnosticKind {
     /// ConfigFormat is above kConfigFormat. It is kept as read (saturated at INT_MAX),
     /// and `key` and `value` are the line's.
     ConfigFormatNewer = 10,
+    /// ApplyCanonical: a value its row's codec does not read. The row keeps its default.
+    /// `section`, `key` and `value` are the line's; `detail` is what the codec expected.
+    InvalidValue = 11,
+    /// ApplyCanonical: a section the table has no row in, so nothing in it is read.
+    /// `section` is its name; the line is its first header's.
+    UnknownSection = 12,
+    /// ApplyCanonical: a key in a section the table reads that no row names and that is
+    /// no retired or non-canonical concept, so it is not read. `section`, `key` and
+    /// `value` are the line's.
+    UnknownKey = 13,
+    /// ApplyCanonical: a key naming a retired concept (the schema's `retired` list), in
+    /// any section but [CameraUnlock]. It is not read. `section`, `key` and `value` are
+    /// the line's.
+    RetiredKey = 14,
+    /// ApplyCanonical: a key naming a concept the canonical format does not write, in any
+    /// section but [CameraUnlock]. It is not read. `section`, `key` and `value` are the
+    /// line's; `detail` is the schema's canonical_reason, the line saying why.
+    NonCanonicalConcept = 15,
+    /// ApplyCanonical: RotationEnabled and PositionEnabled are both false, which is no
+    /// tracking mode, so both take the table's defaults. `lines` are the lines that set
+    /// them.
+    NoTrackingMode = 16,
 };
 
 /// One finding about the document. Returned, never logged, so a caller can read the file
 /// before its logger exists and report afterwards. Every diagnostic names at least one
-/// line. The text fields hold the file's own bytes and are empty where the kind above
-/// does not use them.
+/// line. `section`, `key` and `value` hold the file's own bytes, and every text field is
+/// empty where the kind above does not use it.
 struct CanonicalDiagnostic {
     CanonicalDiagnosticKind kind = CanonicalDiagnosticKind::TextAfterSectionHeader;
     /// 1-based, ascending.
@@ -65,6 +87,8 @@ struct CanonicalDiagnostic {
     std::string section;
     std::string key;
     std::string value;
+    /// The kind's explanation, where the kind above names one.
+    std::string detail;
 };
 
 /// One key of a section: its last occurrence.
@@ -84,6 +108,8 @@ struct CanonicalSection {
     std::string name;
     /// In the order each key first occurs.
     std::vector<CanonicalValue> values;
+    /// 1-based line of its first header.
+    int line = 0;
 
     /// The key compared ASCII case-insensitively, or nullptr.
     const CanonicalValue* Find(std::string_view key) const;

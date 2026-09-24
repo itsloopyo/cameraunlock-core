@@ -7,10 +7,11 @@ namespace CameraUnlock.Core.Config
     /// </summary>
     public sealed class CanonicalSection
     {
-        internal CanonicalSection(byte[] name, CanonicalValue[] values)
+        internal CanonicalSection(byte[] name, CanonicalValue[] values, int line)
         {
             Name = name;
             Values = new ReadOnlyCollection<CanonicalValue>(values);
+            Line = line;
         }
 
         /// <summary>The name's bytes, spelled as its first header spells it.</summary>
@@ -18,6 +19,9 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>In the order each key first occurs.</summary>
         public ReadOnlyCollection<CanonicalValue> Values { get; }
+
+        /// <summary>1-based line of its first header.</summary>
+        public int Line { get; }
 
         /// <summary>
         /// The key compared ASCII case-insensitively with <paramref name="key"/>'s UTF-8

@@ -50,6 +50,15 @@ static_assert(static_cast<int>(CanonicalDiagnosticKind::ConfigFormatInvalid) == 
               "CanonicalDiagnosticKind::ConfigFormatInvalid");
 static_assert(static_cast<int>(CanonicalDiagnosticKind::ConfigFormatNewer) == 10,
               "CanonicalDiagnosticKind::ConfigFormatNewer");
+static_assert(static_cast<int>(CanonicalDiagnosticKind::InvalidValue) == 11, "CanonicalDiagnosticKind::InvalidValue");
+static_assert(static_cast<int>(CanonicalDiagnosticKind::UnknownSection) == 12,
+              "CanonicalDiagnosticKind::UnknownSection");
+static_assert(static_cast<int>(CanonicalDiagnosticKind::UnknownKey) == 13, "CanonicalDiagnosticKind::UnknownKey");
+static_assert(static_cast<int>(CanonicalDiagnosticKind::RetiredKey) == 14, "CanonicalDiagnosticKind::RetiredKey");
+static_assert(static_cast<int>(CanonicalDiagnosticKind::NonCanonicalConcept) == 15,
+              "CanonicalDiagnosticKind::NonCanonicalConcept");
+static_assert(static_cast<int>(CanonicalDiagnosticKind::NoTrackingMode) == 16,
+              "CanonicalDiagnosticKind::NoTrackingMode");
 
 int g_failures = 0;
 

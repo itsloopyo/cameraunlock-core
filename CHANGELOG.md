@@ -9,6 +9,69 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - config tables, applying a canonical file and rendering one, in C# and C++
+
+A config table lists the rows of one game's canonical config file and binds each to a field of
+the game's config. Applying it reads a parsed file into the config; rendering it writes a config
+as a canonical file. Nothing in the fleet uses them yet: core's own table and the config owners
+build on them.
+
+- **Concept rows** take their section, key, codec, range and comment from
+  `data/config-schema.json`, and only a canonical concept can be named. C++ checks the field
+  type at compile time: `bool` for a bool concept, an integral type other than `bool` whose
+  limits hold the concept's range (a `std::uint16_t` holds `UdpPort`, not `DataFreshnessMs`),
+  `float` or `double` for a float concept, `std::string` for a hotkey list. In C# the concept's
+  descriptor fixes the accessors' type.
+- **Local rows** name their own section, key, codec and comment. A row's default is its field's
+  value in the defaults instance the table is built with. Modifiers on the last row: `Comment`
+  (replaces a concept's comment), `Range` (int, float and double local rows), `Engine` (at its
+  default the row is written as `; Key=value`), `Writable` (the owner's Save may change it), and
+  `Select`, which picks a concept row a helper added.
+- **Checks when a row is added**, which throw and leave the table as it was: one key name per
+  file; PascalCase local sections and keys; no local row in `[CameraUnlock]` or in a schema
+  section with no canonical concept (`[Sensitivity]`, `[Inversion]`, `[Reticle]`); a local key
+  may not be any concept's key or alias under the schema's normalisation; a local row with no
+  comment must follow a local row of its section; a default must render; `RotationEnabled` and
+  `PositionEnabled` may not both default to false.
+- **Apply**: every row starts from its default, so an absent key reads as the default with no
+  diagnostic; an invalid value keeps the default with a diagnostic naming the line, the value and
+  what was expected; an unknown section or key draws one diagnostic, none in `[CameraUnlock]`; a
+  key naming a retired concept says so, and one naming a concept the canonical format does not
+  write gives the schema's reason, in any section; `RotationEnabled=false` with
+  `PositionEnabled=false` takes both defaults with one diagnostic naming both lines. No key takes
+  its value from another. Fields no row binds are left alone.
+- **Render**: the header (`; <display name> head tracking settings.`, the comments line, and the
+  hotkey line when a row holds hotkeys), `[CameraUnlock]` with `ConfigFormat=1`, the schema
+  sections in the schema's order with concept rows in its concepts order and then the local rows
+  of that section, then the local sections; comments as `; text`; a blank line between sections;
+  CRLF with a final CRLF; ASCII, no byte order mark. The display name must be printable ASCII.
+- **Hotkey codec**: a hotkey list held as its canonical text. It reads any spelling the binding
+  codec reads and gives the canonical text (`ctrl+shift+y,end` reads as `Ctrl+Shift+Y, End`),
+  and renders only canonical text. C++ reads the native dialect, C# the Unity one.
+
+C++ (`cameraunlock/config/config_table.h`, `hotkey_codec.h`, pure): `ConfigTable<Config>`,
+`ApplyCanonical`, `RenderCanonical`, `ApplyReport`, `RenderHeader`, `FieldHoldsConcept<Id,
+Field>()` and `HotkeyCodec`; failed checks throw `std::invalid_argument`. The generated
+`cameraunlock/config/config_concepts.g.h` holds `schema::Concept`, `schema::ValueFamily`,
+`schema::ConceptTraits<Id>` (section, key, family, range, file comment, canonical default),
+`schema::kConcepts`, `schema::kSections` and `schema::kNonCanonicalConcepts`.
+
+C# (`CameraUnlock.Core.Config`): `ConfigTable<TConfig>` (`Concept`, `Local`, the modifiers,
+`Apply`, `Render` returning bytes), `ApplyReport`, `RenderHeader`, `HotkeyCodec`,
+`ConceptDescriptor`, `ConceptDescriptor<T>`, `ConceptValueFamily`, and the generated
+`ConfigConcepts` with one descriptor per canonical concept. A failed check throws
+`ArgumentException`; a modifier on a row it does not apply to throws
+`InvalidOperationException`.
+
+Also added, for the reader: `CanonicalDiagnosticKind` gains `InvalidValue` (11),
+`UnknownSection` (12), `UnknownKey` (13), `RetiredKey` (14), `NonCanonicalConcept` (15) and
+`NoTrackingMode` (16), with their sentences; `CanonicalDiagnostic` gains `detail` / `Detail`,
+the codec's expectation or the schema's reason; `CanonicalSection` gains `line` / `Line`, its
+first header's line.
+
+The fixtures in `data/fixtures/canonical-ini/table` hold both languages to the same applied
+values, diagnostics and rendered bytes.
+
 ### Added - the canonical value codecs, in C# and C++
 
 How each kind of value is written in a canonical config file and read back. Nothing reads a

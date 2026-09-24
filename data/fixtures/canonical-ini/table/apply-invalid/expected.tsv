@@ -1,0 +1,42 @@
+# A value its codec does not read keeps the default and names the line, the value and what was
+# expected. There are no inline comments, so a note after a value is part of it.
+field	ToggleKey	End, Ctrl+Shift+Y
+field	UdpPort	4242
+field	PositionEnabled	true
+field	RotationEnabled	true
+field	EnableOnStartup	true
+field	LocalSmoothing	0.0
+field	PositionLimitX	0.3
+field	CollisionChannel	3
+field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
+field	Mode	UpdateCamera
+field	LeanDelayMs	50
+field	LeanScale	1.0
+field	NearClip	0.1
+field	UpdateCameraSlot	196
+field	PovOffset	0x404
+field	CleanCameraReader	0x1402A0B10
+field	HookOffsets	0x10, 0x2A
+field	AimCallers	
+field	WidgetNames	Crosshair, Compass
+field	MarkerColor	1.0, 0.5, 0.0, 1.0
+field	LogPath	HeadTracking.log
+field	WriteLog	false
+field	ReloadKey	F10
+diagnostic	InvalidValue	4	Line 4: [Network] UdpPort=0 is not valid (expected a whole number from 1 to 65535), so the default is used.
+diagnostic	InvalidValue	6	Line 6: [General] EnableOnStartup=maybe is not valid (expected true or false), so the default is used.
+diagnostic	InvalidValue	8	Line 8: [Smoothing] LocalSmoothing=1.5 is not valid (expected a number from 0.0 to 1.0), so the default is used.
+diagnostic	InvalidValue	10	Line 10: [Position] PositionLimitX=0.5 ; my note is not valid (expected a number from 0.0 to 10.0), so the default is used.
+diagnostic	InvalidValue	11	Line 11: [Position] LeanDelayMs=2000 is not valid (expected a whole number from 0 to 1000), so the default is used.
+diagnostic	InvalidValue	12	Line 12: [Position] LeanScale=3 is not valid (expected a number from 0.0 to 2.0), so the default is used.
+diagnostic	InvalidValue	14	Line 14: [Hotkeys] ToggleKey=Ctrl+Ctrl+Y is not valid ('Ctrl+Ctrl+Y' names Ctrl twice: expected each modifier at most once), so the default is used.
+diagnostic	InvalidValue	16	Line 16: [Camera] Mode=Sometimes is not valid (expected ControlRotation or UpdateCamera), so the default is used.
+diagnostic	InvalidValue	17	Line 17: [Camera] NearClip=abc is not valid (expected a number such as 1.0, 0.15 or 1e-05), so the default is used.
+diagnostic	InvalidValue	18	Line 18: [Camera] UpdateCameraSlot=1.5 is not valid (expected a whole number from -2147483648 to 2147483647), so the default is used.
+diagnostic	InvalidValue	19	Line 19: [Camera] PovOffset=404 is not valid (expected 0x and 1 to 8 hex digits, such as 0x404), so the default is used.
+diagnostic	InvalidValue	20	Line 20: [Camera] CleanCameraReader=0x1234567890ABCDEF0 is not valid (expected 0x and 1 to 16 hex digits, such as 0x404), so the default is used.
+diagnostic	InvalidValue	21	Line 21: [Camera] HookOffsets=0x10, zz is not valid (item 2 'zz': expected 0x and 1 to 8 hex digits, such as 0x404), so the default is used.
+diagnostic	InvalidValue	22	Line 22: [Camera] WidgetNames=a,,b is not valid (item 2 is empty: expected a value between commas), so the default is used.
+diagnostic	InvalidValue	23	Line 23: [Camera] MarkerColor=1,1,1 is not valid (expected four numbers from 0.0 to 1.0 separated by commas, such as 1.0, 0.5, 0.0, 1.0), so the default is used.
+diagnostic	InvalidValue	25	Line 25: [Logging] WriteLog=2 is not valid (expected true or false), so the default is used.
+diagnostic	InvalidValue	26	Line 26: [Logging] ReloadKey=End, End is not valid ('End' is listed twice: expected each binding once), so the default is used.

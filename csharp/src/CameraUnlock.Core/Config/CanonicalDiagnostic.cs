@@ -8,18 +8,25 @@ namespace CameraUnlock.Core.Config
     /// <summary>
     /// One finding about a canonical INI document. Returned, never logged, so a caller can
     /// read the file before its logger exists and report afterwards. Every diagnostic names
-    /// at least one line. The byte fields hold the file's own bytes and are empty where
-    /// <see cref="CanonicalDiagnosticKind"/> says the kind does not use them.
+    /// at least one line. The byte fields hold the file's own bytes, and every field is empty
+    /// where <see cref="CanonicalDiagnosticKind"/> says the kind does not use it.
     /// </summary>
     public sealed class CanonicalDiagnostic
     {
         internal CanonicalDiagnostic(CanonicalDiagnosticKind kind, int[] lines, byte[] section, byte[] key, byte[] value)
+            : this(kind, lines, section, key, value, string.Empty)
+        {
+        }
+
+        internal CanonicalDiagnostic(CanonicalDiagnosticKind kind, int[] lines, byte[] section, byte[] key, byte[] value,
+            string detail)
         {
             Kind = kind;
             Lines = new ReadOnlyCollection<int>(lines);
             Section = section;
             Key = key;
             Value = value;
+            Detail = detail;
         }
 
         public CanonicalDiagnosticKind Kind { get; }
@@ -33,6 +40,9 @@ namespace CameraUnlock.Core.Config
 
         public byte[] Value { get; }
 
+        /// <summary>The kind's explanation, where <see cref="CanonicalDiagnosticKind"/> names one.</summary>
+        public string Detail { get; }
+
         /// <summary>
         /// One sentence for the player, naming the line or lines, e.g.
         /// <c>[General] ToggleKey is set on lines 3 and 9. Line 9 is used.</c> The file's bytes
@@ -40,7 +50,7 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         public string Describe()
         {
-            string line = "Line " + JoinLines() + ": ";
+            string line = (Lines.Count > 1 ? "Lines " : "Line ") + JoinLines() + ": ";
             string format = CanonicalIni.ConfigFormat.ToString(CultureInfo.InvariantCulture);
             string section = Text(Section);
             string key = Text(Key);
@@ -71,6 +81,20 @@ namespace CameraUnlock.Core.Config
                 case CanonicalDiagnosticKind.ConfigFormatNewer:
                     return line + key + "=" + value + " was written by a newer version of the mod. This version reads format "
                         + format + ".";
+                case CanonicalDiagnosticKind.InvalidValue:
+                    return line + "[" + section + "] " + key + "=" + value + " is not valid (" + Detail
+                        + "), so the default is used.";
+                case CanonicalDiagnosticKind.UnknownSection:
+                    return line + "[" + section + "] is not a section this mod reads, so everything in it is ignored.";
+                case CanonicalDiagnosticKind.UnknownKey:
+                    return line + "[" + section + "] " + key + " is not a setting this mod reads, so it is ignored.";
+                case CanonicalDiagnosticKind.RetiredKey:
+                    return line + "[" + section + "] " + key + " is a setting this mod no longer uses, so it is ignored.";
+                case CanonicalDiagnosticKind.NonCanonicalConcept:
+                    return line + "[" + section + "] " + key + " is ignored. " + Detail;
+                case CanonicalDiagnosticKind.NoTrackingMode:
+                    return line + "RotationEnabled and PositionEnabled are both false, which is not a tracking mode, "
+                        + "so both are read as their defaults.";
                 default:
                     throw new InvalidOperationException("CanonicalDiagnosticKind " + (int)Kind + " has no description");
             }

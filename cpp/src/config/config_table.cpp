@@ -1,0 +1,283 @@
+#include "cameraunlock/config/config_table.h"
+
+#include "cameraunlock/config/config_key_schema.g.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace cameraunlock::config::detail {
+
+namespace {
+
+constexpr std::string_view kStampSection = "CameraUnlock";
+constexpr const char* kCrlf = "\r\n";
+
+bool IsPrintableAscii(std::string_view text) {
+    for (char c : text) {
+        if (c < 0x20 || c > 0x7E) return false;
+    }
+    return true;
+}
+
+bool IsSchemaSectionWithCanonicalConcept(std::string_view section) {
+    for (const schema::ConceptInfo& info : schema::kConcepts) {
+        if (section == info.section) return true;
+    }
+    return false;
+}
+
+void CheckUniqueKey(const std::vector<TableRow>& rows, const TableRow& row) {
+    for (const TableRow& earlier : rows) {
+        if (EqualsAsciiIgnoreCase(earlier.key, row.key)) {
+            throw std::invalid_argument(RowName(row) + ": " + RowName(earlier) +
+                                        " already has that key, and a key name is used once in the file");
+        }
+    }
+}
+
+CanonicalDiagnostic MakeDiagnostic(CanonicalDiagnosticKind kind, int line, std::string_view section,
+                                   std::string_view key, std::string_view value, std::string_view detail) {
+    CanonicalDiagnostic d;
+    d.kind = kind;
+    d.lines.push_back(line);
+    d.section = std::string(section);
+    d.key = std::string(key);
+    d.value = std::string(value);
+    d.detail = std::string(detail);
+    return d;
+}
+
+// The schema's reason for a key naming a concept the canonical format does not write, or
+// nullptr.
+const char* NonCanonicalReason(const char* canonical) {
+    for (const schema::NonCanonicalConcept& concept_info : schema::kNonCanonicalConcepts) {
+        if (std::string_view(canonical) == concept_info.normalized) return concept_info.reason;
+    }
+    return nullptr;
+}
+
+// A key no row read: RetiredKey or NonCanonicalConcept when it names such a concept, else
+// UnknownKey when `report_unknown`.
+void ReportUnread(const CanonicalSection& section, const CanonicalValue& value, bool report_unknown,
+                  std::vector<CanonicalDiagnostic>& out) {
+    const char* canonical = ResolveConfigKey(value.key);
+    if (canonical != nullptr && IsRetiredConfigKey(canonical)) {
+        out.push_back(
+            MakeDiagnostic(CanonicalDiagnosticKind::RetiredKey, value.line, section.name, value.key, value.value, ""));
+        return;
+    }
+    const char* reason = canonical == nullptr ? nullptr : NonCanonicalReason(canonical);
+    if (reason != nullptr) {
+        out.push_back(MakeDiagnostic(CanonicalDiagnosticKind::NonCanonicalConcept, value.line, section.name,
+                                     value.key, value.value, reason));
+        return;
+    }
+    if (report_unknown) {
+        out.push_back(
+            MakeDiagnostic(CanonicalDiagnosticKind::UnknownKey, value.line, section.name, value.key, value.value, ""));
+    }
+}
+
+void AppendRow(std::string& out, const TableRow& row, std::size_t index, const RowSource& source) {
+    for (const std::string& line : row.comment) out.append("; ").append(line).append(kCrlf);
+    const std::string value = source.Render(index);
+    if (row.engine && source.EqualsDefault(index)) out.append("; ");
+    out.append(row.key).append("=").append(value).append(kCrlf);
+}
+
+}  // namespace
+
+std::string RowName(const TableRow& row) { return "[" + row.section + "] " + row.key; }
+
+std::vector<std::string> CommentLines(const char* text, const std::string& row) {
+    std::vector<std::string> lines;
+    const std::string_view all(text);
+    if (all.empty()) return lines;
+    std::size_t start = 0;
+    for (;;) {
+        const std::size_t end = all.find('\n', start);
+        const std::string_view line = all.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
+        const std::string number = std::to_string(lines.size() + 1);
+        if (line.empty()) throw std::invalid_argument(row + ": comment line " + number + " is empty");
+        if (!IsPrintableAscii(line)) {
+            throw std::invalid_argument(row + ": comment line " + number +
+                                        " holds a byte outside printable ASCII, and a canonical file is ASCII");
+        }
+        if (line.front() == ' ' || line.back() == ' ') {
+            throw std::invalid_argument(row + ": comment line " + number + " starts or ends with a space");
+        }
+        lines.emplace_back(line);
+        if (end == std::string_view::npos) return lines;
+        start = end + 1;
+    }
+}
+
+void CheckConceptRow(const std::vector<TableRow>& rows, const TableRow& row) { CheckUniqueKey(rows, row); }
+
+void CheckLocalRow(const std::vector<TableRow>& rows, const TableRow& row) {
+    const std::string name = RowName(row);
+    if (!IsPascalCase(row.section)) {
+        throw std::invalid_argument(name + ": the section name is not PascalCase ASCII letters and digits");
+    }
+    if (!IsPascalCase(row.key)) {
+        throw std::invalid_argument(name + ": the key is not PascalCase ASCII letters and digits");
+    }
+    if (EqualsAsciiIgnoreCase(row.section, kStampSection)) {
+        throw std::invalid_argument(name + ": [CameraUnlock] belongs to core, so a game-local row goes elsewhere");
+    }
+    for (const char* section : schema::kSections) {
+        if (!EqualsAsciiIgnoreCase(row.section, section)) continue;
+        if (row.section != section) {
+            throw std::invalid_argument(name + ": the schema spells this section [" + std::string(section) + "]");
+        }
+        if (!IsSchemaSectionWithCanonicalConcept(section)) {
+            throw std::invalid_argument(name + ": [" + std::string(section) +
+                                        "] holds none of the settings a canonical file writes, so it has no rows");
+        }
+    }
+    for (const TableRow& earlier : rows) {
+        if (EqualsAsciiIgnoreCase(earlier.section, row.section) && earlier.section != row.section) {
+            throw std::invalid_argument(name + ": " + RowName(earlier) + " spells this section [" + earlier.section +
+                                        "]");
+        }
+    }
+    const char* canonical = ResolveConfigKey(row.key);
+    if (canonical != nullptr) {
+        throw std::invalid_argument(name + ": " + row.key + " is the key or an alias of the schema concept '" +
+                                    canonical + "', so a game-local row cannot use it");
+    }
+    CheckUniqueKey(rows, row);
+    if (row.comment.empty()) {
+        const bool covered = std::any_of(rows.begin(), rows.end(), [&](const TableRow& earlier) {
+            return !earlier.concept_id && earlier.section == row.section;
+        });
+        if (!covered) {
+            throw std::invalid_argument(name + " needs a comment: only a row written below a game-local row of its "
+                                               "section may share that row's comment");
+        }
+    }
+}
+
+ApplyReport ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows, RowTarget& target) {
+    if (!doc.IsReadable()) {
+        throw std::invalid_argument(std::string("ApplyCanonical needs a readable document, and this one is ") +
+                                    CanonicalReadStatusName(doc.status));
+    }
+
+    for (std::size_t i = 0; i < rows.size(); ++i) target.ResetToDefault(i);
+
+    ApplyReport report;
+    std::vector<int> read_from(rows.size(), 0);
+    for (const CanonicalSection& section : doc.sections) {
+        if (EqualsAsciiIgnoreCase(section.name, kStampSection)) continue;
+        const bool known = std::any_of(rows.begin(), rows.end(), [&](const TableRow& row) {
+            return EqualsAsciiIgnoreCase(row.section, section.name);
+        });
+        if (!known) {
+            report.diagnostics.push_back(
+                MakeDiagnostic(CanonicalDiagnosticKind::UnknownSection, section.line, section.name, "", "", ""));
+        }
+        for (const CanonicalValue& value : section.values) {
+            std::size_t row = rows.size();
+            for (std::size_t i = 0; known && i < rows.size(); ++i) {
+                if (EqualsAsciiIgnoreCase(rows[i].section, section.name) && EqualsAsciiIgnoreCase(rows[i].key, value.key)) {
+                    row = i;
+                }
+            }
+            if (row == rows.size()) {
+                ReportUnread(section, value, known, report.diagnostics);
+                continue;
+            }
+            const std::string error = target.Apply(row, value.value);
+            if (error.empty()) {
+                read_from[row] = value.line;
+            } else {
+                report.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::InvalidValue, value.line,
+                                                            section.name, value.key, value.value, error));
+            }
+        }
+    }
+
+    std::size_t rotation = rows.size();
+    std::size_t position = rows.size();
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i].concept_id == schema::Concept::RotationEnabled) rotation = i;
+        if (rows[i].concept_id == schema::Concept::PositionEnabled) position = i;
+    }
+    if (rotation < rows.size() && position < rows.size() && target.IsFalse(rotation) && target.IsFalse(position)) {
+        CanonicalDiagnostic d;
+        d.kind = CanonicalDiagnosticKind::NoTrackingMode;
+        for (const std::size_t row : {rotation, position}) {
+            if (read_from[row] != 0) d.lines.push_back(read_from[row]);
+        }
+        std::sort(d.lines.begin(), d.lines.end());
+        target.ResetToDefault(rotation);
+        target.ResetToDefault(position);
+        report.diagnostics.push_back(std::move(d));
+    }
+
+    std::stable_sort(report.diagnostics.begin(), report.diagnostics.end(),
+                     [](const CanonicalDiagnostic& a, const CanonicalDiagnostic& b) {
+                         if (a.lines.front() != b.lines.front()) return a.lines.front() < b.lines.front();
+                         return static_cast<int>(a.kind) < static_cast<int>(b.kind);
+                     });
+    return report;
+}
+
+std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& header, const RowSource& source) {
+    const std::string& name = header.display_name;
+    if (name.empty() || !IsPrintableAscii(name) || name.front() == ' ' || name.back() == ' ') {
+        throw std::invalid_argument("display name '" + name +
+                                    "' is not printable ASCII without a leading or trailing space");
+    }
+
+    std::string out;
+    out.append("; ").append(name).append(" head tracking settings.").append(kCrlf);
+    out.append("; Comments start with ; and go on their own line. Text after a value is part of the value.")
+        .append(kCrlf);
+    if (std::any_of(rows.begin(), rows.end(), [](const TableRow& row) { return row.hotkey; })) {
+        out.append("; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; "
+                   "leave empty for none.")
+            .append(kCrlf);
+    }
+    out.append(kCrlf).append("[CameraUnlock]").append(kCrlf);
+    out.append("; Written by the mod. Leave this section in place.").append(kCrlf);
+    out.append("ConfigFormat=").append(std::to_string(kConfigFormat)).append(kCrlf);
+
+    for (const char* section : schema::kSections) {
+        std::vector<std::size_t> order;
+        for (const schema::ConceptInfo& info : schema::kConcepts) {
+            for (std::size_t i = 0; i < rows.size(); ++i) {
+                if (rows[i].concept_id == info.id && rows[i].section == section) order.push_back(i);
+            }
+        }
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            if (!rows[i].concept_id && rows[i].section == section) order.push_back(i);
+        }
+        if (order.empty()) continue;
+        out.append(kCrlf).append("[").append(section).append("]").append(kCrlf);
+        for (const std::size_t i : order) AppendRow(out, rows[i], i, source);
+    }
+
+    std::vector<std::string> local_sections;
+    for (const TableRow& row : rows) {
+        const bool schema_section = std::any_of(std::begin(schema::kSections), std::end(schema::kSections),
+                                                [&](const char* section) { return row.section == section; });
+        if (!schema_section && std::find(local_sections.begin(), local_sections.end(), row.section) == local_sections.end()) {
+            local_sections.push_back(row.section);
+        }
+    }
+    for (const std::string& section : local_sections) {
+        out.append(kCrlf).append("[").append(section).append("]").append(kCrlf);
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            if (rows[i].section == section) AppendRow(out, rows[i], i, source);
+        }
+    }
+    return out;
+}
+
+}  // namespace cameraunlock::config::detail

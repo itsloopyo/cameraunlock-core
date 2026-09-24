@@ -27,6 +27,7 @@ int RunCheckedFileWriterTests();
 int RunCanonicalIniTests();
 int RunKeyBindingsTests();
 int RunValueCodecsTests();
+int RunConfigTableTests();
 int RunCheckedFileWriterInterruptChild(const char* step);
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
 int RunPluginConfigMigrationTests();
@@ -70,6 +71,7 @@ int main(int argc, char** argv) {
     failures += RunCanonicalIniTests();
     failures += RunKeyBindingsTests();
     failures += RunValueCodecsTests();
+    failures += RunConfigTableTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();
 #endif

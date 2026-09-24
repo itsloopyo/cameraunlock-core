@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Emits the C# and C++ alias tables, the C++ defaults table and the C++ test expectation for
-// the concept ranges from data/config-schema.json, the C++ test expectation for
+// Emits the C# and C++ alias tables, the C++ defaults table, the C# and C++ canonical concept
+// tables (what a config table binds a concept with) and the C++ test expectation for the
+// concept ranges from data/config-schema.json, the C++ test expectation for
 // data/pipeline-conformance.json's preference_modes, and the C# and C++ key-name tables from
 // data/keys.json.
 //
@@ -29,6 +30,8 @@ const conceptRangesTestPath = join(repoRoot, 'cpp', 'tests', 'concept_ranges.g.h
 const keysPath = join(repoRoot, 'data', 'keys.json');
 const keyNamesCppPath = join(repoRoot, 'cpp', 'include', 'cameraunlock', 'input', 'key_names.g.h');
 const keyNamesCsharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Input', 'KeyNames.g.cs');
+const conceptsCppPath = join(repoRoot, 'cpp', 'include', 'cameraunlock', 'config', 'config_concepts.g.h');
+const conceptsCsharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Config', 'ConfigConcepts.g.cs');
 
 const normalize = (key) => key.toLowerCase().replace(/[_-]/g, '');
 
@@ -39,6 +42,7 @@ const identifierPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const spellingPattern = /^[A-Za-z0-9_-]+$/;
 // String defaults are emitted into a C++ string literal the same way, so the same rule.
 const stringDefaultPattern = /^[A-Za-z0-9_-]*$/;
+const pascalCasePattern = /^[A-Z][A-Za-z0-9]*$/;
 
 const conceptFields = new Set([
     'id', 'section', 'key', 'type', 'default', 'aliases', 'doc',
@@ -56,6 +60,10 @@ const valueTypes = {
     color: (v) => Array.isArray(v) && v.length === 4 &&
         v.every((c) => typeof c === 'number' && Number.isFinite(c) && c >= 0 && c <= 1),
 };
+
+// The value family of a canonical concept, by schema type. It fixes the codec a table binds the
+// concept with; a string concept is always a hotkey list (checked below).
+const canonicalFamilies = { bool: 'Bool', int: 'Integer', float: 'Floating', string: 'Hotkey' };
 
 class SchemaError extends Error {}
 
@@ -152,6 +160,10 @@ function checkCanonicalFields(where, concept, keyTable) {
     if (typeof concept.canonical !== 'boolean') {
         schemaError(where, `canonical is ${JSON.stringify(concept.canonical)}, expected true or false`);
     }
+    if (concept.canonical && !(concept.type in canonicalFamilies)) {
+        schemaError(where, `is canonical and its type is '${concept.type}', but the canonical format has no codec ` +
+            `for it: canonical concepts are ${Object.keys(canonicalFamilies).join(', ')}`);
+    }
 
     if (!concept.canonical) {
         if (!('canonical_reason' in concept)) {
@@ -167,6 +179,9 @@ function checkCanonicalFields(where, concept, keyTable) {
     }
 
     if ('canonical_reason' in concept) schemaError(where, 'is canonical, so it has no canonical_reason');
+    if (!pascalCasePattern.test(concept.key)) {
+        schemaError(where, `key '${concept.key}' is canonical, so it is PascalCase ASCII letters and digits`);
+    }
 
     const comment = concept.file_comment;
     if (!Array.isArray(comment) || comment.length < 1 || comment.length > 2) {
@@ -196,6 +211,17 @@ function checkCanonicalFields(where, concept, keyTable) {
 
 function validateSchema(schema, keyTable) {
     if (!Array.isArray(schema.sections)) schemaError('sections', 'missing, expected an array');
+    // The renderer writes section names and canonical keys into files as they stand, and a
+    // canonical file's names are PascalCase. [CameraUnlock] is core's stamp.
+    schema.sections.forEach((section, i) => {
+        if (typeof section !== 'string' || !pascalCasePattern.test(section)) {
+            schemaError(`sections[${i}]`, `${JSON.stringify(section)} is not PascalCase ASCII letters and digits`);
+        }
+        if (section.toLowerCase() === 'cameraunlock') schemaError(`sections[${i}]`, 'CameraUnlock is the format stamp');
+        if (schema.sections.findIndex((s) => typeof s === 'string' && s.toLowerCase() === section.toLowerCase()) !== i) {
+            schemaError(`sections[${i}]`, `'${section}' is listed twice`);
+        }
+    });
     if (!Array.isArray(schema.concepts)) schemaError('concepts', 'missing, expected an array');
     if (!Array.isArray(schema.retired)) schemaError('retired', 'missing, expected an array');
 
@@ -526,6 +552,208 @@ inline bool IsRetiredConfigKey(const char* canonical_key) {
 }
 
 }  // namespace cameraunlock
+`;
+}
+
+const intMinText = { cpp: '-2147483647 - 1', csharp: 'int.MinValue' };
+const intMaxText = { cpp: '2147483647', csharp: 'int.MaxValue' };
+
+// A bound the schema leaves open is the limit of the concept's type: int for an int concept,
+// the largest finite float either side for a float one.
+function rangeBound(concept, field, language) {
+    const range = concept.range ?? {};
+    if (concept.type === 'int') {
+        if (field in range) return String(range[field]);
+        return field === 'min' ? intMinText[language] : intMaxText[language];
+    }
+    if (field in range) {
+        return language === 'cpp' ? cppFloat(range[field]) : `${range[field]}f`;
+    }
+    if (language === 'cpp') {
+        return field === 'min' ? '-std::numeric_limits<float>::max()' : 'std::numeric_limits<float>::max()';
+    }
+    return field === 'min' ? 'float.MinValue' : 'float.MaxValue';
+}
+
+const canonicalConcepts = (schema) => schema.concepts.filter((c) => c.canonical);
+
+function renderConceptsCpp(schema) {
+    const concepts = canonicalConcepts(schema);
+    const cString = (text) => (text === undefined ? 'nullptr' : `"${text}"`);
+    const enumerators = concepts.map((c) => `    ${c.id},`).join('\n');
+    const traits = concepts.map((c) => {
+        const family = canonicalFamilies[c.type];
+        const lines = [
+            'template <>',
+            `struct ConceptTraits<Concept::${c.id}> {`,
+            `    static constexpr const char* kSection = "${c.section}";`,
+            `    static constexpr const char* kKey = "${c.key}";`,
+            `    static constexpr ValueFamily kFamily = ValueFamily::k${family};`,
+        ];
+        if (c.type === 'int') {
+            lines.push(`    static constexpr long long kMin = ${rangeBound(c, 'min', 'cpp')};`);
+            lines.push(`    static constexpr long long kMax = ${rangeBound(c, 'max', 'cpp')};`);
+        } else if (c.type === 'float') {
+            lines.push(`    static constexpr float kMin = ${rangeBound(c, 'min', 'cpp')};`);
+            lines.push(`    static constexpr float kMax = ${rangeBound(c, 'max', 'cpp')};`);
+        }
+        lines.push(`    static constexpr const char* kFileComment[] = {${c.file_comment.map(cString).join(', ')}};`);
+        lines.push(`    static constexpr const char* kCanonicalDefault = ${cString(c.canonical_default)};`);
+        lines.push('};');
+        return lines.join('\n');
+    }).join('\n\n');
+    const infos = concepts.map((c) => {
+        const comment = [c.file_comment[0], c.file_comment[1]].map(cString).join(', ');
+        return `    {Concept::${c.id}, "${c.id}", "${c.section}", "${c.key}", ValueFamily::k${canonicalFamilies[c.type]}, ` +
+            `{${comment}}, ${c.file_comment.length}, ${cString(c.canonical_default)}},`;
+    }).join('\n');
+    const sections = schema.sections.map((s) => `    "${s}",`).join('\n');
+    const others = schema.concepts.filter((c) => !c.canonical)
+        .map((c) => `    {"${c.id}", "${c.section}", "${c.key}", "${normalize(c.key)}", "${c.canonical_reason}"},`)
+        .join('\n');
+
+    return `${banner('//')}
+
+#pragma once
+
+#include <cstddef>
+#include <limits>
+
+namespace cameraunlock::config::schema {
+
+/// The concepts a canonical config file writes: every concept data/config-schema.json marks
+/// canonical, in its concepts order, which is the order a section's concept rows are written in.
+enum class Concept {
+${enumerators}
+};
+
+/// What a concept's field holds, which fixes its codec: kBool is BoolCodec over bool, kInteger
+/// IntCodec over an integral type that holds the concept's range, kFloating FloatCodec or
+/// DoubleCodec, and kHotkey HotkeyCodec over std::string.
+enum class ValueFamily { kBool, kInteger, kFloating, kHotkey };
+
+/// The schema's facts about one canonical concept. kMin and kMax, both inclusive, exist for the
+/// kInteger family (within int) and the kFloating family (as float); a bound the schema leaves
+/// open is the limit of the schema type. kCanonicalDefault is the binding list a canonical file
+/// starts with, where the schema gives one, else nullptr.
+template <Concept Id>
+struct ConceptTraits;
+
+${traits}
+
+/// One canonical concept, for code that walks them all. kConcepts[static_cast<std::size_t>(id)]
+/// describes id. \`file_comment\` holds \`file_comment_lines\` lines; the rest are nullptr.
+struct ConceptInfo {
+    Concept id;
+    const char* name;
+    const char* section;
+    const char* key;
+    ValueFamily family;
+    const char* file_comment[2];
+    std::size_t file_comment_lines;
+    const char* canonical_default;
+};
+
+inline constexpr ConceptInfo kConcepts[] = {
+${infos}
+};
+
+inline constexpr std::size_t kConceptCount = sizeof(kConcepts) / sizeof(kConcepts[0]);
+
+/// The schema's sections, in the order a canonical file writes them.
+inline constexpr const char* kSections[] = {
+${sections}
+};
+
+inline constexpr std::size_t kSectionCount = sizeof(kSections) / sizeof(kSections[0]);
+
+/// A concept the canonical format does not write. \`normalized\` is what ResolveConfigKey returns
+/// for its key and every alias; \`reason\` is the line a player is shown for such a key.
+struct NonCanonicalConcept {
+    const char* name;
+    const char* section;
+    const char* key;
+    const char* normalized;
+    const char* reason;
+};
+
+inline constexpr NonCanonicalConcept kNonCanonicalConcepts[] = {
+${others}
+};
+
+inline constexpr std::size_t kNonCanonicalConceptCount =
+    sizeof(kNonCanonicalConcepts) / sizeof(kNonCanonicalConcepts[0]);
+
+}  // namespace cameraunlock::config::schema
+`;
+}
+
+function renderConceptsCsharp(schema) {
+    const concepts = canonicalConcepts(schema);
+    const csString = (text) => (text === undefined ? 'null' : `"${text}"`);
+    const types = { bool: 'bool', int: 'int', float: 'float', string: 'string' };
+    const codec = (c) => {
+        switch (c.type) {
+            case 'bool': return 'new BoolCodec()';
+            case 'int': return `new IntCodec(${rangeBound(c, 'min', 'csharp')}, ${rangeBound(c, 'max', 'csharp')})`;
+            case 'float': return `new FloatCodec(${rangeBound(c, 'min', 'csharp')}, ${rangeBound(c, 'max', 'csharp')})`;
+            default: return 'new HotkeyCodec()';
+        }
+    };
+    const fields = concepts.map((c, i) => {
+        const type = types[c.type];
+        const comment = c.file_comment.map(csString).join(', ');
+        return [
+            `        /// <summary>[${c.section}] ${c.key}.</summary>`,
+            `        public static readonly ConceptDescriptor<${type}> ${c.id} = new ConceptDescriptor<${type}>(`,
+            `            ${i}, "${c.id}", "${c.section}", "${c.key}", ConceptValueFamily.${canonicalFamilies[c.type]},`,
+            `            ${codec(c)}, new[] { ${comment} }, ${csString(c.canonical_default)});`,
+        ].join('\n');
+    }).join('\n\n');
+    const all = concepts.map((c) => `            ${c.id},`).join('\n');
+    const sections = schema.sections.map((s) => `            "${s}",`).join('\n');
+    const reasons = schema.concepts.filter((c) => !c.canonical)
+        .map((c) => `            { "${normalize(c.key)}", "${c.canonical_reason}" },`)
+        .join('\n');
+
+    return `${banner('//')}
+
+using System.Collections.Generic;
+
+namespace CameraUnlock.Core.Config
+{
+    /// <summary>
+    /// The concepts a canonical config file writes: every concept data/config-schema.json marks
+    /// canonical, shared with the C++ half of the library as cameraunlock::config::schema. A
+    /// config table binds each through its descriptor, whose type fixes the field's type and
+    /// whose codec carries the schema's range.
+    /// </summary>
+    public static class ConfigConcepts
+    {
+${fields}
+
+        /// <summary>In the schema's concepts order, which is the order a section's concept rows are written in.</summary>
+        internal static readonly ConceptDescriptor[] All =
+        {
+${all}
+        };
+
+        /// <summary>The schema's sections, in the order a canonical file writes them.</summary>
+        internal static readonly string[] Sections =
+        {
+${sections}
+        };
+
+        /// <summary>
+        /// The line a player is shown for a key of a concept the canonical format does not write,
+        /// by the name <see cref="ConfigKeySchema.Resolve"/> returns for its key and every alias.
+        /// </summary>
+        internal static readonly Dictionary<string, string> NonCanonicalReasons = new Dictionary<string, string>
+        {
+${reasons}
+        };
+    }
+}
 `;
 }
 
@@ -940,6 +1168,8 @@ function main() {
         { path: conceptRangesTestPath, text: renderConceptRangesTest(schema) },
         { path: keyNamesCppPath, text: renderKeyNamesCpp(keyTable) },
         { path: keyNamesCsharpPath, text: renderKeyNamesCsharp(keyTable) },
+        { path: conceptsCppPath, text: renderConceptsCpp(schema) },
+        { path: conceptsCsharpPath, text: renderConceptsCsharp(schema) },
     ];
 
     const check = process.argv.includes('--check');

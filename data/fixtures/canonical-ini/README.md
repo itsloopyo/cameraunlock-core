@@ -1,11 +1,12 @@
 # Canonical INI fixtures
 
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
-editor, `keys/` for the hotkey binding codec and `codecs/` for the value codecs. Core's C++
-suite runs them unchanged (`cpp/tests/canonical_ini_tests.cpp`,
-`cpp/tests/ini_editor_tests.cpp`, `cpp/tests/key_bindings_tests.cpp` and
-`cpp/tests/value_codecs_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures`,
-`IniEditorFixtures`, `KeyBindingFixtures` and `ValueCodecFixtures`, under xunit on net8.0 and in
+editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs and `table/` for
+config tables. Core's C++ suite runs them unchanged (`cpp/tests/canonical_ini_tests.cpp`,
+`cpp/tests/ini_editor_tests.cpp`, `cpp/tests/key_bindings_tests.cpp`,
+`cpp/tests/value_codecs_tests.cpp` and `cpp/tests/config_table_tests.cpp`), and so does its C#
+suite (`CanonicalIniFixtures`, `IniEditorFixtures`, `KeyBindingFixtures`, `ValueCodecFixtures`
+and `ConfigTableFixtures`, under xunit on net8.0 and in
 `CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2). Lopari's Rust codec is to run the same files, so nothing
 here is specific to one language: a reader or editor in any language is held to every case. The expected files are written by hand from the rules, never produced by an
 implementation.
@@ -161,3 +162,63 @@ disagrees with the rules there: it writes the float 1234.5677490234375 as `1234.
 rule gives `1234.5677`) and the float 3451485.25 as `3451485.3` (the rule gives `3451485.2`,
 the tie rounded to even), and on .NET Framework 3.5 it reads `3e-324` as 0 (the rule gives
 the smallest denormal). Each language's own tests hold them.
+
+## table/
+
+One fixture table and the config it binds, defined identically in both suites, and one
+directory per case. The table is what a game declares; the cases hold `ApplyCanonical` /
+`ConfigTable.Apply` and `RenderCanonical` / `ConfigTable.Render` to it. A port runs them by
+declaring the same table.
+
+The fixture config's fields, in table order, with the row each is bound to and its default.
+The C++ suite binds `UdpPort` to a `std::uint16_t` and `LocalSmoothing` to a `double` reached
+through a getter and a setter; the C# suite binds `int` and `float`. Both write and read the
+same text.
+
+| Field | Row | Codec | Default | Modifiers |
+|-------|-----|-------|---------|-----------|
+| ToggleKey | concept ToggleKey | hotkey | `End, Ctrl+Shift+Y` | Writable |
+| UdpPort | concept UdpPort | int, 1 to 65535 | `4242` | |
+| PositionEnabled | concept PositionEnabled | bool | `true` | Writable |
+| RotationEnabled | concept RotationEnabled | bool | `true` | Writable |
+| EnableOnStartup | concept EnableOnStartup | bool | `true` | |
+| LocalSmoothing | concept LocalSmoothing | float, 0 to 1 | `0.0` | |
+| PositionLimitX | concept PositionLimitX | float, 0 to 10 | `0.3` | Comment: `How far, in metres, leaning sideways moves the view.` and `The fixture's own wording.` |
+| CollisionChannel | concept CollisionChannel | int | `3` | Engine |
+| CycleTrackingModeKey | concept CycleTrackingModeKey | hotkey | `PageUp, Ctrl+Shift+G` | |
+| Mode | local [Camera] Mode | enum `ControlRotation`, `UpdateCamera` | `UpdateCamera` | comment `ControlRotation or UpdateCamera (decoupled).` |
+| LeanDelayMs | local [Position] LeanDelayMs | int | `50` | comment `Milliseconds before a lean starts, and how far it reaches.`; Range(0, 1000) |
+| LeanScale | local [Position] LeanScale | float | `1.0` | no comment; Range(0, 2) |
+| NearClip | local [Camera] NearClip | double | `0.1` | comment `Near clip distance, in the game's units.` |
+| UpdateCameraSlot | local [Camera] UpdateCameraSlot | int | `196` | comment `Engine values. The commented lines show the built-in values.` and `Delete the ; to pin your own.`; Engine |
+| PovOffset | local [Camera] PovOffset | hex32 | `0x404` | no comment; Engine |
+| CleanCameraReader | local [Camera] CleanCameraReader | hex64 | `0x1402A0B10` | no comment; Engine |
+| HookOffsets | local [Camera] HookOffsets | list of hex32 | `0x10, 0x2A` | comment `Offsets the camera hook patches.` |
+| AimCallers | local [Camera] AimCallers | list of hex64 | empty | comment `Return addresses whose aim is left alone. Empty for none.` |
+| WidgetNames | local [Camera] WidgetNames | list of string | `Crosshair, Compass` | comment `Widgets that follow the head.` |
+| MarkerColor | local [Camera] MarkerColor | color | `1.0, 0.5, 0.0, 1.0` | comment `Marker colour: red, green, blue and opacity, each 0 to 1.` |
+| LogPath | local [Logging] LogPath | string | `HeadTracking.log` | comment `Log file, beside the game's executable.` |
+| WriteLog | local [Logging] WriteLog | bool | `false` | comment `true: write the log.`; Engine |
+| ReloadKey | local [Logging] ReloadKey | hotkey | `F10` | comment `Reads this file again.` |
+
+A `\n` in a comment above separates its lines. The render header's display name is
+`Fixture Game`. Every hotkey value in the cases reads the same in the native and the Unity
+dialect, so the C++ suite's native `HotkeyCodec` and the C# suite's Unity one agree on each.
+
+A case directory holds one of two pairs:
+
+- `input.ini` and `expected.tsv`: the table applied to `input.ini` as the reader parses it,
+  onto a config whose fields hold other values beforehand. `expected.tsv` has one `field` row
+  per field in table order (name, and the field's value as its codec writes it) and one
+  `diagnostic` row per diagnostic Apply returns, in its order (kind, lines comma-separated,
+  and the sentence DescribeCanonicalDiagnostic / `Describe` gives). The reader's own
+  diagnostics are not listed.
+- `values.tsv` and `expected.ini`: `values.tsv` has a `field` row for each field that differs
+  from its default, the value as its codec writes it; the config holding them renders exactly
+  as `expected.ini`.
+
+Both TSV files are ASCII with the note rule above, fields separated by one tab, and values and
+sentences in the byte escape. For every case a runner also renders the config the case ends
+with, parses and applies that, and requires no diagnostic from the reader or the table, the
+same field values, and the same bytes when rendered again. Each runner also checks that a
+member of the config no row binds keeps its value through Apply.

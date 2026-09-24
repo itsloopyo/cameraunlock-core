@@ -1,0 +1,25 @@
+# Every row read from a hand-edited file. LocalSmoothing is given twice: the reader keeps the
+# last, so the invalid first value draws nothing. No [CameraUnlock]: Apply does not need the stamp.
+field	ToggleKey	
+field	UdpPort	65535
+field	PositionEnabled	false
+field	RotationEnabled	true
+field	EnableOnStartup	false
+field	LocalSmoothing	0.25
+field	PositionLimitX	10.0
+field	CollisionChannel	-1
+field	CycleTrackingModeKey	Ctrl+Alt+F12
+field	Mode	ControlRotation
+field	LeanDelayMs	0
+field	LeanScale	2.0
+field	NearClip	1e-05
+field	UpdateCameraSlot	0
+field	PovOffset	0x0
+field	CleanCameraReader	0xFFFFFFFFFFFFFFFF
+field	HookOffsets	
+field	AimCallers	0x140001000, 0x7FF6A0B1C2D3
+field	WidgetNames	Main Crosshair
+field	MarkerColor	0.0, 0.0, 0.0, 0.25
+field	LogPath	C:\\Games\\My Logs\\head tracking.log
+field	WriteLog	true
+field	ReloadKey	Shift+F10, Keypad5

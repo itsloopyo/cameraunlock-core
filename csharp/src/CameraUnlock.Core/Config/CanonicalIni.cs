@@ -217,6 +217,7 @@ namespace CameraUnlock.Core.Config
         private sealed class SectionEntry
         {
             public byte[] Name = Empty;
+            public int Line;
             public readonly List<Entry> Values = new List<Entry>();
         }
 
@@ -294,7 +295,7 @@ namespace CameraUnlock.Core.Config
                         _diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.DuplicateKey, lines.ToArray(),
                             entry.Name, e.Key, e.Value));
                     }
-                    sections[s] = new CanonicalSection(entry.Name, values);
+                    sections[s] = new CanonicalSection(entry.Name, values, entry.Line);
                 }
 
                 int format = ReadFormat(sections);
@@ -343,7 +344,7 @@ namespace CameraUnlock.Core.Config
                 }
                 if (_current >= 0) return;
                 _current = _sections.Count;
-                _sections.Add(new SectionEntry { Name = Slice(header.Name) });
+                _sections.Add(new SectionEntry { Name = Slice(header.Name), Line = number });
                 if (_stampHeaderLine == 0 && EqualsAsciiIgnoreCase(_bytes, header.Name, StampSection))
                 {
                     _stampHeaderLine = number;

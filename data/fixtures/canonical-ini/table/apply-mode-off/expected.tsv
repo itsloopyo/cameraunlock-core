@@ -1,0 +1,25 @@
+# Both mode switches off is no tracking mode: both take the table defaults.
+field	ToggleKey	End, Ctrl+Shift+Y
+field	UdpPort	4242
+field	PositionEnabled	true
+field	RotationEnabled	true
+field	EnableOnStartup	true
+field	LocalSmoothing	0.0
+field	PositionLimitX	0.3
+field	CollisionChannel	3
+field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
+field	Mode	UpdateCamera
+field	LeanDelayMs	50
+field	LeanScale	1.0
+field	NearClip	0.1
+field	UpdateCameraSlot	196
+field	PovOffset	0x404
+field	CleanCameraReader	0x1402A0B10
+field	HookOffsets	0x10, 0x2A
+field	AimCallers	
+field	WidgetNames	Crosshair, Compass
+field	MarkerColor	1.0, 0.5, 0.0, 1.0
+field	LogPath	HeadTracking.log
+field	WriteLog	false
+field	ReloadKey	F10
+diagnostic	NoTrackingMode	2,4	Lines 2 and 4: RotationEnabled and PositionEnabled are both false, which is not a tracking mode, so both are read as their defaults.

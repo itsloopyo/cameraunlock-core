@@ -63,5 +63,45 @@ namespace CameraUnlock.Core.Config
         /// (saturated at <see cref="int.MaxValue"/>), and Key and Value are the line's.
         /// </summary>
         ConfigFormatNewer = 10,
+
+        /// <summary>
+        /// <see cref="ConfigTable{TConfig}.Apply"/>: a value its row's codec does not read. The row
+        /// keeps its default. Section, Key and Value are the line's; Detail is what the codec expected.
+        /// </summary>
+        InvalidValue = 11,
+
+        /// <summary>
+        /// <see cref="ConfigTable{TConfig}.Apply"/>: a section the table has no row in, so nothing in
+        /// it is read. Section is its name; the line is its first header's.
+        /// </summary>
+        UnknownSection = 12,
+
+        /// <summary>
+        /// <see cref="ConfigTable{TConfig}.Apply"/>: a key in a section the table reads that no row
+        /// names and that is no retired or non-canonical concept, so it is not read. Section, Key and
+        /// Value are the line's.
+        /// </summary>
+        UnknownKey = 13,
+
+        /// <summary>
+        /// <see cref="ConfigTable{TConfig}.Apply"/>: a key naming a retired concept (the schema's
+        /// retired list), in any section but [CameraUnlock]. It is not read. Section, Key and Value
+        /// are the line's.
+        /// </summary>
+        RetiredKey = 14,
+
+        /// <summary>
+        /// <see cref="ConfigTable{TConfig}.Apply"/>: a key naming a concept the canonical format does
+        /// not write, in any section but [CameraUnlock]. It is not read. Section, Key and Value are the
+        /// line's; Detail is the schema's canonical_reason, the line saying why.
+        /// </summary>
+        NonCanonicalConcept = 15,
+
+        /// <summary>
+        /// <see cref="ConfigTable{TConfig}.Apply"/>: RotationEnabled and PositionEnabled are both
+        /// false, which is no tracking mode, so both take the table's defaults. Lines are the lines
+        /// that set them.
+        /// </summary>
+        NoTrackingMode = 16,
     }
 }

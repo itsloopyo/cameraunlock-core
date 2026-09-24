@@ -228,7 +228,7 @@ CanonicalIni ParseCanonicalIni(std::string_view bytes) {
             }
             if (current < 0) {
                 current = static_cast<int>(doc.sections.size());
-                doc.sections.push_back(CanonicalSection{std::string(header.name), {}});
+                doc.sections.push_back(CanonicalSection{std::string(header.name), {}, number});
                 if (stamp_header_line == 0 && EqualsAsciiIgnoreCase(header.name, kStampSection)) {
                     stamp_header_line = number;
                 }
@@ -311,13 +311,19 @@ const char* CanonicalDiagnosticKindName(CanonicalDiagnosticKind kind) {
         case CanonicalDiagnosticKind::ConfigFormatMissing: return "ConfigFormatMissing";
         case CanonicalDiagnosticKind::ConfigFormatInvalid: return "ConfigFormatInvalid";
         case CanonicalDiagnosticKind::ConfigFormatNewer: return "ConfigFormatNewer";
+        case CanonicalDiagnosticKind::InvalidValue: return "InvalidValue";
+        case CanonicalDiagnosticKind::UnknownSection: return "UnknownSection";
+        case CanonicalDiagnosticKind::UnknownKey: return "UnknownKey";
+        case CanonicalDiagnosticKind::RetiredKey: return "RetiredKey";
+        case CanonicalDiagnosticKind::NonCanonicalConcept: return "NonCanonicalConcept";
+        case CanonicalDiagnosticKind::NoTrackingMode: return "NoTrackingMode";
     }
     throw std::invalid_argument("CanonicalDiagnosticKind " + std::to_string(static_cast<int>(kind)) +
                                 " has no name");
 }
 
 std::string DescribeCanonicalDiagnostic(const CanonicalDiagnostic& d) {
-    const std::string line = "Line " + JoinLines(d.lines) + ": ";
+    const std::string line = (d.lines.size() > 1 ? "Lines " : "Line ") + JoinLines(d.lines) + ": ";
     const std::string format = std::to_string(kConfigFormat);
     switch (d.kind) {
         case CanonicalDiagnosticKind::TextAfterSectionHeader:
@@ -346,6 +352,20 @@ std::string DescribeCanonicalDiagnostic(const CanonicalDiagnostic& d) {
         case CanonicalDiagnosticKind::ConfigFormatNewer:
             return line + d.key + "=" + d.value +
                    " was written by a newer version of the mod. This version reads format " + format + ".";
+        case CanonicalDiagnosticKind::InvalidValue:
+            return line + "[" + d.section + "] " + d.key + "=" + d.value + " is not valid (" + d.detail +
+                   "), so the default is used.";
+        case CanonicalDiagnosticKind::UnknownSection:
+            return line + "[" + d.section + "] is not a section this mod reads, so everything in it is ignored.";
+        case CanonicalDiagnosticKind::UnknownKey:
+            return line + "[" + d.section + "] " + d.key + " is not a setting this mod reads, so it is ignored.";
+        case CanonicalDiagnosticKind::RetiredKey:
+            return line + "[" + d.section + "] " + d.key + " is a setting this mod no longer uses, so it is ignored.";
+        case CanonicalDiagnosticKind::NonCanonicalConcept:
+            return line + "[" + d.section + "] " + d.key + " is ignored. " + d.detail;
+        case CanonicalDiagnosticKind::NoTrackingMode:
+            return line + "RotationEnabled and PositionEnabled are both false, which is not a tracking mode, so both "
+                          "are read as their defaults.";
     }
     throw std::invalid_argument(std::string("CanonicalDiagnosticKind ") + CanonicalDiagnosticKindName(d.kind) +
                                 " has no description");

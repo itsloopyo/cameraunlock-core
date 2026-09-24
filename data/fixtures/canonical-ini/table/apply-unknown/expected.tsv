@@ -1,0 +1,41 @@
+# Unknown sections draw one diagnostic each, however many headers; their plain keys draw none.
+# Unknown keys in a section the table reads draw one each. A key naming a retired or non-canonical
+# concept (by any alias, under the schema normalisation) says so in any section. [CameraUnlock] keys
+# are core's and draw nothing. A concept key in the wrong section, or one this table does not bind,
+# is an unknown key.
+field	ToggleKey	Insert
+field	UdpPort	4242
+field	PositionEnabled	true
+field	RotationEnabled	true
+field	EnableOnStartup	false
+field	LocalSmoothing	0.0
+field	PositionLimitX	0.2
+field	CollisionChannel	3
+field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
+field	Mode	UpdateCamera
+field	LeanDelayMs	50
+field	LeanScale	1.0
+field	NearClip	0.1
+field	UpdateCameraSlot	196
+field	PovOffset	0x404
+field	CleanCameraReader	0x1402A0B10
+field	HookOffsets	0x10, 0x2A
+field	AimCallers	
+field	WidgetNames	Crosshair, Compass
+field	MarkerColor	1.0, 0.5, 0.0, 1.0
+field	LogPath	HeadTracking.log
+field	WriteLog	false
+field	ReloadKey	F10
+diagnostic	RetiredKey	6	Line 6: [General] Smoothing is a setting this mod no longer uses, so it is ignored.
+diagnostic	UnknownKey	7	Line 7: [General] WorldSpaceYaw is not a setting this mod reads, so it is ignored.
+diagnostic	UnknownKey	8	Line 8: [General] Colour is not a setting this mod reads, so it is ignored.
+diagnostic	UnknownSection	9	Line 9: [Sensitivity] is not a section this mod reads, so everything in it is ignored.
+diagnostic	NonCanonicalConcept	10	Line 10: [Sensitivity] YawSensitivity is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.
+diagnostic	NonCanonicalConcept	13	Line 13: [Hotkeys] PositionToggleKey is ignored. CycleTrackingModeKey is the hotkey that switches positional tracking.
+diagnostic	NonCanonicalConcept	16	Line 16: [Position] InvertX is ignored. The mod applies the head pose as the tracker sends it, with no axis inversion of its own.
+diagnostic	UnknownKey	18	Line 18: [Position] UdpPort is not a setting this mod reads, so it is ignored.
+diagnostic	UnknownSection	19	Line 19: [Reticle] is not a section this mod reads, so everything in it is ignored.
+diagnostic	NonCanonicalConcept	20	Line 20: [Reticle] ShowReticle is ignored. Whether a reticle is shown is not a setting.
+diagnostic	UnknownSection	21	Line 21: [Empty] is not a section this mod reads, so everything in it is ignored.
+diagnostic	UnknownSection	22	Line 22: [Extra] is not a section this mod reads, so everything in it is ignored.
+diagnostic	NonCanonicalConcept	27	Line 27: [Camera] recenter_key is ignored. The mod keeps no centre of its own: centre the view in your tracker app.
