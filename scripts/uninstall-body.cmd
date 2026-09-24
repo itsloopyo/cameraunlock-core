@@ -51,6 +51,14 @@
 ::   ROOT_EXTRAS        - optional extra files to remove from GAME_PATH, for
 ::                        mods that deploy below the game root but write their
 ::                        config and log at it
+::   PRESERVE_FILES     - optional config files that uninstall leaves in place,
+::                        so the player's settings survive a reinstall. Paths
+::                        relative to GAME_PATH, space-separated, quoted when
+::                        one holds a space. <path>.pre-canonical and
+::                        <path>.pre-canonical.last are kept with each listed
+::                        path. No removal list and no loader folder removal
+::                        takes them (see :del_one and :rmtree_one). No
+::                        wildcard, drive, leading \, .., /, ! or parenthesis
 ::   USER_FOLDER_EXTRAS - BeamNGUserMods only: files the mod writes at runtime
 ::                        into the per-user folder rather than into mods\.
 ::                        Entries may carry a relative subfolder
@@ -177,6 +185,10 @@ for %%v in (GAME_ID MOD_DISPLAY_NAME STATE_FILE FRAMEWORK_TYPE) do (
         exit /b 1
     )
 )
+:: Checked here, before delayed expansion is enabled, because that is the one
+:: place a `!` in the value can still be seen.
+call :assert_safe_preserve_list
+if errorlevel 1 exit /b 1
 
 echo.
 echo === %MOD_DISPLAY_NAME% - Uninstall ===
@@ -272,6 +284,18 @@ if errorlevel 1 exit /b 1
 set "_LIST=!USER_FOLDER_EXTRAS!"
 call :assert_safe_user_list
 if errorlevel 1 exit /b 1
+
+:: Where :rmtree_one sets PRESERVE_FILES aside while it removes a loader folder.
+:: One left from an earlier run means that run stopped with the player's config
+:: in it, so nothing is touched until it has been put back by hand.
+set "_KEEP_DIR=!GAME_PATH!\CameraUnlock-kept-configs"
+if defined PRESERVE_FILES if exist "!_KEEP_DIR!\" (
+    echo ERROR: !_KEEP_DIR! is left over from an uninstall that did not finish.
+    echo It holds config files that were set aside while a loader folder was
+    echo removed. Move each file in it back to the same place under the game
+    echo folder, delete the folder, and run this uninstaller again.
+    exit /b 1
+)
 
 :: -------- Compute DEPLOY_DIR per FRAMEWORK_TYPE --------
 call :compute_deploy_dir
@@ -389,9 +413,19 @@ exit /b 1
 :: and leaves errorlevel alone, which is how "Removed: X" came to be printed
 :: for a file that is still sitting there. Raises _REMOVE_FAILED instead of
 :: exiting so one locked file does not hide the state of the rest of the tree.
+::
+:: Every list removes through here, so this is where a PRESERVE_FILES path is
+:: left in place and reported as kept.
 :: ============================================
 :del_one
 if not exist "!_DEL_PATH!" exit /b 0
+if defined PRESERVE_FILES (
+    call :is_preserved
+    if not errorlevel 1 (
+        echo   Kept: !_DEL_LABEL!
+        exit /b 0
+    )
+)
 del /f /q "!_DEL_PATH!" >nul 2>&1
 if exist "!_DEL_PATH!" (
     echo   ERROR: could not remove !_DEL_LABEL!
@@ -402,10 +436,18 @@ echo   Removed: !_DEL_LABEL!
 exit /b 0
 
 :: ============================================
-:: Same contract as :del_one for a whole directory tree.
+:: Same contract as :del_one for a whole directory tree. With PRESERVE_FILES
+:: set, :rmtree_keep does the removal instead, so a config inside the tree
+:: outlives it.
 :: ============================================
 :rmtree_one
 if not exist "!_DEL_PATH!\" exit /b 0
+if defined PRESERVE_FILES (
+    call :rmtree_keep
+    if not errorlevel 1 exit /b 0
+    set "_REMOVE_FAILED=1"
+    exit /b 1
+)
 rmdir /s /q "!_DEL_PATH!" >nul 2>&1
 if exist "!_DEL_PATH!\" (
     echo   ERROR: could not remove !_DEL_LABEL!
@@ -413,6 +455,171 @@ if exist "!_DEL_PATH!\" (
     exit /b 1
 )
 echo   Removed: !_DEL_LABEL!
+exit /b 0
+
+:: ============================================
+:: PRESERVE_FILES helpers. Each one runs with delayed expansion OFF: a %%~f
+:: result is substituted before cmd.exe scans for `!`, so with expansion on
+:: every game path holding a `!` would come out mangled. For the same reason
+:: they print through a FOR variable, never %VAR%, which would let a `&` in
+:: the path run as a command.
+::
+:: :is_preserved - errorlevel 0 when _DEL_PATH is a listed path or one of its
+:: two copies, compared as full paths and without regard to case.
+:: ============================================
+:is_preserved
+setlocal disabledelayedexpansion
+for %%g in ("%_DEL_PATH%") do for %%k in (%PRESERVE_FILES%) do for %%q in ("%GAME_PATH%\%%~k") do (
+    if /i "%%~fg"=="%%~fq" exit /b 0
+    if /i "%%~fg"=="%%~fq.pre-canonical" exit /b 0
+    if /i "%%~fg"=="%%~fq.pre-canonical.last" exit /b 0
+)
+exit /b 1
+
+:: ============================================
+:: Remove the tree at _DEL_PATH, keeping every preserved file inside it. Each
+:: one is moved into _KEEP_DIR under its path relative to the game folder -
+:: same volume, so a rename - then the tree goes, then each file is moved back
+:: into a recreated parent. Anything that could not be moved back stays in
+:: _KEEP_DIR, which is named, and the run fails so the state file stays. If a
+:: file cannot be set aside, the tree is left whole rather than lose it.
+:: ============================================
+:rmtree_keep
+setlocal disabledelayedexpansion
+if exist "%_KEEP_DIR%\" (
+    for %%l in ("%_DEL_LABEL%") do echo   ERROR: %%~l was not removed: config files could not be put back
+    for %%h in ("%_KEEP_DIR%") do echo   from %%~h, and nothing more is set aside while it holds them.
+    exit /b 1
+)
+for %%g in ("%_DEL_PATH%") do set "_KEEP_TREE=%%~fg"
+set "_KEEP_OUT_FAILED="
+set "_KEEP_TREE_FAILED="
+set "_KEEP_STRANDED="
+for %%k in (%PRESERVE_FILES%) do for %%c in ("" ".pre-canonical" ".pre-canonical.last") do (
+    set "_KEEP_REL=%%~k%%~c"
+    call :keep_out
+)
+if defined _KEEP_OUT_FAILED goto :keep_restore
+rmdir /s /q "%_KEEP_TREE%" >nul 2>&1
+if exist "%_KEEP_TREE%\" (
+    for %%l in ("%_DEL_LABEL%") do echo   ERROR: could not remove %%~l
+    set "_KEEP_TREE_FAILED=1"
+) else (
+    for %%l in ("%_DEL_LABEL%") do echo   Removed: %%~l
+)
+:keep_restore
+for %%k in (%PRESERVE_FILES%) do for %%c in ("" ".pre-canonical" ".pre-canonical.last") do (
+    set "_KEEP_REL=%%~k%%~c"
+    call :keep_back
+)
+if defined _KEEP_STRANDED (
+    for %%h in ("%_KEEP_DIR%") do echo   Those files are still in %%~h.
+    echo   Move each one back to the same place under the game folder, delete that
+    echo   folder, and run this uninstaller again.
+    exit /b 1
+)
+if exist "%_KEEP_DIR%\" rmdir /s /q "%_KEEP_DIR%"
+if exist "%_KEEP_DIR%\" (
+    for %%h in ("%_KEEP_DIR%") do echo   ERROR: could not remove the emptied folder %%~h
+    exit /b 1
+)
+if defined _KEEP_OUT_FAILED exit /b 1
+if defined _KEEP_TREE_FAILED exit /b 1
+exit /b 0
+
+:: _KEEP_REL = a listed path or copy, relative to the game folder.
+:keep_out
+for %%q in ("%GAME_PATH%\%_KEEP_REL%") do set "_KEEP_LIVE=%%~fq"
+if not exist "%_KEEP_LIVE%" exit /b 0
+if exist "%_KEEP_LIVE%\" exit /b 0
+set "_UNDER_AT=%_KEEP_LIVE%"
+call :keep_in_tree
+if errorlevel 1 exit /b 0
+for %%q in ("%_KEEP_DIR%\%_KEEP_REL%") do (
+    set "_KEEP_HELD=%%~fq"
+    set "_KEEP_HELD_DIR=%%~dpq"
+)
+if not exist "%_KEEP_HELD_DIR%" mkdir "%_KEEP_HELD_DIR%"
+move "%_KEEP_LIVE%" "%_KEEP_HELD%" >nul
+if not errorlevel 1 exit /b 0
+for %%r in ("%_KEEP_REL%") do echo   ERROR: could not set %%~r aside, so the folder holding it is left in place.
+set "_KEEP_OUT_FAILED=1"
+exit /b 0
+
+:keep_back
+for %%q in ("%_KEEP_DIR%\%_KEEP_REL%") do set "_KEEP_HELD=%%~fq"
+if not exist "%_KEEP_HELD%" exit /b 0
+if exist "%_KEEP_HELD%\" exit /b 0
+for %%q in ("%GAME_PATH%\%_KEEP_REL%") do (
+    set "_KEEP_LIVE=%%~fq"
+    set "_KEEP_LIVE_DIR=%%~dpq"
+)
+if not exist "%_KEEP_LIVE_DIR%" mkdir "%_KEEP_LIVE_DIR%"
+move /y "%_KEEP_HELD%" "%_KEEP_LIVE%" >nul
+if errorlevel 1 (
+    for %%r in ("%_KEEP_REL%") do echo   ERROR: could not move %%~r back into place.
+    set "_KEEP_STRANDED=1"
+    exit /b 0
+)
+for %%r in ("%_KEEP_REL%") do echo   Kept: %%~r
+exit /b 0
+
+:: errorlevel 0 when _UNDER_AT lies inside _KEEP_TREE. Walks up the parents
+:: rather than comparing a prefix, which cmd.exe cannot cut to a length held
+:: in a variable without a second expansion that would mangle a `^` or `%`.
+:keep_in_tree
+for %%q in ("%_UNDER_AT%\..") do set "_UNDER_UP=%%~fq"
+if /i "%_UNDER_UP%"=="%_KEEP_TREE%" exit /b 0
+if /i "%_UNDER_UP%"=="%_UNDER_AT%" exit /b 1
+set "_UNDER_AT=%_UNDER_UP%"
+goto :keep_in_tree
+
+:: ============================================
+:: PRESERVE_FILES is validated on its own terms. Unlike the lists that
+:: :assert_safe_list checks it holds paths, so a `\` is allowed inside an
+:: entry, and it is read before delayed expansion is enabled, so a `!` can be
+:: caught. Parentheses are refused because the list is expanded inside for and
+:: if blocks, where one closes the block early. Quotes come off first; they
+:: only group an entry that holds a space.
+:: ============================================
+:assert_safe_preserve_list
+if not defined PRESERVE_FILES exit /b 0
+setlocal
+set "_PL=%PRESERVE_FILES:"=%"
+set "_BAD="
+if not defined _PL (
+    set "_BAD=an empty entry"
+    goto :preserve_list_bad
+)
+if not "%_PL%"=="%_PL:**=%" set "_BAD=a wildcard"
+if not "%_PL%"=="%_PL:?=%"  set "_BAD=a wildcard"
+if not "%_PL%"=="%_PL:..=%" set "_BAD=a .."
+if not "%_PL%"=="%_PL::=%"  set "_BAD=a drive letter"
+if not "%_PL%"=="%_PL:/=%"  set "_BAD=a forward slash"
+if not "%_PL%"=="%_PL:!=%"  set "_BAD=a !"
+if not "%_PL%"=="%_PL:(=%"  set "_BAD=a parenthesis"
+if not "%_PL%"=="%_PL:)=%"  set "_BAD=a parenthesis"
+if defined _BAD goto :preserve_list_bad
+for %%k in (%PRESERVE_FILES%) do (
+    set "_PE=%%~k"
+    call :preserve_entry_check
+)
+if defined _BAD goto :preserve_list_bad
+exit /b 0
+:preserve_list_bad
+for %%b in ("%_BAD%") do echo ERROR: PRESERVE_FILES in the uninstall.cmd CONFIG BLOCK contains %%~b:
+for /f "delims=" %%l in ("%_PL%") do echo   %%l
+echo Each entry is one file, named by its path relative to the game folder:
+echo no drive, no leading \, no .. and no /. A wildcard would reach other files,
+echo and a ! or a parenthesis cannot pass through this script intact.
+exit /b 1
+
+:preserve_entry_check
+if not defined _PE (
+    set "_BAD=an empty entry"
+    exit /b 0
+)
+if "%_PE:~0,1%"=="\" set "_BAD=a leading \"
 exit /b 0
 
 :: ============================================

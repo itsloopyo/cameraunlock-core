@@ -9,6 +9,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `PRESERVE_FILES`: uninstall.cmd can keep a mod's config
+
+`scripts/uninstall-body.cmd` reads a new optional CONFIG BLOCK list, `PRESERVE_FILES`:
+config files the uninstall leaves in place, so a player's settings survive an uninstall and
+reinstall. Entries are paths relative to the game folder, space-separated, quoted when one
+holds a space (`"Eternal Afternoon_Data\Managed\HeadTracking.cfg"`). Each listed path's
+`<path>.pre-canonical` and `<path>.pre-canonical.last`, the copies the config migration keeps
+of the file it converted, are kept with it without being listed.
+
+- Every per-file removal (`MOD_DLLS`, `LEGACY_DLLS`, `MOD_SEED_FILES`, `MOD_LEFTOVERS`,
+  `ROOT_EXTRAS`, `MANAGED_EXTRAS`, the loader files) skips a listed path, compared as a full
+  path without regard to case, and prints `Kept: <name>`.
+- Removing a loader folder (`BepInEx\`, BepInEx's `dotnet\`, `MelonLoader\`, `reframework\`,
+  a UE4SS mod folder) first moves each listed file inside it to `CameraUnlock-kept-configs\`
+  in the game folder under the same relative path, removes the folder, recreates the file's
+  parent and moves it back. A file that cannot be set aside leaves the folder in place; a
+  file that cannot be moved back stays in `CameraUnlock-kept-configs\`, which the uninstall
+  names. Either way the run ends "Uninstall Incomplete", exit 1, with the state file kept.
+- An uninstall that finds `CameraUnlock-kept-configs\` already there refuses with exit 1
+  before it touches anything, since that folder holds a config an earlier run did not put
+  back.
+- An entry with a wildcard, a drive, a leading `\`, a `..`, a `/`, a `!` or a parenthesis,
+  or an empty entry, fails with exit 1 and a message naming `PRESERVE_FILES`.
+
+Unset or empty, the uninstall behaves exactly as before. `scripts/test-uninstall-preserve.ps1`
+runs the body through a real console against synthetic game trees under a path holding `!`
+and a space, including every list type, BepInEx, REFramework and UE4SS trees with
+`installed_by_us` true and false and `/force`, the failure paths and the pause on failure;
+given `-ReferenceBody`, it also checks the cases without the list against an older body.
+
+Consuming repos: nothing to change until a repo converts to the canonical config format, which
+adds `PRESERVE_FILES` to its own `scripts/uninstall.cmd` CONFIG BLOCK. The wrapper template is
+unchanged.
+
 ### Added - REFramework configs on the canonical format, behind `PluginConfigSchema::canonicalConfig`
 
 An RE game converts by setting `canonicalConfig` and `PluginModDescriptor::gameName`. Nothing in
