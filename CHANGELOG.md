@@ -13,8 +13,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 One byte-level reader for the canonical config format, the dialect every converted mod
 will read. It works at the level of sections and keys and leaves values as raw bytes;
-nothing reads values into a config yet. Pure in both languages: no file I/O, and no input
-makes it throw.
+nothing reads values into a config yet. Pure in both languages: no file I/O, and nothing in
+the bytes makes it throw. C# rejects a null array with `ArgumentNullException`.
 
 - C++ (`cameraunlock/config/canonical_ini.h`, namespace `cameraunlock::config`):
   `kConfigFormat` (1), `ParseCanonicalIni(std::string_view)` returning `CanonicalIni`
