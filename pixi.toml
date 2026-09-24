@@ -97,8 +97,10 @@ validate-notices = "node scripts/validate-notices.mjs"
 # install/uninstall wrapper tails, the delayed-expansion pin that decides
 # whether a game path containing `!` installs, the arg-parser contract lopari
 # drives, .cmd line endings, the canonical pixi task set, SHA-pinned actions,
-# the notices/submodule core commit, launcher-manifest.json, LICENSE and the
-# README claims AGENTS.md forbids. Reports; sync-templates.ps1 fixes.
+# the notices/submodule core commit, launcher-manifest.json, LICENSE, the
+# README claims AGENTS.md forbids, and the canonical config format
+# (config-format, config-legacy-reader, config-preserve; see
+# scripts/check-canonical-config.mjs). Reports; sync-templates.ps1 fixes.
 #   pixi run conformance
 #   pixi run conformance -All
 #   pixi run conformance -All -Json
@@ -151,17 +153,30 @@ check-config-schema = "node scripts/generate-config-schema.mjs --check"
 # name fails, because no repo publishes a pre-canonical build after the set lands.
 check-config-format = "node scripts/check-config-format.mjs"
 
+# scripts/lib/canonical-ini.mjs is the canonical INI grammar for core's scripts; this runs
+# data/fixtures/canonical-ini/reader/ through it, the fixtures the C++ and C# readers run,
+# and the hotkey codec in scripts/lib/key-bindings.mjs through keys/cases.tsv. It also holds
+# the canonical config lint (scripts/check-canonical-config.mjs) to its rules.
+check-canonical-ini-js = "node scripts/test-canonical-config.mjs"
+
+# The fleet report over every canonical repo checked out beside this core: game-local
+# (section, key) pairs shared by three or more repos (candidates for a concept), the
+# game-local section names in use, and concept values that differ from the schema default.
+# The lint itself runs in conformance (config-format), or on its own:
+#   node scripts/check-canonical-config.mjs valheim abzu
+config-report = "node scripts/check-canonical-config.mjs --report"
+
 # Development workflow.
 #
 # Ordered cheapest and most deterministic first, because pixi aborts on the first
 # failing dependency and the order decides how long a developer (and CI) waits to
-# find out. The three pure-node gates need no compiler and finish in under a second;
+# find out. The four pure-node gates need no compiler and finish in under a second;
 # they used to sit at the END, behind a full C# build and both test suites, so a
 # stale generated alias table cost several minutes to discover. The vectors come
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

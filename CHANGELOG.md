@@ -9,6 +9,66 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the canonical config lint and three config conformance checks
+
+Conformance now holds each mod repo to the canonical config format. `scripts/conformance.ps1`
+gains `config-format`, `config-legacy-reader` and `config-preserve`, backed by a new lint,
+`scripts/check-canonical-config.mjs`, which reads `data/config-schema.json`, `data/keys.json` and
+`data/config-format.json`. A repo counts as converted when a committed config file that
+`data/config-format.json` records carries the `[CameraUnlock]` stamp; nothing records it
+separately.
+
+- **`scripts/lib/canonical-ini.mjs`**: the canonical INI grammar for core's scripts, the rules of
+  `ParseCanonicalIni` / `CanonicalIni.Parse` and `HasCanonicalStamp` / `CanonicalIni.HasStamp`.
+  `scripts/lib/key-bindings.mjs` is the hotkey binding codec over `data/keys.json`, native and Unity
+  dialects. `pixi run check-canonical-ini-js` (`scripts/test-canonical-config.mjs`, part of
+  `pixi run check`) runs every case in `data/fixtures/canonical-ini/reader/` through the first and
+  `keys/cases.tsv` through the second, and holds the lint to its rules: the two rendered fixture files
+  pass it, and each rule fails a copy of `head-tracking/all-concepts.ini` edited to break it.
+- **The lint**, on each stamped committed file: the reader finds nothing to report, every line ends
+  in CRLF, there is no byte order mark and no byte above 0x7F, and every key line is written
+  `Key=value`; `[CameraUnlock]` holds `ConfigFormat=1` and nothing else; a concept is written only at
+  the schema's section and key, spelled as the schema spells it, and an alias, another spelling or
+  another section fails; a concept the canonical format does not write fails with its
+  `canonical_reason`, a retired key fails, and so does `[Sensitivity]`, `[Inversion]` or `[Reticle]`,
+  the schema sections with no canonical concept; a game-local key is not a bare noun from
+  `deliberately_unaliased` (`Enabled`, `Yaw`, `Position` and the rest), section and key names are
+  PascalCase ASCII letters and digits, and no key name is used in two sections; every value in
+  `[Hotkeys]` is a key list in the file's dialect (hex codes only in native files); each canonical
+  hotkey concept holds its `canonical_default`, apart from a binding `hotkey_exceptions` replaces
+  for the repo; the file is tracked by git and `git check-attr text` reports it unset (`-text`).
+- **`node scripts/check-canonical-config.mjs [repo ...]`** prints each file's problems and exits 1
+  on one; `--json` prints what conformance reads; `pixi run config-report` (`--report`) prints the
+  fleet report: game-local `(section, key)` pairs shared by three or more canonical repos, the
+  game-local section names in use, and concept values in committed files that differ from the
+  schema default.
+- **`config-format`** FAILs a lint problem; a converted `legacy` repo with no `src/legacy_config/`
+  or `Legacy/` folder; a repo outside `legacy` with one; a repo outside `legacy` and `exempt` whose
+  committed file is missing, unrecorded or unstamped, or that `data/config-format.json` does not list
+  at all; a converted `legacy` repo with an unstamped file left; and a recorded committed file the
+  repo does not have. It WARNs once for a `legacy` repo not yet converted. Predecessor repos are not
+  checked.
+- **`config-legacy-reader`** FAILs a converted repo whose tracked C, C++, C# or Rust source outside
+  its legacy folder uses `GetPrivateProfile*`, `WritePrivateProfile*`, `IniReader`, `IniWriter`,
+  `ParseIniConfig`, `ParseIniFile`, or a `.Bind(` call in a C# file that names BepInEx (reported as
+  `ConfigFile.Bind`), unless `allow_legacy_symbols` lists that symbol in that file. `vendor`,
+  `extern`, `third_party`, `cameraunlock-core`, `bin`, `obj`, `build`, `out`, `release`, `dist` and
+  `target` folders are skipped.
+- **`config-preserve`** FAILs a converted repo whose `install.cmd` lists a config file in `MOD_DLLS`,
+  or whose `uninstall.cmd`, where it dispatches to `uninstall-body.cmd`, leaves an installed path or
+  a `legacy_source` out of `PRESERVE_FILES`.
+- **`config-block`** now FAILs a parenthesis in `PRESERVE_FILES`, which `uninstall-body.cmd` expands
+  inside `for %%k in (...)`.
+- **`scripts/check-config-format.mjs`** also checks `hotkey_exceptions`: the key is a hotkey concept
+  with a `canonical_default`, `replaces` is one of its bindings, and `with` is one binding, written
+  as the codec writes it in each dialect the repo's configs use and not already in the default. The
+  `_comment` of `data/config-format.json` now says so, and how `allow_legacy_symbols` names a symbol.
+
+On landing, no repo is converted, so every one of the 87 `legacy` repos draws the `config-format`
+WARN, and every repo outside `legacy` and `exempt` FAILs it: the 40 unpublished movers until each
+converts, and the head-tracking repos checked out beside core that `data/config-format.json` does
+not list. That is the conversion queue, not a regression.
+
 ### Added - `data/config-format.json`: which repos migrate, and where their configs live
 
 A new data file for the canonical config migration, and `pixi run check-config-format`

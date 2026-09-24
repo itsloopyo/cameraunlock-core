@@ -57,7 +57,8 @@ $ACTION_PINS = (Get-Content -LiteralPath (Join-Path $CoreRoot 'scripts/templates
 $CHECK_IDS = @(
     'install-wrapper', 'delayed-expansion', 'arg-parser', 'config-block', 'config-pairing',
     'shim-marker', 'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
-    'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme'
+    'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme',
+    'config-format', 'config-legacy-reader', 'config-preserve'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -319,11 +320,12 @@ $CONFIG_METACHARS = @{ '|' = 'a pipe'; '<' = 'a redirect'; '>' = 'a redirect'; '
 # state-file heredoc echoes the first four out of `> "..." ( ... )`; the rest
 # are expanded inside `if defined ... ( ... )` / `if /i "%FRAMEWORK_TYPE%"==...`
 # blocks in install-body-bepinex.cmd, install-body-cecil.cmd,
-# install-body-ue4ss.cmd and uninstall-body.cmd.
+# install-body-ue4ss.cmd and uninstall-body.cmd, PRESERVE_FILES inside the
+# `for %%k in (%PRESERVE_FILES%)` loops of uninstall-body.cmd.
 $CONFIG_IN_BLOCK = @(
     'GAME_ID', 'MOD_INTERNAL_NAME', 'MOD_VERSION', 'FRAMEWORK_TYPE',
     'PLUGIN_SUBFOLDER', 'BEPINEX_SUBFOLDER', 'BEPINEX_VENDOR_ZIP_NAME',
-    'MANAGED_SUBFOLDER', 'UE4_BINARIES_RELDIR'
+    'MANAGED_SUBFOLDER', 'UE4_BINARIES_RELDIR', 'PRESERVE_FILES'
 )
 
 # The CONFIG BLOCK as name -> value. Both spellings are parsed: cmd.exe accepts
@@ -924,6 +926,161 @@ function Test-ShimMarker {
     }
 }
 
+# The canonical config format (design 6.3). scripts/check-canonical-config.mjs --json says
+# where each repo stands in data/config-format.json and lints every committed config file that
+# carries the [CameraUnlock] stamp; the checks below turn that into findings. A repo is
+# converted when one of its committed files carries the stamp: nothing records it separately.
+$CONFIG_CHECK_IDS = @('config-format', 'config-legacy-reader', 'config-preserve')
+$CanonicalConfig = @{}
+
+# The frozen legacy import lives here and nowhere else (design 4.2): src/legacy_config/ in a
+# C++ repo, a Legacy/ folder in a C# one.
+$LEGACY_FOLDER = '(^|/)(src/legacy_config|Legacy)/'
+$LEGACY_SCAN_SKIP = '(^|/)(vendor|extern|third_party|cameraunlock-core|bin|obj|build|out|release|dist|target)/'
+$LEGACY_SCAN_SOURCE = '\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|cs|rs)$'
+$LEGACY_READER_SYMBOLS = '\b(GetPrivateProfile\w*|WritePrivateProfile\w*|IniReader|IniWriter|ParseIniConfig|ParseIniFile)\b'
+# BepInEx's ConfigFile is reached through BaseUnityPlugin.Config or a parameter of any name, so
+# a Bind call counts in any C# file that names BepInEx.
+$BEPINEX_BIND = '\.\s*Bind\s*(<[^<>()]*>)?\s*\('
+
+function Get-TrackedFiles {
+    param([string]$Root)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $files = & git -c core.quotepath=off -C $Root ls-files 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "git ls-files failed in ${Root}: $files" }
+        # 2>&1 turns a stderr line into an ErrorRecord; on success only the paths are wanted.
+        return $files | Where-Object { $_ -is [string] }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+function Get-LegacyFolderFiles {
+    param([string]$Root)
+    return Get-TrackedFiles $Root | Where-Object { $_ -cmatch $LEGACY_FOLDER -and $_ -notmatch $LEGACY_SCAN_SKIP }
+}
+
+function Test-ConfigFormat {
+    param([string]$Name, [string]$Root)
+
+    $state = $CanonicalConfig[$Root]
+    if ($state.listing -eq 'predecessor') { return }
+
+    $legacyFiles = @(Get-LegacyFolderFiles $Root)
+    if ($state.listing -ne 'legacy' -and $legacyFiles.Count -gt 0) {
+        $folder = [regex]::Match($legacyFiles[0], "^(.*?$LEGACY_FOLDER)").Value
+        Add-Finding $Name 'config-format' 'FAIL' "$folder is a legacy config import, and only a repo in data/config-format.json legacy, one that published a pre-canonical build, carries one"
+    }
+    if ($state.listing -eq 'exempt') { return }
+    if ($state.listing -eq 'unlisted') {
+        Add-Finding $Name 'config-format' 'FAIL' 'not in data/config-format.json; a repo outside legacy and exempt must be canonical, and configs records where its config lives'
+        return
+    }
+
+    foreach ($file in $state.files) {
+        if ($file.state -eq 'stamped') {
+            foreach ($problem in $file.problems) { Add-Finding $Name 'config-format' 'FAIL' "$($file.committed): $problem" }
+        } elseif ($file.state -eq 'missing') {
+            Add-Finding $Name 'config-format' 'FAIL' "data/config-format.json records $($file.committed) as the committed config, and the repo has no such file"
+        } elseif ($state.listing -ne 'legacy' -or $state.converted) {
+            $why = if ($file.state -eq 'unrecorded') {
+                $installed = @($file.installed)
+                $of = if ($installed.Count -gt 0) { " of $($installed[0])" } else { '' }
+                "data/config-format.json records no committed file for the config$of"
+            } else {
+                "$($file.committed) carries no [CameraUnlock] stamp"
+            }
+            $rule = if ($state.listing -eq 'legacy') {
+                'one conversion switches every config file of a repo'
+            } else {
+                'a repo outside legacy and exempt commits its rendered canonical file'
+            }
+            Add-Finding $Name 'config-format' 'FAIL' "${why}; $rule"
+        }
+    }
+
+    if ($state.listing -ne 'legacy') { return }
+    if (-not $state.converted) {
+        Add-Finding $Name 'config-format' 'WARN' 'not converted to the canonical config format yet'
+    } elseif ($legacyFiles.Count -eq 0) {
+        Add-Finding $Name 'config-format' 'FAIL' 'converted, and has no src/legacy_config/ or Legacy/ folder; a repo that published a pre-canonical build keeps its frozen legacy import for the life of the repo'
+    }
+}
+
+function Test-ConfigLegacyReader {
+    param([string]$Name, [string]$Root)
+
+    $state = $CanonicalConfig[$Root]
+    if (-not $state.converted) { return }
+
+    $uses = [ordered]@{}
+    foreach ($rel in @(Get-TrackedFiles $Root)) {
+        if ($rel -notmatch $LEGACY_SCAN_SOURCE -or $rel -match $LEGACY_SCAN_SKIP -or $rel -cmatch $LEGACY_FOLDER) { continue }
+        $lines = [System.IO.File]::ReadAllLines((Join-Path $Root $rel))
+        $isBepInEx = $rel.EndsWith('.cs') -and (($lines -join "`n") -match 'BepInEx')
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $symbols = @([regex]::Matches($lines[$i], $LEGACY_READER_SYMBOLS) | ForEach-Object { $_.Groups[1].Value })
+            if ($isBepInEx -and $lines[$i] -match $BEPINEX_BIND) { $symbols += 'ConfigFile.Bind' }
+            foreach ($symbol in $symbols) {
+                $allowed = @($state.allow_legacy_symbols | Where-Object { $_.symbol -eq $symbol -and $_.file -eq $rel })
+                if ($allowed.Count -gt 0) { continue }
+                $key = "$rel`n$symbol"
+                if (-not $uses.Contains($key)) { $uses[$key] = New-Object System.Collections.Generic.List[int] }
+                if (-not $uses[$key].Contains($i + 1)) { $uses[$key].Add($i + 1) }
+            }
+        }
+    }
+    foreach ($key in $uses.Keys) {
+        $rel, $symbol = $key -split "`n"
+        Add-Finding $Name 'config-legacy-reader' 'FAIL' "${rel}:$($uses[$key] -join ',') uses $symbol outside the legacy import; a converted repo reads its config with the canonical reader (a use that reads no config goes in data/config-format.json allow_legacy_symbols)"
+    }
+}
+
+# The quoted-token split cmd.exe's `for %%k in (...)` gives a list: PRESERVE_FILES entries may
+# hold spaces inside quotes.
+function Get-CmdListItems {
+    param([string]$Value)
+    return [regex]::Matches($Value, '"([^"]*)"|(\S+)') | ForEach-Object {
+        if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value }
+    }
+}
+
+function Test-ConfigPreserve {
+    param([string]$Name, [string]$Root)
+
+    $state = $CanonicalConfig[$Root]
+    if (-not $state.converted) { return }
+    $installed = @($state.files | ForEach-Object { @($_.installed) })
+    $legacySources = @($state.files | Where-Object { $_.legacy_source } | ForEach-Object { $_.legacy_source })
+
+    $installPath = Join-Path $Root 'scripts/install.cmd'
+    if (Test-Path $installPath) {
+        $vars = Get-ConfigBlockVars (Read-TextFile $installPath)
+        if ($vars.Contains('MOD_DLLS')) {
+            $leaves = @($installed | ForEach-Object { Split-Path -Leaf $_ })
+            foreach ($item in @(Get-CmdListItems $vars['MOD_DLLS'])) {
+                if ((Split-Path -Leaf $item) -notin $leaves) { continue }
+                Add-Finding $Name 'config-preserve' 'FAIL' "install.cmd's MOD_DLLS lists $item, so every script install copies the default config over the player's; list it in MOD_SEED_FILES"
+            }
+        }
+    }
+
+    # Only the shared uninstall body reads PRESERVE_FILES. A repo whose uninstall is its own
+    # script, or that has none because only the launcher installs it, keeps its config there.
+    $uninstallPath = Join-Path $Root 'scripts/uninstall.cmd'
+    if (-not (Test-Path $uninstallPath)) { return }
+    $uninstallText = Read-TextFile $uninstallPath
+    if ((Get-WrapperBodyName $uninstallText) -ne 'uninstall-body.cmd') { return }
+    $vars = Get-ConfigBlockVars $uninstallText
+    $preserved = @(if ($vars.Contains('PRESERVE_FILES')) { Get-CmdListItems $vars['PRESERVE_FILES'] })
+    foreach ($path in @($installed + $legacySources)) {
+        if ($path -in $preserved) { continue }
+        Add-Finding $Name 'config-preserve' 'FAIL' "uninstall.cmd's PRESERVE_FILES does not list $path, so an uninstall deletes the player's settings"
+    }
+}
+
 $CHECK_TABLE = [ordered]@{
     'install-wrapper'   = ${function:Test-InstallWrapper}
     'delayed-expansion' = ${function:Test-DelayedExpansion}
@@ -943,6 +1100,9 @@ $CHECK_TABLE = [ordered]@{
     'stray-manifest'    = ${function:Test-StrayManifest}
     'license'           = ${function:Test-License}
     'readme'            = ${function:Test-Readme}
+    'config-format'        = ${function:Test-ConfigFormat}
+    'config-legacy-reader' = ${function:Test-ConfigLegacyReader}
+    'config-preserve'      = ${function:Test-ConfigPreserve}
 }
 
 # ---------------------------------------------------------------------------
@@ -1007,6 +1167,13 @@ if ($All) {
 
 if ($roots.Count -eq 0) { throw "No repos to check under $ReposRoot." }
 
+if (@($selected | Where-Object { $_ -in $CONFIG_CHECK_IDS }).Count -gt 0) {
+    $out = & node (Join-Path $CoreRoot 'scripts/check-canonical-config.mjs') --json @roots
+    if ($LASTEXITCODE -ne 0) { throw "scripts/check-canonical-config.mjs --json failed with exit code $LASTEXITCODE" }
+    $states = ($out -join "`n") | ConvertFrom-Json
+    for ($i = 0; $i -lt $roots.Count; $i++) { $CanonicalConfig[$roots[$i]] = @($states)[$i] }
+}
+
 foreach ($root in $roots) {
     $name = Split-Path -Leaf $root
     foreach ($id in $selected) {
@@ -1035,7 +1202,7 @@ if ($Json) {
         Write-Host "$name  ($fails fail, $warns warn)" -ForegroundColor Cyan
         foreach ($f in ($group.Group | Sort-Object severity, check)) {
             $colour = if ($f.severity -eq 'FAIL') { 'Red' } else { 'Yellow' }
-            Write-Host ("  {0,-4} {1,-18} {2}" -f $f.severity, $f.check, $f.message) -ForegroundColor $colour
+            Write-Host ("  {0,-4} {1,-20} {2}" -f $f.severity, $f.check, $f.message) -ForegroundColor $colour
         }
     }
 

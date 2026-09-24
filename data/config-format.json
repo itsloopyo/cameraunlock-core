@@ -28,10 +28,14 @@
     "`approved` is the date the owner approved one; a normalisation with `approved` null is",
     "pending and no map may apply it. `drop_rule` names the DropRule the import records.",
     "",
-    "`hotkey_exceptions`: per repo, per hotkey key, a chord the game binds itself, with the",
-    "replacement and the reason (/c/data/prompts/controls.md, Per-game conflict exceptions).",
+    "`hotkey_exceptions`: per repo, per canonical hotkey key, a chord the game binds itself:",
+    "`replaces` is the binding of the key's canonical_default that the game takes, `with` the",
+    "binding the repo's file holds in its place, and `reason` why (/c/data/prompts/controls.md,",
+    "Per-game conflict exceptions). The canonical config lint allows no other departure from",
+    "canonical_default.",
     "`allow_legacy_symbols`: per repo, uses of a symbol the legacy-reader check bans that do not",
-    "read the mod's config, each with the repo file and the reason."
+    "read the mod's config: `symbol` as the check reports it (GetPrivateProfileStringA, IniReader,",
+    "ConfigFile.Bind), `file` the repo path and `reason`."
   ],
   "legacy": {
     "abzu-headtracking": {},

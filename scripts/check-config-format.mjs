@@ -9,15 +9,19 @@
 //
 //   node scripts/check-config-format.mjs
 //
-// Reads nothing but data/config-format.json, so it is safe in a clean CI checkout.
+// Reads data/config-format.json, and data/config-schema.json and data/keys.json to check
+// hotkey_exceptions against the hotkey concepts, so it is safe in a clean CI checkout.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { formatKeyBindings, parseKeyBindings } from "./lib/key-bindings.mjs";
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FORMAT_PATH = path.join(REPO_ROOT, "data", "config-format.json");
+const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "data", "config-schema.json"), "utf8"));
 
 const SCHEMA_VERSION = 1;
 const LEGACY_COUNT = 87;
@@ -217,6 +221,25 @@ for (const [name, byKey] of Object.entries(doc.hotkey_exceptions)) {
     checkKeys(`${where}.${key}`, ex, ["replaces", "with", "reason"], []);
     for (const field of ["replaces", "with", "reason"]) {
       if (!isText(ex[field])) fail(`${where}.${key}.${field} must be a non-empty string`);
+    }
+    if (!isText(ex.replaces) || !isText(ex.with)) continue;
+    const concept = SCHEMA.concepts.find((c) => c.key === key && c.canonical_default !== undefined);
+    if (!concept) {
+      fail(`${where}.${key}: not a hotkey concept with a canonical_default in data/config-schema.json`);
+      continue;
+    }
+    const defaults = concept.canonical_default.split(", ");
+    if (!defaults.includes(ex.replaces)) {
+      fail(`${where}.${key}.replaces ${JSON.stringify(ex.replaces)} is not a binding of ${key}'s canonical_default ${concept.canonical_default}`);
+    }
+    if (defaults.includes(ex.with)) fail(`${where}.${key}.with ${JSON.stringify(ex.with)} is already in ${key}'s canonical_default`);
+    for (const dialect of new Set(Array.isArray(configs[name]) ? configs[name].map((f) => f?.dialect) : [])) {
+      if (!DIALECTS.has(dialect)) continue;
+      const parsed = parseKeyBindings(ex.with, dialect);
+      if (parsed.error) fail(`${where}.${key}.with: ${parsed.error}`);
+      else if (parsed.bindings.length !== 1 || formatKeyBindings(parsed.bindings, dialect) !== ex.with) {
+        fail(`${where}.${key}.with must be one binding written as the codec writes it: ${formatKeyBindings(parsed.bindings, dialect)}`);
+      }
     }
   }
 }
