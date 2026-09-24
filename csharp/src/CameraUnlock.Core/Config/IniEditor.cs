@@ -245,18 +245,21 @@ namespace CameraUnlock.Core.Config
                     for (int i = sectionHeader + 1; i < lines.Count && owner[i] == sectionHeader; i++)
                     {
                         Line line = lines[i];
-                        if (line.Kind != LineKind.Blank && line.Kind != LineKind.Comment) anchor = i;
+                        if (sectionHeader == matched[0] && line.Kind != LineKind.Blank && line.Kind != LineKind.Comment)
+                        {
+                            anchor = i;
+                        }
                         if (line.Kind == LineKind.Key && EqualsAsciiIgnoreCase(s, line.NameBegin, line.NameEnd, edit.Key))
                         {
                             keys.Add(i);
                         }
                     }
                 }
-                if (keys.Count > 1)
+                if (keys.Count > 1 && !edit.Edit.FirstOccurrenceWins)
                 {
                     return Refuse(IniEditRefusal.DuplicateKey, edit.Edit, LineNumbers(keys));
                 }
-                if (keys.Count == 1)
+                if (keys.Count > 0)
                 {
                     replacements[keys[0]] = edit.Value;
                     continue;
@@ -265,7 +268,7 @@ namespace CameraUnlock.Core.Config
                 {
                     return Refuse(IniEditRefusal.KeyNotFound, edit.Edit, new int[0]);
                 }
-                if (matched.Count > 1)
+                if (matched.Count > 1 && !edit.Edit.FirstOccurrenceWins)
                 {
                     return Refuse(IniEditRefusal.DuplicateSection, edit.Edit, LineNumbers(matched));
                 }

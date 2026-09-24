@@ -68,9 +68,13 @@ namespace CameraUnlock.Core.Tests.Config
                 {
                     case "set":
                     case "set_or_insert":
+                    case "set_first":
+                    case "set_or_insert_first":
                         string[] e = line.Split(new[] { '\t' }, 4);
                         Assert.Equal(4, e.Length);
-                        c.Edits.Add(new IniEdit(e[1], e[2], e[3], directive == "set_or_insert"));
+                        c.Edits.Add(new IniEdit(e[1], e[2], e[3],
+                            directive == "set_or_insert" || directive == "set_or_insert_first",
+                            directive == "set_first" || directive == "set_or_insert_first"));
                         break;
                     case "rejects":
                         string[] r = line.Split(new[] { '\t' }, 4);

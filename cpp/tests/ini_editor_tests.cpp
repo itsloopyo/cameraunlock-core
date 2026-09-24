@@ -112,10 +112,13 @@ FixtureCase LoadCase(const fs::path& dir) {
     for (const std::string& line : Split(ReadBytes(dir / "case.tsv"), '\n', std::string::npos)) {
         if (line.empty() || line[0] == '#') continue;
         const std::string directive = Split(line, '\t', 2)[0];
-        if (directive == "set" || directive == "set_or_insert") {
+        if (directive == "set" || directive == "set_or_insert" || directive == "set_first" ||
+            directive == "set_or_insert_first") {
             const auto f = Split(line, '\t', 4);
             if (f.size() != 4) throw std::runtime_error(c.name + ": malformed edit: " + line);
-            c.edits.push_back(IniEdit{f[1], f[2], f[3], directive == "set_or_insert"});
+            c.edits.push_back(IniEdit{f[1], f[2], f[3],
+                                      directive == "set_or_insert" || directive == "set_or_insert_first",
+                                      directive == "set_first" || directive == "set_or_insert_first"});
         } else if (directive == "rejects") {
             const auto f = Split(line, '\t', 4);
             if (f.size() != 4) throw std::runtime_error(c.name + ": malformed rejection: " + line);

@@ -107,40 +107,43 @@ std::string DescribeWriteFailure(const char* path, const cameraunlock::CheckedWr
     return text;
 }
 
-bool EqualsAsciiIgnoreCase(const std::string& a, const char* b) {
-    size_t i = 0;
-    for (; i < a.size(); ++i) {
-        if (b[i] == '\0') return false;
-        char x = a[i];
-        char y = b[i];
-        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
-        if (x != y) return false;
+// GetPrivateProfileStringA reads a file with no UTF-16 byte order mark as ANSI text.
+// A byte that is not UTF-8 is a character like any other to it, and a UTF-8 byte order
+// mark is part of the first line, so a header right behind the mark is not a header.
+// EditIni wants UTF-8 and skips that mark, but otherwise reads only ASCII bytes and
+// whether a character is white space. So each byte from 0x80 up reaches it as a letter
+// from U+0180 to U+01FF, which is neither, and comes back as the same byte: EditIni sees
+// the lines this reader sees, and every byte it does not edit is kept.
+std::string ToEditorView(const std::string& bytes) {
+    std::string view;
+    view.reserve(bytes.size() * 2);
+    for (const char c : bytes) {
+        const unsigned byte = static_cast<unsigned char>(c);
+        if (byte < 0x80) {
+            view += c;
+            continue;
+        }
+        const unsigned letter = 0x100 + byte;
+        view += static_cast<char>(0xC0 | (letter >> 6));
+        view += static_cast<char>(0x80 | (letter & 0x3F));
     }
-    return b[i] == '\0';
+    return view;
 }
 
-// GetPrivateProfileStringA does not skip a UTF-8 byte order mark, so a section header
-// on the first line of such a file is not a header to it and the keys under it belong
-// to no section. EditIni skips the mark, and would edit or insert where this reader
-// never looks. Returns the edited section named by such a header, or null.
-const char* EditedSectionBehindBom(const std::string& original, const std::vector<IniEdit>& edits) {
-    if (original.compare(0, 3, "\xEF\xBB\xBF") != 0) return nullptr;
-    size_t at = 3;
-    while (at < original.size() && (original[at] == ' ' || original[at] == '\t')) ++at;
-    if (at == original.size() || original[at] != '[') return nullptr;
-    const size_t lineEnd = original.find_first_of("\r\n", at);
-    const size_t close = original.find(']', at + 1);
-    if (close == std::string::npos || close > lineEnd) return nullptr;
-    size_t begin = at + 1;
-    size_t end = close;
-    while (begin < end && (original[begin] == ' ' || original[begin] == '\t')) ++begin;
-    while (end > begin && (original[end - 1] == ' ' || original[end - 1] == '\t')) --end;
-    const std::string name = original.substr(begin, end - begin);
-    for (const IniEdit& edit : edits) {
-        if (EqualsAsciiIgnoreCase(name, edit.section)) return edit.section;
+// The edits are ASCII, so everything else in EditIni's output came from ToEditorView.
+std::string FromEditorView(const std::string& view) {
+    std::string bytes;
+    bytes.reserve(view.size());
+    for (size_t i = 0; i < view.size(); ++i) {
+        const unsigned lead = static_cast<unsigned char>(view[i]);
+        if (lead < 0x80) {
+            bytes += view[i];
+            continue;
+        }
+        const unsigned letter = ((lead & 0x1F) << 6) | (static_cast<unsigned char>(view[++i]) & 0x3F);
+        bytes += static_cast<char>(letter - 0x100);
     }
-    return nullptr;
+    return bytes;
 }
 
 // Sets the given keys and touches nothing else. Rewriting the whole file through
@@ -168,25 +171,28 @@ bool ApplyIniEdits(const char* path, const std::vector<IniEdit>& edits, std::str
         return false;
     }
 
-    if (const char* section = EditedSectionBehindBom(original, edits)) {
-        error = std::string("its first line is the [") + section +
-                "] header with a UTF-8 byte order mark in front of it, which "
-                "GetPrivateProfileStringA does not read as a header; the file is unchanged";
+    // ToEditorView would hide a UTF-16 byte order mark from EditIni, which cannot edit
+    // UTF-16.
+    if (original.compare(0, 2, "\xFF\xFE") == 0 || original.compare(0, 2, "\xFE\xFF") == 0) {
+        cameraunlock::IniEditResult utf16;
+        utf16.refusal = cameraunlock::IniEditRefusal::Utf16;
+        error = DescribeRefusal(utf16);
         return false;
     }
 
+    // First occurrence wins, as it does for GetPrivateProfileStringA.
     std::vector<cameraunlock::IniEdit> batch;
     for (const IniEdit& edit : edits) {
-        batch.push_back({edit.section, edit.key, edit.value, true});
+        batch.push_back({edit.section, edit.key, edit.value, true, true});
     }
-    const cameraunlock::IniEditResult edited = cameraunlock::EditIni(original, batch);
+    const cameraunlock::IniEditResult edited = cameraunlock::EditIni(ToEditorView(original), batch);
     if (!edited.Succeeded()) {
         error = DescribeRefusal(edited);
         return false;
     }
 
     const cameraunlock::CheckedWriteResult written =
-        cameraunlock::WriteFileChecked(widePath, original, edited.bytes);
+        cameraunlock::WriteFileChecked(widePath, original, FromEditorView(edited.bytes));
     if (!written.Committed()) {
         error = DescribeWriteFailure(path, written);
         return false;

@@ -453,24 +453,27 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
         for (size_t header : matched) {
             for (size_t i = header + 1; i < lines.size() && owner[i] == header; ++i) {
                 const Line& line = lines[i];
-                if (line.kind != LineKind::Blank && line.kind != LineKind::Comment) anchor = i;
+                if (header == matched.front() && line.kind != LineKind::Blank &&
+                    line.kind != LineKind::Comment) {
+                    anchor = i;
+                }
                 if (line.kind == LineKind::Key &&
                     EqualsAsciiIgnoreCase(s, line.name_begin, line.name_end, edit.key)) {
                     keys.push_back(i);
                 }
             }
         }
-        if (keys.size() > 1) {
+        if (keys.size() > 1 && !edit.first_occurrence_wins) {
             std::vector<int> numbers;
             for (size_t index : keys) numbers.push_back(static_cast<int>(index) + 1);
             return RefuseEdit(IniEditRefusal::DuplicateKey, edit, std::move(numbers));
         }
-        if (keys.size() == 1) {
+        if (!keys.empty()) {
             replacements[keys.front()] = &edit.value;
             continue;
         }
         if (!edit.insert_if_absent) return RefuseEdit(IniEditRefusal::KeyNotFound, edit, {});
-        if (matched.size() > 1) {
+        if (matched.size() > 1 && !edit.first_occurrence_wins) {
             std::vector<int> numbers;
             for (size_t header : matched) numbers.push_back(static_cast<int>(header) + 1);
             return RefuseEdit(IniEditRefusal::DuplicateSection, edit, std::move(numbers));

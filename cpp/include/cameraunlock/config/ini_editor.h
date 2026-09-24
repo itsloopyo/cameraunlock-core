@@ -12,11 +12,19 @@ namespace cameraunlock {
 /// is added as `key=value`, and a missing section as `[section]`, spelled exactly as
 /// given here. The value is written verbatim, so it must be one the flat readers read
 /// back unchanged (see EditIni).
+///
+/// Set `first_occurrence_wins` for a reader that takes the first occurrence of a key,
+/// GetPrivateProfileStringA for one. A key that appears more than once in its section,
+/// counting every header of that name, then has its first occurrence in the document
+/// replaced and the others left as they are, and an absent key goes under the first of
+/// several headers of its section. Unset, those edits are refused as DuplicateKey and
+/// DuplicateSection.
 struct IniEdit {
     std::string section;
     std::string key;
     std::string value;
     bool insert_if_absent = false;
+    bool first_occurrence_wins = false;
 };
 
 /// Why EditIni produced no document. The numbers match CameraUnlock.Core.Config's
@@ -31,11 +39,12 @@ enum class IniEditRefusal {
     /// differently, so no edit of it can be checked against both.
     LoneCarriageReturn = 4,
     /// The edit asks for an absent key to be inserted, and its section header
-    /// appears more than once, so there is no one place to put it.
+    /// appears more than once, so there is no one place to put it unless the edit
+    /// says the first occurrence wins.
     DuplicateSection = 5,
     /// The edit's key appears more than once in its section, counting every header
     /// of that name. Which occurrence counts depends on the reader, so the caller
-    /// decides with its own.
+    /// decides with its own: IniEdit::first_occurrence_wins, or no edit.
     DuplicateKey = 6,
     /// The key is absent and the edit did not ask for it to be inserted.
     KeyNotFound = 7,

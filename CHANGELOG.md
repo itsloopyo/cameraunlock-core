@@ -28,22 +28,23 @@ signature changed. What a migrated file looks like changes in these cases:
   newline.
 - Inserted lines use the file's dominant line ending, CRLF on a tie. It used to be CRLF
   whenever the file held any CRLF.
-- A file the editor refuses is left untouched: UTF-16, invalid UTF-8 (an ANSI comment
-  with an accented letter, for one), a NUL, SUB or lone CR byte, a line starting with
-  white space other than a space or tab, `InvertX` or `ConfigVersion` appearing twice in
-  its section, or a repeated `[General]` header when the stamp has to be added. It used
-  to be edited anyway, and a UTF-16 file came out corrupted. A config that is read-only,
-  held open without delete sharing, or changed on disk during the edit is also left
-  untouched. In every such case the correction applies for the session only, the stamp
-  is not claimed, the error log names the refusal or the failed step and its Windows
-  error, and the next launch tries again.
-- A UTF-8 file with a byte order mark whose first line is the `[General]` header is
-  refused the same way. GetPrivateProfileStringA does not read a header with the mark in
-  front of it, so the stamp would land where the mod never reads it, and the migration
-  would run again on every launch and undo a deliberate `InvertX=true` each time. The old
-  code appended a second `[General]` at the end instead, which the mod does read. A file
-  with the mark in front of a comment, a blank line or any other section is migrated as
-  usual.
+- The file is edited as GetPrivateProfileStringA, the mod's reader, reads it. A byte
+  that is not UTF-8, such as an ANSI comment with an accented letter, is kept as it is.
+  A UTF-8 byte order mark is part of the first line to that reader, so a header right
+  behind it is not a header, and the stamp goes in a `[General]` appended at the end, as
+  the old code did. The first of a repeated `InvertX` or `ConfigVersion` is the one
+  edited, as before. A stamp for a repeated `[General]` goes under the first header,
+  which is the only one the reader reads; the old code put it under the last, so that
+  file was never stamped.
+- A file the editor cannot edit as the reader reads it is left untouched: UTF-16, a
+  lone CR (GetPrivateProfileStringA ends a line there and the editor does not), a NUL
+  or SUB byte anywhere, or a vertical tab or form feed at the start of a line or the end
+  of a key (the reader skips those four beside a key or a header, and the editor does
+  not). The old code edited these anyway, and a UTF-16 file came out corrupted. A config that is read-only, held open without delete
+  sharing, or changed on disk during the edit is also left untouched. In every such case
+  the correction applies for the session only, the stamp is not claimed, the error log
+  names the refusal or the failed step and its Windows error, and the next launch tries
+  again.
 - A config deleted between the migration's read and its write is reported and not
   recreated. The old code wrote it back from the copy it had read.
 
@@ -114,7 +115,8 @@ the new bytes back, or a typed refusal and no bytes.
 
 - C#: `CameraUnlock.Core.Config.IniEditor.Edit(byte[] original, IList<IniEdit> edits)`
   returning `IniEditResult` (`Succeeded`, `Refusal`, `Bytes`, `Section`, `Key`,
-  `Lines`). `IniEdit(section, key, value, insertIfAbsent)`. `Bytes` throws
+  `Lines`). `IniEdit(section, key, value, insertIfAbsent)` and
+  `IniEdit(section, key, value, insertIfAbsent, firstOccurrenceWins)`. `Bytes` throws
   `InvalidOperationException` on a refused result. Builds on every target, net35
   included.
 - C++: `cameraunlock/config/ini_editor.h`, with `EditIni(const std::string&,
@@ -135,6 +137,12 @@ count as one section. A key that appears twice in the edited section, under one 
 or across repeats, is refused, not picked. An insertion into a section whose header
 repeats is refused too, since there is no one place for it. Keys above the first
 header belong to no section and are never matched.
+
+An edit marked first-occurrence-wins (`IniEdit.FirstOccurrenceWins` in C#,
+`IniEdit::first_occurrence_wins` in C++) is for a reader that takes the first of a
+repeated key, as GetPrivateProfileStringA does. It replaces the first occurrence in the
+document and leaves the rest, and it inserts an absent key under the first of a
+repeated section header, instead of refusing either.
 
 A line that starts with white space other than a space or tab (form feed, no-break
 space and the like), or a key that ends in it, is refused as `AmbiguousWhitespace`:

@@ -23,14 +23,15 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// The edit asks for an absent key to be inserted, and its section header appears
-        /// more than once, so there is no one place to put it.
+        /// more than once, so there is no one place to put it unless the edit says
+        /// <see cref="IniEdit.FirstOccurrenceWins"/>.
         /// </summary>
         DuplicateSection = 5,
 
         /// <summary>
         /// The edit's key appears more than once in its section, counting every header of
         /// that name. Which occurrence counts depends on the reader, so the caller decides
-        /// with its own.
+        /// with its own: <see cref="IniEdit.FirstOccurrenceWins"/>, or no edit.
         /// </summary>
         DuplicateKey = 6,
 

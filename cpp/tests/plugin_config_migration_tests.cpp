@@ -293,6 +293,18 @@ void CheckRe8Migration(const char* name, const std::string& input, const std::st
     Check(reloaded.configVersion == kPluginConfigVersion, "the stamp reads back");
     Check(!reloaded.positionInvertX, "InvertX reads back false");
     Check(ini.Read() == expected, "a second load leaves the file alone");
+
+    // Where the migration wrote InvertX=false, a user who wanted the mirrored lean
+    // sets it back, and the stamp keeps that choice.
+    const size_t at = expected.find("InvertX=false");
+    if (at == std::string::npos) return;
+    std::string reinstated = expected;
+    reinstated.replace(at, std::string("InvertX=false").size(), "InvertX=true");
+    ini.Write(reinstated);
+    PluginConfig deliberate;
+    deliberate.Load(ini.Path(), kRe8Schema);
+    Check(deliberate.positionInvertX, "a true set back after the migration is in effect");
+    Check(ini.Read() == reinstated, "and the file is left as the user wrote it");
 }
 
 // CRLF throughout, as Notepad and the shipped INIs have it. The key keeps the
@@ -495,6 +507,112 @@ void TestBomBeforeAnUneditedSection() {
         "ConfigVersion=1\n");
 }
 
+// GetPrivateProfileStringA reads the file as ANSI text, so a byte that is not UTF-8 is
+// just a character to it, and the migration keeps it as it is.
+void TestAnsiBytesAreKept() {
+    CheckRe8Migration(
+        "plugin_config_migration_ansi.ini",
+        "; caf\xE9 settings\n"
+        "[Network]\n"
+        "UDPPort=5555\n"
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "Name=Jos\xE9\n",
+        "; caf\xE9 settings\n"
+        "[Network]\n"
+        "UDPPort=5555\n"
+        "[Position]\n"
+        "InvertX=false\n"
+        "[General]\n"
+        "Name=Jos\xE9\n"
+        "ConfigVersion=1\n");
+}
+
+// GetPrivateProfileStringA reads the first of a repeated key, so that is the one the
+// migration corrects and stamps. The later copies stay as they are.
+void TestRepeatedKeysEditTheFirst() {
+    CheckRe8Migration(
+        "plugin_config_migration_repeated.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "InvertX=true\n"
+        "\n"
+        "[General]\n"
+        "ConfigVersion=0\n"
+        "ConfigVersion=0\n",
+        "[Position]\n"
+        "InvertX=false\n"
+        "InvertX=true\n"
+        "\n"
+        "[General]\n"
+        "ConfigVersion=1\n"
+        "ConfigVersion=0\n");
+}
+
+// GetPrivateProfileStringA reads only the first of a repeated section header, so the
+// stamp goes under that one.
+void TestRepeatedSectionStampsTheFirst() {
+    CheckRe8Migration(
+        "plugin_config_migration_repeated_section.ini",
+        "[General]\n"
+        "AutoEnable=true\n"
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "WorldSpaceYaw=true\n",
+        "[General]\n"
+        "AutoEnable=true\n"
+        "ConfigVersion=1\n"
+        "[Position]\n"
+        "InvertX=false\n"
+        "[General]\n"
+        "WorldSpaceYaw=true\n");
+}
+
+// GetPrivateProfileStringA reads a UTF-8 byte order mark as part of the first line, so
+// a header right behind it is not a header and the keys under it belong to no section.
+// The stamp goes in a [General] the reader can see, appended at the end.
+void TestBomHidesTheFirstHeader() {
+    CheckRe8Migration(
+        "plugin_config_migration_bom_header.ini",
+        "\xEF\xBB\xBF[General]\r\n"
+        "AutoEnable=true\r\n"
+        "[Position]\r\n"
+        "InvertX=true\r\n",
+        "\xEF\xBB\xBF[General]\r\n"
+        "AutoEnable=true\r\n"
+        "[Position]\r\n"
+        "InvertX=false\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "ConfigVersion=1\r\n");
+    CheckRe8Migration(
+        "plugin_config_migration_bom_indented_header.ini",
+        "\xEF\xBB\xBF  [General]\n"
+        "AutoEnable=true\n"
+        "[Position]\n"
+        "InvertX=true\n",
+        "\xEF\xBB\xBF  [General]\n"
+        "AutoEnable=true\n"
+        "[Position]\n"
+        "InvertX=false\n"
+        "\n"
+        "[General]\n"
+        "ConfigVersion=1\n");
+}
+
+// A file holding nothing but the mark. The new [General] must not land right behind it.
+void TestBomOnlyFile() {
+    CheckRe8Migration(
+        "plugin_config_migration_bom_only.ini",
+        "\xEF\xBB\xBF",
+        "\xEF\xBB\xBF\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "ConfigVersion=1");
+}
+
 // Load returns false on a missing file and the caller writes the defaults; the
 // migration never creates a file of its own.
 void TestMissingFileIsNotCreated() {
@@ -524,33 +642,15 @@ void CheckRefusedFileIsLeftAlone(const char* name, const std::string& input, con
 }
 
 void TestRefusedFilesAreLeftAlone() {
+    // GetPrivateProfileStringA ends a line at a lone CR, so to it this is the [Position]
+    // header and InvertX=true under it. EditIni splits lines only at LF.
     CheckRefusedFileIsLeftAlone(
-        "plugin_config_migration_latin1.ini",
-        "; caf\xE9 settings\n"
-        "[Position]\n"
+        "plugin_config_migration_lone_cr.ini",
+        "[Position]\r"
         "InvertX=true\n"
-        "\n"
         "[General]\n"
         "AutoEnable=true\n",
-        "(InvalidUtf8 on line 1)");
-    CheckRefusedFileIsLeftAlone(
-        "plugin_config_migration_duplicate.ini",
-        "[Position]\n"
-        "InvertX=true\n"
-        "InvertX=false\n"
-        "\n"
-        "[General]\n"
-        "AutoEnable=true\n",
-        "(DuplicateKey for [Position] InvertX on lines 2, 3)");
-    // GetPrivateProfileStringA reads the byte order mark as part of the first line, so
-    // this [General] is not a header to it and a stamp put under it would never be read.
-    CheckRefusedFileIsLeftAlone(
-        "plugin_config_migration_bom_header.ini",
-        "\xEF\xBB\xBF[General]\r\n"
-        "AutoEnable=true\r\n"
-        "[Position]\r\n"
-        "InvertX=true\r\n",
-        "its first line is the [General] header with a UTF-8 byte order mark in front of it");
+        "(LoneCarriageReturn on line 1)");
     const char utf16[] =
         "\xFF\xFE[\0G\0e\0n\0e\0r\0a\0l\0]\0\r\0\n\0A\0u\0t\0o\0E\0n\0a\0b\0l\0e\0=\0t\0r\0u\0e\0\r\0\n\0";
     CheckRefusedFileIsLeftAlone("plugin_config_migration_utf16.ini",
@@ -670,6 +770,11 @@ int RunPluginConfigMigrationTests() {
     TestDeliberateInversionAfterMigrationOnCrlf();
     TestBomFileKeepsADeliberateInversion();
     TestBomBeforeAnUneditedSection();
+    TestAnsiBytesAreKept();
+    TestRepeatedKeysEditTheFirst();
+    TestRepeatedSectionStampsTheFirst();
+    TestBomHidesTheFirstHeader();
+    TestBomOnlyFile();
     TestMissingFileIsNotCreated();
     TestRefusedFilesAreLeftAlone();
     TestReadOnlyFileIsLeftAlone();
