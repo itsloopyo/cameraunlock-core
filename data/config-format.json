@@ -1,0 +1,556 @@
+{
+  "schema_version": 1,
+  "_comment": [
+    "Which head-tracking repos migrate to the canonical config format, and where each one's",
+    "config lives. scripts/check-config-format.mjs (pixi run check-config-format, part of",
+    "pixi run check) validates the shape and pins `legacy`.",
+    "",
+    "`legacy`: every repo that published a pre-canonical build, a v* release or the rolling",
+    "dev pre-release on GitHub, keyed by its current name. Only these carry a frozen legacy",
+    "import. The set is frozen: the validator pins the SHA-256 of the sorted names, so adding",
+    "or removing one fails the check. `predecessors` names earlier repos of the same mod that",
+    "published releases, whose shipped files are differential-test inputs; `renamed_from` is",
+    "the repo's name before a GitHub rename, which local checkouts may still carry.",
+    "",
+    "`exempt`: repos that cannot move to a canonical reader, or have no config, with the reason.",
+    "A repo in neither `legacy` nor `exempt` must be canonical and carry no legacy import.",
+    "",
+    "`configs`: each migrating repo's config files. `committed` is the repo path of the rendered",
+    "file, null until the conversion commits one where the repo tracks none today. `installed`",
+    "is every path the file takes relative to the game folder, one per store layout, empty only",
+    "with a `no_installed_reason`. `legacy_source` is the file a BepInEx import reads, null",
+    "elsewhere. `dialect` is native (key names, or 0x hex for a key with no name) or unity",
+    "(key names only), for the hotkey lint. Game paths use backslashes, as install scripts and",
+    "PRESERVE_FILES write them; repo paths use forward slashes, as git writes them.",
+    "",
+    "`normalisations` and `approved_changes`: the only differences a differential test may",
+    "allow between the import and the migration, beside a moved default's no-file input.",
+    "`approved` is the date the owner approved one; a normalisation with `approved` null is",
+    "pending and no map may apply it. `drop_rule` names the DropRule the import records.",
+    "",
+    "`hotkey_exceptions`: per repo, per hotkey key, a chord the game binds itself, with the",
+    "replacement and the reason (/c/data/prompts/controls.md, Per-game conflict exceptions).",
+    "`allow_legacy_symbols`: per repo, uses of a symbol the legacy-reader check bans that do not",
+    "read the mod's config, each with the repo file and the reason."
+  ],
+  "legacy": {
+    "abzu-headtracking": {},
+    "alien-isolation-headtracking": {},
+    "amnesia-the-dark-descent-headtracking": {},
+    "arx-fatalis-headtracking": {},
+    "assassins-creed-unity-headtracking": {},
+    "assetto-corsa-evo-headtracking": {},
+    "assetto-corsa-rally-headtracking": {},
+    "bioshock-infinite-headtracking": {},
+    "bioshock-remastered-headtracking": {},
+    "black-and-white-headtracking": {},
+    "black-mesa-headtracking": {},
+    "blue-prince-headtracking": {},
+    "control-ultimate-edition-headtracking": {},
+    "deus-ex-human-revolution-headtracking": {},
+    "dishonored-2-headtracking": {},
+    "dishonored-headtracking": {},
+    "dying-light-2-headtracking": {},
+    "dying-light-headtracking": {},
+    "easy-delivery-co-headtracking": {},
+    "eternal-afternoon-headtracking": {},
+    "fallout-4-headtracking": {},
+    "fallout-new-vegas-headtracking": {"predecessors": ["fallout-new-vegas-headtracking-delete"]},
+    "far-cry-6-headtracking": {},
+    "ghostrunner-headtracking": {},
+    "gone-home-headtracking": {},
+    "half-life-2-headtracking": {},
+    "high-on-life-headtracking": {},
+    "indiana-jones-and-the-great-circle-headtracking": {},
+    "kingdom-come-deliverance-2-headtracking": {},
+    "kingdom-come-deliverance-headtracking": {},
+    "metaphor-refantazio-headtracking": {},
+    "metro-exodus-enhanced-edition-headtracking": {},
+    "minecraft-bedrock-edition-headtracking": {},
+    "mirrors-edge-headtracking": {},
+    "no-mans-sky-headtracking": {},
+    "obra-dinn-headtracking": {"predecessors": ["obra-dinn-headtracking-old2"]},
+    "outer-worlds-spacers-choice-edition-headtracking": {},
+    "outlast-headtracking": {},
+    "pacific-drive-headtracking": {},
+    "pathologic-2-headtracking": {"renamed_from": "pathalogic-2-headtracking"},
+    "peak-headtracking": {"predecessors": ["peak-headtracking-old"]},
+    "pinball-fx-headtracking": {},
+    "portal-2-headtracking": {},
+    "portal-headtracking": {},
+    "portal-with-rtx-headtracking": {},
+    "prey-headtracking": {},
+    "quake-ii-rtx-headtracking": {},
+    "red-eclipse-headtracking": {},
+    "repo-headtracking": {},
+    "resident-evil-2-headtracking": {},
+    "resident-evil-3-headtracking": {},
+    "resident-evil-4-headtracking": {},
+    "resident-evil-7-headtracking": {},
+    "resident-evil-requiem-headtracking": {"predecessors": ["resident-evil-requiem-headtracking-dev"]},
+    "resident-evil-village-headtracking": {},
+    "roadcraft-headtracking": {},
+    "rv-there-yet-headtracking": {},
+    "shadows-of-doubt-headtracking": {},
+    "skyrim-special-edition-headtracking": {},
+    "snowrunner-headtracking": {},
+    "soma-headtracking": {},
+    "sons-of-the-forest-headtracking": {},
+    "spec-ops-the-line-headtracking": {},
+    "starfield-headtracking": {},
+    "still-wakes-the-deep-headtracking": {},
+    "stormworks-build-and-rescue-headtracking": {"renamed_from": "stormworks-headtracking"},
+    "subliminal-headtracking": {},
+    "subnautica-2-headtracking": {},
+    "subnautica-headtracking": {},
+    "superliminal-headtracking": {},
+    "the-painscreek-killings-headtracking": {},
+    "the-vanishing-of-ethan-carter-redux-headtracking": {},
+    "the-witness-headtracking": {},
+    "thief-headtracking": {},
+    "titanfall-2-headtracking": {},
+    "trepang2-headtracking": {},
+    "tt-isle-of-man-ride-on-the-edge-3-headtracking": {},
+    "valheim-headtracking": {},
+    "viewfinder-headtracking": {},
+    "voices-of-the-void-headtracking": {},
+    "what-remains-of-edith-finch-headtracking": {},
+    "wobbly-life-headtracking": {},
+    "wolfenstein-the-new-order-headtracking": {},
+    "wreckfest-2-headtracking": {},
+    "wreckfest-headtracking": {},
+    "yakuza-0-headtracking": {},
+    "yapyap-headtracking": {}
+  },
+  "exempt": {
+    "beamng-drive-headtracking": "Lua in BeamNG's LuaJIT, with file I/O bound to the game's virtual file system, and a JSON config.",
+    "cyberpunk-2077-headtracking": "The config is config.json, read and written by the Lua half under Cyber Engine Tweaks. Core has no JSON reader or editor, and CET's LuaJIT has no FFI, so the Lua half cannot call core.",
+    "firewatch-headtracking": "MelonLoader owns the parse and rewrites the whole shared MelonPreferences.cfg at quit, so toggles stay session-only.",
+    "fusion-360-headtracking": "Pure Python in Fusion's embedded interpreter, reading its config with configparser.",
+    "green-hell-headtracking": "No config: the mod reads no file. A config added later is canonical from the start, with defaults equal to today's hardcoded values.",
+    "minecraft-java-edition-headtracking": "Java under Fabric with a .properties config, and it carries its own Java port of core.",
+    "ni-no-kuni-wrath-of-the-white-witch-headtracking": "No config: the mod reads nothing. A config added later is canonical from the start, with defaults equal to today's hardcoded values.",
+    "outer-wilds-headtracking": "OWML owns the parse and rewrites config.json whole from its menus, and the OWML that runs is the user's, so toggles stay session-only.",
+    "the-pathless-headtracking": "Pure Lua under UE4SS with a JSON config, and nothing to persist: its only runtime control is F10, the master toggle."
+  },
+  "configs": {
+    "a-plague-tale-innocence-headtracking": [
+      {"committed": "dist_assets/headtrack.ini", "installed": ["headtrack.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "abzu-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["AbzuGame\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "alien-isolation-headtracking": [
+      {"committed": null, "installed": ["AlienIsolationHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "amnesia-rebirth-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "amnesia-the-dark-descent-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "arkham-city-headtracking": [
+      {"committed": null, "installed": ["Binaries\\Win32\\ArkhamCityHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "arx-fatalis-headtracking": [
+      {"committed": null, "installed": ["ArxFatalisHeadTracking.ini", "EN\\ArxFatalisHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "assassins-creed-origins-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "assassins-creed-unity-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "assetto-corsa-evo-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "assetto-corsa-rally-headtracking": [
+      {"committed": null, "installed": ["acr\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "battlefield-bad-company-2-headtracking": [
+      {"committed": null, "installed": ["BattlefieldBadCompany2HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "bioshock-infinite-headtracking": [
+      {"committed": null, "installed": ["Binaries\\Win32\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "bioshock-remastered-headtracking": [
+      {"committed": null, "installed": ["Build\\Final\\bioshock_headtrack.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "black-and-white-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "black-mesa-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "blue-prince-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.blueprince.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.blueprince.headtracking.cfg", "dialect": "unity"}
+    ],
+    "bodycam-headtracking": [
+      {"committed": null, "installed": ["Bodycam\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "bully-scholarship-edition-headtracking": [
+      {"committed": null, "installed": ["BullyScholarshipEditionHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "burnout-paradise-the-ultimate-box-headtracking": [
+      {"committed": null, "installed": ["BurnoutParadiseHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "control-ultimate-edition-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dead-rising-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dead-space-headtracking": [
+      {"committed": null, "installed": ["DeadSpaceHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "deep-rock-galactic-headtracking": [
+      {"committed": null, "installed": ["FSD\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "deus-ex-human-revolution-headtracking": [
+      {"committed": null, "installed": ["DeusExHumanRevolutionHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "deus-ex-mankind-divided-headtracking": [
+      {"committed": null, "installed": ["retail\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dishonored-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dishonored-definitive-edition-headtracking": [
+      {"committed": null, "installed": ["Binaries\\Win64\\DishonoredDefinitiveEditionHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dishonored-headtracking": [
+      {"committed": null, "installed": ["Binaries\\Win32\\DishonoredHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dorfromantik-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.dorfromantik.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.dorfromantik.headtracking.cfg", "dialect": "unity"}
+    ],
+    "dragon-age-inquisition-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dying-light-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["ph\\work\\bin\\x64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "dying-light-headtracking": [
+      {"committed": "DyingLightHeadTracking.ini", "installed": ["DyingLightHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "easy-delivery-co-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.easydeliveryco.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.easydeliveryco.headtracking.cfg", "dialect": "unity"}
+    ],
+    "elite-dangerous-headtracking": [
+      {"committed": null, "installed": ["Products\\elite-dangerous-odyssey-64\\EliteDangerousHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "eternal-afternoon-headtracking": [
+      {"committed": null, "installed": ["Eternal Afternoon_Data\\Managed\\HeadTracking.cfg"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "fallout-4-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "fallout-new-vegas-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["HeadTracking.ini", "Fallout New Vegas English\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "far-cry-6-headtracking": [
+      {"committed": null, "installed": ["bin\\FarCry6HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "ghostrunner-2-headtracking": [
+      {"committed": null, "installed": ["Ghostrunner2\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "ghostrunner-headtracking": [
+      {"committed": null, "installed": ["Ghostrunner\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "gone-home-headtracking": [
+      {"committed": null, "installed": ["GoneHome_Data\\Managed\\HeadTracking.cfg"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "half-life-2-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "high-on-life-headtracking": [
+      {"committed": null, "installed": ["Oregon\\Binaries\\Win64\\HeadTracking.ini", "Oregon\\Binaries\\WinGDK\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "homeworld-remastered-collection-headtracking": [
+      {"committed": "HomeworldHeadTracking.ini", "installed": ["HomeworldRM\\bin\\Release\\HomeworldHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "indiana-jones-and-the-great-circle-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "jump-space-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.jumpspace.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.jumpspace.headtracking.cfg", "dialect": "unity"}
+    ],
+    "kingdom-come-deliverance-2-headtracking": [
+      {"committed": null, "installed": ["Bin\\Win64MasterMasterSteamPGO\\HeadTracking.ini", "HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "kingdom-come-deliverance-headtracking": [
+      {"committed": null, "installed": ["Bin\\Win64\\HeadTracking.ini", "HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "la-noire-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "little-nightmares-enhanced-edition-headtracking": [
+      {"committed": null, "installed": ["Atlas\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "mafia-ii-definitive-edition-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["pc\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "mass-effect-legendary-edition-headtracking": [
+      {"committed": null, "installed": ["Game\\ME1\\Binaries\\Win64\\MassEffectLEHeadTracking.ini"], "legacy_source": null, "dialect": "native"},
+      {"committed": null, "installed": ["Game\\ME2\\Binaries\\Win64\\MassEffectLEHeadTracking.ini"], "legacy_source": null, "dialect": "native"},
+      {"committed": null, "installed": ["Game\\ME3\\Binaries\\Win64\\MassEffectLEHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "metaphor-refantazio-headtracking": [
+      {"committed": null, "installed": ["MetaphorHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "metro-2033-redux-headtracking": [
+      {"committed": "Metro2033ReduxHeadTracking.ini", "installed": ["Metro2033ReduxHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "metro-exodus-enhanced-edition-headtracking": [
+      {"committed": "MetroExodusHeadTracking.ini", "installed": ["MetroExodusHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "minecraft-bedrock-edition-headtracking": [
+      {"committed": null, "installed": [], "legacy_source": null, "dialect": "native", "no_installed_reason": "The file sits beside MinecraftHeadTracking.dll, in Lopari's mod_home folder or wherever a manual install was extracted, never in the game folder."}
+    ],
+    "mirrors-edge-headtracking": [
+      {"committed": "assets/MirrorsEdgeHeadTracking.ini", "installed": ["Binaries\\MirrorsEdgeHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "mudrunner-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "no-mans-sky-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Binaries\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "obra-dinn-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.headtracking.obradinn.ini"], "legacy_source": "BepInEx\\config\\com.headtracking.obradinn.cfg", "dialect": "unity"}
+    ],
+    "outer-worlds-spacers-choice-edition-headtracking": [
+      {"committed": null, "installed": ["Indiana\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "outlast-headtracking": [
+      {"committed": null, "installed": ["Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "pacific-drive-headtracking": [
+      {"committed": "PacificDriveHeadTracking.ini", "installed": ["PenDriverPro\\Binaries\\Win64\\PacificDriveHeadTracking.ini", "PenDriverPro\\Binaries\\WinGDK\\PacificDriveHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "pathologic-2-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.pathologic2.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.pathologic2.headtracking.cfg", "dialect": "unity"}
+    ],
+    "peak-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.peak.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.peak.headtracking.cfg", "dialect": "unity"}
+    ],
+    "persona-5-royal-headtracking": [
+      {"committed": null, "installed": ["Persona5RoyalHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "pinball-fx-headtracking": [
+      {"committed": null, "installed": ["PinballFX\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "pixeljunk-monsters-2-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.pixeljunkmonsters2.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.pixeljunkmonsters2.headtracking.cfg", "dialect": "unity"}
+    ],
+    "portal-2-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "portal-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "portal-with-rtx-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "prey-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Binaries\\Danielle\\x64\\Release\\HeadTracking.ini", "Binaries\\Danielle\\Gaming.Desktop.x64\\Release\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "quake-ii-rtx-headtracking": [
+      {"committed": "config/HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "ready-or-not-headtracking": [
+      {"committed": null, "installed": ["ReadyOrNot\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "red-eclipse-headtracking": [
+      {"committed": null, "installed": ["bin\\amd64\\RedEclipseHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "repo-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.repo.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.repo.headtracking.cfg", "dialect": "unity"}
+    ],
+    "resident-evil-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "resident-evil-3-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "resident-evil-4-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "resident-evil-7-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "resident-evil-requiem-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "resident-evil-village-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "roadcraft-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["root\\bin\\pc\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "routine-headtracking": [
+      {"committed": null, "installed": ["Routine\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "rv-there-yet-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Ride\\Binaries\\Win64\\HeadTracking.ini", "Ride\\Binaries\\WinGDK\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "shadows-of-doubt-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.headtracking.shadowsofdoubt.ini"], "legacy_source": "BepInEx\\config\\com.headtracking.shadowsofdoubt.cfg", "dialect": "unity"}
+    ],
+    "skyrim-special-edition-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "sleeping-dogs-headtracking": [
+      {"committed": "config/headtrack.ini", "installed": ["headtrack.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "sniper-elite-v2-remastered-headtracking": [
+      {"committed": null, "installed": ["bin\\SniperEliteV2RemasteredHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "snowrunner-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Sources\\Bin\\HeadTracking.ini", "HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "soma-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "sonic-racing-crossworlds-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["UNION\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "sons-of-the-forest-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.sonsoftheforest.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.sonsoftheforest.headtracking.cfg", "dialect": "unity"}
+    ],
+    "south-park-the-stick-of-truth-headtracking": [
+      {"committed": null, "installed": ["SouthParkTheStickOfTruthHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "spec-ops-the-line-headtracking": [
+      {"committed": null, "installed": ["Binaries\\Win32\\SpecOpsTheLineHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "stalker-call-of-prypiat-enhanced-edition-headtracking": [
+      {"committed": null, "installed": ["StalkerCallOfPrypiatHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "stalker-shadow-of-chornobyl-enhanced-edition-headtracking": [
+      {"committed": null, "installed": ["StalkerShadowOfChornobylHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "starfield-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "still-wakes-the-deep-headtracking": [
+      {"committed": null, "installed": ["Habitat\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "stormworks-build-and-rescue-headtracking": [
+      {"committed": null, "installed": ["StormworksHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "subliminal-headtracking": [
+      {"committed": null, "installed": ["Subliminal\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "subnautica-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["Subnautica2\\Binaries\\Win64\\HeadTracking.ini", "Subnautica2\\Binaries\\WinGDK\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "subnautica-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.subnautica.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.subnautica.headtracking.cfg", "dialect": "unity"}
+    ],
+    "superliminal-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.superliminal.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.superliminal.headtracking.cfg", "dialect": "unity"}
+    ],
+    "system-shock-2-25th-anniversary-remaster-headtracking": [
+      {"committed": "dist_assets/SystemShock2HeadTracking.ini", "installed": ["SystemShock2HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "system-shock-headtracking": [
+      {"committed": null, "installed": ["SystemShock\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "the-forest-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.theforest.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.theforest.headtracking.cfg", "dialect": "unity"}
+    ],
+    "the-painscreek-killings-headtracking": [
+      {"committed": null, "installed": ["Painscreek_Data\\Managed\\HeadTracking.cfg"], "legacy_source": null, "dialect": "unity"}
+    ],
+    "the-vanishing-of-ethan-carter-redux-headtracking": [
+      {"committed": null, "installed": ["EthanCarter\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "the-witness-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "thief-headtracking": [
+      {"committed": null, "installed": ["Binaries2\\Win64\\ThiefHeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "tiny-tinas-wonderlands-headtracking": [
+      {"committed": null, "installed": ["OakGame\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "titanfall-2-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "trepang2-headtracking": [
+      {"committed": null, "installed": ["CPPFPS\\Binaries\\Win64\\HeadTracking.ini", "CPPFPS\\Binaries\\WinGDK\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "tt-isle-of-man-ride-on-the-edge-3-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "valheim-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.valheim.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.valheim.headtracking.cfg", "dialect": "unity"}
+    ],
+    "viewfinder-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.viewfinder.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.viewfinder.headtracking.cfg", "dialect": "unity"}
+    ],
+    "voices-of-the-void-headtracking": [
+      {"committed": null, "installed": ["VotV\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "what-remains-of-edith-finch-headtracking": [
+      {"committed": null, "installed": ["FinchGame\\Binaries\\Win64\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "witcher-3-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["bin\\x64_dx12\\HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "wobbly-life-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.wobblylife.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.wobblylife.headtracking.cfg", "dialect": "unity"}
+    ],
+    "wolfenstein-the-new-order-headtracking": [
+      {"committed": null, "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "wreckfest-2-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "wreckfest-headtracking": [
+      {"committed": "HeadTracking.ini", "installed": ["HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "yakuza-0-headtracking": [
+      {"committed": null, "installed": ["media\\Yakuza0HeadTracking.ini"], "legacy_source": null, "dialect": "native"}
+    ],
+    "yapyap-headtracking": [
+      {"committed": null, "installed": ["BepInEx\\config\\com.cameraunlock.yapyap.headtracking.ini"], "legacy_source": "BepInEx\\config\\com.cameraunlock.yapyap.headtracking.cfg", "dialect": "unity"}
+    ]
+  },
+  "normalisations": {
+    "N1": {
+      "rule": "A legacy hotkey code outside 0x01-0xFE imports as unbound. Unguarded readers accept such codes: core's IniReader::ReadHex in fallout-4 and titanfall-2 reads -1, abc (0xABC), 1abc and 0x230, skyrim-special-edition reads hotkeys with strtol, and HotkeyPoller::AddHotkey stores any code. The canonical hotkey grammar holds 0x01-0xFE only.",
+      "approved": null,
+      "pending": "The owner's answer to open question 2 (design section 10) covers N1 only if GetAsyncKeyState never reports a code outside 0x01-0xFE, and the probe shows that 0xFF does report. Unbinding a legacy 0xFF hotkey would change that user's behaviour, so the owner chooses: (a) approve N1 as written, or (b) widen the canonical hotkey grammar to 0x01-0xFF so 0xFF carries and N1 unbinds only codes nothing can report. Until then no map uses N1, and design 4.3 defers a user holding such a code.",
+      "probe": "pixi run probe-n1 (cameraunlock_tests --probe-getasynckeystate), Windows 11 Pro 10.0.26200, interactive desktop, 2026-09-24: with F24 (0x87) held by SendInput, GetAsyncKeyState reported 0x87 down and reported up for 0x187, 0x287, 0x10087, -121, 0, 0xFF, 0x100 and -1, so no out-of-range code aliases a key in range. With VK 0xFF itself held, GetAsyncKeyState(0xFF) reported down. 0xFF is VK__none_, the code kbd.h gives to scan codes a layout leaves unmapped. A search of every tracked .ini and .cfg in the sibling repos found no key or toggle line holding 0xFF, 255, -1, 0 or 0x0."
+    },
+    "N2": {
+      "rule": "A non-finite float imports as the row's default. IniReader::ReadDouble accepts nan, inf and 1e400, abzu reads its sensitivities and deadzone through it unguarded, and skyrim-special-edition's atof and std::clamp let NaN through, which gives a NaN view matrix every frame. Repos that already sanitise turn a non-finite value into their fallback on read and see no change.",
+      "approved": "2026-09-24",
+      "drop_rule": "NonFiniteNumber"
+    }
+  },
+  "approved_changes": {
+    "reticle": {
+      "decision": 2,
+      "text": "Mods do not draw their own reticles, so the canonical format and the preference set have no reticle toggle and no ShowReticle concept. A migration drops a legacy reticle toggle hotkey, ShowReticle and reticle colour, and the conversion documents the loss.",
+      "approved": "2026-09-24",
+      "drop_rule": "Reticle"
+    },
+    "pose_shaping": {
+      "decision": 3,
+      "text": "The tracker owns pose shaping, so sensitivity multipliers, deadzones, response curves and user-facing axis inversion leave every mod and the canonical format has no rows for them. A value a player set away from the shipped default is dropped. A shipped default that is not identity (abzu InvertRoll=true, [Position] InvertX=true, a roll multiplier other than 1) was correcting the mod's axis conversion, so the conversion folds it into the mod's boundary code and default behaviour does not change.",
+      "approved": "2026-09-24",
+      "drop_rule": "PoseShaping"
+    },
+    "follows_default": {
+      "decision": 4,
+      "text": "A feature shipped disabled pending verification (CollisionEnabled, for example) takes its intended default in the conversion and follows core's default from then on, instead of keeping the value a legacy file holds.",
+      "approved": "2026-09-24",
+      "drop_rule": "FollowsDefault"
+    }
+  },
+  "hotkey_exceptions": {},
+  "allow_legacy_symbols": {}
+}

@@ -145,17 +145,23 @@ validate-games-fleet = "node scripts/validate-games.mjs --fleet"
 #   node scripts/generate-config-schema.mjs   regenerates them all
 check-config-schema = "node scripts/generate-config-schema.mjs --check"
 
+# data/config-format.json names the repos that migrate to the canonical config format and
+# where each one's config lives. This checks its shape and pins its `legacy` set, the repos
+# that published a pre-canonical build and so carry a legacy import: adding or removing a
+# name fails, because no repo publishes a pre-canonical build after the set lands.
+check-config-format = "node scripts/check-config-format.mjs"
+
 # Development workflow.
 #
 # Ordered cheapest and most deterministic first, because pixi aborts on the first
 # failing dependency and the order decides how long a developer (and CI) waits to
-# find out. The two pure-node gates need no compiler and finish in under a second;
+# find out. The three pure-node gates need no compiler and finish in under a second;
 # they used to sit at the END, behind a full C# build and both test suites, so a
 # stale generated alias table cost several minutes to discover. The vectors come
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

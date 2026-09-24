@@ -9,6 +9,56 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `data/config-format.json`: which repos migrate, and where their configs live
+
+A new data file for the canonical config migration, and `pixi run check-config-format`
+(`scripts/check-config-format.mjs`, part of `pixi run check`) to gate it. Nothing reads it yet: the
+config conformance checks and each game's conversion will.
+
+- **`legacy`**: the 87 repos that published a pre-canonical build, meaning a `v*` release or the
+  rolling `dev` pre-release on GitHub. Only these carry a frozen legacy import. The list was built
+  on 2026-09-24 from `gh release list` over every org repo whose name contains "head", draft
+  releases excluded, and matches the 87 of design section 8 name for name. Entries are keyed by the
+  current repo name; `renamed_from` gives the old name for `pathologic-2-headtracking`
+  (`pathalogic-2-headtracking`) and `stormworks-build-and-rescue-headtracking`
+  (`stormworks-headtracking`), which local checkouts still carry. `predecessors` names earlier
+  repos of the same mod with published releases, whose shipped files are differential-test inputs:
+  `fallout-new-vegas-headtracking-delete`, `obra-dinn-headtracking-old2`, `peak-headtracking-old`
+  and `resident-evil-requiem-headtracking-dev`. `obra-dinn-headtracking-old` is not among them: its
+  only release, v1.0.0, is a draft, so it never published a build. The set is frozen. The checker
+  pins the SHA-256 of the sorted names, so adding, removing or renaming one fails `check`.
+- **`exempt`**: the seven repos that cannot move to a canonical reader (cyberpunk-2077,
+  the-pathless, beamng-drive, fusion-360, minecraft-java-edition, firewatch, outer-wilds) and the two
+  with no config (green-hell, ni-no-kuni-wrath-of-the-white-witch), each with its reason.
+- **`configs`**: for each of the 127 migrating repos, each config file: `committed` (the repo path
+  of the rendered file, null where the repo tracks none today), `installed` (every path relative to
+  the game folder, one per store layout, from `data/games.json`'s `executable_relpath` and
+  `xbox_executable_relpath` where the reader resolves the exe or module folder), `legacy_source`
+  (`BepInEx\config\<GUID>.cfg` for the 18 BepInEx repos, whose canonical file is
+  `BepInEx\config\<GUID>.ini`) and `dialect` (`native`, or `unity` for the BepInEx and Cecil repos,
+  which read key names only). mass-effect-legendary-edition has three files. minecraft-bedrock-edition
+  has no path in the game folder, since its file sits beside the mod DLL in Lopari's mod_home, so its
+  `installed` is empty with a `no_installed_reason`, the only form the checker accepts an empty list
+  in. Game paths use backslashes, as install scripts and `PRESERVE_FILES` write them; repo paths use
+  forward slashes, as git writes them.
+- **`normalisations`**: N2 (a non-finite float imports as the row's default), approved by the owner
+  on 2026-09-24, with `drop_rule` `NonFiniteNumber`. N1 (a legacy hotkey code outside 0x01-0xFE
+  imports as unbound) is recorded with `approved` null, a `pending` text and the probe result: it is
+  still with the owner (see the legacy import entry below), and a normalisation with `approved` null
+  may not name a DropRule.
+- **`approved_changes`**: the three docs-survey decisions a differential test also allows, each with
+  its text, its decision number, the date 2026-09-24 and its DropRule: `reticle` (decision 2),
+  `pose_shaping` (decision 3) and `follows_default` (decision 4).
+- **`hotkey_exceptions`** and **`allow_legacy_symbols`**, both empty. A game that binds a chord
+  letter itself records `{ "<hotkey key>": { "replaces", "with", "reason" } }`; a use of a symbol the
+  legacy-reader check bans that does not read the config records `{ "symbol", "file", "reason" }`.
+
+The checker fails on an unknown or missing key, a duplicated key anywhere in the file (which
+`JSON.parse` would drop silently), a repo named twice across `legacy`, its predecessors and old
+names, and `exempt`, an exempt repo with a `configs` entry, a `legacy` repo without one, a path that
+is absolute, uses the other separator or holds an empty, `.` or `..` segment, one installed path
+listed twice in a repo, a DropRule named twice, and any change to the `legacy` names.
+
 ### Added - `MOD_SEED_FILES` in the REFramework install body
 
 `scripts/install-body-reframework.cmd` reads the optional CONFIG BLOCK list `MOD_SEED_FILES`
