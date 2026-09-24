@@ -774,15 +774,30 @@ unfinished replacement `Settings may not be saved: <why>.`
 ### What players are told
 
 A converted repo's README carries a config block that `scripts/generate-readme.mjs` renders from
-`data/config-format.json` and the committed file (see [Tooling](#tooling)). For a repo in
-`legacy` it says, in the player's terms: the file is converted once at the first launch; the
-original is kept as `<file>.pre-canonical`, and `<file>.pre-canonical.last` is the file before the
-most recent conversion; comments and keys the mod never read are not carried over, nor the
-settings each approved change drops; an older version of the mod may misread the new layout; and
-to go back to an older version, copy `.pre-canonical` back first. Then it shows the committed file.
+`data/config-format.json` and the committed file (see [Tooling](#tooling)). What it says between
+the file's location and the committed file depends on the config entry and on whether the repo is
+in `legacy`:
+
+- **In place**, a repo in `legacy` whose entry has no `legacy_source`: the file is converted once
+  at the first launch; the original is kept as `<file>.pre-canonical`, and
+  `<file>.pre-canonical.last` is the file before the most recent conversion; comments and keys the
+  mod never read are not carried over, nor the settings each approved change drops; an older
+  version of the mod may misread the new layout; and to go back to an older version, copy
+  `.pre-canonical` back over the file first.
+- **BepInEx**, a repo in `legacy` whose entry has a `legacy_source`: earlier versions kept the
+  settings in the `.cfg` that `legacy_source` names; the first launch reads them from the `.cfg`
+  and writes them into the `.ini`; the `.cfg` is left as it was and an older version of the mod
+  still reads it; comments, keys the mod never read and the settings each approved change drops
+  are not carried over; BepInEx's ConfigurationManager no longer lists these settings; deleting
+  only the `.ini` converts the `.cfg` again at the next start, and deleting both gives the
+  defaults. There is no `.pre-canonical` and no rollback step.
+- **BepInEx outside `legacy`**, a repo outside `legacy` whose entry has a `legacy_source`: only
+  that BepInEx's ConfigurationManager does not list these settings.
+- **Outside `legacy`** with no `legacy_source`: nothing beyond the location and the file.
+
 `scripts/templates/canonical-config-changelog.md` holds the matching changelog bullets for a
-conversion release. The untracked NEXUS_MODS.md is updated by hand from
-`pixi run readme --print config`.
+conversion release, as an in-place and a BepInEx variant. The untracked NEXUS_MODS.md is updated
+by hand from `pixi run readme --print config`.
 
 ### Rolling back and forward
 
@@ -791,11 +806,14 @@ spelling reads as that build's default, and a value now written as a name can be
 older build that reads hotkeys with core's `IniReader::ReadHex` reads `End` as 0x0E, which is not
 the End key, and `PageUp` as its default. An older build that saves may rewrite the whole file in
 its old layout. The way back is to copy `.pre-canonical` over the file before installing
-the older build.
+the older build. A BepInEx mod makes no copy and needs none: its older build reads the `.cfg`,
+which the conversion never writes (see [BepInEx](#bepinex)).
 
 Rolling forward, a file an older build rewrote has lost its stamp and is converted again, with its
 input kept in `.pre-canonical.last`. A file that kept its stamp is read as canonical, and a key an
-older build appended to it draws an unknown-key diagnostic and is not read.
+older build appended to it draws an unknown-key diagnostic and is not read. A BepInEx mod reads
+an existing `.ini` as canonical, so a setting an older build saved to the `.cfg` is not carried
+over unless the `.ini` is deleted first.
 
 ### Install, uninstall and manual packages
 
