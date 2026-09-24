@@ -75,7 +75,10 @@ for (const key of TOP_LEVEL_KEYS.slice(2)) {
 const { legacy, exempt, configs } = doc;
 const claimed = new Map();
 const claim = (name, where) => {
-  if (!REPO_NAME.test(name)) fail(`${where}: ${JSON.stringify(name)} is not a lowercase hyphenated repo name`);
+  if (typeof name !== "string" || !REPO_NAME.test(name)) {
+    fail(`${where}: ${JSON.stringify(name)} is not a lowercase hyphenated repo name`);
+    return;
+  }
   const first = claimed.get(name);
   if (first) fail(`${where}: ${name} is already named by ${first}`);
   else claimed.set(name, where);
