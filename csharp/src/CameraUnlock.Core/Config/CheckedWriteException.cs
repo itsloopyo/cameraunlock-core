@@ -12,11 +12,13 @@ namespace CameraUnlock.Core.Config
 #if NULLABLE_ENABLED
         internal CheckedWriteException(
             string message, CheckedWriteStep step, string targetPath, string? temporaryPath,
-            bool temporaryRemoved, bool outcomeUncertain, Exception error, Exception? cleanupError)
+            bool temporaryRemoved, bool outcomeUncertain, Exception error, Exception? cleanupError,
+            Exception? completionError)
 #else
         internal CheckedWriteException(
             string message, CheckedWriteStep step, string targetPath, string temporaryPath,
-            bool temporaryRemoved, bool outcomeUncertain, Exception error, Exception cleanupError)
+            bool temporaryRemoved, bool outcomeUncertain, Exception error, Exception cleanupError,
+            Exception completionError)
 #endif
             : base(message, error)
         {
@@ -26,6 +28,7 @@ namespace CameraUnlock.Core.Config
             TemporaryRemoved = temporaryRemoved;
             OutcomeUncertain = outcomeUncertain;
             CleanupError = cleanupError;
+            CompletionError = completionError;
         }
 
         /// <summary>
@@ -55,9 +58,11 @@ namespace CameraUnlock.Core.Config
         public bool TemporaryRemoved { get; }
 
         /// <summary>
-        /// Windows reported that it could not finish a replacement it had started. The target
-        /// may be missing or renamed, and the temporary, which holds the new contents, is left
-        /// at <see cref="TemporaryPath"/> because it may be the only copy.
+        /// Windows reported that it could not finish a replacement it had started, and the writer
+        /// could not finish it either: a file was at the target path, or moving the temporary
+        /// there failed (see <see cref="CompletionError"/>). The target may be missing or
+        /// renamed, and the temporary, which holds the new contents, is left at
+        /// <see cref="TemporaryPath"/> because it may be the only copy.
         /// </summary>
         public bool OutcomeUncertain { get; }
 
@@ -69,6 +74,17 @@ namespace CameraUnlock.Core.Config
         public Exception? CleanupError { get; }
 #else
         public Exception CleanupError { get; }
+#endif
+
+        /// <summary>
+        /// What went wrong moving the temporary into the place of a replacement Windows could not
+        /// finish, or null when that move was not tried. Set only with
+        /// <see cref="OutcomeUncertain"/>.
+        /// </summary>
+#if NULLABLE_ENABLED
+        public Exception? CompletionError { get; }
+#else
+        public Exception CompletionError { get; }
 #endif
     }
 }

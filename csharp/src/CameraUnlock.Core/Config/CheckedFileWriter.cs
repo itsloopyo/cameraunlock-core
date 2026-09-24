@@ -19,6 +19,7 @@ namespace CameraUnlock.Core.Config
         private const uint GenericWrite = 0x40000000;
         private const uint CreateNew = 1;
         private const uint FileAttributeNormal = 0x80;
+        private const uint InvalidFileAttributes = 0xFFFFFFFF;
         private const int ErrorWriteFault = 29;
 
         /// <summary>
@@ -35,6 +36,14 @@ namespace CameraUnlock.Core.Config
         /// string, string)"/>, which keeps the target's attributes, and no backup is made. An
         /// absent one is created by renaming the temporary with <see cref="File.Move"/>, which
         /// fails rather than overwrite a file that appeared after the check.
+        /// </para>
+        /// <para>
+        /// <see cref="File.Replace(string, string, string)"/> failing with
+        /// ERROR_UNABLE_TO_MOVE_REPLACEMENT or <c>_2</c> means Windows stopped partway and can
+        /// leave nothing at the target path. When nothing is found there, the writer finishes the
+        /// job with the same <see cref="File.Move"/>, which still refuses to overwrite, and a move
+        /// that succeeds is <see cref="CheckedWriteOutcome.Committed"/>. Otherwise it throws with
+        /// <see cref="CheckedWriteException.OutcomeUncertain"/> set.
         /// </para>
         /// <para>
         /// The target is never opened for writing, truncated or deleted. A read-only target
@@ -190,7 +199,7 @@ namespace CameraUnlock.Core.Config
                 }
                 catch (Exception e)
                 {
-                    throw Failed(CheckedWriteStep.ReadTarget, e, false);
+                    throw Failed(CheckedWriteStep.ReadTarget, e, false, null);
                 }
 
                 CheckedWriteOutcome outcome = Compare(expected, first, first);
@@ -252,7 +261,21 @@ namespace CameraUnlock.Core.Config
                     {
                         bool uncertain = step == CheckedWriteStep.Commit && !creating
                             && (hresult == HResultUnableToMoveReplacement || hresult == HResultUnableToMoveReplacement2);
-                        throw Failed(step, e, uncertain);
+                        // File.Replace can stop with the target already deleted or renamed. Left like
+                        // that, the next launch finds no file and writes defaults over the user's values.
+                        if (uncertain && GetFileAttributesW(_target) == InvalidFileAttributes)
+                        {
+                            try
+                            {
+                                File.Move(_temporary, _target);
+                            }
+                            catch (Exception moveError)
+                            {
+                                throw Failed(step, e, true, moveError);
+                            }
+                            return CheckedWriteOutcome.Committed;
+                        }
+                        throw Failed(step, e, uncertain, null);
                     }
                 }
 
@@ -266,7 +289,7 @@ namespace CameraUnlock.Core.Config
                     throw new CheckedWriteException(
                         "Writing " + _target + " stopped because the target changed (" + outcome
                             + "), and its temporary " + _temporary + " could not be deleted: " + e.Message,
-                        CheckedWriteStep.RemoveTemporary, _target, _temporary, false, false, e, null);
+                        CheckedWriteStep.RemoveTemporary, _target, _temporary, false, false, e, null, null);
                 }
                 return outcome;
             }
@@ -370,7 +393,13 @@ namespace CameraUnlock.Core.Config
                 }
             }
 
-            private CheckedWriteException Failed(CheckedWriteStep step, Exception error, bool uncertain)
+#if NULLABLE_ENABLED
+            private CheckedWriteException Failed(
+                CheckedWriteStep step, Exception error, bool uncertain, Exception? completionError)
+#else
+            private CheckedWriteException Failed(
+                CheckedWriteStep step, Exception error, bool uncertain, Exception completionError)
+#endif
             {
 #if NULLABLE_ENABLED
                 Exception? closeError = null;
@@ -414,6 +443,10 @@ namespace CameraUnlock.Core.Config
                     message += " Windows did not finish the replacement, so the target may be missing or renamed."
                         + " The new contents are in " + _temporary + ", left in place.";
                 }
+                if (completionError != null)
+                {
+                    message += " Moving them into place failed: " + completionError.Message;
+                }
                 if (closeError != null)
                 {
                     message += " Closing its temporary also failed: " + closeError.Message;
@@ -425,7 +458,7 @@ namespace CameraUnlock.Core.Config
 
                 return new CheckedWriteException(
                     message, step, _target, _created ? _temporary : null, removed, uncertain, error,
-                    removeError ?? closeError);
+                    removeError ?? closeError, completionError);
             }
         }
 
@@ -479,5 +512,8 @@ namespace CameraUnlock.Core.Config
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFileAttributesW(string name);
     }
 }

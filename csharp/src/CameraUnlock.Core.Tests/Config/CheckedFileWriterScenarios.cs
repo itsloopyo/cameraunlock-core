@@ -24,6 +24,8 @@ namespace CameraUnlock.Core.Tests.Config
         private const string FileName = "HeadTracking.ini";
         private const int HResultGenFailure = unchecked((int)0x8007001F);
         private const int HResultSharingViolation = unchecked((int)0x80070020);
+        private const int HResultUnableToMoveReplacement = unchecked((int)0x80070498);
+        private const int HResultUnableToMoveReplacement2 = unchecked((int)0x80070499);
         private const int ErrorInvalidHandle = 6;
         private const int ErrorFileExists = 80;
         private const uint HandleFlagProtectFromClose = 2;
@@ -60,6 +62,8 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-failed-removal-is-reported-not-hidden", AFailedRemovalIsReportedNotHidden),
             Scenario("a-conflict-whose-removal-fails-throws", AConflictWhoseRemovalFailsThrows),
             Scenario("an-unfinished-replacement-keeps-the-temporary", AnUnfinishedReplacementKeepsTheTemporary),
+            Scenario("an-unfinished-replacement-with-no-target-is-finished", AnUnfinishedReplacementWithNoTargetIsFinished),
+            Scenario("a-failed-finishing-move-keeps-the-temporary", AFailedFinishingMoveKeepsTheTemporary),
             Scenario("a-taken-temporary-name-is-not-deleted", ATakenTemporaryNameIsNotDeleted),
             Scenario("a-handle-without-share-delete-fails-the-commit", AHandleWithoutShareDeleteFailsTheCommit),
             Scenario("an-exclusive-handle-fails-the-read", AnExclusiveHandleFailsTheRead),
@@ -405,28 +409,100 @@ namespace CameraUnlock.Core.Tests.Config
         {
             string target = Path.Combine(dir, FileName);
             File.WriteAllBytes(target, Utf8("a=1"));
-            foreach (int hresult in new[] { unchecked((int)0x80070498), unchecked((int)0x80070499) })
+            foreach (int hresult in new[] { HResultUnableToMoveReplacement, HResultUnableToMoveReplacement2 })
             {
                 CheckedWriteException e = ExpectFailure(() => CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"),
                     (step, path) =>
                     {
                         if (step == CheckedWriteStep.Commit) throw new IOException("injected", hresult);
                     }), CheckedWriteStep.Commit);
-                Expect(e.OutcomeUncertain, "ERROR_UNABLE_TO_MOVE_REPLACEMENT(_2) is uncertain");
+                Expect(e.OutcomeUncertain, "ERROR_UNABLE_TO_MOVE_REPLACEMENT(_2) with the target still there is uncertain");
+                Expect(e.CompletionError == null, "no finishing move is tried over the target, got " + e.CompletionError);
                 Expect(!e.TemporaryRemoved && e.CleanupError == null, "the temporary is kept, not deleted");
                 Expect(e.Message.Contains(e.TemporaryPath), "the message says where the new contents are");
                 ExpectBytes(e.TemporaryPath, "a=2");
+                ExpectBytes(target, "a=1");
                 File.Delete(e.TemporaryPath);
             }
 
             CheckedWriteException creation = ExpectFailure(() => CheckedFileWriter.Write(
                 Path.Combine(dir, "absent.ini"), null, Utf8("a=2"), (step, path) =>
                 {
-                    if (step == CheckedWriteStep.Commit) throw new IOException("injected", unchecked((int)0x80070498));
+                    if (step == CheckedWriteStep.Commit) throw new IOException("injected", HResultUnableToMoveReplacement);
                 }), CheckedWriteStep.Commit);
             Expect(!creation.OutcomeUncertain && creation.TemporaryRemoved, "a rename into place is never uncertain");
             ExpectBytes(target, "a=1");
             ExpectListing(dir, FileName);
+        }
+
+        // Microsoft documents _UNABLE_TO_MOVE_REPLACEMENT (no backup) as leaving the target
+        // deleted, and _2 as leaving it renamed. The hook does either in place of File.Replace.
+        private static void AnUnfinishedReplacementWithNoTargetIsFinished(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            string renamed = Path.Combine(dir, "renamed.ini");
+            foreach (int hresult in new[] { HResultUnableToMoveReplacement, HResultUnableToMoveReplacement2 })
+            {
+                File.WriteAllBytes(target, Utf8("a=1"));
+                Expect(CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), (step, path) =>
+                    {
+                        if (step != CheckedWriteStep.Commit) return;
+                        if (hresult == HResultUnableToMoveReplacement)
+                        {
+                            File.Delete(target);
+                        }
+                        else
+                        {
+                            File.Move(target, renamed);
+                        }
+                        throw new IOException("injected", hresult);
+                    }) == CheckedWriteOutcome.Committed,
+                    hresult.ToString("X8") + ": the writer finishes the move and commits");
+                ExpectBytes(target, "a=2");
+                if (hresult == HResultUnableToMoveReplacement)
+                {
+                    ExpectListing(dir, FileName);
+                }
+                else
+                {
+                    ExpectBytes(renamed, "a=1");
+                    ExpectListing(dir, FileName, "renamed.ini");
+                    File.Delete(renamed);
+                }
+            }
+        }
+
+        private static void AFailedFinishingMoveKeepsTheTemporary(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            File.WriteAllBytes(target, Utf8("a=1"));
+            string temporary = null;
+            FileStream held = null;
+            CheckedWriteException e;
+            try
+            {
+                e = ExpectFailure(() => CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), (step, path) =>
+                    {
+                        if (step == CheckedWriteStep.CloseTemporary) temporary = path;
+                        if (step != CheckedWriteStep.Commit) return;
+                        held = new FileStream(temporary, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        File.Delete(target);
+                        throw new IOException("injected", HResultUnableToMoveReplacement);
+                    }), CheckedWriteStep.Commit);
+            }
+            finally
+            {
+                if (held != null) held.Dispose();
+            }
+            Expect(e.OutcomeUncertain, "a finishing move that fails leaves the replacement uncertain");
+            Expect(e.CompletionError != null && Marshal.GetHRForException(e.CompletionError) == HResultSharingViolation,
+                "the move's sharing violation is the completion error, got " + e.CompletionError);
+            Expect(e.InnerException.Message == "injected", "the replacement's error stays the inner exception");
+            Expect(e.Message.Contains(e.CompletionError.Message), "the message says why the move failed");
+            Expect(e.TemporaryPath == temporary && !e.TemporaryRemoved && e.CleanupError == null,
+                "the temporary is kept, not deleted");
+            ExpectBytes(temporary, "a=2");
+            ExpectListing(dir, Path.GetFileName(temporary));
         }
 
         private static void ATakenTemporaryNameIsNotDeleted(string dir)

@@ -53,10 +53,15 @@ struct CheckedWriteResult {
     /// The step that failed and the Win32 error it gave. None and 0 unless status is Failed.
     CheckedWriteStep failed_step = CheckedWriteStep::None;
     std::uint32_t error = 0;
-    /// ReplaceFileW reported ERROR_UNABLE_TO_MOVE_REPLACEMENT or _2: it could not finish a
-    /// replacement it had started, so the target may be missing or renamed. The temporary
-    /// holds the new contents, may be the only copy, and is left at temporary_path.
+    /// ReplaceFileW reported ERROR_UNABLE_TO_MOVE_REPLACEMENT or _2, it could not finish a
+    /// replacement it had started, and the writer could not finish it either: a file was
+    /// at the target path, or moving the temporary there failed (completion_error). The
+    /// target may be missing or renamed. The temporary holds the new contents, may be the
+    /// only copy, and is left at temporary_path.
     bool outcome_uncertain = false;
+    /// The Win32 error from moving the temporary into an unfinished replacement's place, or
+    /// 0 when that move was not tried or succeeded.
+    std::uint32_t completion_error = 0;
     /// The temporary this call created, empty when it created none. A file already sitting
     /// at that name is never counted as created, so it is never deleted.
     std::wstring temporary_path;
@@ -83,6 +88,12 @@ struct CheckedWriteResult {
 /// target's attributes, and no backup is made. An absent one is created by
 /// MoveFileExW(MOVEFILE_WRITE_THROUGH) without MOVEFILE_REPLACE_EXISTING, which fails
 /// rather than overwrite a file that appeared after the check.
+///
+/// ReplaceFileW's ERROR_UNABLE_TO_MOVE_REPLACEMENT and _2 mean it stopped partway and can
+/// leave nothing at the target path. When nothing is found there, the writer finishes the
+/// job with the same MoveFileExW(MOVEFILE_WRITE_THROUGH), still without
+/// MOVEFILE_REPLACE_EXISTING, and a move that succeeds is Committed. Otherwise the result
+/// is Failed at Commit with outcome_uncertain set.
 ///
 /// The target is never opened for writing, truncated or deleted. A read-only target fails
 /// with the error Windows gives; its attribute is left alone.

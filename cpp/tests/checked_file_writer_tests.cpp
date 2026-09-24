@@ -347,9 +347,11 @@ void AnUnfinishedReplacementKeepsTheTemporary(const fs::path& dir) {
         const CheckedWriteResult r =
             WriteFileCheckedWithFault(target.wstring(), "a=1", "a=2", FailAt(CheckedWriteStep::Commit, error));
         Check(r.failed_step == CheckedWriteStep::Commit && r.error == error && r.outcome_uncertain,
-              "ERROR_UNABLE_TO_MOVE_REPLACEMENT(_2) is uncertain");
+              "ERROR_UNABLE_TO_MOVE_REPLACEMENT(_2) with the target still there is uncertain");
+        Check(r.completion_error == 0, "no finishing move is tried over the target");
         Check(!r.temporary_removed && r.cleanup_error == 0, "the temporary is kept, not deleted");
         Check(HoldsBytes(r.temporary_path, "a=2"), "and holds the new contents");
+        Check(HoldsBytes(target, "a=1"), "the target is unchanged");
         fs::remove(r.temporary_path);
     }
     const CheckedWriteResult creation =
@@ -358,6 +360,64 @@ void AnUnfinishedReplacementKeepsTheTemporary(const fs::path& dir) {
     Check(!creation.outcome_uncertain && creation.temporary_removed, "a rename into place is never uncertain");
     Check(HoldsBytes(target, "a=1"), "the target is unchanged");
     Check(ListingIs(dir, {kFileName}), "nothing else is left");
+}
+
+// Microsoft documents _UNABLE_TO_MOVE_REPLACEMENT (no backup) as leaving the target
+// deleted, and _2 as leaving it renamed. The fault does either in place of ReplaceFileW.
+void AnUnfinishedReplacementWithNoTargetIsFinished(const fs::path& dir) {
+    const fs::path target = dir / kFileName;
+    const fs::path renamed = dir / L"renamed.ini";
+    for (DWORD error : {static_cast<DWORD>(ERROR_UNABLE_TO_MOVE_REPLACEMENT),
+                        static_cast<DWORD>(ERROR_UNABLE_TO_MOVE_REPLACEMENT_2)}) {
+        WriteBytes(target, "a=1");
+        const CheckedWriteResult r = WriteFileCheckedWithFault(
+            target.wstring(), "a=1", "a=2", [&](CheckedWriteStep step, const std::wstring&) -> std::uint32_t {
+                if (step != CheckedWriteStep::Commit) return 0;
+                if (error == ERROR_UNABLE_TO_MOVE_REPLACEMENT) {
+                    fs::remove(target);
+                } else {
+                    fs::rename(target, renamed);
+                }
+                return error;
+            });
+        Check(r.Committed() && r.failed_step == CheckedWriteStep::None && r.error == 0,
+              std::to_string(error) + ": the writer finishes the move and commits");
+        Check(!r.outcome_uncertain && r.completion_error == 0, std::to_string(error) + ": nothing is uncertain");
+        Check(HoldsBytes(target, "a=2"), std::to_string(error) + ": the target holds the candidate");
+        if (error == ERROR_UNABLE_TO_MOVE_REPLACEMENT) {
+            Check(ListingIs(dir, {kFileName}), "1176: no temporary is left");
+        } else {
+            Check(HoldsBytes(renamed, "a=1") && ListingIs(dir, {kFileName, L"renamed.ini"}),
+                  "1177: no temporary is left and the renamed original is not touched");
+            fs::remove(renamed);
+        }
+    }
+}
+
+void AFailedFinishingMoveKeepsTheTemporary(const fs::path& dir) {
+    const fs::path target = dir / kFileName;
+    WriteBytes(target, "a=1");
+    std::wstring temporary;
+    HANDLE held = INVALID_HANDLE_VALUE;
+    const CheckedWriteResult r = WriteFileCheckedWithFault(
+        target.wstring(), "a=1", "a=2", [&](CheckedWriteStep step, const std::wstring& path) -> std::uint32_t {
+            if (step == CheckedWriteStep::CloseTemporary) temporary = path;
+            if (step != CheckedWriteStep::Commit) return 0;
+            held = CreateFileW(temporary.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            fs::remove(target);
+            return ERROR_UNABLE_TO_MOVE_REPLACEMENT;
+        });
+    Check(held != INVALID_HANDLE_VALUE, "the temporary is held open without FILE_SHARE_DELETE");
+    if (held != INVALID_HANDLE_VALUE) CloseHandle(held);
+    Check(r.status == CheckedWriteStatus::Failed && r.failed_step == CheckedWriteStep::Commit &&
+              r.error == ERROR_UNABLE_TO_MOVE_REPLACEMENT && r.outcome_uncertain,
+          "a finishing move that fails leaves the replacement uncertain");
+    Check(r.completion_error == ERROR_SHARING_VIOLATION, "completion_error is the move's sharing violation");
+    Check(r.temporary_path == temporary && !r.temporary_removed && r.cleanup_error == 0,
+          "the temporary is kept, not deleted");
+    Check(HoldsBytes(temporary, "a=2"), "and holds the new contents");
+    Check(ListingIs(dir, {fs::path(temporary).filename().wstring()}), "nothing is at the target");
 }
 
 void ATakenTemporaryNameIsNotDeleted(const fs::path& dir) {
@@ -598,6 +658,8 @@ int RunCheckedFileWriterTests() {
     RunScenario("a-failed-removal-is-reported-not-hidden", AFailedRemovalIsReportedNotHidden);
     RunScenario("a-conflict-whose-removal-fails-is-reported", AConflictWhoseRemovalFailsIsReported);
     RunScenario("an-unfinished-replacement-keeps-the-temporary", AnUnfinishedReplacementKeepsTheTemporary);
+    RunScenario("an-unfinished-replacement-with-no-target-is-finished", AnUnfinishedReplacementWithNoTargetIsFinished);
+    RunScenario("a-failed-finishing-move-keeps-the-temporary", AFailedFinishingMoveKeepsTheTemporary);
     RunScenario("a-taken-temporary-name-is-not-deleted", ATakenTemporaryNameIsNotDeleted);
     RunScenario("a-handle-without-share-delete-fails-the-commit", AHandleWithoutShareDeleteFailsTheCommit);
     RunScenario("an-exclusive-handle-fails-the-read", AnExclusiveHandleFailsTheRead);

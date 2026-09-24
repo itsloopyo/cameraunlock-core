@@ -124,12 +124,13 @@ the bytes. Windows only.
   byte[] candidate)` returning `CheckedWriteOutcome`. A null `expected` means the file
   is expected to be absent. A failed step throws `CheckedWriteException`, an
   `IOException` whose inner exception is the original error, with `Step`, `TargetPath`,
-  `TemporaryPath`, `TemporaryRemoved`, `OutcomeUncertain` and `CleanupError`. Builds on
-  every target, net35 included, and throws `PlatformNotSupportedException` off Windows.
+  `TemporaryPath`, `TemporaryRemoved`, `OutcomeUncertain`, `CleanupError` and
+  `CompletionError`. Builds on every target, net35 included, and throws
+  `PlatformNotSupportedException` off Windows.
 - C++: `cameraunlock/config/checked_file_writer.h`, with `WriteFileChecked(const
   std::wstring&, const std::optional<std::string>&, const std::string&)` returning
   `CheckedWriteResult` (`status`, `failed_step`, `error`, `outcome_uncertain`,
-  `temporary_path`, `temporary_removed`, `cleanup_error`), plus
+  `completion_error`, `temporary_path`, `temporary_removed`, `cleanup_error`), plus
   `CheckedWriteStatusName` and `CheckedWriteStepName`.
 - `CheckedWriteOutcome` / `CheckedWriteStatus` are `Committed`, `TargetChanged`,
   `TargetAppeared`, `TargetMissing` and `TargetReplaced`, with the same numbers in both
@@ -154,19 +155,26 @@ with Windows' access-denied error and keeps its attribute. After a conflict or a
 the writer deletes only the temporary it created, by the exact name it recorded. It
 never deletes by pattern, and it does not count a file already sitting at its chosen name
 as its own. The exception is ReplaceFileW's ERROR_UNABLE_TO_MOVE_REPLACEMENT (and `_2`),
-which Microsoft documents as able to leave the target missing or renamed. That is
-reported as `OutcomeUncertain` and the temporary, which may be the only copy of the new
-contents, is kept. The final check and the swap are two operations, so another program
-writing the file between them is overwritten; this is not compare-and-swap. The caller
-serializes its own saves.
+which Microsoft documents as able to leave the target missing or renamed. When nothing is
+at the target path afterwards, the writer finishes the replacement itself with the same
+rename it uses to create a file (`File.Move` / MoveFileExW(MOVEFILE_WRITE_THROUGH), still
+without replace-existing), and a rename that succeeds is `Committed`. Without that the
+next launch would find no file and write defaults. When a file is there, or the rename
+fails, the write is reported as `OutcomeUncertain` / `outcome_uncertain` and the
+temporary, which may be the only copy of the new contents, is kept. The rename's own error
+is `CompletionError` (an exception, null when no rename was tried) in C# and
+`completion_error` (a Win32 error, 0 when none was tried or it succeeded) in C++. The
+final check and the swap are two operations, so another program writing the file between
+them is overwritten; this is not compare-and-swap. The caller serializes its own saves.
 
 Both test suites run the same scenarios against real files. Every step fails in turn
 through an internal fault hook. The target is edited, swapped for a copy with identical
 bytes, deleted, or created between the two reads, and created again just before the
 rename. They also cover a handle open without FILE_SHARE_DELETE, an exclusive handle, a
 read-only target, hidden and system attributes, a taken temporary name, a removal that
-fails, unrelated `.tmp` and `.bak` files beside the target, and a non-ASCII path. The
-C++ suite, and the new `CameraUnlock.Core.FrameworkTests` console on net35 and net472,
+fails, an unfinished replacement with the target deleted, renamed or still in place, a
+finishing rename that fails, unrelated `.tmp` and `.bak` files beside the target, and a
+non-ASCII path. The C++ suite, and the new `CameraUnlock.Core.FrameworkTests` console on net35 and net472,
 also kill a child process at the start of each step and check that the target is
 unchanged and at most the child's own temporary is left behind. `pixi run
 test-framework` runs that console on CLR 2.0 and CLR 4. `pixi run check` runs the net472

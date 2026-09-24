@@ -153,20 +153,33 @@ public:
                          : ReplaceFileW(target_.c_str(), temporary_.c_str(), nullptr, 0, nullptr, nullptr);
             if (!done) error = GetLastError();
         }
-        if (error == 0) {
-            CheckedWriteResult result;
-            result.status = CheckedWriteStatus::Committed;
-            return result;
-        }
+        if (error == 0) return CommittedResult();
         if (creating && (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS)) {
             return Conflict(CheckedWriteStatus::TargetAppeared);
         }
         const bool uncertain = !creating && (error == ERROR_UNABLE_TO_MOVE_REPLACEMENT ||
                                              error == ERROR_UNABLE_TO_MOVE_REPLACEMENT_2);
-        return Fail(CheckedWriteStep::Commit, error, uncertain);
+        if (!uncertain) return Fail(CheckedWriteStep::Commit, error, false);
+
+        // ReplaceFileW can stop with the target already deleted or renamed. Left like that,
+        // the next launch finds no file and writes defaults over the user's values.
+        DWORD completion = 0;
+        if (GetFileAttributesW(target_.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            if (MoveFileExW(temporary_.c_str(), target_.c_str(), MOVEFILE_WRITE_THROUGH)) return CommittedResult();
+            completion = GetLastError();
+        }
+        CheckedWriteResult result = Fail(CheckedWriteStep::Commit, error, true);
+        result.completion_error = completion;
+        return result;
     }
 
 private:
+    static CheckedWriteResult CommittedResult() {
+        CheckedWriteResult result;
+        result.status = CheckedWriteStatus::Committed;
+        return result;
+    }
+
     DWORD Before(CheckedWriteStep step, const std::wstring& path) const {
         return fault_ ? static_cast<DWORD>(fault_(step, path)) : 0;
     }
