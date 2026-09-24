@@ -250,6 +250,151 @@ std::string Join(const std::vector<std::string>& items) {
     return text;
 }
 
+// What PluginConfig::Read gives, written out by hand. The import is compared with Load, which
+// calls Read, so a change inside Read, SetDefaults or PluginConfig's initialisers moves both sides
+// of that comparison; only literal values catch it.
+struct ReadPin {
+    bool found = true;
+    int udpPort = 4242;
+    float yaw = 1.0f, pitch = 1.0f, roll = 1.0f;
+    float local = 0.0f, remote = 0.15f;
+    int toggleKey = 0x23, positionToggleKey = 0x21, yawModeKey = 0x22, diagnosticMarkerKey = 0x78;
+    float sensX = 1.0f, sensY = 1.0f, sensZ = 1.0f;
+    float limitX = 0.3f, limitY = 0.2f, limitZ = 0.4f, limitZBack = 0.1f;
+    bool invertX = false, invertY = false, invertZ = false;
+    bool positionEnabled = true;
+    bool flashlightTracking = true;
+    float flashlightMultiplier = 1.5f;
+    bool autoEnable = true, worldSpaceYaw = true;
+    int configVersion = 0;
+};
+
+ReadPin PinWithSensitivity(float sensitivity) {
+    ReadPin pin;
+    pin.sensX = pin.sensY = pin.sensZ = sensitivity;
+    return pin;
+}
+
+std::vector<std::string> ReadPinDifferences(const PluginConfig& c, bool found, const ReadPin& p) {
+    std::vector<std::string> out;
+    const auto f = [&](const char* name, float got, float want) {
+        if (!SameBits(got, want)) out.push_back(std::string(name) + " " + std::to_string(got) + " not " + std::to_string(want));
+    };
+    const auto i = [&](const char* name, int got, int want) {
+        if (got != want) out.push_back(std::string(name) + " " + std::to_string(got) + " not " + std::to_string(want));
+    };
+    const auto t = [&](const char* name, bool got, bool want) {
+        if (got != want) out.push_back(std::string(name) + " " + Text(got) + " not " + Text(want));
+    };
+    t("found", found, p.found);
+    i("udpPort", c.udpPort, p.udpPort);
+    f("yawMultiplier", c.yawMultiplier, p.yaw);
+    f("pitchMultiplier", c.pitchMultiplier, p.pitch);
+    f("rollMultiplier", c.rollMultiplier, p.roll);
+    f("localSmoothing", c.localSmoothing, p.local);
+    f("remoteSmoothing", c.remoteSmoothing, p.remote);
+    i("toggleKey", c.toggleKey, p.toggleKey);
+    i("positionToggleKey", c.positionToggleKey, p.positionToggleKey);
+    i("yawModeKey", c.yawModeKey, p.yawModeKey);
+    i("diagnosticMarkerKey", c.diagnosticMarkerKey, p.diagnosticMarkerKey);
+    f("positionSensitivityX", c.positionSensitivityX, p.sensX);
+    f("positionSensitivityY", c.positionSensitivityY, p.sensY);
+    f("positionSensitivityZ", c.positionSensitivityZ, p.sensZ);
+    f("positionLimitX", c.positionLimitX, p.limitX);
+    f("positionLimitY", c.positionLimitY, p.limitY);
+    f("positionLimitZ", c.positionLimitZ, p.limitZ);
+    f("positionLimitZBack", c.positionLimitZBack, p.limitZBack);
+    t("positionInvertX", c.positionInvertX, p.invertX);
+    t("positionInvertY", c.positionInvertY, p.invertY);
+    t("positionInvertZ", c.positionInvertZ, p.invertZ);
+    t("positionEnabled", c.positionEnabled, p.positionEnabled);
+    t("flashlightTracking", c.flashlightTracking, p.flashlightTracking);
+    f("flashlightMultiplier", c.flashlightMultiplier, p.flashlightMultiplier);
+    t("autoEnable", c.autoEnable, p.autoEnable);
+    t("worldSpaceYaw", c.worldSpaceYaw, p.worldSpaceYaw);
+    i("configVersion", c.configVersion, p.configVersion);
+    return out;
+}
+
+void CheckRead(PluginConfig& config, const fs::path& file, const PluginConfigSchema& schema, const ReadPin& want,
+               const std::string& name) {
+    const bool found = config.Read(file.string().c_str(), schema);
+    const std::vector<std::string> differences = ReadPinDifferences(config, found, want);
+    Check(differences.empty(), "Read pin: " + name + " " + Join(differences));
+}
+
+void TestReadPinned(const fs::path& root) {
+    const ReadPin kPins[] = {
+        PinWithSensitivity(2.0f), PinWithSensitivity(2.0f), PinWithSensitivity(2.0f), ReadPin{},
+        [] {
+            ReadPin village;
+            village.invertX = true;
+            return village;
+        }(),
+        ReadPin{}, PinWithSensitivity(2.0f),
+    };
+    static_assert(std::size(kPins) == std::size(kFixtures), "one pin per fixture");
+    for (std::size_t n = 0; n < std::size(kFixtures); ++n) {
+        PluginConfig config;
+        CheckRead(config, fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / kFixtures[n].file, kFixtures[n].schema,
+                  kPins[n], kFixtures[n].file);
+    }
+
+    const std::string odd =
+        "[Network]\nUDPPort=80\n"
+        "[Sensitivity]\nYawMultiplier=9\nPitchMultiplier=-1\nRollMultiplier=abc\n"
+        "[Smoothing]\nLocalSmoothing=0,15\nRemoteSmoothing=1.5\n"
+        "[Hotkeys]\nToggleKey=0x230\nPositionToggleKey=0x11\nYawModeKey=zz\nDiagnosticMarkerKey=0x7A\n"
+        "[Position]\nSensitivityX=11\nSensitivityY=0.5 ; half\nSensitivityZ=nan\nLimitX=3\nLimitY=0.25\n"
+        "LimitZ=0x1\nLimitZBack=-0.5\nInvertX=yes\nInvertY=maybe\nInvertZ=1\nEnabled=off\n"
+        "[Flashlight]\nEnabled=false\nMultiplier=7\n"
+        "[General]\nAutoEnable=0\nWorldSpaceYaw=False\nConfigVersion=3\n";
+    const fs::path dir = Fresh(root, "read-pin");
+    const fs::path file = dir / "HeadTracking.ini";
+    WriteBytes(file, odd);
+
+    const PluginConfigSchema every{"Pin", true, true, true, 2.0f, "pin"};
+    ReadPin all;
+    all.yaw = 5.0f;
+    all.pitch = 0.0f;
+    all.remote = 1.0f;
+    all.diagnosticMarkerKey = 0x7A;
+    all.sensX = 10.0f;
+    all.sensY = 0.5f;
+    all.sensZ = 2.0f;
+    all.limitX = 2.0f;
+    all.limitY = 0.25f;
+    all.limitZBack = 0.0f;
+    all.invertX = true;
+    all.invertZ = true;
+    all.positionEnabled = false;
+    all.flashlightTracking = false;
+    all.flashlightMultiplier = 5.0f;
+    all.autoEnable = false;
+    all.worldSpaceYaw = false;
+    all.configVersion = 3;
+    PluginConfig config;
+    CheckRead(config, file, every, all,
+              "out-of-range values clamp, unparseable ones and unpollable keys keep the defaults");
+
+    ReadPin none = all;
+    none.diagnosticMarkerKey = 0x78;
+    none.sensZ = 1.0f;
+    none.invertX = none.invertZ = false;
+    none.flashlightTracking = true;
+    none.flashlightMultiplier = 1.5f;
+    PluginConfig bare;
+    CheckRead(bare, file, PluginConfigSchema{"Pin", false, false, false, 1.0f, ""}, none,
+              "a schema without the optional keys leaves them at their defaults");
+
+    ReadPin absent = PinWithSensitivity(2.0f);
+    absent.found = false;
+    CheckRead(config, dir / "missing.ini", every, absent, "no file gives the defaults over a filled config");
+
+    WriteBytes(file, "");
+    CheckRead(config, file, every, PinWithSensitivity(2.0f), "an empty file is found, on the defaults");
+}
+
 // The corpus description of every key the import reads, with the alternates taken against what
 // Read gives the shipped file.
 std::vector<testing::MutationKey> CorpusKeys(const std::vector<LegacyKey>& reads, const PluginConfig& base) {
@@ -457,10 +602,21 @@ void TestConversionLog(const fs::path& root) {
           "RE2: the reticle toggle's lines are logged as not carried");
     const std::string village = convert(kFixtures[4]);
     Check(!Contains(village, "InvertX"), "RE8: the shipped InvertX=true is corrected, not dropped");
+    // Which positionSensitivity Requiem declares when it converts is the owner's decision: its
+    // v0.4.0 installer ships 1.0 and its v0.4.0 launcher seed 2.0. Both outcomes are checked, so
+    // neither is fixed here.
     const std::string seed = convert(kFixtures[6]);
     Check(Contains(seed, "not carried: [Position] SensitivityX=2, ") &&
               Contains(seed, "not carried: [Position] SensitivityZ=2, "),
-          "the requiem seed's position sensitivity of 2 is logged as dropped");
+          "a position sensitivity of 2 against a schema positionSensitivity of 1 is logged as dropped");
+    Fixture seed_at_two = kFixtures[6];
+    seed_at_two.schema.positionSensitivity = 2.0f;
+    Check(!Contains(convert(seed_at_two), "[Position] Sensitivity"),
+          "and against a schema positionSensitivity of 2 it is the default, so nothing is dropped");
+    Fixture shipped_at_two = kFixtures[5];
+    shipped_at_two.schema.positionSensitivity = 2.0f;
+    Check(Contains(convert(shipped_at_two), "not carried: [Position] SensitivityX=1, "),
+          "while requiem's shipped 1.0 against a schema positionSensitivity of 2 is dropped");
 }
 
 void TestImportDropsAndCorrection(const fs::path& root) {
@@ -631,6 +787,7 @@ int RunPluginConfigCanonicalTests() {
     fs::remove_all(root);
     fs::create_directories(root);
 
+    TestReadPinned(root);
     TestTableRendersTheGamesRows();
     TestImportKeysAreWhatReadReads();
     TestImportDropsAndCorrection(root);

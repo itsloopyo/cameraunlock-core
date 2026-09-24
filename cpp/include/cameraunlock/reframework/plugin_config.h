@@ -149,7 +149,10 @@ struct PluginConfig {
     // without Load's log line or its ConfigVersion migration. False, on the defaults,
     // when there is no file at `path` (an ANSI path). Frozen: it is the legacy import
     // of every REFramework mod (PluginConfigLegacyImport), so a change here changes
-    // how a user's old file converts.
+    // how a user's old file converts. Its defaults are SetDefaults and the field
+    // initialisers above, which are frozen with it: a key an old file lacks converts
+    // to them. A default that has to change for new files changes in
+    // PluginConfigTable's defaults instead.
     bool Read(const char* path, const PluginConfigSchema& schema);
     bool Load(const char* path, const PluginConfigSchema& schema);
     bool Save(const char* path, const PluginConfigSchema& schema) const;

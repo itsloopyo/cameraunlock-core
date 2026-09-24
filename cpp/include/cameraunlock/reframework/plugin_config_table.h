@@ -7,7 +7,9 @@
 namespace cameraunlock::reframework {
 
 /// The canonical config file of a REFramework mod, over PluginConfig. Every row's default is
-/// PluginConfig after SetDefaults(schema). The rows:
+/// PluginConfig after SetDefaults(schema). Those are also what the frozen PluginConfig::Read gives
+/// a key an old file lacks, so a default that moves for new files is set over them in this
+/// function, never in SetDefaults or PluginConfig's initialisers. The rows:
 ///
 /// - [Network] UdpPort; [General] EnableOnStartup and WorldSpaceYaw (Writable);
 /// - [Smoothing] LocalSmoothing and RemoteSmoothing;

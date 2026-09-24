@@ -23,7 +23,12 @@ those builds).
 - **`PluginConfig::Read(path, schema)`**: `SetDefaults`, every read and `Validate`, exactly as
   `Load` did them, with no log line and no migration; false, on the defaults, when there is no
   file. `Load` is now `Read`, its two log lines and the RE8 migration, unchanged in behaviour.
-  `Read` is the legacy import of all six RE mods, so it is frozen from here on.
+  `Read` is the legacy import of all six RE mods, so it is frozen from here on, and with it
+  `SetDefaults` and `PluginConfig`'s field initialisers, which are what it gives a key an old file
+  lacks. A default that changes for new files changes in `PluginConfigTable`'s defaults instead.
+  The C++ suite pins `Read` with hand-written values on each fixture and on out-of-range,
+  unparseable, empty and missing inputs, so a change to it fails even though `Load`, which the
+  import is compared with, calls it too.
 - **`PluginConfig` hotkey lists**, appended: `toggleKeyBindings` (`End, Ctrl+Shift+Y`),
   `cycleTrackingModeKeyBindings` (`PageUp, Ctrl+Shift+G`), `yawModeKeyBindings` (`PageDown,
   Ctrl+Shift+H`) and `diagnosticMarkerKeyBindings` (`F9`), as canonical text. In canonical mode
@@ -72,7 +77,10 @@ those builds).
   file, floats bitwise), checks the import leaves its copy untouched, converts RE8's and
   Requiem's corpora through the owner, and converts each shipped file to a canonical file that
   reads back as imported, keeps `.pre-canonical`, is not rewritten by a second load, and edits
-  one line per `PositionEnabled` or `WorldSpaceYaw` save.
+  one line per `PositionEnabled` or `WorldSpaceYaw` save. Requiem v0.4.0's installer ships position
+  sensitivity 1.0 and its launcher seed 2.0, and core cannot tell a seeded 2.0 from a player's.
+  The tests check both outcomes (dropped against a `positionSensitivity` of 1, kept against 2);
+  which one Requiem declares is decided in its own conversion.
 
 ### Added - the C++ config owner and migration driver
 
