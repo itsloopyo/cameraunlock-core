@@ -57,8 +57,14 @@
 ::                        one holds a space. <path>.pre-canonical and
 ::                        <path>.pre-canonical.last are kept with each listed
 ::                        path. No removal list and no loader folder removal
-::                        takes them (see :del_one and :rmtree_one). No
-::                        wildcard, drive, leading \, .., /, ! or parenthesis
+::                        takes them (see :del_one and :rmtree_one). Each
+::                        entry names a file, never a folder. No wildcard,
+::                        drive, leading or trailing \, .., /, !, parenthesis,
+::                        &, ^, <, > or |. A wrapper whose CONFIG BLOCK has no
+::                        PRESERVE_FILES line inherits the value from the
+::                        console that ran it, which may hold another mod's
+::                        list, so a wrapper that does not use it still sets
+::                        it blank
 ::   USER_FOLDER_EXTRAS - BeamNGUserMods only: files the mod writes at runtime
 ::                        into the per-user folder rather than into mods\.
 ::                        Entries may carry a relative subfolder
@@ -296,6 +302,16 @@ if defined PRESERVE_FILES if exist "!_KEEP_DIR!\" (
     echo folder, delete the folder, and run this uninstaller again.
     exit /b 1
 )
+:: A listed folder would be deleted with the loader folder around it, since
+:: only files are set aside, so the run stops here with nothing touched.
+if defined PRESERVE_FILES for %%k in (%PRESERVE_FILES%) do for %%c in ("" ".pre-canonical" ".pre-canonical.last") do (
+    if exist "!GAME_PATH!\%%~k%%~c\" (
+        echo ERROR: PRESERVE_FILES in the uninstall.cmd CONFIG BLOCK names a folder:
+        echo   %%~k%%~c
+        echo Each entry is one file, named by its path relative to the game folder.
+        exit /b 1
+    )
+)
 
 :: -------- Compute DEPLOY_DIR per FRAMEWORK_TYPE --------
 call :compute_deploy_dir
@@ -531,7 +547,6 @@ exit /b 0
 :keep_out
 for %%q in ("%GAME_PATH%\%_KEEP_REL%") do set "_KEEP_LIVE=%%~fq"
 if not exist "%_KEEP_LIVE%" exit /b 0
-if exist "%_KEEP_LIVE%\" exit /b 0
 set "_UNDER_AT=%_KEEP_LIVE%"
 call :keep_in_tree
 if errorlevel 1 exit /b 0
@@ -549,7 +564,6 @@ exit /b 0
 :keep_back
 for %%q in ("%_KEEP_DIR%\%_KEEP_REL%") do set "_KEEP_HELD=%%~fq"
 if not exist "%_KEEP_HELD%" exit /b 0
-if exist "%_KEEP_HELD%\" exit /b 0
 for %%q in ("%GAME_PATH%\%_KEEP_REL%") do (
     set "_KEEP_LIVE=%%~fq"
     set "_KEEP_LIVE_DIR=%%~dpq"
@@ -579,7 +593,9 @@ goto :keep_in_tree
 :: :assert_safe_list checks it holds paths, so a `\` is allowed inside an
 :: entry, and it is read before delayed expansion is enabled, so a `!` can be
 :: caught. Parentheses are refused because the list is expanded inside for and
-:: if blocks, where one closes the block early. Quotes come off first; they
+:: if blocks, where one closes the block early, and & ^ < > | because the FOR
+:: that splits the list reads an unquoted one as syntax: a ^ vanishes without
+:: a word and the entry no longer matches its file. Quotes come off first; they
 :: only group an entry that holds a space.
 :: ============================================
 :assert_safe_preserve_list
@@ -599,6 +615,11 @@ if not "%_PL%"=="%_PL:/=%"  set "_BAD=a forward slash"
 if not "%_PL%"=="%_PL:!=%"  set "_BAD=a !"
 if not "%_PL%"=="%_PL:(=%"  set "_BAD=a parenthesis"
 if not "%_PL%"=="%_PL:)=%"  set "_BAD=a parenthesis"
+if not "%_PL%"=="%_PL:&=%"  set "_BAD=a &"
+if not "%_PL%"=="%_PL:^=%"  set "_BAD=a ^"
+if not "%_PL%"=="%_PL:<=%"  set "_BAD=a <"
+if not "%_PL%"=="%_PL:>=%"  set "_BAD=a >"
+if not "%_PL%"=="%_PL:|=%"  set "_BAD=a |"
 if defined _BAD goto :preserve_list_bad
 for %%k in (%PRESERVE_FILES%) do (
     set "_PE=%%~k"
@@ -610,8 +631,9 @@ exit /b 0
 for %%b in ("%_BAD%") do echo ERROR: PRESERVE_FILES in the uninstall.cmd CONFIG BLOCK contains %%~b:
 for /f "delims=" %%l in ("%_PL%") do echo   %%l
 echo Each entry is one file, named by its path relative to the game folder:
-echo no drive, no leading \, no .. and no /. A wildcard would reach other files,
-echo and a ! or a parenthesis cannot pass through this script intact.
+echo no drive, no leading or trailing \, no .. and no /. A wildcard would reach
+echo other files, and a !, a parenthesis, ^&, ^^, ^<, ^> or ^| cannot pass through
+echo this script intact.
 exit /b 1
 
 :preserve_entry_check
@@ -620,6 +642,7 @@ if not defined _PE (
     exit /b 0
 )
 if "%_PE:~0,1%"=="\" set "_BAD=a leading \"
+if "%_PE:~-1%"=="\" set "_BAD=a trailing \"
 exit /b 0
 
 :: ============================================

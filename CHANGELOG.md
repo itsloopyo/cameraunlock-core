@@ -30,8 +30,19 @@ of the file it converted, are kept with it without being listed.
 - An uninstall that finds `CameraUnlock-kept-configs\` already there refuses with exit 1
   before it touches anything, since that folder holds a config an earlier run did not put
   back.
-- An entry with a wildcard, a drive, a leading `\`, a `..`, a `/`, a `!` or a parenthesis,
-  or an empty entry, fails with exit 1 and a message naming `PRESERVE_FILES`.
+- An entry with a wildcard, a drive, a leading or trailing `\`, a `..`, a `/`, a `!`, a
+  parenthesis, `&`, `^`, `<`, `>` or `|`, or an empty entry, fails with exit 1 and a message
+  naming `PRESERVE_FILES`. Inside a quoted entry those last five are also unsafe in the
+  wrapper's own `set "PRESERVE_FILES=..."` line, where the entry's quotes leave them exposed
+  and cmd.exe drops the value before the body can see it.
+- An entry, or one of its two copies, that is a folder in the game folder fails with exit 1
+  before anything is touched: only files are set aside, so a listed folder would go with the
+  loader folder around it.
+- The value is inherited like every CONFIG BLOCK variable, because the wrapper sets its CONFIG
+  BLOCK before its `setlocal`. A wrapper with no `PRESERVE_FILES` line, which is every wrapper
+  today, run from a console that already ran a converted mod's uninstall, keeps any of its own
+  files at the paths that mod listed. Lopari runs each script in its own `cmd /C` and is not
+  affected. A converted wrapper sets the line; one that keeps nothing sets it blank.
 
 Unset or empty, the uninstall behaves exactly as before. `scripts/test-uninstall-preserve.ps1`
 runs the body through a real console against synthetic game trees under a path holding `!`

@@ -396,7 +396,8 @@ Write-Host 'PASS move-back failure: files left in the named holding folder, stat
 
 # ---------------------------------------------------------------- arguments
 foreach ($bad in @('*.ini', 'bin\?.ini', '..\up.ini', 'C:\abs.ini', 'D:rel.ini', '\lead.ini', 'bin\ok.ini \lead.ini', 'bin/fwd.ini',
-        'bang!.ini', 'paren(1).ini', 'close).ini', '""', 'bin\ok.ini ""')) {
+        'bang!.ini', 'paren(1).ini', 'close).ini', '""', 'bin\ok.ini ""', 'bin\', 'bin\ok.ini "bin\"', 'a&b.ini', 'c^d.ini',
+        'a<b.ini', 'a>b.ini', 'a|b.ini')) {
     $config = Copy-Map $asiConfig @{ PRESERVE_FILES = $bad }
     $case = New-Case -Name ('unsafe-' + [guid]::NewGuid().ToString('N').Substring(0, 8)) -Config $config -Files $asiFiles -ExeRelPath 'bin\fixture.exe'
     $before = Get-Snapshot $case.Game
@@ -405,6 +406,23 @@ foreach ($bad in @('*.ini', 'bin\?.ini', '..\up.ini', 'C:\abs.ini', 'D:rel.ini',
     if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw "unsafe '$bad': the game folder changed" }
 }
 Write-Host 'PASS unsafe PRESERVE_FILES entries: exit 1, nothing touched'
+
+# Only files are set aside, so a listed folder inside a loader folder would go
+# with it. The copies are checked too.
+$folderCases = @(
+    @{ Name = 'folder-entry'; Config = Copy-Map $trees[0].Config @{ PRESERVE_FILES = 'BepInEx\config' }; Files = $bepFiles; Exe = 'fixture.exe'; Named = 'BepInEx\config' },
+    @{ Name = 'folder-copy'; Config = Copy-Map $asiConfig @{ PRESERVE_FILES = 'bin\Other.ini' }
+        Files = Copy-Map $asiFiles @{ 'bin\Other.ini' = 'bin\Other.ini'; 'bin\Other.ini.pre-canonical.last\x.txt' = 'x' }
+        Exe = 'bin\fixture.exe'; Named = 'bin\Other.ini.pre-canonical.last' }
+)
+foreach ($folder in $folderCases) {
+    $case = New-Case -Name $folder.Name -Config $folder.Config -Files $folder.Files -ExeRelPath $folder.Exe
+    $before = Get-Snapshot $case.Game
+    $output = Invoke-Uninstall $case 1
+    Assert-Output $case $output @('ERROR: PRESERVE_FILES in the uninstall.cmd CONFIG BLOCK names a folder:', $folder.Named)
+    if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw "$($folder.Name): the game folder changed" }
+}
+Write-Host 'PASS folder entries: a listed path or copy that is a folder is refused with exit 1, nothing touched'
 
 $case = New-Case -Name 'unknown-flag' -Config $bepListed -Files $bepFiles -ExeRelPath 'fixture.exe'
 $before = Get-Snapshot $case.Game
