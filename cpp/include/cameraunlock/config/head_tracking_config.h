@@ -84,6 +84,10 @@ struct HeadTrackingConfig {
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.
     ///
+    /// Deprecated: a converted game reads its file through config::ConfigOwner with
+    /// config::HeadTrackingConfigTable. This stays, unchanged, for the mods that call it until
+    /// a major version.
+    ///
     /// Every numeric key is range-checked here, and a value outside its range is REFUSED -
     /// reported through @p log, with the field left holding what it had. A mod does not
     /// need its own guard pass over the result, and the two that matter are not survivable
@@ -98,12 +102,20 @@ struct HeadTrackingConfig {
                      const LogFn& log = nullptr);
 
     /// Reads an INI file and applies it. A missing file leaves every default in place.
+    ///
+    /// Deprecated: a converted game reads its file through config::ConfigOwner with
+    /// config::HeadTrackingConfigTable. This stays, unchanged, for the mods that call it until
+    /// a major version.
     static HeadTrackingConfig LoadFromFile(const std::string& path, const LogFn& log = nullptr);
 };
 
 /// Parses an INI-style file into key/value pairs, discarding section headers. Mirrors
 /// ConfigParsingUtils.ParseIniFile: '#' and ';' start a comment, an inline comment is
 /// stripped only outside a quoted value, and a wholly quoted value has its quotes removed.
+///
+/// Deprecated: a converted game reads its file through config::ConfigOwner with
+/// config::HeadTrackingConfigTable, whose canonical reader is ParseCanonicalIni. This stays,
+/// unchanged, for the mods that call it until a major version.
 std::vector<std::pair<std::string, std::string>> ParseIniConfig(const std::string& path);
 
 /// Value parsers shared with the C# side. Each rejects input it cannot use rather than

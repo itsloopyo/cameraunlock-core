@@ -9,6 +9,67 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the C++ config owner and migration driver
+
+`cameraunlock::config::ConfigOwner<Config>` in `config/config_owner.h` is the C++ twin of the C#
+`ConfigOwner<TConfig>` below: the one reader and writer of a game's canonical config file, writing
+only through `WriteFileChecked`. It has the same statuses with the same numbers, the same player
+messages and the same decisions, including the two the C# entry records: a missing file at `Save`
+is `NotSaved`, and a file that appears while `Load` creates one is `Deferred` on the defaults.
+Nothing in the fleet uses it yet; each native game's conversion wires it. The statuses, options
+and results compile everywhere; the owner itself is Windows only, as the writer is.
+
+- **Options by member assignment**: `ConfigOwnerOptions<Config>` with `path` (a fully qualified
+  `std::wstring`; there is no ANSI path), `table`, `import` (`LegacyImport<Config>`, whose empty
+  `run` means the game never published a pre-canonical build), `header` and `status_sink`. The
+  constructor throws `std::invalid_argument` for an empty or relative path, a table with no rows,
+  an import that names keys but has no run, a table that has both `RotationEnabled` and
+  `PositionEnabled` and marks only one Writable, or a header the renderer refuses. There is no
+  `LegacySourcePath`: that is BepInEx's, and BepInEx is C# only.
+- **`Load()`** returns `ConfigLoadResult<Config>` (`ConfigLoadStatus`: `Canonical` 0, `Migrated`
+  1, `Created` 2, `Deferred` 3, `LegacyRefused` 4, `Unreadable` 5) with the `config`, the
+  `diagnostics`, a UTF-8 `log` and the player's `reason`. It must not run under the loader lock:
+  call it from the game's init thread, never from `DllMain`.
+- **Conversion** holds the legacy file with `CreateFileW(GENERIC_READ, FILE_SHARE_READ |
+  FILE_SHARE_WRITE)`, no `FILE_SHARE_DELETE`, from its snapshot through the import to a second
+  read, then closes it before the copy and the commit, since `ReplaceFileW` fails while such a
+  handle is open. The import is handed a `LegacyInput`: the wide path, its ANSI form from
+  `WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, ...)`, and `ansi_lossy` when a character had
+  no ANSI form (or the form does not convert back). An import that reports `Absent` while the owner
+  holds the file is deferred with both paths in the log, unless the ANSI form was lossy: then the
+  published build, handed that form, never saw the file and ran on its defaults, so the defaults
+  the import gave are written, the file's content is kept in `.pre-canonical`, and the log names
+  the case. Every conversion of a lossy path logs it, so a per-key import that simply read nothing
+  is named too. Copies, commit, verification, the not-carried and dropped-value log lines, and every
+  deferral match the C# owner.
+- **`Save(const std::function<void(Config&)>&)`** returns `ConfigSaveResult`: `Saved` 0,
+  `NotSaved` 1 with the `reason` and the Win32 `error`, or `Uncertain` 2 whose reason names the
+  file and the kept `temporary_path`. A changed row the table does not mark Writable throws
+  `std::logic_error` naming it; the mode pair, the stamp and `ConfigFormat` repair, the read-back
+  through the table and the no-op save are as in C#.
+- **`Reload()`** returns `ConfigReloadResult<Config>` (`Unchanged` 0, `Applied` 1,
+  `LegacyReadOnly` 2, `Unreadable` 3; `config` is a `std::optional`) and never writes.
+  **`FileChanged()`** compares the last write time from `GetFileAttributesExW` with the recorded
+  one; a missing file counts as 0.
+- One `std::mutex` around `Load`, `Reload`, `Save` and `FileChanged`; the status sink runs after it
+  is released. `Save` is synchronous: call it from the HotkeyPoller thread, never per frame.
+- `ConfigLoadStatusName`, `ConfigSaveStatusName` and `ConfigReloadStatusName` give the C#
+  spellings.
+
+The tests run the C# scenario list against real files, the held-handle test (GetPrivateProfileStringA,
+`fopen`, `_wfopen` and `std::ifstream` read a held file; an open denying read sharing, a delete and
+a rename fail), a folder named outside the ANSI code page, and a child of the test binary killed at
+each of 19 conversion steps (`--config-owner-interrupt <step>`), after which the old file or the new
+one is whole and the next launch ends byte for byte where an uninterrupted one does.
+
+### Deprecated - the C++ flat config readers
+
+`ParseIniConfig`, `HeadTrackingConfig::LoadFromFile` and `HeadTrackingConfig::ApplyValues` are
+deprecated in their comments, so the mods that call them build as before. They stay until a major
+version. A converted native game reads its config through `config::ConfigOwner` with
+`config::HeadTrackingConfigTable`. `IniReader` and `IniWriter` are not deprecated here:
+`ini_reader.h` is frozen byte for byte for the legacy imports that call it.
+
 ### Added - the C# config owner and migration driver
 
 `ConfigOwner<TConfig>` in `CameraUnlock.Core.Config` is the one reader and writer of a game's

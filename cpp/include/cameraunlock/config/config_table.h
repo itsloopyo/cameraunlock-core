@@ -5,6 +5,7 @@
 #include <cameraunlock/config/hotkey_codec.h>
 #include <cameraunlock/config/value_codecs.h>
 
+#include <charconv>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -132,6 +133,32 @@ struct IsFloatingCodec : std::false_type {};
 template <class F>
 struct IsFloatingCodec<FloatingCodec<F>> : std::true_type {};
 
+// A value as a message shows it when its codec cannot write it: numbers in their shortest
+// round-trip form, an enum as its number, a list or color as its items joined by ", ".
+template <class T>
+std::string DisplayValue(const T& value) {
+    if constexpr (std::is_same_v<T, bool>) {
+        return value ? "true" : "false";
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        return value;
+    } else if constexpr (std::is_enum_v<T>) {
+        return std::to_string(static_cast<long long>(value));
+    } else if constexpr (std::is_arithmetic_v<T>) {
+        char text[64];
+        const std::to_chars_result written = std::to_chars(text, text + sizeof(text), value);
+        return std::string(text, written.ptr);
+    } else {
+        std::string text;
+        bool first = true;
+        for (const auto& item : value) {
+            if (!first) text += ", ";
+            first = false;
+            text += DisplayValue(item);
+        }
+        return text;
+    }
+}
+
 // Range(lo, hi) of an int row takes whole numbers no larger in size than 2^53, which a
 // double holds exactly, within the field's type.
 constexpr double kLargestExactWhole = 9007199254740992.0;
@@ -142,6 +169,7 @@ public:
     virtual ~RowOps() = default;
     virtual std::string Apply(std::string_view text, Config& config) const = 0;
     virtual std::string Render(const Config& config) const = 0;
+    virtual std::string Display(const Config& config) const = 0;
     virtual bool Equal(const Config& a, const Config& b) const = 0;
     virtual void Assign(Config& to, const Config& from) const = 0;
     virtual bool IsFalse(const Config& config) const = 0;
@@ -163,6 +191,8 @@ public:
     }
 
     std::string Render(const Config& config) const override { return codec_.Render(get_(config)); }
+
+    std::string Display(const Config& config) const override { return DisplayValue(Value(get_(config))); }
 
     bool Equal(const Config& a, const Config& b) const override { return codec_.Equal(get_(a), get_(b)); }
 
@@ -204,6 +234,9 @@ private:
 
 template <class Config>
 class ConfigTable;
+
+template <class Config>
+class ConfigOwner;
 
 template <class Config>
 ApplyReport ApplyCanonical(const CanonicalIni& doc, const ConfigTable<Config>& table, Config& inout);
@@ -345,6 +378,7 @@ public:
     const Config& defaults() const { return defaults_; }
 
 private:
+    friend class ConfigOwner<Config>;
     friend ApplyReport ApplyCanonical<Config>(const CanonicalIni&, const ConfigTable&, Config&);
     friend std::string RenderCanonical<Config>(const ConfigTable&, const Config&, const RenderHeader&);
 

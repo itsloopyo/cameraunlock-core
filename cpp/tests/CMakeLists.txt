@@ -35,6 +35,7 @@ add_executable(cameraunlock_tests
     head_tracking_config_table_tests.cpp
     legacy_import_tests.cpp
     ini_mutations_tests.cpp
+    config_owner_tests.cpp
     getasynckeystate_probe.cpp
 )
 

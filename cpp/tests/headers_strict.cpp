@@ -42,6 +42,7 @@
 #include "cameraunlock/config/checked_file_writer.h"
 #include "cameraunlock/config/config_concepts.g.h"
 #include "cameraunlock/config/config_key_schema.g.h"
+#include "cameraunlock/config/config_owner.h"
 #include "cameraunlock/config/config_table.h"
 #include "cameraunlock/config/head_tracking_config.h"
 #include "cameraunlock/config/head_tracking_config_table.h"
@@ -125,3 +126,6 @@ template cameraunlock::config::ApplyReport cameraunlock::config::ApplyCanonical<
 template std::string cameraunlock::config::RenderCanonical<cameraunlock::HeadTrackingConfig>(
     const cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig>&, const cameraunlock::HeadTrackingConfig&,
     const cameraunlock::config::RenderHeader&);
+#ifdef _WIN32
+template class cameraunlock::config::ConfigOwner<cameraunlock::HeadTrackingConfig>;
+#endif

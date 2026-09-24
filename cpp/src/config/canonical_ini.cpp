@@ -1,5 +1,7 @@
 #include "cameraunlock/config/canonical_ini.h"
 
+#include "canonical_ini_internal.h"
+
 #include <algorithm>
 #include <climits>
 #include <cstddef>
@@ -9,7 +11,18 @@
 
 namespace cameraunlock::config {
 
+namespace detail {
+
+bool StartsWithUtf16Mark(std::string_view bytes) {
+    return bytes.size() >= 2 &&
+           ((bytes[0] == '\xFF' && bytes[1] == '\xFE') || (bytes[0] == '\xFE' && bytes[1] == '\xFF'));
+}
+
+}  // namespace detail
+
 namespace {
+
+using detail::StartsWithUtf16Mark;
 
 constexpr std::string_view kStampSection = "CameraUnlock";
 constexpr std::string_view kFormatKey = "ConfigFormat";
@@ -32,11 +45,6 @@ std::string_view Trim(std::string_view s) {
     while (begin < end && IsSpaceOrTab(s[begin])) ++begin;
     while (end > begin && IsSpaceOrTab(s[end - 1])) --end;
     return s.substr(begin, end - begin);
-}
-
-bool StartsWithUtf16Mark(std::string_view bytes) {
-    return bytes.size() >= 2 &&
-           ((bytes[0] == '\xFF' && bytes[1] == '\xFE') || (bytes[0] == '\xFE' && bytes[1] == '\xFF'));
 }
 
 // Calls visit(line, number) for each line, untrimmed and without its terminator.
@@ -288,6 +296,31 @@ bool HasCanonicalStamp(std::string_view bytes) {
     if (StartsWithUtf16Mark(bytes)) return HasStampInBytes(NarrowUtf16(bytes));
     return HasStampInBytes(bytes);
 }
+
+namespace detail {
+
+std::vector<CanonicalKeyLine> CanonicalKeyLines(std::string_view bytes) {
+    std::vector<CanonicalKeyLine> found;
+    std::optional<std::string> section;
+    ForEachLine(bytes, [&](std::string_view raw, int number) {
+        const std::string_view line = Trim(raw);
+        if (line.empty() || line[0] == ';' || line[0] == '#') return;
+        if (line[0] == '[') {
+            const Header header = ParseHeader(line);
+            section.reset();
+            if (header.closed && !header.name.empty()) section = std::string(header.name);
+            return;
+        }
+        const size_t equals = line.find('=');
+        if (equals == std::string_view::npos) return;
+        const std::string_view key = Trim(line.substr(0, equals));
+        if (key.empty()) return;
+        found.push_back(CanonicalKeyLine{section, std::string(key), std::string(Trim(line.substr(equals + 1))), number});
+    });
+    return found;
+}
+
+}  // namespace detail
 
 const char* CanonicalReadStatusName(CanonicalReadStatus status) {
     switch (status) {
