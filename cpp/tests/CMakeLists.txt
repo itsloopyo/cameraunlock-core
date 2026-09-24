@@ -31,7 +31,7 @@ add_executable(cameraunlock_tests
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)
 target_compile_definitions(cameraunlock_tests PRIVATE
-    CAMERAUNLOCK_INI_EDITOR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/ini-editor"
+    CAMERAUNLOCK_INI_EDITOR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/canonical-ini/editor"
     CAMERAUNLOCK_CANONICAL_INI_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/canonical-ini")
 
 # plugin_config.cpp lives in the optional REFramework target, so its tests can

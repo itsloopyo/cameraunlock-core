@@ -1,0 +1,4 @@
+# An absent key goes after the last key line of the section's last block, where the
+# reader's last-occurrence rule would put it.
+set	Network	P	2
+set_or_insert	General	C	3

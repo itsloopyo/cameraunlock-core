@@ -1,8 +1,0 @@
-# Whitespace around =, inline comments and trailing whitespace survive, and a quoted
-# value holding ; is replaced whole. Only the value itself changes.
-set	General	EnableOnStartup	false
-set	General	WorldSpaceYaw	false
-set	General	Name	c
-set	General	Empty	x
-set	General	Blank	y
-set	General	Tabbed	2

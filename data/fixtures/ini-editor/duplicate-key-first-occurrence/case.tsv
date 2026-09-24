@@ -1,4 +1,0 @@
-# A reader that takes the first of a repeated key, GetPrivateProfileStringA for one.
-# The first occurrence is replaced and the later spelling is left as it is.
-set_first	General	A	9
-flat_duplicate	A

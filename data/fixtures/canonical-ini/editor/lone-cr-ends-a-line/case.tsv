@@ -1,0 +1,4 @@
+# A lone CR ends a line, as it does for the reader. CR CR LF is a lone CR and then a CRLF,
+# so the blank line between them is a line of its own.
+set	General	A	5
+set_or_insert	General	C	3

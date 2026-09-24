@@ -90,15 +90,26 @@ signature changed. What a migrated file looks like changes in these cases:
   edited, as before. A stamp for a repeated `[General]` goes under the first header,
   which is the only one the reader reads; the old code put it under the last, so that
   file was never stamped.
-- A file the editor cannot edit as the reader reads it is left untouched: UTF-16, a
-  lone CR (GetPrivateProfileStringA ends a line there and the editor does not), a NUL
-  or SUB byte anywhere, or a vertical tab or form feed at the start of a line or the end
-  of a key (the reader skips those four beside a key or a header, and the editor does
-  not). The old code edited these anyway, and a UTF-16 file came out corrupted. A config that is read-only, held open without delete
-  sharing, or changed on disk during the edit is also left untouched. In every such case
-  the correction applies for the session only, the stamp is not claimed, the error log
-  names the refusal or the failed step and its Windows error, and the next launch tries
-  again.
+- A file the editor cannot edit as the reader reads it is left untouched: UTF-16, a NUL
+  or SUB byte anywhere, a vertical tab or form feed at the start of a line or the end of
+  a key (the reader skips SUB, vertical tab and form feed beside a key or a header, and
+  the editor keeps them as part of the line), a `[` line with no `]` (the reader opens a
+  section there and the editor none), and a key the migration edits whose first
+  occurrence sits under a later header of a repeated section (the reader reads only the
+  first block, so an edit there changes nothing it sees). A lone CR is refused as well,
+  although in every shape probed GetPrivateProfileStringA ends a line there just as the
+  editor does. The old code edited all of these, and a UTF-16 file came out corrupted.
+- The editor writes no inline comments of its own, so the migration carries a replaced
+  line's comment across itself (from the first `;` or `#` outside quotes, with the white
+  space in front of it, to the end of the line). A comment it cannot write back leaves
+  the file untouched: one holding a tab, a control byte or a byte above 0x7F, or ending
+  in a space. The old code
+  migrated such a file, rewriting the whole line and dropping the comment with it.
+- A config that is read-only, held open without delete sharing, or changed on disk
+  during the edit is left untouched too. In every refused or failed case the correction
+  applies for the session only, the stamp is not claimed, the error log names the
+  refusal and its line or the failed step and its Windows error, and the next launch
+  tries again.
 - A config deleted between the migration's read and its write is reported and not
   recreated. The old code wrote it back from the copy it had read.
 
@@ -161,11 +172,13 @@ test-framework` runs that console on CLR 2.0 and CLR 4. `pixi run check` runs th
 half only, because the net35 half needs the Windows .NET 3.5 feature and the CI image
 has not been checked for it. None of this has run under Unity's Mono yet.
 
-### Added - a pure batch INI editor, in C# and C++
+### Added - a pure batch INI editor for the canonical format, in C# and C++
 
-Sets values in an INI document's bytes and leaves every other byte where it was. It
-does no file I/O: the caller passes the bytes in (empty for an absent file) and gets
-the new bytes back, or a typed refusal and no bytes.
+Sets values in a canonical INI document's bytes and leaves every other byte where it was.
+It does no file I/O: the caller passes the bytes in (empty for an absent file) and gets
+the new bytes back, or a typed refusal and no bytes. It edits the grammar the canonical
+reader reads, and it never decodes, so a byte in any encoding it does not edit is copied
+through.
 
 - C#: `CameraUnlock.Core.Config.IniEditor.Edit(byte[] original, IList<IniEdit> edits)`
   returning `IniEditResult` (`Succeeded`, `Refusal`, `Bytes`, `Section`, `Key`,
@@ -176,53 +189,52 @@ the new bytes back, or a typed refusal and no bytes.
 - C++: `cameraunlock/config/ini_editor.h`, with `EditIni(const std::string&,
   const std::vector<IniEdit>&)` returning `IniEditResult`, and
   `IniEditRefusalName`.
-- `IniEditRefusal` is `None`, `Utf16`, `InvalidUtf8`, `NulByte`,
-  `LoneCarriageReturn`, `DuplicateSection`, `DuplicateKey`, `KeyNotFound`,
-  `AmbiguousWhitespace` and `SubByte`, with the same numbers in both languages.
+- `IniEditRefusal` is `None` (0), `Utf16` (1), `NulByte` (2) and `KeyNotFound` (3), with
+  the same numbers in both languages. `Utf16` and `NulByte` are the two documents the
+  canonical reader cannot read; `Lines` names the NUL's line, counted as the reader
+  counts.
 
+Lines are read as the canonical reader reads them: CRLF, LF and a lone CR each end a line,
+a UTF-8 byte order mark at offset 0 is skipped and kept, lines are trimmed of spaces and
+tabs only, a `[` line is a header named up to its first `]`, and a `[` line with no `]`
+ends the section above it and names none. Repeated headers of one name are one section.
 Sections and keys match ignoring ASCII case, and a replaced line keeps the file's own
-spelling. A replacement changes only the value. The whitespace around `=`, any inline
-comment and the line's own terminator stay as they were. With `insertIfAbsent`, a
-missing key goes after the last non-comment line of its section, and a missing
-section is appended at the end of the file after a blank line. New lines take the
-file's dominant line ending (CRLF on a tie). A file whose last line has no terminator
-still has none afterwards. A UTF-8 BOM is kept. Headers that repeat a section's name
-count as one section. A key that appears twice in the edited section, under one header
-or across repeats, is refused, not picked. An insertion into a section whose header
-repeats is refused too, since there is no one place for it. Keys above the first
-header belong to no section and are never matched.
+spelling. An edit's section, key and value are printable ASCII, so an edit never matches a
+key holding any other byte; SUB (0x1A), a vertical tab, a form feed, invalid UTF-8 and
+cp1252 bytes are ordinary bytes of the lines around it.
+
+A replacement rewrites everything after the `=` and the spaces and tabs after it, up to
+the line terminator: the grammar has no inline comments, so `B = true ; note` becomes
+`B = false`. The white space around `=` and the terminator stay. A repeated key has its
+last occurrence replaced, the one the reader keeps, and the earlier ones stay. With
+`insertIfAbsent`, a missing key goes after the last key line of its section's last block,
+or straight after that block's header when it has none, and a missing section is appended
+at the end of the file after a blank line. New lines take the file's most common line
+ending, CRLF on a tie and then LF. A file whose last line has no terminator still has none
+afterwards. Keys above the first header belong to no section and are never matched.
 
 An edit marked first-occurrence-wins (`IniEdit.FirstOccurrenceWins` in C#,
 `IniEdit::first_occurrence_wins` in C++) is for a reader that takes the first of a
 repeated key, as GetPrivateProfileStringA does. It replaces the first occurrence in the
-document and leaves the rest, and it inserts an absent key under the first of a
-repeated section header, instead of refusing either.
+document, and it inserts an absent key into the first block of a repeated section. Only
+the REFramework migration (the entry above) uses it.
 
-A line that starts with white space other than a space or tab (form feed, no-break
-space and the like), or a key that ends in it, is refused as `AmbiguousWhitespace`:
-`ConfigParsingUtils.ParseIniFile` trims it and `ParseIniConfig` does not, so the two
-read that line differently.
+An edit that would not read back as given throws `ArgumentException` /
+`std::invalid_argument`: a section, key or value holding anything outside printable ASCII
+(0x20 to 0x7E, so a tab too), an empty section or key, a leading or trailing space on any
+of the three, `]` in a section, `=` in a key or a key starting `[`, `;` or `#`, and two
+edits of one key. A value may be empty, and may hold `;`, `#`, `=` and quotes.
 
-A document holding a SUB byte (0x1A, Ctrl-Z) anywhere is refused as `SubByte`, and a
-section, key or value holding one throws. `ParseIniConfig` reads through a text-mode
-`std::ifstream`, which the Microsoft C runtime ends at that byte, while
-`ConfigParsingUtils.ParseIniFile` reads on past it, so the two disagree about
-everything after it.
+Both implementations run the same byte fixtures in `data/fixtures/canonical-ini/editor`,
+67 cases, with their `case.tsv` format in `data/fixtures/canonical-ini/README.md`. The C++
+suite, the xunit suite and `CameraUnlock.Core.FrameworkTests` on net35 and net472 all run
+them, and read every successful case back through the canonical reader: the edited keys
+read their new values, every other key and every unedited line reads as before, and the
+diagnostics differ only on edited lines.
 
-An edit whose key, section or value would not read back as given throws
-`ArgumentException` / `std::invalid_argument`. For a value that means CR, LF, NUL or
-SUB, surrounding white space, `;` or `#` outside quotes, a quote left open (a comment
-after it on the line would read as part of the value), or a pair of matching quotes
-around the whole value. Both test suites try every value of up to four characters
-drawn from `a`, space, `;`, `#`, both quotes, `=`, U+00A0 and U+001A, and check that
-each one the editor accepts reads back as itself and that applying the edit again
-changes nothing.
-
-Both implementations run the same byte fixtures in `data/fixtures/ini-editor`
-(`.gitattributes` keeps git off their line endings). Each successful fixture is read
-back through `ConfigParsingUtils.ParseIniFile` and `ParseIniConfig` as well, to check
-that the edited keys read their new values and every other key reads as before.
-Nothing in core calls the editor yet.
+Its only caller is that migration; nothing outside core calls it. It has not been
+released, so this entry describes it as it first ships; while unreleased it was retargeted
+from the flat readers' grammar to the canonical one, and `IniEditRefusal` was renumbered.
 
 ### Added - the tracking-mode mapping to `RotationEnabled` / `PositionEnabled`
 

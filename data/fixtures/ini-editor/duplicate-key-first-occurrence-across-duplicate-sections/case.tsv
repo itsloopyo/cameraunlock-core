@@ -1,4 +1,0 @@
-# The first occurrence is counted across every header of the section, in document
-# order, and asking for insertion changes nothing when the key is there.
-set_or_insert_first	General	A	9
-flat_duplicate	A

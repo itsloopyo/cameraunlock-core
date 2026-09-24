@@ -1,9 +1,9 @@
-// EditIni against the byte fixtures in data/fixtures/ini-editor, which IniEditorTests
-// runs through the C# IniEditor as well, so the two implementations are held to the
-// same bytes. Each edited document is also read back through ParseIniConfig: the edited
-// keys carry their new values and every other key reads exactly as before.
+// EditIni against the byte fixtures in data/fixtures/canonical-ini/editor, which the C#
+// IniEditorFixtures runs through IniEditor as well, so the two implementations are held to
+// the same bytes. Each edited document is also read back through ParseCanonicalIni, before
+// and after, as data/fixtures/canonical-ini/README.md describes.
 
-#include <cameraunlock/config/head_tracking_config.h>
+#include <cameraunlock/config/canonical_ini.h>
 #include <cameraunlock/config/ini_editor.h>
 
 #include <algorithm>
@@ -11,6 +11,8 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -23,21 +25,15 @@ using cameraunlock::EditIni;
 using cameraunlock::IniEdit;
 using cameraunlock::IniEditRefusal;
 using cameraunlock::IniEditResult;
+using cameraunlock::config::CanonicalDiagnostic;
+using cameraunlock::config::CanonicalIni;
+using cameraunlock::config::ParseCanonicalIni;
 
 // CameraUnlock.Core.Config.IniEditRefusal carries the same numbers.
 static_assert(static_cast<int>(IniEditRefusal::None) == 0, "IniEditRefusal::None");
 static_assert(static_cast<int>(IniEditRefusal::Utf16) == 1, "IniEditRefusal::Utf16");
-static_assert(static_cast<int>(IniEditRefusal::InvalidUtf8) == 2, "IniEditRefusal::InvalidUtf8");
-static_assert(static_cast<int>(IniEditRefusal::NulByte) == 3, "IniEditRefusal::NulByte");
-static_assert(static_cast<int>(IniEditRefusal::LoneCarriageReturn) == 4,
-              "IniEditRefusal::LoneCarriageReturn");
-static_assert(static_cast<int>(IniEditRefusal::DuplicateSection) == 5,
-              "IniEditRefusal::DuplicateSection");
-static_assert(static_cast<int>(IniEditRefusal::DuplicateKey) == 6, "IniEditRefusal::DuplicateKey");
-static_assert(static_cast<int>(IniEditRefusal::KeyNotFound) == 7, "IniEditRefusal::KeyNotFound");
-static_assert(static_cast<int>(IniEditRefusal::AmbiguousWhitespace) == 8,
-              "IniEditRefusal::AmbiguousWhitespace");
-static_assert(static_cast<int>(IniEditRefusal::SubByte) == 9, "IniEditRefusal::SubByte");
+static_assert(static_cast<int>(IniEditRefusal::NulByte) == 2, "IniEditRefusal::NulByte");
+static_assert(static_cast<int>(IniEditRefusal::KeyNotFound) == 3, "IniEditRefusal::KeyNotFound");
 
 int g_failures = 0;
 
@@ -56,14 +52,6 @@ std::string ReadBytes(const fs::path& path) {
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
-void WriteBytes(const fs::path& path, const std::string& bytes) {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) throw std::runtime_error("cannot create " + path.string());
-    out << bytes;
-    out.close();
-    if (!out) throw std::runtime_error("cannot write " + path.string());
-}
-
 std::vector<std::string> Split(const std::string& text, char separator, size_t max_fields) {
     std::vector<std::string> fields;
     size_t begin = 0;
@@ -75,6 +63,29 @@ std::vector<std::string> Split(const std::string& text, char separator, size_t m
     }
     fields.push_back(text.substr(begin));
     return fields;
+}
+
+// The byte escape data/fixtures/canonical-ini/README.md defines.
+std::string Unescape(const std::string& field) {
+    std::string bytes;
+    for (size_t i = 0; i < field.size(); ++i) {
+        if (field[i] != '\\') {
+            bytes.push_back(field[i]);
+            continue;
+        }
+        if (i + 1 < field.size() && field[i + 1] == '\\') {
+            bytes.push_back('\\');
+            ++i;
+            continue;
+        }
+        if (i + 3 < field.size() && field[i + 1] == 'x') {
+            bytes.push_back(static_cast<char>(std::stoi(field.substr(i + 2, 2), nullptr, 16)));
+            i += 3;
+            continue;
+        }
+        throw std::runtime_error("bad escape in fixture field '" + field + "'");
+    }
+    return bytes;
 }
 
 bool EqualsAsciiIgnoreCase(const std::string& a, const std::string& b) {
@@ -91,10 +102,10 @@ bool EqualsAsciiIgnoreCase(const std::string& a, const std::string& b) {
 
 struct FixtureCase {
     std::string name;
-    bool has_input = false;
     std::string input;
     std::vector<IniEdit> edits;
     std::vector<IniEdit> rejected;
+    bool first_mode = false;
     bool refused = false;
     std::string refusal;
     std::string refused_section;
@@ -106,34 +117,32 @@ struct FixtureCase {
 FixtureCase LoadCase(const fs::path& dir) {
     FixtureCase c;
     c.name = dir.filename().string();
-    c.has_input = fs::exists(dir / "input.ini");
-    if (c.has_input) c.input = ReadBytes(dir / "input.ini");
+    if (fs::exists(dir / "input.ini")) c.input = ReadBytes(dir / "input.ini");
 
     for (const std::string& line : Split(ReadBytes(dir / "case.tsv"), '\n', std::string::npos)) {
         if (line.empty() || line[0] == '#') continue;
         const std::string directive = Split(line, '\t', 2)[0];
         if (directive == "set" || directive == "set_or_insert" || directive == "set_first" ||
-            directive == "set_or_insert_first") {
+            directive == "set_or_insert_first" || directive == "rejects") {
             const auto f = Split(line, '\t', 4);
             if (f.size() != 4) throw std::runtime_error(c.name + ": malformed edit: " + line);
-            c.edits.push_back(IniEdit{f[1], f[2], f[3],
-                                      directive == "set_or_insert" || directive == "set_or_insert_first",
-                                      directive == "set_first" || directive == "set_or_insert_first"});
-        } else if (directive == "rejects") {
-            const auto f = Split(line, '\t', 4);
-            if (f.size() != 4) throw std::runtime_error(c.name + ": malformed rejection: " + line);
-            c.rejected.push_back(IniEdit{f[1], f[2], f[3], true});
-        } else if (directive == "flat_duplicate") {
-            // The C++ reader returns every occurrence, so the list comparison below
-            // already covers a key it sees twice.
+            const bool first = directive == "set_first" || directive == "set_or_insert_first";
+            const IniEdit edit{Unescape(f[1]), Unescape(f[2]), Unescape(f[3]),
+                               directive != "set" && directive != "set_first", first};
+            if (directive == "rejects") {
+                c.rejected.push_back(edit);
+            } else {
+                c.edits.push_back(edit);
+                c.first_mode = c.first_mode || first;
+            }
         } else if (directive == "refused") {
             const auto f = Split(line, '\t', 5);
             if (f.size() != 5) throw std::runtime_error(c.name + ": malformed refusal: " + line);
             c.refused = true;
             c.refusal = f[1];
-            c.refused_section = f[2];
-            c.refused_key = f[3];
-            if (!f[4].empty()) {
+            c.refused_section = Unescape(f[2]);
+            c.refused_key = Unescape(f[3]);
+            if (f[4] != "-") {
                 for (const std::string& n : Split(f[4], ',', std::string::npos)) {
                     c.refused_lines.push_back(std::stoi(n));
                 }
@@ -146,74 +155,174 @@ FixtureCase LoadCase(const fs::path& dir) {
     return c;
 }
 
-std::vector<std::pair<std::string, std::string>> ReadFlat(const std::string& bytes,
-                                                          const std::string& tag) {
-    const fs::path path = fs::temp_directory_path() / ("cameraunlock_ini_editor_" + tag + ".ini");
-    WriteBytes(path, bytes);
-    auto values = cameraunlock::ParseIniConfig(path.string());
-    fs::remove(path);
-    return values;
-}
-
-std::vector<std::string> ValuesOf(const std::vector<std::pair<std::string, std::string>>& pairs,
-                                  const std::string& key) {
-    std::vector<std::string> values;
-    for (const auto& pair : pairs) {
-        if (EqualsAsciiIgnoreCase(pair.first, key)) values.push_back(pair.second);
-    }
-    return values;
-}
-
-// The edited key reads back with its new value: in place of one earlier value when it was
-// replaced, or as one more occurrence when it was inserted. Its other occurrences, which a
-// flat reader also sees, are unchanged.
-bool ReadsBackEdited(const std::vector<std::string>& before, const std::vector<std::string>& after,
-                     const std::string& value) {
-    if (std::find(after.begin(), after.end(), value) == after.end()) return false;
-    if (after.size() == before.size()) {
-        int differing = 0;
-        for (size_t i = 0; i < after.size(); ++i) {
-            if (after[i] != before[i]) {
-                if (after[i] != value) return false;
-                ++differing;
-            }
+// Each line with its terminator, as the canonical reader splits them: CRLF, LF or a lone
+// CR, after a UTF-8 byte order mark at offset 0.
+std::vector<std::string> Lines(const std::string& bytes) {
+    std::vector<std::string> lines;
+    size_t pos = bytes.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
+    while (pos < bytes.size()) {
+        size_t end = pos;
+        while (end < bytes.size() && bytes[end] != '\r' && bytes[end] != '\n') ++end;
+        if (end < bytes.size()) {
+            end += (bytes[end] == '\r' && end + 1 < bytes.size() && bytes[end + 1] == '\n') ? 2 : 1;
         }
-        return differing <= 1;
+        lines.push_back(bytes.substr(pos, end - pos));
+        pos = end;
     }
-    if (after.size() != before.size() + 1) return false;
-    for (size_t skip = 0; skip < after.size(); ++skip) {
-        if (after[skip] != value) continue;
-        std::vector<std::string> rest = after;
-        rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(skip));
-        if (rest == before) return true;
+    return lines;
+}
+
+std::string WithoutEnding(const std::string& line) {
+    size_t end = line.size();
+    while (end > 0 && (line[end - 1] == '\r' || line[end - 1] == '\n')) --end;
+    return line.substr(0, end);
+}
+
+// An unterminated last line gains the line ending that joins new text onto it.
+bool Kept(const std::string& after, const std::string& before) {
+    return after == before || (WithoutEnding(before) == before && WithoutEnding(after) == before);
+}
+
+std::string Trim(const std::string& text) {
+    size_t begin = 0;
+    size_t end = text.size();
+    while (begin < end && (text[begin] == ' ' || text[begin] == '\t')) ++begin;
+    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t')) --end;
+    return text.substr(begin, end - begin);
+}
+
+std::string Content(const std::string& line) { return Trim(WithoutEnding(line)); }
+
+// The edit a changed key line holds, or nullptr when the line is not a key line.
+const IniEdit* EditOnLine(const FixtureCase& c, const std::string& line, std::string& value) {
+    const std::string content = Content(line);
+    const size_t equals = content.find('=');
+    if (content.empty() || content[0] == '[' || content[0] == ';' || content[0] == '#' ||
+        equals == std::string::npos) {
+        return nullptr;
+    }
+    const std::string key = Trim(content.substr(0, equals));
+    value = Trim(content.substr(equals + 1));
+    for (const IniEdit& edit : c.edits) {
+        if (EqualsAsciiIgnoreCase(edit.key, key)) return &edit;
+    }
+    return nullptr;
+}
+
+bool Edited(const FixtureCase& c, const std::string& section, const std::string& key) {
+    for (const IniEdit& edit : c.edits) {
+        if (EqualsAsciiIgnoreCase(edit.section, section) && EqualsAsciiIgnoreCase(edit.key, key)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TouchesAny(const CanonicalDiagnostic& d, const std::set<int>& lines) {
+    for (int line : d.lines) {
+        if (lines.count(line) != 0) return true;
     }
     return false;
 }
 
 void CheckReadBack(const FixtureCase& c, const std::string& output) {
-    const auto before = ReadFlat(c.input, c.name + "_in");
-    const auto after = ReadFlat(output, c.name + "_out");
+    const CanonicalIni before = ParseCanonicalIni(c.input);
+    const CanonicalIni after = ParseCanonicalIni(output);
+    Check(before.IsReadable() && after.IsReadable(), c.name + ": both documents are readable");
 
-    auto edited = [&](const std::string& key) {
-        for (const IniEdit& edit : c.edits) {
-            if (EqualsAsciiIgnoreCase(edit.key, key)) return true;
-        }
-        return false;
-    };
-    std::vector<std::pair<std::string, std::string>> before_rest;
-    std::vector<std::pair<std::string, std::string>> after_rest;
-    for (const auto& pair : before) {
-        if (!edited(pair.first)) before_rest.push_back(pair);
-    }
-    for (const auto& pair : after) {
-        if (!edited(pair.first)) after_rest.push_back(pair);
-    }
-    Check(before_rest == after_rest, c.name + ": every unedited key reads back unchanged");
-
+    // Lines of `before` the batch replaced: the occurrence each edit targets.
+    std::set<int> replaced;
     for (const IniEdit& edit : c.edits) {
-        Check(ReadsBackEdited(ValuesOf(before, edit.key), ValuesOf(after, edit.key), edit.value),
-              c.name + ": " + edit.key + " reads back as '" + edit.value + "'");
+        const auto* v = before.Find(edit.section, edit.key);
+        if (v == nullptr) continue;
+        replaced.insert(edit.first_occurrence_wins && !v->earlier_lines.empty() ? v->earlier_lines.front()
+                                                                                : v->line);
     }
+
+    // Walk both line lists: an unchanged line is the same bytes, a replaced one pairs with
+    // its replacement, and anything else in `after` was inserted.
+    const std::vector<std::string> b = Lines(c.input);
+    const std::vector<std::string> a = Lines(output);
+    std::map<int, int> moved;
+    std::set<int> changed;
+    size_t j = 0;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (j < b.size() && replaced.count(static_cast<int>(j) + 1) != 0) {
+            moved[static_cast<int>(j) + 1] = static_cast<int>(i) + 1;
+            changed.insert(static_cast<int>(i) + 1);
+            ++j;
+        } else if (j < b.size() && Kept(a[i], b[j])) {
+            moved[static_cast<int>(j) + 1] = static_cast<int>(i) + 1;
+            ++j;
+        } else {
+            changed.insert(static_cast<int>(i) + 1);
+        }
+    }
+    Check(j == b.size(), c.name + ": every line the batch did not replace is kept, in order");
+
+    std::map<const IniEdit*, int> held;
+    bool shaped = true;
+    for (int number : changed) {
+        const std::string& line = a[static_cast<size_t>(number) - 1];
+        std::string value;
+        const IniEdit* edit = EditOnLine(c, line, value);
+        if (edit != nullptr) {
+            shaped = shaped && value == edit->value;
+            ++held[edit];
+            continue;
+        }
+        const std::string content = Content(line);
+        bool header = false;
+        for (const IniEdit& e : c.edits) header = header || content == "[" + e.section + "]";
+        shaped = shaped && (content.empty() || header);
+    }
+    for (const IniEdit& edit : c.edits) shaped = shaped && held[&edit] == 1;
+    Check(shaped, c.name + ": each changed line is one edit's key with its new value, or a new "
+                           "section's header or blank line");
+
+    bool others = true;
+    for (const auto& section : before.sections) {
+        for (const auto& v : section.values) {
+            if (Edited(c, section.name, v.key)) continue;
+            const auto* now = after.Find(section.name, v.key);
+            others = others && now != nullptr && now->key == v.key && now->value == v.value;
+        }
+    }
+    for (const auto& section : after.sections) {
+        for (const auto& v : section.values) {
+            others = others && (Edited(c, section.name, v.key) || before.Find(section.name, v.key) != nullptr);
+        }
+    }
+    Check(others, c.name + ": every key the batch did not edit reads as before");
+
+    if (c.first_mode) return;
+
+    bool reads = true;
+    for (const IniEdit& edit : c.edits) {
+        const auto* v = after.Find(edit.section, edit.key);
+        reads = reads && v != nullptr && v->value == edit.value && changed.count(v->line) != 0;
+    }
+    Check(reads, c.name + ": each edited key reads its new value from the line the batch changed");
+
+    std::vector<CanonicalDiagnostic> kept_before;
+    for (const CanonicalDiagnostic& d : before.diagnostics) {
+        if (TouchesAny(d, replaced)) continue;
+        CanonicalDiagnostic mapped = d;
+        for (int& line : mapped.lines) line = moved[line];
+        kept_before.push_back(mapped);
+    }
+    std::vector<CanonicalDiagnostic> kept_after;
+    for (const CanonicalDiagnostic& d : after.diagnostics) {
+        if (!TouchesAny(d, changed)) kept_after.push_back(d);
+    }
+    bool same = kept_before.size() == kept_after.size();
+    for (size_t i = 0; same && i < kept_before.size(); ++i) {
+        const CanonicalDiagnostic& x = kept_before[i];
+        const CanonicalDiagnostic& y = kept_after[i];
+        same = x.kind == y.kind && x.lines == y.lines && x.section == y.section && x.key == y.key &&
+               x.value == y.value;
+    }
+    Check(same, c.name + ": the diagnostics differ only on edited lines");
 }
 
 bool ThrowsInvalidArgument(const std::string& input, const IniEdit& edit) {
@@ -270,77 +379,50 @@ bool Throws(const std::vector<IniEdit>& edits) {
     return false;
 }
 
-void TestUnwritableEditsThrow() {
-    std::cout << "EditIni argument checks:\n";
-    Check(Throws({{"", "A", "1"}}), "empty section throws");
-    Check(Throws({{"General", "", "1"}}), "empty key throws");
-    Check(Throws({{" General", "A", "1"}}), "section with leading whitespace throws");
-    Check(Throws({{"General", "A\t", "1"}}), "key with trailing whitespace throws");
-    Check(Throws({{"Gen]eral", "A", "1"}}), "section holding ] throws");
-    Check(Throws({{"General", "A=B", "1"}}), "key holding = throws");
-    Check(Throws({{"General", ";A", "1"}}), "key starting ; throws");
-    Check(Throws({{"General", "#A", "1"}}), "key starting # throws");
-    Check(Throws({{"General", "[A", "1"}}), "key starting [ throws");
-    Check(Throws({{"General", "A", "1\n2"}}), "value holding LF throws");
-    Check(Throws({{"General", "A", "1\r"}}), "value holding CR throws");
-    Check(Throws({{"General", "A", std::string("1\0", 2)}}), "value holding NUL throws");
-    Check(Throws({{"General", "A", "1\x1A"}}), "value holding SUB throws");
-    Check(Throws({{"General", "A", "\xC3"}}), "value holding invalid UTF-8 throws");
-    Check(Throws({{"General", "A", "1"}, {"general", "a", "2"}}),
-          "two edits of one key throw, whatever their case");
-    Check(!Throws({{"General", "A", ""}}), "an empty value is writable");
+void TestPrintableAsciiBoundary() {
+    std::cout << "EditIni writes exactly printable ASCII:\n";
+    int wrong = 0;
+    for (int b = 0; b <= 0xFF; ++b) {
+        const std::string byte(1, static_cast<char>(b));
+        const bool printable = b >= 0x20 && b <= 0x7E;
+        if (Throws({{"General", "A", "x" + byte + "x"}}) != !printable) ++wrong;
+        if (Throws({{"General", "K" + byte + "K", "1"}}) != (!printable || b == '=')) ++wrong;
+        if (Throws({{"S" + byte + "S", "A", "1"}}) != (!printable || b == ']')) ++wrong;
+    }
+    Check(wrong == 0, "inside a value every byte from 0x20 to 0x7E is writable and no other is; "
+                      "a key refuses '=' as well, and a section ']'");
 }
 
-// Every value either throws or reads back through ParseIniConfig as itself, and editing
-// the output again with the same value changes nothing.
-void TestAcceptedValuesReadBackAndReapplyUnchanged() {
-    std::cout << "EditIni value round trip:\n";
-    const std::vector<std::string> inputs = {"[S]\nKey=1\n", "[S]\nKey = 1 ; comment\n",
-                                             "[S]\nKey=\"a;b\"#c"};
-    const std::vector<std::string> alphabet = {"a", " ", ";", "#", "\"", "'", "=", "\xC2\xA0",
-                                               "\x1A"};
-    std::vector<std::string> values = {""};
-    for (size_t start = 0, length = 1; length <= 4; ++length) {
-        const size_t end = values.size();
-        for (size_t i = start; i < end; ++i) {
-            for (const std::string& c : alphabet) values.push_back(values[i] + c);
-        }
-        start = end;
-    }
-
-    int accepted = 0;
-    int wrong = 0;
-    for (const std::string& input : inputs) {
-        for (const std::string& value : values) {
-            const std::vector<IniEdit> edit = {{"S", "Key", value, false}};
-            std::string once;
-            try {
-                once = EditIni(input, edit).bytes;
-            } catch (const std::invalid_argument&) {
-                continue;
-            }
-            ++accepted;
-            const auto read = ReadFlat(once, "round_trip");
-            const bool reads_back = read.size() == 1 && read[0].second == value;
-            const bool stable = EditIni(once, edit).bytes == once;
-            if (!reads_back || !stable) {
-                std::cout << "    value '" << value << "' on '" << input << "' gives '" << once
-                          << "'\n";
-                ++wrong;
-            }
-        }
-    }
-    Check(accepted > 100, "more than 100 values accepted (" + std::to_string(accepted) + ")");
-    Check(wrong == 0, "every accepted value reads back as itself and re-applies unchanged");
+void TestUnwritableEditsThrow() {
+    std::cout << "EditIni argument checks:\n";
+    Check(Throws({{"General", "A", "1"}, {"general", "a", "2"}}),
+          "two edits of one key throw, whatever their case");
+    Check(!Throws({{"General", "A", "1"}, {"Other", "A", "2"}}),
+          "one key in two sections is two edits");
+    Check(!Throws({{"General", "A", ""}}), "an empty value is writable");
+    Check(!Throws({{"General", "A", "x;y #1 \"q\" a=b"}}), "';', '#', '=' and quotes are writable in a value");
 }
 
 void TestNoEditsKeepsBytes() {
     std::cout << "EditIni with no edits:\n";
-    const std::string original = "\xEF\xBB\xBF[General]\r\nA=1\nB = 2 ; c";
+    const std::string original = "\xEF\xBB\xBF[General]\r\nA=1\nB = 2 ; c\r\x1A\x80";
     const IniEditResult result = EditIni(original, {});
     Check(result.Succeeded() && result.bytes == original, "no edits returns the input unchanged");
     Check(EditIni("\xFF\xFE", {}).refusal == IniEditRefusal::Utf16,
-          "no edits still refuses an unsupported encoding");
+          "no edits still refuses a document the reader cannot read");
+}
+
+void TestRefusalNames() {
+    std::cout << "IniEditRefusalName:\n";
+    Check(std::string(cameraunlock::IniEditRefusalName(IniEditRefusal::KeyNotFound)) == "KeyNotFound",
+          "KeyNotFound is named as the fixtures spell it");
+    bool threw = false;
+    try {
+        cameraunlock::IniEditRefusalName(static_cast<IniEditRefusal>(4));
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    Check(threw, "a value with no enumerator throws");
 }
 
 }  // namespace
@@ -348,8 +430,9 @@ void TestNoEditsKeepsBytes() {
 int RunIniEditorTests() {
     std::cout << "\n=== IniEditor Tests ===\n";
     TestFixtures();
+    TestPrintableAsciiBoundary();
     TestUnwritableEditsThrow();
-    TestAcceptedValuesReadBackAndReapplyUnchanged();
     TestNoEditsKeepsBytes();
+    TestRefusalNames();
     return g_failures;
 }

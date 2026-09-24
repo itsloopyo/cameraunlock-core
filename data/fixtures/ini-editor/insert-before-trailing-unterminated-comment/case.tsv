@@ -1,4 +1,0 @@
-# The unterminated final comment stays last and unterminated; a new section after it
-# is joined on with one LF in front of each line.
-set_or_insert	A	y	2
-set_or_insert	B	z	3

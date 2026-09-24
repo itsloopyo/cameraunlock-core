@@ -1,3 +1,0 @@
-# Only ASCII letters fold, in both languages, so [Ünïcode] is not [üNÏCODE].
-set	üNÏCODE	Key	2
-refused	KeyNotFound	üNÏCODE	Key	

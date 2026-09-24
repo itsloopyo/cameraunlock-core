@@ -1,0 +1,3 @@
+# A key below a header with no ']' is outside any section, so it is not [General]'s and an
+# insertion goes above the unclosed header.
+set_or_insert	General	B	2

@@ -1,0 +1,35 @@
+# Each rejects row throws on its own: a byte outside printable ASCII anywhere, a leading
+# or trailing space, an empty section or key, ']' in a section, '=' in a key or a key
+# starting '[', ';' or '#'. Quotes, ';', '#' and inner spaces are written as they are.
+set	General	Name	say "a;b" now
+rejects	General	Name	 x
+rejects	General	Name	x 
+rejects	General	Name	\x09x
+rejects	General	Name	x\x09
+rejects	General	Name	a\x0Db
+rejects	General	Name	a\x0Ab
+rejects	General	Name	a\x00b
+rejects	General	Name	a\x1Ab
+rejects	General	Name	a\x0Bb
+rejects	General	Name	a\x0Cb
+rejects	General	Name	\x1Fx
+rejects	General	Name	a\x7Fb
+rejects	General	Name	caf\xC3\xA9
+rejects	General	Name	\xC2\xA0x
+rejects	General	Name	x\xE3\x80\x80
+rejects	General	Name	\xEF\xBB\xBFx
+rejects	General	 Name	1
+rejects	General	Name 	1
+rejects	General	Na\x09me	1
+rejects	General	N\xC3\xA4me	1
+rejects	General		1
+rejects	General	A=B	1
+rejects	General	[A	1
+rejects	General	;A	1
+rejects	General	#A	1
+rejects	 General	Name	1
+rejects	General 	Name	1
+rejects	Gen]eral	Name	1
+rejects		Name	1
+rejects	G\xC3\xA9n\xC3\xA9ral	Name	1
+rejects	Gen\x09eral	Name	1

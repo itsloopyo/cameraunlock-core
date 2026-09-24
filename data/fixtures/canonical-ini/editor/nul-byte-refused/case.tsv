@@ -1,0 +1,4 @@
+# A NUL anywhere: the reader cannot read it. The line is counted as the reader counts, a
+# lone CR included.
+set	General	A	2
+refused	NulByte			3

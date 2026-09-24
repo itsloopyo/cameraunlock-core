@@ -1,0 +1,2 @@
+# No input.ini: the caller passes no bytes. No line endings, so the tie goes to CRLF.
+set_or_insert	General	RotationEnabled	true

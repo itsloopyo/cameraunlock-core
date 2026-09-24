@@ -1,0 +1,5 @@
+# UTF-8 comments, values and section names pass through as bytes, and a replaced value is
+# replaced whole.
+set	General	PlayerName	Lukasz
+set	General	Greeting	hello
+set_or_insert	General	Title	Omega

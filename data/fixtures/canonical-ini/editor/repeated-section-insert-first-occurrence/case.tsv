@@ -1,0 +1,3 @@
+# When the first occurrence wins, an absent key goes under the first of the repeated
+# headers, after its last key line, where a reader that reads only that header sees it.
+set_or_insert_first	General	C	3

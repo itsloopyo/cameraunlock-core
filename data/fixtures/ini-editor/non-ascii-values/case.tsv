@@ -1,5 +1,0 @@
-# Non-ASCII values, comments and section names pass through as UTF-8 bytes.
-set	General	PlayerName	Łukasz 日本語 ✓
-set_or_insert	General	Title	Ω≈ç√ 🎮
-set	Ünïcode	Key	ü
-set	General	Greeting	grüß

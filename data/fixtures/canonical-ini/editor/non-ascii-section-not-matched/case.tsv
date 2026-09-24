@@ -1,0 +1,3 @@
+# Only ASCII letters fold and an edit's section is ASCII, so a section spelled with two
+# non-ASCII letters is not [Unicode].
+set_or_insert	Unicode	Key	2

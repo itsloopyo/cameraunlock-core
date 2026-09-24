@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iomanip>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace cameraunlock::reframework {
@@ -107,13 +108,11 @@ std::string DescribeWriteFailure(const char* path, const cameraunlock::CheckedWr
     return text;
 }
 
-// GetPrivateProfileStringA reads a file with no UTF-16 byte order mark as ANSI text.
-// A byte that is not UTF-8 is a character like any other to it, and a UTF-8 byte order
-// mark is part of the first line, so a header right behind the mark is not a header.
-// EditIni wants UTF-8 and skips that mark, but otherwise reads only ASCII bytes and
-// whether a character is white space. So each byte from 0x80 up reaches it as a letter
-// from U+0180 to U+01FF, which is neither, and comes back as the same byte: EditIni sees
-// the lines this reader sees, and every byte it does not edit is kept.
+// GetPrivateProfileStringA reads a UTF-8 byte order mark as part of the first line, so a
+// header right behind the mark is not a header to it, while EditIni skips a mark at offset
+// 0. Each byte from 0x80 up reaches EditIni as a two-byte letter from U+0180 to U+01FF, so
+// it never sees a mark, and FromEditorView maps each letter back to its byte. EditIni copies
+// the letters through like any other byte it does not edit.
 std::string ToEditorView(const std::string& bytes) {
     std::string view;
     view.reserve(bytes.size() * 2);
@@ -144,6 +143,183 @@ std::string FromEditorView(const std::string& view) {
         bytes += static_cast<char>(letter - 0x100);
     }
     return bytes;
+}
+
+bool IsSpaceOrTab(char c) { return c == ' ' || c == '\t'; }
+
+// GetPrivateProfileStringA skips these beside a key or a header; EditIni does not.
+bool IsVerticalTabOrFormFeed(char c) { return c == '\x0B' || c == '\x0C'; }
+
+std::string_view TrimSpaceOrTab(std::string_view text) {
+    while (!text.empty() && IsSpaceOrTab(text.front())) text.remove_prefix(1);
+    while (!text.empty() && IsSpaceOrTab(text.back())) text.remove_suffix(1);
+    return text;
+}
+
+bool EqualsAsciiIgnoreCase(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        char x = a[i];
+        char y = b[i];
+        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
+        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
+        if (x != y) return false;
+    }
+    return true;
+}
+
+int LineOfOffset(const std::string& bytes, size_t offset) {
+    int line = 1;
+    for (size_t i = 0; i < offset; ++i) {
+        if (bytes[i] == '\n') ++line;
+    }
+    return line;
+}
+
+std::string Refusal(const std::string& reason) {
+    return "it cannot be edited safely: " + reason + "; the file is unchanged";
+}
+
+// What a replacement has to keep after the new value: from the first ';' or '#' outside
+// quotes, with the white space in front of it, to the end of the line. Empty when the
+// value has no such comment. GetPrivateProfileIntA reads "0 ; note" as 0, so a user's
+// note on the stamp line stays where it was.
+std::string_view InlineComment(std::string_view value) {
+    bool in_quotes = false;
+    char quote = '\0';
+    for (size_t i = 0; i < value.size(); ++i) {
+        const char c = value[i];
+        if (in_quotes) {
+            if (c == quote) in_quotes = false;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            in_quotes = true;
+            quote = c;
+            continue;
+        }
+        if (c == ';' || c == '#') {
+            size_t begin = i;
+            while (begin > 0 && IsSpaceOrTab(value[begin - 1])) --begin;
+            return value.substr(begin);
+        }
+    }
+    return {};
+}
+
+// EditIni reads the canonical grammar, and GetPrivateProfileStringA reads this file.
+// Turns the migration's edits into EditIni edits that change what GetPrivateProfileStringA
+// reads, or refuses a file the two read differently.
+bool PlanEdits(const std::string& bytes, const std::vector<IniEdit>& edits,
+               std::vector<cameraunlock::IniEdit>& batch, std::string& error) {
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (bytes[i] == '\r' && (i + 1 == bytes.size() || bytes[i + 1] != '\n')) {
+            error = Refusal("line " + std::to_string(LineOfOffset(bytes, i)) +
+                            " holds a CR with no LF after it");
+            return false;
+        }
+    }
+    const size_t sub = bytes.find('\x1A');
+    if (sub != std::string::npos) {
+        error = Refusal("line " + std::to_string(LineOfOffset(bytes, sub)) + " holds a SUB byte (0x1A)");
+        return false;
+    }
+
+    struct KeyLine {
+        size_t header;
+        std::string_view key;
+        std::string_view value;
+        int number;
+    };
+    // With no lone CR, only LF ends a line. The byte order mark stays part of the first
+    // line, as GetPrivateProfileStringA reads it.
+    const std::string_view text(bytes);
+    std::vector<std::string_view> headers;
+    std::vector<KeyLine> keys;
+    int number = 0;
+    for (size_t begin = 0; begin < text.size();) {
+        const size_t newline = text.find('\n', begin);
+        size_t end = newline == std::string_view::npos ? text.size() : newline;
+        if (end > begin && text[end - 1] == '\r') --end;
+        std::string_view line = text.substr(begin, end - begin);
+        begin = newline == std::string_view::npos ? text.size() : newline + 1;
+        ++number;
+
+        while (!line.empty() && IsSpaceOrTab(line.front())) line.remove_prefix(1);
+        if (line.empty() || line.front() == ';' || line.front() == '#') continue;
+        if (IsVerticalTabOrFormFeed(line.front())) {
+            error = Refusal("line " + std::to_string(number) +
+                            " starts with a vertical tab or form feed");
+            return false;
+        }
+        if (line.front() == '[') {
+            const size_t close = line.find(']', 1);
+            if (close == std::string_view::npos) {
+                error = Refusal("the section header on line " + std::to_string(number) +
+                                " has no ']'");
+                return false;
+            }
+            headers.push_back(TrimSpaceOrTab(line.substr(1, close - 1)));
+            continue;
+        }
+        const size_t equals = line.find('=');
+        if (equals == std::string_view::npos) continue;
+        const std::string_view key = TrimSpaceOrTab(line.substr(0, equals));
+        if (key.empty()) continue;
+        if (IsVerticalTabOrFormFeed(key.back())) {
+            error = Refusal("the key on line " + std::to_string(number) +
+                            " ends in a vertical tab or form feed");
+            return false;
+        }
+        if (headers.empty()) continue;
+        keys.push_back({headers.size() - 1, key, line.substr(equals + 1), number});
+    }
+
+    for (const IniEdit& edit : edits) {
+        const std::string name = std::string("[") + edit.section + "] " + edit.key;
+        size_t first_header = std::string::npos;
+        for (size_t h = 0; h < headers.size() && first_header == std::string::npos; ++h) {
+            if (EqualsAsciiIgnoreCase(headers[h], edit.section)) first_header = h;
+        }
+        const KeyLine* first = nullptr;
+        for (const KeyLine& line : keys) {
+            if (EqualsAsciiIgnoreCase(headers[line.header], edit.section) &&
+                EqualsAsciiIgnoreCase(line.key, edit.key)) {
+                first = &line;
+                break;
+            }
+        }
+        std::string value = edit.value;
+        if (first != nullptr) {
+            if (first->header != first_header) {
+                error = Refusal(name + " is set only on line " + std::to_string(first->number) +
+                                ", under a repeated [" + edit.section +
+                                "] header that GetPrivateProfileStringA does not read");
+                return false;
+            }
+            const std::string_view comment = InlineComment(first->value);
+            for (const char c : comment) {
+                const unsigned char b = static_cast<unsigned char>(c);
+                if (b < 0x20 || b > 0x7E) {
+                    static const char kHex[] = "0123456789ABCDEF";
+                    error = Refusal("the comment after " + name + " on line " +
+                                    std::to_string(first->number) + " holds the byte 0x" +
+                                    kHex[b >> 4] + kHex[b & 0xF] +
+                                    ", which the editor cannot write back");
+                    return false;
+                }
+            }
+            if (!comment.empty() && comment.back() == ' ') {
+                error = Refusal("the comment after " + name + " on line " +
+                                std::to_string(first->number) +
+                                " ends in a space, which the editor cannot write back");
+                return false;
+            }
+            value += comment;
+        }
+        batch.push_back({edit.section, edit.key, value, true, true});
+    }
+    return true;
 }
 
 // Sets the given keys and touches nothing else. Rewriting the whole file through
@@ -180,11 +356,8 @@ bool ApplyIniEdits(const char* path, const std::vector<IniEdit>& edits, std::str
         return false;
     }
 
-    // First occurrence wins, as it does for GetPrivateProfileStringA.
     std::vector<cameraunlock::IniEdit> batch;
-    for (const IniEdit& edit : edits) {
-        batch.push_back({edit.section, edit.key, edit.value, true, true});
-    }
+    if (!PlanEdits(original, edits, batch, error)) return false;
     const cameraunlock::IniEditResult edited = cameraunlock::EditIni(ToEditorView(original), batch);
     if (!edited.Succeeded()) {
         error = DescribeRefusal(edited);

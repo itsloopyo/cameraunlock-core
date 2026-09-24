@@ -1,3 +1,0 @@
-# Only the named section changes. The flat readers see Enabled twice either way.
-set	Position	Enabled	true
-flat_duplicate	Enabled

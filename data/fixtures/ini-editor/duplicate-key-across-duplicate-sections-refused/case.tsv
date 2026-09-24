@@ -1,3 +1,0 @@
-# One key under two headers of the same section is a duplicate key.
-set	General	A	9
-refused	DuplicateKey	General	A	2,6

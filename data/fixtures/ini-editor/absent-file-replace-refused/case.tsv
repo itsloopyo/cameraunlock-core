@@ -1,3 +1,0 @@
-# Nothing to replace and no insertion asked for.
-set	General	RotationEnabled	true
-refused	KeyNotFound	General	RotationEnabled	

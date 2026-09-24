@@ -3,23 +3,21 @@ using System;
 namespace CameraUnlock.Core.Config
 {
     /// <summary>
-    /// One change to an INI document: give <see cref="Key"/> in
+    /// One change to a canonical INI document: give <see cref="Key"/> in
     /// <c>[<see cref="Section"/>]</c> the value <see cref="Value"/>.
     /// <para>
     /// Section and key match ASCII case-insensitively, and a replaced line keeps the file's
     /// own spelling. When the key is absent and <see cref="InsertIfAbsent"/> is set, the
     /// line is added as <c>Key=Value</c>, and a missing section as <c>[Section]</c>, spelled
-    /// exactly as given here. The value is written verbatim, so it must be one the flat
-    /// readers read back unchanged (see <see cref="IniEditor.Edit"/>).
+    /// exactly as given here. Section, key and value are printable ASCII (see
+    /// <see cref="IniEditor.Edit"/>).
     /// </para>
     /// <para>
-    /// Set <see cref="FirstOccurrenceWins"/> for a reader that takes the first occurrence
-    /// of a key, GetPrivateProfileStringA for one. A key that appears more than once in its
-    /// section, counting every header of that name, then has its first occurrence in the
-    /// document replaced and the others left as they are, and an absent key goes under the
-    /// first of several headers of its section. Unset, those edits are refused as
-    /// <see cref="IniEditRefusal.DuplicateKey"/> and
-    /// <see cref="IniEditRefusal.DuplicateSection"/>.
+    /// By default an edit follows the canonical reader, which keeps the last occurrence of a
+    /// repeated key: that occurrence is replaced, and an absent key goes into the last block
+    /// of a section whose header repeats. Set <see cref="FirstOccurrenceWins"/> for a reader
+    /// that takes the first occurrence instead, GetPrivateProfileStringA for one: the first
+    /// occurrence in the document is replaced, and an absent key goes into the first block.
     /// </para>
     /// </summary>
     public sealed class IniEdit

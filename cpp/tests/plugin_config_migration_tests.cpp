@@ -642,19 +642,113 @@ void CheckRefusedFileIsLeftAlone(const char* name, const std::string& input, con
 }
 
 void TestRefusedFilesAreLeftAlone() {
-    // GetPrivateProfileStringA ends a line at a lone CR, so to it this is the [Position]
-    // header and InvertX=true under it. EditIni splits lines only at LF.
+    // To GetPrivateProfileStringA this is the [Position] header and InvertX=true under it.
     CheckRefusedFileIsLeftAlone(
         "plugin_config_migration_lone_cr.ini",
         "[Position]\r"
         "InvertX=true\n"
         "[General]\n"
         "AutoEnable=true\n",
-        "(LoneCarriageReturn on line 1)");
+        "line 1 holds a CR with no LF after it");
     const char utf16[] =
         "\xFF\xFE[\0G\0e\0n\0e\0r\0a\0l\0]\0\r\0\n\0A\0u\0t\0o\0E\0n\0a\0b\0l\0e\0=\0t\0r\0u\0e\0\r\0\n\0";
     CheckRefusedFileIsLeftAlone("plugin_config_migration_utf16.ini",
                                 std::string(utf16, sizeof(utf16) - 1), "(Utf16)");
+}
+
+// GetPrivateProfileStringA skips SUB, vertical tab and form feed beside a key or a
+// header, where the canonical grammar keeps them as part of the line.
+void TestSkippedControlBytesAreRefused() {
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_sub.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "AutoEnable=true\n"
+        "; saved by an old editor\x1A\n",
+        "line 5 holds a SUB byte (0x1A)");
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_vertical_tab.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "\x0B"
+        "AutoEnable=true\n",
+        "line 4 starts with a vertical tab or form feed");
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_form_feed_header.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "  \x0C[General]\n"
+        "AutoEnable=true\n",
+        "line 3 starts with a vertical tab or form feed");
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_form_feed_key.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "AutoEnable\x0C=true\n",
+        "the key on line 4 ends in a vertical tab or form feed");
+}
+
+// GetPrivateProfileStringA opens a section at a '[' line with no ']'; the canonical
+// grammar opens none there.
+void TestUnclosedHeaderIsRefused() {
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_unclosed_header.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General\n"
+        "AutoEnable=true\n",
+        "the section header on line 3 has no ']'");
+}
+
+// GetPrivateProfileStringA reads only the first block of a repeated section, so a stamp
+// set under the second one reads as absent. Editing it there would change nothing the
+// reader sees.
+void TestKeyUnderALaterRepeatedHeaderIsRefused() {
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_stamp_in_second_block.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "AutoEnable=true\n"
+        "[Network]\n"
+        "UDPPort=5555\n"
+        "[General]\n"
+        "ConfigVersion=0\n",
+        "[General] ConfigVersion is set only on line 8, under a repeated [General] header "
+        "that GetPrivateProfileStringA does not read");
+}
+
+// The comment after a replaced value is written back with it, and the editor writes
+// only printable ASCII with no space at the end. GetPrivateProfileIntA reads each of
+// these stamps as 0.
+void TestCommentTheEditorCannotWriteIsRefused() {
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_comment_ansi.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "ConfigVersion=0 ; caf\xE9\n",
+        "the comment after [General] ConfigVersion on line 4 holds the byte 0xE9, which the "
+        "editor cannot write back");
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_comment_tab.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "ConfigVersion=0\t; lowered\n",
+        "the comment after [General] ConfigVersion on line 4 holds the byte 0x09, which the "
+        "editor cannot write back");
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_comment_trailing_space.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "ConfigVersion=0 ; lowered \n",
+        "the comment after [General] ConfigVersion on line 4 ends in a space, which the editor "
+        "cannot write back");
 }
 
 // The checked writer replaces the file rather than opening it for writing, so a
@@ -777,6 +871,10 @@ int RunPluginConfigMigrationTests() {
     TestBomOnlyFile();
     TestMissingFileIsNotCreated();
     TestRefusedFilesAreLeftAlone();
+    TestSkippedControlBytesAreRefused();
+    TestUnclosedHeaderIsRefused();
+    TestKeyUnderALaterRepeatedHeaderIsRefused();
+    TestCommentTheEditorCannotWriteIsRefused();
     TestReadOnlyFileIsLeftAlone();
     return g_failures;
 }

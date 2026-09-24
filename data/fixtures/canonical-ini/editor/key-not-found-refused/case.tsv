@@ -1,0 +1,3 @@
+# An absent key with no insertion asked for.
+set	General	B	2
+refused	KeyNotFound	General	B	-

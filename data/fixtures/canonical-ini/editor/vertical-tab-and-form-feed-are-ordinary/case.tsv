@@ -1,0 +1,7 @@
+# Only spaces and tabs are trimmed. A line starting with a vertical tab is a key line
+# whose key holds that byte, a key ending in a form feed is not the plain key, and a form
+# feed in front of '[' makes a line with no '=', not a header, so the key below it is
+# still in [General].
+set	General	A	9
+set_or_insert	General	B	3
+set	General	C	4

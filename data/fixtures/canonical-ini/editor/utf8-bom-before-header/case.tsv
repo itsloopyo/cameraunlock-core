@@ -1,0 +1,2 @@
+# The reader skips a byte order mark at offset 0, so a header right behind it is a header.
+set_or_insert	General	B	2

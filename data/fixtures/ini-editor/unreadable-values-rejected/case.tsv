@@ -1,123 +1,0 @@
-# A value is written verbatim, so one a flat reader would read as something else is
-# rejected: surrounding white space, ';' or '#' outside quotes, a quote left open, or
-# quotes around the whole value. The same goes for white space around a key or a
-# section. Quotes inside a value, and white space or non-ASCII text between other
-# characters, are written as they are.
-set	General	Name	say "a;b" now
-rejects	General	Name	x;y
-rejects	General	Name	#1
-rejects	General	Name	a#
-rejects	General	Name	"q"
-rejects	General	Name	'q'
-rejects	General	Name	"c;d"
-rejects	General	Name	"a" "b"
-rejects	General	Name	"x
-rejects	General	Name	it's
-rejects	General	Name	a"b'c
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name		x
-rejects	General	Name	x	
-rejects	General	Name	x
-rejects	General	Name	x
-rejects	General	Name	1
-rejects	General	Name	1
-rejects	General	Name	x
-rejects	General	Name	x
-rejects	General	Name	1
-rejects	General	Name	1
-rejects	General	Name	x
-rejects	General	Name	x
-rejects	General	Name	1
-rejects	General	Name	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	᠎x
-rejects	General	Name	x᠎
-rejects	General	᠎Name	1
-rejects	General	Name᠎	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	​x
-rejects	General	Name	x​
-rejects	General	​Name	1
-rejects	General	Name​	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	 x
-rejects	General	Name	x 
-rejects	General	 Name	1
-rejects	General	Name 	1
-rejects	General	Name	　x
-rejects	General	Name	x　
-rejects	General	　Name	1
-rejects	General	Name　	1
-rejects	General	Name	﻿x
-rejects	General	Name	x﻿
-rejects	General	﻿Name	1
-rejects	General	Name﻿	1
-rejects	 General	Name	1
-rejects	General　	Name	1
-rejects	General	Name	xy
-rejects	General	Name	1
-rejects	General	Name	1

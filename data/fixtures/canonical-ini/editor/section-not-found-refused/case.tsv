@@ -1,0 +1,3 @@
+# An absent section with no insertion asked for.
+set	Position	A	2
+refused	KeyNotFound	Position	A	-

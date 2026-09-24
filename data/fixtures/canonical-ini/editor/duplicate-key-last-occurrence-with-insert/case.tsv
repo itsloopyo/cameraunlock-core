@@ -1,0 +1,2 @@
+# Asking for insertion changes nothing when the key is there.
+set_or_insert	General	A	9

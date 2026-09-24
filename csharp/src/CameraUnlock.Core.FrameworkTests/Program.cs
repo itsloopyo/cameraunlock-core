@@ -55,6 +55,12 @@ namespace CameraUnlock.Core.Tests
                 failures += Report(name, dir => CanonicalIniFixtures.RunReaderCase(fixtures, name));
             }
 
+            Console.WriteLine("INI editor fixtures");
+            foreach (string name in IniEditorFixtures.Cases(fixtures))
+            {
+                failures += Report(name, dir => IniEditorFixtures.RunCase(fixtures, name));
+            }
+
             Console.WriteLine(failures == 0 ? "All passed." : failures + " FAILED.");
             return failures == 0 ? 0 : 1;
         }

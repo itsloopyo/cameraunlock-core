@@ -1,0 +1,3 @@
+# ';', '#', '=' and quotes are ordinary characters in a value, so a value holding them is
+# written as it is.
+set	General	Note	x;y #1 "q" it's a=b

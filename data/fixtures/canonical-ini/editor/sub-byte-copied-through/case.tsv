@@ -1,0 +1,3 @@
+# SUB (0x1A, Ctrl-Z) is an ordinary byte, mid-file or last.
+set	General	B	3
+set_or_insert	General	C	4
