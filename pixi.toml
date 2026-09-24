@@ -168,6 +168,12 @@ check-config-format = "node scripts/check-config-format.mjs"
 # the canonical config lint (scripts/check-canonical-config.mjs) to its rules.
 check-canonical-ini-js = "node scripts/test-canonical-config.mjs"
 
+# The C++ and C# code in docs/*.md is taken from tests that compile and run it
+# (docs/canonical-config.md from cpp/tests/canonical_config_example_tests.cpp and
+# csharp/src/CameraUnlock.Core.Tests/Config/CanonicalConfigExample.cs). This fails when a
+# block no longer matches the lines it names, or a C++ or C# block names none.
+check-doc-examples = "node scripts/check-doc-examples.mjs"
+
 # scripts/encode-seed.mjs re-encodes the launcher-manifest.json seeds that write a converted
 # repo's config from its committed file (a mod repo's render-config task runs it; see
 # scripts/templates/render-config-task-*.toml). This runs it against copies of real manifests.
@@ -184,13 +190,13 @@ config-report = "node scripts/check-canonical-config.mjs --report"
 #
 # Ordered cheapest and most deterministic first, because pixi aborts on the first
 # failing dependency and the order decides how long a developer (and CI) waits to
-# find out. The five pure-node gates need no compiler and finish in seconds;
+# find out. The six pure-node gates need no compiler and finish in seconds;
 # they used to sit at the END, behind a full C# build and both test suites, so a
 # stale generated alias table cost several minutes to discover. The vectors come
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "test-encode-seed", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-encode-seed", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

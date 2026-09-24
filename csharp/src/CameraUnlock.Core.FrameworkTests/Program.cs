@@ -105,6 +105,10 @@ namespace CameraUnlock.Core.Tests
             }
             failures += Report("the cases move every field", dir => HeadTrackingConfigTableFixtures.RunCoverage(fixtures));
 
+            Console.WriteLine("Canonical config example (docs/canonical-config.md)");
+            failures += Report("the table renders example/HeadTracking.ini", dir => CanonicalConfigExample.RunRender(fixtures));
+            failures += Report("the owner creates, saves and reads the file", dir => CanonicalConfigExample.RunOwner(fixtures, dir));
+
             Console.WriteLine("INI mutation fixtures");
             foreach (string name in IniMutationFixtures.Cases(fixtures))
             {

@@ -137,6 +137,10 @@ implementation, are in [docs/porting-the-pipeline.md](docs/porting-the-pipeline.
 An audit of four independent ports found three had made the same angle-handling
 mistake, which is why that document exists.
 
+A port that reads or writes a mod's config file follows the canonical config format in
+[docs/canonical-config.md](docs/canonical-config.md), and runs the byte fixtures in
+`data/fixtures/canonical-ini/` that core's C++ and C# suites run.
+
 ## Unity Integration
 
 ### AimDecouplingState
@@ -198,6 +202,13 @@ DLLs. Unity-coupled helpers are shared as **source** instead via
 [csharp/il2cpp/README.md](csharp/il2cpp/README.md).
 
 ## Configuration
+
+A mod converted to the canonical config format reads and writes its settings file through
+`ConfigOwner` with a config table, which `HeadTrackingConfigTable` builds over core's config types.
+The format, the owner, the conversion of older files and the tooling are in
+[docs/canonical-config.md](docs/canonical-config.md).
+`HeadTrackingConfigData`, the type `HeadTrackingConfigTable` binds in C#, implements the interface
+below, which `StaticHeadTrackingCore.Initialize` takes.
 
 Implement `IHeadTrackingConfig`:
 ```csharp

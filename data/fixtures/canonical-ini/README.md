@@ -2,8 +2,8 @@
 
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
 editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs, `table/` for
-config tables, `head-tracking/` for core's table over its own config types and `mutations/` for
-the differential corpus generator. Core's C++ suite runs them unchanged
+config tables, `head-tracking/` for core's table over its own config types, `mutations/` for
+the differential corpus generator and `example/` for the examples in docs/canonical-config.md. Core's C++ suite runs them unchanged
 (`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp`,
 `cpp/tests/key_bindings_tests.cpp`, `cpp/tests/value_codecs_tests.cpp`,
 `cpp/tests/config_table_tests.cpp`, `cpp/tests/head_tracking_config_table_tests.cpp` and
@@ -250,6 +250,18 @@ Before applying, it sets fields no row binds (the recenter key, the position X s
 the position Y inversion) and requires them unchanged afterwards. It also renders the result,
 reads that back and requires the same fields and bytes. `apply-empty` is the defaults, and across
 the three cases every field is off its default at least once.
+
+## example/
+
+`HeadTracking.ini`: the file the examples in docs/canonical-config.md create at first launch, which
+is the example table's defaults rendered with the display name `Example Game`. The table is
+`HeadTrackingConfigTable` naming `UdpPort`, `EnableOnStartup`, `WorldSpaceYaw`, `RotationEnabled`,
+`PositionEnabled`, `ToggleKey`, `CycleTrackingModeKey` and `YawModeKey`, plus one local row,
+`[Logging] WriteLog`, a bool defaulting to false with the comment
+`true: write HeadTracking.log beside the game's executable.`
+`cpp/tests/canonical_config_example_tests.cpp` and `CanonicalConfigExample` (xunit and
+`CameraUnlock.Core.FrameworkTests`) render it and create it through the config owner, and
+`pixi run check-doc-examples` holds the document's copy of it to this file.
 
 ## mutations/
 

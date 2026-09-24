@@ -9,6 +9,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `docs/canonical-config.md`: the canonical config format, documented
+
+The design lived only in untracked notes, so nothing committed described the format that every
+converted mod and any tool editing a mod's config depend on.
+[docs/canonical-config.md](docs/canonical-config.md) now does: the file's layout, grammar, value codecs, hotkey lists and the two dialects, the stamp
+and `ConfigFormat`, the canonical concept set and why the sensitivity, inversion, reticle,
+position-toggle and recenter concepts have no row; config tables, Writable rows and
+`HeadTrackingConfigTable`; the config owner's Load, Save and Reload results and its threading
+rules; what a conversion does and what players are told, the `.pre-canonical` copies, deferrals
+and rollback; BepInEx's `.ini` beside the `.cfg` and the `Config.Reload()` rule for its import;
+the shared fixtures and their TSV format for ports; and the tooling. README.md links it from the
+pipeline porting paragraph and from Configuration.
+
+- **The examples are compiled and run.** The C++ and C# code in the document is taken from
+  `cpp/tests/canonical_config_example_tests.cpp` and
+  `csharp/src/CameraUnlock.Core.Tests/Config/CanonicalConfigExample.cs`, which build a table over
+  a config type derived from core's with one local row, create the file through `ConfigOwner`,
+  save a yaw toggle and read it back. The C# file also runs in `CameraUnlock.Core.FrameworkTests`,
+  so the example is C# 7.3 that builds on net35. Both render
+  `data/fixtures/canonical-ini/example/HeadTracking.ini`, a new hand-written fixture.
+- **`pixi run check-doc-examples`** (`scripts/check-doc-examples.mjs`, now part of `pixi run check`)
+  fails when a code block in `docs/*.md` preceded by `<!-- excerpt: <path> -->` is not a run of
+  consecutive lines of that file (compared after taking off the run's common indentation), when one
+  preceded by `<!-- file: <path> -->` is not that whole file, and when a `cpp` or `csharp` block
+  carries neither.
+
 ### Added - seed re-encoding, render-config templates and the Nexus config check
 
 Tooling a mod repo uses when it converts to the canonical config format (design 5.1).

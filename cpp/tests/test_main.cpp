@@ -37,6 +37,7 @@ int RunConfigOwnerInterruptChild(const char* step);
 int RunGetAsyncKeyStateProbe();
 int RunLegacyImportTests();
 int RunIniMutationsTests();
+int RunCanonicalConfigExampleTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
 int RunPluginConfigMigrationTests();
 int RunPluginConfigCanonicalTests();
@@ -93,6 +94,7 @@ int main(int argc, char** argv) {
     failures += RunLegacyImportTests();
     failures += RunIniMutationsTests();
     failures += RunConfigOwnerTests();
+    failures += RunCanonicalConfigExampleTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();
     failures += RunPluginConfigCanonicalTests();
