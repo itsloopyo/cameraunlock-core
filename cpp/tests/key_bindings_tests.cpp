@@ -269,7 +269,7 @@ void TestRegistration() {
     using cameraunlock::input::HotkeyPoller;
     using cameraunlock::input::RegisterKeyBindings;
     using cameraunlock::input::detail::BindingFires;
-    using cameraunlock::input::detail::GuardBinding;
+    using cameraunlock::input::detail::GuardKey;
     std::cout << "RegisterKeyBindings:\n";
 
     const KeyModifiers ctrl = KeyModifiers::kCtrl;
@@ -289,17 +289,35 @@ void TestRegistration() {
     Check(BindingFires(alt, alt) && !BindingFires(alt, ctrl), "Alt is a modifier like the others");
 
     int fired = 0;
-    const auto guarded = GuardBinding(ctrl | shift, [&fired] { ++fired; }, &FakeHeld);
+    const auto guarded = GuardKey({ctrl | shift}, [&fired] { ++fired; }, &FakeHeld);
     g_held = ctrl;
     guarded();
     g_held = ctrl | shift;
     guarded();
     Check(fired == 1, "the guard reads the held modifiers when the key fires");
 
+    fired = 0;
+    const auto shared = GuardKey({none, ctrl}, [&fired] { ++fired; }, &FakeHeld);
+    g_held = ctrl;
+    shared();
+    Check(fired == 1, "End, Ctrl+End runs the action once on Ctrl+End");
+
+    fired = 0;
+    const auto overlapping = GuardKey({ctrl, shift, ctrl | shift}, [&fired] { ++fired; }, &FakeHeld);
+    g_held = ctrl | shift;
+    overlapping();
+    Check(fired == 1, "Ctrl+End, Shift+End, Ctrl+Shift+End runs the action once on Ctrl+Shift+End");
+    g_held = none;
+    overlapping();
+    Check(fired == 1, "no binding on the key fires, so the action does not run");
+
     HotkeyPoller poller;
     const auto parsed = ParseKeyBindings("End, Ctrl+Shift+Y, Alt+0xBA");
     const std::vector<int> ids = RegisterKeyBindings(poller, parsed.bindings, [] {});
-    Check(ids.size() == 3 && ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2], "one hotkey per binding");
+    Check(ids.size() == 3 && ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2], "one hotkey per key");
+    const auto sharing = ParseKeyBindings("End, Ctrl+Shift+Y, Ctrl+End, Alt+Y");
+    Check(RegisterKeyBindings(poller, sharing.bindings, [] {}).size() == 2,
+          "bindings that share a key share one hotkey");
     Check(RegisterKeyBindings(poller, {}, [] {}).empty(), "an empty list registers nothing");
 
     HotkeyPoller fresh;

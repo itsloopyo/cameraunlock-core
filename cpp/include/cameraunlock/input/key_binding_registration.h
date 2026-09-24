@@ -11,6 +11,7 @@
 #include <cameraunlock/input/hotkey_poller.h>
 #include <cameraunlock/input/key_bindings.h>
 
+#include <cstddef>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -38,18 +39,27 @@ inline bool BindingFires(KeyModifiers binding, KeyModifiers held) {
     return HasModifiers(held, binding);
 }
 
-inline std::function<void()> GuardBinding(KeyModifiers binding, std::function<void()> action,
-                                          KeyModifiers (*held)()) {
-    return [binding, action = std::move(action), held]() {
-        if (BindingFires(binding, held())) action();
+// One callback for every binding on one key: it runs `action` once when any of them fires,
+// so a list whose items share a key (End, Ctrl+End) counts one press once.
+inline std::function<void()> GuardKey(std::vector<KeyModifiers> bindings, std::function<void()> action,
+                                      KeyModifiers (*held)()) {
+    return [bindings = std::move(bindings), action = std::move(action), held]() {
+        const KeyModifiers now = held();
+        for (const KeyModifiers binding : bindings) {
+            if (BindingFires(binding, now)) {
+                action();
+                return;
+            }
+        }
     };
 }
 
 }  // namespace detail
 
-/// Puts a hotkey list on the poller: one AddHotkey per binding, each running `action` when
-/// its key goes down and detail::BindingFires allows it. Returns the ids in binding order,
-/// for RemoveHotkey. An empty list registers nothing.
+/// Puts a hotkey list on the poller: one AddHotkey per distinct key, running `action` once
+/// when that key goes down and detail::BindingFires allows any binding on it. Returns one id
+/// per distinct key, in the order each key first appears, for RemoveHotkey. An empty list
+/// registers nothing.
 ///
 /// Throws std::invalid_argument for an empty action, a code outside 0x01-0xFE or a
 /// modifier value outside KeyModifiers, before registering anything.
@@ -66,11 +76,23 @@ inline std::vector<int> RegisterKeyBindings(HotkeyPoller& poller, const std::vec
         }
     }
 
-    std::vector<int> ids;
-    ids.reserve(bindings.size());
+    std::vector<int> keys;
+    std::vector<std::vector<KeyModifiers>> modifiers;
     for (const KeyBinding& binding : bindings) {
-        ids.push_back(poller.AddHotkey(binding.vk, detail::GuardBinding(binding.modifiers, action,
-                                                                        &detail::HeldModifiers)));
+        std::size_t i = 0;
+        while (i < keys.size() && keys[i] != binding.vk) ++i;
+        if (i == keys.size()) {
+            keys.push_back(binding.vk);
+            modifiers.emplace_back();
+        }
+        modifiers[i].push_back(binding.modifiers);
+    }
+
+    std::vector<int> ids;
+    ids.reserve(keys.size());
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        ids.push_back(poller.AddHotkey(keys[i], detail::GuardKey(std::move(modifiers[i]), action,
+                                                                 &detail::HeldModifiers)));
     }
     return ids;
 }

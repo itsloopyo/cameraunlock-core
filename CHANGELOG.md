@@ -49,7 +49,10 @@ reads a config through it yet; the canonical config tables will.
   `data/fixtures/canonical-ini/keys/cases.tsv` holds both languages to it.
 - Registration. C++ `cameraunlock/input/key_binding_registration.h` (Windows):
   `RegisterKeyBindings(HotkeyPoller&, const std::vector<KeyBinding>&, std::function<void()>)`
-  adds one hotkey per binding and returns the ids. C# `CameraUnlock.Core.Unity.Extensions.KeyBindingInput.IsTriggered(IList<KeyBinding>)`
+  adds one hotkey per distinct key and returns those ids in the order each key first
+  appears. Bindings that share a key share its hotkey, so one key press runs the action
+  once however many items of the list it matches (`End, Ctrl+End` on Ctrl+End), as
+  `IsTriggered` reports it once. C# `CameraUnlock.Core.Unity.Extensions.KeyBindingInput.IsTriggered(IList<KeyBinding>)`
   asks `Input.GetKeyDown` and `Input.GetKey`. Both apply one rule: a binding with modifiers
   fires when its key goes down while every modifier it names is held, either side; one
   without does not fire while Ctrl and Shift are both held, which is `NavGuarded`'s rule.
