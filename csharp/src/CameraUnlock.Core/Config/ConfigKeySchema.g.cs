@@ -33,7 +33,9 @@ namespace CameraUnlock.Core.Config
             public const string ShowReticle = "showreticle";
             public const string ReticleColor = "reticlecolor";
             public const string RotationEnabled = "rotationenabled";
+            public const string DataFreshnessMs = "datafreshnessms";
             public const string PositionEnabled = "positionenabled";
+            public const string PositionAllowed = "positionallowed";
             public const string PositionSensitivityX = "positionsensitivityx";
             public const string PositionSensitivityY = "positionsensitivityy";
             public const string PositionSensitivityZ = "positionsensitivityz";
@@ -91,6 +93,7 @@ namespace CameraUnlock.Core.Config
             { "cyclemodekey", "cycletrackingmodekey" },
             { "cycletrackingmode", "cycletrackingmodekey" },
             { "cycletrackingmodekey", "cycletrackingmodekey" },
+            { "datafreshnessms", "datafreshnessms" },
             { "decoupleaim", "aimdecoupling" },
             { "decoupledaim", "aimdecoupling" },
             { "drawreticle", "showreticle" },
@@ -169,6 +172,7 @@ namespace CameraUnlock.Core.Config
             { "pivotforward", "trackerpivotforward" },
             { "pivotup", "trackerpivotup" },
             { "port", "udpport" },
+            { "positionallowed", "positionallowed" },
             { "positionenabled", "positionenabled" },
             { "positioninvertx", "invertpositionx" },
             { "positioninverty", "invertpositiony" },

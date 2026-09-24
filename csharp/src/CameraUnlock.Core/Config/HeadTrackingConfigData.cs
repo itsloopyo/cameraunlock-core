@@ -108,6 +108,20 @@ namespace CameraUnlock.Core.Config
         public bool PositionEnabled { get; set; } = true;
 
         /// <summary>
+        /// false: the game never applies positional tracking and the tracking-mode control
+        /// skips the position modes, so tracking runs rotation only whatever
+        /// <see cref="RotationEnabled"/> and <see cref="PositionEnabled"/> say. Core only
+        /// parses it.
+        /// </summary>
+        public bool PositionAllowed { get; set; } = true;
+
+        /// <summary>
+        /// How long, in milliseconds, the newest packet counts as current. Core only parses
+        /// it; the mod's per-frame gate stops following the tracker past it. At least 1.
+        /// </summary>
+        public int DataFreshnessMs { get; set; } = 500;
+
+        /// <summary>
         /// Positional sensitivity, limits and inversion. The smoothing pair on this struct is
         /// recomposed from <see cref="LocalSmoothing"/> and <see cref="RemoteSmoothing"/> at
         /// the end of <see cref="ApplyValues"/>, so position and rotation cannot end up on
@@ -288,6 +302,24 @@ namespace CameraUnlock.Core.Config
                             EnableOnStartup = boolVal;
                         break;
 
+                    // A window of 0 or less never counts a packet as current, so tracking
+                    // would never apply.
+                    case ConfigKeySchema.Keys.DataFreshnessMs:
+                        if (ConfigParsingUtils.TryParseInt(value, out intVal))
+                        {
+                            if (intVal >= 1)
+                            {
+                                DataFreshnessMs = intVal;
+                            }
+                            else
+                            {
+                                log?.Invoke(string.Format(
+                                    "Config key '{0}' has an out-of-range value '{1}' (expected 1 or more) - using {2}",
+                                    kvp.Key, value, DataFreshnessMs.ToString(CultureInfo.InvariantCulture)));
+                            }
+                        }
+                        break;
+
                     case ConfigKeySchema.Keys.YawSensitivity:
                         if (TryParseMagnitude(log, kvp.Key, value, yawSens, MaxSensitivity, out floatVal))
                             yawSens = floatVal;
@@ -395,6 +427,11 @@ namespace CameraUnlock.Core.Config
                     case ConfigKeySchema.Keys.PositionEnabled:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             PositionEnabled = boolVal;
+                        break;
+
+                    case ConfigKeySchema.Keys.PositionAllowed:
+                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
+                            PositionAllowed = boolVal;
                         break;
 
                     case ConfigKeySchema.Keys.PositionSensitivityX:

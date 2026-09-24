@@ -32,6 +32,9 @@ struct HeadTrackingConfig {
 
     int udp_port = 4242;
     bool enable_on_startup = true;
+    /// How long, in milliseconds, the newest packet counts as current. Core only parses it;
+    /// the mod's per-frame gate stops following the tracker past it.
+    int data_freshness_ms = 500;
 
     float yaw_sensitivity = 1.0f;
     float pitch_sensitivity = 1.0f;
@@ -50,6 +53,10 @@ struct HeadTrackingConfig {
 
     bool rotation_enabled = true;
     bool position_enabled = true;
+    /// false: the game never applies positional tracking and the tracking-mode control
+    /// skips the position modes, so tracking runs rotation only whatever rotation_enabled
+    /// and position_enabled say. Core only parses it.
+    bool position_allowed = true;
     PositionSettings position = PositionSettings::Default();
     float tracker_pivot_forward = 0.0f;
     float tracker_pivot_up = 0.0f;

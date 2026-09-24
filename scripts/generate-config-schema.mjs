@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Emits the C# and C++ alias tables, and the C++ defaults table, from data/config-schema.json,
-// the C++ test expectation for data/pipeline-conformance.json's preference_modes, and the C#
-// and C++ key-name tables from data/keys.json.
+// Emits the C# and C++ alias tables, the C++ defaults table and the C++ test expectation for
+// the concept ranges from data/config-schema.json, the C++ test expectation for
+// data/pipeline-conformance.json's preference_modes, and the C# and C++ key-name tables from
+// data/keys.json.
 //
 //   node scripts/generate-config-schema.mjs            write the generated files
 //   node scripts/generate-config-schema.mjs --check    fail if any is stale
@@ -24,6 +25,7 @@ const csharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Config'
 const cppPath = join(repoRoot, 'cpp', 'include', 'cameraunlock', 'config', 'config_key_schema.g.h');
 const conformancePath = join(repoRoot, 'data', 'pipeline-conformance.json');
 const preferenceModesTestPath = join(repoRoot, 'cpp', 'tests', 'preference_modes.g.h');
+const conceptRangesTestPath = join(repoRoot, 'cpp', 'tests', 'concept_ranges.g.h');
 const keysPath = join(repoRoot, 'data', 'keys.json');
 const keyNamesCppPath = join(repoRoot, 'cpp', 'include', 'cameraunlock', 'input', 'key_names.g.h');
 const keyNamesCsharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Input', 'KeyNames.g.cs');
@@ -37,6 +39,11 @@ const identifierPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const spellingPattern = /^[A-Za-z0-9_-]+$/;
 // String defaults are emitted into a C++ string literal the same way, so the same rule.
 const stringDefaultPattern = /^[A-Za-z0-9_-]*$/;
+
+const conceptFields = new Set([
+    'id', 'section', 'key', 'type', 'default', 'aliases', 'doc',
+    'canonical', 'canonical_reason', 'file_comment', 'range', 'codec', 'canonical_default',
+]);
 
 const valueTypes = {
     // The lower bound is INT_MIN + 1: the literal -2147483648 is unary minus applied to
@@ -69,7 +76,125 @@ function checkSpelling(where, label, spelling) {
     }
 }
 
-function validateSchema(schema) {
+// Player text: canonical_reason and the file_comment lines. It goes into C# and C++ string
+// literals unescaped, so it is printable ASCII without '"' and '\', the two characters either
+// language would need escaped.
+function checkPlayerText(where, label, text) {
+    if (typeof text !== 'string' || text.length === 0) {
+        schemaError(where, `${label} is ${JSON.stringify(text)}, expected a non-empty string`);
+    }
+    for (const c of text) {
+        const code = c.charCodeAt(0);
+        if (code < 0x20 || code > 0x7E || c === '"' || c === '\\') {
+            schemaError(where, `${label} holds ${JSON.stringify(c)}. Player text is printable ASCII without '"' ` +
+                "and '\\', because it is emitted unescaped into C# and C++ string literals");
+        }
+    }
+    if (text !== text.trim()) schemaError(where, `${label} ${JSON.stringify(text)} starts or ends with a space`);
+}
+
+// A canonical_default must read in both dialects and be spelled the way the codecs write it,
+// because it is written into canonical files as it stands: Ctrl, Shift and Alt in that order,
+// the key's table name, ', ' between items.
+function checkCanonicalBindings(where, text, keyTable) {
+    if (text === '') return;
+    const byName = new Map(keyTable.keys.map((k) => [k.name, k]));
+    const seen = new Set();
+    for (const item of text.split(', ')) {
+        const tokens = item.split('+');
+        const key = tokens.pop();
+        let previous = -1;
+        for (const token of tokens) {
+            const index = modifierNames.indexOf(token);
+            if (index <= previous) {
+                schemaError(where, `canonical_default item '${item}' is not written as the codecs write it: ` +
+                    `expected ${modifierNames.join(', ')} at most once each and in that order, then one key`);
+            }
+            previous = index;
+        }
+        const entry = byName.get(key);
+        if (entry === undefined) {
+            schemaError(where, `canonical_default item '${item}': '${key}' is not a key name as data/keys.json spells it`);
+        }
+        if (entry.vk === 0) schemaError(where, `canonical_default names '${key}', which has no Windows key code`);
+        if (entry.unity === 0) schemaError(where, `canonical_default names '${key}', which has no Unity KeyCode`);
+        if (seen.has(item)) schemaError(where, `canonical_default lists '${item}' twice`);
+        seen.add(item);
+    }
+}
+
+function checkRange(where, concept) {
+    const { range } = concept;
+    if (concept.type !== 'int' && concept.type !== 'float') {
+        schemaError(where, `has a range, but ranges are for int and float concepts and this one is '${concept.type}'`);
+    }
+    if (range === null || typeof range !== 'object' || Array.isArray(range)) {
+        schemaError(where, `range is ${JSON.stringify(range)}, expected {"min": ..., "max": ...}`);
+    }
+    for (const field of Object.keys(range)) {
+        if (field !== 'min' && field !== 'max') schemaError(where, `range has unknown field '${field}'`);
+    }
+    if (!('min' in range) && !('max' in range)) schemaError(where, 'range names neither min nor max');
+    for (const field of ['min', 'max']) {
+        if (field in range && !valueTypes[concept.type](range[field])) {
+            schemaError(where, `range ${field} ${JSON.stringify(range[field])} is not a valid '${concept.type}'`);
+        }
+    }
+    if ('min' in range && 'max' in range && range.min > range.max) {
+        schemaError(where, `range min ${range.min} is above max ${range.max}`);
+    }
+    if (('min' in range && concept.default < range.min) || ('max' in range && concept.default > range.max)) {
+        schemaError(where, `default ${concept.default} is outside its own range ${JSON.stringify(range)}`);
+    }
+}
+
+function checkCanonicalFields(where, concept, keyTable) {
+    if (typeof concept.canonical !== 'boolean') {
+        schemaError(where, `canonical is ${JSON.stringify(concept.canonical)}, expected true or false`);
+    }
+
+    if (!concept.canonical) {
+        if (!('canonical_reason' in concept)) {
+            schemaError(where, 'is not canonical and has no canonical_reason, the line a player is shown for its key');
+        }
+        checkPlayerText(where, 'canonical_reason', concept.canonical_reason);
+        for (const field of ['file_comment', 'range', 'codec', 'canonical_default']) {
+            if (field in concept) {
+                schemaError(where, `is not canonical, so it has no ${field}: no canonical file writes its key`);
+            }
+        }
+        return;
+    }
+
+    if ('canonical_reason' in concept) schemaError(where, 'is canonical, so it has no canonical_reason');
+
+    const comment = concept.file_comment;
+    if (!Array.isArray(comment) || comment.length < 1 || comment.length > 2) {
+        schemaError(where, `file_comment is ${JSON.stringify(comment)}, expected one or two lines of player text`);
+    }
+    comment.forEach((line, i) => checkPlayerText(where, `file_comment[${i}]`, line));
+
+    if ('range' in concept) checkRange(where, concept);
+
+    if (concept.type === 'string') {
+        if (concept.codec !== 'hotkey') {
+            schemaError(where, `codec is ${JSON.stringify(concept.codec)}: a canonical string concept needs one, ` +
+                "and 'hotkey' is the only one");
+        }
+    } else if ('codec' in concept) {
+        schemaError(where, `has a codec, but only string concepts take one and this one is '${concept.type}'`);
+    }
+
+    if ('canonical_default' in concept) {
+        if (concept.codec !== 'hotkey') schemaError(where, 'has a canonical_default, which only hotkey concepts take');
+        if (typeof concept.canonical_default !== 'string') {
+            schemaError(where, `canonical_default is ${JSON.stringify(concept.canonical_default)}, expected a string`);
+        }
+        checkCanonicalBindings(where, concept.canonical_default, keyTable);
+    }
+}
+
+function validateSchema(schema, keyTable) {
     if (!Array.isArray(schema.sections)) schemaError('sections', 'missing, expected an array');
     if (!Array.isArray(schema.concepts)) schemaError('concepts', 'missing, expected an array');
     if (!Array.isArray(schema.retired)) schemaError('retired', 'missing, expected an array');
@@ -115,6 +240,9 @@ function validateSchema(schema) {
         const where = `concepts[${i}]${typeof concept?.id === 'string' ? ` ('${concept.id}')` : ''}`;
         if (concept === null || typeof concept !== 'object') schemaError(where, 'is not an object');
         claimId(where, concept.id);
+        for (const field of Object.keys(concept)) {
+            if (!conceptFields.has(field)) schemaError(where, `unknown field '${field}'`);
+        }
         if (!schema.sections.includes(concept.section)) {
             schemaError(where, `names section '${concept.section}', which is not in sections[]`);
         }
@@ -137,6 +265,7 @@ function validateSchema(schema) {
                 : '';
             schemaError(where, `default ${JSON.stringify(concept.default)} is not a valid '${concept.type}'${alphabet}`);
         }
+        checkCanonicalFields(where, concept, keyTable);
     });
 
     schema.retired.forEach((concept, i) => {
@@ -493,6 +622,42 @@ inline constexpr size_t kTrackingModeCount = sizeof(kTrackingModes) / sizeof(kTr
 `;
 }
 
+function renderConceptRangesTest(schema) {
+    const bound = (range, field) => (field in range ? `true, ${range[field]}` : 'false, 0');
+    const rows = schema.concepts
+        .filter((c) => 'range' in c)
+        .map((c) => `    { "${c.id}", ${bound(c.range, 'min')}, ${bound(c.range, 'max')} },`)
+        .join('\n');
+
+    return `${banner('//', 'data/config-schema.json', 'the schema')}
+//
+// The ranges data/config-schema.json declares, which config_schema_tests.cpp holds to the
+// constants the flat readers guard with. Nothing outside cpp/tests includes it.
+
+#pragma once
+
+#include <cstddef>
+
+namespace concept_ranges {
+
+struct ConceptRange {
+    const char* id;
+    bool has_min;
+    double min;
+    bool has_max;
+    double max;
+};
+
+inline constexpr ConceptRange kConceptRanges[] = {
+${rows}
+};
+
+inline constexpr size_t kConceptRangeCount = sizeof(kConceptRanges) / sizeof(kConceptRanges[0]);
+
+}  // namespace concept_ranges
+`;
+}
+
 function keysError(where, problem) {
     throw new SchemaError(`data/keys.json ${where}: ${problem}`);
 }
@@ -762,16 +927,17 @@ ${modifiers}
 }
 
 function main() {
+    const keyTable = validateKeys(JSON.parse(readFileSync(keysPath, 'utf8')));
     const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
-    validateSchema(schema);
+    validateSchema(schema, keyTable);
     const entries = buildEntries(schema);
     const trackingModes = validateTrackingModes(JSON.parse(readFileSync(conformancePath, 'utf8')), schema);
-    const keyTable = validateKeys(JSON.parse(readFileSync(keysPath, 'utf8')));
 
     const outputs = [
         { path: csharpPath, text: renderCSharp(schema, entries) },
         { path: cppPath, text: renderCpp(schema, entries) },
         { path: preferenceModesTestPath, text: renderPreferenceModesTest(trackingModes) },
+        { path: conceptRangesTestPath, text: renderConceptRangesTest(schema) },
         { path: keyNamesCppPath, text: renderKeyNamesCpp(keyTable) },
         { path: keyNamesCsharpPath, text: renderKeyNamesCsharp(keyTable) },
     ];

@@ -265,6 +265,17 @@ void HeadTrackingConfig::ApplyValues(
             }
         } else if (canonical == config_keys::kEnableOnStartup) {
             if (TryParseConfigBool(value, bool_val)) enable_on_startup = bool_val;
+        } else if (canonical == config_keys::kDataFreshnessMs) {
+            // A window of 0 or less never counts a packet as current, so tracking would
+            // never apply.
+            if (TryParseConfigInt(value, int_val)) {
+                if (int_val >= 1) {
+                    data_freshness_ms = int_val;
+                } else if (log) {
+                    log("Config key '" + entry.first + "' has an out-of-range value '" + value +
+                        "' (expected 1 or more) - using " + std::to_string(data_freshness_ms));
+                }
+            }
         } else if (canonical == config_keys::kYawSensitivity) {
             if (TryParseConfigFloat(value, float_val)) {
                 AcceptSensitivity(entry.first, value, float_val, log, yaw_sensitivity);
@@ -318,6 +329,8 @@ void HeadTrackingConfig::ApplyValues(
             if (TryParseConfigBool(value, bool_val)) rotation_enabled = bool_val;
         } else if (canonical == config_keys::kPositionEnabled) {
             if (TryParseConfigBool(value, bool_val)) position_enabled = bool_val;
+        } else if (canonical == config_keys::kPositionAllowed) {
+            if (TryParseConfigBool(value, bool_val)) position_allowed = bool_val;
         } else if (canonical == config_keys::kPositionSensitivityX) {
             if (TryParseConfigFloat(value, float_val)) {
                 AcceptSensitivity(entry.first, value, float_val, log, position.sensitivity_x);

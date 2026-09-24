@@ -104,6 +104,63 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.True(config.RotationEnabled);
         }
 
+        [Theory]
+        [InlineData("DataFreshnessMs", "250", 250)]
+        [InlineData("data_freshness_ms", "1", 1)]
+        public void DataFreshnessMs_AcceptsAWindowOfOneOrMore(string spelling, string value, int expected)
+        {
+            var log = new List<string>();
+            var config = new HeadTrackingConfigData();
+            config.ApplyValues(new Dictionary<string, string> { { spelling, value } }, log.Add);
+
+            Assert.Equal(expected, config.DataFreshnessMs);
+            Assert.Empty(log);
+        }
+
+        // A window of 0 or less never counts a packet as current, so tracking would never apply.
+        [Theory]
+        [InlineData("0")]
+        [InlineData("-5")]
+        public void DataFreshnessMs_RefusesAWindowBelowOne(string value)
+        {
+            var log = new List<string>();
+            var config = new HeadTrackingConfigData();
+            config.ApplyValues(new Dictionary<string, string> { { "DataFreshnessMs", value } }, log.Add);
+
+            Assert.Equal(500, config.DataFreshnessMs);
+            string line = Assert.Single(log);
+            Assert.Contains("DataFreshnessMs", line);
+            Assert.Contains("expected 1 or more", line);
+        }
+
+        [Fact]
+        public void DataFreshnessMs_UnparseableValueKeepsTheDefault()
+        {
+            var config = Apply(new Dictionary<string, string> { { "DataFreshnessMs", "half a second" } });
+
+            Assert.Equal(500, config.DataFreshnessMs);
+        }
+
+        [Theory]
+        [InlineData("PositionAllowed")]
+        [InlineData("position_allowed")]
+        public void PositionAllowed_LandsOnItsOwnField(string spelling)
+        {
+            var config = Apply(new Dictionary<string, string> { { spelling, "false" } });
+
+            Assert.False(config.PositionAllowed);
+            Assert.True(config.PositionEnabled);
+            Assert.True(config.RotationEnabled);
+        }
+
+        [Fact]
+        public void PositionAllowed_UnparseableValueKeepsTheDefault()
+        {
+            var config = Apply(new Dictionary<string, string> { { "PositionAllowed", "maybe" } });
+
+            Assert.True(config.PositionAllowed);
+        }
+
         [Fact]
         public void PositionKeys_LandOnPositionSettings()
         {

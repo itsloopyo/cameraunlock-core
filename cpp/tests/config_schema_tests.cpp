@@ -9,7 +9,11 @@
 #include <cameraunlock/config/head_tracking_config.h>
 
 #include <cameraunlock/config/value_guards.h>
+#include <cameraunlock/effects/head_follow_light.h>
 
+#include "concept_ranges.g.h"
+
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -301,6 +305,89 @@ void TestRotationEnabled() {
     Check(unparseable.rotation_enabled, "an unparseable RotationEnabled keeps the default");
 }
 
+void TestDataFreshnessMs() {
+    std::vector<std::string> lines;
+    const cameraunlock::HeadTrackingConfig::LogFn log = [&lines](const std::string& line) {
+        lines.push_back(line);
+    };
+
+    cameraunlock::HeadTrackingConfig accepted;
+    accepted.ApplyValues({{"DataFreshnessMs", "250"}}, log);
+    Check(accepted.data_freshness_ms == 250 && lines.empty(), "DataFreshnessMs=250 is read");
+
+    cameraunlock::HeadTrackingConfig edge;
+    edge.ApplyValues({{"data_freshness_ms", "1"}}, log);
+    Check(edge.data_freshness_ms == 1 && lines.empty(), "1 ms is the smallest window accepted");
+
+    for (const char* refused : {"0", "-5"}) {
+        lines.clear();
+        cameraunlock::HeadTrackingConfig config;
+        config.ApplyValues({{"DataFreshnessMs", refused}}, log);
+        Check(config.data_freshness_ms == 500 && lines.size() == 1 &&
+                  lines[0].find("DataFreshnessMs") != std::string::npos &&
+                  lines[0].find("expected 1 or more") != std::string::npos,
+              (std::string("DataFreshnessMs=") + refused + " is refused with a log line").c_str());
+    }
+
+    auto unparseable = Apply({{"DataFreshnessMs", "half a second"}});
+    Check(unparseable.data_freshness_ms == 500, "an unparseable DataFreshnessMs keeps the default");
+}
+
+void TestPositionAllowed() {
+    for (const char* spelling : {"PositionAllowed", "position_allowed"}) {
+        auto config = Apply({{spelling, "false"}});
+        Check(!config.position_allowed && config.position_enabled && config.rotation_enabled,
+              (std::string(spelling) + "=false clears position_allowed and nothing else").c_str());
+    }
+    auto unparseable = Apply({{"PositionAllowed", "maybe"}});
+    Check(unparseable.position_allowed, "an unparseable PositionAllowed keeps the default");
+}
+
+struct ExpectedRange {
+    bool has_min;
+    double min;
+    bool has_max;
+    double max;
+};
+
+// Every range the schema declares, held to the number it stands for. The position limits,
+// the tracker pivots and the light multiplier name the guard constants, so the schema and the
+// guards cannot move apart.
+void TestSchemaRangesMatchTheGuards() {
+    using cameraunlock::config::kMaxPositionLimit;
+    using cameraunlock::effects::kMaxLightMultiplier;
+    const ExpectedRange unit{true, 0.0, true, 1.0};
+    const ExpectedRange metres{true, 0.0, true, static_cast<double>(kMaxPositionLimit)};
+    const std::map<std::string, ExpectedRange> expected = {
+        {"UdpPort", {true, 1.0, true, 65535.0}},
+        {"DataFreshnessMs", {true, 1.0, true, static_cast<double>(INT_MAX)}},
+        {"LocalSmoothing", unit},
+        {"RemoteSmoothing", unit},
+        {"CollisionReleaseSmoothing", unit},
+        {"PositionLimitX", metres},
+        {"PositionLimitY", metres},
+        {"PositionLimitYDown", metres},
+        {"PositionLimitZ", metres},
+        {"PositionLimitZBack", metres},
+        {"TrackerPivotForward", metres},
+        {"TrackerPivotUp", metres},
+        {"CollisionMargin", {true, 0.0, false, 0.0}},
+        {"LightMultiplier", {true, 0.0, true, static_cast<double>(kMaxLightMultiplier)}},
+    };
+
+    Check(concept_ranges::kConceptRangeCount == expected.size(),
+          "the schema declares a range for exactly the concepts this test expects one for");
+    for (size_t i = 0; i < concept_ranges::kConceptRangeCount; ++i) {
+        const concept_ranges::ConceptRange& declared = concept_ranges::kConceptRanges[i];
+        const auto found = expected.find(declared.id);
+        const bool same = found != expected.end() && declared.has_min == found->second.has_min &&
+                          declared.min == found->second.min &&
+                          declared.has_max == found->second.has_max &&
+                          declared.max == found->second.max;
+        Check(same, (std::string("range of ") + declared.id + " matches its guard").c_str());
+    }
+}
+
 // What a default-constructed field holds, tagged with the type the schema should declare
 // for it. Only the member the tag names is read.
 struct ShippedDefault {
@@ -327,6 +414,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
     return {
         {"UdpPort", ShippedInt(c.udp_port)},
         {"EnableOnStartup", ShippedBool(c.enable_on_startup)},
+        {"DataFreshnessMs", ShippedInt(c.data_freshness_ms)},
         {"YawSensitivity", ShippedFloat(c.yaw_sensitivity)},
         {"PitchSensitivity", ShippedFloat(c.pitch_sensitivity)},
         {"RollSensitivity", ShippedFloat(c.roll_sensitivity)},
@@ -341,6 +429,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"ReticleColor", ShippedColor(c.reticle_color_rgba)},
         {"RotationEnabled", ShippedBool(c.rotation_enabled)},
         {"PositionEnabled", ShippedBool(c.position_enabled)},
+        {"PositionAllowed", ShippedBool(c.position_allowed)},
         {"PositionSensitivityX", ShippedFloat(c.position.sensitivity_x)},
         {"PositionSensitivityY", ShippedFloat(c.position.sensitivity_y)},
         {"PositionSensitivityZ", ShippedFloat(c.position.sensitivity_z)},
@@ -482,6 +571,9 @@ int RunConfigSchemaTests() {
     TestCollisionValues();
     TestHotkeys();
     TestRotationEnabled();
+    TestDataFreshnessMs();
+    TestPositionAllowed();
+    TestSchemaRangesMatchTheGuards();
     TestSchemaDefaultsMatchTheShippedDefaults();
     TestIniParsing();
     return g_failures;

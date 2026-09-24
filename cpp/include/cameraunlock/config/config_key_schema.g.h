@@ -25,7 +25,9 @@ inline constexpr const char* kAimDecoupling = "aimdecoupling";
 inline constexpr const char* kShowReticle = "showreticle";
 inline constexpr const char* kReticleColor = "reticlecolor";
 inline constexpr const char* kRotationEnabled = "rotationenabled";
+inline constexpr const char* kDataFreshnessMs = "datafreshnessms";
 inline constexpr const char* kPositionEnabled = "positionenabled";
+inline constexpr const char* kPositionAllowed = "positionallowed";
 inline constexpr const char* kPositionSensitivityX = "positionsensitivityx";
 inline constexpr const char* kPositionSensitivityY = "positionsensitivityy";
 inline constexpr const char* kPositionSensitivityZ = "positionsensitivityz";
@@ -92,6 +94,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "cyclemodekey", "cycletrackingmodekey", false },
     { "cycletrackingmode", "cycletrackingmodekey", false },
     { "cycletrackingmodekey", "cycletrackingmodekey", false },
+    { "datafreshnessms", "datafreshnessms", false },
     { "decoupleaim", "aimdecoupling", false },
     { "decoupledaim", "aimdecoupling", false },
     { "drawreticle", "showreticle", false },
@@ -170,6 +173,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "pivotforward", "trackerpivotforward", false },
     { "pivotup", "trackerpivotup", false },
     { "port", "udpport", false },
+    { "positionallowed", "positionallowed", false },
     { "positionenabled", "positionenabled", false },
     { "positioninvertx", "invertpositionx", false },
     { "positioninverty", "invertpositiony", false },
@@ -301,7 +305,9 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "ShowReticle", config_keys::kShowReticle, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "ReticleColor", config_keys::kReticleColor, ConfigValueType::kColor, 0, 0.0f, false, nullptr, {1.0f, 1.0f, 1.0f, 1.0f} },
     { "RotationEnabled", config_keys::kRotationEnabled, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "DataFreshnessMs", config_keys::kDataFreshnessMs, ConfigValueType::kInt, 500, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionEnabled", config_keys::kPositionEnabled, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "PositionAllowed", config_keys::kPositionAllowed, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityX", config_keys::kPositionSensitivityX, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityY", config_keys::kPositionSensitivityY, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityZ", config_keys::kPositionSensitivityZ, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },

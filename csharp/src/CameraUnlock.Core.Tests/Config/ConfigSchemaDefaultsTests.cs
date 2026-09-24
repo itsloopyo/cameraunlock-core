@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Xunit;
 using CameraUnlock.Core.Config;
+using CameraUnlock.Core.Effects;
 
 namespace CameraUnlock.Core.Tests.Config
 {
@@ -47,6 +48,7 @@ namespace CameraUnlock.Core.Tests.Config
             {
                 { "UdpPort", config.UdpPort },
                 { "EnableOnStartup", config.EnableOnStartup },
+                { "DataFreshnessMs", config.DataFreshnessMs },
                 { "YawSensitivity", config.Sensitivity.Yaw },
                 { "PitchSensitivity", config.Sensitivity.Pitch },
                 { "RollSensitivity", config.Sensitivity.Roll },
@@ -61,6 +63,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "ReticleColor", config.ReticleColorRgba },
                 { "RotationEnabled", config.RotationEnabled },
                 { "PositionEnabled", config.PositionEnabled },
+                { "PositionAllowed", config.PositionAllowed },
                 { "PositionSensitivityX", config.Position.SensitivityX },
                 { "PositionSensitivityY", config.Position.SensitivityY },
                 { "PositionSensitivityZ", config.Position.SensitivityZ },
@@ -138,6 +141,65 @@ namespace CameraUnlock.Core.Tests.Config
                     }
                 }
             }
+        }
+
+        // Every range the schema declares, held to the number it stands for. The position
+        // limits, the tracker pivots and the light multiplier name the guard constants, so the
+        // schema and the guards cannot move apart. Null is a side the range leaves open.
+        private static Dictionary<string, double?[]> ExpectedRanges()
+        {
+            var unit = new double?[] { 0, 1 };
+            var metres = new double?[] { 0, HeadTrackingConfigData.MaxDistanceMetres };
+            return new Dictionary<string, double?[]>
+            {
+                { "UdpPort", new double?[] { 1, 65535 } },
+                { "DataFreshnessMs", new double?[] { 1, int.MaxValue } },
+                { "LocalSmoothing", unit },
+                { "RemoteSmoothing", unit },
+                { "CollisionReleaseSmoothing", unit },
+                { "PositionLimitX", metres },
+                { "PositionLimitY", metres },
+                { "PositionLimitYDown", metres },
+                { "PositionLimitZ", metres },
+                { "PositionLimitZBack", metres },
+                { "TrackerPivotForward", metres },
+                { "TrackerPivotUp", metres },
+                { "CollisionMargin", new double?[] { 0, null } },
+                { "LightMultiplier", new double?[] { 0, HeadFollowLightSettings.MaxMultiplier } },
+            };
+        }
+
+        [Fact]
+        public void SchemaRanges_MatchTheGuards()
+        {
+            Dictionary<string, double?[]> expected = ExpectedRanges();
+            var declaredIds = new List<string>();
+
+            using (JsonDocument schema = ReadSchema())
+            {
+                foreach (JsonElement concept in schema.RootElement.GetProperty("concepts").EnumerateArray())
+                {
+                    JsonElement range;
+                    if (!concept.TryGetProperty("range", out range)) continue;
+                    string id = concept.GetProperty("id").GetString()!;
+                    declaredIds.Add(id);
+
+                    Assert.True(expected.ContainsKey(id),
+                        "concept '" + id + "' declares a range that ConfigSchemaDefaultsTests does not expect");
+                    Assert.True(Bound(range, "min") == expected[id][0],
+                        "concept '" + id + "': range min " + range.GetRawText() + " is not " + expected[id][0]);
+                    Assert.True(Bound(range, "max") == expected[id][1],
+                        "concept '" + id + "': range max " + range.GetRawText() + " is not " + expected[id][1]);
+                }
+            }
+
+            Assert.Equal(expected.Count, declaredIds.Count);
+        }
+
+        private static double? Bound(JsonElement range, string side)
+        {
+            JsonElement value;
+            return range.TryGetProperty(side, out value) ? value.GetDouble() : (double?)null;
         }
 
         private static string Mismatch(string id, JsonElement declared, object actual)

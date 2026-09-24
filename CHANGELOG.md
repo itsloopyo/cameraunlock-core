@@ -9,6 +9,60 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the canonical concept set in the config schema, and `DataFreshnessMs` and `PositionAllowed`
+
+`data/config-schema.json` now says which concepts the canonical config format writes, and
+what it writes for them. Every field is new and optional to a reader that does not know it,
+and nothing changes for the flat readers: every concept, alias and default parses as before.
+
+- `canonical` on every concept. The ones no canonical file carries are `false` with a
+  one-line `canonical_reason` for players: `RecenterKey` (the tracker app owns the centre),
+  `ShowReticle`, `ReticleColor` and `ReticleToggleKey` (mods draw no reticle of their own),
+  the six sensitivities and six inversions (the mod applies the pose as the tracker sends
+  it), and `PositionToggleKey` (the tracking-mode key is `CycleTrackingModeKey`).
+- `file_comment` on every canonical concept: one or two lines of printable ASCII, without
+  `"` or `\`, written above the key for players. `doc` stays the developer text.
+- `range` (`min`, `max`, either optional) on the canonical numbers, equal to what the flat
+  readers accept: `UdpPort` 1-65535, `DataFreshnessMs` 1-2147483647, the smoothing pair and
+  `CollisionReleaseSmoothing` 0-1, the five position limits and the two tracker pivots 0 to
+  `config::kMaxPositionLimit` (10), `LightMultiplier` 0 to `effects::kMaxLightMultiplier`
+  (5), `CollisionMargin` 0 with no upper bound. `CollisionChannel` has none. The C# flat
+  reader has always refused a tracker pivot outside 0-10; the C++ one takes any finite
+  number, and the range follows the C# side.
+- `codec: "hotkey"` on the canonical key lists, and `canonical_default`, the binding list a
+  canonical file starts with: `ToggleKey` `End, Ctrl+Shift+Y`, `CycleTrackingModeKey`
+  `PageUp, Ctrl+Shift+G`, `YawModeKey` `PageDown, Ctrl+Shift+H`. The `default` values and
+  the field initialisers keep the single key names they have always had.
+- `scripts/generate-config-schema.mjs` checks all of it: `canonical` is a boolean on every
+  concept; `canonical_reason` exactly on the non-canonical ones and `file_comment` exactly
+  on the canonical ones; `range` only on canonical int and float concepts, with numbers of
+  the concept's type, min not above max and the default inside; `codec` only `hotkey` and
+  required on canonical string concepts; `canonical_default` only on hotkey concepts, and
+  it must read in both the native and the Unity dialect of `data/keys.json`, spelled as
+  the codecs write it. A concept field the generator does not know is an error. It also
+  emits `cpp/tests/concept_ranges.g.h`, which the C++ test holds to the guard constants
+  the way `ConfigSchemaDefaultsTests.SchemaRanges_MatchTheGuards` does in C#.
+
+Two new concepts, each parsed by both flat readers:
+
+- `[General] DataFreshnessMs`, int, default 500, no aliases: how long, in milliseconds, the
+  newest tracker packet counts as current. Fields `HeadTrackingConfigData.DataFreshnessMs`
+  and `HeadTrackingConfig::data_freshness_ms`. A value below 1 is refused with a log line
+  and the previous value stands, because a window of 0 or less never counts a packet as
+  current. Core only parses it. `DataFreshnessMs` leaves `deliberately_unaliased`.
+- `[Position] PositionAllowed`, bool, default true, no aliases: false means the game never
+  applies positional tracking and the tracking-mode control skips the position modes.
+  Fields `HeadTrackingConfigData.PositionAllowed` and `HeadTrackingConfig::position_allowed`.
+  Core only parses it.
+
+Neither is on `IHeadTrackingConfig`, which consumers may implement. The generated tables
+gain `ConfigKeySchema.Keys.DataFreshnessMs`, `ConfigKeySchema.Keys.PositionAllowed`,
+`config_keys::kDataFreshnessMs` and `config_keys::kPositionAllowed`. A sweep of the sibling
+repos' INI, cfg and JSON files and the decoded launcher manifest seeds found no file naming
+`PositionAllowed`, and none of the three repos that read through core's flat readers
+(the-painscreek-killings, elite-dangerous, system-shock-2-25th-anniversary-remaster) ships
+`DataFreshnessMs`, so no config already on disk changes meaning.
+
 ### Added - key names and the hotkey binding codec, in C# and C++
 
 One vocabulary for hotkey values: `End`, `End, Ctrl+Shift+Y`, or empty for unbound. Nothing

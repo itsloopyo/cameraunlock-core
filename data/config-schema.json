@@ -15,7 +15,17 @@
     "adding a canonical name never breaks an existing user's config.",
     "",
     "Adding a concept or an alias is safe. Removing one, or moving an alias between",
-    "concepts, is a breaking change for every config file already on a user's disk."
+    "concepts, is a breaking change for every config file already on a user's disk.",
+    "",
+    "`canonical` says whether the canonical config format writes the concept. One with",
+    "`canonical: false` keeps its aliases and its flat-reader parsing, and its",
+    "`canonical_reason` is the one line a player is shown for such a key in a canonical file.",
+    "Every canonical concept has a `file_comment`, the one or two lines written above its key",
+    "for players (`doc` is the developer text), and may have a `range` (`min`, `max`, either",
+    "optional; a value outside it is invalid, never clamped), a `codec` ('hotkey' on the key",
+    "lists) and a `canonical_default`, the binding list a canonical file starts with. The",
+    "`default` and the field initialisers keep the single key name the flat readers have",
+    "always shipped, because changing a default is a breaking change."
   ],
   "deliberately_unaliased": [
     {
@@ -39,7 +49,7 @@
       "reason": "Chord modifiers, not key names. A different concept from the *Key entries."
     },
     {
-      "spellings": ["BindAddress", "DataFreshnessMs", "DeadzoneDeg", "DeadzoneYaw", "CyclePort", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
+      "spellings": ["BindAddress", "DeadzoneDeg", "DeadzoneYaw", "CyclePort", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
       "reason": "Real cross-repo concepts with no field in HeadTrackingConfigData or its C++ twin to bind to. Aliasing a key onto nothing would advertise a setting that does not work. Each needs a concept and a field before it gets an alias."
     }
   ],
@@ -58,7 +68,10 @@
       "type": "int",
       "default": 4242,
       "aliases": ["Port", "OpenTrackPort", "ListenPort", "TrackingPort"],
-      "doc": "UDP port the OpenTrack receiver binds. 1-65535."
+      "doc": "UDP port the OpenTrack receiver binds. 1-65535.",
+      "canonical": true,
+      "file_comment": ["UDP port the mod receives tracker data on (OpenTrack protocol)."],
+      "range": {"min": 1, "max": 65535}
     },
     {
       "id": "EnableOnStartup",
@@ -67,7 +80,9 @@
       "type": "bool",
       "default": true,
       "aliases": ["EnableAtStartup", "EnabledOnStartup", "StartEnabled", "EnableHeadTracking", "AutoEnable"],
-      "doc": "Whether head tracking is active when the game loads."
+      "doc": "Whether head tracking is active when the game loads.",
+      "canonical": true,
+      "file_comment": ["true: head tracking is on when the game starts. ToggleKey turns it on and off."]
     },
     {
       "id": "YawSensitivity",
@@ -76,7 +91,9 @@
       "type": "float",
       "default": 1.0,
       "aliases": ["YawSens", "SensitivityYaw", "YawScale", "YawMultiplier"],
-      "doc": "Yaw (left/right) sensitivity multiplier."
+      "doc": "Yaw (left/right) sensitivity multiplier.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."
     },
     {
       "id": "PitchSensitivity",
@@ -85,7 +102,9 @@
       "type": "float",
       "default": 1.0,
       "aliases": ["PitchSens", "SensitivityPitch", "PitchScale", "PitchMultiplier"],
-      "doc": "Pitch (up/down) sensitivity multiplier."
+      "doc": "Pitch (up/down) sensitivity multiplier.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."
     },
     {
       "id": "RollSensitivity",
@@ -94,7 +113,9 @@
       "type": "float",
       "default": 1.0,
       "aliases": ["RollSens", "SensitivityRoll", "RollScale", "RollMultiplier"],
-      "doc": "Roll (tilt) sensitivity multiplier."
+      "doc": "Roll (tilt) sensitivity multiplier.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."
     },
     {
       "id": "InvertYaw",
@@ -103,7 +124,9 @@
       "type": "bool",
       "default": false,
       "aliases": ["YawInvert", "InvertYawAxis"],
-      "doc": "Invert the yaw axis."
+      "doc": "Invert the yaw axis.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."
     },
     {
       "id": "InvertPitch",
@@ -112,7 +135,9 @@
       "type": "bool",
       "default": false,
       "aliases": ["PitchInvert", "InvertPitchAxis"],
-      "doc": "Invert the pitch axis."
+      "doc": "Invert the pitch axis.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."
     },
     {
       "id": "InvertRoll",
@@ -121,7 +146,9 @@
       "type": "bool",
       "default": false,
       "aliases": ["RollInvert", "InvertRollAxis"],
-      "doc": "Invert the roll axis."
+      "doc": "Invert the roll axis.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."
     },
     {
       "id": "LocalSmoothing",
@@ -130,7 +157,10 @@
       "type": "float",
       "default": 0.0,
       "aliases": ["SmoothingLocal"],
-      "doc": "Smoothing applied when the tracker runs on this machine. 0-1."
+      "doc": "Smoothing applied when the tracker runs on this machine. 0-1.",
+      "canonical": true,
+      "file_comment": ["Smoothing when the tracker runs on this PC. 0 is the least, 1 the most."],
+      "range": {"min": 0, "max": 1}
     },
     {
       "id": "RemoteSmoothing",
@@ -139,7 +169,10 @@
       "type": "float",
       "default": 0.15,
       "aliases": ["SmoothingRemote"],
-      "doc": "Smoothing applied when the tracker is a device on the network. 0-1."
+      "doc": "Smoothing applied when the tracker is a device on the network. 0-1.",
+      "canonical": true,
+      "file_comment": ["Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."],
+      "range": {"min": 0, "max": 1}
     },
     {
       "id": "WorldSpaceYaw",
@@ -148,7 +181,9 @@
       "type": "bool",
       "default": true,
       "aliases": ["HorizonLockedYaw", "WorldLockedYaw", "HorizonLock", "LockHorizon", "WorldYaw"],
-      "doc": "true rotates yaw around world up (horizon locked); false around the camera's own up."
+      "doc": "true rotates yaw around world up (horizon locked); false around the camera's own up.",
+      "canonical": true,
+      "file_comment": ["true: yaw turns around the world's up axis. false: around the camera's own up axis."]
     },
     {
       "id": "AimDecoupling",
@@ -157,7 +192,9 @@
       "type": "bool",
       "default": true,
       "aliases": ["DecoupleAim", "AimDecouple", "EnableAimDecoupling", "DecoupledAim"],
-      "doc": "Keep the aim direction on the mouse rather than on the head."
+      "doc": "Keep the aim direction on the mouse rather than on the head.",
+      "canonical": true,
+      "file_comment": ["true: your aim stays with the mouse or controller while your head moves the view."]
     },
     {
       "id": "ShowReticle",
@@ -166,7 +203,9 @@
       "type": "bool",
       "default": true,
       "aliases": ["ShowDecoupledReticle", "ShowCrosshair", "ShowDecoupledCrosshair", "ReticleEnabled", "DrawReticle", "MoveCrosshair", "CompensateCrosshair", "CompensateReticle"],
-      "doc": "Draw the decoupled aim reticle."
+      "doc": "Draw the decoupled aim reticle.",
+      "canonical": false,
+      "canonical_reason": "The mod draws no reticle of its own to show or hide."
     },
     {
       "id": "ReticleColor",
@@ -175,7 +214,9 @@
       "type": "color",
       "default": [1.0, 1.0, 1.0, 1.0],
       "aliases": ["CrosshairColor", "ReticleColour", "CrosshairColour"],
-      "doc": "Reticle RGBA as four 0-1 floats, comma separated."
+      "doc": "Reticle RGBA as four 0-1 floats, comma separated.",
+      "canonical": false,
+      "canonical_reason": "The mod draws no reticle of its own to colour."
     },
     {
       "id": "RotationEnabled",
@@ -184,7 +225,21 @@
       "type": "bool",
       "default": true,
       "aliases": [],
-      "doc": "Whether rotational (yaw, pitch, roll) tracking is applied. Together with PositionEnabled it records the tracking mode. There is no alias: no config in the fleet named a rotation switch when this key was added, and a bare Enabled stays unmatched; see deliberately_unaliased."
+      "doc": "Whether rotational (yaw, pitch, roll) tracking is applied. Together with PositionEnabled it records the tracking mode. There is no alias: no config in the fleet named a rotation switch when this key was added, and a bare Enabled stays unmatched; see deliberately_unaliased.",
+      "canonical": true,
+      "file_comment": ["true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both."]
+    },
+    {
+      "id": "DataFreshnessMs",
+      "section": "General",
+      "key": "DataFreshnessMs",
+      "type": "int",
+      "default": 500,
+      "aliases": [],
+      "doc": "How long, in milliseconds, the newest tracker packet counts as current. The mods that read it compare the age of the last packet with it every frame and stop following the tracker once the packet is older: most hold the last pose (bioshock-infinite, dead-space, dying-light, outlast), mirrors-edge hands the camera back to the game. 500 is the fixed liveness window of core's UdpReceiver (kConnectionTimeoutMs), which is where the fleet's default came from. A window of 0 or less never counts a packet as current, so tracking never applies: refused below 1. No aliases: every fleet reader spells it DataFreshnessMs, under [General] in all but stormworks ([Advanced]) and fusion-360 ([Tracking]), and beamng keeps dataFreshnessMs in JSON.",
+      "canonical": true,
+      "file_comment": ["Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."],
+      "range": {"min": 1, "max": 2147483647}
     },
     {
       "id": "PositionEnabled",
@@ -193,7 +248,20 @@
       "type": "bool",
       "default": true,
       "aliases": ["EnablePosition", "PositionTracking", "EnablePositionTracking", "PositionTrackingEnabled", "Enable6Dof", "SixDofEnabled"],
-      "doc": "Whether positional (6DOF) tracking is applied."
+      "doc": "Whether positional (6DOF) tracking is applied.",
+      "canonical": true,
+      "file_comment": ["true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."]
+    },
+    {
+      "id": "PositionAllowed",
+      "section": "Position",
+      "key": "PositionAllowed",
+      "type": "bool",
+      "default": true,
+      "aliases": [],
+      "doc": "false means the game never applies positional tracking and the tracking-mode control skips the position modes, so head tracking runs rotation only whatever RotationEnabled and PositionEnabled say. For a game where position cannot work. One spelling fleet-wide: a game-local key may not reuse a concept name, so only a concept keeps every game on this one. No aliases: no config in the fleet named the switch when it was added. Core only parses it.",
+      "canonical": true,
+      "file_comment": ["false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."]
     },
     {
       "id": "PositionSensitivityX",
@@ -202,7 +270,9 @@
       "type": "float",
       "default": 1.0,
       "aliases": ["SensitivityX", "SensX", "PositionSensX", "XSensitivity"],
-      "doc": "Lateral position sensitivity multiplier."
+      "doc": "Lateral position sensitivity multiplier.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."
     },
     {
       "id": "PositionSensitivityY",
@@ -211,7 +281,9 @@
       "type": "float",
       "default": 1.0,
       "aliases": ["SensitivityY", "SensY", "PositionSensY", "YSensitivity"],
-      "doc": "Vertical position sensitivity multiplier."
+      "doc": "Vertical position sensitivity multiplier.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."
     },
     {
       "id": "PositionSensitivityZ",
@@ -220,7 +292,9 @@
       "type": "float",
       "default": 1.0,
       "aliases": ["SensitivityZ", "SensZ", "PositionSensZ", "ZSensitivity"],
-      "doc": "Depth position sensitivity multiplier."
+      "doc": "Depth position sensitivity multiplier.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."
     },
     {
       "id": "PositionLimitX",
@@ -229,7 +303,10 @@
       "type": "float",
       "default": 0.30,
       "aliases": ["LimitX", "MaxX", "PositionMaxX"],
-      "doc": "Maximum lateral displacement in metres, applied symmetrically."
+      "doc": "Maximum lateral displacement in metres, applied symmetrically.",
+      "canonical": true,
+      "file_comment": ["How far, in metres, leaning left or right can move the view."],
+      "range": {"min": 0, "max": 10}
     },
     {
       "id": "PositionLimitY",
@@ -238,7 +315,10 @@
       "type": "float",
       "default": 0.20,
       "aliases": ["LimitY", "MaxY", "PositionMaxY", "LimitYUp", "PositionLimitYUp"],
-      "doc": "Maximum UPWARD displacement in metres."
+      "doc": "Maximum UPWARD displacement in metres.",
+      "canonical": true,
+      "file_comment": ["How far, in metres, raising your head can move the view."],
+      "range": {"min": 0, "max": 10}
     },
     {
       "id": "PositionLimitYDown",
@@ -247,7 +327,10 @@
       "type": "float",
       "default": 0.20,
       "aliases": ["LimitYDown", "MaxYDown", "PositionMaxYDown", "LimitDown"],
-      "doc": "Maximum DOWNWARD displacement in metres. Usually tighter than the upward limit so the camera does not clip into the player body. When a file names PositionLimitY and NOT this key, the up limit is mirrored into it: one vertical limit in the file means one vertical limit in the clamp. Leaving the down side at its default is what caps a raised LimitY at 0.20m downward."
+      "doc": "Maximum DOWNWARD displacement in metres. Usually tighter than the upward limit so the camera does not clip into the player body. When a file names PositionLimitY and NOT this key, the up limit is mirrored into it: one vertical limit in the file means one vertical limit in the clamp. Leaving the down side at its default is what caps a raised LimitY at 0.20m downward.",
+      "canonical": true,
+      "file_comment": ["How far, in metres, lowering your head can move the view."],
+      "range": {"min": 0, "max": 10}
     },
     {
       "id": "PositionLimitZ",
@@ -256,7 +339,10 @@
       "type": "float",
       "default": 0.40,
       "aliases": ["LimitZ", "MaxZ", "PositionMaxZ", "LimitZForward", "PositionLimitZForward", "PositionLimitZFwd", "LimitZFwd"],
-      "doc": "Maximum FORWARD displacement in metres. Negative z is forward, so this is the lower bound of the z clamp."
+      "doc": "Maximum FORWARD displacement in metres. Negative z is forward, so this is the lower bound of the z clamp.",
+      "canonical": true,
+      "file_comment": ["How far, in metres, leaning forward can move the view."],
+      "range": {"min": 0, "max": 10}
     },
     {
       "id": "PositionLimitZBack",
@@ -265,7 +351,10 @@
       "type": "float",
       "default": 0.10,
       "aliases": ["LimitZBack", "MaxZBack", "PositionMaxZBack", "LimitZBackward", "PositionLimitZBackward"],
-      "doc": "Maximum BACKWARD displacement in metres, the upper bound of the z clamp."
+      "doc": "Maximum BACKWARD displacement in metres, the upper bound of the z clamp.",
+      "canonical": true,
+      "file_comment": ["How far, in metres, leaning back can move the view."],
+      "range": {"min": 0, "max": 10}
     },
     {
       "id": "CollisionEnabled",
@@ -274,7 +363,9 @@
       "type": "bool",
       "default": false,
       "aliases": ["LeanCollision", "LeanCollisionEnabled", "CameraCollision", "ClampLean"],
-      "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. Ships off in a mod whose trace has not been confirmed in game, because an unverified channel either blocks on nothing or blocks on everything; a mod turns it on once its log shows the sweep engaging on real geometry. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice."
+      "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. Ships off in a mod whose trace has not been confirmed in game, because an unverified channel either blocks on nothing or blocks on everything; a mod turns it on once its log shows the sweep engaging on real geometry. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice.",
+      "canonical": true,
+      "file_comment": ["true: leaning stops at walls instead of moving the view through them."]
     },
     {
       "id": "CollisionMargin",
@@ -283,7 +374,10 @@
       "type": "float",
       "default": 0.1,
       "aliases": ["CollisionRadius", "LeanCollisionMargin", "CollisionSkin", "CameraCollisionRadius"],
-      "doc": "How far off a blocking surface the eye is held, in the engine's own units. It must EXCEED the camera's near clip distance or geometry is culled before the eye reaches it and the wall goes transparent anyway. CollisionRadius is the spelling where the standoff IS a sweep radius; CollisionMargin where the query is a line and the standoff lives in the clamp."
+      "doc": "How far off a blocking surface the eye is held, in the engine's own units. It must EXCEED the camera's near clip distance or geometry is culled before the eye reaches it and the wall goes transparent anyway. CollisionRadius is the spelling where the standoff IS a sweep radius; CollisionMargin where the query is a line and the standoff lives in the clamp.",
+      "canonical": true,
+      "file_comment": ["How far the view is held off a wall when you lean into it, in the game's own units."],
+      "range": {"min": 0}
     },
     {
       "id": "CollisionChannel",
@@ -292,7 +386,9 @@
       "type": "int",
       "default": 0,
       "aliases": ["LeanCollisionChannel", "TraceChannel", "CollisionTraceChannel"],
-      "doc": "Which trace channel the sweep runs on, for engines whose query needs one. Which channel a level's geometry blocks is a project setting rather than an engine constant, so it is a value to try and read back out of the log. Omitted by mods whose cast takes no channel."
+      "doc": "Which trace channel the sweep runs on, for engines whose query needs one. Which channel a level's geometry blocks is a project setting rather than an engine constant, so it is a value to try and read back out of the log. Omitted by mods whose cast takes no channel.",
+      "canonical": true,
+      "file_comment": ["Which of the game's collision channels the wall check tests against."]
     },
     {
       "id": "CollisionReleaseSmoothing",
@@ -301,7 +397,10 @@
       "type": "float",
       "default": 0.9,
       "aliases": ["LeanReleaseSmoothing", "CollisionRelease", "LeanClampRelease"],
-      "doc": "How quickly the lean reopens once an obstruction clears, on the same 0-1 scale as every other smoothing value in the fleet. 0.9 is a 200ms time constant. Tightening is never smoothed: easing INTO a smaller allowance leaves the eye inside the geometry for the length of the ease, which is the whole bug."
+      "doc": "How quickly the lean reopens once an obstruction clears, on the same 0-1 scale as every other smoothing value in the fleet. 0.9 is a 200ms time constant. Tightening is never smoothed: easing INTO a smaller allowance leaves the eye inside the geometry for the length of the ease, which is the whole bug.",
+      "canonical": true,
+      "file_comment": ["How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest."],
+      "range": {"min": 0, "max": 1}
     },
     {
       "id": "InvertPositionX",
@@ -310,7 +409,9 @@
       "type": "bool",
       "default": false,
       "aliases": ["InvertX", "PositionInvertX", "InvertTrackerX"],
-      "doc": "Invert the lateral position axis."
+      "doc": "Invert the lateral position axis.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."
     },
     {
       "id": "InvertPositionY",
@@ -319,7 +420,9 @@
       "type": "bool",
       "default": false,
       "aliases": ["InvertY", "PositionInvertY", "InvertTrackerY"],
-      "doc": "Invert the vertical position axis."
+      "doc": "Invert the vertical position axis.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."
     },
     {
       "id": "InvertPositionZ",
@@ -328,7 +431,9 @@
       "type": "bool",
       "default": false,
       "aliases": ["InvertZ", "PositionInvertZ", "InvertTrackerZ"],
-      "doc": "Invert the depth position axis. An engine whose camera-local +z is forward negates at the boundary instead of setting this."
+      "doc": "Invert the depth position axis. An engine whose camera-local +z is forward negates at the boundary instead of setting this.",
+      "canonical": false,
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."
     },
     {
       "id": "TrackerPivotForward",
@@ -337,7 +442,10 @@
       "type": "float",
       "default": 0.0,
       "aliases": ["PivotForward", "NeckPivotForward", "PivotArm", "TrackerPivot", "NeckModelForward"],
-      "doc": "Metres from the neck pivot forward to the point the tracker watches. 0 disables pivot compensation."
+      "doc": "Metres from the neck pivot forward to the point the tracker watches. 0 disables pivot compensation.",
+      "canonical": true,
+      "file_comment": ["Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off."],
+      "range": {"min": 0, "max": 10}
     },
     {
       "id": "TrackerPivotUp",
@@ -346,7 +454,10 @@
       "type": "float",
       "default": 0.0,
       "aliases": ["PivotUp", "NeckPivotUp", "NeckModelHeight"],
-      "doc": "Metres from the neck pivot up to the point the tracker watches."
+      "doc": "Metres from the neck pivot up to the point the tracker watches.",
+      "canonical": true,
+      "file_comment": ["Metres from the pivot of your neck up to the point the tracker follows."],
+      "range": {"min": 0, "max": 10}
     },
     {
       "id": "ToggleKey",
@@ -355,7 +466,11 @@
       "type": "string",
       "default": "End",
       "aliases": ["ToggleTrackingKey", "TrackingToggleKey", "EnableKey", "Toggle", "ToggleTracking", "KeyToggle"],
-      "doc": "Key that toggles head tracking on and off."
+      "doc": "Key that toggles head tracking on and off.",
+      "canonical": true,
+      "file_comment": ["Turns head tracking on and off."],
+      "codec": "hotkey",
+      "canonical_default": "End, Ctrl+Shift+Y"
     },
     {
       "id": "PositionToggleKey",
@@ -364,7 +479,9 @@
       "type": "string",
       "default": "PageUp",
       "aliases": ["TogglePositionKey", "PositionKey", "SixDofToggleKey"],
-      "doc": "Key that toggles positional (6DOF) tracking on and off."
+      "doc": "Key that toggles positional (6DOF) tracking on and off.",
+      "canonical": false,
+      "canonical_reason": "CycleTrackingModeKey is the hotkey that switches positional tracking."
     },
     {
       "id": "ReticleToggleKey",
@@ -373,7 +490,9 @@
       "type": "string",
       "default": "Insert",
       "aliases": ["ToggleReticleKey", "ReticleKey", "CrosshairToggleKey", "ToggleCrosshairKey", "ReticleToggle"],
-      "doc": "Key that toggles the decoupled aim reticle."
+      "doc": "Key that toggles the decoupled aim reticle.",
+      "canonical": false,
+      "canonical_reason": "The mod draws no reticle of its own to toggle."
     },
     {
       "id": "CycleTrackingModeKey",
@@ -382,7 +501,11 @@
       "type": "string",
       "default": "",
       "aliases": ["TrackingModeKey", "CycleModeKey", "ModeKey", "CycleTrackingMode", "CycleMode", "ModeCycle", "KeyCycleMode"],
-      "doc": "Key that cycles the tracking mode. Empty leaves it unbound."
+      "doc": "Key that cycles the tracking mode. Empty leaves it unbound.",
+      "canonical": true,
+      "file_comment": ["Changes the tracking mode: rotation and position, rotation only, position only."],
+      "codec": "hotkey",
+      "canonical_default": "PageUp, Ctrl+Shift+G"
     },
     {
       "id": "YawModeKey",
@@ -391,7 +514,11 @@
       "type": "string",
       "default": "PageDown",
       "aliases": ["ToggleYawModeKey", "WorldYawKey", "YawMode", "ToggleYawMode", "KeyYawMode", "ToggleYawKey"],
-      "doc": "Key that toggles world-locked versus camera-local yaw."
+      "doc": "Key that toggles world-locked versus camera-local yaw.",
+      "canonical": true,
+      "file_comment": ["Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw)."],
+      "codec": "hotkey",
+      "canonical_default": "PageDown, Ctrl+Shift+H"
     },
     {
       "id": "RecenterKey",
@@ -400,7 +527,9 @@
       "type": "string",
       "default": "Home",
       "aliases": ["CenterKey", "CentreKey", "RecentreKey"],
-      "doc": "Retained so existing callers keep parsing. No mod polls it: the tracker app owns the centre."
+      "doc": "Retained so existing callers keep parsing. No mod polls it: the tracker app owns the centre.",
+      "canonical": false,
+      "canonical_reason": "The mod keeps no centre of its own: centre the view in your tracker app."
     },
     {
       "id": "LightFollowsHead",
@@ -409,7 +538,9 @@
       "type": "bool",
       "default": true,
       "aliases": ["FlashlightFollowsHead", "CompensateFlashlight"],
-      "doc": "Point a carried light where the head is looking rather than where the body is aiming. The two aliases are the spellings actually shipped - repo (FlashlightFollowsHead) and prey (CompensateFlashlight). The bare Enabled that still-wakes-the-deep and resident-evil-requiem ship under their own section stays unmatched on purpose, because section-less it is the master switch; see deliberately_unaliased."
+      "doc": "Point a carried light where the head is looking rather than where the body is aiming. The two aliases are the spellings actually shipped - repo (FlashlightFollowsHead) and prey (CompensateFlashlight). The bare Enabled that still-wakes-the-deep and resident-evil-requiem ship under their own section stays unmatched on purpose, because section-less it is the master switch; see deliberately_unaliased.",
+      "canonical": true,
+      "file_comment": ["true: a light you carry points where you look instead of where you aim."]
     },
     {
       "id": "LightMultiplier",
@@ -418,7 +549,10 @@
       "type": "float",
       "default": 1.5,
       "aliases": ["FlashlightMultiplier", "FlashlightScale"],
-      "doc": "How far the light turns relative to the head. 1.5 leads the view; 1.0 matches it; 0 pins the beam to the aim. A value outside [0, 5] is rejected with a log line and the previous one stands - not clamped. The two aliases are the spellings actually shipped: repo (FlashlightMultiplier) and prey (FlashlightScale). See cameraunlock::effects::kDefaultLightMultiplier for why it leads."
+      "doc": "How far the light turns relative to the head. 1.5 leads the view; 1.0 matches it; 0 pins the beam to the aim. A value outside [0, 5] is rejected with a log line and the previous one stands - not clamped. The two aliases are the spellings actually shipped: repo (FlashlightMultiplier) and prey (FlashlightScale). See cameraunlock::effects::kDefaultLightMultiplier for why it leads.",
+      "canonical": true,
+      "file_comment": ["How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."],
+      "range": {"min": 0, "max": 5}
     }
   ],
   "retired": [
