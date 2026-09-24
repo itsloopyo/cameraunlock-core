@@ -77,6 +77,12 @@ namespace CameraUnlock.Core.Config
         public string CycleTrackingModeKeyName { get; set; } = string.Empty;
 
         /// <summary>
+        /// The key list that toggles <see cref="TrueFreeLook"/>. Read only through
+        /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public string TrueFreeLookKeyName { get; set; } = "Insert";
+
+        /// <summary>
         /// Yaw mode at startup. true = horizon-locked yaw (rotates around world up
         /// regardless of pitch). false = camera-local yaw (rotates around the camera's
         /// current up axis, producing leaning/rolling at extreme pitches).
@@ -114,6 +120,13 @@ namespace CameraUnlock.Core.Config
         /// parses it.
         /// </summary>
         public bool PositionAllowed { get; set; } = true;
+
+        /// <summary>
+        /// The lean while aiming down sights: false keeps the eye on the sight line (sights
+        /// locked), true leaves the lean in full (true free look). Read only through
+        /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public bool TrueFreeLook { get; set; } = false;
 
         /// <summary>
         /// How long, in milliseconds, the newest packet counts as current. Core only parses
@@ -260,6 +273,9 @@ namespace CameraUnlock.Core.Config
             {
                 string key = ConfigKeySchema.Resolve(kvp.Key);
                 if (key == null) continue;
+                // Added to the schema after this reader was frozen: it skips them as it did when
+                // they resolved to nothing, duplicate-spelling warning included.
+                if (key == ConfigKeySchema.Keys.TrueFreeLook || key == ConfigKeySchema.Keys.TrueFreeLookKey) continue;
 
                 string firstSpelling;
                 if (firstSpellingOf.TryGetValue(key, out firstSpelling))

@@ -36,6 +36,7 @@ namespace CameraUnlock.Core.Config
             public const string DataFreshnessMs = "datafreshnessms";
             public const string PositionEnabled = "positionenabled";
             public const string PositionAllowed = "positionallowed";
+            public const string TrueFreeLook = "truefreelook";
             public const string PositionSensitivityX = "positionsensitivityx";
             public const string PositionSensitivityY = "positionsensitivityy";
             public const string PositionSensitivityZ = "positionsensitivityz";
@@ -58,6 +59,7 @@ namespace CameraUnlock.Core.Config
             public const string ReticleToggleKey = "reticletogglekey";
             public const string CycleTrackingModeKey = "cycletrackingmodekey";
             public const string YawModeKey = "yawmodekey";
+            public const string TrueFreeLookKey = "truefreelookkey";
             public const string RecenterKey = "recenterkey";
             public const string LightFollowsHead = "lightfollowshead";
             public const string LightMultiplier = "lightmultiplier";
@@ -253,6 +255,8 @@ namespace CameraUnlock.Core.Config
             { "trackingmodekey", "cycletrackingmodekey" },
             { "trackingport", "udpport" },
             { "trackingtogglekey", "togglekey" },
+            { "truefreelook", "truefreelook" },
+            { "truefreelookkey", "truefreelookkey" },
             { "udpport", "udpport" },
             { "worldlockedyaw", "worldspaceyaw" },
             { "worldspaceyaw", "worldspaceyaw" },

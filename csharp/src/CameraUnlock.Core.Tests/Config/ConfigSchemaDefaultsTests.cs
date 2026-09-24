@@ -39,7 +39,7 @@ namespace CameraUnlock.Core.Tests.Config
                 File.ReadAllText(Path.Combine(RepoRoot(), "data", "config-schema.json")));
         }
 
-        // Every concept in the schema, bound to the field the parser writes it to. A concept
+        // Every concept in the schema, bound to the field that holds it. A concept
         // added without an entry here fails the test rather than shipping an unchecked default.
         private static Dictionary<string, object> ShippedDefaults()
         {
@@ -64,6 +64,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "RotationEnabled", config.RotationEnabled },
                 { "PositionEnabled", config.PositionEnabled },
                 { "PositionAllowed", config.PositionAllowed },
+                { "TrueFreeLook", config.TrueFreeLook },
                 { "PositionSensitivityX", config.Position.SensitivityX },
                 { "PositionSensitivityY", config.Position.SensitivityY },
                 { "PositionSensitivityZ", config.Position.SensitivityZ },
@@ -86,6 +87,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "ReticleToggleKey", config.ReticleToggleKeyName },
                 { "CycleTrackingModeKey", config.CycleTrackingModeKeyName },
                 { "YawModeKey", config.YawModeKeyName },
+                { "TrueFreeLookKey", config.TrueFreeLookKeyName },
                 { "RecenterKey", config.RecenterKeyName },
                 { "LightFollowsHead", config.Light.FollowsHead },
                 { "LightMultiplier", config.Light.Multiplier },
@@ -107,7 +109,7 @@ namespace CameraUnlock.Core.Tests.Config
 
                     Assert.True(shipped.ContainsKey(id),
                         "concept '" + id + "' declares a default in data/config-schema.json but nothing " +
-                        "in ConfigSchemaDefaultsTests binds it to the field the parser writes it to");
+                        "in ConfigSchemaDefaultsTests binds it to the field that holds it");
 
                     object actual = shipped[id];
                     switch (type)

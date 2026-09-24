@@ -224,7 +224,9 @@ export function lintCanonicalConfig(bytes, { dialect, exceptions }) {
         problems.push(`${where} is retired (data/config-schema.json retired ${retired.id}), so a canonical file has no row for it`);
         continue;
       }
-      if (bareNouns.has(norm)) {
+      if (norm.startsWith("chord")) {
+        problems.push(`${where}: a chord is an item of its action's key list (ToggleKey=End, Ctrl+Shift+Y), not a key of its own`);
+      } else if (bareNouns.has(norm)) {
         problems.push(`${where}: a bare ${v.key} takes its meaning from the section; name what it applies to`);
       } else if (!PASCAL_CASE.test(v.key)) {
         problems.push(`${where} is not a PascalCase name of ASCII letters and digits`);

@@ -28,6 +28,7 @@ inline constexpr const char* kRotationEnabled = "rotationenabled";
 inline constexpr const char* kDataFreshnessMs = "datafreshnessms";
 inline constexpr const char* kPositionEnabled = "positionenabled";
 inline constexpr const char* kPositionAllowed = "positionallowed";
+inline constexpr const char* kTrueFreeLook = "truefreelook";
 inline constexpr const char* kPositionSensitivityX = "positionsensitivityx";
 inline constexpr const char* kPositionSensitivityY = "positionsensitivityy";
 inline constexpr const char* kPositionSensitivityZ = "positionsensitivityz";
@@ -50,6 +51,7 @@ inline constexpr const char* kPositionToggleKey = "positiontogglekey";
 inline constexpr const char* kReticleToggleKey = "reticletogglekey";
 inline constexpr const char* kCycleTrackingModeKey = "cycletrackingmodekey";
 inline constexpr const char* kYawModeKey = "yawmodekey";
+inline constexpr const char* kTrueFreeLookKey = "truefreelookkey";
 inline constexpr const char* kRecenterKey = "recenterkey";
 inline constexpr const char* kLightFollowsHead = "lightfollowshead";
 inline constexpr const char* kLightMultiplier = "lightmultiplier";
@@ -254,6 +256,8 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "trackingmodekey", "cycletrackingmodekey", false },
     { "trackingport", "udpport", false },
     { "trackingtogglekey", "togglekey", false },
+    { "truefreelook", "truefreelook", false },
+    { "truefreelookkey", "truefreelookkey", false },
     { "udpport", "udpport", false },
     { "worldlockedyaw", "worldspaceyaw", false },
     { "worldspaceyaw", "worldspaceyaw", false },
@@ -308,6 +312,7 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "DataFreshnessMs", config_keys::kDataFreshnessMs, ConfigValueType::kInt, 500, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionEnabled", config_keys::kPositionEnabled, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionAllowed", config_keys::kPositionAllowed, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "TrueFreeLook", config_keys::kTrueFreeLook, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityX", config_keys::kPositionSensitivityX, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityY", config_keys::kPositionSensitivityY, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityZ", config_keys::kPositionSensitivityZ, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
@@ -330,6 +335,7 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "ReticleToggleKey", config_keys::kReticleToggleKey, ConfigValueType::kString, 0, 0.0f, false, "Insert", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "CycleTrackingModeKey", config_keys::kCycleTrackingModeKey, ConfigValueType::kString, 0, 0.0f, false, "", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "YawModeKey", config_keys::kYawModeKey, ConfigValueType::kString, 0, 0.0f, false, "PageDown", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "TrueFreeLookKey", config_keys::kTrueFreeLookKey, ConfigValueType::kString, 0, 0.0f, false, "Insert", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "RecenterKey", config_keys::kRecenterKey, ConfigValueType::kString, 0, 0.0f, false, "Home", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LightFollowsHead", config_keys::kLightFollowsHead, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LightMultiplier", config_keys::kLightMultiplier, ConfigValueType::kFloat, 0, 1.5f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },

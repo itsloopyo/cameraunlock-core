@@ -9,6 +9,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `TrueFreeLook` and `TrueFreeLookKey` in the canonical concept set
+
+Aiming down sights has two lean modes in a shooter with positional tracking (the
+`shooter-ads-handling` skill): sights locked, the default, and true free look. The setting and its
+toggle are now schema concepts, so every mod spells them the same way.
+
+- `[Position] TrueFreeLook`, bool, default false, no aliases. false keeps the eye on the sight line
+  while aiming; true leaves the lean in full while the weapon stays put in the world. It is in
+  `[Position]` because the lean is all it changes and it exists only where positional tracking
+  does, and a key goes in the section of its subject, as `CollisionEnabled` does. It is a persisted
+  preference like `WorldSpaceYaw`: the toggle saves it, so a mod marks the row Writable.
+- `[Hotkeys] TrueFreeLookKey`, a key list with `canonical_default` `Insert, Ctrl+Shift+U`. Its
+  `default` and field initialiser are `Insert`, a single key like the other hotkey concepts'.
+- Fields `HeadTrackingConfigData.TrueFreeLook` and `TrueFreeLookKeyName`, and
+  `HeadTrackingConfig::true_free_look` and `true_free_look_key_name`, which come after every
+  existing C++ member. Both `HeadTrackingConfigTable`s bind them, and their defaults instance starts
+  `TrueFreeLookKey` at its `canonical_default`. Neither concept is on `IHeadTrackingConfig`.
+- The deprecated flat readers (`HeadTrackingConfigData.ApplyValues` and `LoadFromFile`,
+  `HeadTrackingConfig::ApplyValues` and `LoadFromFile`) do not read either concept, so their
+  behaviour and defaults are unchanged: the C# one skips both before its duplicate-spelling
+  warning, as it did while they resolved to no concept. `true_free_look` is read only by a mod's legacy import:
+  section-less matching resolves it to `TrueFreeLook`, so in a canonical file it draws
+  `MisplacedKey` and is not read, and the lint reports it as spelled `TrueFreeLook`.
+- The generated tables gain `ConfigConcepts.TrueFreeLook`, `ConfigConcepts.TrueFreeLookKey`, their
+  `ConfigKeySchema.Keys` and `config_keys` constants, and `schema::Concept::TrueFreeLook` and
+  `TrueFreeLookKey`. The two are inserted in the schema's concepts order, after `PositionAllowed`
+  and after `YawModeKey`, which is where the renderer writes them, so the later values of
+  `schema::Concept` move up. That enum has no consumer yet.
+- `data/fixtures/canonical-ini/head-tracking/` carries both concepts: `all-concepts.ini` and the
+  three apply cases.
+
+The canonical hotkey defaults are now the four lists of the controls table: `ToggleKey`
+`End, Ctrl+Shift+Y`, `CycleTrackingModeKey` `PageUp, Ctrl+Shift+G`, `YawModeKey`
+`PageDown, Ctrl+Shift+H` and `TrueFreeLookKey` `Insert, Ctrl+Shift+U`. A chord is an ordinary item
+of its action's list, so the canonical config lint now refuses any key whose name starts with
+`Chord` (`ChordToggle`, `ChordToggleKey` and the rest), and a mod's legacy import folds such a row
+into the action's list. `ShowReticle`, `ReticleToggleKey` and `PositionToggleKey` stay
+non-canonical.
+
+A search of the sibling repos' INI, cfg, JSON, TOML, C++, C#, Lua, Rust and Markdown files and
+their 41 decoded launcher manifest seeds found no `TrueFreeLook` or `true_free_look`, so no
+config already on disk changes meaning.
+
 ### Added - `docs/canonical-config.md`: the canonical config format, documented
 
 The design lived only in untracked notes, so nothing committed described the format that every

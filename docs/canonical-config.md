@@ -184,7 +184,9 @@ dialects differ in one way:
 
 A binding with modifiers fires when its key goes down while every modifier it names is held, on
 either side. A binding without modifiers does not fire while Ctrl and Shift are both held. The
-chords are ordinary items of the list, so a player can rebind or remove them like any other key.
+chords are ordinary items of the list, so a player can rebind or remove them like any other key,
+and no key of its own names a chord: a canonical file has no key whose name starts with `Chord`,
+and a mod's legacy import folds an old chord switch or chord letter row into its action's list.
 C++ `input::RegisterKeyBindings` puts a list on a `HotkeyPoller`, one hotkey per distinct key, so
 one press runs the action once however many items it matches; C#
 `KeyBindingInput.IsTriggered` (`CameraUnlock.Core.Unity`) asks Unity's input the same question.
@@ -213,7 +215,7 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way. This is core's table naming all 26
+The concepts are the settings every mod spells the same way. This is core's table naming all 28
 of them at their defaults, which both languages render byte for byte
 (`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). The comments are the schema's
 `file_comment`, and a mod can replace one where its unit or behaviour differs.
@@ -260,6 +262,9 @@ PositionEnabled=true
 ; false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,
 ; and the mode hotkey skips the modes that use position.
 PositionAllowed=true
+; false: while you aim down the sights, leaning keeps your eye on the sights.
+; true: the weapon stays put and your head moves freely around it (true free look).
+TrueFreeLook=false
 ; How far, in metres, leaning left or right can move the view.
 PositionLimitX=0.3
 ; How far, in metres, raising your head can move the view.
@@ -292,6 +297,8 @@ ToggleKey=End, Ctrl+Shift+Y
 CycleTrackingModeKey=PageUp, Ctrl+Shift+G
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
 YawModeKey=PageDown, Ctrl+Shift+H
+; Switches between keeping your eye on the sights and true free look (TrueFreeLook).
+TrueFreeLookKey=Insert, Ctrl+Shift+U
 
 [Light]
 ; true: a light you carry points where you look instead of where you aim.
@@ -304,15 +311,24 @@ LightMultiplier=1.5
 The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFreshnessMs` 1 to
 2147483647, the smoothing pair and `CollisionReleaseSmoothing` 0 to 1, the five limits and the two
 tracker pivots 0 to 10, `LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its
-unit is the engine's own), and `CollisionChannel` none. The three hotkey lists start at the
+unit is the engine's own), and `CollisionChannel` none. The four hotkey lists start at the
 schema's `canonical_default`. The `default` field and core's field initialisers, which the older
-flat readers use, keep `End` for `ToggleKey` and `PageDown` for `YawModeKey`, and leave
-`CycleTrackingModeKey` empty.
+flat readers use, keep `End` for `ToggleKey`, `PageDown` for `YawModeKey` and `Insert` for
+`TrueFreeLookKey`, and leave `CycleTrackingModeKey` empty.
 
 The tracking mode at startup is the pair `RotationEnabled` and `PositionEnabled`: both true is
 rotation and position, `true, false` rotation only, `false, true` position only. Both false names
 no mode, so the table reads both as their defaults and reports both lines. A mode change always
 writes the pair.
+
+`TrueFreeLook` is the lean while aiming down sights, in a shooter with an aim state and positional
+tracking. `false`, sights locked, keeps the eye on the sight line; `true`, true free look, leaves
+the lean in full while the weapon stays put in the world. It is in `[Position]` because the lean is
+all it changes and it exists only where positional tracking does, and a key belongs in the section
+of its subject, as `CollisionEnabled` does. A mod without positional tracking binds neither it nor
+`TrueFreeLookKey`. It has no alias: `true_free_look` is read only by a mod's legacy import, and in a
+canonical file it draws `MisplacedKey` and is not read. The older flat readers read neither
+`TrueFreeLook` nor `TrueFreeLookKey`.
 
 The schema's other concepts stay in the schema, so the older flat readers still parse them, and
 the canonical format never writes them. Each carries a `canonical_reason`, which the table's
@@ -350,7 +366,8 @@ A local row belongs in the schema section of the same subject when there is one 
 feature under `[Position]`), and otherwise in a section of its own. The canonical config lint also
 refuses a local key that is one of these bare nouns from the schema's `deliberately_unaliased`
 list: `Enabled`, `Enable`, `Amount`, `Factor`, `Scale`, `Limit`, `Multiplier`, `Yaw`, `Pitch`,
-`Roll` and `Position`. It refuses no other spelling from that list.
+`Roll` and `Position`, and any key whose name starts with `Chord` (see [Hotkeys](#hotkeys)). It
+refuses no other spelling from that list.
 
 ## What a mod binds
 
@@ -391,7 +408,7 @@ The list is explicit because a file carries only what the mod binds, and because
 adds later then reaches a mod's file only when that mod names it, so it never breaks an existing
 mod's committed file. An empty list or a concept named twice throws.
 
-The defaults are the config type's own, with the three hotkey lists at their `canonical_default`.
+The defaults are the config type's own, with the four hotkey lists at their `canonical_default`.
 `CollisionChannel` is an Engine row. `LocalSmoothing` and `RemoteSmoothing` also set the copy the
 position settings carry. `PositionLimitY` never sets `PositionLimitYDown`: no key takes its value
 from another.
@@ -403,7 +420,7 @@ throws, naming it. That is how a mod states which of its controls persist:
 
 - A tracking-mode control writes `RotationEnabled` and `PositionEnabled` together, so a table
   that has both must mark both Writable or neither; the owner refuses a table that marks one.
-- The yaw-mode control writes `WorldSpaceYaw`.
+- The yaw-mode control writes `WorldSpaceYaw`, and the true free look toggle writes `TrueFreeLook`.
 - The on/off toggle (End) does not persist: it changes only the session. `EnableOnStartup` is
   Writable only in a mod with a separate control that saves it, and the toggle still never calls
   `Save` for it.
@@ -925,7 +942,8 @@ In a mod repo, and in conformance:
   every concept at the schema's section and key, spelled as the schema spells it and not as an
   alias; no non-canonical or retired concept, and no `[Sensitivity]`, `[Inversion]` or `[Reticle]`
   section; a schema section spelled as the schema spells it; local sections and keys PascalCase,
-  each local key used once in the file and none of the bare nouns above; every hotkey concept, and
+  each local key used once in the file, none of the bare nouns above and none starting with
+  `Chord`; every hotkey concept, and
   every key in `[Hotkeys]`, a key list in the file's dialect, with the canonical hotkey concepts at
   their `canonical_default` unless `hotkey_exceptions` records the repo's reason; the file tracked
   by git and `-text`. It does not check comments.

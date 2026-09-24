@@ -81,6 +81,14 @@ struct HeadTrackingConfig {
     std::string reticle_toggle_key_name = "Insert";
     std::string cycle_tracking_mode_key_name;
 
+    /// The lean while aiming down sights: false keeps the eye on the sight line (sights
+    /// locked), true leaves the lean in full (true free look). Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool true_free_look = false;
+    /// The key list that toggles true_free_look. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    std::string true_free_look_key_name = "Insert";
+
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.
     ///

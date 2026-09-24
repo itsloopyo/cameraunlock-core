@@ -64,6 +64,11 @@ namespace CameraUnlock.Core.Config
             "PositionAllowed", "Position", "PositionAllowed", ConceptValueFamily.Bool,
             new BoolCodec(), new[] { "false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position." }, null);
 
+        /// <summary>[Position] TrueFreeLook.</summary>
+        public static readonly ConceptDescriptor<bool> TrueFreeLook = new ConceptDescriptor<bool>(
+            "TrueFreeLook", "Position", "TrueFreeLook", ConceptValueFamily.Bool,
+            new BoolCodec(), new[] { "false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)." }, null);
+
         /// <summary>[Position] PositionLimitX.</summary>
         public static readonly ConceptDescriptor<float> PositionLimitX = new ConceptDescriptor<float>(
             "PositionLimitX", "Position", "PositionLimitX", ConceptValueFamily.Floating,
@@ -134,6 +139,11 @@ namespace CameraUnlock.Core.Config
             "YawModeKey", "Hotkeys", "YawModeKey", ConceptValueFamily.Hotkey,
             new HotkeyCodec(), new[] { "Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw)." }, "PageDown, Ctrl+Shift+H");
 
+        /// <summary>[Hotkeys] TrueFreeLookKey.</summary>
+        public static readonly ConceptDescriptor<string> TrueFreeLookKey = new ConceptDescriptor<string>(
+            "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ConceptValueFamily.Hotkey,
+            new HotkeyCodec(), new[] { "Switches between keeping your eye on the sights and true free look (TrueFreeLook)." }, "Insert, Ctrl+Shift+U");
+
         /// <summary>[Light] LightFollowsHead.</summary>
         public static readonly ConceptDescriptor<bool> LightFollowsHead = new ConceptDescriptor<bool>(
             "LightFollowsHead", "Light", "LightFollowsHead", ConceptValueFamily.Bool,
@@ -157,6 +167,7 @@ namespace CameraUnlock.Core.Config
             DataFreshnessMs,
             PositionEnabled,
             PositionAllowed,
+            TrueFreeLook,
             PositionLimitX,
             PositionLimitY,
             PositionLimitYDown,
@@ -171,6 +182,7 @@ namespace CameraUnlock.Core.Config
             ToggleKey,
             CycleTrackingModeKey,
             YawModeKey,
+            TrueFreeLookKey,
             LightFollowsHead,
             LightMultiplier,
         };

@@ -72,6 +72,9 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
         case C::PositionAllowed:
             BindHeadTrackingMember<C::PositionAllowed>(table, &H::position_allowed);
             return;
+        case C::TrueFreeLook:
+            BindHeadTrackingMember<C::TrueFreeLook>(table, &H::true_free_look);
+            return;
         case C::PositionLimitX:
             table.template Concept<C::PositionLimitX>([](const Config& c) { return c.position.limit_x; },
                                                       [](Config& c, float v) { c.position.limit_x = v; });
@@ -123,6 +126,9 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
         case C::YawModeKey:
             BindHeadTrackingMember<C::YawModeKey>(table, &H::yaw_mode_key_name);
             return;
+        case C::TrueFreeLookKey:
+            BindHeadTrackingMember<C::TrueFreeLookKey>(table, &H::true_free_look_key_name);
+            return;
         case C::LightFollowsHead:
             table.template Concept<C::LightFollowsHead>([](const Config& c) { return c.light.follows_head; },
                                                         [](Config& c, bool v) { c.light.follows_head = v; });
@@ -150,9 +156,9 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
 /// `light`. CollisionChannel is an Engine row: the channel is data about the game, so at its
 /// default it is written as a comment.
 ///
-/// The defaults instance is Config{} with the three hotkey lists at the schema's canonical_default
-/// (`End, Ctrl+Shift+Y`, `PageUp, Ctrl+Shift+G`, `PageDown, Ctrl+Shift+H`); HeadTrackingConfig's
-/// own field initialisers, which the flat reader uses, stay single keys.
+/// The defaults instance is Config{} with the four hotkey lists at the schema's canonical_default
+/// (`End, Ctrl+Shift+Y`, `PageUp, Ctrl+Shift+G`, `PageDown, Ctrl+Shift+H`, `Insert, Ctrl+Shift+U`);
+/// HeadTrackingConfig's own field initialisers, which the flat reader uses, stay single keys.
 ///
 /// Throws std::invalid_argument for an empty list, a concept named twice, or a value that is not a
 /// canonical concept.
@@ -177,6 +183,7 @@ ConfigTable<Config> HeadTrackingConfigTable(std::initializer_list<schema::Concep
     defaults.cycle_tracking_mode_key_name =
         schema::ConceptTraits<schema::Concept::CycleTrackingModeKey>::kCanonicalDefault;
     defaults.yaw_mode_key_name = schema::ConceptTraits<schema::Concept::YawModeKey>::kCanonicalDefault;
+    defaults.true_free_look_key_name = schema::ConceptTraits<schema::Concept::TrueFreeLookKey>::kCanonicalDefault;
 
     ConfigTable<Config> table(std::move(defaults));
     for (schema::Concept id : implemented) detail::BindHeadTrackingConcept(table, id);

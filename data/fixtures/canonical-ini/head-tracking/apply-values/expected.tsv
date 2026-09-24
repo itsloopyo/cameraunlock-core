@@ -11,6 +11,7 @@ field	RotationEnabled	false
 field	DataFreshnessMs	750
 field	PositionEnabled	true
 field	PositionAllowed	false
+field	TrueFreeLook	true
 field	PositionLimitX	0.35
 field	PositionLimitY	0.25
 field	PositionLimitYDown	0.05
@@ -25,6 +26,7 @@ field	TrackerPivotUp	0.12
 field	ToggleKey	Home
 field	CycleTrackingModeKey	Insert, Ctrl+Alt+F9
 field	YawModeKey	
+field	TrueFreeLookKey	Delete, Alt+U
 field	LightFollowsHead	false
 field	LightMultiplier	1.0
 field	PositionLocalSmoothing	0.25

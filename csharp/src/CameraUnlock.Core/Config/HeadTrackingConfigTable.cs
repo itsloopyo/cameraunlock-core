@@ -23,9 +23,9 @@ namespace CameraUnlock.Core.Config
     /// is written as a comment.
     /// </para>
     /// <para>
-    /// The defaults instance is a new config with the three hotkey lists at the schema's
+    /// The defaults instance is a new config with the four hotkey lists at the schema's
     /// canonical_default (<c>End, Ctrl+Shift+Y</c>, <c>PageUp, Ctrl+Shift+G</c>,
-    /// <c>PageDown, Ctrl+Shift+H</c>); the properties' own initialisers, which
+    /// <c>PageDown, Ctrl+Shift+H</c>, <c>Insert, Ctrl+Shift+U</c>); the properties' own initialisers, which
     /// <see cref="HeadTrackingConfigData.LoadFromFile"/> uses, stay single keys.
     /// </para>
     /// </summary>
@@ -76,6 +76,7 @@ namespace CameraUnlock.Core.Config
             config.ToggleKeyName = CanonicalDefault(ConfigConcepts.ToggleKey);
             config.CycleTrackingModeKeyName = CanonicalDefault(ConfigConcepts.CycleTrackingModeKey);
             config.YawModeKeyName = CanonicalDefault(ConfigConcepts.YawModeKey);
+            config.TrueFreeLookKeyName = CanonicalDefault(ConfigConcepts.TrueFreeLookKey);
             return config;
         }
 
@@ -128,6 +129,9 @@ namespace CameraUnlock.Core.Config
                     return;
                 case nameof(ConfigConcepts.PositionAllowed):
                     table.Concept(ConfigConcepts.PositionAllowed, c => c.PositionAllowed, (c, v) => c.PositionAllowed = v);
+                    return;
+                case nameof(ConfigConcepts.TrueFreeLook):
+                    table.Concept(ConfigConcepts.TrueFreeLook, c => c.TrueFreeLook, (c, v) => c.TrueFreeLook = v);
                     return;
                 case nameof(ConfigConcepts.PositionLimitX):
                     table.Concept(ConfigConcepts.PositionLimitX, c => c.Position.LimitX, (c, v) =>
@@ -193,6 +197,9 @@ namespace CameraUnlock.Core.Config
                     return;
                 case nameof(ConfigConcepts.YawModeKey):
                     table.Concept(ConfigConcepts.YawModeKey, c => c.YawModeKeyName, (c, v) => c.YawModeKeyName = v);
+                    return;
+                case nameof(ConfigConcepts.TrueFreeLookKey):
+                    table.Concept(ConfigConcepts.TrueFreeLookKey, c => c.TrueFreeLookKeyName, (c, v) => c.TrueFreeLookKeyName = v);
                     return;
                 case nameof(ConfigConcepts.LightFollowsHead):
                     table.Concept(ConfigConcepts.LightFollowsHead, c => c.Light.FollowsHead,

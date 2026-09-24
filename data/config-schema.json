@@ -46,7 +46,7 @@
     },
     {
       "spellings": ["ChordToggle", "ChordYawMode", "ChordPosition", "ChordCycleMode", "ChordToggleKey"],
-      "reason": "Chord modifiers, not key names. A different concept from the *Key entries."
+      "reason": "Chord modifiers, not key names. A different concept from the *Key entries. A canonical file has no Chord* key at all: a chord is an ordinary item of its action's key list (ToggleKey=End, Ctrl+Shift+Y), and a game's legacy import folds a chord switch or letter row into that list. The canonical config lint refuses any key whose name starts with Chord."
     },
     {
       "spellings": ["BindAddress", "DeadzoneDeg", "DeadzoneYaw", "CyclePort", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
@@ -262,6 +262,17 @@
       "doc": "false means the game never applies positional tracking and the tracking-mode control skips the position modes, so head tracking runs rotation only whatever RotationEnabled and PositionEnabled say. For a game where position cannot work. One spelling fleet-wide: a game-local key may not reuse a concept name, so only a concept keeps every game on this one. No aliases: no config in the fleet named the switch when it was added. Core only parses it.",
       "canonical": true,
       "file_comment": ["false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."]
+    },
+    {
+      "id": "TrueFreeLook",
+      "section": "Position",
+      "key": "TrueFreeLook",
+      "type": "bool",
+      "default": false,
+      "aliases": [],
+      "doc": "The lean while aiming down sights, in a shooter with an aim state and positional tracking (the shooter-ads-handling skill). false is sights locked: the lean never takes the eye off the sight line, because the mod draws the weapon from the clean eye or eases the lean out through AdsFade while aiming. true is true free look: the lean stays in full, the weapon stays put in the world and the head moves around it. A persisted preference: the TrueFreeLookKey toggle saves it, so a mod marks the row Writable. A mod without positional tracking has one mode and binds neither concept. It sits under [Position] because the lean is all it changes and it exists only where positional tracking does, and design 1.6 puts a key in the schema section of its subject, as CollisionEnabled is. No aliases: true_free_look is read only by a game's legacy import. Section-less matching resolves that spelling to this concept, so a canonical file that holds it draws MisplacedKey and is not read. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
+      "canonical": true,
+      "file_comment": ["false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."]
     },
     {
       "id": "PositionSensitivityX",
@@ -519,6 +530,19 @@
       "file_comment": ["Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw)."],
       "codec": "hotkey",
       "canonical_default": "PageDown, Ctrl+Shift+H"
+    },
+    {
+      "id": "TrueFreeLookKey",
+      "section": "Hotkeys",
+      "key": "TrueFreeLookKey",
+      "type": "string",
+      "default": "Insert",
+      "aliases": [],
+      "doc": "Key that toggles TrueFreeLook, between sights locked and true free look. Only in a mod that binds TrueFreeLook. The deprecated flat readers do not read it, so its default is only the field initialiser's; a canonical file starts at canonical_default.",
+      "canonical": true,
+      "file_comment": ["Switches between keeping your eye on the sights and true free look (TrueFreeLook)."],
+      "codec": "hotkey",
+      "canonical_default": "Insert, Ctrl+Shift+U"
     },
     {
       "id": "RecenterKey",

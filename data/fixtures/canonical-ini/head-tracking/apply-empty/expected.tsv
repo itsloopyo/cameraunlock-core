@@ -9,6 +9,7 @@ field	RotationEnabled	true
 field	DataFreshnessMs	500
 field	PositionEnabled	true
 field	PositionAllowed	true
+field	TrueFreeLook	false
 field	PositionLimitX	0.3
 field	PositionLimitY	0.2
 field	PositionLimitYDown	0.2
@@ -23,6 +24,7 @@ field	TrackerPivotUp	0.0
 field	ToggleKey	End, Ctrl+Shift+Y
 field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
 field	YawModeKey	PageDown, Ctrl+Shift+H
+field	TrueFreeLookKey	Insert, Ctrl+Shift+U
 field	LightFollowsHead	true
 field	LightMultiplier	1.5
 field	PositionLocalSmoothing	0.0

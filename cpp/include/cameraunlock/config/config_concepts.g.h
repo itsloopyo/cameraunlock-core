@@ -22,6 +22,7 @@ enum class Concept {
     DataFreshnessMs,
     PositionEnabled,
     PositionAllowed,
+    TrueFreeLook,
     PositionLimitX,
     PositionLimitY,
     PositionLimitYDown,
@@ -36,6 +37,7 @@ enum class Concept {
     ToggleKey,
     CycleTrackingModeKey,
     YawModeKey,
+    TrueFreeLookKey,
     LightFollowsHead,
     LightMultiplier,
 };
@@ -147,6 +149,15 @@ struct ConceptTraits<Concept::PositionAllowed> {
     static constexpr const char* kKey = "PositionAllowed";
     static constexpr ValueFamily kFamily = ValueFamily::kBool;
     static constexpr const char* kFileComment[] = {"false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."};
+    static constexpr const char* kCanonicalDefault = nullptr;
+};
+
+template <>
+struct ConceptTraits<Concept::TrueFreeLook> {
+    static constexpr const char* kSection = "Position";
+    static constexpr const char* kKey = "TrueFreeLook";
+    static constexpr ValueFamily kFamily = ValueFamily::kBool;
+    static constexpr const char* kFileComment[] = {"false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."};
     static constexpr const char* kCanonicalDefault = nullptr;
 };
 
@@ -297,6 +308,15 @@ struct ConceptTraits<Concept::YawModeKey> {
 };
 
 template <>
+struct ConceptTraits<Concept::TrueFreeLookKey> {
+    static constexpr const char* kSection = "Hotkeys";
+    static constexpr const char* kKey = "TrueFreeLookKey";
+    static constexpr ValueFamily kFamily = ValueFamily::kHotkey;
+    static constexpr const char* kFileComment[] = {"Switches between keeping your eye on the sights and true free look (TrueFreeLook)."};
+    static constexpr const char* kCanonicalDefault = "Insert, Ctrl+Shift+U";
+};
+
+template <>
 struct ConceptTraits<Concept::LightFollowsHead> {
     static constexpr const char* kSection = "Light";
     static constexpr const char* kKey = "LightFollowsHead";
@@ -340,6 +360,7 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::DataFreshnessMs, "DataFreshnessMs", "General", "DataFreshnessMs", ValueFamily::kInteger, {"Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."}, 2, nullptr},
     {Concept::PositionEnabled, "PositionEnabled", "Position", "PositionEnabled", ValueFamily::kBool, {"true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."}, 2, nullptr},
     {Concept::PositionAllowed, "PositionAllowed", "Position", "PositionAllowed", ValueFamily::kBool, {"false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."}, 2, nullptr},
+    {Concept::TrueFreeLook, "TrueFreeLook", "Position", "TrueFreeLook", ValueFamily::kBool, {"false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."}, 2, nullptr},
     {Concept::PositionLimitX, "PositionLimitX", "Position", "PositionLimitX", ValueFamily::kFloating, {"How far, in metres, leaning left or right can move the view.", nullptr}, 1, nullptr},
     {Concept::PositionLimitY, "PositionLimitY", "Position", "PositionLimitY", ValueFamily::kFloating, {"How far, in metres, raising your head can move the view.", nullptr}, 1, nullptr},
     {Concept::PositionLimitYDown, "PositionLimitYDown", "Position", "PositionLimitYDown", ValueFamily::kFloating, {"How far, in metres, lowering your head can move the view.", nullptr}, 1, nullptr},
@@ -354,6 +375,7 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::ToggleKey, "ToggleKey", "Hotkeys", "ToggleKey", ValueFamily::kHotkey, {"Turns head tracking on and off.", nullptr}, 1, "End, Ctrl+Shift+Y"},
     {Concept::CycleTrackingModeKey, "CycleTrackingModeKey", "Hotkeys", "CycleTrackingModeKey", ValueFamily::kHotkey, {"Changes the tracking mode: rotation and position, rotation only, position only.", nullptr}, 1, "PageUp, Ctrl+Shift+G"},
     {Concept::YawModeKey, "YawModeKey", "Hotkeys", "YawModeKey", ValueFamily::kHotkey, {"Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).", nullptr}, 1, "PageDown, Ctrl+Shift+H"},
+    {Concept::TrueFreeLookKey, "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ValueFamily::kHotkey, {"Switches between keeping your eye on the sights and true free look (TrueFreeLook).", nullptr}, 1, "Insert, Ctrl+Shift+U"},
     {Concept::LightFollowsHead, "LightFollowsHead", "Light", "LightFollowsHead", ValueFamily::kBool, {"true: a light you carry points where you look instead of where you aim.", nullptr}, 1, nullptr},
     {Concept::LightMultiplier, "LightMultiplier", "Light", "LightMultiplier", ValueFamily::kFloating, {"How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."}, 2, nullptr},
 };

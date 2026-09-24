@@ -126,6 +126,8 @@ native	pagedown,ctrl+shift+h	canonical	PageDown, Ctrl+Shift+H
 unity	pagedown,ctrl+shift+h	canonical	PageDown, Ctrl+Shift+H
 native	Insert,Ctrl+Shift+U	canonical	Insert, Ctrl+Shift+U
 unity	Insert,Ctrl+Shift+U	canonical	Insert, Ctrl+Shift+U
+native	Insert, Ctrl+Shift+U	canonical	Insert, Ctrl+Shift+U
+unity	Insert, Ctrl+Shift+U	canonical	Insert, Ctrl+Shift+U
 native	Home, End	canonical	Home, End
 unity	Home, End	canonical	Home, End
 native	End, Home, PageUp, PageDown	canonical	End, Home, PageUp, PageDown

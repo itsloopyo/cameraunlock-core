@@ -407,7 +407,7 @@ ShippedDefault ShippedString(const std::string& v) {
 }
 ShippedDefault ShippedColor(const float* v) { return {cameraunlock::ConfigValueType::kColor, 0, 0.0f, false, {}, v}; }
 
-// Every concept in the schema, bound to the field ApplyValues writes it to. A concept
+// Every concept in the schema, bound to the field that holds it. A concept
 // added to the schema without a row here fails the test, which is what stops the C++ half
 // from missing a field the C# half has.
 std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTrackingConfig& c) {
@@ -430,6 +430,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"RotationEnabled", ShippedBool(c.rotation_enabled)},
         {"PositionEnabled", ShippedBool(c.position_enabled)},
         {"PositionAllowed", ShippedBool(c.position_allowed)},
+        {"TrueFreeLook", ShippedBool(c.true_free_look)},
         {"PositionSensitivityX", ShippedFloat(c.position.sensitivity_x)},
         {"PositionSensitivityY", ShippedFloat(c.position.sensitivity_y)},
         {"PositionSensitivityZ", ShippedFloat(c.position.sensitivity_z)},
@@ -452,6 +453,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"ReticleToggleKey", ShippedString(c.reticle_toggle_key_name)},
         {"CycleTrackingModeKey", ShippedString(c.cycle_tracking_mode_key_name)},
         {"YawModeKey", ShippedString(c.yaw_mode_key_name)},
+        {"TrueFreeLookKey", ShippedString(c.true_free_look_key_name)},
         {"RecenterKey", ShippedString(c.recenter_key_name)},
         {"LightFollowsHead", ShippedBool(c.light.follows_head)},
         {"LightMultiplier", ShippedFloat(c.light.multiplier)},

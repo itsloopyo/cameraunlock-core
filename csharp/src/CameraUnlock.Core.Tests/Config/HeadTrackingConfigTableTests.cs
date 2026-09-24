@@ -58,7 +58,8 @@ namespace CameraUnlock.Core.Tests.Config
         public void TheHotkeyDefaultsAreTheCanonicalDefaults()
         {
             HeadTrackingConfigData defaults = HeadTrackingConfigTableFixtures.Defaults(
-                HeadTrackingConfigTable.Create(ConfigConcepts.ToggleKey, ConfigConcepts.CycleTrackingModeKey, ConfigConcepts.YawModeKey));
+                HeadTrackingConfigTable.Create(ConfigConcepts.ToggleKey, ConfigConcepts.CycleTrackingModeKey, ConfigConcepts.YawModeKey,
+                    ConfigConcepts.TrueFreeLookKey));
 
             Assert.Equal("End, Ctrl+Shift+Y", defaults.ToggleKeyName);
             Assert.Equal(ConfigConcepts.ToggleKey.CanonicalDefault, defaults.ToggleKeyName);
@@ -66,15 +67,44 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(ConfigConcepts.CycleTrackingModeKey.CanonicalDefault, defaults.CycleTrackingModeKeyName);
             Assert.Equal("PageDown, Ctrl+Shift+H", defaults.YawModeKeyName);
             Assert.Equal(ConfigConcepts.YawModeKey.CanonicalDefault, defaults.YawModeKeyName);
+            Assert.Equal("Insert, Ctrl+Shift+U", defaults.TrueFreeLookKeyName);
+            Assert.Equal(ConfigConcepts.TrueFreeLookKey.CanonicalDefault, defaults.TrueFreeLookKeyName);
         }
 
         [Fact]
-        public void TheFlatReadersFieldDefaultsAreUnchanged()
+        public void TheFlatReadersFieldDefaultsAreSingleKeys()
         {
             var flat = new HeadTrackingConfigData();
             Assert.Equal("End", flat.ToggleKeyName);
             Assert.Equal(string.Empty, flat.CycleTrackingModeKeyName);
             Assert.Equal("PageDown", flat.YawModeKeyName);
+            Assert.Equal("Insert", flat.TrueFreeLookKeyName);
+        }
+
+        [Fact]
+        public void ACanonicalFilesTrueFreeLookSnakeCaseIsMisplacedAndNotRead()
+        {
+            var config = new HeadTrackingConfigData();
+            ApplyReport report = HeadTrackingConfigTable.Create(ConfigConcepts.TrueFreeLook)
+                .Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Position]\r\ntrue_free_look=true\r\n")), config);
+            Assert.False(config.TrueFreeLook);
+            Assert.Equal(CanonicalDiagnosticKind.MisplacedKey, Assert.Single(report.Diagnostics).Kind);
+        }
+
+        [Fact]
+        public void TheFlatReaderReadsNeitherTrueFreeLookConcept()
+        {
+            var flat = new HeadTrackingConfigData();
+            var log = new List<string>();
+            flat.ApplyValues(new Dictionary<string, string>
+            {
+                { "TrueFreeLook", "true" },
+                { "true_free_look", "true" },
+                { "TrueFreeLookKey", "F8" },
+            }, log.Add);
+            Assert.False(flat.TrueFreeLook);
+            Assert.Equal("Insert", flat.TrueFreeLookKeyName);
+            Assert.Empty(log);
         }
 
         [Fact]

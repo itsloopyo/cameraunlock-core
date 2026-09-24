@@ -123,6 +123,7 @@ std::vector<FieldRead> Fields() {
         {"DataFreshnessMs", [i](const H& c) { return i(c.data_freshness_ms); }},
         {"PositionEnabled", [b](const H& c) { return b(c.position_enabled); }},
         {"PositionAllowed", [b](const H& c) { return b(c.position_allowed); }},
+        {"TrueFreeLook", [b](const H& c) { return b(c.true_free_look); }},
         {"PositionLimitX", [f](const H& c) { return f(c.position.limit_x); }},
         {"PositionLimitY", [f](const H& c) { return f(c.position.limit_y); }},
         {"PositionLimitYDown", [f](const H& c) { return f(c.position.limit_y_down); }},
@@ -137,6 +138,7 @@ std::vector<FieldRead> Fields() {
         {"ToggleKey", [k](const H& c) { return k(c.toggle_key_name); }},
         {"CycleTrackingModeKey", [k](const H& c) { return k(c.cycle_tracking_mode_key_name); }},
         {"YawModeKey", [k](const H& c) { return k(c.yaw_mode_key_name); }},
+        {"TrueFreeLookKey", [k](const H& c) { return k(c.true_free_look_key_name); }},
         {"LightFollowsHead", [b](const H& c) { return b(c.light.follows_head); }},
         {"LightMultiplier", [f](const H& c) { return f(c.light.multiplier); }},
         {"PositionLocalSmoothing", [f](const H& c) { return f(c.position.local_smoothing); }},
@@ -237,8 +239,8 @@ void TestEveryConceptBound() {
 
 void TestHotkeyDefaults() {
     std::cout << "\n[hotkey defaults]\n";
-    const ConfigTable<HeadTrackingConfig> table =
-        HeadTrackingConfigTable({Concept::ToggleKey, Concept::CycleTrackingModeKey, Concept::YawModeKey});
+    const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable(
+        {Concept::ToggleKey, Concept::CycleTrackingModeKey, Concept::YawModeKey, Concept::TrueFreeLookKey});
     const HeadTrackingConfig& d = table.defaults();
     Check(d.toggle_key_name == "End, Ctrl+Shift+Y" &&
               d.toggle_key_name == schema::ConceptTraits<Concept::ToggleKey>::kCanonicalDefault,
@@ -250,11 +252,32 @@ void TestHotkeyDefaults() {
     Check(d.yaw_mode_key_name == "PageDown, Ctrl+Shift+H" &&
               d.yaw_mode_key_name == schema::ConceptTraits<Concept::YawModeKey>::kCanonicalDefault,
           "YawModeKey defaults to its canonical_default");
+    Check(d.true_free_look_key_name == "Insert, Ctrl+Shift+U" &&
+              d.true_free_look_key_name == schema::ConceptTraits<Concept::TrueFreeLookKey>::kCanonicalDefault,
+          "TrueFreeLookKey defaults to its canonical_default");
 
     const HeadTrackingConfig flat;
     Check(flat.toggle_key_name == "End" && flat.cycle_tracking_mode_key_name.empty() &&
-              flat.yaw_mode_key_name == "PageDown",
-          "the flat reader's field defaults are unchanged");
+              flat.yaw_mode_key_name == "PageDown" && flat.true_free_look_key_name == "Insert",
+          "the flat reader's field defaults are single keys");
+}
+
+void TestTrueFreeLookSpellings() {
+    std::cout << "\n[TrueFreeLook is read under its own spelling only]\n";
+    const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable({Concept::TrueFreeLook});
+    HeadTrackingConfig config;
+    const ApplyReport report =
+        ApplyCanonical(ParseCanonicalIni("[Position]\r\ntrue_free_look=true\r\n"), table, config);
+    Check(!config.true_free_look && report.diagnostics.size() == 1 &&
+              report.diagnostics[0].kind == CanonicalDiagnosticKind::MisplacedKey,
+          "a canonical file's true_free_look is misplaced and not read");
+
+    HeadTrackingConfig flat;
+    std::vector<std::string> log;
+    flat.ApplyValues({{"TrueFreeLook", "true"}, {"true_free_look", "true"}, {"TrueFreeLookKey", "F8"}},
+                     [&log](const std::string& line) { log.push_back(line); });
+    Check(!flat.true_free_look && flat.true_free_look_key_name == "Insert" && log.empty(),
+          "the flat reader reads neither TrueFreeLook concept");
 }
 
 void TestArguments() {
@@ -315,6 +338,7 @@ int RunHeadTrackingConfigTableTests() {
         TestEveryConceptBound();
         TestFixtures();
         TestHotkeyDefaults();
+        TestTrueFreeLookSpellings();
         TestArguments();
         TestOnlyNamedConcepts();
         TestDerivedConfig();
