@@ -152,10 +152,14 @@ the file.
 | list of hex32, hex64 or string | items joined by `, ` | split at `,`, each item trimmed and non-empty; an empty value is an empty list |
 | hotkey | a key list, see [Hotkeys](#hotkeys) | see [Hotkeys](#hotkeys) |
 
-`data/fixtures/canonical-ini/codecs/cases.tsv` holds both languages to every codec. On .NET
-Framework the float parser is not correctly rounded, so a hand-typed float text with more digits
-than core writes can read one bit away from what C++ reads; every text core writes reads the same
-in both.
+`data/fixtures/canonical-ini/codecs/cases.tsv` holds both languages to every codec, with three
+values left out because .NET Framework disagrees with the rules there. Its float formatting is
+not always correctly rounded, so it can write a float's last digit differently from C++ and
+.NET 8: the float 1234.5677490234375 as `1234.5678` where the rule gives `1234.5677`, and
+3451485.25 as `3451485.3` where the rule gives `3451485.2`. C++ reads either text as the same
+float. Its float parser is not correctly rounded either, so a hand-typed float text with more
+digits than core writes can read one step away from what C++ reads. .NET Framework 3.5 also reads
+the double `3e-324` as 0. Each language's own tests hold those three values.
 
 ### Hotkeys
 
@@ -301,8 +305,9 @@ The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFres
 2147483647, the smoothing pair and `CollisionReleaseSmoothing` 0 to 1, the five limits and the two
 tracker pivots 0 to 10, `LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its
 unit is the engine's own), and `CollisionChannel` none. The three hotkey lists start at the
-schema's `canonical_default`; the `default` field and core's field initialisers, which the older
-flat readers use, keep their single key names.
+schema's `canonical_default`. The `default` field and core's field initialisers, which the older
+flat readers use, keep `End` for `ToggleKey` and `PageDown` for `YawModeKey`, and leave
+`CycleTrackingModeKey` empty.
 
 The tracking mode at startup is the pair `RotationEnabled` and `PositionEnabled`: both true is
 rotation and position, `true, false` rotation only, `false, true` position only. Both false names
@@ -343,9 +348,9 @@ feature of one game. The table refuses, when the row is added:
 
 A local row belongs in the schema section of the same subject when there is one (a position
 feature under `[Position]`), and otherwise in a section of its own. The canonical config lint also
-refuses a local key that is one of the bare nouns in the schema's `deliberately_unaliased` list
-(`Enabled`, `Enable`, `Amount`, `Factor`, `Scale`, `Limit`, `Multiplier`, `Yaw`, `Pitch`, `Roll`,
-`Position` and the rest).
+refuses a local key that is one of these bare nouns from the schema's `deliberately_unaliased`
+list: `Enabled`, `Enable`, `Amount`, `Factor`, `Scale`, `Limit`, `Multiplier`, `Yaw`, `Pitch`,
+`Roll` and `Position`. It refuses no other spelling from that list.
 
 ## What a mod binds
 
@@ -407,8 +412,10 @@ throws, naming it. That is how a mod states which of its controls persist:
 
 A converted repo commits the file its table renders from its defaults, at the `committed` path
 `data/config-format.json` records, marked `-text` in `.gitattributes`. The repo's render test
-compares the two byte for byte, so the committed file cannot drift from the code, and it is also
-exactly what the owner creates at first launch. `pixi run render-config` rewrites it after a change
+compares the two byte for byte, so the committed file cannot drift from the code. The owner
+creates the same bytes at first launch wherever the runtime writes every value's text as the test
+did: a C# mod on .NET Framework can differ in the last digit of a float, as [Values](#values)
+describes. `pixi run render-config` rewrites it after a change
 to a row, a comment or a default (see [Tooling](#tooling)).
 
 ### C++ example
@@ -540,9 +547,9 @@ later changes no mod's code:
 | `header` | `Header` | What the renderer writes above the settings: the display name. Required |
 | `status_sink` | `StatusSink` | Optional. Shows the player a one-line message, run after the owner releases its lock |
 
-The constructor throws for a missing or relative path, a table with no rows, a table that has
-both `RotationEnabled` and `PositionEnabled` and marks only one Writable, a header the renderer
-refuses, or (C#) a `LegacySourcePath` with no `Import`.
+The constructor throws for a missing or relative path, a table that has both `RotationEnabled`
+and `PositionEnabled` and marks only one Writable, or a header the renderer refuses. The C++ owner
+also throws for a table with no rows, and the C# owner for a `LegacySourcePath` with no `Import`.
 
 ### Load
 
@@ -553,12 +560,12 @@ up and write them afterwards. The status numbers are the same in both languages.
 
 | Status | When | The session runs on | Saves this session |
 |--------|------|---------------------|--------------------|
-| `Canonical` (0) | The file is stamped and readable, or unstamped in a mod with no import (the log says the next save stamps it) | the file | yes |
-| `Migrated` (1) | An unstamped file in a mod with an import was converted this launch | the converted settings | yes |
+| `Canonical` (0) | The file is stamped and readable, or unstamped and not read by the import: a mod with no import, or a BepInEx mod, whose import reads the `.cfg` (the log says the next save stamps it) | the file | yes |
+| `Migrated` (1) | An unstamped file the import reads, or under BepInEx the `.cfg` with no `.ini` beside it, was converted this launch | the converted settings | yes |
 | `Created` (2) | There was no file, and the rendered defaults were written, never over a file that appeared meanwhile | the defaults | yes |
 | `Deferred` (3) | A conversion or creation could not finish, or the file could not be opened | what the import gave, or the defaults | no |
 | `LegacyRefused` (4) | The import refused the file, as the published build did | what the import gave; the mod does what its published build did on that refusal | no |
-| `Unreadable` (5) | A stamped file, or one in a mod with no import, saved as UTF-16 or holding a NUL byte | the defaults | no |
+| `Unreadable` (5) | A stamped file, or an unstamped one the import does not read, saved as UTF-16 or holding a NUL byte | the defaults | no |
 
 The import never runs on a stamped file, and a file the owner cannot open is deferred on the
 defaults without running it, since the stamp that tells a legacy file from a canonical one is
@@ -570,7 +577,9 @@ inside the file.
 new values. The owner then checks that only Writable rows changed, builds one edit (both mode rows
 when either changed), runs the editor, reads the edited bytes back through the table, where only
 the changed rows may differ, and writes exactly those bytes, only if the file still holds the
-bytes it read. A change that leaves every row as it was writes nothing and reports `Saved`.
+bytes it read. That last check and the replacement are two operations, not a compare-and-swap, so
+a program that writes the file between them is overwritten. A change that leaves every row as it
+was writes nothing and reports `Saved`.
 
 | Status | Meaning |
 |--------|---------|
@@ -579,8 +588,9 @@ bytes it read. A change that leaves every row as it was writes nothing and repor
 | `Uncertain` (2) | Windows started replacing the file and did not finish, and the checked writer could not finish it either. The reason names the file and the kept temporary that holds the new contents |
 
 It saves only a readable file whose `ConfigFormat` is not newer than the build's and that is
-stamped or read by no import; an unstamped one gets its `[CameraUnlock]` section in the same
-write. An unstamped file in a mod with an import is a legacy file and is never edited. A missing
+stamped or not read by the import; an unstamped one gets its `[CameraUnlock]` section in the same
+write. An unstamped file the import reads is a legacy file and is never edited. A BepInEx mod's
+import reads the `.cfg`, so an unstamped `.ini` is saved and stamped. A missing
 file is not created by `Save`: the next `Load` creates it. After a `Deferred`, `LegacyRefused` or
 `Unreadable` load every save is `NotSaved` until a `Reload` applies a readable file. `Save` never
 rolls back and never retries: the mod applies the new value first, and a save that fails leaves
@@ -674,7 +684,7 @@ allow.
 
 ### What happens at the first launch
 
-When `Load` finds an unstamped file and the mod has an import:
+When `Load` finds an unstamped file the import reads (for BepInEx, see [BepInEx](#bepinex)):
 
 1. It opens the file for reading, sharing read and write but not delete, and holds it open while
    it reads the bytes, runs the import on the live path and reads the bytes again. No program can
@@ -684,6 +694,8 @@ When `Load` finds an unstamped file and the mod has an import:
 3. It keeps the original bytes (see the copies below), writing the copy through the checked writer
    and reading it back.
 4. It replaces the file with the rendered bytes, only if the file still holds the bytes it read.
+   As in `Save`, the check and the replacement are two operations, so a write that lands between
+   them is overwritten.
 
 A process killed at any point leaves the old file whole or the new file whole, and the next launch
 converts again from what is there. A stamped file is never converted, and the renderer is
@@ -693,8 +705,8 @@ The log names the file on every line. It lists every dropped value and every key
 file the import does not read, for example:
 
 ```text
-not carried: [General] Smoothng=0.3 on line 5, this build does not read it
-not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the default is used
+C:\Games\Example\HeadTracking.ini: not carried: [General] Smoothng=0.3 on line 5, this build does not read it
+C:\Games\Example\HeadTracking.ini: not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the default is used
 ```
 
 Hand-written comments are not carried either: the new file's comments are the renderer's.
@@ -720,16 +732,31 @@ again at the next launch and saves nothing this session.`, where `<why>` is one 
 - `the file is in use by another program`
 - `the file is read-only`
 - `the folder cannot be written`
+- `it could not be read (...)` or `it could not be written (...)`, for any other I/O error, with
+  the error in the brackets: `Windows error N:` and the system's text in C++, the exception's
+  message in C#
 - `the file was changed by another program while it was read`
 - `the copy of the original file could not be written`
 - `[Section] Key=value cannot be converted`, for a value no codec writes or a render that does not
   read back
-- `the file was changed by another program at the same time` (or created, or deleted), when the
-  file changed between the conversion's read and its replacement
+- `the file was changed by another program at the same time`, `another program created the file at
+  the same time` or `the file was deleted at the same time`, when the file changed between the
+  conversion's read and its replacement
+- `Windows did not finish replacing <path>, so it may be missing; the new settings are in <temp>`,
+  where `<path>` is the full path of the config file or of its copy
 - `the old settings reader could not find the file`, when the import reports the file absent while
   the owner holds it open
 - the import's own reason, for `Undecodable`, and for `LegacyRefused`, where the mod then does
   what its published build did on that refusal
+
+The texts about reading and writing can be about the copy as well as the config file. The one
+case where the config file is not left as it was is the unfinished replacement naming the config
+file itself: at step 4
+Windows started replacing it and did not finish, and the checked writer could not finish it
+either. The file may then be missing or renamed, the converted settings are in the named
+temporary, which is kept, and the original bytes are in the `.pre-canonical` or
+`.pre-canonical.last` that step 3 wrote or found holding them. The message still says the mod
+tries again, but a launch that finds no file creates the defaults rather than converting.
 
 In C++ the import is also handed the path in the ANSI code page. When that form lost a character
 and the import reports the file absent, the published build, handed the same ANSI path, never saw
@@ -773,9 +800,11 @@ older build appended to it draws an unknown-key diagnostic and is not read.
 ### Install, uninstall and manual packages
 
 - **`MOD_SEED_FILES`** in an install wrapper's CONFIG BLOCK lists files copied only when the game
-  folder does not already hold one of the same name. A converted repo lists its config there, never
-  in `MOD_DLLS`, which `copy /y` overwrites on every install. The ASI, shim, shim-forwarder, xNVSE,
-  BeamNG and REFramework bodies read it.
+  folder does not already hold one of the same name. A converted repo never lists its config in
+  `MOD_DLLS`, which `copy /y` overwrites on every install: a repo whose install script copied the
+  config through `MOD_DLLS` moves it to `MOD_SEED_FILES`, and a repo whose install scripts never
+  copied the config does not start, since the owner creates it at first launch. The ASI, shim,
+  shim-forwarder, xNVSE, BeamNG and REFramework bodies read it.
 - **`PRESERVE_FILES`** in an uninstall wrapper's CONFIG BLOCK lists config paths, relative to the
   game folder, that `uninstall-body.cmd` leaves in place, together with each one's
   `.pre-canonical` and `.pre-canonical.last`, including inside a loader folder the uninstall
@@ -843,6 +872,10 @@ that edits one follows the owner's rules:
   section at the end, and new lines take the file's most common line ending. The editor refuses a
   UTF-16 file and one holding a NUL byte. `editor/` pins all of it.
 - Read with the reader's rules (`reader/`) and read the edited bytes back before writing them.
+- Expect no protection from the running mod. The owner's lock covers one process, and its check
+  that the file still holds the bytes it read is a separate operation from its replacement, so a
+  tool's edit that lands between the two is overwritten by the mod's save. Edit the file while the
+  game is not running, or accept losing that edit.
 - Take section and key names from `data/config-schema.json`. A hotkey value written by a tool
   must be one the mod's dialect reads.
 
@@ -871,10 +904,13 @@ In a mod repo, and in conformance:
 - **`node scripts/check-canonical-config.mjs [repo ...]`** lints each stamped committed file: the
   reader finds nothing to report; CRLF endings, no byte order mark, ASCII only; `Key=value` and
   `[Name]` written plainly, each section once; `[CameraUnlock]` holding `ConfigFormat=1` alone;
-  every concept at the schema's section and key; no non-canonical or retired concept, and no
-  `[Sensitivity]`, `[Inversion]` or `[Reticle]` section; the game-local rules above; every hotkey
-  a key list in the file's dialect, with the canonical hotkey concepts at their `canonical_default` unless
-  `hotkey_exceptions` records the repo's reason; the file tracked by git and `-text`.
+  every concept at the schema's section and key, spelled as the schema spells it and not as an
+  alias; no non-canonical or retired concept, and no `[Sensitivity]`, `[Inversion]` or `[Reticle]`
+  section; a schema section spelled as the schema spells it; local sections and keys PascalCase,
+  each local key used once in the file and none of the bare nouns above; every hotkey concept, and
+  every key in `[Hotkeys]`, a key list in the file's dialect, with the canonical hotkey concepts at
+  their `canonical_default` unless `hotkey_exceptions` records the repo's reason; the file tracked
+  by git and `-text`. It does not check comments.
 - **Conformance** (`pixi run conformance`) runs the lint as `config-format`, which also fails a
   converted `legacy` repo with no legacy folder (an REFramework repo needs none: its import is
   core's `PluginConfigLegacyImport`), a repo outside `legacy` with one, and a repo outside
@@ -886,8 +922,11 @@ In a mod repo, and in conformance:
   `.cfg` missing from `PRESERVE_FILES`. `readme` fails a converted repo whose README config block
   is missing or differs from the rendered one, and an unconverted repo that has one.
 - **The README config block** sits between `<!-- cameraunlock:config -->` and
-  `<!-- /cameraunlock:config -->` in the Configuration section. `pixi run readme --write` inserts
-  and updates it, and `pixi run readme --print config` prints it for NEXUS_MODS.md.
+  `<!-- /cameraunlock:config -->` in the Configuration section. From core's own checkout,
+  `pixi run readme --write <repo>` inserts and updates it, and `pixi run readme --print config
+  <repo>` prints it for NEXUS_MODS.md, where `<repo>` names a sibling checkout. With no repo name,
+  `scripts/generate-readme.mjs` works on the folder above core, which is the mod when it runs from
+  the mod's `cameraunlock-core` submodule.
 - **`pixi run validate-manifest`**, in a converted repo, also fails when the newest
   `release/*-nexus.zip` carries a file at an `installed` path of the config, or at the tail of one.
 

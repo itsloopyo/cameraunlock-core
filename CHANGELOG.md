@@ -33,7 +33,10 @@ pipeline porting paragraph and from Configuration.
   fails when a code block in `docs/*.md` preceded by `<!-- excerpt: <path> -->` is not a run of
   consecutive lines of that file (compared after taking off the run's common indentation), when one
   preceded by `<!-- file: <path> -->` is not that whole file, and when a `cpp` or `csharp` block
-  carries neither.
+  carries neither. Every other fenced block must be tagged `ini` or `text`, so code cannot get past
+  the check untagged or under another tag such as `cs` or `c++`, and fences indented in a list
+  item are checked like any other. The untagged byte dump in `docs/hcam-inband-protocol.md` is
+  now tagged `text`.
 
 ### Added - seed re-encoding, render-config templates and the Nexus config check
 

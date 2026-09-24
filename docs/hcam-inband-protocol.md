@@ -492,7 +492,7 @@ counter 7.
 
 The 48 bytes on the wire, which is the only thing worth diffing against:
 
-```
+```text
 off 0  : 48 00 00 00 00 00 F0 3F
 off 8  : 43 00 00 00 00 00 00 40
 off 16 : 4D 00 00 00 00 00 08 40
