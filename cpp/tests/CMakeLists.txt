@@ -33,6 +33,9 @@ add_executable(cameraunlock_tests
     value_codecs_tests.cpp
     config_table_tests.cpp
     head_tracking_config_table_tests.cpp
+    legacy_import_tests.cpp
+    ini_mutations_tests.cpp
+    getasynckeystate_probe.cpp
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)

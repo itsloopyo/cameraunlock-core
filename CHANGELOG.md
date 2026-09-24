@@ -9,6 +9,67 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - legacy import support, normalisations N1 and N2, and the differential corpus, in C# and C++
+
+What a game's legacy import hands the migration driver, the two approved normalisations its map
+applies, and the corpus generator its differential test runs. Nothing in the fleet uses them yet:
+the config owners (next) drive the imports, and each game's conversion writes its own.
+
+- **The import contract.** C++ `cameraunlock/config/legacy_import.h`: `ImportStatus` (`Imported`
+  0, `Refused` 1, `Undecodable` 2, `Absent` 3), `ImportResult` with factories that hold each status
+  to its fields (a reason for `Refused` and `Undecodable`, dropped values for `Imported` and
+  `Absent`), `LegacyInput`, `LegacyKey` and `LegacyImport<Config> { run; keys; }`. C#
+  `CameraUnlock.Core.Config`: `ImportStatus`, `ImportResult`, `LegacyImportInput`, `LegacyKey`,
+  the delegate `LegacyImportRun<TConfig>` and `LegacyImport<TConfig>`. Two changes from the
+  design's sketch, which had `run(Config&)` alone: `run` also takes the input, because the driver
+  owns the file's path views and an import never recomputes them (C++ `LegacyInput`: the wide
+  path, the ANSI path and whether the ANSI conversion lost characters; C# `LegacyImportInput`: the
+  config path and, for BepInEx, the separate `.cfg` it migrates from); and the import carries
+  `keys`, every section and key the frozen reader reads, so the driver can log every other key
+  line of the old file as not carried and the corpus mutates the same list. An empty section in a
+  `LegacyKey` means any section, for the readers that ignore sections.
+- **Dropped values.** `DroppedValue` (rule, section, key, the value as the import read it) and
+  `DropRule`: `KeyCodeOutOfRange` 1 (N1), `NonFiniteNumber` 2 (N2), `PoseShaping` 3 (a
+  sensitivity, deadzone, curve or inversion set away from the shipped default), `Reticle` 4 and
+  `FollowsDefault` 5 (a feature shipped off pending verification that now takes the mod's
+  default). The last three are the docs-survey decisions; the design names the first four, and
+  `FollowsDefault` is added so decision 4's changes reach the log too. C++ `DescribeDroppedValue`
+  and C# `DroppedValue.Describe()` give the log line, e.g. `not carried: [Hotkeys]
+  ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound`.
+- **N1**, C++ only: `LegacyVirtualKeyToBindings(long long code)` gives the key name for a code
+  from 0x01 to 0xFE (hex where the table has no name) and "" (unbound) for any other code; an
+  overload records the drop, except for code 0, which is how a legacy file says unbound. A chord
+  switch folds into the same list through `input::FormatKeyBindings`. No C# import reads
+  virtual-key codes, so C# has no N1.
+- **N1 probe.** `pixi run probe-n1` runs `cameraunlock_tests --probe-getasynckeystate`, outside
+  `check` because it injects a key press with SendInput and needs an interactive desktop. On
+  Windows 11 Pro 10.0.26200 (2026-09-24), with F24 held, GetAsyncKeyState reported F24 (0x87) down
+  and reported up for 0x187, 0x287, 0x10087, -121, 0, 0xFF, 0x100 and -1, so a legacy hotkey code
+  outside 0x01-0xFE never fired on a key in range. One code can fire on its own: 0xFF is the code
+  the SDK's kbd.h gives to scan codes a layout leaves unmapped (`VK__none_`), and with VK 0xFF
+  itself held GetAsyncKeyState(0xFF) reported down. N1 unbinds a legacy 0xFF hotkey, a change for
+  a user who bound one; no config the fleet ships binds 0xFF.
+- **N2**: C++ `LegacyFiniteOrDefault` (float and double), C#
+  `LegacyNormalisations.FiniteOrDefault`: a NaN or infinite legacy value gives the runtime row's
+  default and records the drop; a non-finite default throws.
+- **The differential corpus generator**: C++ `GenerateIniMutations` in the header-only
+  `cameraunlock/config/testing/ini_mutations.h`, and C# `IniMutations.Generate` in
+  `csharp/testing/IniMutations.cs`, which no shipped assembly compiles: a test project links it
+  with `<Compile Include="..\cameraunlock-core\csharp\testing\IniMutations.cs"
+  Link="IniMutations.cs" />` (the path relative to the project). C# 7.3, and free of nullable
+  warnings in a project that enables them. Given a legacy file and the keys its import reads
+  (section, key, an alternate valid value, one out-of-range value per refused range, whether it is
+  a hotkey and the chord switches that fold into it), it returns every mutation design 6.2 lists,
+  per key, per pair of keys, per section and per file, as named outputs in a fixed order.
+  `data/fixtures/canonical-ini/README.md` defines each byte for byte, and five fixture cases under
+  `data/fixtures/canonical-ini/mutations/` pin every output's name and SHA-256 in both languages.
+  Choices the design left open: a key the file lacks is first added at its alternate value; the
+  invalid value is `abc`; the listed `""` is both the empty value and a literal pair of quotes; the
+  repeated section block carries each key's alternate value; the 1100-character value is the digit
+  1 repeated; the 0x1A and NUL bytes are lines of their own after the first key; NUL padding is 64
+  bytes; the UTF-16 output decodes the file as UTF-8 where it is UTF-8 and as code page 1252
+  otherwise.
+
 ### Added - core's config table over its own config types, in C# and C++
 
 `HeadTrackingConfigTable` builds the config table for a game that keeps its settings in core's

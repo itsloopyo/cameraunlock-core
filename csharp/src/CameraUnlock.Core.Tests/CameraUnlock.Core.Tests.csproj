@@ -30,6 +30,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\testing\IniMutations.cs" Link="Config\IniMutations.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\CameraUnlock.Core\CameraUnlock.Core.csproj" />
   </ItemGroup>
 </Project>

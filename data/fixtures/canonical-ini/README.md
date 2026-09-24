@@ -2,16 +2,19 @@
 
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
 editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs, `table/` for
-config tables and `head-tracking/` for core's table over its own config types. Core's C++ suite
-runs them unchanged (`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp`,
+config tables, `head-tracking/` for core's table over its own config types and `mutations/` for
+the differential corpus generator. Core's C++ suite runs them unchanged
+(`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp`,
 `cpp/tests/key_bindings_tests.cpp`, `cpp/tests/value_codecs_tests.cpp`,
-`cpp/tests/config_table_tests.cpp` and `cpp/tests/head_tracking_config_table_tests.cpp`), and so
-does its C# suite (`CanonicalIniFixtures`, `IniEditorFixtures`, `KeyBindingFixtures`,
-`ValueCodecFixtures`, `ConfigTableFixtures` and `HeadTrackingConfigTableFixtures`, under xunit on
+`cpp/tests/config_table_tests.cpp`, `cpp/tests/head_tracking_config_table_tests.cpp` and
+`cpp/tests/ini_mutations_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures`,
+`IniEditorFixtures`, `KeyBindingFixtures`, `ValueCodecFixtures`, `ConfigTableFixtures`,
+`HeadTrackingConfigTableFixtures` and `IniMutationFixtures`, under xunit on
 net8.0 and in
 `CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2). Lopari's Rust codec is to run the same files, so nothing
 here is specific to one language: a reader or editor in any language is held to every case. The expected files are written by hand from the rules, never produced by an
-implementation.
+implementation, except under `mutations/`, whose hashes come from a third implementation of
+its rules, in Python, that neither language shares code with.
 
 Everything under `data/fixtures/` is marked `-text` in `.gitattributes`, so git keeps the
 bytes as they are: the CRLF, LF and lone CR endings, the byte order marks, the NUL and
@@ -247,3 +250,125 @@ Before applying, it sets fields no row binds (the recenter key, the position X s
 the position Y inversion) and requires them unchanged afterwards. It also renders the result,
 reads that back and requires the same fields and bytes. `apply-empty` is the defaults, and across
 the three cases every field is off its default at least once.
+
+## mutations/
+
+The differential corpus (design 6.2): C++ `GenerateIniMutations` in
+`cameraunlock/config/testing/ini_mutations.h` and C# `IniMutations.Generate` in
+`csharp/testing/IniMutations.cs`, whose every output a game's differential test runs through its
+legacy import and its migration. One directory per case:
+
+- `input.ini`: the base, a legacy file's bytes.
+- `keys.tsv`: the key descriptors in order. A `key` row has the section, key, alternate valid
+  value and `true` or `false` for a hotkey. Each `range` row after it adds one out-of-range value
+  to that key, and each `chord` row adds a chord switch: section, key, the value that turns it on
+  and the value that turns it off.
+- `expected.tsv`: one row per output in order, its name and the lower-case SHA-256 of its bytes.
+
+Fields use the byte escape above. A runner generates the outputs from `input.ini` and `keys.tsv`
+and requires `expected.tsv` exactly: the same count, order, names and hashes.
+
+### How the generator reads the base
+
+A UTF-8 byte order mark at the start is set aside and written back in front of every output
+unless a mutation says otherwise. The rest splits into lines at CRLF, LF and a lone CR, each line
+keeping its ending; a last line with no ending keeps none. The dominant ending is the most common
+of CRLF, LF and CR among the lines, ties going to CRLF, then LF; with no endings it is CRLF. It is
+fixed from the base and used for every line the generator inserts.
+
+On a line trimmed of spaces and tabs: a line starting `[` is a header, named by the trimmed text
+up to its first `]`; a header with no `]` or an empty name opens no section. A line starting `;`
+or `#` is a comment. Any other line with an `=` and a non-empty trimmed key before it is a key
+line. A key line belongs to the section of the last header above it, and a key line under no
+section is never matched. Names compare ASCII case-insensitively.
+
+A key's line is the first key line with its section and key. Its prefix is the line up to and
+including the first `=` and any spaces and tabs after it; its value is the text after the `=`,
+trimmed. Setting a value makes the line its prefix and the new value.
+
+Inserting a line gives it the dominant ending, except at the end of a file whose last line has no
+ending: that line takes the dominant ending and the new last line takes none, so the file still
+ends without one. A section's insert point is just after the last non-blank line of its first
+block (its first header up to the next header of any kind). Adding a key to a section inserts
+`Key=value` at that point, or, when no header names the section, inserts `[Section]` and then the
+key line at the end of the file.
+
+Before any mutation, every descriptor key with no line gets one, `Key=alternate`, added to its
+section in descriptor order. That file, the full base, is where every output starts.
+
+### The outputs, in order
+
+For each key in descriptor order, named `[Section] Key: ` and then:
+
+1. `removed`: its line deleted.
+2. `duplicate before, another value` and `duplicate after, another value`: its prefix and the
+   alternate value inserted before, then after, its line.
+3. `valid, then an invalid duplicate`: its prefix and `abc` inserted after its line;
+   `invalid, then a valid duplicate`: the same inserted before it.
+4. `key case swapped`: every ASCII letter before the line's `=` changes case.
+5. `section case swapped`: in the header above the line, every ASCII letter between the `[` and
+   the first `]` after it changes case.
+6. `moved to another section`: the line deleted, then inserted at the insert point of the first
+   section in the file other than its own; with none, `[Elsewhere]` and the line are inserted at
+   the end (`[Other]` when its own section is `Elsewhere`).
+7. `before the first header`: the line deleted, then inserted just before the first header of any
+   kind.
+8. `'; x' appended`, `';x' appended`, `' # x' appended`: the text between the quotes added to the
+   end of the line.
+9. `in double quotes`, `in single quotes`: the value set to itself inside `"` or `'`.
+10. `value <label>`: the value set to each of `empty` (nothing), `space` (one space), `""` (two
+    double quotes), `abc`, `nan`, `inf`, `-inf`, `1e400`, `0,15`, `0x10`, `010`, `-1`, `+1`,
+    `space then 1` (a space, then 1), `1 then space`, `1abc`, `True`, `TRUE`, `tRue`, `yes`, `on`,
+    `2`, and `1100 characters` (the digit 1, 1100 times).
+11. `out of range <v>`: the value set to each of the key's out-of-range values.
+12. For a hotkey, `hotkey 0x230`, `hotkey 0` and `hotkey End`: the value set to that; then, for
+    each chord switch, `chord [S] K on` and `chord [S] K off`: the switch set to its on or off
+    value, added to its section when it has no line.
+
+Then for each ordered pair of different keys A and B, named `[SA] KA alternate, [SB] KB` and then
+` removed` (A set to its alternate value and B's line deleted) or ` invalid` (A set to its
+alternate value and B set to `abc`).
+
+Then for each section with a named header, in the order its first header appears and spelled as
+that header spells it, named `[Section]: ` and then:
+
+1. `header with spaces`, `header with a comment`, `header not closed`: its first header line
+   replaced by `[ Section ]`, `[Section] ; c`, `[Section`.
+2. `section repeated`: a copy of its first block inserted right after that block, every descriptor
+   key of the section in the copy set to its alternate value. When the block's last line has no
+   ending it takes the dominant ending, and the copy's last line keeps none.
+
+Then, named `file: ` and then:
+
+1. `UTF-8 mark before a header`: EF BB BF and the full base from its first header on.
+2. `UTF-8 mark before a comment`: EF BB BF, `; comment`, the dominant ending, then the full base
+   without its own mark.
+3. `CRLF`, `LF`, `lone CR`: every line that has an ending given that one.
+4. `mixed line endings`: the lines that have an ending given CRLF, LF, CR, CRLF and so on in turn.
+5. `no final newline`: trailing lines with no content deleted, and the last line's ending removed.
+6. `CRLF, a 199-character line`, and the same for 200, 254 and 255: every ending CRLF, and the
+   first descriptor key's line rewritten as its key, `=`, spaces, then its value, that many
+   characters long before the CRLF.
+7. `0x1A byte`, `NUL byte`: a line holding just that byte inserted after the first descriptor
+   key's line.
+8. `trailing NUL padding`: the full base followed by 64 NUL bytes.
+9. `tab separators`: on every key line, the spaces and tabs around the first `=` replaced by a tab
+   on each side.
+10. `#Key= lines`, `;Key= lines`: after each descriptor key's line, `#` or `;`, the key and
+    `=alternate` inserted.
+11. `indented continuation lines`: after each descriptor key's line, four spaces and its alternate
+    value inserted.
+12. `UTF-16 LE with a mark`: FF FE and the full base without its mark as UTF-16 LE, decoded as
+    UTF-8 where the bytes are strict UTF-8 and as Windows code page 1252 otherwise (the five codes
+    1252 leaves undefined become the same code point, as .NET Framework's code page 1252 table
+    gives them).
+13. `cp1252 byte in a comment`: the line `; caf` and the byte E9 inserted before the first
+    descriptor key's line.
+14. `cp1252 byte in a value`: the byte E9 added to the end of every descriptor key's line.
+
+The cases: `legacy-lf` (LF, a key written `Key = value`, a key the reader does not read, a header
+with a comment, keys and a section the base lacks), `utf8-mark-crlf` (a mark, CRLF, a lower-case
+header and key, UTF-8 in a comment with a code point above U+FFFF, an unclosed header over a key,
+a header with spaces inside its brackets, no final newline, chord switches the base lacks),
+`cp1252-lone-cr` (lone CR, cp1252 bytes, a trailing blank line, one section named `Elsewhere`),
+`tie-crlf-lf` (a CRLF and LF tie, keys above every header) and `tie-lf-cr` (an LF and CR tie).

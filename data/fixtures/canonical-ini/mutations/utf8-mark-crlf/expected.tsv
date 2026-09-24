@@ -1,0 +1,160 @@
+[General] ToggleKey: removed	b73f1626b5792948dfeb9f9b0463aa8fc488029386e2fe2a74183847aa47e9ac
+[General] ToggleKey: duplicate before, another value	3533eea740bf49ee1c126834d3f6ebae1d60d02427bfa71b8b8650a87022d221
+[General] ToggleKey: duplicate after, another value	26a6501ab9ee06c2e37cca6b1e496fbe4d0c1ddadea17b168e2f7ec9a8084565
+[General] ToggleKey: valid, then an invalid duplicate	19119e0b67dff91fbd0494b66091f73a1037e04047292b340d32ed03341549f8
+[General] ToggleKey: invalid, then a valid duplicate	0a375ddd9351f13d32222389c23dda5544061e4854c49ffae2bc23abba2e842b
+[General] ToggleKey: key case swapped	d11c6479632ba9de1f675fa4edb4916f1f9b097d9ccb8639b5dc1795285ec24e
+[General] ToggleKey: section case swapped	5a4b8527451d515be2d08f7c02fc41788fb85030ac8b47fdeb0b940bb802b8ee
+[General] ToggleKey: moved to another section	09b96cca75f7e36044eb99815b4f52e81ca96c8c80260cf1fcdb5fc95fe6d162
+[General] ToggleKey: before the first header	742b6b791c0252a25ef0269de97a9df7cb04a96ee8ad127fa08b4ec22f13f4a2
+[General] ToggleKey: '; x' appended	1b56ca5902f2e78db4169c990cbbaca60f06200a46f7ad611b9cd9ed8cfcadcf
+[General] ToggleKey: ';x' appended	732ecca876a430d94ace61128d0b9b051892c046971775c4d9a9f06cdc083551
+[General] ToggleKey: ' # x' appended	3ea4ca3562d31173194c3fa5883e7ba7356d12c41eee2b1b589e9187bf6c6f46
+[General] ToggleKey: in double quotes	a50704d1af4be80fe655780b66e5fef45f05494ccf33ca18762646ea646883b3
+[General] ToggleKey: in single quotes	6b0a23233c96f3dca34dc5863c6d6b5d9033ced4c43be9da9a4f942d3949da90
+[General] ToggleKey: value empty	5bb818433e0ba8f26618ece2f0d0c8648885ef10cc61aef774fd080f223140ff
+[General] ToggleKey: value space	28eeb9a8a0f03b80b7f04d8c844618350d112d7b132b3c50ffb8d0a79653c0a8
+[General] ToggleKey: value ""	78256c11fbb0ffeaa5d5b70d4bc735f39648e6d38106ff817faf302d5be21eb5
+[General] ToggleKey: value abc	37bd6d06d7adb1a4862fda6895f41240b4fe8480564412305d84b84e572591f9
+[General] ToggleKey: value nan	acd8f77b7c5e7007cda7d390911fa6c89d698b0cab73df96182b601511edb170
+[General] ToggleKey: value inf	ec197d0128f9587ebf142b214a78ffa23b9895585f9c1f02c19e87e35f263e28
+[General] ToggleKey: value -inf	8fa366f9c7132e5d9f865b2a512aba2d59916c37fcb23fd989c1e5299311abde
+[General] ToggleKey: value 1e400	6a01d2fcd9b78f4ebdcf6750927f3efd3a258f11006f47611f20a0ef1c4f8401
+[General] ToggleKey: value 0,15	b7b93be3f181ee0b53c8edaf637d7db37545d05ee644710081d9c948b06aaf0c
+[General] ToggleKey: value 0x10	ea33f78600c68298288a2c5936f988460c3c4a6b3b22ab9170be048f3f9ebc4f
+[General] ToggleKey: value 010	ec1073c72e374ce70cb28134f09661934e246be23fa96d0e718b2b67d2b1b079
+[General] ToggleKey: value -1	e35ab97d03c43b83b5fd175beb047775e5f10897d7baf24bc66f90b067b2e134
+[General] ToggleKey: value +1	7f324ccc1cebd5cda1b3df7a46608d0e0d4b93f7c31a506e7531724b9d9e81fa
+[General] ToggleKey: value space then 1	0cd17e10072914658101257d57194ff6f8f50b4743da7cd1f56c8e81b249a3ee
+[General] ToggleKey: value 1 then space	65c236a16f8ff71d1a896388f16414961455d41c71735373bab9231ed7f132ed
+[General] ToggleKey: value 1abc	736c807ae18029ab154a8f026d89244b51b409c9827b03dcaccc25a2e9faebbf
+[General] ToggleKey: value True	a816dc6a210c15af3617091ad4e0da53c371287cc17fabae0cd04a0794f47dfb
+[General] ToggleKey: value TRUE	164b189801e63e7f48b61fe69090fd5e74366c2ff280528e5c38522c75142391
+[General] ToggleKey: value tRue	41a5fb45f8c4e610009ad3ba18b9eff38f6fd18961f018d4f66ff470dce05f0e
+[General] ToggleKey: value yes	57cbfc5088c6f4d950c314032e6d35bc65ad453b825597457e851712c04f16fa
+[General] ToggleKey: value on	1a0369d1086b86b238d380cdb0cfc16c6a2372f248721f6f64fc076562ad73b6
+[General] ToggleKey: value 2	af012268bdb0b15509c57c7f823fdd0f5441b30d72e147d8695221b1a305d713
+[General] ToggleKey: value 1100 characters	a48d20598da0e7b43df9e00873b799b31bf31021b580086c4c4c51a22ece7e98
+[General] ToggleKey: hotkey 0x230	dcb3dbe22583599dde5e874c2a911bb4751e1e63626db6d88c885a7790f0ad59
+[General] ToggleKey: hotkey 0	c9e077c05cb212e2ff9f9abf58df954f347a508d98126b4b52810a537f797e42
+[General] ToggleKey: hotkey End	46f779ca5ac3db09cf73d817c7a27c2a002513b5de6f4d749937788330e11516
+[General] ToggleKey: chord [Hotkeys] ChordToggle on	22eab797df4cc932787150a636636346b0c0afc58c94e259a2b6f5eb1b56403e
+[General] ToggleKey: chord [Hotkeys] ChordToggle off	8f76baf33906ece25b0c5259477eb05811b6e2b0ac47c51dd7644079854d2349
+[General] ToggleKey: chord [Hotkeys] ChordToggleKey on	17688550bfe2bef0b13d98d8b9fd68b3a171cbd09351092f85b9597d23b6c51d
+[General] ToggleKey: chord [Hotkeys] ChordToggleKey off	30f49e0a8102674ad0c73ca72aa270f1b72eff6854bc17dd34650005b293d149
+[Position] LimitY: removed	89c119898efe9dd1e84cf46a2907aa05f46f3f8cd04a0de308eaf5578b97b848
+[Position] LimitY: duplicate before, another value	b852d9f72d8346683762f54fd44ea7351a53a4da8aa2dc36f071493cf2f93758
+[Position] LimitY: duplicate after, another value	6788d615a9fb96f4ef2c299f39e4bfcde5c63195712ef97db775de210157e373
+[Position] LimitY: valid, then an invalid duplicate	9884d9bf4752a0e56e1d6670e5ad88d0a5793f120ad0fcdabfbe2c526f2e07a2
+[Position] LimitY: invalid, then a valid duplicate	1c3a6a3860780b60de93235a3c8106ef66994cf997a02ad58ce7d59c58eeb8a9
+[Position] LimitY: key case swapped	c6166d7282420de3786f11a8f3418e088376747b26067b94bafc00b2321d3d4f
+[Position] LimitY: section case swapped	b9e34291c882971e8cde2d9a8990e817de656201884b1d17b7b92efcfc5c744d
+[Position] LimitY: moved to another section	700970cfee1e3211201ff1e332c5d4f76822a0aed4625da86420ce8c7e643d1f
+[Position] LimitY: before the first header	538292ec0a5ba6559e9002d7be0a2af261143c9f492945f67e38f96286ab25ac
+[Position] LimitY: '; x' appended	b7ba7463a4443eefa5322cada362563b3a8ca0e96cf0e78fb1fc4bf4ff232fd1
+[Position] LimitY: ';x' appended	4d81faad9a2fea1d8c2aae901da616322231fed2d3fae42974d85516bed3c8f2
+[Position] LimitY: ' # x' appended	ccb3a46c16679741a83574ce6520ea1a760ad5a9e72895f9a818e9aa527f59b6
+[Position] LimitY: in double quotes	5a1515976a01c9d8c0cc43b54bd1ca067cbab08a56a67603f23832e27b031761
+[Position] LimitY: in single quotes	1eb717004a24257bd98a9e1e64d1580323d65c65327c7671dd644bd711c81cee
+[Position] LimitY: value empty	268b59d1d1273b7b92c884b413b8f87b43ccea64a8cb6965bac4badfa374504d
+[Position] LimitY: value space	c387e3f6a4027c6f954c8ecfacc6ce25b922814a697a7b57d43605f99de5076e
+[Position] LimitY: value ""	13b3d40c318977323c2880050d296a46f488fae7aa6d1fb0d3d4e10c29cfb812
+[Position] LimitY: value abc	8c46f9ba2d10a6dddd086d07b1eff0923082fc14b3537ce5c78cd786655a32b2
+[Position] LimitY: value nan	0c53c779384fd6f6b6039fde7f01b7cb6c5f7e331a2747ca28a9779052be9b2b
+[Position] LimitY: value inf	386de1073110902f56c43a0887e16f4504d0691a775c16d1812d45468443717a
+[Position] LimitY: value -inf	b154f6561fd2d230a63a2a623923af4025bcea4fd5660f412fb604fa4c0546d0
+[Position] LimitY: value 1e400	d2b7786078c47d6594c6b58511cfc2e9a981b3e5cfc1f7a1b5e5285418a1d5fe
+[Position] LimitY: value 0,15	eb4be62443832c0f435a88c3eb7e4e56dbcf2babc5473e99159a86fd6934fea4
+[Position] LimitY: value 0x10	6616b1ed5e96fa243ebd240ef18f9c3cde689f19d12d49c70747d2518667fac5
+[Position] LimitY: value 010	7cb12c2fe59d3693773b851febd805fe4005fd241887cfd35d670d41d6e0c5ea
+[Position] LimitY: value -1	4516c19aa133b82366b6ce35d2fadf8aa08b7c91bfb7e0748257c4f2774d3296
+[Position] LimitY: value +1	9efe461ea745f6344cad403a6f5fae26d7723e49af1f8f920eae0fa8a916ddd9
+[Position] LimitY: value space then 1	06448cf85245f6b1eb6114d7cbd242ad760347c95024672d60710973467fe2bf
+[Position] LimitY: value 1 then space	3b00388e1a942eaa260939f0e7a81a97b03d97a12887c7f876b3a6dddc8571c3
+[Position] LimitY: value 1abc	db5c34a7bf02fb697f565d95bb68d5b1c3998f0a752c8b8f287e8b46798a6bfe
+[Position] LimitY: value True	b3334a055e36819ed15667071c9a60b46e8570b55cbc127a079fe6d0743a8290
+[Position] LimitY: value TRUE	4f80af22399b996c80934417a2caf6971c9518cdf38816aec905553b9857c34d
+[Position] LimitY: value tRue	274c669ba39f51a91472aec441b3f0e36b05ad2fda7069ff99066756ec00daaa
+[Position] LimitY: value yes	d7c7873d8cbe87a42f387628207a2b63d41fdd05d42f8ae37e9498a73431d662
+[Position] LimitY: value on	4c358faf639f97106d00c5410e72d6046ceca57da97597e1b5ced5906c4a7b3f
+[Position] LimitY: value 2	4a254572c089c3f8037ac83e5317c5451485779240f1194df097d4a69067b6fe
+[Position] LimitY: value 1100 characters	af2f7b7c9338a6b3ebc4c173cba8092e1e2883544441adde95aae291d4b965df
+[Position] LimitZ: removed	015c1ca10620a476b2fccf4091bc2675dcb8355b591ed0920ea143b5da88b6a0
+[Position] LimitZ: duplicate before, another value	4db8606d2ae071db0f4f88337de07f37610058dc7fe3e3965374d4869a3b21c9
+[Position] LimitZ: duplicate after, another value	4db8606d2ae071db0f4f88337de07f37610058dc7fe3e3965374d4869a3b21c9
+[Position] LimitZ: valid, then an invalid duplicate	143ed5cb40d2799d46eb81a2596029e7fd9914eaa179e2492c5a9c293f33452f
+[Position] LimitZ: invalid, then a valid duplicate	b3458450024bfe9c9befd8a3b5d9b36b8a22345ab37cddfdd3c17a5fed879d00
+[Position] LimitZ: key case swapped	27b9026ebd4ae638d192fea8a9a8361061b4b5414ff213e34a321bf70259b62a
+[Position] LimitZ: section case swapped	b9e34291c882971e8cde2d9a8990e817de656201884b1d17b7b92efcfc5c744d
+[Position] LimitZ: moved to another section	e60b490082835e92862847cf278742ebffadcafbeffec119135d7cfb89b77783
+[Position] LimitZ: before the first header	6e68f49c738804f56b1b3582e7000fde816b6a505f764f9959e763ddc15ede20
+[Position] LimitZ: '; x' appended	a36b0b3623224ddc0b57a5a68fcac9942a8620330343959d1a380c8cc5f7c38a
+[Position] LimitZ: ';x' appended	a347b1066165a2cdf7fb5024da07b0e8e2fe6ee11eb6117c611be9c58d8fe6bc
+[Position] LimitZ: ' # x' appended	b64d40b0ef871229eb90c0323ad536d316500227f617132e61ccbc0a257d0cc8
+[Position] LimitZ: in double quotes	c4c4856e75ca1767571942a15372159c97de58f38c34fa88453a7b377da42024
+[Position] LimitZ: in single quotes	83c61b44269ee8e90fd978b652d058171dcddb4035c14c34c642a3e836c9f95d
+[Position] LimitZ: value empty	7d62f98b54a9153d56f7612c9e007788c0516d2a26c2608e2b143d25922ca3e7
+[Position] LimitZ: value space	f0c135a4c585afc90b80e279d815d6660b35f0e90ce868e4bfa0a0f8a62cab71
+[Position] LimitZ: value ""	a3f04557d8b6a2256475cd82d28cd8ccf49fcc41d5496eff7a7f058f3e1349e4
+[Position] LimitZ: value abc	d3d8cf42254f370e3116d86791409ae9af0cc1154b0675930567b2f11b1f70a9
+[Position] LimitZ: value nan	cc1635d1c9f04d392b82d25c83692633b0386e0f374c0c8238f99f59836fed6d
+[Position] LimitZ: value inf	67ddf33d6b7027862554bbda1a96544d04497620df410e218f4d85ee94bffbe2
+[Position] LimitZ: value -inf	68a0e2608abf08f2975094514a5e8401c756db08af3cd76d120ba4c293deab86
+[Position] LimitZ: value 1e400	73a448fdde2b00f0d6bc6811b136e88588543c4dc8c5062e157599382448e1d1
+[Position] LimitZ: value 0,15	8835dd33749d9a49197d12fcc74b83a715acb214cd4081ccd1394f2c80b5e200
+[Position] LimitZ: value 0x10	5f05b1581d3957cf77c8ef96c88b03509ea27c1177cb82d50dabc0b5acdb2083
+[Position] LimitZ: value 010	d7e8fc32e2bc3f13ac21d6b67a7a90c6dc79b7469039315f6f501f2a01b7f419
+[Position] LimitZ: value -1	51bcbecb3382288a66203349303342acca2ab0100631184f4c8266db1553a1a6
+[Position] LimitZ: value +1	49abdda53bf6b93341b618d8a2f147c97ade03ff28a4a59692c718e0bf84e3f7
+[Position] LimitZ: value space then 1	556b57104af416e486ca8bfffcbce4c5f85a53c7a3dcd8312d9b8f62fa3bda0e
+[Position] LimitZ: value 1 then space	fc5c65ffe43a385f245c5286808118805a01f36ebf9a77f3a3752042f2781947
+[Position] LimitZ: value 1abc	73b6f37cbf21d2d88f539aa2f424d05cf935f81d9fd1d59d1ec88b18ccc031bf
+[Position] LimitZ: value True	913b4e013a4aaf4f40879ff7b8af0b0b261bfe0bc38839fe6a29a4c91060b7fb
+[Position] LimitZ: value TRUE	15c530b25df96073ba17b21b85b815b9e0fb2fe420d01946d29cd885b863647f
+[Position] LimitZ: value tRue	d5028e2faf5f9a928b0e303aaf4b811ba765ce38d87e91c297ebdbe4b4b56562
+[Position] LimitZ: value yes	c759b0a069bd7f20150ce478097cbf030878072a88c17d9c835f4e1f933c77c1
+[Position] LimitZ: value on	3b4275e3da8fa7b919e666de97abe15841cf1b59260987306b92d9cf63fe187b
+[Position] LimitZ: value 2	d1af5ada8c0649fd99b123fbd85dc6fbd0e67d89e86c40af0145b4ad32ed83cf
+[Position] LimitZ: value 1100 characters	debc84d9ebb37bd3b7f8ec015529246afb9bcf9136743b73d00dd2ac9c8179b9
+[Position] LimitZ: out of range 20	4a97bdff3d395642e11945542412ed3b8da9aba4b503559bed71e3c1231c9587
+[General] ToggleKey alternate, [Position] LimitY removed	c547182e3dc1e0d0ca35a08e3689c7ad95df3783875e26ee1212bdc303cd2883
+[General] ToggleKey alternate, [Position] LimitY invalid	1fbeb73acb0246866876f8d5fe8807e99987f493d0e73904abf7be0b879611b2
+[General] ToggleKey alternate, [Position] LimitZ removed	65da9901086438699d74e41ba7e42331c8f6af99dbf6135ebe5e3cc72a82254a
+[General] ToggleKey alternate, [Position] LimitZ invalid	8717e7f9d9bd343fa18c0303833edb2d593508466fddbb7df00273a7c4aec842
+[Position] LimitY alternate, [General] ToggleKey removed	51725a501b595975e7327c151844fc86bda0f5ba04c220e22862fb19730e3379
+[Position] LimitY alternate, [General] ToggleKey invalid	960f8c188cf4f0b9ccad23578398522a32ce9603ce048fb832c0948840827afe
+[Position] LimitY alternate, [Position] LimitZ removed	2d2b886bb678f2674d45c51174d11365cb6468f22c00879cf8be2d74c54ee92d
+[Position] LimitY alternate, [Position] LimitZ invalid	811b65a79e1684edb93748caffa5e420f8b349f43b82f714ea255bc8b65f725e
+[Position] LimitZ alternate, [General] ToggleKey removed	b73f1626b5792948dfeb9f9b0463aa8fc488029386e2fe2a74183847aa47e9ac
+[Position] LimitZ alternate, [General] ToggleKey invalid	37bd6d06d7adb1a4862fda6895f41240b4fe8480564412305d84b84e572591f9
+[Position] LimitZ alternate, [Position] LimitY removed	89c119898efe9dd1e84cf46a2907aa05f46f3f8cd04a0de308eaf5578b97b848
+[Position] LimitZ alternate, [Position] LimitY invalid	8c46f9ba2d10a6dddd086d07b1eff0923082fc14b3537ce5c78cd786655a32b2
+[general]: header with spaces	346d188faeb7ac3fe3a1c7d415841d44a8b4bdb5db277dd7a03a91ae920a1ad0
+[general]: header with a comment	a00251f041d6889032154bba6f3d9a2bfcabdc63830f02be88a7a1ec00fbf34a
+[general]: header not closed	a38c38f17f23467b8e472a45940e25f039c27f59b4a5a1517ff71502891762d0
+[general]: section repeated	85cb9ddb31b31bb483099a60093451cbce0cab7a0072d75eb1e66d90baa4b6ad
+[Position]: header with spaces	63cb45f98696b82e6a8102b9255721ba6cbb1207e21857e28a853635bbad311c
+[Position]: header with a comment	cf0277f4e74472dec6ce47fb363500d6c7cd33fdf2f003c739d981ebde92d95d
+[Position]: header not closed	c13c3af4e98349553d27e80e4bf390bce81926b2fd5829bf400e4a362a8d48ef
+[Position]: section repeated	19de1def56242379befcf85c4eea9992885c398e2c2b9b26da6149b8f12f2866
+file: UTF-8 mark before a header	63cb45f98696b82e6a8102b9255721ba6cbb1207e21857e28a853635bbad311c
+file: UTF-8 mark before a comment	3033a62203d78e6eb917a26cdc0629a766f445b25602878dcdd3c34603ebea93
+file: CRLF	63cb45f98696b82e6a8102b9255721ba6cbb1207e21857e28a853635bbad311c
+file: LF	8b9dbd723ef8d24f3149b1e902dab6f0141e19fb408f743e0a0cf367588f96d9
+file: lone CR	5a21e7086a9b835ee389fbcfb77c596f860d0532b31f07f016133261b7958564
+file: mixed line endings	c5645ae86f5f0b170aa2efa0a82ef87d2dc0b396b4d4a572c3f297ff161b40b1
+file: no final newline	63cb45f98696b82e6a8102b9255721ba6cbb1207e21857e28a853635bbad311c
+file: CRLF, a 199-character line	857d9c003b63c29a67e54cd13a65c2e18a47c812b7aad82ff61f8789a2057f37
+file: CRLF, a 200-character line	0a64ceb0e36404c9e2533da96cf4f3242fa6b803ff01a4bb0f3ecc5a32e253c2
+file: CRLF, a 254-character line	a40e5392c8ba534cf4bc2488491b981c01c98b5ff0982e6fd4234046b711fd98
+file: CRLF, a 255-character line	e82a723197f6d9f092e4b6465409c810317f652fc4b293473689775b1082b57a
+file: 0x1A byte	f78c4170b579820ce73327988181614d0ebbcf6be6d0e687137587feca4bc39f
+file: NUL byte	1ff88b6f0de4edc77ab0225fbeb28afffbf29cb3f485512af294670b760fdb10
+file: trailing NUL padding	5f63ba5084b6c8159ff74dfbf9eeea0274f7dcc044b9200b861b58cc5ceedb51
+file: tab separators	633b089d7f6f70865ad5344571e83dc32149b387909f9403f9b99a590f76689c
+file: #Key= lines	44a4d3b4d656c4b7f893657000e4e5623d222e75f921d2d67ebde358ad93b5cc
+file: ;Key= lines	c8a0b6f151e6cb0bcb3f059d4257e26559a6db1900d658d4e803c0f5224d9a27
+file: indented continuation lines	aed214e39fbe8d0821ef9795c1c1ec2594b7402fa069b62a0355bb9f8c6181c9
+file: UTF-16 LE with a mark	be3a9b5a4cc685c37ea4747b1fe7842489d3bef3ff2e30d394139ad95287345e
+file: cp1252 byte in a comment	0b2c3bba916d86ac7c1402c1515e2a219f4ccc95e816e02577b085926fd020b6
+file: cp1252 byte in a value	5c28c5c4eeedaf1361d04d573cc81d74b2b6f6f370c02351689a4c5d06714796

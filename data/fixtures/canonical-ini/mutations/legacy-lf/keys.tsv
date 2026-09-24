@@ -1,0 +1,11 @@
+key	General	ToggleKey	0x24	true
+chord	General	ChordToggle	true	false
+key	General	EnableOnStartup	false	false
+key	Smoothing	RemoteSmoothing	0.3	false
+range	1.5
+range	-0.1
+key	Position	LimitY	0.10	false
+range	11
+key	Position	LimitYDown	0.05	false
+range	-0.5
+key	Logging	LogPath	C:\\Temp\\ht.log	false

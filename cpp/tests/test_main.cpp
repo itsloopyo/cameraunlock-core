@@ -32,6 +32,9 @@ int RunValueCodecsTests();
 int RunConfigTableTests();
 int RunHeadTrackingConfigTableTests();
 int RunCheckedFileWriterInterruptChild(const char* step);
+int RunGetAsyncKeyStateProbe();
+int RunLegacyImportTests();
+int RunIniMutationsTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
 int RunPluginConfigMigrationTests();
 #endif
@@ -42,6 +45,9 @@ int main(int argc, char** argv) {
     // this executable, started again with these arguments.
     if (argc == 3 && std::string(argv[1]) == "--checked-write-interrupt") {
         return RunCheckedFileWriterInterruptChild(argv[2]);
+    }
+    if (argc == 2 && std::string(argv[1]) == "--probe-getasynckeystate") {
+        return RunGetAsyncKeyStateProbe();
     }
 
     std::cout << "CameraUnlock Core Tests\n";
@@ -78,6 +84,8 @@ int main(int argc, char** argv) {
     failures += RunValueCodecsTests();
     failures += RunConfigTableTests();
     failures += RunHeadTrackingConfigTableTests();
+    failures += RunLegacyImportTests();
+    failures += RunIniMutationsTests();
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();
 #endif

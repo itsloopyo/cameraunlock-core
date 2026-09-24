@@ -89,6 +89,12 @@ namespace CameraUnlock.Core.Tests
             }
             failures += Report("the cases move every field", dir => HeadTrackingConfigTableFixtures.RunCoverage(fixtures));
 
+            Console.WriteLine("INI mutation fixtures");
+            foreach (string name in IniMutationFixtures.Cases(fixtures))
+            {
+                failures += Report(name, dir => IniMutationFixtures.RunCase(fixtures, name));
+            }
+
             Console.WriteLine("Float and double sweep");
             failures += Report("floats read back from their render", dir => ValueCodecFixtures.SweepFloats(SweepCount));
             failures += Report("doubles read back from their render", dir => ValueCodecFixtures.SweepDoubles(SweepCount));

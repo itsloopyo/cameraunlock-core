@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- The xunit suite runs on net8.0 only, so this console runs the file-system
-       scenarios and the canonical INI reader, editor, key binding, value codec, config table and head-tracking table fixtures on the
+       scenarios and the canonical INI reader, editor, key binding, value codec, config table, head-tracking table and INI mutation fixtures on the
        desktop Framework runtimes the library ships for: net35 runs on CLR 2.0, net472 on CLR 4.
        `pixi run test-framework` runs both. -->
   <PropertyGroup>
@@ -22,6 +22,8 @@
     <Compile Include="..\CameraUnlock.Core.Tests\Config\ValueCodecFixtures.cs" Link="ValueCodecFixtures.cs" />
     <Compile Include="..\CameraUnlock.Core.Tests\Config\ConfigTableFixtures.cs" Link="ConfigTableFixtures.cs" />
     <Compile Include="..\CameraUnlock.Core.Tests\Config\HeadTrackingConfigTableFixtures.cs" Link="HeadTrackingConfigTableFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\IniMutationFixtures.cs" Link="IniMutationFixtures.cs" />
+    <Compile Include="..\..\testing\IniMutations.cs" Link="IniMutations.cs" />
   </ItemGroup>
 
   <ItemGroup>
