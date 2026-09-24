@@ -78,7 +78,7 @@ pack = "dotnet pack csharp -c Release -o dist"
 
 # Validate a built installer ZIP is a coherent manifest-mode package
 # (delivery_mode == "manifest" and every declared source exists in the zip).
-# No args: validates the host repo's own release/*-installer.zip - run after
+# No args (or "."): validates the host repo's own release/*-installer.zip - run after
 # packaging. In a repo converted to the canonical config format it also opens
 # the newest release/*-nexus.zip and fails when it carries a config at a path
 # data/config-format.json records as installed (or at a tail of one, for a ZIP

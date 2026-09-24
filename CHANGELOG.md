@@ -36,13 +36,14 @@ Tooling a mod repo uses when it converts to the canonical config format (design 
   words them, plus the Removed bullets for the reticle toggle and settings and for the
   sensitivity, deadzone, response curve and axis inversion settings, which the tracker app now
   owns.
-- **`scripts/validate-manifest.mjs`**, run with no arguments in a converted repo, also opens the
-  newest `release/*-nexus.zip` and fails when it carries a file at a path `data/config-format.json`
-  records as the config's `installed` path, or at a tail of one (a flat ZIP extracted into the exe
-  folder). A Nexus update extracted over the game folder would otherwise replace the player's file
-  with the stamped default, and no migration would run. A repo that is not converted is not
-  checked, so today's Nexus ZIPs that carry the config (abzu, prey, resident-evil-requiem and
-  others) keep passing until their conversion takes it out of the Nexus staging.
+- **`scripts/validate-manifest.mjs`**, run with no arguments or with `.` in a converted repo, also
+  opens the newest `release/*-nexus.zip` and fails when it carries a file at a path
+  `data/config-format.json` records as the config's `installed` path, or at a tail of one (a flat
+  ZIP extracted into the exe folder). A Nexus update extracted over the game folder would otherwise
+  replace the player's file with the stamped default, and no migration would run. A repo that is
+  not converted is not checked, so today's Nexus ZIPs that carry the config (abzu, prey,
+  resident-evil-requiem and others) keep passing until their conversion takes it out of the Nexus
+  staging.
 
 ### Added - the README config block, rendered from the committed config
 

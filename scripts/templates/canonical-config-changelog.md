@@ -19,7 +19,8 @@ Then:
 - Take the hotkey example from the repo's committed config, which differs from the fleet
   default where data/config-format.json records a hotkey_exceptions entry.
 - Keep a bullet marked "Only where" only where that is true of the repo, and delete the
-  marker line.
+  marker line. Where a Removed bullet's condition is false, say instead what changes for
+  which players.
 - List the differences from the newest published build that the repo's differential test
   records (comparison 1, design 6.2), one bullet each with the commit that made it.
 - Add each Removed bullet where the mod had that setting or key before the conversion,
@@ -58,6 +59,8 @@ APPROVED_CHANGE_LINES), so a player reads the same thing in both. Change the two
 - BepInEx's ConfigurationManager no longer lists these settings. Edit `BepInEx\config\<GUID>.ini` with any text editor.
 - Deleting only the `.ini` makes the next start convert the `.cfg` again. To go back to the defaults, delete both files.
 - Hotkeys are written as key names, and each hotkey lists every key that triggers it, the Ctrl+Shift chord included: `ToggleKey=End, Ctrl+Shift+Y`.
+- Only where the mod did not already ignore a plain hotkey while Ctrl and Shift were held:
+  A hotkey bound to a plain key no longer fires while Ctrl and Shift are both held, so Ctrl+Shift with that key reaches only a binding that names the chord.
 - Only where End saved its state before:
   Turning head tracking on or off with End no longer changes the file. The mod starts with head tracking on or off as `EnableOnStartup` says.
 
@@ -66,4 +69,6 @@ APPROVED_CHANGE_LINES), so a player reads the same thing in both. Change the two
 ### Removed
 
 - The key that toggled the reticle, and the reticle settings.
-- The sensitivity, deadzone, response curve and axis inversion settings. Set these in your tracker app instead. With these settings at their shipped defaults the camera moves as it did before.
+- The sensitivity, deadzone, response curve and axis inversion settings. Set these in your tracker app instead.
+- Only where every copy of the config the mod shipped (installer, Nexus ZIP and launcher seed) had the same defaults for these settings:
+  With these settings at their shipped defaults the camera moves as it did before.

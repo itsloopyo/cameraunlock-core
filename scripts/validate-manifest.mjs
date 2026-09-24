@@ -89,7 +89,8 @@ const jobs = tokens.length ? tokens : [SELF];
 
 let failures = 0;
 for (const token of jobs) {
-  const isSelf = token === SELF;
+  // "." resolves to the host repo, so it takes the host-only checks as well.
+  const isSelf = token === SELF || (!token.endsWith(".zip") && path.join(ROOT, token) === ROOT);
   const zip = isSelf ? newestInstaller(path.join(ROOT, "release")) : resolveZip(token);
   const label = isSelf ? path.basename(ROOT) : token;
   if (!zip) {
