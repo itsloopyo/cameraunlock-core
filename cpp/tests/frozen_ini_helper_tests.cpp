@@ -249,16 +249,26 @@ void TestReadString() {
         {"Absent", "D"},
         {"Empty", ""},
         {"Nan", "nan"},
+        {"Inf", "inf"},
+        {"MinusInf", "-inf"},
         {"Huge", "1e400"},
         {"MinusOne", "-1"},
+        {"Abc", "abc"},
+        {"OneAbc", "1abc"},
+        {"Hex", "0x230"},
+        {"Octal", "010"},
+        {"Comma", "0,15"},
         {"Quoted", "12"},
         {"SingleQuoted", "12"},
         {"QuotedComment", "\"12\" ; c"},
         {"Comment", "12 ; c"},
         {"HashComment", "12 # c"},
         {"Padded", "12"},
+        {"Max", "4294967295"},
+        {"FullHex", "0xFFFFFFFF"},
         {"Path", "D:\\Games\\Half#Life"},
         {"Long", kLong.substr(0, 1023)},
+        {"LongHex", kLongHex.substr(0, 1023)},
     };
     for (const auto& row : rows) {
         Check(ini.ReadString("Values", row.key, "D") == row.expected, std::string("ReadString ") + row.key);
@@ -419,6 +429,17 @@ void TestReadBool() {
     }
     Check(ini.ReadBool("Bools", "Absent", true) && !ini.ReadBool("Bools", "Absent", false),
           "ReadBool of an absent key gives the default");
+
+    WriteFixture();
+    const cameraunlock::IniReader values = OpenFixture();
+    const char* const valueKeys[] = {"Empty", "Nan", "Inf", "MinusInf", "Huge", "MinusOne", "Abc", "OneAbc",
+                                     "Hex", "Octal", "Comma", "Quoted", "SingleQuoted", "QuotedComment",
+                                     "Comment", "HashComment", "Padded", "Max", "FullHex", "Path", "Long",
+                                     "LongHex"};
+    for (const char* key : valueKeys) {
+        Check(values.ReadBool("Values", key, true) && !values.ReadBool("Values", key, false),
+              std::string("ReadBool ") + key + " gives the default");
+    }
 }
 
 void TestUnreadableFile() {
