@@ -94,6 +94,12 @@ std::string DescribeWriteFailure(const char* path, const cameraunlock::CheckedWr
     } else {
         text = std::string("the ") + cameraunlock::CheckedWriteStepName(result.failed_step) +
                " step failed with Windows error " + std::to_string(result.error);
+        if (result.outcome_uncertain && result.completion_error != 0) {
+            return text + ". Windows could not finish replacing the file and left nothing at its path, "
+                          "and moving the edited contents there failed with Windows error " +
+                   std::to_string(result.completion_error) + "; they are in " +
+                   DescribeTemporary(path, result.temporary_path);
+        }
         if (result.outcome_uncertain) {
             return text + ". Windows could not finish replacing the file, so it may be missing or "
                           "renamed; the edited contents are in " +

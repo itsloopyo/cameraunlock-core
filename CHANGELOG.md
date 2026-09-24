@@ -110,7 +110,9 @@ signature changed. What a migrated file looks like changes in these cases:
   during the edit is left untouched too. In every refused or failed case the correction
   applies for the session only, the stamp is not claimed, the error log names the
   refusal and its line or the failed step and its Windows error, and the next launch
-  tries again.
+  tries again. When Windows stops partway through replacing the config and the writer
+  cannot finish it, the log also says where the edited copy is, and when the config was
+  gone and moving that copy into its place failed, it gives that move's Windows error.
 - A config deleted between the migration's read and its write is reported and not
   recreated. The old code wrote it back from the copy it had read.
 
