@@ -101,6 +101,7 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
             return;
         case C::CollisionChannel:
             BindHeadTrackingMember<C::CollisionChannel>(table, &H::collision_channel);
+            table.Engine();
             return;
         case C::CollisionReleaseSmoothing:
             table.template Concept<C::CollisionReleaseSmoothing>(
@@ -146,7 +147,8 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
 /// LocalSmoothing and RemoteSmoothing write the top-level field and its copy in `position`.
 /// PositionLimitY never sets PositionLimitYDown: each key is read on its own. CollisionMargin and
 /// CollisionReleaseSmoothing live in `lean_clamp`, LightFollowsHead and LightMultiplier in
-/// `light`.
+/// `light`. CollisionChannel is an Engine row: the channel is data about the game, so at its
+/// default it is written as a comment.
 ///
 /// The defaults instance is Config{} with the three hotkey lists at the schema's canonical_default
 /// (`End, Ctrl+Shift+Y`, `PageUp, Ctrl+Shift+G`, `PageDown, Ctrl+Shift+H`); HeadTrackingConfig's

@@ -39,6 +39,9 @@ to run on it.
   `lean_clamp.release_smoothing`. `LightFollowsHead` and `LightMultiplier` are `light` in C++; in
   C# they, like the position limits, replace `Light` or `Position` with a copy holding the new
   value, so a `HeadFollowLightSettings` another config shares is not changed.
+- **`CollisionChannel` is an Engine row**: the channel is data about the game, not a taste, so at
+  its default it is written as the comment `; CollisionChannel=0` and a later build's corrected
+  default reaches every user who never set it. Any other value is written as an active line.
 
 `data/fixtures/canonical-ini/head-tracking/all-concepts.ini` is the defaults with every canonical
 concept rendered, and both languages must produce it byte for byte; three apply cases hold every

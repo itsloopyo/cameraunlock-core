@@ -232,7 +232,8 @@ and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Ga
 
 - `all-concepts.ini`: the table's defaults instance rendered. It holds every canonical concept at
   its default, the three hotkey lists at their `canonical_default`, so it pins each concept's
-  default rendering in both languages.
+  default rendering in both languages. `CollisionChannel` is the table's one Engine row, so it is
+  the commented line `; CollisionChannel=0`.
 - `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose
   rows are `field`, a name and the value as the concept's codec writes it. The names are the 26
   concepts in the schema's order, then `PositionLocalSmoothing` and `PositionRemoteSmoothing`,

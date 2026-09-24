@@ -19,6 +19,8 @@ namespace CameraUnlock.Core.Config
     /// replace <see cref="HeadTrackingConfigData.Position"/> and
     /// <see cref="HeadTrackingConfigData.Light"/> with a copy carrying the new value, so a
     /// <see cref="HeadFollowLightSettings"/> instance another config shares is never changed.
+    /// CollisionChannel is an Engine row: the channel is data about the game, so at its default it
+    /// is written as a comment.
     /// </para>
     /// <para>
     /// The defaults instance is a new config with the three hotkey lists at the schema's
@@ -169,7 +171,8 @@ namespace CameraUnlock.Core.Config
                     table.Concept(ConfigConcepts.CollisionMargin, c => c.CollisionMargin, (c, v) => c.CollisionMargin = v);
                     return;
                 case nameof(ConfigConcepts.CollisionChannel):
-                    table.Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v);
+                    table.Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v)
+                        .Engine();
                     return;
                 case nameof(ConfigConcepts.CollisionReleaseSmoothing):
                     table.Concept(ConfigConcepts.CollisionReleaseSmoothing, c => c.CollisionReleaseSmoothing,
