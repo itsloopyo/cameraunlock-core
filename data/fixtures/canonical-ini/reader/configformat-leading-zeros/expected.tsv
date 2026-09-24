@@ -1,0 +1,5 @@
+# Leading zeros are digits: 001 is format 1.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	001	2	-

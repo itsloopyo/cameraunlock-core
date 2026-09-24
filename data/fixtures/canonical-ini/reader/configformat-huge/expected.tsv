@@ -1,0 +1,6 @@
+# A format past the int range is newer, saturated at 2147483647.
+status	Readable
+format	2147483647
+stamp	true
+key	CameraUnlock	ConfigFormat	99999999999999999999	2	-
+diagnostic	ConfigFormatNewer	2

@@ -1,0 +1,4 @@
+# UTF-16 LE lines that are not the stamp: a non-ASCII letter in or before the name, a full-width ], a comment.
+status	Utf16
+format	0
+stamp	false

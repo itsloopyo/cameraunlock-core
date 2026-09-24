@@ -1,0 +1,7 @@
+# Header names are trimmed of spaces and tabs, and the header line itself is trimmed.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	2	-
+key	Position	B	2	4	-
+key	Hotkeys	C	3	6	-

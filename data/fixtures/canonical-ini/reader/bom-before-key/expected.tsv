@@ -1,0 +1,6 @@
+# A UTF-8 byte order mark before a key line, which is outside any section.
+status	Readable
+format	1
+stamp	false
+key	General	B	2	3	-
+diagnostic	KeyOutsideSection	1

@@ -1,0 +1,7 @@
+# 0x1A is an ordinary byte, in a value, in a key and alone on the last line.
+status	Readable
+format	1
+stamp	false
+key	General	A	1\x1A	2	-
+key	General	B\x1A	2	3	-
+diagnostic	MissingEquals	4

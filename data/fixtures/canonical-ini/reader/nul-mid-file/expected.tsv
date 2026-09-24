@@ -1,0 +1,4 @@
+# A NUL inside a value makes the document unreadable and names its line.
+status	NulByte	3
+format	0
+stamp	false

@@ -1,0 +1,7 @@
+# A value may be empty, including one of only spaces and tabs.
+status	Readable
+format	1
+stamp	false
+key	General	A		2	-
+key	General	B		3	-
+key	General	C		4	-

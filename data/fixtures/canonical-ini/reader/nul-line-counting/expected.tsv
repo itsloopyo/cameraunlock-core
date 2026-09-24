@@ -1,0 +1,4 @@
+# The NUL's line counts a lone CR, a CRLF and another lone CR.
+status	NulByte	4
+format	0
+stamp	false

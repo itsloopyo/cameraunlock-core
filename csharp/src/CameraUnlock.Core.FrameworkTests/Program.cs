@@ -48,6 +48,13 @@ namespace CameraUnlock.Core.Tests
                 failures += Report("killed-during-" + step, dir => KilledDuring(step, dir));
             }
 
+            Console.WriteLine("Canonical INI reader fixtures");
+            string fixtures = CanonicalIniFixtures.FindRoot(AppDomain.CurrentDomain.BaseDirectory);
+            foreach (string name in CanonicalIniFixtures.ReaderCases(fixtures))
+            {
+                failures += Report(name, dir => CanonicalIniFixtures.RunReaderCase(fixtures, name));
+            }
+
             Console.WriteLine(failures == 0 ? "All passed." : failures + " FAILED.");
             return failures == 0 ? 0 : 1;
         }

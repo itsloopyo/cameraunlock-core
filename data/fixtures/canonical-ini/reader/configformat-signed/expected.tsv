@@ -1,0 +1,6 @@
+# A sign is not a digit.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	+1	2	-
+diagnostic	ConfigFormatInvalid	2

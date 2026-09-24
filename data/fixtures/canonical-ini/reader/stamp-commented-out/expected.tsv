@@ -1,0 +1,5 @@
+# A commented-out stamp is not a stamp.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	4	-

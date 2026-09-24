@@ -1,0 +1,5 @@
+# Blank lines, white-space-only lines and ';' or '#' comments, indented or not, are skipped.
+status	Readable
+format	1
+stamp	false
+key	General	C	3	9	-

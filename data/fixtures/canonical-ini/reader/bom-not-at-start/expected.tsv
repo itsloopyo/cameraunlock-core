@@ -1,0 +1,5 @@
+# Byte order mark bytes anywhere but offset 0 are ordinary bytes of the line.
+status	Readable
+format	1
+stamp	false
+key	General	\xEF\xBB\xBFA	1	2	-

@@ -9,6 +9,60 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the canonical INI reader, in C# and C++
+
+One byte-level reader for the canonical config format, the dialect every converted mod
+will read. It works at the level of sections and keys and leaves values as raw bytes;
+nothing reads values into a config yet. Pure in both languages: no file I/O, and no input
+makes it throw.
+
+- C++ (`cameraunlock/config/canonical_ini.h`, namespace `cameraunlock::config`):
+  `kConfigFormat` (1), `ParseCanonicalIni(std::string_view)` returning `CanonicalIni`
+  (`status`, `unreadable_line`, `format_version`, `sections`, `diagnostics`, `Find`,
+  `FindSection`), `HasCanonicalStamp(std::string_view)`, `CanonicalReadStatus`,
+  `CanonicalDiagnosticKind`, `CanonicalDiagnostic`, `CanonicalSection`, `CanonicalValue`,
+  `CanonicalReadStatusName`, `CanonicalDiagnosticKindName` and
+  `DescribeCanonicalDiagnostic`. No `<windows.h>`; it compiles warning-free with
+  `g++ -std=c++17 -Wall -Wextra -Werror`.
+- C# (`CameraUnlock.Core.Config`): `CanonicalIni.Parse(byte[])`,
+  `CanonicalIni.HasStamp(byte[])`, `CanonicalIni.ConfigFormat`, `CanonicalReadStatus`,
+  `CanonicalDiagnosticKind`, `CanonicalDiagnostic` (with `Describe()`),
+  `CanonicalSection` and `CanonicalValue`. Names and values are `byte[]`; lookups take a
+  string and compare its UTF-8 bytes.
+
+The rules: a UTF-16 byte order mark or any NUL makes the document unreadable and nothing
+in it is read. CRLF, LF and a lone CR end a line; a UTF-8 byte order mark at offset 0 is
+skipped; lines are trimmed of spaces and tabs only; blank lines and lines starting `;` or
+`#` are skipped. A `[` line is a header named by the text up to its first `]`, trimmed;
+text after the `]` is ignored with a diagnostic, a header with no `]` or an empty name
+leaves the lines below it outside any section until the next header, and each key there is
+reported. A key line splits at its first `=`. There are no inline comments, quotes or
+escapes, so `B=true ; c` has the value `true ; c`. Repeated headers of one name are one
+section, a repeated key keeps its last occurrence and one diagnostic names every line.
+Section and key names compare ASCII case-insensitively and nothing else is folded; 0x1A
+and every byte above 0x7F are ordinary bytes.
+
+`[CameraUnlock] ConfigFormat` gives the format version. Missing, or not digits, reads as
+`kConfigFormat` with a diagnostic; so does `0`, because formats are numbered from 1. A
+number above `kConfigFormat` is kept as read (capped at 2147483647) with a diagnostic.
+The section's other keys are reserved for core.
+
+The stamp is a line that opens a section named `CameraUnlock` under the reader's own
+header rule, so `[CameraUnlock] ; note` is stamped and `; [CameraUnlock]` is not, and the
+stamp and the reader can never disagree about a readable file. A file starting with a
+UTF-16 byte order mark is searched in its UTF-16 decoding, the only place core decodes
+UTF-16, so a canonical file re-saved as UTF-16 still counts as stamped; a stamped file
+can still be unreadable.
+
+Diagnostics are returned, never logged, ordered by first line and then kind, and each
+has a sentence for the player. `CanonicalDiagnosticKind` numbers 1 to 10 are the same in
+both languages; later kinds are appended and no number changes.
+
+The shared fixtures are `data/fixtures/canonical-ini/reader/<case>/input.ini` and
+`expected.tsv`, 59 cases, with the row format and byte escape in
+`data/fixtures/canonical-ini/README.md`. The C++ suite, the xunit suite and
+`CameraUnlock.Core.FrameworkTests` on net35 and net472 all run them.
+
 ### Changed - the REFramework config migration edits through the INI editor and checked writer
 
 `PluginConfig::Load`'s ConfigVersion migration (RE8's `[Position] InvertX` correction and

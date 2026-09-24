@@ -1,0 +1,6 @@
+# A format above the reader's own is kept as read and reported.
+status	Readable
+format	2
+stamp	true
+key	CameraUnlock	ConfigFormat	2	2	-
+diagnostic	ConfigFormatNewer	2

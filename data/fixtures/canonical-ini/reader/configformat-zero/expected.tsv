@@ -1,0 +1,6 @@
+# Formats are numbered from 1, so 0 is not a format number.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	0	2	-
+diagnostic	ConfigFormatInvalid	2

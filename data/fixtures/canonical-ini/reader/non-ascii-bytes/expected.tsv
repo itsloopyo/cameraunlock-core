@@ -1,0 +1,10 @@
+# UTF-8 and cp1252 bytes in a comment, a section, keys and values are ordinary bytes, never case-folded.
+status	Readable
+format	1
+stamp	false
+key	Caf\xE9	Na\xC3\xAFve	Zo\xC3\xAB	3	-
+key	Caf\xE9	Path	C:\\Users\\J\xF6rg	4	-
+key	General	K\xC9	1	6	-
+key	General	K\xE9	2	7	-
+key	General	\xC3\x89t\xC3\xA9	3	8	-
+key	General	\xC3\xA9t\xC3\xA9	4	9	-

@@ -1,0 +1,6 @@
+# An empty ConfigFormat.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat		2	-
+diagnostic	ConfigFormatInvalid	2

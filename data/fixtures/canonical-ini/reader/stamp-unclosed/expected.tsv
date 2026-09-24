@@ -1,0 +1,6 @@
+# [CameraUnlock with no ] is not a stamp, and ConfigFormat below it is outside any section.
+status	Readable
+format	1
+stamp	false
+diagnostic	UnclosedSectionHeader	1
+diagnostic	KeyOutsideSection	2

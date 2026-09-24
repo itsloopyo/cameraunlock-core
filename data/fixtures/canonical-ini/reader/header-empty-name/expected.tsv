@@ -1,0 +1,10 @@
+# [] and a header of only spaces and tabs open a section nothing matches.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	2	-
+key	General	D	4	8	-
+diagnostic	EmptySectionName	3
+diagnostic	KeyOutsideSection	4
+diagnostic	EmptySectionName	5
+diagnostic	KeyOutsideSection	6

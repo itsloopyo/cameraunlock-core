@@ -1,0 +1,7 @@
+# [CameraUnlock] without ConfigFormat; its other keys draw nothing.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	Other	x	2	-
+key	General	A	1	4	-
+diagnostic	ConfigFormatMissing	1

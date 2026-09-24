@@ -1,0 +1,6 @@
+# A note after ConfigFormat's number is part of the value, so it is not a number.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	1 ; do not change	2	-
+diagnostic	ConfigFormatInvalid	2

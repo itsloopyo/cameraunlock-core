@@ -1,0 +1,6 @@
+# The last line has no terminator.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	2	-
+key	General	B	2	3	-

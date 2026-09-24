@@ -1,0 +1,4 @@
+# NUL padding after the last line of a stamped file: unreadable, still stamped.
+status	NulByte	5
+format	0
+stamp	true

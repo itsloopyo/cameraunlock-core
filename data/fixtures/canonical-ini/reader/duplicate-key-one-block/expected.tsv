@@ -1,0 +1,7 @@
+# A key repeated in one block, in any case: the last wins, spelled as written there.
+status	Readable
+format	1
+stamp	false
+key	General	B	2	3	-
+key	General	a	4	5	2,4
+diagnostic	DuplicateKey	2,4,5

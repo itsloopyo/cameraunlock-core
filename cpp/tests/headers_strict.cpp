@@ -38,6 +38,7 @@
 #include "cameraunlock/ads/ads_fade.h"
 #include "cameraunlock/camera/lean_clamp.h"
 #include "cameraunlock/camera/zoom_compensation.h"
+#include "cameraunlock/config/canonical_ini.h"
 #include "cameraunlock/config/checked_file_writer.h"
 #include "cameraunlock/config/config_key_schema.g.h"
 #include "cameraunlock/config/head_tracking_config.h"

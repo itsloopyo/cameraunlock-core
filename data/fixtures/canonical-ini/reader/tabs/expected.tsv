@@ -1,0 +1,6 @@
+# Tabs are trimmed like spaces, around headers, keys, values and comments.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	2	-
+key	General	B		3	-

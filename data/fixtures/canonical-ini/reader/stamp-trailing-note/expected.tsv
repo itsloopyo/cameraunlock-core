@@ -1,0 +1,6 @@
+# A stamp line with a trailing note is still the stamp; the note draws a diagnostic.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	1	2	-
+diagnostic	TextAfterSectionHeader	1

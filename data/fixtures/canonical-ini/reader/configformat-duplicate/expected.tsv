@@ -1,0 +1,6 @@
+# A repeated ConfigFormat: the last wins, like any key.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	1	3	2
+diagnostic	DuplicateKey	2,3

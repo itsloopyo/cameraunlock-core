@@ -1,0 +1,4 @@
+# UTF-16 LE without a mark: the NUL bytes make it unreadable.
+status	NulByte	1
+format	0
+stamp	false

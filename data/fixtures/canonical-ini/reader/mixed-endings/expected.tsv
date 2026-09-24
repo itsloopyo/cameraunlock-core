@@ -1,0 +1,9 @@
+# CRLF, LF and lone CR in one file; CR CR LF is a lone CR then a CRLF; no final newline.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	2	-
+key	General	B	2	3	-
+key	General	C	3	4	-
+key	General	D	4	6	-
+key	General	E	5	9	-

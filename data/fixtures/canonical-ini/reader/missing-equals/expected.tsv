@@ -1,0 +1,7 @@
+# A line with no '=' is reported and skipped.
+status	Readable
+format	1
+stamp	false
+key	General	A	1	3	-
+diagnostic	MissingEquals	2
+diagnostic	MissingEquals	4

@@ -1,0 +1,5 @@
+# A UTF-8 byte order mark at offset 0 is skipped, so the header behind it counts.
+status	Readable
+format	1
+stamp	true
+key	CameraUnlock	ConfigFormat	1	2	-
