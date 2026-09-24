@@ -171,6 +171,8 @@ const CONFIG_HEADING = 'Configuration';
 const CONFIG_HEADING_RE = /^(\d+\.\s+)?configuration$/i;
 const CONFIG_INSERT_AFTER = ['Controls', OPENTRACK_HEADING, 'Installation'];
 
+const FORMAT = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, 'data', 'config-format.json'), 'utf8'));
+
 const leaf = (p) => p.split(/[\\/]/).pop();
 
 const code = (p) => `\`${p}\``;
@@ -208,17 +210,38 @@ function locationParagraph(entries, name) {
   ].join('\n');
 }
 
+// Settings the conversion drops although the mod read them, one line per approved_changes entry.
+// An entry with no line here stops the block rendering, so a newly approved change cannot reach
+// players' files without the README saying so.
+const APPROVED_CHANGE_LINES = {
+  pose_shaping: 'A sensitivity, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.',
+  reticle: 'Reticle settings, and a key that toggled the reticle.',
+  follows_default: "The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.",
+};
+
+function droppedSettings() {
+  const lines = Object.keys(FORMAT.approved_changes).map((id) => {
+    if (!(id in APPROVED_CHANGE_LINES)) {
+      throw new Error(`data/config-format.json approved_changes.${id} has no line in the config block; add one to APPROVED_CHANGE_LINES in scripts/generate-readme.mjs`);
+    }
+    return `- ${APPROVED_CHANGE_LINES[id]}`;
+  });
+  return ['Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:', '', ...lines].join('\n');
+}
+
 function legacyParagraphs(name) {
   return [
-    `Earlier versions of the mod used an older layout for this file. The first time this version starts, it converts the file once into the layout below and keeps the file as it was beside it as ${code(`${name}.pre-canonical`)}. Comments, and keys the mod never read, are not carried over. ${code(`${name}.pre-canonical.last`)}, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.`,
-    `An older version of the mod reads the new layout with its own defaults for any key that moved. Copying ${code(`${name}.pre-canonical`)} back over ${code(name)} restores the old file.`,
+    `Earlier versions of the mod used an older layout for this file. The first time this version starts, it converts the file once into the layout below and keeps the file as it was beside it as ${code(`${name}.pre-canonical`)}. ${code(`${name}.pre-canonical.last`)}, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.`,
+    droppedSettings(),
+    `An older version of the mod may not read the new layout correctly. It reads a key that moved as its own default, and it can misread a hotkey or another value that is now written as a name. To go back to an older version, first copy ${code(`${name}.pre-canonical`)} back over ${code(name)}, which restores the old file.`,
   ];
 }
 
 function bepinexParagraphs(cfg, legacy) {
   if (!legacy) return ["BepInEx's ConfigurationManager does not list these settings."];
   return [
-    `Earlier versions of the mod kept their settings in ${code(cfg)}. The first time this version starts, it reads your settings from the \`.cfg\` and writes them into the \`.ini\`. Comments, and keys the mod never read, are not carried over. The \`.cfg\` is left as it was, and an older version of the mod still reads it.`,
+    `Earlier versions of the mod kept their settings in ${code(cfg)}. The first time this version starts, it reads your settings from the \`.cfg\` and writes them into the \`.ini\`. The \`.cfg\` is left as it was, and an older version of the mod still reads it.`,
+    droppedSettings(),
     "BepInEx's ConfigurationManager no longer lists these settings.",
     'Deleting only the `.ini` makes the next start convert the `.cfg` again. To go back to the defaults, delete both files.',
   ];
@@ -270,6 +293,9 @@ function configBlock(state) {
 }
 
 function findConfigMarkers(doc) {
+  if (doc.preamble.some((line) => line === CONFIG_START || line === CONFIG_END)) {
+    throw new Error(`README.md has a config block marker above its first section; the block belongs in ## ${CONFIG_HEADING}`);
+  }
   const found = [];
   doc.blocks.forEach((b, blockIndex) => {
     b.body.forEach((line, lineIndex) => {
@@ -287,6 +313,9 @@ function applyConfigBlock(doc, rendered) {
     if (markers.length !== 2 || start.line !== CONFIG_START || end.line !== CONFIG_END || start.blockIndex !== end.blockIndex) {
       throw new Error(`README.md needs exactly one ${CONFIG_START} line followed by one ${CONFIG_END} line in the same section`);
     }
+    if (!CONFIG_HEADING_RE.test(doc.blocks[start.blockIndex].heading)) {
+      throw new Error(`README.md has its config block under ## ${doc.blocks[start.blockIndex].heading}; the block belongs in ## ${CONFIG_HEADING}`);
+    }
     const body = doc.blocks[start.blockIndex].body;
     if (rendered === null) {
       body.splice(start.lineIndex, end.lineIndex - start.lineIndex + 1);
@@ -302,9 +331,19 @@ function applyConfigBlock(doc, rendered) {
   const lines = [CONFIG_START, ...rendered.split('\n'), CONFIG_END];
   const at = doc.blocks.findIndex((b) => CONFIG_HEADING_RE.test(b.heading));
   if (at >= 0) {
+    // Before the section's first ### subsection: a block appended at the end would read as part
+    // of whatever subsection comes last.
     const body = doc.blocks[at].body;
-    while (body.length > 0 && body[body.length - 1].trim() === '') body.pop();
-    body.push('', ...lines);
+    let fenced = false;
+    let sub = body.findIndex((line) => {
+      if (/^```/.test(line)) fenced = !fenced;
+      return !fenced && /^###\s/.test(line);
+    });
+    if (sub < 0) sub = body.length;
+    const lead = body.slice(0, sub);
+    while (lead.length > 0 && lead[lead.length - 1].trim() === '') lead.pop();
+    const rest = body.slice(sub);
+    body.splice(0, body.length, ...lead, ...(lead.length > 0 ? [''] : []), ...lines, ...(rest.length > 0 ? ['', ...rest] : []));
     return 'inserted';
   }
   let insertAt = doc.blocks.length;

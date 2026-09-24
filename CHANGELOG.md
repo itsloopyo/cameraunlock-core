@@ -20,18 +20,25 @@ file only, so a converted repo has one and an unconverted repo has none.
 - **What it says**: where the file is installed, one path or the list of store layouts, and that
   the mod creates it when it finds none. For a repo in `legacy`: the one-time conversion at first
   launch, the original kept as `<file>.pre-canonical` and `<file>.pre-canonical.last` as the file
-  before the most recent conversion, comments and keys the mod never read not carried over, an
-  older version of the mod reading the new layout with its defaults for keys that moved, and
-  copying `.pre-canonical` back restoring the old file. For a BepInEx repo (one whose entry has a
-  `legacy_source`): that ConfigurationManager does not list the settings, and in a `legacy` repo that
-  the settings now live in `BepInEx\config\<GUID>.ini`, the `.cfg` is left as it was and an older
-  version still reads it, and a reset deletes both files. Then the committed file itself in an
-  `ini` code fence, CRLF turned to LF.
+  before the most recent conversion, comments and keys the mod never read not carried over, nor
+  the settings each `approved_changes` entry drops (one line per entry: a changed sensitivity,
+  deadzone, response curve or axis inversion; reticle settings and a reticle toggle key; the
+  setting of a feature shipped switched off while untested, which now follows the mod's default),
+  an older version of the mod possibly misreading the new layout (a key that moved reads as its
+  default, a hotkey or other value now written as a name can be misread), and copying
+  `.pre-canonical` back first as the way to go back to an older version. An `approved_changes`
+  entry with no line in the generator stops the block rendering. For a BepInEx repo (one whose
+  entry has a `legacy_source`): that ConfigurationManager does not list the settings, and in a
+  `legacy` repo that the settings now live in `BepInEx\config\<GUID>.ini`, the `.cfg` is left as
+  it was and an older version still reads it, the same list of what is not carried over, and a
+  reset deletes both files. Then the committed file itself in an `ini` code fence, CRLF turned to
+  LF.
 - **`pixi run readme`** checks the block with the other generated sections, and `--write` (which now
-  applies `config` by default beside `opentrack` and `community`) inserts it at the end of
-  Configuration, adds the section after Controls when there is none, keeps it current, and removes
-  one from a repo that is not converted. A converted repo whose block cannot be rendered (a config
-  file unstamped or unrecorded, or markers that do not pair) is reported and exits 1 in both modes.
+  applies `config` by default beside `opentrack` and `community`) inserts it after Configuration's
+  lead prose, before its first `###` subsection, adds the section after Controls when there is
+  none, keeps it current, and removes one from a repo that is not converted. A converted repo whose block cannot be rendered (a config
+  file unstamped or unrecorded, markers that do not pair, or a marker above the first section or
+  under an H2 other than Configuration) is reported and exits 1 in both modes.
   Unconverted repos without a block see no change: `pixi run readme --all` prints the same output as
   before.
 - **`--print config [repo]`** prints one repo's block for NEXUS_MODS.md, which is untracked and so is

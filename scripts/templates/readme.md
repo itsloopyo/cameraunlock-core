@@ -53,18 +53,24 @@ config block, and a README without one fails conformance's `readme` check:
 (rendered, never edited by hand)
 <!-- /cameraunlock:config -->
 
-Each marker is a line of its own, with nothing else on it. The block says where
+Each marker is a line of its own, with nothing else on it, and both sit in
+Configuration itself: a marker above the first section or under another H2
+stops the block rendering. The block says where
 the file is installed; for a repo that published a pre-canonical build, the
 one-time conversion, the `<file>.pre-canonical` and `<file>.pre-canonical.last`
-copies, what is not carried over, and what an older version of the mod reads;
+copies, what is not carried over (comments, unread keys, and one line for each
+entry in data/config-format.json's `approved_changes`), and that an older
+version of the mod may misread the new layout, so going back means copying
+`.pre-canonical` back first;
 for a BepInEx mod, that ConfigurationManager does not list the settings, and
 where it published a pre-canonical build, the `.ini` beside the untouched
 `.cfg` in place of the copies, and how to reset; then the committed file itself
 in an ini code fence. It replaces any hand-written key
 listing, since the file's own comments describe every key.
 
-`pixi run readme --write --sections config` inserts the block at the end of
-Configuration (or adds the section when there is none) and keeps it current;
+`pixi run readme --write --sections config` inserts the block after the lead
+prose of Configuration, before its first ### subsection (or adds the section
+when there is none) and keeps it current;
 conformance fails a converted repo whose block differs, and an unconverted repo
 that has one. NEXUS_MODS.md is untracked, so nothing checks it: paste the output
 of `node cameraunlock-core/scripts/generate-readme.mjs --print config` into its
