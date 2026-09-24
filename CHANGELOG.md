@@ -15,8 +15,10 @@ Conformance now holds each mod repo to the canonical config format. `scripts/con
 gains `config-format`, `config-legacy-reader` and `config-preserve`, backed by a new lint,
 `scripts/check-canonical-config.mjs`, which reads `data/config-schema.json`, `data/keys.json` and
 `data/config-format.json`. A repo counts as converted when a committed config file that
-`data/config-format.json` records carries the `[CameraUnlock]` stamp; nothing records it
-separately.
+`data/config-format.json` records carries the `[CameraUnlock]` stamp, or, where its entry records
+no committed path yet, when any tracked `.ini` or `.cfg` file does; nothing records it separately.
+A checkout is matched to its entry by folder name, and by the name its `origin` remote gives where
+the folder name is not listed (a worktree, a clone under another name), ignoring ASCII case.
 
 - **`scripts/lib/canonical-ini.mjs`**: the canonical INI grammar for core's scripts, the rules of
   `ParseCanonicalIni` / `CanonicalIni.Parse` and `HasCanonicalStamp` / `CanonicalIni.HasStamp`.
@@ -26,8 +28,8 @@ separately.
   `keys/cases.tsv` through the second, and holds the lint to its rules: the two rendered fixture files
   pass it, and each rule fails a copy of `head-tracking/all-concepts.ini` edited to break it.
 - **The lint**, on each stamped committed file: the reader finds nothing to report, every line ends
-  in CRLF, there is no byte order mark and no byte above 0x7F, and every key line is written
-  `Key=value`; `[CameraUnlock]` holds `ConfigFormat=1` and nothing else; a concept is written only at
+  in CRLF, there is no byte order mark and no byte above 0x7F, every key line is written
+  `Key=value`, and every section header is written `[Name]` and appears once; `[CameraUnlock]` holds `ConfigFormat=1` and nothing else; a concept is written only at
   the schema's section and key, spelled as the schema spells it, and an alias, another spelling or
   another section fails; a concept the canonical format does not write fails with its
   `canonical_reason`, a retired key fails, and so does `[Sensitivity]`, `[Inversion]` or `[Reticle]`,
@@ -38,7 +40,8 @@ separately.
   hotkey concept holds its `canonical_default`, apart from a binding `hotkey_exceptions` replaces
   for the repo; the file is tracked by git and `git check-attr text` reports it unset (`-text`).
 - **`node scripts/check-canonical-config.mjs [repo ...]`** prints each file's problems and exits 1
-  on one; `--json` prints what conformance reads; `pixi run config-report` (`--report`) prints the
+  on one; `--json` prints what conformance reads, and `--roots-file <file>` takes the repo paths
+  one per line, which conformance uses so no fleet size runs into the Windows command-line limit; `pixi run config-report` (`--report`) prints the
   fleet report: game-local `(section, key)` pairs shared by three or more canonical repos, the
   game-local section names in use, and concept values in committed files that differ from the
   schema default.
@@ -46,14 +49,18 @@ separately.
   or `Legacy/` folder; a repo outside `legacy` with one; a repo outside `legacy` and `exempt` whose
   committed file is missing, unrecorded or unstamped, or that `data/config-format.json` does not list
   at all; a converted `legacy` repo with an unstamped file left; and a recorded committed file the
-  repo does not have. It WARNs once for a `legacy` repo not yet converted. Predecessor repos are not
-  checked.
+  repo does not have; and a tracked file carrying the stamp where `data/config-format.json` records
+  no committed path, since nothing is linted until the conversion records it. A repo whose
+  `install.cmd` dispatches to `install-body-reframework.cmd` needs no legacy folder: its import is
+  core's `PluginConfigLegacyImport`. It WARNs once for a `legacy` repo not yet converted.
+  Predecessor repos are not checked.
 - **`config-legacy-reader`** FAILs a converted repo whose tracked C, C++, C# or Rust source outside
   its legacy folder uses `GetPrivateProfile*`, `WritePrivateProfile*`, `IniReader`, `IniWriter`,
   `ParseIniConfig`, `ParseIniFile`, or a `.Bind(` call in a C# file that names BepInEx (reported as
   `ConfigFile.Bind`), unless `allow_legacy_symbols` lists that symbol in that file. `vendor`,
   `extern`, `third_party`, `cameraunlock-core`, `bin`, `obj`, `build`, `out`, `release`, `dist` and
-  `target` folders are skipped.
+  `target` folders are skipped, and so is `tests/config_differential/`, whose oracle compiles the
+  published build's reader. A `Legacy/` folder under it is not a legacy import folder either.
 - **`config-preserve`** FAILs a converted repo whose `install.cmd` lists a config file in `MOD_DLLS`,
   or whose `uninstall.cmd`, where it dispatches to `uninstall-body.cmd`, leaves an installed path or
   a `legacy_source` out of `PRESERVE_FILES`.

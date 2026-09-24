@@ -7,6 +7,7 @@
 //   node scripts/check-canonical-config.mjs                  # the repo vendoring this core
 //   node scripts/check-canonical-config.mjs <repo> [...]     # repo paths or sibling names
 //   node scripts/check-canonical-config.mjs --json <repo> [...]
+//   node scripts/check-canonical-config.mjs --json --roots-file <file>   # repo paths, one per line
 //   node scripts/check-canonical-config.mjs --report         # pixi run config-report
 //
 // The default run prints each stamped file's problems and exits 1 when there is one.
@@ -32,7 +33,7 @@ import {
   splitLines,
   trimSpaceTab,
 } from "./lib/canonical-ini.mjs";
-import { formatKeyBindings, parseKeyBindings } from "./lib/key-bindings.mjs";
+import { parseKeyBindings } from "./lib/key-bindings.mjs";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPOS_ROOT = path.dirname(CORE_ROOT);
@@ -124,9 +125,25 @@ export function lintCanonicalConfig(bytes, { dialect, exceptions }) {
 
   for (const d of doc.diagnostics) problems.push(describeDiagnostic(d));
 
+  const headerLines = new Map();
   for (const { text, number } of lines) {
     const line = trimSpaceTab(text);
-    if (line === "" || line[0] === ";" || line[0] === "#" || line[0] === "[") continue;
+    if (line === "" || line[0] === ";" || line[0] === "#") continue;
+    if (line[0] === "[") {
+      const close = line.indexOf("]");
+      const name = close < 0 ? "" : trimSpaceTab(line.slice(1, close));
+      if (name === "" || close !== line.length - 1) continue;
+      if (text !== `[${name}]`) {
+        problems.push(`line ${number} is not written [${name}], with nothing around the name or the brackets`);
+      }
+      const first = headerLines.get(name.toLowerCase());
+      if (first !== undefined) {
+        problems.push(`line ${number}: [${name}] repeats the section begun on line ${first}; a canonical file writes each section once`);
+      } else {
+        headerLines.set(name.toLowerCase(), number);
+      }
+      continue;
+    }
     const equals = line.indexOf("=");
     if (equals < 0) continue;
     if (text !== `${trimSpaceTab(line.slice(0, equals))}=${trimSpaceTab(line.slice(equals + 1))}`) {
@@ -233,15 +250,46 @@ function git(root, args) {
   return result;
 }
 
-// Where a checkout stands in data/config-format.json: `repo` is its name there.
-function listingOf(folder) {
-  if (folder in FORMAT.exempt) return { repo: folder, listing: "exempt" };
-  for (const [name, entry] of Object.entries(FORMAT.legacy)) {
-    if (name === folder || entry.renamed_from === folder) return { repo: name, listing: "legacy" };
-    if ((entry.predecessors ?? []).includes(folder)) return { repo: name, listing: "predecessor" };
+const lowerKeys = (object) => new Map(Object.keys(object).map((name) => [name.toLowerCase(), name]));
+const EXEMPT = lowerKeys(FORMAT.exempt);
+const CONFIGS = lowerKeys(FORMAT.configs);
+
+// Where a repo name stands in data/config-format.json: `repo` is its name there. GitHub names
+// are case-insensitive, so the match is too.
+function listingOf(name) {
+  const lower = name.toLowerCase();
+  if (EXEMPT.has(lower)) return { repo: EXEMPT.get(lower), listing: "exempt" };
+  for (const [repo, entry] of Object.entries(FORMAT.legacy)) {
+    if (repo.toLowerCase() === lower || entry.renamed_from?.toLowerCase() === lower) return { repo, listing: "legacy" };
+    if ((entry.predecessors ?? []).some((p) => p.toLowerCase() === lower)) return { repo, listing: "predecessor" };
   }
-  if (folder in FORMAT.configs) return { repo: folder, listing: "mover" };
+  if (CONFIGS.has(lower)) return { repo: CONFIGS.get(lower), listing: "mover" };
   return { repo: null, listing: "unlisted" };
+}
+
+// A worktree or a clone under another folder name is still the repo its origin names.
+function listingOfCheckout(root, folder) {
+  const byFolder = listingOf(folder);
+  if (byFolder.listing !== "unlisted") return byFolder;
+  const origin = git(root, ["remote", "get-url", "origin"]);
+  if (origin.status !== 0) return byFolder;
+  const name = origin.stdout.trim().split(/[\\/:]/).filter(Boolean).pop();
+  return name === undefined ? byFolder : listingOf(name.replace(/\.git$/i, ""));
+}
+
+// Tracked config files carrying the stamp, in a repo whose data/config-format.json entry
+// records no committed path for one of its files: the conversion committed a canonical file
+// and did not record it in core.
+function unrecordedStampedFiles(root) {
+  const listed = git(root, ["-c", "core.quotepath=off", "ls-files", "-z"]);
+  if (listed.status !== 0) throw new Error(`git ls-files failed in ${root}: ${listed.stderr.trim()}`);
+  return listed.stdout
+    .split("\0")
+    .filter((rel) => /\.(ini|cfg)$/i.test(rel))
+    .filter((rel) => {
+      const full = path.join(root, ...rel.split("/"));
+      return fs.existsSync(full) && hasCanonicalStamp(fs.readFileSync(full));
+    });
 }
 
 function fileState(root, repo, file) {
@@ -280,12 +328,13 @@ function fileState(root, repo, file) {
 
 export function repoState(root) {
   const folder = path.basename(root);
-  const { repo, listing } = listingOf(folder);
-  const result = { root, folder, repo, listing, converted: false, files: [], allow_legacy_symbols: [] };
+  const { repo, listing } = listingOfCheckout(root, folder);
+  const result = { root, folder, repo, listing, converted: false, files: [], unrecorded_stamped: [], allow_legacy_symbols: [] };
   if (listing === "exempt") result.reason = FORMAT.exempt[repo];
   if (listing !== "legacy" && listing !== "mover") return result;
   result.files = FORMAT.configs[repo].map((file) => fileState(root, repo, file));
-  result.converted = result.files.some((f) => f.state === "stamped");
+  if (result.files.some((f) => f.state === "unrecorded")) result.unrecorded_stamped = unrecordedStampedFiles(root);
+  result.converted = result.files.some((f) => f.state === "stamped") || result.unrecorded_stamped.length > 0;
   result.allow_legacy_symbols = FORMAT.allow_legacy_symbols[repo] ?? [];
   return result;
 }
@@ -313,6 +362,10 @@ function lintMain(roots) {
       console.log(`FAIL ${s.folder}: not in data/config-format.json, so nothing records its config files`);
       failed = true;
       continue;
+    }
+    for (const rel of s.unrecorded_stamped) {
+      console.log(`FAIL ${s.folder}: ${rel} carries the [${STAMP_SECTION}] stamp, and data/config-format.json records no committed file for it`);
+      failed = true;
     }
     for (const f of s.files) {
       const name = `${s.folder}: ${f.committed ?? f.installed[0] ?? "(no path)"}`;
@@ -402,15 +455,25 @@ function reportMain() {
 }
 
 function main(argv) {
+  const rootsFileAt = argv.indexOf("--roots-file");
+  let rootsFile = null;
+  if (rootsFileAt >= 0) {
+    rootsFile = argv[rootsFileAt + 1];
+    if (rootsFile === undefined) throw new Error("--roots-file takes a file of repo paths, one per line");
+    argv = argv.filter((_, i) => i !== rootsFileAt && i !== rootsFileAt + 1);
+  }
   const json = argv.includes("--json");
   const report = argv.includes("--report");
-  const tokens = argv.filter((a) => a !== "--json" && a !== "--report");
+  let tokens = argv.filter((a) => a !== "--json" && a !== "--report");
   const unknown = tokens.find((t) => t.startsWith("--"));
   if (unknown) throw new Error(`unknown option ${unknown}`);
   if (report) {
-    if (json || tokens.length > 0) throw new Error("--report takes no repos and no --json");
+    if (json || tokens.length > 0 || rootsFile !== null) throw new Error("--report takes no repos and no --json");
     reportMain();
     return 0;
+  }
+  if (rootsFile !== null) {
+    tokens = [...tokens, ...fs.readFileSync(rootsFile, "utf8").split(/\r?\n/).filter((line) => line !== "")];
   }
   const roots = tokens.length > 0 ? tokens.map(resolveRoot) : [REPOS_ROOT];
   if (json) {

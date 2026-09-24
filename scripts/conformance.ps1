@@ -937,6 +937,9 @@ $CanonicalConfig = @{}
 # C++ repo, a Legacy/ folder in a C# one.
 $LEGACY_FOLDER = '(^|/)(src/legacy_config|Legacy)/'
 $LEGACY_SCAN_SKIP = '(^|/)(vendor|extern|third_party|cameraunlock-core|bin|obj|build|out|release|dist|target)/'
+# The differential test (design 6.2) compiles the published build's reader as its oracle, so it
+# names the banned symbols by design, and it is not the import.
+$DIFFERENTIAL_TEST_FOLDER = '^tests/config_differential/'
 $LEGACY_SCAN_SOURCE = '\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|cs|rs)$'
 $LEGACY_READER_SYMBOLS = '\b(GetPrivateProfile\w*|WritePrivateProfile\w*|IniReader|IniWriter|ParseIniConfig|ParseIniFile)\b'
 # BepInEx's ConfigFile is reached through BaseUnityPlugin.Config or a parameter of any name, so
@@ -959,7 +962,7 @@ function Get-TrackedFiles {
 
 function Get-LegacyFolderFiles {
     param([string]$Root)
-    return Get-TrackedFiles $Root | Where-Object { $_ -cmatch $LEGACY_FOLDER -and $_ -notmatch $LEGACY_SCAN_SKIP }
+    return Get-TrackedFiles $Root | Where-Object { $_ -cmatch $LEGACY_FOLDER -and $_ -notmatch $LEGACY_SCAN_SKIP -and $_ -notmatch $DIFFERENTIAL_TEST_FOLDER }
 }
 
 function Test-ConfigFormat {
@@ -979,7 +982,13 @@ function Test-ConfigFormat {
         return
     }
 
+    $unrecordedStamped = @($state.unrecorded_stamped)
+    foreach ($rel in $unrecordedStamped) {
+        Add-Finding $Name 'config-format' 'FAIL' "$rel carries the [CameraUnlock] stamp, and data/config-format.json configs records no committed file for it; a conversion records its committed path in core, and nothing is linted until it does"
+    }
+
     foreach ($file in $state.files) {
+        if ($file.state -eq 'unrecorded' -and $unrecordedStamped.Count -gt 0) { continue }
         if ($file.state -eq 'stamped') {
             foreach ($problem in $file.problems) { Add-Finding $Name 'config-format' 'FAIL' "$($file.committed): $problem" }
         } elseif ($file.state -eq 'missing') {
@@ -1004,7 +1013,13 @@ function Test-ConfigFormat {
     if ($state.listing -ne 'legacy') { return }
     if (-not $state.converted) {
         Add-Finding $Name 'config-format' 'WARN' 'not converted to the canonical config format yet'
-    } elseif ($legacyFiles.Count -eq 0) {
+        return
+    }
+    # An REFramework mod's legacy import is core's PluginConfigLegacyImport (design 2.8), so the
+    # repo has no folder of its own to carry it.
+    $installPath = Join-Path $Root 'scripts/install.cmd'
+    $coreImport = (Test-Path $installPath) -and ((Get-WrapperBodyName (Read-TextFile $installPath)) -eq 'install-body-reframework.cmd')
+    if ($legacyFiles.Count -eq 0 -and -not $coreImport) {
         Add-Finding $Name 'config-format' 'FAIL' 'converted, and has no src/legacy_config/ or Legacy/ folder; a repo that published a pre-canonical build keeps its frozen legacy import for the life of the repo'
     }
 }
@@ -1017,7 +1032,7 @@ function Test-ConfigLegacyReader {
 
     $uses = [ordered]@{}
     foreach ($rel in @(Get-TrackedFiles $Root)) {
-        if ($rel -notmatch $LEGACY_SCAN_SOURCE -or $rel -match $LEGACY_SCAN_SKIP -or $rel -cmatch $LEGACY_FOLDER) { continue }
+        if ($rel -notmatch $LEGACY_SCAN_SOURCE -or $rel -match $LEGACY_SCAN_SKIP -or $rel -match $DIFFERENTIAL_TEST_FOLDER -or $rel -cmatch $LEGACY_FOLDER) { continue }
         $lines = [System.IO.File]::ReadAllLines((Join-Path $Root $rel))
         $isBepInEx = $rel.EndsWith('.cs') -and (($lines -join "`n") -match 'BepInEx')
         for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -1168,8 +1183,16 @@ if ($All) {
 if ($roots.Count -eq 0) { throw "No repos to check under $ReposRoot." }
 
 if (@($selected | Where-Object { $_ -in $CONFIG_CHECK_IDS }).Count -gt 0) {
-    $out = & node (Join-Path $CoreRoot 'scripts/check-canonical-config.mjs') --json @roots
-    if ($LASTEXITCODE -ne 0) { throw "scripts/check-canonical-config.mjs --json failed with exit code $LASTEXITCODE" }
+    # A file, not argv: Windows caps a command line at 32767 characters, which a fleet of a few
+    # hundred absolute repo paths passes.
+    $rootsFile = [System.IO.Path]::GetTempFileName()
+    try {
+        [System.IO.File]::WriteAllLines($rootsFile, [string[]]$roots, (New-Object System.Text.UTF8Encoding $false))
+        $out = & node (Join-Path $CoreRoot 'scripts/check-canonical-config.mjs') --json --roots-file $rootsFile
+        if ($LASTEXITCODE -ne 0) { throw "scripts/check-canonical-config.mjs --json failed with exit code $LASTEXITCODE" }
+    } finally {
+        Remove-Item -LiteralPath $rootsFile
+    }
     $states = ($out -join "`n") | ConvertFrom-Json
     for ($i = 0; $i -lt $roots.Count; $i++) { $CanonicalConfig[$roots[$i]] = @($states)[$i] }
 }
