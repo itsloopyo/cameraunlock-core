@@ -1,0 +1,19 @@
+# `render-config` for a C++ mod repo on the canonical config format. Paste the task into
+# the repo's [tasks] and fill in the three <...> placeholders.
+#
+# The committed config is RenderCanonical(table, Config{}, header), byte for byte, at the
+# `committed` path data/config-format.json records for the repo, marked `-text` in
+# .gitattributes. The repo's render test compares the two and fails on any difference, so
+# the file cannot drift from the code; this task is how the file is rewritten after a
+# change to a row, a comment or a default.
+#
+# The test binary owns the mode: given `--render-config <path>` it writes the rendered bytes
+# to <path> and exits 0 without running its tests. encode-seed then re-encodes every
+# launcher-manifest.json seed that writes the config from the new bytes, and says so when
+# the repo has no manifest or no such seed.
+#
+# <test binary>     the test executable the build produces, e.g. build/tests/Release/<name>_tests.exe
+# <build task>      the task that builds it
+# <committed path>  the repo path data/config-format.json records as `committed`
+
+render-config = { cmd = "<test binary> --render-config <committed path> && node cameraunlock-core/scripts/encode-seed.mjs", depends-on = ["<build task>"] }

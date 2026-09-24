@@ -1,0 +1,18 @@
+# `render-config` for a C# mod repo on the canonical config format. Paste the task into
+# the repo's [tasks] and fill in the two <...> placeholders.
+#
+# The committed config is ConfigTable.Render over a Config from the table's defaults, byte
+# for byte, at the `committed` path data/config-format.json records for the repo, marked
+# `-text` in .gitattributes. The repo's render test compares the two and fails on any
+# difference, so the file cannot drift from the code; this task is how the file is
+# rewritten after a change to a row, a comment or a default.
+#
+# The render test owns the mode: with CAMERAUNLOCK_RENDER_CONFIG set to `write` it writes
+# the rendered bytes to the committed path and passes; unset, it compares; any other value
+# fails the test. encode-seed then re-encodes every launcher-manifest.json seed that writes
+# the config from the new bytes, and says so when the repo has no manifest or no such seed.
+#
+# <test project>  the test .csproj
+# <render test>   a dotnet test --filter expression that selects the render test alone
+
+render-config = { cmd = "dotnet test <test project> --filter <render test> && node cameraunlock-core/scripts/encode-seed.mjs", env = { CAMERAUNLOCK_RENDER_CONFIG = "write" } }

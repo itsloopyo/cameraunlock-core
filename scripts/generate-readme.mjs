@@ -212,7 +212,8 @@ function locationParagraph(entries, name) {
 
 // Settings the conversion drops although the mod read them, one line per approved_changes entry.
 // An entry with no line here stops the block rendering, so a newly approved change cannot reach
-// players' files without the README saying so.
+// players' files without the README saying so. scripts/templates/canonical-config-changelog.md
+// repeats these lines and the paragraphs below for each conversion's changelog; change both.
 const APPROVED_CHANGE_LINES = {
   pose_shaping: 'A sensitivity, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.',
   reticle: 'Reticle settings, and a key that toggled the reticle.',

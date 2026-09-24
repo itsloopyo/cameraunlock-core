@@ -9,6 +9,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - seed re-encoding, render-config templates and the Nexus config check
+
+Tooling a mod repo uses when it converts to the canonical config format (design 5.1).
+
+- **`scripts/encode-seed.mjs`** rewrites the `content_b64` of every `launcher-manifest.json` seed
+  that writes the repo's config, from the committed file's bytes. It reads the same seed shapes as
+  `Assert-ManifestSeedsMatchShipped` (`loader.seed`, a top-level `seed`, `variants[].loader.seed`),
+  and a seed writes the config when its target, resolved against its anchor (`exe_dir` through
+  `data/games.json`'s `executable_relpath` and `xbox_executable_relpath`), is an `installed` path
+  `data/config-format.json` records for the repo. Other seeds (BepInEx.cfg, a marks file) are left
+  alone, and only the `content_b64` strings change: every other byte of the manifest is kept, and
+  the script checks that the rewritten manifest parses to the old one with only those values
+  replaced. It refuses a committed file without the `[CameraUnlock]` stamp, a config entry with no
+  committed path, an unknown anchor, and two seeds that share a blob but need different contents.
+  `--check` exits 1 when a seed is stale and writes nothing. No manifest, or no seed that writes a
+  config, is reported and exits 0. `pixi run test-encode-seed`, now part of `pixi run check`, runs
+  it against unchanged copies of resident-evil-2-headtracking's and prey-headtracking's manifests in
+  `data/fixtures/encode-seed/`.
+- **`scripts/templates/render-config-task-cpp.toml`** and **`render-config-task-csharp.toml`**: the
+  `render-config` pixi task a converted repo adds. C++ runs the test binary's `--render-config
+  <path>` mode, C# runs the render test with `CAMERAUNLOCK_RENDER_CONFIG=write`, and both then run
+  encode-seed. Each file states what the repo's test has to do for its mode.
+- **`scripts/templates/canonical-config-changelog.md`**: the fleet's standard changelog bullets for
+  a conversion release, in an in-place and a BepInEx variant, worded as the README config block
+  words them, plus the Removed bullets for the reticle toggle and settings and for the
+  sensitivity, deadzone, response curve and axis inversion settings, which the tracker app now
+  owns.
+- **`scripts/validate-manifest.mjs`**, run with no arguments in a converted repo, also opens the
+  newest `release/*-nexus.zip` and fails when it carries a file at a path `data/config-format.json`
+  records as the config's `installed` path, or at a tail of one (a flat ZIP extracted into the exe
+  folder). A Nexus update extracted over the game folder would otherwise replace the player's file
+  with the stamped default, and no migration would run. A repo that is not converted is not
+  checked, so today's Nexus ZIPs that carry the config (abzu, prey, resident-evil-requiem and
+  others) keep passing until their conversion takes it out of the Nexus staging.
+
 ### Added - the README config block, rendered from the committed config
 
 A repo converted to the canonical config format documents its config in a block that

@@ -60,7 +60,9 @@
 //   node scripts/validate-manifest.mjs <repo-or-zip> [...]
 //
 // With no args it validates the host repo's newest release/*-installer.zip
-// (run it right after packaging). A bare repo token (e.g. dying-light-2, or
+// (run it right after packaging), and, in a repo converted to the canonical
+// config format, checks its newest release/*-nexus.zip for the config (see
+// checkNexusConfig). A bare repo token (e.g. dying-light-2, or
 // dying-light-2-headtracking) resolves to a sibling repo's newest
 // release/*-installer.zip, for validating across a full checkout. A repo that
 // publishes no installer at all - external delivery hands a manager-consumable
@@ -70,6 +72,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+
+import { repoState } from "./check-canonical-config.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // core lives at <root>/cameraunlock-core/scripts. Two levels up is the repo
@@ -98,6 +102,14 @@ for (const token of jobs) {
   } catch (e) {
     console.error(`FAIL ${label}: ${e.message}`);
     failures += 1;
+  }
+  if (isSelf) {
+    try {
+      checkNexusConfig(label);
+    } catch (e) {
+      console.error(`FAIL ${label}: ${e.message}`);
+      failures += 1;
+    }
   }
 }
 
@@ -279,6 +291,33 @@ function validateExternal(label, zip, man, entryByLower) {
   );
   warnDescriptive(label, missing);
   warnMiscased(label, miscased);
+}
+
+// A Nexus ZIP is extracted by hand over the game folder, or into the folder the
+// mod sits in, so a config in it lands on the player's file. Once the repo is
+// converted, the file it would land as carries the [CameraUnlock] stamp, so the
+// mod reads it as canonical and no migration runs: the player's settings are
+// replaced by the defaults with no .pre-canonical copy (design R3-8). An entry
+// fails when it is an installed path data/config-format.json records for the
+// repo, or a tail of one (a flat ZIP meant for the exe folder). A repo that is
+// not converted yet is not checked; its conversion takes the config out of the
+// Nexus staging.
+function checkNexusConfig(label) {
+  const zip = newestNexus(path.join(ROOT, "release"));
+  if (zip === null) return;
+  const state = repoState(ROOT);
+  if (!state.converted) return;
+  const installed = state.files.flatMap((f) => f.installed).map((p) => p.replace(/\\/g, "/").toLowerCase());
+  const live = listZip(zip)
+    .map((e) => e.replace(/\\/g, "/"))
+    .filter((e) => !e.endsWith("/"))
+    .filter((e) => installed.some((p) => p === e.toLowerCase() || p.endsWith(`/${e.toLowerCase()}`)));
+  if (live.length > 0) {
+    throw new Error(
+      `${path.basename(zip)} carries ${live.join(", ")}, which extracts over the config the mod keeps in the game folder. An update would replace the player's file with the stamped default and no migration would run. Take the config out of the Nexus staging.`,
+    );
+  }
+  console.log(`OK   ${label}: ${path.basename(zip)} - carries no config`);
 }
 
 // What a .cmd in the package hands off to. Both forms are real: the thin
@@ -530,6 +569,15 @@ function newestInstaller(dir) {
   const installers = names.filter((n) => n.endsWith("-installer.zip"));
   const pool = installers.length ? installers : names.filter((n) => !n.endsWith("-nexus.zip"));
   return pool.map((n) => path.join(dir, n)).sort(byNewest)[0] ?? null;
+}
+
+function newestNexus(dir) {
+  if (!fs.existsSync(dir)) return null;
+  const zips = fs
+    .readdirSync(dir)
+    .filter((n) => n.endsWith("-nexus.zip"))
+    .map((n) => path.join(dir, n));
+  return zips.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] ?? null;
 }
 
 function systemTar() {
