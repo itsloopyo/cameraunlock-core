@@ -24,7 +24,8 @@ namespace CameraUnlock.Core.Config
     /// <para>
     /// Nothing here writes a row the table does not mark Writable, so the End toggle, which
     /// changes only the session, never reaches EnableOnStartup unless the game marks that row
-    /// Writable and calls Save for it.
+    /// Writable and calls Save for it. A table with both RotationEnabled and PositionEnabled
+    /// must mark both Writable or neither, since a mode change writes the pair.
     /// </para>
     /// </summary>
     public sealed class ConfigOwner<TConfig> where TConfig : class
@@ -32,6 +33,7 @@ namespace CameraUnlock.Core.Config
         private const string CopySuffix = ".pre-canonical";
         private const string LastCopySuffix = ".pre-canonical.last";
         private const string StampSection = "CameraUnlock";
+        private const string ChangedWhileRead = "the file was changed by another program while it was read";
         private const int HResultAccessDenied = unchecked((int)0x80070005);
         private const int HResultSharingViolation = unchecked((int)0x80070020);
         private const int HResultLockViolation = unchecked((int)0x80070021);
@@ -68,8 +70,9 @@ namespace CameraUnlock.Core.Config
 
         /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
         /// <exception cref="ArgumentException">Path, Table or Header is missing; a path is not
-        /// absolute; LegacySourcePath is set without an Import, or names Path; a legacy key's name
-        /// holds an unpaired surrogate; or the table cannot render its defaults under the header.</exception>
+        /// absolute; LegacySourcePath is set without an Import, or names Path; the table has both
+        /// RotationEnabled and PositionEnabled and marks only one of them Writable; a legacy key's
+        /// name holds an unpaired surrogate; or the table cannot render its defaults under the header.</exception>
         /// <exception cref="PlatformNotSupportedException">Not running on Windows.</exception>
         public ConfigOwner(ConfigOwnerOptions<TConfig> options)
             : this(options, null)
@@ -117,6 +120,15 @@ namespace CameraUnlock.Core.Config
             _import = options.Import;
             _statusSink = options.StatusSink;
             _beforeStep = beforeStep;
+            int rotation = _table.RowOf(ConfigConcepts.RotationEnabled);
+            int position = _table.RowOf(ConfigConcepts.PositionEnabled);
+            if (rotation >= 0 && position >= 0 && _table.RowWritable(rotation) != _table.RowWritable(position))
+            {
+                int writable = _table.RowWritable(rotation) ? rotation : position;
+                int other = writable == rotation ? position : rotation;
+                throw new ArgumentException("the table marks " + _table.RowName(writable) + " Writable but not "
+                    + _table.RowName(other) + ", and a tracking mode change writes both", "options");
+            }
             _defaultBytes = _table.Render(_table.CreateDefaults(), _header);
             IList<LegacyKey> keys = _import == null ? (IList<LegacyKey>)new LegacyKey[0] : _import.Keys;
             _importSections = new byte[keys.Count][];
@@ -186,8 +198,9 @@ namespace CameraUnlock.Core.Config
         /// so a tracking mode is always one edit.
         /// <para>
         /// Saves only a file the canonical reader can read, whose ConfigFormat is not newer than
-        /// this build's, and that is stamped or is read by no legacy import; an unstamped file gets
-        /// its [CameraUnlock] ConfigFormat line in the same write. The edited bytes are read back
+        /// this build's, and that is stamped or is read by no legacy import; an unstamped file, or
+        /// a stamp with no ConfigFormat or one that is not a number, gets its [CameraUnlock]
+        /// ConfigFormat line in the same write. The edited bytes are read back
         /// through the table before anything is written: only the changed rows may differ, and they
         /// must hold the new values. Rows already holding the values write nothing and report
         /// Saved. A missing file is not created here: <see cref="Load"/> creates it at the next
@@ -224,8 +237,11 @@ namespace CameraUnlock.Core.Config
         /// player asked for. Unchanged when the file holds exactly the bytes the owner last wrote,
         /// the conversion's and creation's included, and no Reload has applied other bytes since.
         /// A file with no stamp that the legacy import
-        /// reads is read through it and never written (LegacyReadOnly); the next launch converts
-        /// it. Unreadable leaves the game's settings as they are and is handed to the status sink.
+        /// reads is read through it, held open as a conversion holds it, and never written
+        /// (LegacyReadOnly); the next launch converts it. An import that refuses the file, cannot
+        /// decode it or finds none, or a file that changes while the import reads it, is
+        /// Unreadable. Unreadable leaves the game's settings as they are and is handed to the
+        /// status sink.
         /// Never writes and never converts.
         /// </summary>
         /// <exception cref="InvalidOperationException">Load has not run.</exception>
@@ -374,7 +390,7 @@ namespace CameraUnlock.Core.Config
                 Step("Recheck", input);
                 try
                 {
-                    if (!Same(held.Reread(), snapshot)) changedWhy = "the file was changed by another program while it was read";
+                    if (!Same(held.Reread(), snapshot)) changedWhy = ChangedWhileRead;
                 }
                 catch (IOException e)
                 {
@@ -633,7 +649,7 @@ namespace CameraUnlock.Core.Config
                 edits.Add(new IniEdit(_table.RowSection(i), _table.RowKey(i),
                     Encoding.UTF8.GetString(_table.RowRender(i, changed)), true));
             }
-            if (!stamped)
+            if (!stamped || FormatUnread(doc))
             {
                 edits.Add(new IniEdit(StampSection, CanonicalIni.FormatKeyText,
                     CanonicalIni.ConfigFormat.ToString(CultureInfo.InvariantCulture), true));
@@ -724,25 +740,7 @@ namespace CameraUnlock.Core.Config
                 return Reloaded(ConfigReloadStatus.Unchanged, null, NoDiagnostics(), log, string.Empty);
             }
 
-            if (!CanonicalIni.HasStamp(bytes) && ImportReadsPath)
-            {
-                TConfig imported = _table.CreateDefaults();
-                ImportResult import = RequireImport().Run(new LegacyImportInput(_path, null), imported);
-                if (import == null) throw new InvalidOperationException("the legacy import returned no result");
-                if (import.Status == ImportStatus.Refused || import.Status == ImportStatus.Undecodable)
-                {
-                    log.Add(_path + ": not reloaded: the old settings reader refused the file: " + import.Reason);
-                    return Reloaded(ConfigReloadStatus.Unreadable, null, NoDiagnostics(), log,
-                        _name + " cannot be read: " + import.Reason + ". The current settings stay.");
-                }
-                LogDropped(import, _path, log);
-                log.Add(_path + ": has no [CameraUnlock] section, so it is an old file. It is read, not saved, and "
-                    + "converted at the next launch.");
-                _committed = null;
-                return Reloaded(ConfigReloadStatus.LegacyReadOnly, imported, NoDiagnostics(), log,
-                    _name + " is in the old settings format. It is read, changes are not saved, and it is converted at the "
-                        + "next launch.");
-            }
+            if (!CanonicalIni.HasStamp(bytes) && ImportReadsPath) return ReloadLegacy(bytes, log);
 
             CanonicalIni doc = CanonicalIni.Parse(bytes);
             if (!doc.IsReadable)
@@ -757,6 +755,79 @@ namespace CameraUnlock.Core.Config
             _committed = null;
             _savesAllowed = true;
             return Reloaded(ConfigReloadStatus.Applied, config, diagnostics, log, string.Empty);
+        }
+
+        // The import reads the file while it is held as a conversion holds it, so the settings it
+        // gives come from the bytes checked for a stamp.
+        private ConfigReloadResult<TConfig> ReloadLegacy(byte[] bytes, List<string> log)
+        {
+            TConfig imported = _table.CreateDefaults();
+            ImportResult import;
+#if NULLABLE_ENABLED
+            string? changedWhy = null;
+            Held? held;
+#else
+            string changedWhy = null;
+            Held held;
+#endif
+            try
+            {
+                held = Held.Open(_path);
+            }
+            catch (IOException e)
+            {
+                return NotReloaded(Why(e), e.Message, log);
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                return NotReloaded(Why(e), e.Message, log);
+            }
+            if (held == null) return NotReloaded("the file was deleted while it was read", "the file is missing", log);
+            try
+            {
+                if (!Same(held.Snapshot, bytes)) return NotReloaded(ChangedWhileRead, ChangedWhileRead, log);
+                import = RequireImport().Run(new LegacyImportInput(_path, null), imported);
+                if (import == null) throw new InvalidOperationException("the legacy import returned no result");
+                try
+                {
+                    if (!Same(held.Reread(), bytes)) changedWhy = ChangedWhileRead;
+                }
+                catch (IOException e)
+                {
+                    changedWhy = Why(e);
+                    log.Add(_path + ": could not be read again after the import: " + e.Message);
+                }
+            }
+            finally
+            {
+                held.Dispose();
+            }
+
+            if (changedWhy != null) return NotReloaded(changedWhy, changedWhy, log);
+            switch (import.Status)
+            {
+                case ImportStatus.Refused:
+                case ImportStatus.Undecodable:
+                    return NotReloaded(import.Reason, "the old settings reader refused the file: " + import.Reason, log);
+                case ImportStatus.Absent:
+                    return NotReloaded("the old settings reader could not find the file",
+                        "the old settings reader found no file, while the owner holds it open ("
+                            + bytes.Length.ToString(CultureInfo.InvariantCulture) + " bytes)", log);
+            }
+            LogDropped(import, _path, log);
+            log.Add(_path + ": has no [CameraUnlock] section, so it is an old file. It is read, not saved, and "
+                + "converted at the next launch.");
+            _committed = null;
+            return Reloaded(ConfigReloadStatus.LegacyReadOnly, imported, NoDiagnostics(), log,
+                _name + " is in the old settings format. It is read, changes are not saved, and it is converted at the "
+                    + "next launch.");
+        }
+
+        private ConfigReloadResult<TConfig> NotReloaded(string why, string detail, List<string> log)
+        {
+            log.Add(_path + ": not reloaded: " + detail);
+            return Reloaded(ConfigReloadStatus.Unreadable, null, NoDiagnostics(), log,
+                _name + " cannot be read: " + why + ". The current settings stay.");
         }
 
         private List<CanonicalDiagnostic> Apply(CanonicalIni doc, TConfig config, List<string> log)
@@ -859,6 +930,21 @@ namespace CameraUnlock.Core.Config
         {
             if (doc.Status == CanonicalReadStatus.Utf16) return "it is saved as UTF-16; save it as ANSI or UTF-8";
             return "line " + doc.UnreadableLine.ToString(CultureInfo.InvariantCulture) + " holds a NUL byte";
+        }
+
+        // Design 1.8: a stamp with no ConfigFormat, or one that is not a number, is read as the
+        // current format, and the next save writes the number.
+        private static bool FormatUnread(CanonicalIni doc)
+        {
+            foreach (CanonicalDiagnostic diagnostic in doc.Diagnostics)
+            {
+                if (diagnostic.Kind == CanonicalDiagnosticKind.ConfigFormatMissing
+                    || diagnostic.Kind == CanonicalDiagnosticKind.ConfigFormatInvalid)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static string Conflict(CheckedWriteOutcome outcome)

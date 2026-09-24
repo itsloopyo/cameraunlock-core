@@ -21,7 +21,8 @@ comes next and follows the same statuses and decisions.
   (null for a game that never published a pre-canonical build), `LegacySourcePath`, `Header` and
   `StatusSink`. The owner copies them when it is built and throws `ArgumentException` for a missing
   path, table or header, a relative path, a `LegacySourcePath` without an `Import` or equal to
-  `Path`, or a header the renderer refuses.
+  `Path`, a table that has both `RotationEnabled` and `PositionEnabled` and marks only one of them
+  Writable (a mode change writes the pair), or a header the renderer refuses.
 - **`Load()`** returns `ConfigLoadResult<TConfig>`: `Status` (`ConfigLoadStatus`: `Canonical` 0,
   `Migrated` 1, `Created` 2, `Deferred` 3, `LegacyRefused` 4, `Unreadable` 5), the `Config` the
   session runs on, the reader's and table's `Diagnostics`, a `Log` of lines naming the file for the
@@ -54,14 +55,17 @@ comes next and follows the same statuses and decisions.
   `InvalidOperationException` naming it, so End, which changes only the session, never writes
   `EnableOnStartup`. When `RotationEnabled` or `PositionEnabled` changes both are written. It saves
   only a readable file whose `ConfigFormat` is not newer than this build's and that is stamped or
-  read by no import, stamping an unstamped one in the same edit, and reads the edited bytes back
+  read by no import, stamping an unstamped one in the same edit (a stamp with no `ConfigFormat`,
+  or one that is not a number, gets `ConfigFormat=1` the same way), and reads the edited bytes back
   through the table before writing: only the changed rows may differ. A change that leaves every
   row as it was writes nothing.
   Never rolls back or retries.
 - **`Reload()`** returns `ConfigReloadResult<TConfig>`: `Unchanged` 0 (the file holds the bytes
   the owner last created, converted or saved), `Applied` 1, `LegacyReadOnly` 2 (an old file put
-  back is read through the import, never written, and converted at the next launch) or
-  `Unreadable` 3 (the game keeps its settings). It never writes. **`FileChanged()`** compares the
+  back is read through the import while the owner holds it as a conversion does, never written,
+  and converted at the next launch) or `Unreadable` 3 (the game keeps its settings; this includes
+  an old file the import reports `Refused`, `Undecodable` or `Absent`, or that changes while the
+  import reads it). It never writes. **`FileChanged()`** compares the
   file's last write time with the one recorded at the last Load, Reload or save.
 - One lock around Load, Save and Reload; the status sink runs after it is released. A Unity mod
   calls them on the main thread: a save is one synchronous write per key press.

@@ -42,6 +42,8 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-stamped-utf16-file-is-unreadable-and-never-migrated", AStampedUtf16FileIsUnreadableAndNeverMigrated),
             Scenario("a-stamped-file-holding-a-nul-is-unreadable", AStampedFileHoldingANulIsUnreadable),
             Scenario("an-unstamped-file-with-an-import-is-migrated", AnUnstampedFileWithAnImportIsMigrated),
+            Scenario("an-unstamped-utf16-file-with-an-import-is-migrated", AnUnstampedUtf16FileWithAnImportIsMigrated),
+            Scenario("an-unstamped-file-holding-a-nul-with-an-import-is-migrated", AnUnstampedFileHoldingANulWithAnImportIsMigrated),
             Scenario("a-second-load-rewrites-nothing", ASecondLoadRewritesNothing),
             Scenario("an-unstamped-file-without-an-import-is-canonical-and-stamped-by-a-save",
                 AnUnstampedFileWithoutAnImportIsCanonicalAndStampedByASave),
@@ -64,8 +66,10 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-file-changed-before-the-commit-defers", AFileChangedBeforeTheCommitDefers),
             Scenario("the-held-file-reads-and-refuses-exclusive-opens", TheHeldFileReadsAndRefusesExclusiveOpens),
             Scenario("a-newer-config-format-refuses-saves", ANewerConfigFormatRefusesSaves),
+            Scenario("a-save-writes-a-missing-or-unreadable-config-format", ASaveWritesAMissingOrUnreadableConfigFormat),
             Scenario("a-save-writes-only-the-changed-row", ASaveWritesOnlyTheChangedRow),
             Scenario("a-mode-change-writes-both-rows", AModeChangeWritesBothRows),
+            Scenario("a-table-marking-one-mode-row-writable-is-refused", ATableMarkingOneModeRowWritableIsRefused),
             Scenario("a-save-with-nothing-changed-writes-nothing", ASaveWithNothingChangedWritesNothing),
             Scenario("a-save-conflict-is-not-saved", ASaveConflictIsNotSaved),
             Scenario("a-change-to-a-row-that-is-not-writable-throws", AChangeToARowThatIsNotWritableThrows),
@@ -76,6 +80,10 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites),
             Scenario("reload-of-an-old-file-is-read-only", ReloadOfAnOldFileIsReadOnly),
             Scenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings),
+            Scenario("reload-of-an-old-file-the-import-cannot-find-keeps-the-settings",
+                ReloadOfAnOldFileTheImportCannotFindKeepsTheSettings),
+            Scenario("reload-of-an-old-file-changed-during-the-import-keeps-the-settings",
+                ReloadOfAnOldFileChangedDuringTheImportKeepsTheSettings),
             Scenario("options-and-call-order-are-checked", OptionsAndCallOrderAreChecked),
         };
 
@@ -285,6 +293,40 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(rig.Legacy.Runs == 1 && rig.Legacy.Inputs[0].Path == rig.Path && rig.Legacy.Inputs[0].LegacySourcePath == null,
                 "the import runs once on the file itself");
             Expect(rig.Sink.Count == 0, "nothing is reported");
+            ExpectListing(dir, FileName, FileName + ".pre-canonical");
+        }
+
+        private static void AnUnstampedUtf16FileWithAnImportIsMigrated(string dir)
+        {
+            var rig = new Rig(dir);
+            byte[] utf16 = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(LegacyText)).ToArray();
+            File.WriteAllBytes(rig.Path, utf16);
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            ExpectSame(load.Config, MigratedConfig(), "the imported values");
+            ExpectBytes(rig.Path, MigratedBytes());
+            ExpectBytes(rig.Path + ".pre-canonical", utf16);
+            ExpectLogLine(load, rig.Path + ": is saved as UTF-16, so its lines this build does not read are not listed; the "
+                + "original keeps them.");
+            Expect(!load.Log.Any(l => l.Contains("not carried")), "no line of a UTF-16 file is listed");
+            Expect(rig.Legacy.Runs == 1 && rig.Sink.Count == 0, "one import and nothing reported");
+            ExpectListing(dir, FileName, FileName + ".pre-canonical");
+        }
+
+        private static void AnUnstampedFileHoldingANulWithAnImportIsMigrated(string dir)
+        {
+            var rig = new Rig(dir);
+            byte[] nul = Ascii(LegacyText + "Extra=1\0\r\n");
+            File.WriteAllBytes(rig.Path, nul);
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            ExpectSame(load.Config, MigratedConfig(), "the imported values");
+            ExpectBytes(rig.Path, MigratedBytes());
+            ExpectBytes(rig.Path + ".pre-canonical", nul);
+            ExpectLogLine(load, rig.Path + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
+            ExpectLogLine(load, rig.Path + ": not carried: [Position] Extra=1\0 on line 8, this build does not read it");
+            Expect(load.Log.Count(l => l.Contains("not carried")) == 2, "only the unread keys are listed");
+            Expect(rig.Legacy.Runs == 1 && rig.Sink.Count == 0, "one import and nothing reported");
             ExpectListing(dir, FileName, FileName + ".pre-canonical");
         }
 
@@ -667,6 +709,36 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectBytes(rig.Path, newer);
         }
 
+        private static void ASaveWritesAMissingOrUnreadableConfigFormat(string dir)
+        {
+            string canonical = Encoding.ASCII.GetString(Render(Defaults()));
+            string missing = canonical.Replace("ConfigFormat=1\r\n", "");
+            string yawOff = canonical.Replace("WorldSpaceYaw=true", "WorldSpaceYaw=false");
+            var cases = new[]
+            {
+                new { File = missing, Kind = CanonicalDiagnosticKind.ConfigFormatMissing,
+                    Saved = yawOff.Replace("ConfigFormat=1\r\n", "").Replace("[CameraUnlock]\r\n", "[CameraUnlock]\r\nConfigFormat=1\r\n") },
+                new { File = canonical.Replace("ConfigFormat=1", "ConfigFormat=abc"), Kind = CanonicalDiagnosticKind.ConfigFormatInvalid,
+                    Saved = yawOff },
+            };
+            foreach (var test in cases)
+            {
+                var rig = new Rig(dir);
+                File.WriteAllBytes(rig.Path, Ascii(test.File));
+                ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+                ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
+                ExpectStatus(load, ConfigLoadStatus.Canonical);
+                Expect(load.Diagnostics.Any(d => d.Kind == test.Kind), "the reader warns " + test.Kind);
+                ExpectSaved(owner.Save(c => c.WorldSpaceYaw = true));
+                ExpectBytes(rig.Path, Ascii(test.File));
+                ExpectSaved(owner.Save(c => c.WorldSpaceYaw = false));
+                ExpectBytes(rig.Path, Ascii(test.Saved));
+                Expect(rig.Owner().Load().Diagnostics.Count == 0, "the saved file reads clean");
+                Expect(rig.Legacy.Runs == 0 && rig.Sink.Count == 0, "no import and nothing reported");
+                ExpectListing(dir, FileName);
+            }
+        }
+
         private static void ASaveWritesOnlyTheChangedRow(string dir)
         {
             var rig = new Rig(dir);
@@ -697,6 +769,35 @@ namespace CameraUnlock.Core.Tests.Config
             string saved = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
             Expect(saved.Contains("PositionEnabled=false\r\n") && saved.Contains("RotationEnabled=true\r\n"),
                 "both rows of the mode are written:\n" + saved);
+        }
+
+        private static void ATableMarkingOneModeRowWritableIsRefused(string dir)
+        {
+            string path = Path.Combine(dir, FileName);
+            ConfigOwnerOptions<HeadTrackingConfigData> positionOnly = Options(path);
+            positionOnly.Table = HeadTrackingConfigTable.Create(ConfigConcepts.UdpPort, ConfigConcepts.RotationEnabled,
+                ConfigConcepts.PositionEnabled).Select(ConfigConcepts.PositionEnabled).Writable();
+            ArgumentException e = ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(positionOnly),
+                "PositionEnabled is Writable and RotationEnabled is not");
+            ExpectContains(e.Message, "the table marks [Position] PositionEnabled Writable but not [General] RotationEnabled");
+            ConfigOwnerOptions<HeadTrackingConfigData> rotationOnly = Options(path);
+            rotationOnly.Table = HeadTrackingConfigTable.Create(ConfigConcepts.UdpPort, ConfigConcepts.RotationEnabled,
+                ConfigConcepts.PositionEnabled).Select(ConfigConcepts.RotationEnabled).Writable();
+            e = ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(rotationOnly),
+                "RotationEnabled is Writable and PositionEnabled is not");
+            ExpectContains(e.Message, "the table marks [General] RotationEnabled Writable but not [Position] PositionEnabled");
+            ExpectListing(dir);
+
+            ConfigOwnerOptions<HeadTrackingConfigData> twoState = Options(path);
+            twoState.Table = HeadTrackingConfigTable.Create(ConfigConcepts.UdpPort, ConfigConcepts.PositionEnabled)
+                .Select(ConfigConcepts.PositionEnabled).Writable();
+            var owner = new ConfigOwner<HeadTrackingConfigData>(twoState);
+            Expect(owner.Load().Status == ConfigLoadStatus.Created, "a table with one mode row is built and loads");
+            string created = Encoding.ASCII.GetString(File.ReadAllBytes(path));
+            Expect(created.Contains("PositionEnabled=true\r\n") && !created.Contains("RotationEnabled="),
+                "the file holds PositionEnabled and no RotationEnabled:\n" + created);
+            ExpectSaved(owner.Save(c => c.PositionEnabled = false));
+            ExpectBytes(path, Ascii(created.Replace("PositionEnabled=true", "PositionEnabled=false")));
         }
 
         private static void ASaveWithNothingChangedWritesNothing(string dir)
@@ -857,6 +958,49 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectSunkOnce(rig, reload.Reason);
             Expect(rig.Legacy.Runs == 0, "a stamped file is never imported");
             ExpectBytes(rig.Path, utf16);
+        }
+
+        private static void ReloadOfAnOldFileTheImportCannotFindKeepsTheSettings(string dir)
+        {
+            var rig = new Rig(dir);
+            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
+            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.Legacy.Result = config => ImportResult.Absent(new DroppedValue[0]);
+            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Unreadable && reload.Config == null,
+                "an import that finds no file leaves the settings, got " + reload.Status);
+            ExpectContains(reload.Reason, "the old settings reader could not find the file");
+            Expect(reload.Log.Contains(rig.Path + ": not reloaded: the old settings reader found no file, while the owner holds it "
+                + "open (" + LegacyText.Length.ToString(CultureInfo.InvariantCulture) + " bytes)"), "the log gives both views");
+            ExpectSunkOnce(rig, reload.Reason);
+            Expect(rig.Legacy.Runs == 2, "the import ran on the reload");
+            ExpectBytes(rig.Path, Ascii(LegacyText));
+        }
+
+        private static void ReloadOfAnOldFileChangedDuringTheImportKeepsTheSettings(string dir)
+        {
+            var rig = new Rig(dir);
+            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
+            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            string changed = LegacyText.Replace("5555", "7000");
+            rig.Legacy.During = input => File.WriteAllBytes(input.Path, Ascii(changed));
+            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Unreadable && reload.Config == null,
+                "a file changed while the import read it leaves the settings, got " + reload.Status);
+            ExpectContains(reload.Reason, "the file was changed by another program while it was read");
+            ExpectSunkOnce(rig, reload.Reason);
+            ExpectBytes(rig.Path, Ascii(changed));
+
+            rig.Legacy.During = null;
+            rig.Sink.Clear();
+            reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.LegacyReadOnly && reload.Config.UdpPort == 7000,
+                "the next reload reads the settled file, got " + reload.Status);
+            Expect(rig.Sink.Count == 0, "nothing more is reported");
         }
 
         private static void OptionsAndCallOrderAreChecked(string dir)
