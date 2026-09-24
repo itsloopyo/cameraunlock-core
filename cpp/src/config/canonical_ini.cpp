@@ -317,6 +317,7 @@ const char* CanonicalDiagnosticKindName(CanonicalDiagnosticKind kind) {
         case CanonicalDiagnosticKind::RetiredKey: return "RetiredKey";
         case CanonicalDiagnosticKind::NonCanonicalConcept: return "NonCanonicalConcept";
         case CanonicalDiagnosticKind::NoTrackingMode: return "NoTrackingMode";
+        case CanonicalDiagnosticKind::MisplacedKey: return "MisplacedKey";
     }
     throw std::invalid_argument("CanonicalDiagnosticKind " + std::to_string(static_cast<int>(kind)) +
                                 " has no name");
@@ -366,6 +367,8 @@ std::string DescribeCanonicalDiagnostic(const CanonicalDiagnostic& d) {
         case CanonicalDiagnosticKind::NoTrackingMode:
             return line + "RotationEnabled and PositionEnabled are both false, which is not a tracking mode, so both "
                           "are read as their defaults.";
+        case CanonicalDiagnosticKind::MisplacedKey:
+            return line + "[" + d.section + "] " + d.key + " is ignored. This mod reads it as " + d.detail + ".";
     }
     throw std::invalid_argument(std::string("CanonicalDiagnosticKind ") + CanonicalDiagnosticKindName(d.kind) +
                                 " has no description");

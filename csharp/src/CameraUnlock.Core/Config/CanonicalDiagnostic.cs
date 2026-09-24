@@ -95,6 +95,8 @@ namespace CameraUnlock.Core.Config
                 case CanonicalDiagnosticKind.NoTrackingMode:
                     return line + "RotationEnabled and PositionEnabled are both false, which is not a tracking mode, "
                         + "so both are read as their defaults.";
+                case CanonicalDiagnosticKind.MisplacedKey:
+                    return line + "[" + section + "] " + key + " is ignored. This mod reads it as " + Detail + ".";
                 default:
                     throw new InvalidOperationException("CanonicalDiagnosticKind " + (int)Kind + " has no description");
             }

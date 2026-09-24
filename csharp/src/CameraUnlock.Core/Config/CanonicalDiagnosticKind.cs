@@ -78,8 +78,8 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// <see cref="ConfigTable{TConfig}.Apply"/>: a key in a section the table reads that no row
-        /// names and that is no retired or non-canonical concept, so it is not read. Section, Key and
-        /// Value are the line's.
+        /// names and that is no retired or non-canonical concept and no setting the table reads under
+        /// another section or name, so it is not read. Section, Key and Value are the line's.
         /// </summary>
         UnknownKey = 13,
 
@@ -103,5 +103,13 @@ namespace CameraUnlock.Core.Config
         /// that set them.
         /// </summary>
         NoTrackingMode = 16,
+
+        /// <summary>
+        /// <see cref="ConfigTable{TConfig}.Apply"/>: a key naming a setting the table reads, but in
+        /// another section, or by an alias rather than the key the table writes, in any section but
+        /// [CameraUnlock]. It is not read. Section, Key and Value are the line's; Detail is the row's
+        /// section and key as the file writes them, e.g. <c>[Network] UdpPort</c>.
+        /// </summary>
+        MisplacedKey = 17,
     }
 }

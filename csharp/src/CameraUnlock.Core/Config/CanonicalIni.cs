@@ -17,7 +17,8 @@ namespace CameraUnlock.Core.Config
         public const int ConfigFormat = 1;
 
         private static readonly byte[] StampSection = Encoding.ASCII.GetBytes("CameraUnlock");
-        private static readonly byte[] FormatKey = Encoding.ASCII.GetBytes("ConfigFormat");
+        internal const string FormatKeyText = "ConfigFormat";
+        internal static readonly byte[] FormatKey = Encoding.ASCII.GetBytes(FormatKeyText);
         private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
         private static readonly byte[] Empty = new byte[0];
 

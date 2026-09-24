@@ -75,6 +75,16 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Theory]
+        [InlineData("ConfigFormat")]
+        [InlineData("Configformat")]
+        public void ALocalKeyNamedLikeTheFormatStampThrows(string key)
+        {
+            var e = Assert.Throws<ArgumentException>(() => WithOffset(NewTable(), "Debug", key, "One."));
+            Assert.Contains("[CameraUnlock] ConfigFormat already has that key, and a key name is used once in the file",
+                e.Message);
+        }
+
+        [Theory]
         [InlineData("CameraUnlock", "[CameraUnlock] belongs to core")]
         [InlineData("cameraunlock", "PascalCase")]
         [InlineData("Sensitivity", "holds none of the settings a canonical file writes")]

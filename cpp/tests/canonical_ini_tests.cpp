@@ -59,6 +59,7 @@ static_assert(static_cast<int>(CanonicalDiagnosticKind::NonCanonicalConcept) == 
               "CanonicalDiagnosticKind::NonCanonicalConcept");
 static_assert(static_cast<int>(CanonicalDiagnosticKind::NoTrackingMode) == 16,
               "CanonicalDiagnosticKind::NoTrackingMode");
+static_assert(static_cast<int>(CanonicalDiagnosticKind::MisplacedKey) == 17, "CanonicalDiagnosticKind::MisplacedKey");
 
 int g_failures = 0;
 

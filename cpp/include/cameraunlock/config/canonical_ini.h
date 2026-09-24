@@ -59,8 +59,8 @@ enum class CanonicalDiagnosticKind {
     /// `section` is its name; the line is its first header's.
     UnknownSection = 12,
     /// ApplyCanonical: a key in a section the table reads that no row names and that is
-    /// no retired or non-canonical concept, so it is not read. `section`, `key` and
-    /// `value` are the line's.
+    /// no retired or non-canonical concept and no setting the table reads under another
+    /// section or name, so it is not read. `section`, `key` and `value` are the line's.
     UnknownKey = 13,
     /// ApplyCanonical: a key naming a retired concept (the schema's `retired` list), in
     /// any section but [CameraUnlock]. It is not read. `section`, `key` and `value` are
@@ -74,6 +74,11 @@ enum class CanonicalDiagnosticKind {
     /// tracking mode, so both take the table's defaults. `lines` are the lines that set
     /// them.
     NoTrackingMode = 16,
+    /// ApplyCanonical: a key naming a setting the table reads, but in another section, or
+    /// by an alias rather than the key the table writes, in any section but [CameraUnlock].
+    /// It is not read. `section`, `key` and `value` are the line's; `detail` is the row's
+    /// section and key as the file writes them, e.g. `[Network] UdpPort`.
+    MisplacedKey = 17,
 };
 
 /// One finding about the document. Returned, never logged, so a caller can read the file

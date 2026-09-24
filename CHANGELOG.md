@@ -28,7 +28,7 @@ build on them.
   default the row is written as `; Key=value`), `Writable` (the owner's Save may change it), and
   `Select`, which picks a concept row a helper added.
 - **Checks when a row is added**, which throw and leave the table as it was: one key name per
-  file; PascalCase local sections and keys; no local row in `[CameraUnlock]` or in a schema
+  file, counting the `ConfigFormat` key core writes in `[CameraUnlock]`; PascalCase local sections and keys; no local row in `[CameraUnlock]` or in a schema
   section with no canonical concept (`[Sensitivity]`, `[Inversion]`, `[Reticle]`); a local key
   may not be any concept's key or alias under the schema's normalisation; a local row with no
   comment must follow a local row of its section; a default must render; `RotationEnabled` and
@@ -36,8 +36,9 @@ build on them.
 - **Apply**: every row starts from its default, so an absent key reads as the default with no
   diagnostic; an invalid value keeps the default with a diagnostic naming the line, the value and
   what was expected; an unknown section or key draws one diagnostic, none in `[CameraUnlock]`; a
-  key naming a retired concept says so, and one naming a concept the canonical format does not
-  write gives the schema's reason, in any section; `RotationEnabled=false` with
+  key naming a row of the table in another section, or a concept row by an alias, names the row
+  the mod reads it as, a key naming a retired concept says so, and one naming a concept the
+  canonical format does not write gives the schema's reason, all in any section; `RotationEnabled=false` with
   `PositionEnabled=false` takes both defaults with one diagnostic naming both lines. No key takes
   its value from another. Fields no row binds are left alone.
 - **Render**: the header (`; <display name> head tracking settings.`, the comments line, and the
@@ -64,9 +65,10 @@ C# (`CameraUnlock.Core.Config`): `ConfigTable<TConfig>` (`Concept`, `Local`, the
 `InvalidOperationException`.
 
 Also added, for the reader: `CanonicalDiagnosticKind` gains `InvalidValue` (11),
-`UnknownSection` (12), `UnknownKey` (13), `RetiredKey` (14), `NonCanonicalConcept` (15) and
-`NoTrackingMode` (16), with their sentences; `CanonicalDiagnostic` gains `detail` / `Detail`,
-the codec's expectation or the schema's reason; `CanonicalSection` gains `line` / `Line`, its
+`UnknownSection` (12), `UnknownKey` (13), `RetiredKey` (14), `NonCanonicalConcept` (15),
+`NoTrackingMode` (16) and `MisplacedKey` (17), with their sentences; `CanonicalDiagnostic` gains
+`detail` / `Detail`, the codec's expectation, the schema's reason or the row a misplaced key
+belongs to; `CanonicalSection` gains `line` / `Line`, its
 first header's line.
 
 The fixtures in `data/fixtures/canonical-ini/table` hold both languages to the same applied

@@ -21,7 +21,7 @@ namespace CameraUnlock.Core.Config
     /// </summary>
     public abstract class ConceptDescriptor
     {
-        internal ConceptDescriptor(int index, string id, string section, string key, ConceptValueFamily family,
+        internal ConceptDescriptor(string id, string section, string key, ConceptValueFamily family,
             string[] fileComment,
 #if NULLABLE_ENABLED
             string? canonicalDefault)
@@ -29,7 +29,6 @@ namespace CameraUnlock.Core.Config
             string canonicalDefault)
 #endif
         {
-            Index = index;
             Id = id;
             Section = section;
             Key = key;
@@ -58,10 +57,6 @@ namespace CameraUnlock.Core.Config
 #else
         public string CanonicalDefault { get; }
 #endif
-
-        // The position in the schema's concepts array among the canonical concepts, which orders
-        // a section's concept rows.
-        internal int Index { get; }
     }
 
     /// <summary>
@@ -71,14 +66,14 @@ namespace CameraUnlock.Core.Config
     /// </summary>
     public sealed class ConceptDescriptor<T> : ConceptDescriptor
     {
-        internal ConceptDescriptor(int index, string id, string section, string key, ConceptValueFamily family,
+        internal ConceptDescriptor(string id, string section, string key, ConceptValueFamily family,
             IValueCodec<T> codec, string[] fileComment,
 #if NULLABLE_ENABLED
             string? canonicalDefault)
 #else
             string canonicalDefault)
 #endif
-            : base(index, id, section, key, family, fileComment, canonicalDefault)
+            : base(id, section, key, family, fileComment, canonicalDefault)
         {
             Codec = codec;
         }

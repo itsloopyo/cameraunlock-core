@@ -700,13 +700,13 @@ function renderConceptsCsharp(schema) {
             default: return 'new HotkeyCodec()';
         }
     };
-    const fields = concepts.map((c, i) => {
+    const fields = concepts.map((c) => {
         const type = types[c.type];
         const comment = c.file_comment.map(csString).join(', ');
         return [
             `        /// <summary>[${c.section}] ${c.key}.</summary>`,
             `        public static readonly ConceptDescriptor<${type}> ${c.id} = new ConceptDescriptor<${type}>(`,
-            `            ${i}, "${c.id}", "${c.section}", "${c.key}", ConceptValueFamily.${canonicalFamilies[c.type]},`,
+            `            "${c.id}", "${c.section}", "${c.key}", ConceptValueFamily.${canonicalFamilies[c.type]},`,
             `            ${codec(c)}, new[] { ${comment} }, ${csString(c.canonical_default)});`,
         ].join('\n');
     }).join('\n\n');

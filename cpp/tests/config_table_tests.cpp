@@ -387,6 +387,11 @@ void TestConstructionChecks() {
                    }),
                    "a key name is used once in the file"),
           "a concept bound twice throws");
+    for (const char* key : {"ConfigFormat", "Configformat"}) {
+        Check(Contains(Thrown([&] { ConfigTable<S>().Local("Debug", key, &S::value, IntCodec<int>(), "One."); }),
+                       "[CameraUnlock] ConfigFormat already has that key, and a key name is used once in the file"),
+              std::string("a local key named ") + key + " throws");
+    }
     Check(Contains(Thrown([] { ConfigTable<S>().Local("CameraUnlock", "Offset", &S::value, IntCodec<int>(), "One."); }),
                    "[CameraUnlock] belongs to core"),
           "a local row in [CameraUnlock] throws");

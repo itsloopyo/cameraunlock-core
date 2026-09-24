@@ -42,7 +42,7 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(1, (int)CanonicalReadStatus.Utf16);
             Assert.Equal(2, (int)CanonicalReadStatus.NulByte);
 
-            Assert.Equal(Enumerable.Range(1, 16), ((CanonicalDiagnosticKind[])Enum.GetValues(typeof(CanonicalDiagnosticKind))).Select(v => (int)v));
+            Assert.Equal(Enumerable.Range(1, 17), ((CanonicalDiagnosticKind[])Enum.GetValues(typeof(CanonicalDiagnosticKind))).Select(v => (int)v));
             Assert.Equal(1, (int)CanonicalDiagnosticKind.TextAfterSectionHeader);
             Assert.Equal(2, (int)CanonicalDiagnosticKind.UnclosedSectionHeader);
             Assert.Equal(3, (int)CanonicalDiagnosticKind.EmptySectionName);
@@ -59,6 +59,7 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(14, (int)CanonicalDiagnosticKind.RetiredKey);
             Assert.Equal(15, (int)CanonicalDiagnosticKind.NonCanonicalConcept);
             Assert.Equal(16, (int)CanonicalDiagnosticKind.NoTrackingMode);
+            Assert.Equal(17, (int)CanonicalDiagnosticKind.MisplacedKey);
         }
 
         [Fact]

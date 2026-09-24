@@ -19,15 +19,15 @@ namespace CameraUnlock.Core.Config
     /// </para>
     /// <para>
     /// Every check throws from the call that breaks it, ArgumentException for what the row
-    /// declares: two rows with one key name anywhere in the file (ASCII case-insensitive); a local
-    /// section or key that is not PascalCase ASCII letters and digits; a local row in
-    /// [CameraUnlock], or in a schema section that holds no canonical concept ([Sensitivity],
-    /// [Inversion], [Reticle]), or in a section spelled like a schema section or an earlier local
-    /// section with other letter case; a local key that is a concept's key or alias, canonical,
-    /// non-canonical or retired, under the schema's normalisation
-    /// (<see cref="ConfigKeySchema.Resolve"/>); a local row with no comment that follows no local
-    /// row of its section; a default its row cannot write; RotationEnabled and PositionEnabled
-    /// both defaulting to false. <see cref="EnumCodec{TEnum}"/> already refuses a token that is
+    /// declares: two rows with one key name anywhere in the file (ASCII case-insensitive), counting
+    /// the ConfigFormat key core writes in [CameraUnlock]; a local section or key that is not
+    /// PascalCase ASCII letters and digits; a local row in [CameraUnlock], or in a schema section
+    /// that holds no canonical concept ([Sensitivity], [Inversion], [Reticle]), or in a section
+    /// spelled like a schema section or an earlier local section with other letter case; a local key
+    /// that is a concept's key or alias, canonical, non-canonical or retired, under the schema's
+    /// normalisation (<see cref="ConfigKeySchema.Resolve"/>); a local row with no comment that
+    /// follows no local row of its section; a default its row cannot write; RotationEnabled and
+    /// PositionEnabled both defaulting to false. <see cref="EnumCodec{TEnum}"/> already refuses a token that is
     /// not PascalCase. A modifier used on a row it does not apply to throws
     /// InvalidOperationException. A row that fails a check is not added.
     /// </para>
@@ -209,11 +209,13 @@ namespace CameraUnlock.Core.Config
         /// leaves out reads as the default with no diagnostic. A value its codec does not read keeps
         /// the default and draws <see cref="CanonicalDiagnosticKind.InvalidValue"/>. A section the
         /// table has no row in draws one UnknownSection, a key no row of a read section names one
-        /// UnknownKey, and none is drawn in [CameraUnlock]. A key that names a retired concept draws
-        /// RetiredKey, and one that names a concept the canonical format does not write draws
-        /// NonCanonicalConcept with the schema's reason, in any section. No key takes its value from
-        /// another. When the table binds RotationEnabled and PositionEnabled and both read false,
-        /// both take their defaults and one NoTrackingMode names the lines that set them.
+        /// UnknownKey, and none is drawn in [CameraUnlock]. A key that names a row of the table in
+        /// another section, or a concept row by an alias, draws MisplacedKey naming the row; one that
+        /// names a retired concept draws RetiredKey, and one that names a concept the canonical format
+        /// does not write draws NonCanonicalConcept with the schema's reason; all three in any section.
+        /// No key takes its value from another. When the table binds RotationEnabled and
+        /// PositionEnabled and both read false, both take their defaults and one NoTrackingMode names
+        /// the lines that set them.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
         /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable.</exception>
@@ -332,7 +334,7 @@ namespace CameraUnlock.Core.Config
             Line(output, string.Empty);
             Line(output, "[" + StampSection + "]");
             Line(output, "; Written by the mod. Leave this section in place.");
-            Line(output, "ConfigFormat=" + CanonicalIni.ConfigFormat.ToString(CultureInfo.InvariantCulture));
+            Line(output, CanonicalIni.FormatKeyText + "=" + CanonicalIni.ConfigFormat.ToString(CultureInfo.InvariantCulture));
 
             foreach (string section in ConfigConcepts.Sections)
             {
@@ -478,6 +480,11 @@ namespace CameraUnlock.Core.Config
                 throw new ArgumentException(row.Name + ": " + row.Key + " is the key or an alias of the schema concept '"
                     + canonicalKey + "', so a game-local row cannot use it", "key");
             }
+            if (CanonicalIni.EqualsAsciiIgnoreCase(row.KeyBytes, CanonicalIni.FormatKey))
+            {
+                throw new ArgumentException(row.Name + ": [CameraUnlock] ConfigFormat already has that key, and a key name is "
+                    + "used once in the file", "key");
+            }
             CheckUniqueKey(row);
             if (row.Comment.Length == 0)
             {
@@ -494,16 +501,40 @@ namespace CameraUnlock.Core.Config
             }
         }
 
-        private static void ReportUnread(CanonicalSection section, CanonicalValue value, bool reportUnknown,
+        // The row a key names outside its own section or spelling: a row's key in any section, or
+        // a concept row's key or alias. Every key name is used once in a file, so there is at most one.
+#if NULLABLE_ENABLED
+        private Row? MisplacedRow(byte[] key, string? canonical)
+#else
+        private Row MisplacedRow(byte[] key, string canonical)
+#endif
+        {
+            foreach (Row row in rows)
+            {
+                if (CanonicalIni.EqualsAsciiIgnoreCase(row.KeyBytes, key)) return row;
+                if (canonical != null && row.Concept != null && ConfigKeySchema.Normalize(row.Key) == canonical) return row;
+            }
+            return null;
+        }
+
+        private void ReportUnread(CanonicalSection section, CanonicalValue value, bool reportUnknown,
             List<CanonicalDiagnostic> diagnostics)
         {
 #if NULLABLE_ENABLED
             string? canonical = ConfigKeySchema.Resolve(Encoding.UTF8.GetString(value.Key));
             string? reason = null;
+            Row? misplaced = MisplacedRow(value.Key, canonical);
 #else
             string canonical = ConfigKeySchema.Resolve(Encoding.UTF8.GetString(value.Key));
             string reason = null;
+            Row misplaced = MisplacedRow(value.Key, canonical);
 #endif
+            if (misplaced != null)
+            {
+                diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.MisplacedKey, new[] { value.Line },
+                    section.Name, value.Key, value.Value, misplaced.Name));
+                return;
+            }
             if (canonical != null && ConfigKeySchema.IsRetired(canonical))
             {
                 diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.RetiredKey, new[] { value.Line }, section.Name,

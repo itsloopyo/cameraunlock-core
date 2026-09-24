@@ -14,6 +14,7 @@ namespace cameraunlock::config::detail {
 namespace {
 
 constexpr std::string_view kStampSection = "CameraUnlock";
+constexpr std::string_view kFormatKey = "ConfigFormat";
 constexpr const char* kCrlf = "\r\n";
 
 bool IsPrintableAscii(std::string_view text) {
@@ -60,11 +61,26 @@ const char* NonCanonicalReason(const char* canonical) {
     return nullptr;
 }
 
-// A key no row read: RetiredKey or NonCanonicalConcept when it names such a concept, else
-// UnknownKey when `report_unknown`.
-void ReportUnread(const CanonicalSection& section, const CanonicalValue& value, bool report_unknown,
-                  std::vector<CanonicalDiagnostic>& out) {
+// The row a key names outside its own section or spelling: a row's key in any section, or a
+// concept row's key or alias. Every key name is used once in a file, so there is at most one.
+const TableRow* MisplacedRow(const std::vector<TableRow>& rows, const std::string& key, const char* canonical) {
+    for (const TableRow& row : rows) {
+        if (EqualsAsciiIgnoreCase(row.key, key)) return &row;
+        if (canonical != nullptr && row.concept_id && NormalizeConfigKey(row.key) == canonical) return &row;
+    }
+    return nullptr;
+}
+
+// A key no row read: MisplacedKey, RetiredKey or NonCanonicalConcept when it names such a
+// setting, else UnknownKey when `report_unknown`.
+void ReportUnread(const std::vector<TableRow>& rows, const CanonicalSection& section, const CanonicalValue& value,
+                  bool report_unknown, std::vector<CanonicalDiagnostic>& out) {
     const char* canonical = ResolveConfigKey(value.key);
+    if (const TableRow* row = MisplacedRow(rows, value.key, canonical)) {
+        out.push_back(MakeDiagnostic(CanonicalDiagnosticKind::MisplacedKey, value.line, section.name, value.key,
+                                     value.value, RowName(*row)));
+        return;
+    }
     if (canonical != nullptr && IsRetiredConfigKey(canonical)) {
         out.push_back(
             MakeDiagnostic(CanonicalDiagnosticKind::RetiredKey, value.line, section.name, value.key, value.value, ""));
@@ -150,6 +166,10 @@ void CheckLocalRow(const std::vector<TableRow>& rows, const TableRow& row) {
         throw std::invalid_argument(name + ": " + row.key + " is the key or an alias of the schema concept '" +
                                     canonical + "', so a game-local row cannot use it");
     }
+    if (EqualsAsciiIgnoreCase(row.key, kFormatKey)) {
+        throw std::invalid_argument(name + ": [CameraUnlock] ConfigFormat already has that key, and a key name is used "
+                                           "once in the file");
+    }
     CheckUniqueKey(rows, row);
     if (row.comment.empty()) {
         const bool covered = std::any_of(rows.begin(), rows.end(), [&](const TableRow& earlier) {
@@ -189,7 +209,7 @@ ApplyReport ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows
                 }
             }
             if (row == rows.size()) {
-                ReportUnread(section, value, known, report.diagnostics);
+                ReportUnread(rows, section, value, known, report.diagnostics);
                 continue;
             }
             const std::string error = target.Apply(row, value.value);
@@ -246,7 +266,7 @@ std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& he
     }
     out.append(kCrlf).append("[CameraUnlock]").append(kCrlf);
     out.append("; Written by the mod. Leave this section in place.").append(kCrlf);
-    out.append("ConfigFormat=").append(std::to_string(kConfigFormat)).append(kCrlf);
+    out.append(kFormatKey).append("=").append(std::to_string(kConfigFormat)).append(kCrlf);
 
     for (const char* section : schema::kSections) {
         std::vector<std::size_t> order;

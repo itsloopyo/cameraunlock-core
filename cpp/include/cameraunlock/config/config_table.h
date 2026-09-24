@@ -219,11 +219,12 @@ std::string RenderCanonical(const ConfigTable<Config>& table, const Config& valu
 /// row added, or to the concept row Select names.
 ///
 /// Every check throws std::invalid_argument from the call that breaks it: two rows with one key
-/// name anywhere in the file (ASCII case-insensitive); a local section or key that is not
-/// PascalCase ASCII letters and digits; a local row in [CameraUnlock], or in a schema section
-/// that holds no canonical concept ([Sensitivity], [Inversion], [Reticle]), or in a section
-/// spelled like a schema section or an earlier local section with other letter case; a local
-/// key that is a concept's key or alias, canonical, non-canonical or retired, under the
+/// name anywhere in the file (ASCII case-insensitive), counting the ConfigFormat key core
+/// writes in [CameraUnlock]; a local section or key that is not PascalCase ASCII letters and
+/// digits; a local row in [CameraUnlock], or in a schema section that holds no canonical
+/// concept ([Sensitivity], [Inversion], [Reticle]), or in a section spelled like a schema
+/// section or an earlier local section with other letter case; a local key that is a
+/// concept's key or alias, canonical, non-canonical or retired, under the
 /// schema's normalisation (ResolveConfigKey); a local row with no comment that follows no
 /// local row of its section; a default its row cannot write; RotationEnabled and
 /// PositionEnabled both defaulting to false. EnumCodec already refuses a token that is not
@@ -439,10 +440,12 @@ private:
 /// default with no diagnostic. A value its codec does not read keeps the default and draws
 /// InvalidValue. A section the table has no row in draws one UnknownSection, a key no row of a
 /// read section names one UnknownKey, and none is drawn in [CameraUnlock]. A key that names a
-/// retired concept draws RetiredKey, and one that names a concept the canonical format does not
-/// write draws NonCanonicalConcept with the schema's reason, in any section. No key takes its
-/// value from another. When the table binds RotationEnabled and PositionEnabled and both read
-/// false, both take their defaults and one NoTrackingMode names the lines that set them.
+/// row of the table in another section, or a concept row by an alias, draws MisplacedKey naming
+/// the row; one that names a retired concept draws RetiredKey, and one that names a concept the
+/// canonical format does not write draws NonCanonicalConcept with the schema's reason; all three
+/// in any section. No key takes its value from another. When the table binds RotationEnabled and
+/// PositionEnabled and both read false, both take their defaults and one NoTrackingMode names the
+/// lines that set them.
 ///
 /// Throws std::invalid_argument for a document that is not readable.
 template <class Config>
