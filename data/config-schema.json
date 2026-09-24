@@ -205,7 +205,7 @@
       "aliases": ["ShowDecoupledReticle", "ShowCrosshair", "ShowDecoupledCrosshair", "ReticleEnabled", "DrawReticle", "MoveCrosshair", "CompensateCrosshair", "CompensateReticle"],
       "doc": "Draw the decoupled aim reticle.",
       "canonical": false,
-      "canonical_reason": "The mod draws no reticle of its own to show or hide."
+      "canonical_reason": "Whether a reticle is shown is not a setting."
     },
     {
       "id": "ReticleColor",
@@ -216,7 +216,7 @@
       "aliases": ["CrosshairColor", "ReticleColour", "CrosshairColour"],
       "doc": "Reticle RGBA as four 0-1 floats, comma separated.",
       "canonical": false,
-      "canonical_reason": "The mod draws no reticle of its own to colour."
+      "canonical_reason": "The reticle colour is not a setting."
     },
     {
       "id": "RotationEnabled",
@@ -492,7 +492,7 @@
       "aliases": ["ToggleReticleKey", "ReticleKey", "CrosshairToggleKey", "ToggleCrosshairKey", "ReticleToggle"],
       "doc": "Key that toggles the decoupled aim reticle.",
       "canonical": false,
-      "canonical_reason": "The mod draws no reticle of its own to toggle."
+      "canonical_reason": "The reticle has no toggle key."
     },
     {
       "id": "CycleTrackingModeKey",

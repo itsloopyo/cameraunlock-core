@@ -17,9 +17,11 @@ and nothing changes for the flat readers: every concept, alias and default parse
 
 - `canonical` on every concept. The ones no canonical file carries are `false` with a
   one-line `canonical_reason` for players: `RecenterKey` (the tracker app owns the centre),
-  `ShowReticle`, `ReticleColor` and `ReticleToggleKey` (mods draw no reticle of their own),
-  the six sensitivities and six inversions (the mod applies the pose as the tracker sends
-  it), and `PositionToggleKey` (the tracking-mode key is `CycleTrackingModeKey`).
+  `ShowReticle`, `ReticleColor` and `ReticleToggleKey` (a mod draws a reticle only where
+  the game shows none and the interaction point would otherwise be ambiguous, and never
+  makes it a setting), the six sensitivities and six inversions (the mod applies the pose
+  as the tracker sends it), and `PositionToggleKey` (the tracking-mode key is
+  `CycleTrackingModeKey`).
 - `file_comment` on every canonical concept: one or two lines of printable ASCII, without
   `"` or `\`, written above the key for players. `doc` stays the developer text.
 - `range` (`min`, `max`, either optional) on the canonical numbers, equal to what the flat
