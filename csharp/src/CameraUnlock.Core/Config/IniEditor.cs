@@ -92,7 +92,9 @@ namespace CameraUnlock.Core.Config
         /// first block when the edit says the first occurrence wins, and straight after the
         /// header when that block has no key line. A missing section is appended at the end of
         /// the file after a blank line. New lines end with the file's most common line ending,
-        /// CRLF on a tie and then LF. A file whose last line has no terminator still ends
+        /// CRLF on a tie and then LF, except that CRLF is written where a lone CR or LF would
+        /// pair with a CR before it or an LF after it into one CRLF, which would lose a line.
+        /// A file whose last line has no terminator still ends
         /// without one: the new text is joined on with a line ending in front instead of
         /// behind.
         /// </para>
@@ -253,9 +255,10 @@ namespace CameraUnlock.Core.Config
                 }
                 if (insertions[i] == null) continue;
                 bool terminated = line.End != line.ContentEnd;
-                foreach (byte[] inserted in insertions[i])
+                bool lfNext = line.End < s.Length && s[line.End] == '\n';
+                for (int k = 0; k < insertions[i].Count; k++)
                 {
-                    WriteLine(output, inserted, eol, terminated);
+                    WriteLine(output, insertions[i][k], eol, terminated, k + 1 == insertions[i].Count && lfNext);
                 }
             }
 
@@ -271,9 +274,10 @@ namespace CameraUnlock.Core.Config
                     appended.AddRange(newSections[i].Lines);
                 }
                 bool terminated = empty || IsLineEnd(output.GetBuffer()[output.Length - 1]);
-                foreach (byte[] line in appended)
+                for (int k = 0; k < appended.Count; k++)
                 {
-                    WriteLine(output, line, eol, terminated);
+                    bool lfFollows = k + 1 < appended.Count && appended[k + 1].Length == 0 && eol.Length == 1 && eol[0] == '\n';
+                    WriteLine(output, appended[k], eol, terminated, lfFollows);
                 }
             }
 
@@ -455,17 +459,35 @@ namespace CameraUnlock.Core.Config
             return result;
         }
 
-        private static void WriteLine(MemoryStream output, byte[] line, byte[] eol, bool afterTerminatedLine)
+        private static void WriteLine(MemoryStream output, byte[] line, byte[] eol, bool afterTerminatedLine, bool lfFollows)
         {
             if (afterTerminatedLine)
             {
                 output.Write(line, 0, line.Length);
-                output.Write(eol, 0, eol.Length);
+                WriteEol(output, eol, lfFollows);
+            }
+            else
+            {
+                WriteEol(output, eol, line.Length == 0 && lfFollows);
+                output.Write(line, 0, line.Length);
+            }
+        }
+
+        // An ending written straight after a CR, or straight before an LF, would pair with it
+        // into one CRLF and the reader would lose a line; CRLF pairs with neither, so it is
+        // written there.
+        private static void WriteEol(MemoryStream output, byte[] eol, bool lfFollows)
+        {
+            bool afterCr = output.Length > 0 && output.GetBuffer()[output.Length - 1] == '\r';
+            bool pairs = eol.Length == 1 && ((eol[0] == '\n' && afterCr) || (eol[0] == '\r' && lfFollows));
+            if (pairs)
+            {
+                output.WriteByte((byte)'\r');
+                output.WriteByte((byte)'\n');
             }
             else
             {
                 output.Write(eol, 0, eol.Length);
-                output.Write(line, 0, line.Length);
             }
         }
 

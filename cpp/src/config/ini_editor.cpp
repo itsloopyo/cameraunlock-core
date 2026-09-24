@@ -182,13 +182,21 @@ bool LastLineIsBlank(const std::string& s, size_t body_begin) {
     return true;
 }
 
+// An ending written straight after a CR, or straight before an LF, would pair with it into
+// one CRLF and the reader would lose a line; CRLF pairs with neither, so it is written there.
+void AppendEol(std::string& out, const std::string& eol, bool lf_follows) {
+    const bool pairs = (eol == "\n" && !out.empty() && out.back() == '\r') ||
+                       (eol == "\r" && lf_follows);
+    out.append(pairs ? "\r\n" : eol);
+}
+
 void AppendLine(std::string& out, const std::string& line, const std::string& eol,
-                bool after_terminated_line) {
+                bool after_terminated_line, bool lf_follows) {
     if (after_terminated_line) {
         out.append(line);
-        out.append(eol);
+        AppendEol(out, eol, lf_follows);
     } else {
-        out.append(eol);
+        AppendEol(out, eol, line.empty() && lf_follows);
         out.append(line);
     }
 }
@@ -319,7 +327,11 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
             out.append(s, line.begin, line.end - line.begin);
         }
         const bool terminated = line.end != line.content_end;
-        for (const std::string& inserted : insertions[i]) AppendLine(out, inserted, eol, terminated);
+        const bool lf_next = line.end < s.size() && s[line.end] == '\n';
+        for (size_t k = 0; k < insertions[i].size(); ++k) {
+            AppendLine(out, insertions[i][k], eol, terminated,
+                       k + 1 == insertions[i].size() && lf_next);
+        }
     }
 
     if (!new_sections.empty()) {
@@ -332,7 +344,10 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
             for (const std::string& line : new_sections[i].lines) appended.push_back(line);
         }
         const bool terminated = empty || IsLineEnd(out.back());
-        for (const std::string& line : appended) AppendLine(out, line, eol, terminated);
+        for (size_t k = 0; k < appended.size(); ++k) {
+            const bool lf_follows = k + 1 < appended.size() && appended[k + 1].empty() && eol == "\n";
+            AppendLine(out, appended[k], eol, terminated, lf_follows);
+        }
     }
 
     IniEditResult result;

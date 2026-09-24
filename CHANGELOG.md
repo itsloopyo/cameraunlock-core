@@ -210,8 +210,9 @@ last occurrence replaced, the one the reader keeps, and the earlier ones stay. W
 `insertIfAbsent`, a missing key goes after the last key line of its section's last block,
 or straight after that block's header when it has none, and a missing section is appended
 at the end of the file after a blank line. New lines take the file's most common line
-ending, CRLF on a tie and then LF. A file whose last line has no terminator still has none
-afterwards. Keys above the first header belong to no section and are never matched.
+ending, CRLF on a tie and then LF, except where that ending would pair with a CR before
+it or an LF after it into one CRLF and lose a line: there the line gets CRLF. A file
+whose last line has no terminator still has none afterwards. Keys above the first header belong to no section and are never matched.
 
 An edit marked first-occurrence-wins (`IniEdit.FirstOccurrenceWins` in C#,
 `IniEdit::first_occurrence_wins` in C++) is for a reader that takes the first of a

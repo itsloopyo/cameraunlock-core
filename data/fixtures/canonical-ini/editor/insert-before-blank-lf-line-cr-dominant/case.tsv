@@ -1,0 +1,4 @@
+# CR is the dominant ending, and the inserted line is followed by a blank line ending in
+# LF. The inserted line gets CRLF, as a CR straight before that LF would make one CRLF of
+# the two and lose the blank line.
+set_or_insert	General	B	2

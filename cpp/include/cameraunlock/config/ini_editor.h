@@ -82,7 +82,9 @@ struct IniEditResult {
 /// first block when the edit says the first occurrence wins, and straight after the
 /// header when that block has no key line. A missing section is appended at the end of
 /// the file after a blank line. New lines end with the file's most common line ending,
-/// CRLF on a tie and then LF. A file whose last line has no terminator still ends
+/// CRLF on a tie and then LF, except that CRLF is written where a lone CR or LF would
+/// pair with a CR before it or an LF after it into one CRLF, which would lose a line.
+/// A file whose last line has no terminator still ends
 /// without one: the new text is joined on with a line ending in front instead of behind.
 ///
 /// Throws std::invalid_argument for an edit that cannot be written so that it reads back
