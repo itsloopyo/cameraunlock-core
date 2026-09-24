@@ -9,10 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added - legacy import support, normalisations N1 and N2, and the differential corpus, in C# and C++
+### Added - legacy import support, normalisation N2, and the differential corpus, in C# and C++
 
-What a game's legacy import hands the migration driver, the two approved normalisations its map
-applies, and the corpus generator its differential test runs. Nothing in the fleet uses them yet:
+What a game's legacy import hands the migration driver, the normalisation its map applies, and the
+corpus generator its differential test runs. Nothing in the fleet uses them yet:
 the config owners (next) drive the imports, and each game's conversion writes its own.
 
 - **The import contract.** C++ `cameraunlock/config/legacy_import.h`: `ImportStatus` (`Imported`
@@ -26,29 +26,28 @@ the config owners (next) drive the imports, and each game's conversion writes it
   path, the ANSI path and whether the ANSI conversion lost characters; C# `LegacyImportInput`: the
   config path and, for BepInEx, the separate `.cfg` it migrates from); and the import carries
   `keys`, every section and key the frozen reader reads, so the driver can log every other key
-  line of the old file as not carried and the corpus mutates the same list. An empty section in a
-  `LegacyKey` means any section, for the readers that ignore sections.
+  line of the old file as not carried and the corpus generator takes the same list. An empty
+  section in a `LegacyKey` means any section, for the readers that ignore sections.
 - **Dropped values.** `DroppedValue` (rule, section, key, the value as the import read it) and
-  `DropRule`: `KeyCodeOutOfRange` 1 (N1), `NonFiniteNumber` 2 (N2), `PoseShaping` 3 (a
-  sensitivity, deadzone, curve or inversion set away from the shipped default), `Reticle` 4 and
-  `FollowsDefault` 5 (a feature shipped off pending verification that now takes the mod's
-  default). The last three are the docs-survey decisions; the design names the first four, and
-  `FollowsDefault` is added so decision 4's changes reach the log too. C++ `DescribeDroppedValue`
-  and C# `DroppedValue.Describe()` give the log line, e.g. `not carried: [Hotkeys]
-  ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound`.
-- **N1**, C++ only: `LegacyVirtualKeyToBindings(long long code)` gives the key name for a code
-  from 0x01 to 0xFE (hex where the table has no name) and "" (unbound) for any other code; an
-  overload records the drop, except for code 0, which is how a legacy file says unbound. A chord
-  switch folds into the same list through `input::FormatKeyBindings`. No C# import reads
-  virtual-key codes, so C# has no N1.
-- **N1 probe.** `pixi run probe-n1` runs `cameraunlock_tests --probe-getasynckeystate`, outside
-  `check` because it injects a key press with SendInput and needs an interactive desktop. On
-  Windows 11 Pro 10.0.26200 (2026-09-24), with F24 held, GetAsyncKeyState reported F24 (0x87) down
-  and reported up for 0x187, 0x287, 0x10087, -121, 0, 0xFF, 0x100 and -1, so a legacy hotkey code
-  outside 0x01-0xFE never fired on a key in range. One code can fire on its own: 0xFF is the code
-  the SDK's kbd.h gives to scan codes a layout leaves unmapped (`VK__none_`), and with VK 0xFF
-  itself held GetAsyncKeyState(0xFF) reported down. N1 unbinds a legacy 0xFF hotkey, a change for
-  a user who bound one; no config the fleet ships binds 0xFF.
+  `DropRule`: `NonFiniteNumber` 1 (N2), `PoseShaping` 2 (a sensitivity, deadzone, curve or
+  inversion set away from the shipped default), `Reticle` 3 and `FollowsDefault` 4 (a feature
+  shipped off pending verification that now takes the mod's default). The last three are the
+  docs-survey decisions; `FollowsDefault` is added to the design's list so decision 4's changes
+  reach the log too. C++ `DescribeDroppedValue` and C# `DroppedValue.Describe()` give the log
+  line, e.g. `not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the
+  default is used`.
+- **N1 is not shipped: it goes back to the owner.** N1 would import a legacy hotkey code outside
+  0x01-0xFE as unbound, and the design approves it without a decision only if GetAsyncKeyState
+  never reports a code outside that range. `pixi run probe-n1` runs `cameraunlock_tests
+  --probe-getasynckeystate`, outside `check` because it injects a key press with SendInput and
+  needs an interactive desktop. On Windows 11 Pro 10.0.26200 (2026-09-24), with F24 held,
+  GetAsyncKeyState reported F24 (0x87) down and reported up for 0x187, 0x287, 0x10087, -121, 0,
+  0xFF, 0x100 and -1, so no out-of-range code reports a key in range. But 0xFF reports on its own:
+  it is the code the SDK's kbd.h gives to scan codes a layout leaves unmapped (`VK__none_`), and
+  with VK 0xFF itself held GetAsyncKeyState(0xFF) reported down. A legacy 0xFF hotkey can
+  therefore fire, the canonical hotkey grammar (0x01-0xFE) cannot hold it, and unbinding it would
+  change that user's behaviour, so the rule needs the owner's decision before a map may use it.
+  Until a rule exists, design 4.3 defers the migration of a user holding a value no rule covers.
 - **N2**: C++ `LegacyFiniteOrDefault` (float and double), C#
   `LegacyNormalisations.FiniteOrDefault`: a NaN or infinite legacy value gives the runtime row's
   default and records the drop; a non-finite default throws.
@@ -57,18 +56,26 @@ the config owners (next) drive the imports, and each game's conversion writes it
   `csharp/testing/IniMutations.cs`, which no shipped assembly compiles: a test project links it
   with `<Compile Include="..\cameraunlock-core\csharp\testing\IniMutations.cs"
   Link="IniMutations.cs" />` (the path relative to the project). C# 7.3, and free of nullable
-  warnings in a project that enables them. Given a legacy file and the keys its import reads
-  (section, key, an alternate valid value, one out-of-range value per refused range, whether it is
-  a hotkey and the chord switches that fold into it), it returns every mutation design 6.2 lists,
-  per key, per pair of keys, per section and per file, as named outputs in a fixed order.
-  `data/fixtures/canonical-ini/README.md` defines each byte for byte, and five fixture cases under
-  `data/fixtures/canonical-ini/mutations/` pin every output's name and SHA-256 in both languages.
+  warnings in a project that enables them. It takes a legacy file, the import's own key list
+  (`LegacyImport` keys) and a descriptor for each of those keys (section, key, an alternate valid
+  value, one out-of-range value per refused range, whether it is a hotkey and the chord switches
+  that fold into it), and refuses the call when the list and the descriptors name different keys,
+  so a game's corpus cannot leave out a key its import reads. A descriptor with an empty section
+  is a section-less key, matched anywhere in the file, which covers the section-less C# readers
+  and header-less files. It returns every mutation design 6.2 lists, per key, per pair of keys,
+  per section and per file, as named outputs in a fixed order.
+  `data/fixtures/canonical-ini/README.md` defines each byte for byte, and seven fixture cases
+  under `data/fixtures/canonical-ini/mutations/`, two of them section-less, pin every output's
+  name and SHA-256 in both languages.
   Choices the design left open: a key the file lacks is first added at its alternate value; the
   invalid value is `abc`; the listed `""` is both the empty value and a literal pair of quotes; the
   repeated section block carries each key's alternate value; the 1100-character value is the digit
   1 repeated; the 0x1A and NUL bytes are lines of their own after the first key; NUL padding is 64
   bytes; the UTF-16 output decodes the file as UTF-8 where it is UTF-8 and as code page 1252
-  otherwise.
+  otherwise; a section-less key the file lacks goes after the last line above the first header,
+  gets no section case swap, and moves to another section under a new `[Elsewhere]` at the end;
+  "before the first header" and "UTF-8 mark before a header" apply only where the file has a
+  header above the key or at all.
 
 ### Added - core's config table over its own config types, in C# and C++
 

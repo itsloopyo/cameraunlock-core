@@ -62,18 +62,15 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(1, (int)ImportStatus.Refused);
             Assert.Equal(2, (int)ImportStatus.Undecodable);
             Assert.Equal(3, (int)ImportStatus.Absent);
-            Assert.Equal(1, (int)DropRule.KeyCodeOutOfRange);
-            Assert.Equal(2, (int)DropRule.NonFiniteNumber);
-            Assert.Equal(3, (int)DropRule.PoseShaping);
-            Assert.Equal(4, (int)DropRule.Reticle);
-            Assert.Equal(5, (int)DropRule.FollowsDefault);
+            Assert.Equal(1, (int)DropRule.NonFiniteNumber);
+            Assert.Equal(2, (int)DropRule.PoseShaping);
+            Assert.Equal(3, (int)DropRule.Reticle);
+            Assert.Equal(4, (int)DropRule.FollowsDefault);
         }
 
         [Fact]
         public void EachRuleHasItsLine()
         {
-            Assert.Equal("not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
-                new DroppedValue(DropRule.KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230").Describe());
             Assert.Equal("not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the default is used",
                 new DroppedValue(DropRule.NonFiniteNumber, "Smoothing", "RemoteSmoothing", "nan").Describe());
             Assert.Equal("not carried: [Sensitivity] YawSensitivity=1.5, sensitivity, deadzones, response curves and axis "
@@ -90,6 +87,7 @@ namespace CameraUnlock.Core.Tests.Config
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)9, "A", "B", "C"));
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)0, "A", "B", "C"));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)5, "A", "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, null!, "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", null!, "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", "B", null!));

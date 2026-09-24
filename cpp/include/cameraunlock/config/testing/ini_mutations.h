@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include <cameraunlock/config/legacy_import.h>
+
 // The differential corpus: every mutation of a legacy config file that design 6.2 lists, for a
 // game's differential test to run through its legacy import and its migration. Test code only,
 // header-only and pure; nothing in the library includes it. csharp/testing/IniMutations.cs is the
@@ -18,6 +20,7 @@ namespace cameraunlock::config::testing {
 
 /// A legacy switch or letter row that folds a Ctrl+Shift binding into a hotkey's list.
 struct ChordSwitch {
+    /// Empty for a reader that ignores sections, as in MutationKey.
     std::string section;
     std::string key;
     /// The values that turn it on and off, as the legacy reader reads them.
@@ -27,6 +30,8 @@ struct ChordSwitch {
 
 /// One key the frozen legacy reader reads.
 struct MutationKey {
+    /// Empty for a reader that ignores sections, as an empty LegacyKey section means: the key's
+    /// line is then its first key line anywhere in the file.
     std::string section;
     std::string key;
     /// A valid value other than the shipped one.
@@ -97,6 +102,10 @@ inline std::string MutationKeyOf(std::string_view content) {
     return std::string(MutationTrim(t.substr(0, eq)));
 }
 
+inline std::string MutationLabel(std::string_view section, std::string_view key) {
+    return section.empty() ? std::string(key) : "[" + std::string(section) + "] " + std::string(key);
+}
+
 class MutationDoc {
 public:
     explicit MutationDoc(std::string_view data) {
@@ -151,19 +160,15 @@ public:
                 continue;
             }
             const std::string found = MutationKeyOf(lines_[i].content);
-            if (!found.empty() && !current.empty() && MutationSameName(current, section) &&
-                MutationSameName(found, key)) {
-                return i;
-            }
+            const bool in_section = section.empty() || (!current.empty() && MutationSameName(current, section));
+            if (!found.empty() && in_section && MutationSameName(found, key)) return i;
         }
         return npos;
     }
 
     std::size_t Require(std::string_view section, std::string_view key) const {
         const std::size_t i = Find(section, key);
-        if (i == npos) {
-            throw std::logic_error("[" + std::string(section) + "] " + std::string(key) + " has no line");
-        }
+        if (i == npos) throw std::logic_error(MutationLabel(section, key) + " has no line");
         return i;
     }
 
@@ -180,7 +185,7 @@ public:
         for (std::size_t i = 0; i < lines_.size(); ++i) {
             if (MutationIsHeader(lines_[i].content)) return i;
         }
-        throw std::logic_error("the file has no header");
+        return npos;
     }
 
     std::size_t BlockEnd(std::size_t header) const {
@@ -198,6 +203,18 @@ public:
         return last + 1;
     }
 
+    // Just after the last non-blank line above the first header, or in the file when it has no
+    // header; the start of the file when there is no such line.
+    std::size_t TopInsertPoint() const {
+        const std::size_t header = FirstAnyHeader();
+        const std::size_t end = header == npos ? lines_.size() : header;
+        std::size_t point = 0;
+        for (std::size_t j = 0; j < end; ++j) {
+            if (!MutationTrim(lines_[j].content).empty()) point = j + 1;
+        }
+        return point;
+    }
+
     void Insert(std::size_t index, std::string content) {
         if (index == lines_.size() && !lines_.empty() && lines_.back().ending.empty()) {
             lines_.back().ending = dominant_;
@@ -210,7 +227,9 @@ public:
     void Remove(std::size_t index) { lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(index)); }
 
     void AppendToSection(std::string_view section, std::string content) {
-        if (FirstHeader(section) == npos) {
+        if (section.empty()) {
+            Insert(TopInsertPoint(), std::move(content));
+        } else if (FirstHeader(section) == npos) {
             Insert(lines_.size(), "[" + std::string(section) + "]");
             Insert(lines_.size(), std::move(content));
         } else {
@@ -258,9 +277,9 @@ inline void MutationCheckText(const std::string& text, const std::string& what) 
 inline void MutationCheckName(const std::string& section, const std::string& key, const std::string& what) {
     MutationCheckText(section, what + " section");
     MutationCheckText(key, what + " key");
-    if (section.empty() || key.empty()) throw std::invalid_argument(what + " needs a section and a key");
+    if (key.empty()) throw std::invalid_argument(what + " needs a key");
     if (MutationTrim(section).size() != section.size() || MutationTrim(key).size() != key.size()) {
-        throw std::invalid_argument(what + " [" + section + "] " + key + " starts or ends with a space");
+        throw std::invalid_argument(what + " " + MutationLabel(section, key) + " starts or ends with a space");
     }
     if (section.find(']') != std::string::npos) {
         throw std::invalid_argument(what + " section " + section + " holds ']'");
@@ -270,24 +289,49 @@ inline void MutationCheckName(const std::string& section, const std::string& key
     }
 }
 
-inline void MutationCheckKeys(const std::vector<MutationKey>& keys) {
+// A section-less key's line is the first with its name in any section, so it clashes with every
+// key of that name.
+inline bool MutationClash(const MutationKey& a, const MutationKey& b) {
+    return MutationSameName(a.key, b.key) &&
+           (a.section.empty() || b.section.empty() || MutationSameName(a.section, b.section));
+}
+
+inline bool MutationNames(const LegacyKey& read, const MutationKey& k) {
+    return MutationSameName(read.section, k.section) && MutationSameName(read.key, k.key);
+}
+
+inline void MutationCheckKeys(const std::vector<LegacyKey>& reads, const std::vector<MutationKey>& keys) {
     if (keys.empty()) throw std::invalid_argument("the corpus needs at least one key");
     for (std::size_t n = 0; n < keys.size(); ++n) {
         const MutationKey& k = keys[n];
+        const std::string label = MutationLabel(k.section, k.key);
         MutationCheckName(k.section, k.key, "a key's");
-        MutationCheckText(k.alternate, "[" + k.section + "] " + k.key + "'s alternate value");
-        for (const std::string& value : k.out_of_range) {
-            MutationCheckText(value, "[" + k.section + "] " + k.key + "'s out-of-range value");
-        }
+        MutationCheckText(k.alternate, label + "'s alternate value");
+        for (const std::string& value : k.out_of_range) MutationCheckText(value, label + "'s out-of-range value");
         for (const ChordSwitch& chord : k.chords) {
             MutationCheckName(chord.section, chord.key, "a chord's");
-            MutationCheckText(chord.on, "[" + chord.section + "] " + chord.key + "'s on value");
-            MutationCheckText(chord.off, "[" + chord.section + "] " + chord.key + "'s off value");
+            MutationCheckText(chord.on, MutationLabel(chord.section, chord.key) + "'s on value");
+            MutationCheckText(chord.off, MutationLabel(chord.section, chord.key) + "'s off value");
         }
         for (std::size_t m = 0; m < n; ++m) {
-            if (MutationSameName(keys[m].section, k.section) && MutationSameName(keys[m].key, k.key)) {
-                throw std::invalid_argument("[" + k.section + "] " + k.key + " is listed twice");
+            if (MutationClash(keys[m], k)) {
+                throw std::invalid_argument(label + " is listed twice, or once in a section and once without one");
             }
+        }
+        if (std::none_of(reads.begin(), reads.end(), [&k](const LegacyKey& r) { return MutationNames(r, k); })) {
+            throw std::invalid_argument(label + " is not among the keys the import reads");
+        }
+    }
+    for (std::size_t n = 0; n < reads.size(); ++n) {
+        const LegacyKey& r = reads[n];
+        const std::string label = MutationLabel(r.section, r.key);
+        for (std::size_t m = 0; m < n; ++m) {
+            if (MutationSameName(reads[m].section, r.section) && MutationSameName(reads[m].key, r.key)) {
+                throw std::invalid_argument(label + " is read twice");
+            }
+        }
+        if (std::none_of(keys.begin(), keys.end(), [&r](const MutationKey& k) { return MutationNames(r, k); })) {
+            throw std::invalid_argument(label + " is read by the import and has no key descriptor");
         }
     }
 }
@@ -369,18 +413,21 @@ inline std::string MutationUtf16(std::string_view data) {
 
 /// Every corpus input design 6.2 lists, built from `base` (a legacy file's bytes) and the keys
 /// the frozen reader reads, as (name, bytes) in a fixed order with names that never repeat.
-/// data/fixtures/canonical-ini/README.md defines each mutation byte for byte.
+/// `reads` is the import's LegacyImport::keys, and `keys` describes each of them in the order
+/// the outputs follow. data/fixtures/canonical-ini/README.md defines each mutation byte for byte.
 ///
 /// Lines end at CRLF, LF or a lone CR, and a UTF-8 mark at the start is set aside and put back.
 /// A key missing from `base` is added first, set to its alternate value, at the end of its
-/// section or in a new section at the end, and every mutation starts from that file. Throws
-/// std::invalid_argument for no keys, a key listed twice, a name or value outside printable
-/// ASCII, a section or key with a space at either end, a section holding ']', a key holding
-/// '=' or starting with ';', '#' or '[', or a first key whose line cannot be padded to 199
-/// characters.
-inline std::vector<IniMutation> GenerateIniMutations(std::string_view base, const std::vector<MutationKey>& keys) {
+/// section or in a new section at the end (a section-less key after the last line above the
+/// first header), and every mutation starts from that file. Throws std::invalid_argument for no
+/// keys, `reads` and `keys` naming different keys, a key read or listed twice, a section-less
+/// key beside another key of its name, a name or value outside printable ASCII, a section or key
+/// with a space at either end, a section holding ']', a key holding '=' or starting with ';', '#'
+/// or '[', or a first key whose line cannot be padded to 199 characters.
+inline std::vector<IniMutation> GenerateIniMutations(std::string_view base, const std::vector<LegacyKey>& reads,
+                                                     const std::vector<MutationKey>& keys) {
     using detail::MutationDoc;
-    detail::MutationCheckKeys(keys);
+    detail::MutationCheckKeys(reads, keys);
 
     MutationDoc full(base);
     for (const MutationKey& k : keys) {
@@ -389,7 +436,7 @@ inline std::vector<IniMutation> GenerateIniMutations(std::string_view base, cons
 
     std::vector<IniMutation> out;
     const auto emit = [&out](std::string name, std::string bytes) { out.push_back({std::move(name), std::move(bytes)}); };
-    const auto label = [](const std::string& section, const std::string& key) { return "[" + section + "] " + key; };
+    const auto label = [](const std::string& section, const std::string& key) { return detail::MutationLabel(section, key); };
     const std::string invalid = "abc";
 
     static const std::pair<const char*, std::string> kValues[] = {
@@ -432,8 +479,8 @@ inline std::vector<IniMutation> GenerateIniMutations(std::string_view base, cons
         }
         emit(n + "key case swapped", d.Bytes());
 
-        d = full;
-        {
+        if (!k.section.empty()) {
+            d = full;
             std::size_t header = i;
             while (!detail::MutationIsHeader(d.lines()[header].content)) --header;
             std::string& content = d.lines()[header].content;
@@ -442,11 +489,16 @@ inline std::vector<IniMutation> GenerateIniMutations(std::string_view base, cons
             content = content.substr(0, open + 1) +
                       detail::MutationSwapCase(std::string_view(content).substr(open + 1, close - open - 1)) +
                       content.substr(close);
+            emit(n + "section case swapped", d.Bytes());
         }
-        emit(n + "section case swapped", d.Bytes());
 
         d = full;
-        {
+        if (k.section.empty()) {
+            std::string moved = d.lines()[i].content;
+            d.Remove(i);
+            d.Insert(d.lines().size(), "[Elsewhere]");
+            d.Insert(d.lines().size(), std::move(moved));
+        } else {
             std::string moved = d.lines()[i].content;
             d.Remove(i);
             std::string target;
@@ -468,13 +520,14 @@ inline std::vector<IniMutation> GenerateIniMutations(std::string_view base, cons
         }
         emit(n + "moved to another section", d.Bytes());
 
-        d = full;
-        {
+        const std::size_t first_header = full.FirstAnyHeader();
+        if (first_header != MutationDoc::npos && first_header < i) {
+            d = full;
             std::string moved = d.lines()[i].content;
             d.Remove(i);
-            d.Insert(d.FirstAnyHeader(), std::move(moved));
+            d.Insert(first_header, std::move(moved));
+            emit(n + "before the first header", d.Bytes());
         }
-        emit(n + "before the first header", d.Bytes());
 
         for (const char* tail : {"; x", ";x", " # x"}) {
             d = full;
@@ -559,7 +612,8 @@ inline std::vector<IniMutation> GenerateIniMutations(std::string_view base, cons
             const std::string found = detail::MutationKeyOf(line.content);
             if (found.empty()) continue;
             for (const MutationKey& k : keys) {
-                if (detail::MutationSameName(k.section, s) && detail::MutationSameName(k.key, found)) {
+                if ((k.section.empty() || detail::MutationSameName(k.section, s)) &&
+                    detail::MutationSameName(k.key, found)) {
                     line.content = MutationDoc::Prefix(line.content) + k.alternate;
                     break;
                 }
@@ -572,9 +626,9 @@ inline std::vector<IniMutation> GenerateIniMutations(std::string_view base, cons
     const std::string n = "file: ";
     const MutationKey& first = keys.front();
     const std::string mark = "\xEF\xBB\xBF";
-    {
+    if (const std::size_t header = full.FirstAnyHeader(); header != MutationDoc::npos) {
         MutationDoc d = full;
-        d.lines().erase(d.lines().begin(), d.lines().begin() + static_cast<std::ptrdiff_t>(full.FirstAnyHeader()));
+        d.lines().erase(d.lines().begin(), d.lines().begin() + static_cast<std::ptrdiff_t>(header));
         emit(n + "UTF-8 mark before a header", mark + d.Bytes(false));
     }
     emit(n + "UTF-8 mark before a comment", mark + "; comment" + full.dominant() + full.Bytes(false));

@@ -256,17 +256,20 @@ the three cases every field is off its default at least once.
 The differential corpus (design 6.2): C++ `GenerateIniMutations` in
 `cameraunlock/config/testing/ini_mutations.h` and C# `IniMutations.Generate` in
 `csharp/testing/IniMutations.cs`, whose every output a game's differential test runs through its
-legacy import and its migration. One directory per case:
+legacy import and its migration. The generator takes the import's list of the keys it reads
+(`LegacyImport` keys) and a descriptor for each, and refuses the pair when the two name different
+keys. One directory per case:
 
 - `input.ini`: the base, a legacy file's bytes.
-- `keys.tsv`: the key descriptors in order. A `key` row has the section, key, alternate valid
-  value and `true` or `false` for a hotkey. Each `range` row after it adds one out-of-range value
+- `keys.tsv`: the key descriptors in order. A `key` row has the section (empty for a reader that
+  ignores sections), key, alternate valid value and `true` or `false` for a hotkey. Each `range` row after it adds one out-of-range value
   to that key, and each `chord` row adds a chord switch: section, key, the value that turns it on
   and the value that turns it off.
 - `expected.tsv`: one row per output in order, its name and the lower-case SHA-256 of its bytes.
 
-Fields use the byte escape above. A runner generates the outputs from `input.ini` and `keys.tsv`
-and requires `expected.tsv` exactly: the same count, order, names and hashes.
+Fields use the byte escape above. A runner generates the outputs from `input.ini` and `keys.tsv`,
+passing the `key` rows' sections and keys as the import's list, and requires `expected.tsv`
+exactly: the same count, order, names and hashes.
 
 ### How the generator reads the base
 
@@ -280,9 +283,11 @@ On a line trimmed of spaces and tabs: a line starting `[` is a header, named by 
 up to its first `]`; a header with no `]` or an empty name opens no section. A line starting `;`
 or `#` is a comment. Any other line with an `=` and a non-empty trimmed key before it is a key
 line. A key line belongs to the section of the last header above it, and a key line under no
-section is never matched. Names compare ASCII case-insensitively.
+section is never matched by a key with a section. Names compare ASCII case-insensitively.
 
-A key's line is the first key line with its section and key. Its prefix is the line up to and
+A key's line is the first key line with its section and key. A section-less key (empty section)
+is a key a reader looks up in every section, and its line is the first key line with its key
+anywhere in the file, above every header or under any header, named or not. Its prefix is the line up to and
 including the first `=` and any spaces and tabs after it; its value is the text after the `=`,
 trimmed. Setting a value makes the line its prefix and the new value.
 
@@ -291,14 +296,17 @@ ending: that line takes the dominant ending and the new last line takes none, so
 ends without one. A section's insert point is just after the last non-blank line of its first
 block (its first header up to the next header of any kind). Adding a key to a section inserts
 `Key=value` at that point, or, when no header names the section, inserts `[Section]` and then the
-key line at the end of the file.
+key line at the end of the file. Adding a section-less key inserts it just after the last
+non-blank line above the first header of any kind (in the whole file when it has no header), or
+at the start of the file when there is no such line.
 
 Before any mutation, every descriptor key with no line gets one, `Key=alternate`, added to its
 section in descriptor order. That file, the full base, is where every output starts.
 
 ### The outputs, in order
 
-For each key in descriptor order, named `[Section] Key: ` and then:
+For each key in descriptor order, named `[Section] Key: ` (`Key: ` for a section-less key) and
+then:
 
 1. `removed`: its line deleted.
 2. `duplicate before, another value` and `duplicate after, another value`: its prefix and the
@@ -307,12 +315,13 @@ For each key in descriptor order, named `[Section] Key: ` and then:
    `invalid, then a valid duplicate`: the same inserted before it.
 4. `key case swapped`: every ASCII letter before the line's `=` changes case.
 5. `section case swapped`: in the header above the line, every ASCII letter between the `[` and
-   the first `]` after it changes case.
+   the first `]` after it changes case. Not for a section-less key.
 6. `moved to another section`: the line deleted, then inserted at the insert point of the first
    section in the file other than its own; with none, `[Elsewhere]` and the line are inserted at
-   the end (`[Other]` when its own section is `Elsewhere`).
+   the end (`[Other]` when its own section is `Elsewhere`). A section-less key has no section of
+   its own, so `[Elsewhere]` and its line are always inserted at the end.
 7. `before the first header`: the line deleted, then inserted just before the first header of any
-   kind.
+   kind. Only when that header is above the line, which it always is for a key with a section.
 8. `'; x' appended`, `';x' appended`, `' # x' appended`: the text between the quotes added to the
    end of the line.
 9. `in double quotes`, `in single quotes`: the value set to itself inside `"` or `'`.
@@ -335,12 +344,14 @@ that header spells it, named `[Section]: ` and then:
 1. `header with spaces`, `header with a comment`, `header not closed`: its first header line
    replaced by `[ Section ]`, `[Section] ; c`, `[Section`.
 2. `section repeated`: a copy of its first block inserted right after that block, every descriptor
-   key of the section in the copy set to its alternate value. When the block's last line has no
-   ending it takes the dominant ending, and the copy's last line keeps none.
+   key of the section, and every section-less descriptor key, in the copy set to its alternate
+   value. When the block's last line has no ending it takes the dominant ending, and the copy's
+   last line keeps none.
 
 Then, named `file: ` and then:
 
-1. `UTF-8 mark before a header`: EF BB BF and the full base from its first header on.
+1. `UTF-8 mark before a header`: EF BB BF and the full base from its first header on. Only when
+   the full base has a header.
 2. `UTF-8 mark before a comment`: EF BB BF, `; comment`, the dominant ending, then the full base
    without its own mark.
 3. `CRLF`, `LF`, `lone CR`: every line that has an ending given that one.
@@ -371,4 +382,9 @@ with a comment, keys and a section the base lacks), `utf8-mark-crlf` (a mark, CR
 header and key, UTF-8 in a comment with a code point above U+FFFF, an unclosed header over a key,
 a header with spaces inside its brackets, no final newline, chord switches the base lacks),
 `cp1252-lone-cr` (lone CR, cp1252 bytes, a trailing blank line, one section named `Elsewhere`),
-`tie-crlf-lf` (a CRLF and LF tie, keys above every header) and `tie-lf-cr` (an LF and CR tie).
+`tie-crlf-lf` (a CRLF and LF tie, keys above every header), `tie-lf-cr` (an LF and CR tie),
+`no-header-crlf` (no header and `Key = value` lines, the shape of gone-home's first-run file, in
+CRLF; only section-less keys, one the base lacks, and a section-less chord switch the base lacks)
+and
+`sectionless-lf` (section-less keys above every header and under one, one the base lacks, a key
+with a section beside them, no final newline).

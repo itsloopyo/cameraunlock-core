@@ -1,0 +1,5 @@
+key		LimitY	0.1	false
+range	11
+key	General	ToggleKey	0x24	true
+key		Verbose	0	false
+key		Scale	2.0	false

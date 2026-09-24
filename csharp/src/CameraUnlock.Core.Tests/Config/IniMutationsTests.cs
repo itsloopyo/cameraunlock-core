@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using CameraUnlock.Core.Config;
 using CameraUnlock.Core.Config.Testing;
 using Xunit;
 
@@ -49,17 +50,29 @@ namespace CameraUnlock.Core.Tests.Config
             return new MutationKey(section, key, alternate, outOfRange ?? new string[0], chords != null, chords ?? new ChordSwitch[0]);
         }
 
+        private static List<IniMutation> Generate(byte[] input, params MutationKey[] keys)
+        {
+            return IniMutations.Generate(input, IniMutationFixtures.Reads(keys), keys);
+        }
+
         private static string Refusal(params MutationKey[] keys)
         {
-            return Assert.Throws<ArgumentException>(() => IniMutations.Generate(Base, keys)).Message;
+            return Assert.Throws<ArgumentException>(() => Generate(Base, keys)).Message;
+        }
+
+        private static string Refusal(LegacyKey[] reads, params MutationKey[] keys)
+        {
+            return Assert.Throws<ArgumentException>(() => IniMutations.Generate(Base, reads, keys)).Message;
         }
 
         [Fact]
         public void RefusesBadKeys()
         {
             Assert.StartsWith("the corpus needs at least one key", Refusal());
-            Assert.StartsWith("[general] togglekey is listed twice", Refusal(Key("General", "ToggleKey"), Key("general", "togglekey")));
-            Refusal(Key("", "ToggleKey"));
+            Assert.StartsWith("[general] togglekey is listed twice, or once in a section and once without one",
+                Refusal(Key("General", "ToggleKey"), Key("general", "togglekey")));
+            Assert.StartsWith("togglekey is listed twice, or once in a section and once without one",
+                Refusal(Key("General", "ToggleKey"), Key("", "togglekey")));
             Refusal(Key("General", ""));
             Refusal(Key(" General", "ToggleKey"));
             Refusal(Key("General", "ToggleKey "));
@@ -73,22 +86,41 @@ namespace CameraUnlock.Core.Tests.Config
             Refusal(Key("General", "ToggleKey", "1", new[] { "\u007f" }));
             Refusal(Key("General", "ToggleKey", "1", null, new[] { new ChordSwitch("Hotkeys", "Chord=", "1", "0") }));
             Refusal(Key("General", "ToggleKey", "1", null, new[] { new ChordSwitch("Hotkeys", "Chord", "1", "\n") }));
-            Assert.Throws<ArgumentNullException>(() => IniMutations.Generate(Base, new MutationKey[] { null! }));
-            Assert.Throws<ArgumentNullException>(() => IniMutations.Generate(null!, new[] { Key("General", "ToggleKey") }));
+            Assert.Throws<ArgumentNullException>(() => IniMutations.Generate(Base, new LegacyKey[0], new MutationKey[] { null! }));
+            Assert.Throws<ArgumentNullException>(() => Generate(null!, Key("General", "ToggleKey")));
+            Assert.Throws<ArgumentNullException>(() => IniMutations.Generate(Base, null!, new[] { Key("General", "ToggleKey") }));
+            Assert.Throws<ArgumentNullException>(() =>
+                IniMutations.Generate(Base, new LegacyKey[] { null! }, new[] { Key("General", "ToggleKey") }));
+        }
+
+        [Fact]
+        public void TakesTheImportsKeysAndRefusesAMismatch()
+        {
+            MutationKey toggle = Key("General", "ToggleKey");
+            Assert.StartsWith("[Position] LimitY is not among the keys the import reads",
+                Refusal(new[] { new LegacyKey("General", "ToggleKey") }, toggle, Key("Position", "LimitY")));
+            Assert.StartsWith("Verbose is read by the import and has no key descriptor",
+                Refusal(new[] { new LegacyKey("General", "ToggleKey"), new LegacyKey("", "Verbose") }, toggle));
+            Assert.StartsWith("ToggleKey is not among the keys the import reads",
+                Refusal(new[] { new LegacyKey("General", "ToggleKey") }, Key("", "ToggleKey")));
+            Assert.StartsWith("[general] TOGGLEKEY is read twice",
+                Refusal(new[] { new LegacyKey("General", "ToggleKey"), new LegacyKey("general", "TOGGLEKEY") }, toggle));
+            Assert.NotEmpty(IniMutations.Generate(Base, new[] { new LegacyKey("GENERAL", "togglekey") }, new[] { toggle }));
+            Assert.NotEmpty(Generate(Base, Key("", "ToggleKey")));
         }
 
         [Fact]
         public void RefusesAFirstKeyTooLongForThe199CharacterLine()
         {
             byte[] input = Encoding.ASCII.GetBytes("[General]\nToggleKey=" + new string('x', 190) + "\n");
-            var error = Assert.Throws<ArgumentException>(() => IniMutations.Generate(input, new[] { Key("General", "ToggleKey") }));
+            var error = Assert.Throws<ArgumentException>(() => Generate(input, Key("General", "ToggleKey")));
             Assert.StartsWith("[General] ToggleKey=" + new string('x', 190) + " is longer than 199 characters", error.Message);
         }
 
         private static byte[] Utf16Of(byte[] comment)
         {
             byte[] input = Encoding.ASCII.GetBytes("; ").Concat(comment).Concat(Encoding.ASCII.GetBytes("\n[Main]\nK=1\n")).ToArray();
-            return IniMutations.Generate(input, new[] { Key("Main", "K", "2") }).Single(m => m.Name == "file: UTF-16 LE with a mark").Bytes;
+            return Generate(input, Key("Main", "K", "2")).Single(m => m.Name == "file: UTF-16 LE with a mark").Bytes;
         }
 
         private static byte[] Utf16Expected(params int[] commentUnits)
@@ -124,12 +156,23 @@ namespace CameraUnlock.Core.Tests.Config
         [Fact]
         public void AnEmptyBaseGainsTheKeyInANewSection()
         {
-            List<IniMutation> outputs = IniMutations.Generate(new byte[0], new[] { Key("General", "Enabled", "false") });
+            List<IniMutation> outputs = Generate(new byte[0], Key("General", "Enabled", "false"));
             Assert.Equal(62, outputs.Count);
             Assert.Equal("[General] Enabled: removed", outputs[0].Name);
             Assert.Equal("[General]\r\n", Encoding.ASCII.GetString(outputs[0].Bytes));
             Assert.Equal("file: cp1252 byte in a value", outputs[outputs.Count - 1].Name);
             Assert.Equal(Encoding.ASCII.GetBytes("[General]\r\nEnabled=false").Concat(new byte[] { 0xE9, 0x0D, 0x0A }),
+                outputs[outputs.Count - 1].Bytes);
+        }
+
+        [Fact]
+        public void AnEmptyBaseGainsASectionLessKeyAndNoHeader()
+        {
+            List<IniMutation> outputs = Generate(new byte[0], Key("", "Enabled", "false"));
+            Assert.Equal(55, outputs.Count);
+            Assert.Equal("Enabled: removed", outputs[0].Name);
+            Assert.Empty(outputs[0].Bytes);
+            Assert.Equal(Encoding.ASCII.GetBytes("Enabled=false").Concat(new byte[] { 0xE9, 0x0D, 0x0A }),
                 outputs[outputs.Count - 1].Bytes);
         }
     }

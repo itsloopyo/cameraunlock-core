@@ -7,31 +7,25 @@ namespace CameraUnlock.Core.Config
     public enum DropRule
     {
         /// <summary>
-        /// N1: a hotkey code outside 0x01-0xFE imports as unbound. Only native imports meet it,
-        /// since no C# import reads virtual-key codes.
-        /// </summary>
-        KeyCodeOutOfRange = 1,
-
-        /// <summary>
         /// N2: a non-finite float or double imports as the row's default
         /// (<see cref="LegacyNormalisations"/>).
         /// </summary>
-        NonFiniteNumber = 2,
+        NonFiniteNumber = 1,
 
         /// <summary>
         /// A sensitivity, deadzone, response curve or axis inversion the player set away from the
         /// shipped default. The tracker shapes the pose; the mod no longer does. A shipped default
         /// that is not identity moves into the mod's axis conversion instead and is not dropped.
         /// </summary>
-        PoseShaping = 3,
+        PoseShaping = 2,
 
         /// <summary>A reticle setting: mods no longer draw or toggle a reticle.</summary>
-        Reticle = 4,
+        Reticle = 3,
 
         /// <summary>
         /// A feature that shipped disabled pending verification now follows the mod's default.
         /// The map records one only where the legacy value differs from that default.
         /// </summary>
-        FollowsDefault = 5,
+        FollowsDefault = 4,
     }
 }

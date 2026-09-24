@@ -15,6 +15,8 @@ namespace CameraUnlock.Core.Config.Testing
     /// <summary>A legacy switch or letter row that folds a Ctrl+Shift binding into a hotkey's list.</summary>
     internal sealed class ChordSwitch
     {
+        /// <param name="section">The section, or "" for a reader that ignores sections, as in
+        /// <see cref="MutationKey"/>.</param>
         /// <param name="on">The value that turns it on, as the legacy reader reads it.</param>
         /// <param name="off">The value that turns it off.</param>
         public ChordSwitch(string section, string key, string on, string off)
@@ -38,6 +40,9 @@ namespace CameraUnlock.Core.Config.Testing
     /// <summary>One key the frozen legacy reader reads.</summary>
     internal sealed class MutationKey
     {
+        /// <param name="section">The section, or "" for a reader that ignores sections, as an empty
+        /// <see cref="LegacyKey"/> section means: the key's line is then its first key line anywhere
+        /// in the file.</param>
         /// <param name="alternate">A valid value other than the shipped one.</param>
         /// <param name="outOfRange">One value outside each range the legacy reader refuses or clamps.</param>
         /// <param name="isHotkey">Whether the key holds a hotkey.</param>
@@ -123,21 +128,28 @@ namespace CameraUnlock.Core.Config.Testing
         /// names that never repeat. data/fixtures/canonical-ini/README.md defines each mutation byte
         /// for byte.
         /// </summary>
+        /// <param name="baseBytes">The legacy file.</param>
+        /// <param name="reads">The import's <see cref="LegacyImport{TConfig}.Keys"/>.</param>
+        /// <param name="keys">A descriptor for each key in <paramref name="reads"/>, in the order the
+        /// outputs follow.</param>
         /// <remarks>
         /// Lines end at CRLF, LF or a lone CR, and a UTF-8 mark at the start is set aside and put
         /// back. A key missing from the base is added first, set to its alternate value, at the end
-        /// of its section or in a new section at the end, and every mutation starts from that file.
+        /// of its section or in a new section at the end (a section-less key after the last line
+        /// above the first header), and every mutation starts from that file.
         /// </remarks>
-        /// <exception cref="ArgumentNullException">An argument or a key is null.</exception>
-        /// <exception cref="ArgumentException">No keys, a key listed twice, a name or value outside
-        /// printable ASCII, a section or key with a space at either end, a section holding ']', a key
-        /// holding '=' or starting with ';', '#' or '[', or a first key whose line cannot be padded to
-        /// 199 characters.</exception>
-        public static List<IniMutation> Generate(byte[] baseBytes, IList<MutationKey> keys)
+        /// <exception cref="ArgumentNullException">An argument, a read or a key is null.</exception>
+        /// <exception cref="ArgumentException">No keys, <paramref name="reads"/> and
+        /// <paramref name="keys"/> naming different keys, a key read or listed twice, a section-less
+        /// key beside another key of its name, a name or value outside printable ASCII, a section or
+        /// key with a space at either end, a section holding ']', a key holding '=' or starting with
+        /// ';', '#' or '[', or a first key whose line cannot be padded to 199 characters.</exception>
+        public static List<IniMutation> Generate(byte[] baseBytes, IList<LegacyKey> reads, IList<MutationKey> keys)
         {
             if (baseBytes == null) throw new ArgumentNullException("baseBytes");
+            if (reads == null) throw new ArgumentNullException("reads");
             if (keys == null) throw new ArgumentNullException("keys");
-            CheckKeys(keys);
+            CheckKeys(reads, keys);
 
             Doc full = new Doc(baseBytes);
             foreach (MutationKey k in keys)
@@ -180,8 +192,9 @@ namespace CameraUnlock.Core.Config.Testing
                 }
                 emit(n + "key case swapped", d.Bytes(true));
 
-                d = full.Clone();
+                if (k.Section.Length != 0)
                 {
+                    d = full.Clone();
                     int header = i;
                     while (!IsHeader(d.Lines[header].Content)) header--;
                     byte[] content = d.Lines[header].Content;
@@ -189,10 +202,18 @@ namespace CameraUnlock.Core.Config.Testing
                     int close = IndexOf(content, (byte)']', open);
                     d.Lines[header].Content = Concat(Slice(content, 0, open + 1),
                         SwapCase(Slice(content, open + 1, close - open - 1)), Slice(content, close, content.Length - close));
+                    emit(n + "section case swapped", d.Bytes(true));
                 }
-                emit(n + "section case swapped", d.Bytes(true));
 
                 d = full.Clone();
+                if (k.Section.Length == 0)
+                {
+                    byte[] moved = d.Lines[i].Content;
+                    d.Lines.RemoveAt(i);
+                    d.Insert(d.Lines.Count, Ascii("[Elsewhere]"));
+                    d.Insert(d.Lines.Count, moved);
+                }
+                else
                 {
                     byte[] moved = d.Lines[i].Content;
                     d.Lines.RemoveAt(i);
@@ -220,13 +241,15 @@ namespace CameraUnlock.Core.Config.Testing
                 }
                 emit(n + "moved to another section", d.Bytes(true));
 
-                d = full.Clone();
+                int firstHeader = full.FirstAnyHeader();
+                if (firstHeader >= 0 && firstHeader < i)
                 {
+                    d = full.Clone();
                     byte[] moved = d.Lines[i].Content;
                     d.Lines.RemoveAt(i);
-                    d.Insert(d.FirstAnyHeader(), moved);
+                    d.Insert(firstHeader, moved);
+                    emit(n + "before the first header", d.Bytes(true));
                 }
-                emit(n + "before the first header", d.Bytes(true));
 
                 foreach (string tail in new[] { "; x", ";x", " # x" })
                 {
@@ -327,7 +350,7 @@ namespace CameraUnlock.Core.Config.Testing
                     if (found.Length == 0) continue;
                     foreach (MutationKey k in keys)
                     {
-                        if (SameName(k.Section, s) && SameName(k.Key, found))
+                        if ((k.Section.Length == 0 || SameName(k.Section, s)) && SameName(k.Key, found))
                         {
                             line.Content = Concat(Doc.Prefix(line.Content), Ascii(k.Alternate));
                             break;
@@ -340,9 +363,11 @@ namespace CameraUnlock.Core.Config.Testing
 
             const string f = "file: ";
             MutationKey first = keys[0];
+            int fileHeader = full.FirstAnyHeader();
+            if (fileHeader >= 0)
             {
                 Doc d = full.Clone();
-                d.Lines.RemoveRange(0, full.FirstAnyHeader());
+                d.Lines.RemoveRange(0, fileHeader);
                 emit(f + "UTF-8 mark before a header", Concat(Mark, d.Bytes(false)));
             }
             emit(f + "UTF-8 mark before a comment", Concat(Mark, Ascii("; comment"), full.Dominant, full.Bytes(false)));
@@ -549,7 +574,8 @@ namespace CameraUnlock.Core.Config.Testing
                         continue;
                     }
                     string found = KeyOf(Lines[i].Content);
-                    if (found.Length != 0 && current.Length != 0 && SameName(current, section) && SameName(found, key)) return i;
+                    bool inSection = section.Length == 0 || (current.Length != 0 && SameName(current, section));
+                    if (found.Length != 0 && inSection && SameName(found, key)) return i;
                 }
                 return -1;
             }
@@ -576,7 +602,7 @@ namespace CameraUnlock.Core.Config.Testing
                 {
                     if (IsHeader(Lines[i].Content)) return i;
                 }
-                throw new InvalidOperationException("the file has no header");
+                return -1;
             }
 
             public int BlockEnd(int header)
@@ -597,6 +623,20 @@ namespace CameraUnlock.Core.Config.Testing
                 return last + 1;
             }
 
+            // Just after the last non-blank line above the first header, or in the file when it
+            // has no header; the start of the file when there is no such line.
+            public int TopInsertPoint()
+            {
+                int header = FirstAnyHeader();
+                int end = header < 0 ? Lines.Count : header;
+                int point = 0;
+                for (int j = 0; j < end; j++)
+                {
+                    if (Trim(Lines[j].Content).Length != 0) point = j + 1;
+                }
+                return point;
+            }
+
             public void Insert(int index, byte[] content)
             {
                 if (index == Lines.Count && Lines.Count > 0 && Lines[Lines.Count - 1].Ending.Length == 0)
@@ -613,7 +653,11 @@ namespace CameraUnlock.Core.Config.Testing
             public void AppendToSection(byte[] section, byte[] content)
             {
                 string name = Encoding.ASCII.GetString(section);
-                if (FirstHeader(name) < 0)
+                if (name.Length == 0)
+                {
+                    Insert(TopInsertPoint(), content);
+                }
+                else if (FirstHeader(name) < 0)
                 {
                     Insert(Lines.Count, Concat(Ascii("["), section, Ascii("]")));
                     Insert(Lines.Count, content);
@@ -664,10 +708,10 @@ namespace CameraUnlock.Core.Config.Testing
         {
             CheckText(section, what + " section");
             CheckText(key, what + " key");
-            if (section.Length == 0 || key.Length == 0) throw new ArgumentException(what + " needs a section and a key", "keys");
+            if (key.Length == 0) throw new ArgumentException(what + " needs a key", "keys");
             if (section.Trim(' ') != section || key.Trim(' ') != key)
             {
-                throw new ArgumentException(what + " [" + section + "] " + key + " starts or ends with a space", "keys");
+                throw new ArgumentException(what + " " + Label(section, key) + " starts or ends with a space", "keys");
             }
             if (section.IndexOf(']') >= 0) throw new ArgumentException(what + " section " + section + " holds ']'", "keys");
             if (key.IndexOf('=') >= 0 || key[0] == ';' || key[0] == '#' || key[0] == '[')
@@ -676,16 +720,33 @@ namespace CameraUnlock.Core.Config.Testing
             }
         }
 
-        private static void CheckKeys(IList<MutationKey> keys)
+        // A section-less key's line is the first with its name in any section, so it clashes with
+        // every key of that name.
+        private static bool Clash(MutationKey a, MutationKey b)
+        {
+            return SameName(a.Key, b.Key) && (a.Section.Length == 0 || b.Section.Length == 0 || SameName(a.Section, b.Section));
+        }
+
+        private static bool Names(LegacyKey read, MutationKey k)
+        {
+            return SameName(read.Section, k.Section) && SameName(read.Key, k.Key);
+        }
+
+        private static void CheckKeys(IList<LegacyKey> reads, IList<MutationKey> keys)
         {
             if (keys.Count == 0) throw new ArgumentException("the corpus needs at least one key", "keys");
+            foreach (LegacyKey read in reads)
+            {
+                if (read == null) throw new ArgumentNullException("reads", "a read is null");
+            }
             for (int n = 0; n < keys.Count; n++)
             {
                 MutationKey k = keys[n];
                 if (k == null) throw new ArgumentNullException("keys", "a key is null");
+                string label = Label(k.Section, k.Key);
                 CheckName(k.Section, k.Key, "a key's");
-                CheckText(k.Alternate, Label(k.Section, k.Key) + "'s alternate value");
-                foreach (string value in k.OutOfRange) CheckText(value, Label(k.Section, k.Key) + "'s out-of-range value");
+                CheckText(k.Alternate, label + "'s alternate value");
+                foreach (string value in k.OutOfRange) CheckText(value, label + "'s out-of-range value");
                 foreach (ChordSwitch chord in k.Chords)
                 {
                     CheckName(chord.Section, chord.Key, "a chord's");
@@ -694,17 +755,35 @@ namespace CameraUnlock.Core.Config.Testing
                 }
                 for (int m = 0; m < n; m++)
                 {
-                    if (SameName(keys[m].Section, k.Section) && SameName(keys[m].Key, k.Key))
+                    if (Clash(keys[m], k))
                     {
-                        throw new ArgumentException(Label(k.Section, k.Key) + " is listed twice", "keys");
+                        throw new ArgumentException(label + " is listed twice, or once in a section and once without one", "keys");
                     }
                 }
+                bool read = false;
+                foreach (LegacyKey r in reads) read |= Names(r, k);
+                if (!read) throw new ArgumentException(label + " is not among the keys the import reads", "keys");
+            }
+            for (int n = 0; n < reads.Count; n++)
+            {
+                LegacyKey r = reads[n];
+                string label = Label(r.Section, r.Key);
+                for (int m = 0; m < n; m++)
+                {
+                    if (SameName(reads[m].Section, r.Section) && SameName(reads[m].Key, r.Key))
+                    {
+                        throw new ArgumentException(label + " is read twice", "reads");
+                    }
+                }
+                bool described = false;
+                foreach (MutationKey k in keys) described |= Names(r, k);
+                if (!described) throw new ArgumentException(label + " is read by the import and has no key descriptor", "reads");
             }
         }
 
         private static string Label(string section, string key)
         {
-            return "[" + section + "] " + key;
+            return section.Length == 0 ? key : "[" + section + "] " + key;
         }
 
         private static bool IsBlank(byte b)

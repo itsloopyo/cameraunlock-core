@@ -21,6 +21,7 @@ namespace {
 
 namespace fs = std::filesystem;
 using namespace cameraunlock::config::testing;
+using cameraunlock::config::LegacyKey;
 
 int g_failures = 0;
 
@@ -166,11 +167,21 @@ std::vector<MutationKey> ReadKeys(const fs::path& path) {
     return keys;
 }
 
+std::vector<LegacyKey> Reads(const std::vector<MutationKey>& keys) {
+    std::vector<LegacyKey> reads;
+    for (const MutationKey& k : keys) reads.push_back({k.section, k.key});
+    return reads;
+}
+
+std::vector<IniMutation> Generate(std::string_view base, const std::vector<MutationKey>& keys) {
+    return GenerateIniMutations(base, Reads(keys), keys);
+}
+
 void RunCase(const fs::path& dir) {
     const std::string name = dir.filename().string();
     const std::string input = ReadBytes(dir / "input.ini");
     const std::vector<MutationKey> keys = ReadKeys(dir / "keys.tsv");
-    const std::vector<IniMutation> outputs = GenerateIniMutations(input, keys);
+    const std::vector<IniMutation> outputs = Generate(input, keys);
     const std::vector<std::string> expected = Rows(dir / "expected.tsv");
 
     std::vector<std::string> got;
@@ -196,7 +207,7 @@ void RunCase(const fs::path& dir) {
     for (const IniMutation& m : outputs) names.insert(m.name);
     Check(names.size() == outputs.size(), name + ": no name repeats");
 
-    const std::vector<IniMutation> again = GenerateIniMutations(input, keys);
+    const std::vector<IniMutation> again = Generate(input, keys);
     bool equal = again.size() == outputs.size();
     for (std::size_t i = 0; equal && i < again.size(); ++i) {
         equal = again[i].name == outputs[i].name && again[i].bytes == outputs[i].bytes;
@@ -214,14 +225,17 @@ void TestSha256() {
 void TestArguments() {
     const std::string base = "[General]\nToggleKey=0x23\n";
     const MutationKey good{"General", "ToggleKey", "0x24", {}, true, {}};
-    Check(Thrown([&] { GenerateIniMutations(base, {}); }) == "the corpus needs at least one key", "no keys throws");
-    Check(Thrown([&] { GenerateIniMutations(base, {good, MutationKey{"general", "togglekey", "0x25", {}, true, {}}}); }) ==
-              "[general] togglekey is listed twice",
+    Check(Thrown([&] { Generate(base, {}); }) == "the corpus needs at least one key", "no keys throws");
+    Check(Thrown([&] { Generate(base, {good, MutationKey{"general", "togglekey", "0x25", {}, true, {}}}); }) ==
+              "[general] togglekey is listed twice, or once in a section and once without one",
           "a key listed twice, in other case, throws");
+    Check(Thrown([&] { Generate(base, {good, MutationKey{"", "togglekey", "0x25", {}, true, {}}}); }) ==
+              "togglekey is listed twice, or once in a section and once without one",
+          "a section-less key beside the same key in a section throws");
     const auto fails = [&](MutationKey key) {
-        return Thrown([&] { GenerateIniMutations(base, {key}); }) != "(nothing thrown)";
+        return Thrown([&] { Generate(base, {key}); }) != "(nothing thrown)";
     };
-    Check(fails({"", "ToggleKey", "1", {}, false, {}}), "an empty section throws");
+    Check(!fails({"", "ToggleKey", "1", {}, false, {}}), "an empty section is a section-less key");
     Check(fails({"General", "", "1", {}, false, {}}), "an empty key throws");
     Check(fails({" General", "ToggleKey", "1", {}, false, {}}), "a section starting with a space throws");
     Check(fails({"General", "ToggleKey ", "1", {}, false, {}}), "a key ending with a space throws");
@@ -235,24 +249,45 @@ void TestArguments() {
     Check(fails({"General", "ToggleKey", "1", {"\x7F"}, false, {}}), "DEL in an out-of-range value throws");
     Check(fails({"General", "ToggleKey", "1", {}, true, {{"Hotkeys", "Chord=", "1", "0"}}}), "a bad chord key throws");
     Check(fails({"General", "ToggleKey", "1", {}, true, {{"Hotkeys", "Chord", "1", "\n"}}}), "a bad chord value throws");
-    Check(Thrown([&] { GenerateIniMutations("[General]\nToggleKey=" + std::string(190, 'x') + "\n", {good}); }) ==
+    Check(Thrown([&] { Generate("[General]\nToggleKey=" + std::string(190, 'x') + "\n", {good}); }) ==
               "[General] ToggleKey=" + std::string(190, 'x') + " is longer than 199 characters",
           "a first key too long for the 199-character line throws");
-    Check(Thrown([&] { GenerateIniMutations(base, {good}); }) == "(nothing thrown)", "a valid key is accepted");
+    Check(Thrown([&] { Generate(base, {good}); }) == "(nothing thrown)", "a valid key is accepted");
+
+    const MutationKey limit{"Position", "LimitY", "0.1", {}, false, {}};
+    Check(Thrown([&] { GenerateIniMutations(base, {{"General", "ToggleKey"}}, {good, limit}); }) ==
+              "[Position] LimitY is not among the keys the import reads",
+          "a descriptor for a key the import does not read throws");
+    Check(Thrown([&] { GenerateIniMutations(base, {{"General", "ToggleKey"}, {"", "Verbose"}}, {good}); }) ==
+              "Verbose is read by the import and has no key descriptor",
+          "a key the import reads with no descriptor throws");
+    Check(Thrown([&] {
+              GenerateIniMutations(base, {{"General", "ToggleKey"}}, {MutationKey{"", "ToggleKey", "0x24", {}, true, {}}});
+          }) == "ToggleKey is not among the keys the import reads",
+          "a section-less descriptor does not stand for a key the import reads in one section");
+    Check(Thrown([&] { GenerateIniMutations(base, {{"General", "ToggleKey"}, {"general", "TOGGLEKEY"}}, {good}); }) ==
+              "[general] TOGGLEKEY is read twice",
+          "a key read twice throws");
+    Check(Thrown([&] { GenerateIniMutations(base, {{"GENERAL", "togglekey"}}, {good}); }) == "(nothing thrown)",
+          "the import's keys match the descriptors ASCII case-insensitively");
 }
 
 void TestEmptyBase() {
-    const std::vector<IniMutation> out = GenerateIniMutations("", {MutationKey{"General", "Enabled", "false", {}, false, {}}});
+    const std::vector<IniMutation> out = Generate("", {MutationKey{"General", "Enabled", "false", {}, false, {}}});
     Check(out.size() == 62 && out[0].name == "[General] Enabled: removed" && out[0].bytes == "[General]\r\n",
           "an empty base gains the key in a new section, with CRLF endings");
     Check(out.back().name == "file: cp1252 byte in a value" && out.back().bytes == "[General]\r\nEnabled=false\xE9\r\n",
           "the last output is the cp1252 byte in a value");
+
+    const std::vector<IniMutation> top = Generate("", {MutationKey{"", "Enabled", "false", {}, false, {}}});
+    Check(top.size() == 55 && top[0].name == "Enabled: removed" && top[0].bytes.empty() &&
+              top.back().bytes == "Enabled=false\xE9\r\n",
+          "an empty base gains a section-less key and no header, so no header mutation is made");
 }
 
 // The UTF-16 output of `; <comment>` above a one-key section.
 std::string Utf16Of(const std::string& comment) {
-    const std::vector<IniMutation> out =
-        GenerateIniMutations("; " + comment + "\n[Main]\nK=1\n", {MutationKey{"Main", "K", "2", {}, false, {}}});
+    const std::vector<IniMutation> out = Generate("; " + comment + "\n[Main]\nK=1\n", {MutationKey{"Main", "K", "2", {}, false, {}}});
     for (const IniMutation& m : out) {
         if (m.name == "file: UTF-16 LE with a mark") return m.bytes;
     }

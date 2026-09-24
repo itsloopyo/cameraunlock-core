@@ -35,33 +35,31 @@ enum class ImportStatus {
 /// The approved rule by which a map left a legacy value out of the migrated file. The numbers
 /// match CameraUnlock.Core.Config.DropRule.
 enum class DropRule {
-    /// N1: a hotkey code outside 0x01-0xFE imports as unbound (LegacyVirtualKeyToBindings).
-    KeyCodeOutOfRange = 1,
     /// N2: a non-finite float or double imports as the row's default (LegacyFiniteOrDefault).
-    NonFiniteNumber = 2,
+    NonFiniteNumber = 1,
     /// A sensitivity, deadzone, response curve or axis inversion the player set away from the
     /// shipped default. The tracker shapes the pose; the mod no longer does. A shipped default
     /// that is not identity moves into the mod's axis conversion instead and is not dropped.
-    PoseShaping = 3,
+    PoseShaping = 2,
     /// A reticle setting: mods no longer draw or toggle a reticle.
-    Reticle = 4,
+    Reticle = 3,
     /// A feature that shipped disabled pending verification now follows the mod's default. The
     /// map records one only where the legacy value differs from that default.
-    FollowsDefault = 5,
+    FollowsDefault = 4,
 };
 
 /// One legacy value the map did not carry, for the migration log.
 struct DroppedValue {
-    DropRule rule = DropRule::KeyCodeOutOfRange;
+    DropRule rule = DropRule::NonFiniteNumber;
     std::string section;
     std::string key;
-    /// The value as the import read it, e.g. "0x230" or "nan".
+    /// The value as the import read it, e.g. "nan".
     std::string value;
 };
 
 /// The line the migration logs for a dropped value, e.g.
-/// `not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the
-/// action is unbound`. Throws std::invalid_argument for a rule outside DropRule.
+/// `not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the default is
+/// used`. Throws std::invalid_argument for a rule outside DropRule.
 std::string DescribeDroppedValue(const DroppedValue& dropped);
 
 /// What an import returns. Build it with the factories, which hold each status to its fields.
@@ -121,25 +119,9 @@ struct LegacyImport {
     std::function<ImportResult(const LegacyInput& input, Config& out)> run;
     /// Every key the frozen reader reads, reads outside the reader included. The driver logs
     /// each other key line of the legacy file as not carried, and the differential corpus
-    /// mutates each one.
+    /// (testing::GenerateIniMutations) takes the same list and mutates each one.
     std::vector<LegacyKey> keys;
 };
-
-/// Normalisation N1: a legacy hotkey code as a hotkey value. A code from 0x01 to 0xFE gives
-/// its key name, or `0x` and hex for a code the key table does not name; any other code gives
-/// "", unbound. `pixi run probe-n1` shows GetAsyncKeyState reporting none of them for a key
-/// held in range, so such a hotkey never fired on one. The exception is 0xFF: kbd.h gives it to
-/// the scan codes a layout leaves unmapped (VK__none_), and GetAsyncKeyState(0xFF) reports down
-/// while that code is held, so a legacy 0xFF hotkey could fire and N1 unbinds it. A map folding a legacy chord switch into the same action formats the
-/// whole list instead, with input::FormatKeyBindings: the code's binding when it is in range,
-/// then {Ctrl | Shift, the chord's letter}.
-std::string LegacyVirtualKeyToBindings(long long code);
-
-/// LegacyVirtualKeyToBindings, recording the drop in `dropped` under `section` and `key` when
-/// the code is outside 0x01-0xFE. Code 0 is recorded as nothing: it is how a legacy file says
-/// unbound, and it stays unbound.
-std::string LegacyVirtualKeyToBindings(long long code, const std::string& section, const std::string& key,
-                                       std::vector<DroppedValue>& dropped);
 
 /// Normalisation N2: a legacy float or double that is not finite imports as `row_default`,
 /// the runtime row's default, and the drop is recorded in `dropped` under `section` and

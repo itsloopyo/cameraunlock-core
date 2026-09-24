@@ -5,8 +5,7 @@ namespace CameraUnlock.Core.Config
 {
     /// <summary>
     /// The owner-approved normalisations a legacy import's map applies where the canonical
-    /// codecs cannot hold a legacy value. N1, the hotkey code rule, is native only: C# imports
-    /// read Unity key names, not virtual-key codes.
+    /// codecs cannot hold a legacy value.
     /// </summary>
     public static class LegacyNormalisations
     {

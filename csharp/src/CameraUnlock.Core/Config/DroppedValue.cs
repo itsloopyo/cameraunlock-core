@@ -42,8 +42,6 @@ namespace CameraUnlock.Core.Config
         {
             switch (rule)
             {
-                case DropRule.KeyCodeOutOfRange:
-                    return "it is not a key code from 0x01 to 0xFE, so the action is unbound";
                 case DropRule.NonFiniteNumber:
                     return "it is not a finite number, so the default is used";
                 case DropRule.PoseShaping:

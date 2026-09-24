@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using CameraUnlock.Core.Config;
 using CameraUnlock.Core.Config.Testing;
 
 namespace CameraUnlock.Core.Tests.Config
@@ -39,7 +40,8 @@ namespace CameraUnlock.Core.Tests.Config
             string dir = Path.Combine(Path.Combine(root, "mutations"), name);
             byte[] input = File.ReadAllBytes(Path.Combine(dir, "input.ini"));
             List<MutationKey> keys = ReadKeys(Path.Combine(dir, "keys.tsv"));
-            List<IniMutation> outputs = IniMutations.Generate(input, keys);
+            List<LegacyKey> reads = Reads(keys);
+            List<IniMutation> outputs = IniMutations.Generate(input, reads, keys);
 
             var actual = new List<string>();
             foreach (IniMutation m in outputs) actual.Add(m.Name + "\t" + Sha256(m.Bytes));
@@ -66,7 +68,7 @@ namespace CameraUnlock.Core.Tests.Config
                 if (!names.Add(m.Name)) throw new InvalidOperationException("the name '" + m.Name + "' repeats");
             }
 
-            List<IniMutation> again = IniMutations.Generate(input, keys);
+            List<IniMutation> again = IniMutations.Generate(input, reads, keys);
             for (int i = 0; i < outputs.Count; i++)
             {
                 if (again[i].Name != outputs[i].Name || !Same(again[i].Bytes, outputs[i].Bytes))
@@ -74,6 +76,14 @@ namespace CameraUnlock.Core.Tests.Config
                     throw new InvalidOperationException("a second run differs at output " + i);
                 }
             }
+        }
+
+        /// <summary>The import's list of keys for descriptors: the same sections and keys.</summary>
+        public static List<LegacyKey> Reads(IList<MutationKey> keys)
+        {
+            var reads = new List<LegacyKey>();
+            foreach (MutationKey k in keys) reads.Add(new LegacyKey(k.Section, k.Key));
+            return reads;
         }
 
         public static string Sha256(byte[] data)
