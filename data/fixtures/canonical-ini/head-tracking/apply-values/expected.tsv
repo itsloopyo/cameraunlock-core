@@ -1,0 +1,31 @@
+# Every concept away from its default except PositionEnabled, which stays true because
+# RotationEnabled=false and both false is not a tracking mode; apply-position-off moves it.
+# The smoothing pair also reaches the position settings' copy. An empty YawModeKey is no binding.
+field	UdpPort	5252
+field	EnableOnStartup	false
+field	LocalSmoothing	0.25
+field	RemoteSmoothing	0.5
+field	WorldSpaceYaw	false
+field	AimDecoupling	false
+field	RotationEnabled	false
+field	DataFreshnessMs	750
+field	PositionEnabled	true
+field	PositionAllowed	false
+field	PositionLimitX	0.35
+field	PositionLimitY	0.25
+field	PositionLimitYDown	0.05
+field	PositionLimitZ	0.5
+field	PositionLimitZBack	0.15
+field	CollisionEnabled	true
+field	CollisionMargin	10.0
+field	CollisionChannel	2
+field	CollisionReleaseSmoothing	0.5
+field	TrackerPivotForward	0.08
+field	TrackerPivotUp	0.12
+field	ToggleKey	Home
+field	CycleTrackingModeKey	Insert, Ctrl+Alt+F9
+field	YawModeKey	
+field	LightFollowsHead	false
+field	LightMultiplier	1.0
+field	PositionLocalSmoothing	0.25
+field	PositionRemoteSmoothing	0.5

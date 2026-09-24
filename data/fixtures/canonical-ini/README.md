@@ -1,12 +1,14 @@
 # Canonical INI fixtures
 
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
-editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs and `table/` for
-config tables. Core's C++ suite runs them unchanged (`cpp/tests/canonical_ini_tests.cpp`,
-`cpp/tests/ini_editor_tests.cpp`, `cpp/tests/key_bindings_tests.cpp`,
-`cpp/tests/value_codecs_tests.cpp` and `cpp/tests/config_table_tests.cpp`), and so does its C#
-suite (`CanonicalIniFixtures`, `IniEditorFixtures`, `KeyBindingFixtures`, `ValueCodecFixtures`
-and `ConfigTableFixtures`, under xunit on net8.0 and in
+editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs, `table/` for
+config tables and `head-tracking/` for core's table over its own config types. Core's C++ suite
+runs them unchanged (`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp`,
+`cpp/tests/key_bindings_tests.cpp`, `cpp/tests/value_codecs_tests.cpp`,
+`cpp/tests/config_table_tests.cpp` and `cpp/tests/head_tracking_config_table_tests.cpp`), and so
+does its C# suite (`CanonicalIniFixtures`, `IniEditorFixtures`, `KeyBindingFixtures`,
+`ValueCodecFixtures`, `ConfigTableFixtures` and `HeadTrackingConfigTableFixtures`, under xunit on
+net8.0 and in
 `CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2). Lopari's Rust codec is to run the same files, so nothing
 here is specific to one language: a reader or editor in any language is held to every case. The expected files are written by hand from the rules, never produced by an
 implementation.
@@ -222,3 +224,25 @@ sentences in the byte escape. For every case a runner also renders the config th
 with, parses and applies that, and requires no diagnostic from the reader or the table, the
 same field values, and the same bytes when rendered again. Each runner also checks that a
 member of the config no row binds keeps its value through Apply.
+
+## head-tracking/
+
+Core's `HeadTrackingConfigTable` naming every canonical concept, over C++ `HeadTrackingConfig`
+and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Game`.
+
+- `all-concepts.ini`: the table's defaults instance rendered. It holds every canonical concept at
+  its default, the three hotkey lists at their `canonical_default`, so it pins each concept's
+  default rendering in both languages.
+- `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose
+  rows are `field`, a name and the value as the concept's codec writes it. The names are the 26
+  concepts in the schema's order, then `PositionLocalSmoothing` and `PositionRemoteSmoothing`,
+  the copy of the smoothing pair the position settings carry (C++ `position.local_smoothing`,
+  C# `Position.LocalSmoothing`). A runner reads each field straight off the config, not through
+  the table.
+
+A runner applies each `input.ini` twice, onto a new config and onto the config `apply-values`
+produces, and requires `expected.tsv` both times with no diagnostic from the reader or the table.
+Before applying, it sets fields no row binds (the recenter key, the position X sensitivity and
+the position Y inversion) and requires them unchanged afterwards. It also renders the result,
+reads that back and requires the same fields and bytes. `apply-empty` is the defaults, and across
+the three cases every field is off its default at least once.

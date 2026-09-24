@@ -44,6 +44,7 @@
 #include "cameraunlock/config/config_key_schema.g.h"
 #include "cameraunlock/config/config_table.h"
 #include "cameraunlock/config/head_tracking_config.h"
+#include "cameraunlock/config/head_tracking_config_table.h"
 #include "cameraunlock/config/hotkey_codec.h"
 #include "cameraunlock/config/ini_editor.h"
 #include "cameraunlock/config/ini_reader.h"
@@ -110,3 +111,15 @@
 #include "cameraunlock/tracking/tracking_mode.h"
 #include "cameraunlock/unreal/ue_math.h"
 #include "cameraunlock/unreal/ue_runtime.h"
+
+// A template is only compiled where it is instantiated, and nothing above instantiates one, so
+// core's table over its own config type is instantiated here to hold it to this warning level.
+template cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig>
+cameraunlock::config::HeadTrackingConfigTable<cameraunlock::HeadTrackingConfig>(
+    std::initializer_list<cameraunlock::config::schema::Concept>);
+template cameraunlock::config::ApplyReport cameraunlock::config::ApplyCanonical<cameraunlock::HeadTrackingConfig>(
+    const cameraunlock::config::CanonicalIni&, const cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig>&,
+    cameraunlock::HeadTrackingConfig&);
+template std::string cameraunlock::config::RenderCanonical<cameraunlock::HeadTrackingConfig>(
+    const cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig>&, const cameraunlock::HeadTrackingConfig&,
+    const cameraunlock::config::RenderHeader&);

@@ -9,6 +9,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - core's config table over its own config types, in C# and C++
+
+`HeadTrackingConfigTable` builds the config table for a game that keeps its settings in core's
+config type: C++ `HeadTrackingConfigTable({...})` in `cameraunlock/config/head_tracking_config_table.h`
+over `HeadTrackingConfig`, C# `HeadTrackingConfigTable.Create(...)` over `HeadTrackingConfigData`.
+Nothing in the fleet uses it yet; elite-dangerous and system-shock-2-25th-anniversary-remaster are
+to run on it.
+
+- **The game names the concepts it implements**, and core binds each; the game then appends its
+  local rows and modifiers (`Select(...).Writable()` and the rest). A list rather than every
+  concept, because a canonical file carries only what the game binds: a game with no carried light
+  has no `[Light]`. It also means a concept core adds later never enters an existing game's file,
+  and so never fails its render test, until the game names it. An empty list, a concept named
+  twice, or (C++) a value that is not a canonical concept throws `std::invalid_argument` /
+  `ArgumentException`; a null list or item throws `ArgumentNullException`.
+- **A derived config type** carries the game's own fields for its local rows:
+  `HeadTrackingConfigTable<ModConfig>({...})` where `ModConfig` derives from `HeadTrackingConfig`,
+  and `HeadTrackingConfigTable.Create<ModConfig>(...)` where it derives from
+  `HeadTrackingConfigData` and has a public parameterless constructor.
+- **Defaults**: the config type's own defaults, with `ToggleKey`, `CycleTrackingModeKey` and
+  `YawModeKey` at their schema `canonical_default`: `End, Ctrl+Shift+Y`, `PageUp, Ctrl+Shift+G`
+  and `PageDown, Ctrl+Shift+H`. The field initialisers the flat readers use are unchanged (`End`,
+  empty, `PageDown`).
+- **Bindings**: `LocalSmoothing` and `RemoteSmoothing` set the top-level value and the position
+  settings' copy (C# recomposes `Position` with `WithSmoothing`, as `ApplyValues` does).
+  `PositionLimitY` never sets `PositionLimitYDown`; the flat readers keep their mirror.
+  `CollisionMargin` and `CollisionReleaseSmoothing` are C++ `lean_clamp.skin` and
+  `lean_clamp.release_smoothing`. `LightFollowsHead` and `LightMultiplier` are `light` in C++; in
+  C# they, like the position limits, replace `Light` or `Position` with a copy holding the new
+  value, so a `HeadFollowLightSettings` another config shares is not changed.
+
+`data/fixtures/canonical-ini/head-tracking/all-concepts.ini` is the defaults with every canonical
+concept rendered, and both languages must produce it byte for byte; three apply cases hold every
+field each concept reaches.
+
 ### Added - config tables, applying a canonical file and rendering one, in C# and C++
 
 A config table lists the rows of one game's canonical config file and binds each to a field of

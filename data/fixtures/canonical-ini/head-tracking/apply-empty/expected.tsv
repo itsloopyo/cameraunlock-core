@@ -1,0 +1,29 @@
+# An empty file reads every row as its default, the hotkeys at their canonical lists.
+field	UdpPort	4242
+field	EnableOnStartup	true
+field	LocalSmoothing	0.0
+field	RemoteSmoothing	0.15
+field	WorldSpaceYaw	true
+field	AimDecoupling	true
+field	RotationEnabled	true
+field	DataFreshnessMs	500
+field	PositionEnabled	true
+field	PositionAllowed	true
+field	PositionLimitX	0.3
+field	PositionLimitY	0.2
+field	PositionLimitYDown	0.2
+field	PositionLimitZ	0.4
+field	PositionLimitZBack	0.1
+field	CollisionEnabled	false
+field	CollisionMargin	0.1
+field	CollisionChannel	0
+field	CollisionReleaseSmoothing	0.9
+field	TrackerPivotForward	0.0
+field	TrackerPivotUp	0.0
+field	ToggleKey	End, Ctrl+Shift+Y
+field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
+field	YawModeKey	PageDown, Ctrl+Shift+H
+field	LightFollowsHead	true
+field	LightMultiplier	1.5
+field	PositionLocalSmoothing	0.0
+field	PositionRemoteSmoothing	0.15

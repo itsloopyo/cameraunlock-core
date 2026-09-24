@@ -81,6 +81,14 @@ namespace CameraUnlock.Core.Tests
                 failures += Report(name, dir => ConfigTableFixtures.RunCase(fixtures, name));
             }
 
+            Console.WriteLine("Head-tracking config table fixtures");
+            failures += Report("all-concepts.ini", dir => HeadTrackingConfigTableFixtures.RunRender(fixtures));
+            foreach (string name in HeadTrackingConfigTableFixtures.Cases)
+            {
+                failures += Report(name, dir => HeadTrackingConfigTableFixtures.RunCase(fixtures, name));
+            }
+            failures += Report("the cases move every field", dir => HeadTrackingConfigTableFixtures.RunCoverage(fixtures));
+
             Console.WriteLine("Float and double sweep");
             failures += Report("floats read back from their render", dir => ValueCodecFixtures.SweepFloats(SweepCount));
             failures += Report("doubles read back from their render", dir => ValueCodecFixtures.SweepDoubles(SweepCount));
