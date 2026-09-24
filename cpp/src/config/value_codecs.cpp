@@ -6,6 +6,10 @@
 #include <system_error>
 #include <utility>
 
+#if defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE < 12
+#error "the float codecs need libstdc++ from GCC 12 or later: in GCC 11 std::from_chars reports every subnormal result as out of range, so a subnormal float would not read back"
+#endif
+
 namespace cameraunlock::config {
 
 namespace detail {
@@ -166,12 +170,14 @@ template <>
 struct FloatTraits<float> {
     using Bits = std::uint32_t;
     static constexpr int kMaxPrecision = 9;
+    static constexpr const char* kDenormMinText = "1e-45";
 };
 
 template <>
 struct FloatTraits<double> {
     using Bits = std::uint64_t;
     static constexpr int kMaxPrecision = 17;
+    static constexpr const char* kDenormMinText = "5e-324";
 };
 
 template <class F>
@@ -323,8 +329,8 @@ CodecParseResult<F> FloatingCodec<F>::Parse(std::string_view text) const {
                                             " to " + RenderFinite(std::numeric_limits<F>::max())
                                       : RangeExpectation();
         } else {
-            result.error = "expected 0.0 or a number no closer to zero than " +
-                           RenderFinite(std::numeric_limits<F>::denorm_min());
+            result.error =
+                std::string("expected 0.0 or a number no closer to zero than ") + FloatTraits<F>::kDenormMinText;
         }
         return result;
     }

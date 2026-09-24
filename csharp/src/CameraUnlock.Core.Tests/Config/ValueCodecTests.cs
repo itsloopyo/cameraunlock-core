@@ -180,8 +180,8 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         // Kept out of the shared fixtures because .NET Framework disagrees with C++ on them (it
-        // writes 1234.5678 and 3451485.3, and net35 reads 3e-324 as 0); this host runs .NET 8,
-        // which agrees.
+        // writes 1234.5678 and 3451485.3, reads the float text below as 1.0, and net35 reads
+        // 3e-324 as 0); this host runs .NET 8, which agrees.
         [Fact]
         public void ModernDotNetMatchesCppWhereNetFrameworkDoesNot()
         {
@@ -189,6 +189,8 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal("3451485.2", Encoding.ASCII.GetString(new FloatCodec().Render(3451485.25f)));
             Assert.True(new DoubleCodec().TryParse(B("3e-324"), out double denormal, out _));
             Assert.Equal(1L, BitConverter.DoubleToInt64Bits(denormal));
+            Assert.True(new FloatCodec().TryParse(B("1.00000005960464477539062500001"), out float aboveTie, out _));
+            Assert.Equal(0x3F800001, BitConverter.ToInt32(BitConverter.GetBytes(aboveTie), 0));
         }
 
         [Fact]

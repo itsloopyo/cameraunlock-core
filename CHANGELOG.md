@@ -49,8 +49,10 @@ C++ (`cameraunlock/config/value_codecs.h`, pure, no `<windows.h>`): `CodecParseR
 `Hex64ListCodec` and `StringListCodec` (`ListCodec<Item>`). Each has `Value`, `Parse`,
 `Render` and `Equal`; a range or token list that makes no sense, and a render that would not
 read back, throw `std::invalid_argument`. Floats go through `std::to_chars` and
-`std::from_chars`, so a consumer needs a standard library with floating-point `<charconv>`;
-verified with MSVC 19.50 and GCC 13.5.
+`std::from_chars`, so a consumer needs a standard library whose floating-point `<charconv>`
+is correctly rounded down to the subnormals; verified with MSVC 19.50 and libstdc++ from GCC
+12.5 and 13.5. `value_codecs.cpp` refuses to compile against libstdc++ 11, whose
+`std::from_chars` reports every subnormal result as out of range.
 
 C# (`CameraUnlock.Core.Config`): `IValueCodec<T>` (`TryParse(byte[], out T, out string)`,
 `Render(T)` returning bytes, `Equal`), `BoolCodec`, `IntCodec` (int), `Hex32Codec` (uint),
@@ -58,8 +60,11 @@ C# (`CameraUnlock.Core.Config`): `IValueCodec<T>` (`TryParse(byte[], out T, out 
 `EnumCodec<TEnum>`, `ColorCodec` (a four-element float array), `Hex32ListCodec`,
 `Hex64ListCodec` and `StringListCodec`. On .NET Framework a float can be written with a
 different last digit than C++ writes (1234.5677490234375 as `1234.5678`), which C++ reads
-as the same float, and `double.Parse` is not correctly rounded, so a double written there
-can read as a neighbouring double elsewhere. On every runtime a value reads back to the
+as the same float. Neither `float.Parse` nor `double.Parse` is correctly rounded there, so a
+double written there can read as a neighbouring double elsewhere, and so can a hand-typed
+float text with more digits than core writes: `1.00000005960464477539062500001` reads as 1.0
+there and as 1.0000001 in C++. The float texts core writes read the same in both; a
+cross-check of 1.5 million of them found no difference. On every runtime a value reads back to the
 same bits where it was written.
 
 `data/fixtures/canonical-ini/codecs/cases.tsv` (397 rows) holds both languages to the same

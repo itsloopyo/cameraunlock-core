@@ -22,7 +22,10 @@ namespace CameraUnlock.Core.Config
     /// Framework the text can differ from the C++ codec's in the last digit, because its "G"
     /// formatting of a float is not always correctly rounded: it writes 1234.5677490234375 as
     /// 1234.5678 and the exact tie 3451485.25 as 3451485.3, where C++ and .NET 8 write
-    /// 1234.5677 and 3451485.2. C++ reads such a text as the same float.
+    /// 1234.5677 and 3451485.2. C++ reads such a text as the same float. Its float.Parse is
+    /// not correctly rounded either: it reads 1.00000005960464477539062500001 as 1.0 where
+    /// C++ reads 1.0000001, so a hand-typed text with more digits than this codec writes can
+    /// read one step apart in the two languages.
     /// </para>
     /// </summary>
     public sealed class FloatCodec : IValueCodec<float>

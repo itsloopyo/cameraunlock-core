@@ -24,6 +24,11 @@
 // tabs, and never throws. Render writes the canonical text, which Parse reads back as an
 // Equal value, and throws std::invalid_argument for a value that would not read back.
 // Equal is what verification compares with: floats compare bitwise.
+//
+// Floats go through std::to_chars and std::from_chars, which must be correctly rounded
+// down to the subnormals. Verified with MSVC 19.50 and libstdc++ from GCC 12.5 and 13.5.
+// libstdc++ 11 reports every subnormal result as out of range, so value_codecs.cpp refuses
+// to compile against it.
 
 namespace cameraunlock::config {
 

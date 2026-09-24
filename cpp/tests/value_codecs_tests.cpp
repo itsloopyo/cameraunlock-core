@@ -355,11 +355,15 @@ void TestFloatingApi() {
           "a float and the double holding it are written for their own type");
 
     // Kept out of the shared fixtures because .NET Framework disagrees: it writes these two
-    // floats 1234.5678 and 3451485.3, and net35 reads 3e-324 as 0.
+    // floats 1234.5678 and 3451485.3, reads the float text below as 1.0, and net35 reads
+    // 3e-324 as 0.
     Check(FloatCodec().Render(1234.5677490234375f) == "1234.5677", "%.8g of 1234.5677490234375 is 1234.5677");
     Check(FloatCodec().Render(3451485.25f) == "3451485.2", "an exact tie at the last digit rounds to even");
     const CodecParseResult<double> denormal = DoubleCodec().Parse("3e-324");
     Check(denormal.ok() && BitsOf(denormal.value) == 1, "3e-324 reads as the smallest denormal");
+    const CodecParseResult<float> above_tie = FloatCodec().Parse("1.00000005960464477539062500001");
+    Check(above_tie.ok() && BitsOf(above_tie.value) == 0x3F800001u,
+          "a float text just above the midpoint of 1.0 and the next float reads as the next float");
 }
 
 void TestErrorsNameTheExpectation() {

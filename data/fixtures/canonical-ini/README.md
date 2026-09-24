@@ -149,12 +149,15 @@ the smallest N. `.0` is appended when the text has neither `.` nor `e`. So 1 is 
 `10.0` rather than `1e+01`, 0.15 is `0.15`, 0.00001 is `1e-05` and -0 is `-0.0`. A value is
 read with correct rounding, ties to even, from the grammar
 `-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?`; a number too large for the type, or one that is not
-zero but rounds to zero, is invalid.
+zero but rounds to zero, is invalid. .NET Framework's `float.Parse` and `double.Parse` are
+not correctly rounded (it reads `1.00000005960464477539062500001` as the float 1.0, where the
+rule gives 1.0000001), and no row holds a text it reads wrongly.
 
 The rows are hand-written, and every float and double row was also checked against an
 independent reference that parses with exact rational arithmetic and formats with Python's
 `%g`. The C# string codec reads strict UTF-8 where the C++ one keeps any bytes, so the
-fixtures hold no string that is not UTF-8. Two values are kept out because .NET Framework
+fixtures hold no string that is not UTF-8. Three values are kept out because .NET Framework
 disagrees with the rules there: it writes the float 1234.5677490234375 as `1234.5678` (the
-rule gives `1234.5677`), and on .NET Framework 3.5 it reads `3e-324` as 0 (the rule gives the
-smallest denormal). Each language's own tests hold them.
+rule gives `1234.5677`) and the float 3451485.25 as `3451485.3` (the rule gives `3451485.2`,
+the tie rounded to even), and on .NET Framework 3.5 it reads `3e-324` as 0 (the rule gives
+the smallest denormal). Each language's own tests hold them.
