@@ -147,8 +147,19 @@ std::string FromEditorView(const std::string& view) {
 
 bool IsSpaceOrTab(char c) { return c == ' ' || c == '\t'; }
 
-// GetPrivateProfileStringA skips these beside a key or a header; EditIni does not.
-bool IsVerticalTabOrFormFeed(char c) { return c == '\x0B' || c == '\x0C'; }
+// GetPrivateProfileStringA skips these before or after a key, before a header, just inside
+// its brackets and at the start of a value, while EditIni keeps them as part of the line.
+// NUL is skipped too, and EditIni refuses it itself.
+bool IsSkippedControlByte(char c) {
+    const unsigned char b = static_cast<unsigned char>(c);
+    return b >= 0x01 && b < 0x20 && c != '\t' && c != '\n' && c != '\r';
+}
+
+std::string HexByte(char c) {
+    static const char kHex[] = "0123456789ABCDEF";
+    const unsigned char b = static_cast<unsigned char>(c);
+    return std::string("0x") + kHex[b >> 4] + kHex[b & 0xF];
+}
 
 std::string_view TrimSpaceOrTab(std::string_view text) {
     while (!text.empty() && IsSpaceOrTab(text.front())) text.remove_prefix(1);
@@ -219,10 +230,12 @@ bool PlanEdits(const std::string& bytes, const std::vector<IniEdit>& edits,
             return false;
         }
     }
-    const size_t sub = bytes.find('\x1A');
-    if (sub != std::string::npos) {
-        error = Refusal("line " + std::to_string(LineOfOffset(bytes, sub)) + " holds a SUB byte (0x1A)");
-        return false;
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (IsSkippedControlByte(bytes[i])) {
+            error = Refusal("line " + std::to_string(LineOfOffset(bytes, i)) +
+                            " holds the control byte " + HexByte(bytes[i]));
+            return false;
+        }
     }
 
     struct KeyLine {
@@ -247,11 +260,6 @@ bool PlanEdits(const std::string& bytes, const std::vector<IniEdit>& edits,
 
         while (!line.empty() && IsSpaceOrTab(line.front())) line.remove_prefix(1);
         if (line.empty() || line.front() == ';' || line.front() == '#') continue;
-        if (IsVerticalTabOrFormFeed(line.front())) {
-            error = Refusal("line " + std::to_string(number) +
-                            " starts with a vertical tab or form feed");
-            return false;
-        }
         if (line.front() == '[') {
             const size_t close = line.find(']', 1);
             if (close == std::string_view::npos) {
@@ -266,11 +274,6 @@ bool PlanEdits(const std::string& bytes, const std::vector<IniEdit>& edits,
         if (equals == std::string_view::npos) continue;
         const std::string_view key = TrimSpaceOrTab(line.substr(0, equals));
         if (key.empty()) continue;
-        if (IsVerticalTabOrFormFeed(key.back())) {
-            error = Refusal("the key on line " + std::to_string(number) +
-                            " ends in a vertical tab or form feed");
-            return false;
-        }
         if (headers.empty()) continue;
         keys.push_back({headers.size() - 1, key, line.substr(equals + 1), number});
     }
@@ -301,11 +304,9 @@ bool PlanEdits(const std::string& bytes, const std::vector<IniEdit>& edits,
             for (const char c : comment) {
                 const unsigned char b = static_cast<unsigned char>(c);
                 if (b < 0x20 || b > 0x7E) {
-                    static const char kHex[] = "0123456789ABCDEF";
                     error = Refusal("the comment after " + name + " on line " +
-                                    std::to_string(first->number) + " holds the byte 0x" +
-                                    kHex[b >> 4] + kHex[b & 0xF] +
-                                    ", which the editor cannot write back");
+                                    std::to_string(first->number) + " holds the byte " +
+                                    HexByte(c) + ", which the editor cannot write back");
                     return false;
                 }
             }

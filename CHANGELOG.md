@@ -90,15 +90,16 @@ signature changed. What a migrated file looks like changes in these cases:
   edited, as before. A stamp for a repeated `[General]` goes under the first header,
   which is the only one the reader reads; the old code put it under the last, so that
   file was never stamped.
-- A file the editor cannot edit as the reader reads it is left untouched: UTF-16, a NUL
-  or SUB byte anywhere, a vertical tab or form feed at the start of a line or the end of
-  a key (the reader skips SUB, vertical tab and form feed beside a key or a header, and
-  the editor keeps them as part of the line), a `[` line with no `]` (the reader opens a
-  section there and the editor none), and a key the migration edits whose first
-  occurrence sits under a later header of a repeated section (the reader reads only the
-  first block, so an edit there changes nothing it sees). A lone CR is refused as well,
-  although in every shape probed GetPrivateProfileStringA ends a line there just as the
-  editor does. The old code edited all of these, and a UTF-16 file came out corrupted.
+- A file the editor cannot edit as the reader reads it is left untouched: UTF-16, a
+  control byte other than tab, LF and CR anywhere (the reader skips each byte from 0x00
+  to 0x1F but those three before or after a key, before a header, just inside a header's
+  brackets and at the start of a value, and the editor keeps them as part of the line),
+  a `[` line with no `]` (the reader opens a section there and the editor none), and a
+  key the migration edits whose first occurrence sits under a later header of a repeated
+  section (the reader reads only the first block, so an edit there changes nothing it
+  sees). A lone CR is refused as well, although in every shape probed
+  GetPrivateProfileStringA ends a line there just as the editor does. The old code
+  edited all of these, and a UTF-16 file came out corrupted.
 - The editor writes no inline comments of its own, so the migration carries a replaced
   line's comment across itself (from the first `;` or `#` outside quotes, with the white
   space in front of it, to the end of the line). A comment it cannot write back leaves

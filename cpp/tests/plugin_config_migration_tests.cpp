@@ -656,9 +656,28 @@ void TestRefusedFilesAreLeftAlone() {
                                 std::string(utf16, sizeof(utf16) - 1), "(Utf16)");
 }
 
-// GetPrivateProfileStringA skips SUB, vertical tab and form feed beside a key or a
-// header, where the canonical grammar keeps them as part of the line.
+// GetPrivateProfileStringA skips every control byte but tab, LF and CR before or after a
+// key, before a header, just inside its brackets and at the start of a value, where the
+// canonical grammar keeps it as part of the line. So any of them anywhere refuses the file.
 void TestSkippedControlBytesAreRefused() {
+    // To GetPrivateProfileStringA this is InvertX=true, so inserting InvertX=false after
+    // it would stamp the file and leave the lean mirrored.
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_soh_key.ini",
+        "[Position]\n"
+        "\x01InvertX=true\n"
+        "[General]\n"
+        "AutoEnable=true\n",
+        "line 2 holds the control byte 0x01");
+    // To GetPrivateProfileStringA this is [General], so a stamp under an appended
+    // [General] would never be read.
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_vertical_tab_header.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General\x0B]\n"
+        "ConfigVersion=0\n",
+        "line 3 holds the control byte 0x0B");
     CheckRefusedFileIsLeftAlone(
         "plugin_config_migration_sub.ini",
         "[Position]\n"
@@ -666,7 +685,7 @@ void TestSkippedControlBytesAreRefused() {
         "[General]\n"
         "AutoEnable=true\n"
         "; saved by an old editor\x1A\n",
-        "line 5 holds a SUB byte (0x1A)");
+        "line 5 holds the control byte 0x1A");
     CheckRefusedFileIsLeftAlone(
         "plugin_config_migration_vertical_tab.ini",
         "[Position]\n"
@@ -674,21 +693,28 @@ void TestSkippedControlBytesAreRefused() {
         "[General]\n"
         "\x0B"
         "AutoEnable=true\n",
-        "line 4 starts with a vertical tab or form feed");
+        "line 4 holds the control byte 0x0B");
     CheckRefusedFileIsLeftAlone(
         "plugin_config_migration_form_feed_header.ini",
         "[Position]\n"
         "InvertX=true\n"
         "  \x0C[General]\n"
         "AutoEnable=true\n",
-        "line 3 starts with a vertical tab or form feed");
+        "line 3 holds the control byte 0x0C");
     CheckRefusedFileIsLeftAlone(
         "plugin_config_migration_form_feed_key.ini",
         "[Position]\n"
         "InvertX=true\n"
         "[General]\n"
         "AutoEnable\x0C=true\n",
-        "the key on line 4 ends in a vertical tab or form feed");
+        "line 4 holds the control byte 0x0C");
+    CheckRefusedFileIsLeftAlone(
+        "plugin_config_migration_unit_separator_value.ini",
+        "[Position]\n"
+        "InvertX=true\n"
+        "[General]\n"
+        "ConfigVersion=\x1F" "0\n",
+        "line 4 holds the control byte 0x1F");
 }
 
 // GetPrivateProfileStringA opens a section at a '[' line with no ']'; the canonical
