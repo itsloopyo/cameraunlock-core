@@ -376,6 +376,66 @@ namespace CameraUnlock.Core.Config
             return output.ToArray();
         }
 
+        internal TConfig CreateDefaults()
+        {
+            return NewDefaults();
+        }
+
+        internal int RowCount
+        {
+            get { return rows.Count; }
+        }
+
+        internal string RowName(int row)
+        {
+            return rows[row].Name;
+        }
+
+        internal string RowSection(int row)
+        {
+            return rows[row].Section;
+        }
+
+        internal string RowKey(int row)
+        {
+            return rows[row].Key;
+        }
+
+        internal bool RowWritable(int row)
+        {
+            return rows[row].Writable;
+        }
+
+        internal bool RowEqual(int row, TConfig a, TConfig b)
+        {
+            return rows[row].Equal(a, b);
+        }
+
+        /// <exception cref="ArgumentException">The row's codec cannot write the value.</exception>
+        internal byte[] RowRender(int row, TConfig config)
+        {
+            return rows[row].Render(config);
+        }
+
+        /// <summary>The row's value as a message shows it: its canonical text, or the value as .NET
+        /// prints it when the codec cannot write it.</summary>
+        internal string RowValueText(int row, TConfig config)
+        {
+            try
+            {
+                return Encoding.UTF8.GetString(rows[row].Render(config));
+            }
+            catch (ArgumentException)
+            {
+                return rows[row].Display(config);
+            }
+        }
+
+        internal int RowOf(ConceptDescriptor concept)
+        {
+            return IndexOf(concept);
+        }
+
         private TConfig NewDefaults()
         {
             TConfig made = defaults();
@@ -712,6 +772,8 @@ namespace CameraUnlock.Core.Config
 
             public abstract byte[] Render(TConfig config);
 
+            public abstract string Display(TConfig config);
+
             public abstract bool Equal(TConfig a, TConfig b);
 
             public abstract void Assign(TConfig to, TConfig from);
@@ -765,6 +827,21 @@ namespace CameraUnlock.Core.Config
             public override byte[] Render(TConfig config)
             {
                 return codec.Render(get(config));
+            }
+
+            public override string Display(TConfig config)
+            {
+                T held = get(config);
+                if (held == null) return "null";
+                object value = held;
+                var items = value as System.Collections.IEnumerable;
+                if (items != null && !(value is string))
+                {
+                    var parts = new List<string>();
+                    foreach (object item in items) parts.Add(Convert.ToString(item, CultureInfo.InvariantCulture));
+                    return string.Join(", ", parts.ToArray());
+                }
+                return Convert.ToString(value, CultureInfo.InvariantCulture);
             }
 
             public override bool Equal(TConfig a, TConfig b)

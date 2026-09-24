@@ -514,6 +514,6 @@ namespace CameraUnlock.Core.Config
         private static extern bool CloseHandle(IntPtr handle);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern uint GetFileAttributesW(string name);
+        internal static extern uint GetFileAttributesW(string name);
     }
 }

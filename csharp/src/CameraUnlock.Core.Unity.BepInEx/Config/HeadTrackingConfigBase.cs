@@ -13,6 +13,13 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
     /// 2. Call Initialize() with your plugin's ConfigFile
     /// 3. Access cached values directly for per-frame reads
     /// 4. Override OnConfigChanged() to propagate changes to your systems
+    /// <para>
+    /// Deprecated, kept for the mods that derive from it until a major version: a BepInEx game
+    /// reads its settings from BepInEx\config\&lt;GUID&gt;.ini through
+    /// <see cref="CameraUnlock.Core.Config.ConfigOwner{TConfig}"/> with
+    /// <see cref="CameraUnlock.Core.Config.HeadTrackingConfigTable"/>, and its .cfg only through
+    /// the game's frozen legacy import.
+    /// </para>
     /// </summary>
     public abstract class HeadTrackingConfigBase
     {

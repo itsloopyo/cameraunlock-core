@@ -13,6 +13,7 @@ namespace CameraUnlock.Core.Tests
     internal static class Program
     {
         private const string InterruptFlag = "--interrupt";
+        private const string OwnerInterruptFlag = "--owner-interrupt";
         private const int SweepCount = 50000;
 
         private static readonly CheckedWriteStep[] InterruptibleSteps =
@@ -31,6 +32,11 @@ namespace CameraUnlock.Core.Tests
             {
                 return DieDuring((CheckedWriteStep)Enum.Parse(typeof(CheckedWriteStep), args[1]), args[2]);
             }
+            if (args.Length == 3 && args[0] == OwnerInterruptFlag)
+            {
+                ConfigOwnerScenarios.RunInterruptedChild(args[1], args[2]);
+                return 0;
+            }
 
 #if NET35
             const string built = "net35";
@@ -48,6 +54,16 @@ namespace CameraUnlock.Core.Tests
             foreach (CheckedWriteStep step in InterruptibleSteps)
             {
                 failures += Report("killed-during-" + step, dir => KilledDuring(step, dir));
+            }
+
+            Console.WriteLine("ConfigOwner scenarios");
+            foreach (string name in ConfigOwnerScenarios.Names)
+            {
+                failures += Report(name, dir => ConfigOwnerScenarios.Run(name, dir));
+            }
+            foreach (string label in ConfigOwnerScenarios.InterruptionLabels)
+            {
+                failures += Report("conversion-killed-at-" + label, dir => ConversionKilledAt(label, dir));
             }
 
             Console.WriteLine("Canonical INI reader fixtures");
@@ -161,6 +177,23 @@ namespace CameraUnlock.Core.Tests
             {
                 throw new InvalidOperationException("the next write did not commit");
             }
+        }
+
+        // The child is killed at the start of the labelled conversion step, so every step before it has run.
+        private static void ConversionKilledAt(string label, string dir)
+        {
+            ConfigOwnerScenarios.PrepareInterruption(dir);
+            var start = new ProcessStartInfo(Assembly.GetEntryAssembly().Location,
+                OwnerInterruptFlag + " " + label + " \"" + dir + "\"")
+            {
+                UseShellExecute = false,
+            };
+            using (Process child = Process.Start(start))
+            {
+                if (!child.WaitForExit(60000)) throw new InvalidOperationException("the child did not exit");
+                if (child.ExitCode == 0) throw new InvalidOperationException("the child finished instead of dying");
+            }
+            ConfigOwnerScenarios.CheckAfterInterruption(label, dir);
         }
 
         private static int DieDuring(CheckedWriteStep step, string dir)

@@ -182,6 +182,10 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// Loads configuration from an INI file. Returns defaults for missing values.
+        /// <para>
+        /// Deprecated, kept for the mods that call it until a major version: a game reads its config
+        /// through <see cref="ConfigOwner{TConfig}"/> with <see cref="HeadTrackingConfigTable"/>.
+        /// </para>
         /// </summary>
         /// <param name="filePath">Path to the config file.</param>
         /// <param name="log">Optional logging action.</param>
@@ -216,6 +220,10 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// Applies values from a dictionary to this config.
+        /// <para>
+        /// Deprecated, kept for the mods that call it until a major version: a game reads its config
+        /// through <see cref="ConfigOwner{TConfig}"/> with <see cref="HeadTrackingConfigTable"/>.
+        /// </para>
         /// </summary>
 #if NULLABLE_ENABLED
         public void ApplyValues(Dictionary<string, string> values, Action<string>? log = null)

@@ -160,6 +160,75 @@ namespace CameraUnlock.Core.Config
             return false;
         }
 
+        internal sealed class KeyLine
+        {
+#if NULLABLE_ENABLED
+            public KeyLine(byte[]? section, byte[] key, byte[] value, int line)
+#else
+            public KeyLine(byte[] section, byte[] key, byte[] value, int line)
+#endif
+            {
+                Section = section;
+                Key = key;
+                Value = value;
+                Line = line;
+            }
+
+            /// <summary>Null for a key above the first header or below one that names no section.</summary>
+#if NULLABLE_ENABLED
+            public byte[]? Section { get; }
+#else
+            public byte[] Section { get; }
+#endif
+
+            public byte[] Key { get; }
+
+            public byte[] Value { get; }
+
+            public int Line { get; }
+        }
+
+        /// <summary>
+        /// Every key line in document order under <see cref="Parse"/>'s line, header and key rules,
+        /// repeats and keys outside a section included. Bytes are not checked, so a NUL is an
+        /// ordinary byte here; a UTF-16 document gives nothing useful and is the caller's to skip.
+        /// </summary>
+        internal static List<KeyLine> KeyLines(byte[] bytes)
+        {
+            var found = new List<KeyLine>();
+#if NULLABLE_ENABLED
+            byte[]? section = null;
+#else
+            byte[] section = null;
+#endif
+            int number = 0;
+            foreach (Span raw in Lines(bytes))
+            {
+                number++;
+                Span line = Trim(bytes, raw);
+                if (line.IsEmpty || bytes[line.Begin] == (byte)';' || bytes[line.Begin] == (byte)'#') continue;
+                if (bytes[line.Begin] == (byte)'[')
+                {
+                    Header header = ParseHeader(bytes, line);
+                    section = header.Closed && !header.Name.IsEmpty ? Copy(bytes, header.Name) : null;
+                    continue;
+                }
+                int equals = Array.IndexOf(bytes, (byte)'=', line.Begin, line.Length);
+                if (equals < 0) continue;
+                Span key = Trim(bytes, new Span(line.Begin, equals));
+                if (key.IsEmpty) continue;
+                found.Add(new KeyLine(section, Copy(bytes, key), Copy(bytes, Trim(bytes, new Span(equals + 1, line.End))), number));
+            }
+            return found;
+        }
+
+        private static byte[] Copy(byte[] bytes, Span span)
+        {
+            var copy = new byte[span.Length];
+            Array.Copy(bytes, span.Begin, copy, 0, span.Length);
+            return copy;
+        }
+
         internal static byte[] NameBytes(string name, string parameter)
         {
             if (name == null) throw new ArgumentNullException(parameter);
@@ -419,7 +488,7 @@ namespace CameraUnlock.Core.Config
             return number < 1 ? -1 : (int)number;
         }
 
-        private static bool StartsWithUtf16Mark(byte[] bytes)
+        internal static bool StartsWithUtf16Mark(byte[] bytes)
         {
             return bytes.Length >= 2 && ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF));
         }

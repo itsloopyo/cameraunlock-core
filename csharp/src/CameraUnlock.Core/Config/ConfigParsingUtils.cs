@@ -140,6 +140,10 @@ namespace CameraUnlock.Core.Config
         /// leading character as absent, so a line beginning U+00AD SOFT HYPHEN read as a
         /// section header on this side and as a key line on the C++ side.
         /// </para>
+        /// <para>
+        /// Deprecated, kept for the mods that call it until a major version: a game reads its config
+        /// through <see cref="ConfigOwner{TConfig}"/> with <see cref="HeadTrackingConfigTable"/>.
+        /// </para>
         /// </summary>
         /// <param name="filePath">Path to the config file.</param>
         /// <returns>Dictionary of key-value pairs.</returns>

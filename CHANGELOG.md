@@ -9,6 +9,96 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the C# config owner and migration driver
+
+`ConfigOwner<TConfig>` in `CameraUnlock.Core.Config` is the one reader and writer of a game's
+canonical config file: it converts a legacy file once through the game's frozen import, creates a
+missing file, saves the rows the table marks Writable and reloads. It writes only through
+`CheckedFileWriter`. Nothing in the fleet uses it yet; each game's conversion wires it. The C++ twin
+comes next and follows the same statuses and decisions.
+
+- **Options by property**: `ConfigOwnerOptions<TConfig>` with `Path` (absolute), `Table`, `Import`
+  (null for a game that never published a pre-canonical build), `LegacySourcePath`, `Header` and
+  `StatusSink`. The owner copies them when it is built and throws `ArgumentException` for a missing
+  path, table or header, a relative path, a `LegacySourcePath` without an `Import` or equal to
+  `Path`, or a header the renderer refuses.
+- **`Load()`** returns `ConfigLoadResult<TConfig>`: `Status` (`ConfigLoadStatus`: `Canonical` 0,
+  `Migrated` 1, `Created` 2, `Deferred` 3, `LegacyRefused` 4, `Unreadable` 5), the `Config` the
+  session runs on, the reader's and table's `Diagnostics`, a `Log` of lines naming the file for the
+  game to write once its logger is up, and the player's `Reason`. Detection: a file with a
+  `[CameraUnlock]` stamp, looked for in a UTF-16 file's text too, is read as canonical and never
+  imported (`Unreadable` when it is UTF-16 or holds a NUL); an unstamped file the import reads is
+  converted; an unstamped file with no import is read as canonical and stamped by the next save; no
+  file is created from the table's defaults, never over a file that appears meanwhile (that is
+  `Deferred` on the defaults, and nothing retries).
+- **Conversion**: the owner holds the legacy file open for reading, sharing read and write but not
+  delete, from its snapshot through the import to a second read of its bytes, so no program can
+  newly lock, rename or delete it meanwhile and a write is caught. It renders the imported settings,
+  reads the render back through the table and requires every row to equal the import's (floats
+  bitwise), keeps the original bytes in `<file>.pre-canonical` (written once) or, for a later
+  conversion whose input differs, `<file>.pre-canonical.last` (replaced each time), each through
+  the checked writer and read back, then replaces the file only if it still holds the snapshot. The
+  log lists the import's dropped values and every key line of the old file the import does not
+  read (`not carried: [General] Smoothng=0.3 on line 5, this build does not read it`). A process
+  killed at any step leaves the old file whole or the new one whole.
+- **Deferral**: the file in use by another program, read-only, a folder that cannot be written, a
+  file changed during the import, a copy or commit that fails, a value no codec writes or a render
+  that does not read back (`[Light] LightMultiplier=7.5 cannot be converted`), and an import that
+  reports `Undecodable` or `Absent` leave the file as it was and give `Deferred`; an import that
+  refuses the file gives `LegacyRefused`. The session runs on what the import gave, the player is
+  told once through the status sink, nothing is saved that session and the next launch tries again.
+- **`Save(Action<TConfig> change)`** returns `ConfigSaveResult`: `Saved` 0, `NotSaved` 1 (with the
+  `Reason` and the unchanged `Error`) or `Uncertain` 2 (Windows did not finish the replacement; the
+  reason names the file and `TemporaryPath`, the kept temporary). The change runs on the settings
+  read from the file as it is now; a changed row the table does not mark Writable throws
+  `InvalidOperationException` naming it, so End, which changes only the session, never writes
+  `EnableOnStartup`. When `RotationEnabled` or `PositionEnabled` changes both are written. It saves
+  only a readable file whose `ConfigFormat` is not newer than this build's and that is stamped or
+  read by no import, stamping an unstamped one in the same edit, and reads the edited bytes back
+  through the table before writing: only the changed rows may differ. A change that leaves every
+  row as it was writes nothing.
+  Never rolls back or retries.
+- **`Reload()`** returns `ConfigReloadResult<TConfig>`: `Unchanged` 0 (the file holds the bytes
+  the owner last created, converted or saved), `Applied` 1, `LegacyReadOnly` 2 (an old file put
+  back is read through the import, never written, and converted at the next launch) or
+  `Unreadable` 3 (the game keeps its settings). It never writes. **`FileChanged()`** compares the
+  file's last write time with the one recorded at the last Load, Reload or save.
+- One lock around Load, Save and Reload; the status sink runs after it is released. A Unity mod
+  calls them on the main thread: a save is one synchronous write per key press.
+
+Decisions the design left open, each in the API's own documentation:
+
+- **A missing file at `Save` is `NotSaved`** ("the settings file is missing; it is created again at
+  the next launch"), not created: creating it outside `Load` would pre-empt a BepInEx plugin's
+  conversion from its `.cfg`.
+- **A file `Load` cannot open** (another program holds it denying read sharing) is `Deferred` on the
+  table's defaults and the import does not run. The stamp is inside the file, so an unopened file
+  cannot be told legacy from canonical, and a legacy import run on a canonical file reads it wrong.
+- **With `LegacySourcePath` set**, the import reads only that file: a file at `Path` is always read
+  as canonical, and one that lost its stamp is stamped again at the next save. Deleting it converts
+  the `.cfg` again.
+- **After a `Deferred`, `LegacyRefused` or `Unreadable` load**, every save that session is
+  `NotSaved`, until a `Reload` applies a readable file.
+- An import that throws, or returns no result, is a bug: the exception reaches the caller.
+
+A BepInEx import, documented on `Import`: BepInEx's `ConfigFile` reads the `.cfg` in its
+constructor (`if (File.Exists(ConfigFilePath)) Reload();` in 5.4.23.5 and be.785), before the
+owner holds the file, so the import sets `SaveOnConfigSet = false`, then calls `Config.Reload()`,
+then binds. The fleet's BepInEx plugins compile against their own BepInEx assemblies, not core's
+`csharp/stubs/BepInExStubs.cs`, and core calls none of those members, so the stubs are unchanged.
+
+Not yet run: the owner on Unity Mono or under BepInEx 6 on CoreCLR. The scenarios run on .NET 8,
+CLR 2 (net35) and CLR 4 (net472); the first converted game of each runtime checks it in game.
+
+### Deprecated - the C# flat config readers and `HeadTrackingConfigBase`
+
+`ConfigParsingUtils.ParseIniFile`, `HeadTrackingConfigData.LoadFromFile` and
+`HeadTrackingConfigData.ApplyValues` (`CameraUnlock.Core`), and `HeadTrackingConfigBase`
+(`CameraUnlock.Core.Unity.BepInEx`) are deprecated in their documentation, not with `[Obsolete]`, so
+the mods that call them build as before. They stay until a major version. A converted game reads
+its config through `ConfigOwner` with `HeadTrackingConfigTable`, and a BepInEx game reads its `.cfg`
+only through its frozen legacy import.
+
 ### Added - legacy import support, normalisation N2, and the differential corpus, in C# and C++
 
 What a game's legacy import hands the migration driver, the normalisation its map applies, and the
