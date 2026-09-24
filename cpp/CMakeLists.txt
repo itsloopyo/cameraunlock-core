@@ -31,6 +31,7 @@ set(CAMERAUNLOCK_SOURCES
     src/config/canonical_ini.cpp
     src/config/checked_file_writer.cpp
     src/config/value_guards.cpp
+    src/config/value_codecs.cpp
     src/os/module_paths.cpp
     src/os/game_window.cpp
     src/discovery/probe_selection.cpp

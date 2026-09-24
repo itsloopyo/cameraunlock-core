@@ -13,6 +13,7 @@ namespace CameraUnlock.Core.Tests
     internal static class Program
     {
         private const string InterruptFlag = "--interrupt";
+        private const int SweepCount = 50000;
 
         private static readonly CheckedWriteStep[] InterruptibleSteps =
         {
@@ -67,6 +68,16 @@ namespace CameraUnlock.Core.Tests
             {
                 failures += Report(row.Replace('\t', ' '), dir => KeyBindingFixtures.RunRow(row));
             }
+
+            Console.WriteLine("Value codec fixtures");
+            foreach (string row in ValueCodecFixtures.Rows(fixtures))
+            {
+                failures += Report(row.Replace('\t', ' '), dir => ValueCodecFixtures.RunRow(row));
+            }
+
+            Console.WriteLine("Float and double sweep");
+            failures += Report("floats read back from their render", dir => ValueCodecFixtures.SweepFloats(SweepCount));
+            failures += Report("doubles read back from their render", dir => ValueCodecFixtures.SweepDoubles(SweepCount));
 
             Console.WriteLine(failures == 0 ? "All passed." : failures + " FAILED.");
             return failures == 0 ? 0 : 1;

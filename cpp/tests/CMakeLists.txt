@@ -28,6 +28,7 @@ add_executable(cameraunlock_tests
     checked_file_writer_tests.cpp
     canonical_ini_tests.cpp
     key_bindings_tests.cpp
+    value_codecs_tests.cpp
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)

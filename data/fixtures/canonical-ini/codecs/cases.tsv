@@ -1,0 +1,427 @@
+# Canonical value codec cases. See ../README.md, codecs/.
+# codec	input	result	canonical	bits
+
+# bool
+bool	true	canonical	true
+bool	TRUE	canonical	true
+bool	True	canonical	true
+bool	tRuE	canonical	true
+bool	1	canonical	true
+bool	yes	canonical	true
+bool	YES	canonical	true
+bool	Yes	canonical	true
+bool	on	canonical	true
+bool	ON	canonical	true
+bool	On	canonical	true
+bool	false	canonical	false
+bool	FALSE	canonical	false
+bool	False	canonical	false
+bool	0	canonical	false
+bool	no	canonical	false
+bool	NO	canonical	false
+bool	No	canonical	false
+bool	off	canonical	false
+bool	OFF	canonical	false
+bool	Off	canonical	false
+bool		invalid
+bool	t	invalid
+bool	f	invalid
+bool	y	invalid
+bool	n	invalid
+bool	tru	invalid
+bool	truee	invalid
+bool	yess	invalid
+bool	onn	invalid
+bool	2	invalid
+bool	-1	invalid
+bool	01	invalid
+bool	00	invalid
+bool	1.0	invalid
+bool	enabled	invalid
+bool	disabled	invalid
+bool	true ;note	invalid
+bool	true\x09x	invalid
+bool	"true"	invalid
+bool	ye\xC5\xBF	invalid
+bool	o\xEF\xBD\x8E	invalid
+
+# int: 32-bit signed, every value
+int	0	canonical	0
+int	-0	canonical	0
+int	-00	canonical	0
+int	5	canonical	5
+int	007	canonical	7
+int	-5	canonical	-5
+int	-0012	canonical	-12
+int	500	canonical	500
+int	2147483647	canonical	2147483647
+int	-2147483648	canonical	-2147483648
+int	00000000000000000000000000000000000001	canonical	1
+int		invalid
+int	-	invalid
+int	--5	invalid
+int	+5	invalid
+int	5 	invalid
+int	5.0	invalid
+int	5.	invalid
+int	1e3	invalid
+int	0x10	invalid
+int	0X10	invalid
+int	1_000	invalid
+int	1,000	invalid
+int	1 000	invalid
+int	2147483648	invalid
+int	-2147483649	invalid
+int	99999999999999999999999999	invalid
+int	-99999999999999999999999999	invalid
+int	five	invalid
+int	5a	invalid
+int	\xD9\xA3	invalid
+int	\xEF\xBC\x95	invalid
+int	5 ;note	invalid
+
+# int: 32-bit signed, 1 to 65535
+int[1,65535]	1	canonical	1
+int[1,65535]	4242	canonical	4242
+int[1,65535]	04242	canonical	4242
+int[1,65535]	65535	canonical	65535
+int[1,65535]	0	invalid
+int[1,65535]	-0	invalid
+int[1,65535]	-1	invalid
+int[1,65535]	65536	invalid
+int[1,65535]	2147483648	invalid
+int[1,65535]		invalid
+
+# hex32
+hex32	0x0	canonical	0x0
+hex32	0X0	canonical	0x0
+hex32	0x00000000	canonical	0x0
+hex32	0x404	canonical	0x404
+hex32	0xbd4	canonical	0xBD4
+hex32	0XbD4	canonical	0xBD4
+hex32	0x00000404	canonical	0x404
+hex32	0xFFFFFFFF	canonical	0xFFFFFFFF
+hex32	0xffffffff	canonical	0xFFFFFFFF
+hex32	0x80000000	canonical	0x80000000
+hex32		invalid
+hex32	0	invalid
+hex32	0x	invalid
+hex32	0X	invalid
+hex32	404	invalid
+hex32	x404	invalid
+hex32	0h404	invalid
+hex32	0x000000404	invalid
+hex32	0x100000000	invalid
+hex32	0xG	invalid
+hex32	0xg1	invalid
+hex32	-0x1	invalid
+hex32	0x-1	invalid
+hex32	+0x1	invalid
+hex32	0x 1	invalid
+hex32	0x1 	invalid
+hex32	0x1.5	invalid
+hex32	0x1L	invalid
+hex32	0x1,0x2	invalid
+hex32	00x1	invalid
+hex32	1024	invalid
+
+# hex64
+hex64	0x0	canonical	0x0
+hex64	0x1	canonical	0x1
+hex64	0x0000000000000001	canonical	0x1
+hex64	0x100000000	canonical	0x100000000
+hex64	0x7ff6a0b21000	canonical	0x7FF6A0B21000
+hex64	0xFFFFFFFFFFFFFFFF	canonical	0xFFFFFFFFFFFFFFFF
+hex64	0xffffffffffffffff	canonical	0xFFFFFFFFFFFFFFFF
+hex64		invalid
+hex64	0x	invalid
+hex64	0x00000000000000001	invalid
+hex64	0x10000000000000000	invalid
+hex64	140698833649664	invalid
+hex64	0x7FF6A0B2100G	invalid
+
+# float: every finite value; the last field is the value read, in hex
+float	0	canonical	0.0	0x00000000
+float	0.0	canonical	0.0	0x00000000
+float	-0	canonical	-0.0	0x80000000
+float	-0.0	canonical	-0.0	0x80000000
+float	00.500	canonical	0.5	0x3F000000
+float	1	canonical	1.0	0x3F800000
+float	1.0	canonical	1.0	0x3F800000
+float	1.00	canonical	1.0	0x3F800000
+float	-1.5	canonical	-1.5	0xBFC00000
+float	0.1	canonical	0.1	0x3DCCCCCD
+float	0.15	canonical	0.15	0x3E19999A
+float	0.2	canonical	0.2	0x3E4CCCCD
+float	0.3	canonical	0.3	0x3E99999A
+float	0.30	canonical	0.3	0x3E99999A
+float	2.5	canonical	2.5	0x40200000
+float	10	canonical	10.0	0x41200000
+float	100	canonical	100.0	0x42C80000
+float	1000	canonical	1000.0	0x447A0000
+float	10000	canonical	10000.0	0x461C4000
+float	20000	canonical	20000.0	0x469C4000
+float	1e2	canonical	100.0	0x42C80000
+float	1E2	canonical	100.0	0x42C80000
+float	1e+2	canonical	100.0	0x42C80000
+float	1e6	canonical	1000000.0	0x49742400
+float	1e9	canonical	1e+09	0x4E6E6B28
+float	1e10	canonical	1e+10	0x501502F9
+float	1e+10	canonical	1e+10	0x501502F9
+float	1e-05	canonical	1e-05	0x3727C5AC
+float	1E-5	canonical	1e-05	0x3727C5AC
+float	0.00001	canonical	1e-05	0x3727C5AC
+float	0.0001	canonical	0.0001	0x38D1B717
+float	0.00012	canonical	0.00012	0x38FBA882
+float	3.14159265358979	canonical	3.1415927	0x40490FDB
+float	123456789	canonical	123456792.0	0x4CEB79A3
+float	16777216	canonical	16777216.0	0x4B800000
+float	16777217	canonical	16777216.0	0x4B800000
+float	3.4028235e38	canonical	3.4028235e+38	0x7F7FFFFF
+float	3.40282347e+38	canonical	3.4028235e+38	0x7F7FFFFF
+float	-3.4028235e38	canonical	-3.4028235e+38	0xFF7FFFFF
+float	1.1754944e-38	canonical	1.1754944e-38	0x00800000
+float	1e-45	canonical	1e-45	0x00000001
+float	1.4e-45	canonical	1e-45	0x00000001
+float	-1.4e-45	canonical	-1e-45	0x80000001
+float	8e-46	canonical	1e-45	0x00000001
+float	0.0000000000000000000000000000000000000000000014	canonical	1e-45	0x00000001
+float	0.1500000000000000000000000000000001	canonical	0.15	0x3E19999A
+float	0e999999	canonical	0.0	0x00000000
+float	0.000e-999999999999	canonical	0.0	0x00000000
+float	1000000.0625	canonical	1000000.06	0x49742401
+float	0.333333343267	canonical	0.33333334	0x3EAAAAAB
+float	90	canonical	90.0	0x42B40000
+float	75.5	canonical	75.5	0x42970000
+float		invalid
+float	-	invalid
+float	+1	invalid
+float	.5	invalid
+float	-.5	invalid
+float	5.	invalid
+float	1.	invalid
+float	1,5	invalid
+float	1.5.5	invalid
+float	1e	invalid
+float	1e+	invalid
+float	1e-	invalid
+float	e5	invalid
+float	1e5.5	invalid
+float	0x1p3	invalid
+float	0x10	invalid
+float	inf	invalid
+float	-inf	invalid
+float	Infinity	invalid
+float	nan	invalid
+float	NaN	invalid
+float	1 	invalid
+float	1f	invalid
+float	1d	invalid
+float	--1	invalid
+float	1e--5	invalid
+float	1.5 ;note	invalid
+float	\xEF\xBC\x91	invalid
+float	1e999999999999999999999	invalid
+float	-1e999999999999999999999	invalid
+float	1e-999999999999999999999	invalid
+float	-1e-999999999999999999999	invalid
+float	3.5e38	invalid
+float	-3.5e38	invalid
+float	1e39	invalid
+float	7e-46	invalid
+float	1e-46	invalid
+float	1e-400	invalid
+float	1e400	invalid
+
+# double: every finite value; the last field is the value read, in hex
+double	0	canonical	0.0	0x0000000000000000
+double	-0	canonical	-0.0	0x8000000000000000
+double	-0.0	canonical	-0.0	0x8000000000000000
+double	1	canonical	1.0	0x3FF0000000000000
+double	0.1	canonical	0.1	0x3FB999999999999A
+double	0.15	canonical	0.15	0x3FC3333333333333
+double	0.2	canonical	0.2	0x3FC999999999999A
+double	0.3	canonical	0.3	0x3FD3333333333333
+double	0.30000000000000004	canonical	0.30000000000000004	0x3FD3333333333334
+double	10	canonical	10.0	0x4024000000000000
+double	100	canonical	100.0	0x4059000000000000
+double	1e-05	canonical	1e-05	0x3EE4F8B588E368F1
+double	0.0001	canonical	0.0001	0x3F1A36E2EB1C432D
+double	3.141592653589793	canonical	3.141592653589793	0x400921FB54442D18
+double	2.718281828459045	canonical	2.718281828459045	0x4005BF0A8B145769
+double	1e15	canonical	1000000000000000.0	0x430C6BF526340000
+double	1e16	canonical	10000000000000000.0	0x4341C37937E08000
+double	1e17	canonical	1e+17	0x4376345785D8A000
+double	1e23	canonical	1e+23	0x44B52D02C7E14AF6
+double	123456789012345678	canonical	1.2345678901234568e+17	0x437B69B4BA630F35
+double	9007199254740993	canonical	9007199254740992.0	0x4340000000000000
+double	1.7976931348623157e308	canonical	1.7976931348623157e+308	0x7FEFFFFFFFFFFFFF
+double	-1.7976931348623157e308	canonical	-1.7976931348623157e+308	0xFFEFFFFFFFFFFFFF
+double	2.2250738585072014e-308	canonical	2.2250738585072014e-308	0x0010000000000000
+double	5e-324	canonical	5e-324	0x0000000000000001
+double	4.9406564584124654e-324	canonical	5e-324	0x0000000000000001
+double	0.1e-322	canonical	1e-323	0x0000000000000002
+double	1.5	canonical	1.5	0x3FF8000000000000
+double	0.333	canonical	0.333	0x3FD54FDF3B645A1D
+double	1e-300	canonical	1e-300	0x01A56E1FC2F8F359
+double	1e300	canonical	1e+300	0x7E37E43C8800759C
+double	0e999999	canonical	0.0	0x0000000000000000
+double		invalid
+double	-	invalid
+double	+1	invalid
+double	.5	invalid
+double	-.5	invalid
+double	5.	invalid
+double	1.	invalid
+double	1,5	invalid
+double	1.5.5	invalid
+double	1e	invalid
+double	1e+	invalid
+double	1e-	invalid
+double	e5	invalid
+double	1e5.5	invalid
+double	0x1p3	invalid
+double	0x10	invalid
+double	inf	invalid
+double	-inf	invalid
+double	Infinity	invalid
+double	nan	invalid
+double	NaN	invalid
+double	1 	invalid
+double	1f	invalid
+double	1d	invalid
+double	--1	invalid
+double	1e--5	invalid
+double	1.5 ;note	invalid
+double	\xEF\xBC\x91	invalid
+double	1e999999999999999999999	invalid
+double	-1e999999999999999999999	invalid
+double	1e-999999999999999999999	invalid
+double	-1e-999999999999999999999	invalid
+double	1.8e308	invalid
+double	-1.8e308	invalid
+double	1e309	invalid
+double	2e-324	invalid
+double	1e-324	invalid
+double	1e-400	invalid
+double	1e400	invalid
+
+# float: 0 to 1
+float[0,1]	0	canonical	0.0	0x00000000
+float[0,1]	-0	canonical	-0.0	0x80000000
+float[0,1]	1	canonical	1.0	0x3F800000
+float[0,1]	0.15	canonical	0.15	0x3E19999A
+float[0,1]	1e-05	canonical	1e-05	0x3727C5AC
+float[0,1]	0.99999994	canonical	0.99999994	0x3F7FFFFF
+float[0,1]	-0.1	invalid
+float[0,1]	1.0000001	invalid
+float[0,1]	2	invalid
+float[0,1]	-1e-05	invalid
+float[0,1]	1e-46	invalid
+float[0,1]	abc	invalid
+float[0,1]		invalid
+
+# string: the bytes as read
+string		canonical	
+string	abc	canonical	abc
+string	a b	canonical	a b
+string	a\x09b	canonical	a\x09b
+string	;not a comment	canonical	;not a comment
+string	x=y	canonical	x=y
+string	"quoted"	canonical	"quoted"
+string	C:\\Games\\My Game	canonical	C:\\Games\\My Game
+string	caf\xC3\xA9	canonical	caf\xC3\xA9
+string	\xF0\x9F\x98\x80	canonical	\xF0\x9F\x98\x80
+string	\x7F	canonical	\x7F
+string	a,b	canonical	a,b
+string	a\x01b	invalid
+string	\x1F	invalid
+string	a\x1Bb	invalid
+string	\x0B	invalid
+string	\x0C	invalid
+
+# enum: Never, MenusOnly, AllDialogue, AllOverlays
+enum	Never	canonical	Never
+enum	never	canonical	Never
+enum	NEVER	canonical	Never
+enum	MenusOnly	canonical	MenusOnly
+enum	menusonly	canonical	MenusOnly
+enum	MENUSONLY	canonical	MenusOnly
+enum	allDialogue	canonical	AllDialogue
+enum	AllOverlays	canonical	AllOverlays
+enum		invalid
+enum	0	invalid
+enum	1	invalid
+enum	3	invalid
+enum	Menus Only	invalid
+enum	Menus_Only	invalid
+enum	MenusOnly2	invalid
+enum	Nevr	invalid
+enum	Never ;note	invalid
+enum	Never,MenusOnly	invalid
+enum	Ne\xC5\xBFer	invalid
+
+# color: four floats from 0 to 1
+color	1, 1, 1, 1	canonical	1.0, 1.0, 1.0, 1.0
+color	1,0.5,0,1	canonical	1.0, 0.5, 0.0, 1.0
+color	0.15 ,\x090.2,0.3 , 1	canonical	0.15, 0.2, 0.3, 1.0
+color	0,0,0,0	canonical	0.0, 0.0, 0.0, 0.0
+color	-0,0,0,1	canonical	-0.0, 0.0, 0.0, 1.0
+color	1e-05, 1E0, 0.1, 1.0	canonical	1e-05, 1.0, 0.1, 1.0
+color		invalid
+color	1,1,1	invalid
+color	1,1,1,1,1	invalid
+color	1,1,1,1,	invalid
+color	,1,1,1	invalid
+color	1,,1,1	invalid
+color	255,255,255,255	invalid
+color	1.5,0,0,1	invalid
+color	-0.1,0,0,1	invalid
+color	1;1;1;1	invalid
+color	1 1 1 1	invalid
+color	a,b,c,d	invalid
+color	nan,0,0,1	invalid
+color	1,1,1,1e-46	invalid
+color	#FFFFFFFF	invalid
+
+# list<hex32>
+list<hex32>		canonical	
+list<hex32>	0x404	canonical	0x404
+list<hex32>	0x404,0xbd4	canonical	0x404, 0xBD4
+list<hex32>	0x1 ,\x090X2	canonical	0x1, 0x2
+list<hex32>	0x0, 0x0	canonical	0x0, 0x0
+list<hex32>	,	invalid
+list<hex32>	 , 	invalid
+list<hex32>	0x1,	invalid
+list<hex32>	,0x1	invalid
+list<hex32>	0x1,,0x2	invalid
+list<hex32>	0x1, ,0x2	invalid
+list<hex32>	404	invalid
+list<hex32>	0x1 0x2	invalid
+list<hex32>	0x100000000	invalid
+list<hex32>	0x1;0x2	invalid
+
+# list<hex64>
+list<hex64>		canonical	
+list<hex64>	0x7ff6a0b21000, 0x10	canonical	0x7FF6A0B21000, 0x10
+list<hex64>	0xffffffffffffffff	canonical	0xFFFFFFFFFFFFFFFF
+list<hex64>	0x10000000000000000	invalid
+list<hex64>	0x1,	invalid
+list<hex64>	0x1,,0x2	invalid
+
+# list<string>
+list<string>		canonical	
+list<string>	a	canonical	a
+list<string>	a,b	canonical	a, b
+list<string>	a , b	canonical	a, b
+list<string>	a,\x09b	canonical	a, b
+list<string>	Foo Bar, Baz	canonical	Foo Bar, Baz
+list<string>	a\x09b,c	canonical	a\x09b, c
+list<string>	caf\xC3\xA9,x	canonical	caf\xC3\xA9, x
+list<string>	a, a	canonical	a, a
+list<string>	,	invalid
+list<string>	a,	invalid
+list<string>	,a	invalid
+list<string>	a,,b	invalid
+list<string>	a, ,b	invalid
+list<string>	a\x01,b	invalid

@@ -1,10 +1,11 @@
 # Canonical INI fixtures
 
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
-editor and `keys/` for the hotkey binding codec. Core's C++ suite runs them unchanged
-(`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp` and
-`cpp/tests/key_bindings_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures`,
-`IniEditorFixtures` and `KeyBindingFixtures`, under xunit on net8.0 and in
+editor, `keys/` for the hotkey binding codec and `codecs/` for the value codecs. Core's C++
+suite runs them unchanged (`cpp/tests/canonical_ini_tests.cpp`,
+`cpp/tests/ini_editor_tests.cpp`, `cpp/tests/key_bindings_tests.cpp` and
+`cpp/tests/value_codecs_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures`,
+`IniEditorFixtures`, `KeyBindingFixtures` and `ValueCodecFixtures`, under xunit on net8.0 and in
 `CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2). Lopari's Rust codec is to run the same files, so nothing
 here is specific to one language: a reader or editor in any language is held to every case. The expected files are written by hand from the rules, never produced by an
 implementation.
@@ -109,3 +110,51 @@ case-insensitively; nothing else is folded. The same binding twice in one list i
 The canonical text writes the modifiers as `Ctrl+Shift+Alt+` in that order, the key as
 `data/keys.json` spells it (an alias as the key's name), a native code with no name as `0x`
 and upper-case hex without padding, and joins the items with `, `.
+
+## codecs/
+
+`cases.tsv` holds values and what each value codec reads from them and writes back. It is
+ASCII with the same note rule as `expected.tsv`, and each other line is a row whose fields
+are separated by one tab:
+
+| Field | Meaning |
+|-------|---------|
+| codec | one of the names below |
+| input | the value as the reader hands it over, already trimmed, with the byte escape above |
+| result | `canonical` or `invalid` |
+| canonical | only after `canonical`: the text the codec writes for what it read, with the byte escape; empty for an empty string or list |
+| bits | only for `float`, `double` and `float[0,1]`: the value read, as `0x` and 8 or 16 upper-case hex digits of its IEEE 754 bits |
+
+For a `canonical` row the codec must read the input, write exactly the canonical text, read
+that text back as an equal value (floats bit for bit) and write it again unchanged. For an
+`invalid` row it must refuse the input with an error, which names what was expected.
+
+| Codec | What it is |
+|-------|------------|
+| `bool` | writes `true` or `false`; reads `true false 1 0 yes no on off`, ASCII case-insensitive |
+| `int` | a 32-bit signed whole number: writes decimal, `-` only when negative, no leading zeros; reads `-?[0-9]+` |
+| `int[1,65535]` | `int` within 1 to 65535 |
+| `hex32`, `hex64` | writes `0x` and upper-case digits without padding; reads `0x` or `0X` and 1 to 8, or 1 to 16, digits of either case |
+| `float`, `double` | IEEE 754 binary32 and binary64, every finite value; see below |
+| `float[0,1]` | `float` within 0 to 1 |
+| `string` | the bytes as they are; refuses a byte below 0x20 other than tab |
+| `enum` | the tokens `Never`, `MenusOnly`, `AllDialogue` and `AllOverlays`: read ASCII case-insensitively, written in that spelling |
+| `color` | four `float[0,1]` separated by commas, each trimmed; written `r, g, b, a` |
+| `list<hex32>`, `list<hex64>`, `list<string>` | an empty value is an empty list; otherwise items split at `,`, each trimmed of spaces and tabs, non-empty and read by the item codec; written joined by `, ` |
+
+Floats. The text written is chosen among `%.Ng` in the C locale, N from 1 to 9 for `float`
+and 1 to 17 for `double`, keeping only the texts that read back to the same bits: the one
+with the smallest N that has no exponent, or, when every one has an exponent, the one with
+the smallest N. `.0` is appended when the text has neither `.` nor `e`. So 1 is `1.0`, 10 is
+`10.0` rather than `1e+01`, 0.15 is `0.15`, 0.00001 is `1e-05` and -0 is `-0.0`. A value is
+read with correct rounding, ties to even, from the grammar
+`-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?`; a number too large for the type, or one that is not
+zero but rounds to zero, is invalid.
+
+The rows are hand-written, and every float and double row was also checked against an
+independent reference that parses with exact rational arithmetic and formats with Python's
+`%g`. The C# string codec reads strict UTF-8 where the C++ one keeps any bytes, so the
+fixtures hold no string that is not UTF-8. Two values are kept out because .NET Framework
+disagrees with the rules there: it writes the float 1234.5677490234375 as `1234.5678` (the
+rule gives `1234.5677`), and on .NET Framework 3.5 it reads `3e-324` as 0 (the rule gives the
+smallest denormal). Each language's own tests hold them.

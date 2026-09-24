@@ -9,6 +9,65 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the canonical value codecs, in C# and C++
+
+How each kind of value is written in a canonical config file and read back. Nothing reads a
+config through them yet; the canonical config tables will. Every codec has one shape: parse
+a value as the canonical reader hands it over (already trimmed) into the value or an error
+naming what was expected, render the value as canonical text, and compare two values for
+verification, floats bit for bit. Rendering throws for a value that would not read back as
+itself.
+
+- `bool`: writes `true` / `false`; reads `true false 1 0 yes no on off`, ASCII
+  case-insensitive.
+- `int`: writes decimal, `-` only when negative, no leading zeros; reads `-?[0-9]+` within
+  the field type and an optional inclusive range.
+- `hex32`, `hex64`: write `0x` and upper-case digits without padding (`0x404`, `0x0`); read
+  `0x` or `0X` and 1 to 8 or 1 to 16 digits of either case.
+- `float`, `double`: of the `%.Ng` texts (N 1 to 9, or 1 to 17) that read back to the same
+  bits, the one with the smallest N that has no exponent, else the one with the smallest N,
+  with `.0` appended when it has neither `.` nor `e`: `1.0`, `10.0`, `0.15`, `1e-05`,
+  `-0.0`. Preferring the text without an exponent is what keeps 10 from being written
+  `1e+01`, which the smallest N alone would give. Reads
+  `-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?` within an optional inclusive range; no `inf`,
+  `nan`, leading `+`, leading or trailing `.`, comma or hex float, and a number too large
+  for the type, or one that is not zero but rounds to zero, is invalid.
+- `string`: C++ keeps the bytes, whatever their encoding; C# reads strict UTF-8 and treats
+  anything else as invalid. Neither reads a byte below 0x20 other than tab.
+- `enum`: PascalCase tokens, checked when the codec is built, read ASCII case-insensitively
+  and written in the declared spelling, never as a number.
+- `color`: four comma-separated floats in [0,1], each trimmed; written `r, g, b, a`.
+- `list<hex32>`, `list<hex64>`, `list<string>`: split at `,`, items trimmed of spaces and
+  tabs and non-empty; an empty value is an empty list; written joined by `, `. A string
+  item that is empty or holds `,` cannot be written.
+
+C++ (`cameraunlock/config/value_codecs.h`, pure, no `<windows.h>`): `CodecParseResult<T>`
+(`value`, `error`, `ok()`), `BoolCodec`, `IntCodec<Int>` over every integral type but
+`bool`, `Hex32Codec` and `Hex64Codec` (`HexCodec<std::uint32_t>` / `<std::uint64_t>`),
+`FloatCodec` and `DoubleCodec` (`FloatingCodec<F>`), `StringCodec`, `EnumToken<E>` and
+`EnumCodec<E>`, `ColorCodec` (`std::array<float, 4>`), and `Hex32ListCodec`,
+`Hex64ListCodec` and `StringListCodec` (`ListCodec<Item>`). Each has `Value`, `Parse`,
+`Render` and `Equal`; a range or token list that makes no sense, and a render that would not
+read back, throw `std::invalid_argument`. Floats go through `std::to_chars` and
+`std::from_chars`, so a consumer needs a standard library with floating-point `<charconv>`;
+verified with MSVC 19.50 and GCC 13.5.
+
+C# (`CameraUnlock.Core.Config`): `IValueCodec<T>` (`TryParse(byte[], out T, out string)`,
+`Render(T)` returning bytes, `Equal`), `BoolCodec`, `IntCodec` (int), `Hex32Codec` (uint),
+`Hex64Codec` (ulong), `FloatCodec`, `DoubleCodec`, `StringCodec`, `EnumToken<TEnum>` and
+`EnumCodec<TEnum>`, `ColorCodec` (a four-element float array), `Hex32ListCodec`,
+`Hex64ListCodec` and `StringListCodec`. On .NET Framework a float can be written with a
+different last digit than C++ writes (1234.5677490234375 as `1234.5678`), which C++ reads
+as the same float, and `double.Parse` is not correctly rounded, so a double written there
+can read as a neighbouring double elsewhere. On every runtime a value reads back to the
+same bits where it was written.
+
+`data/fixtures/canonical-ini/codecs/cases.tsv` (397 rows) holds both languages to the same
+text, run by the C++ suite, xunit on .NET 8 and `CameraUnlock.Core.FrameworkTests` on .NET
+Framework 3.5 and 4.7.2, and each language sweeps over 200,000 random finite floats and
+doubles plus zeros, denormals, the limits and the powers of ten, reading every render back
+bit for bit.
+
 ### Added - the canonical concept set in the config schema, and `DataFreshnessMs` and `PositionAllowed`
 
 `data/config-schema.json` now says which concepts the canonical config format writes, and

@@ -44,6 +44,7 @@
 #include "cameraunlock/config/head_tracking_config.h"
 #include "cameraunlock/config/ini_editor.h"
 #include "cameraunlock/config/ini_reader.h"
+#include "cameraunlock/config/value_codecs.h"
 #include "cameraunlock/config/value_guards.h"
 #include "cameraunlock/data/position_data.h"
 #include "cameraunlock/data/position_settings.h"
