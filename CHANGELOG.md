@@ -173,6 +173,24 @@ converted release ships and seeds neither file; the BepInEx section names
 `CameraUnlock.ini` as canonical; and a launcher edits `CameraUnlock.ini` only, never the legacy
 file. No code changes.
 
+### Fixed - the README config block resets to the defaults without deleting the legacy file
+
+The block for a repo in `legacy` told players to delete both files to go back to the defaults. A
+Lopari v0.9.0 receipt can record the legacy file as a seed: resident-evil-requiem-headtracking
+v0.4.0 installs REFramework and seeds `reframework/plugins/HeadTracking.ini`, and Lopari copies
+that record into the receipt of every later install while it owns the loader. With the file
+deleted the receipt is never intact again, so Lopari downloads and reinstalls the mod before every
+launch, and the reinstall writes no seed because REFramework is already there.
+
+- `generate-readme` and `scripts/templates/canonical-config-changelog.md`: to go back to the
+  defaults, replace everything in `CameraUnlock.ini` with the defaults the block prints.
+  Deleting only `CameraUnlock.ini` still imports the legacy file again.
+- The changelog template's notes and docs/canonical-config.md record why the legacy file is never
+  to be deleted.
+
+Consuming repos: a converted repo re-renders its README block with
+`pixi run readme --write --sections config`.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

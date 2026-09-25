@@ -26,6 +26,14 @@ Then:
 The migration bullets take their wording from the README config block that
 scripts/generate-readme.mjs renders (legacyParagraphs, the ConfigurationManager line and
 APPROVED_CHANGE_LINES), so a player reads the same thing in both. Change the two together.
+
+The reset bullet has the player replace what CameraUnlock.ini holds and never tells them to
+delete the legacy file. A Lopari v0.9.0 receipt can record the legacy file as a seed:
+resident-evil-requiem-headtracking v0.4.0 installs REFramework and seeds
+reframework/plugins/HeadTracking.ini, and Lopari carries that record into the receipt of every
+later install while it owns the loader. Once the file is gone the receipt is not intact, so
+Lopari downloads the latest release and reinstalls it before every launch, and the reinstall
+writes no seed because REFramework is already there.
 -->
 
 ## Legacy
@@ -38,7 +46,7 @@ APPROVED_CHANGE_LINES), so a player reads the same thing in both. Change the two
   - Reticle settings, and a key that toggled the reticle.
   - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
 - An older version of the mod reads `<legacy>` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `<legacy>`.
-- Deleting only `CameraUnlock.ini` makes the next start read `<legacy>` again. To go back to the defaults, delete both files.
+- Deleting only `CameraUnlock.ini` makes the next start read `<legacy>` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults the README shows.
 - Only where the mod is a BepInEx mod:
   BepInEx's ConfigurationManager no longer lists these settings. Edit `<path>` with any text editor.
 - Hotkeys are written as key names, and each hotkey lists every key that triggers it, the Ctrl+Shift chord included: `ToggleKey=End, Ctrl+Shift+Y`.

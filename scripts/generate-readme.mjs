@@ -238,7 +238,7 @@ function legacyParagraphs(legacy) {
     `Earlier versions of the mod kept these settings in ${old}, in the same folder. The first time this version starts and finds no ${config}, it reads your settings from ${old} and writes them into ${config}. It never changes ${old}, and does not read it again while ${config} exists.`,
     droppedSettings(),
     `An older version of the mod reads ${old} and never reads ${config}, so a setting you change after updating is not in ${old}.`,
-    `Deleting only ${config} makes the next start read ${old} again. To go back to the defaults, delete both files.`,
+    `Deleting only ${config} makes the next start read ${old} again. To go back to the defaults, replace everything in ${config} with the defaults below.`,
   ];
 }
 

@@ -857,8 +857,11 @@ in `legacy`:
   it again while `CameraUnlock.ini` exists; comments, keys the mod never read and the settings
   each approved change drops are not carried over; an older version of the mod reads the legacy
   file and never `CameraUnlock.ini`, so a setting changed after updating is not in the legacy
-  file; deleting only `CameraUnlock.ini` imports the legacy file again at the next start, and
-  deleting both gives the defaults.
+  file; deleting only `CameraUnlock.ini` imports the legacy file again at the next start; and
+  replacing everything in `CameraUnlock.ini` with the file the block ends with gives the defaults.
+  The block never tells a player to delete the legacy file: a Lopari v0.9.0 receipt can record it
+  as a seed (resident-evil-requiem-headtracking v0.4.0 seeds `reframework/plugins/HeadTracking.ini`
+  beside REFramework), and with that file gone Lopari reinstalls the mod before every launch.
 - **Outside `legacy`**: nothing beyond the location and the file.
 - **A BepInEx mod**, installed under `BepInEx\config\`, adds that BepInEx's ConfigurationManager
   no longer lists these settings, or for a repo outside `legacy`, does not list them.
