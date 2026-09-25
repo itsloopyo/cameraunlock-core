@@ -285,9 +285,15 @@ function validateSchema(schema, keyTable) {
             schemaError(where, `type '${concept.type}' is not one of ${Object.keys(valueTypes).join(', ')}`);
         }
         if (!('default' in concept)) schemaError(where, `has no default (type '${concept.type}')`);
-        if (!check(concept.default)) {
+        // A binding list needs no escaping either, and is accepted only as the concept's own
+        // canonical_default, which checkCanonicalFields validates. It belongs only on a key no
+        // flat reader reads, since those parse a single key name; the generator cannot tell
+        // which keys those are, and the flat readers' single-key defaults are pinned in
+        // HeadTrackingConfigTableTests and head_tracking_config_table_tests.cpp.
+        const listDefault = concept.codec === 'hotkey' && concept.default === concept.canonical_default;
+        if (!listDefault && !check(concept.default)) {
             const alphabet = concept.type === 'string'
-                ? '. String defaults are emitted verbatim into a C++ string literal, so they are limited to [A-Za-z0-9_-]'
+                ? '. String defaults are emitted verbatim into a C++ string literal, so they are limited to [A-Za-z0-9_-], or on a hotkey concept to its canonical_default'
                 : '';
             schemaError(where, `default ${JSON.stringify(concept.default)} is not a valid '${concept.type}'${alphabet}`);
         }

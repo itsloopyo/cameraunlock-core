@@ -313,8 +313,9 @@ The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFres
 tracker pivots 0 to 10, `LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its
 unit is the engine's own), and `CollisionChannel` none. The four hotkey lists start at the
 schema's `canonical_default`. The `default` field and core's field initialisers, which the older
-flat readers use, keep `End` for `ToggleKey`, `PageDown` for `YawModeKey` and `Insert` for
-`TrueFreeLookKey`, and leave `CycleTrackingModeKey` empty.
+flat readers use, keep `End` for `ToggleKey` and `PageDown` for `YawModeKey`, and leave
+`CycleTrackingModeKey` empty. No flat reader reads `TrueFreeLookKey`, so its `default` and field
+initialisers are its `canonical_default`.
 
 The tracking mode at startup is the pair `RotationEnabled` and `PositionEnabled`: both true is
 rotation and position, `true, false` rotation only, `false, true` position only. Both false names

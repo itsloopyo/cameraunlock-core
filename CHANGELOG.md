@@ -20,8 +20,10 @@ toggle are now schema concepts, so every mod spells them the same way.
   `[Position]` because the lean is all it changes and it exists only where positional tracking
   does, and a key goes in the section of its subject, as `CollisionEnabled` does. It is a persisted
   preference like `WorldSpaceYaw`: the toggle saves it, so a mod marks the row Writable.
-- `[Hotkeys] TrueFreeLookKey`, a key list with `canonical_default` `Insert, Ctrl+Shift+U`. Its
-  `default` and field initialiser are `Insert`, a single key like the other hotkey concepts'.
+- `[Hotkeys] TrueFreeLookKey`, a key list with `canonical_default` `Insert, Ctrl+Shift+U`. No flat
+  reader reads it, so its `default` and field initialisers are that list too, where the other
+  hotkey concepts keep the single key the flat readers have always shipped. The generator accepts a
+  list `default` only when it is the concept's own `canonical_default`.
 - Fields `HeadTrackingConfigData.TrueFreeLook` and `TrueFreeLookKeyName`, and
   `HeadTrackingConfig::true_free_look` and `true_free_look_key_name`, which come after every
   existing C++ member. Both `HeadTrackingConfigTable`s bind them, and their defaults instance starts

@@ -258,8 +258,10 @@ void TestHotkeyDefaults() {
 
     const HeadTrackingConfig flat;
     Check(flat.toggle_key_name == "End" && flat.cycle_tracking_mode_key_name.empty() &&
-              flat.yaw_mode_key_name == "PageDown" && flat.true_free_look_key_name == "Insert",
+              flat.yaw_mode_key_name == "PageDown",
           "the flat reader's field defaults are single keys");
+    Check(flat.true_free_look_key_name == schema::ConceptTraits<Concept::TrueFreeLookKey>::kCanonicalDefault,
+          "true_free_look_key_name's initialiser is its canonical_default");
 }
 
 void TestTrueFreeLookSpellings() {
@@ -276,7 +278,7 @@ void TestTrueFreeLookSpellings() {
     std::vector<std::string> log;
     flat.ApplyValues({{"TrueFreeLook", "true"}, {"true_free_look", "true"}, {"TrueFreeLookKey", "F8"}},
                      [&log](const std::string& line) { log.push_back(line); });
-    Check(!flat.true_free_look && flat.true_free_look_key_name == "Insert" && log.empty(),
+    Check(!flat.true_free_look && flat.true_free_look_key_name == "Insert, Ctrl+Shift+U" && log.empty(),
           "the flat reader reads neither TrueFreeLook concept");
 }
 

@@ -24,8 +24,9 @@
     "for players (`doc` is the developer text), and may have a `range` (`min`, `max`, either",
     "optional; a value outside it is invalid, never clamped), a `codec` ('hotkey' on the key",
     "lists) and a `canonical_default`, the binding list a canonical file starts with. The",
-    "`default` and the field initialisers keep the single key name the flat readers have",
-    "always shipped, because changing a default is a breaking change."
+    "`default` and the field initialisers of a key the flat readers read keep the single key",
+    "name those readers have always shipped, because changing a default is a breaking change.",
+    "A hotkey concept no flat reader reads has its `canonical_default` as its `default`."
   ],
   "deliberately_unaliased": [
     {
@@ -536,9 +537,9 @@
       "section": "Hotkeys",
       "key": "TrueFreeLookKey",
       "type": "string",
-      "default": "Insert",
+      "default": "Insert, Ctrl+Shift+U",
       "aliases": [],
-      "doc": "Key that toggles TrueFreeLook, between sights locked and true free look. Only in a mod that binds TrueFreeLook. The deprecated flat readers do not read it, so its default is only the field initialiser's; a canonical file starts at canonical_default.",
+      "doc": "Key list that toggles TrueFreeLook, between sights locked and true free look. Only in a mod that binds TrueFreeLook. The deprecated flat readers do not read it, so nothing holds its default to a single key name: the default and the field initialisers are the canonical_default.",
       "canonical": true,
       "file_comment": ["Switches between keeping your eye on the sights and true free look (TrueFreeLook)."],
       "codec": "hotkey",

@@ -335,7 +335,7 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "ReticleToggleKey", config_keys::kReticleToggleKey, ConfigValueType::kString, 0, 0.0f, false, "Insert", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "CycleTrackingModeKey", config_keys::kCycleTrackingModeKey, ConfigValueType::kString, 0, 0.0f, false, "", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "YawModeKey", config_keys::kYawModeKey, ConfigValueType::kString, 0, 0.0f, false, "PageDown", {0.0f, 0.0f, 0.0f, 0.0f} },
-    { "TrueFreeLookKey", config_keys::kTrueFreeLookKey, ConfigValueType::kString, 0, 0.0f, false, "Insert", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "TrueFreeLookKey", config_keys::kTrueFreeLookKey, ConfigValueType::kString, 0, 0.0f, false, "Insert, Ctrl+Shift+U", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "RecenterKey", config_keys::kRecenterKey, ConfigValueType::kString, 0, 0.0f, false, "Home", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LightFollowsHead", config_keys::kLightFollowsHead, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LightMultiplier", config_keys::kLightMultiplier, ConfigValueType::kFloat, 0, 1.5f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },

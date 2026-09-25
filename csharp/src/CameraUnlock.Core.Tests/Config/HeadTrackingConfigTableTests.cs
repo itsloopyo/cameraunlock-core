@@ -78,7 +78,12 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal("End", flat.ToggleKeyName);
             Assert.Equal(string.Empty, flat.CycleTrackingModeKeyName);
             Assert.Equal("PageDown", flat.YawModeKeyName);
-            Assert.Equal("Insert", flat.TrueFreeLookKeyName);
+        }
+
+        [Fact]
+        public void TrueFreeLookKeyNamesInitialiserIsItsCanonicalDefault()
+        {
+            Assert.Equal(ConfigConcepts.TrueFreeLookKey.CanonicalDefault, new HeadTrackingConfigData().TrueFreeLookKeyName);
         }
 
         [Fact]
@@ -103,7 +108,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "TrueFreeLookKey", "F8" },
             }, log.Add);
             Assert.False(flat.TrueFreeLook);
-            Assert.Equal("Insert", flat.TrueFreeLookKeyName);
+            Assert.Equal("Insert, Ctrl+Shift+U", flat.TrueFreeLookKeyName);
             Assert.Empty(log);
         }
 

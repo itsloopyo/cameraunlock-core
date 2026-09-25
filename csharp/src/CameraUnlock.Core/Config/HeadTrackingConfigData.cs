@@ -80,7 +80,7 @@ namespace CameraUnlock.Core.Config
         /// The key list that toggles <see cref="TrueFreeLook"/>. Read only through
         /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
         /// </summary>
-        public string TrueFreeLookKeyName { get; set; } = "Insert";
+        public string TrueFreeLookKeyName { get; set; } = "Insert, Ctrl+Shift+U";
 
         /// <summary>
         /// Yaw mode at startup. true = horizon-locked yaw (rotates around world up

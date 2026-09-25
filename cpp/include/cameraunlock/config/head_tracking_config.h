@@ -87,7 +87,7 @@ struct HeadTrackingConfig {
     bool true_free_look = false;
     /// The key list that toggles true_free_look. Read only through
     /// config::HeadTrackingConfigTable; ApplyValues does not read it.
-    std::string true_free_look_key_name = "Insert";
+    std::string true_free_look_key_name = "Insert, Ctrl+Shift+U";
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.
