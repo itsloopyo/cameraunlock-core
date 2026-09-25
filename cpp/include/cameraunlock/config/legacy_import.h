@@ -66,9 +66,9 @@ struct DroppedValue {
 std::string DescribeDroppedValue(const DroppedValue& dropped);
 
 /// The effective legacy value of one pose-shaping setting the frozen reader read: a sensitivity,
-/// deadzone, response curve or axis inversion, which the canonical format has no row for. A
-/// differential test reads these to check the conversion: where `folded` is true, the mod's own
-/// axis code now does what `shipped` did.
+/// unit scale, deadzone, response curve or axis inversion, which the canonical format has no row
+/// for. A differential test reads these to check the conversion: where `folded` is true, the mod's
+/// own axis code now does what `shipped` did.
 struct PoseShapingValue {
     std::string section;
     std::string key;

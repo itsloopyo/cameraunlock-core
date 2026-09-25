@@ -50,7 +50,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `scripts/templates/canonical-config-changelog.md`, and the `PoseShaping` log line in both
   languages, now `sensitivity, scales, deadzones, response curves and axis inversion are set in the
   tracker now, not in this mod`. No mod has converted, so no README or log a player has seen
-  changes.
+  changes. metaphor-refantazio's scale is a bare `[Position] Scale`, which no group can list
+  because section-less matching would also take `[FieldOfView] Scale` and `[Reticle] Scale`. The
+  lint refuses a bare `Scale` in a canonical file; the table and apply do not name it, so that
+  conversion folds and drops the scale by hand through `LegacyPoseShaping`.
 
 ### Fixed - every wrapper sets `MOD_SEED_FILES` and `PRESERVE_FILES`, blank where unused
 

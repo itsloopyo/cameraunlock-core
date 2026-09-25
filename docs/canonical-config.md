@@ -372,6 +372,13 @@ The lists match these spellings and no others. A pose-shaping setting under a na
 passes the table, apply and the lint as a game-local row, so a conversion that meets a new
 spelling adds it to its group in core's schema, never as a list of the mod's own.
 
+A bare noun cannot go into a group. metaphor-refantazio reads its unit scale as `[Position] Scale`,
+and section-less matching would take spec-ops-the-line's `[FieldOfView] Scale` and rv-there-yet's
+`[Reticle] Scale` with it, which are not pose shaping. The lint refuses a bare `Scale` in any
+canonical file, but a table accepts it as a game-local row and apply reports a stray one as
+`UnknownKey`, so that conversion folds the scale into code and drops the legacy value through
+`LegacyPoseShaping` by hand, with no gate behind it.
+
 The conversion from the tracker's metres to the game's units is the mod's boundary code, like its
 axis signs. A scale the player can edit is a position sensitivity under another name, so, by the
 owner's ruling of 2026-09-25, a conversion folds the shipped value into code as a constant and
