@@ -52,7 +52,7 @@ function boolConcept(id) {
 // In the order the generator writes them.
 export const LAUNCHER_ROWS = ["EnableOnStartup", "WorldSpaceYaw", "RotationEnabled", "PositionEnabled", "TrueFreeLook"].map(boolConcept);
 const POSITION_ALLOWED = boolConcept("PositionAllowed");
-// The one row data/config-format.json descriptor_omits can list.
+// The row whose committed value away from the fleet default needs a per_game entry.
 const WORLD_SPACE_YAW = LAUNCHER_ROWS.find((r) => r.id === "WorldSpaceYaw");
 const TRACKING_ROWS = ["RotationEnabled", "PositionEnabled"];
 if (!isDeepStrictEqual(TRACKING_MODE.channels, TRACKING_ROWS)) {
@@ -69,6 +69,7 @@ const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
 const TAG_VERSION = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+const perGameRows = (repo) => (FORMAT.per_game[repo] ?? []).map((e) => e.row);
 const slashes = (p) => p.replace(/\\/g, "/");
 const lower = (p) => slashes(p).toLowerCase();
 const anchorOf = (item) => item.anchor ?? "game_root";
@@ -193,10 +194,10 @@ export function shapeProblems(man, { checkVersion }) {
 
 // The rows a repo's descriptor holds: every launcher concept its committed file has as an active
 // line, with the committed value. Two kinds are left out. A concept data/config-format.json
-// descriptor_omits lists for the repo, which the launcher then never manages. And the tracking
-// pair, when the file has PositionAllowed=false, since that mod runs rotation only whatever the
-// pair says. A committed WorldSpaceYaw away from the fleet default is refused unless it is
-// omitted, so a game that differs on purpose cannot be handed to a launcher global by default.
+// per_game lists for the repo, which the launcher then never manages. And the tracking pair, when
+// the file has PositionAllowed=false, since that mod runs rotation only whatever the pair says. A
+// committed WorldSpaceYaw away from the fleet default is refused unless per_game lists it, so a
+// game that differs on purpose cannot be handed to a launcher global by default.
 export function expectedRows(root, state) {
   if (state.files.length !== 1) {
     return { rows: null, problems: [`data/config-format.json records ${state.files.length} config files for ${state.repo}, and a descriptor names one`] };
@@ -207,7 +208,7 @@ export function expectedRows(root, state) {
     return { rows: null, problems: [`descriptor rows come from the committed config, and data/config-format.json ${which} for ${state.repo}`] };
   }
   const doc = parseCanonicalIni(fs.readFileSync(path.join(root, ...file.committed.split("/"))));
-  const omitted = (FORMAT.descriptor_omits[state.repo] ?? []).map((o) => o.row);
+  const omitted = perGameRows(state.repo);
   const problems = [];
   const read = (concept) => {
     const section = findSection(doc, concept.section);
@@ -224,14 +225,14 @@ export function expectedRows(root, state) {
     const value = read(concept);
     if (omitted.includes(concept.id)) {
       if (value === undefined) {
-        problems.push(`data/config-format.json descriptor_omits lists ${concept.id} for ${state.repo}, and ${file.committed} has no ${concept.key} line`);
+        problems.push(`data/config-format.json per_game lists ${concept.id} for ${state.repo}, and ${file.committed} has no ${concept.key} line`);
       }
       continue;
     }
     if (value === undefined) continue;
     if (concept === WORLD_SPACE_YAW && value !== concept.default) {
       problems.push(
-        `${file.committed} has [${concept.section}] ${concept.key}=${value}, away from the fleet default ${concept.default}; a game whose default differs on purpose is listed in data/config-format.json descriptor_omits, so a launcher global never reaches it, and any other game commits the default`,
+        `${file.committed} has [${concept.section}] ${concept.key}=${value}, away from the fleet default ${concept.default}; a game whose default differs on purpose is listed in data/config-format.json per_game, so a launcher global never reaches it, and any other game commits the default`,
       );
       continue;
     }
@@ -375,8 +376,8 @@ function repoProblems(man, root, state) {
 }
 
 function fixHint(state) {
-  const omits = (FORMAT.descriptor_omits[state.repo] ?? []).map((o) => o.row);
-  const omitted = omits.length > 0 ? ` (data/config-format.json descriptor_omits leaves out ${omits.join(", ")})` : "";
+  const omits = perGameRows(state.repo).filter((row) => LAUNCHER_ROWS.some((r) => r.id === row));
+  const omitted = omits.length > 0 ? ` (data/config-format.json per_game leaves out ${omits.join(", ")})` : "";
   return `node cameraunlock-core/scripts/encode-seed.mjs, which render-config runs, rewrites rows${omitted}`;
 }
 

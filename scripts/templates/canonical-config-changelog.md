@@ -13,8 +13,9 @@ Then:
 - Replace <legacy> with the entry's `legacy_source`, the file the pre-canonical builds read
   (HeadTracking.ini, or the BepInEx <GUID>.cfg), and <path> with the installed path of
   CameraUnlock.ini (BepInEx\config\CameraUnlock.ini).
-- Take the hotkey example from the repo's committed config, which differs from the fleet
-  default where data/config-format.json records a hotkey_exceptions entry.
+- Take the hotkey example from the fleet default, or, where data/config-format.json per_game
+  lists the repo's ToggleKey because the game binds a chord itself, from the value the repo's
+  committed config holds on that row.
 - Keep a bullet marked "Only where" only where that is true of the repo, and delete the
   marker line. Where a Removed bullet's condition is false, say instead what changes for
   which players.

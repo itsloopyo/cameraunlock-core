@@ -9,15 +9,13 @@
 //
 //   node scripts/check-config-format.mjs
 //
-// Reads data/config-format.json, and data/config-schema.json and data/keys.json to check
-// hotkey_exceptions against the hotkey concepts, so it is safe in a clean CI checkout.
+// Reads data/config-format.json, and data/config-schema.json to check per_game rows against
+// the canonical concepts, so it is safe in a clean CI checkout.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { formatKeyBindings, parseKeyBindings } from "./lib/key-bindings.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FORMAT_PATH = path.join(REPO_ROOT, "data", "config-format.json");
@@ -36,14 +34,15 @@ const TOP_LEVEL_KEYS = [
   "normalisations",
   "approved_changes",
   "conversion_notes",
-  "hotkey_exceptions",
   "allow_legacy_symbols",
-  "descriptor_omits",
+  "per_game",
 ];
+const REPLACED_KEYS = {
+  hotkey_exceptions: "a chord a game binds itself is a per_game hotkey row",
+  descriptor_omits: "a row a game keeps for itself is a per_game row",
+};
 const DIALECTS = new Set(["native", "unity"]);
-// The launcher rows a config descriptor may leave out: world-space yaw, in a game whose default
-// differs from the fleet's on purpose (no stable up) and which a launcher global must not reach.
-const OMITTABLE_ROWS = new Set(["WorldSpaceYaw"]);
+const CANONICAL_IDS = new Set(SCHEMA.concepts.filter((c) => c.canonical).map((c) => c.id));
 const REPO_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const BAD_PATH_CHARS = /[<>:"|?*\x00-\x1f]/;
@@ -68,7 +67,10 @@ for (const dup of duplicateKeys(raw)) fail(dup);
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const isText = (v) => typeof v === "string" && v.trim() !== "";
 
-checkKeys("the top level", doc, TOP_LEVEL_KEYS, []);
+for (const [key, instead] of Object.entries(REPLACED_KEYS)) {
+  if (key in doc) fail(`the top level has "${key}", which per_game replaced: ${instead}`);
+}
+checkKeys("the top level", doc, TOP_LEVEL_KEYS, Object.keys(REPLACED_KEYS));
 if (doc.schema_version !== SCHEMA_VERSION) {
   fail(`schema_version is ${JSON.stringify(doc.schema_version)} but this validator implements v${SCHEMA_VERSION}`);
 }
@@ -235,44 +237,6 @@ for (const [name, notes] of Object.entries(doc.conversion_notes)) {
   });
 }
 
-for (const [name, byKey] of Object.entries(doc.hotkey_exceptions)) {
-  const where = `hotkey_exceptions.${name}`;
-  if (!(name in configs)) fail(`${where}: ${name} is not a repo in configs`);
-  if (!isObject(byKey) || Object.keys(byKey).length === 0) {
-    fail(`${where} must be a non-empty object keyed by hotkey key`);
-    continue;
-  }
-  for (const [key, ex] of Object.entries(byKey)) {
-    if (!isObject(ex)) {
-      fail(`${where}.${key} must be an object`);
-      continue;
-    }
-    checkKeys(`${where}.${key}`, ex, ["replaces", "with", "reason"], []);
-    for (const field of ["replaces", "with", "reason"]) {
-      if (!isText(ex[field])) fail(`${where}.${key}.${field} must be a non-empty string`);
-    }
-    if (!isText(ex.replaces) || !isText(ex.with)) continue;
-    const concept = SCHEMA.concepts.find((c) => c.key === key && c.canonical_default !== undefined);
-    if (!concept) {
-      fail(`${where}.${key}: not a hotkey concept with a canonical_default in data/config-schema.json`);
-      continue;
-    }
-    const defaults = concept.canonical_default.split(", ");
-    if (!defaults.includes(ex.replaces)) {
-      fail(`${where}.${key}.replaces ${JSON.stringify(ex.replaces)} is not a binding of ${key}'s canonical_default ${concept.canonical_default}`);
-    }
-    if (defaults.includes(ex.with)) fail(`${where}.${key}.with ${JSON.stringify(ex.with)} is already in ${key}'s canonical_default`);
-    for (const dialect of new Set(Array.isArray(configs[name]) ? configs[name].map((f) => f?.dialect) : [])) {
-      if (!DIALECTS.has(dialect)) continue;
-      const parsed = parseKeyBindings(ex.with, dialect);
-      if (parsed.error) fail(`${where}.${key}.with: ${parsed.error}`);
-      else if (parsed.bindings.length !== 1 || formatKeyBindings(parsed.bindings, dialect) !== ex.with) {
-        fail(`${where}.${key}.with must be one binding written as the codec writes it: ${formatKeyBindings(parsed.bindings, dialect)}`);
-      }
-    }
-  }
-}
-
 for (const [name, uses] of Object.entries(doc.allow_legacy_symbols)) {
   const where = `allow_legacy_symbols.${name}`;
   if (!(name in configs)) fail(`${where}: ${name} is not a repo in configs`);
@@ -292,25 +256,25 @@ for (const [name, uses] of Object.entries(doc.allow_legacy_symbols)) {
   });
 }
 
-for (const [name, omits] of Object.entries(doc.descriptor_omits)) {
-  const where = `descriptor_omits.${name}`;
+for (const [name, entries] of Object.entries(doc.per_game)) {
+  const where = `per_game.${name}`;
   if (!(name in configs)) fail(`${where}: ${name} is not a repo in configs`);
-  if (!Array.isArray(omits) || omits.length === 0) {
+  if (!Array.isArray(entries) || entries.length === 0) {
     fail(`${where} must be a non-empty array`);
     continue;
   }
   const rows = new Set();
-  omits.forEach((omit, i) => {
-    if (!isObject(omit)) {
+  entries.forEach((entry, i) => {
+    if (!isObject(entry)) {
       fail(`${where}[${i}] must be an object`);
       return;
     }
-    checkKeys(`${where}[${i}]`, omit, ["row", "reason", "approved"], []);
-    if (!OMITTABLE_ROWS.has(omit.row)) fail(`${where}[${i}].row ${JSON.stringify(omit.row)} is not one of ${[...OMITTABLE_ROWS].join(", ")}`);
-    else if (rows.has(omit.row)) fail(`${where}[${i}].row ${omit.row} is listed twice`);
-    rows.add(omit.row);
-    if (!isText(omit.reason)) fail(`${where}[${i}].reason must be a non-empty string`);
-    if (typeof omit.approved !== "string" || !DATE.test(omit.approved)) fail(`${where}[${i}].approved must be a YYYY-MM-DD date`);
+    checkKeys(`${where}[${i}]`, entry, ["row", "reason", "approved"], []);
+    if (!CANONICAL_IDS.has(entry.row)) fail(`${where}[${i}].row ${JSON.stringify(entry.row)} is not the id of a canonical concept in data/config-schema.json`);
+    else if (rows.has(entry.row)) fail(`${where}[${i}].row ${entry.row} is listed twice`);
+    rows.add(entry.row);
+    if (!isText(entry.reason)) fail(`${where}[${i}].reason must be a non-empty string`);
+    if (typeof entry.approved !== "string" || !DATE.test(entry.approved)) fail(`${where}[${i}].approved must be the YYYY-MM-DD date the owner approved it`);
   });
 }
 

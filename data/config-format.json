@@ -35,21 +35,21 @@
     "`conversion_notes`: per repo in `configs`, facts the owner decided that its conversion and",
     "differential test follow: `text` and the `approved` date.",
     "",
-    "`hotkey_exceptions`: per repo, per canonical hotkey key, a chord the game binds itself:",
-    "`replaces` is the binding of the key's canonical_default that the game takes, `with` the",
-    "binding the repo's file holds in its place, and `reason` why (/c/data/prompts/controls.md,",
-    "Per-game conflict exceptions). The canonical config lint allows no other departure from",
-    "canonical_default.",
     "`allow_legacy_symbols`: per repo, uses of a symbol the legacy-reader check bans that do not",
     "read the mod's config: `symbol` as the check reports it (GetPrivateProfileStringA, IniReader,",
     "ConfigFile.Bind), `file` the repo path and `reason`.",
     "",
-    "`descriptor_omits`: per repo in `configs`, launcher rows the `config` descriptor in its",
-    "launcher-manifest.json leaves out of `rows` although the committed file has them, so a",
-    "launcher never sets them: `row` (only WorldSpaceYaw), `reason` and the `approved` date. For",
-    "a game whose default differs from the fleet on purpose. scripts/check-config-descriptor.mjs",
-    "and encode-seed.mjs read it; every other launcher row in the committed file is in `rows`, and",
-    "a committed WorldSpaceYaw away from the data/config-schema.json default fails unless listed."
+    "`per_game`: per repo in `configs`, the canonical concept rows the game keeps for itself",
+    "instead of taking them from Defaults.ini: `row` the concept id, `reason` and the `approved`",
+    "date, which every entry needs. The game's table marks each such row PerGame(), and the",
+    "committed file holds its value there, where every other concept row holds default; the",
+    "canonical config lint holds the file to that. A chord a game binds itself is a per_game",
+    "hotkey row, whose reason names the chord it replaces and the one it uses. An entry added",
+    "after the repo's first converted release changes what default means in files already on",
+    "players' disks, since those rows stop following Defaults.ini, so it is a breaking change for",
+    "that repo. scripts/check-config-descriptor.mjs leaves a listed launcher row out of the",
+    "descriptor's `rows`, and fails a committed WorldSpaceYaw away from the",
+    "data/config-schema.json default unless it is listed."
   ],
   "legacy": {
     "abzu-headtracking": {},
@@ -577,13 +577,12 @@
       }
     ]
   },
-  "hotkey_exceptions": {},
   "allow_legacy_symbols": {},
-  "descriptor_omits": {
+  "per_game": {
     "subnautica-headtracking": [
       {
         "row": "WorldSpaceYaw",
-        "reason": "The mod defaults to camera-local yaw because swimming has no stable up, so a launcher global for world-space yaw must not reach it.",
+        "reason": "The mod defaults to camera-local yaw because swimming has no stable up, so Defaults.ini's WorldSpaceYaw must not reach it.",
         "approved": "2026-09-25"
       }
     ]

@@ -137,7 +137,7 @@ const sd = real("sleeping-dogs", "sleeping-dogs-headtracking");
 const sdConfig = { path: "CameraUnlock.ini", rows: { ...ALL_ROWS } };
 clean("sleeping-dogs", manifest("sleeping-dogs", structuredClone(sdConfig)), sd);
 
-// subnautica-headtracking's BepInEx entry, legacy, with descriptor_omits WorldSpaceYaw, given a
+// subnautica-headtracking's BepInEx entry, legacy, with per_game WorldSpaceYaw, given a
 // committed file.
 const BEP_LEGACY = FORMAT.configs["subnautica-headtracking"][0].legacy_source;
 const bep = synthetic("bepinex", "subnautica-headtracking", "legacy", [{ ...FORMAT.configs["subnautica-headtracking"][0], committed: "Config.ini" }]);
@@ -232,12 +232,12 @@ fails("committed row left out", abzuMan(({ rows: { TrueFreeLook: _, ...rows }, .
   ]);
   clean("WorldSpaceYaw away from the default, omitted", bepMan(), omitted);
 }
-fails("an omitted row declared", bepMan((c) => ({ ...c, rows: { ...ALL_ROWS } })), bep, "descriptor_omits leaves out WorldSpaceYaw");
+fails("an omitted row declared", bepMan((c) => ({ ...c, rows: { ...ALL_ROWS } })), bep, "per_game leaves out WorldSpaceYaw");
 {
   const noYaw = synthetic("omit-absent", "subnautica-headtracking", "legacy", [
     { ...bep.state.files[0], text: edit(ALL, "WorldSpaceYaw=true\r\n", "") },
   ]);
-  fails("descriptor_omits names a row the file lacks", bepMan(), noYaw, "descriptor_omits lists WorldSpaceYaw for subnautica-headtracking, and Config.ini has no WorldSpaceYaw line");
+  fails("per_game names a row the file lacks", bepMan(), noYaw, "per_game lists WorldSpaceYaw for subnautica-headtracking, and Config.ini has no WorldSpaceYaw line");
 }
 {
   const base = abzuWith("position-not-allowed", edit(ALL, "PositionAllowed=true", "PositionAllowed=false"));
@@ -508,6 +508,56 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     preserve.status === 1 && messages.length === expected.length &&
       expected.every((e) => messages.filter((m) => m.startsWith(e) && m.endsWith("The mod creates CameraUnlock.ini at first launch; list neither file.")).length === 1),
     `conformance: config-preserve should fail each converted repo's listings and nothing else, got ${preserve.status}\n${preserve.stdout}${preserve.stderr}`,
+  );
+
+  // conformance's config-defaults check: in a converted repo, DefaultsFile.At outside a test
+  // folder, PerUser inside one, and a test source that builds an owner or initialises PluginMod
+  // without naming At each fail; vendored code, an unconverted repo and the right uses do not.
+  const tracked = (label, name, files) => {
+    const root = repo(label, name, files);
+    git(root, "add", "-A");
+    return root;
+  };
+  const wrong = tracked("defaults-wrong", "abzu-headtracking", {
+    "HeadTracking.ini": ALL,
+    "src/mod.cpp": "void Load() {\r\n  options.defaults = config::DefaultsFile::At(L\"C:\\\\Defaults.ini\");\r\n}\r\n",
+    "src/Mod/Plugin.cs": "class P {\r\n  void Load() { options.Defaults = DefaultsFile.At(path); }\r\n}\r\n",
+    "tests/config_tests.cpp": "auto d = DefaultsFile::PerUser();\r\nConfigOwner<Config> owner(Options(dir));\r\n",
+    "src/Mod.Tests/OwnerTests.cs": "class T {\r\n  void Run() { var owner = new ConfigOwner<Cfg>(options); }\r\n}\r\n",
+    "tests/config_differential/differential_tests.cpp": "auto owner = std::make_unique<cfg::ConfigOwner<Config>>(Options(p));\r\n",
+    "Test/plugin_test.cpp": "void Run() { ref::PluginMod::Instance().Initialize(descriptor); }\r\n",
+    "vendor/lib/x.cpp": "auto d = DefaultsFile::At(L\"C:\\\\x.ini\");\r\n",
+  });
+  const right = tracked("defaults-right", "abzu-headtracking", {
+    "HeadTracking.ini": ALL,
+    "src/dllmain.cpp": "options.defaults = cameraunlock::config::DefaultsFile::PerUser();\r\ng_owner = std::make_unique<cfg::ConfigOwner<Config>>(std::move(options));\r\n",
+    "tests/config_tests.cpp": "ConfigOwner<Config> owner(Options(dir, DefaultsFile::At(dir / L\"Defaults.ini\")));\r\n",
+    "src/Game.Tests/T.cs": "var owner = new ConfigOwner<C>(new ConfigOwnerOptions<C> { Defaults = DefaultsFile.At(p) });\r\n",
+    "tests/helpers.h": "std::unique_ptr<ConfigOwner<Config>> NewOwner(const fs::path& path);\r\nvoid Use(ConfigOwner<Config>& owner);\r\n",
+    "src/latests/foo.cpp": "auto d = DefaultsFile::PerUser();\r\n",
+  });
+  const unconvertedAt = tracked("defaults-unconverted", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "src/mod.cpp": "auto d = DefaultsFile::At(L\"C:\\\\x.ini\");\r\n" });
+  const defaults = spawnSync(
+    "powershell",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo '${wrong}','${right}','${unconvertedAt}' -Check config-defaults -Json; exit $LASTEXITCODE`],
+    { encoding: "utf8" },
+  );
+  const defaultsFindings = JSON.parse(defaults.stdout.replace(/^\uFEFF/, "") || "[]");
+  const defaultsMessages = (Array.isArray(defaultsFindings) ? defaultsFindings : [defaultsFindings]).map((x) => `${x.severity} ${x.message}`);
+  const atRule = "a mod must never point at a fixed path, so it passes DefaultsFile.PerUser()";
+  const testRule = "a test must never read or create the player's real Defaults.ini, so it passes DefaultsFile.At with a scratch path";
+  const expectedDefaults = [
+    `FAIL src/mod.cpp:2 names DefaultsFile.At outside a test folder; ${atRule}`,
+    `FAIL src/Mod/Plugin.cs:2 names DefaultsFile.At outside a test folder; ${atRule}`,
+    `FAIL tests/config_tests.cpp:1 names DefaultsFile.PerUser in a test folder; ${testRule}`,
+    `FAIL tests/config_tests.cpp:2 builds a ConfigOwner and never names DefaultsFile.At; ${testRule}`,
+    `FAIL src/Mod.Tests/OwnerTests.cs:2 builds a ConfigOwner and never names DefaultsFile.At; ${testRule}`,
+    `FAIL tests/config_differential/differential_tests.cpp:1 builds a ConfigOwner and never names DefaultsFile.At; ${testRule}`,
+    `FAIL Test/plugin_test.cpp:1 initialises PluginMod and never names DefaultsFile.At; ${testRule}`,
+  ];
+  check(
+    defaults.status === 1 && isDeepStrictEqual([...defaultsMessages].sort(), [...expectedDefaults].sort()),
+    `conformance: config-defaults should fail each wrong use and nothing else, got ${defaults.status}\n${defaults.stdout}${defaults.stderr}`,
   );
 }
 

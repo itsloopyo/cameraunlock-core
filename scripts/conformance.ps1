@@ -58,7 +58,7 @@ $CHECK_IDS = @(
     'install-wrapper', 'delayed-expansion', 'arg-parser', 'config-block', 'config-pairing',
     'shim-marker', 'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
     'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme',
-    'config-format', 'config-legacy-reader', 'config-preserve', 'config-descriptor'
+    'config-format', 'config-legacy-reader', 'config-preserve', 'config-descriptor', 'config-defaults'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -957,7 +957,7 @@ function Test-ShimMarker {
 # where each repo stands in data/config-format.json and lints every committed config file that
 # carries the [CameraUnlock] stamp; the checks below turn that into findings. A repo is
 # converted when one of its committed files carries the stamp: nothing records it separately.
-$CONFIG_CHECK_IDS = @('config-format', 'config-legacy-reader', 'config-preserve')
+$CONFIG_CHECK_IDS = @('config-format', 'config-legacy-reader', 'config-preserve', 'config-defaults')
 $CanonicalConfig = @{}
 # scripts/generate-readme.mjs --json --sections config, per root: whether README.md's config
 # block matches the one rendered from data/config-format.json and the committed config.
@@ -1169,6 +1169,66 @@ function Test-ConfigPreserve {
     }
 }
 
+# Where a converted repo's owners find Defaults.ini. A mod passes DefaultsFile.PerUser() and never
+# a fixed path; a test passes DefaultsFile.At with a scratch path and never PerUser, and a test
+# source that builds an owner or initialises PluginMod has to name At, since an options helper
+# shared with the mod would otherwise hand a test the player's real file. A test folder is a
+# folder named test or tests in any case, or one whose name ends in Tests.
+$DEFAULTS_SCAN_SOURCE = '\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|cs)$'
+$DEFAULTS_AT = '\bDefaultsFile\s*(\.|::)\s*At\b'
+$DEFAULTS_PER_USER = '\bDefaultsFile\s*(\.|::)\s*PerUser\b'
+$OWNER_BUILT_CPP = '\bnew\s+(\w+\s*::\s*)*ConfigOwner\s*<|\bmake_(unique|shared)\s*<\s*(\w+\s*::\s*)*ConfigOwner\s*<|\bConfigOwner\s*<([^<>;]|<[^<>;]*>)*>\s*([A-Za-z_]\w*\s*)?[({=]'
+$OWNER_BUILT_CS = '\bnew\s+(\w+\s*\.\s*)*ConfigOwner\s*<|\bConfigOwner\s*<[^;()]*>\s+[A-Za-z_]\w*\s*=\s*new\s*\('
+$PLUGIN_MOD_INIT = '\bPluginMod\s*::\s*Instance\s*\(\s*\)\s*\.\s*Initialize\s*\(|\bInitializePlugin\s*\('
+
+function Test-IsTestSource {
+    param([string]$Rel)
+    foreach ($folder in @($Rel -split '/' | Select-Object -SkipLast 1)) {
+        if ($folder -match '^tests?$' -or $folder -cmatch 'Tests$') { return $true }
+    }
+    return $false
+}
+
+function Test-ConfigDefaults {
+    param([string]$Name, [string]$Root)
+
+    $state = $CanonicalConfig[$Root]
+    if (-not $state.converted) { return }
+
+    $testRule = 'a test must never read or create the player''s real Defaults.ini, so it passes DefaultsFile.At with a scratch path'
+    foreach ($rel in @(Get-TrackedFiles $Root)) {
+        if ($rel -notmatch $DEFAULTS_SCAN_SOURCE -or $rel -match $LEGACY_SCAN_SKIP) { continue }
+        $lines = [System.IO.File]::ReadAllLines((Join-Path $Root $rel))
+        $built = if ($rel.EndsWith('.cs')) { $OWNER_BUILT_CS } else { $OWNER_BUILT_CPP }
+        $at = New-Object System.Collections.Generic.List[int]
+        $perUser = New-Object System.Collections.Generic.List[int]
+        $owners = New-Object System.Collections.Generic.List[int]
+        $pluginMod = New-Object System.Collections.Generic.List[int]
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -cmatch $DEFAULTS_AT) { $at.Add($i + 1) }
+            if ($lines[$i] -cmatch $DEFAULTS_PER_USER) { $perUser.Add($i + 1) }
+            if ($lines[$i] -cmatch $built) { $owners.Add($i + 1) }
+            if ($lines[$i] -cmatch $PLUGIN_MOD_INIT) { $pluginMod.Add($i + 1) }
+        }
+        if (-not (Test-IsTestSource $rel)) {
+            if ($at.Count -gt 0) {
+                Add-Finding $Name 'config-defaults' 'FAIL' "${rel}:$($at -join ',') names DefaultsFile.At outside a test folder; a mod must never point at a fixed path, so it passes DefaultsFile.PerUser()"
+            }
+            continue
+        }
+        if ($perUser.Count -gt 0) {
+            Add-Finding $Name 'config-defaults' 'FAIL' "${rel}:$($perUser -join ',') names DefaultsFile.PerUser in a test folder; $testRule"
+        }
+        if ($at.Count -gt 0) { continue }
+        if ($owners.Count -gt 0) {
+            Add-Finding $Name 'config-defaults' 'FAIL' "${rel}:$($owners -join ',') builds a ConfigOwner and never names DefaultsFile.At; $testRule"
+        }
+        if ($pluginMod.Count -gt 0) {
+            Add-Finding $Name 'config-defaults' 'FAIL' "${rel}:$($pluginMod -join ',') initialises PluginMod and never names DefaultsFile.At; $testRule"
+        }
+    }
+}
+
 # The config descriptor, the launcher-manifest.json block a launcher reads to find a converted
 # mod's config and the preference rows it binds. scripts/check-config-descriptor.mjs --json fails
 # a repo delivered by manifest whose one recorded config file is stamped and that has no block,
@@ -1214,6 +1274,7 @@ $CHECK_TABLE = [ordered]@{
     'config-legacy-reader' = ${function:Test-ConfigLegacyReader}
     'config-preserve'      = ${function:Test-ConfigPreserve}
     'config-descriptor'    = ${function:Test-ConfigDescriptor}
+    'config-defaults'      = ${function:Test-ConfigDefaults}
 }
 
 # ---------------------------------------------------------------------------

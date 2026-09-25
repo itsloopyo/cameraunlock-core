@@ -1086,13 +1086,13 @@ on the built ZIP against the repo it was built from:
 - `rows` holds every one of the five concepts the committed file has as a line, with the
   committed value (the renderer writes `true` or `false`), and no other. Two exceptions. When the
   committed file has `PositionAllowed=false`, `rows` has neither `RotationEnabled` nor
-  `PositionEnabled`. And a row `data/config-format.json` `descriptor_omits` lists for the repo is
-  left out, so a launcher never sets it: that list holds `WorldSpaceYaw` alone, for a game whose
-  default differs from the fleet's on purpose because it has no stable up (Subnautica, where the
-  player swims), each with its reason and the date the owner approved it. An omission has to be
-  listed there, so a row dropped by accident still fails, and a committed `WorldSpaceYaw` away
-  from the `data/config-schema.json` default fails unless it is listed, so a game that differs is
-  not handed to a launcher's global.
+  `PositionEnabled`. And a row `data/config-format.json` `per_game` lists for the repo is left
+  out, so a launcher never sets it: `per_game` names the rows a game keeps for itself, each with
+  its reason and the date the owner approved it, such as `WorldSpaceYaw` for a game whose default
+  differs from the fleet's on purpose because it has no stable up (Subnautica, where the player
+  swims). An omission has to be listed there, so a row dropped by accident still fails, and a
+  committed `WorldSpaceYaw` away from the `data/config-schema.json` default fails unless it is
+  listed, so a game that differs is not handed to a launcher's global.
 
 `path`, `anchor`, `legacy_source` and `canonical_since` are written by hand at the conversion,
 with `"rows": {}`. `scripts/encode-seed.mjs`, which `render-config` runs, then writes `rows` from
@@ -1129,11 +1129,11 @@ In core:
 | Command | What it does |
 |---------|--------------|
 | `pixi run check-config-schema` | Fails when the C++ and C# files generated from `data/config-schema.json` and `data/keys.json` are stale. `node scripts/generate-config-schema.mjs` regenerates them |
-| `pixi run check-config-format` | Checks the shape of `data/config-format.json` and pins its `legacy` names |
+| `pixi run check-config-format` | Checks the shape of `data/config-format.json` and pins its `legacy` names. A `per_game` entry names a canonical concept id, a reason and the date the owner approved it |
 | `pixi run check-canonical-ini-js` | Runs the reader and key fixtures through core's script grammar (`scripts/lib/canonical-ini.mjs`, `scripts/lib/key-bindings.mjs`) and holds the lint to its rules |
 | `pixi run check-doc-examples` | Fails when a C++ or C# block in `docs/` is not a run of lines of the test it names, or an ini block is not the fixture it names |
 | `pixi run test-config-descriptor` | Checks that a good config descriptor passes and one mutation per rule fails, and runs encode-seed's `rows`, validate-manifest and conformance on it. It also checks that a converted repo seeds and ships neither `CameraUnlock.ini` nor its legacy file, in the manifest or the install scripts |
-| `pixi run config-report` | The fleet report: game-local keys three or more canonical repos share, local section names in use, and concept values in committed files that differ from the schema default |
+| `pixi run config-report` | The fleet report: game-local keys three or more canonical repos share, local section names in use, and each repo's `per_game` rows with the value its canonical committed file holds there |
 
 In a mod repo, and in conformance:
 
@@ -1152,10 +1152,12 @@ In a mod repo, and in conformance:
   `[Sensitivity]`, `[Inversion]`, `[Reticle]` or `[Deadzone]` section, and no key in one of the
   sections `non_canonical_keys` lists; a schema section spelled as the schema spells it; local sections and keys PascalCase,
   each local key used once in the file, none of the bare nouns above and none starting with
-  `Chord`; every hotkey concept, and
-  every key in `[Hotkeys]`, a key list in the file's dialect, with the canonical hotkey concepts at
-  their `canonical_default` unless `hotkey_exceptions` records the repo's reason; the file tracked
-  by git and `-text`. It does not check comments.
+  `Chord`; every concept row holding `default` (compared without case), except the rows
+  `data/config-format.json` `per_game` lists for the repo, which hold the game's own value and
+  never the token, a hotkey one as a key list in the file's dialect; every local key in
+  `[Hotkeys]` a key list in the file's dialect, where `default` is an ordinary value like any
+  other; the file tracked by git and `-text`. It does not check comments. A chord a game binds
+  itself is a `per_game` hotkey row, whose reason names the chord it replaces and the one it uses.
 - **Conformance** (`pixi run conformance`) runs the lint as `config-format`, which also fails a
   converted `legacy` repo with no legacy folder (an REFramework repo needs none: its import is
   core's `PluginConfigLegacyImport`), a repo outside `legacy` with one, and a repo outside
@@ -1172,6 +1174,16 @@ In a mod repo, and in conformance:
   has one.
   `config-descriptor` holds the committed manifest to the config descriptor's rules (see
   "The config descriptor") and fails a converted repo's manifest that seeds or ships its config.
+  `config-defaults` fails a converted repo's tracked C#, C++ or header source that names
+  `DefaultsFile.At` / `DefaultsFile::At` outside a test folder, since a mod never points at a fixed
+  path; one inside a test folder that names `DefaultsFile.PerUser` / `DefaultsFile::PerUser`; and
+  one inside a test folder that builds a `ConfigOwner` (`new ConfigOwner<`, a `ConfigOwner<...>`
+  object, `make_unique` or `make_shared` of one) or initialises `PluginMod`
+  (`PluginMod::Instance().Initialize` or `InitializePlugin`) and never names `At`, since a test
+  never reads or creates the player's real Defaults.ini. A test folder is a folder
+  named `test` or `tests` in any case, or one whose name ends in `Tests`, so the differential test's
+  `tests/config_differential/` is one. The rule is per file: a test file that names `At` for one
+  owner passes for every owner it builds.
 - **The README config block** sits between `<!-- cameraunlock:config -->` and
   `<!-- /cameraunlock:config -->` in the Configuration section. From core's own checkout,
   `pixi run readme --write <repo>` inserts and updates it, and `pixi run readme --print config

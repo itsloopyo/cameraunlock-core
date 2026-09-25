@@ -15,8 +15,7 @@
 // stands in data/config-format.json, and each config file's state and problems. It always
 // exits 0; the FAIL and WARN policy is conformance's.
 // --report prints the fleet report: game-local (section, key) pairs shared by three or more
-// canonical repos, the game-local section names in use, and concept values in committed
-// files that differ from the schema default.
+// canonical repos, the game-local section names in use, and each repo's per_game rows.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -25,10 +24,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   CONFIG_FORMAT,
+  DEFAULT_TOKEN,
   FORMAT_KEY,
   STAMP_SECTION,
   equalsAsciiIgnoreCase,
+  findSection,
+  findValue,
   hasCanonicalStamp,
+  isDefaultToken,
   parseCanonicalIni,
   splitLines,
   trimSpaceTab,
@@ -74,15 +77,6 @@ const deadSections = new Set([
 ]);
 const schemaSection = (name) => SCHEMA.sections.find((s) => equalsAsciiIgnoreCase(s, name)) ?? null;
 
-// The binding list a canonical hotkey concept must hold in this repo: its canonical_default,
-// with any binding hotkey_exceptions replaces for the repo swapped for its replacement.
-export function expectedHotkey(concept, exceptions) {
-  const exception = exceptions?.[concept.key];
-  const bindings = concept.canonical_default.split(", ");
-  if (!exception) return bindings.join(", ");
-  return bindings.map((b) => (b === exception.replaces ? exception.with : b)).join(", ");
-}
-
 const lineList = (lines) => lines.join(", ");
 // "line 4", "lines 4, 7", or the first three and a count, so a file saved with the wrong line
 // endings is one readable problem rather than a list of every line.
@@ -110,9 +104,11 @@ function describeDiagnostic(d) {
   }
 }
 
-// The problems of one canonical file, as sentences. `dialect` is the repo's hotkey dialect,
-// `exceptions` its hotkey_exceptions entry.
-export function lintCanonicalConfig(bytes, { dialect, exceptions }) {
+// The problems of one committed canonical file, as sentences. `dialect` is the repo's hotkey
+// dialect, `perGame` the concept ids data/config-format.json per_game lists for the repo: those
+// rows hold the game's own value, and every other concept row holds default.
+export function lintCanonicalConfig(bytes, { dialect, perGame }) {
+  if (!Array.isArray(perGame)) throw new Error("lintCanonicalConfig needs perGame, the repo's per_game concept ids");
   const doc = parseCanonicalIni(bytes);
   if (doc.status === "Utf16") return ["is unreadable: it starts with a UTF-16 byte order mark"];
   if (doc.status === "NulByte") return [`is unreadable: line ${doc.unreadableLine} holds a NUL byte`];
@@ -175,6 +171,7 @@ export function lintCanonicalConfig(bytes, { dialect, exceptions }) {
   }
 
   const keySections = new Map();
+  const valued = [];
   for (const section of doc.sections) {
     if (section === stamp) {
       for (const v of section.values) keySections.set(v.key.toLowerCase(), section.name);
@@ -212,16 +209,22 @@ export function lintCanonicalConfig(bytes, { dialect, exceptions }) {
           problems.push(`${where} belongs in [${concept.section}]`);
           continue;
         }
-        if (concept.codec === "hotkey") {
-          const parsed = parseKeyBindings(v.value, dialect);
-          const expected = expectedHotkey(concept, exceptions);
-          if (parsed.error) {
-            problems.push(`${where}=${v.value} is not a ${dialect} key list: ${parsed.error}`);
-          } else if (v.value !== expected) {
+        const kept = perGame.includes(concept.id);
+        if (isDefaultToken(v.value)) {
+          if (kept) {
             problems.push(
-              `${where}=${v.value} differs from the fleet's ${expected}; a game that binds one of those chords itself records the replacement in data/config-format.json hotkey_exceptions`,
+              `${where}=${v.value}: data/config-format.json per_game lists ${concept.id} for this repo, so its table marks the row PerGame() and the file holds the game's own value there`,
             );
           }
+          continue;
+        }
+        if (!kept) {
+          valued.push(v);
+          continue;
+        }
+        if (concept.codec === "hotkey") {
+          const parsed = parseKeyBindings(v.value, dialect);
+          if (parsed.error) problems.push(`${where}=${v.value} is not a ${dialect} key list: ${parsed.error}`);
         }
         continue;
       }
@@ -254,6 +257,16 @@ export function lintCanonicalConfig(bytes, { dialect, exceptions }) {
         if (parsed.error) problems.push(`${where}=${v.value} is not a ${dialect} key list: ${parsed.error}`);
       }
     }
+  }
+  if (valued.length > 0) {
+    valued.sort((a, b) => a.line - b.line);
+    const keys = valued.map((v) => v.key).join(", ");
+    const lines = someLines(valued.map((v) => v.line));
+    problems.push(
+      valued.length === 1
+        ? `${lines}: ${keys} holds a value, and data/config-format.json per_game does not list it for this repo; a committed file holds ${DEFAULT_TOKEN} on every concept row but the ones per_game lists, as render-config writes it`
+        : `${lines}: ${keys} hold values, and data/config-format.json per_game lists none of them for this repo; a committed file holds ${DEFAULT_TOKEN} on every concept row but the ones per_game lists, as render-config writes it`,
+    );
   }
   return problems;
 }
@@ -328,7 +341,7 @@ function fileState(root, repo, file) {
     return state;
   }
   state.state = "stamped";
-  state.problems = lintCanonicalConfig(bytes, { dialect: file.dialect, exceptions: FORMAT.hotkey_exceptions[repo] });
+  state.problems = lintCanonicalConfig(bytes, { dialect: file.dialect, perGame: (FORMAT.per_game[repo] ?? []).map((e) => e.row) });
   if (git(root, ["ls-files", "--error-unmatch", "--", file.committed]).status !== 0) {
     state.problems.push("is not tracked by git");
   }
@@ -419,17 +432,6 @@ function lintMain(roots) {
   return failed ? 1 : 0;
 }
 
-function conceptDiffersFromDefault(concept, value) {
-  if (concept.codec === "hotkey") return value !== concept.canonical_default;
-  switch (concept.type) {
-    case "bool": return value.toLowerCase() !== String(concept.default);
-    case "int":
-    case "float": return Number(value) !== concept.default;
-    case "string": return value !== concept.default;
-    default: throw new Error(`no default comparison for concept type ${concept.type}`);
-  }
-}
-
 function reportMain() {
   const canonical = [];
   let withCheckout = 0;
@@ -448,22 +450,17 @@ function reportMain() {
 
   const pairs = new Map();
   const sections = new Map();
-  const differing = [];
   const note = (map, key, spelled, repo) => {
     if (!map.has(key)) map.set(key, { spelled, repos: new Set() });
     map.get(key).repos.add(repo);
   };
-  for (const { repo, committed, doc } of canonical) {
+  for (const { repo, doc } of canonical) {
     for (const section of doc.sections) {
       if (equalsAsciiIgnoreCase(section.name, STAMP_SECTION)) continue;
       if (schemaSection(section.name) === null) note(sections, section.name.toLowerCase(), section.name, repo);
       for (const v of section.values) {
-        const concept = conceptByName.get(normalise(v.key));
-        if (!concept) {
+        if (!conceptByName.has(normalise(v.key))) {
           note(pairs, `${section.name}\n${v.key}`.toLowerCase(), `[${section.name}] ${v.key}`, repo);
-        } else if (concept.canonical && conceptDiffersFromDefault(concept, v.value)) {
-          const def = concept.codec === "hotkey" ? concept.canonical_default : String(concept.default);
-          differing.push(`${repo} ${committed}: [${section.name}] ${v.key}=${v.value} (schema default ${def})`);
         }
       }
     }
@@ -481,10 +478,27 @@ function reportMain() {
     "Game-local section names in use (design 1.6 rule 5):",
     ...list(byCount(sections).map((e) => `  [${e.spelled}]  ${e.repos.size}: ${[...e.repos].sort().join(", ")}`)),
     "",
-    "Concept values in committed files that differ from the schema default (input to the end-of-project audit):",
-    ...list(differing.map((d) => `  ${d}`)),
+    "Rows data/config-format.json per_game lets a game keep for itself, with the value each canonical committed file holds:",
+    ...list(perGameRows(canonical)),
   ];
   console.log(out.join("\n"));
+}
+
+function perGameRows(canonical) {
+  return Object.entries(FORMAT.per_game).flatMap(([repo, entries]) =>
+    entries.map((entry) => {
+      const concept = SCHEMA.concepts.find((c) => c.id === entry.row);
+      const values = canonical
+        .filter((c) => c.repo === repo)
+        .map(({ committed, doc }) => {
+          const section = findSection(doc, concept.section);
+          const line = section === null ? null : findValue(section, concept.key);
+          return `${committed} ${line === null ? "has no line" : `${concept.key}=${line.value}`}`;
+        });
+      const held = values.length === 0 ? "no canonical committed file" : values.join("; ");
+      return `  ${repo}: ${entry.row}, approved ${entry.approved} (${held}): ${entry.reason}`;
+    }),
+  );
 }
 
 function main(argv) {

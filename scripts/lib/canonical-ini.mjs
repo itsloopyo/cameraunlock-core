@@ -9,6 +9,8 @@
 export const CONFIG_FORMAT = 1;
 export const STAMP_SECTION = "CameraUnlock";
 export const FORMAT_KEY = "ConfigFormat";
+// On a concept row, and only there, this value takes the row's value from Defaults.ini.
+export const DEFAULT_TOKEN = "default";
 
 export const DIAGNOSTIC_KINDS = Object.freeze({
   TextAfterSectionHeader: 1,
@@ -39,6 +41,11 @@ function foldAscii(s) {
 
 export function equalsAsciiIgnoreCase(a, b) {
   return a.length === b.length && foldAscii(a) === foldAscii(b);
+}
+
+// `value` as the reader returns it, already trimmed of spaces and tabs.
+export function isDefaultToken(value) {
+  return equalsAsciiIgnoreCase(value, DEFAULT_TOKEN);
 }
 
 function toLatin1(bytes) {

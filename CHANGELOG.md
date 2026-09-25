@@ -9,6 +9,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - BREAKING - committed configs hold `default` rows, and `per_game` replaces `descriptor_omits` and `hotkey_exceptions`
+
+- **The canonical config lint** (`scripts/check-canonical-config.mjs`, which conformance runs as
+  `config-format`) reads `default` as `scripts/lib/canonical-ini.mjs` spells it: the value, trimmed,
+  equal to `default` without case, on a concept row only. In a committed file every concept row
+  holds it, except the rows `data/config-format.json` `per_game` lists for the repo, which hold the
+  game's own value and never the token; a `per_game` hotkey row holds a key list in the file's
+  dialect. The rule that a hotkey concept holds its `canonical_default` is gone, since those rows
+  hold `default` too. `default ; note`, `"default"` and `End, default` are values, not the token.
+  On a local row `default` is an ordinary value. The lint's `exceptions` option is now `perGame`,
+  the repo's `per_game` concept ids, and a call without it throws.
+- **`data/config-format.json` `per_game`**, per repo in `configs`, a list of `{row, reason,
+  approved}`: `row` a canonical concept id, `reason` why the game keeps that row for itself, and
+  `approved` the date the owner approved it, never null. The game's table marks each row
+  `PerGame()`. A chord a game binds itself is a `per_game` hotkey row whose reason names the chord
+  it replaces and the one it uses. An entry added after a repo's first converted release changes
+  what `default` means in files already on players' disks, so it is a breaking change for that
+  repo. It replaces `descriptor_omits`, whose one entry (subnautica-headtracking, `WorldSpaceYaw`,
+  approved 2026-09-25) moved over, and `hotkey_exceptions`, which was empty.
+  `scripts/check-config-format.mjs` checks the shape and refuses the two old keys by name.
+  `scripts/check-config-descriptor.mjs` leaves a `per_game` launcher row out of `rows` where it
+  left a `descriptor_omits` one, with the same meaning, until the descriptor drops `rows`.
+- **`config-defaults`**, a new conformance check for converted repos. It fails a tracked C#, C++ or
+  header source outside a test folder that names `DefaultsFile.At` / `DefaultsFile::At`; one inside
+  a test folder that names `DefaultsFile.PerUser` / `DefaultsFile::PerUser`; and one inside a test
+  folder that builds a `ConfigOwner` or initialises `PluginMod` and never names `At`. A test folder
+  is a folder named `test` or `tests` in any case, or one whose name ends in `Tests`.
+- **`pixi run config-report`** lists each repo's `per_game` rows, with the value its canonical
+  committed file holds there, in place of committed concept values that differ from the schema
+  default.
+
+What a consuming repo changes. A converted repo's committed file fails the lint until it is
+re-rendered after its pin bump: `pixi run render-config` writes `default` on every concept row
+except the `per_game` ones. Its tests and mod pass `DefaultsFile.At` and `DefaultsFile.PerUser()`
+as `config-defaults` asks, which the pin bump to the Defaults.ini owner needs anyway. The config
+descriptor check still refuses a committed `WorldSpaceYaw=default` (it reads `true` or `false`),
+and the README config block does not yet explain `default`, until the next core commits, so a
+converted repo still bumps its pin after those.
+
 ### Added - Defaults.ini probe modes and `pixi run test-linux-probe`
 
 - **Probe modes.** `cameraunlock_tests --probe-defaults-ini <game folder> [--probe-save]` and
