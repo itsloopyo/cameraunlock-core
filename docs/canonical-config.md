@@ -704,13 +704,14 @@ the session running on it.
 
 ### Reload and FileChanged
 
-`FileChanged()` compares the file's last write time with the one the owner recorded at its last
-load, reload or save, for a mod that watches its file. `Reload()` reads only the config file, never
-writes, and never runs the import:
+`FileChanged()` compares the last write times of the file and of Defaults.ini with the ones the
+owner recorded at its last load, reload or save, for a mod that watches its file. `Reload()` reads
+Defaults.ini again where `Load` found it, then the config file over its values. It never writes, and
+never runs the import:
 
 | Status | Meaning |
 |--------|---------|
-| `Unchanged` (0) | The file holds the bytes the owner last created or saved |
+| `Unchanged` (0) | The file holds the bytes the owner last created or saved, and Defaults.ini gave nothing new |
 | `Applied` (1) | The file was read as canonical, stamped or not, and the result holds its settings |
 | `Unreadable` (3) | The file is missing or could not be read. The mod keeps the settings it has |
 

@@ -64,7 +64,12 @@ writes `default` where the imported value equals what `default` gives at that la
   `PluginModDescriptor::defaults`, appended as the last member. The load, save and reload results
   gain no member.
 
-What a consuming repo changes at its pin bump:
+What a consuming repo changes at its pin bump. A converted repo does not bump to this commit on its
+own: until the lint, the config descriptor check and the README generator read `default` (the
+design's C7 to C9, which follow), core's own gates reject the file it commits here.
+`check-canonical-config.mjs`, which conformance runs, refuses `ToggleKey=default` and every other
+hotkey `default` row, `check-config-descriptor.mjs` refuses `WorldSpaceYaw=default`, and the
+generated README block fences `default` rows it does not explain. Bump after C9.
 
 - **Set the Defaults.ini option.** In the mod, `Defaults = DefaultsFile.PerUser()` (C#) or
   `options.defaults = DefaultsFile::PerUser()` (C++). In every test that builds an owner,
@@ -85,6 +90,10 @@ What a consuming repo changes at its pin bump:
 - **Tests** that compared a created file with `Render` of the defaults compare with the fresh render,
   and a migrated file holds `default` where the imported value equals the built-in one. A test that
   counts the load's log lines counts the Defaults.ini lines too.
+- **Write every line of a save's `Log`, including for `Saved`.** Before this commit that log was
+  empty for `Saved`, so a mod that writes it only for `NotSaved` and `Uncertain` never writes
+  `<path>: WorldSpaceYaw=false is now set for this game, and no longer follows Defaults.ini.`
+  Core's `PluginMod` now writes it.
 - **The C# owner no longer throws off Windows** and runs read-only there, so a C# mod that caught
   `PlatformNotSupportedException` around it drops the catch.
 
