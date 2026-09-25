@@ -35,7 +35,12 @@
     "key in one is the group's, whatever it is spelled. A canonical table refuses a game-local",
     "row named by a spelling or in such a section, applying a canonical file reports either as",
     "NonCanonicalConcept with the group's `canonical_reason`, and the canonical config lint fails",
-    "a file holding one."
+    "a file holding one.",
+    "",
+    "Every canonical concept is global: a canonical file's row for it may hold `default`, which",
+    "reads the value from Defaults.ini, and Defaults.ini carries every canonical concept. A game",
+    "keeps its own value for one only through the table's PerGame(). So a concept that must never",
+    "follow Defaults.ini needs a schema change before it is added."
   ],
   "deliberately_unaliased": [
     {

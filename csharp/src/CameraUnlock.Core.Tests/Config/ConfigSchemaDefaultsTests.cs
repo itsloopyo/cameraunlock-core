@@ -145,6 +145,49 @@ namespace CameraUnlock.Core.Tests.Config
             }
         }
 
+        // A config table's fresh render compares a row's default with the concept's DefaultText as
+        // the row's codec reads it, so every canonical concept's text reads, and reads as the schema's
+        // default: the canonical_default of a hotkey concept.
+        [Fact]
+        public void EachCanonicalConceptsDefaultTextReadsAsItsSchemaDefault()
+        {
+            using (JsonDocument schema = ReadSchema())
+            {
+                var concepts = new Dictionary<string, JsonElement>();
+                foreach (JsonElement concept in schema.RootElement.GetProperty("concepts").EnumerateArray())
+                {
+                    concepts.Add(concept.GetProperty("id").GetString()!, concept);
+                }
+                foreach (ConceptDescriptor descriptor in ConfigConcepts.All)
+                {
+                    JsonElement declared = concepts[descriptor.Id];
+                    byte[] text = System.Text.Encoding.ASCII.GetBytes(descriptor.DefaultText);
+                    string? error;
+                    switch (descriptor)
+                    {
+                        case ConceptDescriptor<bool> b:
+                            Assert.True(b.Codec.TryParse(text, out bool flag, out error), descriptor.Id + ": " + error);
+                            Assert.Equal(declared.GetProperty("default").GetBoolean(), flag);
+                            break;
+                        case ConceptDescriptor<int> i:
+                            Assert.True(i.Codec.TryParse(text, out int whole, out error), descriptor.Id + ": " + error);
+                            Assert.Equal(declared.GetProperty("default").GetInt32(), whole);
+                            break;
+                        case ConceptDescriptor<float> f:
+                            Assert.True(f.Codec.TryParse(text, out float number, out error), descriptor.Id + ": " + error);
+                            Assert.Equal((float)declared.GetProperty("default").GetDouble(), number);
+                            break;
+                        case ConceptDescriptor<string> s:
+                            Assert.True(s.Codec.TryParse(text, out string? keys, out error), descriptor.Id + ": " + error);
+                            Assert.Equal(declared.GetProperty("canonical_default").GetString(), keys);
+                            break;
+                        default:
+                            throw new InvalidOperationException(descriptor.Id + " has a type this test cannot read");
+                    }
+                }
+            }
+        }
+
         // Every range the schema declares, held to the number it stands for. The position
         // limits, the tracker pivots and the light multiplier name the guard constants, so the
         // schema and the guards cannot move apart. Null is a side the range leaves open.

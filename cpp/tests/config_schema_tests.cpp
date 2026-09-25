@@ -6,7 +6,10 @@
 // of them must land on the same field, and a key that belongs to no concept must be
 // ignored rather than guessed at.
 
+#include <cameraunlock/config/config_concepts.g.h>
 #include <cameraunlock/config/head_tracking_config.h>
+#include <cameraunlock/config/hotkey_codec.h>
+#include <cameraunlock/config/value_codecs.h>
 
 #include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/effects/head_follow_light.h>
@@ -16,11 +19,13 @@
 #include <climits>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -534,6 +539,61 @@ void TestSchemaDefaultsMatchTheShippedDefaults() {
     }
 }
 
+// A config table's fresh render compares a row's default with the concept's kDefaultText as the
+// row's codec reads it, so every canonical concept's text reads, and reads as the schema's default:
+// the canonical_default of a hotkey concept. The C++ twin of ConfigSchemaDefaultsTests'
+// EachCanonicalConceptsDefaultTextReadsAsItsSchemaDefault.
+template <cameraunlock::config::schema::Concept Id>
+void CheckDefaultText() {
+    namespace config = cameraunlock::config;
+    using Traits = config::schema::ConceptTraits<Id>;
+    const config::schema::ConceptInfo& info = config::schema::kConcepts[static_cast<std::size_t>(Id)];
+    const std::string name = info.name;
+    Check(std::strcmp(info.default_text, Traits::kDefaultText) == 0,
+          (name + ": kConcepts carries the traits' default text").c_str());
+
+    const cameraunlock::ConfigConceptDefault* declared = nullptr;
+    for (std::size_t i = 0; i < cameraunlock::kConfigConceptDefaultCount; ++i) {
+        if (name == cameraunlock::kConfigConceptDefaults[i].id) declared = &cameraunlock::kConfigConceptDefaults[i];
+    }
+    if (declared == nullptr) {
+        Check(false, (name + " has a schema default").c_str());
+        return;
+    }
+    bool same = false;
+    std::string error;
+    if constexpr (Traits::kFamily == config::schema::ValueFamily::kBool) {
+        const auto read = config::BoolCodec().Parse(Traits::kDefaultText);
+        error = read.error;
+        same = read.ok() && read.value == declared->bool_value;
+    } else if constexpr (Traits::kFamily == config::schema::ValueFamily::kInteger) {
+        const auto read = config::IntCodec<int>(static_cast<int>(Traits::kMin), static_cast<int>(Traits::kMax))
+                              .Parse(Traits::kDefaultText);
+        error = read.error;
+        same = read.ok() && read.value == declared->int_value;
+    } else if constexpr (Traits::kFamily == config::schema::ValueFamily::kFloating) {
+        const auto read = config::FloatCodec(Traits::kMin, Traits::kMax).Parse(Traits::kDefaultText);
+        error = read.error;
+        same = read.ok() && read.value == declared->float_value;
+    } else {
+        const auto read = config::HotkeyCodec().Parse(Traits::kDefaultText);
+        error = read.error;
+        same = read.ok() && read.value == Traits::kCanonicalDefault;
+    }
+    Check(same, (name + ": the default text '" + Traits::kDefaultText + "' reads as the schema's default" +
+                 (error.empty() ? "" : ": " + error))
+                    .c_str());
+}
+
+template <std::size_t... I>
+void CheckDefaultTexts(std::index_sequence<I...>) {
+    (CheckDefaultText<cameraunlock::config::schema::kConcepts[I].id>(), ...);
+}
+
+void TestCanonicalDefaultTexts() {
+    CheckDefaultTexts(std::make_index_sequence<cameraunlock::config::schema::kConceptCount>{});
+}
+
 void TestIniParsing() {
     const std::string path = "config_schema_tests.ini";
     {
@@ -577,6 +637,7 @@ int RunConfigSchemaTests() {
     TestPositionAllowed();
     TestSchemaRangesMatchTheGuards();
     TestSchemaDefaultsMatchTheShippedDefaults();
+    TestCanonicalDefaultTexts();
     TestIniParsing();
     return g_failures;
 }

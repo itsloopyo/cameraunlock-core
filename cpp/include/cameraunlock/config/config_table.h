@@ -18,8 +18,9 @@
 #include <vector>
 
 // Config tables: which rows a canonical config file holds and which Config field each one
-// reads into, then ApplyCanonical to read a parsed file into a Config and RenderCanonical to
-// write a Config as a canonical file. Pure, no <windows.h>. CameraUnlock.Core.Config.ConfigTable
+// reads into, then ApplyCanonical to read a parsed file into a Config, RenderCanonical to
+// write a Config as a canonical file and RenderCanonicalFresh to write the file a game starts
+// with. Pure, no <windows.h>. CameraUnlock.Core.Config.ConfigTable
 // is the C# twin, and data/fixtures/canonical-ini/table holds both to the same bytes.
 
 namespace cameraunlock::config {
@@ -85,7 +86,25 @@ struct TableRow {
     bool engine = false;
     bool writable = false;
     bool hotkey = false;
+    bool per_game = false;
 };
+
+// A concept row that is not PerGame, whose default is the effective default.
+inline bool FollowsDefaultsIni(const TableRow& row) { return row.concept_id.has_value() && !row.per_game; }
+
+// Where a row's value came from when ApplyCanonicalEffective read a file: the file's own value,
+// or the row's start, the effective default, which Defaults.ini or the table gave.
+enum class ValueSource { kFile, kDefaultsIni, kBuiltIn };
+
+// What ApplyCanonicalEffective found, and each row's source, in table order.
+struct EffectiveApplyResult {
+    ApplyReport report;
+    std::vector<ValueSource> sources;
+};
+
+// How a render writes a row: as RenderCanonical does (an Engine row at its default commented),
+// as its value, or as the default token.
+enum class RowForm { kAsRender, kValue, kDefault };
 
 // One Config's row values, for ApplyRows.
 class RowTarget {
@@ -93,7 +112,7 @@ public:
     // Reads text into the row's field. Returns the codec's error, empty when it was read.
     virtual std::string Apply(std::size_t row, std::string_view text) = 0;
     virtual bool IsFalse(std::size_t row) const = 0;
-    virtual void ResetToDefault(std::size_t row) = 0;
+    virtual void ResetToStart(std::size_t row) = 0;
 
 protected:
     ~RowTarget() = default;
@@ -120,8 +139,20 @@ std::vector<std::string> CommentLines(const char* text, const std::string& row);
 void CheckConceptRow(const std::vector<TableRow>& rows, const TableRow& row);
 void CheckLocalRow(const std::vector<TableRow>& rows, const TableRow& row);
 
-ApplyReport ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows, RowTarget& target);
-std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& header, const RowSource& source);
+// The concept's schema name, or its number when it is not a canonical concept.
+std::string ConceptLabel(schema::Concept id);
+
+// Throw std::invalid_argument when the table cannot render a fresh file: a row that follows
+// Defaults.ini whose default is not the schema's (`holds` false; the two texts as the row's codec
+// writes them), or RotationEnabled without PositionEnabled.
+void CheckFreshRow(const TableRow& row, bool holds, const std::string& table_default, const std::string& schema_default);
+void CheckFreshPair(const std::vector<TableRow>& rows);
+
+// Every row starts at its start and reports start_sources[row] until the file sets it.
+EffectiveApplyResult ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows, RowTarget& target,
+                               const std::vector<ValueSource>& start_sources);
+std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& header, const RowSource& source,
+                       const std::vector<RowForm>& forms);
 
 template <class T>
 struct IsIntCodec : std::false_type {};
@@ -171,6 +202,9 @@ public:
     virtual std::string Render(const Config& config) const = 0;
     virtual std::string Display(const Config& config) const = 0;
     virtual bool Equal(const Config& a, const Config& b) const = 0;
+    // Whether the field holds the text as the row's codec reads it; the text as the codec writes
+    // it comes back in `canonical`.
+    virtual bool Holds(const Config& config, std::string_view text, std::string& canonical) const = 0;
     virtual void Assign(Config& to, const Config& from) const = 0;
     virtual bool IsFalse(const Config& config) const = 0;
     virtual std::shared_ptr<const RowOps> WithRange(double lo, double hi) const = 0;
@@ -195,6 +229,13 @@ public:
     std::string Display(const Config& config) const override { return DisplayValue(Value(get_(config))); }
 
     bool Equal(const Config& a, const Config& b) const override { return codec_.Equal(get_(a), get_(b)); }
+
+    bool Holds(const Config& config, std::string_view text, std::string& canonical) const override {
+        const CodecParseResult<Value> read = codec_.Parse(text);
+        if (!read.ok()) throw std::logic_error("'" + std::string(text) + "' does not read: " + read.error);
+        canonical = codec_.Render(read.value);
+        return codec_.Equal(get_(config), read.value);
+    }
 
     void Assign(Config& to, const Config& from) const override { set_(to, Value(get_(from))); }
 
@@ -243,6 +284,22 @@ ApplyReport ApplyCanonical(const CanonicalIni& doc, const ConfigTable<Config>& t
 
 template <class Config>
 std::string RenderCanonical(const ConfigTable<Config>& table, const Config& values, const RenderHeader& header);
+
+template <class Config>
+std::string RenderCanonicalFresh(const ConfigTable<Config>& table, const RenderHeader& header);
+
+namespace detail {
+
+template <class Config>
+EffectiveApplyResult ApplyCanonicalEffective(const CanonicalIni& doc, const ConfigTable<Config>& table, Config& inout,
+                                             const Config& effective,
+                                             const std::vector<schema::Concept>& from_defaults_ini);
+
+template <class Config>
+std::string RenderCanonicalMigration(const ConfigTable<Config>& table, const Config& values, const Config& effective,
+                                     const RenderHeader& header);
+
+}  // namespace detail
 
 /// The rows of one game's canonical config file, each bound to a field of Config.
 ///
@@ -358,6 +415,20 @@ public:
         return *this;
     }
 
+    /// Marks the concept row as one this game keeps: its default is the table's own and never
+    /// Defaults.ini's, so `default`, a missing key and an invalid value all read the table's
+    /// default, and RenderCanonicalFresh writes the row's value. Each use needs an entry, approved
+    /// by the owner, in the repo's `per_game` list in data/config-format.json.
+    ConfigTable& PerGame() {
+        const std::size_t row = Last("PerGame");
+        if (!rows_[row].concept_id) {
+            throw std::invalid_argument(detail::RowName(rows_[row]) +
+                                        " is a local row, which never takes a value from Defaults.ini");
+        }
+        rows_[row].per_game = true;
+        return *this;
+    }
+
     /// Marks the row as one the config owner's Save may change.
     ConfigTable& Writable() {
         rows_[Last("Writable")].writable = true;
@@ -383,6 +454,12 @@ private:
     friend class ConfigOwner<Config>;
     friend ApplyReport ApplyCanonical<Config>(const CanonicalIni&, const ConfigTable&, Config&);
     friend std::string RenderCanonical<Config>(const ConfigTable&, const Config&, const RenderHeader&);
+    friend std::string RenderCanonicalFresh<Config>(const ConfigTable&, const RenderHeader&);
+    friend detail::EffectiveApplyResult detail::ApplyCanonicalEffective<Config>(const CanonicalIni&, const ConfigTable&,
+                                                                                Config&, const Config&,
+                                                                                const std::vector<schema::Concept>&);
+    friend std::string detail::RenderCanonicalMigration<Config>(const ConfigTable&, const Config&, const Config&,
+                                                                const RenderHeader&);
 
     template <class Field>
     static auto MemberGetter(Field Config::*field) {
@@ -471,9 +548,127 @@ private:
     std::optional<std::size_t> last_;
 };
 
+namespace detail {
+
+template <class Config>
+using RowOpsList = std::vector<std::shared_ptr<const RowOps<Config>>>;
+
+template <class Config>
+class ConfigRowTarget final : public RowTarget {
+public:
+    ConfigRowTarget(const RowOpsList<Config>& ops, const std::vector<const Config*>& starts, Config& config)
+        : ops_(ops), starts_(starts), config_(config) {}
+    std::string Apply(std::size_t row, std::string_view text) override { return ops_[row]->Apply(text, config_); }
+    bool IsFalse(std::size_t row) const override { return ops_[row]->IsFalse(config_); }
+    void ResetToStart(std::size_t row) override { ops_[row]->Assign(config_, *starts_[row]); }
+
+private:
+    const RowOpsList<Config>& ops_;
+    const std::vector<const Config*>& starts_;
+    Config& config_;
+};
+
+template <class Config>
+class ConfigRowSource final : public RowSource {
+public:
+    ConfigRowSource(const std::vector<TableRow>& rows, const RowOpsList<Config>& ops, const Config& defaults,
+                    const Config& values)
+        : rows_(rows), ops_(ops), defaults_(defaults), values_(values) {}
+    std::string Render(std::size_t row) const override {
+        try {
+            return ops_[row]->Render(values_);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(RowName(rows_[row]) + ": " + e.what());
+        }
+    }
+    bool EqualsDefault(std::size_t row) const override { return ops_[row]->Equal(values_, defaults_); }
+
+private:
+    const std::vector<TableRow>& rows_;
+    const RowOpsList<Config>& ops_;
+    const Config& defaults_;
+    const Config& values_;
+};
+
+/// ApplyCanonical over effective defaults. A concept row that is not PerGame starts from its value
+/// in `effective`, every other row from the table's defaults; `default`, a missing key and an
+/// invalid value leave a row at its start, and a pair naming no tracking mode takes both starts.
+/// `from_defaults_ini` names the concepts whose effective default Defaults.ini gave, which the
+/// result reports as the source of such a row left at its start.
+///
+/// Throws std::invalid_argument for a document that is not readable, a concept in
+/// `from_defaults_ini` that is not a row of the table following Defaults.ini, and starts of
+/// RotationEnabled and PositionEnabled that are both false.
+template <class Config>
+EffectiveApplyResult ApplyCanonicalEffective(const CanonicalIni& doc, const ConfigTable<Config>& table, Config& inout,
+                                             const Config& effective,
+                                             const std::vector<schema::Concept>& from_defaults_ini) {
+    const std::vector<TableRow>& rows = table.rows_;
+    const RowOpsList<Config>& ops = table.ops_;
+    std::vector<const Config*> starts;
+    std::vector<ValueSource> start_sources(rows.size(), ValueSource::kBuiltIn);
+    for (const TableRow& row : rows) starts.push_back(FollowsDefaultsIni(row) ? &effective : &table.defaults_);
+    for (const schema::Concept id : from_defaults_ini) {
+        std::size_t found = rows.size();
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            if (rows[i].concept_id == id && FollowsDefaultsIni(rows[i])) found = i;
+        }
+        if (found == rows.size()) {
+            throw std::invalid_argument(ConceptLabel(id) + " is not a row of this table that follows Defaults.ini");
+        }
+        start_sources[found] = ValueSource::kDefaultsIni;
+    }
+    std::size_t rotation = rows.size();
+    std::size_t position = rows.size();
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i].concept_id == schema::Concept::RotationEnabled) rotation = i;
+        if (rows[i].concept_id == schema::Concept::PositionEnabled) position = i;
+    }
+    if (rotation < rows.size() && position < rows.size() && ops[rotation]->IsFalse(*starts[rotation]) &&
+        ops[position]->IsFalse(*starts[position])) {
+        throw std::invalid_argument("RotationEnabled and PositionEnabled both start false, which is not a tracking mode");
+    }
+    ConfigRowTarget<Config> target(ops, starts, inout);
+    return ApplyRows(doc, rows, target, start_sources);
+}
+
+/// Writes a migrated file: RenderCanonical of `values`, except that a concept row that is not
+/// PerGame is written `Key=default` when its value equals its value in `effective`, and otherwise
+/// as its value, never in the commented form of an Engine row, which would read back as the
+/// effective default. RotationEnabled and PositionEnabled are written default only when both equal
+/// their effective values. Throws as RenderCanonical.
+template <class Config>
+std::string RenderCanonicalMigration(const ConfigTable<Config>& table, const Config& values, const Config& effective,
+                                     const RenderHeader& header) {
+    const std::vector<TableRow>& rows = table.rows_;
+    std::vector<RowForm> forms(rows.size(), RowForm::kAsRender);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (FollowsDefaultsIni(rows[i])) {
+            forms[i] = table.ops_[i]->Equal(values, effective) ? RowForm::kDefault : RowForm::kValue;
+        }
+    }
+    std::size_t rotation = rows.size();
+    std::size_t position = rows.size();
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (rows[i].concept_id == schema::Concept::RotationEnabled) rotation = i;
+        if (rows[i].concept_id == schema::Concept::PositionEnabled) position = i;
+    }
+    if (rotation < rows.size() && position < rows.size() &&
+        (forms[rotation] == RowForm::kValue || forms[position] == RowForm::kValue)) {
+        if (forms[rotation] == RowForm::kDefault) forms[rotation] = RowForm::kValue;
+        if (forms[position] == RowForm::kDefault) forms[position] = RowForm::kValue;
+    }
+    const ConfigRowSource<Config> source(rows, table.ops_, table.defaults_, values);
+    return RenderRows(rows, header, source, forms);
+}
+
+}  // namespace detail
+
 /// Reads a parsed canonical file into the table's rows of `inout`; fields no row binds are left
 /// as they are. Every row starts from its default, so a key the file leaves out reads as the
-/// default with no diagnostic. A value its codec does not read keeps the default and draws
+/// default with no diagnostic, and so does `default` on a concept row: the value, after the
+/// reader's trimming, equal to `default` in any ASCII letter case. On a local row the word is a
+/// value like any other. A value its codec does not read keeps the default and draws
 /// InvalidValue. A section the table has no row in draws one UnknownSection, a key no row of a
 /// read section names one UnknownKey, and none is drawn in [CameraUnlock]. A key that names a
 /// row of the table in another section, or a concept row by an alias, draws MisplacedKey naming
@@ -489,23 +684,7 @@ private:
 /// Throws std::invalid_argument for a document that is not readable.
 template <class Config>
 ApplyReport ApplyCanonical(const CanonicalIni& doc, const ConfigTable<Config>& table, Config& inout) {
-    using Ops = std::vector<std::shared_ptr<const detail::RowOps<Config>>>;
-    class Target final : public detail::RowTarget {
-    public:
-        Target(const Ops& ops, const Config& defaults, Config& config)
-            : ops_(ops), defaults_(defaults), config_(config) {}
-        std::string Apply(std::size_t row, std::string_view text) override { return ops_[row]->Apply(text, config_); }
-        bool IsFalse(std::size_t row) const override { return ops_[row]->IsFalse(config_); }
-        void ResetToDefault(std::size_t row) override { ops_[row]->Assign(config_, defaults_); }
-
-    private:
-        const Ops& ops_;
-        const Config& defaults_;
-        Config& config_;
-    };
-
-    Target target(table.ops_, table.defaults_, inout);
-    return detail::ApplyRows(doc, table.rows_, target);
+    return detail::ApplyCanonicalEffective(doc, table, inout, table.defaults_, {}).report;
 }
 
 /// Writes `values` as a canonical file: the header comments, [CameraUnlock]
@@ -513,36 +692,41 @@ ApplyReport ApplyCanonical(const CanonicalIni& doc, const ConfigTable<Config>& t
 /// with its concept rows in the schema's concepts order and then its local rows in table order,
 /// then the local sections in table order. Each row is its comment lines as `; text`, then
 /// `Key=value`, or `; Key=value` for an Engine row holding its default. A blank line separates
-/// sections. CRLF line endings with a final CRLF, no byte order mark.
+/// sections. CRLF line endings with a final CRLF, no byte order mark. When the table has a
+/// concept row that is not PerGame, six header lines say what `default` means and where
+/// Defaults.ini is.
 ///
 /// Throws std::invalid_argument, naming the row, for a value its codec cannot write, and for a
 /// display name that is empty, has a leading or trailing space, or holds a byte outside
 /// printable ASCII.
 template <class Config>
 std::string RenderCanonical(const ConfigTable<Config>& table, const Config& values, const RenderHeader& header) {
-    using Ops = std::vector<std::shared_ptr<const detail::RowOps<Config>>>;
-    class Source final : public detail::RowSource {
-    public:
-        Source(const std::vector<detail::TableRow>& rows, const Ops& ops, const Config& defaults, const Config& values)
-            : rows_(rows), ops_(ops), defaults_(defaults), values_(values) {}
-        std::string Render(std::size_t row) const override {
-            try {
-                return ops_[row]->Render(values_);
-            } catch (const std::invalid_argument& e) {
-                throw std::invalid_argument(detail::RowName(rows_[row]) + ": " + e.what());
-            }
-        }
-        bool EqualsDefault(std::size_t row) const override { return ops_[row]->Equal(values_, defaults_); }
+    const detail::ConfigRowSource<Config> source(table.rows_, table.ops_, table.defaults_, values);
+    return detail::RenderRows(table.rows_, header, source,
+                              std::vector<detail::RowForm>(table.rows_.size(), detail::RowForm::kAsRender));
+}
 
-    private:
-        const std::vector<detail::TableRow>& rows_;
-        const Ops& ops_;
-        const Config& defaults_;
-        const Config& values_;
-    };
-
-    const Source source(table.rows_, table.ops_, table.defaults_, values);
-    return detail::RenderRows(table.rows_, header, source);
+/// Writes the file a game starts with: RenderCanonical of the defaults, except that every concept
+/// row that is not PerGame is written `Key=default`, an Engine row included.
+///
+/// Throws std::invalid_argument when a concept row that is not PerGame defaults to a value other
+/// than the schema's, naming the row; when the table binds RotationEnabled without
+/// PositionEnabled; and for a display name RenderCanonical refuses.
+template <class Config>
+std::string RenderCanonicalFresh(const ConfigTable<Config>& table, const RenderHeader& header) {
+    const std::vector<detail::TableRow>& rows = table.rows_;
+    std::vector<detail::RowForm> forms(rows.size(), detail::RowForm::kAsRender);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (!detail::FollowsDefaultsIni(rows[i])) continue;
+        std::string schema_default;
+        const bool holds = table.ops_[i]->Holds(
+            table.defaults_, schema::kConcepts[static_cast<std::size_t>(*rows[i].concept_id)].default_text, schema_default);
+        detail::CheckFreshRow(rows[i], holds, table.ops_[i]->Render(table.defaults_), schema_default);
+        forms[i] = detail::RowForm::kDefault;
+    }
+    detail::CheckFreshPair(rows);
+    const detail::ConfigRowSource<Config> source(rows, table.ops_, table.defaults_, table.defaults_);
+    return detail::RenderRows(rows, header, source, forms);
 }
 
 }  // namespace cameraunlock::config

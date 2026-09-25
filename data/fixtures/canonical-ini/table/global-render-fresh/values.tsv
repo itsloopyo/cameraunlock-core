@@ -1,0 +1,7 @@
+# The same table rendered with values. Every row that is not PerGame reads Defaults.ini through
+# default in the fresh file; here each is a value, and the PerGame CollisionChannel is active
+# away from its default.
+field	UdpPort	5000
+field	EnableOnStartup	false
+field	CollisionChannel	5
+field	LogPath	Other.log

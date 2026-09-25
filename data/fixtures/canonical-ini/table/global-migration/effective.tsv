@@ -1,0 +1,10 @@
+# Defaults.ini gave UdpPort, EnableOnStartup, PositionLimitX and ToggleKey; every other row's
+# effective default is the table's.
+field	UdpPort	5000
+field	EnableOnStartup	false
+field	PositionLimitX	0.35
+field	ToggleKey	F8
+defaults_ini	UdpPort
+defaults_ini	EnableOnStartup
+defaults_ini	PositionLimitX
+defaults_ini	ToggleKey

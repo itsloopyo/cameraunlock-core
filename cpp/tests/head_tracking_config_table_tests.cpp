@@ -4,6 +4,7 @@
 
 #include <cameraunlock/config/head_tracking_config_table.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
@@ -226,6 +227,54 @@ void TestFixtures() {
     }
 }
 
+void TestFreshRender() {
+    std::cout << "\n[the fresh file with every concept]\n";
+    const ConfigTable<HeadTrackingConfig> table = AllConceptsTable();
+    const std::string rendered = RenderCanonicalFresh(table, kHeader);
+    Check(rendered == ReadBytes(Root() / "all-concepts-fresh.ini"),
+          "the table with every concept passes the fresh render's gate and renders as all-concepts-fresh.ini");
+    bool clean = false;
+    const HeadTrackingConfig reread = Applied(table, rendered, HeadTrackingConfig{}, clean);
+    Check(clean && FieldRows(reread) == FieldRows(table.defaults()), "the fresh file reads back as the defaults");
+}
+
+// Effective LocalSmoothing and RemoteSmoothing reach the position settings' copy, and the migration
+// render writes CollisionChannel, an Engine row that follows Defaults.ini, as an active value where
+// it differs from its effective default. The C# twin is HeadTrackingConfigTableFixtures.RunEffectiveDefaults.
+void TestEffectiveDefaults() {
+    std::cout << "\n[effective defaults]\n";
+    const ConfigTable<HeadTrackingConfig> table =
+        HeadTrackingConfigTable({Concept::LocalSmoothing, Concept::RemoteSmoothing, Concept::CollisionChannel});
+    HeadTrackingConfig effective = table.defaults();
+    effective.local_smoothing = 0.25f;
+    effective.remote_smoothing = 0.5f;
+    effective.collision_channel = 2;
+    const std::vector<Concept> from_defaults_ini{Concept::LocalSmoothing, Concept::RemoteSmoothing,
+                                                 Concept::CollisionChannel};
+    HeadTrackingConfig config;
+    const detail::EffectiveApplyResult result =
+        detail::ApplyCanonicalEffective(ParseCanonicalIni(""), table, config, effective, from_defaults_ini);
+    Check(config.local_smoothing == 0.25f && config.remote_smoothing == 0.5f && config.position.local_smoothing == 0.25f &&
+              config.position.remote_smoothing == 0.5f && config.collision_channel == 2,
+          "the effective defaults reach every field, the position copy included");
+    Check(std::all_of(result.sources.begin(), result.sources.end(),
+                      [](detail::ValueSource s) { return s == detail::ValueSource::kDefaultsIni; }),
+          "each row's source is Defaults.ini");
+
+    HeadTrackingConfig values = table.defaults();
+    values.local_smoothing = 0.25f;
+    const std::string migrated = detail::RenderCanonicalMigration(table, values, effective, kHeader);
+    Check(Contains(migrated, "\r\nLocalSmoothing=default\r\n") && Contains(migrated, "\r\nRemoteSmoothing=0.15\r\n") &&
+              Contains(migrated, "\r\nCollisionChannel=0\r\n") && !Contains(migrated, "; CollisionChannel"),
+          "the migration render writes default, a value, and the Engine row as an active value");
+    HeadTrackingConfig reread;
+    const detail::EffectiveApplyResult back =
+        detail::ApplyCanonicalEffective(ParseCanonicalIni(migrated), table, reread, effective, from_defaults_ini);
+    Check(back.report.diagnostics.empty() && reread.local_smoothing == 0.25f && reread.remote_smoothing == 0.15f &&
+              reread.collision_channel == 0,
+          "the migrated file reads back as its values");
+}
+
 void TestEveryConceptBound() {
     std::cout << "\n[every canonical concept has a binding]\n";
     std::string error;
@@ -339,6 +388,8 @@ int RunHeadTrackingConfigTableTests() {
     try {
         TestEveryConceptBound();
         TestFixtures();
+        TestFreshRender();
+        TestEffectiveDefaults();
         TestHotkeyDefaults();
         TestTrueFreeLookSpellings();
         TestArguments();

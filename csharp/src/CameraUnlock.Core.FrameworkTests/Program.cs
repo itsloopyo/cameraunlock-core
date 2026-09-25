@@ -96,9 +96,12 @@ namespace CameraUnlock.Core.Tests
             {
                 failures += Report(name, dir => ConfigTableFixtures.RunCase(fixtures, name));
             }
+            failures += Report("the fresh render's gate, PerGame and the default token", dir => ConfigTableFixtures.RunGlobalChecks());
 
             Console.WriteLine("Head-tracking config table fixtures");
             failures += Report("all-concepts.ini", dir => HeadTrackingConfigTableFixtures.RunRender(fixtures));
+            failures += Report("all-concepts-fresh.ini", dir => HeadTrackingConfigTableFixtures.RunFreshRender(fixtures));
+            failures += Report("effective defaults reach the position copy", dir => HeadTrackingConfigTableFixtures.RunEffectiveDefaults());
             foreach (string name in HeadTrackingConfigTableFixtures.Cases)
             {
                 failures += Report(name, dir => HeadTrackingConfigTableFixtures.RunCase(fixtures, name));

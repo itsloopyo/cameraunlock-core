@@ -24,10 +24,11 @@ namespace CameraUnlock.Core.Config
         internal ConceptDescriptor(string id, string section, string key, ConceptValueFamily family,
             string[] fileComment,
 #if NULLABLE_ENABLED
-            string? canonicalDefault)
+            string? canonicalDefault,
 #else
-            string canonicalDefault)
+            string canonicalDefault,
 #endif
+            string defaultText)
         {
             Id = id;
             Section = section;
@@ -35,6 +36,7 @@ namespace CameraUnlock.Core.Config
             Family = family;
             FileComment = new ReadOnlyCollection<string>(fileComment);
             CanonicalDefault = canonicalDefault;
+            DefaultText = defaultText;
         }
 
         /// <summary>The schema's id for the concept.</summary>
@@ -57,6 +59,10 @@ namespace CameraUnlock.Core.Config
 #else
         public string CanonicalDefault { get; }
 #endif
+
+        // The schema's default as text the concept's codec reads: a hotkey concept's
+        // canonical_default, else the schema's value as written there.
+        internal string DefaultText { get; }
     }
 
     /// <summary>
@@ -69,11 +75,12 @@ namespace CameraUnlock.Core.Config
         internal ConceptDescriptor(string id, string section, string key, ConceptValueFamily family,
             IValueCodec<T> codec, string[] fileComment,
 #if NULLABLE_ENABLED
-            string? canonicalDefault)
+            string? canonicalDefault,
 #else
-            string canonicalDefault)
+            string canonicalDefault,
 #endif
-            : base(id, section, key, family, fileComment, canonicalDefault)
+            string defaultText)
+            : base(id, section, key, family, fileComment, canonicalDefault, defaultText)
         {
             Codec = codec;
         }

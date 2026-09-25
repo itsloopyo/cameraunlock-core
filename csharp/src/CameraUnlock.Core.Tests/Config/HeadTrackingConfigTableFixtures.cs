@@ -41,6 +41,68 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         /// <summary>
+        /// Throws when the fresh render of the table with every concept does not give
+        /// all-concepts-fresh.ini, which holds core's own table to the fresh render's gate, or does not
+        /// read back as the defaults.
+        /// </summary>
+        public static void RunFreshRender(string root)
+        {
+            ConfigTable<HeadTrackingConfigData> table = AllConceptsTable();
+            byte[] rendered = table.RenderFresh(Header);
+            byte[] expected = File.ReadAllBytes(Path.Combine(Path.Combine(root, "head-tracking"), "all-concepts-fresh.ini"));
+            if (!Same(rendered, expected))
+            {
+                throw new InvalidOperationException("rendered bytes differ:\n" + Encoding.UTF8.GetString(rendered));
+            }
+            SameRows(FieldRows(Applied(table, rendered, new HeadTrackingConfigData())), FieldRows(Defaults(table)),
+                "the fresh file read back");
+        }
+
+        /// <summary>
+        /// Throws unless effective LocalSmoothing and RemoteSmoothing values also reach the position
+        /// settings' copy, and the migration render writes CollisionChannel, an Engine row that follows
+        /// Defaults.ini, as an active value where it differs from its effective default.
+        /// </summary>
+        public static void RunEffectiveDefaults()
+        {
+            ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
+                ConfigConcepts.LocalSmoothing, ConfigConcepts.RemoteSmoothing, ConfigConcepts.CollisionChannel);
+            var effective = new HeadTrackingConfigData { LocalSmoothing = 0.25f, RemoteSmoothing = 0.5f, CollisionChannel = 2 };
+            ConceptDescriptor[] fromDefaultsIni =
+            {
+                ConfigConcepts.LocalSmoothing, ConfigConcepts.RemoteSmoothing, ConfigConcepts.CollisionChannel,
+            };
+            var config = new HeadTrackingConfigData();
+            TableApplyResult result = table.Apply(CanonicalIni.Parse(new byte[0]), config, effective, fromDefaultsIni);
+            if (config.LocalSmoothing != 0.25f || config.RemoteSmoothing != 0.5f || config.Position.LocalSmoothing != 0.25f
+                || config.Position.RemoteSmoothing != 0.5f || config.CollisionChannel != 2)
+            {
+                throw new InvalidOperationException("the effective defaults did not reach every field, the position copy included");
+            }
+            foreach (ConfigValueSource source in result.Sources)
+            {
+                if (source != ConfigValueSource.DefaultsIni) throw new InvalidOperationException("a row's source is " + source);
+            }
+
+            HeadTrackingConfigData values = Defaults(table);
+            values.LocalSmoothing = 0.25f;
+            string migrated = Encoding.ASCII.GetString(table.RenderMigration(values, effective, Header));
+            if (!migrated.Contains("\r\nLocalSmoothing=default\r\n") || !migrated.Contains("\r\nRemoteSmoothing=0.15\r\n")
+                || !migrated.Contains("\r\nCollisionChannel=0\r\n") || migrated.Contains("; CollisionChannel"))
+            {
+                throw new InvalidOperationException("the migration render wrote:\n" + migrated);
+            }
+            var reread = new HeadTrackingConfigData();
+            TableApplyResult back = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes(migrated)), reread, effective,
+                fromDefaultsIni);
+            if (back.Report.Diagnostics.Count != 0 || reread.LocalSmoothing != 0.25f || reread.RemoteSmoothing != 0.15f
+                || reread.CollisionChannel != 0)
+            {
+                throw new InvalidOperationException("the migrated file did not read back as its values");
+            }
+        }
+
+        /// <summary>
         /// Throws when the case, applied onto a new config and onto apply-values' result, does not give
         /// its expected.tsv, reads with a diagnostic, changes a field no row binds, or renders a file
         /// that does not read back as itself.

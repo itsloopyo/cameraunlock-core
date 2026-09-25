@@ -35,6 +35,12 @@ namespace CameraUnlock.Core.Tests.Config
             ConfigTableFixtures.RunCase(Root(), name);
         }
 
+        [Fact]
+        public void TheFreshRenderGatePerGameAndTheDefaultToken()
+        {
+            ConfigTableFixtures.RunGlobalChecks();
+        }
+
         private sealed class Small
         {
             public bool Rotation = true;

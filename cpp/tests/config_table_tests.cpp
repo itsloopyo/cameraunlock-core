@@ -158,6 +158,7 @@ ConfigTable<FixtureConfig> FixtureTable() {
         .Comment("How far, in metres, leaning sideways moves the view.\nThe fixture's own wording.")
         .Concept<Concept::CollisionChannel>(&F::collision_channel)
         .Engine()
+        .PerGame()
         .Concept<Concept::CycleTrackingModeKey>(&F::cycle_key)
         .Local("Camera", "Mode", &F::mode, ModeCodec(), "ControlRotation or UpdateCamera (decoupled).")
         .Local("Position", "LeanDelayMs", &F::lean_delay_ms, IntCodec<int>(),
@@ -278,13 +279,68 @@ void CheckRoundTrip(const ConfigTable<FixtureConfig>& table, const FixtureConfig
     Check(RenderCanonical(table, applied, kHeader) == rendered, name + ": rendering what it read gives the same bytes");
 }
 
+// The defaults with effective.tsv's field rows, and the concepts its defaults_ini rows name.
+FixtureConfig Effective(const fs::path& dir, std::vector<Concept>& from_defaults_ini) {
+    const std::vector<FieldAccess> fields = Fields();
+    FixtureConfig effective;
+    for (const std::vector<std::string>& row : TsvRows(dir / "effective.tsv")) {
+        if (row.size() < 2) throw std::runtime_error("malformed row in " + (dir / "effective.tsv").string());
+        const auto field = std::find_if(fields.begin(), fields.end(), [&](const FieldAccess& f) { return f.name == row[1]; });
+        if (row[0] == "field" && row.size() == 3 && field != fields.end()) {
+            field->parse(effective, Unescape(row[2]));
+            continue;
+        }
+        const auto concept_info = std::find_if(std::begin(schema::kConcepts), std::end(schema::kConcepts),
+                                               [&](const schema::ConceptInfo& info) { return row[1] == info.name; });
+        if (row[0] != "defaults_ini" || row.size() != 2 || concept_info == std::end(schema::kConcepts)) {
+            throw std::runtime_error("malformed row in " + (dir / "effective.tsv").string());
+        }
+        from_defaults_ini.push_back(concept_info->id);
+    }
+    return effective;
+}
+
+std::vector<std::string> SourceRows(const std::vector<detail::ValueSource>& sources) {
+    const std::vector<FieldAccess> fields = Fields();
+    if (sources.size() != fields.size()) throw std::runtime_error("one source per row expected");
+    std::vector<std::string> rows;
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        const char* source = sources[i] == detail::ValueSource::kFile          ? "file"
+                             : sources[i] == detail::ValueSource::kDefaultsIni ? "defaults_ini"
+                                                                                : "built_in";
+        rows.push_back(fields[i].name + "=" + source);
+    }
+    return rows;
+}
+
+FixtureConfig Values(const fs::path& dir) {
+    const std::vector<FieldAccess> fields = Fields();
+    FixtureConfig values;
+    for (const std::vector<std::string>& row : TsvRows(dir / "values.tsv")) {
+        if (row[0] != "field" || row.size() != 3) throw std::runtime_error("malformed row in " + dir.string());
+        const auto field = std::find_if(fields.begin(), fields.end(), [&](const FieldAccess& f) { return f.name == row[1]; });
+        if (field == fields.end()) throw std::runtime_error("unknown field " + row[1] + " in " + dir.string());
+        field->parse(values, Unescape(row[2]));
+    }
+    return values;
+}
+
+void CheckBytes(const std::string& rendered, const fs::path& path, const std::string& name) {
+    const std::string expected = ReadBytes(path);
+    Check(rendered == expected, name);
+    if (rendered != expected) std::cout << "    rendered:\n" << rendered << "\n";
+}
+
 void RunApplyCase(const ConfigTable<FixtureConfig>& table, const fs::path& dir) {
     const std::string name = dir.filename().string();
     std::vector<std::string> expected_fields;
+    std::vector<std::string> expected_sources;
     std::vector<std::string> expected_diagnostics;
     for (const std::vector<std::string>& row : TsvRows(dir / "expected.tsv")) {
         if (row[0] == "field" && row.size() == 3) {
             expected_fields.push_back(row[1] + "=" + Unescape(row[2]));
+        } else if (row[0] == "source" && row.size() == 3) {
+            expected_sources.push_back(row[1] + "=" + row[2]);
         } else if (row[0] == "diagnostic" && row.size() == 4) {
             expected_diagnostics.push_back(row[1] + " " + row[2] + " " + Unescape(row[3]));
         } else {
@@ -298,7 +354,18 @@ void RunApplyCase(const ConfigTable<FixtureConfig>& table, const fs::path& dir) 
     config.udp_port = 1;
     config.write_log = true;
     config.hook_offsets.clear();
-    const ApplyReport report = ApplyCanonical(doc, table, config);
+    ApplyReport report;
+    if (fs::exists(dir / "effective.tsv")) {
+        std::vector<Concept> from_defaults_ini;
+        const FixtureConfig effective = Effective(dir, from_defaults_ini);
+        const detail::EffectiveApplyResult result =
+            detail::ApplyCanonicalEffective(doc, table, config, effective, from_defaults_ini);
+        report = result.report;
+        CheckRows(SourceRows(result.sources), expected_sources, name + ": sources");
+    } else {
+        if (!expected_sources.empty()) throw std::runtime_error(name + " lists sources and has no effective.tsv");
+        report = ApplyCanonical(doc, table, config);
+    }
     CheckRows(FieldRows(config), expected_fields, name + ": field values");
     CheckRows(DiagnosticRows(report), expected_diagnostics, name + ": diagnostics");
     Check(config.not_in_table == 99, name + ": a field no row binds is left alone");
@@ -307,19 +374,40 @@ void RunApplyCase(const ConfigTable<FixtureConfig>& table, const fs::path& dir) 
 
 void RunRenderCase(const ConfigTable<FixtureConfig>& table, const fs::path& dir) {
     const std::string name = dir.filename().string();
-    const std::vector<FieldAccess> fields = Fields();
-    FixtureConfig values;
-    for (const std::vector<std::string>& row : TsvRows(dir / "values.tsv")) {
-        if (row[0] != "field" || row.size() != 3) throw std::runtime_error("malformed row in " + name);
-        const auto field = std::find_if(fields.begin(), fields.end(), [&](const FieldAccess& f) { return f.name == row[1]; });
-        if (field == fields.end()) throw std::runtime_error("unknown field " + row[1] + " in " + name);
-        field->parse(values, Unescape(row[2]));
-    }
-    const std::string rendered = RenderCanonical(table, values, kHeader);
-    const std::string expected = ReadBytes(dir / "expected.ini");
-    Check(rendered == expected, name + ": rendered bytes");
-    if (rendered != expected) std::cout << "    rendered:\n" << rendered << "\n";
+    const FixtureConfig values = Values(dir);
+    CheckBytes(RenderCanonical(table, values, kHeader), dir / "expected.ini", name + ": rendered bytes");
     CheckRoundTrip(table, values, name);
+}
+
+// The fresh file reads back as the defaults with no diagnostic.
+void RunFreshCase(const ConfigTable<FixtureConfig>& table, const fs::path& dir) {
+    const std::string name = dir.filename().string();
+    const std::string rendered = RenderCanonicalFresh(table, kHeader);
+    CheckBytes(rendered, dir / "fresh.ini", name + ": fresh bytes");
+    const CanonicalIni doc = ParseCanonicalIni(rendered);
+    FixtureConfig applied;
+    applied.udp_port = 1;
+    const ApplyReport report = ApplyCanonical(doc, table, applied);
+    Check(doc.diagnostics.empty() && report.diagnostics.empty(), name + ": the fresh file reads with no diagnostic");
+    CheckRows(FieldRows(applied), FieldRows(FixtureConfig{}), name + ": the fresh file reads back as the defaults");
+}
+
+// The migrated file reads back, over the same effective defaults, as the values it was written from.
+void RunMigrationCase(const ConfigTable<FixtureConfig>& table, const fs::path& dir) {
+    const std::string name = dir.filename().string();
+    std::vector<Concept> from_defaults_ini;
+    const FixtureConfig effective = Effective(dir, from_defaults_ini);
+    const FixtureConfig values = Values(dir);
+    const std::string rendered = detail::RenderCanonicalMigration(table, values, effective, kHeader);
+    CheckBytes(rendered, dir / "migration.ini", name + ": migration bytes");
+    const CanonicalIni doc = ParseCanonicalIni(rendered);
+    FixtureConfig applied;
+    applied.udp_port = 1;
+    const detail::EffectiveApplyResult result =
+        detail::ApplyCanonicalEffective(doc, table, applied, effective, from_defaults_ini);
+    Check(doc.diagnostics.empty() && result.report.diagnostics.empty(),
+          name + ": the migrated file reads with no diagnostic");
+    CheckRows(FieldRows(applied), FieldRows(values), name + ": the migrated file reads back as the values");
 }
 
 void TestFixtures() {
@@ -329,13 +417,26 @@ void TestFixtures() {
     std::vector<fs::path> cases;
     for (const fs::directory_entry& entry : fs::directory_iterator(root)) cases.push_back(entry.path());
     std::sort(cases.begin(), cases.end());
-    Check(cases.size() == 12, "twelve table fixture cases");
+    Check(cases.size() == 23, "twenty-three table fixture cases");
     for (const fs::path& dir : cases) {
         if (fs::exists(dir / "input.ini")) {
             RunApplyCase(table, dir);
-        } else {
-            RunRenderCase(table, dir);
+            continue;
         }
+        bool ran = false;
+        if (fs::exists(dir / "fresh.ini")) {
+            RunFreshCase(table, dir);
+            ran = true;
+        }
+        if (fs::exists(dir / "expected.ini")) {
+            RunRenderCase(table, dir);
+            ran = true;
+        }
+        if (fs::exists(dir / "migration.ini")) {
+            RunMigrationCase(table, dir);
+            ran = true;
+        }
+        if (!ran) throw std::runtime_error(dir.string() + " holds no input.ini, fresh.ini, expected.ini or migration.ini");
     }
 }
 
@@ -625,6 +726,89 @@ void TestRenderAndApply() {
           "a code outside 0x01-0xFE is refused");
 }
 
+const char* const kFreshRowTail =
+    ". A fresh file writes default on this row, which takes Defaults.ini's value, so the row's own default must be the "
+    "schema's, or the row must be marked PerGame().";
+
+// The same checks, with the same messages, as ConfigTableFixtures.RunGlobalChecks.
+void TestGlobalChecks() {
+    std::cout << "\nConfig table fresh render, PerGame and the default token:\n";
+    using S = Small;
+    const RenderHeader header{"G"};
+
+    Check(Thrown([&] { RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::UdpPort>(&S::value), header); }) ==
+              std::string("[Network] UdpPort defaults to 5, and the schema to 4242") + kFreshRowTail,
+          "an int row off the schema's default throws from the fresh render, naming it");
+    Check(Thrown([&] { RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::ToggleKey>(&S::key), header); }) ==
+              std::string("[Hotkeys] ToggleKey defaults to End, and the schema to End, Ctrl+Shift+Y") + kFreshRowTail,
+          "a hotkey row off the schema's list throws");
+    Check(Thrown([&] { RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::LocalSmoothing>(&S::scale), header); }) ==
+              std::string("[Smoothing] LocalSmoothing defaults to 1.0, and the schema to 0.0") + kFreshRowTail,
+          "a float row off the schema's default throws");
+
+    const std::string per_game =
+        RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::UdpPort>(&S::value).PerGame(), header);
+    Check(Contains(per_game, "\r\nUdpPort=5\r\n") && !Contains(per_game, "Defaults.ini"),
+          "the same row marked PerGame renders its value, and no other concept row means no Defaults.ini lines");
+
+    Check(Thrown([&] { RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::RotationEnabled>(&S::rotation), header); }) ==
+              "the table binds [General] RotationEnabled without [Position] PositionEnabled, and the tracking mode is "
+              "the two of them together",
+          "RotationEnabled without PositionEnabled throws");
+    Check(Thrown([&] { RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::PositionEnabled>(&S::position), header); }) ==
+              "(nothing thrown)",
+          "PositionEnabled alone renders");
+
+    Check(Thrown([] { ConfigTable<S>().Local("Camera", "Offset", &S::value, IntCodec<int>(), "One.").PerGame(); }) ==
+              "[Camera] Offset is a local row, which never takes a value from Defaults.ini",
+          "PerGame on a local row throws");
+
+    S keys_defaults;
+    keys_defaults.text = "End, Ctrl+Shift+Y";
+    ConfigTable<S> keyed(keys_defaults);
+    keyed.Concept<Concept::ToggleKey>(&S::text)
+        .Concept<Concept::RotationEnabled>(&S::rotation)
+        .Concept<Concept::PositionEnabled>(&S::position)
+        .PerGame();
+    S config;
+    config.text = "F1";
+    const ApplyReport report = ApplyCanonical(ParseCanonicalIni("[Hotkeys]\r\nToggleKey=End, default\r\n"), keyed, config);
+    Check(report.diagnostics.size() == 1 && report.diagnostics[0].kind == CanonicalDiagnosticKind::InvalidValue &&
+              config.text == "End, Ctrl+Shift+Y",
+          "End, default is a key list with an item that is no key, not the token");
+
+    const CanonicalIni empty = ParseCanonicalIni("");
+    ConfigTable<S> pair;
+    pair.Concept<Concept::RotationEnabled>(&S::rotation).Concept<Concept::PositionEnabled>(&S::position);
+    S both_off;
+    both_off.rotation = false;
+    both_off.position = false;
+    S target;
+    Check(Contains(Thrown([&] { detail::ApplyCanonicalEffective(empty, pair, target, both_off, {}); }),
+                   "both start false"),
+          "effective defaults that name no tracking mode throw");
+    Check(Contains(Thrown([&] {
+                       detail::ApplyCanonicalEffective(empty, keyed, target, keyed.defaults(), {Concept::PositionEnabled});
+                   }),
+                   "PositionEnabled is not a row of this table that follows Defaults.ini"),
+          "a PerGame row named as coming from Defaults.ini throws");
+    Check(Contains(Thrown([&] {
+                       detail::ApplyCanonicalEffective(empty, keyed, target, keyed.defaults(), {Concept::UdpPort});
+                   }),
+                   "UdpPort is not a row of this table that follows Defaults.ini"),
+          "a concept the table does not bind named as coming from Defaults.ini throws");
+    S effective = keyed.defaults();
+    effective.position = false;
+    S applied;
+    applied.rotation = false;
+    applied.position = false;
+    const detail::EffectiveApplyResult result =
+        detail::ApplyCanonicalEffective(empty, keyed, applied, effective, {Concept::RotationEnabled});
+    Check(applied.rotation && applied.position && result.sources[1] == detail::ValueSource::kDefaultsIni &&
+              result.sources[2] == detail::ValueSource::kBuiltIn,
+          "a PerGame row starts from the table's default, whatever the effective defaults hold");
+}
+
 }  // namespace
 
 int RunConfigTableTests() {
@@ -635,6 +819,7 @@ int RunConfigTableTests() {
         TestConstructionChecks();
         TestModifiers();
         TestRenderAndApply();
+        TestGlobalChecks();
     } catch (const std::exception& e) {
         std::cout << "  [FAIL] unexpected exception: " << e.what() << "\n";
         ++g_failures;

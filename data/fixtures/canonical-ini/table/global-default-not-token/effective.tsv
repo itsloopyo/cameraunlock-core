@@ -1,0 +1,5 @@
+# Defaults.ini gave EnableOnStartup and LocalSmoothing.
+field	EnableOnStartup	false
+field	LocalSmoothing	0.5
+defaults_ini	EnableOnStartup
+defaults_ini	LocalSmoothing

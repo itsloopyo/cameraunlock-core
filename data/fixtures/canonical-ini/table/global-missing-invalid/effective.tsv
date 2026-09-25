@@ -1,0 +1,7 @@
+# Defaults.ini gave UdpPort, EnableOnStartup and CycleTrackingModeKey.
+field	UdpPort	5000
+field	EnableOnStartup	false
+field	CycleTrackingModeKey	F7
+defaults_ini	UdpPort
+defaults_ini	EnableOnStartup
+defaults_ini	CycleTrackingModeKey

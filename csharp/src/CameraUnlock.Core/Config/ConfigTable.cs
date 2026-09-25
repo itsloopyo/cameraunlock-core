@@ -7,8 +7,9 @@ namespace CameraUnlock.Core.Config
 {
     /// <summary>
     /// The rows of one game's canonical config file, each bound to a property or field of
-    /// <typeparamref name="TConfig"/>: <see cref="Apply"/> reads a parsed file into a config and
-    /// <see cref="Render"/> writes a config as a canonical file. The C++ twin is
+    /// <typeparamref name="TConfig"/>: <see cref="Apply(CanonicalIni, TConfig)"/> reads a parsed file
+    /// into a config, <see cref="Render"/> writes a config as a canonical file and
+    /// <see cref="RenderFresh"/> writes the file a game starts with. The C++ twin is
     /// cameraunlock::config::ConfigTable, and data/fixtures/canonical-ini/table holds both to the
     /// same bytes.
     /// <para>
@@ -41,6 +42,26 @@ namespace CameraUnlock.Core.Config
         private static readonly byte[] StampSectionBytes = Encoding.ASCII.GetBytes(StampSection);
         private static readonly byte[] Empty = new byte[0];
         private static readonly byte[] Crlf = { (byte)'\r', (byte)'\n' };
+        private static readonly byte[] DefaultToken = Encoding.ASCII.GetBytes("default");
+
+        private static readonly string[] DefaultsIniHeader =
+        {
+            "; A setting set to default takes its value from Defaults.ini, which every head tracking mod",
+            "; that keeps its settings in CameraUnlock.ini reads: %AppData%\\CameraUnlock\\Defaults.ini on",
+            "; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on",
+            "; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini",
+            "; on macOS. The log names the file it read. Write a value instead of default to change that",
+            "; setting for this game only.",
+        };
+
+        // How a render writes a row: as Render does (an Engine row at its default commented), as
+        // its value, or as the default token.
+        private enum RowForm
+        {
+            AsRender = 0,
+            Value = 1,
+            Default = 2,
+        }
 
         private readonly Func<TConfig> defaults;
         private readonly TConfig checkDefaults;
@@ -177,6 +198,24 @@ namespace CameraUnlock.Core.Config
             return this;
         }
 
+        /// <summary>
+        /// Marks the concept row as one this game keeps: its default is the table's own and never
+        /// Defaults.ini's, so <c>default</c>, a missing key and an invalid value all read the table's
+        /// default, and <see cref="RenderFresh"/> writes the row's value. Each use needs an entry,
+        /// approved by the owner, in the repo's <c>per_game</c> list in data/config-format.json.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">There is no row, or it is a local row.</exception>
+        public ConfigTable<TConfig> PerGame()
+        {
+            Row row = Last("PerGame");
+            if (row.Concept == null)
+            {
+                throw new InvalidOperationException(row.Name + " is a local row, which never takes a value from Defaults.ini");
+            }
+            row.PerGame = true;
+            return this;
+        }
+
         /// <summary>Marks the row as one the config owner's Save may change.</summary>
         /// <exception cref="InvalidOperationException">There is no row.</exception>
         public ConfigTable<TConfig> Writable()
@@ -208,9 +247,11 @@ namespace CameraUnlock.Core.Config
         /// <summary>
         /// Reads a parsed canonical file into the table's rows of <paramref name="config"/>; members
         /// no row binds are left as they are. Every row starts from its default, so a key the file
-        /// leaves out reads as the default with no diagnostic. A value its codec does not read keeps
-        /// the default and draws <see cref="CanonicalDiagnosticKind.InvalidValue"/>. A section the
-        /// table has no row in draws one UnknownSection, a key no row of a read section names one
+        /// leaves out reads as the default with no diagnostic, and so does <c>default</c> on a concept
+        /// row: the value, after the reader's trimming, equal to <c>default</c> in any ASCII letter
+        /// case. On a local row the word is a value like any other. A value its codec does not read
+        /// keeps the default and draws <see cref="CanonicalDiagnosticKind.InvalidValue"/>. A section
+        /// the table has no row in draws one UnknownSection, a key no row of a read section names one
         /// UnknownKey, and none is drawn in [CameraUnlock]. A key that names a row of the table in
         /// another section, or a concept row by an alias, draws MisplacedKey naming the row; one that
         /// names a retired concept draws RetiredKey, and one that names a concept the canonical format
@@ -227,15 +268,67 @@ namespace CameraUnlock.Core.Config
         /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable.</exception>
         public ApplyReport Apply(CanonicalIni doc, TConfig config)
         {
+            return Apply(doc, config, NewDefaults(), new ConceptDescriptor[0]).Report;
+        }
+
+        /// <summary>
+        /// <see cref="Apply(CanonicalIni, TConfig)"/> over effective defaults. A concept row that is
+        /// not PerGame starts from its value in <paramref name="effective"/>, every other row from the
+        /// table's defaults; <c>default</c>, a missing key and an invalid value leave a row at its
+        /// start, and a pair naming no tracking mode takes both starts. <paramref name="fromDefaultsIni"/>
+        /// names the concepts whose effective default Defaults.ini gave, which the result reports as
+        /// the source of such a row left at its start.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable;
+        /// <paramref name="fromDefaultsIni"/> names a concept that is not a row of the table following
+        /// Defaults.ini; or the starts of RotationEnabled and PositionEnabled are both false.</exception>
+        internal TableApplyResult Apply(CanonicalIni doc, TConfig config, TConfig effective,
+            ICollection<ConceptDescriptor> fromDefaultsIni)
+        {
             if (doc == null) throw new ArgumentNullException("doc");
             if (config == null) throw new ArgumentNullException("config");
+            if (effective == null) throw new ArgumentNullException("effective");
+            if (fromDefaultsIni == null) throw new ArgumentNullException("fromDefaultsIni");
             if (!doc.IsReadable)
             {
                 throw new ArgumentException("Apply needs a readable document, and this one is " + doc.Status, "doc");
             }
 
             TConfig fresh = NewDefaults();
-            foreach (Row row in rows) row.Assign(config, fresh);
+            var starts = new TConfig[rows.Count];
+            var startSources = new ConfigValueSource[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                starts[i] = rows[i].FollowsDefaultsIni ? effective : fresh;
+                startSources[i] = ConfigValueSource.BuiltIn;
+            }
+            foreach (ConceptDescriptor concept in fromDefaultsIni)
+            {
+                if (concept == null) throw new ArgumentNullException("fromDefaultsIni", "an item is null");
+                int i = IndexOf(concept);
+                if (i < 0 || !rows[i].FollowsDefaultsIni)
+                {
+                    throw new ArgumentException(concept.Id + " is not a row of this table that follows Defaults.ini",
+                        "fromDefaultsIni");
+                }
+                startSources[i] = ConfigValueSource.DefaultsIni;
+            }
+            int rotation = IndexOf(ConfigConcepts.RotationEnabled);
+            int position = IndexOf(ConfigConcepts.PositionEnabled);
+            if (rotation >= 0 && position >= 0 && rows[rotation].IsFalse(starts[rotation])
+                && rows[position].IsFalse(starts[position]))
+            {
+                throw new ArgumentException("RotationEnabled and PositionEnabled both start false, which is not a tracking mode",
+                    "effective");
+            }
+
+            var sources = new ConfigValueSource[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                rows[i].Assign(config, starts[i]);
+                sources[i] = startSources[i];
+            }
 
             var diagnostics = new List<CanonicalDiagnostic>();
             var readFrom = new int[rows.Count];
@@ -268,6 +361,7 @@ namespace CameraUnlock.Core.Config
                         ReportUnread(section, value, known, diagnostics);
                         continue;
                     }
+                    if (rows[found].Concept != null && CanonicalIni.EqualsAsciiIgnoreCase(value.Value, DefaultToken)) continue;
 #if NULLABLE_ENABLED
                     string? error = rows[found].Apply(value.Value, config);
 #else
@@ -276,6 +370,7 @@ namespace CameraUnlock.Core.Config
                     if (error == null)
                     {
                         readFrom[found] = value.Line;
+                        sources[found] = ConfigValueSource.File;
                     }
                     else
                     {
@@ -285,21 +380,22 @@ namespace CameraUnlock.Core.Config
                 }
             }
 
-            int rotation = IndexOf(ConfigConcepts.RotationEnabled);
-            int position = IndexOf(ConfigConcepts.PositionEnabled);
             if (rotation >= 0 && position >= 0 && rows[rotation].IsFalse(config) && rows[position].IsFalse(config))
             {
                 var lines = new List<int>();
                 if (readFrom[rotation] != 0) lines.Add(readFrom[rotation]);
                 if (readFrom[position] != 0) lines.Add(readFrom[position]);
                 lines.Sort();
-                rows[rotation].Assign(config, fresh);
-                rows[position].Assign(config, fresh);
+                foreach (int i in new[] { rotation, position })
+                {
+                    rows[i].Assign(config, starts[i]);
+                    sources[i] = startSources[i];
+                }
                 diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.NoTrackingMode, lines.ToArray(), Empty,
                     Empty, Empty));
             }
 
-            return new ApplyReport(Sorted(diagnostics));
+            return new TableApplyResult(new ApplyReport(Sorted(diagnostics)), sources);
         }
 
         /// <summary>
@@ -309,7 +405,8 @@ namespace CameraUnlock.Core.Config
         /// order, then the local sections in table order. Each row is its comment lines as
         /// <c>; text</c>, then <c>Key=value</c>, or <c>; Key=value</c> for an Engine row holding its
         /// default. A blank line separates sections. CRLF line endings with a final CRLF, no byte
-        /// order mark.
+        /// order mark. When the table has a concept row that is not PerGame, six header lines say
+        /// what <c>default</c> means and where Defaults.ini is.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
         /// <exception cref="ArgumentException">A value its codec cannot write, naming the row; or a
@@ -319,6 +416,75 @@ namespace CameraUnlock.Core.Config
         {
             if (values == null) throw new ArgumentNullException("values");
             if (header == null) throw new ArgumentNullException("header");
+            return RenderRows(values, header, new RowForm[rows.Count]);
+        }
+
+        /// <summary>
+        /// Writes the file a game starts with: <see cref="Render"/> of the defaults, except that every
+        /// concept row that is not PerGame is written <c>Key=default</c>, an Engine row included.
+        /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="header"/> is null.</exception>
+        /// <exception cref="ArgumentException">A concept row that is not PerGame defaults to a value
+        /// other than the schema's, naming the row; the table binds RotationEnabled without
+        /// PositionEnabled; or the display name breaks <see cref="Render"/>'s rule.</exception>
+        public byte[] RenderFresh(RenderHeader header)
+        {
+            if (header == null) throw new ArgumentNullException("header");
+            foreach (Row row in rows)
+            {
+                var concept = row.Concept;
+                if (concept == null || row.PerGame) continue;
+                string schema;
+                if (row.Holds(checkDefaults, concept.DefaultText, out schema)) continue;
+                throw new ArgumentException(row.Name + " defaults to " + Encoding.ASCII.GetString(row.Render(checkDefaults))
+                    + ", and the schema to " + schema + ". A fresh file writes default on this row, which takes "
+                    + "Defaults.ini's value, so the row's own default must be the schema's, or the row must be marked "
+                    + "PerGame().");
+            }
+            if (IndexOf(ConfigConcepts.RotationEnabled) >= 0 && IndexOf(ConfigConcepts.PositionEnabled) < 0)
+            {
+                throw new ArgumentException("the table binds [General] RotationEnabled without [Position] PositionEnabled, "
+                    + "and the tracking mode is the two of them together");
+            }
+            var forms = new RowForm[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].FollowsDefaultsIni) forms[i] = RowForm.Default;
+            }
+            return RenderRows(NewDefaults(), header, forms);
+        }
+
+        /// <summary>
+        /// Writes a migrated file: <see cref="Render"/> of <paramref name="values"/>, except that a
+        /// concept row that is not PerGame is written <c>Key=default</c> when its value equals its
+        /// value in <paramref name="effective"/>, and otherwise as its value, never in the commented
+        /// form of an Engine row, which would read back as the effective default. RotationEnabled and
+        /// PositionEnabled are written default only when both equal their effective values.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException">As <see cref="Render"/>.</exception>
+        internal byte[] RenderMigration(TConfig values, TConfig effective, RenderHeader header)
+        {
+            if (values == null) throw new ArgumentNullException("values");
+            if (effective == null) throw new ArgumentNullException("effective");
+            if (header == null) throw new ArgumentNullException("header");
+            var forms = new RowForm[rows.Count];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].FollowsDefaultsIni) forms[i] = rows[i].Equal(values, effective) ? RowForm.Default : RowForm.Value;
+            }
+            int rotation = IndexOf(ConfigConcepts.RotationEnabled);
+            int position = IndexOf(ConfigConcepts.PositionEnabled);
+            if (rotation >= 0 && position >= 0 && (forms[rotation] == RowForm.Value || forms[position] == RowForm.Value))
+            {
+                if (forms[rotation] == RowForm.Default) forms[rotation] = RowForm.Value;
+                if (forms[position] == RowForm.Default) forms[position] = RowForm.Value;
+            }
+            return RenderRows(values, header, forms);
+        }
+
+        private byte[] RenderRows(TConfig values, RenderHeader header, RowForm[] forms)
+        {
             string name = header.DisplayName;
             if (name.Length == 0 || !IsPrintableAscii(name) || name[0] == ' ' || name[name.Length - 1] == ' ')
             {
@@ -331,11 +497,20 @@ namespace CameraUnlock.Core.Config
             Line(output, "; " + name + " head tracking settings.");
             Line(output, "; Comments start with ; and go on their own line. Text after a value is part of the value.");
             bool hotkeys = false;
-            foreach (Row row in rows) hotkeys |= row.Hotkey;
+            bool followsDefaultsIni = false;
+            foreach (Row row in rows)
+            {
+                hotkeys |= row.Hotkey;
+                followsDefaultsIni |= row.FollowsDefaultsIni;
+            }
             if (hotkeys)
             {
                 Line(output, "; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; "
                     + "leave empty for none.");
+            }
+            if (followsDefaultsIni)
+            {
+                foreach (string line in DefaultsIniHeader) Line(output, line);
             }
             Line(output, string.Empty);
             Line(output, "[" + StampSection + "]");
@@ -344,22 +519,22 @@ namespace CameraUnlock.Core.Config
 
             foreach (string section in ConfigConcepts.Sections)
             {
-                var order = new List<Row>();
+                var order = new List<int>();
                 foreach (ConceptDescriptor concept in ConfigConcepts.All)
                 {
-                    foreach (Row row in rows)
+                    for (int i = 0; i < rows.Count; i++)
                     {
-                        if (row.Concept == concept && row.Section == section) order.Add(row);
+                        if (rows[i].Concept == concept && rows[i].Section == section) order.Add(i);
                     }
                 }
-                foreach (Row row in rows)
+                for (int i = 0; i < rows.Count; i++)
                 {
-                    if (row.Concept == null && row.Section == section) order.Add(row);
+                    if (rows[i].Concept == null && rows[i].Section == section) order.Add(i);
                 }
                 if (order.Count == 0) continue;
                 Line(output, string.Empty);
                 Line(output, "[" + section + "]");
-                foreach (Row row in order) AppendRow(output, row, values, fresh);
+                foreach (int i in order) AppendRow(output, rows[i], forms[i], values, fresh);
             }
 
             var localSections = new List<string>();
@@ -374,9 +549,9 @@ namespace CameraUnlock.Core.Config
             {
                 Line(output, string.Empty);
                 Line(output, "[" + section + "]");
-                foreach (Row row in rows)
+                for (int i = 0; i < rows.Count; i++)
                 {
-                    if (row.Section == section) AppendRow(output, row, values, fresh);
+                    if (rows[i].Section == section) AppendRow(output, rows[i], forms[i], values, fresh);
                 }
             }
             return output.ToArray();
@@ -666,19 +841,19 @@ namespace CameraUnlock.Core.Config
             return sorted;
         }
 
-        private static void AppendRow(List<byte> output, Row row, TConfig values, TConfig fresh)
+        private static void AppendRow(List<byte> output, Row row, RowForm form, TConfig values, TConfig fresh)
         {
             foreach (string line in row.Comment) Line(output, "; " + line);
             byte[] value;
             try
             {
-                value = row.Render(values);
+                value = form == RowForm.Default ? DefaultToken : row.Render(values);
             }
             catch (ArgumentException e)
             {
                 throw new ArgumentException(row.Name + ": " + e.Message, "values", e);
             }
-            if (row.Engine && row.Equal(values, fresh)) output.AddRange(Encoding.ASCII.GetBytes("; "));
+            if (form == RowForm.AsRender && row.Engine && row.Equal(values, fresh)) output.AddRange(Encoding.ASCII.GetBytes("; "));
             output.AddRange(row.KeyBytes);
             output.Add((byte)'=');
             output.AddRange(value);
@@ -790,6 +965,14 @@ namespace CameraUnlock.Core.Config
 
             public bool Writable { get; set; }
 
+            public bool PerGame { get; set; }
+
+            // A concept row that is not PerGame, whose default is the effective default.
+            public bool FollowsDefaultsIni
+            {
+                get { return Concept != null && !PerGame; }
+            }
+
             public string Name
             {
                 get { return "[" + Section + "] " + Key; }
@@ -807,6 +990,10 @@ namespace CameraUnlock.Core.Config
             public abstract string Display(TConfig config);
 
             public abstract bool Equal(TConfig a, TConfig b);
+
+            // Whether the row's value in the config is the text as the row's codec reads it; the
+            // text as the codec writes it comes back in canonical.
+            public abstract bool Holds(TConfig config, string text, out string canonical);
 
             public abstract void Assign(TConfig to, TConfig from);
 
@@ -879,6 +1066,22 @@ namespace CameraUnlock.Core.Config
             public override bool Equal(TConfig a, TConfig b)
             {
                 return codec.Equal(get(a), get(b));
+            }
+
+            public override bool Holds(TConfig config, string text, out string canonical)
+            {
+                T value;
+#if NULLABLE_ENABLED
+                string? error;
+#else
+                string error;
+#endif
+                if (!codec.TryParse(Encoding.ASCII.GetBytes(text), out value, out error))
+                {
+                    throw new InvalidOperationException(Name + ": '" + text + "' does not read: " + error);
+                }
+                canonical = Encoding.ASCII.GetString(codec.Render(value));
+                return codec.Equal(get(config), value);
             }
 
             public override void Assign(TConfig to, TConfig from)

@@ -1,0 +1,5 @@
+# Defaults.ini gave UdpPort and EnableOnStartup.
+field	UdpPort	5000
+field	EnableOnStartup	false
+defaults_ini	UdpPort
+defaults_ini	EnableOnStartup

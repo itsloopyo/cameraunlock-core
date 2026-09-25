@@ -46,6 +46,12 @@ for byte:
 ; Example Game head tracking settings.
 ; Comments start with ; and go on their own line. Text after a value is part of the value.
 ; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
 
 [CameraUnlock]
 ; Written by the mod. Leave this section in place.
@@ -88,7 +94,9 @@ One renderer writes every file, so every file has the same shape:
 
 1. A header of comment lines: `; <display name> head tracking settings.`, where the display name
    is the game's name as `data/games.json` spells it; a line saying comments go on their own line;
-   and, when the file holds a hotkey row, a line on how hotkeys are written.
+   when the file holds a hotkey row, a line on how hotkeys are written; and, when it holds a
+   concept row not marked `PerGame`, six lines on what a setting set to `default` means and where
+   Defaults.ini is.
 2. `[CameraUnlock]`, a comment asking the player to leave it in place, and `ConfigFormat=1`.
 3. The schema sections the mod has rows in, in the order of the schema's `sections` array
    (Network, General, Smoothing, Position, Hotkeys, Light), each with its concept rows in the order
@@ -226,6 +234,12 @@ of them at their defaults, which both languages render byte for byte
 ; Fixture Game head tracking settings.
 ; Comments start with ; and go on their own line. Text after a value is part of the value.
 ; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
 
 [CameraUnlock]
 ; Written by the mod. Leave this section in place.
@@ -427,14 +441,22 @@ built with, so the defaults live in the config type, as they always have.
 - **Local rows** name their section, key, codec and comment.
 - **Modifiers** apply to the last row added, or to the concept row `Select` names: `Comment`
   replaces a concept's comment, `Range` bounds an int, float or double local row, `Engine` makes
-  the row an Engine row, `Writable` marks a row the owner's `Save` may change.
+  the row an Engine row, `Writable` marks a row the owner's `Save` may change, and `PerGame` marks
+  a concept row whose default stays the game's own and never follows Defaults.ini. `PerGame` throws
+  on a local row, and each use needs an owner-approved `per_game` entry for the repo in
+  `data/config-format.json`.
 
 `ApplyCanonical(doc, table, config)` / `table.Apply(doc, config)` reads a parsed file into a
 config: every row starts from its default, fields no row binds are left alone, and it returns the
 table's diagnostics (an invalid value, an unknown section or key, a key in the wrong section or
-spelled as an alias, a retired or non-canonical concept, a pair that names no tracking mode).
-`RenderCanonical(table, config, header)` / `table.Render(config, header)` writes a config as a
-canonical file.
+spelled as an alias, a retired or non-canonical concept, a pair that names no tracking mode). On a
+concept row, the value `default` in any ASCII letter case reads as the row's default with no
+diagnostic; `default ; note` and `"default"` are values like any other, and on a local row the
+word is data. `RenderCanonical(table, config, header)` / `table.Render(config, header)` writes a
+config as a canonical file. `RenderCanonicalFresh(table, header)` / `table.RenderFresh(header)`
+writes the defaults with every concept row that is not `PerGame` as `Key=default`, and throws,
+naming the row, when such a row defaults to anything but the schema's `default` (a hotkey list's
+`canonical_default`), and when the table binds `RotationEnabled` without `PositionEnabled`.
 
 ### HeadTrackingConfigTable
 

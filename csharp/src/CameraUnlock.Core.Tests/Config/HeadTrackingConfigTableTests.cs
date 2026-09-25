@@ -41,6 +41,18 @@ namespace CameraUnlock.Core.Tests.Config
             HeadTrackingConfigTableFixtures.RunRender(Root());
         }
 
+        [Fact]
+        public void TheFreshFileWithEveryConceptIsAllConceptsFreshIni()
+        {
+            HeadTrackingConfigTableFixtures.RunFreshRender(Root());
+        }
+
+        [Fact]
+        public void EffectiveDefaultsReachThePositionCopyAndMigrationWritesTheEngineRowAsAValue()
+        {
+            HeadTrackingConfigTableFixtures.RunEffectiveDefaults();
+        }
+
         [Theory]
         [MemberData(nameof(Cases))]
         public void Fixture(string name)

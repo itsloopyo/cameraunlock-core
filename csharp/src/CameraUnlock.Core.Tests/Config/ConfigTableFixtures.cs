@@ -79,6 +79,7 @@ namespace CameraUnlock.Core.Tests.Config
                 .Comment("How far, in metres, leaning sideways moves the view.\nThe fixture's own wording.")
                 .Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v)
                 .Engine()
+                .PerGame()
                 .Concept(ConfigConcepts.CycleTrackingModeKey, c => c.CycleTrackingModeKey, (c, v) => c.CycleTrackingModeKey = v)
                 .Local("Camera", "Mode", c => c.Mode, (c, v) => c.Mode = v, ModeCodec(),
                     "ControlRotation or UpdateCamera (decoupled).")
@@ -122,7 +123,7 @@ namespace CameraUnlock.Core.Tests.Config
                 names.Add(Path.GetFileName(dir));
             }
             names.Sort(StringComparer.Ordinal);
-            if (names.Count != 12) throw new InvalidOperationException(names.Count + " table cases under " + root + ", expected 12");
+            if (names.Count != 23) throw new InvalidOperationException(names.Count + " table cases under " + root + ", expected 23");
             return names.ToArray();
         }
 
@@ -134,22 +135,152 @@ namespace CameraUnlock.Core.Tests.Config
             if (File.Exists(Path.Combine(dir, "input.ini")))
             {
                 RunApplyCase(table, dir);
+                return;
             }
-            else
+            bool ran = false;
+            if (File.Exists(Path.Combine(dir, "fresh.ini")))
+            {
+                RunFreshCase(table, dir);
+                ran = true;
+            }
+            if (File.Exists(Path.Combine(dir, "expected.ini")))
             {
                 RunRenderCase(table, dir);
+                ran = true;
             }
+            if (File.Exists(Path.Combine(dir, "migration.ini")))
+            {
+                RunMigrationCase(table, dir);
+                ran = true;
+            }
+            if (!ran) throw new InvalidOperationException(dir + " holds no input.ini, fresh.ini, expected.ini or migration.ini");
+        }
+
+        /// <summary>A config for the checks below.</summary>
+        public sealed class SmallConfig
+        {
+            public bool Rotation = true;
+            public bool Position = true;
+            public int Value = 5;
+            public float Scale = 1.0f;
+            public string Key = "End";
+            public string Keys = "End, Ctrl+Shift+Y";
+        }
+
+        private const string FreshRowTail = ". A fresh file writes default on this row, which takes Defaults.ini's value, so "
+            + "the row's own default must be the schema's, or the row must be marked PerGame().";
+
+        /// <summary>
+        /// Throws unless RenderFresh's gate, PerGame and the default token behave as
+        /// cpp/tests/config_table_tests.cpp holds them, with the same messages.
+        /// </summary>
+        public static void RunGlobalChecks()
+        {
+            var header = new RenderHeader("G");
+            ExpectMessage<ArgumentException>(() => SmallTable().Concept(ConfigConcepts.UdpPort, s => s.Value, (s, v) => s.Value = v)
+                .RenderFresh(header), "[Network] UdpPort defaults to 5, and the schema to 4242" + FreshRowTail);
+            ExpectMessage<ArgumentException>(() => SmallTable().Concept(ConfigConcepts.ToggleKey, s => s.Key, (s, v) => s.Key = v)
+                .RenderFresh(header), "[Hotkeys] ToggleKey defaults to End, and the schema to End, Ctrl+Shift+Y" + FreshRowTail);
+            ExpectMessage<ArgumentException>(() => SmallTable()
+                .Concept(ConfigConcepts.LocalSmoothing, s => s.Scale, (s, v) => s.Scale = v)
+                .RenderFresh(header), "[Smoothing] LocalSmoothing defaults to 1.0, and the schema to 0.0" + FreshRowTail);
+
+            string perGame = Encoding.ASCII.GetString(SmallTable()
+                .Concept(ConfigConcepts.UdpPort, s => s.Value, (s, v) => s.Value = v)
+                .PerGame()
+                .RenderFresh(header));
+            if (!perGame.Contains("\r\nUdpPort=5\r\n") || perGame.Contains("Defaults.ini"))
+            {
+                throw new InvalidOperationException("a PerGame row off the schema's default renders its value, and a table "
+                    + "with no other concept row has no Defaults.ini lines:\n" + perGame);
+            }
+
+            ExpectMessage<ArgumentException>(() => SmallTable()
+                .Concept(ConfigConcepts.RotationEnabled, s => s.Rotation, (s, v) => s.Rotation = v)
+                .RenderFresh(header),
+                "the table binds [General] RotationEnabled without [Position] PositionEnabled, and the tracking mode is the "
+                + "two of them together");
+            SmallTable()
+                .Concept(ConfigConcepts.PositionEnabled, s => s.Position, (s, v) => s.Position = v)
+                .RenderFresh(header);
+
+            ExpectMessage<InvalidOperationException>(() => SmallTable()
+                .Local("Camera", "Offset", s => s.Value, (s, v) => s.Value = v, new IntCodec(), "One.")
+                .PerGame(), "[Camera] Offset is a local row, which never takes a value from Defaults.ini");
+
+            ConfigTable<SmallConfig> keys = SmallTable()
+                .Concept(ConfigConcepts.ToggleKey, s => s.Keys, (s, v) => s.Keys = v)
+                .Concept(ConfigConcepts.RotationEnabled, s => s.Rotation, (s, v) => s.Rotation = v)
+                .Concept(ConfigConcepts.PositionEnabled, s => s.Position, (s, v) => s.Position = v)
+                .PerGame();
+            var config = new SmallConfig { Keys = "F1" };
+            ApplyReport report = keys.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Hotkeys]\r\nToggleKey=End, default\r\n")),
+                config);
+            if (report.Diagnostics.Count != 1 || report.Diagnostics[0].Kind != CanonicalDiagnosticKind.InvalidValue
+                || config.Keys != "End, Ctrl+Shift+Y")
+            {
+                throw new InvalidOperationException("End, default is a key list with an item that is no key, not the token");
+            }
+
+            ExpectMessage<ArgumentException>(
+                () => SmallTable()
+                    .Concept(ConfigConcepts.RotationEnabled, s => s.Rotation, (s, v) => s.Rotation = v)
+                    .Concept(ConfigConcepts.PositionEnabled, s => s.Position, (s, v) => s.Position = v)
+                    .Apply(CanonicalIni.Parse(new byte[0]), new SmallConfig(), new SmallConfig { Rotation = false, Position = false },
+                        new ConceptDescriptor[0]),
+                null);
+            ExpectMessage<ArgumentException>(
+                () => keys.Apply(CanonicalIni.Parse(new byte[0]), new SmallConfig(), new SmallConfig(),
+                    new ConceptDescriptor[] { ConfigConcepts.PositionEnabled }),
+                null);
+            ExpectMessage<ArgumentException>(
+                () => keys.Apply(CanonicalIni.Parse(new byte[0]), new SmallConfig(), new SmallConfig(),
+                    new ConceptDescriptor[] { ConfigConcepts.UdpPort }),
+                null);
+            var applied = new SmallConfig { Rotation = false, Position = false };
+            TableApplyResult perGamePair = keys.Apply(CanonicalIni.Parse(new byte[0]), applied,
+                new SmallConfig { Position = false }, new ConceptDescriptor[] { ConfigConcepts.RotationEnabled });
+            if (!applied.Rotation || !applied.Position || perGamePair.Sources[1] != ConfigValueSource.DefaultsIni
+                || perGamePair.Sources[2] != ConfigValueSource.BuiltIn)
+            {
+                throw new InvalidOperationException("a PerGame row starts from the table's default, whatever the effective defaults hold");
+            }
+        }
+
+        private static ConfigTable<SmallConfig> SmallTable()
+        {
+            return new ConfigTable<SmallConfig>(() => new SmallConfig());
+        }
+
+        // Throws unless action throws a TException, with exactly this message when one is given.
+        private static void ExpectMessage<TException>(Action action, string message) where TException : Exception
+        {
+            try
+            {
+                action();
+            }
+            catch (TException e)
+            {
+                if (message == null || e.Message == message) return;
+                throw new InvalidOperationException("expected the message\n  " + message + "\nand got\n  " + e.Message);
+            }
+            throw new InvalidOperationException("expected a " + typeof(TException).Name + ": " + message);
         }
 
         private static void RunApplyCase(ConfigTable<FixtureConfig> table, string dir)
         {
             var expectedFields = new List<string>();
+            var expectedSources = new List<string>();
             var expectedDiagnostics = new List<string>();
             foreach (string[] row in TsvRows(Path.Combine(dir, "expected.tsv")))
             {
                 if (row[0] == "field" && row.Length == 3)
                 {
                     expectedFields.Add(row[1] + "=" + Encoding.UTF8.GetString(Unescape(row[2])));
+                }
+                else if (row[0] == "source" && row.Length == 3)
+                {
+                    expectedSources.Add(row[1] + "=" + row[2]);
                 }
                 else if (row[0] == "diagnostic" && row.Length == 4)
                 {
@@ -163,7 +294,20 @@ namespace CameraUnlock.Core.Tests.Config
 
             CanonicalIni doc = CanonicalIni.Parse(File.ReadAllBytes(Path.Combine(dir, "input.ini")));
             var config = new FixtureConfig { NotInTable = 99, UdpPort = 1, WriteLog = true, HookOffsets = new uint[0] };
-            ApplyReport report = table.Apply(doc, config);
+            ApplyReport report;
+            if (File.Exists(Path.Combine(dir, "effective.tsv")))
+            {
+                List<ConceptDescriptor> fromDefaultsIni;
+                FixtureConfig effective = Effective(dir, out fromDefaultsIni);
+                TableApplyResult result = table.Apply(doc, config, effective, fromDefaultsIni);
+                report = result.Report;
+                SameRows(SourceRows(result.Sources), expectedSources, "sources");
+            }
+            else
+            {
+                if (expectedSources.Count != 0) throw new InvalidOperationException(dir + " lists sources and has no effective.tsv");
+                report = table.Apply(doc, config);
+            }
             SameRows(FieldRows(config), expectedFields, "field values");
             SameRows(DiagnosticRows(report), expectedDiagnostics, "diagnostics");
             if (config.NotInTable != 99) throw new InvalidOperationException("a member no row binds changed");
@@ -171,6 +315,47 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         private static void RunRenderCase(ConfigTable<FixtureConfig> table, string dir)
+        {
+            FixtureConfig values = Values(dir);
+            byte[] rendered = table.Render(values, Header);
+            SameBytes(rendered, File.ReadAllBytes(Path.Combine(dir, "expected.ini")), "rendered");
+            CheckRoundTrip(table, values);
+        }
+
+        // The fresh file reads back as the defaults with no diagnostic.
+        private static void RunFreshCase(ConfigTable<FixtureConfig> table, string dir)
+        {
+            byte[] rendered = table.RenderFresh(Header);
+            SameBytes(rendered, File.ReadAllBytes(Path.Combine(dir, "fresh.ini")), "fresh");
+            CanonicalIni doc = CanonicalIni.Parse(rendered);
+            var applied = new FixtureConfig { UdpPort = 1 };
+            ApplyReport report = table.Apply(doc, applied);
+            if (doc.Diagnostics.Count != 0 || report.Diagnostics.Count != 0)
+            {
+                throw new InvalidOperationException("the fresh file reads with diagnostics");
+            }
+            SameRows(FieldRows(applied), FieldRows(new FixtureConfig()), "the fresh file read back");
+        }
+
+        // The migrated file reads back, over the same effective defaults, as the values it was written from.
+        private static void RunMigrationCase(ConfigTable<FixtureConfig> table, string dir)
+        {
+            List<ConceptDescriptor> fromDefaultsIni;
+            FixtureConfig effective = Effective(dir, out fromDefaultsIni);
+            FixtureConfig values = Values(dir);
+            byte[] rendered = table.RenderMigration(values, effective, Header);
+            SameBytes(rendered, File.ReadAllBytes(Path.Combine(dir, "migration.ini")), "migration");
+            CanonicalIni doc = CanonicalIni.Parse(rendered);
+            var applied = new FixtureConfig { UdpPort = 1 };
+            TableApplyResult result = table.Apply(doc, applied, effective, fromDefaultsIni);
+            if (doc.Diagnostics.Count != 0 || result.Report.Diagnostics.Count != 0)
+            {
+                throw new InvalidOperationException("the migrated file reads with diagnostics");
+            }
+            SameRows(FieldRows(applied), FieldRows(values), "the migrated file read back");
+        }
+
+        private static FixtureConfig Values(string dir)
         {
             Dictionary<string, Field> fields = Fields();
             var values = new FixtureConfig();
@@ -183,13 +368,64 @@ namespace CameraUnlock.Core.Tests.Config
                 }
                 field.Parse(values, Unescape(row[2]));
             }
-            byte[] rendered = table.Render(values, Header);
-            byte[] expected = File.ReadAllBytes(Path.Combine(dir, "expected.ini"));
-            if (!Same(rendered, expected))
+            return values;
+        }
+
+        // The defaults with effective.tsv's field rows, and the concepts its defaults_ini rows name.
+        private static FixtureConfig Effective(string dir, out List<ConceptDescriptor> fromDefaultsIni)
+        {
+            Dictionary<string, Field> fields = Fields();
+            var effective = new FixtureConfig();
+            fromDefaultsIni = new List<ConceptDescriptor>();
+            foreach (string[] row in TsvRows(Path.Combine(dir, "effective.tsv")))
             {
-                throw new InvalidOperationException("rendered bytes differ:\n" + Encoding.UTF8.GetString(rendered));
+                Field field;
+                if (row[0] == "field" && row.Length == 3 && fields.TryGetValue(row[1], out field))
+                {
+                    field.Parse(effective, Unescape(row[2]));
+                    continue;
+                }
+                ConceptDescriptor concept = row[0] == "defaults_ini" && row.Length == 2 ? ConceptNamed(row[1]) : null;
+                if (concept == null) throw new InvalidOperationException("malformed row in " + Path.Combine(dir, "effective.tsv"));
+                fromDefaultsIni.Add(concept);
             }
-            CheckRoundTrip(table, values);
+            return effective;
+        }
+
+        private static ConceptDescriptor ConceptNamed(string id)
+        {
+            foreach (ConceptDescriptor concept in ConfigConcepts.All)
+            {
+                if (concept.Id == id) return concept;
+            }
+            return null;
+        }
+
+        private static List<string> SourceRows(ConfigValueSource[] sources)
+        {
+            var rows = new List<string>();
+            for (int i = 0; i < FieldOrder.Length; i++)
+            {
+                string name;
+                switch (sources[i])
+                {
+                    case ConfigValueSource.File: name = "file"; break;
+                    case ConfigValueSource.DefaultsIni: name = "defaults_ini"; break;
+                    case ConfigValueSource.BuiltIn: name = "built_in"; break;
+                    default: throw new InvalidOperationException("source " + (int)sources[i]);
+                }
+                rows.Add(FieldOrder[i] + "=" + name);
+            }
+            if (sources.Length != FieldOrder.Length) throw new InvalidOperationException(sources.Length + " sources, expected one per row");
+            return rows;
+        }
+
+        private static void SameBytes(byte[] actual, byte[] expected, string what)
+        {
+            if (!Same(actual, expected))
+            {
+                throw new InvalidOperationException(what + " bytes differ:\n" + Encoding.UTF8.GetString(actual));
+            }
         }
 
         // Rendering what a rendered file applies to gives the same bytes and the same fields, with

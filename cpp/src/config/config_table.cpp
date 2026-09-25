@@ -16,6 +16,16 @@ namespace {
 constexpr std::string_view kStampSection = "CameraUnlock";
 constexpr std::string_view kFormatKey = "ConfigFormat";
 constexpr const char* kCrlf = "\r\n";
+constexpr std::string_view kDefaultToken = "default";
+
+constexpr const char* kDefaultsIniHeader[] = {
+    "; A setting set to default takes its value from Defaults.ini, which every head tracking mod",
+    "; that keeps its settings in CameraUnlock.ini reads: %AppData%\\CameraUnlock\\Defaults.ini on",
+    "; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on",
+    "; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini",
+    "; on macOS. The log names the file it read. Write a value instead of default to change that",
+    "; setting for this game only.",
+};
 
 bool IsPrintableAscii(std::string_view text) {
     for (char c : text) {
@@ -118,16 +128,38 @@ void ReportUnread(const std::vector<TableRow>& rows, const CanonicalSection& sec
     }
 }
 
-void AppendRow(std::string& out, const TableRow& row, std::size_t index, const RowSource& source) {
+void AppendRow(std::string& out, const TableRow& row, std::size_t index, const RowSource& source, RowForm form) {
     for (const std::string& line : row.comment) out.append("; ").append(line).append(kCrlf);
-    const std::string value = source.Render(index);
-    if (row.engine && source.EqualsDefault(index)) out.append("; ");
+    const std::string value = form == RowForm::kDefault ? std::string(kDefaultToken) : source.Render(index);
+    if (form == RowForm::kAsRender && row.engine && source.EqualsDefault(index)) out.append("; ");
     out.append(row.key).append("=").append(value).append(kCrlf);
 }
 
 }  // namespace
 
 std::string RowName(const TableRow& row) { return "[" + row.section + "] " + row.key; }
+
+std::string ConceptLabel(schema::Concept id) {
+    const auto index = static_cast<std::size_t>(id);
+    return index < schema::kConceptCount ? schema::kConcepts[index].name : "concept " + std::to_string(index);
+}
+
+void CheckFreshRow(const TableRow& row, bool holds, const std::string& table_default, const std::string& schema_default) {
+    if (holds) return;
+    throw std::invalid_argument(RowName(row) + " defaults to " + table_default + ", and the schema to " + schema_default +
+                                ". A fresh file writes default on this row, which takes Defaults.ini's value, so the "
+                                "row's own default must be the schema's, or the row must be marked PerGame().");
+}
+
+void CheckFreshPair(const std::vector<TableRow>& rows) {
+    const auto binds = [&](schema::Concept id) {
+        return std::any_of(rows.begin(), rows.end(), [&](const TableRow& row) { return row.concept_id == id; });
+    };
+    if (binds(schema::Concept::RotationEnabled) && !binds(schema::Concept::PositionEnabled)) {
+        throw std::invalid_argument("the table binds [General] RotationEnabled without [Position] PositionEnabled, and "
+                                    "the tracking mode is the two of them together");
+    }
+}
 
 std::vector<std::string> CommentLines(const char* text, const std::string& row) {
     std::vector<std::string> lines;
@@ -210,15 +242,18 @@ void CheckLocalRow(const std::vector<TableRow>& rows, const TableRow& row) {
     }
 }
 
-ApplyReport ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows, RowTarget& target) {
+EffectiveApplyResult ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows, RowTarget& target,
+                               const std::vector<ValueSource>& start_sources) {
     if (!doc.IsReadable()) {
         throw std::invalid_argument(std::string("ApplyCanonical needs a readable document, and this one is ") +
                                     CanonicalReadStatusName(doc.status));
     }
 
-    for (std::size_t i = 0; i < rows.size(); ++i) target.ResetToDefault(i);
+    for (std::size_t i = 0; i < rows.size(); ++i) target.ResetToStart(i);
 
-    ApplyReport report;
+    EffectiveApplyResult result;
+    result.sources = start_sources;
+    ApplyReport& report = result.report;
     std::vector<int> read_from(rows.size(), 0);
     for (const CanonicalSection& section : doc.sections) {
         if (EqualsAsciiIgnoreCase(section.name, kStampSection)) continue;
@@ -240,9 +275,11 @@ ApplyReport ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows
                 ReportUnread(rows, section, value, known, report.diagnostics);
                 continue;
             }
+            if (rows[row].concept_id && EqualsAsciiIgnoreCase(value.value, kDefaultToken)) continue;
             const std::string error = target.Apply(row, value.value);
             if (error.empty()) {
                 read_from[row] = value.line;
+                result.sources[row] = ValueSource::kFile;
             } else {
                 report.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::InvalidValue, value.line,
                                                             section.name, value.key, value.value, error));
@@ -263,8 +300,10 @@ ApplyReport ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows
             if (read_from[row] != 0) d.lines.push_back(read_from[row]);
         }
         std::sort(d.lines.begin(), d.lines.end());
-        target.ResetToDefault(rotation);
-        target.ResetToDefault(position);
+        for (const std::size_t row : {rotation, position}) {
+            target.ResetToStart(row);
+            result.sources[row] = start_sources[row];
+        }
         report.diagnostics.push_back(std::move(d));
     }
 
@@ -273,10 +312,11 @@ ApplyReport ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows
                          if (a.lines.front() != b.lines.front()) return a.lines.front() < b.lines.front();
                          return static_cast<int>(a.kind) < static_cast<int>(b.kind);
                      });
-    return report;
+    return result;
 }
 
-std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& header, const RowSource& source) {
+std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& header, const RowSource& source,
+                       const std::vector<RowForm>& forms) {
     const std::string& name = header.display_name;
     if (name.empty() || !IsPrintableAscii(name) || name.front() == ' ' || name.back() == ' ') {
         throw std::invalid_argument("display name '" + name +
@@ -291,6 +331,9 @@ std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& he
         out.append("; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; "
                    "leave empty for none.")
             .append(kCrlf);
+    }
+    if (std::any_of(rows.begin(), rows.end(), FollowsDefaultsIni)) {
+        for (const char* line : kDefaultsIniHeader) out.append(line).append(kCrlf);
     }
     out.append(kCrlf).append("[CameraUnlock]").append(kCrlf);
     out.append("; Written by the mod. Leave this section in place.").append(kCrlf);
@@ -308,7 +351,7 @@ std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& he
         }
         if (order.empty()) continue;
         out.append(kCrlf).append("[").append(section).append("]").append(kCrlf);
-        for (const std::size_t i : order) AppendRow(out, rows[i], i, source);
+        for (const std::size_t i : order) AppendRow(out, rows[i], i, source, forms[i]);
     }
 
     std::vector<std::string> local_sections;
@@ -322,7 +365,7 @@ std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& he
     for (const std::string& section : local_sections) {
         out.append(kCrlf).append("[").append(section).append("]").append(kCrlf);
         for (std::size_t i = 0; i < rows.size(); ++i) {
-            if (rows[i].section == section) AppendRow(out, rows[i], i, source);
+            if (rows[i].section == section) AppendRow(out, rows[i], i, source, forms[i]);
         }
     }
     return out;

@@ -9,6 +9,73 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - BREAKING - a table with a concept row not marked `PerGame` renders six lines on `default`
+
+Every render of a config table (C# `ConfigTable.Render`, C++ `RenderCanonical`, and the new fresh
+render below) writes six more header lines whenever the table has a concept row that is not marked
+`PerGame()`. They come after the hotkeys line, or after the comments line when the table has no
+hotkey row, and before the blank line:
+
+```text
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
+```
+
+The config owners still create and migrate with `Render`, so a new file and a migrated file carry
+the lines too. Nothing reads Defaults.ini yet; a later core commit adds it.
+
+Consuming repos: every converted repo's committed config and its render test compare bytes, so
+after bumping the pin, re-run `pixi run render-config` and commit the file. The example, the
+all-concepts file and the table fixtures under `data/fixtures/canonical-ini/` gained the lines.
+
+### Added - the `default` token, `RenderFresh` / `RenderCanonicalFresh` and `PerGame()`
+
+Owner answers of 2026-09-25: all 28 canonical concepts are global, and migration writes `default`
+where the imported value equals what `default` gives at that launch.
+
+- **The token.** On a concept row, a value equal to `default` in any ASCII letter case, after the
+  reader's trimming, reads as the row's default and draws no diagnostic, the way a missing key
+  does. `default ; note`, `"default"` and `End, default` are values like any other and go to the
+  codec. On a local row the word is data: a string row stores it, a bool row refuses it. Before
+  this change the word drew `InvalidValue` on every concept row.
+- **`PerGame()`**, C# `ConfigTable.PerGame()` and C++ `ConfigTable::PerGame()`, marks the last or
+  selected concept row as one the game keeps: its default stays the table's own, never Defaults.ini's.
+  It throws `InvalidOperationException` (C++ `std::invalid_argument`) on a local row. Each use needs
+  an owner-approved `per_game` entry for the repo in `data/config-format.json`, which a later core
+  commit adds.
+- **`RenderFresh(header)`**, C++ `RenderCanonicalFresh(table, header)`: the table's defaults with
+  every concept row that is not `PerGame` written `Key=default`, an Engine row included; `PerGame`
+  and local rows as `Render` writes them. It throws `ArgumentException` (C++ `std::invalid_argument`)
+  when such a row defaults to anything but the schema's `default` (a hotkey list's
+  `canonical_default`, floats compared by their bits), naming the row:
+  `[Network] UdpPort defaults to 5, and the schema to 4242. A fresh file writes default on this
+  row, which takes Defaults.ini's value, so the row's own default must be the schema's, or the row
+  must be marked PerGame().`, and when the table binds `RotationEnabled` without `PositionEnabled`.
+  `HeadTrackingConfigTable` naming every concept passes it
+  (`data/fixtures/canonical-ini/head-tracking/all-concepts-fresh.ini`).
+- **Internal, for the owner's later adoption**: an `Apply` overload over effective defaults that
+  reports where each row's value came from (the file, Defaults.ini or the table), and a migration
+  render that writes `default` where a value equals its effective default (C++
+  `detail::ApplyCanonicalEffective` and `detail::RenderCanonicalMigration`). The public `Apply` is
+  that overload over the table's own defaults, so it differs from before only where a concept row
+  holds the token.
+- **Schema**: each canonical concept's default as text its codec reads, C# internal
+  `ConceptDescriptor.DefaultText`, C++ `ConceptTraits<Id>::kDefaultText` and
+  `ConceptInfo::default_text`, appended as the struct's last member so existing aggregate
+  initialisation still compiles. `scripts/generate-config-schema.mjs` refuses a key name, alias or
+  modifier in `data/keys.json` spelled `default` in any letter case (none is), and
+  `data/config-schema.json` says every canonical concept is global, so a concept that must never
+  follow Defaults.ini needs a schema change before it is added.
+- **Fixtures**: `table/global-*` (the token on each row type and letter case, what is not the token,
+  a missing key and an invalid value, a `PerGame` row, local rows, the tracking-mode pair over
+  effective defaults, the fresh and migration renders), read by both suites and both
+  FrameworkTests targets. The fixture table's `CollisionChannel` row is `PerGame`, which pins that a
+  `PerGame` Engine row keeps its commented form.
+
 ### Changed - BREAKING - the C# config owner imports a legacy file beside the config and never writes it
 
 Owner decision of 2026-09-25: settings live in `CameraUnlock.ini`, in the folder that holds the

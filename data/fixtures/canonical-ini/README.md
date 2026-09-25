@@ -203,7 +203,7 @@ same text.
 | EnableOnStartup | concept EnableOnStartup | bool | `true` | |
 | LocalSmoothing | concept LocalSmoothing | float, 0 to 1 | `0.0` | |
 | PositionLimitX | concept PositionLimitX | float, 0 to 10 | `0.3` | Comment: `How far, in metres, leaning sideways moves the view.` and `The fixture's own wording.` |
-| CollisionChannel | concept CollisionChannel | int | `3` | Engine |
+| CollisionChannel | concept CollisionChannel | int | `3` | Engine, PerGame |
 | CycleTrackingModeKey | concept CycleTrackingModeKey | hotkey | `PageUp, Ctrl+Shift+G` | |
 | Mode | local [Camera] Mode | enum `ControlRotation`, `UpdateCamera` | `UpdateCamera` | comment `ControlRotation or UpdateCamera (decoupled).` |
 | LeanDelayMs | local [Position] LeanDelayMs | int | `50` | comment `Milliseconds before a lean starts, and the metres its wall trace reaches.`; Range(0, 1000) |
@@ -224,7 +224,12 @@ A `\n` in a comment above separates its lines. The render header's display name 
 `Fixture Game`. Every hotkey value in the cases reads the same in the native and the Unity
 dialect, so the C++ suite's native `HotkeyCodec` and the C# suite's Unity one agree on each.
 
-A case directory holds one of two pairs:
+`CollisionChannel` is the table's one PerGame row and its one Engine concept row, so every other
+concept row follows Defaults.ini: the table passes the fresh render's gate, its renders carry the
+six header lines on `default`, and the cases pin that a PerGame Engine row keeps the commented
+form.
+
+A case directory holds `input.ini`, or one or more of the render files below:
 
 - `input.ini` and `expected.tsv`: the table applied to `input.ini` as the reader parses it,
   onto a config whose fields hold other values beforehand. `expected.tsv` has one `field` row
@@ -232,15 +237,46 @@ A case directory holds one of two pairs:
   `diagnostic` row per diagnostic Apply returns, in its order (kind, lines comma-separated,
   and the sentence DescribeCanonicalDiagnostic / `Describe` gives). The reader's own
   diagnostics are not listed.
+- `input.ini`, `effective.tsv` and `expected.tsv`: the same, through the Apply that takes
+  effective defaults (C++ `detail::ApplyCanonicalEffective`, C# the internal
+  `ConfigTable.Apply(doc, config, effective, fromDefaultsIni)`). `effective.tsv` has a `field`
+  row, as in `values.tsv`, for each field whose effective default differs from the table's
+  default, and a `defaults_ini` row naming each concept whose effective default Defaults.ini
+  gave. `expected.tsv` then also has one `source` row per field in table order, after the
+  `field` rows: the name and `file`, `defaults_ini` or `built_in`, where the row's value came
+  from. Only these cases list sources.
 - `values.tsv` and `expected.ini`: `values.tsv` has a `field` row for each field that differs
   from its default, the value as its codec writes it; the config holding them renders exactly
   as `expected.ini`.
+- `fresh.ini`: the table's fresh render (C++ `RenderCanonicalFresh`, C# `RenderFresh`), which
+  reads back through Apply as the defaults with no diagnostic.
+- `values.tsv`, `effective.tsv` and `migration.ini`: the migration render (C++
+  `detail::RenderCanonicalMigration`, C# the internal `ConfigTable.RenderMigration`) of the
+  values over the effective defaults, which reads back through the effective Apply as the values
+  with no diagnostic.
 
-Both TSV files are ASCII with the note rule above, fields separated by one tab, and values and
-sentences in the byte escape. For every case a runner also renders the config the case ends
-with, parses and applies that, and requires no diagnostic from the reader or the table, the
-same field values, and the same bytes when rendered again. Each runner also checks that a
-member of the config no row binds keeps its value through Apply.
+The TSV files are ASCII with the note rule above, fields separated by one tab, and values and
+sentences in the byte escape. For every `input.ini` and `expected.ini` case a runner also renders
+the config the case ends with, parses and applies that, and requires no diagnostic from the
+reader or the table, the same field values, and the same bytes when rendered again. Each runner
+also checks that a member of the config no row binds keeps its value through Apply.
+
+The `global-` cases hold the `default` token, effective defaults and the fresh and migration
+renders:
+
+| Case | What it holds |
+|------|---------------|
+| `global-default` | `default` on an int, a bool, a float and two hotkey rows reads each row's effective default: Defaults.ini's where it gave one (`UdpPort=5000`, `EnableOnStartup=false`, `LocalSmoothing=0.5`, `ToggleKey=F8`), the table's for `CycleTrackingModeKey`. `PositionLimitX=0.25` in the file wins over Defaults.ini's 0.35 |
+| `global-default-case` | `Default`, `DEFAULT` and `default` with spaces the reader trims are the token |
+| `global-default-not-token` | `"default"` and `default ; note` go to the codec, which refuses them: the effective default and an InvalidValue |
+| `global-missing-invalid` | a missing key and an invalid value both read the effective default; the invalid value also draws InvalidValue |
+| `global-per-game` | `default` on the PerGame `CollisionChannel` reads the table's own 3 though the effective defaults hold 7; on `PositionLimitX` it reads Defaults.ini's 0.35 |
+| `global-local` | on a local row the word is data: `LogPath=default` stores it, `WriteLog=default` is an InvalidValue |
+| `global-pair-one-default` | `RotationEnabled=default` reads the effective false beside `PositionEnabled=false`: no tracking mode, so both take the effective pair, rotation off and position on, and NoTrackingMode names only the line that set a value |
+| `global-pair-off` | both false, with an effective pair of rotation off and position on: both take the effective pair |
+| `global-render-fresh` | the fresh render (`fresh.ini`: every concept row but `CollisionChannel` is `default`, and `CollisionChannel` is commented at 3) and a values render of the same table (`values.tsv` and `expected.ini`) |
+| `global-migration` | the migration render: rows equal to their effective default are `default`, the others values; `RotationEnabled` equals its effective default and `PositionEnabled` does not, so both are values; the PerGame `CollisionChannel` and the local rows are written as Render writes them |
+| `global-migration-pair` | imported values equal to the effective defaults, the pair included, migrate to the bytes of `fresh.ini` |
 
 ## head-tracking/
 
@@ -251,6 +287,9 @@ and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Ga
   its default, the four hotkey lists at their `canonical_default`, so it pins each concept's
   default rendering in both languages. `CollisionChannel` is the table's one Engine row, so it is
   the commented line `; CollisionChannel=0`.
+- `all-concepts-fresh.ini`: the same table's fresh render, every concept `Key=default`, the Engine
+  row too. It proves core's own table passes the fresh render's gate: every concept defaults to
+  the schema's `default`, and the table binds `PositionEnabled` beside `RotationEnabled`.
 - `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose
   rows are `field`, a name and the value as the concept's codec writes it. The names are the 28
   concepts in the schema's order, then `PositionLocalSmoothing` and `PositionRemoteSmoothing`,
@@ -349,7 +388,8 @@ and all three invalid (`single-bools-invalid`); a single bool changed beside mod
 ## example/
 
 `CameraUnlock.ini`: the file the examples in docs/canonical-config.md create at first launch, which
-is the example table's defaults rendered with the display name `Example Game`. The table is
+is the example table's defaults rendered with the display name `Example Game`, the six header
+lines on `default` included. The table is
 `HeadTrackingConfigTable` naming `UdpPort`, `EnableOnStartup`, `WorldSpaceYaw`, `RotationEnabled`,
 `PositionEnabled`, `ToggleKey`, `CycleTrackingModeKey` and `YawModeKey`, plus one local row,
 `[Logging] WriteLog`, a bool defaulting to false with the comment

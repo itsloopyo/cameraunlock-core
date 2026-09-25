@@ -127,6 +127,16 @@ template cameraunlock::config::ApplyReport cameraunlock::config::ApplyCanonical<
 template std::string cameraunlock::config::RenderCanonical<cameraunlock::HeadTrackingConfig>(
     const cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig>&, const cameraunlock::HeadTrackingConfig&,
     const cameraunlock::config::RenderHeader&);
+template std::string cameraunlock::config::RenderCanonicalFresh<cameraunlock::HeadTrackingConfig>(
+    const cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig>&, const cameraunlock::config::RenderHeader&);
+template cameraunlock::config::detail::EffectiveApplyResult
+cameraunlock::config::detail::ApplyCanonicalEffective<cameraunlock::HeadTrackingConfig>(
+    const cameraunlock::config::CanonicalIni&, const cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig>&,
+    cameraunlock::HeadTrackingConfig&, const cameraunlock::HeadTrackingConfig&,
+    const std::vector<cameraunlock::config::schema::Concept>&);
+template std::string cameraunlock::config::detail::RenderCanonicalMigration<cameraunlock::HeadTrackingConfig>(
+    const cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig>&, const cameraunlock::HeadTrackingConfig&,
+    const cameraunlock::HeadTrackingConfig&, const cameraunlock::config::RenderHeader&);
 #ifdef _WIN32
 template class cameraunlock::config::ConfigOwner<cameraunlock::HeadTrackingConfig>;
 template class cameraunlock::config::ConfigOwner<cameraunlock::reframework::PluginConfig>;

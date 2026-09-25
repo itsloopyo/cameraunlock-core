@@ -1,0 +1,47 @@
+# The token in any ASCII letter case, and with spaces the reader trims, is the token.
+field	ToggleKey	End, Ctrl+Shift+Y
+field	UdpPort	5000
+field	PositionEnabled	true
+field	RotationEnabled	true
+field	EnableOnStartup	false
+field	LocalSmoothing	0.0
+field	PositionLimitX	0.3
+field	CollisionChannel	3
+field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
+field	Mode	UpdateCamera
+field	LeanDelayMs	50
+field	LeanTraceLength	1.0
+field	NearClip	0.1
+field	UpdateCameraSlot	196
+field	PovOffset	0x404
+field	CleanCameraReader	0x1402A0B10
+field	HookOffsets	0x10, 0x2A
+field	AimCallers	
+field	WidgetNames	Crosshair, Compass
+field	MarkerColor	1.0, 0.5, 0.0, 1.0
+field	LogPath	HeadTracking.log
+field	WriteLog	false
+field	ReloadKey	F10
+source	ToggleKey	built_in
+source	UdpPort	defaults_ini
+source	PositionEnabled	built_in
+source	RotationEnabled	built_in
+source	EnableOnStartup	defaults_ini
+source	LocalSmoothing	built_in
+source	PositionLimitX	built_in
+source	CollisionChannel	built_in
+source	CycleTrackingModeKey	built_in
+source	Mode	built_in
+source	LeanDelayMs	built_in
+source	LeanTraceLength	built_in
+source	NearClip	built_in
+source	UpdateCameraSlot	built_in
+source	PovOffset	built_in
+source	CleanCameraReader	built_in
+source	HookOffsets	built_in
+source	AimCallers	built_in
+source	WidgetNames	built_in
+source	MarkerColor	built_in
+source	LogPath	built_in
+source	WriteLog	built_in
+source	ReloadKey	built_in

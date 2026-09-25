@@ -660,6 +660,11 @@ function rangeBound(concept, field, language) {
 
 const canonicalConcepts = (schema) => schema.concepts.filter((c) => c.canonical);
 
+// The schema's default as text the concept's canonical codec reads: a hotkey concept's
+// canonical_default, and the JSON value as it stands for the rest. A config table's fresh render
+// compares a row's own default with it.
+const defaultText = (c) => (c.type === 'string' ? c.canonical_default ?? c.default : String(c.default));
+
 function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
     const concepts = canonicalConcepts(schema);
     const cString = (text) => (text === undefined ? 'nullptr' : `"${text}"`);
@@ -682,13 +687,14 @@ function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
         }
         lines.push(`    static constexpr const char* kFileComment[] = {${c.file_comment.map(cString).join(', ')}};`);
         lines.push(`    static constexpr const char* kCanonicalDefault = ${cString(c.canonical_default)};`);
+        lines.push(`    static constexpr const char* kDefaultText = ${cString(defaultText(c))};`);
         lines.push('};');
         return lines.join('\n');
     }).join('\n\n');
     const infos = concepts.map((c) => {
         const comment = [c.file_comment[0], c.file_comment[1]].map(cString).join(', ');
         return `    {Concept::${c.id}, "${c.id}", "${c.section}", "${c.key}", ValueFamily::k${canonicalFamilies[c.type]}, ` +
-            `{${comment}}, ${c.file_comment.length}, ${cString(c.canonical_default)}},`;
+            `{${comment}}, ${c.file_comment.length}, ${cString(c.canonical_default)}, ${cString(defaultText(c))}},`;
     }).join('\n');
     const sections = schema.sections.map((s) => `    "${s}",`).join('\n');
     const others = schema.concepts.filter((c) => !c.canonical)
@@ -720,7 +726,9 @@ enum class ValueFamily { kBool, kInteger, kFloating, kHotkey };
 /// The schema's facts about one canonical concept. kMin and kMax, both inclusive, exist for the
 /// kInteger family (within int) and the kFloating family (as float); a bound the schema leaves
 /// open is the limit of the schema type. kCanonicalDefault is the binding list a canonical file
-/// starts with, where the schema gives one, else nullptr.
+/// starts with, where the schema gives one, else nullptr. kDefaultText is the schema's default as
+/// text the concept's codec reads: the canonical_default of a hotkey concept, else the schema's
+/// value as it is written there.
 template <Concept Id>
 struct ConceptTraits;
 
@@ -728,6 +736,7 @@ ${traits}
 
 /// One canonical concept, for code that walks them all. kConcepts[static_cast<std::size_t>(id)]
 /// describes id. \`file_comment\` holds \`file_comment_lines\` lines; the rest are nullptr.
+/// \`default_text\` is ConceptTraits<id>::kDefaultText.
 struct ConceptInfo {
     Concept id;
     const char* name;
@@ -737,6 +746,7 @@ struct ConceptInfo {
     const char* file_comment[2];
     std::size_t file_comment_lines;
     const char* canonical_default;
+    const char* default_text;
 };
 
 inline constexpr ConceptInfo kConcepts[] = {
@@ -824,7 +834,7 @@ function renderConceptsCsharp(schema, nonCanonicalKeys, nonCanonicalSections) {
             `        /// <summary>[${c.section}] ${c.key}.</summary>`,
             `        public static readonly ConceptDescriptor<${type}> ${c.id} = new ConceptDescriptor<${type}>(`,
             `            "${c.id}", "${c.section}", "${c.key}", ConceptValueFamily.${canonicalFamilies[c.type]},`,
-            `            ${codec(c)}, new[] { ${comment} }, ${csString(c.canonical_default)});`,
+            `            ${codec(c)}, new[] { ${comment} }, ${csString(c.canonical_default)}, ${csString(defaultText(c))});`,
         ].join('\n');
     }).join('\n\n');
     const all = concepts.map((c) => `            ${c.id},`).join('\n');
@@ -1068,6 +1078,10 @@ function validateKeys(doc) {
             keysError(where, `${JSON.stringify(spelling)} is not ASCII letters and digits`);
         }
         const folded = spelling.toLowerCase();
+        if (folded === 'default') {
+            keysError(where, `'${spelling}' is the word a canonical config file writes for a setting's default, ` +
+                'so no key name, alias or modifier may be spelled that way in any letter case');
+        }
         if (spellings.has(folded)) keysError(where, `'${spelling}' is already spelled by ${spellings.get(folded)}`);
         spellings.set(folded, where);
     };
