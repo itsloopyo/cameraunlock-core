@@ -1180,8 +1180,10 @@ In a mod repo, and in conformance:
   `DefaultsFile.At` / `DefaultsFile::At` outside a test folder, since a mod never points at a fixed
   path; one inside a test folder that names `DefaultsFile.PerUser` / `DefaultsFile::PerUser`; and
   one inside a test folder that builds a `ConfigOwner` (`new ConfigOwner<`, a `ConfigOwner<...>`
-  object, `make_unique` or `make_shared` of one) or initialises `PluginMod`
-  (`PluginMod::Instance().Initialize` or `InitializePlugin`) and never names `At`, since a test
+  object, `make_unique`, `make_shared` or `make_optional` of one, a `std::optional` of one built
+  `in_place`, or an `emplace` into a `std::optional` owner declared in any of the repo's C++ sources)
+  or initialises `PluginMod` (`PluginMod::Instance().Initialize`, `Initialize` through a reference
+  or pointer bound to `PluginMod::Instance()`, or `InitializePlugin`) and never names `At`, since a test
   never reads or creates the player's real Defaults.ini. A test folder is a folder
   named `test` or `tests` in any case, or one whose name ends in `Tests`, so the differential test's
   `tests/config_differential/` is one. The rule is per file: a test file that names `At` for one

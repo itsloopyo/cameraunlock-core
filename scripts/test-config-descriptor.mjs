@@ -511,8 +511,9 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   );
 
   // conformance's config-defaults check: in a converted repo, DefaultsFile.At outside a test
-  // folder, PerUser inside one, and a test source that builds an owner or initialises PluginMod
-  // without naming At each fail; vendored code, an unconverted repo and the right uses do not.
+  // folder, PerUser inside one, and a test source that builds an owner (emplacing an optional one
+  // declared in another file included) or initialises PluginMod through a reference without naming
+  // At each fail; vendored code, an unconverted repo, reads of PluginMod and the right uses do not.
   const tracked = (label, name, files) => {
     const root = repo(label, name, files);
     git(root, "add", "-A");
@@ -526,6 +527,10 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     "src/Mod.Tests/OwnerTests.cs": "class T {\r\n  void Run() { var owner = new ConfigOwner<Cfg>(options); }\r\n}\r\n",
     "tests/config_differential/differential_tests.cpp": "auto owner = std::make_unique<cfg::ConfigOwner<Config>>(Options(p));\r\n",
     "Test/plugin_test.cpp": "void Run() { ref::PluginMod::Instance().Initialize(descriptor); }\r\n",
+    "tests/fixture.h": "struct Fixture {\r\n  std::optional<cameraunlock::config::ConfigOwner<Config>> m_owner;\r\n  void Build(std::optional<ConfigOwner<Config>>& slot);\r\n};\r\n",
+    "tests/fixture.cpp": "void Fixture::Load() {\r\n  m_owner.emplace(ConfigOwnerOptionsFor(path));\r\n}\r\nvoid Fixture::Build(std::optional<ConfigOwner<Config>>& slot) { slot->emplace(Options(p)); }\r\n",
+    "tests/in_place_test.cpp": "std::optional<ConfigOwner<Config>> owner{std::in_place, Options(p)};\r\n",
+    "tests/plugin_ref_test.cpp": "void Run() {\r\n  auto& mod = ref::PluginMod::Instance();\r\n  mod.Initialize(descriptor);\r\n}\r\n",
     "vendor/lib/x.cpp": "auto d = DefaultsFile::At(L\"C:\\\\x.ini\");\r\n",
   });
   const right = tracked("defaults-right", "abzu-headtracking", {
@@ -535,6 +540,10 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     "src/Game.Tests/T.cs": "var owner = new ConfigOwner<C>(new ConfigOwnerOptions<C> { Defaults = DefaultsFile.At(p) });\r\n",
     "tests/helpers.h": "std::unique_ptr<ConfigOwner<Config>> NewOwner(const fs::path& path);\r\nvoid Use(ConfigOwner<Config>& owner);\r\n",
     "src/latests/foo.cpp": "auto d = DefaultsFile::PerUser();\r\n",
+    "src/mod.h": "class Mod {\r\n  std::optional<cameraunlock::config::ConfigOwner<Config>> m_owner;\r\n};\r\n",
+    "src/mod.cpp": "void Mod::Load() {\r\n  m_owner.emplace(ConfigOwnerOptionsFor(path, DefaultsFile::PerUser()));\r\n}\r\n",
+    "tests/emplace_test.cpp": "std::optional<ConfigOwner<Config>> owner;\r\nowner.emplace(Options(dir, DefaultsFile::At(dir / L\"Defaults.ini\")));\r\n",
+    "tests/plugin_read_test.cpp": "void Check() {\r\n  auto& config = ref::PluginMod::Instance().GetConfig();\r\n  bool on = ref::PluginMod::Instance().IsEnabled();\r\n  std::vector<int> v;\r\n  v.emplace(v.end(), 1);\r\n}\r\n",
   });
   const unconvertedAt = tracked("defaults-unconverted", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "src/mod.cpp": "auto d = DefaultsFile::At(L\"C:\\\\x.ini\");\r\n" });
   const defaults = spawnSync(
@@ -554,6 +563,9 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     `FAIL src/Mod.Tests/OwnerTests.cs:2 builds a ConfigOwner and never names DefaultsFile.At; ${testRule}`,
     `FAIL tests/config_differential/differential_tests.cpp:1 builds a ConfigOwner and never names DefaultsFile.At; ${testRule}`,
     `FAIL Test/plugin_test.cpp:1 initialises PluginMod and never names DefaultsFile.At; ${testRule}`,
+    `FAIL tests/fixture.cpp:2,4 builds a ConfigOwner and never names DefaultsFile.At; ${testRule}`,
+    `FAIL tests/in_place_test.cpp:1 builds a ConfigOwner and never names DefaultsFile.At; ${testRule}`,
+    `FAIL tests/plugin_ref_test.cpp:3 initialises PluginMod and never names DefaultsFile.At; ${testRule}`,
   ];
   check(
     defaults.status === 1 && isDeepStrictEqual([...defaultsMessages].sort(), [...expectedDefaults].sort()),

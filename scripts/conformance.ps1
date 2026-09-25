@@ -1172,14 +1172,18 @@ function Test-ConfigPreserve {
 # Where a converted repo's owners find Defaults.ini. A mod passes DefaultsFile.PerUser() and never
 # a fixed path; a test passes DefaultsFile.At with a scratch path and never PerUser, and a test
 # source that builds an owner or initialises PluginMod has to name At, since an options helper
-# shared with the mod would otherwise hand a test the player's real file. A test folder is a
-# folder named test or tests in any case, or one whose name ends in Tests.
+# shared with the mod would otherwise hand a test the player's real file. The fleet's C++ mods
+# declare a std::optional owner, often in a header, and emplace it in a source file, so the name of
+# every optional owner in the repo is collected first and an emplace of one counts as building it.
+# A test folder is a folder named test or tests in any case, or one whose name ends in Tests.
 $DEFAULTS_SCAN_SOURCE = '\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|cs)$'
 $DEFAULTS_AT = '\bDefaultsFile\s*(\.|::)\s*At\b'
 $DEFAULTS_PER_USER = '\bDefaultsFile\s*(\.|::)\s*PerUser\b'
-$OWNER_BUILT_CPP = '\bnew\s+(\w+\s*::\s*)*ConfigOwner\s*<|\bmake_(unique|shared)\s*<\s*(\w+\s*::\s*)*ConfigOwner\s*<|\bConfigOwner\s*<([^<>;]|<[^<>;]*>)*>\s*([A-Za-z_]\w*\s*)?[({=]'
+$OWNER_BUILT_CPP = '\bnew\s+(\w+\s*::\s*)*ConfigOwner\s*<|\bmake_(unique|shared|optional)\s*<\s*(\w+\s*::\s*)*ConfigOwner\s*<|\bConfigOwner\s*<([^<>;]|<[^<>;]*>)*>\s*([A-Za-z_]\w*\s*)?[({=]'
+$OWNER_OPTIONAL_CPP = '\boptional\s*<\s*(\w+\s*::\s*)*ConfigOwner\s*<([^<>;]|<[^<>;]*>)*>\s*>\s*[&*]?\s*(?<name>[A-Za-z_]\w*)'
 $OWNER_BUILT_CS = '\bnew\s+(\w+\s*\.\s*)*ConfigOwner\s*<|\bConfigOwner\s*<[^;()]*>\s+[A-Za-z_]\w*\s*=\s*new\s*\('
 $PLUGIN_MOD_INIT = '\bPluginMod\s*::\s*Instance\s*\(\s*\)\s*\.\s*Initialize\s*\(|\bInitializePlugin\s*\('
+$PLUGIN_MOD_REF = '[&*]\s*(?<name>[A-Za-z_]\w*)\s*=\s*&?\s*(\w+\s*::\s*)*PluginMod\s*::\s*Instance\s*\(\s*\)(?!\s*(\.|->))'
 
 function Test-IsTestSource {
     param([string]$Rel)
@@ -1196,19 +1200,38 @@ function Test-ConfigDefaults {
     if (-not $state.converted) { return }
 
     $testRule = 'a test must never read or create the player''s real Defaults.ini, so it passes DefaultsFile.At with a scratch path'
+    $sources = [ordered]@{}
+    $optionalOwners = New-Object System.Collections.Generic.HashSet[string]
     foreach ($rel in @(Get-TrackedFiles $Root)) {
         if ($rel -notmatch $DEFAULTS_SCAN_SOURCE -or $rel -match $LEGACY_SCAN_SKIP) { continue }
-        $lines = [System.IO.File]::ReadAllLines((Join-Path $Root $rel))
-        $built = if ($rel.EndsWith('.cs')) { $OWNER_BUILT_CS } else { $OWNER_BUILT_CPP }
+        $sources[$rel] = [System.IO.File]::ReadAllLines((Join-Path $Root $rel))
+        if ($rel.EndsWith('.cs')) { continue }
+        foreach ($line in $sources[$rel]) {
+            foreach ($m in [regex]::Matches($line, $OWNER_OPTIONAL_CPP)) { [void]$optionalOwners.Add($m.Groups['name'].Value) }
+        }
+    }
+    $emplaced = if ($optionalOwners.Count -gt 0) {
+        '\b(' + (@($optionalOwners | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')\s*(\.|->)\s*emplace\s*\('
+    }
+    foreach ($rel in $sources.Keys) {
+        $lines = $sources[$rel]
+        $isCs = $rel.EndsWith('.cs')
+        $built = if ($isCs) { $OWNER_BUILT_CS } else { $OWNER_BUILT_CPP }
+        $pluginRefs = @(if (-not $isCs) { foreach ($line in $lines) { foreach ($m in [regex]::Matches($line, $PLUGIN_MOD_REF)) { [regex]::Escape($m.Groups['name'].Value) } } })
+        $pluginRefInit = if ($pluginRefs.Count -gt 0) { '\b(' + ($pluginRefs -join '|') + ')\s*(\.|->)\s*Initialize\s*\(' }
         $at = New-Object System.Collections.Generic.List[int]
         $perUser = New-Object System.Collections.Generic.List[int]
         $owners = New-Object System.Collections.Generic.List[int]
         $pluginMod = New-Object System.Collections.Generic.List[int]
         for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -cmatch $DEFAULTS_AT) { $at.Add($i + 1) }
-            if ($lines[$i] -cmatch $DEFAULTS_PER_USER) { $perUser.Add($i + 1) }
-            if ($lines[$i] -cmatch $built) { $owners.Add($i + 1) }
-            if ($lines[$i] -cmatch $PLUGIN_MOD_INIT) { $pluginMod.Add($i + 1) }
+            $line = $lines[$i]
+            if ($line -cmatch $DEFAULTS_AT) { $at.Add($i + 1) }
+            if ($line -cmatch $DEFAULTS_PER_USER) { $perUser.Add($i + 1) }
+            if ($line -cmatch $built -or
+                (-not $isCs -and (($emplaced -and $line -cmatch $emplaced) -or ($line -cmatch $OWNER_OPTIONAL_CPP -and $line -cmatch '\bin_place\b')))) {
+                $owners.Add($i + 1)
+            }
+            if ($line -cmatch $PLUGIN_MOD_INIT -or ($pluginRefInit -and $line -cmatch $pluginRefInit)) { $pluginMod.Add($i + 1) }
         }
         if (-not (Test-IsTestSource $rel)) {
             if ($at.Count -gt 0) {
