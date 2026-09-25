@@ -1069,9 +1069,12 @@ carries no stamp. A shallow clone has no tags, and the check warns that it did n
 Packaging stamps `mod_info.version` by reading the manifest with `ConvertFrom-Json` and writing it
 with `ConvertTo-Json -Depth 10`; `pixi run test-config-descriptor` runs that round trip over a
 block and compares the result. `Copy-SharedBundle` runs the same rules on the committed manifest
-through `Assert-LauncherManifestConfig` whenever it has a block, so a package script that never
-calls validate-manifest still refuses stale `rows`; that needs `node` on `PATH`, as
-`render-config` does.
+through `Assert-LauncherManifestConfig`, so a package script that never calls validate-manifest
+still refuses stale `rows`, and in a converted repo, with a block or without one, a seed or
+`files[]` row of `CameraUnlock.ini` or the legacy file. A converted repo with no block yet fails
+conformance and still packages. Whether a repo is converted is read from its committed config by
+`scripts/check-config-descriptor.mjs --package`, so packaging any repo with a
+`launcher-manifest.json` needs `node` on `PATH`.
 
 ## Tooling
 

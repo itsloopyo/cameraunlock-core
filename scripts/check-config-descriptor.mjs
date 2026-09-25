@@ -10,10 +10,14 @@
 //   node scripts/check-config-descriptor.mjs                  # the repo vendoring this core
 //   node scripts/check-config-descriptor.mjs <repo> [...]     # repo paths or sibling names
 //   node scripts/check-config-descriptor.mjs --json --roots-file <file>
+//   node scripts/check-config-descriptor.mjs --package <repo>
 //
 // The default run prints each repo's problems, a converted repo delivered by manifest that
 // carries no block among them, and exits 1 when there is one. --json prints what
 // scripts/conformance.ps1 decides its config-descriptor check from, and always exits 0.
+// --package is what Copy-SharedBundle runs on a mod's committed manifest: every problem but the
+// missing block, which conformance reports, since the block lands in its own change and a
+// converted repo has to be able to release before it does.
 //
 // The committed manifest carries a placeholder mod_info.version that packaging stamps, so the
 // rule holding canonical_since to that version runs on a built ZIP only. The rule holding it
@@ -481,11 +485,14 @@ function main(argv) {
     tokens = [...argv.filter((_, i) => i !== rootsFileAt && i !== rootsFileAt + 1), ...fs.readFileSync(file, "utf8").split(/\r?\n/).filter((l) => l !== "")];
   }
   const json = tokens.includes("--json");
-  tokens = tokens.filter((t) => t !== "--json");
+  const packaging = tokens.includes("--package");
+  if (json && packaging) throw new Error("--json and --package are separate runs");
+  tokens = tokens.filter((t) => t !== "--json" && t !== "--package");
   const unknown = tokens.find((t) => t.startsWith("--"));
   if (unknown) throw new Error(`unknown option ${unknown}`);
   const roots = tokens.length > 0 ? tokens.map(resolveRoot) : [REPOS_ROOT];
   const reports = roots.map((root) => repoReport(root));
+  if (packaging) for (const r of reports) r.problems = r.problems.filter((p) => p !== NO_BLOCK);
   if (json) {
     console.log(JSON.stringify(reports, null, 1));
     return 0;

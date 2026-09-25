@@ -1317,17 +1317,25 @@ function Assert-LauncherManifestDelivery {
 
 <#
 .SYNOPSIS
-    Fails packaging when launcher-manifest.json carries a config block that
-    breaks a rule of scripts/check-config-descriptor.mjs, stale rows included.
+    Fails packaging when launcher-manifest.json breaks a config rule of
+    scripts/check-config-descriptor.mjs: a config block that breaks the
+    descriptor rules, stale rows included, or, in a converted repo with a
+    block or without one, a seed or files[] row that writes CameraUnlock.ini,
+    the legacy file or a file named like the committed config.
 .DESCRIPTION
     The block tells a launcher which file to manage and what the mod's defaults
     are. Rows that no longer match the committed config make the launcher read
-    a fresh file as changed by the player, so it never writes it. The same
-    rules run in validate-manifest on the built ZIP, which most package scripts
-    never call; this runs from Copy-SharedBundle so they hold in every one.
+    a fresh file as changed by the player, so it never writes it. A converted
+    release seeds nothing: a seeded CameraUnlock.ini stops the legacy import on
+    an update, and a seeded legacy file is imported on a fresh install. The
+    same rules run in validate-manifest on the built ZIP, which most package
+    scripts never call; this runs from Copy-SharedBundle so they hold in every
+    one.
 
-    A repo with no manifest, or a manifest with no config block, is skipped, so
-    node is needed only where the block is, as render-config already needs it.
+    Whether a repo is converted is decided by the [CameraUnlock] stamp in its
+    committed config, which only the node checker reads, so every repo with a
+    manifest needs node on PATH to package. A converted repo with no block
+    yet is conformance's finding and does not fail here.
 .PARAMETER RepoRoot
     Root of the mod repository.
 .PARAMETER CoreRoot
@@ -1340,20 +1348,17 @@ function Assert-LauncherManifestConfig {
         [Parameter(Mandatory=$true)][string]$CoreRoot
     )
 
-    $path = Join-Path $RepoRoot 'launcher-manifest.json'
-    if (-not (Test-Path -LiteralPath $path)) { return }
-    $manifest = [System.IO.File]::ReadAllText($path).TrimStart([char]0xFEFF) | ConvertFrom-Json
-    if ($manifest.PSObject.Properties.Name -notcontains 'config') { return }
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'launcher-manifest.json'))) { return }
 
     $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $node) {
-        throw "launcher-manifest.json has a config block, and checking it needs node on PATH, as render-config does."
+        throw "Packaging holds launcher-manifest.json to the config rules of scripts/check-config-descriptor.mjs, and running them needs node on PATH."
     }
     $script = Join-Path $CoreRoot 'scripts\check-config-descriptor.mjs'
     $global:LASTEXITCODE = 0
-    $output = (& $node.Source $script $RepoRoot | Out-String).TrimEnd()
+    $output = (& $node.Source $script --package $RepoRoot | Out-String).TrimEnd()
     if ($LASTEXITCODE -ne 0) {
-        throw "launcher-manifest.json's config block breaks the descriptor rules (docs/canonical-config.md, The config descriptor). Stale rows are rewritten by render-config.`n$output"
+        throw "launcher-manifest.json breaks the config rules (docs/canonical-config.md, The config descriptor). render-config rewrites stale rows; a seed or files[] row of the config comes out of the manifest by hand.`n$output"
     }
     if ($output) { Write-Host $output }
 }

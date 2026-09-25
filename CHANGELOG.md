@@ -215,6 +215,27 @@ file, and one with two recorded files or an unrecorded committed file was never 
 legacy file with no block: fallout-new-vegas, metro-exodus-enhanced-edition, no-mans-sky and
 starfield. No unconverted repo is checked.
 
+### Fixed - packaging fails a converted repo that seeds its config with no config block
+
+`Assert-LauncherManifestConfig`, which `Copy-SharedBundle` runs in every mod's package, returned
+early on a manifest with no config block, so the no-seed rule held there only in
+`validate-manifest` and conformance, and most package scripts never call `validate-manifest`.
+
+- `scripts/check-config-descriptor.mjs --package <repo>` reports every problem the default run
+  does except a converted repo's missing block, which stays conformance's finding so a converted
+  repo can release before its block lands.
+- `Assert-LauncherManifestConfig` runs it on every committed `launcher-manifest.json`, block or
+  not. Whether a repo is converted is read from its committed config by the checker, so
+  packaging any repo with a manifest now needs `node` on `PATH`; GitHub's hosted runners carry it.
+- `test-config-descriptor` runs a seed and a `files[]` row of `CameraUnlock.ini` and of the legacy
+  file through `Assert-LauncherManifestConfig` with no block, and a converted repo with no block
+  and no seed, and an unconverted repo seeding its config, which both pass.
+
+Consuming repos: fallout-new-vegas, metro-exodus-enhanced-edition, no-mans-sky and starfield
+seed their legacy file with no block and fail `pixi run package` once they pin this core; take
+the seed out of `launcher-manifest.json`. `check-config-descriptor.mjs --package` fails those 4 of
+the 131 repos with a manifest and nothing else.
+
 ### Removed - `encode-seed.mjs` no longer re-encodes seeds
 
 `encode-seed` rewrote the `content_b64` of every seed whose target is an installed config path.

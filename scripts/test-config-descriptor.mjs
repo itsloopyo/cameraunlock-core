@@ -512,7 +512,8 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
 }
 
 // Copy-SharedBundle runs Assert-LauncherManifestConfig on the committed manifest, so a package
-// script that never calls validate-manifest still refuses a broken block.
+// script that never calls validate-manifest still refuses a broken block, and a seed or files[]
+// row of the config in a converted repo, block or not.
 {
   const module = path.join(CORE_ROOT, "powershell", "ReleaseWorkflow.psm1");
   const assertConfig = (root) =>
@@ -527,6 +528,16 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   check(stale.status === 1 && stale.stdout.includes("config.rows is"), `packaging: stale rows should fail, got ${stale.status}\n${stale.stdout}${stale.stderr}`);
   const none = assertConfig(repo("assert-none", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) }));
   check(none.status === 0, `packaging: a manifest with no block should pass, got ${none.status}\n${none.stdout}${none.stderr}`);
+  // The no-seed rule holds at packaging with no block, and the missing block alone, which
+  // conformance reports, does not fail a release.
+  for (const [label, extra, message] of BLOCKLESS_WRITES) {
+    const r = assertConfig(repo(`assert-blockless-${label.replace(/\W+/g, "-")}`, "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined, extra)) }));
+    check(r.status === 1 && r.stdout.includes(message), `packaging: ${label} with no block in a converted repo should fail with "${message}", got ${r.status}\n${r.stdout}${r.stderr}`);
+  }
+  const blockless = assertConfig(repo("assert-blockless-clean", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) }));
+  check(blockless.status === 0, `packaging: a converted repo with no block and no seed should pass, got ${blockless.status}\n${blockless.stdout}${blockless.stderr}`);
+  const unconvertedSeed = assertConfig(repo("assert-unconverted-seed", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined, BLOCKLESS_WRITES[0][1])) }));
+  check(unconvertedSeed.status === 0, `packaging: an unconverted repo seeding its config should pass, got ${unconvertedSeed.status}\n${unconvertedSeed.stdout}${unconvertedSeed.stderr}`);
 }
 
 // Packaging stamps the version through ConvertFrom-Json and ConvertTo-Json -Depth 10 in Windows
