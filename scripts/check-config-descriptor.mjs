@@ -4,7 +4,8 @@
 // and which launcher preference rows it binds, with their committed values (docs/canonical-config.md,
 // "The config descriptor"). This file holds every rule the block is held to. validate-manifest.mjs
 // runs them on a built ZIP's manifest, conformance runs them on the committed one, and
-// encode-seed.mjs writes `rows` from expectedRows().
+// encode-seed.mjs writes `rows` from expectedRows(). It also holds the rule that a converted
+// repo's manifest seeds and ships no config, block or not (configWriteProblems).
 //
 //   node scripts/check-config-descriptor.mjs                  # the repo vendoring this core
 //   node scripts/check-config-descriptor.mjs <repo> [...]     # repo paths or sibling names
@@ -236,17 +237,51 @@ export function expectedRows(root, state) {
   return { rows: problems.length === 0 ? rows : null, problems };
 }
 
-function payloads(man) {
-  const variants = Array.isArray(man.variants) ? man.variants : [];
-  return variants.length === 0 ? [man] : variants;
+// Every seed and files[] row, at the top level and in each variant, with a string target.
+function writersOf(man) {
+  const holders = [man, ...(Array.isArray(man.variants) ? man.variants : [])].filter(isObject);
+  const listed = (lists) => lists.filter(Array.isArray).flat().filter((i) => isObject(i) && typeof i.target === "string");
+  return {
+    seeds: listed(holders.flatMap((h) => [h.seed, isObject(h.loader) ? h.loader.seed : undefined])),
+    files: listed(holders.map((h) => h.files)),
+  };
 }
 
-function seedsOf(man) {
-  const seeds = [];
-  for (const list of [man.seed, ...payloads(man).map((p) => p?.loader?.seed)]) {
-    if (Array.isArray(list)) seeds.push(...list.filter(isObject));
+const leafOf = (p) => p.split(/[\\/]/).pop();
+
+// A converted release seeds nothing and ships no config through files[]: no seed or row writes
+// CameraUnlock.ini, the legacy file or a file named like the committed config, with a config
+// block or without one. Matched by file name in any folder and at any anchor, so a mod_home
+// target, or an exe_dir one for a game data/games.json does not list, is caught too, and no
+// converted release writes a file of one of those names for another reason.
+export function configWriteProblems(man, state) {
+  if (!state.converted) return [];
+  const names = new Map([[CONFIG_NAME.toLowerCase(), CONFIG_NAME]]);
+  const add = (name, what) => {
+    if (!names.has(name.toLowerCase())) names.set(name.toLowerCase(), what);
+  };
+  for (const f of state.files) if (f.legacy_source !== null) add(f.legacy_source, `the legacy file ${f.legacy_source}`);
+  for (const committed of [...state.files.map((f) => f.committed).filter((c) => c !== null), ...state.unrecorded_stamped]) {
+    add(leafOf(committed), `${leafOf(committed)}, the committed config's name`);
   }
-  return seeds;
+  const hit = (item) => names.get(leafOf(item.target).toLowerCase());
+  const { seeds, files } = writersOf(man);
+  const problems = [];
+  for (const f of files) {
+    const what = hit(f);
+    if (what) {
+      problems.push(`files[] ${f.target} (${anchorOf(f)}) lands on ${what}; a files[] row is copied over whatever is there at every deploy, the player's settings included, and a converted release ships no config`);
+    }
+  }
+  for (const seed of seeds) {
+    const what = hit(seed);
+    if (what) {
+      problems.push(
+        `seed ${seed.target} (${anchorOf(seed)}) writes ${what}; a converted release seeds nothing. The mod creates CameraUnlock.ini at first launch and imports the legacy file only while CameraUnlock.ini is absent, so a seeded CameraUnlock.ini stops the import on an update and a seeded legacy file is imported on a fresh install. Lopari v0.9.0 also records a seeded file's hash and, once the file has changed or is gone, reinstalls the mod before launching`,
+      );
+    }
+  }
+  return problems;
 }
 
 function listingText(state) {
@@ -256,8 +291,8 @@ function listingText(state) {
   return "no committed config file carries the [CameraUnlock] stamp";
 }
 
-// The rules that hold the block to the repo it was built from: data/config-format.json's entry,
-// the committed file, and the manifest's own seeds and files[].
+// The rules that hold the block to the repo it was built from: data/config-format.json's entry
+// and the committed file.
 function repoProblems(man, root, state) {
   const config = man.config;
   if (!state.converted) return [`config is declared, and ${state.folder} is not converted to the canonical config format (${listingText(state)})`];
@@ -274,15 +309,8 @@ function repoProblems(man, root, state) {
 
   const gameId = man.mod_info?.game_id;
   const gameKnown = GAMES[gameId] !== undefined;
-  const seeds = seedsOf(man).filter((s) => typeof s.target === "string");
-  const files = payloads(man)
-    .flatMap((payload) => (Array.isArray(payload?.files) ? payload.files : []))
-    .filter((f) => isObject(f) && typeof f.target === "string");
-  const atExeDir = [config, ...seeds, ...files].filter((i) => anchorOf(i) === "exe_dir").map((i) => i.target ?? i.path);
-  if (!gameKnown && atExeDir.length > 0) {
-    problems.push(
-      `${atExeDir.join(", ")} anchored at exe_dir, and mod_info.game_id ${JSON.stringify(gameId)} is not in data/games.json, so which file each lands on cannot be checked`,
-    );
+  if (!gameKnown && anchor === "exe_dir") {
+    problems.push(`config.path ${p} is anchored at exe_dir, and mod_info.game_id ${JSON.stringify(gameId)} is not in data/games.json, so which file it lands on cannot be checked`);
   }
   const targets = (item) =>
     ANCHORS.includes(anchorOf(item)) && (anchorOf(item) !== "exe_dir" || gameKnown) ? gameRelativeTargets(item, man) : [];
@@ -332,29 +360,6 @@ function repoProblems(man, root, state) {
     problems.push(`config has no canonical_since, and ${state.repo} published pre-canonical builds (data/config-format.json legacy); it names the first version that shipped the canonical file`);
   } else if (state.listing !== "legacy" && "canonical_since" in config) {
     problems.push(`config.canonical_since is set, and ${state.repo} never published a pre-canonical build (it is not in data/config-format.json legacy)`);
-  }
-
-  // An item hits a file when it names the file from the same anchor, or resolves onto one of the
-  // file's paths in the game folder.
-  const hits = (name, gameFiles) => (item) =>
-    (anchorOf(item) === anchor && lower(item.target) === name.toLowerCase()) || targets(item).some((t) => gameFiles.has(t));
-  const onConfig = hits(p, new Set([...installedLower, ...targets({ target: p, anchor })]));
-  const onLegacy = legacy === null
-    ? () => false
-    : hits(legacy, new Set([...installed.map((i) => besideOf(i, legacyName).toLowerCase()), ...targets({ target: legacy, anchor })]));
-  const hitFile = (item) => (onConfig(item) ? "the config" : onLegacy(item) ? `the legacy file ${legacy}` : null);
-
-  for (const f of files) {
-    const hit = hitFile(f);
-    if (hit) problems.push(`files[] ${f.target} (${anchorOf(f)}) lands on ${hit}; a files[] row is copied over whatever is there at every deploy, the player's settings included`);
-  }
-  for (const seed of seeds) {
-    const hit = hitFile(seed);
-    if (hit) {
-      problems.push(
-        `seed ${seed.target} (${anchorOf(seed)}) writes ${hit}; a package with a config block seeds neither its config nor its legacy file. The mod creates the config at first launch and imports the legacy file only while the config is absent, and a launcher that hash-checks seeded files (Lopari v0.9.0) downloads a drifted one again, which a file the launcher edits always is`,
-      );
-    }
   }
 
   const expected = expectedRows(root, state);
@@ -450,7 +455,7 @@ export function repoReport(root, state = repoState(root)) {
   // cannot carry a block yet; config-format reports that.
   report.applies =
     state.converted && MANIFEST_MODES.includes(man.delivery_mode) && state.files.length === 1 && state.files[0].state === "stamped";
-  report.problems = descriptorProblems(man, { root, state, checkVersion: false });
+  report.problems = [...descriptorProblems(man, { root, state, checkVersion: false }), ...configWriteProblems(man, state)];
   if (report.applies && !report.has_block) report.problems.push(NO_BLOCK);
   if (report.has_block && report.problems.length === 0) {
     const tags = tagProblems(root, state, man.config);

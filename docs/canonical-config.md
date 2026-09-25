@@ -899,9 +899,13 @@ imports the legacy file again at the next start.
   from a legacy build would stop the import; the second would replace the file an older build
   reads, which is also what the mod imports while `CameraUnlock.ini` is absent.
   `pixi run validate-manifest` fails a converted repo's Nexus ZIP that carries either.
-- **Launcher seeds**: a converted release seeds neither file in `launcher-manifest.json`; the owner
-  creates `CameraUnlock.ini` at first launch. Lopari v0.9.0 hash-checks seeded files and downloads
-  a drifted one again, and a file the mod or a launcher edits always drifts.
+- **Launcher seeds**: a converted release seeds nothing in `launcher-manifest.json`. No seed and
+  no `files[]` row writes `CameraUnlock.ini`, the legacy file or a file named like the committed
+  config, in any folder, with a config block or without one; the owner creates `CameraUnlock.ini`
+  at first launch. Lopari v0.9.0 records a seeded file's hash in its receipt and, once the file has
+  changed or is gone, downloads and reinstalls the mod before launching. A `files[]` row is copied
+  over whatever is there at every deploy. `pixi run validate-manifest` fails such a package and
+  conformance's `config-descriptor` the committed manifest.
 
 ### BepInEx
 
@@ -1028,11 +1032,9 @@ on the built ZIP against the repo it was built from:
   to be one of them, which is the anchor for a file with one path per store layout; `mod_home` is
   for a file with no `installed` path. `legacy_source` is the folder of `path` and the name the
   entry records.
-- No seed writes the config or the legacy file, and no `files[]` row lands on either. The mod
-  creates the config at first launch and imports the legacy file only while the config is absent,
-  so a seeded config skips the import, and Lopari v0.9.0 downloads a seeded file again once its
-  hash drifts, which a file the launcher edits always does. A `files[]` row is copied over
-  whatever is there at every deploy.
+- The manifest seeds no config and ships none through `files[]`. That rule holds for every
+  converted repo, with a block or without one (Launcher seeds, under "Install, uninstall and
+  manual packages").
 - `rows` holds every one of the five concepts the committed file has as a line, with the
   committed value (the renderer writes `true` or `false`), and no other. Two exceptions. When the
   committed file has `PositionAllowed=false`, `rows` has neither `RotationEnabled` nor
@@ -1117,7 +1119,7 @@ In a mod repo, and in conformance:
   one missing from `PRESERVE_FILES`. `readme` fails a converted repo whose README config block
   is missing or differs from the rendered one, and an unconverted repo that has one.
   `config-descriptor` holds the committed manifest to the config descriptor's rules (see
-  "The config descriptor").
+  "The config descriptor") and fails a converted repo's manifest that seeds or ships its config.
 - **The README config block** sits between `<!-- cameraunlock:config -->` and
   `<!-- /cameraunlock:config -->` in the Configuration section. From core's own checkout,
   `pixi run readme --write <repo>` inserts and updates it, and `pixi run readme --print config

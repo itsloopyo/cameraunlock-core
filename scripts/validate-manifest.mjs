@@ -72,7 +72,9 @@
 // the mod's canonical config and the preference rows it binds, has the block
 // held to every rule in check-config-descriptor.mjs, against the repo the ZIP
 // was built from: the host repo, the sibling a token names, or the repo whose
-// release/ folder holds a ZIP named by path.
+// release/ folder holds a ZIP named by path. The package of a converted repo
+// fails a seed or files[] row that writes its config or legacy file, with a
+// block or without one.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -80,7 +82,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
-import { descriptorProblems } from "./check-config-descriptor.mjs";
+import { configWriteProblems, descriptorProblems } from "./check-config-descriptor.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // core lives at <root>/cameraunlock-core/scripts. Two levels up is the repo
@@ -143,6 +145,7 @@ function validate(label, zip, repo) {
 
   assertVersionMatchesZipName(man, zip);
   const descriptor = checkDescriptor(man, repo);
+  checkConfigWrites(man, repo);
 
   const mode = man.delivery_mode;
   // Lopari installs an absent mode through install.cmd, so it needs the same
@@ -242,6 +245,15 @@ function checkDescriptor(man, repo) {
   const problems = descriptorProblems(man, { root: repo, checkVersion: true });
   if (problems.length > 0) throw new Error(`config descriptor: ${problems.join("; ")}`);
   return ", config descriptor";
+}
+
+// A converted repo's package seeds and ships no config, whether or not the manifest has a config
+// block (configWriteProblems). Whether the repo is converted is read from the repo the ZIP was
+// built from, so a ZIP named by a path outside any release/ folder is not checked.
+function checkConfigWrites(man, repo) {
+  if (repo === null) return;
+  const problems = configWriteProblems(man, repoState(repo));
+  if (problems.length > 0) throw new Error(problems.join("; "));
 }
 
 // install_cmd: the scripts ARE the delivery mechanism, so the gate is that

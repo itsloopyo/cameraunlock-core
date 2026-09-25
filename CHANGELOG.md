@@ -191,6 +191,30 @@ launch, and the reinstall writes no seed because REFramework is already there.
 Consuming repos: a converted repo re-renders its README block with
 `pixi run readme --write --sections config`.
 
+### Fixed - a converted repo's manifest fails a seed of its config with or without a config block
+
+The rule that no seed or `files[]` row writes the config or the legacy file ran inside the config
+descriptor rules, so it held only for a manifest with a block and one recorded config file. A
+converted repo with no block passed `validate-manifest` and conformance while seeding its legacy
+file, and one with two recorded files or an unrecorded committed file was never checked.
+
+- `configWriteProblems(man, state)` in `scripts/check-config-descriptor.mjs` fails, for a converted
+  repo, every seed (`seed`, `loader.seed`, at the top level and in each variant) and `files[]` row
+  whose file name is `CameraUnlock.ini`, a recorded `legacy_source` or the name of a committed
+  config file, recorded or not. It matches by name in any folder and at any anchor, so a `mod_home`
+  target and an `exe_dir` one for a game `data/games.json` does not list are caught too. The
+  descriptor rules no longer check seeds, so a seed is reported once.
+- `validate-manifest` runs it on every package built from a repo it can name, block or not.
+  Conformance's `config-descriptor` check reports it for the committed manifest.
+- `test-config-descriptor` holds the rule to manifests with and without a block, a mod_home seed,
+  a seed named like the committed file, a repo with two config files, a top-level `loader.seed`
+  beside variants, and an unconverted repo, and runs it through `validate-manifest` and
+  conformance.
+
+`pixi run conformance -All -Check config-descriptor`: 5 -> 9 FAIL. The four new ones seed the
+legacy file with no block: fallout-new-vegas, metro-exodus-enhanced-edition, no-mans-sky and
+starfield. No unconverted repo is checked.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

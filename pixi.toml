@@ -90,7 +90,9 @@ pack = "dotnet pack csharp -c Release -o dist"
 # takes it out of the Nexus staging.
 # A manifest with a config descriptor (the `config` block a launcher reads to find the mod's
 # canonical config and the preference rows it binds) has it held to every rule in
-# scripts/check-config-descriptor.mjs, against the repo the ZIP was built from.
+# scripts/check-config-descriptor.mjs, against the repo the ZIP was built from. A converted
+# repo's package fails a seed or files[] row that writes its config or legacy file, with a
+# block or without one.
 # Or pass repo tokens / zip paths to validate across a checkout:
 #   pixi run validate-manifest
 #   pixi run validate-manifest dying-light-2 bioshock-remastered
