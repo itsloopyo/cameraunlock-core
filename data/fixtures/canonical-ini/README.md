@@ -16,17 +16,17 @@ written by hand from the rules, never produced by an implementation, except unde
 `mutations/`, whose hashes come from a third implementation of its rules, in Python, that
 neither language shares code with.
 
-Lopari's Rust codec is to run the same files, so nothing here is specific to one language,
-with one exception in `editor/`. The `set_first` and `set_or_insert_first` directives exist
-for REFramework's `ApplyIniEdits` (`cpp/src/reframework/plugin_config.cpp`), which edits a
-file that GetPrivateProfileStringA reads, and that reader takes the first occurrence of a
-repeated key. An editor that implements only the canonical occurrence rule (an edit
-replaces the last occurrence of a repeated key, and an absent key goes into the last block
-of a section whose header repeats) runs every `reader/` case and every `editor/` case except
-those whose `case.tsv` holds a `_first` directive. It picks the cases to skip by directive,
-never by name, so a new case without one is run as soon as it lands. A reader, and an editor
-that also implements the first-occurrence rule (`first_occurrence_wins` in C++,
-`FirstOccurrenceWins` in C#), is held to every case.
+Lopari's Rust codec is to run the same files. Of the `editor/` cases, those whose `case.tsv`
+holds a `set_first` or `set_or_insert_first` directive exist for REFramework's
+`ApplyIniEdits` (`cpp/src/reframework/plugin_config.cpp`), which edits a file that
+GetPrivateProfileStringA reads, and that reader takes the first occurrence of a repeated
+key. A port whose editor implements only the canonical occurrence rule (an edit replaces
+the last occurrence of a repeated key, and an absent key goes into the last block of a
+section whose header repeats) runs every other `editor/` case, and its reader runs every
+`reader/` case. The port's runner skips those cases by directive, never by name, so a new
+case without one is run as soon as it lands. An editor that also implements the
+first-occurrence rule (`first_occurrence_wins` in C++, `FirstOccurrenceWins` in C#) is held
+to every `editor/` case, as core's C++ and C# suites are.
 
 Everything under `data/fixtures/` is marked `-text` in `.gitattributes`, so git keeps the
 bytes as they are: the CRLF, LF and lone CR endings, the byte order marks, the NUL and
