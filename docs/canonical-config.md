@@ -446,7 +446,10 @@ built with, so the defaults live in the config type, as they always have.
   the row an Engine row, `Writable` marks a row the owner's `Save` may change, and `PerGame` marks
   a concept row whose default stays the game's own and never follows Defaults.ini. `PerGame` throws
   on a local row, and each use needs an owner-approved `per_game` entry for the repo in
-  `data/config-format.json`. `RotationEnabled` and `PositionEnabled` are one setting, so a table
+  `data/config-format.json`. A concept row whose default is in the engine's own units or is engine
+  data (a `CollisionMargin` in centimetres, a `CollisionChannel` naming one engine's trace channel)
+  has a default the schema's number cannot stand for, and the fresh render refuses it unless the
+  row is `PerGame`. `RotationEnabled` and `PositionEnabled` are one setting, so a table
   that binds both marks both `PerGame` or neither; apply and the fresh render throw on one alone.
 
 `ApplyCanonical(doc, table, config)` / `table.Apply(doc, config)` reads a parsed file into a

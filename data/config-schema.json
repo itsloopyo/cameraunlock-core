@@ -40,7 +40,10 @@
     "Every canonical concept is global: a canonical file's row for it may hold `default`, which",
     "reads the value from Defaults.ini, and Defaults.ini carries every canonical concept. A game",
     "keeps its own value for one only through the table's PerGame(). So a concept that must never",
-    "follow Defaults.ini needs a schema change before it is added."
+    "follow Defaults.ini needs a schema change before it is added. A row whose default is in the",
+    "engine's own units or is engine data, such as a CollisionMargin in centimetres or a",
+    "CollisionChannel naming one engine's trace channel, has a default the schema's number cannot",
+    "stand for, so it needs PerGame() or a schema change."
   ],
   "deliberately_unaliased": [
     {

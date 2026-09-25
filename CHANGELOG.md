@@ -65,7 +65,11 @@ where the imported value equals what `default` gives at that launch.
   row, which takes Defaults.ini's value, so the row's own default must be the schema's, or the row
   must be marked PerGame().`, and when the table binds `RotationEnabled` without `PositionEnabled`.
   `HeadTrackingConfigTable` naming every concept passes it
-  (`data/fixtures/canonical-ini/head-tracking/all-concepts-fresh.ini`).
+  (`data/fixtures/canonical-ini/head-tracking/all-concepts-fresh.ini`). Seven converted repos
+  default `CollisionEnabled`, `CollisionMargin` or `CollisionChannel` off the schema, several in the
+  engine's own units, so their tables would fail it as they stand. The owner has not yet decided
+  whether those rows become `PerGame` or collision leaves the global set; keep their shipped
+  defaults until then.
 - **Internal, for the owner's later adoption**: an `Apply` overload over effective defaults that
   reports where each row's value came from (the file, Defaults.ini or the table), and a migration
   render that writes `default` where a value equals its effective default (C++
