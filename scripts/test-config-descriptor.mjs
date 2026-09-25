@@ -468,19 +468,28 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   );
 
   // conformance's config-preserve check: a converted repo's install.cmd lists neither file in
-  // MOD_DLLS or MOD_SEED_FILES, and its uninstall.cmd neither in MOD_SEED_FILES. The same scripts
-  // in an unconverted repo, and the lists without them in a converted one, draw nothing.
+  // MOD_DLLS or MOD_SEED_FILES, and its uninstall.cmd neither in MOD_SEED_FILES. A repo converted
+  // only by a stamped file data/config-format.json does not record lists that file's name in
+  // neither. The same scripts in an unconverted repo, and the lists without them in a converted
+  // one, draw nothing.
   const PRESERVE = `"AbzuGame\\Binaries\\Win64\\CameraUnlock.ini" "AbzuGame\\Binaries\\Win64\\HeadTracking.ini"`;
-  const scripts = (dlls, seeds, uninstallSeeds = seeds) => ({
+  const scripts = (dlls, seeds, uninstallSeeds = seeds, preserve = PRESERVE) => ({
     "scripts/install.cmd": `@echo off\r\n:: --- CONFIG BLOCK ---\r\nset "MOD_DLLS=${dlls}"\r\nset "MOD_SEED_FILES=${seeds}"\r\n:: --- END CONFIG BLOCK ---\r\n`,
-    "scripts/uninstall.cmd": `@echo off\r\n:: --- CONFIG BLOCK ---\r\nset "MOD_DLLS=${dlls}"\r\nset "MOD_SEED_FILES=${uninstallSeeds}"\r\nset "PRESERVE_FILES=${PRESERVE}"\r\n:: --- END CONFIG BLOCK ---\r\nset "_BODY=%WRAPPER_DIR%shared\\uninstall-body.cmd"\r\n`,
+    "scripts/uninstall.cmd": `@echo off\r\n:: --- CONFIG BLOCK ---\r\nset "MOD_DLLS=${dlls}"\r\nset "MOD_SEED_FILES=${uninstallSeeds}"\r\nset "PRESERVE_FILES=${preserve}"\r\n:: --- END CONFIG BLOCK ---\r\nset "_BODY=%WRAPPER_DIR%shared\\uninstall-body.cmd"\r\n`,
   });
   const listed = repo("preserve-listed", "abzu-headtracking", { "HeadTracking.ini": ALL, ...scripts("Mod.asi HeadTracking.ini", "CameraUnlock.ini", "CameraUnlock.ini HeadTracking.ini") });
+  const swapped = repo("preserve-swapped", "abzu-headtracking", { "HeadTracking.ini": ALL, ...scripts("Mod.asi CameraUnlock.ini", "HeadTracking.ini", "") });
+  const stampOnly = repo("preserve-stamp-only", "deus-ex-mankind-divided-headtracking", { "config/HeadTracking.ini": ALL, ...scripts("Mod.asi", "HeadTracking.ini", "HeadTracking.ini", "retail\\CameraUnlock.ini") });
+  git(stampOnly, "add", "config/HeadTracking.ini");
+  check(
+    isDeepStrictEqual(repoState(stampOnly).unrecorded_stamped, ["config/HeadTracking.ini"]),
+    `preserve-stamp-only: the fixture should be converted by its unrecorded stamped file alone, got ${JSON.stringify(repoState(stampOnly))}`,
+  );
   const unlisted = repo("preserve-unlisted", "abzu-headtracking", { "HeadTracking.ini": ALL, ...scripts("Mod.asi", "") });
   const legacyListed = repo("preserve-unconverted", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, ...scripts("Mod.asi HeadTracking.ini", "CameraUnlock.ini") });
   const preserve = spawnSync(
     "powershell",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo '${listed}','${unlisted}','${legacyListed}' -Check config-preserve -Json; exit $LASTEXITCODE`],
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo '${listed}','${swapped}','${stampOnly}','${unlisted}','${legacyListed}' -Check config-preserve -Json; exit $LASTEXITCODE`],
     { encoding: "utf8" },
   );
   const preserveFindings = JSON.parse(preserve.stdout.replace(/^\uFEFF/, "") || "[]");
@@ -490,11 +499,15 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     "FAIL install.cmd's MOD_SEED_FILES lists CameraUnlock.ini, which an update from a legacy build writes",
     "FAIL uninstall.cmd's MOD_SEED_FILES lists CameraUnlock.ini, the player's settings,",
     "FAIL uninstall.cmd's MOD_SEED_FILES lists HeadTracking.ini, the legacy file an older build reads after a rollback,",
+    "FAIL install.cmd's MOD_DLLS lists CameraUnlock.ini, so every script install copies the default over the player's settings.",
+    "FAIL install.cmd's MOD_SEED_FILES lists HeadTracking.ini, the legacy file, so a fresh install gets a legacy file no older build wrote",
+    "FAIL install.cmd's MOD_SEED_FILES lists HeadTracking.ini, a copy of the committed config,",
+    "FAIL uninstall.cmd's MOD_SEED_FILES lists HeadTracking.ini, a file named like the committed config,",
   ];
   check(
     preserve.status === 1 && messages.length === expected.length &&
       expected.every((e) => messages.filter((m) => m.startsWith(e) && m.endsWith("The mod creates CameraUnlock.ini at first launch; list neither file.")).length === 1),
-    `conformance: config-preserve should fail the converted repo's four listings and nothing else, got ${preserve.status}\n${preserve.stdout}${preserve.stderr}`,
+    `conformance: config-preserve should fail each converted repo's listings and nothing else, got ${preserve.status}\n${preserve.stdout}${preserve.stderr}`,
   );
 }
 

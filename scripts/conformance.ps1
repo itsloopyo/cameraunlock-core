@@ -1115,7 +1115,7 @@ function Test-ConfigPreserve {
     # it. The uninstall wrapper's MOD_SEED_FILES mirrors install.cmd's and deletes what it lists.
     $configLeaves = @($installed | ForEach-Object { Split-Path -Leaf $_ })
     $legacyLeaves = @($state.files | Where-Object { $_.legacy_source } | ForEach-Object { $_.legacy_source })
-    $committedLeaves = @($state.files | Where-Object { $_.committed } | ForEach-Object { Split-Path -Leaf $_.committed })
+    $committedLeaves = @(@($state.files | Where-Object { $_.committed } | ForEach-Object { $_.committed }) + @($state.unrecorded_stamped) | ForEach-Object { Split-Path -Leaf $_ })
     $listNeither = 'The mod creates CameraUnlock.ini at first launch; list neither file.'
     $installPath = Join-Path $Root 'scripts/install.cmd'
     if (Test-Path $installPath) {

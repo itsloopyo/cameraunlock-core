@@ -245,12 +245,18 @@ settings.
   `CameraUnlock.ini`, the legacy file or the committed file's name in `MOD_SEED_FILES`.
 - Every `config-preserve` seed finding ends "The mod creates CameraUnlock.ini at first launch;
   list neither file." The seed finding of `configWriteProblems` is one sentence.
-- `MOD_SEED_FILES` stays in every install body, wrapper template and uninstall body: every
-  wrapper sets it and unconverted repos still use it.
+- `config-preserve` counts a stamped file that `data/config-format.json` does not record among the
+  committed config's names, as `configWriteProblems` does, so a repo converted only by such a file
+  fails a listing of its name in either wrapper.
+- `MOD_SEED_FILES` stays in the install bodies and wrapper templates that read it (ASI, BeamNG,
+  REFramework, shim, shim-forwarder, xNVSE) and in the uninstall body and wrapper: those wrappers
+  set it, and unconverted repos still use it.
 - `test-config-descriptor` runs `validate-manifest` and conformance's `config-descriptor` over a
   converted repo with no block that seeds `CameraUnlock.ini`, seeds the legacy file, or carries a
   `files[]` row on either, each of which fails, and an unconverted repo seeding its config, which
-  passes. It runs `config-preserve` over wrappers listing either file.
+  passes. It runs `config-preserve` over wrappers listing either file in each of `install.cmd`'s
+  `MOD_DLLS` and `MOD_SEED_FILES` and `uninstall.cmd`'s `MOD_SEED_FILES`, and over a repo converted
+  only by an unrecorded stamped file that lists it.
 
 `pixi run conformance -All`: 238 -> 244 FAIL (config-preserve 26 -> 32). The six new ones are the
 uninstall wrappers of the repos converted in place: a-plague-tale-innocence and sleeping-dogs list
