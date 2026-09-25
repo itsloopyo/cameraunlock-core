@@ -341,9 +341,10 @@ inserted by the change (`three-state-missing-position`, `three-state-missing-rot
 `two-state-missing-section`, whose change appends the section); an invalid row beside a missing
 one (`three-state-invalid-and-missing`, the one case without a change); `yes` and `on`
 (`three-state-yes-on`); each single bool (`world-space-yaw`, `true-free-look`, `launch-enabled`)
-and all three invalid (`single-bools-invalid`); a repeated key (`repeated-key`); lone CR endings
-(`cr-only`); and a stray `RotationEnabled` in a two-state file (`two-state-stray-rotation`). Each
-`case.tsv` says what its case shows in its notes.
+and all three invalid (`single-bools-invalid`); a single bool changed beside mode rows spelled
+`yes` and `nope`, which the save leaves byte for byte (`single-bool-keeps-mode`); a repeated key
+(`repeated-key`); lone CR endings (`cr-only`); and a stray `RotationEnabled` in a two-state file
+(`two-state-stray-rotation`). Each `case.tsv` says what its case shows in its notes.
 
 ## example/
 
