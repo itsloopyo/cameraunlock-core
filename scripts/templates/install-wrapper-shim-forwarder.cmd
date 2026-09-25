@@ -10,6 +10,9 @@
 :: cameraunlock-core/scripts/templates/install-wrapper-shim-forwarder.cmd. Copy
 :: this file to <mod>/scripts/install.cmd, fill in the CONFIG BLOCK, change
 :: nothing else. scripts/conformance.ps1 checks that nothing else changed.
+:: Keep every CONFIG BLOCK line, blank where it does not apply. A name the
+:: block leaves out is not unset: it keeps whatever another mod's wrapper set
+:: in the same console, and the body acts on that value.
 ::
 :: Forwarding shim: the mod DLL is a system-DLL proxy whose exports forward to
 :: a renamed copy of the real system DLL, which cannot ship in the ZIP. The

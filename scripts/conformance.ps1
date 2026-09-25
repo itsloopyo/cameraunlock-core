@@ -251,15 +251,14 @@ function Test-InstallWrapper {
         }
 
         # A wrapper sets its CONFIG BLOCK before its setlocal, so a name it leaves
-        # out keeps whatever another mod's wrapper set in the same console. For
-        # these two lists that is another mod's config: an install that fails on
-        # seeds its package does not ship, or an uninstall that keeps files it
-        # should remove. sync-templates.ps1 never writes a CONFIG BLOCK.
-        $templateVars = Get-ConfigBlockVars (Read-TextFile $templatePath)
+        # out keeps whatever another mod's wrapper set in the same console, and the
+        # body acts on it: an inherited ASI_SUBDIR sends an uninstall to another
+        # mod's folder. sync-templates.ps1 never writes a CONFIG BLOCK.
         $wrapperVars = Get-ConfigBlockVars $text
-        foreach ($var in @('MOD_SEED_FILES', 'PRESERVE_FILES')) {
-            if (-not $templateVars.Contains($var) -or $wrapperVars.Contains($var)) { continue }
-            Add-Finding $Name 'install-wrapper' 'FAIL' "scripts/$($pair.Script)'s CONFIG BLOCK does not set $var, so it runs with the value another mod's wrapper left in the console; add set `"$var=`" as scripts/templates/$templateName does"
+        $missing = @((Get-ConfigBlockVars (Read-TextFile $templatePath)).Keys | Where-Object { -not $wrapperVars.Contains($_) })
+        if ($missing.Count -gt 0) {
+            $lines = ($missing | ForEach-Object { "set `"$_=`"" }) -join ', '
+            Add-Finding $Name 'install-wrapper' 'FAIL' "scripts/$($pair.Script)'s CONFIG BLOCK does not set $($missing -join ', '), so it runs with whatever another mod's wrapper left in the console; add $lines as scripts/templates/$templateName sets them"
         }
     }
 }

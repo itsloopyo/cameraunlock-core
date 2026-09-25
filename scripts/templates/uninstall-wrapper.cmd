@@ -11,6 +11,9 @@
 :: cameraunlock-core/scripts/templates/uninstall-wrapper.cmd. Copy this file to
 :: <mod>/scripts/uninstall.cmd, fill in the CONFIG BLOCK, change nothing else.
 :: scripts/conformance.ps1 checks that nothing else changed.
+:: Keep every CONFIG BLOCK line, blank where it does not apply. A name the
+:: block leaves out is not unset: it keeps whatever another mod's wrapper set
+:: in the same console, and the body acts on that value.
 :: ============================================
 
 :: --- CONFIG BLOCK ---
@@ -32,8 +35,6 @@ set "PLUGIN_SUBFOLDER="
 set "MOD_SEED_FILES="
 :: Config files the uninstall leaves in place so the player's settings survive a
 :: reinstall: paths relative to the game folder, quoted when one holds a space.
-:: Keep the line when it is blank, or the list another mod's uninstall.cmd set
-:: in the same console is used instead.
 set "PRESERVE_FILES="
 :: Config and log files the mod writes at runtime, removed from wherever the
 :: DLLs were deployed.

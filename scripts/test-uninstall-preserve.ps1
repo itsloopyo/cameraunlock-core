@@ -440,25 +440,73 @@ Invoke-Uninstall $case 0 '-y' | Out-Null
 Assert-Files $case (@('fixture.exe', 'user.txt') + $trees[0].Kept)
 Write-Host 'PASS arguments: unknown flag exit 2, -y completes'
 
-# The uninstall wrapper template itself, from a folder holding '!', run from a
-# console where another mod's wrapper already set PRESERVE_FILES to a path this
-# mod installs: its blank line has to win, so the file goes.
-$templateFiles = [ordered]@{}
-foreach ($rel in @('bin\winmm.dll', 'bin\Fixture.asi', 'bin\HeadTracking.ini', 'bin\user.txt')) { $templateFiles[$rel] = $rel }
-$case = New-Case -Name 'uninstall-template' -Config ([ordered]@{}) -Files $templateFiles -ExeRelPath 'bin\fixture.exe' -Under (Join-Path $root 'Wrapper ! Folder')
-$template = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'templates\uninstall-wrapper.cmd'))
-foreach ($pair in @(@('<games.json id>', 'fixture'), @('<Game Name> Head Tracking', 'Fixture'), @('<Mod>HeadTracking.dll', 'Fixture.asi HeadTracking.ini'),
-        @('<Mod>HeadTracking', 'Fixture'), @('.headtracking-state.json', '.fixture-state.json'), @('set "FRAMEWORK_TYPE=None"', 'set "FRAMEWORK_TYPE=ASILoader"'))) {
-    if (-not $template.Contains($pair[0])) { throw "uninstall-template: template no longer contains $($pair[0])" }
-    $template = $template.Replace($pair[0], $pair[1])
+# ---------------------------------------------------------------- wrapper templates
+# A template filled in for the fixture, with the named CONFIG BLOCK lines left
+# out to stand for a wrapper that never had them.
+function Write-Template([string]$Template, [string[][]]$Pairs, [string]$Dest, [string[]]$Drop = @()) {
+    $text = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "templates\$Template"))
+    foreach ($pair in $Pairs) {
+        if (-not $text.Contains($pair[0])) { throw "${Template}: template no longer contains $($pair[0])" }
+        $text = $text.Replace($pair[0], $pair[1])
+    }
+    foreach ($name in $Drop) {
+        $line = "set `"$name=`"`r`n"
+        if (-not $text.Contains($line)) { throw "${Template}: template no longer sets $name blank" }
+        $text = $text.Replace($line, '')
+    }
+    [IO.File]::WriteAllText($Dest, $text)
 }
-[IO.File]::WriteAllText((Join-Path $case.Root 'uninstall.cmd'), $template)
-$env:PRESERVE_FILES = 'bin\HeadTracking.ini'
-try { $output = Invoke-Uninstall $case 0 } finally { Remove-Item Env:PRESERVE_FILES }
-Assert-Files $case @('bin\fixture.exe', 'bin\user.txt')
+
+# Every name the template's CONFIG BLOCK sets blank, each given the value another
+# mod's wrapper could have left in the console. $Values overrides the default.
+function Get-InheritedConsole([string]$Template, [Collections.IDictionary]$Values) {
+    $console = [ordered]@{}
+    $inBlock = $false
+    foreach ($line in [IO.File]::ReadAllLines((Join-Path $PSScriptRoot "templates\$Template"))) {
+        if ($line.Contains('END CONFIG BLOCK')) { break }
+        if ($line.Contains('--- CONFIG BLOCK ---')) { $inBlock = $true; continue }
+        if ($inBlock -and $line -match '^set "([A-Z0-9_]+)="$') {
+            $console[$Matches[1]] = if ($Values.Contains($Matches[1])) { $Values[$Matches[1]] } else { 'OtherMod.ini' }
+        }
+    }
+    if ($console.Count -eq 0) { throw "${Template}: no blank CONFIG BLOCK names found" }
+    foreach ($name in $Values.Keys) { if (-not $console.Contains($name)) { throw "${Template}: no longer sets $name blank" } }
+    $console
+}
+
+function Invoke-InConsole([Collections.IDictionary]$Console, [scriptblock]$Run) {
+    foreach ($name in $Console.Keys) { Set-Item "Env:$name" $Console[$name] }
+    try { & $Run } finally { foreach ($name in $Console.Keys) { Remove-Item "Env:$name" } }
+}
+
+# The uninstall wrapper template itself, from a folder holding '!', run from a
+# console where another mod's wrappers already set every name its CONFIG BLOCK
+# sets blank: ASI_SUBDIR to a folder of that mod's, PRESERVE_FILES to a file this
+# mod installs, MOD_LEFTOVERS to the player's own file. The blank lines win, so
+# the uninstall works in bin\ and removes exactly what it would from a clean
+# console. The same wrapper without its ASI_SUBDIR line, which is how 91 fleet
+# wrappers shipped, goes to the other mod's folder and leaves this mod installed.
+$uninstallConsole = Get-InheritedConsole 'uninstall-wrapper.cmd' ([ordered]@{
+        ASI_SUBDIR = 'OtherMod'; PRESERVE_FILES = 'bin\HeadTracking.ini'; MOD_LEFTOVERS = 'user.txt' })
+$uninstallPairs = @(@('<games.json id>', 'fixture'), @('<Game Name> Head Tracking', 'Fixture'), @('<Mod>HeadTracking.dll', 'Fixture.asi HeadTracking.ini'),
+    @('<Mod>HeadTracking', 'Fixture'), @('.headtracking-state.json', '.fixture-state.json'), @('set "FRAMEWORK_TYPE=None"', 'set "FRAMEWORK_TYPE=ASILoader"'))
+$templateFiles = [ordered]@{}
+foreach ($rel in @('bin\winmm.dll', 'bin\Fixture.asi', 'bin\HeadTracking.ini', 'bin\user.txt', 'bin\OtherMod\OtherMod.asi')) { $templateFiles[$rel] = $rel }
+
+$case = New-Case -Name 'uninstall-template' -Config ([ordered]@{}) -Files $templateFiles -ExeRelPath 'bin\fixture.exe' -Under (Join-Path $root 'Wrapper ! Folder')
+Write-Template 'uninstall-wrapper.cmd' $uninstallPairs (Join-Path $case.Root 'uninstall.cmd')
+$output = Invoke-InConsole $uninstallConsole { Invoke-Uninstall $case 0 }
+Assert-Files $case @('bin\fixture.exe', 'bin\user.txt', 'bin\OtherMod\OtherMod.asi')
 if ($output -match '(?m)^\s*Kept: ') { throw "uninstall-template: the inherited PRESERVE_FILES reached the body`n$output" }
-Assert-Output $case $output @('Removed: HeadTracking.ini', '=== Uninstall Complete ===')
-Write-Host 'PASS uninstall wrapper template: a PRESERVE_FILES left in the console by another wrapper is cleared'
+Assert-Output $case $output @('Removed: winmm.dll', 'Removed: Fixture.asi', 'Removed: HeadTracking.ini', '=== Uninstall Complete ===')
+
+$case = New-Case -Name 'uninstall-template-no-asi-subdir' -Config ([ordered]@{}) -Files $templateFiles -ExeRelPath 'bin\fixture.exe' -Under (Join-Path $root 'Wrapper ! Folder')
+Write-Template 'uninstall-wrapper.cmd' $uninstallPairs (Join-Path $case.Root 'uninstall.cmd') -Drop 'ASI_SUBDIR'
+Invoke-InConsole $uninstallConsole { Invoke-Uninstall $case 0 } | Out-Null
+foreach ($rel in @('bin\winmm.dll', 'bin\Fixture.asi')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $case.Game $rel))) { throw "uninstall-template-no-asi-subdir: $rel removed, so the harness no longer shows an inherited ASI_SUBDIR" }
+}
+Write-Host 'PASS uninstall wrapper template: every blank CONFIG BLOCK name another wrapper left in the console is cleared; without the ASI_SUBDIR line the uninstall misses bin\'
 
 # ---------------------------------------------------------------- REFramework install
 # The package folder holds a '!' as well as the game folder: install.cmd reads
@@ -624,5 +672,40 @@ Assert-Output $case $output @('ERROR: Failed to copy HeadTracking.ini - is the g
     'Deployed: HeadTracking.dll', 'Deployment Failed!')
 if (Test-Path -LiteralPath (Join-Path $case.Game '.fixture-state.json')) { throw 're-seed-unwritable: state file written' }
 Write-Host 'PASS reframework seed copy failure: named, exit 1, no state file'
+
+# The ASI install wrapper template, the same way: ASI_SUBDIR, ASI_LOADER_VERSION
+# and MOD_SEED_FILES inherited from another mod's install.
+$installConsole = Get-InheritedConsole 'install-wrapper-asi.cmd' ([ordered]@{ ASI_SUBDIR = 'OtherMod'; ASI_LOADER_VERSION = '9.9.9' })
+function New-AsiInstallCase([string]$Name, [string[]]$Drop = @()) {
+    $caseRoot = Join-Path (Join-Path $root 'Wrapper ! Folder') $Name
+    $pkg = Join-Path $caseRoot 'Package ! Folder'
+    $game = Join-Path $caseRoot 'Game ! Folder'
+    $shared = Join-Path $pkg 'shared'
+    New-Item -ItemType Directory -Path (Join-Path $game 'bin\OtherMod'), $shared, (Join-Path $pkg 'vendor\ultimate-asi-loader'), (Join-Path $pkg 'plugins') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $BodiesRoot 'install-body-asi.cmd') -Destination $shared
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'find-game.ps1') -Destination $shared
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../powershell/GamePathDetection.psm1') -Destination $shared
+    $gamesJson = @{ schema_version = 1; games = @{ fixture = @{ display_name = 'Fixture'; env_var = 'CUL_FIXTURE_PATH'; executable_relpath = 'bin\fixture.exe' } } }
+    [IO.File]::WriteAllText((Join-Path $shared 'games.json'), ($gamesJson | ConvertTo-Json -Depth 5))
+    [IO.File]::WriteAllText((Join-Path $pkg 'vendor\ultimate-asi-loader\dinput8.dll'), 'asi loader')
+    [IO.File]::WriteAllText((Join-Path $pkg 'plugins\Fixture.asi'), 'Fixture.asi')
+    [IO.File]::WriteAllText((Join-Path $game 'bin\fixture.exe'), 'bin\fixture.exe')
+    [IO.File]::WriteAllText((Join-Path $game 'bin\OtherMod\OtherMod.asi'), 'bin\OtherMod\OtherMod.asi')
+    Write-Template 'install-wrapper-asi.cmd' @(@('<games.json id>', 'fixture'), @('<Game Name> Head Tracking', 'Fixture'), @('<Mod>HeadTracking.dll', 'Fixture.asi'),
+        @('<Mod>HeadTracking', 'Fixture'), @('.headtracking-state.json', '.fixture-state.json')) (Join-Path $pkg 'install.cmd') -Drop $Drop
+    [pscustomobject]@{ Name = $Name; Root = $pkg; Game = $game; Runs = 0 }
+}
+
+$case = New-AsiInstallCase 'asi-install-template'
+$output = Invoke-InConsole $installConsole { Invoke-Install $case 0 }
+if ($output.Contains('OtherMod') -or $output.Contains('9.9.9')) { throw "asi-install-template: an inherited value reached the body`n$output" }
+if ([IO.File]::ReadAllText((Join-Path $case.Game '.fixture-state.json')).Contains('9.9.9')) { throw 'asi-install-template: the inherited ASI_LOADER_VERSION reached the state file' }
+Assert-Installed $case ([ordered]@{ 'bin\fixture.exe' = 'bin\fixture.exe'; 'bin\winmm.dll' = 'asi loader'; 'bin\Fixture.asi' = 'Fixture.asi'
+        'bin\OtherMod\OtherMod.asi' = 'bin\OtherMod\OtherMod.asi' }) 'true'
+
+$case = New-AsiInstallCase 'asi-install-template-no-asi-subdir' 'ASI_SUBDIR'
+Invoke-InConsole $installConsole { Invoke-Install $case 0 } | Out-Null
+if (-not (Test-Path -LiteralPath (Join-Path $case.Game 'bin\OtherMod\Fixture.asi'))) { throw 'asi-install-template-no-asi-subdir: the harness no longer shows an inherited ASI_SUBDIR' }
+Write-Host 'PASS asi install wrapper template: every blank CONFIG BLOCK name another wrapper left in the console is cleared; without the ASI_SUBDIR line the install lands in the other mod''s folder'
 
 Write-Host "Fixtures retained at $root"

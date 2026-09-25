@@ -10,6 +10,9 @@
 :: cameraunlock-core/scripts/templates/install-wrapper-xnvse.cmd. Copy this
 :: file to <mod>/scripts/install.cmd, fill in the CONFIG BLOCK, change nothing
 :: else. scripts/conformance.ps1 checks that nothing else changed.
+:: Keep every CONFIG BLOCK line, blank where it does not apply. A name the
+:: block leaves out is not unset: it keeps whatever another mod's wrapper set
+:: in the same console, and the body acts on that value.
 ::
 :: xNVSE: a loader exe beside the game exe, with plugins as DLLs under
 :: Data\NVSE\Plugins. It is the one loader that is downloaded rather than

@@ -10,6 +10,9 @@
 :: cameraunlock-core/scripts/templates/install-wrapper-ue4ss.cmd. Copy this
 :: file to <mod>/scripts/install.cmd, fill in the CONFIG BLOCK, change nothing
 :: else. scripts/conformance.ps1 checks that nothing else changed.
+:: Keep every CONFIG BLOCK line, blank where it does not apply. A name the
+:: block leaves out is not unset: it keeps whatever another mod's wrapper set
+:: in the same console, and the body acts on that value.
 ::
 :: UE4SS: a single-DLL injector beside the game's shipping exe in
 :: <Game>\<Project>\Binaries\Win64. The mod ships as a Lua mod folder that

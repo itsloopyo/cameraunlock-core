@@ -10,6 +10,9 @@
 :: cameraunlock-core/scripts/templates/install-wrapper-bepinex.cmd. Copy this
 :: file to <mod>/scripts/install.cmd, fill in the CONFIG BLOCK, change nothing
 :: else. scripts/conformance.ps1 checks that nothing else changed.
+:: Keep every CONFIG BLOCK line, blank where it does not apply. A name the
+:: block leaves out is not unset: it keeps whatever another mod's wrapper set
+:: in the same console, and the body acts on that value.
 ::
 :: Two BepInEx variants, dispatched by BEPINEX_SUBFOLDER: leave it empty for
 :: a regular BepInEx_win_<arch>.zip extracted to the game root, or set it to
@@ -34,6 +37,13 @@ set "BEPINEX_VENDOR_ZIP_NAME="
 set "BEPINEX_SUBFOLDER="
 :: Subfolder under BepInEx\plugins\ to deploy into. Empty lays the DLLs flat.
 set "PLUGIN_SUBFOLDER="
+:: A game whose IL2CPP build ships on one store and its Mono build on another:
+:: the vendor folder, loader zip and plugin folder an IL2CPP install takes, set
+:: all three or none, and optionally the DLL list that replaces MOD_DLLS there.
+set "IL2CPP_VENDOR_DIR_NAME="
+set "IL2CPP_VENDOR_ZIP_NAME="
+set "IL2CPP_PLUGIN_DIR_NAME="
+set "IL2CPP_MOD_DLLS="
 :: Post-install help text. `&echo ` starts each further line.
 set "MOD_CONTROLS=Controls:&echo   End      - Toggle head tracking on/off&echo   Page Up  - Toggle position tracking on/off&echo   Page Down - Toggle yaw mode (world-locked / camera-local)"
 :: --- END CONFIG BLOCK ---

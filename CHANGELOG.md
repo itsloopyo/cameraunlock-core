@@ -9,6 +9,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - every wrapper sets every name its template's CONFIG BLOCK sets
+
+The `MOD_SEED_FILES` and `PRESERVE_FILES` fix below closed two names of a wider gap. A wrapper
+sets its CONFIG BLOCK before its `setlocal`, so any name the block leaves out keeps whatever
+another mod's wrapper set in the same console, and the body acts on it. 32 ASI uninstall wrappers
+and 29 ASI install wrappers had no `ASI_SUBDIR` line. Run after a wrapper that set it, the
+uninstall looked in that mod's folder, removed nothing of its own and still exited 0, and the
+install deployed into that folder, or failed with exit 1 where this game has none. Lopari runs each script in its own `cmd /C` and was never
+affected.
+
+The body cannot clear the names itself. It runs after the wrapper's `set` lines and cannot tell
+an inherited value from one the wrapper set, so the lines have to be in each wrapper.
+
+- Every template's header now says to keep every CONFIG BLOCK line, blank where it does not
+  apply. `install-wrapper-bepinex.cmd` sets `IL2CPP_VENDOR_DIR_NAME`, `IL2CPP_VENDOR_ZIP_NAME`,
+  `IL2CPP_PLUGIN_DIR_NAME` and `IL2CPP_MOD_DLLS` blank: `install-body-bepinex.cmd` reads all four
+  and no template set them. The template tails are unchanged, so `sync-templates.ps1` rewrites
+  nothing.
+- **`install-wrapper`** in `conformance.ps1` FAILs a wrapper whose CONFIG BLOCK does not set every
+  name its template's CONFIG BLOCK sets, where it checked only `MOD_SEED_FILES` and
+  `PRESERVE_FILES` before.
+- `scripts/test-uninstall-preserve.ps1` runs the uninstall template and the ASI install template
+  from a folder holding `!`, in a console that holds a value for every name each template sets
+  blank (`ASI_SUBDIR` naming a folder of another mod's), and expects the same result as from a
+  clean console. With the `ASI_SUBDIR` line taken out, the uninstall misses `bin\` and the install
+  lands in the other mod's folder, which the harness also asserts.
+
+Consuming repos: the 168 wrappers in 109 repos checked out beside core that lacked a name have had
+it added, blank, after the last `set` line of their CONFIG BLOCK. No existing value changed. A
+repo not in that sweep adds the names `install-wrapper` lists, or it fails.
+
 ### Changed - owner rulings on the Stage 3 open issues (2026-09-25)
 
 - **N1 is approved and back**: a legacy hotkey code outside 0x01-0xFE, 0xFF included, imports as
