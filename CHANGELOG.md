@@ -25,11 +25,16 @@ copies. The C++ owner changes the same way in a following commit.
 - **Log**: when `Path` is read and a legacy file also exists, the log holds
   `<Path>: settings are read from this file. <LegacySourcePath> is left as it was and is not read.`
   An import that completes logs `<Path>: created from <LegacySourcePath>, which is left as it was.`
-- **Player message** for a Deferred or LegacyRefused import:
+- **Player message** for a Deferred or LegacyRefused import, including a legacy file that cannot
+  be opened:
   `<legacy file name> was not imported into <config file name>: <why>. The mod tries again at the
   next launch and saves nothing this session.`
-- **Save** no longer refuses an unstamped file; it stamps it. **Reload** reads only `Path` and
-  never runs the import.
+  When another program created `Path` before the commit, the next launch reads that file and does
+  not import, and the message says so:
+  `<legacy file name> was not imported into <config file name>: <why>. The mod saves nothing this
+  session and reads <config file name>, not <legacy file name>, at the next launch.`
+- **Save** no longer refuses an unstamped file; the first save that changes a row stamps it.
+  **Reload** reads only `Path` and never runs the import.
 
 Consuming repos (no converted mod has been released):
 

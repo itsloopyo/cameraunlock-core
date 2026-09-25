@@ -150,9 +150,9 @@ namespace CameraUnlock.Core.Config
         /// <list type="bullet">
         /// <item>A file at Path: read as canonical (Canonical), stamped or not, or Unreadable when
         /// saved as UTF-16 or holding a NUL. An unstamped file gets a line in the log saying the
-        /// next save stamps it. The import never runs and the legacy file is never opened; when one
-        /// exists, a line in the log says the settings are read from Path and the legacy file is
-        /// not read.</item>
+        /// next save adds the section; the first save that changes a row stamps it. The import
+        /// never runs and the legacy file is never opened; when one exists, a line in the log says
+        /// the settings are read from Path and the legacy file is not read.</item>
         /// <item>No file at Path and a file at LegacySourcePath: the legacy file is imported into a
         /// new file at Path (Migrated).</item>
         /// <item>Neither: the table's defaults are rendered and the file created, never over a file
@@ -165,8 +165,11 @@ namespace CameraUnlock.Core.Config
         /// that changed meanwhile defer it. It then renders the imported settings, reads the render
         /// back through the table and requires every row to equal the import's (floats bitwise),
         /// and creates the file at Path only if no file has appeared there. Any failure defers: Path
-        /// is not created, the session runs on what the import gave, the player is told once
-        /// through the status sink, and the next launch tries again. The legacy file is never
+        /// is not created by the owner, the session runs on what the import gave, nothing is saved,
+        /// and the player is told once through the status sink. The next launch imports again,
+        /// unless another program created a file at Path meanwhile: that file is read at the next
+        /// launch and the import does not run again, which the player message says. A legacy file
+        /// that cannot be opened defers the same way, on the defaults. The legacy file is never
         /// written, renamed, deleted or copied, whatever happens. A process killed at any point
         /// leaves Path absent or whole.
         /// </para>
@@ -295,11 +298,11 @@ namespace CameraUnlock.Core.Config
             }
             catch (IOException e)
             {
-                return CannotRead(opening, e, log);
+                return CannotOpen(opening, e, log);
             }
             catch (UnauthorizedAccessException e)
             {
-                return CannotRead(opening, e, log);
+                return CannotOpen(opening, e, log);
             }
 
             if (bytes != null)
@@ -315,9 +318,10 @@ namespace CameraUnlock.Core.Config
             return Create(log);
         }
 
-        private ConfigLoadResult<TConfig> CannotRead(string path, Exception e, List<string> log)
+        private ConfigLoadResult<TConfig> CannotOpen(string path, Exception e, List<string> log)
         {
             log.Add(path + ": could not be opened: " + e.Message);
+            if (path == _legacySourcePath) return Defer(_table.CreateDefaults(), path, log, Why(e), true);
             return Result(ConfigLoadStatus.Deferred, _table.CreateDefaults(), NoDiagnostics(), log,
                 System.IO.Path.GetFileName(path) + " cannot be read: " + Why(e)
                     + ". The mod runs on its default settings this session.");
@@ -403,21 +407,21 @@ namespace CameraUnlock.Core.Config
                 held.Dispose();
             }
 
-            if (changedWhy != null) return Defer(imported, input, log, changedWhy);
+            if (changedWhy != null) return Defer(imported, input, log, changedWhy, true);
             switch (import.Status)
             {
                 case ImportStatus.Refused:
                     log.Add(input + ": the old settings reader refused the file: " + import.Reason);
                     return Result(ConfigLoadStatus.LegacyRefused, imported, NoDiagnostics(), log,
-                        NotImported(input, import.Reason));
+                        NotImported(input, import.Reason, true));
                 case ImportStatus.Undecodable:
                     log.Add(input + ": the old settings reader could not decode the file: " + import.Reason);
-                    return Defer(imported, input, log, import.Reason);
+                    return Defer(imported, input, log, import.Reason, true);
                 case ImportStatus.Absent:
                     log.Add(input + ": the old settings reader found no file, while the owner holds it open ("
                         + snapshot.Length.ToString(CultureInfo.InvariantCulture) + " bytes)");
                     LogDropped(import, input, log);
-                    return Defer(imported, input, log, "the old settings reader could not find the file");
+                    return Defer(imported, input, log, "the old settings reader could not find the file", true);
             }
             LogDropped(import, input, log);
 
@@ -431,7 +435,7 @@ namespace CameraUnlock.Core.Config
                 int row = FirstUnwritable(imported);
                 if (row < 0) throw;
                 log.Add(input + ": " + _table.RowName(row) + " cannot be written in the new format: " + e.Message);
-                return Defer(imported, input, log, Unconvertible(row, imported));
+                return Defer(imported, input, log, Unconvertible(row, imported), true);
             }
 
             CanonicalIni doc = CanonicalIni.Parse(rendered);
@@ -443,7 +447,7 @@ namespace CameraUnlock.Core.Config
             {
                 log.Add(input + ": " + _table.RowName(different) + " reads back from the new format as "
                     + _table.RowValueText(different, reread) + ", not " + _table.RowValueText(different, imported));
-                return Defer(imported, input, log, Unconvertible(different, imported));
+                return Defer(imported, input, log, Unconvertible(different, imported), true);
             }
 
             try
@@ -452,13 +456,15 @@ namespace CameraUnlock.Core.Config
                 if (outcome != CheckedWriteOutcome.Committed)
                 {
                     log.Add(_path + ": not created: " + outcome);
-                    return Defer(imported, input, log, Conflict(outcome));
+                    return Defer(imported, input, log, Conflict(outcome), false);
                 }
             }
             catch (CheckedWriteException e)
             {
                 log.Add(e.Message);
-                return Defer(imported, input, log, Why(e));
+                // A failed RemoveTemporary means a file appeared at Path first, and the next launch
+                // reads that file instead of importing.
+                return Defer(imported, input, log, Why(e), e.Step != CheckedWriteStep.RemoveTemporary);
             }
 
             Step("Remember", _path);
@@ -471,15 +477,18 @@ namespace CameraUnlock.Core.Config
             return Result(ConfigLoadStatus.Migrated, reread, diagnostics, log, string.Empty);
         }
 
-        private ConfigLoadResult<TConfig> Defer(TConfig config, string input, List<string> log, string why)
+        private ConfigLoadResult<TConfig> Defer(TConfig config, string input, List<string> log, string why, bool retried)
         {
-            return Result(ConfigLoadStatus.Deferred, config, NoDiagnostics(), log, NotImported(input, why));
+            return Result(ConfigLoadStatus.Deferred, config, NoDiagnostics(), log, NotImported(input, why, retried));
         }
 
-        private string NotImported(string input, string why)
+        private string NotImported(string input, string why, bool retried)
         {
-            return System.IO.Path.GetFileName(input) + " was not imported into " + _name + ": " + why
-                + ". The mod tries again at the next launch and saves nothing this session.";
+            string legacy = System.IO.Path.GetFileName(input);
+            string head = legacy + " was not imported into " + _name + ": " + why;
+            if (retried) return head + ". The mod tries again at the next launch and saves nothing this session.";
+            return head + ". The mod saves nothing this session and reads " + _name + ", not " + legacy
+                + ", at the next launch.";
         }
         private string Unconvertible(int row, TConfig config)
         {

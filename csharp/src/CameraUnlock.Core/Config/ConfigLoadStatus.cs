@@ -4,8 +4,8 @@ namespace CameraUnlock.Core.Config
     public enum ConfigLoadStatus
     {
         /// <summary>
-        /// The file at Path was read as a canonical file, stamped or not; the first save stamps an
-        /// unstamped one. The legacy file is not read.
+        /// The file at Path was read as a canonical file, stamped or not; the first save that
+        /// changes a row stamps an unstamped one. The legacy file is not read.
         /// </summary>
         Canonical = 0,
 
@@ -23,10 +23,11 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// The file at Path could not be read or created, or the legacy file could not be read or
-        /// imported, this launch. The legacy file is left as it was and Path is not created; a file
-        /// at Path that could not be read is left as it was too. The session runs on the settings
-        /// <see cref="ConfigLoadResult{TConfig}.Config"/> holds, nothing is saved this session, and
-        /// the next launch tries again.
+        /// imported, this launch. The legacy file is left as it was and the owner creates no file at
+        /// Path; a file at Path that could not be read is left as it was too. The session runs on
+        /// the settings <see cref="ConfigLoadResult{TConfig}.Config"/> holds and nothing is saved
+        /// this session. The next launch loads again: it reads a file another program created at
+        /// Path meanwhile, and otherwise imports or creates the file again.
         /// </summary>
         Deferred = 3,
 

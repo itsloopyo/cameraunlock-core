@@ -71,6 +71,7 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-verify-mismatch-defers", AVerifyMismatchDefers),
             Scenario("a-value-no-codec-writes-defers", AValueNoCodecWritesDefers),
             Scenario("a-config-appearing-before-the-commit-defers", AConfigAppearingBeforeTheCommitDefers),
+            Scenario("a-config-appearing-with-a-temporary-left-behind-defers", AConfigAppearingWithATemporaryLeftBehindDefers),
             Scenario("the-held-file-reads-and-refuses-exclusive-opens", TheHeldFileReadsAndRefusesExclusiveOpens),
             Scenario("a-newer-config-format-refuses-saves", ANewerConfigFormatRefusesSaves),
             Scenario("a-save-writes-a-missing-or-unreadable-config-format", ASaveWritesAMissingOrUnreadableConfigFormat),
@@ -550,7 +551,10 @@ namespace CameraUnlock.Core.Tests.Config
                 load = rig.Owner().Load();
             }
             ExpectStatus(load, ConfigLoadStatus.Deferred);
-            ExpectContains(load.Reason, LegacyName + " cannot be read: the file is in use by another program");
+            Expect(load.Reason == LegacyName + " was not imported into " + FileName + ": the file is in use by another program. "
+                + "The mod tries again at the next launch and saves nothing this session.", "the reason was: " + load.Reason);
+            Expect(load.Log.Any(line => line.StartsWith(rig.LegacyPath + ": could not be opened: ", StringComparison.Ordinal)),
+                "the log names the legacy file that could not be opened");
             ExpectSame(load.Config, Defaults(), "a legacy file that cannot be opened cannot be imported, so the defaults");
             Expect(rig.Legacy.Runs == 0, "the import does not run");
             ExpectSunkOnce(rig, load.Reason);
@@ -624,7 +628,7 @@ namespace CameraUnlock.Core.Tests.Config
 
         // Another program creating the config file between the import and the commit, at each point
         // of the create-if-absent write: before its first read, before its final check, and in the
-        // gap between the check and the rename.
+        // gap between the check and the rename. The next launch reads that file and never imports.
         private static void AConfigAppearingBeforeTheCommitDefers(string dir)
         {
             foreach (string label in new[] { "Commit.ReadTarget", "Commit.RecheckTarget", "Commit.Commit" })
@@ -638,8 +642,8 @@ namespace CameraUnlock.Core.Tests.Config
                 ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
                 ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
                 ExpectStatus(load, ConfigLoadStatus.Deferred);
-                ExpectContains(load.Reason, LegacyName + " was not imported into " + FileName
-                    + ": another program created the file at the same time.");
+                Expect(load.Reason == AppearedReason("another program created the file at the same time"),
+                    label + ": the reason was: " + load.Reason);
                 ExpectLogLine(load, rig.Path + ": not created: TargetAppeared");
                 ExpectSame(load.Config, MigratedConfig(), label + ": the session runs on what the import gave");
                 ExpectSunkOnce(rig, load.Reason);
@@ -647,8 +651,43 @@ namespace CameraUnlock.Core.Tests.Config
                 ExpectBytes(rig.Path, Ascii("theirs"));
                 rig.ExpectLegacyKept();
                 ExpectListing(dir, FileName, LegacyName);
+
+                rig.Hook = null;
+                ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Canonical);
+                Expect(rig.Legacy.Runs == 1, label + ": the next launch reads the file that appeared and does not import");
+                ExpectBytes(rig.Path, Ascii("theirs"));
+                rig.ExpectLegacyKept();
                 File.Delete(rig.Path);
             }
+        }
+
+        // A temporary that cannot be removed after a config appeared at the commit: the player is
+        // told the next launch reads that config, not that it tries the import again.
+        private static void AConfigAppearingWithATemporaryLeftBehindDefers(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutLegacy(Ascii(LegacyText));
+            rig.Hook = (step, path) =>
+            {
+                if (step == "Commit.RecheckTarget") File.WriteAllBytes(rig.Path, Ascii("theirs"));
+                if (step == "Commit.RemoveTemporary") throw new IOException("injected");
+            };
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Deferred);
+            Expect(load.Reason == AppearedReason("it could not be written (injected)"), "the reason was: " + load.Reason);
+            ExpectSunkOnce(rig, load.Reason);
+            ExpectBytes(rig.Path, Ascii("theirs"));
+            rig.ExpectLegacyKept();
+            string[] temporaries = Directory.GetFiles(dir, FileName + ".*.tmp");
+            Expect(temporaries.Length == 1, "one temporary is left, found " + temporaries.Length);
+            File.Delete(temporaries[0]);
+            ExpectListing(dir, FileName, LegacyName);
+        }
+
+        private static string AppearedReason(string why)
+        {
+            return LegacyName + " was not imported into " + FileName + ": " + why + ". The mod saves nothing this session and reads "
+                + FileName + ", not " + LegacyName + ", at the next launch.";
         }
 
         // Design 4.5 step 1 (R3-2): while the owner holds the legacy file, the readers imports use

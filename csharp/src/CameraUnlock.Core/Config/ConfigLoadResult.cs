@@ -28,10 +28,12 @@ namespace CameraUnlock.Core.Config
         public ReadOnlyCollection<CanonicalDiagnostic> Diagnostics { get; }
 
         /// <summary>
-        /// Every line for the game's log, each naming the file, in order: the line saying the
-        /// settings are read from Path while a legacy file is also present, the diagnostics'
-        /// sentences, the import's lines (values it dropped, lines of the legacy file the new file
-        /// does not carry) and the error behind a Deferred, LegacyRefused or Unreadable load.
+        /// Every line for the game's log, each naming the file. It can hold the line saying the
+        /// settings are read from Path while a legacy file is also present, the line saying an
+        /// unstamped file gets its section at the next save, the diagnostics' sentences, the line
+        /// saying Path was created and from what, the import's lines (values it dropped, lines of
+        /// the legacy file the new file does not carry) and the error behind a Deferred,
+        /// LegacyRefused or Unreadable load.
         /// Returned rather than logged, so a game can load before its logger is up.
         /// </summary>
         public ReadOnlyCollection<string> Log { get; }
