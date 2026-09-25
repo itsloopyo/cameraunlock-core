@@ -1128,10 +1128,10 @@ function Test-ConfigPreserve {
 
 # The config descriptor, the launcher-manifest.json block a launcher reads to find a converted
 # mod's config and the preference rows it binds. scripts/check-config-descriptor.mjs --json fails
-# a converted repo delivered by manifest that has no block, holds the committed manifest to every
-# rule in that script except the one comparing canonical_since with mod_info.version, which
-# packaging stamps, and holds canonical_since above every v* tag whose committed config lacks the
-# stamp, which needs a clone with its tags.
+# a repo delivered by manifest whose one recorded config file is stamped and that has no block,
+# holds the committed manifest to every rule in that script except the one comparing
+# canonical_since with mod_info.version, which packaging stamps, and holds canonical_since above
+# every v* tag whose committed config lacks the stamp, which needs a clone with its tags.
 $DescriptorState = @{}
 
 function Test-ConfigDescriptor {

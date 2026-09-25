@@ -1026,23 +1026,30 @@ on the built ZIP against the repo it was built from:
 - `rows` names only the five concepts, each `true` or `false`; `RotationEnabled` only beside
   `PositionEnabled`; and the two of them together are a pair `preference_modes` in
   `data/pipeline-conformance.json` lists.
-- `canonical_since` is written `x.y.z` and is not above `mod_info.version`.
+- `canonical_since` is written `x.y.z` and is not above `mod_info.version`. A pre-release sorts
+  below its release, so a `1.1.0-rc1` build cannot carry `canonical_since` `1.1.0`.
 - `delivery_mode` is `manifest` or `manifest_variants`.
 - The repo is converted and `data/config-format.json` records one config file for it. `game_root`
   needs exactly one `installed` path, and `path` is it; `exe_dir` needs `path` to be the tail of
-  every `installed` path, which is the anchor for a file with one path per store layout;
-  `mod_home` is for a file with no `installed` path. `legacy_source` is the entry's, named from
-  the same anchor and folder as `path`.
-- A seed that writes the config names it with the same anchor and target as `path`, and no
-  `files[]` row lands on it: a `files[]` row is copied over whatever is there at every deploy.
+  every `installed` path, and `path` beside each executable `data/games.json` records for the game
+  to be one of them, which is the anchor for a file with one path per store layout; `mod_home` is
+  for a file with no `installed` path. `legacy_source` is the entry's, named from the same anchor
+  and folder as `path`.
+- No seed writes the config or the legacy file, and no `files[]` row lands on either. The mod
+  creates the config at first launch and imports the legacy file only while the config is absent,
+  so a seeded config skips the import, and Lopari v0.9.0 downloads a seeded file again once its
+  hash drifts, which a file the launcher edits always does. A `files[]` row is copied over
+  whatever is there at every deploy.
 - `rows` holds every one of the five concepts the committed file has as a line, with the
   committed value (the renderer writes `true` or `false`), and no other. Two exceptions. When the
   committed file has `PositionAllowed=false`, `rows` has neither `RotationEnabled` nor
   `PositionEnabled`. And a row `data/config-format.json` `descriptor_omits` lists for the repo is
   left out, so a launcher never sets it: that list holds `WorldSpaceYaw` alone, for a game whose
   default differs from the fleet's on purpose because it has no stable up (Subnautica, where the
-  player swims), each with its reason and the date the owner approved it. An omission has to be
-  listed there, so a row dropped by accident still fails.
+  player swims; Sonic Racing: CrossWorlds, on its loops and walls), each with its reason and the
+  date the owner approved it. An omission has to be listed there, so a row dropped by accident
+  still fails, and a committed `WorldSpaceYaw` away from the `data/config-schema.json` default
+  fails unless it is listed, so a game that differs is not handed to a launcher's global.
 
 `path`, `anchor`, `legacy_source` and `canonical_since` are written by hand at the conversion,
 with `"rows": {}`. `scripts/encode-seed.mjs`, which `render-config` runs, then writes `rows` from
@@ -1051,13 +1058,18 @@ stale.
 
 Conformance's `config-descriptor` check runs the same rules on the committed manifest, except
 the one against `mod_info.version`, which packaging stamps. It also fails a converted repo
-delivered by manifest that has one config file and no block, and, in a clone with its tags, a
+delivered by manifest whose one config file `data/config-format.json` records as stamped, and
+which has no block (a stamped file the entry does not record is config-format's finding), and, in
+a clone with its tags, a
 `canonical_since` that is not above every `v*` tag whose committed config carries no stamp. A
 shallow clone has no tags, and the check warns that it did not run.
 
 Packaging stamps `mod_info.version` by reading the manifest with `ConvertFrom-Json` and writing it
 with `ConvertTo-Json -Depth 10`; `pixi run test-config-descriptor` runs that round trip over a
-block and compares the result.
+block and compares the result. `Copy-SharedBundle` runs the same rules on the committed manifest
+through `Assert-LauncherManifestConfig` whenever it has a block, so a package script that never
+calls validate-manifest still refuses stale `rows`; that needs `node` on `PATH`, as
+`render-config` does.
 
 ## Tooling
 

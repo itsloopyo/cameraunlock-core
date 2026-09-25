@@ -41,12 +41,14 @@ function boolConcept(id) {
   if (!concept || !concept.canonical || concept.type !== "bool") {
     throw new Error(`data/config-schema.json has no canonical bool concept ${id}, which the config descriptor reads`);
   }
-  return { id, section: concept.section, key: concept.key };
+  return { id, section: concept.section, key: concept.key, default: concept.default };
 }
 
 // In the order the generator writes them.
 export const LAUNCHER_ROWS = ["EnableOnStartup", "WorldSpaceYaw", "RotationEnabled", "PositionEnabled", "TrueFreeLook"].map(boolConcept);
 const POSITION_ALLOWED = boolConcept("PositionAllowed");
+// The one row data/config-format.json descriptor_omits can list.
+const WORLD_SPACE_YAW = LAUNCHER_ROWS.find((r) => r.id === "WorldSpaceYaw");
 const TRACKING_ROWS = ["RotationEnabled", "PositionEnabled"];
 if (!isDeepStrictEqual(TRACKING_MODE.channels, TRACKING_ROWS)) {
   throw new Error(`data/pipeline-conformance.json tracking_mode channels are ${TRACKING_MODE.channels.join(", ")}, and the descriptor reads ${TRACKING_ROWS.join(", ")}`);
@@ -145,7 +147,7 @@ export function shapeProblems(man, { checkVersion }) {
       const version = man.mod_info?.version;
       if (typeof version !== "string" || !/^\d+\.\d+\.\d+(-.+)?$/.test(version)) {
         problems.push(`config.canonical_since needs mod_info.version to compare with, and it is ${JSON.stringify(version)}`);
-      } else if (compareVersions(since, version.replace(/-.+$/, "")) > 0) {
+      } else if (compareVersions(since, version) > 0) {
         problems.push(`config.canonical_since ${since} is above mod_info.version ${version}; it names a version that shipped the canonical file`);
       }
     }
@@ -180,7 +182,8 @@ export function shapeProblems(man, { checkVersion }) {
 // line, with the committed value. Two kinds are left out. A concept data/config-format.json
 // descriptor_omits lists for the repo, which the launcher then never manages. And the tracking
 // pair, when the file has PositionAllowed=false, since that mod runs rotation only whatever the
-// pair says.
+// pair says. A committed WorldSpaceYaw away from the fleet default is refused unless it is
+// omitted, so a game that differs on purpose cannot be handed to a launcher global by default.
 export function expectedRows(root, state) {
   if (state.files.length !== 1) {
     return { rows: null, problems: [`data/config-format.json records ${state.files.length} config files for ${state.repo}, and a descriptor names one`] };
@@ -213,6 +216,12 @@ export function expectedRows(root, state) {
       continue;
     }
     if (value === undefined) continue;
+    if (concept === WORLD_SPACE_YAW && value !== concept.default) {
+      problems.push(
+        `${file.committed} has [${concept.section}] ${concept.key}=${value}, away from the fleet default ${concept.default}; a game whose default differs on purpose is listed in data/config-format.json descriptor_omits, so a launcher global never reaches it, and any other game commits the default`,
+      );
+      continue;
+    }
     if (positionAllowed === false && TRACKING_ROWS.includes(concept.id)) continue;
     rows[concept.id] = value;
   }
@@ -252,7 +261,23 @@ function repoProblems(man, root, state) {
   const anchor = anchorOf(config);
   const p = config.path;
   const installed = file.installed.map(slashes);
+  const installedLower = installed.map((i) => i.toLowerCase());
   const listed = installed.join(", ");
+
+  const gameId = man.mod_info?.game_id;
+  const gameKnown = GAMES[gameId] !== undefined;
+  const seeds = seedsOf(man).filter((s) => typeof s.target === "string");
+  const files = payloads(man)
+    .flatMap((payload) => (Array.isArray(payload?.files) ? payload.files : []))
+    .filter((f) => isObject(f) && typeof f.target === "string");
+  const atExeDir = [config, ...seeds, ...files].filter((i) => anchorOf(i) === "exe_dir").map((i) => i.target ?? i.path);
+  if (!gameKnown && atExeDir.length > 0) {
+    problems.push(
+      `${atExeDir.join(", ")} anchored at exe_dir, and mod_info.game_id ${JSON.stringify(gameId)} is not in data/games.json, so which file each lands on cannot be checked`,
+    );
+  }
+  const targets = (item) =>
+    ANCHORS.includes(anchorOf(item)) && (anchorOf(item) !== "exe_dir" || gameKnown) ? gameRelativeTargets(item, man) : [];
 
   if (anchor === "game_root") {
     if (installed.length !== 1) {
@@ -270,6 +295,12 @@ function repoProblems(man, root, state) {
     } else {
       const not = installed.filter((i) => i !== p && !i.endsWith(`/${p}`));
       if (not.length > 0) problems.push(`config.path ${p} is not the tail of every installed path data/config-format.json records: not of ${not.join(", ")}`);
+      const off = targets({ target: p, anchor }).filter((t) => !installedLower.includes(t));
+      if (off.length > 0) {
+        problems.push(
+          `config.path ${p} at exe_dir lands on ${off.join(", ")} beside the executable data/games.json records for ${gameId}, which is not an installed path data/config-format.json records (${listed}); a launcher would manage a file the mod never reads`,
+        );
+      }
     }
   } else if (installed.length > 0) {
     problems.push(`config.anchor is mod_home, and data/config-format.json records installed path(s) in the game folder: ${listed}`);
@@ -302,29 +333,27 @@ function repoProblems(man, root, state) {
     problems.push(`config.canonical_since is set, and ${state.repo} never published a pre-canonical build (it is not in data/config-format.json legacy)`);
   }
 
-  const resolvable = (item) => {
-    if (anchorOf(item) !== "exe_dir" || GAMES[man.mod_info?.game_id] !== undefined) return true;
-    problems.push(`${item.target} is anchored at exe_dir, and mod_info.game_id ${JSON.stringify(man.mod_info?.game_id)} is not in data/games.json, so which file it lands on cannot be checked`);
-    return false;
-  };
-  const configFiles = new Set(installed.map((i) => i.toLowerCase()));
-  if (resolvable(config)) for (const t of gameRelativeTargets({ target: p, anchor }, man)) configFiles.add(t);
-  const landsOnConfig = (item) =>
-    (anchorOf(item) === anchor && lower(item.target) === p.toLowerCase()) ||
-    (ANCHORS.includes(anchorOf(item)) && resolvable(item) && gameRelativeTargets(item, man).some((t) => configFiles.has(t)));
+  // An item hits a file when it names the file from the same anchor, or resolves onto one of the
+  // file's paths in the game folder.
+  const hits = (name, gameFiles) => (item) =>
+    (name !== null && anchorOf(item) === anchor && lower(item.target) === name.toLowerCase()) || targets(item).some((t) => gameFiles.has(t));
+  const onConfig = hits(p, new Set([...installedLower, ...targets({ target: p, anchor })]));
+  const legacyName = typeof config.legacy_source === "string" ? config.legacy_source : null;
+  const onLegacy = legacy === null
+    ? () => false
+    : hits(legacyName, new Set([legacy.toLowerCase(), ...(legacyName === null ? [] : targets({ target: legacyName, anchor }))]));
+  const hitFile = (item) => (onConfig(item) ? "the config" : onLegacy(item) ? `the legacy file ${legacy}` : null);
 
-  for (const payload of payloads(man)) {
-    for (const f of Array.isArray(payload?.files) ? payload.files : []) {
-      if (!isObject(f) || typeof f.target !== "string") continue;
-      if (landsOnConfig(f)) {
-        problems.push(`files[] ${f.target} (${anchorOf(f)}) lands on the config; a files[] row is copied over whatever is there at every deploy, the player's settings included`);
-      }
-    }
+  for (const f of files) {
+    const hit = hitFile(f);
+    if (hit) problems.push(`files[] ${f.target} (${anchorOf(f)}) lands on ${hit}; a files[] row is copied over whatever is there at every deploy, the player's settings included`);
   }
-  for (const seed of seedsOf(man)) {
-    if (typeof seed.target !== "string" || !landsOnConfig(seed)) continue;
-    if (anchorOf(seed) !== anchor || slashes(seed.target) !== p) {
-      problems.push(`seed ${seed.target} (${anchorOf(seed)}) writes the config, and config names ${p} (${anchor}); both name the file with the same anchor and target`);
+  for (const seed of seeds) {
+    const hit = hitFile(seed);
+    if (hit) {
+      problems.push(
+        `seed ${seed.target} (${anchorOf(seed)}) writes ${hit}; a package with a config block seeds neither its config nor its legacy file. The mod creates the config at first launch and imports the legacy file only while the config is absent, and a launcher that hash-checks seeded files (Lopari v0.9.0) downloads a drifted one again, which a file the launcher edits always is`,
+      );
     }
   }
 
@@ -416,7 +445,9 @@ export function repoReport(root) {
   report.manifest = "present";
   report.delivery_mode = man.delivery_mode ?? null;
   report.has_block = "config" in man;
-  report.applies = state.converted && MANIFEST_MODES.includes(man.delivery_mode) && state.files.length === 1;
+  // Rows are written from the committed file, so a repo data/config-format.json records none for
+  // cannot carry a block yet; config-format reports that.
+  report.applies = state.converted && MANIFEST_MODES.includes(man.delivery_mode) && state.files.length === 1 && state.files[0].state === "stamped";
   report.problems = descriptorProblems(man, { root, state, checkVersion: false });
   if (report.applies && !report.has_block) report.problems.push(NO_BLOCK);
   if (report.has_block && report.problems.length === 0) {
