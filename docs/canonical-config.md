@@ -905,10 +905,9 @@ over unless the `.ini` is deleted first.
   update from a legacy build finds no `CameraUnlock.ini`, so a seeded one would be written before
   the mod starts and the mod would never import the player's legacy file.
 - **`PRESERVE_FILES`** in an uninstall wrapper's CONFIG BLOCK lists config paths, relative to the
-  game folder, that `uninstall-body.cmd` leaves in place, together with each one's
-  `.pre-canonical` and `.pre-canonical.last`, including inside a loader folder the uninstall
-  removes. A converted repo lists every `installed` path, and a repo in `legacy` also lists the
-  legacy file in the folder of each one.
+  game folder, that `uninstall-body.cmd` leaves in place, including inside a loader folder the
+  uninstall removes. A converted repo lists every `installed` path, and a repo in `legacy` also
+  lists the legacy file in the folder of each one.
 - **Manual (Nexus) ZIPs** never carry the config. A ZIP extracted over the game folder would put
   the stamped default over the player's file, and no conversion would run.
 - A conversion adds no launcher seed where the repo had none: the owner creates the file at first

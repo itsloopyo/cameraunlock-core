@@ -215,40 +215,37 @@ function Set-Deny([string]$Dir, [switch]$Remove, [string]$Right = 'AD') {
 $asiConfig = [ordered]@{
     FRAMEWORK_TYPE = 'ASILoader'; ASI_LOADER_NAME = 'winmm.dll'
     MOD_DLLS = 'Fixture.asi HeadTracking.ini'; MOD_SEED_FILES = 'Seed.ini'
-    MOD_LEFTOVERS = 'Leftover.ini Fixture.log HeadTracking.ini.pre-canonical Fixture.log.pre-canonical Gone.ini.pre-canonical'
+    MOD_LEFTOVERS = 'Leftover.ini Fixture.log'
     ROOT_EXTRAS = 'Root.ini Root.log'
 }
 $asiFiles = [ordered]@{}
-foreach ($rel in @('bin\winmm.dll', 'bin\Fixture.asi', 'bin\HeadTracking.ini', 'bin\HeadTracking.ini.pre-canonical',
-        'bin\HeadTracking.ini.pre-canonical.last', 'bin\Seed.ini', 'bin\Leftover.ini', 'bin\Fixture.log',
-        'bin\Fixture.log.pre-canonical', 'bin\Gone.ini.pre-canonical', 'Root.ini', 'Root.log', 'bin\user.txt')) { $asiFiles[$rel] = $rel }
+foreach ($rel in @('bin\winmm.dll', 'bin\Fixture.asi', 'bin\HeadTracking.ini', 'bin\Seed.ini', 'bin\Leftover.ini',
+        'bin\Fixture.log', 'Root.ini', 'Root.log', 'bin\user.txt')) { $asiFiles[$rel] = $rel }
 Invoke-Unlisted -Name 'asi-unlisted' -Config $asiConfig -Files $asiFiles -ExeRelPath 'bin\fixture.exe' -InstalledByUs 'true' -Flags '/y' `
-    -Remaining @('bin\fixture.exe', 'bin\user.txt', 'bin\HeadTracking.ini.pre-canonical.last')
+    -Remaining @('bin\fixture.exe', 'bin\user.txt')
 
-# %~f gives an existing file the case it has on disk and a missing one the case
-# it was written in, so bin\GONE.INI, gone while its copy is still there, is
-# the entry that needs the comparison to ignore case.
+# BIN\headtracking.INI is spelled in another case than the file on disk, and
+# bin\GONE.INI names a file that is not there.
 $listed = Copy-Map $asiConfig @{ PRESERVE_FILES = 'BIN\headtracking.INI bin\Seed.ini "bin\Leftover.ini" Root.ini bin\GONE.INI' }
 $case = New-Case -Name 'asi-listed' -Config $listed -Files $asiFiles -ExeRelPath 'bin\fixture.exe'
 $output = Invoke-Uninstall $case 0
-Assert-Files $case @('bin\fixture.exe', 'bin\user.txt', 'bin\HeadTracking.ini', 'bin\HeadTracking.ini.pre-canonical',
-    'bin\HeadTracking.ini.pre-canonical.last', 'bin\Seed.ini', 'bin\Leftover.ini', 'Root.ini', 'bin\Gone.ini.pre-canonical')
-Assert-KeptLines $case $output @('HeadTracking.ini', 'Seed.ini', 'Leftover.ini', 'Root.ini', 'HeadTracking.ini.pre-canonical', 'Gone.ini.pre-canonical')
-Assert-Output $case $output @('Removed: Fixture.log.pre-canonical', 'Removed: winmm.dll', 'Removed: state file', '=== Uninstall Complete ===')
+Assert-Files $case @('bin\fixture.exe', 'bin\user.txt', 'bin\HeadTracking.ini', 'bin\Seed.ini', 'bin\Leftover.ini', 'Root.ini')
+Assert-KeptLines $case $output @('HeadTracking.ini', 'Seed.ini', 'Leftover.ini', 'Root.ini')
+Assert-Output $case $output @('Removed: Fixture.log', 'Removed: winmm.dll', 'Removed: state file', '=== Uninstall Complete ===')
 Assert-NoHolding $case
-Write-Host 'PASS asi: unlisted removes as before; MOD_DLLS, MOD_SEED_FILES, MOD_LEFTOVERS and ROOT_EXTRAS entries kept, with a copy, case-insensitively'
+Write-Host 'PASS asi: unlisted removes as before; MOD_DLLS, MOD_SEED_FILES, MOD_LEFTOVERS and ROOT_EXTRAS entries kept, case-insensitively'
 
 # ---------------------------------------------------------------- MonoCecil
 $cecilConfig = [ordered]@{
     FRAMEWORK_TYPE = 'MonoCecil'; MANAGED_SUBFOLDER = 'Eternal Afternoon_Data\Managed'; ASSEMBLY_DLL = 'Assembly-CSharp.dll'
     PATCH_MARKER = 'FixturePatched'; MOD_DLLS = 'HeadTracking.dll'
-    MANAGED_EXTRAS = 'HeadTracking.cfg HeadTracking.log HeadTracking.cfg.pre-canonical'
+    MANAGED_EXTRAS = 'HeadTracking.cfg HeadTracking.log'
 }
 $m = 'Eternal Afternoon_Data\Managed'
 $cecilFiles = [ordered]@{
     "$m\Assembly-CSharp.dll" = 'FixturePatched build'; "$m\Assembly-CSharp.dll.original" = 'clean build'
     "$m\HeadTracking.dll" = "$m\HeadTracking.dll"; "$m\HeadTracking.cfg" = "$m\HeadTracking.cfg"
-    "$m\HeadTracking.cfg.pre-canonical" = "$m\HeadTracking.cfg.pre-canonical"; "$m\HeadTracking.log" = "$m\HeadTracking.log"
+    "$m\HeadTracking.log" = "$m\HeadTracking.log"
 }
 $restored = @{ "$m\Assembly-CSharp.dll" = 'clean build' }
 Invoke-Unlisted -Name 'cecil-unlisted' -Config $cecilConfig -Files $cecilFiles -ExeRelPath 'fixture.exe' -InstalledByUs 'true' -Flags '/y' `
@@ -256,22 +253,22 @@ Invoke-Unlisted -Name 'cecil-unlisted' -Config $cecilConfig -Files $cecilFiles -
 $listed = Copy-Map $cecilConfig @{ PRESERVE_FILES = """$m\HeadTracking.cfg""" }
 $case = New-Case -Name 'cecil-listed' -Config $listed -Files $cecilFiles -ExeRelPath 'fixture.exe'
 $output = Invoke-Uninstall $case 0
-Assert-Files $case @('fixture.exe', "$m\Assembly-CSharp.dll", "$m\HeadTracking.cfg", "$m\HeadTracking.cfg.pre-canonical") $restored
-Assert-KeptLines $case $output @('HeadTracking.cfg', 'HeadTracking.cfg.pre-canonical')
+Assert-Files $case @('fixture.exe', "$m\Assembly-CSharp.dll", "$m\HeadTracking.cfg") $restored
+Assert-KeptLines $case $output @('HeadTracking.cfg')
 Assert-Output $case $output @('Removed: HeadTracking.log', '=== Uninstall Complete ===')
-Write-Host 'PASS cecil: MANAGED_EXTRAS entry quoted with a space kept, with its copy'
+Write-Host 'PASS cecil: MANAGED_EXTRAS entry quoted with a space kept'
 
 # ---------------------------------------------------------------- loader trees
-$guid = 'BepInEx\config\com.cameraunlock.fixture.headtracking'
+$bepConfig = 'BepInEx\config\CameraUnlock.ini'
+$bepLegacy = 'BepInEx\config\com.cameraunlock.fixture.headtracking.cfg'
 $trees = @(
     @{
         Kind = 'bepinex'; Exe = 'fixture.exe'
         Config = [ordered]@{ FRAMEWORK_TYPE = 'BepInEx'; MOD_DLLS = 'Fixture.dll' }
         Files = @('winhttp.dll', 'doorstop_config.ini', '.doorstop_version', 'BepInEx\core\BepInEx.dll', 'BepInEx\plugins\Fixture.dll',
-            'BepInEx\plugins\Other.dll', 'BepInEx\config\BepInEx.cfg', 'BepInEx\config\other.cfg', "$guid.ini",
-            "$guid.ini.pre-canonical", "$guid.ini.pre-canonical.last", "$guid.cfg", 'user.txt')
-        Preserve = "$guid.ini $guid.cfg"
-        Kept = @("$guid.ini", "$guid.ini.pre-canonical", "$guid.ini.pre-canonical.last", "$guid.cfg")
+            'BepInEx\plugins\Other.dll', 'BepInEx\config\BepInEx.cfg', 'BepInEx\config\other.cfg', $bepConfig, $bepLegacy, 'user.txt')
+        Preserve = "$bepConfig $bepLegacy"
+        Kept = @($bepConfig, $bepLegacy)
         ModFiles = @('BepInEx\plugins\Fixture.dll')
         LoaderKept = @('user.txt')
         DelOneKept = @()
@@ -281,11 +278,9 @@ $trees = @(
         Kind = 'reframework'; Exe = 'fixture.exe'
         Config = [ordered]@{ FRAMEWORK_TYPE = 'REFramework'; MOD_DLLS = 'HeadTracking.dll HeadTracking.ini' }
         Files = @('dinput8.dll', 'reframework_revision.txt', 'reframework\plugins\HeadTracking.dll', 'reframework\plugins\HeadTracking.ini',
-            'reframework\plugins\HeadTracking.ini.pre-canonical', 'reframework\plugins\HeadTracking.ini.pre-canonical.last',
             'reframework\autorun\other.lua', 'user.txt')
         Preserve = 'reframework\plugins\HeadTracking.ini'
-        Kept = @('reframework\plugins\HeadTracking.ini', 'reframework\plugins\HeadTracking.ini.pre-canonical',
-            'reframework\plugins\HeadTracking.ini.pre-canonical.last')
+        Kept = @('reframework\plugins\HeadTracking.ini')
         ModFiles = @('reframework\plugins\HeadTracking.dll', 'reframework\plugins\HeadTracking.ini')
         LoaderKept = @('user.txt')
         DelOneKept = @('HeadTracking.ini')
@@ -296,13 +291,10 @@ $trees = @(
         Config = [ordered]@{ FRAMEWORK_TYPE = 'UE4SS'; MOD_INTERNAL_NAME = 'HeadTracking'; UE4_BINARIES_RELDIR = 'Game\Binaries\Win64'; MOD_DLLS = '' }
         Files = @('Game\Binaries\Win64\dwmapi.dll', 'Game\Binaries\Win64\ue4ss\UE4SS.dll', 'Game\Binaries\Win64\Mods\BPModLoaderMod\enabled.txt',
             'Game\Binaries\Win64\Mods\mods.txt', 'Game\Binaries\Win64\Mods\HeadTracking\Scripts\main.lua',
-            'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini', 'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini.pre-canonical',
-            'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini.pre-canonical.last', 'user.txt')
+            'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini', 'user.txt')
         Preserve = 'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini'
-        Kept = @('Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini', 'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini.pre-canonical',
-            'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini.pre-canonical.last')
-        ModFiles = @('Game\Binaries\Win64\Mods\HeadTracking\Scripts\main.lua', 'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini',
-            'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini.pre-canonical', 'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini.pre-canonical.last')
+        Kept = @('Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini')
+        ModFiles = @('Game\Binaries\Win64\Mods\HeadTracking\Scripts\main.lua', 'Game\Binaries\Win64\Mods\HeadTracking\HeadTracking.ini')
         LoaderKept = @('user.txt', 'Game\Binaries\Win64\Mods\mods.txt')
         DelOneKept = @()
         Contents = @{ 'Game\Binaries\Win64\Mods\mods.txt' = "BPModLoaderMod : 1`r`n" }
@@ -336,7 +328,7 @@ foreach ($tree in $trees) {
         Assert-Output $case $output @('=== Uninstall Complete ===')
         Assert-NoHolding $case
     }
-    Write-Host "PASS $($tree.Kind): installed_by_us true, false and /force, with and without the list, copies kept through the tree removal"
+    Write-Host "PASS $($tree.Kind): installed_by_us true, false and /force, with and without the list, listed files kept through the tree removal"
 }
 
 # ---------------------------------------------------------------- failures
@@ -344,7 +336,7 @@ $bepFiles = [ordered]@{}
 foreach ($rel in $trees[0].Files) { $bepFiles[$rel] = $rel }
 $bepListed = Copy-Map $trees[0].Config @{ PRESERVE_FILES = $trees[0].Preserve }
 
-$case = New-Case -Name 'leftover-holding' -Config $bepListed -Files (Copy-Map $bepFiles @{ "$holding\$guid.ini" = 'set aside earlier' }) -ExeRelPath 'fixture.exe'
+$case = New-Case -Name 'leftover-holding' -Config $bepListed -Files (Copy-Map $bepFiles @{ "$holding\$bepConfig" = 'set aside earlier' }) -ExeRelPath 'fixture.exe'
 $before = Get-Snapshot $case.Game
 $output = Invoke-Uninstall $case 1
 if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'leftover-holding: the game folder changed' }
@@ -364,7 +356,7 @@ $case = New-Case -Name 'set-aside-fails' -Config $bepListed -Files $bepFiles -Ex
 $before = Get-Snapshot $case.Game
 Set-Deny $case.Game
 try { $output = Invoke-Uninstall $case 1 } finally { Set-Deny $case.Game -Remove }
-Assert-Output $case $output @("ERROR: could not set $guid.ini aside, so the folder holding it is left in place.", '=== Uninstall Incomplete ===')
+Assert-Output $case $output @("ERROR: could not set $bepConfig aside, so the folder holding it is left in place.", '=== Uninstall Incomplete ===')
 $after = @(Get-Snapshot $case.Game)
 foreach ($entry in $before) {
     if ($entry -like 'BepInEx\*' -and $entry -notlike 'BepInEx\plugins\Fixture.dll*' -and $after -notcontains $entry) { throw "set-aside-fails: lost $entry" }
@@ -416,12 +408,9 @@ foreach ($bad in @('*.ini', 'bin\?.ini', '..\up.ini', 'C:\abs.ini', 'D:rel.ini',
 Write-Host 'PASS unsafe PRESERVE_FILES entries: exit 1, nothing touched'
 
 # Only files are set aside, so a listed folder inside a loader folder would go
-# with it. The copies are checked too.
+# with it.
 $folderCases = @(
-    @{ Name = 'folder-entry'; Config = Copy-Map $trees[0].Config @{ PRESERVE_FILES = 'BepInEx\config' }; Files = $bepFiles; Exe = 'fixture.exe'; Named = 'BepInEx\config' },
-    @{ Name = 'folder-copy'; Config = Copy-Map $asiConfig @{ PRESERVE_FILES = 'bin\Other.ini' }
-        Files = Copy-Map $asiFiles @{ 'bin\Other.ini' = 'bin\Other.ini'; 'bin\Other.ini.pre-canonical.last\x.txt' = 'x' }
-        Exe = 'bin\fixture.exe'; Named = 'bin\Other.ini.pre-canonical.last' }
+    @{ Name = 'folder-entry'; Config = Copy-Map $trees[0].Config @{ PRESERVE_FILES = 'BepInEx\config' }; Files = $bepFiles; Exe = 'fixture.exe'; Named = 'BepInEx\config' }
 )
 foreach ($folder in $folderCases) {
     $case = New-Case -Name $folder.Name -Config $folder.Config -Files $folder.Files -ExeRelPath $folder.Exe
@@ -430,7 +419,7 @@ foreach ($folder in $folderCases) {
     Assert-Output $case $output @('ERROR: PRESERVE_FILES in the uninstall.cmd CONFIG BLOCK names a folder:', $folder.Named)
     if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw "$($folder.Name): the game folder changed" }
 }
-Write-Host 'PASS folder entries: a listed path or copy that is a folder is refused with exit 1, nothing touched'
+Write-Host 'PASS folder entries: a listed path that is a folder is refused with exit 1, nothing touched'
 
 $case = New-Case -Name 'unknown-flag' -Config $bepListed -Files $bepFiles -ExeRelPath 'fixture.exe'
 $before = Get-Snapshot $case.Game

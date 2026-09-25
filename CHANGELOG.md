@@ -150,6 +150,16 @@ which is also what the mod imports while `CameraUnlock.ini` is absent.
 The newest Nexus ZIP of each of the ten converted repos checked out beside core carries neither
 file, before and after.
 
+### Removed - `uninstall-body.cmd` no longer keeps `.pre-canonical` copies
+
+Nothing writes `<file>.pre-canonical` or `<file>.pre-canonical.last` any more. The 18 repos
+converted in place committed their conversion on 2026-09-25, after their newest GitHub release
+(`v*` or the `dev` pre-release), so no published build wrote one. `uninstall-body.cmd` keeps each
+`PRESERVE_FILES` path and nothing beside it: the folder refusal, `:is_preserved` and the set-aside
+around a loader folder removal check the listed path alone. `test-uninstall-preserve.ps1` drops
+the copies from its fixtures and the folder-named-as-a-copy case, and its BepInEx fixture keeps
+`BepInEx\config\CameraUnlock.ini` and the plugin's `.cfg`. The template tails are unchanged.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

@@ -54,16 +54,14 @@
 ::   PRESERVE_FILES     - optional config files that uninstall leaves in place,
 ::                        so the player's settings survive a reinstall. Paths
 ::                        relative to GAME_PATH, space-separated, quoted when
-::                        one holds a space. <path>.pre-canonical and
-::                        <path>.pre-canonical.last are kept with each listed
-::                        path. No removal list and no loader folder removal
-::                        takes them (see :del_one and :rmtree_one). Each
-::                        entry names a file, never a folder. No wildcard,
-::                        drive, leading or trailing \, .., /, !, parenthesis,
-::                        &, ^, <, > or |. The wrapper template sets it,
-::                        blank; a wrapper without the line inherits the
-::                        value from the console that ran it, which may hold
-::                        another mod's list
+::                        one holds a space. No removal list and no loader
+::                        folder removal takes them (see :del_one and
+::                        :rmtree_one). Each entry names a file, never a
+::                        folder. No wildcard, drive, leading or trailing \,
+::                        .., /, !, parenthesis, &, ^, <, > or |. The wrapper
+::                        template sets it, blank; a wrapper without the line
+::                        inherits the value from the console that ran it,
+::                        which may hold another mod's list
 ::   USER_FOLDER_EXTRAS - BeamNGUserMods only: files the mod writes at runtime
 ::                        into the per-user folder rather than into mods\.
 ::                        Entries may carry a relative subfolder
@@ -303,10 +301,10 @@ if defined PRESERVE_FILES if exist "!_KEEP_DIR!\" (
 )
 :: A listed folder would be deleted with the loader folder around it, since
 :: only files are set aside, so the run stops here with nothing touched.
-if defined PRESERVE_FILES for %%k in (%PRESERVE_FILES%) do for %%c in ("" ".pre-canonical" ".pre-canonical.last") do (
-    if exist "!GAME_PATH!\%%~k%%~c\" (
+if defined PRESERVE_FILES for %%k in (%PRESERVE_FILES%) do (
+    if exist "!GAME_PATH!\%%~k\" (
         echo ERROR: PRESERVE_FILES in the uninstall.cmd CONFIG BLOCK names a folder:
-        echo   %%~k%%~c
+        echo   %%~k
         echo Each entry is one file, named by its path relative to the game folder.
         exit /b 1
     )
@@ -479,15 +477,13 @@ exit /b 0
 :: they print through a FOR variable, never %VAR%, which would let a `&` in
 :: the path run as a command.
 ::
-:: :is_preserved - errorlevel 0 when _DEL_PATH is a listed path or one of its
-:: two copies, compared as full paths and without regard to case.
+:: :is_preserved - errorlevel 0 when _DEL_PATH is a listed path, compared as
+:: full paths and without regard to case.
 :: ============================================
 :is_preserved
 setlocal disabledelayedexpansion
 for %%g in ("%_DEL_PATH%") do for %%k in (%PRESERVE_FILES%) do for %%q in ("%GAME_PATH%\%%~k") do (
     if /i "%%~fg"=="%%~fq" exit /b 0
-    if /i "%%~fg"=="%%~fq.pre-canonical" exit /b 0
-    if /i "%%~fg"=="%%~fq.pre-canonical.last" exit /b 0
 )
 exit /b 1
 
@@ -510,8 +506,8 @@ for %%g in ("%_DEL_PATH%") do set "_KEEP_TREE=%%~fg"
 set "_KEEP_OUT_FAILED="
 set "_KEEP_TREE_FAILED="
 set "_KEEP_STRANDED="
-for %%k in (%PRESERVE_FILES%) do for %%c in ("" ".pre-canonical" ".pre-canonical.last") do (
-    set "_KEEP_REL=%%~k%%~c"
+for %%k in (%PRESERVE_FILES%) do (
+    set "_KEEP_REL=%%~k"
     call :keep_out
 )
 if defined _KEEP_OUT_FAILED goto :keep_restore
@@ -523,8 +519,8 @@ if exist "%_KEEP_TREE%\" (
     for %%l in ("%_DEL_LABEL%") do echo   Removed: %%~l
 )
 :keep_restore
-for %%k in (%PRESERVE_FILES%) do for %%c in ("" ".pre-canonical" ".pre-canonical.last") do (
-    set "_KEEP_REL=%%~k%%~c"
+for %%k in (%PRESERVE_FILES%) do (
+    set "_KEEP_REL=%%~k"
     call :keep_back
 )
 if defined _KEEP_STRANDED (
@@ -542,7 +538,7 @@ if defined _KEEP_OUT_FAILED exit /b 1
 if defined _KEEP_TREE_FAILED exit /b 1
 exit /b 0
 
-:: _KEEP_REL = a listed path or copy, relative to the game folder.
+:: _KEEP_REL = a listed path, relative to the game folder.
 :keep_out
 for %%q in ("%GAME_PATH%\%_KEEP_REL%") do set "_KEEP_LIVE=%%~fq"
 if not exist "%_KEEP_LIVE%" exit /b 0
