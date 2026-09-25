@@ -648,6 +648,33 @@ namespace CameraUnlock.Core.Config
             return IndexOf(concept);
         }
 
+        /// <summary>The row's concept, or null for a local row.</summary>
+#if NULLABLE_ENABLED
+        internal ConceptDescriptor? RowConcept(int row)
+#else
+        internal ConceptDescriptor RowConcept(int row)
+#endif
+        {
+            return rows[row].Concept;
+        }
+
+        /// <summary>A concept row not marked PerGame, whose default is the effective default.</summary>
+        internal bool RowFollowsDefaultsIni(int row)
+        {
+            return rows[row].FollowsDefaultsIni;
+        }
+
+        /// <summary>Reads <paramref name="text"/> into the row's field through its codec and setter;
+        /// the codec's error, or null when it was read.</summary>
+#if NULLABLE_ENABLED
+        internal string? RowApply(int row, byte[] text, TConfig config)
+#else
+        internal string RowApply(int row, byte[] text, TConfig config)
+#endif
+        {
+            return rows[row].Apply(text, config);
+        }
+
         private TConfig NewDefaults()
         {
             TConfig made = defaults();

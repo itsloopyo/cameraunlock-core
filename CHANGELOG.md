@@ -9,10 +9,88 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - BREAKING - the config owners read and create Defaults.ini
+
+`ConfigOwner` (C# and C++) and core's REFramework `PluginMod` now read Defaults.ini, the file every
+concept row not marked `PerGame()` takes its default from, and create it with the built-in values
+where none exists. Owner answers of 2026-09-25: all 28 canonical concepts are global, and migration
+writes `default` where the imported value equals what `default` gives at that launch.
+
+- **Load** first finds Defaults.ini (the resolver and choice of the previous entries), creates it
+  where the choice allows (the `CameraUnlock` folder one level only, then the checked writer with no
+  expected bytes, so a file another program created at the same time is read instead), whatever
+  becomes of the game's own file, a migrated game included. It never creates it in a packaged app.
+  It reads it once, and each concept row not marked `PerGame` that the file gives an accepted value
+  for starts from that value, through the row's own codec and setter. `default`, a missing key and
+  an invalid value on such a row read that value, or the row's own default where Defaults.ini gives
+  none. Every failure to find, create or read it gives the built-in values and one log line; only
+  `IOException`, `UnauthorizedAccessException`, `CheckedWriteException` and a Win32 error in C++ are
+  caught.
+- **A created file** is the table's fresh render (`RenderFresh` / `RenderCanonicalFresh`), `default`
+  on every concept row not marked `PerGame`. **A migrated file** writes `default` on such a row where
+  the imported value equals what `default` gives at that Load (floats by their bits, hotkey lists by
+  their canonical text), and the value otherwise; the tracking mode pair is `default` on both rows
+  only when both are equal. The read-back that guards the migration reads over the same Defaults.ini
+  values, so a `default` row reads back as the value it replaced.
+- **Log lines**, returned with the rest: where Defaults.ini is and what happened to it
+  (`Defaults.ini: <path> (read)`, `(created with the built-in values)`, `(created by another program
+  at the same time, and read)`, the Wine forms, or one failure line); then, naming the game's file,
+  `from Defaults.ini: UdpPort=4242; ToggleKey=End, Ctrl+Shift+Y`, `set in this file, so Defaults.ini
+  does not change them: UdpPort, WorldSpaceYaw.` and `built-in, not set in Defaults.ini: ...`; and a
+  line for each value Defaults.ini holds that this game would take and cannot use. The Defaults.ini
+  paths show `%AppData%` or `~` in place of the profile or home folder.
+- **The status sink** gets, after the game file's own message, at most one about Defaults.ini per
+  Load or Reload: that it cannot be read, else that values this game would take from it are refused
+  (`Defaults.ini: 1 setting cannot be used (ToggleKey=Mouse4), so this game uses its built-in values
+  for them. The log has the details.`), else that two Defaults.ini files exist and one is ignored.
+- **Save** reads the file over the session's Defaults.ini values, requires every unedited row to keep
+  where its value came from, never touches Defaults.ini, and does not depend on it. A save that turns
+  a `default` or missing row into a value returns `<path>: WorldSpaceYaw=false is now set for this
+  game, and no longer follows Defaults.ini.` in its log, including for `Saved`.
+- **Reload** reads Defaults.ini again where Load found it: new readable bytes replace its values, and
+  a file that went missing or cannot be read keeps them, with one line and one message. **FileChanged**
+  is true when either file's write time changed.
+- **C# off Windows**: the owner no longer throws `PlatformNotSupportedException`. When
+  `Environment.OSVersion.Platform` is not `Win32NT` it reads `CameraUnlock.ini`, or imports the
+  legacy file in memory, or runs on the defaults, reads the first native Defaults.ini candidate,
+  creates and writes nothing, and loads with the new status `ConfigLoadStatus.ReadOnly` (6), whose
+  message is `Settings are read but not saved on this system: this version saves settings only on
+  Windows, including under Wine and Proton. Changes made in game last until the game closes.` Every
+  `Save` returns `NotSaved` with `Settings not saved: this version saves settings only on Windows.`
+  C++ has no such status: a C++ mod always runs as a Windows program.
+- **New public API**: C# `DefaultsFile` (`PerUser()`, `At(path)`), `ConfigOwnerOptions.Defaults`,
+  `ConfigLoadStatus.ReadOnly`; C++ `config::DefaultsFile` (`PerUser()`, `At(path)`) in
+  `cameraunlock/config/defaults_file.h`, `ConfigOwnerOptions::defaults` and
+  `PluginModDescriptor::defaults`, appended as the last member. The load, save and reload results
+  gain no member.
+
+What a consuming repo changes at its pin bump:
+
+- **Set the Defaults.ini option.** In the mod, `Defaults = DefaultsFile.PerUser()` (C#) or
+  `options.defaults = DefaultsFile::PerUser()` (C++). In every test that builds an owner,
+  `DefaultsFile.At` / `DefaultsFile::At` with a scratch path. A helper that builds the options for the
+  mod and its tests takes the `DefaultsFile` as a parameter, so a test never reads or creates the
+  player's own file. The constructor throws `ArgumentException` (C++ `std::invalid_argument`) when it
+  is unset, naming both factories.
+- **An REFramework mod** sets `PluginModDescriptor::defaults = config::DefaultsFile::PerUser()`.
+  `PluginMod::Initialize` throws `std::invalid_argument` without it when `canonicalConfig` is set,
+  as it does for `gameName`.
+- **A table whose concept row not marked `PerGame` has a default other than the schema's now throws
+  from the owner's constructor**, since the owner renders its fresh file there. Move the row's
+  default to the schema's value, or, with an owner-approved `per_game` entry, mark it `PerGame()`.
+  A table that binds `RotationEnabled` without `PositionEnabled` throws the same way.
+- **Re-run `pixi run render-config` and commit the file**: the committed file is now the fresh
+  render, `default` on every concept row not marked `PerGame`, which is what the owner creates.
+  A render test compares with `RenderFresh` / `RenderCanonicalFresh`.
+- **Tests** that compared a created file with `Render` of the defaults compare with the fresh render,
+  and a migrated file holds `default` where the imported value equals the built-in one. A test that
+  counts the load's log lines counts the Defaults.ini lines too.
+- **The C# owner no longer throws off Windows** and runs read-only there, so a C# mod that caught
+  `PlatformNotSupportedException` around it drops the catch.
+
 ### Added - where Defaults.ini is, internal to core
 
-The pieces the config owner will find Defaults.ini with. Nothing here is public API, and no owner
-looks for, reads or creates the file yet.
+The pieces the config owner finds Defaults.ini with (the entry above). Nothing here is public API.
 
 - **The resolver**: C# internal `DefaultsLocation.Resolve(DefaultsProbe)`, C++
   `detail::ResolveDefaults` in `cameraunlock/config/defaults_location.h`. Pure: from what the
@@ -61,8 +139,8 @@ changed by this entry, and they still differ between the languages for such byte
 
 ### Added - Defaults.ini's render and reader, internal to core
 
-The pieces the config owner reads and creates Defaults.ini with. Nothing here is public API, and
-no owner reads or writes the file yet.
+The pieces the config owner reads and creates Defaults.ini with (the entry above). Nothing here is
+public API.
 
 - **Core's global table and the render**: C# internal `DefaultsIni.Table()` and
   `DefaultsIni.Render()`, C++ `detail::DefaultsIniTable()` and `detail::RenderDefaultsIni()` in
@@ -109,16 +187,16 @@ hotkey row, and before the blank line:
 ; setting for this game only.
 ```
 
-The config owners still create and migrate with `Render`, so a new file and a migrated file carry
-the lines too. Nothing reads Defaults.ini yet; a later core commit adds it.
+A migrated file and a file the owner creates carry the lines too: the owner creates with the fresh
+render and migrates with the migration render (see the Defaults.ini entry above).
 
 Consuming repos: every converted repo's committed config and its render test compare bytes, so
 after bumping the pin, re-run `pixi run render-config` and commit the file. The example, the
 all-concepts file and the table fixtures under `data/fixtures/canonical-ini/` gained the lines.
 
-Do not release a mod built on a core pin from this commit until core's owner reads Defaults.ini.
-Until then the lines tell players about a file the mod does not read and a log line it does not
-write, so a player who follows them gets no effect.
+Do not release a mod built on a core pin from before the owner reads Defaults.ini (the entry
+above): on such a pin the lines tell players about a file the mod does not read. No converted mod is
+released before the Wine and native Mono container runs of the design pass (its C11).
 
 ### Added - the `default` token, `RenderFresh` / `RenderCanonicalFresh` and `PerGame()`
 
@@ -151,9 +229,10 @@ where the imported value equals what `default` gives at that launch.
   `HeadTrackingConfigTable` naming every concept passes it
   (`data/fixtures/canonical-ini/head-tracking/all-concepts-fresh.ini`). Seven converted repos
   default `CollisionEnabled`, `CollisionMargin` or `CollisionChannel` off the schema, several in the
-  engine's own units, so their tables would fail it as they stand. The owner has not yet decided
-  whether those rows become `PerGame` or collision leaves the global set; keep their shipped
-  defaults until then.
+  engine's own units, so their tables fail it as they stand, and since the owner renders its fresh
+  file when it is built, their owners throw from the constructor at a pin with the Defaults.ini
+  entry above. The owner has not yet decided whether those rows become `PerGame` or collision
+  leaves the global set, so those repos do not bump past that entry until the decision.
 - **Internal, for the owner's later adoption**: an `Apply` overload over effective defaults that
   reports where each row's value came from (the file, Defaults.ini or the table), and a migration
   render that writes `default` where a value equals its effective default (C++

@@ -627,8 +627,8 @@ and all three invalid (`single-bools-invalid`); a single bool changed beside mod
 ## example/
 
 `CameraUnlock.ini`: the file the examples in docs/canonical-config.md create at first launch, which
-is the example table's defaults rendered with the display name `Example Game`, the six header
-lines on `default` included. The table is
+is the example table's fresh render (`RenderCanonicalFresh` / `RenderFresh`) with the display name
+`Example Game`: the six header lines on `default`, and `default` on every concept row. The table is
 `HeadTrackingConfigTable` naming `UdpPort`, `EnableOnStartup`, `WorldSpaceYaw`, `RotationEnabled`,
 `PositionEnabled`, `ToggleKey`, `CycleTrackingModeKey` and `YawModeKey`, plus one local row,
 `[Logging] WriteLog`, a bool defaulting to false with the comment

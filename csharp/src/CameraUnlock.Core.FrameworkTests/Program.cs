@@ -63,7 +63,7 @@ namespace CameraUnlock.Core.Tests
             }
             foreach (string label in ConfigOwnerScenarios.InterruptionLabels)
             {
-                failures += Report("import-killed-at-" + label, dir => ImportKilledAt(label, dir));
+                failures += Report("first-launch-killed-at-" + label, dir => FirstLaunchKilledAt(label, dir));
             }
 
             Console.WriteLine("Canonical INI reader fixtures");
@@ -209,8 +209,9 @@ namespace CameraUnlock.Core.Tests
             }
         }
 
-        // The child is killed at the start of the labelled import step, so every step before it has run.
-        private static void ImportKilledAt(string label, string dir)
+        // The child is killed at the start of the labelled step of a first launch that creates
+        // Defaults.ini and imports the legacy file, so every step before it has run.
+        private static void FirstLaunchKilledAt(string label, string dir)
         {
             ConfigOwnerScenarios.PrepareInterruption(dir);
             var start = new ProcessStartInfo(Assembly.GetEntryAssembly().Location,

@@ -39,7 +39,8 @@ A game with several config files gives each its own entry and its own owner.
 ### What it looks like
 
 This is the file the C++ and C# examples [below](#what-a-mod-binds) create at first launch, byte
-for byte:
+for byte. Each setting set to `default` takes its value from Defaults.ini, the file every mod that
+keeps its settings in `CameraUnlock.ini` reads for those rows:
 
 <!-- file: data/fixtures/canonical-ini/example/CameraUnlock.ini -->
 ```ini
@@ -59,29 +60,29 @@ ConfigFormat=1
 
 [Network]
 ; UDP port the mod receives tracker data on (OpenTrack protocol).
-UdpPort=4242
+UdpPort=default
 
 [General]
 ; true: head tracking is on when the game starts. ToggleKey turns it on and off.
-EnableOnStartup=true
+EnableOnStartup=default
 ; true: yaw turns around the world's up axis. false: around the camera's own up axis.
-WorldSpaceYaw=true
+WorldSpaceYaw=default
 ; true: turning your head turns the view.
 ; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
-RotationEnabled=true
+RotationEnabled=default
 
 [Position]
 ; true: moving your head moves the view.
 ; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
-PositionEnabled=true
+PositionEnabled=default
 
 [Hotkeys]
 ; Turns head tracking on and off.
-ToggleKey=End, Ctrl+Shift+Y
+ToggleKey=default
 ; Changes the tracking mode: rotation and position, rotation only, position only.
-CycleTrackingModeKey=PageUp, Ctrl+Shift+G
+CycleTrackingModeKey=default
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
-YawModeKey=PageDown, Ctrl+Shift+H
+YawModeKey=default
 
 [Logging]
 ; true: write HeadTracking.log beside the game's executable.
@@ -108,9 +109,10 @@ Lines end in CRLF, including the last, and everything the renderer writes is ASC
 order mark.
 
 A file holds only the rows the mod binds: a mod with no carried light has no `[Light]`, and one
-whose mode control has two states has no `RotationEnabled`. Every bound row is written, so a
-converted file states every setting explicitly, and a default in code only decides a key the
-player deleted or one a later version added.
+whose mode control has two states has no `RotationEnabled`. Every bound row is written. A new
+file writes `default` on each concept row not marked `PerGame`, which then takes Defaults.ini's
+value, or the row's own default where Defaults.ini gives none; a key the player deleted or one a
+later version added reads the same way.
 
 An **Engine** row holds data about the game rather than a taste: an address, an offset, a vtable
 slot, a collision channel. At its default it is written as a comment showing the value,
@@ -498,8 +500,9 @@ throws, naming it. That is how a mod states which of its controls persist:
 
 ### The committed file
 
-A converted repo commits the file its table renders from its defaults, at the `committed` path
-`data/config-format.json` records, marked `-text` in `.gitattributes`. The repo's render test
+A converted repo commits its table's fresh render (`RenderCanonicalFresh(table, header)` /
+`table.RenderFresh(header)`), at the `committed` path `data/config-format.json` records, marked
+`-text` in `.gitattributes`. The repo's render test
 compares the two byte for byte, so the committed file cannot drift from the code. The owner
 creates the same bytes at first launch wherever the runtime writes every value's text as the test
 did: a C# mod on .NET Framework can differ in the last digit of a float, as [Values](#values)
@@ -532,7 +535,8 @@ ConfigTable<ModConfig> ModConfigTable() {
 ```
 
 The owner is built once, before anything reads the file, with the file's full path (in the test,
-`dir` is a scratch folder; a mod uses the folder its loader loads it from). `Load` runs on the
+`dir` is a scratch folder; a mod uses the folder its loader loads it from) and where Defaults.ini
+is (in the test, a scratch file; a mod passes `DefaultsFile::PerUser()`). `Load` runs on the
 mod's init thread, never in `DllMain`, and `Save` runs where the hotkey fired, after the mod has
 applied the new value to its running state:
 
@@ -542,6 +546,7 @@ ConfigOwnerOptions<ModConfig> options;
 options.path = (dir / L"CameraUnlock.ini").wstring();
 options.table = ModConfigTable();
 options.header.display_name = "Example Game";
+options.defaults = DefaultsFile::At((dir / L"global" / L"Defaults.ini").wstring());
 ConfigOwner<ModConfig> owner(std::move(options));
 
 ConfigLoadResult<ModConfig> loaded = owner.Load();
@@ -590,6 +595,7 @@ var owner = new ConfigOwner<ModConfig>(new ConfigOwnerOptions<ModConfig>
     Path = Path.Combine(dir, "CameraUnlock.ini"),
     Table = ModConfigTable(),
     Header = new RenderHeader("Example Game"),
+    Defaults = DefaultsFile.At(Path.Combine(Path.Combine(dir, "global"), "Defaults.ini")),
 });
 
 ConfigLoadResult<ModConfig> loaded = owner.Load();
@@ -599,7 +605,8 @@ bool parsed = KeyBindings.TryParse(config.ToggleKeyName, out var toggle, out var
 ConfigSaveResult saved = owner.Save(c => c.WorldSpaceYaw = false);
 ```
 
-A Unity mod calls `Load`, `Save` and `Reload` on the main thread, where its hotkeys fire.
+A mod passes `DefaultsFile.PerUser()` where the test passes a scratch file. A Unity mod calls
+`Load`, `Save` and `Reload` on the main thread, where its hotkeys fire.
 
 ### REFramework mods
 
@@ -622,11 +629,13 @@ migrates and writes `configFileName` as it did before.
 
 `ConfigOwner<Config>` (C++ `config/config_owner.h`) and `ConfigOwner<TConfig>` (C#) are the one
 reader and writer of a config file. Each file has one owner, built before anything reads the file,
-and nothing else reads or writes it. The owner writes only the config file, never the legacy file, and only through
-the checked file writer, which never opens the live file for writing: it writes a temporary beside
-it and swaps it in whole, or creates the file only where none is. The
-owner runs on Windows only; the reader, the table, the codecs and the renderer are pure and run
-anywhere.
+and nothing else reads or writes it. The owner writes only the config file and, where none exists
+yet, Defaults.ini, never the legacy file, and only through the checked file writer, which never
+opens the live file for writing: it writes a temporary beside it and swaps it in whole, or creates
+the file only where none is. The owner reads and writes on Windows, Wine and Proton included, and
+off Windows the C# owner reads the file, imports the legacy file in memory and reads Defaults.ini
+but writes nothing, loads `ReadOnly` (6) and refuses every save. The reader, the table, the codecs
+and the renderer are pure and run anywhere.
 
 The options are filled by member (C++) or property (C#), never positionally, so an option added
 later changes no mod's code:
@@ -639,10 +648,13 @@ later changes no mod's code:
 | `legacy_path` | `LegacySourcePath` | The legacy file the import reads, as a full path, normally in the folder of `path`: the file the game's last pre-canonical build read, which is the entry's `legacy_source` in `data/config-format.json`, for example `HeadTracking.ini` or a BepInEx plugin's `<GUID>.cfg`. Required with an import and refused without one |
 | `header` | `Header` | What the renderer writes above the settings: the display name. Required |
 | `status_sink` | `StatusSink` | Optional. Shows the player a one-line message, run after the owner releases its lock |
+| `defaults` | `Defaults` | Where Defaults.ini is: `DefaultsFile::PerUser()` / `DefaultsFile.PerUser()` in a mod, `DefaultsFile::At(path)` / `DefaultsFile.At(path)` with a scratch path in every test. Required. A helper that builds the options for the mod and its tests takes it as a parameter |
 
-The constructor throws for a missing or relative path, a table that has both `RotationEnabled`
-and `PositionEnabled` and marks only one Writable, a header the renderer refuses, an import without
-a legacy path, a legacy path without an import, or a legacy path naming the config file itself
+The constructor throws for a missing or relative path, missing `defaults`, a table that has both
+`RotationEnabled` and `PositionEnabled` and marks only one Writable, a table whose fresh render
+refuses it (a concept row not marked `PerGame` whose default is not the schema's, or
+`RotationEnabled` without `PositionEnabled`), a header the renderer refuses, an import without a
+legacy path, a legacy path without an import, or a legacy path naming the config file itself
 (compared without case). The C++ owner also throws for a table with no rows.
 
 ### Load
@@ -660,6 +672,7 @@ up and write them afterwards. The status numbers are the same in both languages.
 | `Deferred` (3) | An import or creation could not finish, or the config file or the legacy file could not be opened | what the import gave, or the defaults | no |
 | `LegacyRefused` (4) | The import refused the legacy file, as the published build did | what the import gave; the mod does what its published build did on that refusal | no |
 | `Unreadable` (5) | The config file is saved as UTF-16 or holds a NUL byte | the defaults | no |
+| `ReadOnly` (6) | C# only, off Windows: the config file was read, the legacy file imported in memory, or neither exists; nothing is written | the file, the import or the defaults | no |
 
 While the config file exists the import never runs and the legacy file is never opened; when a
 legacy file is also present, the log says so:

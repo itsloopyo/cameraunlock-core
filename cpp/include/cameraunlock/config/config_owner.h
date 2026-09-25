@@ -4,6 +4,9 @@
 #include <cameraunlock/config/checked_file_writer.h>
 #include <cameraunlock/config/config_concepts.g.h>
 #include <cameraunlock/config/config_table.h>
+#include <cameraunlock/config/defaults_file.h>
+#include <cameraunlock/config/defaults_ini.h>
+#include <cameraunlock/config/defaults_location.h>
 #include <cameraunlock/config/ini_editor.h>
 #include <cameraunlock/config/legacy_import.h>
 
@@ -110,6 +113,10 @@ struct ConfigOwnerOptions {
     /// not imported, cannot be read or are not saved. Optional. It runs after the owner has
     /// released its lock.
     std::function<void(const std::string&)> status_sink;
+    /// Where Defaults.ini is: DefaultsFile::PerUser() in a mod, and DefaultsFile::At(path) with a
+    /// scratch path in every test. A helper that builds the options for both takes it as a
+    /// parameter, so a test never reaches the player's own file. Required.
+    DefaultsFile defaults;
 };
 
 /// What ConfigOwner::Load returns. Nothing is logged by the owner.
@@ -126,11 +133,15 @@ struct ConfigLoadResult {
     /// unstamped file gets its section at the next save, the diagnostics' sentences, the line
     /// saying `path` was created and from what, the import's lines (values it dropped, lines of
     /// the legacy file the new file does not carry) and the error behind a Deferred,
-    /// LegacyRefused or Unreadable load. Returned rather than logged, so a game can load before
-    /// its logger is up.
+    /// LegacyRefused or Unreadable load. It starts with where Defaults.ini is and what happened
+    /// to it, and ends with which rows took their value from Defaults.ini, which the file sets
+    /// itself, which took the built-in value, and each value Defaults.ini holds that this game
+    /// would take and cannot use. Returned rather than logged, so a game can load before its
+    /// logger is up.
     std::vector<std::string> log;
     /// For Deferred, LegacyRefused and Unreadable, the message for the player, which the owner
-    /// also hands its status sink once; empty otherwise.
+    /// also hands its status sink once; empty otherwise. A message about Defaults.ini goes to the
+    /// status sink after it and is not here.
     std::string reason;
 };
 
@@ -145,7 +156,9 @@ struct ConfigSaveResult {
     std::uint32_t error = 0;
     /// For Uncertain, the temporary holding the new contents, left in place; empty otherwise.
     std::wstring temporary_path;
-    /// The lines for the game's log, UTF-8, naming the file and the operation. Empty for Saved.
+    /// The lines for the game's log, UTF-8, naming the file and the operation. For Saved, a line
+    /// for each row that held `default` or was missing and is now written as a value, so no longer
+    /// follows Defaults.ini; otherwise empty for Saved.
     std::vector<std::string> log;
 };
 
@@ -173,8 +186,8 @@ namespace detail {
 
 // The test seam. Run before each step with a label and the path the step acts on: `Open` (the
 // config file, then the legacy file), `Import`, `Recheck` and `Remember` for the import's own
-// steps, and `Commit.`, `Create.` or `Save.` followed by a CheckedWriteStepName for the
-// writer's. At a writer step a nonzero return fails that step with that Win32 error, as the
+// steps, and `Defaults.`, `Commit.`, `Create.` or `Save.` followed by a CheckedWriteStepName for
+// the writer's. At a writer step a nonzero return fails that step with that Win32 error, as the
 // writer's own fault seam does; at the owner's steps it must return 0. A test ends the process
 // from it to interrupt a step, or changes the files to race one.
 using ConfigOwnerHook = std::function<std::uint32_t(const std::string& label, const std::wstring& path)>;
@@ -227,6 +240,17 @@ bool OwnerSamePath(const std::wstring& a, const std::wstring& b);
 // True when GetFileAttributesW finds a file, not a folder, at the path. Nothing is opened.
 bool OwnerFileExists(const std::wstring& path);
 
+// True when GetFileAttributesW finds a file or a folder at the path, so a folder named
+// Defaults.ini is found and then fails to read with its reason. Nothing is opened.
+bool OwnerPathExists(const std::wstring& path);
+
+// OwnerLastWriteTime, or the largest count when the time cannot be read, so a Defaults.ini whose
+// time stays unreadable never counts as changed and never throws from FileChanged.
+std::uint64_t DefaultsLastWriteTime(const std::wstring& path);
+
+// What the player is told when the CameraUnlock folder could not be created.
+std::string DefaultsFolderWhy(std::uint32_t error);
+
 // Design 4.5 step 2: the path in the ANSI code page, converted with WC_NO_BEST_FIT_CHARS, and
 // whether a character had no representation there.
 LegacyInput OwnerLegacyInput(const std::wstring& path);
@@ -266,9 +290,17 @@ struct ConfigOwnerTestAccess;
 
 /// The one reader and writer of a game's canonical config file. While that file is absent it
 /// imports the game's legacy file, a separate file it never writes, through the game's frozen
-/// import into a new config file, or creates the config file from the table's defaults. It saves
-/// the rows the table marks Writable, and reloads. It writes only the config file, and only
-/// through WriteFileChecked, so every write replaces the whole file or nothing. Windows only.
+/// import into a new config file, or creates the config file from the table's fresh render. It
+/// saves the rows the table marks Writable, and reloads. It writes only the config file and a
+/// Defaults.ini that is absent, and only through WriteFileChecked, so every write replaces the
+/// whole file or nothing. Windows only, Wine and Proton included.
+///
+/// Every concept row the table does not mark PerGame takes its default from Defaults.ini
+/// (`options.defaults`): `default`, a missing key and an invalid value on such a row read
+/// Defaults.ini's value, or the row's own default where Defaults.ini gives none. Load finds the
+/// file, creates it with the built-in values where none exists and it may, and reads it once;
+/// Reload reads it again. No failure to find, create or read it stops the mod: the rows then use
+/// the built-in values, with one line in the log.
 ///
 /// Build it before anything reads the file, and read the file only through it. One mutex
 /// serializes Load, Reload, Save and FileChanged; the status sink runs after it is released.
@@ -290,15 +322,22 @@ public:
     /// no rows, the import names keys but has no run, the import has a run and legacy_path is
     /// empty, legacy_path is set and the import has no run, legacy_path is not fully qualified or
     /// names the file `path` names (compared without case), the table has both RotationEnabled
-    /// and PositionEnabled and marks only one of them Writable, or the table cannot render its
-    /// defaults under the header.
+    /// and PositionEnabled and marks only one of them Writable, `defaults` names no file, or the
+    /// table cannot render its fresh file under the header (RenderCanonicalFresh: a concept row
+    /// not marked PerGame whose default is not the schema's, RotationEnabled without
+    /// PositionEnabled, or a header the renderer refuses).
     explicit ConfigOwner(ConfigOwnerOptions<Config> options) : ConfigOwner(std::move(options), nullptr) {}
 
     ConfigOwner(const ConfigOwner&) = delete;
     ConfigOwner& operator=(const ConfigOwner&) = delete;
 
-    /// Reads the config file, first importing the legacy file or creating the config file where
-    /// there is none:
+    /// Reads Defaults.ini, then the config file, first importing the legacy file or creating the
+    /// config file where there is none:
+    /// - Defaults.ini first: where no file exists it is created with the built-in values, outside
+    ///   a packaged app, never over a file that appears meanwhile, whatever becomes of the config
+    ///   file. It is read once, and the rows that follow it take its values for the session. A
+    ///   Defaults.ini that cannot be found, created or read gives the built-in values, one line in
+    ///   the log and, when it exists and cannot be read, one message.
     /// - A file at `path`: read as canonical (Canonical), stamped or not, or Unreadable when saved
     ///   as UTF-16 or holding a NUL. An unstamped file gets a line in the log saying the next save
     ///   adds the section; the first save that changes a row stamps it. The import never runs and
@@ -307,10 +346,12 @@ public:
     ///   that cannot be opened (held by a program denying read sharing, pending deletion, or
     ///   denied by its permissions) is Deferred on the table's defaults, and nothing is imported.
     /// - No file at `path` and a file at legacy_path: the legacy file is imported into a new file
-    ///   at `path` (Migrated).
-    /// - Neither: the table's defaults are rendered and the file created, never over a file that
-    ///   appears meanwhile (Created). If one appears, or the folder cannot be written, the session
-    ///   runs on the defaults and nothing retries (Deferred).
+    ///   at `path` (Migrated). A row that follows Defaults.ini is written `default` where the
+    ///   imported value equals what `default` gives it at this Load, and the tracking mode pair
+    ///   only when both rows do.
+    /// - Neither: the table's fresh render is written, never over a file that appears meanwhile
+    ///   (Created). If one appears, or the folder cannot be written, the session runs on the
+    ///   defaults and nothing retries (Deferred).
     ///
     /// An import holds the legacy file open, readable and writable by others but not deletable,
     /// while it reads the bytes, runs the import and reads the bytes again; bytes that changed
@@ -330,20 +371,28 @@ public:
     /// a file at `path` meanwhile: that file is read at the next launch and the import does not
     /// run again, which the player message says. A legacy file that cannot be opened defers the
     /// same way, on the defaults. The legacy file is never written, renamed, deleted or copied,
-    /// whatever happens. A process killed at any point leaves `path` absent or whole.
+    /// whatever happens. A process killed at any point leaves `path` and Defaults.ini each absent
+    /// or whole.
     ///
-    /// Must not run under the loader lock. Ordinary I/O failures are reported through the result.
-    /// An import that throws, or a table hook that throws, is a bug and the exception is not caught.
+    /// The status sink gets the config file's message, then at most one about Defaults.ini: that
+    /// it cannot be read, else that a value this game would take from it is refused, else that two
+    /// Defaults.ini files exist and one is ignored. Must not run under the loader lock. Ordinary
+    /// I/O failures are reported through the result. An import that throws, or a table hook that
+    /// throws, is a bug and the exception is not caught.
     ConfigLoadResult<Config> Load() {
         ConfigLoadResult<Config> result;
+        std::string defaults_message;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            result = LoadLocked();
+            result = LoadLocked(defaults_message);
         }
         const bool report = result.status == ConfigLoadStatus::Deferred ||
                             result.status == ConfigLoadStatus::LegacyRefused ||
                             result.status == ConfigLoadStatus::Unreadable;
-        if (report && status_sink_) status_sink_(result.reason);
+        if (status_sink_) {
+            if (report) status_sink_(result.reason);
+            if (!defaults_message.empty()) status_sink_(defaults_message);
+        }
         return result;
     }
 
@@ -351,17 +400,19 @@ public:
     /// and sets the new values on it; the game has already applied them to its running state. A
     /// row that holds a new value afterwards must be marked Writable in the table. When
     /// RotationEnabled or PositionEnabled changes, both are written, so a tracking mode is always
-    /// one edit.
+    /// one edit. A row that held `default` or was missing is written as its value, so from then on
+    /// this game keeps it, and the log says so.
     ///
     /// Saves only a file the canonical reader can read and whose ConfigFormat is not newer than
     /// this build's; an unstamped file, or a stamp with no ConfigFormat or one that is not a
-    /// number, gets its [CameraUnlock] ConfigFormat line in the same write. The edited bytes are
-    /// read back through the table before anything is written: only the changed rows may differ,
-    /// and they must hold the new values. Rows already holding the values write nothing and report
-    /// Saved. A missing file is not created here: Load creates it at the next launch, importing
-    /// the legacy file if there is one. After a Deferred, LegacyRefused or Unreadable load nothing
-    /// is saved that session, until a Reload applies a readable file. The legacy file is never
-    /// written.
+    /// number, gets its [CameraUnlock] ConfigFormat line in the same write. The file is read over
+    /// the values Defaults.ini gave this session. The edited bytes are read back through the table
+    /// before anything is written: only the changed rows may differ, they must hold the new
+    /// values, and every other row must take its value from where it did. Rows already holding the
+    /// values write nothing and report Saved. A missing file is not created here: Load creates it
+    /// at the next launch, importing the legacy file if there is one. After a Deferred,
+    /// LegacyRefused or Unreadable load nothing is saved that session, until a Reload applies a
+    /// readable file. Neither the legacy file nor Defaults.ini is ever written.
     ///
     /// Never rolls back and never retries. NotSaved and Uncertain are handed to the status sink
     /// once. An editor writing the file between the last check and the replacement is
@@ -383,38 +434,44 @@ public:
         return result;
     }
 
-    /// Reads the file again, for a watcher that saw FileChanged or a reload the player asked
-    /// for. Unchanged when the file holds exactly the bytes the owner last wrote, the import's and
-    /// creation's included, and no Reload has applied other bytes since. Any other file is read as
-    /// canonical, stamped or not (Applied). A missing file, or one the canonical reader cannot
+    /// Reads Defaults.ini and the file again, for a watcher that saw FileChanged or a reload the
+    /// player asked for. Defaults.ini is read where Load found it: new readable bytes replace the
+    /// values it gives; a file that went missing or cannot be read keeps them, with one line in the
+    /// log and one message. Unchanged when the file holds exactly the bytes the owner last wrote,
+    /// the import's and creation's included, no Reload has applied other bytes since, and
+    /// Defaults.ini gave nothing new. Any other file is read as canonical, stamped or not, over
+    /// Defaults.ini's current values (Applied). A missing file, or one the canonical reader cannot
     /// read, is Unreadable, which leaves the game's settings as they are and is handed to the
-    /// status sink. Reads only the file at `path`: never writes, never imports and never opens the
-    /// legacy file.
+    /// status sink. Never writes, never imports and never opens the legacy file.
     ///
     /// Throws std::logic_error when Load has not run.
     ConfigReloadResult<Config> Reload() {
         ConfigReloadResult<Config> result;
+        std::string defaults_message;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             RequireLoaded("Reload");
-            result = ReloadLocked();
+            result = ReloadLocked(defaults_message);
         }
-        if (result.status == ConfigReloadStatus::Unreadable && status_sink_) status_sink_(result.reason);
+        if (status_sink_) {
+            if (result.status == ConfigReloadStatus::Unreadable) status_sink_(result.reason);
+            if (!defaults_message.empty()) status_sink_(defaults_message);
+        }
         return result;
     }
 
-    /// True when the file's last write time differs from the one the owner recorded at its last
-    /// Load, Reload or committed Save. The time is read with GetFileAttributesExW, or from the
-    /// folder's listing with FindFirstFileW when that refuses a file that is there (one pending
-    /// deletion), as .NET reads it. A missing file counts as write time 0, so a file that appears
-    /// or goes away counts.
+    /// True when the last write time of the file, or of Defaults.ini where Load found it, differs
+    /// from the one the owner recorded at its last Load, Reload or committed Save. The time is read
+    /// with GetFileAttributesExW, or from the folder's listing with FindFirstFileW when that
+    /// refuses a file that is there (one pending deletion), as .NET reads it. A missing file counts
+    /// as write time 0, so a file that appears or goes away counts.
     ///
     /// Throws std::logic_error when Load has not run, and std::system_error when Windows can read
-    /// the time neither way for a reason other than the file's absence.
+    /// the config file's time neither way for a reason other than the file's absence.
     bool FileChanged() {
         std::lock_guard<std::mutex> lock(mutex_);
         RequireLoaded("FileChanged");
-        return detail::OwnerLastWriteTime(path_) != recorded_write_time_;
+        return detail::OwnerLastWriteTime(path_) != recorded_write_time_ || DefaultsWriteTime() != defaults_write_time_;
     }
 
 private:
@@ -431,7 +488,10 @@ private:
           import_(std::move(options.import)),
           header_(std::move(options.header)),
           status_sink_(std::move(options.status_sink)),
-          hook_(std::move(hook)) {
+          hook_(std::move(hook)),
+          defaults_(std::move(options.defaults)),
+          snapshot_(detail::ReadDefaultsIni("")),
+          effective_(table_.defaults()) {
         if (table_.rows_.empty()) throw std::invalid_argument("the options' table has no rows");
         if (!import_.run && !import_.keys.empty()) {
             throw std::invalid_argument("the options' import names keys but has no run");
@@ -444,10 +504,17 @@ private:
             throw std::invalid_argument("the table marks " + RowName(writable) + " Writable but not " +
                                         RowName(other) + ", and a tracking mode change writes both");
         }
-        default_bytes_ = RenderCanonical(table_, table_.defaults(), header_);
+        if (!detail::DefaultsFileIsSet(defaults_)) {
+            throw std::invalid_argument(
+                "the options name no defaults: a mod sets DefaultsFile::PerUser(), and a test DefaultsFile::At(path) "
+                "with a scratch path");
+        }
+        fresh_bytes_ = RenderCanonicalFresh(table_, header_);
     }
 
     static constexpr const char* kChangedWhileRead = "the file was changed by another program while it was read";
+    static constexpr const char* kKeptUntilRestart =
+        " Settings that use it keep the values they had until the game restarts.";
 
     // The legacy file's full path, empty for a game with no import. Runs in the member
     // initializers, before `options.import` is moved.
@@ -462,18 +529,28 @@ private:
         return legacy;
     }
 
-    ConfigLoadResult<Config> LoadLocked() {
+    ConfigLoadResult<Config> LoadLocked(std::string& defaults_message) {
         loaded_ = true;
         saves_allowed_ = false;
         committed_.reset();
+        sources_.reset();
         std::vector<std::string> log;
+        std::string two_files;
+        const std::string unreadable = LoadDefaults(log, two_files);
+        ConfigLoadResult<Config> result = LoadConfigFile(std::move(log));
+        const std::string refused = DefaultsLines(result.log);
+        defaults_message = !unreadable.empty() ? unreadable : !refused.empty() ? refused : two_files;
+        return result;
+    }
+
+    ConfigLoadResult<Config> LoadConfigFile(std::vector<std::string> log) {
         recorded_write_time_ = detail::OwnerLastWriteTime(path_);
 
         detail::OwnerStep(hook_, "Open", path_);
         const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
         if (read.error != 0) {
             log.push_back(path_text_ + ": could not be opened: " + detail::OwnerErrorText(read.error));
-            return LoadResult(ConfigLoadStatus::Deferred, table_.defaults(), {}, std::move(log),
+            return LoadResult(ConfigLoadStatus::Deferred, OnDefaults(), {}, std::move(log),
                               name_ + " cannot be read: " + detail::OwnerReadWhy(read.error) +
                                   ". The mod runs on its default settings this session.");
         }
@@ -491,7 +568,7 @@ private:
         const detail::OwnerFileRead opened = held.Open(legacy_path_);
         if (opened.error != 0) {
             log.push_back(legacy_text_ + ": could not be opened: " + detail::OwnerErrorText(opened.error));
-            return Defer(table_.defaults(), std::move(log), detail::OwnerReadWhy(opened.error), true);
+            return Defer(OnDefaults(), std::move(log), detail::OwnerReadWhy(opened.error), true);
         }
         if (!opened.present) return Create(std::move(log));
         return Migrate(held, opened.bytes, std::move(log));
@@ -502,7 +579,7 @@ private:
         if (!doc.IsReadable()) {
             const std::string why = Unreadable(doc);
             log.push_back(path_text_ + ": cannot be read: " + why);
-            return LoadResult(ConfigLoadStatus::Unreadable, table_.defaults(), {}, std::move(log),
+            return LoadResult(ConfigLoadStatus::Unreadable, OnDefaults(), {}, std::move(log),
                               name_ + " cannot be read: " + why +
                                   ". The mod runs on its default settings and saves nothing until the file is fixed.");
         }
@@ -518,14 +595,15 @@ private:
     }
 
     ConfigLoadResult<Config> Create(std::vector<std::string> log) {
-        const CheckedWriteResult written = detail::OwnerWrite(path_, std::nullopt, default_bytes_, hook_, "Create.");
+        Config defaults = OnDefaults();
+        const CheckedWriteResult written = detail::OwnerWrite(path_, std::nullopt, fresh_bytes_, hook_, "Create.");
         std::string why;
         if (written.Committed()) {
-            committed_ = default_bytes_;
+            committed_ = fresh_bytes_;
             recorded_write_time_ = detail::OwnerLastWriteTime(path_);
             saves_allowed_ = true;
             log.push_back(path_text_ + ": created with the default settings.");
-            return LoadResult(ConfigLoadStatus::Created, table_.defaults(), {}, std::move(log), "");
+            return LoadResult(ConfigLoadStatus::Created, std::move(defaults), {}, std::move(log), "");
         }
         if (detail::OwnerWriteFailed(written)) {
             why = detail::OwnerWriteWhy(path_, written);
@@ -534,7 +612,7 @@ private:
             why = detail::OwnerConflict(written.status);
             log.push_back(path_text_ + ": not created: " + CheckedWriteStatusName(written.status));
         }
-        return LoadResult(ConfigLoadStatus::Deferred, table_.defaults(), {}, std::move(log),
+        return LoadResult(ConfigLoadStatus::Deferred, std::move(defaults), {}, std::move(log),
                           name_ + " was not created: " + why + ". The mod runs on its default settings this session.");
     }
 
@@ -592,7 +670,7 @@ private:
 
         std::string rendered;
         try {
-            rendered = RenderCanonical(table_, imported, header_);
+            rendered = detail::RenderCanonicalMigration(table_, imported, effective_, header_);
         } catch (const std::invalid_argument& e) {
             const std::optional<std::size_t> row = FirstUnwritable(imported);
             if (!row) throw;
@@ -606,6 +684,7 @@ private:
         std::vector<CanonicalDiagnostic> diagnostics = Apply(ParseCanonicalIni(rendered), reread_config, read_back);
         const std::optional<std::size_t> different = FirstDifference(imported, reread_config);
         if (different) {
+            sources_.reset();
             log.push_back(legacy_text_ + ": " + RowName(*different) + " reads back from the new format as " +
                           RowValueText(*different, reread_config) + ", not " + RowValueText(*different, imported));
             std::string why = Unconvertible(*different, imported);
@@ -685,7 +764,8 @@ private:
         const bool stamped = HasCanonicalStamp(snapshot);
 
         Config baseline = table_.defaults();
-        ApplyCanonical(doc, table_, baseline);
+        const std::vector<detail::ValueSource> baseline_sources =
+            detail::ApplyCanonicalEffective(doc, table_, baseline, effective_, from_defaults_ini_).sources;
         Config changed = baseline;
         change(changed);
 
@@ -736,12 +816,20 @@ private:
         const std::string& candidate = edit.bytes;
 
         Config written_config = table_.defaults();
-        ApplyCanonical(ParseCanonicalIni(candidate), table_, written_config);
+        const std::vector<detail::ValueSource> written_sources =
+            detail::ApplyCanonicalEffective(ParseCanonicalIni(candidate), table_, written_config, effective_,
+                                            from_defaults_ini_)
+                .sources;
         for (std::size_t i = 0; i < count; ++i) {
             const Config& expected = edited[i] ? changed : baseline;
-            if (table_.ops_[i]->Equal(written_config, expected)) continue;
+            if (table_.ops_[i]->Equal(written_config, expected) &&
+                (edited[i] || written_sources[i] == baseline_sources[i])) {
+                continue;
+            }
             log.push_back(path_text_ + ": not saved: " + RowName(i) + " would read back as " +
-                          RowValueText(i, written_config) + ", not " + RowValueText(i, expected));
+                          RowValueText(i, written_config) + " from " + SourceName(written_sources[i]) + ", not " +
+                          RowValueText(i, expected) + " from " +
+                          SourceName(edited[i] ? detail::ValueSource::kFile : baseline_sources[i]));
             return NotSaved(RowName(i) + "=" + RowValueText(i, changed) + " does not read back from " + name_, 0,
                             std::move(log));
         }
@@ -768,7 +856,25 @@ private:
         }
         committed_ = candidate;
         recorded_write_time_ = detail::OwnerLastWriteTime(path_);
-        return ConfigSaveResult{};
+        ConfigSaveResult saved;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (!edited[i] || !detail::FollowsDefaultsIni(table_.rows_[i]) ||
+                baseline_sources[i] == detail::ValueSource::kFile) {
+                continue;
+            }
+            saved.log.push_back(path_text_ + ": " + table_.rows_[i].key + "=" + RowValueText(i, changed) +
+                                " is now set for this game, and no longer follows Defaults.ini.");
+        }
+        return saved;
+    }
+
+    static const char* SourceName(detail::ValueSource source) {
+        switch (source) {
+            case detail::ValueSource::kFile: return "the file";
+            case detail::ValueSource::kDefaultsIni: return "Defaults.ini";
+            case detail::ValueSource::kBuiltIn: return "the built-in value";
+        }
+        throw std::invalid_argument("a value source outside the enum");
     }
 
     static ConfigSaveResult NotSaved(const std::string& why, std::uint32_t error, std::vector<std::string> log) {
@@ -780,9 +886,21 @@ private:
         return result;
     }
 
-    ConfigReloadResult<Config> ReloadLocked() {
-        std::vector<std::string> log;
+    ConfigReloadResult<Config> ReloadLocked(std::string& defaults_message) {
+        sources_.reset();
         const std::uint64_t write_time = detail::OwnerLastWriteTime(path_);
+        defaults_write_time_ = DefaultsWriteTime();
+        std::vector<std::string> log;
+        bool changed = false;
+        const std::string unreadable = ReloadDefaults(log, changed);
+        ConfigReloadResult<Config> result = ReloadConfigFile(std::move(log), write_time, changed);
+        const std::string refused = DefaultsLines(result.log);
+        defaults_message = !unreadable.empty() ? unreadable : changed ? refused : std::string();
+        return result;
+    }
+
+    ConfigReloadResult<Config> ReloadConfigFile(std::vector<std::string> log, std::uint64_t write_time,
+                                                bool snapshot_changed) {
         const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
         if (read.error != 0) {
             log.push_back(path_text_ + ": not reloaded: " + detail::OwnerErrorText(read.error));
@@ -798,7 +916,7 @@ private:
         }
         const std::string& bytes = read.bytes;
 
-        if (committed_ && bytes == *committed_) {
+        if (committed_ && bytes == *committed_ && !snapshot_changed) {
             return Reloaded(ConfigReloadStatus::Unchanged, std::nullopt, {}, std::move(log), "");
         }
 
@@ -811,19 +929,243 @@ private:
         }
         Config config = table_.defaults();
         std::vector<CanonicalDiagnostic> diagnostics = Apply(doc, config, log);
-        committed_.reset();
+        if (committed_ && bytes != *committed_) committed_.reset();
         saves_allowed_ = true;
         return Reloaded(ConfigReloadStatus::Applied, std::move(config), std::move(diagnostics), std::move(log), "");
     }
 
+    // Where Defaults.ini is, created where the choice allows it and read once. Adds its one
+    // location line, or the one failure line, and returns the message for a file that exists and
+    // cannot be read, or empty; `two_files` gets the message for two files, or empty.
+    std::string LoadDefaults(std::vector<std::string>& log, std::string& two_files) {
+        two_files.clear();
+        const detail::DefaultsResolution resolution = detail::ResolveDefaultsFile(defaults_);
+        const std::vector<detail::DefaultsCandidate>& candidates = resolution.candidates;
+        std::vector<bool> exists;
+        for (const detail::DefaultsCandidate& candidate : candidates) exists.push_back(detail::OwnerPathExists(candidate.path));
+        std::vector<detail::DefaultsCreationOutcome> outcomes(candidates.size());
+        std::optional<std::string> created;
+        detail::DefaultsChoice choice = detail::ChooseDefaults(resolution, exists, outcomes);
+        while (choice.create >= 0) {
+            const std::size_t index = static_cast<std::size_t>(choice.create);
+            outcomes[index] = CreateDefaults(candidates[index], created);
+            choice = detail::ChooseDefaults(resolution, exists, outcomes);
+        }
+
+        if (choice.read >= 0) {
+            defaults_at_ = candidates[static_cast<std::size_t>(choice.read)];
+        } else if (!candidates.empty()) {
+            defaults_at_ = candidates[0];
+        } else {
+            defaults_at_.reset();
+        }
+        defaults_write_time_ = DefaultsWriteTime();
+        defaults_seen_.reset();
+        if (choice.read < 0) {
+            log.push_back(choice.line);
+            TakeSnapshot(detail::ReadDefaultsIni(""));
+            return {};
+        }
+
+        const detail::DefaultsCandidate& at = candidates[static_cast<std::size_t>(choice.read)];
+        std::string bytes;
+        if (outcomes[static_cast<std::size_t>(choice.read)].kind == detail::DefaultsCreation::kCreated) {
+            bytes = *created;
+        } else {
+            const detail::OwnerFileRead read = detail::OwnerReadFile(at.path);
+            if (read.error != 0) return NotRead(log, at, detail::OwnerReadWhy(read.error));
+            if (!read.present) {
+                NotRead(log, at, "the file was deleted at the same time");
+                return {};
+            }
+            bytes = read.bytes;
+        }
+
+        defaults_seen_ = bytes;
+        detail::DefaultsIniSnapshot snapshot = detail::ReadDefaultsIni(bytes);
+        if (snapshot.unreadable) return NotRead(log, at, *snapshot.unreadable);
+        log.push_back(choice.line);
+        if (snapshot.format_line) log.push_back(*snapshot.format_line);
+        TakeSnapshot(std::move(snapshot));
+        two_files = choice.message;
+        return {};
+    }
+
+    // A Defaults.ini found and not read: its one line, the built-in values, and the message.
+    std::string NotRead(std::vector<std::string>& log, const detail::DefaultsCandidate& at, const std::string& why) {
+        log.push_back("Defaults.ini: " + detail::DefaultsNamed(at) + " cannot be read: " + why + "." +
+                      detail::kDefaultsBuiltIn);
+        TakeSnapshot(detail::ReadDefaultsIni(""));
+        return "Defaults.ini cannot be read: " + why + ". Settings that use it take the built-in values.";
+    }
+
+    // The folder by the one-level rule, then the file through the checked writer with no expected
+    // bytes, so it is never written over a file that appeared meanwhile.
+    detail::DefaultsCreationOutcome CreateDefaults(const detail::DefaultsCandidate& candidate,
+                                                   std::optional<std::string>& created) {
+        const std::uint32_t folder = detail::CreateDefaultsFolder(candidate.folder);
+        if (folder == detail::kDefaultsPathNotFound) return {detail::DefaultsCreation::kParentMissing, ""};
+        if (folder != 0) return {detail::DefaultsCreation::kFolderFailed, detail::DefaultsFolderWhy(folder)};
+        const std::string bytes = detail::RenderDefaultsIni();
+        const CheckedWriteResult written = detail::OwnerWrite(candidate.path, std::nullopt, bytes, hook_, "Defaults.");
+        if (detail::OwnerWriteFailed(written)) {
+            return {detail::DefaultsCreation::kFileFailed, detail::OwnerWriteWhy(candidate.path, written)};
+        }
+        if (written.Committed()) {
+            created = bytes;
+            return {detail::DefaultsCreation::kCreated, ""};
+        }
+        if (written.status == CheckedWriteStatus::TargetAppeared) return {detail::DefaultsCreation::kAppeared, ""};
+        throw std::logic_error(std::string("a write that expects no file gave ") + CheckedWriteStatusName(written.status));
+    }
+
+    // Defaults.ini again, where Load found it. Returns the message for one that went missing or
+    // cannot be read, which keeps the values it gave, or empty.
+    std::string ReloadDefaults(std::vector<std::string>& log, bool& changed) {
+        changed = false;
+        if (!defaults_at_) return {};
+        const std::string named = detail::DefaultsNamed(*defaults_at_);
+        const detail::OwnerFileRead read = detail::OwnerReadFile(defaults_at_->path);
+        if (read.error != 0) return KeptValues(log, named, detail::OwnerReadWhy(read.error));
+        if (!read.present) {
+            if (!defaults_seen_) return {};
+            defaults_seen_.reset();
+            log.push_back("Defaults.ini: " + named + " is missing." + kKeptUntilRestart);
+            return std::string("Defaults.ini is missing.") + kKeptUntilRestart;
+        }
+        if (defaults_seen_ && read.bytes == *defaults_seen_) return {};
+        defaults_seen_ = read.bytes;
+        detail::DefaultsIniSnapshot snapshot = detail::ReadDefaultsIni(read.bytes);
+        if (snapshot.unreadable) return KeptValues(log, named, *snapshot.unreadable);
+        log.push_back("Defaults.ini: " + named + " (read)");
+        if (snapshot.format_line) log.push_back(*snapshot.format_line);
+        TakeSnapshot(std::move(snapshot));
+        changed = true;
+        return {};
+    }
+
+    static std::string KeptValues(std::vector<std::string>& log, const std::string& named, const std::string& why) {
+        log.push_back("Defaults.ini: " + named + " cannot be read: " + why + "." + kKeptUntilRestart);
+        return "Defaults.ini cannot be read: " + why + "." + kKeptUntilRestart;
+    }
+
+    // The values Defaults.ini gives: each accepted value of a row that follows Defaults.ini,
+    // through the row's own codec and setter, over a fresh defaults instance.
+    void TakeSnapshot(detail::DefaultsIniSnapshot snapshot) {
+        Config effective = table_.defaults();
+        std::vector<schema::Concept> from;
+        for (std::size_t i = 0; i < table_.rows_.size(); ++i) {
+            if (!detail::FollowsDefaultsIni(table_.rows_[i])) continue;
+            const schema::Concept id = *table_.rows_[i].concept_id;
+            const detail::DefaultsIniValue& value = snapshot.Value(id);
+            if (value.state != detail::DefaultsIniValueState::kAccepted) continue;
+            const std::string error = table_.ops_[i]->Apply(value.value, effective);
+            if (!error.empty()) {
+                throw std::logic_error(RowName(i) + ": Defaults.ini's value " + detail::DefaultsIniText(value.value) +
+                                       " passed the Defaults.ini reader and not the row's codec: " + error);
+            }
+            from.push_back(id);
+        }
+        snapshot_ = std::move(snapshot);
+        effective_ = std::move(effective);
+        from_defaults_ini_ = std::move(from);
+    }
+
+    // Design 3.3: which rows came from Defaults.ini, which the file sets itself, which took the
+    // built-in, and a line per refused value this game would take. Returns the in-game message for
+    // those refused values, or empty.
+    std::string DefaultsLines(std::vector<std::string>& log) const {
+        if (!sources_) return {};
+        const Config& built_in = table_.defaults();
+        std::vector<std::string> taken;
+        std::vector<std::string> own;
+        std::vector<std::string> fallen;
+        std::vector<std::string> refused_lines;
+        std::vector<std::string> refused;
+        bool pair_logged = false;
+        for (std::size_t i = 0; i < table_.rows_.size(); ++i) {
+            if (!detail::FollowsDefaultsIni(table_.rows_[i])) continue;
+            const schema::Concept id = *table_.rows_[i].concept_id;
+            const std::string& key = table_.rows_[i].key;
+            if ((*sources_)[i] == detail::ValueSource::kFile) {
+                own.push_back(key);
+                continue;
+            }
+            if ((*sources_)[i] == detail::ValueSource::kDefaultsIni) {
+                taken.push_back(key + "=" + RowValueText(i, effective_));
+                continue;
+            }
+            fallen.push_back(key + "=" + RowValueText(i, built_in));
+            const detail::DefaultsIniValue& value = snapshot_.Value(id);
+            if (value.state != detail::DefaultsIniValueState::kRefused) continue;
+            const bool pair = id == schema::Concept::RotationEnabled || id == schema::Concept::PositionEnabled;
+            if (!pair || !snapshot_.pair_refused) {
+                refused_lines.push_back(detail::DefaultsIniRefusedLine(value, RowValueText(i, built_in)));
+                refused.push_back(key + "=" + detail::DefaultsIniText(value.value));
+                continue;
+            }
+            if (pair_logged) continue;
+            pair_logged = true;
+            refused_lines.push_back(detail::DefaultsIniPairLine(
+                snapshot_, BuiltInText(schema::Concept::RotationEnabled), BuiltInText(schema::Concept::PositionEnabled)));
+            std::string entry;
+            for (const schema::Concept member : {schema::Concept::RotationEnabled, schema::Concept::PositionEnabled}) {
+                const detail::DefaultsIniValue& held = snapshot_.Value(member);
+                if (held.state != detail::DefaultsIniValueState::kRefused) continue;
+                entry += (entry.empty() ? "" : " and ") + std::string(schema::kConcepts[static_cast<std::size_t>(member)].key) +
+                         "=" + detail::DefaultsIniText(held.value);
+            }
+            refused.push_back(entry);
+        }
+
+        if (!taken.empty()) log.push_back(path_text_ + ": from Defaults.ini: " + Joined(taken, "; "));
+        if (!own.empty()) {
+            log.push_back(path_text_ + ": set in this file, so Defaults.ini does not change them: " + Joined(own, ", ") + ".");
+        }
+        if (!fallen.empty()) log.push_back(path_text_ + ": built-in, not set in Defaults.ini: " + Joined(fallen, "; "));
+        log.insert(log.end(), refused_lines.begin(), refused_lines.end());
+        if (refused.empty()) return {};
+        return "Defaults.ini: " + std::to_string(refused.size()) +
+               (refused.size() == 1 ? " setting cannot" : " settings cannot") + " be used (" + Joined(refused, "; ") +
+               "), so this game uses its built-in values for them. The log has the details.";
+    }
+
+    // The game's built-in value of a tracking mode row, or the schema's for one the table does not
+    // bind; the two are equal for every row that follows Defaults.ini.
+    std::string BuiltInText(schema::Concept id) const {
+        const std::optional<std::size_t> row = RowOf(id);
+        return row ? RowValueText(*row, table_.defaults()) : schema::kConcepts[static_cast<std::size_t>(id)].default_text;
+    }
+
+    static std::string Joined(const std::vector<std::string>& items, const char* separator) {
+        std::string text;
+        for (const std::string& item : items) text += (text.empty() ? "" : separator) + item;
+        return text;
+    }
+
     std::vector<CanonicalDiagnostic> Apply(const CanonicalIni& doc, Config& config, std::vector<std::string>& log) {
         std::vector<CanonicalDiagnostic> diagnostics = doc.diagnostics;
-        ApplyReport report = ApplyCanonical(doc, table_, config);
-        diagnostics.insert(diagnostics.end(), report.diagnostics.begin(), report.diagnostics.end());
+        detail::EffectiveApplyResult applied =
+            detail::ApplyCanonicalEffective(doc, table_, config, effective_, from_defaults_ini_);
+        diagnostics.insert(diagnostics.end(), applied.report.diagnostics.begin(), applied.report.diagnostics.end());
+        sources_ = std::move(applied.sources);
         for (const CanonicalDiagnostic& diagnostic : diagnostics) {
             log.push_back(path_text_ + ": " + DescribeCanonicalDiagnostic(diagnostic));
         }
         return diagnostics;
+    }
+
+    // The defaults the session runs on where no file is read: Defaults.ini's values on the rows
+    // that follow it, the table's on the rest.
+    Config OnDefaults() {
+        Config config = table_.defaults();
+        sources_ = detail::ApplyCanonicalEffective(ParseCanonicalIni(""), table_, config, effective_, from_defaults_ini_)
+                       .sources;
+        return config;
+    }
+
+    std::uint64_t DefaultsWriteTime() const {
+        return defaults_at_ ? detail::DefaultsLastWriteTime(defaults_at_->path) : 0;
     }
 
     void LogDropped(const ImportResult& import, std::vector<std::string>& log) const {
@@ -916,7 +1258,20 @@ private:
     const RenderHeader header_;
     const std::function<void(const std::string&)> status_sink_;
     const detail::ConfigOwnerHook hook_;
-    std::string default_bytes_;
+    const DefaultsFile defaults_;
+    std::string fresh_bytes_;
+
+    // Defaults.ini for the session: where it is, the bytes last read there (none when there was
+    // no file), their write time, and what it gives.
+    std::optional<detail::DefaultsCandidate> defaults_at_;
+    std::optional<std::string> defaults_seen_;
+    std::uint64_t defaults_write_time_ = 0;
+    detail::DefaultsIniSnapshot snapshot_;
+    Config effective_;
+    std::vector<schema::Concept> from_defaults_ini_;
+    // Where each row of the config the last Load or Reload returned took its value, when it
+    // was read over the effective defaults; none for a config the import gave.
+    std::optional<std::vector<detail::ValueSource>> sources_;
 
     std::mutex mutex_;
     bool loaded_ = false;

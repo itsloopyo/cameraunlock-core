@@ -16,6 +16,8 @@ namespace cameraunlock::config::detail {
 // What GetCurrentPackageFullName returns for a process that is not packaged.
 inline constexpr long kDefaultsNoPackage = 15700;
 inline constexpr std::uint32_t kDefaultsPathNotFound = 3;
+// The sentence every line ends with where rows set to default take the built-in values.
+inline constexpr char kDefaultsBuiltIn[] = " Settings set to default use the built-in values.";
 
 enum class DefaultsPlatform {
     // Windows, including a Wine that hides its exports.
@@ -132,6 +134,10 @@ DefaultsChoice ChooseDefaults(const DefaultsResolution& resolution, const std::v
 
 // A wide text as UTF-8, an unpaired surrogate written as U+FFFD, as C# encodes a string.
 std::string DefaultsUtf8(const std::wstring& text);
+
+// The candidate as a line names it: its shown path, and for the prefix's file under Wine
+// ` (this Wine prefix)` after it.
+std::string DefaultsNamed(const DefaultsCandidate& candidate);
 
 #ifdef _WIN32
 

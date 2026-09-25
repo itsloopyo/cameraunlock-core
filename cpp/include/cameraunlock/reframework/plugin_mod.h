@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cameraunlock/config/defaults_file.h>
 #include <cameraunlock/input/deferred_actions.h>
 #include <cameraunlock/protocol/udp_receiver.h>
 #include <cameraunlock/reframework/plugin_config.h>
@@ -32,6 +33,11 @@ struct PluginModDescriptor {
     // The game's name as data/games.json spells it, in printable ASCII, written at the
     // top of a canonical config. Required with config.canonicalConfig.
     const char* gameName = nullptr;
+    // Where Defaults.ini is, which the canonical config's concept rows take their defaults from:
+    // config::DefaultsFile::PerUser() in a mod, config::DefaultsFile::At with a scratch path in a
+    // test. Required with config.canonicalConfig. Members are only ever appended, and this one
+    // is last.
+    config::DefaultsFile defaults;
 };
 
 // The tracking pipeline every RE Engine head-tracking plugin owns: config load,

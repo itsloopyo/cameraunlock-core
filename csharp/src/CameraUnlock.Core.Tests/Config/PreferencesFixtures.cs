@@ -66,6 +66,7 @@ namespace CameraUnlock.Core.Tests.Config
                 Path = target,
                 Table = Table(fixture.ThreeState, true),
                 Header = Header,
+                Defaults = DefaultsFile.At(Path.Combine(Path.Combine(scratch, "global"), "Defaults.ini")),
             });
             ConfigLoadResult<HeadTrackingConfigData> loaded = owner.Load();
             if (loaded.Status != ConfigLoadStatus.Canonical)

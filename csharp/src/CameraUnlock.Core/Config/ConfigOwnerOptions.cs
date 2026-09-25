@@ -70,6 +70,18 @@ namespace CameraUnlock.Core.Config
 #endif
 
         /// <summary>
+        /// Where Defaults.ini is: <see cref="DefaultsFile.PerUser"/> in a mod, and
+        /// <see cref="DefaultsFile.At"/> with a scratch path in every test. A helper that builds the
+        /// options for both takes it as a parameter, so a test never reaches the player's own file.
+        /// Required.
+        /// </summary>
+#if NULLABLE_ENABLED
+        public DefaultsFile? Defaults { get; set; }
+#else
+        public DefaultsFile Defaults { get; set; }
+#endif
+
+        /// <summary>
         /// Shows the player a one-line message, e.g. through the game's toast, when settings are
         /// not imported, cannot be read or are not saved. Optional. It runs after the owner has
         /// released its lock.

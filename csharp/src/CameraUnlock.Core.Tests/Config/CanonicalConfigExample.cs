@@ -38,13 +38,11 @@ namespace CameraUnlock.Core.Tests.Config
                     "true: write HeadTracking.log beside the game's executable.");
         }
 
-        /// <summary>Throws when the table's defaults do not render as example/CameraUnlock.ini.</summary>
+        /// <summary>Throws when the table's fresh render is not example/CameraUnlock.ini.</summary>
         public static void RunRender(string root)
         {
             ConfigTable<ModConfig> table = ModConfigTable();
-            var defaults = new ModConfig();
-            table.Apply(CanonicalIni.Parse(new byte[0]), defaults);
-            byte[] rendered = table.Render(defaults, new RenderHeader("Example Game"));
+            byte[] rendered = table.RenderFresh(new RenderHeader("Example Game"));
             if (Encoding.ASCII.GetString(rendered) != Expected(root))
             {
                 throw new InvalidOperationException("rendered bytes differ:\n" + Encoding.ASCII.GetString(rendered));
@@ -53,7 +51,8 @@ namespace CameraUnlock.Core.Tests.Config
 
         /// <summary>
         /// Throws unless the owner creates the file on the first Load, saves the yaw toggle as one
-        /// changed line, and the next launch reads the saved value.
+        /// changed line, and the next launch reads the saved value. Defaults.ini is a scratch file
+        /// beside the config, which the first Load creates.
         /// </summary>
         public static void RunOwner(string root, string dir)
         {
@@ -62,6 +61,7 @@ namespace CameraUnlock.Core.Tests.Config
                 Path = Path.Combine(dir, "CameraUnlock.ini"),
                 Table = ModConfigTable(),
                 Header = new RenderHeader("Example Game"),
+                Defaults = DefaultsFile.At(Path.Combine(Path.Combine(dir, "global"), "Defaults.ini")),
             });
 
             ConfigLoadResult<ModConfig> loaded = owner.Load();
@@ -73,7 +73,7 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(loaded.Status == ConfigLoadStatus.Created, "the first Load creates the file, not " + loaded.Status);
             Expect(parsed && toggle.Length == 2, "ToggleKey reads as two bindings: " + error);
             Expect(saved.Status == ConfigSaveStatus.Saved, "the yaw toggle saves, not " + saved.Status + ": " + saved.Reason);
-            string after = Expected(root).Replace("WorldSpaceYaw=true", "WorldSpaceYaw=false");
+            string after = Expected(root).Replace("WorldSpaceYaw=default", "WorldSpaceYaw=false");
             Expect(File.ReadAllText(Path.Combine(dir, "CameraUnlock.ini"), Encoding.ASCII) == after,
                 "the save changes the WorldSpaceYaw line and nothing else");
 
@@ -82,6 +82,7 @@ namespace CameraUnlock.Core.Tests.Config
                 Path = Path.Combine(dir, "CameraUnlock.ini"),
                 Table = ModConfigTable(),
                 Header = new RenderHeader("Example Game"),
+                Defaults = DefaultsFile.At(Path.Combine(Path.Combine(dir, "global"), "Defaults.ini")),
             });
             ConfigLoadResult<ModConfig> reread = next.Load();
             Expect(reread.Status == ConfigLoadStatus.Canonical && !reread.Config.WorldSpaceYaw && !reread.Config.WriteLog,

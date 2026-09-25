@@ -64,9 +64,8 @@ std::string Expected() {
 }
 
 void TheTableRendersTheExampleFile() {
-    const ConfigTable<ModConfig> table = ModConfigTable();
-    Check(RenderCanonical(table, table.defaults(), RenderHeader{"Example Game"}) == Expected(),
-          "the defaults render as example/CameraUnlock.ini");
+    Check(RenderCanonicalFresh(ModConfigTable(), RenderHeader{"Example Game"}) == Expected(),
+          "the fresh render is example/CameraUnlock.ini");
 }
 
 #ifdef _WIN32
@@ -76,6 +75,7 @@ void TheOwnerCreatesSavesAndReadsTheFile(const fs::path& dir) {
     options.path = (dir / L"CameraUnlock.ini").wstring();
     options.table = ModConfigTable();
     options.header.display_name = "Example Game";
+    options.defaults = DefaultsFile::At((dir / L"global" / L"Defaults.ini").wstring());
     ConfigOwner<ModConfig> owner(std::move(options));
 
     ConfigLoadResult<ModConfig> loaded = owner.Load();
@@ -89,13 +89,14 @@ void TheOwnerCreatesSavesAndReadsTheFile(const fs::path& dir) {
     Check(saved.status == ConfigSaveStatus::Saved, "the yaw toggle saves");
 
     std::string after = Expected();
-    after.replace(after.find("WorldSpaceYaw=true"), 18, "WorldSpaceYaw=false");
+    after.replace(after.find("WorldSpaceYaw=default"), 21, "WorldSpaceYaw=false");
     Check(ReadBytes(dir / "CameraUnlock.ini") == after, "the save changed the WorldSpaceYaw line and nothing else");
 
     ConfigOwnerOptions<ModConfig> again;
     again.path = (dir / L"CameraUnlock.ini").wstring();
     again.table = ModConfigTable();
     again.header.display_name = "Example Game";
+    again.defaults = DefaultsFile::At((dir / L"global" / L"Defaults.ini").wstring());
     ConfigOwner<ModConfig> next(std::move(again));
     ConfigLoadResult<ModConfig> reread = next.Load();
     Check(reread.status == ConfigLoadStatus::Canonical && !reread.config.world_space_yaw && !reread.config.write_log,

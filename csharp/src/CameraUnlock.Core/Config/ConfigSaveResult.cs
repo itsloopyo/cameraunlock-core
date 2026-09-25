@@ -47,7 +47,11 @@ namespace CameraUnlock.Core.Config
         public string TemporaryPath { get; }
 #endif
 
-        /// <summary>The lines for the game's log, naming the file and the operation. Empty for Saved.</summary>
+        /// <summary>
+        /// The lines for the game's log, naming the file and the operation. For Saved, a line for each
+        /// row that held <c>default</c> or was missing and is now written as a value, so no longer
+        /// follows Defaults.ini; otherwise empty for Saved.
+        /// </summary>
         public ReadOnlyCollection<string> Log { get; }
     }
 }

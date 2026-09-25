@@ -20,7 +20,7 @@ namespace CameraUnlock.Core.Config
         private const string FolderName = "CameraUnlock";
         private const string FileName = "Defaults.ini";
         private const string NoKnownFolder = "Windows reported no roaming AppData folder";
-        private const string BuiltIn = " Settings set to default use the built-in values.";
+        internal const string BuiltIn = " Settings set to default use the built-in values.";
         private const string ThisPrefix = " (this Wine prefix)";
 
         /// <summary>
@@ -362,7 +362,9 @@ namespace CameraUnlock.Core.Config
             return underRoot ? rootName + path.Substring(root.Length) : path;
         }
 
-        private static string Named(DefaultsCandidate candidate)
+        /// <summary>The candidate as a line names it: its shown path, and for the prefix's file under Wine
+        /// <c> (this Wine prefix)</c> after it.</summary>
+        internal static string Named(DefaultsCandidate candidate)
         {
             return candidate.Kind == DefaultsCandidateKind.WinePrefix ? candidate.Shown + ThisPrefix : candidate.Shown;
         }

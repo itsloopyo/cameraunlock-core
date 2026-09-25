@@ -10,7 +10,6 @@ namespace {
 constexpr wchar_t kFolderName[] = L"CameraUnlock";
 constexpr wchar_t kFileName[] = L"Defaults.ini";
 constexpr char kNoKnownFolder[] = "Windows reported no roaming AppData folder";
-constexpr char kBuiltIn[] = " Settings set to default use the built-in values.";
 constexpr char kThisPrefix[] = " (this Wine prefix)";
 
 bool IsDrivePath(const std::wstring& path) {
@@ -152,9 +151,6 @@ DefaultsResolution ResolveNative(const DefaultsProbe& probe) {
     return resolution;
 }
 
-std::string Named(const DefaultsCandidate& candidate) {
-    return candidate.kind == DefaultsCandidateKind::kWinePrefix ? candidate.shown + kThisPrefix : candidate.shown;
-}
 
 bool HasHost(const DefaultsResolution& resolution) {
     return !resolution.candidates.empty() && resolution.candidates[0].kind == DefaultsCandidateKind::kWineHost;
@@ -261,6 +257,10 @@ std::string DefaultsUtf8(const std::wstring& text) {
     return utf8;
 }
 
+std::string DefaultsNamed(const DefaultsCandidate& candidate) {
+    return candidate.kind == DefaultsCandidateKind::kWinePrefix ? candidate.shown + kThisPrefix : candidate.shown;
+}
+
 DefaultsResolution ResolveDefaults(const DefaultsProbe& probe) {
     switch (probe.platform) {
         case DefaultsPlatform::kWindows: {
@@ -293,17 +293,17 @@ DefaultsChoice ChooseDefaults(const DefaultsResolution& resolution, const std::v
     if (candidates.empty()) {
         std::string line = "Defaults.ini: no location: " + resolution.no_location + ".";
         if (resolution.platform == DefaultsPlatform::kWine) line += HostSentence(resolution, outcomes);
-        return Final(line + kBuiltIn);
+        return Final(line + kDefaultsBuiltIn);
     }
 
     for (std::size_t read = 0; read < candidates.size(); ++read) {
         if (!exists[read]) continue;
         for (std::size_t ignored = read + 1; ignored < candidates.size(); ++ignored) {
             if (!exists[ignored]) continue;
-            DefaultsChoice choice = ReadAt(read, "Defaults.ini: " + Named(candidates[read]) + " is read, and " +
-                                                     Named(candidates[ignored]) + " is not.");
-            choice.message = "Two Defaults.ini files: this game reads " + Named(candidates[read]) + " and ignores " +
-                             Named(candidates[ignored]) + ".";
+            DefaultsChoice choice = ReadAt(read, "Defaults.ini: " + DefaultsNamed(candidates[read]) + " is read, and " +
+                                                     DefaultsNamed(candidates[ignored]) + " is not.");
+            choice.message = "Two Defaults.ini files: this game reads " + DefaultsNamed(candidates[read]) + " and ignores " +
+                             DefaultsNamed(candidates[ignored]) + ".";
             return choice;
         }
         return ReadAt(read, Found(resolution, read, "read", outcomes));
@@ -315,7 +315,7 @@ DefaultsChoice ChooseDefaults(const DefaultsResolution& resolution, const std::v
             shown += (shown.empty() ? "" : " or ") + candidate.shown;
         }
         return Final("Defaults.ini: no file at " + shown +
-                     "; on this system the mod reads Defaults.ini but does not create it." + kBuiltIn);
+                     "; on this system the mod reads Defaults.ini but does not create it." + kDefaultsBuiltIn);
     }
 
     for (std::size_t i = 0; i < candidates.size(); ++i) {
@@ -337,7 +337,7 @@ DefaultsChoice ChooseDefaults(const DefaultsResolution& resolution, const std::v
 
     if (resolution.platform == DefaultsPlatform::kWindows) {
         const DefaultsCandidate& only = candidates[0];
-        if (only.may_create) return Final("Defaults.ini: " + Failure(only, outcomes[0], "") + kBuiltIn);
+        if (only.may_create) return Final("Defaults.ini: " + Failure(only, outcomes[0], "") + kDefaultsBuiltIn);
         return Final("Defaults.ini: not created, because this game runs as a packaged app (GetCurrentPackageFullName returned " +
                      std::to_string(resolution.package_result) + "); " + only.shown +
                      " is created by the next game that is not packaged, or by Lopari.");
@@ -347,7 +347,7 @@ DefaultsChoice ChooseDefaults(const DefaultsResolution& resolution, const std::v
     const std::string failure = candidates[prefix].kind == DefaultsCandidateKind::kWinePrefix
                                     ? Failure(candidates[prefix], outcomes[prefix], kThisPrefix)
                                     : std::string("no location: ") + kNoKnownFolder + ".";
-    return Final("Defaults.ini: " + failure + HostSentence(resolution, outcomes) + kBuiltIn);
+    return Final("Defaults.ini: " + failure + HostSentence(resolution, outcomes) + kDefaultsBuiltIn);
 }
 
 }  // namespace cameraunlock::config::detail

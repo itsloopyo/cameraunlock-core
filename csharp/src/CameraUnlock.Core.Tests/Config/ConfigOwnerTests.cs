@@ -20,13 +20,14 @@ namespace CameraUnlock.Core.Tests.Config
         [Fact]
         public void StatusNumbersArePinnedForTheCppTwin()
         {
-            Assert.Equal(new[] { 0, 1, 2, 3, 4, 5 }, ((ConfigLoadStatus[])System.Enum.GetValues(typeof(ConfigLoadStatus))).Select(v => (int)v));
+            Assert.Equal(new[] { 0, 1, 2, 3, 4, 5, 6 }, ((ConfigLoadStatus[])System.Enum.GetValues(typeof(ConfigLoadStatus))).Select(v => (int)v));
             Assert.Equal(0, (int)ConfigLoadStatus.Canonical);
             Assert.Equal(1, (int)ConfigLoadStatus.Migrated);
             Assert.Equal(2, (int)ConfigLoadStatus.Created);
             Assert.Equal(3, (int)ConfigLoadStatus.Deferred);
             Assert.Equal(4, (int)ConfigLoadStatus.LegacyRefused);
             Assert.Equal(5, (int)ConfigLoadStatus.Unreadable);
+            Assert.Equal(6, (int)ConfigLoadStatus.ReadOnly);
 
             Assert.Equal(new[] { 0, 1, 2 }, ((ConfigSaveStatus[])System.Enum.GetValues(typeof(ConfigSaveStatus))).Select(v => (int)v));
             Assert.Equal(0, (int)ConfigSaveStatus.Saved);

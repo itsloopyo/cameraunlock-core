@@ -469,7 +469,8 @@ std::vector<testing::MutationKey> CorpusKeys(const std::vector<LegacyKey>& reads
 }
 
 // The owner PluginMod builds with canonicalConfig: CameraUnlock.ini in `dir`, importing the
-// legacy HeadTracking.ini beside it.
+// legacy HeadTracking.ini beside it. Defaults.ini is a scratch file in a folder beside `dir`, so
+// the folder holds the two files alone.
 ConfigOwnerOptions<PluginConfig> OwnerOptions(const Fixture& f, const fs::path& dir) {
     ConfigOwnerOptions<PluginConfig> options;
     options.path = (dir / "CameraUnlock.ini").wstring();
@@ -477,6 +478,7 @@ ConfigOwnerOptions<PluginConfig> OwnerOptions(const Fixture& f, const fs::path& 
     options.import = PluginConfigLegacyImport(f.schema);
     options.legacy_path = (dir / "HeadTracking.ini").wstring();
     options.header.display_name = f.game;
+    options.defaults = DefaultsFile::At((dir.parent_path() / "defaults" / "Defaults.ini").wstring());
     return options;
 }
 
@@ -590,13 +592,15 @@ void TestOwnerConvertsShippedFile(const fs::path& root, const Fixture& f) {
     Check(HasCanonicalStamp(converted) && doc.IsReadable() && doc.diagnostics.empty() && report.diagnostics.empty(),
           name + ": the new file is stamped and reads with no diagnostics");
     Check(differences.empty(), name + ": and reads back as the import gave it " + Join(differences));
-    Check(Contains(converted, "\r\nToggleKey=" + imported.toggleKeyBindings + "\r\n") &&
+    Check(Contains(converted, "\r\nToggleKey=default\r\n") && reread.toggleKeyBindings == imported.toggleKeyBindings &&
               Contains(imported.toggleKeyBindings, "Ctrl+Shift+Y") &&
-              Contains(converted, "\r\nCycleTrackingModeKey=" + imported.cycleTrackingModeKeyBindings + "\r\n") &&
+              Contains(converted, "\r\nCycleTrackingModeKey=default\r\n") &&
+              reread.cycleTrackingModeKeyBindings == imported.cycleTrackingModeKeyBindings &&
               Contains(imported.cycleTrackingModeKeyBindings, "Ctrl+Shift+G") &&
-              Contains(converted, "\r\nYawModeKey=" + imported.yawModeKeyBindings + "\r\n") &&
+              Contains(converted, "\r\nYawModeKey=default\r\n") &&
+              reread.yawModeKeyBindings == imported.yawModeKeyBindings &&
               Contains(imported.yawModeKeyBindings, "Ctrl+Shift+H"),
-          name + ": its hotkey lists carry the chords");
+          name + ": its shipped hotkey lists, chords included, are what default gives, so they are written default");
     Check(!Contains(converted, "ConfigVersion=1") && !Contains(converted, "PositionToggleKey") &&
               !Contains(converted, "Sensitivity") && !Contains(converted, "Invert") &&
               !Contains(converted, "RotationEnabled") && !Contains(converted, "PositionLimitYDown"),
@@ -606,9 +610,13 @@ void TestOwnerConvertsShippedFile(const fs::path& root, const Fixture& f) {
 
     ConfigOwner<PluginConfig> again(OwnerOptions(f, dir));
     const ConfigLoadResult<PluginConfig> second = again.Load();
-    Check(second.status == ConfigLoadStatus::Canonical && second.log.size() == 1 &&
-              Contains(second.log[0], "CameraUnlock.ini: settings are read from this file. ") &&
-              Contains(second.log[0], "HeadTracking.ini is left as it was and is not read."),
+    std::vector<std::string> game_lines;
+    for (const std::string& line : second.log) {
+        if (!Contains(line, "Defaults.ini")) game_lines.push_back(line);
+    }
+    Check(second.status == ConfigLoadStatus::Canonical && game_lines.size() == 1 &&
+              Contains(game_lines[0], "CameraUnlock.ini: settings are read from this file. ") &&
+              Contains(game_lines[0], "HeadTracking.ini is left as it was and is not read."),
           name + ": a second load reads CameraUnlock.ini as canonical and says HeadTracking.ini is not read");
     Check(ReadBytes(file) == converted && ReadBytes(legacy) == base && Listing(dir) == both, name + ": and writes nothing");
 
@@ -826,6 +834,27 @@ void TestTableRendersTheGamesRows() {
     Check(!Contains(RenderDefaults(kFixtures[0].schema, "Resident Evil 2"), "[Light]"), "RE2's carry no [Light]");
 }
 
+// The owner renders its fresh file when it is built, and that render refuses a row following
+// Defaults.ini whose default is not the schema's, so every schema the RE tests use has to pass it.
+void TestEverySchemaRendersFresh() {
+    std::vector<PluginConfigSchema> schemas;
+    for (const Fixture& f : kFixtures) schemas.push_back(f.schema);
+    schemas.push_back(kRe8Schema);
+    schemas.push_back(PluginConfigSchema{"Pin", true, true, true, 2.0f, "pin"});
+    schemas.push_back(PluginConfigSchema{"Pin", false, false, false, 1.0f, ""});
+    for (const PluginConfigSchema& schema : schemas) {
+        std::string fresh;
+        std::string error;
+        try {
+            fresh = RenderCanonicalFresh(PluginConfigTable(schema), RenderHeader{"Fixture Game"});
+        } catch (const std::invalid_argument& e) {
+            error = e.what();
+        }
+        Check(error.empty() && Contains(fresh, "\r\nUdpPort=default\r\n") && Contains(fresh, "\r\nPositionLimitZBack=default\r\n"),
+              std::string(schema.title) + " (" + schema.modId + "): PluginConfigTable renders a fresh file " + error);
+    }
+}
+
 void TestLoadIgnoresCanonicalConfig(const fs::path& root) {
     const std::string base = ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / kFixtures[4].file);
     PluginConfigSchema canonical = kRe8Schema;
@@ -855,6 +884,7 @@ int RunPluginConfigCanonicalTests() {
 
     TestReadPinned(root);
     TestTableRendersTheGamesRows();
+    TestEverySchemaRendersFresh();
     TestImportKeysAreWhatReadReads();
     TestImportDropsAndCorrection(root);
     TestShippedShapingIsFolded(root);

@@ -164,6 +164,11 @@ bool PluginMod::LoadCanonicalConfig() {
     if (m_descriptor.gameName == nullptr) {
         throw std::invalid_argument("PluginModDescriptor::gameName is required with canonicalConfig");
     }
+    if (!cameraunlock::config::detail::DefaultsFileIsSet(m_descriptor.defaults)) {
+        throw std::invalid_argument(
+            "PluginModDescriptor::defaults is required with canonicalConfig: DefaultsFile::PerUser() in a mod, "
+            "DefaultsFile::At(path) with a scratch path in a test");
+    }
     m_config.SetDefaults(m_descriptor.config);
     bool loaded = false;
 
@@ -187,6 +192,7 @@ bool PluginMod::LoadCanonicalConfig() {
         options.import = PluginConfigLegacyImport(m_descriptor.config);
         options.legacy_path = directory + L"\\" + wideName;
         options.header.display_name = m_descriptor.gameName;
+        options.defaults = m_descriptor.defaults;
         m_configOwner = std::make_unique<cameraunlock::config::ConfigOwner<PluginConfig>>(std::move(options));
 
         const cameraunlock::config::ConfigLoadResult<PluginConfig> result = m_configOwner->Load();
@@ -216,7 +222,10 @@ bool PluginMod::LoadCanonicalConfig() {
 void PluginMod::SaveConfig(const char* row, const std::function<void(PluginConfig&)>& change) {
     if (!m_configOwner) return;
     const cameraunlock::config::ConfigSaveResult result = m_configOwner->Save(change);
-    if (result.status == cameraunlock::config::ConfigSaveStatus::Saved) return;
+    if (result.status == cameraunlock::config::ConfigSaveStatus::Saved) {
+        for (const std::string& line : result.log) LogInfo("%s", line.c_str());
+        return;
+    }
     const LogLevel level =
         result.status == cameraunlock::config::ConfigSaveStatus::Uncertain ? LogLevel::Error : LogLevel::Warning;
     Log(level, "%s %s: %s", row, cameraunlock::config::ConfigSaveStatusName(result.status), result.reason.c_str());

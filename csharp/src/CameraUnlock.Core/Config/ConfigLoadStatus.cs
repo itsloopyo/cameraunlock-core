@@ -44,5 +44,13 @@ namespace CameraUnlock.Core.Config
         /// The legacy file is not read.
         /// </summary>
         Unreadable = 5,
+
+        /// <summary>
+        /// Not running on Windows (Linux or macOS with a native runtime), where the owner writes
+        /// nothing. The file at Path was read, or the legacy file imported in memory, or the session
+        /// runs on the defaults; no file is created and every save is NotSaved. C# only: a C++ mod
+        /// always runs as a Windows program, under Wine included.
+        /// </summary>
+        ReadOnly = 6,
     }
 }

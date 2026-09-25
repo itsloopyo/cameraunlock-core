@@ -88,4 +88,8 @@ std::string DefaultsIniRefusedLine(const DefaultsIniValue& value, std::string_vi
 std::string DefaultsIniPairLine(const DefaultsIniSnapshot& snapshot, std::string_view rotation_built_in,
                                 std::string_view position_built_in);
 
+// A value's bytes as the lines write them: well-formed UTF-8 kept, each maximal subpart of an
+// ill-formed sequence written as U+FFFD, as C# core's CodecText.Utf8Text decodes them.
+std::string DefaultsIniText(std::string_view bytes);
+
 }  // namespace cameraunlock::config::detail

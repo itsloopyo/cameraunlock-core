@@ -89,6 +89,26 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites),
             Scenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports),
             Scenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings),
+            Scenario("defaults-ini-absent-is-created-with-the-built-in-values", DefaultsIniAbsentIsCreatedWithTheBuiltInValues),
+            Scenario("defaults-ini-under-a-missing-folder-is-not-created", DefaultsIniUnderAMissingFolderIsNotCreated),
+            Scenario("defaults-ini-in-a-folder-that-denies-file-creation-is-not-created",
+                DefaultsIniInAFolderThatDeniesFileCreationIsNotCreated),
+            Scenario("a-packaged-game-reads-defaults-ini-and-never-creates-it", APackagedGameReadsDefaultsIniAndNeverCreatesIt),
+            Scenario("defaults-ini-present-is-read", DefaultsIniPresentIsRead),
+            Scenario("a-refused-value-is-told-only-where-the-game-takes-it", ARefusedValueIsToldOnlyWhereTheGameTakesIt),
+            Scenario("an-unreadable-defaults-ini-gives-the-built-in-values", AnUnreadableDefaultsIniGivesTheBuiltInValues),
+            Scenario("defaults-ini-appearing-during-creation-is-read", DefaultsIniAppearingDuringCreationIsRead),
+            Scenario("a-migrated-game-writes-default-where-the-import-equals-it", AMigratedGameWritesDefaultWhereTheImportEqualsIt),
+            Scenario("a-migrated-game-writes-a-value-where-defaults-ini-differs", AMigratedGameWritesAValueWhereDefaultsIniDiffers),
+            Scenario("a-toggle-on-a-default-row-writes-its-value", AToggleOnADefaultRowWritesItsValue),
+            Scenario("a-mode-change-from-default-writes-both-rows", AModeChangeFromDefaultWritesBothRows),
+            Scenario("end-saves-nothing", EndSavesNothing),
+            Scenario("a-save-after-defaults-ini-changed-keeps-default-rows", ASaveAfterDefaultsIniChangedKeepsDefaultRows),
+            Scenario("reload-and-file-changed-follow-defaults-ini", ReloadAndFileChangedFollowDefaultsIni),
+            Scenario("a-table-off-the-schema-default-is-refused-unless-per-game", ATableOffTheSchemaDefaultIsRefusedUnlessPerGame),
+            Scenario("read-only-over-a-config-file", ReadOnlyOverAConfigFile),
+            Scenario("read-only-over-a-legacy-file", ReadOnlyOverALegacyFile),
+            Scenario("read-only-over-nothing", ReadOnlyOverNothing),
             Scenario("options-and-call-order-are-checked", OptionsAndCallOrderAreChecked),
         };
 
@@ -97,18 +117,23 @@ namespace CameraUnlock.Core.Tests.Config
             get { return All.Select(s => s.Key); }
         }
 
-        /// <summary>The steps of an import, as the owner's internal hook names them.</summary>
+        /// <summary>
+        /// The steps of a first launch with a legacy file and no Defaults.ini, as the owner's internal
+        /// hook names them: Defaults.ini's creation, then the import's.
+        /// </summary>
         public static IEnumerable<string> InterruptionLabels
         {
             get
             {
-                var labels = new List<string> { "Open", "Import", "Recheck" };
                 CheckedWriteStep[] writer =
                 {
                     CheckedWriteStep.ReadTarget, CheckedWriteStep.CreateTemporary, CheckedWriteStep.WriteTemporary,
                     CheckedWriteStep.FlushTemporary, CheckedWriteStep.CloseTemporary, CheckedWriteStep.RecheckTarget,
                     CheckedWriteStep.Commit,
                 };
+                var labels = new List<string>();
+                foreach (CheckedWriteStep step in writer) labels.Add("Defaults." + step);
+                labels.AddRange(new[] { "Open", "Import", "Recheck" });
                 foreach (CheckedWriteStep step in writer) labels.Add("Commit." + step);
                 labels.Add("Remember");
                 return labels;
@@ -146,14 +171,33 @@ namespace CameraUnlock.Core.Tests.Config
 
         /// <summary>
         /// The parent's side, after the child died at <paramref name="label"/>: the legacy file is
-        /// whole and unwritten, the config file is absent before the commit and whole after it, and
-        /// beside them at most the writer's temporaries. The next launch then ends where an
-        /// uninterrupted one does.
+        /// whole and unwritten, Defaults.ini is absent before its commit and whole after it, the
+        /// config file is absent before the commit and whole after it, and beside each at most the
+        /// writer's temporaries. The next launch then ends where an uninterrupted one does.
         /// </summary>
         public static void CheckAfterInterruption(string label, string dir)
         {
             var rig = new Rig(dir);
             rig.ExpectLegacyKept(Ascii(LegacyText), label);
+            if (label.StartsWith("Defaults.", StringComparison.Ordinal))
+            {
+                Expect(!File.Exists(rig.DefaultsPath), label + ": Defaults.ini exists though the child died before its commit");
+            }
+            else
+            {
+                ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
+            }
+            string global = Path.GetDirectoryName(rig.DefaultsPath);
+            if (Directory.Exists(global))
+            {
+                foreach (string file in Directory.GetFiles(global))
+                {
+                    string name = Path.GetFileName(file);
+                    if (name == "Defaults.ini") continue;
+                    Expect(name.StartsWith("Defaults.ini.", StringComparison.Ordinal) && name.EndsWith(".tmp", StringComparison.Ordinal),
+                        label + ": unexpected leftover " + name);
+                }
+            }
             bool committed = label == "Remember";
             if (committed)
             {
@@ -175,6 +219,7 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(next.Status == (committed ? ConfigLoadStatus.Canonical : ConfigLoadStatus.Migrated),
                 label + ": the next launch is " + next.Status);
             ExpectBytes(rig.Path, MigratedBytes());
+            ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
             rig.ExpectLegacyKept(Ascii(LegacyText), label + ", after the next launch");
         }
 
@@ -204,7 +249,7 @@ namespace CameraUnlock.Core.Tests.Config
             var rig = new Rig(dir);
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Created);
-            ExpectBytes(rig.Path, Render(Defaults()));
+            ExpectBytes(rig.Path, Fresh());
             ExpectSame(load.Config, Defaults(), "the session runs on the defaults");
             Expect(rig.Legacy.Runs == 0, "no import runs when there is no legacy file");
             Expect(rig.Sink.Count == 0, "nothing is reported");
@@ -241,7 +286,7 @@ namespace CameraUnlock.Core.Tests.Config
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Canonical);
             ExpectSame(load.Config, chosen, "the file's values");
-            Expect(load.Diagnostics.Count == 0 && load.Log.Count == 0,
+            Expect(load.Diagnostics.Count == 0 && GameLines(load).Length == 0,
                 "a clean file with no legacy file beside it draws nothing, got:\n" + string.Join("\n", load.Log.ToArray()));
             Expect(rig.Legacy.Runs == 0, "the import never runs while the config exists");
             ExpectBytes(rig.Path, canonical);
@@ -339,7 +384,7 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(steps.SequenceEqual(new[] { "Open" }), "the second launch only opens the file, got " + string.Join(", ", steps.ToArray()));
             Expect(rig.Legacy.Runs == 1, "the import does not run again");
             ExpectLogLine(again, rig.Path + ": settings are read from this file. " + rig.LegacyPath + " is left as it was and is not read.");
-            Expect(again.Log.Count == 1, "that is the only line, got:\n" + string.Join("\n", again.Log.ToArray()));
+            Expect(GameLines(again).Length == 1, "that is the only line, got:\n" + string.Join("\n", again.Log.ToArray()));
             Expect(File.GetLastWriteTimeUtc(rig.Path) == written, "the config is not rewritten");
             ExpectImported(rig);
         }
@@ -358,10 +403,10 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectStatus(load, ConfigLoadStatus.Canonical);
             ExpectSame(load.Config, chosen, "the config's values, not the legacy file's");
             Expect(rig.Legacy.Runs == 0, "the import never runs while the config exists");
-            Expect(opened.SequenceEqual(new[] { "Open " + rig.Path }),
+            Expect(opened.Where(o => !o.StartsWith("Defaults.", StringComparison.Ordinal)).SequenceEqual(new[] { "Open " + rig.Path }),
                 "only the config is opened, got " + string.Join(", ", opened.ToArray()));
             ExpectLogLine(load, rig.Path + ": settings are read from this file. " + rig.LegacyPath + " is left as it was and is not read.");
-            Expect(load.Log.Count == 1, "that is the only line, got:\n" + string.Join("\n", load.Log.ToArray()));
+            Expect(GameLines(load).Length == 1, "that is the only line, got:\n" + string.Join("\n", load.Log.ToArray()));
             Expect(rig.Sink.Count == 0, "nothing is reported");
             ExpectBytes(rig.Path, canonical);
             rig.ExpectLegacyKept();
@@ -828,13 +873,13 @@ namespace CameraUnlock.Core.Tests.Config
         private static void ATableMarkingOneModeRowWritableIsRefused(string dir)
         {
             string path = Path.Combine(dir, FileName);
-            ConfigOwnerOptions<HeadTrackingConfigData> positionOnly = Options(path);
+            ConfigOwnerOptions<HeadTrackingConfigData> positionOnly = Options(dir, path);
             positionOnly.Table = HeadTrackingConfigTable.Create(ConfigConcepts.UdpPort, ConfigConcepts.RotationEnabled,
                 ConfigConcepts.PositionEnabled).Select(ConfigConcepts.PositionEnabled).Writable();
             ArgumentException e = ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(positionOnly),
                 "PositionEnabled is Writable and RotationEnabled is not");
             ExpectContains(e.Message, "the table marks [Position] PositionEnabled Writable but not [General] RotationEnabled");
-            ConfigOwnerOptions<HeadTrackingConfigData> rotationOnly = Options(path);
+            ConfigOwnerOptions<HeadTrackingConfigData> rotationOnly = Options(dir, path);
             rotationOnly.Table = HeadTrackingConfigTable.Create(ConfigConcepts.UdpPort, ConfigConcepts.RotationEnabled,
                 ConfigConcepts.PositionEnabled).Select(ConfigConcepts.RotationEnabled).Writable();
             e = ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(rotationOnly),
@@ -842,16 +887,16 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectContains(e.Message, "the table marks [General] RotationEnabled Writable but not [Position] PositionEnabled");
             ExpectListing(dir);
 
-            ConfigOwnerOptions<HeadTrackingConfigData> twoState = Options(path);
+            ConfigOwnerOptions<HeadTrackingConfigData> twoState = Options(dir, path);
             twoState.Table = HeadTrackingConfigTable.Create(ConfigConcepts.UdpPort, ConfigConcepts.PositionEnabled)
                 .Select(ConfigConcepts.PositionEnabled).Writable();
             var owner = new ConfigOwner<HeadTrackingConfigData>(twoState);
             Expect(owner.Load().Status == ConfigLoadStatus.Created, "a table with one mode row is built and loads");
             string created = Encoding.ASCII.GetString(File.ReadAllBytes(path));
-            Expect(created.Contains("PositionEnabled=true\r\n") && !created.Contains("RotationEnabled="),
+            Expect(created.Contains("PositionEnabled=default\r\n") && !created.Contains("RotationEnabled="),
                 "the file holds PositionEnabled and no RotationEnabled:\n" + created);
             ExpectSaved(owner.Save(c => c.PositionEnabled = false));
-            ExpectBytes(path, Ascii(created.Replace("PositionEnabled=true", "PositionEnabled=false")));
+            ExpectBytes(path, Ascii(created.Replace("PositionEnabled=default", "PositionEnabled=false")));
         }
 
         private static void ASaveWithNothingChangedWritesNothing(string dir)
@@ -865,7 +910,7 @@ namespace CameraUnlock.Core.Tests.Config
             ConfigSaveResult save = owner.Save(c => c.WorldSpaceYaw = true);
             ExpectSaved(save);
             Expect(steps.Count == 0, "the writer never ran, got " + string.Join(", ", steps.ToArray()));
-            ExpectBytes(rig.Path, Render(Defaults()));
+            ExpectBytes(rig.Path, Fresh());
             Expect(File.GetLastWriteTimeUtc(rig.Path) == written, "the file is not rewritten");
         }
 
@@ -874,7 +919,7 @@ namespace CameraUnlock.Core.Tests.Config
             var rig = new Rig(dir);
             ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
             ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
-            byte[] theirs = Render(Defaults()).Concat(Ascii("[Extra]\r\nNote=1\r\n")).ToArray();
+            byte[] theirs = Fresh().Concat(Ascii("[Extra]\r\nNote=1\r\n")).ToArray();
             rig.Hook = (step, path) =>
             {
                 if (step == "Save.RecheckTarget") File.WriteAllBytes(rig.Path, theirs);
@@ -895,7 +940,7 @@ namespace CameraUnlock.Core.Tests.Config
             InvalidOperationException e = ExpectThrows<InvalidOperationException>(
                 () => owner.Save(c => c.EnableOnStartup = !c.EnableOnStartup), "EnableOnStartup is not Writable");
             ExpectContains(e.Message, "[General] EnableOnStartup");
-            ExpectBytes(rig.Path, Render(Defaults()));
+            ExpectBytes(rig.Path, Fresh());
             Expect(rig.Sink.Count == 0, "a programming error is thrown, not reported");
         }
 
@@ -920,7 +965,7 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectNotSaved(save, "the file is read-only");
             Expect(save.Error is CheckedWriteException, "the writer's error is carried, got " + save.Error);
             Expect(save.Log.Any(l => l.Contains(rig.Path) && l.Contains("Commit")), "the log names the file and the step");
-            ExpectBytes(rig.Path, Render(Defaults()));
+            ExpectBytes(rig.Path, Fresh());
             ExpectListing(dir, FileName);
         }
 
@@ -939,8 +984,8 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectContains(save.Reason, rig.Path);
             ExpectContains(save.Reason, save.TemporaryPath);
             ExpectSunkOnce(rig, save.Reason);
-            ExpectBytes(save.TemporaryPath, Ascii(Encoding.ASCII.GetString(Render(Defaults()))
-                .Replace("WorldSpaceYaw=true", "WorldSpaceYaw=false")));
+            ExpectBytes(save.TemporaryPath, Ascii(Encoding.ASCII.GetString(Fresh())
+                .Replace("WorldSpaceYaw=default", "WorldSpaceYaw=false")));
             File.Delete(save.TemporaryPath);
             ExpectListing(dir, FileName);
         }
@@ -1012,36 +1057,483 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectBytes(rig.Path, utf16);
         }
 
+        // Every row of the test table, in table order, as the created Defaults.ini gives it.
+        private const string AllFromDefaultsIni = "UdpPort=4242; EnableOnStartup=true; WorldSpaceYaw=true; RotationEnabled=true; "
+            + "PositionEnabled=true; ToggleKey=End, Ctrl+Shift+Y; LightMultiplier=1.5";
+
+        private static void DefaultsIniAbsentIsCreatedWithTheBuiltInValues(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
+            ExpectBytes(rig.Path, Fresh());
+            Expect(Encoding.ASCII.GetString(Fresh()).Contains("\r\nUdpPort=default\r\n"), "a fresh file writes default rows");
+            ExpectSame(load.Config, Defaults(), "the session runs on the built-in values");
+            ExpectLogLine(load, "Defaults.ini: " + rig.DefaultsPath + " (created with the built-in values)");
+            ExpectLogLine(load, rig.Path + ": from Defaults.ini: " + AllFromDefaultsIni);
+            Expect(load.Log[0] == "Defaults.ini: " + rig.DefaultsPath + " (created with the built-in values)",
+                "the location line comes first");
+            Expect(!load.Log.Any(l => l.Contains("set in this file") || l.Contains("built-in, not set")),
+                "every row follows Defaults.ini:\n" + string.Join("\n", load.Log.ToArray()));
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+            ExpectListing(Path.GetDirectoryName(rig.DefaultsPath), "Defaults.ini");
+
+            ConfigLoadResult<HeadTrackingConfigData> again = rig.Owner().Load();
+            ExpectStatus(again, ConfigLoadStatus.Canonical);
+            ExpectLogLine(again, "Defaults.ini: " + rig.DefaultsPath + " (read)");
+            ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
+        }
+
+        private static void DefaultsIniUnderAMissingFolderIsNotCreated(string dir)
+        {
+            var rig = new Rig(dir);
+            string parent = Path.Combine(dir, "missing");
+            string folder = Path.Combine(parent, "CameraUnlock");
+            rig.Defaults = DefaultsFile.At(Path.Combine(folder, "Defaults.ini"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            ExpectLogLine(load, "Defaults.ini: " + folder + " was not created, because " + parent
+                + " does not exist. Settings set to default use the built-in values.");
+            Expect(load.Log.Count(l => l.StartsWith("Defaults.ini:", StringComparison.Ordinal)) == 1, "one Defaults.ini line");
+            ExpectLogLine(load, rig.Path + ": built-in, not set in Defaults.ini: " + AllFromDefaultsIni);
+            Expect(!Directory.Exists(parent), "no folder is created above the CameraUnlock folder");
+            ExpectBytes(rig.Path, Fresh());
+            ExpectSame(load.Config, Defaults(), "the built-in values");
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+        }
+
+        private static void DefaultsIniInAFolderThatDeniesFileCreationIsNotCreated(string dir)
+        {
+            var rig = new Rig(dir);
+            string global = Path.GetDirectoryName(rig.DefaultsPath);
+            Directory.CreateDirectory(global);
+            var folder = new DirectoryInfo(global);
+            DirectorySecurity security = folder.GetAccessControl();
+            var deny = new FileSystemAccessRule(WindowsIdentity.GetCurrent().User, FileSystemRights.CreateFiles, AccessControlType.Deny);
+            security.AddAccessRule(deny);
+            folder.SetAccessControl(security);
+            ConfigLoadResult<HeadTrackingConfigData> load;
+            try
+            {
+                load = rig.Owner().Load();
+            }
+            finally
+            {
+                security.RemoveAccessRule(deny);
+                folder.SetAccessControl(security);
+            }
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            ExpectLogLine(load, "Defaults.ini: " + rig.DefaultsPath
+                + " was not created: the folder cannot be written. Settings set to default use the built-in values.");
+            ExpectListing(global);
+            ExpectBytes(rig.Path, Fresh());
+            ExpectSame(load.Config, Defaults(), "the built-in values");
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+        }
+
+        private static void APackagedGameReadsDefaultsIniAndNeverCreatesIt(string dir)
+        {
+            var rig = new Rig(dir);
+            string roaming = Path.Combine(dir, "Roaming");
+            Directory.CreateDirectory(roaming);
+            var probe = new DefaultsProbe { Platform = DefaultsPlatform.Windows, KnownFolder = roaming, PackageResult = 15703 };
+            rig.Defaults = DefaultsFile.Probed(probe);
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            ExpectLogLine(load, @"Defaults.ini: not created, because this game runs as a packaged app (GetCurrentPackageFullName "
+                + @"returned 15703); %AppData%\CameraUnlock\Defaults.ini is created by the next game that is not packaged, or by Lopari.");
+            Expect(Directory.GetFileSystemEntries(roaming).Length == 0, "nothing is created in the roaming folder");
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+
+            string folder = Path.Combine(roaming, "CameraUnlock");
+            Directory.CreateDirectory(folder);
+            byte[] theirs = Ascii("[Network]\r\nUdpPort=5000\r\n");
+            File.WriteAllBytes(Path.Combine(folder, "Defaults.ini"), theirs);
+            ConfigLoadResult<HeadTrackingConfigData> next = rig.Owner().Load();
+            ExpectStatus(next, ConfigLoadStatus.Canonical);
+            ExpectLogLine(next, @"Defaults.ini: %AppData%\CameraUnlock\Defaults.ini (read)");
+            Expect(next.Config.UdpPort == 5000, "a packaged game reads the file that exists");
+            ExpectBytes(Path.Combine(folder, "Defaults.ini"), theirs);
+        }
+
+        private static void DefaultsIniPresentIsRead(string dir)
+        {
+            var rig = new Rig(dir);
+            byte[] global = Ascii("[Network]\r\nUdpPort=5000\r\n[General]\r\nAimDecoupling=false\r\n[Hotkeys]\r\nToggleKey=F8\r\n");
+            rig.PutDefaults(global);
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            ExpectBytes(rig.Path, Fresh());
+            ExpectBytes(rig.DefaultsPath, global);
+            Expect(load.Config.UdpPort == 5000 && load.Config.ToggleKeyName == "F8", "the rows take Defaults.ini's values");
+            ExpectLogLine(load, "Defaults.ini: " + rig.DefaultsPath + " (read)");
+            ExpectLogLine(load, rig.Path + ": from Defaults.ini: UdpPort=5000; ToggleKey=F8");
+            ExpectLogLine(load, rig.Path + ": built-in, not set in Defaults.ini: EnableOnStartup=true; WorldSpaceYaw=true; "
+                + "RotationEnabled=true; PositionEnabled=true; LightMultiplier=1.5");
+            Expect(!load.Log.Any(l => l.Contains("AimDecoupling")), "a key this table does not bind draws nothing");
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+
+            File.WriteAllBytes(rig.Path, Encoding.ASCII.GetBytes(Encoding.ASCII.GetString(Fresh())
+                .Replace("UdpPort=default", "UdpPort=6000").Replace("WorldSpaceYaw=default", "WorldSpaceYaw=true")));
+            ConfigLoadResult<HeadTrackingConfigData> own = rig.Owner().Load();
+            ExpectStatus(own, ConfigLoadStatus.Canonical);
+            Expect(own.Config.UdpPort == 6000, "a value in the file wins over Defaults.ini");
+            ExpectLogLine(own, rig.Path + ": set in this file, so Defaults.ini does not change them: UdpPort, WorldSpaceYaw.");
+        }
+
+        private static void ARefusedValueIsToldOnlyWhereTheGameTakesIt(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutDefaults(Ascii("[Hotkeys]\r\nToggleKey=Mouse4\r\nYawModeKey=Mouse5\r\n[Position]\r\nCollisionMargin=abc\r\n"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            Expect(load.Config.ToggleKeyName == "End, Ctrl+Shift+Y", "the refused key list gives the built-in");
+            ExpectLogLine(load, "Defaults.ini: line 2: [Hotkeys] ToggleKey=Mouse4 is not read (Mouse4 is not one of the key names "
+                + "this file takes), so the built-in End, Ctrl+Shift+Y is used.");
+            Expect(load.Log.Count(l => l.StartsWith("Defaults.ini: line", StringComparison.Ordinal)) == 1,
+                "rows this table does not bind draw no line:\n" + string.Join("\n", load.Log.ToArray()));
+            ExpectSunkOnce(rig, "Defaults.ini: 1 setting cannot be used (ToggleKey=Mouse4), so this game uses its built-in "
+                + "values for them. The log has the details.");
+
+            File.WriteAllBytes(rig.Path, Ascii(Encoding.ASCII.GetString(Fresh()).Replace("ToggleKey=default", "ToggleKey=Home")));
+            rig.Sink.Clear();
+            ConfigLoadResult<HeadTrackingConfigData> own = rig.Owner().Load();
+            ExpectStatus(own, ConfigLoadStatus.Canonical);
+            Expect(!own.Log.Any(l => l.StartsWith("Defaults.ini: line", StringComparison.Ordinal)),
+                "a row the file sets itself draws no line for Defaults.ini's value");
+            Expect(rig.Sink.Count == 0, "nor a message");
+        }
+
+        private static void AnUnreadableDefaultsIniGivesTheBuiltInValues(string dir)
+        {
+            string text = "[Network]\r\nUdpPort=5000\r\n";
+            byte[] utf16 = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(text)).ToArray();
+            byte[] nul = Ascii(text + "\0\r\n");
+            foreach (var test in new[]
+            {
+                new { Bytes = utf16, Why = "it is saved as UTF-16; save it as ANSI or UTF-8" },
+                new { Bytes = nul, Why = "line 3 holds a NUL byte" },
+            })
+            {
+                var rig = new Rig(dir);
+                if (File.Exists(rig.Path)) File.Delete(rig.Path);
+                rig.PutDefaults(test.Bytes);
+                ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+                ExpectStatus(load, ConfigLoadStatus.Created);
+                Expect(load.Config.UdpPort == 4242, "the built-in port");
+                ExpectLogLine(load, "Defaults.ini: " + rig.DefaultsPath + " cannot be read: " + test.Why
+                    + ". Settings set to default use the built-in values.");
+                ExpectSunkOnce(rig, "Defaults.ini cannot be read: " + test.Why + ". Settings that use it take the built-in values.");
+                ExpectBytes(rig.DefaultsPath, test.Bytes);
+            }
+        }
+
+        private static void DefaultsIniAppearingDuringCreationIsRead(string dir)
+        {
+            var rig = new Rig(dir);
+            byte[] theirs = Ascii("[Network]\r\nUdpPort=6000\r\n");
+            rig.Hook = (step, path) =>
+            {
+                if (step == "Defaults.RecheckTarget") File.WriteAllBytes(rig.DefaultsPath, theirs);
+            };
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            ExpectLogLine(load, "Defaults.ini: " + rig.DefaultsPath + " (created by another program at the same time, and read)");
+            Expect(load.Config.UdpPort == 6000, "the other program's file is read");
+            ExpectBytes(rig.DefaultsPath, theirs);
+            ExpectListing(Path.GetDirectoryName(rig.DefaultsPath), "Defaults.ini");
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+        }
+
+        private static void AMigratedGameWritesDefaultWhereTheImportEqualsIt(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutLegacy(Ascii(LegacyText));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
+            string migrated = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+            foreach (string line in new[]
+            {
+                "UdpPort=5555", "EnableOnStartup=default", "WorldSpaceYaw=false", "RotationEnabled=true", "PositionEnabled=false",
+                "ToggleKey=default", "LightMultiplier=default",
+            })
+            {
+                Expect(migrated.Contains("\r\n" + line + "\r\n"), "the migrated file holds " + line + ":\n" + migrated);
+            }
+            ExpectSame(load.Config, MigratedConfig(), "the imported values");
+            ExpectLogLine(load, rig.Path + ": set in this file, so Defaults.ini does not change them: UdpPort, WorldSpaceYaw, "
+                + "RotationEnabled, PositionEnabled.");
+            ExpectLogLine(load, rig.Path + ": from Defaults.ini: EnableOnStartup=true; ToggleKey=End, Ctrl+Shift+Y; LightMultiplier=1.5");
+            ExpectImported(rig);
+        }
+
+        private static void AMigratedGameWritesAValueWhereDefaultsIniDiffers(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutLegacy(Ascii(LegacyText));
+            rig.PutDefaults(Ascii("[Hotkeys]\r\nToggleKey=F8\r\n"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            string migrated = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+            Expect(migrated.Contains("\r\nToggleKey=End, Ctrl+Shift+Y\r\n") && migrated.Contains("\r\nEnableOnStartup=default\r\n"),
+                "the untouched key list is not what default gives here, so it is written as a value:\n" + migrated);
+            Expect(load.Config.ToggleKeyName == "End, Ctrl+Shift+Y", "the player keeps the keys they had");
+            rig.ExpectLegacyKept();
+        }
+
+        private static void AToggleOnADefaultRowWritesItsValue(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
+            DateTime defaultsTime = File.GetLastWriteTimeUtc(rig.DefaultsPath);
+            ConfigSaveResult save = owner.Save(c => c.WorldSpaceYaw = false);
+            ExpectSaved(save);
+            ExpectBytes(rig.Path, Ascii(Encoding.ASCII.GetString(Fresh()).Replace("WorldSpaceYaw=default", "WorldSpaceYaw=false")));
+            Expect(save.Log.SequenceEqual(new[]
+            {
+                rig.Path + ": WorldSpaceYaw=false is now set for this game, and no longer follows Defaults.ini.",
+            }), "the save names the row it took off Defaults.ini, got:\n" + string.Join("\n", save.Log.ToArray()));
+            ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
+            Expect(File.GetLastWriteTimeUtc(rig.DefaultsPath) == defaultsTime, "Defaults.ini is not written");
+
+            save = owner.Save(c => c.WorldSpaceYaw = true);
+            ExpectSaved(save);
+            Expect(save.Log.Count == 0, "a row that already holds a value draws no line");
+            ExpectBytes(rig.Path, Ascii(Encoding.ASCII.GetString(Fresh()).Replace("WorldSpaceYaw=default", "WorldSpaceYaw=true")));
+        }
+
+        private static void AModeChangeFromDefaultWritesBothRows(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
+            ConfigSaveResult save = owner.Save(c => c.PositionEnabled = false);
+            ExpectSaved(save);
+            ExpectBytes(rig.Path, Ascii(Encoding.ASCII.GetString(Fresh()).Replace("RotationEnabled=default", "RotationEnabled=true")
+                .Replace("PositionEnabled=default", "PositionEnabled=false")));
+            Expect(save.Log.SequenceEqual(new[]
+            {
+                rig.Path + ": RotationEnabled=true is now set for this game, and no longer follows Defaults.ini.",
+                rig.Path + ": PositionEnabled=false is now set for this game, and no longer follows Defaults.ini.",
+            }), "the pair stops following Defaults.ini together, got:\n" + string.Join("\n", save.Log.ToArray()));
+            ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
+        }
+
+        // End changes only the session: the mod changes its running config and calls nothing.
+        private static void EndSavesNothing(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            load.Config.EnableOnStartup = false;
+            Expect(!owner.FileChanged(), "nothing was written");
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unchanged, "the file holds what the owner created");
+            ExpectBytes(rig.Path, Fresh());
+            ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
+        }
+
+        private static void ASaveAfterDefaultsIniChangedKeepsDefaultRows(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
+            File.WriteAllBytes(rig.DefaultsPath, Ascii("[Network]\r\nUdpPort=7000\r\n[General]\r\nEnableOnStartup=false\r\n"));
+            ConfigSaveResult save = owner.Save(c => c.WorldSpaceYaw = false);
+            ExpectSaved(save);
+            ExpectBytes(rig.Path, Ascii(Encoding.ASCII.GetString(Fresh()).Replace("WorldSpaceYaw=default", "WorldSpaceYaw=false")));
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+        }
+
+        private static void ReloadAndFileChangedFollowDefaultsIni(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
+            Expect(!owner.FileChanged(), "nothing changed yet");
+
+            rig.PutDefaults(Ascii("[Network]\r\nUdpPort=7000\r\n"));
+            File.SetLastWriteTimeUtc(rig.DefaultsPath, DateTime.UtcNow.AddSeconds(5));
+            Expect(owner.FileChanged(), "an edit to Defaults.ini is seen");
+            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Applied && reload.Config.UdpPort == 7000,
+                "the edit is applied, got " + reload.Status);
+            Expect(reload.Log.Contains("Defaults.ini: " + rig.DefaultsPath + " (read)"), "the reload names the file it read");
+            Expect(reload.Log.Contains(rig.Path + ": from Defaults.ini: UdpPort=7000"), "and the rows that took its values:\n"
+                + string.Join("\n", reload.Log.ToArray()));
+            Expect(!owner.FileChanged(), "the reload records the write time");
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unchanged, "the same bytes again are Unchanged");
+
+            byte[] utf16 = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes("[Network]\r\nUdpPort=8000\r\n")).ToArray();
+            File.WriteAllBytes(rig.DefaultsPath, utf16);
+            File.SetLastWriteTimeUtc(rig.DefaultsPath, DateTime.UtcNow.AddSeconds(10));
+            Expect(owner.FileChanged(), "a save as UTF-16 is seen");
+            reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Unchanged, "the values stay, got " + reload.Status);
+            string keep = "Defaults.ini cannot be read: it is saved as UTF-16; save it as ANSI or UTF-8. Settings that use it keep the "
+                + "values they had until the game restarts.";
+            ExpectSunkOnce(rig, keep);
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unchanged && rig.Sink.Count == 1, "the message comes once");
+            Expect(!owner.FileChanged(), "the time is recorded");
+            ConfigSaveResult save = owner.Save(c => c.WorldSpaceYaw = false);
+            ExpectSaved(save);
+            Expect(File.ReadAllText(rig.Path).Contains("\r\nUdpPort=default\r\n"), "an untouched row stays default");
+
+            File.Delete(rig.DefaultsPath);
+            Expect(owner.FileChanged(), "a deleted Defaults.ini is seen");
+            rig.Sink.Clear();
+            reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Unchanged, "the values stay, got " + reload.Status);
+            ExpectSunkOnce(rig, "Defaults.ini is missing. Settings that use it keep the values they had until the game restarts.");
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unchanged && rig.Sink.Count == 1, "the message comes once");
+            ExpectSaved(owner.Save(c => c.WorldSpaceYaw = true));
+        }
+
+        private static void ATableOffTheSchemaDefaultIsRefusedUnlessPerGame(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.Table = new ConfigTable<HeadTrackingConfigData>(() => new HeadTrackingConfigData { UdpPort = 5000 })
+                .Concept(ConfigConcepts.UdpPort, c => c.UdpPort, (c, v) => c.UdpPort = v);
+            ArgumentException e = ExpectThrows<ArgumentException>(() => rig.Owner(), "a row off the schema's default");
+            ExpectContains(e.Message, "[Network] UdpPort defaults to 5000, and the schema to 4242.");
+
+            rig.Table = new ConfigTable<HeadTrackingConfigData>(() => new HeadTrackingConfigData { UdpPort = 5000 })
+                .Concept(ConfigConcepts.UdpPort, c => c.UdpPort, (c, v) => c.UdpPort = v).PerGame();
+            rig.PutDefaults(Ascii("[Network]\r\nUdpPort=7000\r\n"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            Expect(load.Config.UdpPort == 5000, "a PerGame row keeps its own default");
+            Expect(File.ReadAllText(rig.Path).Contains("\r\nUdpPort=5000\r\n"), "and a fresh file writes its value");
+            Expect(!load.Log.Any(l => l.StartsWith(rig.Path + ": ", StringComparison.Ordinal) && l.Contains("Defaults.ini")),
+                "a PerGame row is named in no Defaults.ini line");
+        }
+
+        private static void ReadOnlyOverAConfigFile(string dir)
+        {
+            var rig = new Rig(dir) { Platform = PlatformID.Unix };
+            rig.PutLegacy(Ascii(LegacyText));
+            byte[] canonical = Ascii(Encoding.ASCII.GetString(Fresh()).Replace("UdpPort=default", "UdpPort=5000"));
+            File.WriteAllBytes(rig.Path, canonical);
+            rig.PutDefaults(Ascii("[General]\r\nWorldSpaceYaw=false\r\n"));
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
+            ExpectStatus(load, ConfigLoadStatus.ReadOnly);
+            Expect(load.Config.UdpPort == 5000 && !load.Config.WorldSpaceYaw, "the file over Defaults.ini");
+            ExpectLogLine(load, "Defaults.ini: " + rig.DefaultsPath + " (read)");
+            ExpectLogLine(load, ReadOnlyLine);
+            Expect(load.Reason == ReadOnlyLine, "the player is told, got: " + load.Reason);
+            ExpectSunkOnce(rig, ReadOnlyLine);
+            ExpectReadOnlySaves(rig, owner);
+
+            File.WriteAllBytes(rig.Path, Ascii(Encoding.ASCII.GetString(canonical).Replace("UdpPort=5000", "UdpPort=6000")));
+            File.SetLastWriteTimeUtc(rig.Path, DateTime.UtcNow.AddSeconds(5));
+            Expect(owner.FileChanged(), "an edit is seen");
+            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Applied && reload.Config.UdpPort == 6000, "and applied");
+            rig.ExpectLegacyKept();
+            ExpectListing(dir, FileName, LegacyName);
+        }
+
+        private static void ReadOnlyOverALegacyFile(string dir)
+        {
+            var rig = new Rig(dir) { Platform = PlatformID.Unix };
+            rig.PutLegacy(Ascii(LegacyText));
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
+            ExpectStatus(load, ConfigLoadStatus.ReadOnly);
+            ExpectSame(load.Config, MigratedConfig(), "the import, read back in memory");
+            ExpectLogLine(load, "Defaults.ini: no file at " + rig.DefaultsPath
+                + "; on this system the mod reads Defaults.ini but does not create it. Settings set to default use the built-in values.");
+            ExpectLogLine(load, rig.LegacyPath + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
+            ExpectSunkOnce(rig, ReadOnlyLine);
+            ExpectReadOnlySaves(rig, owner);
+            Expect(!Directory.Exists(Path.GetDirectoryName(rig.DefaultsPath)), "no Defaults.ini folder is created");
+            ExpectNotImported(rig);
+
+            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.ReadOnly);
+            Expect(rig.Legacy.Runs == 2, "the next start imports again");
+        }
+
+        private static void ReadOnlyOverNothing(string dir)
+        {
+            var rig = new Rig(dir) { Platform = PlatformID.Unix };
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
+            ExpectStatus(load, ConfigLoadStatus.ReadOnly);
+            ExpectSame(load.Config, Defaults(), "the built-in values");
+            ExpectSunkOnce(rig, ReadOnlyLine);
+            ExpectReadOnlySaves(rig, owner);
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unreadable, "a reload finds no file and writes none");
+            ExpectListing(dir);
+            Expect(!Directory.Exists(Path.GetDirectoryName(rig.DefaultsPath)), "no Defaults.ini folder is created");
+        }
+
+        private const string ReadOnlyLine = "Settings are read but not saved on this system: this version saves settings only on "
+            + "Windows, including under Wine and Proton. Changes made in game last until the game closes.";
+
+        private static void ExpectReadOnlySaves(Rig rig, ConfigOwner<HeadTrackingConfigData> owner)
+        {
+            byte[] before = File.Exists(rig.Path) ? File.ReadAllBytes(rig.Path) : null;
+            rig.Sink.Clear();
+            foreach (Action<HeadTrackingConfigData> change in new Action<HeadTrackingConfigData>[]
+            {
+                c => c.WorldSpaceYaw = !c.WorldSpaceYaw,
+                c => c.PositionEnabled = !c.PositionEnabled,
+                c => { },
+            })
+            {
+                ConfigSaveResult save = owner.Save(change);
+                Expect(save.Status == ConfigSaveStatus.NotSaved
+                    && save.Reason == "Settings not saved: this version saves settings only on Windows.",
+                    "every save is NotSaved, got " + save.Status + " (" + save.Reason + ")");
+            }
+            Expect(rig.Sink.Count == 3, "each is shown");
+            if (before == null) Expect(!File.Exists(rig.Path), "no file is created");
+            else ExpectBytes(rig.Path, before);
+        }
+
         private static void OptionsAndCallOrderAreChecked(string dir)
         {
             string path = Path.Combine(dir, FileName);
+            ConfigOwnerOptions<HeadTrackingConfigData> noDefaults = Options(dir, path);
+            noDefaults.Defaults = null;
+            ArgumentException missing = ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(noDefaults),
+                "no Defaults");
+            ExpectContains(missing.Message, "DefaultsFile.PerUser()");
+            ExpectContains(missing.Message, "DefaultsFile.At(path)");
+            ExpectThrows<ArgumentException>(() => DefaultsFile.At("Defaults.ini"), "a relative Defaults.ini path");
+            ExpectThrows<ArgumentException>(() => DefaultsFile.At(""), "an empty Defaults.ini path");
+            ExpectThrows<ArgumentNullException>(() => DefaultsFile.At(null), "a null Defaults.ini path");
             ExpectThrows<ArgumentNullException>(() => new ConfigOwner<HeadTrackingConfigData>(null), "null options");
-            ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(Options(null)), "no path");
-            ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(Options(FileName)), "a relative path");
-            ConfigOwnerOptions<HeadTrackingConfigData> noTable = Options(path);
+            ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(Options(dir, null)), "no path");
+            ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(Options(dir, FileName)), "a relative path");
+            ConfigOwnerOptions<HeadTrackingConfigData> noTable = Options(dir, path);
             noTable.Table = null;
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(noTable), "no table");
-            ConfigOwnerOptions<HeadTrackingConfigData> noHeader = Options(path);
+            ConfigOwnerOptions<HeadTrackingConfigData> noHeader = Options(dir, path);
             noHeader.Header = null;
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(noHeader), "no header");
-            ConfigOwnerOptions<HeadTrackingConfigData> badHeader = Options(path);
+            ConfigOwnerOptions<HeadTrackingConfigData> badHeader = Options(dir, path);
             badHeader.Header = new RenderHeader("ABZÛU");
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(badHeader), "a header the renderer refuses");
-            ConfigOwnerOptions<HeadTrackingConfigData> importWithoutSource = Options(path);
+            ConfigOwnerOptions<HeadTrackingConfigData> importWithoutSource = Options(dir, path);
             importWithoutSource.Import = new Legacy().Import;
             ArgumentException e = ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(importWithoutSource),
                 "an import with no legacy file");
             ExpectContains(e.Message, "Import is set, but no LegacySourcePath names the file it reads");
-            ConfigOwnerOptions<HeadTrackingConfigData> sourceWithoutImport = Options(path);
+            ConfigOwnerOptions<HeadTrackingConfigData> sourceWithoutImport = Options(dir, path);
             sourceWithoutImport.LegacySourcePath = Path.Combine(dir, LegacyName);
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(sourceWithoutImport),
                 "a legacy file with no import");
-            ConfigOwnerOptions<HeadTrackingConfigData> sourceIsPath = Options(path);
+            ConfigOwnerOptions<HeadTrackingConfigData> sourceIsPath = Options(dir, path);
             sourceIsPath.Import = new Legacy().Import;
             sourceIsPath.LegacySourcePath = path;
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(sourceIsPath), "a legacy file that is the config");
 
-            var owner = new ConfigOwner<HeadTrackingConfigData>(Options(path));
+            var owner = new ConfigOwner<HeadTrackingConfigData>(Options(dir, path));
             ExpectThrows<InvalidOperationException>(() => owner.Save(c => c.WorldSpaceYaw = false), "Save before Load");
             ExpectThrows<InvalidOperationException>(() => owner.Reload(), "Reload before Load");
             ExpectThrows<InvalidOperationException>(() => owner.FileChanged(), "FileChanged before Load");
@@ -1049,9 +1541,22 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectListing(dir);
         }
 
-        private static ConfigOwnerOptions<HeadTrackingConfigData> Options(string path)
+        private static ConfigOwnerOptions<HeadTrackingConfigData> Options(string dir, string path)
         {
-            return new ConfigOwnerOptions<HeadTrackingConfigData> { Path = path, Table = Table(), Header = new RenderHeader(Display) };
+            return new ConfigOwnerOptions<HeadTrackingConfigData>
+            {
+                Path = path,
+                Table = Table(),
+                Header = new RenderHeader(Display),
+                Defaults = DefaultsFile.At(ScratchDefaults(dir)),
+            };
+        }
+
+        // Defaults.ini in a folder of the scratch directory, so a listing of the directory's files
+        // is the config file and the legacy file alone.
+        private static string ScratchDefaults(string dir)
+        {
+            return Path.Combine(Path.Combine(dir, "global"), "Defaults.ini");
         }
 
         private static ConfigTable<HeadTrackingConfigData> Table()
@@ -1081,9 +1586,22 @@ namespace CameraUnlock.Core.Tests.Config
             return config;
         }
 
+        // With Defaults.ini at the built-in values, a row the import left at its default is written
+        // default, and every other row, the tracking mode pair included, its value.
         private static byte[] MigratedBytes()
         {
-            return Render(MigratedConfig());
+            return Table().RenderMigration(MigratedConfig(), Defaults(), new RenderHeader(Display));
+        }
+
+        private static byte[] Fresh()
+        {
+            return Table().RenderFresh(new RenderHeader(Display));
+        }
+
+        // The log without the Defaults.ini lines.
+        private static string[] GameLines(ConfigLoadResult<HeadTrackingConfigData> load)
+        {
+            return load.Log.Where(l => !l.Contains("Defaults.ini")).ToArray();
         }
 
         private static byte[] Render(HeadTrackingConfigData config)
@@ -1106,8 +1624,12 @@ namespace CameraUnlock.Core.Tests.Config
             public readonly string LegacyPath;
             public readonly List<string> Sink = new List<string>();
             public readonly Legacy Legacy = new Legacy();
+            public readonly string DefaultsPath;
             public Action<string, string> Hook;
             public bool WithImport = true;
+            public DefaultsFile Defaults;
+            public ConfigTable<HeadTrackingConfigData> Table;
+            public PlatformID Platform = PlatformID.Win32NT;
             private byte[] _legacyBytes;
 
             public Rig(string dir)
@@ -1115,6 +1637,13 @@ namespace CameraUnlock.Core.Tests.Config
                 Dir = dir;
                 Path = System.IO.Path.Combine(dir, FileName);
                 LegacyPath = System.IO.Path.Combine(dir, LegacyName);
+                DefaultsPath = ScratchDefaults(dir);
+            }
+
+            public void PutDefaults(byte[] bytes)
+            {
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(DefaultsPath));
+                File.WriteAllBytes(DefaultsPath, bytes);
             }
 
             public void PutLegacy(byte[] bytes)
@@ -1138,14 +1667,16 @@ namespace CameraUnlock.Core.Tests.Config
 
             public ConfigOwner<HeadTrackingConfigData> Owner()
             {
-                ConfigOwnerOptions<HeadTrackingConfigData> options = Options(Path);
+                ConfigOwnerOptions<HeadTrackingConfigData> options = Options(Dir, Path);
                 options.Import = WithImport ? Legacy.Import : null;
                 options.LegacySourcePath = WithImport ? LegacyPath : null;
                 options.StatusSink = message => Sink.Add(message);
+                if (Defaults != null) options.Defaults = Defaults;
+                if (Table != null) options.Table = Table;
                 return new ConfigOwner<HeadTrackingConfigData>(options, (step, path) =>
                 {
                     if (Hook != null) Hook(step, path);
-                });
+                }, Platform);
             }
         }
 

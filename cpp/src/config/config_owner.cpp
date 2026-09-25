@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #ifdef _WIN32
 
@@ -11,6 +12,7 @@
 #include "checked_file_writer_internal.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <system_error>
 #include <vector>
 
@@ -47,6 +49,49 @@ const char* ConfigReloadStatusName(ConfigReloadStatus status) {
     }
     throw std::invalid_argument("ConfigReloadStatus " + std::to_string(static_cast<int>(status)) + " has no name");
 }
+
+namespace {
+
+bool IsPathSeparator(wchar_t c) { return c == L'\\' || c == L'/'; }
+
+bool IsFullyQualified(const std::wstring& path) {
+    const bool drive = path.size() >= 3 && ((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) &&
+                       path[1] == L':' && IsPathSeparator(path[2]);
+    const bool unc = path.size() >= 2 && IsPathSeparator(path[0]) && IsPathSeparator(path[1]);
+    return drive || unc;
+}
+
+}  // namespace
+
+DefaultsFile DefaultsFile::PerUser() {
+    DefaultsFile file;
+    file.kind_ = Kind::kPerUser;
+    return file;
+}
+
+DefaultsFile DefaultsFile::At(std::wstring path) {
+    if (!IsFullyQualified(path)) {
+        throw std::invalid_argument("DefaultsFile::At takes a fully qualified path, and '" + detail::DefaultsUtf8(path) +
+                                    "' is not one");
+    }
+    DefaultsFile file;
+    file.kind_ = Kind::kAt;
+    file.path_ = std::move(path);
+    return file;
+}
+
+namespace detail {
+
+DefaultsFile DefaultsFileFromProbe(DefaultsProbe probe) {
+    DefaultsFile file;
+    file.kind_ = DefaultsFile::Kind::kProbed;
+    file.probe_ = std::move(probe);
+    return file;
+}
+
+bool DefaultsFileIsSet(const DefaultsFile& file) { return file.kind_ != DefaultsFile::Kind::kUnset; }
+
+}  // namespace detail
 
 #ifdef _WIN32
 
@@ -214,6 +259,48 @@ bool OwnerSamePath(const std::wstring& a, const std::wstring& b) {
 bool OwnerFileExists(const std::wstring& path) {
     const DWORD attributes = GetFileAttributesW(path.c_str());
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+bool OwnerPathExists(const std::wstring& path) { return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; }
+
+std::uint64_t DefaultsLastWriteTime(const std::wstring& path) {
+    try {
+        return OwnerLastWriteTime(path);
+    } catch (const std::system_error&) {
+        return UINT64_MAX;
+    }
+}
+
+std::string DefaultsFolderWhy(std::uint32_t error) {
+    if (error == ERROR_ACCESS_DENIED) return "the folder cannot be written";
+    return "it could not be written (" + OwnerErrorText(error) + ")";
+}
+
+DefaultsResolution ResolveDefaultsFile(const DefaultsFile& file) {
+    switch (file.kind_) {
+        case DefaultsFile::Kind::kPerUser: return ResolveDefaults(ProbeDefaults());
+        case DefaultsFile::Kind::kProbed: return ResolveDefaults(*file.probe_);
+        case DefaultsFile::Kind::kAt: break;
+        case DefaultsFile::Kind::kUnset: throw std::invalid_argument("the DefaultsFile names no file");
+    }
+    const std::wstring path = OwnerFullPath(file.path_, "defaults");
+    const std::size_t file_separator = path.find_last_of(L"\\/");
+    const std::wstring folder = path.substr(0, file_separator);
+    const std::size_t folder_separator = folder.find_last_of(L"\\/");
+    const std::wstring parent = folder_separator == std::wstring::npos ? folder : folder.substr(0, folder_separator);
+    DefaultsCandidate candidate;
+    candidate.kind = DefaultsCandidateKind::kWindows;
+    candidate.may_create = true;
+    candidate.path = path;
+    candidate.folder = folder;
+    candidate.parent = parent;
+    candidate.shown = DefaultsUtf8(path);
+    candidate.shown_folder = DefaultsUtf8(folder);
+    candidate.shown_parent = DefaultsUtf8(parent);
+    DefaultsResolution resolution;
+    resolution.platform = DefaultsPlatform::kWindows;
+    resolution.candidates.push_back(std::move(candidate));
+    return resolution;
 }
 
 LegacyInput OwnerLegacyInput(const std::wstring& path) {

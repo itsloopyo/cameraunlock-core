@@ -1,11 +1,11 @@
 # `render-config` for a C# mod repo on the canonical config format. Paste the task into
 # the repo's [tasks] and fill in the two <...> placeholders.
 #
-# The committed config is ConfigTable.Render over a Config from the table's defaults, byte
-# for byte, at the `committed` path data/config-format.json records for the repo, marked
-# `-text` in .gitattributes. The repo's render test compares the two and fails on any
-# difference, so the file cannot drift from the code; this task is how the file is
-# rewritten after a change to a row, a comment or a default.
+# The committed config is ConfigTable.RenderFresh(header), the bytes ConfigOwner creates at
+# first launch, byte for byte, at the `committed` path data/config-format.json records for
+# the repo, marked `-text` in .gitattributes. The repo's render test compares the two and
+# fails on any difference, so the file cannot drift from the code; this task is how the
+# file is rewritten after a change to a row, a comment or a default.
 #
 # The render test owns the mode: with CAMERAUNLOCK_RENDER_CONFIG set to `write` it writes
 # the rendered bytes to the committed path and passes; unset, it compares; any other value

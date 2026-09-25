@@ -247,6 +247,7 @@ void RunOwner(const Case& fixture, const std::string& input, const fs::path& dir
     options.path = target.wstring();
     options.table = Table(fixture.three_state, true);
     options.header.display_name = "Fixture Game";
+    options.defaults = DefaultsFile::At((scratch / L"global" / L"Defaults.ini").wstring());
     ConfigOwner<HeadTrackingConfig> owner(std::move(options));
 
     const ConfigLoadResult<HeadTrackingConfig> loaded = owner.Load();

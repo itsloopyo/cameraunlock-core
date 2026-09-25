@@ -11,10 +11,24 @@ namespace CameraUnlock.Core.Config
     /// <summary>
     /// The one reader and writer of a game's canonical config file. While that file is absent it
     /// imports the game's legacy file, a separate file it never writes, through the game's frozen
-    /// import into a new config file, or creates the config file from the table's defaults. It
-    /// saves the rows the table marks Writable, and reloads. It writes only the config file, and
-    /// only through <see cref="CheckedFileWriter"/>, so every write replaces the whole file or
-    /// nothing. The C++ twin is cameraunlock::config::ConfigOwner. Windows only.
+    /// import into a new config file, or creates the config file from the table's fresh render. It
+    /// saves the rows the table marks Writable, and reloads. It writes only the config file and a
+    /// Defaults.ini that is absent, and only through <see cref="CheckedFileWriter"/>, so every write
+    /// replaces the whole file or nothing. The C++ twin is cameraunlock::config::ConfigOwner.
+    /// <para>
+    /// Every concept row the table does not mark PerGame takes its default from Defaults.ini
+    /// (<see cref="ConfigOwnerOptions{TConfig}.Defaults"/>): <c>default</c>, a missing key and an
+    /// invalid value on such a row read Defaults.ini's value, or the row's own default where
+    /// Defaults.ini gives none. Load finds the file, creates it with the built-in values where none
+    /// exists and it may, and reads it once; Reload reads it again. No failure to find, create or read
+    /// it stops the mod: the rows then use the built-in values, with one line in the log.
+    /// </para>
+    /// <para>
+    /// On Windows, under Wine included, it reads and writes. Anywhere else (Linux or macOS with a
+    /// native runtime) it reads the config file, imports the legacy file in memory, reads the first
+    /// Defaults.ini it finds and writes nothing: Load returns <see cref="ConfigLoadStatus.ReadOnly"/>
+    /// and every save is NotSaved.
+    /// </para>
     /// <para>
     /// Build it before anything reads the file, and read the file only through it. One lock
     /// serializes <see cref="Load"/>, <see cref="Reload"/> and <see cref="Save"/>; the status sink
@@ -33,6 +47,10 @@ namespace CameraUnlock.Core.Config
     {
         private const string StampSection = "CameraUnlock";
         private const string ChangedWhileRead = "the file was changed by another program while it was read";
+        private const string ReadOnlyText = "Settings are read but not saved on this system: this version saves settings "
+            + "only on Windows, including under Wine and Proton. Changes made in game last until the game closes.";
+        private const string SavesOnlyOnWindows = "this version saves settings only on Windows";
+        private const string KeptUntilRestart = " Settings that use it keep the values they had until the game restarts.";
         private const int HResultAccessDenied = unchecked((int)0x80070005);
         private const int HResultSharingViolation = unchecked((int)0x80070020);
         private const int HResultLockViolation = unchecked((int)0x80070021);
@@ -47,35 +65,57 @@ namespace CameraUnlock.Core.Config
         private readonly string _name;
         private readonly ConfigTable<TConfig> _table;
         private readonly RenderHeader _header;
-        private readonly byte[] _defaultBytes;
+        private readonly byte[] _freshBytes;
         private readonly byte[][] _importSections;
         private readonly byte[][] _importKeys;
+        private readonly DefaultsFile _defaultsFile;
+        private readonly bool _writes;
 #if NULLABLE_ENABLED
         private readonly LegacyImport<TConfig>? _import;
         private readonly string? _legacySourcePath;
         private readonly Action<string>? _statusSink;
         private readonly Action<string, string>? _beforeStep;
         private byte[]? _committed;
+        private DefaultsCandidate? _defaultsAt;
+        private byte[]? _defaultsSeen;
+        private ConfigValueSource[]? _sources;
 #else
         private readonly LegacyImport<TConfig> _import;
         private readonly string _legacySourcePath;
         private readonly Action<string> _statusSink;
         private readonly Action<string, string> _beforeStep;
         private byte[] _committed;
+        private DefaultsCandidate _defaultsAt;
+        private byte[] _defaultsSeen;
+        private ConfigValueSource[] _sources;
 #endif
         private bool _loaded;
         private bool _savesAllowed;
         private DateTime _recordedWriteTime;
+        private DateTime _defaultsWriteTime;
+        private DefaultsIniSnapshot _snapshot;
+        private TConfig _effective;
+        private ConceptDescriptor[] _fromDefaultsIni;
 
         /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-        /// <exception cref="ArgumentException">Path, Table or Header is missing; a path is not
-        /// absolute; Import is set without a LegacySourcePath; LegacySourcePath is set without an
+        /// <exception cref="ArgumentException">Path, Table, Header or Defaults is missing; a path is
+        /// not absolute; Import is set without a LegacySourcePath; LegacySourcePath is set without an
         /// Import, or names Path; the table has both RotationEnabled and PositionEnabled and marks
         /// only one of them Writable; a legacy key's name holds an unpaired surrogate; or the table
-        /// cannot render its defaults under the header.</exception>
-        /// <exception cref="PlatformNotSupportedException">Not running on Windows.</exception>
+        /// cannot render its fresh file under the header (<see cref="ConfigTable{TConfig}.RenderFresh"/>:
+        /// a concept row not marked PerGame whose default is not the schema's, RotationEnabled
+        /// without PositionEnabled, or a header the renderer refuses).</exception>
         public ConfigOwner(ConfigOwnerOptions<TConfig> options)
-            : this(options, null)
+            : this(options, null, Environment.OSVersion.Platform)
+        {
+        }
+
+#if NULLABLE_ENABLED
+        internal ConfigOwner(ConfigOwnerOptions<TConfig> options, Action<string, string>? beforeStep)
+#else
+        internal ConfigOwner(ConfigOwnerOptions<TConfig> options, Action<string, string> beforeStep)
+#endif
+            : this(options, beforeStep, Environment.OSVersion.Platform)
         {
         }
 
@@ -83,23 +123,25 @@ namespace CameraUnlock.Core.Config
         /// <see cref="ConfigOwner{TConfig}(ConfigOwnerOptions{TConfig})"/> with a hook run before each
         /// step, given a label and the path the step acts on: <c>Open</c> (the config file, then the
         /// legacy file), <c>Import</c>, <c>Recheck</c> and <c>Remember</c> for the import's own steps,
-        /// and <c>Commit.</c>, <c>Create.</c> or <c>Save.</c> followed by a
+        /// and <c>Defaults.</c>, <c>Commit.</c>, <c>Create.</c> or <c>Save.</c> followed by a
         /// <see cref="CheckedWriteStep"/> name for the writer's. A test throws from it to fail a step,
-        /// or ends the process to interrupt one.
+        /// or ends the process to interrupt one. <paramref name="platform"/> stands for the system the
+        /// owner runs on: anything but Win32NT gives the read-only owner.
         /// </summary>
 #if NULLABLE_ENABLED
-        internal ConfigOwner(ConfigOwnerOptions<TConfig> options, Action<string, string>? beforeStep)
+        internal ConfigOwner(ConfigOwnerOptions<TConfig> options, Action<string, string>? beforeStep, PlatformID platform)
 #else
-        internal ConfigOwner(ConfigOwnerOptions<TConfig> options, Action<string, string> beforeStep)
+        internal ConfigOwner(ConfigOwnerOptions<TConfig> options, Action<string, string> beforeStep, PlatformID platform)
 #endif
         {
             if (options == null) throw new ArgumentNullException("options");
-            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
-            {
-                throw new PlatformNotSupportedException("ConfigOwner runs on Windows only.");
-            }
             if (options.Table == null) throw new ArgumentException("the options name no Table", "options");
             if (options.Header == null) throw new ArgumentException("the options name no Header", "options");
+            if (options.Defaults == null)
+            {
+                throw new ArgumentException("the options name no Defaults: a mod sets DefaultsFile.PerUser(), and a test "
+                    + "DefaultsFile.At(path) with a scratch path", "options");
+            }
             _path = AbsolutePath(options.Path, "Path");
             if (options.Import != null && options.LegacySourcePath == null)
             {
@@ -124,6 +166,8 @@ namespace CameraUnlock.Core.Config
             _import = options.Import;
             _statusSink = options.StatusSink;
             _beforeStep = beforeStep;
+            _defaultsFile = options.Defaults;
+            _writes = platform == PlatformID.Win32NT;
             int rotation = _table.RowOf(ConfigConcepts.RotationEnabled);
             int position = _table.RowOf(ConfigConcepts.PositionEnabled);
             if (rotation >= 0 && position >= 0 && _table.RowWritable(rotation) != _table.RowWritable(position))
@@ -133,7 +177,7 @@ namespace CameraUnlock.Core.Config
                 throw new ArgumentException("the table marks " + _table.RowName(writable) + " Writable but not "
                     + _table.RowName(other) + ", and a tracking mode change writes both", "options");
             }
-            _defaultBytes = _table.Render(_table.CreateDefaults(), _header);
+            _freshBytes = _table.RenderFresh(_header);
             IList<LegacyKey> keys = _import == null ? (IList<LegacyKey>)new LegacyKey[0] : _import.Keys;
             _importSections = new byte[keys.Count][];
             _importKeys = new byte[keys.Count][];
@@ -142,22 +186,32 @@ namespace CameraUnlock.Core.Config
                 _importSections[i] = CanonicalIni.NameBytes(keys[i].Section, "options");
                 _importKeys[i] = CanonicalIni.NameBytes(keys[i].Key, "options");
             }
+            _snapshot = DefaultsIni.Read(new byte[0]);
+            _effective = _table.CreateDefaults();
+            _fromDefaultsIni = new ConceptDescriptor[0];
         }
 
         /// <summary>
-        /// Reads the config file, first importing the legacy file or creating the config file where
-        /// there is none:
+        /// Reads Defaults.ini, then the config file, first importing the legacy file or creating the
+        /// config file where there is none:
         /// <list type="bullet">
+        /// <item>Defaults.ini first: where no file exists it is created with the built-in values, on
+        /// Windows and under Wine outside a packaged app, never over a file that appears meanwhile,
+        /// whatever becomes of the config file. It is read once, and the rows that follow it take its
+        /// values for the session. A Defaults.ini that cannot be found, created or read gives the
+        /// built-in values, one line in the log and, when it exists and cannot be read, one message.</item>
         /// <item>A file at Path: read as canonical (Canonical), stamped or not, or Unreadable when
         /// saved as UTF-16 or holding a NUL. An unstamped file gets a line in the log saying the
         /// next save adds the section; the first save that changes a row stamps it. The import
         /// never runs and the legacy file is never opened; when one exists, a line in the log says
         /// the settings are read from Path and the legacy file is not read.</item>
         /// <item>No file at Path and a file at LegacySourcePath: the legacy file is imported into a
-        /// new file at Path (Migrated).</item>
-        /// <item>Neither: the table's defaults are rendered and the file created, never over a file
-        /// that appears meanwhile (Created). If one appears, or the folder cannot be written, the
-        /// session runs on the defaults and nothing retries (Deferred).</item>
+        /// new file at Path (Migrated). A row that follows Defaults.ini is written <c>default</c>
+        /// where the imported value equals what <c>default</c> gives it at this Load, and the
+        /// tracking mode pair only when both rows do.</item>
+        /// <item>Neither: the table's fresh render is written, never over a file that appears
+        /// meanwhile (Created). If one appears, or the folder cannot be written, the session runs on
+        /// the defaults and nothing retries (Deferred).</item>
         /// </list>
         /// <para>
         /// An import holds the legacy file open, readable and writable by others but not
@@ -171,23 +225,35 @@ namespace CameraUnlock.Core.Config
         /// launch and the import does not run again, which the player message says. A legacy file
         /// that cannot be opened defers the same way, on the defaults. The legacy file is never
         /// written, renamed, deleted or copied, whatever happens. A process killed at any point
-        /// leaves Path absent or whole.
+        /// leaves Path and Defaults.ini each absent or whole.
         /// </para>
         /// <para>
-        /// Ordinary I/O failures are reported through the result. An import that throws, or a
-        /// hook in the table that throws, is a bug and the exception is not caught.
+        /// Off Windows nothing is written: the config file is read, or the legacy file imported and
+        /// read back in memory, or the session runs on the defaults, and the status is ReadOnly.
+        /// </para>
+        /// <para>
+        /// The status sink gets the config file's message, then at most one about Defaults.ini:
+        /// that it cannot be read, else that a value this game would take from it is refused, else
+        /// that two Defaults.ini files exist and one is ignored. Ordinary I/O failures are reported
+        /// through the result. An import that throws, or a hook in the table that throws, is a bug
+        /// and the exception is not caught.
         /// </para>
         /// </summary>
         public ConfigLoadResult<TConfig> Load()
         {
             ConfigLoadResult<TConfig> result;
+            string defaultsMessage;
             lock (_lock)
             {
-                result = LoadLocked();
+                result = LoadLocked(out defaultsMessage);
             }
-            bool report = result.Status == ConfigLoadStatus.Deferred || result.Status == ConfigLoadStatus.LegacyRefused
-                || result.Status == ConfigLoadStatus.Unreadable;
-            if (report && _statusSink != null) _statusSink(result.Reason);
+            if (_statusSink != null)
+            {
+                bool report = result.Status == ConfigLoadStatus.Deferred || result.Status == ConfigLoadStatus.LegacyRefused
+                    || result.Status == ConfigLoadStatus.Unreadable || result.Status == ConfigLoadStatus.ReadOnly;
+                if (report) _statusSink(result.Reason);
+                if (defaultsMessage.Length > 0) _statusSink(defaultsMessage);
+            }
             return result;
         }
 
@@ -196,17 +262,20 @@ namespace CameraUnlock.Core.Config
         /// file as it is now and sets the new values on it; the game has already applied them to
         /// its running state. A row that holds a new value afterwards must be marked Writable in the
         /// table, or this throws. When RotationEnabled or PositionEnabled changes, both are written,
-        /// so a tracking mode is always one edit.
+        /// so a tracking mode is always one edit. A row that held <c>default</c> or was missing is
+        /// written as its value, so from then on this game keeps it, and the log says so.
         /// <para>
         /// Saves only a file the canonical reader can read and whose ConfigFormat is not newer than
         /// this build's; an unstamped file, or a stamp with no ConfigFormat or one that is not a
-        /// number, gets its [CameraUnlock] ConfigFormat line in the same write. The edited bytes are
-        /// read back through the table before anything is written: only the changed rows may
-        /// differ, and they must hold the new values. Rows already holding the values write nothing
-        /// and report Saved. A missing file is not created here: <see cref="Load"/> creates it at the
-        /// next launch, importing the legacy file if there is one. After a Deferred, LegacyRefused
-        /// or Unreadable load nothing is saved that session, until a Reload applies a readable file.
-        /// The legacy file is never written.
+        /// number, gets its [CameraUnlock] ConfigFormat line in the same write. The file is read over
+        /// the values Defaults.ini gave this session. The edited bytes are read back through the
+        /// table before anything is written: only the changed rows may differ, they must hold the
+        /// new values, and every other row must take its value from where it did. Rows already
+        /// holding the values write nothing and report Saved. A missing file is not created here:
+        /// <see cref="Load"/> creates it at the next launch, importing the legacy file if there is
+        /// one. After a Deferred, LegacyRefused or Unreadable load nothing is saved that session,
+        /// until a Reload applies a readable file. After a ReadOnly load nothing is saved at all.
+        /// Neither the legacy file nor Defaults.ini is ever written.
         /// </para>
         /// <para>
         /// Never rolls back and never retries. NotSaved and Uncertain are handed to the status sink
@@ -233,31 +302,38 @@ namespace CameraUnlock.Core.Config
         }
 
         /// <summary>
-        /// Reads the file again, for a watcher that saw <see cref="FileChanged"/> or a reload the
-        /// player asked for. Unchanged when the file holds exactly the bytes the owner last wrote,
-        /// the import's and creation's included, and no Reload has applied other bytes since. Any
-        /// other file is read as canonical, stamped or not (Applied). A missing file, or one the
-        /// canonical reader cannot read, is Unreadable, which leaves the game's settings as they
-        /// are and is handed to the status sink. Reads only the file at Path: never writes, never
-        /// imports and never opens the legacy file.
+        /// Reads Defaults.ini and the file again, for a watcher that saw <see cref="FileChanged"/> or
+        /// a reload the player asked for. Defaults.ini is read where Load found it: new readable bytes
+        /// replace the values it gives; a file that went missing or cannot be read keeps them, with
+        /// one line in the log and one message. Unchanged when the file holds exactly the bytes the
+        /// owner last wrote, the import's and creation's included, no Reload has applied other bytes
+        /// since, and Defaults.ini gave nothing new. Any other file is read as canonical, stamped or
+        /// not, over Defaults.ini's current values (Applied). A missing file, or one the canonical
+        /// reader cannot read, is Unreadable, which leaves the game's settings as they are and is
+        /// handed to the status sink. Never writes, never imports and never opens the legacy file.
         /// </summary>
         /// <exception cref="InvalidOperationException">Load has not run.</exception>
         public ConfigReloadResult<TConfig> Reload()
         {
             ConfigReloadResult<TConfig> result;
+            string defaultsMessage;
             lock (_lock)
             {
                 RequireLoaded("Reload");
-                result = ReloadLocked();
+                result = ReloadLocked(out defaultsMessage);
             }
-            if (result.Status == ConfigReloadStatus.Unreadable && _statusSink != null) _statusSink(result.Reason);
+            if (_statusSink != null)
+            {
+                if (result.Status == ConfigReloadStatus.Unreadable) _statusSink(result.Reason);
+                if (defaultsMessage.Length > 0) _statusSink(defaultsMessage);
+            }
             return result;
         }
 
         /// <summary>
-        /// True when the file's last write time differs from the one the owner recorded at its last
-        /// Load, Reload or committed Save. A missing file has a write time too, so a file that
-        /// appears or goes away counts.
+        /// True when the last write time of the file, or of Defaults.ini where Load found it, differs
+        /// from the one the owner recorded at its last Load, Reload or committed Save. A missing file
+        /// has a write time too, so a file that appears or goes away counts.
         /// </summary>
         /// <exception cref="InvalidOperationException">Load has not run.</exception>
         public bool FileChanged()
@@ -265,16 +341,39 @@ namespace CameraUnlock.Core.Config
             lock (_lock)
             {
                 RequireLoaded("FileChanged");
-                return File.GetLastWriteTimeUtc(_path) != _recordedWriteTime;
+                return File.GetLastWriteTimeUtc(_path) != _recordedWriteTime || DefaultsWriteTime() != _defaultsWriteTime;
             }
         }
 
-        private ConfigLoadResult<TConfig> LoadLocked()
+        private ConfigLoadResult<TConfig> LoadLocked(out string defaultsMessage)
         {
             _loaded = true;
             _savesAllowed = false;
             _committed = null;
+            _sources = null;
             var log = new List<string>();
+            string twoFiles;
+            string unreadable = LoadDefaults(log, out twoFiles);
+
+            ConfigLoadResult<TConfig> loaded = LoadConfigFile(log);
+            var lines = new List<string>(loaded.Log);
+            string refused = DefaultsLines(lines);
+            defaultsMessage = unreadable.Length > 0 ? unreadable : refused.Length > 0 ? refused : twoFiles;
+
+            ConfigLoadStatus status = loaded.Status;
+            string reason = loaded.Reason;
+            if (!_writes && (status == ConfigLoadStatus.Canonical || status == ConfigLoadStatus.Migrated
+                || status == ConfigLoadStatus.Created))
+            {
+                status = ConfigLoadStatus.ReadOnly;
+                reason = ReadOnlyText;
+                lines.Add(ReadOnlyText);
+            }
+            return Result(status, loaded.Config, new List<CanonicalDiagnostic>(loaded.Diagnostics), lines, reason);
+        }
+
+        private ConfigLoadResult<TConfig> LoadConfigFile(List<string> log)
+        {
             _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
 
 #if NULLABLE_ENABLED
@@ -318,11 +417,240 @@ namespace CameraUnlock.Core.Config
             return Create(log);
         }
 
+        // Where Defaults.ini is, created where the choice allows it and read once. Adds its one
+        // location line, or the one failure line, and returns the message for a file that exists and
+        // cannot be read, or empty; twoFiles gets the message for two files, or empty.
+        private string LoadDefaults(List<string> log, out string twoFiles)
+        {
+            twoFiles = string.Empty;
+            DefaultsResolution resolution = _defaultsFile.Resolve(_writes);
+            IList<DefaultsCandidate> candidates = resolution.Candidates;
+            var exists = new bool[candidates.Count];
+            for (int i = 0; i < exists.Length; i++) exists[i] = Exists(candidates[i].Path);
+            var outcomes = new DefaultsCreationOutcome[candidates.Count];
+#if NULLABLE_ENABLED
+            byte[]? created = null;
+#else
+            byte[] created = null;
+#endif
+            DefaultsChoice choice = DefaultsLocation.Choose(resolution, exists, outcomes);
+            while (choice.Create >= 0)
+            {
+                outcomes[choice.Create] = CreateDefaults(candidates[choice.Create], out created);
+                choice = DefaultsLocation.Choose(resolution, exists, outcomes);
+            }
+
+            _defaultsAt = choice.Read >= 0 ? candidates[choice.Read] : candidates.Count > 0 ? candidates[0] : null;
+            _defaultsWriteTime = DefaultsWriteTime();
+            _defaultsSeen = null;
+            DefaultsIniSnapshot none = DefaultsIni.Read(new byte[0]);
+            if (choice.Read < 0)
+            {
+                log.Add(choice.Line);
+                TakeSnapshot(none);
+                return string.Empty;
+            }
+
+            DefaultsCandidate at = candidates[choice.Read];
+#if NULLABLE_ENABLED
+            byte[]? bytes = outcomes[choice.Read].Kind == DefaultsCreation.Created ? created : null;
+#else
+            byte[] bytes = outcomes[choice.Read].Kind == DefaultsCreation.Created ? created : null;
+#endif
+            if (bytes == null)
+            {
+                try
+                {
+                    bytes = ReadIfPresent(at.Path);
+                }
+                catch (IOException e)
+                {
+                    return NotRead(log, at, DefaultsWhy(e, at));
+                }
+                catch (UnauthorizedAccessException e)
+                {
+                    return NotRead(log, at, DefaultsWhy(e, at));
+                }
+                if (bytes == null)
+                {
+                    NotRead(log, at, "the file was deleted at the same time");
+                    return string.Empty;
+                }
+            }
+
+            _defaultsSeen = bytes;
+            DefaultsIniSnapshot snapshot = DefaultsIni.Read(bytes);
+            if (snapshot.Unreadable != null) return NotRead(log, at, snapshot.Unreadable);
+            log.Add(choice.Line);
+            if (snapshot.FormatLine != null) log.Add(snapshot.FormatLine);
+            TakeSnapshot(snapshot);
+            twoFiles = choice.Message;
+            return string.Empty;
+        }
+
+        // A Defaults.ini found and not read: its one line, the built-in values, and the message.
+        private string NotRead(List<string> log, DefaultsCandidate at, string why)
+        {
+            log.Add("Defaults.ini: " + DefaultsLocation.Named(at) + " cannot be read: " + why + "." + DefaultsLocation.BuiltIn);
+            TakeSnapshot(DefaultsIni.Read(new byte[0]));
+            return "Defaults.ini cannot be read: " + why + ". Settings that use it take the built-in values.";
+        }
+
+        // The folder by the one-level rule, then the file through the checked writer with no
+        // expected bytes, so it is never written over a file that appeared meanwhile.
+#if NULLABLE_ENABLED
+        private DefaultsCreationOutcome CreateDefaults(DefaultsCandidate candidate, out byte[]? created)
+#else
+        private DefaultsCreationOutcome CreateDefaults(DefaultsCandidate candidate, out byte[] created)
+#endif
+        {
+            created = null;
+            int folder = DefaultsLocation.CreateFolder(candidate.Folder);
+            if (folder == DefaultsLocation.ErrorPathNotFound) return new DefaultsCreationOutcome(DefaultsCreation.ParentMissing, string.Empty);
+            if (folder != 0)
+            {
+                string why = folder == ErrorAccessDenied
+                    ? "the folder cannot be written"
+                    : "it could not be written (" + new Win32Exception(folder).Message + ")";
+                return new DefaultsCreationOutcome(DefaultsCreation.FolderFailed, why);
+            }
+
+            byte[] bytes = DefaultsIni.Render();
+            CheckedWriteOutcome outcome;
+            try
+            {
+                outcome = CheckedFileWriter.Write(candidate.Path, null, bytes, WriterHook("Defaults."));
+            }
+            catch (CheckedWriteException e)
+            {
+                return new DefaultsCreationOutcome(DefaultsCreation.FileFailed, DefaultsWhy(e, candidate));
+            }
+            switch (outcome)
+            {
+                case CheckedWriteOutcome.Committed:
+                    created = bytes;
+                    return new DefaultsCreationOutcome(DefaultsCreation.Created, string.Empty);
+                case CheckedWriteOutcome.TargetAppeared:
+                    return new DefaultsCreationOutcome(DefaultsCreation.Appeared, string.Empty);
+                default:
+                    throw new InvalidOperationException("a write that expects no file gave " + outcome);
+            }
+        }
+
+        // The values Defaults.ini gives: each accepted value of a row that follows Defaults.ini,
+        // through the row's own codec and setter, over a fresh defaults instance.
+        private void TakeSnapshot(DefaultsIniSnapshot snapshot)
+        {
+            TConfig effective = _table.CreateDefaults();
+            var from = new List<ConceptDescriptor>();
+            for (int i = 0; i < _table.RowCount; i++)
+            {
+#if NULLABLE_ENABLED
+                ConceptDescriptor? concept = _table.RowConcept(i);
+#else
+                ConceptDescriptor concept = _table.RowConcept(i);
+#endif
+                if (concept == null || !_table.RowFollowsDefaultsIni(i)) continue;
+                DefaultsIniValue value = snapshot.Value(concept);
+                if (value.State != DefaultsIniValueState.Accepted) continue;
+#if NULLABLE_ENABLED
+                string? error = _table.RowApply(i, value.Value, effective);
+#else
+                string error = _table.RowApply(i, value.Value, effective);
+#endif
+                if (error != null)
+                {
+                    throw new InvalidOperationException(_table.RowName(i) + ": Defaults.ini's value "
+                        + CodecText.Utf8Text(value.Value) + " passed the Defaults.ini reader and not the row's codec: " + error);
+                }
+                from.Add(concept);
+            }
+            _snapshot = snapshot;
+            _effective = effective;
+            _fromDefaultsIni = from.ToArray();
+        }
+
+        // Design 3.3: which rows came from Defaults.ini, which the file sets itself, which took the
+        // built-in, and a line per refused value this game would take. Returns the in-game message
+        // for those refused values, or empty.
+        private string DefaultsLines(List<string> log)
+        {
+            if (_sources == null) return string.Empty;
+            TConfig builtIn = _table.CreateDefaults();
+            var taken = new List<string>();
+            var own = new List<string>();
+            var fallen = new List<string>();
+            var refusedLines = new List<string>();
+            var refused = new List<string>();
+            bool pairLogged = false;
+            for (int i = 0; i < _table.RowCount; i++)
+            {
+#if NULLABLE_ENABLED
+                ConceptDescriptor? concept = _table.RowConcept(i);
+#else
+                ConceptDescriptor concept = _table.RowConcept(i);
+#endif
+                if (concept == null || !_table.RowFollowsDefaultsIni(i)) continue;
+                string key = _table.RowKey(i);
+                if (_sources[i] == ConfigValueSource.File)
+                {
+                    own.Add(key);
+                    continue;
+                }
+                if (_sources[i] == ConfigValueSource.DefaultsIni)
+                {
+                    taken.Add(key + "=" + _table.RowValueText(i, _effective));
+                    continue;
+                }
+                fallen.Add(key + "=" + _table.RowValueText(i, builtIn));
+                DefaultsIniValue value = _snapshot.Value(concept);
+                if (value.State != DefaultsIniValueState.Refused) continue;
+                bool pair = concept == ConfigConcepts.RotationEnabled || concept == ConfigConcepts.PositionEnabled;
+                if (!pair || !_snapshot.PairRefused)
+                {
+                    refusedLines.Add(DefaultsIni.RefusedLine(value, _table.RowValueText(i, builtIn)));
+                    refused.Add(key + "=" + CodecText.Utf8Text(value.Value));
+                    continue;
+                }
+                if (pairLogged) continue;
+                pairLogged = true;
+                refusedLines.Add(DefaultsIni.PairLine(_snapshot, BuiltInText(ConfigConcepts.RotationEnabled, builtIn),
+                    BuiltInText(ConfigConcepts.PositionEnabled, builtIn)));
+                var entries = new List<string>();
+                foreach (ConceptDescriptor member in new ConceptDescriptor[] { ConfigConcepts.RotationEnabled, ConfigConcepts.PositionEnabled })
+                {
+                    DefaultsIniValue held = _snapshot.Value(member);
+                    if (held.State == DefaultsIniValueState.Refused) entries.Add(member.Key + "=" + CodecText.Utf8Text(held.Value));
+                }
+                refused.Add(string.Join(" and ", entries.ToArray()));
+            }
+
+            if (taken.Count > 0) log.Add(_path + ": from Defaults.ini: " + string.Join("; ", taken.ToArray()));
+            if (own.Count > 0)
+            {
+                log.Add(_path + ": set in this file, so Defaults.ini does not change them: " + string.Join(", ", own.ToArray()) + ".");
+            }
+            if (fallen.Count > 0) log.Add(_path + ": built-in, not set in Defaults.ini: " + string.Join("; ", fallen.ToArray()));
+            log.AddRange(refusedLines);
+            if (refused.Count == 0) return string.Empty;
+            return "Defaults.ini: " + refused.Count.ToString(CultureInfo.InvariantCulture)
+                + (refused.Count == 1 ? " setting cannot" : " settings cannot") + " be used (" + string.Join("; ", refused.ToArray())
+                + "), so this game uses its built-in values for them. The log has the details.";
+        }
+
+        // The game's built-in value of a tracking mode row, or the schema's for one the table does
+        // not bind; the two are equal for every row that follows Defaults.ini.
+        private string BuiltInText(ConceptDescriptor concept, TConfig builtIn)
+        {
+            int row = _table.RowOf(concept);
+            return row >= 0 ? _table.RowValueText(row, builtIn) : concept.DefaultText;
+        }
+
         private ConfigLoadResult<TConfig> CannotOpen(string path, Exception e, List<string> log)
         {
             log.Add(path + ": could not be opened: " + e.Message);
-            if (path == _legacySourcePath) return Defer(_table.CreateDefaults(), path, log, Why(e), true);
-            return Result(ConfigLoadStatus.Deferred, _table.CreateDefaults(), NoDiagnostics(), log,
+            if (path == _legacySourcePath) return Defer(OnDefaults(), path, log, Why(e), true);
+            return Result(ConfigLoadStatus.Deferred, OnDefaults(), NoDiagnostics(), log,
                 System.IO.Path.GetFileName(path) + " cannot be read: " + Why(e)
                     + ". The mod runs on its default settings this session.");
         }
@@ -334,13 +662,13 @@ namespace CameraUnlock.Core.Config
             {
                 string why = Unreadable(doc);
                 log.Add(_path + ": cannot be read: " + why);
-                return Result(ConfigLoadStatus.Unreadable, _table.CreateDefaults(), NoDiagnostics(), log,
+                return Result(ConfigLoadStatus.Unreadable, OnDefaults(), NoDiagnostics(), log,
                     _name + " cannot be read: " + why + ". The mod runs on its default settings and saves nothing until "
                         + "the file is fixed.");
             }
             TConfig config = _table.CreateDefaults();
             List<CanonicalDiagnostic> diagnostics = Apply(doc, config, log);
-            if (!stamped)
+            if (!stamped && _writes)
             {
                 log.Add(_path + ": has no [CameraUnlock] section. It is read as the canonical format, and the next save "
                     + "adds the section.");
@@ -351,14 +679,15 @@ namespace CameraUnlock.Core.Config
 
         private ConfigLoadResult<TConfig> Create(List<string> log)
         {
-            TConfig defaults = _table.CreateDefaults();
+            TConfig defaults = OnDefaults();
+            if (!_writes) return Result(ConfigLoadStatus.Created, defaults, NoDiagnostics(), log, string.Empty);
             string why;
             try
             {
-                CheckedWriteOutcome outcome = CheckedFileWriter.Write(_path, null, _defaultBytes, WriterHook("Create."));
+                CheckedWriteOutcome outcome = CheckedFileWriter.Write(_path, null, _freshBytes, WriterHook("Create."));
                 if (outcome == CheckedWriteOutcome.Committed)
                 {
-                    _committed = _defaultBytes;
+                    _committed = _freshBytes;
                     _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
                     _savesAllowed = true;
                     log.Add(_path + ": created with the default settings.");
@@ -428,7 +757,7 @@ namespace CameraUnlock.Core.Config
             byte[] rendered;
             try
             {
-                rendered = _table.Render(imported, _header);
+                rendered = _table.RenderMigration(imported, _effective, _header);
             }
             catch (ArgumentException e)
             {
@@ -445,9 +774,16 @@ namespace CameraUnlock.Core.Config
             int different = FirstDifference(imported, reread);
             if (different >= 0)
             {
+                _sources = null;
                 log.Add(input + ": " + _table.RowName(different) + " reads back from the new format as "
                     + _table.RowValueText(different, reread) + ", not " + _table.RowValueText(different, imported));
                 return Defer(imported, input, log, Unconvertible(different, imported), true);
+            }
+            if (!_writes)
+            {
+                LogNotCarried(snapshot, input, log);
+                log.AddRange(readBack);
+                return Result(ConfigLoadStatus.Migrated, reread, diagnostics, log, string.Empty);
             }
 
             try
@@ -498,6 +834,11 @@ namespace CameraUnlock.Core.Config
         private ConfigSaveResult SaveLocked(Action<TConfig> change)
         {
             var log = new List<string>();
+            if (!_writes)
+            {
+                log.Add(_path + ": not saved: " + SavesOnlyOnWindows);
+                return NotSaved(SavesOnlyOnWindows, null, log);
+            }
             if (!_savesAllowed)
             {
                 log.Add(_path + ": not saved: the file was not loaded this session");
@@ -546,9 +887,9 @@ namespace CameraUnlock.Core.Config
             bool stamped = CanonicalIni.HasStamp(snapshot);
 
             TConfig baseline = _table.CreateDefaults();
-            _table.Apply(doc, baseline);
+            ConfigValueSource[] baselineSources = _table.Apply(doc, baseline, _effective, _fromDefaultsIni).Sources;
             TConfig changed = _table.CreateDefaults();
-            _table.Apply(doc, changed);
+            _table.Apply(doc, changed, _effective, _fromDefaultsIni);
             change(changed);
 
             int count = _table.RowCount;
@@ -590,12 +931,17 @@ namespace CameraUnlock.Core.Config
             byte[] candidate = IniEditor.Edit(snapshot, edits).Bytes;
 
             TConfig written = _table.CreateDefaults();
-            _table.Apply(CanonicalIni.Parse(candidate), written);
+            ConfigValueSource[] writtenSources = _table.Apply(CanonicalIni.Parse(candidate), written, _effective, _fromDefaultsIni).Sources;
             for (int i = 0; i < count; i++)
             {
-                if (_table.RowEqual(i, written, edited[i] ? changed : baseline)) continue;
+                if (_table.RowEqual(i, written, edited[i] ? changed : baseline)
+                    && (edited[i] || writtenSources[i] == baselineSources[i]))
+                {
+                    continue;
+                }
                 log.Add(_path + ": not saved: " + _table.RowName(i) + " would read back as "
-                    + _table.RowValueText(i, written) + ", not " + _table.RowValueText(i, edited[i] ? changed : baseline));
+                    + _table.RowValueText(i, written) + " from " + SourceName(writtenSources[i]) + ", not "
+                    + _table.RowValueText(i, edited[i] ? changed : baseline) + " from " + SourceName(edited[i] ? ConfigValueSource.File : baselineSources[i]));
                 return NotSaved(_table.RowName(i) + "=" + _table.RowValueText(i, changed) + " does not read back from "
                     + _name, null, log);
             }
@@ -621,7 +967,26 @@ namespace CameraUnlock.Core.Config
             }
             _committed = candidate;
             _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
+            for (int i = 0; i < count; i++)
+            {
+                if (!edited[i] || !_table.RowFollowsDefaultsIni(i) || baselineSources[i] == ConfigValueSource.File) continue;
+                log.Add(_path + ": " + _table.RowKey(i) + "=" + _table.RowValueText(i, changed)
+                    + " is now set for this game, and no longer follows Defaults.ini.");
+            }
             return new ConfigSaveResult(ConfigSaveStatus.Saved, string.Empty, null, null, log);
+        }
+
+        private static string SourceName(ConfigValueSource source)
+        {
+            switch (source)
+            {
+                case ConfigValueSource.File:
+                    return "the file";
+                case ConfigValueSource.DefaultsIni:
+                    return "Defaults.ini";
+                default:
+                    return "the built-in value";
+            }
         }
 
 #if NULLABLE_ENABLED
@@ -633,10 +998,24 @@ namespace CameraUnlock.Core.Config
             return new ConfigSaveResult(ConfigSaveStatus.NotSaved, "Settings not saved: " + why + ".", error, null, log);
         }
 
-        private ConfigReloadResult<TConfig> ReloadLocked()
+        private ConfigReloadResult<TConfig> ReloadLocked(out string defaultsMessage)
         {
             var log = new List<string>();
+            _sources = null;
             DateTime writeTime = File.GetLastWriteTimeUtc(_path);
+            _defaultsWriteTime = DefaultsWriteTime();
+            bool snapshotChanged;
+            string unreadable = ReloadDefaults(log, out snapshotChanged);
+            ConfigReloadResult<TConfig> reloaded = ReloadConfigFile(log, writeTime, snapshotChanged);
+            var lines = new List<string>(reloaded.Log);
+            string refused = DefaultsLines(lines);
+            defaultsMessage = unreadable.Length > 0 ? unreadable : snapshotChanged ? refused : string.Empty;
+            return Reloaded(reloaded.Status, reloaded.Config, new List<CanonicalDiagnostic>(reloaded.Diagnostics), lines,
+                reloaded.Reason);
+        }
+
+        private ConfigReloadResult<TConfig> ReloadConfigFile(List<string> log, DateTime writeTime, bool snapshotChanged)
+        {
             byte[] bytes;
             try
             {
@@ -668,7 +1047,7 @@ namespace CameraUnlock.Core.Config
             }
             _recordedWriteTime = writeTime;
 
-            if (_committed != null && Same(bytes, _committed))
+            if (_committed != null && Same(bytes, _committed) && !snapshotChanged)
             {
                 return Reloaded(ConfigReloadStatus.Unchanged, null, NoDiagnostics(), log, string.Empty);
             }
@@ -683,17 +1062,93 @@ namespace CameraUnlock.Core.Config
             }
             TConfig config = _table.CreateDefaults();
             List<CanonicalDiagnostic> diagnostics = Apply(doc, config, log);
-            _committed = null;
+            if (_committed != null && !Same(bytes, _committed)) _committed = null;
             _savesAllowed = true;
             return Reloaded(ConfigReloadStatus.Applied, config, diagnostics, log, string.Empty);
+        }
+
+        // Defaults.ini again, where Load found it. Returns the message for one that went missing or
+        // cannot be read, which keeps the values it gave, or empty.
+        private string ReloadDefaults(List<string> log, out bool changed)
+        {
+            changed = false;
+            if (_defaultsAt == null) return string.Empty;
+            string named = DefaultsLocation.Named(_defaultsAt);
+#if NULLABLE_ENABLED
+            byte[]? bytes;
+#else
+            byte[] bytes;
+#endif
+            try
+            {
+                bytes = ReadIfPresent(_defaultsAt.Path);
+            }
+            catch (IOException e)
+            {
+                return KeptValues(log, named, DefaultsWhy(e, _defaultsAt));
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                return KeptValues(log, named, DefaultsWhy(e, _defaultsAt));
+            }
+            if (bytes == null)
+            {
+                if (_defaultsSeen == null) return string.Empty;
+                _defaultsSeen = null;
+                log.Add("Defaults.ini: " + named + " is missing." + KeptUntilRestart);
+                return "Defaults.ini is missing." + KeptUntilRestart;
+            }
+            if (_defaultsSeen != null && Same(bytes, _defaultsSeen)) return string.Empty;
+            _defaultsSeen = bytes;
+            DefaultsIniSnapshot snapshot = DefaultsIni.Read(bytes);
+            if (snapshot.Unreadable != null) return KeptValues(log, named, snapshot.Unreadable);
+            log.Add("Defaults.ini: " + named + " (read)");
+            if (snapshot.FormatLine != null) log.Add(snapshot.FormatLine);
+            TakeSnapshot(snapshot);
+            changed = true;
+            return string.Empty;
+        }
+
+        private static string KeptValues(List<string> log, string named, string why)
+        {
+            log.Add("Defaults.ini: " + named + " cannot be read: " + why + "." + KeptUntilRestart);
+            return "Defaults.ini cannot be read: " + why + "." + KeptUntilRestart;
         }
 
         private List<CanonicalDiagnostic> Apply(CanonicalIni doc, TConfig config, List<string> log)
         {
             var diagnostics = new List<CanonicalDiagnostic>(doc.Diagnostics);
-            diagnostics.AddRange(_table.Apply(doc, config).Diagnostics);
+            TableApplyResult applied = _table.Apply(doc, config, _effective, _fromDefaultsIni);
+            diagnostics.AddRange(applied.Report.Diagnostics);
+            _sources = applied.Sources;
             foreach (CanonicalDiagnostic diagnostic in diagnostics) log.Add(_path + ": " + diagnostic.Describe());
             return diagnostics;
+        }
+
+        // The defaults the session runs on where no file is read: Defaults.ini's values on the rows
+        // that follow it, the table's on the rest.
+        private TConfig OnDefaults()
+        {
+            TConfig config = _table.CreateDefaults();
+            _sources = _table.Apply(CanonicalIni.Parse(new byte[0]), config, _effective, _fromDefaultsIni).Sources;
+            return config;
+        }
+
+        private DateTime DefaultsWriteTime()
+        {
+            if (_defaultsAt == null) return DateTime.MinValue;
+            try
+            {
+                return File.GetLastWriteTimeUtc(_defaultsAt.Path);
+            }
+            catch (IOException)
+            {
+                return DateTime.MaxValue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return DateTime.MaxValue;
+            }
         }
 
         private void LogDropped(ImportResult import, string input, List<string> log)
@@ -818,7 +1273,8 @@ namespace CameraUnlock.Core.Config
             }
         }
 
-        // What the player is told about an I/O error, in the words of design 4.7.
+        // What the player is told about an I/O error, in the words of design 4.7. Off Windows the
+        // read-only attribute is not asked about, since that asks kernel32.
         private string Why(Exception error)
         {
             var failed = error as CheckedWriteException;
@@ -837,14 +1293,38 @@ namespace CameraUnlock.Core.Config
             }
             bool denied = cause is UnauthorizedAccessException || native == ErrorAccessDenied || hresult == HResultAccessDenied;
             if (denied && failed != null && failed.Step == CheckedWriteStep.CreateTemporary) return "the folder cannot be written";
-            if (denied && failed != null && IsReadOnly(failed.TargetPath)) return "the file is read-only";
+            if (denied && failed != null && _writes && IsReadOnly(failed.TargetPath)) return "the file is read-only";
             return (failed != null ? "it could not be written (" : "it could not be read (") + cause.Message + ")";
+        }
+
+        // Why, with the Defaults.ini candidate's paths in the form its lines show them, so a system
+        // message that names a path carries no account name.
+        private string DefaultsWhy(Exception error, DefaultsCandidate candidate)
+        {
+            string why = Why(error);
+            foreach (KeyValuePair<string, string> path in new[]
+            {
+                new KeyValuePair<string, string>(candidate.Path, candidate.Shown),
+                new KeyValuePair<string, string>(candidate.Folder, candidate.ShownFolder),
+                new KeyValuePair<string, string>(candidate.Parent, candidate.ShownParent),
+            })
+            {
+                if (path.Key.Length > 0) why = why.Replace(path.Key, path.Value);
+            }
+            return why;
         }
 
         private static bool IsReadOnly(string path)
         {
             uint attributes = CheckedFileWriter.GetFileAttributesW(path);
             return attributes != InvalidFileAttributes && (attributes & FileAttributeReadOnly) != 0;
+        }
+
+        // A file or a folder of that name: either one is there for the choice, and a folder then
+        // fails to read with its reason.
+        private static bool Exists(string path)
+        {
+            return File.Exists(path) || Directory.Exists(path);
         }
 
         private static string AbsolutePath(

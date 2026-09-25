@@ -244,6 +244,8 @@ std::string DefaultsIniRefusedLine(const DefaultsIniValue& value, std::string_vi
            "), so the built-in " + std::string(built_in) + " is used.";
 }
 
+std::string DefaultsIniText(std::string_view bytes) { return Utf8Text(bytes); }
+
 std::string DefaultsIniPairLine(const DefaultsIniSnapshot& snapshot, std::string_view rotation_built_in,
                                 std::string_view position_built_in) {
     if (!snapshot.pair_refused) throw std::invalid_argument("the snapshot's tracking-mode pair is not refused");
