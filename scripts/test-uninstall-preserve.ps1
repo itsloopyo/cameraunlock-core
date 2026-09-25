@@ -331,10 +331,11 @@ foreach ($tree in $trees) {
     Write-Host "PASS $($tree.Kind): installed_by_us true, false and /force, with and without the list, listed files kept through the tree removal"
 }
 
-# A <file>.pre-canonical beside a listed config is a file like any other now: a
-# removal list or a loader folder removal that covers it takes it. BepInEx has no
-# list reaching BepInEx\config, so there only the loader removal takes them; the
-# REFramework MOD_LEFTOVERS names two and the loader removal takes the third.
+# A file whose name starts with a listed config's name, such as <file>.bak, is not
+# kept by PRESERVE_FILES: a removal list or a loader folder removal that covers it
+# takes it. BepInEx has no list reaching BepInEx\config, so there only the loader
+# removal takes them; the REFramework MOD_LEFTOVERS names two and the loader
+# removal takes the third.
 $rp = 'reframework\plugins'
 $strays = @(
     @{
@@ -343,18 +344,18 @@ $strays = @(
         Loader = @('winhttp.dll', 'BepInEx\core\BepInEx.dll')
         ModFiles = @('BepInEx\plugins\Fixture.dll')
         Kept = @($bepConfig, $bepLegacy)
-        Strays = @("$bepConfig.pre-canonical", "$bepLegacy.pre-canonical", "$bepLegacy.pre-canonical.last")
+        Strays = @("$bepConfig.bak", "$bepLegacy.bak", "$bepLegacy.bak.old")
         Listed = @()
     },
     @{
         Kind = 'reframework'
         Config = [ordered]@{ FRAMEWORK_TYPE = 'REFramework'; MOD_DLLS = 'HeadTracking.dll'
-            MOD_LEFTOVERS = 'CameraUnlock.ini.pre-canonical HeadTracking.ini.pre-canonical'; PRESERVE_FILES = "$rp\CameraUnlock.ini $rp\HeadTracking.ini" }
+            MOD_LEFTOVERS = 'CameraUnlock.ini.bak HeadTracking.ini.bak'; PRESERVE_FILES = "$rp\CameraUnlock.ini $rp\HeadTracking.ini" }
         Loader = @('dinput8.dll', 'reframework_revision.txt', 'reframework\autorun\other.lua')
         ModFiles = @("$rp\HeadTracking.dll")
         Kept = @("$rp\CameraUnlock.ini", "$rp\HeadTracking.ini")
-        Strays = @("$rp\CameraUnlock.ini.pre-canonical", "$rp\HeadTracking.ini.pre-canonical", "$rp\HeadTracking.ini.pre-canonical.last")
-        Listed = @("$rp\CameraUnlock.ini.pre-canonical", "$rp\HeadTracking.ini.pre-canonical")
+        Strays = @("$rp\CameraUnlock.ini.bak", "$rp\HeadTracking.ini.bak", "$rp\HeadTracking.ini.bak.old")
+        Listed = @("$rp\CameraUnlock.ini.bak", "$rp\HeadTracking.ini.bak")
     }
 )
 foreach ($stray in $strays) {
@@ -372,7 +373,7 @@ foreach ($stray in $strays) {
         Assert-Output $case $output (@($stray.Listed | ForEach-Object { 'Removed: ' + (Split-Path $_ -Leaf) }) + '=== Uninstall Complete ===')
         Assert-NoHolding $case
     }
-    Write-Host "PASS $($stray.Kind) .pre-canonical beside a listed config: removed by the list that names it and by the loader folder removal, the listed configs kept"
+    Write-Host "PASS $($stray.Kind) a name extending a listed config's: removed by the list that names it and by the loader folder removal, the listed configs kept"
 }
 
 # ---------------------------------------------------------------- failures

@@ -161,18 +161,17 @@ template tails are unchanged.
 
 `test-uninstall-preserve.ps1` drops the copies from its fixtures and the folder-named-as-a-copy
 case, and its BepInEx fixture keeps `BepInEx\config\CameraUnlock.ini` and the plugin's `.cfg`. Two
-cases show a copy beside a listed config now goes like any other unlisted file, each run with
-`installed_by_us` true, false and `/force`:
+cases show a file whose name extends a listed config's (`<file>.bak`, `<file>.bak.old`) goes like
+any other unlisted file, each run with `installed_by_us` true, false and `/force`:
 
-- BepInEx, listing `BepInEx\config\CameraUnlock.ini` and the plugin's `.cfg`, with a
-  `.pre-canonical` beside each and a `.pre-canonical.last` beside the `.cfg`. No removal list reaches
-  `BepInEx\config`, so the loader folder removal takes the three copies and the two listed files
-  are set aside and put back. Without it all five stay.
-- REFramework, listing `reframework\plugins\CameraUnlock.ini` and `reframework\plugins\HeadTracking.ini`,
-  with `MOD_LEFTOVERS` naming the two `.pre-canonical` files and a third copy it does not name. The
-  list removes its two on every run, and the loader folder removal takes the third.
-
-Both cases fail against the body from before this change, which kept every copy.
+- BepInEx, listing `BepInEx\config\CameraUnlock.ini` and the plugin's `.cfg`, with a `.bak`
+  beside each and a `.bak.old` beside the `.cfg`. No removal list reaches `BepInEx\config`, so the
+  loader folder removal takes the three and the two listed files are set aside and put back.
+  Without it all five stay.
+- REFramework, listing `reframework\plugins\CameraUnlock.ini` and
+  `reframework\plugins\HeadTracking.ini`, with `MOD_LEFTOVERS` naming the two `.bak` files and a
+  third file it does not name. The list removes its two on every run, and the loader folder
+  removal takes the third.
 
 ### Changed - docs/canonical-config.md describes the import into `CameraUnlock.ini` throughout
 
