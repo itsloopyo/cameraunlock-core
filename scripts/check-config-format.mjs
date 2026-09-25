@@ -38,8 +38,12 @@ const TOP_LEVEL_KEYS = [
   "conversion_notes",
   "hotkey_exceptions",
   "allow_legacy_symbols",
+  "descriptor_omits",
 ];
 const DIALECTS = new Set(["native", "unity"]);
+// The launcher rows a config descriptor may leave out: world-space yaw, in a game whose default
+// differs from the fleet's on purpose (no stable up) and which a launcher global must not reach.
+const OMITTABLE_ROWS = new Set(["WorldSpaceYaw"]);
 const REPO_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const BAD_PATH_CHARS = /[<>:"|?*\x00-\x1f]/;
@@ -281,6 +285,28 @@ for (const [name, uses] of Object.entries(doc.allow_legacy_symbols)) {
     if (!isText(use.symbol)) fail(`${where}[${i}].symbol must be a non-empty string`);
     if (!isText(use.reason)) fail(`${where}[${i}].reason must be a non-empty string`);
     checkPath(`${where}[${i}].file`, use.file, "/");
+  });
+}
+
+for (const [name, omits] of Object.entries(doc.descriptor_omits)) {
+  const where = `descriptor_omits.${name}`;
+  if (!(name in configs)) fail(`${where}: ${name} is not a repo in configs`);
+  if (!Array.isArray(omits) || omits.length === 0) {
+    fail(`${where} must be a non-empty array`);
+    continue;
+  }
+  const rows = new Set();
+  omits.forEach((omit, i) => {
+    if (!isObject(omit)) {
+      fail(`${where}[${i}] must be an object`);
+      return;
+    }
+    checkKeys(`${where}[${i}]`, omit, ["row", "reason", "approved"], []);
+    if (!OMITTABLE_ROWS.has(omit.row)) fail(`${where}[${i}].row ${JSON.stringify(omit.row)} is not one of ${[...OMITTABLE_ROWS].join(", ")}`);
+    else if (rows.has(omit.row)) fail(`${where}[${i}].row ${omit.row} is listed twice`);
+    rows.add(omit.row);
+    if (!isText(omit.reason)) fail(`${where}[${i}].reason must be a non-empty string`);
+    if (typeof omit.approved !== "string" || !DATE.test(omit.approved)) fail(`${where}[${i}].approved must be a YYYY-MM-DD date`);
   });
 }
 

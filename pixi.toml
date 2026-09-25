@@ -86,6 +86,9 @@ pack = "dotnet pack csharp -c Release -o dist"
 # would replace the player's file with the stamped default, and no migration
 # would run. Unconverted repos are not checked, so their Nexus ZIPs keep the
 # config until their conversion takes it out of the Nexus staging.
+# A manifest with a config descriptor (the `config` block a launcher reads to find the mod's
+# canonical config and the preference rows it binds) has it held to every rule in
+# scripts/check-config-descriptor.mjs, against the repo the ZIP was built from.
 # Or pass repo tokens / zip paths to validate across a checkout:
 #   pixi run validate-manifest
 #   pixi run validate-manifest dying-light-2 bioshock-remastered
@@ -107,7 +110,8 @@ validate-notices = "node scripts/validate-notices.mjs"
 # the notices/submodule core commit, launcher-manifest.json, LICENSE, the
 # README claims AGENTS.md forbids, and the canonical config format
 # (config-format, config-legacy-reader, config-preserve; see
-# scripts/check-canonical-config.mjs). Reports; sync-templates.ps1 fixes.
+# scripts/check-canonical-config.mjs), and the launcher-manifest.json config descriptor
+# (config-descriptor; see scripts/check-config-descriptor.mjs). Reports; sync-templates.ps1 fixes.
 #   pixi run conformance
 #   pixi run conformance -All
 #   pixi run conformance -All -Json
@@ -175,9 +179,17 @@ check-canonical-ini-js = "node scripts/test-canonical-config.mjs"
 check-doc-examples = "node scripts/check-doc-examples.mjs"
 
 # scripts/encode-seed.mjs re-encodes the launcher-manifest.json seeds that write a converted
-# repo's config from its committed file (a mod repo's render-config task runs it; see
-# scripts/templates/render-config-task-*.toml). This runs it against copies of real manifests.
+# repo's config, and the config descriptor's rows, from its committed file (a mod repo's
+# render-config task runs it; see scripts/templates/render-config-task-*.toml). This runs it
+# against copies of real manifests.
 test-encode-seed = "node scripts/test-encode-seed.mjs"
+
+# scripts/check-config-descriptor.mjs holds the launcher-manifest.json config descriptor to its
+# rules; validate-manifest runs them on a built ZIP and conformance (config-descriptor) on the
+# committed manifest. This checks that a good descriptor passes and that one mutation per rule
+# fails, and runs the rows generator, both callers and the packager's ConvertTo-Json round trip.
+# Windows: it runs conformance.ps1 and Windows PowerShell.
+test-config-descriptor = "node scripts/test-config-descriptor.mjs"
 
 # The fleet report over every canonical repo checked out beside this core: game-local
 # (section, key) pairs shared by three or more repos (candidates for a concept), the
@@ -190,13 +202,13 @@ config-report = "node scripts/check-canonical-config.mjs --report"
 #
 # Ordered cheapest and most deterministic first, because pixi aborts on the first
 # failing dependency and the order decides how long a developer (and CI) waits to
-# find out. The six pure-node gates need no compiler and finish in seconds;
+# find out. The seven node gates need no compiler and finish in seconds;
 # they used to sit at the END, behind a full C# build and both test suites, so a
 # stale generated alias table cost several minutes to discover. The vectors come
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-encode-seed", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-encode-seed", "test-config-descriptor", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

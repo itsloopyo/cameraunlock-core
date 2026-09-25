@@ -9,6 +9,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the `config` descriptor in `launcher-manifest.json`
+
+A converted package can tell a launcher where its canonical file is and which of the launcher's
+preference rows the mod binds, with their committed values: a top-level `config` block of `path`,
+`anchor`, `legacy_source`, `canonical_since` and `rows` (docs/canonical-config.md, "The config
+descriptor"). No mod carries one yet; a repo adds it at or after its conversion.
+
+- **`scripts/check-config-descriptor.mjs`** holds the block's rules: its shape, the tracking pair
+  against `preference_modes`, `canonical_since` against `mod_info.version`, and the block against
+  the repo's `data/config-format.json` entry, its seeds and `files[]`, and its committed file.
+  `pixi run validate-manifest` runs them on a built ZIP whose manifest carries a block.
+- **Conformance `config-descriptor`** runs them on the committed manifest, fails a converted repo
+  delivered by manifest with one config file and no block, and, with tags, a `canonical_since`
+  not above every `v*` tag whose committed config lacks the stamp.
+- **`scripts/encode-seed.mjs`** also rewrites `config.rows` from the committed file, leaving every
+  other byte; `--check` fails stale rows. The `render-config` task command is unchanged.
+- **`data/config-format.json` `descriptor_omits`**: per repo, launcher rows the descriptor leaves
+  out on purpose, with a reason and an approval date. Only `WorldSpaceYaw` may be listed; it lists
+  subnautica-headtracking, whose mod defaults to camera-local yaw because swimming has no stable
+  up. `check-config-format` validates the key.
+- **`pixi run test-config-descriptor`**, part of `pixi run check`.
+
 ### Added - `data/fixtures/canonical-ini/preferences/`: a launcher's preferences against the mod
 
 19 cases for the four preferences a launcher manages in a canonical file (tracking mode,

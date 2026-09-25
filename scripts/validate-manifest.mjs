@@ -67,6 +67,12 @@
 // release/*-installer.zip, for validating across a full checkout. A repo that
 // publishes no installer at all - external delivery hands a manager-consumable
 // ZIP straight to the user - falls back to its newest non-Nexus release ZIP.
+//
+// A manifest carrying a config block, the descriptor a launcher reads to find
+// the mod's canonical config and the preference rows it binds, has the block
+// held to every rule in check-config-descriptor.mjs, against the repo the ZIP
+// was built from: the host repo, the sibling a token names, or the repo whose
+// release/ folder holds a ZIP named by path.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -74,6 +80,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { repoState } from "./check-canonical-config.mjs";
+import { descriptorProblems } from "./check-config-descriptor.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // core lives at <root>/cameraunlock-core/scripts. Two levels up is the repo
@@ -91,7 +98,7 @@ let failures = 0;
 for (const token of jobs) {
   // "." resolves to the host repo, so it takes the host-only checks as well.
   const isSelf = token === SELF || (!token.endsWith(".zip") && path.join(ROOT, token) === ROOT);
-  const zip = isSelf ? newestInstaller(path.join(ROOT, "release")) : resolveZip(token);
+  const { zip, repo } = isSelf ? { zip: newestInstaller(path.join(ROOT, "release")), repo: ROOT } : resolveZip(token);
   const label = isSelf ? path.basename(ROOT) : token;
   if (!zip) {
     console.error(`FAIL ${label}: no installer zip found`);
@@ -99,7 +106,7 @@ for (const token of jobs) {
     continue;
   }
   try {
-    validate(label, zip);
+    validate(label, zip, repo);
   } catch (e) {
     console.error(`FAIL ${label}: ${e.message}`);
     failures += 1;
@@ -120,7 +127,7 @@ if (failures > 0) {
 }
 console.log("\nall packages valid.");
 
-function validate(label, zip) {
+function validate(label, zip, repo) {
   // PowerShell 5.1's Compress-Archive writes backslash separators, and the
   // launcher deploys on Windows where casing does not decide a match, so both
   // are normalised away before comparing. Casing differences are still worth
@@ -135,6 +142,7 @@ function validate(label, zip) {
   const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
 
   assertVersionMatchesZipName(man, zip);
+  const descriptor = checkDescriptor(man, repo);
 
   const mode = man.delivery_mode;
   // Lopari installs an absent mode through install.cmd, so it needs the same
@@ -216,10 +224,24 @@ function validate(label, zip) {
     ? `, ${man.variants.length} variant(s) (${man.variants.map((v) => v.id).join(", ")})`
     : "";
   console.log(
-    `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${variants}`,
+    `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${variants}${descriptor}`,
   );
   warnMiscased(label, miscased);
   warnUndeployed(label, undeclared.cosmetic);
+}
+
+// The config descriptor, held to every rule in check-config-descriptor.mjs: its shape, and
+// against the repo the ZIP was built from, data/config-format.json's entry and the committed
+// config. A manifest without one (and whose variants carry none) has nothing to check here.
+function checkDescriptor(man, repo) {
+  const variants = Array.isArray(man.variants) ? man.variants : [];
+  if (!("config" in man) && !variants.some((v) => v && typeof v === "object" && "config" in v)) return "";
+  if (repo === null) {
+    throw new Error("the manifest has a config descriptor, which is checked against the repo the ZIP was built from; name the repo, or a ZIP in its release/ folder");
+  }
+  const problems = descriptorProblems(man, { root: repo, checkVersion: true });
+  if (problems.length > 0) throw new Error(`config descriptor: ${problems.join("; ")}`);
+  return ", config descriptor";
 }
 
 // install_cmd: the scripts ARE the delivery mechanism, so the gate is that
@@ -548,15 +570,22 @@ function warnDescriptive(label, missing) {
   );
 }
 
+// The ZIP and the repo it was built from, which the config descriptor is checked against. A ZIP
+// named by path has a repo when it sits in one's release/ folder.
 function resolveZip(token) {
-  if (token.endsWith(".zip")) return fs.existsSync(token) ? path.resolve(token) : null;
+  if (token.endsWith(".zip")) {
+    if (!fs.existsSync(token)) return { zip: null, repo: null };
+    const zip = path.resolve(token);
+    const dir = path.dirname(zip);
+    return { zip, repo: path.basename(dir).toLowerCase() === "release" ? path.dirname(dir) : null };
+  }
   // token is a repo dir name or a catalog id; find its release dir under the
   // repos root (only meaningful from a standalone core checkout).
   for (const name of [token, `${token}-headtracking`]) {
     const z = newestInstaller(path.join(ROOT, name, "release"));
-    if (z) return z;
+    if (z) return { zip: z, repo: path.join(ROOT, name) };
   }
-  return null;
+  return { zip: null, repo: null };
 }
 
 // Newest installer ZIP, or - for a mod that publishes none because a third

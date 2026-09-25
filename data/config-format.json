@@ -38,7 +38,13 @@
     "canonical_default.",
     "`allow_legacy_symbols`: per repo, uses of a symbol the legacy-reader check bans that do not",
     "read the mod's config: `symbol` as the check reports it (GetPrivateProfileStringA, IniReader,",
-    "ConfigFile.Bind), `file` the repo path and `reason`."
+    "ConfigFile.Bind), `file` the repo path and `reason`.",
+    "",
+    "`descriptor_omits`: per repo in `configs`, launcher rows the `config` descriptor in its",
+    "launcher-manifest.json leaves out of `rows` although the committed file has them, so a",
+    "launcher never sets them: `row` (only WorldSpaceYaw), `reason` and the `approved` date. For",
+    "a game whose default differs from the fleet on purpose. scripts/check-config-descriptor.mjs",
+    "and encode-seed.mjs read it; every other launcher row in the committed file is in `rows`."
   ],
   "legacy": {
     "abzu-headtracking": {},
@@ -567,5 +573,14 @@
     ]
   },
   "hotkey_exceptions": {},
-  "allow_legacy_symbols": {}
+  "allow_legacy_symbols": {},
+  "descriptor_omits": {
+    "subnautica-headtracking": [
+      {
+        "row": "WorldSpaceYaw",
+        "reason": "The mod defaults to camera-local yaw because swimming has no stable up, so a launcher global for world-space yaw must not reach it.",
+        "approved": "2026-09-25"
+      }
+    ]
+  }
 }

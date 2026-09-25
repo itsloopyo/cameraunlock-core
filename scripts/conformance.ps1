@@ -58,7 +58,7 @@ $CHECK_IDS = @(
     'install-wrapper', 'delayed-expansion', 'arg-parser', 'config-block', 'config-pairing',
     'shim-marker', 'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
     'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme',
-    'config-format', 'config-legacy-reader', 'config-preserve'
+    'config-format', 'config-legacy-reader', 'config-preserve', 'config-descriptor'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -1126,6 +1126,26 @@ function Test-ConfigPreserve {
     }
 }
 
+# The config descriptor, the launcher-manifest.json block a launcher reads to find a converted
+# mod's config and the preference rows it binds. scripts/check-config-descriptor.mjs --json fails
+# a converted repo delivered by manifest that has no block, holds the committed manifest to every
+# rule in that script except the one comparing canonical_since with mod_info.version, which
+# packaging stamps, and holds canonical_since above every v* tag whose committed config lacks the
+# stamp, which needs a clone with its tags.
+$DescriptorState = @{}
+
+function Test-ConfigDescriptor {
+    param([string]$Name, [string]$Root)
+
+    $report = $DescriptorState[$Root]
+    foreach ($problem in @($report.problems)) {
+        Add-Finding $Name 'config-descriptor' 'FAIL' $problem
+    }
+    if ($report.shallow) {
+        Add-Finding $Name 'config-descriptor' 'WARN' 'a shallow clone has no tags, so canonical_since was not held to them'
+    }
+}
+
 $CHECK_TABLE = [ordered]@{
     'install-wrapper'   = ${function:Test-InstallWrapper}
     'delayed-expansion' = ${function:Test-DelayedExpansion}
@@ -1148,6 +1168,7 @@ $CHECK_TABLE = [ordered]@{
     'config-format'        = ${function:Test-ConfigFormat}
     'config-legacy-reader' = ${function:Test-ConfigLegacyReader}
     'config-preserve'      = ${function:Test-ConfigPreserve}
+    'config-descriptor'    = ${function:Test-ConfigDescriptor}
 }
 
 # ---------------------------------------------------------------------------
@@ -1231,6 +1252,11 @@ function Invoke-NodeOverRoots {
 if (@($selected | Where-Object { $_ -in $CONFIG_CHECK_IDS }).Count -gt 0) {
     $states = Invoke-NodeOverRoots 'scripts/check-canonical-config.mjs' @('--json') $roots
     for ($i = 0; $i -lt $roots.Count; $i++) { $CanonicalConfig[$roots[$i]] = $states[$i] }
+}
+
+if ('config-descriptor' -in $selected) {
+    $reports = Invoke-NodeOverRoots 'scripts/check-config-descriptor.mjs' @('--json') $roots
+    for ($i = 0; $i -lt $roots.Count; $i++) { $DescriptorState[$roots[$i]] = $reports[$i] }
 }
 
 if ('readme' -in $selected) {

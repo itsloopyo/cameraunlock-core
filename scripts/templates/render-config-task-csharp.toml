@@ -10,7 +10,8 @@
 # The render test owns the mode: with CAMERAUNLOCK_RENDER_CONFIG set to `write` it writes
 # the rendered bytes to the committed path and passes; unset, it compares; any other value
 # fails the test. encode-seed then re-encodes every launcher-manifest.json seed that writes
-# the config from the new bytes, and says so when the repo has no manifest or no such seed.
+# the config from the new bytes, and rewrites the rows of the manifest's config descriptor,
+# and says so when the repo has no manifest, no such seed or no descriptor.
 #
 # <test project>  the test .csproj
 # <render test>   a dotnet test --filter expression that selects the render test alone
