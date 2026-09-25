@@ -727,8 +727,10 @@ those builds).
   outside 0x01-0xFE (and the modifiers) and keeps the default, so every code it gives has a
   canonical spelling.
 - **`PluginMod` in canonical mode**: `LoadConfig` builds a `ConfigOwner<PluginConfig>` on the wide
-  path beside the plugin DLL with that table and import, so a missing file is the owner's
-  `Created` (the old Save-on-missing) and a legacy file converts once. The owner's log lines are
+  path of `CameraUnlock.ini` beside the plugin DLL with that table and import, and `legacy_path`
+  the `configFileName` beside it (`HeadTracking.ini` by default), so with neither file the owner
+  creates `CameraUnlock.ini` (`Created`, the old Save-on-missing) and a legacy file is imported
+  once while `CameraUnlock.ini` is absent, and never written. The owner's log lines are
   logged at once (logging is up by then), as warnings with the player's reason when the load was
   not usable. `RequestCycleTrackingMode`, on the hotkey thread, computes the next two-state mode
   from the mode the render thread last applied, stores it as desired, requests the apply and
@@ -743,11 +745,13 @@ those builds).
   resident-evil-2, -3, -4, -7, -village and -requiem shipped at its newest published build, byte
   for byte, plus the older file Requiem v0.4.0's launcher manifest seeds. The C++ suite runs
   `PluginConfig::Load` against the import on each and on its whole corpus (about 2,000 inputs a
-  file, floats bitwise), checks the import leaves its copy untouched, converts RE8's and
-  Requiem's corpora through the owner, and converts each shipped file to a canonical file that
-  reads back as imported, keeps `.pre-canonical`, is not rewritten by a second load, and edits
-  one line per `PositionEnabled` or `WorldSpaceYaw` save. Requiem v0.4.0's installer ships position
-  sensitivity 1.0 and its launcher seed 2.0, and core cannot tell a seeded 2.0 from a player's.
+  file, floats bitwise), checks the import leaves its copy untouched, imports RE8's and
+  Requiem's corpora through the owner into `CameraUnlock.ini`, and imports each shipped file into a
+  `CameraUnlock.ini` that reads back as imported, is not rewritten by a second load, and edits one
+  line per `PositionEnabled` or `WorldSpaceYaw` save. Every owner import leaves `HeadTracking.ini`
+  byte for byte as it was, with nothing but the two files in the folder. Requiem v0.4.0's
+  installer ships position sensitivity 1.0 and its launcher seed 2.0, and core cannot tell a
+  seeded 2.0 from a player's.
   The owner ruled on 2026-09-25 that 1.0 stands (`data/config-format.json` `conversion_notes`),
   so the seed's 2.0 is logged as dropped.
 
@@ -762,35 +766,42 @@ Nothing in the fleet uses it yet; each native game's conversion wires it. The st
 and results compile everywhere; the owner itself is Windows only, as the writer is.
 
 - **Options by member assignment**: `ConfigOwnerOptions<Config>` with `path` (a fully qualified
-  `std::wstring`; there is no ANSI path), `table`, `import` (`LegacyImport<Config>`, whose empty
-  `run` means the game never published a pre-canonical build), `header` and `status_sink`. The
-  constructor throws `std::invalid_argument` for an empty or relative path, a table with no rows,
-  an import that names keys but has no run, a table that has both `RotationEnabled` and
-  `PositionEnabled` and marks only one Writable, or a header the renderer refuses. There is no
-  `LegacySourcePath`: that is BepInEx's, and BepInEx is C# only.
+  `std::wstring`, `CameraUnlock.ini`; there is no ANSI path), `table`, `import`
+  (`LegacyImport<Config>`, whose empty `run` means the game never published a pre-canonical
+  build), `legacy_path` (the fully qualified legacy file the import reads, `HeadTracking.ini`
+  beside `CameraUnlock.ini`), `header` and `status_sink`. The constructor throws
+  `std::invalid_argument` for an empty or relative path, a table with no rows, an import that
+  names keys but has no run, an import `run` with no `legacy_path`, a `legacy_path` with no `run`,
+  a `legacy_path` that is not fully qualified or names the file `path` names (compared without
+  case), a table that has both `RotationEnabled` and `PositionEnabled` and marks only one Writable,
+  or a header the renderer refuses.
 - **`Load()`** returns `ConfigLoadResult<Config>` (`ConfigLoadStatus`: `Canonical` 0, `Migrated`
   1, `Created` 2, `Deferred` 3, `LegacyRefused` 4, `Unreadable` 5) with the `config`, the
   `diagnostics`, a UTF-8 `log` and the player's `reason`. It must not run under the loader lock:
-  call it from the game's init thread, never from `DllMain`.
-- **Conversion** holds the legacy file with `CreateFileW(GENERIC_READ, FILE_SHARE_READ |
+  call it from the game's init thread, never from `DllMain`. A file at `path` is read as
+  canonical, stamped or not, and the legacy file is never opened; when one exists
+  (`GetFileAttributesW`) the log says settings are read from `path` and the legacy file is left as
+  it was and not read. With no file at `path`, the legacy file is imported into a new file at
+  `path`, or with no legacy file either, `path` is created from the defaults.
+- **Import** holds the legacy file with `CreateFileW(GENERIC_READ, FILE_SHARE_READ |
   FILE_SHARE_WRITE)`, no `FILE_SHARE_DELETE`, from its snapshot through the import to a second
-  read, then closes it before the copy and the commit, since `ReplaceFileW` fails while such a
-  handle is open. The import is handed a `LegacyInput`: the wide path, its ANSI form from
-  `WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, ...)`, and `ansi_lossy` when a character had
-  no ANSI form (or the form does not convert back). An import that reports `Absent` while the owner
-  holds the file is deferred with both paths in the log, unless the ANSI form was lossy: then the
-  published build, handed that form, never saw the file and ran on its defaults, so the defaults
-  the import gave are written, the file's content is kept in `.pre-canonical`, and the log names
-  the case. Every conversion of a lossy path logs it, so a per-key import that simply read nothing
-  is named too. Copies, commit, verification, the not-carried and dropped-value log lines, and every
-  deferral match the C# owner.
+  read, then closes it before the commit. The import is handed a `LegacyInput`: the wide path, its
+  ANSI form from `WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, ...)`, and `ansi_lossy` when a
+  character had no ANSI form (or the form does not convert back). An import that reports `Absent`
+  while the owner holds the file is deferred with both paths in the log, unless the ANSI form was
+  lossy: then the published build, handed that form, never saw the file and ran on its defaults,
+  so the defaults the import gave are written to `path`, the legacy file is left as it was, and the
+  log names the case. Every import of a lossy path logs it, so a per-key import that simply read
+  nothing is named too. The render is read back through the table and `path` is created with a
+  create-if-absent checked write. The legacy file is never written, renamed, deleted or copied.
+  Verification, the not-carried and dropped-value log lines, and every deferral match the C# owner.
 - **`Save(const std::function<void(Config&)>&)`** returns `ConfigSaveResult`: `Saved` 0,
   `NotSaved` 1 with the `reason` and the Win32 `error`, or `Uncertain` 2 whose reason names the
   file and the kept `temporary_path`. A changed row the table does not mark Writable throws
   `std::logic_error` naming it; the mode pair, the stamp and `ConfigFormat` repair, the read-back
   through the table and the no-op save are as in C#.
-- **`Reload()`** returns `ConfigReloadResult<Config>` (`Unchanged` 0, `Applied` 1,
-  `LegacyReadOnly` 2, `Unreadable` 3; `config` is a `std::optional`) and never writes.
+- **`Reload()`** returns `ConfigReloadResult<Config>` (`Unchanged` 0, `Applied` 1, `Unreadable`
+  3; 2 is not used; `config` is a `std::optional`), reads only `path` and never writes.
   **`FileChanged()`** compares the last write time from `GetFileAttributesExW` with the recorded
   one; a missing file counts as 0. When `GetFileAttributesExW` refuses a file that is there (one
   pending deletion refuses it with access denied), the time comes from `FindFirstFileW`, as .NET's
@@ -802,9 +813,10 @@ and results compile everywhere; the owner itself is Windows only, as the writer 
 
 The tests run the C# scenario list against real files, the held-handle test (GetPrivateProfileStringA,
 `fopen`, `_wfopen` and `std::ifstream` read a held file; an open denying read sharing, a delete and
-a rename fail), a folder named outside the ANSI code page, and a child of the test binary killed at
-each of 19 conversion steps (`--config-owner-interrupt <step>`), after which the old file or the new
-one is whole and the next launch ends byte for byte where an uninterrupted one does.
+a rename fail), a legacy file in a folder named outside the ANSI code page, and a child of the
+test binary killed at each of the 11 steps its hook names in an import
+(`--config-owner-interrupt <step>`), after which the legacy file is unwritten, `path` is absent or
+whole, and the next launch ends byte for byte where an uninterrupted one does.
 
 ### Deprecated - the C++ flat config readers
 
@@ -817,60 +829,62 @@ version. A converted native game reads its config through `config::ConfigOwner` 
 ### Added - the C# config owner and migration driver
 
 `ConfigOwner<TConfig>` in `CameraUnlock.Core.Config` is the one reader and writer of a game's
-canonical config file: it converts a legacy file once through the game's frozen import, creates a
-missing file, saves the rows the table marks Writable and reloads. It writes only through
-`CheckedFileWriter`. Nothing in the fleet uses it yet; each game's conversion wires it. The C++ twin
-comes next and follows the same statuses and decisions.
+canonical config file, `CameraUnlock.ini`: while that file is absent it imports the game's legacy
+file once through the game's frozen import into a new file, or creates the file from the defaults;
+it saves the rows the table marks Writable and reloads. It never writes the legacy file, and
+writes `CameraUnlock.ini` only through `CheckedFileWriter`. Nothing in the fleet uses it yet; each
+game's conversion wires it. The C++ twin comes next and follows the same statuses and decisions.
 
-- **Options by property**: `ConfigOwnerOptions<TConfig>` with `Path` (absolute), `Table`, `Import`
-  (null for a game that never published a pre-canonical build), `LegacySourcePath`, `Header` and
-  `StatusSink`. The owner copies them when it is built and throws `ArgumentException` for a missing
-  path, table or header, a relative path, a `LegacySourcePath` without an `Import` or equal to
-  `Path`, a table that has both `RotationEnabled` and `PositionEnabled` and marks only one of them
-  Writable (a mode change writes the pair), or a header the renderer refuses.
+- **Options by property**: `ConfigOwnerOptions<TConfig>` with `Path` (absolute, `CameraUnlock.ini`),
+  `Table`, `Import` (null for a game that never published a pre-canonical build),
+  `LegacySourcePath` (the legacy file the import reads, beside `Path`), `Header` and `StatusSink`.
+  The owner copies them when it is built and throws `ArgumentException` for a missing path, table
+  or header, a relative path, an `Import` without a `LegacySourcePath`, a `LegacySourcePath`
+  without an `Import` or naming `Path`, a table that has both `RotationEnabled` and
+  `PositionEnabled` and marks only one of them Writable (a mode change writes the pair), or a
+  header the renderer refuses.
 - **`Load()`** returns `ConfigLoadResult<TConfig>`: `Status` (`ConfigLoadStatus`: `Canonical` 0,
   `Migrated` 1, `Created` 2, `Deferred` 3, `LegacyRefused` 4, `Unreadable` 5), the `Config` the
   session runs on, the reader's and table's `Diagnostics`, a `Log` of lines naming the file for the
-  game to write once its logger is up, and the player's `Reason`. Detection: a file with a
-  `[CameraUnlock]` stamp, looked for in a UTF-16 file's text too, is read as canonical and never
-  imported (`Unreadable` when it is UTF-16 or holds a NUL); an unstamped file the import reads is
-  converted; an unstamped file with no import is read as canonical and stamped by the next save; no
-  file is created from the table's defaults, never over a file that appears meanwhile (that is
-  `Deferred` on the defaults, and nothing retries).
-- **Conversion**: the owner holds the legacy file open for reading, sharing read and write but not
+  game to write once its logger is up, and the player's `Reason`. A file at `Path` is read as
+  canonical, stamped or not (`Unreadable` when it is UTF-16 or holds a NUL), and stamped by the
+  first save that changes a row; the import never runs and the legacy file is never opened, and
+  when a legacy file exists the log says settings are read from `Path` and the legacy file is left
+  as it was and not read. With no file at `Path` and a legacy file, the legacy file is imported
+  into a new file at `Path`. With neither, the file is created from the table's defaults, never
+  over a file that appears meanwhile (that is `Deferred` on the defaults, and nothing retries).
+- **Import**: the owner holds the legacy file open for reading, sharing read and write but not
   delete, from its snapshot through the import to a second read of its bytes, so no program can
   newly lock, rename or delete it meanwhile and a write is caught. It renders the imported settings,
   reads the render back through the table and requires every row to equal the import's (floats
-  bitwise), keeps the original bytes in `<file>.pre-canonical` (written once) or, for a later
-  conversion whose input differs, `<file>.pre-canonical.last` (replaced each time), each through
-  the checked writer and read back, then replaces the file only if it still holds the snapshot. The
-  log lists the import's dropped values and every key line of the old file the import does not
-  read (`not carried: [General] Smoothng=0.3 on line 5, this build does not read it`). A process
-  killed at any step leaves the old file whole or the new one whole.
-- **Deferral**: the file in use by another program, read-only, a folder that cannot be written, a
-  file changed during the import, a copy or commit that fails, a value no codec writes or a render
-  that does not read back (`[Light] LightMultiplier=7.5 cannot be converted`), and an import that
-  reports `Undecodable` or `Absent` leave the file as it was and give `Deferred`; an import that
+  bitwise), then creates `Path` with a create-if-absent checked write. The legacy file is never
+  written, renamed, deleted or copied. The log lists the import's dropped values and every key
+  line of the legacy file the import does not read (`not carried: [General] Smoothng=0.3 on line
+  5, this build does not read it`). A process killed at any step leaves `Path` absent or whole.
+- **Deferral**: a legacy file in use by another program, a folder that cannot be written, a legacy
+  file changed during the import, a commit that fails, a value no codec writes or a render that
+  does not read back (`[Light] LightMultiplier=7.5 cannot be converted`), and an import that
+  reports `Undecodable` or `Absent` create no file at `Path` and give `Deferred`; an import that
   refuses the file gives `LegacyRefused`. The session runs on what the import gave, the player is
-  told once through the status sink, nothing is saved that session and the next launch tries again.
+  told once through the status sink, nothing is saved that session and the next launch imports
+  again, unless another program created `Path` meanwhile, which the next launch reads instead.
 - **`Save(Action<TConfig> change)`** returns `ConfigSaveResult`: `Saved` 0, `NotSaved` 1 (with the
   `Reason` and the unchanged `Error`) or `Uncertain` 2 (Windows did not finish the replacement; the
   reason names the file and `TemporaryPath`, the kept temporary). The change runs on the settings
   read from the file as it is now; a changed row the table does not mark Writable throws
   `InvalidOperationException` naming it, so End, which changes only the session, never writes
   `EnableOnStartup`. When `RotationEnabled` or `PositionEnabled` changes both are written. It saves
-  only a readable file whose `ConfigFormat` is not newer than this build's and that is stamped or
-  read by no import, stamping an unstamped one in the same edit (a stamp with no `ConfigFormat`,
-  or one that is not a number, gets `ConfigFormat=1` the same way), and reads the edited bytes back
+  only a readable file whose `ConfigFormat` is not newer than this build's, stamping an unstamped
+  one in the same edit (a stamp with no `ConfigFormat`, or one that is not a number, gets
+  `ConfigFormat=1` the same way), and reads the edited bytes back
   through the table before writing: only the changed rows may differ. A change that leaves every
   row as it was writes nothing.
   Never rolls back or retries.
 - **`Reload()`** returns `ConfigReloadResult<TConfig>`: `Unchanged` 0 (the file holds the bytes
-  the owner last created, converted or saved), `Applied` 1, `LegacyReadOnly` 2 (an old file put
-  back is read through the import while the owner holds it as a conversion does, never written,
-  and converted at the next launch) or `Unreadable` 3 (the game keeps its settings; this includes
-  an old file the import reports `Refused`, `Undecodable` or `Absent`, or that changes while the
-  import reads it). It never writes. **`FileChanged()`** compares the
+  the owner last created, imported or saved), `Applied` 1 (any other file at `Path`, read as
+  canonical, stamped or not) or `Unreadable` 3 (a missing file or one the canonical reader cannot
+  read; the game keeps its settings). 2 is not used. It reads only `Path`, never imports and never
+  writes. **`FileChanged()`** compares the
   file's last write time with the one recorded at the last Load, Reload or save.
 - One lock around Load, Save and Reload; the status sink runs after it is released. A Unity mod
   calls them on the main thread: a save is one synchronous write per key press.
@@ -878,14 +892,13 @@ comes next and follows the same statuses and decisions.
 Decisions the design left open, each in the API's own documentation:
 
 - **A missing file at `Save` is `NotSaved`** ("the settings file is missing; it is created again at
-  the next launch"), not created: creating it outside `Load` would pre-empt a BepInEx plugin's
-  conversion from its `.cfg`.
+  the next launch"), not created: creating it outside `Load` would pre-empt the import from the
+  legacy file.
 - **A file `Load` cannot open** (another program holds it denying read sharing) is `Deferred` on the
-  table's defaults and the import does not run. The stamp is inside the file, so an unopened file
-  cannot be told legacy from canonical, and a legacy import run on a canonical file reads it wrong.
-- **With `LegacySourcePath` set**, the import reads only that file: a file at `Path` is always read
-  as canonical, and one that lost its stamp is stamped again at the next save. Deleting it converts
-  the `.cfg` again.
+  table's defaults and the import does not run, since it runs only while no file is at `Path`.
+- **The import reads only `LegacySourcePath`**: a file at `Path` is always read as canonical, and
+  one that lost its stamp is stamped again at the next save. Deleting it imports the legacy file
+  again at the next launch.
 - **After a `Deferred`, `LegacyRefused` or `Unreadable` load**, every save that session is
   `NotSaved`, until a `Reload` applies a readable file.
 - An import that throws, or returns no result, is a bug: the exception reaches the caller.
