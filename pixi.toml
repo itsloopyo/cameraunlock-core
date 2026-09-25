@@ -30,6 +30,13 @@ test-cpp = { cmd = "ctest --test-dir cpp/build-test -C Release --output-on-failu
 # checks that GetAsyncKeyState reports no code outside 0x01-0xFE for it, which normalisation N1
 # (a legacy hotkey code outside that range imports as unbound) rests on. Exit 2: no input desktop.
 probe-n1 = { cmd = "cpp/build-test/tests/Release/cameraunlock_tests.exe --probe-getasynckeystate", depends-on = ["build-cpp"] }
+# Needs Docker with a Linux engine, so not part of `check`: builds containers/linux-probe (Debian
+# pinned by digest, apt pinned to a snapshot, distro Wine and Mono, and wine-mono pinned by URL and
+# SHA-256), then runs the `--probe-defaults-ini` mode of the C++ test binary and of both
+# FrameworkTests builds in containers with no network, a read-only root and no capabilities: under
+# Wine over a non-ASCII home and each XDG_CONFIG_HOME case, and natively on Mono over the read-only
+# owner. Fails on any case that differs from its expectation; output under build-linux-probe/.
+test-linux-probe = { cmd = "node scripts/test-linux-probe.mjs", depends-on = ["build-cpp", "build-framework-tests"] }
 # Every optional module ON. They default OFF for a consumer that does not want them,
 # but a module nothing here configures is a module nothing here compiles: with the
 # defaults, `pixi run check` built none of the RE Engine driver, none of the Unreal

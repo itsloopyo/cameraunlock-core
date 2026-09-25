@@ -1,7 +1,9 @@
 // The C++ example docs/canonical-config.md shows, run for real. scripts/check-doc-examples.mjs
-// holds the document's C++ blocks to this file line for line, so an example that stops compiling
-// or behaving as the document says fails here. The table renders
+// holds the document's C++ blocks to this file and canonical_config_example.h line for line, so an
+// example that stops compiling or behaving as the document says fails here. The table renders
 // data/fixtures/canonical-ini/example/CameraUnlock.ini, as the C# CanonicalConfigExample's does.
+
+#include "canonical_config_example.h"
 
 #include <cameraunlock/config/config_owner.h>
 #include <cameraunlock/config/head_tracking_config_table.h>
@@ -20,15 +22,10 @@
 #include <utility>
 #endif
 
-namespace {
+namespace canonical_config_example {
 
-namespace fs = std::filesystem;
 using namespace cameraunlock::config;
 using schema::Concept;
-
-struct ModConfig : cameraunlock::HeadTrackingConfig {
-    bool write_log = false;
-};
 
 ConfigTable<ModConfig> ModConfigTable() {
     ConfigTable<ModConfig> table = HeadTrackingConfigTable<ModConfig>(
@@ -41,6 +38,15 @@ ConfigTable<ModConfig> ModConfigTable() {
                 "true: write HeadTracking.log beside the game's executable.");
     return table;
 }
+
+}  // namespace canonical_config_example
+
+namespace {
+
+namespace fs = std::filesystem;
+using namespace cameraunlock::config;
+using canonical_config_example::ModConfig;
+using canonical_config_example::ModConfigTable;
 
 int g_failures = 0;
 

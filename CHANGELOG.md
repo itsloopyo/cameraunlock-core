@@ -9,6 +9,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - Defaults.ini probe modes and `pixi run test-linux-probe`
+
+- **Probe modes.** `cameraunlock_tests --probe-defaults-ini <game folder> [--probe-save]` and
+  `CameraUnlock.Core.FrameworkTests.exe --probe-defaults-ini <game folder> [--probe-save]
+  [--probe-legacy]` (net35 and net472) print tab-separated lines: the resolver's probed inputs, the
+  candidates with their kinds and shown paths, whether each file exists, the choice made from that,
+  then `Load` of the docs example's table over `CameraUnlock.ini` in the game folder with
+  `DefaultsFile.PerUser()`, the status, every log line and status-sink message, with `--probe-save`
+  one `Save` of the yaw toggle and its status and reason, and last the path and SHA-256 of every file
+  in the game folder and in each candidate's folder. `--probe-legacy` loads the owner scenarios' table
+  and legacy import over `HeadTracking.ini` instead. Exit 0 when the probe ran, 1 on an exception.
+  They find and create the player's own Defaults.ini, so no suite runs them; the container task does.
+- **`pixi run test-linux-probe`**, not part of `check` since it needs Docker with a Linux engine.
+  It builds `containers/linux-probe` (Debian trixie pinned by digest, apt pinned to
+  snapshot.debian.org at 2026-09-11, Debian's Wine 10.0 and Mono 6.12, and wine-mono 9.4.0 from its
+  MSI pinned by URL and the SHA-256 Wine's own source names), the only step that uses the network.
+  Each case then runs in a container with no network, a read-only root, every capability dropped,
+  no-new-privileges, a non-root user, tmpfs for the homes and Wine prefixes, and the build outputs
+  mounted read-only. Under Wine it runs the C++ probe and both FrameworkTests builds with a home
+  whose name is not ASCII: `XDG_CONFIG_HOME` unset, set, relative, below a missing parent (with
+  Wine's menu builder off, and as Wine starts by default), the host config folder unwritable, two
+  prefixes sharing one home, and a prefix file made before the host file. Natively on Mono it runs
+  both FrameworkTests builds over a legacy file, a `CameraUnlock.ini` and nothing, with Defaults.ini
+  at `$XDG_CONFIG_HOME`, `~/.config`, `~/Library/Application Support`, the first with the second,
+  the second with the third, and with `HOME` unset with and without `XDG_CONFIG_HOME`. Every case's
+  output is checked against its expectation and any difference fails the task. Output goes to
+  `build-linux-probe/`.
+- The C++ docs example's config type moved to `cpp/tests/canonical_config_example.h`, so the probe
+  loads the same table, and docs/canonical-config.md shows it as its own block. The test binary now
+  links bcrypt for the probe's SHA-256.
+
+Nothing for a consuming repo to change.
+
 ### Changed - BREAKING - the config owners read and create Defaults.ini
 
 `ConfigOwner` (C# and C++) and core's REFramework `PluginMod` now read Defaults.ini, the file every

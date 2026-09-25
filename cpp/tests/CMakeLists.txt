@@ -41,9 +41,13 @@ add_executable(cameraunlock_tests
     config_owner_tests.cpp
     canonical_config_example_tests.cpp
     getasynckeystate_probe.cpp
+    defaults_ini_probe.cpp
 )
 
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)
+if(WIN32)
+    target_link_libraries(cameraunlock_tests PRIVATE bcrypt)
+endif()
 target_compile_definitions(cameraunlock_tests PRIVATE
     CAMERAUNLOCK_INI_EDITOR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/canonical-ini/editor"
     CAMERAUNLOCK_CANONICAL_INI_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/canonical-ini")

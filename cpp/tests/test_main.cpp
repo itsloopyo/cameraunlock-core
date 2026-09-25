@@ -38,6 +38,7 @@ int RunCheckedFileWriterInterruptChild(const char* step);
 int RunConfigOwnerTests();
 int RunConfigOwnerInterruptChild(const char* step);
 int RunGetAsyncKeyStateProbe();
+int RunDefaultsIniProbe(const char* folder, bool save);
 int RunLegacyImportTests();
 int RunIniMutationsTests();
 int RunCanonicalConfigExampleTests();
@@ -58,6 +59,10 @@ int main(int argc, char** argv) {
     }
     if (argc == 2 && std::string(argv[1]) == "--probe-getasynckeystate") {
         return RunGetAsyncKeyStateProbe();
+    }
+    if ((argc == 3 || (argc == 4 && std::string(argv[3]) == "--probe-save")) &&
+        std::string(argv[1]) == "--probe-defaults-ini") {
+        return RunDefaultsIniProbe(argv[2], argc == 4);
     }
 
     std::cout << "CameraUnlock Core Tests\n";

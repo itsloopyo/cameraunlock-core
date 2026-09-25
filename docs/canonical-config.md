@@ -512,15 +512,19 @@ to a row, a comment or a default (see [Tooling](#tooling)).
 ### C++ example
 
 A native mod with core's config type and one local row. The code below is compiled and run by
-`cpp/tests/canonical_config_example_tests.cpp`, and `pixi run check` fails when it no longer
-matches that file.
+`cpp/tests/canonical_config_example_tests.cpp`, with the config type in
+`cpp/tests/canonical_config_example.h`, and `pixi run check` fails when it no longer matches
+those files.
 
-<!-- excerpt: cpp/tests/canonical_config_example_tests.cpp -->
+<!-- excerpt: cpp/tests/canonical_config_example.h -->
 ```cpp
 struct ModConfig : cameraunlock::HeadTrackingConfig {
     bool write_log = false;
 };
+```
 
+<!-- excerpt: cpp/tests/canonical_config_example_tests.cpp -->
+```cpp
 ConfigTable<ModConfig> ModConfigTable() {
     ConfigTable<ModConfig> table = HeadTrackingConfigTable<ModConfig>(
         {Concept::UdpPort, Concept::EnableOnStartup, Concept::WorldSpaceYaw, Concept::RotationEnabled,

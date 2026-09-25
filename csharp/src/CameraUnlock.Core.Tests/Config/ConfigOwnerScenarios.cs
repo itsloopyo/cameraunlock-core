@@ -155,6 +155,22 @@ namespace CameraUnlock.Core.Tests.Config
             throw new ArgumentException("no scenario named " + name, nameof(name));
         }
 
+        /// <summary>
+        /// The scenarios' table, header and legacy import over CameraUnlock.ini and HeadTracking.ini
+        /// in <paramref name="dir"/>, for the FrameworkTests Defaults.ini probe, which sets Defaults.
+        /// </summary>
+        public static ConfigOwnerOptions<HeadTrackingConfigData> ImportOptions(string dir)
+        {
+            return new ConfigOwnerOptions<HeadTrackingConfigData>
+            {
+                Path = Path.Combine(dir, FileName),
+                Table = Table(),
+                Header = new RenderHeader(Display),
+                Import = new Legacy().Import,
+                LegacySourcePath = Path.Combine(dir, LegacyName),
+            };
+        }
+
         public static void PrepareInterruption(string dir)
         {
             new Rig(dir).PutLegacy(Ascii(LegacyText));
