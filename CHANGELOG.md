@@ -46,7 +46,12 @@ where the imported value equals what `default` gives at that launch.
   selected concept row as one the game keeps: its default stays the table's own, never Defaults.ini's.
   It throws `InvalidOperationException` (C++ `std::invalid_argument`) on a local row. Each use needs
   an owner-approved `per_game` entry for the repo in `data/config-format.json`, which a later core
-  commit adds.
+  commit adds. `RotationEnabled` and `PositionEnabled` are one setting, the tracking mode, so a
+  table that binds both marks both or neither. `Apply`, the fresh render and the migration render
+  throw `ArgumentException` (C++ `std::invalid_argument`) on a table that marks one alone:
+  `[Position] PositionEnabled is marked PerGame() and [General] RotationEnabled is not. The two are
+  one setting, the tracking mode, so PerGame() marks both or neither.` Starting the pair from two
+  sources could otherwise name no tracking mode from a Defaults.ini pair that is valid on its own.
 - **`RenderFresh(header)`**, C++ `RenderCanonicalFresh(table, header)`: the table's defaults with
   every concept row that is not `PerGame` written `Key=default`, an Engine row included; `PerGame`
   and local rows as `Render` writes them. It throws `ArgumentException` (C++ `std::invalid_argument`)

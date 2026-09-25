@@ -763,11 +763,40 @@ void TestGlobalChecks() {
               "[Camera] Offset is a local row, which never takes a value from Defaults.ini",
           "PerGame on a local row throws");
 
+    const std::string pair_message =
+        "[Position] PositionEnabled is marked PerGame() and [General] RotationEnabled is not. The two are one setting, "
+        "the tracking mode, so PerGame() marks both or neither.";
+    ConfigTable<S> half_per_game;
+    half_per_game.Concept<Concept::RotationEnabled>(&S::rotation).Concept<Concept::PositionEnabled>(&S::position).PerGame();
+    Check(Thrown([&] { RenderCanonicalFresh(half_per_game, header); }) == pair_message,
+          "PerGame on one half of the tracking pair throws from the fresh render");
+    Check(Thrown([&] {
+              S out;
+              ApplyCanonical(ParseCanonicalIni(""), half_per_game, out);
+          }) == pair_message,
+          "and from Apply");
+    Check(Thrown([&] { detail::RenderCanonicalMigration(half_per_game, S(), S(), header); }) == pair_message,
+          "and from the migration render");
+
+    ConfigTable<S> two_state;
+    two_state.Concept<Concept::PositionEnabled>(&S::position);
+    S two_state_effective;
+    two_state_effective.position = false;
+    S two_state_config;
+    const detail::EffectiveApplyResult two_state_result = detail::ApplyCanonicalEffective(
+        ParseCanonicalIni("[Position]\r\nPositionEnabled=default\r\n"), two_state, two_state_config,
+        two_state_effective, {Concept::PositionEnabled});
+    Check(!two_state_config.position && two_state_result.sources[0] == detail::ValueSource::kDefaultsIni &&
+              two_state_result.report.diagnostics.empty(),
+          "a table without RotationEnabled reads PositionEnabled=default as an effective false from Defaults.ini, and no "
+          "pair rule fires");
+
     S keys_defaults;
     keys_defaults.text = "End, Ctrl+Shift+Y";
     ConfigTable<S> keyed(keys_defaults);
     keyed.Concept<Concept::ToggleKey>(&S::text)
         .Concept<Concept::RotationEnabled>(&S::rotation)
+        .PerGame()
         .Concept<Concept::PositionEnabled>(&S::position)
         .PerGame();
     S config;
@@ -798,14 +827,17 @@ void TestGlobalChecks() {
                    "UdpPort is not a row of this table that follows Defaults.ini"),
           "a concept the table does not bind named as coming from Defaults.ini throws");
     S effective = keyed.defaults();
+    effective.text = "F1";
+    effective.rotation = false;
     effective.position = false;
     S applied;
     applied.rotation = false;
     applied.position = false;
     const detail::EffectiveApplyResult result =
-        detail::ApplyCanonicalEffective(empty, keyed, applied, effective, {Concept::RotationEnabled});
-    Check(applied.rotation && applied.position && result.sources[1] == detail::ValueSource::kDefaultsIni &&
-              result.sources[2] == detail::ValueSource::kBuiltIn,
+        detail::ApplyCanonicalEffective(empty, keyed, applied, effective, {Concept::ToggleKey});
+    Check(applied.text == "F1" && applied.rotation && applied.position &&
+              result.sources[0] == detail::ValueSource::kDefaultsIni &&
+              result.sources[1] == detail::ValueSource::kBuiltIn && result.sources[2] == detail::ValueSource::kBuiltIn,
           "a PerGame row starts from the table's default, whatever the effective defaults hold");
 }
 

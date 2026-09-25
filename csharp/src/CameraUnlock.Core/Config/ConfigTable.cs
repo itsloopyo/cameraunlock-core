@@ -203,6 +203,8 @@ namespace CameraUnlock.Core.Config
         /// Defaults.ini's, so <c>default</c>, a missing key and an invalid value all read the table's
         /// default, and <see cref="RenderFresh"/> writes the row's value. Each use needs an entry,
         /// approved by the owner, in the repo's <c>per_game</c> list in data/config-format.json.
+        /// RotationEnabled and PositionEnabled are one setting, the tracking mode, so a table that
+        /// binds both marks both or neither; Apply and RenderFresh throw on one without the other.
         /// </summary>
         /// <exception cref="InvalidOperationException">There is no row, or it is a local row.</exception>
         public ConfigTable<TConfig> PerGame()
@@ -265,7 +267,8 @@ namespace CameraUnlock.Core.Config
         /// the lines that set them.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
-        /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable.</exception>
+        /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable, or the table
+        /// marks one of RotationEnabled and PositionEnabled PerGame and not the other.</exception>
         public ApplyReport Apply(CanonicalIni doc, TConfig config)
         {
             return Apply(doc, config, NewDefaults(), new ConceptDescriptor[0]).Report;
@@ -280,7 +283,8 @@ namespace CameraUnlock.Core.Config
         /// the source of such a row left at its start.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
-        /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable;
+        /// <exception cref="ArgumentException"><paramref name="doc"/> is not readable; the table marks
+        /// one of RotationEnabled and PositionEnabled PerGame and not the other;
         /// <paramref name="fromDefaultsIni"/> names a concept that is not a row of the table following
         /// Defaults.ini; or the starts of RotationEnabled and PositionEnabled are both false.</exception>
         internal TableApplyResult Apply(CanonicalIni doc, TConfig config, TConfig effective,
@@ -294,6 +298,7 @@ namespace CameraUnlock.Core.Config
             {
                 throw new ArgumentException("Apply needs a readable document, and this one is " + doc.Status, "doc");
             }
+            CheckPairPerGame();
 
             TConfig fresh = NewDefaults();
             var starts = new TConfig[rows.Count];
@@ -426,7 +431,8 @@ namespace CameraUnlock.Core.Config
         /// <exception cref="ArgumentNullException"><paramref name="header"/> is null.</exception>
         /// <exception cref="ArgumentException">A concept row that is not PerGame defaults to a value
         /// other than the schema's, naming the row; the table binds RotationEnabled without
-        /// PositionEnabled; or the display name breaks <see cref="Render"/>'s rule.</exception>
+        /// PositionEnabled, or marks one of them PerGame and not the other; or the display name breaks
+        /// <see cref="Render"/>'s rule.</exception>
         public byte[] RenderFresh(RenderHeader header)
         {
             if (header == null) throw new ArgumentNullException("header");
@@ -446,6 +452,7 @@ namespace CameraUnlock.Core.Config
                 throw new ArgumentException("the table binds [General] RotationEnabled without [Position] PositionEnabled, "
                     + "and the tracking mode is the two of them together");
             }
+            CheckPairPerGame();
             var forms = new RowForm[rows.Count];
             for (int i = 0; i < rows.Count; i++)
             {
@@ -462,12 +469,14 @@ namespace CameraUnlock.Core.Config
         /// PositionEnabled are written default only when both equal their effective values.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
-        /// <exception cref="ArgumentException">As <see cref="Render"/>.</exception>
+        /// <exception cref="ArgumentException">As <see cref="Render"/>, or the table marks one of
+        /// RotationEnabled and PositionEnabled PerGame and not the other.</exception>
         internal byte[] RenderMigration(TConfig values, TConfig effective, RenderHeader header)
         {
             if (values == null) throw new ArgumentNullException("values");
             if (effective == null) throw new ArgumentNullException("effective");
             if (header == null) throw new ArgumentNullException("header");
+            CheckPairPerGame();
             var forms = new RowForm[rows.Count];
             for (int i = 0; i < rows.Count; i++)
             {
@@ -647,6 +656,19 @@ namespace CameraUnlock.Core.Config
         {
             if (last < 0) throw new InvalidOperationException(modifier + " needs a row: add or Select one first");
             return rows[last];
+        }
+
+        // One PerGame half would start the pair from two sources, which can name no tracking mode
+        // from a Defaults.ini pair that is valid on its own.
+        private void CheckPairPerGame()
+        {
+            int rotation = IndexOf(ConfigConcepts.RotationEnabled);
+            int position = IndexOf(ConfigConcepts.PositionEnabled);
+            if (rotation < 0 || position < 0 || rows[rotation].PerGame == rows[position].PerGame) return;
+            Row marked = rows[rotation].PerGame ? rows[rotation] : rows[position];
+            Row other = rows[rotation].PerGame ? rows[position] : rows[rotation];
+            throw new ArgumentException(marked.Name + " is marked PerGame() and " + other.Name + " is not. The two are "
+                + "one setting, the tracking mode, so PerGame() marks both or neither.");
         }
 
         private int IndexOf(ConceptDescriptor concept)

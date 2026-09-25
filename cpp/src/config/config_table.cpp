@@ -139,11 +139,6 @@ void AppendRow(std::string& out, const TableRow& row, std::size_t index, const R
 
 std::string RowName(const TableRow& row) { return "[" + row.section + "] " + row.key; }
 
-std::string ConceptLabel(schema::Concept id) {
-    const auto index = static_cast<std::size_t>(id);
-    return index < schema::kConceptCount ? schema::kConcepts[index].name : "concept " + std::to_string(index);
-}
-
 void CheckFreshRow(const TableRow& row, bool holds, const std::string& table_default, const std::string& schema_default) {
     if (holds) return;
     throw std::invalid_argument(RowName(row) + " defaults to " + table_default + ", and the schema to " + schema_default +
@@ -159,6 +154,20 @@ void CheckFreshPair(const std::vector<TableRow>& rows) {
         throw std::invalid_argument("the table binds [General] RotationEnabled without [Position] PositionEnabled, and "
                                     "the tracking mode is the two of them together");
     }
+}
+
+void CheckPairPerGame(const std::vector<TableRow>& rows) {
+    const auto find = [&](schema::Concept id) {
+        return std::find_if(rows.begin(), rows.end(), [&](const TableRow& row) { return row.concept_id == id; });
+    };
+    const auto rotation = find(schema::Concept::RotationEnabled);
+    const auto position = find(schema::Concept::PositionEnabled);
+    if (rotation == rows.end() || position == rows.end() || rotation->per_game == position->per_game) return;
+    const TableRow& marked = rotation->per_game ? *rotation : *position;
+    const TableRow& other = rotation->per_game ? *position : *rotation;
+    throw std::invalid_argument(RowName(marked) + " is marked PerGame() and " + RowName(other) +
+                                " is not. The two are one setting, the tracking mode, so PerGame() marks both or "
+                                "neither.");
 }
 
 std::vector<std::string> CommentLines(const char* text, const std::string& row) {

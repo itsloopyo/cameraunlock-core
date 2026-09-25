@@ -208,9 +208,35 @@ namespace CameraUnlock.Core.Tests.Config
                 .Local("Camera", "Offset", s => s.Value, (s, v) => s.Value = v, new IntCodec(), "One.")
                 .PerGame(), "[Camera] Offset is a local row, which never takes a value from Defaults.ini");
 
+            const string pairMessage = "[Position] PositionEnabled is marked PerGame() and [General] RotationEnabled is not. "
+                + "The two are one setting, the tracking mode, so PerGame() marks both or neither.";
+            ConfigTable<SmallConfig> halfPerGame = SmallTable()
+                .Concept(ConfigConcepts.RotationEnabled, s => s.Rotation, (s, v) => s.Rotation = v)
+                .Concept(ConfigConcepts.PositionEnabled, s => s.Position, (s, v) => s.Position = v)
+                .PerGame();
+            ExpectMessage<ArgumentException>(() => halfPerGame.RenderFresh(header), pairMessage);
+            ExpectMessage<ArgumentException>(() => halfPerGame.Apply(CanonicalIni.Parse(new byte[0]), new SmallConfig()),
+                pairMessage);
+            ExpectMessage<ArgumentException>(
+                () => halfPerGame.RenderMigration(new SmallConfig(), new SmallConfig(), header), pairMessage);
+
+            ConfigTable<SmallConfig> twoState = SmallTable()
+                .Concept(ConfigConcepts.PositionEnabled, s => s.Position, (s, v) => s.Position = v);
+            var twoStateConfig = new SmallConfig();
+            TableApplyResult twoStateResult = twoState.Apply(
+                CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Position]\r\nPositionEnabled=default\r\n")), twoStateConfig,
+                new SmallConfig { Position = false }, new ConceptDescriptor[] { ConfigConcepts.PositionEnabled });
+            if (twoStateConfig.Position || twoStateResult.Sources[0] != ConfigValueSource.DefaultsIni
+                || twoStateResult.Report.Diagnostics.Count != 0)
+            {
+                throw new InvalidOperationException("a table without RotationEnabled reads PositionEnabled=default as an "
+                    + "effective false from Defaults.ini, and no pair rule fires");
+            }
+
             ConfigTable<SmallConfig> keys = SmallTable()
                 .Concept(ConfigConcepts.ToggleKey, s => s.Keys, (s, v) => s.Keys = v)
                 .Concept(ConfigConcepts.RotationEnabled, s => s.Rotation, (s, v) => s.Rotation = v)
+                .PerGame()
                 .Concept(ConfigConcepts.PositionEnabled, s => s.Position, (s, v) => s.Position = v)
                 .PerGame();
             var config = new SmallConfig { Keys = "F1" };
@@ -239,9 +265,11 @@ namespace CameraUnlock.Core.Tests.Config
                 null);
             var applied = new SmallConfig { Rotation = false, Position = false };
             TableApplyResult perGamePair = keys.Apply(CanonicalIni.Parse(new byte[0]), applied,
-                new SmallConfig { Position = false }, new ConceptDescriptor[] { ConfigConcepts.RotationEnabled });
-            if (!applied.Rotation || !applied.Position || perGamePair.Sources[1] != ConfigValueSource.DefaultsIni
-                || perGamePair.Sources[2] != ConfigValueSource.BuiltIn)
+                new SmallConfig { Keys = "F1", Rotation = false, Position = false },
+                new ConceptDescriptor[] { ConfigConcepts.ToggleKey });
+            if (applied.Keys != "F1" || !applied.Rotation || !applied.Position
+                || perGamePair.Sources[0] != ConfigValueSource.DefaultsIni
+                || perGamePair.Sources[1] != ConfigValueSource.BuiltIn || perGamePair.Sources[2] != ConfigValueSource.BuiltIn)
             {
                 throw new InvalidOperationException("a PerGame row starts from the table's default, whatever the effective defaults hold");
             }

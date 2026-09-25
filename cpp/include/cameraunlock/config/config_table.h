@@ -139,14 +139,17 @@ std::vector<std::string> CommentLines(const char* text, const std::string& row);
 void CheckConceptRow(const std::vector<TableRow>& rows, const TableRow& row);
 void CheckLocalRow(const std::vector<TableRow>& rows, const TableRow& row);
 
-// The concept's schema name, or its number when it is not a canonical concept.
-std::string ConceptLabel(schema::Concept id);
 
 // Throw std::invalid_argument when the table cannot render a fresh file: a row that follows
 // Defaults.ini whose default is not the schema's (`holds` false; the two texts as the row's codec
 // writes them), or RotationEnabled without PositionEnabled.
 void CheckFreshRow(const TableRow& row, bool holds, const std::string& table_default, const std::string& schema_default);
 void CheckFreshPair(const std::vector<TableRow>& rows);
+
+// Throw std::invalid_argument when the table marks one of RotationEnabled and PositionEnabled
+// PerGame and not the other. One PerGame half would start the pair from two sources, which can
+// name no tracking mode from a Defaults.ini pair that is valid on its own.
+void CheckPairPerGame(const std::vector<TableRow>& rows);
 
 // Every row starts at its start and reports start_sources[row] until the file sets it.
 EffectiveApplyResult ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows, RowTarget& target,
@@ -418,7 +421,9 @@ public:
     /// Marks the concept row as one this game keeps: its default is the table's own and never
     /// Defaults.ini's, so `default`, a missing key and an invalid value all read the table's
     /// default, and RenderCanonicalFresh writes the row's value. Each use needs an entry, approved
-    /// by the owner, in the repo's `per_game` list in data/config-format.json.
+    /// by the owner, in the repo's `per_game` list in data/config-format.json. RotationEnabled and
+    /// PositionEnabled are one setting, the tracking mode, so a table that binds both marks both or
+    /// neither; ApplyCanonical and RenderCanonicalFresh throw on one without the other.
     ConfigTable& PerGame() {
         const std::size_t row = Last("PerGame");
         if (!rows_[row].concept_id) {
@@ -596,15 +601,17 @@ private:
 /// `from_defaults_ini` names the concepts whose effective default Defaults.ini gave, which the
 /// result reports as the source of such a row left at its start.
 ///
-/// Throws std::invalid_argument for a document that is not readable, a concept in
-/// `from_defaults_ini` that is not a row of the table following Defaults.ini, and starts of
-/// RotationEnabled and PositionEnabled that are both false.
+/// Throws std::invalid_argument for a document that is not readable, a table that marks one of
+/// RotationEnabled and PositionEnabled PerGame and not the other, a concept in `from_defaults_ini`
+/// that is not a row of the table following Defaults.ini, and starts of RotationEnabled and
+/// PositionEnabled that are both false.
 template <class Config>
 EffectiveApplyResult ApplyCanonicalEffective(const CanonicalIni& doc, const ConfigTable<Config>& table, Config& inout,
                                              const Config& effective,
                                              const std::vector<schema::Concept>& from_defaults_ini) {
     const std::vector<TableRow>& rows = table.rows_;
     const RowOpsList<Config>& ops = table.ops_;
+    CheckPairPerGame(rows);
     std::vector<const Config*> starts;
     std::vector<ValueSource> start_sources(rows.size(), ValueSource::kBuiltIn);
     for (const TableRow& row : rows) starts.push_back(FollowsDefaultsIni(row) ? &effective : &table.defaults_);
@@ -614,7 +621,8 @@ EffectiveApplyResult ApplyCanonicalEffective(const CanonicalIni& doc, const Conf
             if (rows[i].concept_id == id && FollowsDefaultsIni(rows[i])) found = i;
         }
         if (found == rows.size()) {
-            throw std::invalid_argument(ConceptLabel(id) + " is not a row of this table that follows Defaults.ini");
+            throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
+                                        " is not a row of this table that follows Defaults.ini");
         }
         start_sources[found] = ValueSource::kDefaultsIni;
     }
@@ -636,11 +644,13 @@ EffectiveApplyResult ApplyCanonicalEffective(const CanonicalIni& doc, const Conf
 /// PerGame is written `Key=default` when its value equals its value in `effective`, and otherwise
 /// as its value, never in the commented form of an Engine row, which would read back as the
 /// effective default. RotationEnabled and PositionEnabled are written default only when both equal
-/// their effective values. Throws as RenderCanonical.
+/// their effective values. Throws as RenderCanonical, and std::invalid_argument for a table that
+/// marks one of RotationEnabled and PositionEnabled PerGame and not the other.
 template <class Config>
 std::string RenderCanonicalMigration(const ConfigTable<Config>& table, const Config& values, const Config& effective,
                                      const RenderHeader& header) {
     const std::vector<TableRow>& rows = table.rows_;
+    CheckPairPerGame(rows);
     std::vector<RowForm> forms(rows.size(), RowForm::kAsRender);
     for (std::size_t i = 0; i < rows.size(); ++i) {
         if (FollowsDefaultsIni(rows[i])) {
@@ -681,7 +691,8 @@ std::string RenderCanonicalMigration(const ConfigTable<Config>& table, const Con
 /// PositionEnabled and both read false, both take their defaults and one NoTrackingMode names the
 /// lines that set them.
 ///
-/// Throws std::invalid_argument for a document that is not readable.
+/// Throws std::invalid_argument for a document that is not readable, and for a table that marks
+/// one of RotationEnabled and PositionEnabled PerGame and not the other.
 template <class Config>
 ApplyReport ApplyCanonical(const CanonicalIni& doc, const ConfigTable<Config>& table, Config& inout) {
     return detail::ApplyCanonicalEffective(doc, table, inout, table.defaults_, {}).report;
@@ -711,7 +722,8 @@ std::string RenderCanonical(const ConfigTable<Config>& table, const Config& valu
 ///
 /// Throws std::invalid_argument when a concept row that is not PerGame defaults to a value other
 /// than the schema's, naming the row; when the table binds RotationEnabled without
-/// PositionEnabled; and for a display name RenderCanonical refuses.
+/// PositionEnabled, or marks one of them PerGame and not the other; and for a display name
+/// RenderCanonical refuses.
 template <class Config>
 std::string RenderCanonicalFresh(const ConfigTable<Config>& table, const RenderHeader& header) {
     const std::vector<detail::TableRow>& rows = table.rows_;
@@ -725,6 +737,7 @@ std::string RenderCanonicalFresh(const ConfigTable<Config>& table, const RenderH
         forms[i] = detail::RowForm::kDefault;
     }
     detail::CheckFreshPair(rows);
+    detail::CheckPairPerGame(rows);
     const detail::ConfigRowSource<Config> source(rows, table.ops_, table.defaults_, table.defaults_);
     return detail::RenderRows(rows, header, source, forms);
 }

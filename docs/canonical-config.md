@@ -444,7 +444,8 @@ built with, so the defaults live in the config type, as they always have.
   the row an Engine row, `Writable` marks a row the owner's `Save` may change, and `PerGame` marks
   a concept row whose default stays the game's own and never follows Defaults.ini. `PerGame` throws
   on a local row, and each use needs an owner-approved `per_game` entry for the repo in
-  `data/config-format.json`.
+  `data/config-format.json`. `RotationEnabled` and `PositionEnabled` are one setting, so a table
+  that binds both marks both `PerGame` or neither; apply and the fresh render throw on one alone.
 
 `ApplyCanonical(doc, table, config)` / `table.Apply(doc, config)` reads a parsed file into a
 config: every row starts from its default, fields no row binds are left alone, and it returns the
@@ -456,7 +457,8 @@ word is data. `RenderCanonical(table, config, header)` / `table.Render(config, h
 config as a canonical file. `RenderCanonicalFresh(table, header)` / `table.RenderFresh(header)`
 writes the defaults with every concept row that is not `PerGame` as `Key=default`, and throws,
 naming the row, when such a row defaults to anything but the schema's `default` (a hotkey list's
-`canonical_default`), and when the table binds `RotationEnabled` without `PositionEnabled`.
+`canonical_default`), when the table binds `RotationEnabled` without `PositionEnabled`, and when
+it marks one of that pair `PerGame` and not the other.
 
 ### HeadTrackingConfigTable
 
