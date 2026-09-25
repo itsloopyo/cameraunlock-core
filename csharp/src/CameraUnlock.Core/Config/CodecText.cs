@@ -8,17 +8,74 @@ namespace CameraUnlock.Core.Config
     /// <summary>Byte and number helpers the value codecs share.</summary>
     internal static class CodecText
     {
-        private static readonly UTF8Encoding LenientUtf8 = new UTF8Encoding(false, false);
-
         public static byte[] Ascii(string text)
         {
             return Encoding.ASCII.GetBytes(text);
         }
 
-        /// <summary>'text' in single quotes, decoded as UTF-8 with U+FFFD for what is not.</summary>
+        /// <summary>'text' in single quotes, as <see cref="Utf8Text"/> decodes it.</summary>
         public static string Quote(byte[] text)
         {
-            return "'" + LenientUtf8.GetString(text) + "'";
+            return "'" + Utf8Text(text) + "'";
+        }
+
+        /// <summary>
+        /// The bytes as UTF-8, each maximal subpart of an ill-formed sequence decoded as one U+FFFD,
+        /// which is what C++ core writes for the same bytes. Encoding.UTF8 is not used because .NET
+        /// Framework substitutes differently: it reads F0 80 80 as two U+FFFD, not three.
+        /// </summary>
+        public static string Utf8Text(byte[] bytes)
+        {
+            if (bytes == null) throw new ArgumentNullException("bytes");
+
+            var text = new StringBuilder(bytes.Length);
+            int i = 0;
+            while (i < bytes.Length)
+            {
+                byte lead = bytes[i];
+                if (lead < 0x80)
+                {
+                    text.Append((char)lead);
+                    i++;
+                    continue;
+                }
+
+                int length = 0;
+                int codePoint = 0;
+                byte low = 0x80;
+                byte high = 0xBF;
+                if (lead >= 0xC2 && lead <= 0xDF)
+                {
+                    length = 2;
+                    codePoint = lead & 0x1F;
+                }
+                else if (lead >= 0xE0 && lead <= 0xEF)
+                {
+                    length = 3;
+                    codePoint = lead & 0x0F;
+                    if (lead == 0xE0) low = 0xA0;
+                    else if (lead == 0xED) high = 0x9F;
+                }
+                else if (lead >= 0xF0 && lead <= 0xF4)
+                {
+                    length = 4;
+                    codePoint = lead & 0x07;
+                    if (lead == 0xF0) low = 0x90;
+                    else if (lead == 0xF4) high = 0x8F;
+                }
+
+                int next = i + 1;
+                while (next < i + length && next < bytes.Length && bytes[next] >= low && bytes[next] <= high)
+                {
+                    codePoint = (codePoint << 6) | (bytes[next] & 0x3F);
+                    next++;
+                    low = 0x80;
+                    high = 0xBF;
+                }
+                text.Append(char.ConvertFromUtf32(length != 0 && next == i + length ? codePoint : 0xFFFD));
+                i = next;
+            }
+            return text.ToString();
         }
 
         public static string Number(int value)

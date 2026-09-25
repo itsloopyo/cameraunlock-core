@@ -200,7 +200,7 @@ namespace CameraUnlock.Core.Config
         private static string KeyNameError(byte[] text)
 #endif
         {
-            foreach (string item in Encoding.UTF8.GetString(text).Split(','))
+            foreach (string item in CodecText.Utf8Text(text).Split(','))
             {
                 string[] tokens = item.Split('+');
                 string key = tokens[tokens.Length - 1].Trim(' ', '\t');
@@ -281,7 +281,7 @@ namespace CameraUnlock.Core.Config
 
         private static string Text(byte[] bytes)
         {
-            return Encoding.UTF8.GetString(bytes);
+            return CodecText.Utf8Text(bytes);
         }
 
         private static string Number(int n)

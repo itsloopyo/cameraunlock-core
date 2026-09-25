@@ -41,6 +41,48 @@ std::string_view Trim(std::string_view text) {
     return text.substr(begin, end - begin);
 }
 
+// The bytes as UTF-8 for a log line: well-formed sequences kept, each maximal subpart of an
+// ill-formed one written as U+FFFD, which is how C# core's CodecText.Utf8Text decodes them.
+std::string Utf8Text(std::string_view bytes) {
+    std::string text;
+    std::size_t i = 0;
+    while (i < bytes.size()) {
+        const auto lead = static_cast<unsigned char>(bytes[i]);
+        std::size_t length = 0;
+        unsigned char low = 0x80;
+        unsigned char high = 0xBF;
+        if (lead < 0x80) {
+            length = 1;
+        } else if (lead >= 0xC2 && lead <= 0xDF) {
+            length = 2;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            length = 3;
+            if (lead == 0xE0) low = 0xA0;
+            else if (lead == 0xED) high = 0x9F;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            length = 4;
+            if (lead == 0xF0) low = 0x90;
+            else if (lead == 0xF4) high = 0x8F;
+        }
+
+        std::size_t next = i + 1;
+        while (next < i + length && next < bytes.size()) {
+            const auto b = static_cast<unsigned char>(bytes[next]);
+            if (b < low || b > high) break;
+            ++next;
+            low = 0x80;
+            high = 0xBF;
+        }
+        if (length != 0 && next == i + length) {
+            text.append(bytes.substr(i, length));
+        } else {
+            text += "\xEF\xBF\xBD";
+        }
+        i = next;
+    }
+    return text;
+}
+
 bool IsModifier(std::string_view token) {
     for (const input::KeyModifierEntry& modifier : input::kKeyModifiers) {
         if (EqualsAsciiIgnoreCase(token, modifier.name)) return true;
@@ -105,7 +147,7 @@ DefaultsIniValue ReadValue(const CanonicalIni& doc, const schema::ConceptInfo& i
     read.section = section->name;
     read.key = found->key;
     read.value = found->value;
-    read.reason = ConceptCodecError(info.id, found->value, std::make_index_sequence<schema::kConceptCount>{});
+    read.reason = Utf8Text(ConceptCodecError(info.id, found->value, std::make_index_sequence<schema::kConceptCount>{}));
     read.state = read.reason.empty() ? DefaultsIniValueState::kAccepted : DefaultsIniValueState::kRefused;
     return read;
 }
@@ -143,7 +185,7 @@ ConfigTable<HeadTrackingConfig> EveryConceptTable(std::index_sequence<I...>) {
 }
 
 std::string Setting(const DefaultsIniValue& value) {
-    return "[" + value.section + "] " + value.key + "=" + value.value;
+    return "[" + value.section + "] " + value.key + "=" + Utf8Text(value.value);
 }
 
 }  // namespace

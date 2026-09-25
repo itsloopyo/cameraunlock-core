@@ -1,0 +1,19 @@
+# Bytes that are not UTF-8, as an ANSI save leaves them, beside well-formed UTF-8. A reason or line
+# keeps well-formed UTF-8 as it is and writes U+FFFD for each maximal subpart of an ill-formed
+# sequence: one each for the lone A3, A7 and B0 and the truncated E9 A3, three for F0 80 80, since
+# 80 cannot follow F0. PositionLimitY holds the overlong C0 AF (two), E0 80 (two), the surrogate
+# ED A0 80 (three), a kept U+1F600 and U+20AC, and F4 90 80 80, above U+10FFFF (four).
+value	RotationEnabled	refused	2	General	RotationEnabled	\xF0\x80\x80on	RotationEnabled: expected true or false, and the two are read together as the tracking mode
+value	PositionLimitX	refused	4	Position	PositionLimitX	0.3\xB0	expected a number from 0.0 to 10.0
+value	PositionLimitY	refused	5	Position	PositionLimitY	\xC0\xAF\xE0\x80\xED\xA0\x80\xF0\x9F\x98\x80\xE2\x82\xAC\xF4\x90\x80\x80	expected a number from 0.0 to 10.0
+value	ToggleKey	refused	7	Hotkeys	ToggleKey	\xA3	\xEF\xBF\xBD is not one of the key names this file takes
+value	CycleTrackingModeKey	refused	8	Hotkeys	CycleTrackingModeKey	\xA7+A	'\xEF\xBF\xBD+A': expected Ctrl, Shift or Alt before each '+' and one key after the last
+value	YawModeKey	refused	9	Hotkeys	YawModeKey	Ctrl+\xC3\xA9	\xC3\xA9 is not one of the key names this file takes
+value	TrueFreeLookKey	refused	10	Hotkeys	TrueFreeLookKey	Shift+\xE9\xA3	\xEF\xBF\xBD is not one of the key names this file takes
+line	PositionLimitX	Defaults.ini: line 4: [Position] PositionLimitX=0.3\xEF\xBF\xBD is not read (expected a number from 0.0 to 10.0), so the built-in 0.3 is used.
+line	PositionLimitY	Defaults.ini: line 5: [Position] PositionLimitY=\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xF0\x9F\x98\x80\xE2\x82\xAC\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD is not read (expected a number from 0.0 to 10.0), so the built-in 0.2 is used.
+line	ToggleKey	Defaults.ini: line 7: [Hotkeys] ToggleKey=\xEF\xBF\xBD is not read (\xEF\xBF\xBD is not one of the key names this file takes), so the built-in End, Ctrl+Shift+Y is used.
+line	CycleTrackingModeKey	Defaults.ini: line 8: [Hotkeys] CycleTrackingModeKey=\xEF\xBF\xBD+A is not read ('\xEF\xBF\xBD+A': expected Ctrl, Shift or Alt before each '+' and one key after the last), so the built-in PageUp, Ctrl+Shift+G is used.
+line	YawModeKey	Defaults.ini: line 9: [Hotkeys] YawModeKey=Ctrl+\xC3\xA9 is not read (\xC3\xA9 is not one of the key names this file takes), so the built-in PageDown, Ctrl+Shift+H is used.
+line	TrueFreeLookKey	Defaults.ini: line 10: [Hotkeys] TrueFreeLookKey=Shift+\xEF\xBF\xBD is not read (\xEF\xBF\xBD is not one of the key names this file takes), so the built-in Insert, Ctrl+Shift+U is used.
+pair	Defaults.ini: line 2: [General] RotationEnabled=\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBDon is not read (RotationEnabled: expected true or false, and the two are read together as the tracking mode), so the built-in RotationEnabled=true and PositionEnabled=true are used.

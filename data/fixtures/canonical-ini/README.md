@@ -381,9 +381,16 @@ The line texts:
 - With both, in line order:
   `Defaults.ini: lines N and M: [S1] K1=v1 and [S2] K2=v2 are not read (reason), so the built-in RotationEnabled=R and PositionEnabled=P are used.`
 
+A reason and a line are UTF-8 whatever bytes the value holds, since an ANSI save is readable.
+Where the value, or the part of it a reason quotes, is well-formed UTF-8 its bytes are kept.
+Each maximal subpart of an ill-formed sequence, as Unicode defines it for U+FFFD substitution, is
+written as U+FFFD (`EF BF BD`): a lone `A3` is one, the truncated `E9 A3` is one, and `F0 80 80`
+is three, since `80` cannot follow `F0`. The `value` row's value field stays the file's bytes.
+
 | Case | What it holds |
 |------|---------------|
 | `read-empty` | an empty file: every concept absent, nothing said |
+| `read-ansi` | bytes that are not UTF-8 in a bool, two floats and hotkey values, reaching the value, a key-name reason and a codec reason: lone, truncated, overlong, surrogate and above-U+10FFFF sequences each written as U+FFFD by the rule above, beside well-formed 2, 3 and 4 byte sequences kept as they are |
 | `read-utf16`, `read-nul` | the two unreadable files |
 | `read-no-stamp`, `read-format-missing`, `read-format-zero`, `read-format-not-a-number` | read with no line |
 | `read-format-newer` | `ConfigFormat=2`: the format line, and the file read |

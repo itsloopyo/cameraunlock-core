@@ -23,7 +23,8 @@ enum class DefaultsIniValueState { kAbsent, kAccepted, kRefused };
 
 // For a line that was read, the section, key and value are the file's own bytes and the line is
 // 1-based; for an absent concept they are empty and the line is 0. `reason` is empty unless the
-// value is refused.
+// value is refused. The reason and the lines are UTF-8 whatever the file holds: each maximal
+// subpart of an ill-formed sequence in the value is written as U+FFFD, as C# decodes it.
 struct DefaultsIniValue {
     DefaultsIniValueState state = DefaultsIniValueState::kAbsent;
     int line = 0;

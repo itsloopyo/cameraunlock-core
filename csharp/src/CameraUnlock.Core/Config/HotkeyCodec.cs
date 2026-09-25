@@ -24,7 +24,7 @@ namespace CameraUnlock.Core.Config
 
             value = string.Empty;
             KeyBinding[] bindings;
-            if (!KeyBindings.TryParse(Encoding.UTF8.GetString(text), out bindings, out error)) return false;
+            if (!KeyBindings.TryParse(CodecText.Utf8Text(text), out bindings, out error)) return false;
             value = KeyBindings.Format(bindings);
             return true;
         }

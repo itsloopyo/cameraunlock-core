@@ -3,7 +3,8 @@ namespace CameraUnlock.Core.Config
     /// <summary>
     /// One canonical concept as Defaults.ini holds it. For a line that was read, the section, key
     /// and value are the file's own bytes and the line is 1-based; for an absent concept they are
-    /// empty and the line is 0. The reason is empty unless the value is refused.
+    /// empty and the line is 0. The reason is empty unless the value is refused, and it and the
+    /// lines decode the value by <see cref="CodecText.Utf8Text"/>, as C++ core writes them.
     /// </summary>
     internal sealed class DefaultsIniValue
     {

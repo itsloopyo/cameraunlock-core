@@ -9,6 +9,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - Defaults.ini's reasons and lines match in C# and C++ for bytes that are not UTF-8
+
+A Defaults.ini saved as ANSI is read, so a value can hold bytes that are not UTF-8, such as a `£`
+typed as a hotkey. C# decoded them with `Encoding.UTF8` and C++ copied them raw, so the refused
+value's reason and log line differed between the languages, and C++ wrote bytes that are not
+UTF-8 into a UTF-8 log line. Both now write each maximal subpart of an ill-formed sequence as
+U+FFFD and keep well-formed UTF-8 as it is. C# does it by hand in the internal
+`CodecText.Utf8Text`, because .NET Framework's decoder substitutes differently from that rule
+(it reads `F0 80 80` as two U+FFFD, not three). The new `global/read-ansi` case pins it.
+
+Public API: `HotkeyCodec.TryParse` (C#) and the list and color codecs' item errors now decode
+through the same function, so on .NET Framework an error quoting such bytes can hold a different
+number of U+FFFD than before. What they read is unchanged. The game-file diagnostics are not
+changed by this entry, and they still differ between the languages for such bytes.
+
 ### Added - Defaults.ini's render and reader, internal to core
 
 The pieces the config owner reads and creates Defaults.ini with. Nothing here is public API, and
@@ -37,7 +52,7 @@ no owner reads or writes the file yet.
   `Defaults.ini: lines 2 and 4: [General] RotationEnabled=false and [Position]
   PositionEnabled=false are not read (both false is not a tracking mode), so the built-in
   RotationEnabled=true and PositionEnabled=true are used.`
-- **Fixtures**: `global/Defaults.ini` and 23 `global/read-*` cases, run by the C++ suite, xunit and
+- **Fixtures**: `global/Defaults.ini` and 24 `global/read-*` cases, run by the C++ suite, xunit and
   both FrameworkTests targets. `data/fixtures/canonical-ini/README.md` defines them.
 - **Internal to the table**: C# `ConfigTable.RenderValues` and C++ `detail::RenderCanonicalValues`
   write every row as its value under a given header, which the Defaults.ini render uses. `Render`,
