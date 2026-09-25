@@ -9,6 +9,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - pose-shaping sections and the rest of the fleet's pose-shaping spellings are refused
+
+The deadzone shape most of the fleet reads, a bare `Yaw`, `Pitch` and `Roll` under `[Deadzone]`
+(black-and-white, black-mesa, dorfromantik, fallout-new-vegas, half-life-2, portal, portal-2,
+subnautica, titanfall-2), got through: a table accepted a local row in `[Deadzone]`, applying such
+a file drew only `UnknownSection`, and the lint passed `[Deadzone] Threshold` and gave `[Deadzone]
+Yaw` only the bare-noun hint. A bare key under `[Sensitivity]` or `[Inversion]` drew no key
+diagnostic either. And several pose-shaping spellings the fleet and core use were in no list.
+
+- A `non_canonical_keys` group now has `sections`, sections that hold only its settings:
+  `Sensitivity` lists `[Sensitivity]`, `Inversion` lists `[Inversion]` and `Deadzone` lists
+  `[Deadzone]`. The generator checks them (PascalCase, not `[CameraUnlock]`, not a schema section
+  with a canonical concept, each listed once) and emits C++ `schema::kNonCanonicalSections` and C#
+  `ConfigConcepts.NonCanonicalSectionReasons`. A config table refuses a local row in one, applying
+  a canonical file reports every key in one that nothing else names as `NonCanonicalConcept` with
+  the group's reason (beside the section's `UnknownSection`), and the lint fails the section and
+  each key in it with that reason.
+- New spellings: `RotScale` (group `Sensitivity`); `SignYaw`, `SignPitch`, `SignRoll`, `SignX`,
+  `SignY`, `SignZ` (group `Inversion`), which dead-rising-2 and mafia-ii-definitive-edition read as
+  `[tuning] rot_scale` and `sign_*`; `DeadzoneMin`, `DeadzoneMax` and the `Deadband` forms (group
+  `Deadzone`); `SensitivityCurve` and `CurveStrength` (group `ResponseCurve`), the names core's own
+  `AxisConfig` profile format writes.
+- New group `PositionScale`: `PositionScale`, `PositionScaleUU`, `PosScale`, `WorldScale`,
+  `UnitsPerMeter`, `UnitsPerMetre`, `WorldUnitsPerMeter`, `WorldUnitsPerMetre`. Converting the
+  tracker's metres to the game's units is the mod's boundary code; a scale the player can edit is a
+  position sensitivity under another name. `PositionScale`, `WorldScale` and `UnitsPerMeter` leave
+  `deliberately_unaliased`, whose reason (a concept still to come) pointed the other way.
+- `deliberately_unaliased` and the `Deadzone` group's doc no longer give conflicting counts: the
+  nine repos that read `[Deadzone] Yaw` are named, and they all read `[Sensitivity] Yaw` too. The
+  `DeadzoneDeg` and `ResponseCurve` docs say who reads what.
+- `data/fixtures/canonical-ini/table/apply-unknown` adds `[Sensitivity] Pitch`, `[Network]
+  WorldScale`, `[Deadzone] Yaw` and `Threshold`, and a `[Tuning]` section with `rot_scale` and
+  `SignYaw`.
+
+None of these spellings is an alias, so the deprecated flat readers and `HeadTrackingConfigBase`
+read exactly what they read before.
+
 ### Added - pose shaping leaves the canonical format: deadzone and curve keys, and the fold record
 
 The tracker owns pose shaping, so a canonical file carries no sensitivity multiplier (rotation or

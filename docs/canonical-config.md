@@ -348,21 +348,31 @@ So the schema sections `[Sensitivity]`, `[Inversion]` and `[Reticle]` hold no ca
 and no canonical file has them. The retired `Smoothing` key (and its alias `SmoothingFactor`) is
 not written either.
 
-Deadzones and response curves were never schema concepts, so the schema lists their spellings
-under `non_canonical_keys` instead. These are not aliases: neither flat reader resolves them, and
-no field is bound to them. A canonical file holding one draws the same `NonCanonicalConcept`
-diagnostic with the group's `canonical_reason`, in any section:
+Deadzones, response curves, unit scales and axis signs a player can edit were never schema
+concepts, so the schema lists their spellings under `non_canonical_keys` instead. These are not
+aliases: neither flat reader resolves them, and no field is bound to them. A canonical file
+holding one draws the same `NonCanonicalConcept` diagnostic with the group's `canonical_reason`,
+in any section. A group's sections hold nothing else, so every key in one draws the group's
+reason whatever it is spelled, beside the section's own `UnknownSection`:
 
-| `non_canonical_keys` | Spellings | Reason |
-|----------------------|-----------|--------|
-| `Deadzone` | `Deadzone`, `DeadzoneDeg`, `DeadzoneYaw`, `DeadzonePitch`, `DeadzoneRoll`, `YawDeadzone`, `PitchDeadzone`, `RollDeadzone`, `EnableDeadzone` | The mod applies the head pose as the tracker sends it, with no deadzone of its own |
-| `ResponseCurve` | `ResponseCurve`, `YawCurve`, `PitchCurve`, `RollCurve` | The mod applies the head pose as the tracker sends it, with no response curve of its own |
+| `non_canonical_keys` | Sections | Spellings | Reason |
+|----------------------|----------|-----------|--------|
+| `Sensitivity` | `[Sensitivity]` | `RotScale` | The mod applies the head pose as the tracker sends it, with no sensitivity of its own |
+| `Inversion` | `[Inversion]` | `SignYaw`, `SignPitch`, `SignRoll`, `SignX`, `SignY`, `SignZ` | The mod applies the head pose as the tracker sends it, with no axis inversion of its own |
+| `Deadzone` | `[Deadzone]` | `Deadzone`, `DeadzoneDeg`, `DeadzoneYaw`, `DeadzonePitch`, `DeadzoneRoll`, `YawDeadzone`, `PitchDeadzone`, `RollDeadzone`, `EnableDeadzone`, `DeadzoneMin`, `DeadzoneMax`, `Deadband`, `YawDeadband`, `PitchDeadband`, `RollDeadband` | The mod applies the head pose as the tracker sends it, with no deadzone of its own |
+| `ResponseCurve` | | `ResponseCurve`, `YawCurve`, `PitchCurve`, `RollCurve`, `SensitivityCurve`, `CurveStrength` | The mod applies the head pose as the tracker sends it, with no response curve of its own |
+| `PositionScale` | | `PositionScale`, `PositionScaleUU`, `PosScale`, `WorldScale`, `UnitsPerMeter`, `UnitsPerMetre`, `WorldUnitsPerMeter`, `WorldUnitsPerMetre` | The mod converts your head movement to the game's units itself, so the scale is not a setting |
 
 Matching is the schema's: ASCII case and `_` and `-` are ignored, so `deadzone_yaw` is
-`DeadzoneYaw`. The bare `Yaw`, `Pitch` and `Roll` that some mods wrote under `[Deadzone]` are not
-listed, because section-less they are also the sensitivity keys; the lint refuses them as bare
-nouns (see below). `LightMultiplier` is not pose shaping: it turns a carried light, not the view,
-and stays a canonical concept.
+`DeadzoneYaw` and `rot_scale` is `RotScale`; a section matches ASCII case-insensitively. The bare
+`Yaw`, `Pitch` and `Roll` that mods wrote under `[Sensitivity]` and `[Deadzone]` are in no list,
+because section-less they would be both; they draw the reason of the section they are in.
+
+The conversion from the tracker's metres to the game's units is the mod's boundary code, like its
+axis conversion. A scale the player can edit is a position sensitivity under another name, so a
+conversion folds the shipped value into code and drops a value the player changed, as it does a
+sensitivity. `LightMultiplier` is not pose shaping: it turns a carried light, not the view, and
+stays a canonical concept.
 
 ### Game-local rows
 
@@ -374,7 +384,7 @@ feature of one game. The table refuses, when the row is added:
 - a key that is any concept's key or alias under the schema's normalisation (case and `_` and `-`
   ignored), canonical, non-canonical or retired, or a spelling `non_canonical_keys` lists;
 - a section or key that is not PascalCase ASCII letters and digits;
-- a row in `[CameraUnlock]`, in `[Sensitivity]`, `[Inversion]` or `[Reticle]`, or in a section
+- a row in `[CameraUnlock]`, in `[Sensitivity]`, `[Inversion]`, `[Reticle]` or `[Deadzone]`, or in a section
   spelled like a schema section or an earlier local section with other letter case;
 - a row with no comment, unless an earlier local row of its section is written above it and its
   comment covers both.
@@ -704,7 +714,8 @@ nothing. It stays for the life of the repo, since a player can update from any o
 Normalisation N1, a legacy hotkey code outside 0x01-0xFE importing as unbound, is recorded with
 `approved` null: it waits on the owner, and no map may apply it.
 
-A map passes every sensitivity, deadzone, response curve and axis inversion its frozen reader read
+A map passes every sensitivity (a unit scale the player can edit included), deadzone, response
+curve and axis inversion its frozen reader read
 through C++ `LegacyPoseShaping` or C# `LegacyPoseShaping.Record` (bool, float and double), with the
 effective legacy value and the value the game shipped. Each call adds a `PoseShapingValue` to the
 result's `pose_shaping` (C# `PoseShaping`): section, key, both values written as the canonical codecs
@@ -980,7 +991,8 @@ In a mod repo, and in conformance:
   `[Name]` written plainly, each section once; `[CameraUnlock]` holding `ConfigFormat=1` alone;
   every concept at the schema's section and key, spelled as the schema spells it and not as an
   alias; no non-canonical or retired concept, no spelling `non_canonical_keys` lists, and no
-  `[Sensitivity]`, `[Inversion]` or `[Reticle]` section; a schema section spelled as the schema spells it; local sections and keys PascalCase,
+  `[Sensitivity]`, `[Inversion]`, `[Reticle]` or `[Deadzone]` section, and no key in one of the
+  sections `non_canonical_keys` lists; a schema section spelled as the schema spells it; local sections and keys PascalCase,
   each local key used once in the file, none of the bare nouns above and none starting with
   `Chord`; every hotkey concept, and
   every key in `[Hotkeys]`, a key list in the file's dialect, with the canonical hotkey concepts at

@@ -59,16 +59,19 @@ for (const concept of SCHEMA.concepts) {
   for (const name of [concept.key, ...concept.aliases]) conceptByName.set(normalise(name), concept);
 }
 const nonCanonicalKeyByName = new Map();
+const nonCanonicalSectionByName = new Map();
 for (const group of SCHEMA.non_canonical_keys) {
   for (const name of group.spellings) nonCanonicalKeyByName.set(normalise(name), group);
+  for (const section of group.sections) nonCanonicalSectionByName.set(section.toLowerCase(), group);
 }
 const retiredByName = new Map();
 for (const retired of SCHEMA.retired) {
   for (const name of retired.aliases) retiredByName.set(normalise(name), retired);
 }
-const deadSections = new Set(
-  SCHEMA.sections.filter((s) => !SCHEMA.concepts.some((c) => c.canonical && c.section === s)).map((s) => s.toLowerCase()),
-);
+const deadSections = new Set([
+  ...SCHEMA.sections.filter((s) => !SCHEMA.concepts.some((c) => c.canonical && c.section === s)).map((s) => s.toLowerCase()),
+  ...nonCanonicalSectionByName.keys(),
+]);
 const schemaSection = (name) => SCHEMA.sections.find((s) => equalsAsciiIgnoreCase(s, name)) ?? null;
 
 // The binding list a canonical hotkey concept must hold in this repo: its canonical_default,
@@ -228,7 +231,7 @@ export function lintCanonicalConfig(bytes, { dialect, exceptions }) {
         problems.push(`${where} is retired (data/config-schema.json retired ${retired.id}), so a canonical file has no row for it`);
         continue;
       }
-      const nonCanonical = nonCanonicalKeyByName.get(norm);
+      const nonCanonical = nonCanonicalKeyByName.get(norm) ?? nonCanonicalSectionByName.get(section.name.toLowerCase());
       if (nonCanonical) {
         problems.push(`${where}: ${nonCanonical.canonical_reason}`);
         continue;

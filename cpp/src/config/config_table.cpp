@@ -71,6 +71,15 @@ const char* NonCanonicalKeyReason(const std::string& key) {
     return nullptr;
 }
 
+// The schema's reason for a section that holds only settings the canonical format does not
+// write ([Sensitivity], [Inversion], [Deadzone]), or nullptr.
+const char* NonCanonicalSectionReason(std::string_view section) {
+    for (const schema::NonCanonicalSection& other : schema::kNonCanonicalSections) {
+        if (EqualsAsciiIgnoreCase(section, other.section)) return other.reason;
+    }
+    return nullptr;
+}
+
 // The row a key names outside its own section or spelling: a row's key in any section, or a
 // concept row's key or alias. Every key name is used once in a file, so there is at most one.
 const TableRow* MisplacedRow(const std::vector<TableRow>& rows, const std::string& key, const char* canonical) {
@@ -97,6 +106,7 @@ void ReportUnread(const std::vector<TableRow>& rows, const CanonicalSection& sec
         return;
     }
     const char* reason = canonical == nullptr ? NonCanonicalKeyReason(value.key) : NonCanonicalReason(canonical);
+    if (reason == nullptr) reason = NonCanonicalSectionReason(section.name);
     if (reason != nullptr) {
         out.push_back(MakeDiagnostic(CanonicalDiagnosticKind::NonCanonicalConcept, value.line, section.name,
                                      value.key, value.value, reason));
@@ -164,6 +174,10 @@ void CheckLocalRow(const std::vector<TableRow>& rows, const TableRow& row) {
             throw std::invalid_argument(name + ": [" + std::string(section) +
                                         "] holds none of the settings a canonical file writes, so it has no rows");
         }
+    }
+    if (const char* reason = NonCanonicalSectionReason(row.section)) {
+        throw std::invalid_argument(name + ": [" + row.section + "] holds only settings a canonical file does not "
+                                    "carry, so it has no rows: " + reason);
     }
     for (const TableRow& earlier : rows) {
         if (EqualsAsciiIgnoreCase(earlier.section, row.section) && earlier.section != row.section) {

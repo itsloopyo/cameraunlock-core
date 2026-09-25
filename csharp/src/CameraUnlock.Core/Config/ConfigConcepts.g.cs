@@ -234,6 +234,13 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         internal static readonly Dictionary<string, string> NonCanonicalKeyReasons = new Dictionary<string, string>
         {
+            { "rotscale", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "signyaw", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
+            { "signpitch", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
+            { "signroll", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
+            { "signx", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
+            { "signy", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
+            { "signz", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
             { "deadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
             { "deadzonedeg", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
             { "deadzoneyaw", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
@@ -243,10 +250,38 @@ namespace CameraUnlock.Core.Config
             { "pitchdeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
             { "rolldeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
             { "enabledeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "deadzonemin", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "deadzonemax", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "deadband", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "yawdeadband", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "pitchdeadband", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "rolldeadband", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
             { "responsecurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
             { "yawcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
             { "pitchcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
             { "rollcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
+            { "sensitivitycurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
+            { "curvestrength", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
+            { "positionscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "positionscaleuu", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "posscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "worldscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "unitspermeter", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "unitspermetre", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "worldunitspermeter", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "worldunitspermetre", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+        };
+
+        /// <summary>
+        /// Each section that holds only settings the canonical format does not write (a group's
+        /// sections in the schema's non_canonical_keys), with the line a player is shown for any
+        /// key in it. Matched ASCII case-insensitively.
+        /// </summary>
+        internal static readonly KeyValuePair<string, string>[] NonCanonicalSectionReasons =
+        {
+            new KeyValuePair<string, string>("Sensitivity", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."),
+            new KeyValuePair<string, string>("Inversion", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."),
+            new KeyValuePair<string, string>("Deadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."),
         };
     }
 }

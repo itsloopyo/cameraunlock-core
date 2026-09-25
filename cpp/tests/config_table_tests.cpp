@@ -404,6 +404,12 @@ void TestConstructionChecks() {
                        "holds none of the settings a canonical file writes"),
               std::string("a local row in [") + section + "] throws");
     }
+    for (const char* section : {"Deadzone", "DeadZone"}) {
+        Check(Contains(Thrown([&] { ConfigTable<S>().Local(section, "YawDegrees", &S::scale, FloatCodec(), "One."); }),
+                       "] holds only settings a canonical file does not carry, so it has no rows: The mod applies the "
+                       "head pose as the tracker sends it, with no deadzone of its own."),
+              std::string("a local row in [") + section + "] throws");
+    }
     Check(Thrown([] { ConfigTable<S>().Local("Position", "LeanScale", &S::scale, FloatCodec(), "One."); }) ==
               "(nothing thrown)",
           "a local row in [Position] is allowed");
@@ -422,10 +428,17 @@ void TestConstructionChecks() {
                        "is the key or an alias of the schema concept"),
               std::string("a local key named ") + key + " throws");
     }
-    for (const char* key : {"Deadzone", "DeadzoneDeg", "YawDeadzone", "EnableDeadzone", "ResponseCurve", "RollCurve"}) {
+    for (const char* key : {"Deadzone", "DeadzoneDeg", "YawDeadzone", "EnableDeadzone", "ResponseCurve", "RollCurve",
+                            "DeadzoneMin", "CurveStrength", "SignYaw", "RotScale"}) {
         Check(Contains(Thrown([&] { ConfigTable<S>().Local("Camera", key, &S::value, IntCodec<int>(), "One."); }),
                        "names a setting a canonical file does not carry, so a game-local row cannot use it: The mod "
                        "applies the head pose as the tracker sends it"),
+              std::string("a local key named ") + key + " throws");
+    }
+    for (const char* key : {"PositionScale", "WorldScale", "UnitsPerMeter"}) {
+        Check(Contains(Thrown([&] { ConfigTable<S>().Local("Camera", key, &S::value, IntCodec<int>(), "One."); }),
+                       "names a setting a canonical file does not carry, so a game-local row cannot use it: The mod "
+                       "converts your head movement to the game's units itself"),
               std::string("a local key named ") + key + " throws");
     }
     for (const schema::NonCanonicalKey& other : schema::kNonCanonicalKeys) {

@@ -44,7 +44,7 @@ const spellingPattern = /^[A-Za-z0-9_-]+$/;
 const stringDefaultPattern = /^[A-Za-z0-9_-]*$/;
 const pascalCasePattern = /^[A-Z][A-Za-z0-9]*$/;
 
-const nonCanonicalKeyFields = new Set(['id', 'spellings', 'doc', 'canonical_reason']);
+const nonCanonicalKeyFields = new Set(['id', 'sections', 'spellings', 'doc', 'canonical_reason']);
 
 const conceptFields = new Set([
     'id', 'section', 'key', 'type', 'default', 'aliases', 'doc',
@@ -322,7 +322,42 @@ function validateSchema(schema, keyTable) {
         }
         group.spellings.forEach((spelling, j) => checkSpelling(where, `spellings[${j}]`, spelling));
         checkPlayerText(where, 'canonical_reason', group.canonical_reason);
+        if (!Array.isArray(group.sections)) {
+            schemaError(where, `sections is ${JSON.stringify(group.sections)}, expected an array of section names`);
+        }
+        group.sections.forEach((section, j) => {
+            if (typeof section !== 'string' || !pascalCasePattern.test(section)) {
+                schemaError(where, `sections[${j}] ${JSON.stringify(section)} is not PascalCase ASCII letters and digits`);
+            }
+            if (section.toLowerCase() === 'cameraunlock') schemaError(where, 'CameraUnlock is the format stamp');
+            const inSchema = schema.sections.find((s) => s.toLowerCase() === section.toLowerCase());
+            if (inSchema !== undefined && inSchema !== section) {
+                schemaError(where, `sections[${j}] '${section}' is the schema section spelled '${inSchema}'`);
+            }
+            if (schema.concepts.some((c) => c.canonical && c.section === inSchema)) {
+                schemaError(where, `sections[${j}] '${section}' holds canonical concepts, so not every key in it is this group's`);
+            }
+        });
     });
+}
+
+// The sections non_canonical_keys lists, each with its group. A section is listed once, compared
+// ASCII case-insensitively, since a reader matches section names that way.
+function nonCanonicalSectionEntries(schema) {
+    const seen = new Map();
+    const out = [];
+    schema.non_canonical_keys.forEach((group, i) => {
+        for (const section of group.sections) {
+            const lower = section.toLowerCase();
+            if (seen.has(lower)) {
+                schemaError(`non_canonical_keys[${i}] ('${group.id}')`,
+                    `section '${section}' is already listed by '${seen.get(lower)}'`);
+            }
+            seen.set(lower, group.id);
+            out.push({ id: group.id, section, reason: group.canonical_reason });
+        }
+    });
+    return out;
 }
 
 // The normalised spellings of non_canonical_keys. None may be a concept's key or alias or a
@@ -625,7 +660,7 @@ function rangeBound(concept, field, language) {
 
 const canonicalConcepts = (schema) => schema.concepts.filter((c) => c.canonical);
 
-function renderConceptsCpp(schema, nonCanonicalKeys) {
+function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
     const concepts = canonicalConcepts(schema);
     const cString = (text) => (text === undefined ? 'nullptr' : `"${text}"`);
     const enumerators = concepts.map((c) => `    ${c.id},`).join('\n');
@@ -660,6 +695,7 @@ function renderConceptsCpp(schema, nonCanonicalKeys) {
         .map((c) => `    {"${c.id}", "${c.section}", "${c.key}", "${normalize(c.key)}", "${c.canonical_reason}"},`)
         .join('\n');
     const otherKeys = nonCanonicalKeys.map((k) => `    {"${k.id}", "${k.normalized}", "${k.reason}"},`).join('\n');
+    const otherSections = nonCanonicalSections.map((k) => `    {"${k.id}", "${k.section}", "${k.reason}"},`).join('\n');
 
     return `${banner('//')}
 
@@ -749,11 +785,27 @@ ${otherKeys}
 
 inline constexpr std::size_t kNonCanonicalKeyCount = sizeof(kNonCanonicalKeys) / sizeof(kNonCanonicalKeys[0]);
 
+/// A section that holds only settings the canonical format does not write (a group's
+/// \`sections\` in the schema's non_canonical_keys), so every key in it is the group's. Matched
+/// ASCII case-insensitively; \`reason\` is the line a player is shown for a key in it.
+struct NonCanonicalSection {
+    const char* name;
+    const char* section;
+    const char* reason;
+};
+
+inline constexpr NonCanonicalSection kNonCanonicalSections[] = {
+${otherSections}
+};
+
+inline constexpr std::size_t kNonCanonicalSectionCount =
+    sizeof(kNonCanonicalSections) / sizeof(kNonCanonicalSections[0]);
+
 }  // namespace cameraunlock::config::schema
 `;
 }
 
-function renderConceptsCsharp(schema, nonCanonicalKeys) {
+function renderConceptsCsharp(schema, nonCanonicalKeys, nonCanonicalSections) {
     const concepts = canonicalConcepts(schema);
     const csString = (text) => (text === undefined ? 'null' : `"${text}"`);
     const types = { bool: 'bool', int: 'int', float: 'float', string: 'string' };
@@ -781,6 +833,8 @@ function renderConceptsCsharp(schema, nonCanonicalKeys) {
         .map((c) => `            { "${normalize(c.key)}", "${c.canonical_reason}" },`)
         .join('\n');
     const keyReasons = nonCanonicalKeys.map((k) => `            { "${k.normalized}", "${k.reason}" },`).join('\n');
+    const sectionReasons = nonCanonicalSections
+        .map((k) => `            new KeyValuePair<string, string>("${k.section}", "${k.reason}"),`).join('\n');
 
     return `${banner('//')}
 
@@ -828,6 +882,16 @@ ${reasons}
         internal static readonly Dictionary<string, string> NonCanonicalKeyReasons = new Dictionary<string, string>
         {
 ${keyReasons}
+        };
+
+        /// <summary>
+        /// Each section that holds only settings the canonical format does not write (a group's
+        /// sections in the schema's non_canonical_keys), with the line a player is shown for any
+        /// key in it. Matched ASCII case-insensitively.
+        /// </summary>
+        internal static readonly KeyValuePair<string, string>[] NonCanonicalSectionReasons =
+        {
+${sectionReasons}
         };
     }
 }
@@ -1237,6 +1301,7 @@ function main() {
     validateSchema(schema, keyTable);
     const entries = buildEntries(schema);
     const nonCanonicalKeys = nonCanonicalKeyEntries(schema, entries);
+    const nonCanonicalSections = nonCanonicalSectionEntries(schema);
     const trackingModes = validateTrackingModes(JSON.parse(readFileSync(conformancePath, 'utf8')), schema);
 
     const outputs = [
@@ -1246,8 +1311,8 @@ function main() {
         { path: conceptRangesTestPath, text: renderConceptRangesTest(schema) },
         { path: keyNamesCppPath, text: renderKeyNamesCpp(keyTable) },
         { path: keyNamesCsharpPath, text: renderKeyNamesCsharp(keyTable) },
-        { path: conceptsCppPath, text: renderConceptsCpp(schema, nonCanonicalKeys) },
-        { path: conceptsCsharpPath, text: renderConceptsCsharp(schema, nonCanonicalKeys) },
+        { path: conceptsCppPath, text: renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) },
+        { path: conceptsCsharpPath, text: renderConceptsCsharp(schema, nonCanonicalKeys, nonCanonicalSections) },
     ];
 
     const check = process.argv.includes('--check');

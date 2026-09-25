@@ -441,6 +441,13 @@ struct NonCanonicalKey {
 };
 
 inline constexpr NonCanonicalKey kNonCanonicalKeys[] = {
+    {"Sensitivity", "rotscale", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Inversion", "signyaw", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
+    {"Inversion", "signpitch", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
+    {"Inversion", "signroll", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
+    {"Inversion", "signx", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
+    {"Inversion", "signy", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
+    {"Inversion", "signz", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
     {"Deadzone", "deadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
     {"Deadzone", "deadzonedeg", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
     {"Deadzone", "deadzoneyaw", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
@@ -450,12 +457,46 @@ inline constexpr NonCanonicalKey kNonCanonicalKeys[] = {
     {"Deadzone", "pitchdeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
     {"Deadzone", "rolldeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
     {"Deadzone", "enabledeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "deadzonemin", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "deadzonemax", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "deadband", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "yawdeadband", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "pitchdeadband", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "rolldeadband", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
     {"ResponseCurve", "responsecurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
     {"ResponseCurve", "yawcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
     {"ResponseCurve", "pitchcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
     {"ResponseCurve", "rollcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
+    {"ResponseCurve", "sensitivitycurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
+    {"ResponseCurve", "curvestrength", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
+    {"PositionScale", "positionscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
+    {"PositionScale", "positionscaleuu", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
+    {"PositionScale", "posscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
+    {"PositionScale", "worldscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
+    {"PositionScale", "unitspermeter", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
+    {"PositionScale", "unitspermetre", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
+    {"PositionScale", "worldunitspermeter", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
+    {"PositionScale", "worldunitspermetre", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
 };
 
 inline constexpr std::size_t kNonCanonicalKeyCount = sizeof(kNonCanonicalKeys) / sizeof(kNonCanonicalKeys[0]);
+
+/// A section that holds only settings the canonical format does not write (a group's
+/// `sections` in the schema's non_canonical_keys), so every key in it is the group's. Matched
+/// ASCII case-insensitively; `reason` is the line a player is shown for a key in it.
+struct NonCanonicalSection {
+    const char* name;
+    const char* section;
+    const char* reason;
+};
+
+inline constexpr NonCanonicalSection kNonCanonicalSections[] = {
+    {"Sensitivity", "Sensitivity", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Inversion", "Inversion", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
+    {"Deadzone", "Deadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+};
+
+inline constexpr std::size_t kNonCanonicalSectionCount =
+    sizeof(kNonCanonicalSections) / sizeof(kNonCanonicalSections[0]);
 
 }  // namespace cameraunlock::config::schema

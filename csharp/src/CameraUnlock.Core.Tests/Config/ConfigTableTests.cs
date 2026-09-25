@@ -90,6 +90,9 @@ namespace CameraUnlock.Core.Tests.Config
         [InlineData("Sensitivity", "holds none of the settings a canonical file writes")]
         [InlineData("Inversion", "holds none of the settings a canonical file writes")]
         [InlineData("Reticle", "holds none of the settings a canonical file writes")]
+        [InlineData("Deadzone", "[Deadzone] holds only settings a canonical file does not carry, so it has no rows: The mod "
+            + "applies the head pose as the tracker sends it, with no deadzone of its own.")]
+        [InlineData("DeadZone", "[DeadZone] holds only settings a canonical file does not carry, so it has no rows")]
         [InlineData("POSITION", "the schema spells this section [Position]")]
         public void LocalSectionsThatThrow(string section, string message)
         {
@@ -127,6 +130,10 @@ namespace CameraUnlock.Core.Tests.Config
         [InlineData("EnableDeadzone")]
         [InlineData("ResponseCurve")]
         [InlineData("RollCurve")]
+        [InlineData("DeadzoneMin")]
+        [InlineData("CurveStrength")]
+        [InlineData("SignYaw")]
+        [InlineData("RotScale")]
         public void LocalKeysNamingANonCanonicalSettingThrow(string key)
         {
             var e = Assert.Throws<ArgumentException>(() => WithOffset(NewTable(), "Camera", key, "One."));
@@ -150,6 +157,32 @@ namespace CameraUnlock.Core.Tests.Config
             {
                 Assert.Null(ConfigKeySchema.Resolve(normalized));
             }
+        }
+
+        [Theory]
+        [InlineData("PositionScale")]
+        [InlineData("WorldScale")]
+        [InlineData("UnitsPerMeter")]
+        public void LocalKeysNamingAUnitScaleThrow(string key)
+        {
+            var e = Assert.Throws<ArgumentException>(() => WithOffset(NewTable(), "Camera", key, "One."));
+            Assert.Contains("names a setting a canonical file does not carry, so a game-local row cannot use it: The mod "
+                + "converts your head movement to the game's units itself", e.Message);
+        }
+
+        [Fact]
+        public void TheNonCanonicalSectionsAreTheSchemas()
+        {
+            var expected = new List<KeyValuePair<string, string>>();
+            foreach (JsonElement group in Schema().GetProperty("non_canonical_keys").EnumerateArray())
+            {
+                foreach (JsonElement section in group.GetProperty("sections").EnumerateArray())
+                {
+                    expected.Add(new KeyValuePair<string, string>(section.GetString()!,
+                        group.GetProperty("canonical_reason").GetString()!));
+                }
+            }
+            Assert.Equal(expected, ConfigConcepts.NonCanonicalSectionReasons);
         }
 
         [Fact]

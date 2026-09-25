@@ -29,16 +29,18 @@
     "A hotkey concept no flat reader reads has its `canonical_default` as its `default`.",
     "",
     "`non_canonical_keys` names settings no canonical file carries that are not concepts: the",
-    "tracker owns pose shaping, and deadzones and response curves were never schema concepts.",
-    "Their spellings are not aliases, so neither flat reader resolves them and nothing binds",
-    "them to a field. A canonical table refuses a game-local row named by one, applying a",
-    "canonical file reports one as NonCanonicalConcept with its `canonical_reason`, and the",
-    "canonical config lint fails a file holding one."
+    "tracker owns pose shaping, and deadzones, response curves and unit scales were never schema",
+    "concepts. Their spellings are not aliases, so neither flat reader resolves them and nothing",
+    "binds them to a field. A group's `sections` are sections that hold only such settings: any",
+    "key in one is the group's, whatever it is spelled. A canonical table refuses a game-local",
+    "row named by a spelling or in such a section, applying a canonical file reports either as",
+    "NonCanonicalConcept with the group's `canonical_reason`, and the canonical config lint fails",
+    "a file holding one."
   ],
   "deliberately_unaliased": [
     {
       "spellings": ["Yaw", "Pitch", "Roll"],
-      "reason": "AMBIGUOUS UNDER SECTION-LESS MATCHING. 13 repos ship these under [Sensitivity] meaning a sensitivity multiplier, 4 ship them under [Deadzone] meaning degrees of deadzone, and black-and-white, fallout-new-vegas, dorfromantik and subnautica ship BOTH sections in one file. Normalisation throws the section away, so aliasing the bare names onto either concept would read one of them as the other. Deadzones are not settings any more (non_canonical_keys Deadzone), and these bare names stay out of that list too."
+      "reason": "AMBIGUOUS UNDER SECTION-LESS MATCHING. Mods ship these under [Sensitivity] meaning a sensitivity multiplier and under [Deadzone] meaning degrees of deadzone, and the nine repos non_canonical_keys Deadzone names read both sections from one file. Normalisation throws the section away, so aliasing the bare names onto either concept would read one of them as the other. Neither is a setting any more: the Sensitivity and Deadzone groups of non_canonical_keys list those two sections, so a key in either draws the group's reason whatever it is spelled."
     },
     {
       "spellings": ["Position"],
@@ -57,7 +59,7 @@
       "reason": "Chord modifiers, not key names. A different concept from the *Key entries. A canonical file has no Chord* key at all: a chord is an ordinary item of its action's key list (ToggleKey=End, Ctrl+Shift+Y), and a game's legacy import folds a chord switch or letter row into that list. The canonical config lint refuses any key whose name starts with Chord."
     },
     {
-      "spellings": ["BindAddress", "CyclePort", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
+      "spellings": ["BindAddress", "CyclePort", "LogToFile", "ShowNotifications", "FieldOfView", "FovOffset"],
       "reason": "Real cross-repo concepts with no field in HeadTrackingConfigData or its C++ twin to bind to. Aliasing a key onto nothing would advertise a setting that does not work. Each needs a concept and a field before it gets an alias."
     }
   ],
@@ -596,16 +598,39 @@
   ],
   "non_canonical_keys": [
     {
+      "id": "Sensitivity",
+      "sections": ["Sensitivity"],
+      "spellings": ["RotScale"],
+      "doc": "Rotation multipliers that are no concept's alias. [tuning] rot_scale is dead-rising-2's and mafia-ii-definitive-edition's, which scale all three rotation axes by it. The section is the schema's own [Sensitivity], listed so that a key in it no concept names (the bare Yaw, Pitch and Roll most mods wrote there) draws this group's reason too.",
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."
+    },
+    {
+      "id": "Inversion",
+      "sections": ["Inversion"],
+      "spellings": ["SignYaw", "SignPitch", "SignRoll", "SignX", "SignY", "SignZ"],
+      "doc": "Per-axis signs a player can edit, which is user-facing inversion. [tuning] sign_yaw and the rest are dead-rising-2's and mafia-ii-definitive-edition's; mafia-ii ships sign_yaw and sign_roll at -1 to match its engine, which the conversion folds into the mod's axis code. The section is the schema's own [Inversion], listed for the same reason as [Sensitivity].",
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."
+    },
+    {
       "id": "Deadzone",
-      "spellings": ["Deadzone", "DeadzoneDeg", "DeadzoneYaw", "DeadzonePitch", "DeadzoneRoll", "YawDeadzone", "PitchDeadzone", "RollDeadzone", "EnableDeadzone"],
-      "doc": "Deadzones are pose shaping, which the tracker owns. The spellings are the fleet's own on 2026-09-25: [Tracking] Deadzone (abzu, prey), [Rotation] Deadzone (quake-ii-rtx), [Smoothing] DeadzoneDeg (six repos), [Tracking] DeadzoneYaw/Pitch/Roll (homeworld-remastered-collection; deadzone_yaw in minecraft-java-edition), [Rotation] YawDeadzone/PitchDeadzone/RollDeadzone (control-ultimate-edition, fusion-360), and peak's Enable Deadzone in PascalCase. The bare Yaw, Pitch and Roll that nine repos read under [Deadzone] stay in deliberately_unaliased: section-less they are also the sensitivity keys, and the lint refuses them as bare nouns.",
+      "sections": ["Deadzone"],
+      "spellings": ["Deadzone", "DeadzoneDeg", "DeadzoneYaw", "DeadzonePitch", "DeadzoneRoll", "YawDeadzone", "PitchDeadzone", "RollDeadzone", "EnableDeadzone", "DeadzoneMin", "DeadzoneMax", "Deadband", "YawDeadband", "PitchDeadband", "RollDeadband"],
+      "doc": "Deadzones are pose shaping, which the tracker owns. The spellings are the fleet's own on 2026-09-25: [Tracking] Deadzone (abzu, prey), [Rotation] Deadzone (quake-ii-rtx), [Smoothing] DeadzoneDeg (read by bully-scholarship-edition, burnout-paradise-the-ultimate-box, deus-ex-human-revolution, red-eclipse and south-park-the-stick-of-truth, and listed as a dead key by bioshock-infinite, outlast and spec-ops-the-line), [Tracking] DeadzoneYaw/Pitch/Roll (homeworld-remastered-collection; deadzone_yaw in minecraft-java-edition), [Rotation] YawDeadzone/PitchDeadzone/RollDeadzone (control-ultimate-edition, fusion-360), peak's Enable Deadzone in PascalCase, and DeadzoneMin/DeadzoneMax, the names core's own AxisConfig profile format writes. No fleet config reads a Deadband; those are the other plain name for one. The section [Deadzone] is where black-and-white, black-mesa, dorfromantik, fallout-new-vegas, half-life-2, portal, portal-2, subnautica and titanfall-2 read a bare Yaw, Pitch and Roll, so every key in it draws this group's reason.",
       "canonical_reason": "The mod applies the head pose as the tracker sends it, with no deadzone of its own."
     },
     {
       "id": "ResponseCurve",
-      "spellings": ["ResponseCurve", "YawCurve", "PitchCurve", "RollCurve"],
-      "doc": "Response curves are pose shaping, which the tracker owns. No fleet config read one on 2026-09-25; the spellings are the plain names a mod would give one.",
+      "sections": [],
+      "spellings": ["ResponseCurve", "YawCurve", "PitchCurve", "RollCurve", "SensitivityCurve", "CurveStrength"],
+      "doc": "Response curves are pose shaping, which the tracker owns. SensitivityCurve and CurveStrength are the names core's own AxisConfig profile format writes (ProfileSerializer, as AxisMapping.<Axis>.SensitivityCurve). No fleet config file read a curve on 2026-09-25; the other spellings are the plain names a mod would give one.",
       "canonical_reason": "The mod applies the head pose as the tracker sends it, with no response curve of its own."
+    },
+    {
+      "id": "PositionScale",
+      "sections": [],
+      "spellings": ["PositionScale", "PositionScaleUU", "PosScale", "WorldScale", "UnitsPerMeter", "UnitsPerMetre", "WorldUnitsPerMeter", "WorldUnitsPerMetre"],
+      "doc": "Game units per metre of head movement. Converting the tracker's metres to the engine's units is the mod's boundary code, not a setting: a player-edited scale is a position sensitivity under another name (homeworld-remastered-collection's PositionScale comment tells players to raise it for stronger parallax, black-and-white calls WorldScale its main tuning knob). Fleet spellings on 2026-09-25: PositionScale (dishonored, dishonored-definitive-edition, homeworld-remastered-collection, persona-5-royal, red-eclipse, spec-ops-the-line, thief), PositionScaleUU (mirrors-edge), pos_scale (dead-rising-2, mafia-ii-definitive-edition), WorldScale (black-and-white, black-mesa, half-life-2, portal, portal-2, titanfall-2), UnitsPerMeter (quake-ii-rtx) and world_units_per_metre (a-plague-tale-innocence). The conversion folds the shipped value into the mod's code.",
+      "canonical_reason": "The mod converts your head movement to the game's units itself, so the scale is not a setting."
     }
   ]
 }
