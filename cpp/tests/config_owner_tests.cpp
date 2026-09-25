@@ -699,12 +699,12 @@ void AReadOnlyLegacyFileIsImportedAndLeftAsItWas(const fs::path& dir) {
     ExpectImported(rig);
 }
 
-// Denies the current user FILE_ADD_FILE on the folder until destroyed.
-class DenyCreateFiles {
+// Denies the current user the given rights on a file or folder until destroyed.
+class DenyAccess {
 public:
-    explicit DenyCreateFiles(const fs::path& dir) : dir_(dir.wstring()) {
+    DenyAccess(const fs::path& path, DWORD rights) : path_(path.wstring()) {
         PACL old = nullptr;
-        if (GetNamedSecurityInfoW(dir_.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &old,
+        if (GetNamedSecurityInfoW(path_.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &old,
                                   nullptr, &descriptor_) != ERROR_SUCCESS) {
             throw std::runtime_error("GetNamedSecurityInfoW failed");
         }
@@ -717,7 +717,7 @@ public:
         if (!GetTokenInformation(token, TokenUser, user.data(), size, &size)) throw std::runtime_error("GetTokenInformation");
         CloseHandle(token);
         EXPLICIT_ACCESS_W deny{};
-        deny.grfAccessPermissions = FILE_ADD_FILE;
+        deny.grfAccessPermissions = rights;
         deny.grfAccessMode = DENY_ACCESS;
         deny.grfInheritance = NO_INHERITANCE;
         deny.Trustee.TrusteeForm = TRUSTEE_IS_SID;
@@ -725,20 +725,20 @@ public:
         deny.Trustee.ptstrName = static_cast<LPWSTR>(reinterpret_cast<TOKEN_USER*>(user.data())->User.Sid);
         PACL denied = nullptr;
         if (SetEntriesInAclW(1, &deny, old_, &denied) != ERROR_SUCCESS) throw std::runtime_error("SetEntriesInAclW");
-        const DWORD set = SetNamedSecurityInfoW(&dir_[0], SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr,
+        const DWORD set = SetNamedSecurityInfoW(&path_[0], SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr,
                                                 denied, nullptr);
         LocalFree(denied);
         if (set != ERROR_SUCCESS) throw std::runtime_error("SetNamedSecurityInfoW");
     }
-    DenyCreateFiles(const DenyCreateFiles&) = delete;
-    DenyCreateFiles& operator=(const DenyCreateFiles&) = delete;
-    ~DenyCreateFiles() {
-        SetNamedSecurityInfoW(&dir_[0], SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, old_, nullptr);
+    DenyAccess(const DenyAccess&) = delete;
+    DenyAccess& operator=(const DenyAccess&) = delete;
+    ~DenyAccess() {
+        SetNamedSecurityInfoW(&path_[0], SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, old_, nullptr);
         LocalFree(descriptor_);
     }
 
 private:
-    std::wstring dir_;
+    std::wstring path_;
     PSECURITY_DESCRIPTOR descriptor_ = nullptr;
     PACL old_ = nullptr;
 };
@@ -748,12 +748,34 @@ void AFolderThatCannotBeWrittenDefers(const fs::path& dir) {
     rig.PutLegacy(kLegacyText);
     std::optional<Load> load;
     {
-        DenyCreateFiles deny(dir);
+        DenyAccess deny(dir, FILE_ADD_FILE);
         load = rig.Make()->Load();
     }
     ExpectStatus(*load, ConfigLoadStatus::Deferred);
     ExpectReason(load->reason, RetriedReason("the folder cannot be written"));
     Check(Same(load->config, MigratedConfig()), "the session runs on what the import gave");
+    ExpectSunkOnce(rig, load->reason);
+    ExpectNotImported(rig);
+
+    ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
+    ExpectImported(rig);
+}
+
+// The read-only attribute never refuses a read, so a denied read is not blamed on it.
+void AReadOnlyLegacyFileThatCannotBeReadCouldNotBeRead(const fs::path& dir) {
+    Rig rig(dir);
+    rig.PutLegacy(kLegacyText);
+    SetReadOnly(rig.legacy_path, true);
+    std::optional<Load> load;
+    {
+        DenyAccess deny(rig.legacy_path, FILE_READ_DATA);
+        load = rig.Make()->Load();
+    }
+    ExpectStatus(*load, ConfigLoadStatus::Deferred);
+    Check(Contains(load->reason, std::string(kLegacyNameText) + " was not imported into " + kFileNameText +
+                                     ": it could not be read (Windows error 5"),
+          "the reason says why: " + load->reason);
+    Check(Same(load->config, Defaults()), "a legacy file that cannot be read cannot be imported, so the defaults");
     ExpectSunkOnce(rig, load->reason);
     ExpectNotImported(rig);
 
@@ -1505,6 +1527,8 @@ int RunConfigOwnerTests() {
     RunScenario("an-absent-import-defers", AnAbsentImportDefers);
     RunScenario("a-read-only-legacy-file-is-imported-and-left-as-it-was", AReadOnlyLegacyFileIsImportedAndLeftAsItWas);
     RunScenario("a-folder-that-cannot-be-written-defers", AFolderThatCannotBeWrittenDefers);
+    RunScenario("a-read-only-legacy-file-that-cannot-be-read-could-not-be-read",
+                AReadOnlyLegacyFileThatCannotBeReadCouldNotBeRead);
     RunScenario("a-legacy-file-held-denying-read-sharing-defers", ALegacyFileHeldDenyingReadSharingDefers);
     RunScenario("a-config-held-denying-read-sharing-defers-and-nothing-is-imported",
                 AConfigHeldDenyingReadSharingDefersAndNothingIsImported);

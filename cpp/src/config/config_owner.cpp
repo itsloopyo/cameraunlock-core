@@ -310,9 +310,8 @@ std::string OwnerWriteWhy(const std::wstring& path, const CheckedWriteResult& re
     return "it could not be written (" + OwnerErrorText(error) + ")";
 }
 
-std::string OwnerReadWhy(const std::wstring& path, std::uint32_t error) {
+std::string OwnerReadWhy(std::uint32_t error) {
     if (IsInUse(error)) return "the file is in use by another program";
-    if (error == ERROR_ACCESS_DENIED && IsReadOnly(path)) return "the file is read-only";
     return "it could not be read (" + OwnerErrorText(error) + ")";
 }
 

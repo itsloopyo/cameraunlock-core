@@ -837,7 +837,7 @@ namespace CameraUnlock.Core.Config
             }
             bool denied = cause is UnauthorizedAccessException || native == ErrorAccessDenied || hresult == HResultAccessDenied;
             if (denied && failed != null && failed.Step == CheckedWriteStep.CreateTemporary) return "the folder cannot be written";
-            if (denied && IsReadOnly(failed != null ? failed.TargetPath : _path)) return "the file is read-only";
+            if (denied && failed != null && IsReadOnly(failed.TargetPath)) return "the file is read-only";
             return (failed != null ? "it could not be written (" : "it could not be read (") + cause.Message + ")";
         }
 

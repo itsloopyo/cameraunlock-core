@@ -64,6 +64,8 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("an-absent-import-defers", AnAbsentImportDefers),
             Scenario("a-read-only-legacy-file-is-imported-and-left-as-it-was", AReadOnlyLegacyFileIsImportedAndLeftAsItWas),
             Scenario("a-folder-that-cannot-be-written-defers", AFolderThatCannotBeWrittenDefers),
+            Scenario("a-read-only-legacy-file-that-cannot-be-read-could-not-be-read",
+                AReadOnlyLegacyFileThatCannotBeReadCouldNotBeRead),
             Scenario("a-legacy-file-held-denying-read-sharing-defers", ALegacyFileHeldDenyingReadSharingDefers),
             Scenario("a-config-held-denying-read-sharing-defers-and-nothing-is-imported",
                 AConfigHeldDenyingReadSharingDefersAndNothingIsImported),
@@ -534,6 +536,37 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectStatus(load, ConfigLoadStatus.Deferred);
             ExpectContains(load.Reason, "the folder cannot be written");
             ExpectSame(load.Config, MigratedConfig(), "the session runs on what the import gave");
+            ExpectSunkOnce(rig, load.Reason);
+            ExpectNotImported(rig);
+
+            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
+            ExpectImported(rig);
+        }
+
+        // The read-only attribute never refuses a read, so a denied read is not blamed on it.
+        private static void AReadOnlyLegacyFileThatCannotBeReadCouldNotBeRead(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutLegacy(Ascii(LegacyText));
+            File.SetAttributes(rig.LegacyPath, FileAttributes.ReadOnly);
+            var legacy = new FileInfo(rig.LegacyPath);
+            FileSecurity security = legacy.GetAccessControl();
+            var deny = new FileSystemAccessRule(WindowsIdentity.GetCurrent().User, FileSystemRights.ReadData, AccessControlType.Deny);
+            security.AddAccessRule(deny);
+            legacy.SetAccessControl(security);
+            ConfigLoadResult<HeadTrackingConfigData> load;
+            try
+            {
+                load = rig.Owner().Load();
+            }
+            finally
+            {
+                security.RemoveAccessRule(deny);
+                legacy.SetAccessControl(security);
+            }
+            ExpectStatus(load, ConfigLoadStatus.Deferred);
+            ExpectContains(load.Reason, LegacyName + " was not imported into " + FileName + ": it could not be read (");
+            ExpectSame(load.Config, Defaults(), "a legacy file that cannot be read cannot be imported, so the defaults");
             ExpectSunkOnce(rig, load.Reason);
             ExpectNotImported(rig);
 

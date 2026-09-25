@@ -316,6 +316,18 @@ Consuming repos: a converted repo takes both files out of `MOD_SEED_FILES` in `i
 
 No library code changes.
 
+### Fixed - a legacy file that cannot be read is not reported as read-only
+
+A read that failed with access denied was blamed on the read-only attribute. The C++ owner
+checked the attribute on the file it read, and the C# owner on `CameraUnlock.ini` whichever file
+it read, so a denied read of a read-only legacy file gave `the file is read-only` in C++ and `it
+could not be read (...)` in C#. The attribute never refuses a read. Both owners now report a
+failed read as `it could not be read (...)`, or `the file is in use by another program`, and `the
+file is read-only` comes only from a write that fails on a read-only file. `detail::OwnerReadWhy` loses its path parameter.
+An import only ever creates `CameraUnlock.ini`, never writes over a file, so it never gives that
+reason, and docs/canonical-config.md drops it from the import's list. A scenario in both languages
+denies the current user read access to a read-only legacy file.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

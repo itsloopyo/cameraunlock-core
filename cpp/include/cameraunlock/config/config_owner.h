@@ -249,7 +249,7 @@ std::string OwnerWriteLog(const std::wstring& path, const CheckedWriteResult& re
 // What the player is told about a failed write, in the words of design 4.7.
 std::string OwnerWriteWhy(const std::wstring& path, const CheckedWriteResult& result);
 // What the player is told about a read that failed with a Win32 error.
-std::string OwnerReadWhy(const std::wstring& path, std::uint32_t error);
+std::string OwnerReadWhy(std::uint32_t error);
 // What the player is told about a write that found the file changed, appeared or gone.
 std::string OwnerConflict(CheckedWriteStatus status);
 // "Windows error N: <the system's message>".
@@ -474,7 +474,7 @@ private:
         if (read.error != 0) {
             log.push_back(path_text_ + ": could not be opened: " + detail::OwnerErrorText(read.error));
             return LoadResult(ConfigLoadStatus::Deferred, table_.defaults(), {}, std::move(log),
-                              name_ + " cannot be read: " + detail::OwnerReadWhy(path_, read.error) +
+                              name_ + " cannot be read: " + detail::OwnerReadWhy(read.error) +
                                   ". The mod runs on its default settings this session.");
         }
         if (read.present) {
@@ -491,7 +491,7 @@ private:
         const detail::OwnerFileRead opened = held.Open(legacy_path_);
         if (opened.error != 0) {
             log.push_back(legacy_text_ + ": could not be opened: " + detail::OwnerErrorText(opened.error));
-            return Defer(table_.defaults(), std::move(log), detail::OwnerReadWhy(legacy_path_, opened.error), true);
+            return Defer(table_.defaults(), std::move(log), detail::OwnerReadWhy(opened.error), true);
         }
         if (!opened.present) return Create(std::move(log));
         return Migrate(held, opened.bytes, std::move(log));
@@ -549,7 +549,7 @@ private:
         std::string reread;
         const std::uint32_t reread_error = held.Reread(reread);
         if (reread_error != 0) {
-            changed_why = detail::OwnerReadWhy(legacy_path_, reread_error);
+            changed_why = detail::OwnerReadWhy(reread_error);
             log.push_back(legacy_text_ + ": could not be read again after the import: " +
                           detail::OwnerErrorText(reread_error));
         } else if (reread != snapshot) {
@@ -663,7 +663,7 @@ private:
         const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
         if (read.error != 0) {
             log.push_back(path_text_ + ": not saved: could not be read: " + detail::OwnerErrorText(read.error));
-            return NotSaved(detail::OwnerReadWhy(path_, read.error), read.error, std::move(log));
+            return NotSaved(detail::OwnerReadWhy(read.error), read.error, std::move(log));
         }
         if (!read.present) {
             log.push_back(path_text_ + ": not saved: the file is missing");
@@ -787,7 +787,7 @@ private:
         if (read.error != 0) {
             log.push_back(path_text_ + ": not reloaded: " + detail::OwnerErrorText(read.error));
             return Reloaded(ConfigReloadStatus::Unreadable, std::nullopt, {}, std::move(log),
-                            name_ + " cannot be read: " + detail::OwnerReadWhy(path_, read.error) +
+                            name_ + " cannot be read: " + detail::OwnerReadWhy(read.error) +
                                 ". The current settings stay.");
         }
         recorded_write_time_ = write_time;

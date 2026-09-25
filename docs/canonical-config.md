@@ -811,7 +811,6 @@ through the status sink. The message is `<legacy file> was not imported into <co
 one of:
 
 - `the file is in use by another program`
-- `the file is read-only`
 - `the folder cannot be written`
 - `it could not be read (...)` or `it could not be written (...)`, for any other I/O error, with
   the error in the brackets: `Windows error N:` and the system's text in C++, the exception's
