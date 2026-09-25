@@ -1098,7 +1098,14 @@ function Test-ConfigPreserve {
     $state = $CanonicalConfig[$Root]
     if (-not $state.converted) { return }
     $installed = @($state.files | ForEach-Object { @($_.installed) })
-    $legacySources = @($state.files | Where-Object { $_.legacy_source } | ForEach-Object { $_.legacy_source })
+    # legacy_source is a bare name: the legacy file sits in the folder of each installed path.
+    $legacyPaths = @($state.files | Where-Object { $_.legacy_source } | ForEach-Object {
+        $legacyName = $_.legacy_source
+        foreach ($at in @($_.installed)) {
+            $cut = $at.LastIndexOf('\')
+            if ($cut -lt 0) { $legacyName } else { $at.Substring(0, $cut + 1) + $legacyName }
+        }
+    })
 
     $installPath = Join-Path $Root 'scripts/install.cmd'
     if (Test-Path $installPath) {
@@ -1120,7 +1127,7 @@ function Test-ConfigPreserve {
     if ((Get-WrapperBodyName $uninstallText) -ne 'uninstall-body.cmd') { return }
     $vars = Get-ConfigBlockVars $uninstallText
     $preserved = @(if ($vars.Contains('PRESERVE_FILES')) { Get-CmdListItems $vars['PRESERVE_FILES'] })
-    foreach ($path in @($installed + $legacySources)) {
+    foreach ($path in @($installed + $legacyPaths)) {
         if ($path -in $preserved) { continue }
         Add-Finding $Name 'config-preserve' 'FAIL' "uninstall.cmd's PRESERVE_FILES does not list $path, so an uninstall deletes the player's settings"
     }

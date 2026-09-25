@@ -314,25 +314,18 @@ function repoProblems(man, root, state) {
     problems.push(`config.anchor is mod_home, and data/config-format.json records installed path(s) in the game folder: ${listed}`);
   }
 
-  const legacy = file.legacy_source === null ? null : slashes(file.legacy_source);
+  // The legacy file sits beside the config, so from the config's anchor it is the folder of
+  // config.path and the name data/config-format.json records.
+  const folderOf = (s) => s.slice(0, Math.max(s.lastIndexOf("/"), 0));
+  const besideOf = (s, name) => (folderOf(s) === "" ? name : `${folderOf(s)}/${name}`);
+  const legacyName = file.legacy_source;
+  const legacy = legacyName === null ? null : besideOf(p, legacyName);
   if (legacy === null && "legacy_source" in config) {
     problems.push(`config.legacy_source is ${config.legacy_source}, and data/config-format.json records no legacy_source for ${state.repo}`);
   } else if (legacy !== null && !("legacy_source" in config)) {
-    problems.push(`config has no legacy_source, and data/config-format.json records ${legacy}`);
-  } else if (legacy !== null) {
-    // At exe_dir both files are named from the executable's folder, so the entry's legacy_source
-    // loses the same prefix an installed path does, and stays in the config's folder.
-    const folder = (s) => s.slice(0, Math.max(s.lastIndexOf("/"), 0));
-    const accepted = anchor === "exe_dir"
-      ? installed
-          .map((i) => i.slice(0, i.length - p.length))
-          .filter((prefix) => legacy.startsWith(prefix))
-          .map((prefix) => legacy.slice(prefix.length))
-          .filter((rel) => folder(rel) === folder(p))
-      : [legacy];
-    if (!accepted.includes(config.legacy_source)) {
-      problems.push(`config.legacy_source ${config.legacy_source} does not name ${legacy}, the legacy_source data/config-format.json records, from the anchor and folder of config.path`);
-    }
+    problems.push(`config has no legacy_source, and data/config-format.json records ${legacyName}, which is ${legacy} beside config.path`);
+  } else if (legacy !== null && config.legacy_source !== legacy) {
+    problems.push(`config.legacy_source ${config.legacy_source} is not ${legacy}, the legacy file data/config-format.json records (${legacyName}) in the folder of config.path`);
   }
 
   if (state.listing === "legacy" && !("canonical_since" in config)) {
@@ -344,12 +337,11 @@ function repoProblems(man, root, state) {
   // An item hits a file when it names the file from the same anchor, or resolves onto one of the
   // file's paths in the game folder.
   const hits = (name, gameFiles) => (item) =>
-    (name !== null && anchorOf(item) === anchor && lower(item.target) === name.toLowerCase()) || targets(item).some((t) => gameFiles.has(t));
+    (anchorOf(item) === anchor && lower(item.target) === name.toLowerCase()) || targets(item).some((t) => gameFiles.has(t));
   const onConfig = hits(p, new Set([...installedLower, ...targets({ target: p, anchor })]));
-  const legacyName = typeof config.legacy_source === "string" ? config.legacy_source : null;
   const onLegacy = legacy === null
     ? () => false
-    : hits(legacyName, new Set([legacy.toLowerCase(), ...(legacyName === null ? [] : targets({ target: legacyName, anchor }))]));
+    : hits(legacy, new Set([...installed.map((i) => besideOf(i, legacyName).toLowerCase()), ...targets({ target: legacy, anchor })]));
   const hitFile = (item) => (onConfig(item) ? "the config" : onLegacy(item) ? `the legacy file ${legacy}` : null);
 
   for (const f of files) {
@@ -422,11 +414,6 @@ export function tagProblems(root, state, config) {
 const NO_BLOCK =
   "converted, delivered by manifest, and launcher-manifest.json has no config block; write path and anchor by hand, legacy_source and canonical_since where the rules ask for them, and \"rows\": {}, then run render-config";
 
-// A block is asked for only once data/config-format.json records the file under the fleet name.
-// A repo converted in place still keeps its settings in the file its pre-canonical builds read,
-// which no descriptor may name.
-const underFleetName = (file) => file.installed.length > 0 && file.installed.every((i) => slashes(i).split("/").pop() === CONFIG_NAME);
-
 // What conformance's config-descriptor check reads for one repo's committed manifest.
 export function repoReport(root, state = repoState(root)) {
   const report = {
@@ -460,7 +447,7 @@ export function repoReport(root, state = repoState(root)) {
   // Rows are written from the committed file, so a repo data/config-format.json records none for
   // cannot carry a block yet; config-format reports that.
   report.applies =
-    state.converted && MANIFEST_MODES.includes(man.delivery_mode) && state.files.length === 1 && state.files[0].state === "stamped" && underFleetName(state.files[0]);
+    state.converted && MANIFEST_MODES.includes(man.delivery_mode) && state.files.length === 1 && state.files[0].state === "stamped";
   report.problems = descriptorProblems(man, { root, state, checkVersion: false });
   if (report.applies && !report.has_block) report.problems.push(NO_BLOCK);
   if (report.has_block && report.problems.length === 0) {

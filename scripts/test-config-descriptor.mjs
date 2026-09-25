@@ -2,16 +2,16 @@
 
 // Holds scripts/check-config-descriptor.mjs to its rules: a descriptor that meets every rule is
 // clean, and one mutation per rule fails with that rule's message. Repos are throwaway git
-// checkouts named after data/config-format.json entries. A descriptor names CameraUnlock.ini, and
-// no entry records that name yet, so the clean cases run against synthetic entries: real repos'
-// shapes (abzu-headtracking, one installed path; fallout-new-vegas-headtracking and
-// prey-headtracking, two; sleeping-dogs-headtracking, never published a pre-canonical build) with
-// the file recorded under the fleet name, and shapes no repo has (a legacy_source beside the
-// executable, a mod_home file, two config files). The real entries stand for a repo converted in
-// place, whose file a pre-canonical release reads. It also runs the rows generator in
-// encode-seed.mjs, the rules in validate-manifest.mjs on built ZIPs, the report conformance reads,
-// conformance's config-descriptor check, and the packager's ConvertFrom-Json /
-// ConvertTo-Json -Depth 10 round trip.
+// checkouts named after data/config-format.json entries. Real entries that record a committed
+// file are read through repoState: abzu-headtracking (one installed path),
+// fallout-new-vegas-headtracking and prey-headtracking (two, beside two executables), each with
+// its legacy file beside CameraUnlock.ini, and sleeping-dogs-headtracking (never published a
+// pre-canonical build, so no legacy file). The rest are synthetic: subnautica-headtracking's
+// BepInEx entry with a committed file, whose real entry records none yet, and shapes no repo has
+// (a mod_home file, two config files). It also runs the rows generator in encode-seed.mjs, the
+// rules in validate-manifest.mjs on built ZIPs, the report conformance reads, conformance's
+// config-descriptor check, and the packager's ConvertFrom-Json / ConvertTo-Json -Depth 10 round
+// trip.
 //
 //   node scripts/test-config-descriptor.mjs      (pixi run test-config-descriptor, part of pixi run check)
 
@@ -30,6 +30,7 @@ const SCRIPTS = path.join(CORE_ROOT, "scripts");
 const ALL = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "canonical-ini", "head-tracking", "all-concepts.ini"), "latin1");
 const ALL_ROWS = { EnableOnStartup: true, WorldSpaceYaw: true, RotationEnabled: true, PositionEnabled: true, TrueFreeLook: false };
 const LEGACY_INI = "[General]\r\nEnabled=1\r\n";
+const FORMAT = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, "data", "config-format.json"), "utf8"));
 
 const failures = [];
 let checks = 0;
@@ -60,6 +61,13 @@ function repo(label, name, files) {
     fs.writeFileSync(path.join(root, rel), typeof text === "string" ? Buffer.from(text, "latin1") : text);
   }
   return root;
+}
+
+// A throwaway checkout of a real entry, with text at the committed path it records, and its state.
+function real(label, name, text = ALL) {
+  const [{ committed }] = FORMAT.configs[name];
+  const root = repo(label, name, { [committed]: text });
+  return { root, state: repoState(root) };
 }
 
 // The state repoState would give an entry no real repo has yet, for a checkout at root.
@@ -98,40 +106,42 @@ function fails(label, man, base, expected, checkVersion) {
 }
 
 // abzu-headtracking: legacy, one installed path, so game_root.
-const ABZU_ENTRY = { committed: "HeadTracking.ini", installed: ["AbzuGame\\Binaries\\Win64\\CameraUnlock.ini"] };
-const abzuWith = (label, text) => synthetic(label, "abzu-headtracking", "legacy", [{ ...ABZU_ENTRY, text }]);
+const abzuWith = (label, text) => real(label, "abzu-headtracking", text);
 const abzu = abzuWith("abzu", ALL);
-const abzuConfig = { path: "AbzuGame/Binaries/Win64/CameraUnlock.ini", anchor: "game_root", canonical_since: "1.1.0", rows: { ...ALL_ROWS } };
+const abzuConfig = {
+  path: "AbzuGame/Binaries/Win64/CameraUnlock.ini",
+  anchor: "game_root",
+  legacy_source: "AbzuGame/Binaries/Win64/HeadTracking.ini",
+  canonical_since: "1.1.0",
+  rows: { ...ALL_ROWS },
+};
 const abzuMan = (change = (c) => c, extra = {}) => manifest("abzu", change(structuredClone(abzuConfig)), extra);
 clean("abzu", abzuMan(), abzu);
 clean("abzu without anchor, which is game_root", abzuMan(({ anchor, ...c }) => c), abzu);
 
 // fallout-new-vegas-headtracking: two installed paths, so exe_dir with the tail of both.
-const fnv = synthetic("fnv", "fallout-new-vegas-headtracking", "legacy", [
-  { committed: "config/HeadTracking.ini", installed: ["CameraUnlock.ini", "Fallout New Vegas English\\CameraUnlock.ini"] },
-]);
-const fnvConfig = { path: "CameraUnlock.ini", anchor: "exe_dir", canonical_since: "1.1.0", rows: { ...ALL_ROWS } };
+const fnv = real("fnv", "fallout-new-vegas-headtracking");
+const fnvConfig = { path: "CameraUnlock.ini", anchor: "exe_dir", legacy_source: "HeadTracking.ini", canonical_since: "1.1.0", rows: { ...ALL_ROWS } };
 const fnvMan = (change = (c) => c, extra = {}) => manifest("fallout-new-vegas", change(structuredClone(fnvConfig)), extra);
 clean("fallout-new-vegas", fnvMan(), fnv);
 
 // prey-headtracking: two installed paths beside two executables.
-const prey = synthetic("prey", "prey-headtracking", "legacy", [
-  { committed: "HeadTracking.ini", installed: ["Binaries\\Danielle\\x64\\Release\\CameraUnlock.ini", "Binaries\\Danielle\\Gaming.Desktop.x64\\Release\\CameraUnlock.ini"] },
-]);
-const preyMan = (change = (c) => c) => manifest("prey", change({ path: "CameraUnlock.ini", anchor: "exe_dir", canonical_since: "1.1.0", rows: { ...ALL_ROWS } }));
+const prey = real("prey", "prey-headtracking");
+const preyMan = (change = (c) => c) =>
+  manifest("prey", change({ path: "CameraUnlock.ini", anchor: "exe_dir", legacy_source: "HeadTracking.ini", canonical_since: "1.1.0", rows: { ...ALL_ROWS } }));
 clean("prey", preyMan(), prey);
 
 // sleeping-dogs-headtracking: never published a pre-canonical build, so no canonical_since.
-const sd = synthetic("sleeping-dogs", "sleeping-dogs-headtracking", "mover", [{ committed: "config/headtrack.ini", installed: ["CameraUnlock.ini"] }]);
+const sd = real("sleeping-dogs", "sleeping-dogs-headtracking");
 const sdConfig = { path: "CameraUnlock.ini", rows: { ...ALL_ROWS } };
 clean("sleeping-dogs", manifest("sleeping-dogs", structuredClone(sdConfig)), sd);
 
-// A BepInEx-shaped entry with a legacy_source, legacy, and descriptor_omits WorldSpaceYaw for it.
-const bep = synthetic("bepinex", "subnautica-headtracking", "legacy", [
-  { committed: "Config.ini", installed: ["BepInEx\\config\\CameraUnlock.ini"], legacy_source: "BepInEx\\config\\com.cameraunlock.x.cfg", dialect: "unity" },
-]);
+// subnautica-headtracking's BepInEx entry, legacy, with descriptor_omits WorldSpaceYaw, given a
+// committed file.
+const BEP_LEGACY = FORMAT.configs["subnautica-headtracking"][0].legacy_source;
+const bep = synthetic("bepinex", "subnautica-headtracking", "legacy", [{ ...FORMAT.configs["subnautica-headtracking"][0], committed: "Config.ini" }]);
 const { WorldSpaceYaw: _omitted, ...bepRows } = ALL_ROWS;
-const bepConfig = { path: "BepInEx/config/CameraUnlock.ini", legacy_source: "BepInEx/config/com.cameraunlock.x.cfg", canonical_since: "1.1.0", rows: bepRows };
+const bepConfig = { path: "BepInEx/config/CameraUnlock.ini", legacy_source: `BepInEx/config/${BEP_LEGACY}`, canonical_since: "1.1.0", rows: bepRows };
 const bepMan = (change = (c) => c, extra = {}) => manifest("subnautica", change(structuredClone(bepConfig)), extra);
 clean("bepinex with legacy_source and an omitted row", bepMan(), bep);
 
@@ -142,14 +152,6 @@ const home = synthetic("mod-home", "mod-home-headtracking", "mover", [
 const homeMan = (change = (c) => c) => manifest("abzu", change({ path: "CameraUnlock.ini", anchor: "mod_home", rows: { ...ALL_ROWS } }));
 clean("mod_home", homeMan(), home);
 
-// An exe_dir entry with a legacy_source, which is relative to the same folder as the path. The
-// installed paths are beside fallout-new-vegas's two executables.
-const exeLegacy = synthetic("exe-legacy", "exe-legacy-headtracking", "mover", [
-  { committed: "Config.ini", installed: ["Fallout New Vegas English\\CameraUnlock.ini", "CameraUnlock.ini"], legacy_source: "Fallout New Vegas English\\Old.ini" },
-]);
-const exeLegacyMan = (legacy, extra) => manifest("fallout-new-vegas", { path: "CameraUnlock.ini", anchor: "exe_dir", legacy_source: legacy, rows: { ...ALL_ROWS } }, extra);
-clean("exe_dir legacy_source", exeLegacyMan("Old.ini"), exeLegacy);
-fails("exe_dir legacy_source spelled game-relative", exeLegacyMan("Fallout New Vegas English/Old.ini"), exeLegacy, "config.legacy_source Fallout New Vegas English/Old.ini does not name Fallout New Vegas English/Old.ini");
 
 // One mutation per shape rule.
 fails("config not an object", abzuMan(() => 5), abzu, "config must be an object");
@@ -161,15 +163,12 @@ fails("rooted path", abzuMan((c) => ({ ...c, path: "/HeadTracking.ini" })), abzu
 fails("drive path", abzuMan((c) => ({ ...c, path: "C:/HeadTracking.ini" })), abzu, "names a root or a drive");
 fails("traversing path", abzuMan((c) => ({ ...c, path: "../HeadTracking.ini" })), abzu, 'has an empty, "." or ".." segment');
 fails("traversing legacy_source", bepMan((c) => ({ ...c, legacy_source: "BepInEx/../x.cfg" })), bep, "config.legacy_source BepInEx/../x.cfg has an empty");
-{
-  const root = repo("in-place", "abzu-headtracking", { "HeadTracking.ini": ALL });
-  fails(
-    "path the file a pre-canonical release reads",
-    abzuMan((c) => ({ ...c, path: "AbzuGame/Binaries/Win64/HeadTracking.ini" })),
-    { root, state: repoState(root) },
-    "config.path AbzuGame/Binaries/Win64/HeadTracking.ini is not named CameraUnlock.ini",
-  );
-}
+fails(
+  "path the legacy file",
+  abzuMan((c) => ({ ...c, path: "AbzuGame/Binaries/Win64/HeadTracking.ini" })),
+  abzu,
+  "config.path AbzuGame/Binaries/Win64/HeadTracking.ini is not named CameraUnlock.ini",
+);
 fails("unknown anchor", abzuMan((c) => ({ ...c, anchor: "install_dir" })), abzu, 'config.anchor "install_dir" is not one of');
 fails("no rows", abzuMan(({ rows: _, ...c }) => c), abzu, "config has no rows");
 fails("rows not an object", abzuMan((c) => ({ ...c, rows: [] })), abzu, "config.rows must be an object");
@@ -206,12 +205,14 @@ fails("game_root with two installed paths", fnvMan((c) => ({ ...c, anchor: "game
 fails("game_root with no installed path", homeMan((c) => ({ ...c, anchor: "game_root" })), home, "anchor is game_root, and data/config-format.json records no installed path");
 fails("exe_dir path not a tail", fnvMan((c) => ({ ...c, path: "Other/CameraUnlock.ini" })), fnv, "is not the tail of every installed path");
 fails("exe_dir path a tail that lands off the installed paths", preyMan((c) => ({ ...c, path: "Release/CameraUnlock.ini" })), prey, "lands on binaries/danielle/x64/release/release/cameraunlock.ini, binaries/danielle/gaming.desktop.x64/release/release/cameraunlock.ini beside the executable");
-fails("exe_dir bare name of a file below the executable's folder", bepMan((c) => ({ ...c, anchor: "exe_dir", path: "CameraUnlock.ini", legacy_source: "com.cameraunlock.x.cfg" })), bep, "config.path CameraUnlock.ini at exe_dir lands on cameraunlock.ini beside the executable");
+fails("exe_dir bare name of a file below the executable's folder", bepMan((c) => ({ ...c, anchor: "exe_dir", path: "CameraUnlock.ini", legacy_source: BEP_LEGACY })), bep, "config.path CameraUnlock.ini at exe_dir lands on cameraunlock.ini beside the executable");
 fails("exe_dir with no installed path", homeMan((c) => ({ ...c, anchor: "exe_dir" })), home, "anchor is exe_dir, and data/config-format.json records no installed path");
 fails("mod_home with installed paths", abzuMan((c) => ({ ...c, anchor: "mod_home" })), abzu, "anchor is mod_home");
-fails("legacy_source where the entry has none", abzuMan((c) => ({ ...c, legacy_source: "Old.cfg" })), abzu, "records no legacy_source");
+fails("legacy_source where the entry has none", manifest("sleeping-dogs", { ...structuredClone(sdConfig), legacy_source: "headtrack.ini" }), sd, "records no legacy_source");
 fails("no legacy_source where the entry has one", bepMan(({ legacy_source: _, ...c }) => c), bep, "config has no legacy_source");
-fails("legacy_source not the entry's", bepMan((c) => ({ ...c, legacy_source: "BepInEx/config/other.cfg" })), bep, "config.legacy_source BepInEx/config/other.cfg does not name");
+fails("legacy_source not the entry's", bepMan((c) => ({ ...c, legacy_source: "BepInEx/config/other.cfg" })), bep, `config.legacy_source BepInEx/config/other.cfg is not BepInEx/config/${BEP_LEGACY}`);
+fails("legacy_source in another folder", abzuMan((c) => ({ ...c, legacy_source: "HeadTracking.ini" })), abzu, "config.legacy_source HeadTracking.ini is not AbzuGame/Binaries/Win64/HeadTracking.ini");
+fails("exe_dir legacy_source spelled game-relative", fnvMan((c) => ({ ...c, legacy_source: "Fallout New Vegas English/HeadTracking.ini" })), fnv, "config.legacy_source Fallout New Vegas English/HeadTracking.ini is not HeadTracking.ini");
 fails("legacy repo without canonical_since", abzuMan(({ canonical_since: _, ...c }) => c), abzu, "config has no canonical_since");
 fails("canonical_since in a repo with no pre-canonical build", manifest("sleeping-dogs", { ...structuredClone(sdConfig), canonical_since: "1.0.0" }), sd, "never published a pre-canonical build");
 fails("stale row value", abzuMan((c) => ({ ...c, rows: { ...c.rows, EnableOnStartup: false } })), abzu, "config.rows is");
@@ -249,12 +250,13 @@ fails("an omitted row declared", bepMan((c) => ({ ...c, rows: { ...ALL_ROWS } })
 fails("files[] over the config", abzuMan(undefined, { files: [{ source: "CameraUnlock.ini", target: "AbzuGame/Binaries/Win64/CameraUnlock.ini" }] }), abzu, "lands on the config");
 fails("files[] over one layout of the config", fnvMan(undefined, { files: [{ source: "CameraUnlock.ini", target: "Fallout New Vegas English/CameraUnlock.ini" }] }), fnv, "lands on the config");
 fails("files[] in a variant over the config", abzuMan(undefined, { delivery_mode: "manifest_variants", files: undefined, variants: [{ id: "steam", files: [{ source: "a", target: "AbzuGame\\Binaries\\Win64\\CameraUnlock.ini" }] }] }), abzu, "lands on the config");
-fails("files[] over the legacy file", bepMan(undefined, { files: [{ source: "a", target: "BepInEx/config/com.cameraunlock.x.cfg" }] }), bep, "lands on the legacy file");
+fails("files[] over the legacy file", bepMan(undefined, { files: [{ source: "a", target: `BepInEx/config/${BEP_LEGACY}` }] }), bep, "lands on the legacy file");
 fails("a seed of the config", fnvMan(undefined, { loader: { seed: [{ target: "CameraUnlock.ini", anchor: "exe_dir", content_b64: "" }] } }), fnv, "seed CameraUnlock.ini (exe_dir) writes the config; a package with a config block seeds neither");
 fails("a config seed at another anchor", fnvMan(undefined, { loader: { seed: [{ target: "CameraUnlock.ini", content_b64: "" }] } }), fnv, "seed CameraUnlock.ini (game_root) writes the config");
 fails("a config seed in a variant", abzuMan(undefined, { delivery_mode: "manifest_variants", variants: [{ id: "steam", loader: { seed: [{ target: "AbzuGame/Binaries/Win64/CameraUnlock.ini", content_b64: "" }] } }] }), abzu, "writes the config");
-fails("a seed of the legacy file", bepMan(undefined, { seed: [{ target: "BepInEx\\config\\com.cameraunlock.x.cfg", content_b64: "" }] }), bep, "writes the legacy file BepInEx/config/com.cameraunlock.x.cfg");
-fails("an exe_dir seed of the legacy file", exeLegacyMan("Old.ini", { loader: { seed: [{ target: "Old.ini", anchor: "exe_dir", content_b64: "" }] } }), exeLegacy, "writes the legacy file");
+fails("a seed of the legacy file", bepMan(undefined, { seed: [{ target: `BepInEx\\config\\${BEP_LEGACY}`, content_b64: "" }] }), bep, `writes the legacy file BepInEx/config/${BEP_LEGACY}`);
+fails("an exe_dir seed of the legacy file", fnvMan(undefined, { loader: { seed: [{ target: "HeadTracking.ini", anchor: "exe_dir", content_b64: "" }] } }), fnv, "seed HeadTracking.ini (exe_dir) writes the legacy file HeadTracking.ini");
+fails("a seed of one layout's legacy file", fnvMan(undefined, { seed: [{ target: "Fallout New Vegas English\\HeadTracking.ini", content_b64: "" }] }), fnv, "writes the legacy file HeadTracking.ini");
 fails("a config seed spelled another way", abzuMan(undefined, { seed: [{ target: "abzugame\\binaries\\win64\\cameraunlock.ini", content_b64: "" }] }), abzu, "writes the config");
 clean("a seed that writes another file", abzuMan(undefined, { loader: { seed: [{ target: "BepInEx/config/BepInEx.cfg", content_b64: "" }] } }), abzu);
 fails("exe_dir for a game data/games.json does not list", manifest("no-such-game", structuredClone(fnvConfig)), fnv, "is not in data/games.json");
@@ -272,8 +274,10 @@ function runScript(script, ...args) {
 }
 {
   const preyText = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "encode-seed", "prey-headtracking.launcher-manifest.json"), "utf8");
-  const block = '  "config": {\n    "path": "CameraUnlock.ini",\n    "anchor": "exe_dir",\n    "canonical_since": "1.1.0",\n    "rows": {}\n  },\n';
-  const staleText = edit(preyText, '  "delivery_mode": "manifest",\n', `  "delivery_mode": "manifest",\n${block}`);
+  const block = '  "config": {\n    "path": "CameraUnlock.ini",\n    "anchor": "exe_dir",\n    "legacy_source": "HeadTracking.ini",\n    "canonical_since": "1.1.0",\n    "rows": {}\n  },\n';
+  // The fixture seeds HeadTracking.ini, the legacy file; retargeted, it seeds the config.
+  const seeded = edit(preyText, '"target": "HeadTracking.ini"', '"target": "CameraUnlock.ini"');
+  const staleText = edit(seeded, '  "delivery_mode": "manifest",\n', `  "delivery_mode": "manifest",\n${block}`);
   const root = repo("generator", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": staleText });
   const seedsBefore = JSON.parse(staleText).loader.seed;
 
@@ -293,9 +297,10 @@ function runScript(script, ...args) {
   check(after.status === 0 && after.out.includes("ok    config.rows match HeadTracking.ini"), `generator: --check after encoding should exit 0, got ${after.status}\n${after.out}`);
   runScript("encode-seed.mjs", root);
   check(fs.readFileSync(path.join(root, "launcher-manifest.json"), "utf8") === text, "generator: encoding current rows should change nothing");
-  // The fixture keeps its seed of HeadTracking.ini to show both rewritten. Against prey's entry
-  // recorded under CameraUnlock.ini, that seed writes another file and the rows pass.
-  const ruled = problemsOf(JSON.parse(text), { root, state: syntheticState(root, "prey-headtracking", "legacy", prey.state.files) }, false);
+  // The seed is there to show both rewritten. A package with a block seeds neither file, so the
+  // rules run on the manifest without it.
+  const { loader: _seedOnly, ...unseeded } = JSON.parse(text);
+  const ruled = problemsOf(unseeded, { root, state: repoState(root) }, false);
   check(ruled.length === 0, `generator: the rows it writes should pass the rules, got ${JSON.stringify(ruled)}`);
 
   const crlf = repo("generator-crlf", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": staleText.replace(/\n/g, "\r\n") });
@@ -311,10 +316,8 @@ function runScript(script, ...args) {
   check(unstampedRun.status !== 0 && unstampedRun.out.includes("which is unstamped"), `generator: rows from an unstamped file should be refused, got ${unstampedRun.status}\n${unstampedRun.out}`);
 }
 
-// validate-manifest runs the rules on a built ZIP, against the repo whose release/ folder holds it.
-// It reads the repo's real data/config-format.json entry, abzu-headtracking's, which is recorded
-// under HeadTracking.ini, so a block naming CameraUnlock.ini there also fails for its path; each
-// case checks that the rule it is about is among the problems.
+// validate-manifest runs the rules on a built ZIP, against the repo whose release/ folder holds it,
+// which it reads through the real data/config-format.json entry, abzu-headtracking's.
 function zipRepo(label, config, name = "abzu-headtracking") {
   const man = abzuMan(() => config);
   const root = repo(label, name, { "HeadTracking.ini": ALL });
@@ -329,8 +332,10 @@ function zipRepo(label, config, name = "abzu-headtracking") {
   return zip;
 }
 {
-  const inPlace = runScript("validate-manifest.mjs", zipRepo("zip-in-place", { ...structuredClone(abzuConfig), path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }));
-  check(inPlace.status === 1 && inPlace.out.includes("is not named CameraUnlock.ini"), `validate-manifest: a block naming the file a pre-canonical release reads should fail, got ${inPlace.status}\n${inPlace.out}`);
+  const good = runScript("validate-manifest.mjs", zipRepo("zip-good", structuredClone(abzuConfig)));
+  check(good.status === 0 && good.out.includes("config descriptor"), `validate-manifest: a block that meets every rule should pass, got ${good.status}\n${good.out}`);
+  const legacyPath = runScript("validate-manifest.mjs", zipRepo("zip-legacy-path", { ...structuredClone(abzuConfig), path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }));
+  check(legacyPath.status === 1 && legacyPath.out.includes("is not named CameraUnlock.ini"), `validate-manifest: a block naming the legacy file should fail, got ${legacyPath.status}\n${legacyPath.out}`);
   const stale = runScript("validate-manifest.mjs", zipRepo("zip-stale", { ...structuredClone(abzuConfig), rows: { ...ALL_ROWS, EnableOnStartup: false } }));
   check(stale.status === 1 && stale.out.includes("config.rows is"), `validate-manifest: stale rows should fail, got ${stale.status}\n${stale.out}`);
   const version = runScript("validate-manifest.mjs", zipRepo("zip-version", { ...structuredClone(abzuConfig), canonical_since: "2.0.0" }));
@@ -346,11 +351,8 @@ function zipRepo(label, config, name = "abzu-headtracking") {
 {
   const reworked = abzuWith("report-no-block", ALL);
   fs.writeFileSync(path.join(reworked.root, "launcher-manifest.json"), JSON.stringify(abzuMan(() => undefined)));
-  const r = repoReport(reworked.root, reworked.state);
+  const r = repoReport(reworked.root);
   check(r.applies && !r.has_block && r.problems.length === 1 && r.problems[0].includes("has no config block"), `report: a converted manifest repo without a block should fail for it, got ${JSON.stringify(r)}`);
-  const inPlaceRoot = repo("report-in-place", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) });
-  const inPlace = repoReport(inPlaceRoot);
-  check(inPlace.converted && !inPlace.applies && inPlace.problems.length === 0, `report: a repo converted in place, its file not yet CameraUnlock.ini, should not be asked for a block, got ${JSON.stringify(inPlace)}`);
   const unconverted = repoReport(repo("report-unconverted", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) }));
   check(!unconverted.applies && unconverted.problems.length === 0, `report: an unconverted repo without a block should not apply, got ${JSON.stringify(unconverted)}`);
   const unrecordedRoot = repo("report-unrecorded", "far-cry-6-headtracking", { "config/FarCry6HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(manifest("far-cry-6", undefined)) });
@@ -370,37 +372,38 @@ function zipRepo(label, config, name = "abzu-headtracking") {
   git(tagged, "commit", "-q", "-m", "canonical");
   git(tagged, "tag", "v1.1.0");
   fs.writeFileSync(path.join(tagged, "launcher-manifest.json"), JSON.stringify(abzuMan()));
-  const taggedState = syntheticState(tagged, "abzu-headtracking", "legacy", [ABZU_ENTRY]);
-  const good = repoReport(tagged, taggedState);
+  const good = repoReport(tagged);
   check(good.problems.length === 0 && !good.shallow, `tags: canonical_since 1.1.0 is above v1.0.0 and v1.1.0-beta, got ${JSON.stringify(good.problems)}`);
   fs.writeFileSync(path.join(tagged, "launcher-manifest.json"), JSON.stringify(abzuMan((c) => ({ ...c, canonical_since: "1.0.0" }))));
-  const low = repoReport(tagged, taggedState);
+  const low = repoReport(tagged);
   check(low.problems.some((p) => p.includes("is not above v1.0.0")), `tags: canonical_since 1.0.0 should fail against v1.0.0, got ${JSON.stringify(low.problems)}`);
 
   const shallowRoot = path.join(scratch, "shallow", "abzu-headtracking");
   const clone = spawnSync("git", ["clone", "-q", "--depth", "1", `file://${tagged.replace(/\\/g, "/")}`, shallowRoot], { encoding: "utf8" });
   if (clone.status !== 0) throw new Error(`git clone failed: ${clone.stderr}`);
   fs.writeFileSync(path.join(shallowRoot, "launcher-manifest.json"), JSON.stringify(abzuMan((c) => ({ ...c, canonical_since: "1.0.0" }))));
-  const shallow = repoReport(shallowRoot, syntheticState(shallowRoot, "abzu-headtracking", "legacy", [ABZU_ENTRY]));
+  const shallow = repoReport(shallowRoot);
   check(shallow.shallow && shallow.problems.length === 0, `tags: a shallow clone should be reported as such, got ${JSON.stringify(shallow)}`);
 
-  // conformance's config-descriptor check over real entries: nothing for a repo converted in
-  // place without a block, and a FAIL for one whose block names the file its old releases read.
-  const inPlaceBlock = repo("conformance-in-place", "abzu-headtracking", {
+  // conformance's config-descriptor check over real entries: a FAIL for a converted repo with no
+  // block, one for a block that names the legacy file, and nothing for a block that meets every rule.
+  const noBlock = repo("conformance-no-block", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) });
+  const legacyBlock = repo("conformance-legacy-path", "abzu-headtracking", {
     "HeadTracking.ini": ALL,
     "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }))),
   });
+  const goodBlock = repo("conformance-good", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan()) });
   const conformance = spawnSync(
     "powershell",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo '${inPlaceRoot}','${inPlaceBlock}' -Check config-descriptor -Json; exit $LASTEXITCODE`],
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo '${noBlock}','${legacyBlock}','${goodBlock}' -Check config-descriptor -Json; exit $LASTEXITCODE`],
     { encoding: "utf8" },
   );
   const findings = JSON.parse(conformance.stdout.replace(/^\uFEFF/, "") || "[]");
-  const list = Array.isArray(findings) ? findings : [findings];
+  const list = (Array.isArray(findings) ? findings : [findings]).filter((x) => x.check === "config-descriptor" && x.severity === "FAIL");
   check(
-    conformance.status === 1 && list.length === 1 && list[0].check === "config-descriptor" && list[0].severity === "FAIL" &&
-      list[0].message.includes("is not named CameraUnlock.ini"),
-    `conformance: config-descriptor should fail only the block that names the file old releases read, got ${conformance.status}\n${conformance.stdout}${conformance.stderr}`,
+    conformance.status === 1 && list.length === 2 &&
+      list.some((x) => x.message.includes("has no config block")) && list.some((x) => x.message.includes("is not named CameraUnlock.ini")),
+    `conformance: config-descriptor should fail the repo with no block and the block that names the legacy file, and nothing else, got ${conformance.status}\n${conformance.stdout}${conformance.stderr}`,
   );
 }
 
@@ -414,8 +417,8 @@ function zipRepo(label, config, name = "abzu-headtracking") {
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `Import-Module '${module}' -Force; try { Assert-LauncherManifestConfig -RepoRoot '${root}' -CoreRoot '${CORE_ROOT}'; exit 0 } catch { Write-Output $_.Exception.Message; exit 1 }`],
       { encoding: "utf8" },
     );
-  const inPlace = assertConfig(repo("assert-in-place", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }))) }));
-  check(inPlace.status === 1 && inPlace.stdout.includes("is not named CameraUnlock.ini"), `packaging: a block naming the file a pre-canonical release reads should fail, got ${inPlace.status}\n${inPlace.stdout}${inPlace.stderr}`);
+  const legacyPath = assertConfig(repo("assert-legacy-path", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }))) }));
+  check(legacyPath.status === 1 && legacyPath.stdout.includes("is not named CameraUnlock.ini"), `packaging: a block naming the legacy file should fail, got ${legacyPath.status}\n${legacyPath.stdout}${legacyPath.stderr}`);
   const stale = assertConfig(repo("assert-stale", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, rows: { ...c.rows, EnableOnStartup: false } }))) }));
   check(stale.status === 1 && stale.stdout.includes("config.rows is"), `packaging: stale rows should fail, got ${stale.status}\n${stale.stdout}${stale.stderr}`);
   const none = assertConfig(repo("assert-none", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) }));

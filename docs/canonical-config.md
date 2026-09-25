@@ -23,17 +23,18 @@ languages follow the same rules, with the same enum numbers, and are held to the
 
 ### Where it lives
 
-A repo that already shipped an INI file keeps its path and file name: the conversion rewrites the
-file in place, so every launcher seed target, install and uninstall list and README path that
-names it stays valid. A BepInEx mod moves to `BepInEx\config\<GUID>.ini`, beside the plugin's old
-`<GUID>.cfg`, which the conversion reads and never writes (see [BepInEx](#bepinex)). A new repo
-names its file `HeadTracking.ini` in the folder its loader loads the mod from, or
-`BepInEx\config\<GUID>.ini` under BepInEx.
+Every converted mod keeps its settings in `CameraUnlock.ini`, in the folder its old config sat in:
+`BepInEx\config\CameraUnlock.ini` under BepInEx, `reframework\plugins\CameraUnlock.ini` under
+REFramework. A repo that published a pre-canonical build leaves its old file, the legacy file,
+where it is: the mod imports it once while `CameraUnlock.ini` is absent and never writes, renames
+or deletes it, so an older build still reads it after a rollback. A new repo puts
+`CameraUnlock.ini` in the folder its loader loads the mod from.
 
 `data/config-format.json` records every config file of every converting repo: `committed`, the
-repo path of the rendered file, and `installed`, each path the file takes relative to the game
-folder, one per store layout. A game with several config files gives each its own entry and its
-own owner.
+repo path of the rendered file; `installed`, each path the file takes relative to the game
+folder, one per store layout, every one named `CameraUnlock.ini`; and `legacy_source`, the bare
+name of the legacy file in the folder of each installed path, set exactly for a repo in `legacy`.
+A game with several config files gives each its own entry and its own owner.
 
 ### What it looks like
 
@@ -862,26 +863,21 @@ A converted repo's README carries a config block that `scripts/generate-readme.m
 the file's location and the committed file depends on the config entry and on whether the repo is
 in `legacy`:
 
-- **In place**, a repo in `legacy` whose entry has no `legacy_source`: the file is converted once
-  at the first launch; the original is kept as `<file>.pre-canonical`, and
-  `<file>.pre-canonical.last` is the file before the most recent conversion; comments and keys the
-  mod never read are not carried over, nor the settings each approved change drops; an older
-  version of the mod may misread the new layout; and to go back to an older version, copy
-  `.pre-canonical` back over the file first.
-- **BepInEx**, a repo in `legacy` whose entry has a `legacy_source`: earlier versions kept the
-  settings in the `.cfg` that `legacy_source` names; the first launch reads them from the `.cfg`
-  and writes them into the `.ini`; the `.cfg` is left as it was and an older version of the mod
-  still reads it; comments, keys the mod never read and the settings each approved change drops
-  are not carried over; BepInEx's ConfigurationManager no longer lists these settings; deleting
-  only the `.ini` converts the `.cfg` again at the next start, and deleting both gives the
-  defaults. There is no `.pre-canonical` and no rollback step.
-- **BepInEx outside `legacy`**, a repo outside `legacy` whose entry has a `legacy_source`: only
-  that BepInEx's ConfigurationManager does not list these settings.
-- **Outside `legacy`** with no `legacy_source`: nothing beyond the location and the file.
+- **A repo in `legacy`**: earlier versions kept these settings in the legacy file, in the same
+  folder; the first start that finds no `CameraUnlock.ini` reads the settings from the legacy
+  file and writes them into `CameraUnlock.ini`, never changes the legacy file, and does not read
+  it again while `CameraUnlock.ini` exists; comments, keys the mod never read and the settings
+  each approved change drops are not carried over; an older version of the mod reads the legacy
+  file and never `CameraUnlock.ini`, so a setting changed after updating is not in the legacy
+  file; deleting only `CameraUnlock.ini` imports the legacy file again at the next start, and
+  deleting both gives the defaults.
+- **Outside `legacy`**: nothing beyond the location and the file.
+- **A BepInEx mod**, installed under `BepInEx\config\`, adds that BepInEx's ConfigurationManager
+  no longer lists these settings, or for a repo outside `legacy`, does not list them.
 
 `scripts/templates/canonical-config-changelog.md` holds the matching changelog bullets for a
-conversion release, as an in-place and a BepInEx variant. The untracked NEXUS_MODS.md is updated
-by hand from `pixi run readme --print config`.
+conversion release of a repo in `legacy`. The untracked NEXUS_MODS.md is updated by hand from
+`pixi run readme --print config`.
 
 ### Rolling back and forward
 
@@ -910,7 +906,8 @@ over unless the `.ini` is deleted first.
 - **`PRESERVE_FILES`** in an uninstall wrapper's CONFIG BLOCK lists config paths, relative to the
   game folder, that `uninstall-body.cmd` leaves in place, together with each one's
   `.pre-canonical` and `.pre-canonical.last`, including inside a loader folder the uninstall
-  removes. A converted repo lists every `installed` path, and for BepInEx the `.cfg` as well.
+  removes. A converted repo lists every `installed` path, and a repo in `legacy` also lists the
+  legacy file in the folder of each one.
 - **Manual (Nexus) ZIPs** never carry the config. A ZIP extracted over the game folder would put
   the stamped default over the player's file, and no conversion would run.
 - A conversion adds no launcher seed where the repo had none: the owner creates the file at first
@@ -1009,7 +1006,8 @@ The paths and version above show the shape; each repo's come from its own entry 
 - `path` is the file, relative to `anchor`, with `/` between segments. The file is named
   `CameraUnlock.ini`.
 - `anchor` is `game_root` (the default when absent), `exe_dir` or `mod_home`, as for a seed.
-- `legacy_source` is the file the import reads, where `data/config-format.json` records one.
+- `legacy_source` is the legacy file the import reads, in the folder of `path`, present exactly
+  where `data/config-format.json` records one.
 - `canonical_since` is the first version of the mod that shipped the canonical file, present
   exactly when the repo is in `legacy`. A launcher can warn before installing an older version.
 - `rows` maps `data/config-schema.json` concept ids to the committed file's values. The ids a
@@ -1026,9 +1024,7 @@ on the built ZIP against the repo it was built from:
   `\`, drive, root, empty, `.` or `..` segment; `anchor` is one of the three.
 - `path` names `CameraUnlock.ini`, the fleet's one config name. No `v*` release from before the
   canonical format reads a file of that name, so a launcher that manages it leaves alone the file
-  an older version of the mod reads after a rollback. A repo converted in place, whose
-  `data/config-format.json` entry still records the file its old releases read, moves to
-  `CameraUnlock.ini` before it carries a block.
+  an older version of the mod reads after a rollback.
 - `rows` names only the five concepts, each `true` or `false`; `RotationEnabled` only beside
   `PositionEnabled`; and the two of them together are a pair `preference_modes` in
   `data/pipeline-conformance.json` lists.
@@ -1039,8 +1035,8 @@ on the built ZIP against the repo it was built from:
   needs exactly one `installed` path, and `path` is it; `exe_dir` needs `path` to be the tail of
   every `installed` path, and `path` beside each executable `data/games.json` records for the game
   to be one of them, which is the anchor for a file with one path per store layout; `mod_home` is
-  for a file with no `installed` path. `legacy_source` is the entry's, named from the same anchor
-  and folder as `path`.
+  for a file with no `installed` path. `legacy_source` is the folder of `path` and the name the
+  entry records.
 - No seed writes the config or the legacy file, and no `files[]` row lands on either. The mod
   creates the config at first launch and imports the legacy file only while the config is absent,
   so a seeded config skips the import, and Lopari v0.9.0 downloads a seeded file again once its
@@ -1064,12 +1060,10 @@ stale.
 
 Conformance's `config-descriptor` check runs the same rules on the committed manifest, except
 the one against `mod_info.version`, which packaging stamps. It also fails a converted repo
-delivered by manifest whose one config file `data/config-format.json` records as stamped and
-installed as `CameraUnlock.ini`, and which has no block (a stamped file the entry does not record
-is config-format's finding, and a repo converted in place is not asked for a block until its entry
-records the new name), and, in a clone with its tags, a `canonical_since` that is not above every
-`v*` tag whose committed config carries no stamp. A shallow clone has no tags, and the check warns
-that it did not run.
+delivered by manifest whose one config file `data/config-format.json` records as stamped, and
+which has no block (a stamped file the entry does not record is config-format's finding), and, in
+a clone with its tags, a `canonical_since` that is not above every `v*` tag whose committed config
+carries no stamp. A shallow clone has no tags, and the check warns that it did not run.
 
 Packaging stamps `mod_info.version` by reading the manifest with `ConvertFrom-Json` and writing it
 with `ConvertTo-Json -Depth 10`; `pixi run test-config-descriptor` runs that round trip over a

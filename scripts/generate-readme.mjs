@@ -157,11 +157,11 @@ const SECTIONS = {
 // ---------------------------------------------------------------------------
 // The config block
 //
-// Every sentence is a fact data/config-format.json records or the canonical
-// migration guarantees for every converted mod (design 3.1, 3.3, 4.6, 4.8):
-// the installed path, the one-time conversion of a legacy file, the copies it
-// keeps, what an older build reads, and for BepInEx the .ini beside the .cfg.
-// Nothing here knows which game it is describing.
+// Every sentence is a fact data/config-format.json records or core's config
+// owner does for every converted mod: the installed path, the one-time import
+// of the legacy file in the same folder, which the mod never writes, what an
+// older build reads, and for BepInEx that ConfigurationManager does not list the
+// settings. Nothing here knows which game it is describing.
 // ---------------------------------------------------------------------------
 
 const CONFIG_ID = 'config';
@@ -173,24 +173,24 @@ const CONFIG_INSERT_AFTER = ['Controls', OPENTRACK_HEADING, 'Installation'];
 
 const FORMAT = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, 'data', 'config-format.json'), 'utf8'));
 
-const leaf = (p) => p.split(/[\\/]/).pop();
+const CONFIG_NAME = 'CameraUnlock.ini';
 
 const code = (p) => `\`${p}\``;
 const EDIT = 'Edit it with any text editor.';
 
 // One committed file can stand for several config entries (mass-effect keeps one per game),
 // and each entry lists one installed path per store layout.
-function locationParagraph(entries, name) {
+function locationParagraph(entries) {
   if (entries.length === 1) {
     const [{ installed, no_installed_reason: reason }] = entries;
     if (installed.length === 0) {
-      return `The mod reads its settings from ${code(name)}. ${reason} It creates the file when it starts and finds none. ${EDIT}`;
+      return `The mod reads its settings from ${code(CONFIG_NAME)}. ${reason} It creates the file when it starts and finds none. ${EDIT}`;
     }
     if (installed.length === 1) {
       return `The mod reads its settings from ${code(installed[0])} in the game folder, and creates the file when it starts and finds none. ${EDIT}`;
     }
     return [
-      `The mod reads its settings from ${code(name)} in the game folder, at one of these paths depending on the store the game came from:`,
+      `The mod reads its settings from ${code(CONFIG_NAME)} in the game folder, at one of these paths depending on the store the game came from:`,
       '',
       ...installed.map((p) => `- ${code(p)}`),
       '',
@@ -198,11 +198,11 @@ function locationParagraph(entries, name) {
     ].join('\n');
   }
   if (entries.some((e) => e.installed.length === 0)) {
-    throw new Error(`data/config-format.json gives ${name} several entries, one of them with no installed path; the config block has no wording for that`);
+    throw new Error(`data/config-format.json gives ${CONFIG_NAME} several entries, one of them with no installed path; the config block has no wording for that`);
   }
   const alternatives = entries.some((e) => e.installed.length > 1);
   return [
-    `The mod keeps a separate ${code(name)} at each of these paths in the game folder:`,
+    `The mod keeps a separate ${code(CONFIG_NAME)} at each of these paths in the game folder:`,
     '',
     ...entries.map((e) => `- ${e.installed.map(code).join(' or ')}`),
     '',
@@ -230,23 +230,19 @@ function droppedSettings() {
   return ['Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:', '', ...lines].join('\n');
 }
 
-function legacyParagraphs(name) {
+// legacy is the bare name of the file the repo's pre-canonical builds read, in the same folder.
+function legacyParagraphs(legacy) {
+  const old = code(legacy);
+  const config = code(CONFIG_NAME);
   return [
-    `Earlier versions of the mod used an older layout for this file. The first time this version starts, it converts the file once into the layout below and keeps the file as it was beside it as ${code(`${name}.pre-canonical`)}. ${code(`${name}.pre-canonical.last`)}, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.`,
+    `Earlier versions of the mod kept these settings in ${old}, in the same folder. The first time this version starts and finds no ${config}, it reads your settings from ${old} and writes them into ${config}. It never changes ${old}, and does not read it again while ${config} exists.`,
     droppedSettings(),
-    `An older version of the mod may not read the new layout correctly. It reads a key that moved as its own default, and it can misread a hotkey or another value that is now written as a name. To go back to an older version, first copy ${code(`${name}.pre-canonical`)} back over ${code(name)}, which restores the old file.`,
+    `An older version of the mod reads ${old} and never reads ${config}, so a setting you change after updating is not in ${old}.`,
+    `Deleting only ${config} makes the next start read ${old} again. To go back to the defaults, delete both files.`,
   ];
 }
 
-function bepinexParagraphs(cfg, legacy) {
-  if (!legacy) return ["BepInEx's ConfigurationManager does not list these settings."];
-  return [
-    `Earlier versions of the mod kept their settings in ${code(cfg)}. The first time this version starts, it reads your settings from the \`.cfg\` and writes them into the \`.ini\`. The \`.cfg\` is left as it was, and an older version of the mod still reads it.`,
-    droppedSettings(),
-    "BepInEx's ConfigurationManager no longer lists these settings.",
-    'Deleting only the `.ini` makes the next start convert the `.cfg` again. To go back to the defaults, delete both files.',
-  ];
-}
+const isBepInEx = (entry) => entry.installed.some((p) => p.toLowerCase().startsWith('bepinex\\config\\'));
 
 function fencedIni(root, committed) {
   const text = fs.readFileSync(path.join(root, ...committed.split('/')), 'utf8').replace(/\r\n/g, '\n');
@@ -275,18 +271,13 @@ function configBlock(state) {
   }
   const parts = [];
   for (const [committed, entries] of groups) {
-    const names = [...new Set(entries.flatMap((e) => e.installed).map(leaf))];
-    if (names.length > 1) {
-      throw new Error(`data/config-format.json installs ${committed} under ${names.length} file names (${names.join(', ')}); the config block names one`);
-    }
-    const name = names[0] ?? leaf(committed);
-    const cfg = entries[0].legacy_source;
-    if (entries.length > 1 && (legacy || cfg !== null)) {
+    const bepinex = entries.some(isBepInEx);
+    if (entries.length > 1 && (legacy || bepinex)) {
       throw new Error(`data/config-format.json gives ${committed} several entries in a legacy or BepInEx repo; the config block has no wording for that`);
     }
-    parts.push(locationParagraph(entries, name));
-    if (cfg !== null) parts.push(...bepinexParagraphs(cfg, legacy));
-    else if (legacy) parts.push(...legacyParagraphs(name));
+    parts.push(locationParagraph(entries));
+    if (legacy) parts.push(...legacyParagraphs(entries[0].legacy_source));
+    if (bepinex) parts.push(`BepInEx's ConfigurationManager ${legacy ? 'no longer lists' : 'does not list'} these settings.`);
     parts.push('With every setting at its default, the file reads:');
     parts.push(fencedIni(state.root, committed));
   }

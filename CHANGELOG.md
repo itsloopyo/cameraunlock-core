@@ -82,6 +82,34 @@ Consuming repos (no converted mod has been released):
   InvertX migration inside it, are unchanged. The mod's `PRESERVE_FILES` must list both
   `CameraUnlock.ini` and the legacy file.
 
+### Changed - `data/config-format.json` records every config as `CameraUnlock.ini`, with its legacy file beside it
+
+Every `installed` path keeps its folder and names `CameraUnlock.ini`
+(`BepInEx\config\CameraUnlock.ini`, `reframework\plugins\CameraUnlock.ini`,
+`GoneHome_Data\Managed\CameraUnlock.ini`). `legacy_source` is now a bare file name, the file the repo's pre-canonical builds read, in the folder of each
+installed path: the BepInEx `<GUID>.cfg`, or the old installed file name (`HeadTracking.ini`,
+`MinecraftHeadTracking.ini` for minecraft-bedrock-edition, which has no installed path). It is set
+for every repo in `legacy` and null for every other repo, the four unpublished BepInEx repos
+included. `schema_version` stays 1: only core's own scripts read the file.
+
+- `check-config-format` fails an installed path not named `CameraUnlock.ini`, and a
+  `legacy_source` that holds a folder, names `CameraUnlock.ini`, is null for a repo in `legacy` or
+  is set for a repo outside it.
+- `check-config-descriptor`: a block's `legacy_source` is the folder of `config.path` and the
+  entry's name, and a seed or `files[]` row that lands on the legacy file beside any installed
+  path fails. A converted repo delivered by manifest with one stamped recorded config and no block
+  now fails, since every entry is recorded under `CameraUnlock.ini`; the exemption for a repo
+  converted in place is gone.
+- Conformance `config-preserve`: `PRESERVE_FILES` must list every installed path and, for a repo
+  in `legacy`, the legacy file in the folder of each one.
+- The README config block and `scripts/templates/canonical-config-changelog.md` have one wording
+  for a repo in `legacy`: the import from the legacy file, which is never changed, what an older
+  version reads, and how to import again or reset. A BepInEx mod adds that ConfigurationManager no
+  longer lists (outside `legacy`: does not list) the settings. The `.pre-canonical` wording is gone.
+
+Consuming repos: a converted repo moves its config to `CameraUnlock.ini`, lists the legacy file in
+`PRESERVE_FILES`, and re-renders its README block with `pixi run readme --write --sections config`.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

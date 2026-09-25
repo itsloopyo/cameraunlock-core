@@ -47,6 +47,7 @@ const OMITTABLE_ROWS = new Set(["WorldSpaceYaw"]);
 const REPO_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const BAD_PATH_CHARS = /[<>:"|?*\x00-\x1f]/;
+const CONFIG_NAME = "CameraUnlock.ini";
 
 const problems = [];
 const fail = (msg) => problems.push(msg);
@@ -146,7 +147,7 @@ for (const [name, files] of Object.entries(configs)) {
     }
     checkKeys(where, file, ["committed", "installed", "legacy_source", "dialect"], ["no_installed_reason"]);
     if (file.committed !== null) checkPath(`${where}.committed`, file.committed, "/");
-    if (file.legacy_source !== null) checkPath(`${where}.legacy_source`, file.legacy_source, "\\");
+    checkLegacySource(`${where}.legacy_source`, file.legacy_source, name in legacy);
     if (!DIALECTS.has(file.dialect)) {
       fail(`${where}.dialect ${JSON.stringify(file.dialect)} is not one of ${[...DIALECTS].join(", ")}`);
     }
@@ -162,6 +163,9 @@ for (const [name, files] of Object.entries(configs)) {
     }
     for (const p of file.installed) {
       checkPath(`${where}.installed`, p, "\\");
+      if (typeof p === "string" && p.split("\\").pop() !== CONFIG_NAME) {
+        fail(`${where}.installed: ${p} is not named ${CONFIG_NAME}, the file every converted mod keeps its settings in`);
+      }
       const key = typeof p === "string" ? p.toLowerCase() : p;
       if (seen.has(key)) fail(`${where}.installed: ${p} is also installed by ${seen.get(key)}`);
       else seen.set(key, where);
@@ -354,6 +358,32 @@ function checkPath(where, p, sep) {
       return;
     }
   }
+}
+
+// The legacy file sits in the folder of each installed path, so it is named without one, and
+// only a repo that published a pre-canonical build has players holding one.
+function checkLegacySource(where, name, isLegacy) {
+  if (name === null) {
+    if (isLegacy) fail(`${where} is null, and the repo is in legacy; name the file its pre-canonical builds read`);
+    return;
+  }
+  if (!isLegacy) {
+    fail(`${where} is ${JSON.stringify(name)}, and the repo is not in legacy, so no player holds an older file; make it null`);
+    return;
+  }
+  if (!isText(name)) {
+    fail(`${where}: ${JSON.stringify(name)} must be null or a non-empty string`);
+    return;
+  }
+  if (name.includes("\\") || name.includes("/")) {
+    fail(`${where}: ${name} has a folder; it is a bare file name, read in the folder of each installed path`);
+    return;
+  }
+  if (name.toLowerCase() === CONFIG_NAME.toLowerCase()) {
+    fail(`${where}: ${name} is the canonical file; legacy_source names the file the pre-canonical builds read`);
+    return;
+  }
+  checkPath(where, name, "\\");
 }
 
 function duplicateKeys(text) {

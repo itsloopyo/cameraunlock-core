@@ -56,17 +56,15 @@ config block, and a README without one fails conformance's `readme` check:
 Each marker is a line of its own, with nothing else on it, and both sit in
 Configuration itself: a marker above the first section or under another H2
 stops the block rendering. The block says where
-the file is installed; for a repo that published a pre-canonical build, the
-one-time conversion, the `<file>.pre-canonical` and `<file>.pre-canonical.last`
-copies, what is not carried over (comments, unread keys, and one line for each
-entry in data/config-format.json's `approved_changes`), and that an older
-version of the mod may misread the new layout, so going back means copying
-`.pre-canonical` back first;
-for a BepInEx mod, that ConfigurationManager does not list the settings, and
-where it published a pre-canonical build, the `.ini` beside the untouched
-`.cfg` in place of the copies, and how to reset; then the committed file itself
-in an ini code fence. It replaces any hand-written key
-listing, since the file's own comments describe every key.
+`CameraUnlock.ini` is installed; for a repo that published a pre-canonical
+build, that the first start with no `CameraUnlock.ini` imports the settings
+once from the legacy file in the same folder and never changes that file, what
+is not carried over (comments, unread keys, and one line for each entry in
+data/config-format.json's `approved_changes`), that an older version of the mod
+reads only the legacy file, and how to import again or reset; for a BepInEx
+mod, that ConfigurationManager does not list the settings; then the committed
+file itself in an ini code fence. It replaces any hand-written key listing,
+since the file's own comments describe every key.
 
 `pixi run readme --write --sections config` inserts the block after the lead
 prose of Configuration, before its first ### subsection (or adds the section

@@ -3,7 +3,10 @@
 // Runs scripts/encode-seed.mjs against copies of real manifests in throwaway git repos:
 // resident-evil-2-headtracking's (loader.seed, game_root) and prey-headtracking's (exe_dir,
 // two store layouts), both copied unchanged into data/fixtures/encode-seed/, plus the
-// top-level and variant seed shapes built from the first.
+// top-level and variant seed shapes built from the first. The fixtures seed HeadTracking.ini,
+// which data/config-format.json records as each repo's legacy file, so the cases retarget
+// the seed to CameraUnlock.ini, the config the entries record, and one case keeps the
+// fixture's own seed to show a seed of the legacy file is not a config seed.
 //
 //   node scripts/test-encode-seed.mjs      (pixi run test-encode-seed, part of pixi run check)
 
@@ -79,11 +82,17 @@ function roundTrip(label, name, manifestText, configSeeds) {
   check(readManifest(root) === text, `${label}: encoding a current manifest should change nothing`);
 }
 
-const re2Text = fs.readFileSync(path.join(FIXTURES, "resident-evil-2-headtracking.launcher-manifest.json"), "utf8");
+// The fixture's seed of the legacy file, retargeted to the config beside it.
+const retarget = (text, from, to) => {
+  if (text.split(from).length !== 2) throw new Error(`the fixture does not name ${from} once`);
+  return text.replace(from, to);
+};
+const re2Fixture = fs.readFileSync(path.join(FIXTURES, "resident-evil-2-headtracking.launcher-manifest.json"), "utf8");
+const re2Text = retarget(re2Fixture, '"target": "reframework/plugins/HeadTracking.ini"', '"target": "reframework/plugins/CameraUnlock.ini"');
 const re2 = JSON.parse(re2Text);
 roundTrip("loader-seed", "resident-evil-2-headtracking", re2Text, re2.loader.seed);
 
-const preyText = fs.readFileSync(path.join(FIXTURES, "prey-headtracking.launcher-manifest.json"), "utf8");
+const preyText = retarget(fs.readFileSync(path.join(FIXTURES, "prey-headtracking.launcher-manifest.json"), "utf8"), '"target": "HeadTracking.ini"', '"target": "CameraUnlock.ini"');
 roundTrip("exe-dir", "prey-headtracking", preyText, JSON.parse(preyText).loader.seed);
 
 const configSeed = re2.loader.seed[0];
@@ -99,6 +108,15 @@ const variants = {
   variants: ["a", "b"].map((id) => ({ id, loader: { ...loader, seed: [configSeed, otherSeed] }, files: re2.files })),
 };
 roundTrip("variants", "resident-evil-2-headtracking", JSON.stringify(variants, null, 2), [configSeed, configSeed]);
+
+// A seed of the legacy file writes no config, so encoding leaves it as it was.
+const legacySeed = repo("legacy-seed", "resident-evil-2-headtracking", re2Fixture, CANONICAL);
+const legacySeedRun = run(legacySeed);
+check(
+  legacySeedRun.status === 0 && legacySeedRun.out.includes("no seed in launcher-manifest.json writes a config") && readManifest(legacySeed) === re2Fixture,
+  `legacy seed: should be left alone, got ${legacySeedRun.status}
+${legacySeedRun.out}`,
+);
 
 // The committed file must be the converted one: an unstamped file is refused and not encoded.
 const legacyBytes = Buffer.from(configSeed.content_b64, "base64");
