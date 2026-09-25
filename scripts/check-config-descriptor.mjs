@@ -411,8 +411,10 @@ export function tagProblems(root, state, config) {
   return { shallow: false, problems };
 }
 
+// The rules compare the block with data/config-format.json, never with the mod's code, so the
+// hint puts the code first: a block written for a build that still reads the legacy file passes.
 const NO_BLOCK =
-  "converted, delivered by manifest, and launcher-manifest.json has no config block; write path and anchor by hand, legacy_source and canonical_since where the rules ask for them, and \"rows\": {}, then run render-config";
+  "converted, delivered by manifest, and launcher-manifest.json has no config block. The block names CameraUnlock.ini, so it lands with or after the change that makes the mod read CameraUnlock.ini, with the legacy file as the owner's legacy path; then write path and anchor by hand, legacy_source and canonical_since where the rules ask for them, and \"rows\": {}, and run render-config";
 
 // What conformance's config-descriptor check reads for one repo's committed manifest.
 export function repoReport(root, state = repoState(root)) {

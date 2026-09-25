@@ -109,6 +109,10 @@ included. `schema_version` stays 1: only core's own scripts read the file.
 
 Consuming repos: a converted repo moves its config to `CameraUnlock.ini`, lists the legacy file in
 `PRESERVE_FILES`, and re-renders its README block with `pixi run readme --write --sections config`.
+The code change comes first, or in the same commit: the README block and a config descriptor
+describe `CameraUnlock.ini`, and no check compares either with the path the mod's code reads, so
+written first they pass and describe a file the build does not read. The `config-descriptor`
+finding for a missing block says so.
 
 ### Fixed - conformance `config-preserve` fails a converted install that ships its config
 

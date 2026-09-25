@@ -1059,6 +1059,12 @@ with `"rows": {}`. `scripts/encode-seed.mjs`, which `render-config` runs, then w
 the committed file and changes no other byte of the manifest; `--check` exits 1 when `rows` is
 stale.
 
+No rule compares the block with what the mod's code reads: the rules compare it with
+`data/config-format.json`, which records `CameraUnlock.ini`. A repo whose build still reads its
+legacy file moves its owner to `CameraUnlock.ini`, with the legacy file as the owner's legacy
+path, before it adds the block or re-renders its README config block, or in the same change.
+Either one written first passes every check and describes a file the build does not read.
+
 Conformance's `config-descriptor` check runs the same rules on the committed manifest, except
 the one against `mod_info.version`, which packaging stamps. It also fails a converted repo
 delivered by manifest whose one config file `data/config-format.json` records as stamped, and

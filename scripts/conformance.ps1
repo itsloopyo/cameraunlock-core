@@ -916,7 +916,7 @@ function Test-Readme {
     }
 
     $config = $ReadmeConfig[$Root]
-    $fix = 'pixi run readme --write --sections config renders it'
+    $fix = 'pixi run readme --write --sections config renders it, in the change that makes the mod read CameraUnlock.ini or after it, since the block describes that file'
     if ($null -ne $config.error) {
         Add-Finding $Name 'readme' 'FAIL' "the config block cannot be rendered: $($config.error)"
         return
