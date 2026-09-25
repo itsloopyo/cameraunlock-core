@@ -41,7 +41,7 @@ A game with several config files gives each its own entry and its own owner.
 This is the file the C++ and C# examples [below](#what-a-mod-binds) create at first launch, byte
 for byte:
 
-<!-- file: data/fixtures/canonical-ini/example/HeadTracking.ini -->
+<!-- file: data/fixtures/canonical-ini/example/CameraUnlock.ini -->
 ```ini
 ; Example Game head tracking settings.
 ; Comments start with ; and go on their own line. Text after a value is part of the value.
@@ -510,7 +510,7 @@ applied the new value to its running state:
 <!-- excerpt: cpp/tests/canonical_config_example_tests.cpp -->
 ```cpp
 ConfigOwnerOptions<ModConfig> options;
-options.path = (dir / L"HeadTracking.ini").wstring();
+options.path = (dir / L"CameraUnlock.ini").wstring();
 options.table = ModConfigTable();
 options.header.display_name = "Example Game";
 ConfigOwner<ModConfig> owner(std::move(options));
@@ -525,7 +525,7 @@ ConfigSaveResult saved = owner.Save([](ModConfig& c) { c.world_space_yaw = false
 On the first launch `loaded.status` is `Created` and the folder holds the file shown
 [above](#what-it-looks-like). The save changes the `WorldSpaceYaw` line and nothing else, and the
 next launch loads `Canonical` with the saved value. A mod with a published pre-canonical build
-also sets `options.import` (see [The legacy import](#the-legacy-import)).
+also sets `options.import` and `options.legacy_path` (see [The legacy import](#the-legacy-import)).
 
 ### C# example
 
@@ -558,7 +558,7 @@ public static ConfigTable<ModConfig> ModConfigTable()
 ```csharp
 var owner = new ConfigOwner<ModConfig>(new ConfigOwnerOptions<ModConfig>
 {
-    Path = Path.Combine(dir, "HeadTracking.ini"),
+    Path = Path.Combine(dir, "CameraUnlock.ini"),
     Table = ModConfigTable(),
     Header = new RenderHeader("Example Game"),
 });
@@ -672,8 +672,8 @@ writes, and never runs the import:
 | `Applied` (1) | The file was read as canonical, stamped or not, and the result holds its settings |
 | `Unreadable` (3) | The file is missing or could not be read. The mod keeps the settings it has |
 
-There is no status 2: `LegacyReadOnly`, which read a legacy file mid-session, went with the
-conversion in place.
+There is no status 2. `Reload` never reads the legacy file, so it has no status for one, and the
+number stays unused so the others keep theirs in both languages.
 
 ### Threading
 
@@ -821,7 +821,6 @@ one of:
   read back
 - `another program created the file at the same time`, when a file appeared at the config path
   before the owner created it
-- `Windows did not finish replacing <path>, so it may be missing; the new settings are in <temp>`
 - `the old settings reader could not find the file`, when the import reports the legacy file
   absent while the owner holds it open
 - the import's own reason, for `Undecodable`, and for `LegacyRefused`, where the mod then does
@@ -946,7 +945,7 @@ test. `data/fixtures/canonical-ini/README.md` defines every file byte for byte.
 | `head-tracking/` | `HeadTrackingConfigTable` | `all-concepts.ini` and three apply cases |
 | `preferences/` | a launcher's four preferences against the mod: what it reads, what the mod runs on, what the owner's `Save` writes | per case, `case.tsv` of `binds`, `preference` and `change` rows, `input.ini`, and `expected.ini` for a case with a change |
 | `mutations/` | the differential corpus generator | per case `input.ini`, `keys.tsv` and `expected.tsv` of output names and SHA-256 hashes |
-| `example/` | the examples in this document | `HeadTracking.ini` |
+| `example/` | the examples in this document | `CameraUnlock.ini` |
 
 The TSV files share one shape: ASCII, one row per LF-terminated line, fields separated by one tab,
 and a line that is empty or starts with `#` is a note. Section, key and value fields use one byte
@@ -1118,9 +1117,10 @@ In a mod repo, and in conformance:
   `GetPrivateProfile*`, `WritePrivateProfile*`, `IniReader`, `IniWriter`, `ParseIniConfig`,
   `ParseIniFile` or BepInEx's `ConfigFile.Bind`, unless `allow_legacy_symbols` records a use that
   reads no config. `config-preserve` fails `CameraUnlock.ini`, the legacy file or the committed
-  file's name in `install.cmd`'s `MOD_DLLS` or `MOD_SEED_FILES` or in `uninstall.cmd`'s
-  `MOD_SEED_FILES`, and an installed path or the legacy file beside one missing from
-  `PRESERVE_FILES`. `readme` fails a converted repo whose README config block is missing or
+  file's name (a stamped file `data/config-format.json` does not record counts as the committed
+  file) in `install.cmd`'s `MOD_DLLS` or `MOD_SEED_FILES`, and, where `uninstall.cmd` dispatches
+  to `uninstall-body.cmd`, in its `MOD_SEED_FILES`, and an installed path or the legacy file
+  beside one missing from its `PRESERVE_FILES`. `readme` fails a converted repo whose README config block is missing or
   differs from the rendered one, and an unconverted repo that has one.
   `config-descriptor` holds the committed manifest to the config descriptor's rules (see
   "The config descriptor") and fails a converted repo's manifest that seeds or ships its config.
@@ -1130,10 +1130,11 @@ In a mod repo, and in conformance:
   <repo>` prints it for NEXUS_MODS.md, where `<repo>` names a sibling checkout. With no repo name,
   `scripts/generate-readme.mjs` works on the folder above core, which is the mod when it runs from
   the mod's `cameraunlock-core` submodule.
-- **`pixi run validate-manifest`**, in a converted repo, also fails when the newest
-  `release/*-nexus.zip` carries a file at an `installed` path of the config or at the legacy file
-  beside one, or at the tail of either.
-  A ZIP whose manifest carries a config descriptor is held to its rules.
+- **`pixi run validate-manifest`**, in a converted repo, fails a package whose manifest seeds, or
+  ships through `files[]`, `CameraUnlock.ini`, the legacy file or a file named like the committed
+  config, with a config block or without one. It also fails when the newest `release/*-nexus.zip`
+  carries a file at an `installed` path of the config or at the legacy file beside one, or at the
+  tail of either. A ZIP whose manifest carries a config descriptor is held to its rules.
 
 ## Changing the format
 

@@ -348,7 +348,7 @@ and all three invalid (`single-bools-invalid`); a single bool changed beside mod
 
 ## example/
 
-`HeadTracking.ini`: the file the examples in docs/canonical-config.md create at first launch, which
+`CameraUnlock.ini`: the file the examples in docs/canonical-config.md create at first launch, which
 is the example table's defaults rendered with the display name `Example Game`. The table is
 `HeadTrackingConfigTable` naming `UdpPort`, `EnableOnStartup`, `WorldSpaceYaw`, `RotationEnabled`,
 `PositionEnabled`, `ToggleKey`, `CycleTrackingModeKey` and `YawModeKey`, plus one local row,

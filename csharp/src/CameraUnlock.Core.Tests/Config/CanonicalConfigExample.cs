@@ -14,7 +14,7 @@ namespace CameraUnlock.Core.Tests.Config
     /// The C# example docs/canonical-config.md shows, run for real. scripts/check-doc-examples.mjs
     /// holds the document's C# blocks to this file line for line, so an example that stops compiling
     /// or behaving as the document says fails here. The table renders
-    /// data/fixtures/canonical-ini/example/HeadTracking.ini, as the C++ example's does. The same
+    /// data/fixtures/canonical-ini/example/CameraUnlock.ini, as the C++ example's does. The same
     /// source runs under xunit on net8.0 (CanonicalConfigExampleTests) and in the
     /// CameraUnlock.Core.FrameworkTests console on .NET Framework 3.5 and 4.7.2, so the example is
     /// C# 7.3 that compiles on net35.
@@ -38,7 +38,7 @@ namespace CameraUnlock.Core.Tests.Config
                     "true: write HeadTracking.log beside the game's executable.");
         }
 
-        /// <summary>Throws when the table's defaults do not render as example/HeadTracking.ini.</summary>
+        /// <summary>Throws when the table's defaults do not render as example/CameraUnlock.ini.</summary>
         public static void RunRender(string root)
         {
             ConfigTable<ModConfig> table = ModConfigTable();
@@ -59,7 +59,7 @@ namespace CameraUnlock.Core.Tests.Config
         {
             var owner = new ConfigOwner<ModConfig>(new ConfigOwnerOptions<ModConfig>
             {
-                Path = Path.Combine(dir, "HeadTracking.ini"),
+                Path = Path.Combine(dir, "CameraUnlock.ini"),
                 Table = ModConfigTable(),
                 Header = new RenderHeader("Example Game"),
             });
@@ -74,12 +74,12 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(parsed && toggle.Length == 2, "ToggleKey reads as two bindings: " + error);
             Expect(saved.Status == ConfigSaveStatus.Saved, "the yaw toggle saves, not " + saved.Status + ": " + saved.Reason);
             string after = Expected(root).Replace("WorldSpaceYaw=true", "WorldSpaceYaw=false");
-            Expect(File.ReadAllText(Path.Combine(dir, "HeadTracking.ini"), Encoding.ASCII) == after,
+            Expect(File.ReadAllText(Path.Combine(dir, "CameraUnlock.ini"), Encoding.ASCII) == after,
                 "the save changes the WorldSpaceYaw line and nothing else");
 
             var next = new ConfigOwner<ModConfig>(new ConfigOwnerOptions<ModConfig>
             {
-                Path = Path.Combine(dir, "HeadTracking.ini"),
+                Path = Path.Combine(dir, "CameraUnlock.ini"),
                 Table = ModConfigTable(),
                 Header = new RenderHeader("Example Game"),
             });
@@ -90,7 +90,7 @@ namespace CameraUnlock.Core.Tests.Config
 
         private static string Expected(string root)
         {
-            return File.ReadAllText(Path.Combine(Path.Combine(root, "example"), "HeadTracking.ini"), Encoding.ASCII);
+            return File.ReadAllText(Path.Combine(Path.Combine(root, "example"), "CameraUnlock.ini"), Encoding.ASCII);
         }
 
         private static void Expect(bool condition, string what)

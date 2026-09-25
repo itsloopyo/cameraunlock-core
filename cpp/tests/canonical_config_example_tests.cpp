@@ -1,7 +1,7 @@
 // The C++ example docs/canonical-config.md shows, run for real. scripts/check-doc-examples.mjs
 // holds the document's C++ blocks to this file line for line, so an example that stops compiling
 // or behaving as the document says fails here. The table renders
-// data/fixtures/canonical-ini/example/HeadTracking.ini, as the C# CanonicalConfigExample's does.
+// data/fixtures/canonical-ini/example/CameraUnlock.ini, as the C# CanonicalConfigExample's does.
 
 #include <cameraunlock/config/config_owner.h>
 #include <cameraunlock/config/head_tracking_config_table.h>
@@ -60,20 +60,20 @@ std::string ReadBytes(const fs::path& path) {
 }
 
 std::string Expected() {
-    return ReadBytes(fs::path(CAMERAUNLOCK_CANONICAL_INI_FIXTURES) / "example" / "HeadTracking.ini");
+    return ReadBytes(fs::path(CAMERAUNLOCK_CANONICAL_INI_FIXTURES) / "example" / "CameraUnlock.ini");
 }
 
 void TheTableRendersTheExampleFile() {
     const ConfigTable<ModConfig> table = ModConfigTable();
     Check(RenderCanonical(table, table.defaults(), RenderHeader{"Example Game"}) == Expected(),
-          "the defaults render as example/HeadTracking.ini");
+          "the defaults render as example/CameraUnlock.ini");
 }
 
 #ifdef _WIN32
 
 void TheOwnerCreatesSavesAndReadsTheFile(const fs::path& dir) {
     ConfigOwnerOptions<ModConfig> options;
-    options.path = (dir / L"HeadTracking.ini").wstring();
+    options.path = (dir / L"CameraUnlock.ini").wstring();
     options.table = ModConfigTable();
     options.header.display_name = "Example Game";
     ConfigOwner<ModConfig> owner(std::move(options));
@@ -90,10 +90,10 @@ void TheOwnerCreatesSavesAndReadsTheFile(const fs::path& dir) {
 
     std::string after = Expected();
     after.replace(after.find("WorldSpaceYaw=true"), 18, "WorldSpaceYaw=false");
-    Check(ReadBytes(dir / "HeadTracking.ini") == after, "the save changed the WorldSpaceYaw line and nothing else");
+    Check(ReadBytes(dir / "CameraUnlock.ini") == after, "the save changed the WorldSpaceYaw line and nothing else");
 
     ConfigOwnerOptions<ModConfig> again;
-    again.path = (dir / L"HeadTracking.ini").wstring();
+    again.path = (dir / L"CameraUnlock.ini").wstring();
     again.table = ModConfigTable();
     again.header.display_name = "Example Game";
     ConfigOwner<ModConfig> next(std::move(again));

@@ -301,6 +301,21 @@ legacy file. No unconverted repo is checked.
 Consuming repos: a converted repo takes both files out of `MOD_SEED_FILES` in `install.cmd` and
 `uninstall.cmd`, and out of `install.cmd`'s `MOD_DLLS`.
 
+### Changed - docs/canonical-config.md and its example name `CameraUnlock.ini`
+
+- The example fixture is `data/fixtures/canonical-ini/example/CameraUnlock.ini`, renamed from
+  `HeadTracking.ini`, and the C++ and C# examples the document excerpts create
+  `CameraUnlock.ini`. The bytes are unchanged.
+- The C++ example says a mod with an import also sets `options.legacy_path`.
+- "When an import does not happen" no longer lists `Windows did not finish replacing ...`. The
+  import creates the config file and never replaces one, and only a replacement stops half way.
+- The Reload table's note on the unused status 2 no longer refers to the conversion in place.
+- The Tooling section lists what `config-preserve` checks now (an unrecorded stamped file counts as
+  the committed config, and the uninstall wrapper is checked only on the shared body) and that
+  `validate-manifest` fails a converted repo's package that seeds or ships either config file.
+
+No library code changes.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's
