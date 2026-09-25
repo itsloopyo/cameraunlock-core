@@ -61,6 +61,9 @@ const conceptByName = new Map();
 for (const concept of SCHEMA.concepts) {
   for (const name of [concept.key, ...concept.aliases]) conceptByName.set(normalise(name), concept);
 }
+const canonicalByKey = new Map(SCHEMA.concepts.filter((c) => c.canonical).map((c) => [c.key, c]));
+// The renderer comments out an Engine row that holds its default as "; Key=value".
+const COMMENTED_ROW = /^;[ \t]*([A-Za-z0-9]+)[ \t]*=/;
 const nonCanonicalKeyByName = new Map();
 const nonCanonicalSectionByName = new Map();
 for (const group of SCHEMA.non_canonical_keys) {
@@ -129,13 +132,25 @@ export function lintCanonicalConfig(bytes, { dialect, perGame }) {
   for (const d of doc.diagnostics) problems.push(describeDiagnostic(d));
 
   const headerLines = new Map();
+  let current = null;
   for (const { text, number } of lines) {
     const line = trimSpaceTab(text);
-    if (line === "" || line[0] === ";" || line[0] === "#") continue;
+    if (line[0] === ";") {
+      const commented = COMMENTED_ROW.exec(line);
+      const concept = commented === null ? undefined : canonicalByKey.get(commented[1]);
+      if (concept !== undefined && current !== null && equalsAsciiIgnoreCase(current, concept.section) && !perGame.includes(concept.id)) {
+        problems.push(
+          `line ${number}: [${current}] ${concept.key} is commented out, the form render-config gives an Engine row marked PerGame() at its default, and data/config-format.json per_game does not list ${concept.id} for this repo; a committed file writes ${concept.key}=${DEFAULT_TOKEN} there`,
+        );
+      }
+      continue;
+    }
+    if (line === "" || line[0] === "#") continue;
     if (line[0] === "[") {
       const close = line.indexOf("]");
       const name = close < 0 ? "" : trimSpaceTab(line.slice(1, close));
       if (name === "" || close !== line.length - 1) continue;
+      current = name;
       if (text !== `[${name}]`) {
         problems.push(`line ${number} is not written [${name}], with nothing around the name or the brackets`);
       }

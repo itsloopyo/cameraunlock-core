@@ -1129,7 +1129,7 @@ In core:
 | Command | What it does |
 |---------|--------------|
 | `pixi run check-config-schema` | Fails when the C++ and C# files generated from `data/config-schema.json` and `data/keys.json` are stale. `node scripts/generate-config-schema.mjs` regenerates them |
-| `pixi run check-config-format` | Checks the shape of `data/config-format.json` and pins its `legacy` names. A `per_game` entry names a canonical concept id, a reason and the date the owner approved it |
+| `pixi run check-config-format` | Checks the shape of `data/config-format.json` and pins its `legacy` names. A `per_game` entry names a canonical concept id, a reason and the date the owner approved it, and a repo's list names both of `RotationEnabled` and `PositionEnabled` or neither |
 | `pixi run check-canonical-ini-js` | Runs the reader and key fixtures through core's script grammar (`scripts/lib/canonical-ini.mjs`, `scripts/lib/key-bindings.mjs`) and holds the lint to its rules |
 | `pixi run check-doc-examples` | Fails when a C++ or C# block in `docs/` is not a run of lines of the test it names, or an ini block is not the fixture it names |
 | `pixi run test-config-descriptor` | Checks that a good config descriptor passes and one mutation per rule fails, and runs encode-seed's `rows`, validate-manifest and conformance on it. It also checks that a converted repo seeds and ships neither `CameraUnlock.ini` nor its legacy file, in the manifest or the install scripts |
@@ -1156,8 +1156,10 @@ In a mod repo, and in conformance:
   `data/config-format.json` `per_game` lists for the repo, which hold the game's own value and
   never the token, a hotkey one as a key list in the file's dialect; every local key in
   `[Hotkeys]` a key list in the file's dialect, where `default` is an ordinary value like any
-  other; the file tracked by git and `-text`. It does not check comments. A chord a game binds
-  itself is a `per_game` hotkey row, whose reason names the chord it replaces and the one it uses.
+  other; no concept row commented out under its own section (`; CollisionChannel=3`, the form the
+  renderer gives an Engine row marked `PerGame()` at its default) unless `per_game` lists it; the
+  file tracked by git and `-text`. It checks no other comment. A chord a game binds itself is a
+  `per_game` hotkey row, whose reason names the chord it replaces and the one it uses.
 - **Conformance** (`pixi run conformance`) runs the lint as `config-format`, which also fails a
   converted `legacy` repo with no legacy folder (an REFramework repo needs none: its import is
   core's `PluginConfigLegacyImport`), a repo outside `legacy` with one, and a repo outside

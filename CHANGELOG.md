@@ -18,7 +18,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   game's own value and never the token; a `per_game` hotkey row holds a key list in the file's
   dialect. The rule that a hotkey concept holds its `canonical_default` is gone, since those rows
   hold `default` too. `default ; note`, `"default"` and `End, default` are values, not the token.
-  On a local row `default` is an ordinary value. The lint's `exceptions` option is now `perGame`,
+  On a local row `default` is an ordinary value. A concept row commented out under its own section
+  (`; CollisionChannel=3`, the form the renderer gives an Engine row marked `PerGame()` at its
+  default) fails unless `per_game` lists it, so a `PerGame()` mark cannot keep a row from
+  Defaults.ini without an owner-approved entry. The lint's `exceptions` option is now `perGame`,
   the repo's `per_game` concept ids, and a call without it throws.
 - **`data/config-format.json` `per_game`**, per repo in `configs`, a list of `{row, reason,
   approved}`: `row` a canonical concept id, `reason` why the game keeps that row for itself, and
@@ -28,7 +31,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   what `default` means in files already on players' disks, so it is a breaking change for that
   repo. It replaces `descriptor_omits`, whose one entry (subnautica-headtracking, `WorldSpaceYaw`,
   approved 2026-09-25) moved over, and `hotkey_exceptions`, which was empty.
-  `scripts/check-config-format.mjs` checks the shape and refuses the two old keys by name.
+  `scripts/check-config-format.mjs` checks the shape and refuses the two old keys by name, and a
+  list that names one of `RotationEnabled` and `PositionEnabled` without the other, which no table
+  can match since `PerGame()` marks both or neither.
   `scripts/check-config-descriptor.mjs` leaves a `per_game` launcher row out of `rows` where it
   left a `descriptor_omits` one, with the same meaning, until the descriptor drops `rows`.
 - **`config-defaults`**, a new conformance check for converted repos. It fails a tracked C#, C++ or
@@ -44,9 +49,11 @@ What a consuming repo changes. A converted repo's committed file fails the lint 
 re-rendered after its pin bump: `pixi run render-config` writes `default` on every concept row
 except the `per_game` ones. Its tests and mod pass `DefaultsFile.At` and `DefaultsFile.PerUser()`
 as `config-defaults` asks, which the pin bump to the Defaults.ini owner needs anyway. The config
-descriptor check still refuses a committed `WorldSpaceYaw=default` (it reads `true` or `false`),
-and the README config block does not yet explain `default`, until the next core commits, so a
-converted repo still bumps its pin after those.
+descriptor check still reads only `true` or `false`, so it refuses `default` on `PositionAllowed`
+and on every launcher row (`EnableOnStartup`, `WorldSpaceYaw`, `RotationEnabled`,
+`PositionEnabled`, `TrueFreeLook`), six problems on a fresh render, and the README config block
+does not yet explain `default`, until the next core commits, so a converted repo still bumps its
+pin after those.
 
 ### Added - Defaults.ini probe modes and `pixi run test-linux-probe`
 
@@ -147,8 +154,8 @@ What a consuming repo changes at its pin bump. A converted repo does not bump to
 own: until the lint, the config descriptor check and the README generator read `default` (the
 design's C7 to C9, which follow), core's own gates reject the file it commits here.
 `check-canonical-config.mjs`, which conformance runs, refuses `ToggleKey=default` and every other
-hotkey `default` row, `check-config-descriptor.mjs` refuses `WorldSpaceYaw=default`, and the
-generated README block fences `default` rows it does not explain. Bump after C9.
+hotkey `default` row, `check-config-descriptor.mjs` refuses `default` on `PositionAllowed` and on
+every launcher row, and the generated README block fences `default` rows it does not explain. Bump after C9.
 
 - **Set the Defaults.ini option.** In the mod, `Defaults = DefaultsFile.PerUser()` (C#) or
   `options.defaults = DefaultsFile::PerUser()` (C++). In every test that builds an owner,

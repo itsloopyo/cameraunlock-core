@@ -9,7 +9,8 @@
 export const CONFIG_FORMAT = 1;
 export const STAMP_SECTION = "CameraUnlock";
 export const FORMAT_KEY = "ConfigFormat";
-// On a concept row, and only there, this value takes the row's value from Defaults.ini.
+// A token on concept rows only, where it leaves the row at its default: Defaults.ini's value when
+// the row is not PerGame() and Defaults.ini supplies one, the table's default otherwise.
 export const DEFAULT_TOKEN = "default";
 
 export const DIAGNOSTIC_KINDS = Object.freeze({

@@ -276,6 +276,13 @@ for (const [name, entries] of Object.entries(doc.per_game)) {
     if (!isText(entry.reason)) fail(`${where}[${i}].reason must be a non-empty string`);
     if (typeof entry.approved !== "string" || !DATE.test(entry.approved)) fail(`${where}[${i}].approved must be the YYYY-MM-DD date the owner approved it`);
   });
+  if (rows.has("RotationEnabled") !== rows.has("PositionEnabled")) {
+    fail(
+      `${where} lists ${rows.has("RotationEnabled") ? "RotationEnabled" : "PositionEnabled"} without ` +
+        `${rows.has("RotationEnabled") ? "PositionEnabled" : "RotationEnabled"}. The two are one setting, the tracking ` +
+        "mode, so the table's PerGame() marks both or neither and per_game lists both or neither",
+    );
+  }
 }
 
 if (problems.length > 0) {

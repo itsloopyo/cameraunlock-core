@@ -103,18 +103,27 @@ for (const [dialect, input, result, canonical = ""] of keyRows) {
   check(JSON.stringify(reread.bindings) === JSON.stringify(parsed.bindings), `${label}: '${written}' reads back differently`);
 }
 
-// The lint. Every file below is a fresh render, `default` on every concept row, so it has to pass
-// with no per_game row; each mutation breaks one rule and must draw exactly the problem named.
+// The lint. Every file below is a fresh render, `default` on every concept row but the ones its
+// table marks PerGame(), so it has to pass with those rows as per_game; each mutation breaks one
+// rule and must draw exactly the problem named.
 const fresh = [
-  "head-tracking/all-concepts-fresh.ini",
-  "table/global-render-fresh/fresh.ini",
-  "example/CameraUnlock.ini",
+  ["head-tracking/all-concepts-fresh.ini", []],
+  ["table/global-render-fresh/fresh.ini", ["CollisionChannel"]],
+  ["example/CameraUnlock.ini", []],
 ];
-for (const rel of fresh) {
+for (const [rel, perGame] of fresh) {
   for (const dialect of ["native", "unity"]) {
-    const problems = lintCanonicalConfig(fs.readFileSync(path.join(FIXTURES, rel)), { dialect, perGame: [] });
+    const problems = lintCanonicalConfig(fs.readFileSync(path.join(FIXTURES, rel)), { dialect, perGame });
     check(problems.length === 0, `lint ${rel} (${dialect}) should pass, and says:\n    ${problems.join("\n    ")}`);
   }
+}
+{
+  const problems = lintCanonicalConfig(fs.readFileSync(path.join(FIXTURES, "table", "global-render-fresh", "fresh.ini")), { dialect: "native", perGame: [] });
+  check(
+    problems.length === 1 && problems[0].startsWith("line 38: [Position] CollisionChannel is commented out") &&
+      problems[0].includes("per_game does not list CollisionChannel for this repo"),
+    `lint table/global-render-fresh/fresh.ini with no per_game row should fail once for its commented PerGame() row, got\n    ${problems.join("\n    ")}`,
+  );
 }
 
 // A values render holds a value on every concept row, which passes only where per_game lists them all.
@@ -129,9 +138,10 @@ for (const dialect of ["native", "unity"]) {
 {
   const problems = lintCanonicalConfig(values, { dialect: "native", perGame: [] });
   check(
-    problems.length === 1 && problems[0].startsWith("lines 17, 21, 23 and 24 more: UdpPort, EnableOnStartup, WorldSpaceYaw, AimDecoupling,") &&
-      problems[0].includes(" hold values, and data/config-format.json per_game lists none of them for this repo"),
-    `lint head-tracking/all-concepts.ini with no per_game row should fail once for its 27 active concept rows, got\n    ${problems.join("\n    ")}`,
+    problems.length === 2 && problems[0].startsWith("line 65: [Position] CollisionChannel is commented out") &&
+      problems[1].startsWith("lines 17, 21, 23 and 24 more: UdpPort, EnableOnStartup, WorldSpaceYaw, AimDecoupling,") &&
+      problems[1].includes(" hold values, and data/config-format.json per_game lists none of them for this repo"),
+    `lint head-tracking/all-concepts.ini with no per_game row should fail for its commented CollisionChannel and once for its 27 active concept rows, got\n    ${problems.join("\n    ")}`,
   );
 }
 
@@ -227,6 +237,11 @@ const mutations = [
   ["a per_game hotkey row that is no key", replace("ToggleKey=default", "ToggleKey=Endd, Ctrl+Shift+Y"), "ToggleKey=Endd, Ctrl+Shift+Y is not a native key list: 'Endd' is not a key name", "native", ["ToggleKey"]],
   ["a hex per_game hotkey in a Unity mod", replace("YawModeKey=default", "YawModeKey=0x22, Ctrl+Shift+H"), "YawModeKey=0x22, Ctrl+Shift+H is not a unity key list", "unity", ["YawModeKey"]],
   ["a hex per_game hotkey in a native mod", replace("YawModeKey=default", "YawModeKey=0x22, Ctrl+Shift+H"), [], "native", ["YawModeKey"]],
+  ["a commented concept row", replace("CollisionChannel=default", "; CollisionChannel=3"), "line 65: [Position] CollisionChannel is commented out, the form render-config gives an Engine row marked PerGame() at its default, and data/config-format.json per_game does not list CollisionChannel"],
+  ["a commented concept row with no space", replace("CollisionChannel=default", ";CollisionChannel=3"), "line 65: [Position] CollisionChannel is commented out"],
+  ["a commented per_game row", replace("CollisionChannel=default", "; CollisionChannel=3"), [], "native", ["CollisionChannel"]],
+  ["a commented concept key in another section", replace("[Light]\r\n", "[Light]\r\n; CollisionChannel=3\r\n"), []],
+  ["a comment naming a local key", replace("[Light]\r\n", "[Light]\r\n; Mode=3\r\n"), []],
 ];
 for (const [label, text, expected, dialect = "native", perGame = []] of mutations) {
   const want = [expected].flat();
