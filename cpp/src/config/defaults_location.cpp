@@ -25,10 +25,13 @@ std::wstring TrimEnd(std::wstring text, wchar_t c) {
     return text;
 }
 
-std::string Show(const std::wstring& path, const std::wstring& home, wchar_t separator) {
-    const bool under_home = !home.empty() && path.compare(0, home.size(), home) == 0 &&
-                            (path.size() == home.size() || path[home.size()] == separator);
-    return under_home ? "~" + DefaultsUtf8(path.substr(home.size())) : DefaultsUtf8(path);
+// The root is the home, shown as ~, or with no home known the XDG folder the path came from,
+// shown as its variable, so an account name in either never reaches the log.
+std::string Show(const std::wstring& path, const std::wstring& root, const std::string& root_name,
+                 wchar_t separator) {
+    const bool under_root = !root.empty() && path.compare(0, root.size(), root) == 0 &&
+                            (path.size() == root.size() || path[root.size()] == separator);
+    return under_root ? root_name + DefaultsUtf8(path.substr(root.size())) : DefaultsUtf8(path);
 }
 
 // The first XDG spelling that is absolute, as the dirs crate reads it, joined with the folder
@@ -71,17 +74,20 @@ DefaultsCandidate AppData(DefaultsCandidateKind kind, const std::wstring& known_
     return candidate;
 }
 
+// With no home the root is the candidate's parent, the XDG folder `variable` named.
 DefaultsCandidate Located(DefaultsCandidateKind kind, bool may_create, const std::wstring& folder, wchar_t separator,
-                          const std::wstring& home) {
+                          const std::wstring& home, const std::string& variable) {
     DefaultsCandidate candidate;
     candidate.kind = kind;
     candidate.may_create = may_create;
     candidate.folder = folder;
     candidate.path = folder + separator + kFileName;
     candidate.parent = folder.substr(0, folder.find_last_of(separator));
-    candidate.shown = Show(candidate.path, home, separator);
-    candidate.shown_folder = Show(candidate.folder, home, separator);
-    candidate.shown_parent = Show(candidate.parent, home, separator);
+    const std::wstring& root = home.empty() ? candidate.parent : home;
+    const std::string root_name = home.empty() ? "$" + variable : "~";
+    candidate.shown = Show(candidate.path, root, root_name, separator);
+    candidate.shown_folder = Show(candidate.folder, root, root_name, separator);
+    candidate.shown_parent = Show(candidate.parent, root, root_name, separator);
     return candidate;
 }
 
@@ -116,7 +122,7 @@ DefaultsResolution ResolveWine(const DefaultsProbe& probe) {
     }
 
     if (!host_folder.empty()) {
-        resolution.candidates.push_back(Located(DefaultsCandidateKind::kWineHost, true, host_folder, L'\\', home));
+        resolution.candidates.push_back(Located(DefaultsCandidateKind::kWineHost, true, host_folder, L'\\', home, variable));
     }
     if (!probe.known_folder.empty()) {
         resolution.candidates.push_back(AppData(DefaultsCandidateKind::kWinePrefix, probe.known_folder, true));
@@ -132,14 +138,15 @@ DefaultsResolution ResolveNative(const DefaultsProbe& probe) {
     const std::wstring home = has_home ? TrimEnd(probe.home, L'/') : std::wstring();
     if (IsUnixAbsolute(probe.xdg_config_home)) {
         resolution.candidates.push_back(Located(DefaultsCandidateKind::kNative, false,
-                                                TrimEnd(probe.xdg_config_home, L'/') + L"/" + kFolderName, L'/', home));
+                                                TrimEnd(probe.xdg_config_home, L'/') + L"/" + kFolderName, L'/', home,
+                                                "XDG_CONFIG_HOME"));
     } else if (has_home) {
         resolution.candidates.push_back(
-            Located(DefaultsCandidateKind::kNative, false, home + L"/.config/" + kFolderName, L'/', home));
+            Located(DefaultsCandidateKind::kNative, false, home + L"/.config/" + kFolderName, L'/', home, ""));
     }
     if (has_home) {
         resolution.candidates.push_back(Located(DefaultsCandidateKind::kNative, false,
-                                                home + L"/Library/Application Support/" + kFolderName, L'/', home));
+                                                home + L"/Library/Application Support/" + kFolderName, L'/', home, ""));
     }
     if (resolution.candidates.empty()) resolution.no_location = "HOME is not set to an absolute path";
     return resolution;

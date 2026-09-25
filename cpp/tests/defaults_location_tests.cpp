@@ -314,12 +314,16 @@ void TestCreateFolder() {
     Check(CreateDefaultsFolder((missing / L"CameraUnlock").wstring()) == kDefaultsPathNotFound && !fs::exists(missing),
           "a missing parent is ERROR_PATH_NOT_FOUND, and is not created");
     Check(CreateDefaultsFolder(dir.wstring() + L"\\bad?name") == ERROR_INVALID_NAME, "any other error is returned");
+    const fs::path file = dir / L"file";
+    std::ofstream(file).close();
+    Check(CreateDefaultsFolder(file.wstring()) == 0 && fs::is_regular_file(file),
+          "a file of that name gives ERROR_ALREADY_EXISTS, counted as done, and stays a file");
     std::size_t entries = 0;
     for (const fs::directory_entry& entry : fs::directory_iterator(dir)) {
         (void)entry;
         ++entries;
     }
-    Check(entries == 1, "nothing besides CameraUnlock was created");
+    Check(entries == 2, "nothing besides CameraUnlock and the file was created");
 
     fs::remove_all(dir);
 }

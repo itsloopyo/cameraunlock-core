@@ -484,14 +484,19 @@ The rules the cases hold. A folder's parent is the folder up to its last separat
   that starts with a drive letter, `:` and `\`, and there is none otherwise (`\??\unix\...`).
   A host path is shown with its leading part replaced by `~` when that part equals the DOS home
   and the path ends there or goes on with `\`; any other host path is shown as it is. With no
-  candidate at all the reason is `Windows reported no roaming AppData folder`.
+  DOS home, a host folder from `dos_file_name` is shown with its parent replaced by
+  `$<variable>`, as in `$XDG_CONFIG_HOME\CameraUnlock`. With no candidate at all the reason is
+  `Windows reported no roaming AppData folder`.
 - **Native** reads `XDG_CONFIG_HOME` and `HOME`, each counted only when it starts with `/` and
   taken with the `/` at its end removed. The first candidate is `<XDG_CONFIG_HOME>/CameraUnlock/Defaults.ini`,
   or `<HOME>/.config/CameraUnlock/Defaults.ini` when `XDG_CONFIG_HOME` does not count; the second
   is `<HOME>/Library/Application Support/CameraUnlock/Defaults.ini`. A candidate that needs `HOME`
   is left out when it does not count, and with no candidate the reason is
   `HOME is not set to an absolute path`. None may be created. A path is shown with its leading part
-  replaced by `~` when that part equals `HOME` and the path ends there or goes on with `/`.
+  replaced by `~` when that part equals `HOME` and the path ends there or goes on with `/`. When
+  `HOME` does not count, the `XDG_CONFIG_HOME` candidate is shown with that folder replaced by
+  `$XDG_CONFIG_HOME`. A `HOME` or `XDG_CONFIG_HOME` that is empty once the `/` at its end is
+  removed replaces nothing.
 
 The choice, where `Settings` stands for ` Settings set to default use the built-in values.`, a
 candidate's name is its shown path with ` (this Wine prefix)` added for the prefix candidate, and

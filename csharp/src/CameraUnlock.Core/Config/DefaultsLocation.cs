@@ -203,8 +203,10 @@ namespace CameraUnlock.Core.Config
         /// Creates <paramref name="folder"/>, the CameraUnlock folder, with CreateDirectoryW, so
         /// only that one level: its parent must already exist. Windows and Wine only.
         /// </summary>
-        /// <returns>0 when the folder is there afterwards, whoever made it; <see cref="ErrorPathNotFound"/>
-        /// when its parent does not exist; any other Win32 error it failed with.</returns>
+        /// <returns>0 when CreateDirectoryW created it or gave ERROR_ALREADY_EXISTS, which a file of that
+        /// name gives too, so the folder may not be there and creating Defaults.ini in it then fails;
+        /// <see cref="ErrorPathNotFound"/> when its parent does not exist; any other Win32 error it
+        /// failed with.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="folder"/> is null.</exception>
         /// <exception cref="PlatformNotSupportedException">Not running on Windows or under Wine.</exception>
         internal static int CreateFolder(string folder)
@@ -257,9 +259,11 @@ namespace CameraUnlock.Core.Config
             {
                 string parent = hostFolder.Substring(0, hostFolder.LastIndexOf('\\'));
                 string path = hostFolder + @"\" + FileName;
+                string root = home.Length > 0 ? home : parent;
+                string rootName = home.Length > 0 ? "~" : "$" + variable;
                 candidates.Add(new DefaultsCandidate(
-                    DefaultsCandidateKind.WineHost, true, path, hostFolder, parent, Show(path, home, '\\'),
-                    Show(hostFolder, home, '\\'), Show(parent, home, '\\')));
+                    DefaultsCandidateKind.WineHost, true, path, hostFolder, parent, Show(path, root, rootName, '\\'),
+                    Show(hostFolder, root, rootName, '\\'), Show(parent, root, rootName, '\\')));
             }
             if (probe.KnownFolder.Length > 0) candidates.Add(AppData(DefaultsCandidateKind.WinePrefix, probe.KnownFolder, true));
             return new DefaultsResolution(
@@ -272,9 +276,16 @@ namespace CameraUnlock.Core.Config
             bool hasHome = IsUnixAbsolute(probe.Home);
             string home = hasHome ? probe.Home.TrimEnd('/') : string.Empty;
             var candidates = new List<DefaultsCandidate>();
-            if (IsUnixAbsolute(probe.XdgConfigHome)) candidates.Add(Native(probe.XdgConfigHome.TrimEnd('/'), home));
-            else if (hasHome) candidates.Add(Native(home + "/.config", home));
-            if (hasHome) candidates.Add(Native(home + "/Library/Application Support", home));
+            if (IsUnixAbsolute(probe.XdgConfigHome))
+            {
+                string xdg = probe.XdgConfigHome.TrimEnd('/');
+                candidates.Add(hasHome ? Native(xdg, home, "~") : Native(xdg, xdg, "$XDG_CONFIG_HOME"));
+            }
+            else if (hasHome)
+            {
+                candidates.Add(Native(home + "/.config", home, "~"));
+            }
+            if (hasHome) candidates.Add(Native(home + "/Library/Application Support", home, "~"));
             return new DefaultsResolution(
                 probe.Platform, candidates.ToArray(), candidates.Count == 0 ? "HOME is not set to an absolute path" : string.Empty,
                 string.Empty, string.Empty, string.Empty, NoPackage);
@@ -288,13 +299,13 @@ namespace CameraUnlock.Core.Config
                 @"%AppData%\CameraUnlock", "%AppData%");
         }
 
-        private static DefaultsCandidate Native(string parent, string home)
+        private static DefaultsCandidate Native(string parent, string root, string rootName)
         {
             string folder = parent + "/" + FolderName;
             string path = folder + "/" + FileName;
             return new DefaultsCandidate(
-                DefaultsCandidateKind.Native, false, path, folder, parent, Show(path, home, '/'), Show(folder, home, '/'),
-                Show(parent, home, '/'));
+                DefaultsCandidateKind.Native, false, path, folder, parent, Show(path, root, rootName, '/'),
+                Show(folder, root, rootName, '/'), Show(parent, root, rootName, '/'));
         }
 
         // The first XDG spelling that is absolute, as the dirs crate reads it, joined with the
@@ -342,11 +353,13 @@ namespace CameraUnlock.Core.Config
             return path.Length > 0 && path[0] == '/';
         }
 
-        private static string Show(string path, string home, char separator)
+        // The root is the home, shown as ~, or with no home known the XDG folder the path came
+        // from, shown as its variable, so an account name in either never reaches the log.
+        private static string Show(string path, string root, string rootName, char separator)
         {
-            bool underHome = home.Length > 0 && path.StartsWith(home, StringComparison.Ordinal)
-                && (path.Length == home.Length || path[home.Length] == separator);
-            return underHome ? "~" + path.Substring(home.Length) : path;
+            bool underRoot = root.Length > 0 && path.StartsWith(root, StringComparison.Ordinal)
+                && (path.Length == root.Length || path[root.Length] == separator);
+            return underRoot ? rootName + path.Substring(root.Length) : path;
         }
 
         private static string Named(DefaultsCandidate candidate)

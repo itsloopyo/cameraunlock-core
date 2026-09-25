@@ -142,8 +142,10 @@ std::string DefaultsUtf8(const std::wstring& text);
 DefaultsProbe ProbeDefaults();
 
 // Creates `folder`, the CameraUnlock folder, with CreateDirectoryW, so only that one level: its
-// parent must already exist. Returns 0 when the folder is there afterwards, whoever made it;
-// kDefaultsPathNotFound when its parent does not exist; any other Win32 error it failed with.
+// parent must already exist. Returns 0 when CreateDirectoryW created it or gave
+// ERROR_ALREADY_EXISTS, which a file of that name gives too, so the folder may not be there and
+// creating Defaults.ini in it then fails; kDefaultsPathNotFound when its parent does not exist;
+// any other Win32 error it failed with.
 std::uint32_t CreateDefaultsFolder(const std::wstring& folder);
 
 #endif

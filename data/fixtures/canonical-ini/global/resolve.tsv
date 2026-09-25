@@ -336,7 +336,7 @@ read	-
 create	-
 line	Defaults.ini: %AppData%\\CameraUnlock (this Wine prefix) could not be created: the folder cannot be written. The host's config folder none could not be used: WINEHOMEDIR is not set. Settings set to default use the built-in values.
 
-# XDG does not need the home; the host path is then shown as it is.
+# XDG does not need the home. With no home to show as ~, the XDG folder is shown by its variable.
 case	wine-no-winehomedir-with-xdg
 input	platform	wine
 input	known_folder	C:\\users\\ann\\AppData\\Roaming
@@ -345,14 +345,38 @@ input	host	Linux
 input	WINE_HOST_XDG_CONFIG_HOME	/home/ann/.config
 input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
 unix	/home/ann/.config/CameraUnlock
-candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	$WINE_HOST_XDG_CONFIG_HOME\\CameraUnlock\\Defaults.ini
 candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
 choice
 outcome	0	parent_missing
 outcome	1	created
 read	1
 create	-
-line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, created with the built-in values): the host's config folder Z:\\home\\ann\\.config\\CameraUnlock could not be used: Z:\\home\\ann\\.config does not exist.
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, created with the built-in values): the host's config folder $WINE_HOST_XDG_CONFIG_HOME\\CameraUnlock could not be used: $WINE_HOST_XDG_CONFIG_HOME does not exist.
+
+# A home no drive maps is no home to show as ~ either.
+case	wine-unix-home-with-xdg
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\unix\\home\\ann
+input	XDG_CONFIG_HOME	/home/ann/.config/
+input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
+unix	/home/ann/.config/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	$XDG_CONFIG_HOME\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: $XDG_CONFIG_HOME\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, the host's config folder, read)
+choice
+outcome	0	folder_failed	the folder cannot be written
+outcome	1	created
+read	1
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, created with the built-in values): the host's config folder $XDG_CONFIG_HOME\\CameraUnlock could not be used: it could not be created: the folder cannot be written.
 
 # No drive maps the home.
 case	wine-unix-home
@@ -585,11 +609,17 @@ candidate	native	no	/home/ann/Library/Application Support/CameraUnlock/Defaults.
 case	native-home-unset
 input	platform	native
 input	XDG_CONFIG_HOME	/home/ann/.config
-candidate	native	no	/home/ann/.config/CameraUnlock/Defaults.ini	/home/ann/.config/CameraUnlock/Defaults.ini
+candidate	native	no	/home/ann/.config/CameraUnlock/Defaults.ini	$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini
 choice
 read	-
 create	-
-line	Defaults.ini: no file at /home/ann/.config/CameraUnlock/Defaults.ini; on this system the mod reads Defaults.ini but does not create it. Settings set to default use the built-in values.
+line	Defaults.ini: no file at $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini; on this system the mod reads Defaults.ini but does not create it. Settings set to default use the built-in values.
+
+# The root folder names no account, and nothing is replaced.
+case	native-xdg-root
+input	platform	native
+input	XDG_CONFIG_HOME	/
+candidate	native	no	/CameraUnlock/Defaults.ini	/CameraUnlock/Defaults.ini
 
 case	native-home-relative
 input	platform	native

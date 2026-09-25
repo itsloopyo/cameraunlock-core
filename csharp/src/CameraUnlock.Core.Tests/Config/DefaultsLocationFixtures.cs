@@ -148,7 +148,12 @@ namespace CameraUnlock.Core.Tests.Config
 
             int invalid = DefaultsLocation.CreateFolder(dir + "\\bad?name");
             Require(invalid == ErrorInvalidName, "an invalid name gave " + invalid);
-            Require(Directory.GetFileSystemEntries(dir).Length == 1, "something besides CameraUnlock was created");
+
+            string file = Path.Combine(dir, "file");
+            File.WriteAllBytes(file, new byte[0]);
+            Require(DefaultsLocation.CreateFolder(file) == 0 && File.Exists(file) && !Directory.Exists(file),
+                "a file of that name did not give ERROR_ALREADY_EXISTS, counted as done");
+            Require(Directory.GetFileSystemEntries(dir).Length == 2, "something besides CameraUnlock and the file was created");
         }
 
         private static List<List<string[]>> Blocks(string root)
