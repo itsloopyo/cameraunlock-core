@@ -1,14 +1,8 @@
-// `cameraunlock_tests --probe-defaults-ini <game folder> [--probe-save]`, run by
-// `pixi run test-linux-probe` under Wine in a Linux container, where scripts/test-linux-probe.mjs
-// checks what it prints. Not part of the suite: it finds and creates the player's own Defaults.ini
-// through DefaultsFile::PerUser(), so it only ever runs where that is a scratch home.
-//
-// It prints tab-separated lines: the resolver's probed inputs, the candidates, whether each file
-// exists, the choice made from that before Load, then Load of the docs example's table over
-// CameraUnlock.ini in the game folder, every log line and status-sink message, with --probe-save
-// one Save of the yaw toggle, and last the path and SHA-256 of every file in the game folder and
-// in each candidate's folder. CameraUnlock.Core.FrameworkTests' Program has the same mode.
+// `cameraunlock_tests --probe-defaults-ini <game folder> [--probe-save]`. Not part of the suite: it
+// finds and creates the player's own Defaults.ini through DefaultsFile::PerUser(), so it only ever
+// runs where that is a scratch home.
 
+#include <cstring>
 #include <iostream>
 
 #ifdef _WIN32
@@ -196,9 +190,7 @@ void Probe(const std::wstring& folder, bool save) {
     Line("end", "ok");
 }
 
-}  // namespace
-
-int RunDefaultsIniProbe(const char* folder, bool save) {
+int RunProbe(const char* folder, bool save) {
     // Text mode would write each line break as CRLF.
     if (_setmode(_fileno(stdout), _O_BINARY) == -1) {
         Line("error", "standard output cannot be switched to binary mode");
@@ -213,11 +205,25 @@ int RunDefaultsIniProbe(const char* folder, bool save) {
     }
 }
 
+}  // namespace
+
 #else
 
-int RunDefaultsIniProbe(const char*, bool) {
+namespace {
+
+int RunProbe(const char*, bool) {
     std::cout << "error\tthe Defaults.ini probe runs on Windows or under Wine\n";
     return 1;
 }
 
+}  // namespace
+
 #endif  // _WIN32
+
+int RunDefaultsIniProbe(int argc, char** argv) {
+    if (argc < 3 || argc > 4 || (argc == 4 && std::strcmp(argv[3], "--probe-save") != 0)) {
+        std::cerr << "usage: cameraunlock_tests --probe-defaults-ini <game folder> [--probe-save]\n";
+        return 2;
+    }
+    return RunProbe(argv[2], argc == 4);
+}

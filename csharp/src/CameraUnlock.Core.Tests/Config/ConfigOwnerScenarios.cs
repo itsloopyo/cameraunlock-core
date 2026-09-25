@@ -157,7 +157,7 @@ namespace CameraUnlock.Core.Tests.Config
 
         /// <summary>
         /// The scenarios' table, header and legacy import over CameraUnlock.ini and HeadTracking.ini
-        /// in <paramref name="dir"/>, for the FrameworkTests Defaults.ini probe, which sets Defaults.
+        /// in <paramref name="dir"/>, with Defaults left unset.
         /// </summary>
         public static ConfigOwnerOptions<HeadTrackingConfigData> ImportOptions(string dir)
         {

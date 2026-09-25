@@ -19,7 +19,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `DefaultsFile.PerUser()`, the status, every log line and status-sink message, with `--probe-save`
   one `Save` of the yaw toggle and its status and reason, and last the path and SHA-256 of every file
   in the game folder and in each candidate's folder. `--probe-legacy` loads the owner scenarios' table
-  and legacy import over `HeadTracking.ini` instead. Exit 0 when the probe ran, 1 on an exception.
+  and legacy import over `HeadTracking.ini` instead. Exit 0 when the probe ran, and 1 with an
+  `error` line on an exception. A missing game folder or any other argument prints the usage to
+  standard error and exits 2.
   They find and create the player's own Defaults.ini, so no suite runs them; the container task does.
 - **`pixi run test-linux-probe`**, not part of `check` since it needs Docker with a Linux engine.
   It builds `containers/linux-probe` (Debian trixie pinned by digest, apt pinned to
@@ -30,11 +32,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   mounted read-only. Under Wine it runs the C++ probe and both FrameworkTests builds with a home
   whose name is not ASCII: `XDG_CONFIG_HOME` unset, set, relative, below a missing parent (with
   Wine's menu builder off, and as Wine starts by default), the host config folder unwritable, two
-  prefixes sharing one home, and a prefix file made before the host file. Natively on Mono it runs
-  both FrameworkTests builds over a legacy file, a `CameraUnlock.ini` and nothing, with Defaults.ini
-  at `$XDG_CONFIG_HOME`, `~/.config`, `~/Library/Application Support`, the first with the second,
-  the second with the third, and with `HOME` unset with and without `XDG_CONFIG_HOME`. Every case's
-  output is checked against its expectation and any difference fails the task. Output goes to
+  prefixes sharing one home, and a prefix file made before the host file. It also runs both
+  FrameworkTests builds over a legacy `HeadTracking.ini` against a hand-written host Defaults.ini,
+  where the migrated file writes `default` for the port the two agree on and values for the rest.
+  wine-mono runs both builds on its 4.0 runtime. Natively on Mono, which also runs both builds on
+  its 4.0 runtime, it runs them over a legacy file, a `CameraUnlock.ini` and nothing, with
+  Defaults.ini at `$XDG_CONFIG_HOME`, `~/.config`, `~/Library/Application Support`, the first with
+  the second, the second with the third, at none of them, and with `HOME` unset with and without
+  `XDG_CONFIG_HOME`. Every case's output is checked against its expectation, including that nothing
+  else reached standard output and nothing but Wine's own session-start line reached standard error,
+  and any difference fails the task. Output goes to
   `build-linux-probe/`.
 - The C++ docs example's config type moved to `cpp/tests/canonical_config_example.h`, so the probe
   loads the same table, and docs/canonical-config.md shows it as its own block. The test binary now

@@ -2,8 +2,7 @@
   <!-- The xunit suite runs on net8.0 only, so this console runs the file-system
        scenarios (the checked writer and the config owner, with killed-child runs of both) and the canonical INI reader, editor, key binding, value codec, config table, head-tracking table, Defaults.ini and its location, preferences and INI mutation fixtures, and the canonical config example, on the
        desktop Framework runtimes the library ships for: net35 runs on CLR 2.0, net472 on CLR 4.
-       `pixi run test-framework` runs both. DefaultsIniProbe.cs is the Defaults.ini probe mode
-       `pixi run test-linux-probe` runs under Wine and Mono. -->
+       `pixi run test-framework` runs both. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFrameworks>net35;net472</TargetFrameworks>

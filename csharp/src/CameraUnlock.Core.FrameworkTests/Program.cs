@@ -37,7 +37,7 @@ namespace CameraUnlock.Core.Tests
                 ConfigOwnerScenarios.RunInterruptedChild(args[1], args[2]);
                 return 0;
             }
-            if (args.Length >= 2 && args[0] == DefaultsIniProbe.Flag)
+            if (args.Length >= 1 && args[0] == DefaultsIniProbe.Flag)
             {
                 return DefaultsIniProbe.Run(args);
             }

@@ -37,6 +37,8 @@ const READ_ONLY = 'Settings are read but not saved on this system: this version 
 const NOT_SAVED = 'Settings not saved: this version saves settings only on Windows.';
 const MONO_NET35_WARNING = ['WARNING: The runtime version supported by this application is unavailable.',
   'Using default runtime: v4.0.30319'];
+const CLR4 = '4.0.30319.42000';
+const WINE_SESSION_NOISE = 'error: XDG_RUNTIME_DIR is invalid or not set in the environment.';
 
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const example = fs.readFileSync(path.join(FIXTURES, 'example', 'CameraUnlock.ini'));
@@ -45,6 +47,9 @@ const EXAMPLE_SAVED_SHA = sha(Buffer.from(
   example.toString('latin1').replace('WorldSpaceYaw=default', 'WorldSpaceYaw=false'), 'latin1'));
 const DEFAULTS_SHA = sha(fs.readFileSync(path.join(FIXTURES, 'global', 'Defaults.ini')));
 const HAND_WRITTEN_SHA = sha(Buffer.from('[Network]\r\nUdpPort=5151\r\n', 'latin1'));
+const MIGRATE_DEFAULTS_SHA = sha(Buffer.from('[Network]\r\nUdpPort=5151\r\n[Hotkeys]\r\nToggleKey=F8\r\n', 'latin1'));
+const MIGRATE_LEGACY_SHA = sha(Buffer.from(
+  '; tuned by hand\r\n[General]\r\nPort = 5151\r\nYawWorld = false\r\nSmoothng = 0.3\r\n[Position]\r\nPosition = false\r\n', 'latin1'));
 
 const MOUNTS = [
   [path.join(CONTEXT, 'run-case.sh'), '/probe/run-case.sh'],
@@ -82,7 +87,7 @@ function parse(stdout) {
     if (f[0] === 'step') {
       step = {
         input: {}, resolution: {}, runtime: {}, candidates: [], choice: {}, load: {}, log: [], sink: [], save: {},
-        saveLog: [], files: [], exit: null, end: false, error: [], stderr: [], other: [],
+        saveLog: [], files: [], exit: null, end: false, error: [], stderr: [], other: [], gameLines: [],
       };
       steps.set(f[1], step);
       continue;
@@ -117,6 +122,7 @@ function parse(stdout) {
       case 'error': step.error.push(f[1]); break;
       case 'exit': step.exit = Number(f[1]); break;
       case 'stderr': step.stderr.push(f.slice(1).join('\t')); break;
+      case 'game-line': step.gameLines.push(f.slice(1).join('\t')); break;
       default: step.other.push(line);
     }
   }
@@ -186,6 +192,18 @@ function created(step, where) {
 function prefixCreated(step, hostFolder, why) {
   return `Defaults.ini: ${PREFIX_FILE} (${wineName(step)}, this Wine prefix, created with the built-in values): `
     + `the host's config folder ${hostFolder} could not be used: ${why}.`;
+}
+
+// Every step of a Wine case prints only the probe's lines, and at most the one line Wine writes to
+// stderr when a session starts; wine-mono runs both FrameworkTests builds on its 4.0 runtime.
+function wineSteps(check, run, runtime) {
+  for (const [name, step] of run.steps) {
+    check.eq(step.other, [], `${name}: other output`);
+    check.that(step.stderr.length <= 1 && step.stderr.every((l) => l === WINE_SESSION_NOISE),
+      `${name}: stderr holds only Wine's session line, got ${JSON.stringify(step.stderr)}`);
+    if (runtime === 'cpp') check.eq(step.runtime, {}, `${name}: runtime lines`);
+    else check.eq([step.runtime.build, step.runtime.clr], [runtime, CLR4], `${name}: the build and CLR that ran`);
+  }
 }
 
 function wineCommon(check, step, name, versions) {
@@ -375,7 +393,41 @@ const WINE_CASES = {
     check.eq(b.get(prefixFile), a.get(prefixFile), 'host: the prefix file kept its bytes and write time');
     check.eq(fileSha(b, `${HOME}/.config/CameraUnlock/Defaults.ini`), HAND_WRITTEN_SHA, 'host: the host file is untouched');
   },
+
+  // A legacy file whose port equals the host Defaults.ini's, with a hand-written ToggleKey there that
+  // the untouched legacy keys differ from.
+  migrate(check, run, versions) {
+    const step = stepOf(check, run, 'migrate');
+    wineCommon(check, step, 'migrate', versions);
+    const legacy = 'C:\\game\\HeadTracking.ini';
+    if (step) {
+      check.eq(step.load.status, 'Migrated', 'migrate: load status');
+      check.eq(step.log[0], `Defaults.ini: ${HOST_FILE} (${wineName(step)}, the host's config folder, read)`,
+        'migrate: the location line');
+      check.that(step.log.includes(`${GAME}: created from ${legacy}, which is left as it was.`), 'migrate: the created-from line');
+      check.that(step.log.includes(`${legacy}: not carried: [General] Smoothng=0.3 on line 5, this build does not read it`),
+        'migrate: the not-carried line');
+      check.that(listed(step.log, `${GAME}: from Defaults.ini: `, 'UdpPort=5151'), 'migrate: UdpPort follows Defaults.ini');
+      check.eq(step.sink, [], 'migrate: status-sink messages');
+      const rows = step.gameLines.filter((l) => /^[A-Za-z]+=/.test(l));
+      check.eq(rows, ['ConfigFormat=1', 'UdpPort=default', 'EnableOnStartup=default', 'WorldSpaceYaw=false', 'RotationEnabled=true',
+        'PositionEnabled=false', 'ToggleKey=End, Ctrl+Shift+Y', 'LightMultiplier=default'], 'migrate: the migrated rows');
+    }
+    const a = snapOf(check, run, 'before');
+    const b = snapOf(check, run, 'migrate');
+    const host = `${HOME}/.config/CameraUnlock/Defaults.ini`;
+    check.eq(fileSha(a, host), MIGRATE_DEFAULTS_SHA, 'before: the hand-written host file');
+    check.eq(b.get(host), a.get(host), 'migrate: the host file kept its bytes and write time');
+    const legacyPath = '/tmp/prefix-a/drive_c/game/HeadTracking.ini';
+    check.eq(fileSha(a, legacyPath), MIGRATE_LEGACY_SHA, 'before: the legacy file');
+    check.eq(b.get(legacyPath), a.get(legacyPath), 'migrate: the legacy file kept its bytes and write time');
+    check.eq(under(b, `/tmp/prefix-a/${PREFIX_ROAMING}/CameraUnlock`), [], 'migrate: nothing in the prefix\'s AppData');
+    check.eq(under(b, '/tmp/prefix-a/drive_c/game'),
+      ['/tmp/prefix-a/drive_c/game', '/tmp/prefix-a/drive_c/game/CameraUnlock.ini', legacyPath], 'migrate: the game folder');
+  },
 };
+
+const WINE_RUNTIMES = { migrate: ['net35', 'net472'] };
 
 // ---- (b) native Mono ----
 
@@ -389,6 +441,11 @@ const PLACEMENTS = {
     message: 'Two Defaults.ini files: this game reads ~/.config/CameraUnlock/Defaults.ini and ignores '
       + '~/Library/Application Support/CameraUnlock/Defaults.ini.',
     reads: true,
+  },
+  none: {
+    line: 'Defaults.ini: no file at ~/.config/CameraUnlock/Defaults.ini or ~/Library/Application Support/CameraUnlock/Defaults.ini; '
+      + 'on this system the mod reads Defaults.ini but does not create it. Settings set to default use the built-in values.',
+    reads: false,
   },
   'home-unset': {
     line: 'Defaults.ini: no location: HOME is not set to an absolute path. Settings set to default use the built-in values.',
@@ -405,7 +462,8 @@ function nativeCase(state, placement) {
     for (const build of ['net35', 'net472']) {
       const step = stepOf(check, run, build);
       if (step) {
-        check.eq(step.runtime.build, build, `${build}: the build that ran`);
+        check.eq([step.runtime.build, step.runtime.clr], [build, CLR4], `${build}: the build and CLR that ran`);
+        check.eq(step.stderr, [], `${build}: stderr`);
         check.eq(step.input.platform, 'Native', `${build}: platform`);
         check.eq(step.input.HOME, placement.startsWith('home-unset') ? '' : HOME, `${build}: HOME`);
         check.eq([step.load.status, step.load.reason], ['ReadOnly', READ_ONLY], `${build}: load`);
@@ -467,8 +525,15 @@ function main() {
 
   const cases = [];
   for (const name of Object.keys(WINE_CASES)) {
-    for (const runtime of ['cpp', 'net35', 'net472']) {
-      cases.push({ id: `wine-${name}-${runtime}`, args: ['wine', name, runtime], check: WINE_CASES[name] });
+    for (const runtime of WINE_RUNTIMES[name] ?? ['cpp', 'net35', 'net472']) {
+      cases.push({
+        id: `wine-${name}-${runtime}`,
+        args: ['wine', name, runtime],
+        check: (check, run, versions) => {
+          WINE_CASES[name](check, run, versions);
+          wineSteps(check, run, runtime);
+        },
+      });
     }
   }
   for (const state of NATIVE_STATES) {

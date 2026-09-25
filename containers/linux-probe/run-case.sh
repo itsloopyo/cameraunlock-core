@@ -3,7 +3,8 @@
 # with no network, a read-only root, and tmpfs at /tmp (prefixes, game folders, the copied build)
 # and /home. It sets the case up, runs the probes, and prints tab-separated lines for the host to
 # check: `step` before each probe run, the probe's own lines, `exit` with its exit code, `stderr`
-# with what it wrote there, and `snap` for each file and folder under the roots a snapshot names.
+# with what it wrote there, `snap` for each file and folder under the roots a snapshot names, and
+# `game-line` for each line of a game file a case prints.
 #
 #   run-case.sh versions
 #   run-case.sh wine <case> <cpp|net35|net472>
@@ -12,6 +13,7 @@ set -euo pipefail
 
 HOME_DIR='/home/jösé-日本'
 PREFIX_ROAMING='drive_c/users/probe/AppData/Roaming'
+SNAPSHOT_PRUNE=()
 
 # Run from Docker Desktop's bind mount of the Windows host, the C++ test binary faulted at its
 # entry point under Wine; from tmpfs it runs. So every binary runs from a tmpfs copy.
@@ -70,7 +72,7 @@ snapshot() {
         while IFS= read -r -d '' path; do
             if [ -f "$path" ]; then sha=$(sha256sum "$path" | cut -d' ' -f1); else sha=folder; fi
             printf 'snap\t%s\t%s\t%s\t%s\n' "$label" "$path" "$sha" "$(stat -c '%y %a' "$path")"
-        done < <(find "$root" -path "$HOME_DIR/.cache" -prune -o \( -type f -o -type d \) -print0 | sort -z)
+        done < <(find "$root" "${SNAPSHOT_PRUNE[@]}" \( -type f -o -type d \) -print0 | sort -z)
     done
 }
 
@@ -79,15 +81,30 @@ defaults_file() {
     printf '[Network]\r\nUdpPort=%s\r\n' "$2" > "$1/Defaults.ini"
 }
 
+legacy_file() {
+    printf '; tuned by hand\r\n[General]\r\nPort = %s\r\nYawWorld = false\r\nSmoothng = 0.3\r\n[Position]\r\nPosition = false\r\n' \
+        "$2" > "$1/HeadTracking.ini"
+}
+
 run_wine() {
     local case_name=$1 runtime=$2
     local a=/tmp/prefix-a b=/tmp/prefix-b
+    SNAPSHOT_PRUNE=(-path "$HOME_DIR/.cache" -prune -o)
     export HOME=$HOME_DIR
     mkdir "$HOME"
     unset XDG_CONFIG_HOME
     new_prefix "$a"
     local roots=("$HOME" "$a/$PREFIX_ROAMING" "$a/drive_c/game")
     case "$case_name" in
+        migrate)
+            mkdir -p "$HOME/.config/CameraUnlock"
+            printf '[Network]\r\nUdpPort=5151\r\n[Hotkeys]\r\nToggleKey=F8\r\n' > "$HOME/.config/CameraUnlock/Defaults.ini"
+            legacy_file "$a/drive_c/game" 5151
+            snapshot before "${roots[@]}"
+            wine_probe migrate "$a" "$runtime" --probe-legacy
+            snapshot migrate "${roots[@]}"
+            sed 's/\r$//; s/^/game-line\t/' "$a/drive_c/game/CameraUnlock.ini"
+            ;;
         home)
             mkdir "$HOME/.config"
             wine_probe create "$a" "$runtime"
@@ -182,6 +199,7 @@ run_native() {
             defaults_file "$HOME/.config/CameraUnlock" 5151
             defaults_file "$HOME/Library/Application Support/CameraUnlock" 6262
             ;;
+        none) ;;
         home-unset)
             defaults_file "$HOME/.config/CameraUnlock" 6262
             ;;
@@ -199,8 +217,7 @@ run_native() {
     local flags=(--probe-save)
     case "$state" in
         legacy)
-            printf '; tuned by hand\r\n[General]\r\nPort = 5555\r\nYawWorld = false\r\nSmoothng = 0.3\r\n[Position]\r\nPosition = false\r\n' \
-                > "$game/HeadTracking.ini"
+            legacy_file "$game" 5555
             flags+=(--probe-legacy)
             ;;
         canonical)

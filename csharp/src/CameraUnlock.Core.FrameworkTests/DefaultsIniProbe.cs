@@ -10,20 +10,9 @@ using CameraUnlock.Core.Tests.Config;
 namespace CameraUnlock.Core.Tests
 {
     /// <summary>
-    /// <c>--probe-defaults-ini &lt;game folder&gt; [--probe-save] [--probe-legacy]</c>, the probe the C++
-    /// test binary has under the same name, run by <c>pixi run test-linux-probe</c> under Wine and
-    /// natively on Mono in Linux containers, where scripts/test-linux-probe.mjs checks what it prints.
-    /// Not part of the suite: it finds, and on Windows and under Wine creates, the player's own
-    /// Defaults.ini through <see cref="DefaultsFile.PerUser"/>, so it only ever runs where that is a
-    /// scratch home.
-    /// <para>
-    /// It prints tab-separated lines: the runtime, the resolver's probed inputs, the candidates,
-    /// whether each file exists, the choice made from that before Load, then Load over
-    /// CameraUnlock.ini in the game folder, every log line and status-sink message, with
-    /// --probe-save one Save of the yaw toggle, and last the path and SHA-256 of every file in the
-    /// game folder and in each candidate's folder. The owner loads the docs example's table, or with
-    /// --probe-legacy the ConfigOwnerScenarios table and legacy import over HeadTracking.ini.
-    /// </para>
+    /// <c>--probe-defaults-ini &lt;game folder&gt; [--probe-save] [--probe-legacy]</c>. Not part of the
+    /// suite: it finds, and on Windows and under Wine creates, the player's own Defaults.ini through
+    /// <see cref="DefaultsFile.PerUser"/>, so it only ever runs where that is a scratch home.
     /// </summary>
     internal static class DefaultsIniProbe
     {
@@ -31,17 +20,37 @@ namespace CameraUnlock.Core.Tests
 
         internal static int Run(string[] args)
         {
-            string folder = args[1];
             bool save = false;
             bool legacy = false;
             foreach (string flag in args.Skip(2))
             {
                 if (flag == "--probe-save") save = true;
                 else if (flag == "--probe-legacy") legacy = true;
-                else throw new ArgumentException("unknown argument " + flag);
+                else return Usage();
             }
+            if (args.Length < 2) return Usage();
 
             var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
+            try
+            {
+                Probe(output, args[1], save, legacy);
+                return 0;
+            }
+            catch (Exception e)
+            {
+                Line(output, "error", e.ToString());
+                return 1;
+            }
+        }
+
+        private static int Usage()
+        {
+            Console.Error.WriteLine("usage: CameraUnlock.Core.FrameworkTests.exe " + Flag + " <game folder> [--probe-save] [--probe-legacy]");
+            return 2;
+        }
+
+        private static void Probe(TextWriter output, string folder, bool save, bool legacy)
+        {
 #if NET35
             Line(output, "runtime", "build", "net35");
 #else
@@ -107,7 +116,6 @@ namespace CameraUnlock.Core.Tests
             Files(output, folder);
             foreach (DefaultsCandidate candidate in resolution.Candidates) Files(output, candidate.Folder);
             Line(output, "end", "ok");
-            return 0;
         }
 
         private static void Owner<T>(TextWriter output, ConfigOwnerOptions<T> options, bool save) where T : HeadTrackingConfigData

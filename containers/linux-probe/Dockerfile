@@ -1,5 +1,9 @@
 FROM debian@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 
+# apt runs the packages' maintainer scripts here, as root and with the network, because it has no
+# way to skip them and still leave the packages configured. Among them, libwine's writes Wine's
+# builtin zlib1.dll from libz-mingw's, and wine's and mono-runtime's set up /usr/bin alternatives.
+# Nothing is installed or downloaded when a case runs.
 RUN rm /etc/apt/sources.list.d/debian.sources \
  && printf '%s\n' \
     'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian/20260911T000000Z' 'Suites: trixie trixie-updates' \
