@@ -29,8 +29,8 @@
     "A hotkey concept no flat reader reads has its `canonical_default` as its `default`.",
     "",
     "`non_canonical_keys` names settings no canonical file carries that are not concepts: the",
-    "tracker owns pose shaping, and deadzones, response curves and unit scales were never schema",
-    "concepts. Their spellings are not aliases, so neither flat reader resolves them and nothing",
+    "tracker owns pose shaping, and deadzones and response curves were never schema concepts.",
+    "Their spellings are not aliases, so neither flat reader resolves them and nothing",
     "binds them to a field. A group's `sections` are sections that hold only such settings: any",
     "key in one is the group's, whatever it is spelled. A canonical table refuses a game-local",
     "row named by a spelling or in such a section, applying a canonical file reports either as",
@@ -61,6 +61,10 @@
     {
       "spellings": ["BindAddress", "CyclePort", "LogToFile", "ShowNotifications", "FieldOfView", "FovOffset"],
       "reason": "Real cross-repo concepts with no field in HeadTrackingConfigData or its C++ twin to bind to. Aliasing a key onto nothing would advertise a setting that does not work. Each needs a concept and a field before it gets an alias."
+    },
+    {
+      "spellings": ["PositionScale", "PositionScaleUU", "PosScale", "WorldScale", "UnitsPerMeter", "UnitsPerMetre", "WorldUnitsPerMeter", "WorldUnitsPerMetre"],
+      "reason": "Game units per metre of head movement. Fleet spellings on 2026-09-25: PositionScale (dishonored, dishonored-definitive-edition, homeworld-remastered-collection, persona-5-royal, red-eclipse, spec-ops-the-line, thief), PositionScaleUU (mirrors-edge), pos_scale (dead-rising-2, mafia-ii-definitive-edition), WorldScale (black-and-white, black-mesa, half-life-2, portal, portal-2, titanfall-2), UnitsPerMeter (quake-ii-rtx) and world_units_per_metre (a-plague-tale-innocence). Not a concept: each game's units differ, so there is no fleet default to share. Not in non_canonical_keys either: the owner's pose_shaping approval names sensitivities, deadzones, response curves and axis inversion, not unit scales, so whether a scale the player can edit is dropped like a sensitivity is still the owner's to decide. Until then a conversion can keep a game's scale as an Engine row or a local row."
     }
   ],
   "default_conflicts": [
@@ -624,13 +628,6 @@
       "spellings": ["ResponseCurve", "YawCurve", "PitchCurve", "RollCurve", "SensitivityCurve", "CurveStrength"],
       "doc": "Response curves are pose shaping, which the tracker owns. SensitivityCurve and CurveStrength are the names core's own AxisConfig profile format writes (ProfileSerializer, as AxisMapping.<Axis>.SensitivityCurve). No fleet config file read a curve on 2026-09-25; the other spellings are the plain names a mod would give one.",
       "canonical_reason": "The mod applies the head pose as the tracker sends it, with no response curve of its own."
-    },
-    {
-      "id": "PositionScale",
-      "sections": [],
-      "spellings": ["PositionScale", "PositionScaleUU", "PosScale", "WorldScale", "UnitsPerMeter", "UnitsPerMetre", "WorldUnitsPerMeter", "WorldUnitsPerMetre"],
-      "doc": "Game units per metre of head movement. Converting the tracker's metres to the engine's units is the mod's boundary code, not a setting: a player-edited scale is a position sensitivity under another name (homeworld-remastered-collection's PositionScale comment tells players to raise it for stronger parallax, black-and-white calls WorldScale its main tuning knob). Fleet spellings on 2026-09-25: PositionScale (dishonored, dishonored-definitive-edition, homeworld-remastered-collection, persona-5-royal, red-eclipse, spec-ops-the-line, thief), PositionScaleUU (mirrors-edge), pos_scale (dead-rising-2, mafia-ii-definitive-edition), WorldScale (black-and-white, black-mesa, half-life-2, portal, portal-2, titanfall-2), UnitsPerMeter (quake-ii-rtx) and world_units_per_metre (a-plague-tale-innocence). The conversion folds the shipped value into the mod's code.",
-      "canonical_reason": "The mod converts your head movement to the game's units itself, so the scale is not a setting."
     }
   ]
 }

@@ -39,17 +39,20 @@ diagnostic either. And several pose-shaping spellings the fleet and core use wer
   carry any of them as a game-local row with no diagnostic. The gates still match listed spellings
   only, so a sensitivity under a name no group lists passes them; the group's doc and
   docs/canonical-config.md say so.
-- New group `PositionScale`: `PositionScale`, `PositionScaleUU`, `PosScale`, `WorldScale`,
-  `UnitsPerMeter`, `UnitsPerMetre`, `WorldUnitsPerMeter`, `WorldUnitsPerMetre`. Converting the
-  tracker's metres to the game's units is the mod's boundary code; a scale the player can edit is a
-  position sensitivity under another name. `PositionScale`, `WorldScale` and `UnitsPerMeter` leave
-  `deliberately_unaliased`, whose reason (a concept still to come) pointed the other way.
+- Unit scales (`PositionScale`, `PositionScaleUU`, `PosScale`, `WorldScale`, `UnitsPerMeter`,
+  `UnitsPerMetre`, `WorldUnitsPerMeter`, `WorldUnitsPerMetre`) have a `deliberately_unaliased`
+  entry of their own, with the fleet repos that read each, and are in no `non_canonical_keys`
+  group. The owner's `pose_shaping` approval names sensitivities, deadzones, response curves and
+  axis inversion, not unit scales, so whether a scale the player can edit is dropped like a
+  sensitivity waits on the owner; meanwhile a table accepts one as a local row and the lint passes
+  it, so a conversion can keep a game's scale as an Engine or local row. `PositionScale`,
+  `WorldScale` and `UnitsPerMeter` leave the entry whose reason promised them a concept.
 - `deliberately_unaliased` and the `Deadzone` group's doc no longer give conflicting counts: the
   nine repos that read `[Deadzone] Yaw` are named, and they all read `[Sensitivity] Yaw` too. The
   `DeadzoneDeg` and `ResponseCurve` docs say who reads what.
-- `data/fixtures/canonical-ini/table/apply-unknown` adds `[Sensitivity] Pitch`, `[Network]
-  WorldScale`, `[Deadzone] Yaw` and `Threshold`, and a `[Tuning]` section with `rot_scale` and
-  `SignYaw`.
+- `data/fixtures/canonical-ini/table/apply-unknown` adds `[Sensitivity] Pitch`, `[Deadzone] Yaw`
+  and `Threshold`, a `[Tuning]` section with `rot_scale`, `SignYaw`, `YawGain`,
+  `PositionSensitivity` and `LeanScale`, and `[Network] WorldScale`, an ordinary `UnknownKey`.
 - The shared table fixture's `[Position] LeanScale` row, a position multiplier under another
   name, is `[Position] LeanTraceLength` now (float, 0 to 2, default `1.0`), and `LeanDelayMs`'s
   comment reads `Milliseconds before a lean starts, and the metres its wall trace reaches.` A port

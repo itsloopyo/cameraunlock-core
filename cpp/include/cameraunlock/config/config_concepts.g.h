@@ -480,14 +480,6 @@ inline constexpr NonCanonicalKey kNonCanonicalKeys[] = {
     {"ResponseCurve", "rollcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
     {"ResponseCurve", "sensitivitycurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
     {"ResponseCurve", "curvestrength", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
-    {"PositionScale", "positionscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
-    {"PositionScale", "positionscaleuu", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
-    {"PositionScale", "posscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
-    {"PositionScale", "worldscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
-    {"PositionScale", "unitspermeter", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
-    {"PositionScale", "unitspermetre", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
-    {"PositionScale", "worldunitspermeter", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
-    {"PositionScale", "worldunitspermetre", "The mod converts your head movement to the game's units itself, so the scale is not a setting."},
 };
 
 inline constexpr std::size_t kNonCanonicalKeyCount = sizeof(kNonCanonicalKeys) / sizeof(kNonCanonicalKeys[0]);

@@ -1,11 +1,12 @@
 # Unknown sections draw one diagnostic each, however many headers; their plain keys draw none.
 # Unknown keys in a section the table reads draw one each. A key naming a retired or non-canonical
 # concept (by any alias, under the schema normalisation), or spelled as the schema's
-# non_canonical_keys lists (a sensitivity, a deadzone, a response curve, a unit scale, an axis
-# sign), says so in any section. So does every other key in a section a non_canonical_keys group
-# lists ([Sensitivity], [Deadzone]), whatever it is spelled. So does a key naming a row of the
-# table in another section, or a concept row by an alias: it names the row. [CameraUnlock] keys
-# are core's and draw nothing. A concept key this table does not bind is an unknown key.
+# non_canonical_keys lists (a sensitivity, a deadzone, a response curve, an axis sign), says so in
+# any section. So does every other key in a section a non_canonical_keys group lists
+# ([Sensitivity], [Deadzone]), whatever it is spelled. So does a key naming a row of the table in
+# another section, or a concept row by an alias: it names the row. [CameraUnlock] keys are core's
+# and draw nothing. A concept key this table does not bind is an unknown key, and so is a unit
+# scale (WorldScale), which no list names.
 field	ToggleKey	Insert
 field	UdpPort	4242
 field	PositionEnabled	true
@@ -49,7 +50,7 @@ diagnostic	UnknownSection	30	Line 30: [Netwrok] is not a section this mod reads,
 diagnostic	MisplacedKey	31	Line 31: [Netwrok] UdpPort is ignored. This mod reads it as [Network] UdpPort.
 diagnostic	MisplacedKey	34	Line 34: [Network] OpenTrackPort is ignored. This mod reads it as [Network] UdpPort.
 diagnostic	NonCanonicalConcept	35	Line 35: [Network] ResponseCurve is ignored. The mod applies the head pose as the tracker sends it, with no response curve of its own.
-diagnostic	NonCanonicalConcept	36	Line 36: [Network] WorldScale is ignored. The mod converts your head movement to the game's units itself, so the scale is not a setting.
+diagnostic	UnknownKey	36	Line 36: [Network] WorldScale is not a setting this mod reads, so it is ignored.
 diagnostic	UnknownSection	37	Line 37: [Deadzone] is not a section this mod reads, so everything in it is ignored.
 diagnostic	NonCanonicalConcept	38	Line 38: [Deadzone] DeadzoneYaw is ignored. The mod applies the head pose as the tracker sends it, with no deadzone of its own.
 diagnostic	NonCanonicalConcept	39	Line 39: [Deadzone] Yaw is ignored. The mod applies the head pose as the tracker sends it, with no deadzone of its own.

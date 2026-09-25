@@ -437,10 +437,9 @@ void TestConstructionChecks() {
               std::string("a local key named ") + key + " throws");
     }
     for (const char* key : {"PositionScale", "WorldScale", "UnitsPerMeter"}) {
-        Check(Contains(Thrown([&] { ConfigTable<S>().Local("Camera", key, &S::value, IntCodec<int>(), "One."); }),
-                       "names a setting a canonical file does not carry, so a game-local row cannot use it: The mod "
-                       "converts your head movement to the game's units itself"),
-              std::string("a local key named ") + key + " throws");
+        Check(Thrown([&] { ConfigTable<S>().Local("Camera", key, &S::value, IntCodec<int>(), "One."); }) ==
+                  "(nothing thrown)",
+              std::string("a local key named ") + key + " is accepted");
     }
     for (const schema::NonCanonicalKey& other : schema::kNonCanonicalKeys) {
         Check(cameraunlock::ResolveConfigKey(other.normalized) == nullptr,

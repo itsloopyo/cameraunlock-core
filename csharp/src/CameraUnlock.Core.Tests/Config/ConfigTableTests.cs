@@ -167,11 +167,9 @@ namespace CameraUnlock.Core.Tests.Config
         [InlineData("PositionScale")]
         [InlineData("WorldScale")]
         [InlineData("UnitsPerMeter")]
-        public void LocalKeysNamingAUnitScaleThrow(string key)
+        public void LocalKeysNamingAUnitScaleAreAccepted(string key)
         {
-            var e = Assert.Throws<ArgumentException>(() => WithOffset(NewTable(), "Camera", key, "One."));
-            Assert.Contains("names a setting a canonical file does not carry, so a game-local row cannot use it: The mod "
-                + "converts your head movement to the game's units itself", e.Message);
+            Assert.Contains(key + "=5", Rendered(WithOffset(NewTable(), "Camera", key, "One."), new Small()));
         }
 
         [Fact]
