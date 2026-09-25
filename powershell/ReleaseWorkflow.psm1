@@ -1319,18 +1319,19 @@ function Assert-LauncherManifestDelivery {
 .SYNOPSIS
     Fails packaging when launcher-manifest.json breaks a config rule of
     scripts/check-config-descriptor.mjs: a config block that breaks the
-    descriptor rules, stale rows included, or, in a converted repo with a
-    block or without one, a seed or files[] row that writes CameraUnlock.ini,
-    the legacy file or a file named like the committed config.
+    descriptor rules, a rows field or a stale per_game included, or, in a
+    converted repo with a block or without one, a seed or files[] row that
+    writes CameraUnlock.ini, the legacy file or a file named like the
+    committed config.
 .DESCRIPTION
-    The block tells a launcher which file to manage and what the mod's defaults
-    are. Rows that no longer match the committed config make the launcher read
-    a fresh file as changed by the player, so it never writes it. A converted
-    release seeds nothing: a seeded CameraUnlock.ini stops the legacy import on
-    an update, and a seeded legacy file is imported on a fresh install. The
-    same rules run in validate-manifest on the built ZIP, which most package
-    scripts never call; this runs from Copy-SharedBundle so they hold in every
-    one.
+    The block tells a launcher where the mod's CameraUnlock.ini is and which of
+    its rows the game keeps for itself, with the values the committed config
+    holds there. A per_game that no longer matches the committed config shows
+    the player a value the game does not use. A converted release seeds
+    nothing: a seeded CameraUnlock.ini stops the legacy import on an update,
+    and a seeded legacy file is imported on a fresh install. The same rules
+    run in validate-manifest on the built ZIP, which most package scripts
+    never call; this runs from Copy-SharedBundle so they hold in every one.
 
     Whether a repo is converted is decided by the [CameraUnlock] stamp in its
     committed config, which only the node checker reads, so every repo with a
@@ -1358,7 +1359,7 @@ function Assert-LauncherManifestConfig {
     $global:LASTEXITCODE = 0
     $output = (& $node.Source $script --package $RepoRoot | Out-String).TrimEnd()
     if ($LASTEXITCODE -ne 0) {
-        throw "launcher-manifest.json breaks the config rules (docs/canonical-config.md, The config descriptor). render-config rewrites stale rows; a seed or files[] row of the config comes out of the manifest by hand.`n$output"
+        throw "launcher-manifest.json breaks the config rules (docs/canonical-config.md, The config descriptor). render-config rewrites a stale per_game, and a rows field is replaced with `"per_game`": {} by hand; a seed or files[] row of the config comes out of the manifest by hand.`n$output"
     }
     if ($output) { Write-Host $output }
 }

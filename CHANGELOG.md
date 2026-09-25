@@ -9,6 +9,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - BREAKING - the config descriptor lists per-game rows, not preference values
+
+A launcher now writes no game file: it edits Defaults.ini and reads a game's `CameraUnlock.ini`
+for display only. So the `config` block in `launcher-manifest.json` no longer carries the
+preference values a launcher once wrote. It holds `path`, `anchor`, `legacy_source`,
+`canonical_since` and `per_game`, and nothing else (docs/canonical-config.md, "The config
+descriptor").
+
+- **`per_game`** maps each concept id `data/config-format.json` `per_game` lists for the repo to the
+  value text the committed file holds on that row, and is `{}` for a repo with none. A launcher
+  uses it to show which rows a game keeps as its own and their values, including where the file
+  holds `default` or leaves the row out.
+- **`scripts/check-config-descriptor.mjs`** refuses `rows` by name, and fails a `per_game` whose ids
+  are not exactly the repo's `per_game` rows (a missing id and an extra one both fail), a value
+  that is not the committed file's text on the row, a value that is not text, and a value that is
+  `default` in any case. A `per_game` row the committed file holds `default` on, or has no line
+  for, fails too. A row commented out the way the renderer writes an Engine row marked
+  `PerGame()` at its default holds the commented value. The five launcher rows, their `true` or
+  `false` rule, the tracking pair against `preference_modes`, the `PositionAllowed=false`
+  exception and the rule that a committed `WorldSpaceYaw` away from the schema default needs a
+  `per_game` entry are gone: `RenderFresh`'s schema-default gate and the lint's `per_game` rule
+  hold a game's own rows now. A fresh render's `default` rows no longer draw a descriptor problem.
+  The rules for `path`, `anchor`, `legacy_source`, `canonical_since`, `delivery_mode`, one config
+  file and no seed are unchanged. `expectedRows` and `LAUNCHER_ROWS` are replaced by
+  `expectedPerGame`.
+- **`scripts/encode-seed.mjs`** writes `per_game` in place of `rows`, from `data/config-format.json`
+  and the committed file, one row per line, changing no other byte of the manifest; `--check`
+  exits 1 when `per_game` is stale. It refuses a block that still has `rows`. `encodeRows` is now
+  `encodePerGame`.
+- **`validate-manifest`**, conformance's **`config-descriptor`** check and
+  **`Assert-LauncherManifestConfig`** (run by `Copy-SharedBundle`) share those rules, so each refuses
+  `rows` and a stale `per_game`. `Assert-LauncherManifestConfig` takes the same parameters as before.
+  The `ConvertFrom-Json` / `ConvertTo-Json -Depth 10` round trip packaging uses to stamp
+  `mod_info.version` keeps `per_game` intact, `{}` included; `pixi run test-config-descriptor` runs
+  it.
+
+What a consuming repo changes. No manifest in the fleet carried a `config` block on 2026-09-26, so
+nothing has to be migrated. A converted repo delivered by manifest writes its block with
+`"per_game": {}` in place of `rows` and runs `render-config`, which fills `per_game` through
+encode-seed. `Assert-LauncherManifestConfig` and `validate-manifest` refuse a block with `rows`.
+
 ### Changed - BREAKING - committed configs hold `default` rows, and `per_game` replaces `descriptor_omits` and `hotkey_exceptions`
 
 - **The canonical config lint** (`scripts/check-canonical-config.mjs`, which conformance runs as

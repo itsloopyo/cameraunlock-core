@@ -1024,21 +1024,17 @@ that edits one follows the owner's rules:
 
 ### The config descriptor
 
-A package tells a launcher where its canonical file is, and which of the launcher's preference
-rows the mod binds, with a top-level `config` block in `launcher-manifest.json`:
+A package tells a launcher where its canonical file is, and which of its rows the game keeps for
+itself, with a top-level `config` block in `launcher-manifest.json`:
 
 ```text
 "config": {
   "path": "BepInEx/config/CameraUnlock.ini",
   "anchor": "game_root",
-  "legacy_source": "BepInEx/config/com.cameraunlock.valheim.headtracking.cfg",
+  "legacy_source": "BepInEx/config/com.cameraunlock.subnautica.headtracking.cfg",
   "canonical_since": "1.1.0",
-  "rows": {
-    "EnableOnStartup": true,
-    "WorldSpaceYaw": true,
-    "RotationEnabled": true,
-    "PositionEnabled": true,
-    "TrueFreeLook": false
+  "per_game": {
+    "WorldSpaceYaw": "false"
   }
 }
 ```
@@ -1053,9 +1049,15 @@ The paths and version above show the shape; each repo's come from its own entry 
   where `data/config-format.json` records one.
 - `canonical_since` is the first version of the mod that shipped the canonical file, present
   exactly when the repo is in `legacy`. A launcher can warn before installing an older version.
-- `rows` maps `data/config-schema.json` concept ids to the committed file's values. The ids a
-  launcher reads are `EnableOnStartup`, `WorldSpaceYaw`, `RotationEnabled`, `PositionEnabled`
-  and `TrueFreeLook`.
+- `per_game` maps each concept id `data/config-format.json` `per_game` lists for the repo to the
+  value text the committed file holds on that row, and is `{}` for a repo with none. Those are the
+  rows the game keeps for itself: its table marks them `PerGame()`, so `default` there means the
+  game's own value and Defaults.ini never reaches them.
+
+A launcher writes no game file. It edits Defaults.ini, and reads a game's `CameraUnlock.ini` for
+display only: `per_game` tells it which of the game's rows are the game's own and what they hold
+when the file says `default`, leaves the row out or holds a value the mod refuses. Every other
+concept row in the file follows Defaults.ini unless the file sets a value on it.
 
 There is no format field: the file's `[CameraUnlock] ConfigFormat` names the dialect. A package
 with more than one config file carries no block, and no variant carries one.
@@ -1063,14 +1065,14 @@ with more than one config file carries no block, and no variant carries one.
 `scripts/check-config-descriptor.mjs` holds every rule, and `pixi run validate-manifest` runs them
 on the built ZIP against the repo it was built from:
 
-- The block has those five fields and no other; `path` and `legacy_source` are relative, with no
-  `\`, drive, root, empty, `.` or `..` segment; `anchor` is one of the three.
+- The block has those five fields and no other. A `rows` field, the preference values the block
+  carried before a launcher stopped writing game files, is refused by name. `path` and
+  `legacy_source` are relative, with no `\`, drive, root, empty, `.` or `..` segment; `anchor` is
+  one of the three.
 - `path` names `CameraUnlock.ini`, the fleet's one config name. No `v*` release from before the
-  canonical format reads a file of that name, so a launcher that manages it leaves alone the file
-  an older version of the mod reads after a rollback.
-- `rows` names only the five concepts, each `true` or `false`; `RotationEnabled` only beside
-  `PositionEnabled`; and the two of them together are a pair `preference_modes` in
-  `data/pipeline-conformance.json` lists.
+  canonical format reads a file of that name, so a launcher that reads it never mistakes it for
+  the file an older version of the mod reads after a rollback.
+- `per_game` is an object whose values are text, and no value is `default` in any case.
 - `canonical_since` is written `x.y.z` and is not above `mod_info.version`. A pre-release sorts
   below its release, so a `1.1.0-rc1` build cannot carry `canonical_since` `1.1.0`.
 - `delivery_mode` is `manifest` or `manifest_variants`.
@@ -1083,27 +1085,27 @@ on the built ZIP against the repo it was built from:
 - The manifest seeds no config and ships none through `files[]`. That rule holds for every
   converted repo, with a block or without one (Launcher seeds, under "Install, uninstall and
   manual packages").
-- `rows` holds every one of the five concepts the committed file has as a line, with the
-  committed value (the renderer writes `true` or `false`), and no other. Two exceptions. When the
-  committed file has `PositionAllowed=false`, `rows` has neither `RotationEnabled` nor
-  `PositionEnabled`. And a row `data/config-format.json` `per_game` lists for the repo is left
-  out, so a launcher never sets it: `per_game` names the rows a game keeps for itself, each with
-  its reason and the date the owner approved it, such as `WorldSpaceYaw` for a game whose default
-  differs from the fleet's on purpose because it has no stable up (Subnautica, where the player
-  swims). An omission has to be listed there, so a row dropped by accident still fails, and a
-  committed `WorldSpaceYaw` away from the `data/config-schema.json` default fails unless it is
-  listed, so a game that differs is not handed to a launcher's global.
+- `per_game` names exactly the ids `data/config-format.json` `per_game` lists for the repo: a
+  missing id and an extra one both fail. Each value is the committed file's text on the row, as
+  the reader returns it, so a stale value fails, and the committed file holds a value there, never
+  `default`. A row the renderer comments out (`; CollisionChannel=3`, an Engine row marked
+  `PerGame()` at its default) holds the commented value. An entry in `data/config-format.json`
+  needs the owner's approval date, so a game cannot keep a row for itself by accident.
 
 `path`, `anchor`, `legacy_source` and `canonical_since` are written by hand at the conversion,
-with `"rows": {}`. `scripts/encode-seed.mjs`, which `render-config` runs, then writes `rows` from
-the committed file and changes no other byte of the manifest; `--check` exits 1 when `rows` is
-stale.
+with `"per_game": {}`. `scripts/encode-seed.mjs`, which `render-config` runs, then writes
+`per_game` from `data/config-format.json` and the committed file and changes no other byte of the
+manifest; `--check` exits 1 when `per_game` is stale. It refuses a block that still has `rows`,
+which is replaced with `"per_game": {}` by hand.
 
 No rule compares the block with what the mod's code reads: the rules compare it with
 `data/config-format.json`, which records `CameraUnlock.ini`. A repo whose build still reads its
 legacy file moves its owner to `CameraUnlock.ini`, with the legacy file as the owner's legacy
 path, before it adds the block or re-renders its README config block, or in the same change.
-Either one written first passes every check and describes a file the build does not read.
+Either one written first passes every check and describes a file the build does not read. That the rows the
+block lists are the rows the table marks `PerGame()` is held through the committed file:
+`render-config` writes a value on a `PerGame()` row and `default` on every other concept row, and
+the lint fails a value on a row `per_game` does not list and `default` on one it lists.
 
 Conformance's `config-descriptor` check runs the same rules on the committed manifest, except
 the one against `mod_info.version`, which packaging stamps. It also fails a converted repo
@@ -1114,11 +1116,12 @@ carries no stamp. A shallow clone has no tags, and the check warns that it did n
 
 Packaging stamps `mod_info.version` by reading the manifest with `ConvertFrom-Json` and writing it
 with `ConvertTo-Json -Depth 10`; `pixi run test-config-descriptor` runs that round trip over a
-block and compares the result. `Copy-SharedBundle` runs the same rules on the committed manifest
-through `Assert-LauncherManifestConfig`, so a package script that never calls validate-manifest
-still refuses stale `rows`, and in a converted repo, with a block or without one, a seed or
-`files[]` row of `CameraUnlock.ini` or the legacy file. A converted repo with no block yet fails
-conformance and still packages. Whether a repo is converted is read from its committed config by
+block with a `per_game` row and one with `{}` and compares the results. `Copy-SharedBundle` runs
+the same rules on the committed manifest through `Assert-LauncherManifestConfig`, so a package
+script that never calls validate-manifest still refuses `rows` and a stale `per_game`, and in a
+converted repo, with a block or without one, a seed or `files[]` row of `CameraUnlock.ini` or the
+legacy file. A converted repo with no block yet fails conformance and still packages. Whether a
+repo is converted is read from its committed config by
 `scripts/check-config-descriptor.mjs --package`, so packaging any repo with a
 `launcher-manifest.json` needs `node` on `PATH`.
 
@@ -1132,7 +1135,7 @@ In core:
 | `pixi run check-config-format` | Checks the shape of `data/config-format.json` and pins its `legacy` names. A `per_game` entry names a canonical concept id, a reason and the date the owner approved it, and a repo's list names both of `RotationEnabled` and `PositionEnabled` or neither |
 | `pixi run check-canonical-ini-js` | Runs the reader and key fixtures through core's script grammar (`scripts/lib/canonical-ini.mjs`, `scripts/lib/key-bindings.mjs`) and holds the lint to its rules |
 | `pixi run check-doc-examples` | Fails when a C++ or C# block in `docs/` is not a run of lines of the test it names, or an ini block is not the fixture it names |
-| `pixi run test-config-descriptor` | Checks that a good config descriptor passes and one mutation per rule fails, and runs encode-seed's `rows`, validate-manifest and conformance on it. It also checks that a converted repo seeds and ships neither `CameraUnlock.ini` nor its legacy file, in the manifest or the install scripts |
+| `pixi run test-config-descriptor` | Checks that a good config descriptor passes and one mutation per rule fails, and runs encode-seed's `per_game`, validate-manifest, conformance and packaging on it. It also checks that a converted repo seeds and ships neither `CameraUnlock.ini` nor its legacy file, in the manifest or the install scripts |
 | `pixi run config-report` | The fleet report: game-local keys three or more canonical repos share, local section names in use, and each repo's `per_game` rows with the value its canonical committed file holds there |
 
 In a mod repo, and in conformance:
@@ -1141,9 +1144,11 @@ In a mod repo, and in conformance:
   `render-config-task-csharp.toml`, rewrites the committed file from the table (the C++ test
   binary's `--render-config <path>` mode, or the C# render test with
   `CAMERAUNLOCK_RENDER_CONFIG=write`) and then runs encode-seed.
-- **`scripts/encode-seed.mjs`** rewrites the config descriptor's `rows` in `launcher-manifest.json`
-  from the committed file's values, leaving every other byte of the manifest as it was, and writes
-  no seed. `--check` exits 1 when `rows` is stale.
+- **`scripts/encode-seed.mjs`** rewrites the config descriptor's `per_game` in
+  `launcher-manifest.json`: each row `data/config-format.json` `per_game` lists for the repo, with
+  the value text the committed file holds there. It leaves every other byte of the manifest as it
+  was, writes no seed, and refuses a block that still has `rows`. `--check` exits 1 when
+  `per_game` is stale.
 - **`node scripts/check-canonical-config.mjs [repo ...]`** lints each stamped committed file: the
   reader finds nothing to report; CRLF endings, no byte order mark, ASCII only; `Key=value` and
   `[Name]` written plainly, each section once; `[CameraUnlock]` holding `ConfigFormat=1` alone;

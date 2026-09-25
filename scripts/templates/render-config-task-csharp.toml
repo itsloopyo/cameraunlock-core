@@ -9,8 +9,9 @@
 #
 # The render test owns the mode: with CAMERAUNLOCK_RENDER_CONFIG set to `write` it writes
 # the rendered bytes to the committed path and passes; unset, it compares; any other value
-# fails the test. encode-seed then rewrites the rows of the launcher-manifest.json config
-# descriptor from the new file, and says so when the repo has no manifest or no descriptor.
+# fails the test. encode-seed then rewrites the launcher-manifest.json config descriptor's
+# per_game from data/config-format.json and the new file, the value each row the game keeps
+# for itself holds there, and says so when the repo has no manifest or no descriptor.
 #
 # <test project>  the test .csproj
 # <render test>   a dotnet test --filter expression that selects the render test alone

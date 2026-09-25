@@ -9,7 +9,7 @@
 // pre-canonical build, so no legacy file). The rest are synthetic: subnautica-headtracking's
 // BepInEx entry with a committed file, whose real entry records none yet, and shapes no repo has
 // (a mod_home file, two config files). It also holds the rule that a converted repo's manifest
-// seeds and ships no config, block or not, and runs the rows generator in encode-seed.mjs, the
+// seeds and ships no config, block or not, and runs the per_game generator in encode-seed.mjs, the
 // rules in validate-manifest.mjs on built ZIPs, the Nexus ZIP config rule, the report conformance
 // reads, conformance's config-descriptor and config-preserve checks, and the packager's ConvertFrom-Json /
 // ConvertTo-Json -Depth 10 round trip.
@@ -24,12 +24,15 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
-import { configWriteProblems, descriptorProblems, expectedRows, repoReport } from "./check-config-descriptor.mjs";
+import { configWriteProblems, descriptorProblems, expectedPerGame, repoReport } from "./check-config-descriptor.mjs";
+import { encodePerGame } from "./encode-seed.mjs";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPTS = path.join(CORE_ROOT, "scripts");
-const ALL = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "canonical-ini", "head-tracking", "all-concepts.ini"), "latin1");
-const ALL_ROWS = { EnableOnStartup: true, WorldSpaceYaw: true, RotationEnabled: true, PositionEnabled: true, TrueFreeLook: false };
+// What render-config commits: default on every concept row a table does not mark PerGame().
+const ALL = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "canonical-ini", "head-tracking", "all-concepts-fresh.ini"), "latin1");
+// The same file for subnautica-headtracking, whose per_game lists WorldSpaceYaw.
+const YAW_KEPT = ALL.replace("WorldSpaceYaw=default", "WorldSpaceYaw=false");
 const LEGACY_INI = "[General]\r\nEnabled=1\r\n";
 const FORMAT = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, "data", "config-format.json"), "utf8"));
 
@@ -114,7 +117,7 @@ const abzuConfig = {
   anchor: "game_root",
   legacy_source: "AbzuGame/Binaries/Win64/HeadTracking.ini",
   canonical_since: "1.1.0",
-  rows: { ...ALL_ROWS },
+  per_game: {},
 };
 const abzuMan = (change = (c) => c, extra = {}) => manifest("abzu", change(structuredClone(abzuConfig)), extra);
 clean("abzu", abzuMan(), abzu);
@@ -122,35 +125,36 @@ clean("abzu without anchor, which is game_root", abzuMan(({ anchor, ...c }) => c
 
 // fallout-new-vegas-headtracking: two installed paths, so exe_dir with the tail of both.
 const fnv = real("fnv", "fallout-new-vegas-headtracking");
-const fnvConfig = { path: "CameraUnlock.ini", anchor: "exe_dir", legacy_source: "HeadTracking.ini", canonical_since: "1.1.0", rows: { ...ALL_ROWS } };
+const fnvConfig = { path: "CameraUnlock.ini", anchor: "exe_dir", legacy_source: "HeadTracking.ini", canonical_since: "1.1.0", per_game: {} };
 const fnvMan = (change = (c) => c, extra = {}) => manifest("fallout-new-vegas", change(structuredClone(fnvConfig)), extra);
 clean("fallout-new-vegas", fnvMan(), fnv);
 
 // prey-headtracking: two installed paths beside two executables.
 const prey = real("prey", "prey-headtracking");
 const preyMan = (change = (c) => c) =>
-  manifest("prey", change({ path: "CameraUnlock.ini", anchor: "exe_dir", legacy_source: "HeadTracking.ini", canonical_since: "1.1.0", rows: { ...ALL_ROWS } }));
+  manifest("prey", change({ path: "CameraUnlock.ini", anchor: "exe_dir", legacy_source: "HeadTracking.ini", canonical_since: "1.1.0", per_game: {} }));
 clean("prey", preyMan(), prey);
 
 // sleeping-dogs-headtracking: never published a pre-canonical build, so no canonical_since.
 const sd = real("sleeping-dogs", "sleeping-dogs-headtracking");
-const sdConfig = { path: "CameraUnlock.ini", rows: { ...ALL_ROWS } };
+const sdConfig = { path: "CameraUnlock.ini", per_game: {} };
 clean("sleeping-dogs", manifest("sleeping-dogs", structuredClone(sdConfig)), sd);
 
 // subnautica-headtracking's BepInEx entry, legacy, with per_game WorldSpaceYaw, given a
 // committed file.
 const BEP_LEGACY = FORMAT.configs["subnautica-headtracking"][0].legacy_source;
-const bep = synthetic("bepinex", "subnautica-headtracking", "legacy", [{ ...FORMAT.configs["subnautica-headtracking"][0], committed: "Config.ini" }]);
-const { WorldSpaceYaw: _omitted, ...bepRows } = ALL_ROWS;
-const bepConfig = { path: "BepInEx/config/CameraUnlock.ini", legacy_source: `BepInEx/config/${BEP_LEGACY}`, canonical_since: "1.1.0", rows: bepRows };
+const BEP_ENTRY = { ...FORMAT.configs["subnautica-headtracking"][0], committed: "Config.ini" };
+const bepWith = (label, text) => synthetic(label, "subnautica-headtracking", "legacy", [{ ...BEP_ENTRY, text }]);
+const bep = bepWith("bepinex", YAW_KEPT);
+const bepConfig = { path: "BepInEx/config/CameraUnlock.ini", legacy_source: `BepInEx/config/${BEP_LEGACY}`, canonical_since: "1.1.0", per_game: { WorldSpaceYaw: "false" } };
 const bepMan = (change = (c) => c, extra = {}) => manifest("subnautica", change(structuredClone(bepConfig)), extra);
-clean("bepinex with legacy_source and an omitted row", bepMan(), bep);
+clean("bepinex with legacy_source and a per_game row", bepMan(), bep);
 
 // A file outside the game folder.
 const home = synthetic("mod-home", "mod-home-headtracking", "mover", [
   { committed: "HeadTracking.ini", installed: [], no_installed_reason: "beside the DLL" },
 ]);
-const homeMan = (change = (c) => c) => manifest("abzu", change({ path: "CameraUnlock.ini", anchor: "mod_home", rows: { ...ALL_ROWS } }));
+const homeMan = (change = (c) => c) => manifest("abzu", change({ path: "CameraUnlock.ini", anchor: "mod_home", per_game: {} }));
 clean("mod_home", homeMan(), home);
 
 
@@ -171,12 +175,15 @@ fails(
   "config.path AbzuGame/Binaries/Win64/HeadTracking.ini is not named CameraUnlock.ini",
 );
 fails("unknown anchor", abzuMan((c) => ({ ...c, anchor: "install_dir" })), abzu, 'config.anchor "install_dir" is not one of');
-fails("no rows", abzuMan(({ rows: _, ...c }) => c), abzu, "config has no rows");
-fails("rows not an object", abzuMan((c) => ({ ...c, rows: [] })), abzu, "config.rows must be an object");
-fails("unknown row", abzuMan((c) => ({ ...c, rows: { ...c.rows, ShowReticle: true } })), abzu, "config.rows names ShowReticle");
-fails("row not a bool", abzuMan((c) => ({ ...c, rows: { ...c.rows, TrueFreeLook: "false" } })), abzu, 'config.rows.TrueFreeLook is "false"');
-fails("RotationEnabled alone", abzuMan((c) => ({ ...c, rows: { RotationEnabled: true } })), abzu, "RotationEnabled without PositionEnabled");
-fails("unlisted pair", abzuMan((c) => ({ ...c, rows: { ...c.rows, RotationEnabled: false, PositionEnabled: false } })), abzu, "is no mode data/pipeline-conformance.json");
+const ROWS_REFUSED = "config has rows, which the descriptor no longer carries";
+fails("rows beside per_game", abzuMan((c) => ({ ...c, rows: {} })), abzu, ROWS_REFUSED);
+fails("rows in place of per_game", abzuMan(({ per_game: _, ...c }) => ({ ...c, rows: { EnableOnStartup: true } })), abzu, ROWS_REFUSED);
+fails("no per_game", abzuMan(({ per_game: _, ...c }) => c), abzu, "config has no per_game");
+fails("per_game not an object", abzuMan((c) => ({ ...c, per_game: [] })), abzu, "config.per_game must be an object");
+fails("per_game value not text", bepMan((c) => ({ ...c, per_game: { WorldSpaceYaw: false } })), bep, "config.per_game.WorldSpaceYaw is false, not the text");
+for (const token of ["default", "Default", "DEFAULT", " default\t"]) {
+  fails(`per_game value ${JSON.stringify(token)}`, bepMan((c) => ({ ...c, per_game: { WorldSpaceYaw: token } })), bep, "never the default token");
+}
 fails("canonical_since not x.y.z", abzuMan((c) => ({ ...c, canonical_since: "1.1" })), abzu, 'config.canonical_since "1.1" is not a version');
 fails("canonical_since above the version", abzuMan((c) => ({ ...c, canonical_since: "1.3.0" })), abzu, "is above mod_info.version 1.2.0");
 clean("canonical_since above a committed placeholder version, which conformance does not compare", abzuMan((c) => ({ ...c, canonical_since: "1.3.0" }), { mod_info: { name: "Mod", version: "0.0.0", game_id: "abzu" } }), abzu, false);
@@ -199,7 +206,7 @@ fails("install_cmd delivery", abzuMan(undefined, { delivery_mode: "install_cmd" 
     { committed: "A.ini", installed: ["A.ini"] },
     { committed: "B.ini", installed: ["B.ini"] },
   ]);
-  fails("two config files", manifest("abzu", { path: "CameraUnlock.ini", rows: { ...ALL_ROWS } }), two, "records 2 config files for two-files-headtracking; a package with more than one declares no descriptor");
+  fails("two config files", manifest("abzu", { path: "CameraUnlock.ini", per_game: {} }), two, "records 2 config files for two-files-headtracking; a package with more than one declares no descriptor");
 }
 fails("game_root path not the installed one", abzuMan((c) => ({ ...c, path: "CameraUnlock.ini" })), abzu, "config.path CameraUnlock.ini is not AbzuGame/Binaries/Win64/CameraUnlock.ini");
 fails("game_root with two installed paths", fnvMan((c) => ({ ...c, anchor: "game_root" })), fnv, "records 2 installed paths");
@@ -216,38 +223,25 @@ fails("legacy_source in another folder", abzuMan((c) => ({ ...c, legacy_source: 
 fails("exe_dir legacy_source spelled game-relative", fnvMan((c) => ({ ...c, legacy_source: "Fallout New Vegas English/HeadTracking.ini" })), fnv, "config.legacy_source Fallout New Vegas English/HeadTracking.ini is not HeadTracking.ini");
 fails("legacy repo without canonical_since", abzuMan(({ canonical_since: _, ...c }) => c), abzu, "config has no canonical_since");
 fails("canonical_since in a repo with no pre-canonical build", manifest("sleeping-dogs", { ...structuredClone(sdConfig), canonical_since: "1.0.0" }), sd, "never published a pre-canonical build");
-fails("stale row value", abzuMan((c) => ({ ...c, rows: { ...c.rows, EnableOnStartup: false } })), abzu, "config.rows is");
-fails("committed row left out", abzuMan(({ rows: { TrueFreeLook: _, ...rows }, ...c }) => ({ ...c, rows })), abzu, "config.rows is");
+fails("a per_game id data/config-format.json lists, missing", bepMan((c) => ({ ...c, per_game: {} })), bep, "config.per_game has no WorldSpaceYaw, which data/config-format.json per_game lists for subnautica-headtracking");
+fails("a per_game id data/config-format.json does not list", abzuMan((c) => ({ ...c, per_game: { WorldSpaceYaw: "false" } })), abzu, "config.per_game names WorldSpaceYaw, which data/config-format.json per_game does not list for abzu-headtracking");
+fails("an extra per_game id beside a listed one", bepMan((c) => ({ ...c, per_game: { ...c.per_game, UdpPort: "4243" } })), bep, "config.per_game names UdpPort");
+fails("a stale per_game value", bepMan((c) => ({ ...c, per_game: { WorldSpaceYaw: "true" } })), bep, 'config.per_game.WorldSpaceYaw is "true", and Config.ini holds "false" there');
+fails("a per_game value spelled another way", bepMan((c) => ({ ...c, per_game: { WorldSpaceYaw: "False" } })), bep, 'config.per_game.WorldSpaceYaw is "False", and Config.ini holds "false" there');
 {
-  const base = abzuWith("no-free-look", edit(ALL, "TrueFreeLook=false\r\n", ""));
-  const { TrueFreeLook: _, ...rows } = ALL_ROWS;
-  clean("a file without TrueFreeLook", abzuMan((c) => ({ ...c, rows })), base);
-  fails("a row the committed file does not have", abzuMan(), base, "config.rows is");
-}
-{
-  const base = abzuWith("yaw-off-default", edit(ALL, "WorldSpaceYaw=true", "WorldSpaceYaw=false"));
-  fails("WorldSpaceYaw away from the default, not omitted", abzuMan((c) => ({ ...c, rows: { ...c.rows, WorldSpaceYaw: false } })), base, "WorldSpaceYaw=false, away from the fleet default true");
-  const omitted = synthetic("yaw-off-default-omitted", "subnautica-headtracking", "legacy", [
-    { ...bep.state.files[0], text: edit(ALL, "WorldSpaceYaw=true", "WorldSpaceYaw=false") },
-  ]);
-  clean("WorldSpaceYaw away from the default, omitted", bepMan(), omitted);
-}
-fails("an omitted row declared", bepMan((c) => ({ ...c, rows: { ...ALL_ROWS } })), bep, "per_game leaves out WorldSpaceYaw");
-{
-  const noYaw = synthetic("omit-absent", "subnautica-headtracking", "legacy", [
-    { ...bep.state.files[0], text: edit(ALL, "WorldSpaceYaw=true\r\n", "") },
-  ]);
+  const noYaw = bepWith("per-game-absent", edit(ALL, "WorldSpaceYaw=default\r\n", ""));
   fails("per_game names a row the file lacks", bepMan(), noYaw, "per_game lists WorldSpaceYaw for subnautica-headtracking, and Config.ini has no WorldSpaceYaw line");
+  const tokened = bepWith("per-game-token", ALL);
+  fails("a per_game row the file holds default on", bepMan(), tokened, "Config.ini line 23: [General] WorldSpaceYaw=default, and data/config-format.json per_game lists WorldSpaceYaw");
+  const commented = bepWith("per-game-commented", edit(ALL, "WorldSpaceYaw=default", "; WorldSpaceYaw=false"));
+  clean("a per_game row commented out at the game's own default", bepMan(), commented);
+  const commentedElsewhere = bepWith("per-game-commented-elsewhere", edit(edit(ALL, "WorldSpaceYaw=default\r\n", ""), "[Network]\r\n", "[Network]\r\n; WorldSpaceYaw=false\r\n"));
+  fails("a per_game row commented out under another section", bepMan(), commentedElsewhere, "Config.ini has no WorldSpaceYaw line");
 }
-{
-  const base = abzuWith("position-not-allowed", edit(ALL, "PositionAllowed=true", "PositionAllowed=false"));
-  const { RotationEnabled: _r, PositionEnabled: _p, ...rows } = ALL_ROWS;
-  clean("PositionAllowed=false without tracking rows", abzuMan((c) => ({ ...c, rows })), base);
-  fails("PositionAllowed=false with tracking rows", abzuMan(), base, "config.rows is");
-}
-{
-  fails("a committed bool not written true or false", abzuMan(), abzuWith("yes-value", edit(ALL, "EnableOnStartup=true", "EnableOnStartup=yes")), "EnableOnStartup=yes is not true or false");
-}
+// The rows a launcher once read no longer draw anything from the descriptor: a value on a row
+// per_game does not list is the lint's finding, and PositionAllowed no longer changes the block.
+clean("a value on a row per_game does not list", abzuMan(), abzuWith("yaw-value", edit(ALL, "WorldSpaceYaw=default", "WorldSpaceYaw=false")));
+clean("PositionAllowed=false", abzuMan(), abzuWith("position-not-allowed", edit(ALL, "PositionAllowed=default", "PositionAllowed=false")));
 fails("exe_dir for a game data/games.json does not list", manifest("no-such-game", structuredClone(fnvConfig)), fnv, "is not in data/games.json");
 
 // The write rule, which runs on a converted repo's manifest with a config block or without one:
@@ -304,12 +298,11 @@ check(
 }
 
 // Every rule's mutation above changes one thing; so does each of these, which must stay clean.
-clean("rows in another order", abzuMan((c) => ({ ...c, rows: Object.fromEntries(Object.entries(c.rows).reverse()) })), abzu);
+// expectedPerGame is what the generator writes.
+check(isDeepStrictEqual(expectedPerGame(bep.root, bep.state).perGame, { WorldSpaceYaw: "false" }), "expectedPerGame should read the per_game row subnautica-headtracking keeps");
+check(isDeepStrictEqual(expectedPerGame(abzu.root, abzu.state).perGame, {}), "expectedPerGame should be empty for a repo per_game lists nothing for");
 
-// expectedRows is what the generator writes.
-check(isDeepStrictEqual(expectedRows(abzu.root, abzu.state).rows, ALL_ROWS), "expectedRows should read the five rows of all-concepts.ini");
-
-// The generator: encode-seed rewrites config.rows and nothing else, the fixture's seed of the
+// The generator: encode-seed rewrites config.per_game and nothing else, the fixture's seed of the
 // legacy file included.
 function runScript(script, ...args) {
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, script), ...args], { encoding: "utf8" });
@@ -317,39 +310,63 @@ function runScript(script, ...args) {
 }
 {
   const preyText = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "encode-seed", "prey-headtracking.launcher-manifest.json"), "utf8");
-  const block = '  "config": {\n    "path": "CameraUnlock.ini",\n    "anchor": "exe_dir",\n    "legacy_source": "HeadTracking.ini",\n    "canonical_since": "1.1.0",\n    "rows": {}\n  },\n';
-  const staleText = edit(preyText, '  "delivery_mode": "manifest",\n', `  "delivery_mode": "manifest",\n${block}`);
+  const blockWith = (perGame) =>
+    `  "config": {\n    "path": "CameraUnlock.ini",\n    "anchor": "exe_dir",\n    "legacy_source": "HeadTracking.ini",\n    "canonical_since": "1.1.0",\n    ${perGame}\n  },\n`;
+  const withBlock = (perGame) => edit(preyText, '  "delivery_mode": "manifest",\n', `  "delivery_mode": "manifest",\n${blockWith(perGame)}`);
+  const staleText = withBlock('"per_game": { "WorldSpaceYaw": "true" }');
   const root = repo("generator", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": staleText });
 
   const before = runScript("encode-seed.mjs", "--check", root);
-  check(before.status === 1 && before.out.includes("STALE config.rows"), `generator: --check on stale rows should exit 1, got ${before.status}\n${before.out}`);
+  check(before.status === 1 && before.out.includes("STALE config.per_game"), `generator: --check on a stale per_game should exit 1, got ${before.status}\n${before.out}`);
   check(fs.readFileSync(path.join(root, "launcher-manifest.json"), "utf8") === staleText, "generator: --check should not write");
 
   const wrote = runScript("encode-seed.mjs", root);
-  check(wrote.status === 0 && wrote.out.includes("wrote   config.rows"), `generator: encoding should exit 0, got ${wrote.status}\n${wrote.out}`);
+  check(wrote.status === 0 && wrote.out.includes("wrote   config.per_game"), `generator: encoding should exit 0, got ${wrote.status}\n${wrote.out}`);
   const text = fs.readFileSync(path.join(root, "launcher-manifest.json"), "utf8");
-  const rowsText = '"rows": {\n      "EnableOnStartup": true,\n      "WorldSpaceYaw": true,\n      "RotationEnabled": true,\n      "PositionEnabled": true,\n      "TrueFreeLook": false\n    }';
-  const expectedText = edit(staleText, '"rows": {}', rowsText);
-  check(text === expectedText, "generator: only config.rows should change, the fixture's seed included, rows one per line at the file's indent");
+  const expectedText = withBlock('"per_game": {}');
+  check(text === expectedText, "generator: only config.per_game should change, the fixture's seed included");
 
   const after = runScript("encode-seed.mjs", "--check", root);
-  check(after.status === 0 && after.out.includes("ok    config.rows match HeadTracking.ini"), `generator: --check after encoding should exit 0, got ${after.status}\n${after.out}`);
+  check(after.status === 0 && after.out.includes("ok    config.per_game matches HeadTracking.ini"), `generator: --check after encoding should exit 0, got ${after.status}\n${after.out}`);
   runScript("encode-seed.mjs", root);
-  check(fs.readFileSync(path.join(root, "launcher-manifest.json"), "utf8") === text, "generator: encoding current rows should change nothing");
+  check(fs.readFileSync(path.join(root, "launcher-manifest.json"), "utf8") === text, "generator: encoding a current per_game should change nothing");
   const ruled = problemsOf(JSON.parse(text), { root, state: repoState(root) }, false);
-  check(ruled.length === 0, `generator: the rows it writes should pass the rules, got ${JSON.stringify(ruled)}`);
+  check(ruled.length === 0, `generator: the per_game it writes should pass the rules, got ${JSON.stringify(ruled)}`);
 
   const crlf = repo("generator-crlf", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": staleText.replace(/\n/g, "\r\n") });
   runScript("encode-seed.mjs", crlf);
-  check(fs.readFileSync(path.join(crlf, "launcher-manifest.json"), "utf8") === expectedText.replace(/\n/g, "\r\n"), "generator: a CRLF manifest should get CRLF rows");
+  check(fs.readFileSync(path.join(crlf, "launcher-manifest.json"), "utf8") === expectedText.replace(/\n/g, "\r\n"), "generator: a CRLF manifest should keep its CRLF");
 
-  const noRows = repo("generator-no-rows", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": edit(staleText, ',\n    "rows": {}', "") });
-  const noRowsRun = runScript("encode-seed.mjs", noRows);
-  check(noRowsRun.status !== 0 && noRowsRun.out.includes('add "rows": {}'), `generator: a block without rows should be refused, got ${noRowsRun.status}\n${noRowsRun.out}`);
+  // A repo per_game lists a row for, through the synthetic subnautica-headtracking entry: one row
+  // per line at the file's indent, a stale value rewritten, every other byte kept.
+  for (const [label, from] of [
+    ["empty", '"per_game": {}'],
+    ["stale", '"per_game": {\n      "WorldSpaceYaw": "true"\n    }'],
+  ]) {
+    const kept = bepWith(`generator-per-game-${label}`, YAW_KEPT);
+    fs.writeFileSync(path.join(kept.root, "launcher-manifest.json"), withBlock(from));
+    const result = encodePerGame(kept.root, kept.state);
+    check(
+      result.perGame.stale && result.updated === withBlock('"per_game": {\n      "WorldSpaceYaw": "false"\n    }'),
+      `generator: a ${label} per_game should get the committed WorldSpaceYaw, got\n${result.updated}`,
+    );
+  }
+
+  const noPerGame = repo("generator-no-per-game", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": edit(staleText, ',\n    "per_game": { "WorldSpaceYaw": "true" }', "") });
+  const noPerGameRun = runScript("encode-seed.mjs", noPerGame);
+  check(noPerGameRun.status !== 0 && noPerGameRun.out.includes('add "per_game": {}'), `generator: a block without per_game should be refused, got ${noPerGameRun.status}\n${noPerGameRun.out}`);
+
+  const rowsText = withBlock('"rows": {}');
+  const rows = repo("generator-rows", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": rowsText });
+  const rowsRun = runScript("encode-seed.mjs", rows);
+  check(
+    rowsRun.status !== 0 && rowsRun.out.includes('replace it with "per_game": {}') && fs.readFileSync(path.join(rows, "launcher-manifest.json"), "utf8") === rowsText,
+    `generator: a block with rows should be refused and left as it was, got ${rowsRun.status}\n${rowsRun.out}`,
+  );
 
   const unstamped = repo("generator-unstamped", "prey-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": staleText });
   const unstampedRun = runScript("encode-seed.mjs", unstamped);
-  check(unstampedRun.status !== 0 && unstampedRun.out.includes("which is unstamped"), `generator: rows from an unstamped file should be refused, got ${unstampedRun.status}\n${unstampedRun.out}`);
+  check(unstampedRun.status !== 0 && unstampedRun.out.includes("which is unstamped"), `generator: per_game from an unstamped file should be refused, got ${unstampedRun.status}\n${unstampedRun.out}`);
 }
 
 // validate-manifest runs the rules on a built ZIP, against the repo whose release/ folder holds it,
@@ -382,8 +399,10 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   check(good.status === 0 && good.out.includes("config descriptor"), `validate-manifest: a block that meets every rule should pass, got ${good.status}\n${good.out}`);
   const legacyPath = runScript("validate-manifest.mjs", zipRepo("zip-legacy-path", { ...structuredClone(abzuConfig), path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }));
   check(legacyPath.status === 1 && legacyPath.out.includes("is not named CameraUnlock.ini"), `validate-manifest: a block naming the legacy file should fail, got ${legacyPath.status}\n${legacyPath.out}`);
-  const stale = runScript("validate-manifest.mjs", zipRepo("zip-stale", { ...structuredClone(abzuConfig), rows: { ...ALL_ROWS, EnableOnStartup: false } }));
-  check(stale.status === 1 && stale.out.includes("config.rows is"), `validate-manifest: stale rows should fail, got ${stale.status}\n${stale.out}`);
+  const rows = runScript("validate-manifest.mjs", zipRepo("zip-rows", { ...structuredClone(abzuConfig), rows: {} }));
+  check(rows.status === 1 && rows.out.includes(ROWS_REFUSED), `validate-manifest: a block with rows should fail, got ${rows.status}\n${rows.out}`);
+  const extra = runScript("validate-manifest.mjs", zipRepo("zip-extra-per-game", { ...structuredClone(abzuConfig), per_game: { WorldSpaceYaw: "false" } }));
+  check(extra.status === 1 && extra.out.includes("config.per_game names WorldSpaceYaw"), `validate-manifest: a per_game id the repo does not keep should fail, got ${extra.status}\n${extra.out}`);
   const version = runScript("validate-manifest.mjs", zipRepo("zip-version", { ...structuredClone(abzuConfig), canonical_since: "2.0.0" }));
   check(version.status === 1 && version.out.includes("is above mod_info.version 1.2.0"), `validate-manifest: canonical_since above the ZIP's version should fail, got ${version.status}\n${version.out}`);
   for (const [i, [what, extra, expected]] of BLOCKLESS_WRITES.entries()) {
@@ -439,8 +458,8 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
 
   // conformance's config-descriptor check over real entries: for each converted repo with no
   // block that seeds or ships either file, a FAIL for the missing block and one for the write;
-  // one for a block that names the legacy file; and nothing for a block that meets every rule or
-  // for an unconverted repo that seeds its config.
+  // one for a block that names the legacy file and one for a block that carries rows; and nothing
+  // for a block that meets every rule or for an unconverted repo that seeds its config.
   const noBlock = BLOCKLESS_WRITES.map(([, extra], i) =>
     repo(`conformance-no-block-${i}`, "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined, extra)) }),
   );
@@ -452,19 +471,24 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     "HeadTracking.ini": ALL,
     "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }))),
   });
+  const rowsBlock = repo("conformance-rows", "abzu-headtracking", {
+    "HeadTracking.ini": ALL,
+    "launcher-manifest.json": JSON.stringify(abzuMan(({ per_game: _, ...c }) => ({ ...c, rows: {} }))),
+  });
   const goodBlock = repo("conformance-good", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan()) });
   const conformance = spawnSync(
     "powershell",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo ${[...noBlock, unconvertedSeed, legacyBlock, goodBlock].map((r) => `'${r}'`).join(",")} -Check config-descriptor -Json; exit $LASTEXITCODE`],
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo ${[...noBlock, unconvertedSeed, legacyBlock, rowsBlock, goodBlock].map((r) => `'${r}'`).join(",")} -Check config-descriptor -Json; exit $LASTEXITCODE`],
     { encoding: "utf8" },
   );
   const findings = JSON.parse(conformance.stdout.replace(/^\uFEFF/, "") || "[]");
   const list = (Array.isArray(findings) ? findings : [findings]).filter((x) => x.check === "config-descriptor" && x.severity === "FAIL");
   const count = (needle) => list.filter((x) => x.message.includes(needle)).length;
   check(
-    conformance.status === 1 && list.length === 2 * BLOCKLESS_WRITES.length + 1 && count("has no config block") === BLOCKLESS_WRITES.length &&
-      BLOCKLESS_WRITES.every(([, , expected]) => count(expected) === 1) && count("is not named CameraUnlock.ini") === 1,
-    `conformance: config-descriptor should fail each converted repo with no block on the block and on its write, and the block that names the legacy file, and nothing else, got ${conformance.status}\n${conformance.stdout}${conformance.stderr}`,
+    conformance.status === 1 && list.length === 2 * BLOCKLESS_WRITES.length + 3 && count("has no config block") === BLOCKLESS_WRITES.length &&
+      BLOCKLESS_WRITES.every(([, , expected]) => count(expected) === 1) && count("is not named CameraUnlock.ini") === 1 &&
+      count(ROWS_REFUSED) === 1 && count("config has no per_game") === 1,
+    `conformance: config-descriptor should fail each converted repo with no block on the block and on its write, the block that names the legacy file, and the block with rows for rows and for its missing per_game, and nothing else, got ${conformance.status}\n${conformance.stdout}${conformance.stderr}`,
   );
 
   // conformance's config-preserve check: a converted repo's install.cmd lists neither file in
@@ -586,8 +610,12 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     );
   const legacyPath = assertConfig(repo("assert-legacy-path", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }))) }));
   check(legacyPath.status === 1 && legacyPath.stdout.includes("is not named CameraUnlock.ini"), `packaging: a block naming the legacy file should fail, got ${legacyPath.status}\n${legacyPath.stdout}${legacyPath.stderr}`);
-  const stale = assertConfig(repo("assert-stale", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, rows: { ...c.rows, EnableOnStartup: false } }))) }));
-  check(stale.status === 1 && stale.stdout.includes("config.rows is"), `packaging: stale rows should fail, got ${stale.status}\n${stale.stdout}${stale.stderr}`);
+  const good = assertConfig(repo("assert-good", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan()) }));
+  check(good.status === 0, `packaging: a block with an empty per_game should pass, got ${good.status}\n${good.stdout}${good.stderr}`);
+  const rows = assertConfig(repo("assert-rows", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, rows: {} }))) }));
+  check(rows.status === 1 && rows.stdout.includes(ROWS_REFUSED), `packaging: a block with rows should fail, got ${rows.status}\n${rows.stdout}${rows.stderr}`);
+  const extra = assertConfig(repo("assert-extra-per-game", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, per_game: { WorldSpaceYaw: "false" } }))) }));
+  check(extra.status === 1 && extra.stdout.includes("config.per_game names WorldSpaceYaw"), `packaging: a per_game id the repo does not keep should fail, got ${extra.status}\n${extra.stdout}${extra.stderr}`);
   const none = assertConfig(repo("assert-none", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) }));
   check(none.status === 0, `packaging: a manifest with no block should pass, got ${none.status}\n${none.stdout}${none.stderr}`);
   // The no-seed rule holds at packaging with no block, and the missing block alone, which
@@ -603,9 +631,9 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
 }
 
 // Packaging stamps the version through ConvertFrom-Json and ConvertTo-Json -Depth 10 in Windows
-// PowerShell (scripts/package-bepinex-mod.ps1), which must carry the block through unchanged.
-{
-  const man = bepMan();
+// PowerShell (scripts/package-bepinex-mod.ps1), which must carry the block through unchanged, an
+// empty per_game included.
+for (const [label, man] of [["a per_game row", bepMan()], ["an empty per_game", abzuMan()]]) {
   const file = path.join(scratch, "roundtrip.json");
   fs.writeFileSync(file, JSON.stringify(man, null, 2));
   const ps = spawnSync(
@@ -613,7 +641,7 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     ["-NoProfile", "-Command", `(Get-Content -LiteralPath '${file}' -Raw | ConvertFrom-Json) | ConvertTo-Json -Depth 10`],
     { encoding: "utf8" },
   );
-  check(ps.status === 0 && isDeepStrictEqual(JSON.parse(ps.stdout), man), `packaging round trip: the config block should survive, got ${ps.status}\n${ps.stdout}${ps.stderr}`);
+  check(ps.status === 0 && isDeepStrictEqual(JSON.parse(ps.stdout), man), `packaging round trip: the config block with ${label} should survive, got ${ps.status}\n${ps.stdout}${ps.stderr}`);
 }
 
 fs.rmSync(scratch, { recursive: true, force: true });

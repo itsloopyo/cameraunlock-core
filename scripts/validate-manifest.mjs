@@ -69,7 +69,7 @@
 // ZIP straight to the user - falls back to its newest non-Nexus release ZIP.
 //
 // A manifest carrying a config block, the descriptor a launcher reads to find
-// the mod's canonical config and the preference rows it binds, has the block
+// the mod's canonical config and the rows the game keeps for itself, has the block
 // held to every rule in check-config-descriptor.mjs, against the repo the ZIP
 // was built from: the host repo, the sibling a token names, or the repo whose
 // release/ folder holds a ZIP named by path. The package of a converted repo

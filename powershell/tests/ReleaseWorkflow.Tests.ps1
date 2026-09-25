@@ -187,6 +187,30 @@ Check 'a blank install_cmd_reason is refused' ($err -match 'install_cmd_reason')
 $err = Test-Delivery 'install-cmd-reason' '{ "delivery_mode": "install_cmd", "install_cmd_reason": "writes a registry key" }'
 Check 'install_cmd with a reason passes' ($err -eq '') "threw $err"
 
+# --- Assert-LauncherManifestConfig ------------------------------------------
+
+# A converted abzu-headtracking checkout (the folder name is its data/config-format.json entry)
+# with a committed config as render-config writes it and a manifest carrying the given block.
+$coreRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$freshIni = Join-Path $coreRoot 'data\fixtures\canonical-ini\head-tracking\all-concepts-fresh.ini'
+function Test-ManifestConfig {
+    param([string]$Name, [string]$Block)
+    $dir = Join-Path (Join-Path $sandbox "config-$Name") 'abzu-headtracking'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    & git -C $dir init -q
+    Copy-Item -LiteralPath $freshIni -Destination (Join-Path $dir 'HeadTracking.ini')
+    $json = "{ `"schema_version`": 2, `"mod_info`": { `"name`": `"Mod`", `"version`": `"0.0.0`", `"game_id`": `"abzu`" }, `"delivery_mode`": `"manifest`", `"files`": [], `"config`": { `"path`": `"AbzuGame/Binaries/Win64/CameraUnlock.ini`", `"legacy_source`": `"AbzuGame/Binaries/Win64/HeadTracking.ini`", `"canonical_since`": `"1.1.0`", $Block } }"
+    [System.IO.File]::WriteAllText((Join-Path $dir 'launcher-manifest.json'), $json, (New-Object System.Text.UTF8Encoding($false)))
+    return Get-ThrownId { Assert-LauncherManifestConfig -RepoRoot $dir -CoreRoot $coreRoot }
+}
+
+$err = Test-ManifestConfig 'per-game' '"per_game": {}'
+Check 'a block with an empty per_game passes' ($err -eq '') "threw $err"
+$err = Test-ManifestConfig 'rows' '"rows": { "EnableOnStartup": true }'
+Check 'a block with rows in place of per_game is refused' ($err -match 'config has rows, which the descriptor no longer carries') "got '$err'"
+$err = Test-ManifestConfig 'extra' '"per_game": { "WorldSpaceYaw": "false" }'
+Check 'a per_game row the repo does not keep is refused' ($err -match 'config\.per_game names WorldSpaceYaw') "got '$err'"
+
 # --- New-ChangelogFromCommits counts launcher-manifest.json ----------------
 
 # A manifest-only fix got "No commits found" from every mod whose artifact list

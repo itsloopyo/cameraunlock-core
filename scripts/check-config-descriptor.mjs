@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 // The `config` descriptor in launcher-manifest.json: where a converted mod's config file lives
-// and which launcher preference rows it binds, with their committed values (docs/canonical-config.md,
-// "The config descriptor"). This file holds every rule the block is held to. validate-manifest.mjs
-// runs them on a built ZIP's manifest, conformance runs them on the committed one, and
-// encode-seed.mjs writes `rows` from expectedRows(). It also holds the rule that a converted
-// repo's manifest seeds and ships no config, block or not (configWriteProblems).
+// and which rows the game keeps for itself, with the values its committed file holds there
+// (docs/canonical-config.md, "The config descriptor"). This file holds every rule the block is
+// held to. validate-manifest.mjs runs them on a built ZIP's manifest, conformance runs them on the
+// committed one, and encode-seed.mjs writes `per_game` from expectedPerGame(). It also holds the
+// rule that a converted repo's manifest seeds and ships no config, block or not
+// (configWriteProblems).
 //
 //   node scripts/check-config-descriptor.mjs                  # the repo vendoring this core
 //   node scripts/check-config-descriptor.mjs <repo> [...]     # repo paths or sibling names
@@ -27,11 +28,19 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { repoState } from "./check-canonical-config.mjs";
-import { findSection, findValue, hasCanonicalStamp, parseCanonicalIni } from "./lib/canonical-ini.mjs";
+import {
+  equalsAsciiIgnoreCase,
+  findSection,
+  findValue,
+  hasCanonicalStamp,
+  isDefaultToken,
+  parseCanonicalIni,
+  splitLines,
+  trimSpaceTab,
+} from "./lib/canonical-ini.mjs";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPOS_ROOT = path.dirname(CORE_ROOT);
@@ -39,27 +48,10 @@ const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(CORE_ROOT, rel), 
 const SCHEMA = readJson("data/config-schema.json");
 const FORMAT = readJson("data/config-format.json");
 const GAMES = readJson("data/games.json").games;
-const TRACKING_MODE = readJson("data/pipeline-conformance.json").preference_modes.tracking_mode;
 
-function boolConcept(id) {
-  const concept = SCHEMA.concepts.find((c) => c.id === id);
-  if (!concept || !concept.canonical || concept.type !== "bool") {
-    throw new Error(`data/config-schema.json has no canonical bool concept ${id}, which the config descriptor reads`);
-  }
-  return { id, section: concept.section, key: concept.key, default: concept.default };
-}
-
-// In the order the generator writes them.
-export const LAUNCHER_ROWS = ["EnableOnStartup", "WorldSpaceYaw", "RotationEnabled", "PositionEnabled", "TrueFreeLook"].map(boolConcept);
-const POSITION_ALLOWED = boolConcept("PositionAllowed");
-// The row whose committed value away from the fleet default needs a per_game entry.
-const WORLD_SPACE_YAW = LAUNCHER_ROWS.find((r) => r.id === "WorldSpaceYaw");
-const TRACKING_ROWS = ["RotationEnabled", "PositionEnabled"];
-if (!isDeepStrictEqual(TRACKING_MODE.channels, TRACKING_ROWS)) {
-  throw new Error(`data/pipeline-conformance.json tracking_mode channels are ${TRACKING_MODE.channels.join(", ")}, and the descriptor reads ${TRACKING_ROWS.join(", ")}`);
-}
-
-const FIELDS = ["path", "anchor", "legacy_source", "canonical_since", "rows"];
+const FIELDS = ["path", "anchor", "legacy_source", "canonical_since", "per_game"];
+// The renderer writes an Engine row marked PerGame() at its default as "; Key=value".
+const COMMENTED_ROW = /^;[ \t]*([A-Za-z0-9]+)[ \t]*=(.*)$/;
 // The fleet's one config name. No v* release before the canonical format reads a file of that
 // name, so a launcher that manages it leaves alone the file an older version reads after a rollback.
 const CONFIG_NAME = "CameraUnlock.ini";
@@ -134,7 +126,13 @@ export function shapeProblems(man, { checkVersion }) {
     );
   }
   for (const key of Object.keys(config)) {
-    if (!FIELDS.includes(key)) problems.push(`config has an unknown field "${key}"; it holds ${FIELDS.join(", ")}`);
+    if (key === "rows") {
+      problems.push(
+        'config has rows, which the descriptor no longer carries: a launcher writes no game file, so the block lists only the rows the game keeps for itself, in per_game ("per_game": {} where there are none, which render-config fills)',
+      );
+    } else if (!FIELDS.includes(key)) {
+      problems.push(`config has an unknown field "${key}"; it holds ${FIELDS.join(", ")}`);
+    }
   }
   if (!("path" in config)) problems.push("config has no path");
   else {
@@ -167,79 +165,76 @@ export function shapeProblems(man, { checkVersion }) {
     }
   }
 
-  if (!("rows" in config)) {
-    problems.push("config has no rows");
+  if (!("per_game" in config)) {
+    problems.push('config has no per_game; write "per_game": {} and run render-config, which fills it');
     return problems;
   }
-  const rows = config.rows;
-  if (!isObject(rows)) return [...problems, `config.rows must be an object, not ${JSON.stringify(rows)}`];
-  const ids = LAUNCHER_ROWS.map((r) => r.id);
-  for (const [id, value] of Object.entries(rows)) {
-    if (!ids.includes(id)) problems.push(`config.rows names ${id}, which is not one of ${ids.join(", ")}`);
-    else if (typeof value !== "boolean") problems.push(`config.rows.${id} is ${JSON.stringify(value)}, not true or false`);
-  }
-  if ("RotationEnabled" in rows && !("PositionEnabled" in rows)) {
-    problems.push("config.rows has RotationEnabled without PositionEnabled; a tracking mode is written through PositionEnabled");
-  }
-  if (typeof rows.RotationEnabled === "boolean" && typeof rows.PositionEnabled === "boolean") {
-    const listed = TRACKING_MODE.modes.some((m) => m.RotationEnabled === rows.RotationEnabled && m.PositionEnabled === rows.PositionEnabled);
-    if (!listed) {
-      problems.push(
-        `config.rows RotationEnabled=${rows.RotationEnabled}, PositionEnabled=${rows.PositionEnabled} is no mode data/pipeline-conformance.json preference_modes lists`,
-      );
+  const perGame = config.per_game;
+  if (!isObject(perGame)) return [...problems, `config.per_game must be an object, not ${JSON.stringify(perGame)}`];
+  for (const [id, value] of Object.entries(perGame)) {
+    if (typeof value !== "string") {
+      problems.push(`config.per_game.${id} is ${JSON.stringify(value)}, not the text the committed file holds on the row`);
+    } else if (isDefaultToken(trimSpaceTab(value))) {
+      problems.push(`config.per_game.${id} is ${JSON.stringify(value)}; per_game holds the value the game keeps for itself, never the default token`);
     }
   }
   return problems;
 }
 
-// The rows a repo's descriptor holds: every launcher concept its committed file has as an active
-// line, with the committed value. Two kinds are left out. A concept data/config-format.json
-// per_game lists for the repo, which the launcher then never manages. And the tracking pair, when
-// the file has PositionAllowed=false, since that mod runs rotation only whatever the pair says. A
-// committed WorldSpaceYaw away from the fleet default is refused unless per_game lists it, so a
-// game that differs on purpose cannot be handed to a launcher global by default.
-export function expectedRows(root, state) {
+// The value text a committed file holds on a concept row: the active line's value, or, with no
+// active line, the value of the row commented out under its own section, the form the renderer
+// gives an Engine row marked PerGame() at its default. null when the file has neither.
+function committedText(bytes, doc, concept) {
+  const section = findSection(doc, concept.section);
+  const line = section === null ? null : findValue(section, concept.key);
+  if (line !== null) return { value: line.value, line: line.line };
+  let current = null;
+  let found = null;
+  for (const { text, number } of splitLines(bytes)) {
+    const trimmed = trimSpaceTab(text);
+    if (trimmed.startsWith("[")) {
+      const close = trimmed.indexOf("]");
+      current = close < 0 ? null : trimSpaceTab(trimmed.slice(1, close));
+      continue;
+    }
+    const commented = COMMENTED_ROW.exec(trimmed);
+    if (commented !== null && commented[1] === concept.key && current !== null && equalsAsciiIgnoreCase(current, concept.section)) {
+      found = { value: trimSpaceTab(commented[2]), line: number };
+    }
+  }
+  return found;
+}
+
+// The per_game map a repo's descriptor holds: each concept data/config-format.json per_game lists
+// for the repo, in that order, with the value text its committed file holds on the row. The file
+// holds a value there, never the token, since the table marks the row PerGame().
+export function expectedPerGame(root, state) {
   if (state.files.length !== 1) {
-    return { rows: null, problems: [`data/config-format.json records ${state.files.length} config files for ${state.repo}, and a descriptor names one`] };
+    return { perGame: null, problems: [`data/config-format.json records ${state.files.length} config files for ${state.repo}, and a descriptor names one`] };
   }
   const [file] = state.files;
   if (file.state !== "stamped") {
     const which = file.committed === null ? "records no committed file" : `records ${file.committed}, which is ${file.state}`;
-    return { rows: null, problems: [`descriptor rows come from the committed config, and data/config-format.json ${which} for ${state.repo}`] };
+    return { perGame: null, problems: [`descriptor per_game values come from the committed config, and data/config-format.json ${which} for ${state.repo}`] };
   }
-  const doc = parseCanonicalIni(fs.readFileSync(path.join(root, ...file.committed.split("/"))));
-  const omitted = perGameRows(state.repo);
+  const bytes = fs.readFileSync(path.join(root, ...file.committed.split("/")));
+  const doc = parseCanonicalIni(bytes);
   const problems = [];
-  const read = (concept) => {
-    const section = findSection(doc, concept.section);
-    const line = section === null ? null : findValue(section, concept.key);
-    if (line === null) return undefined;
-    if (line.value === "true") return true;
-    if (line.value === "false") return false;
-    problems.push(`${file.committed} line ${line.line}: [${concept.section}] ${concept.key}=${line.value} is not true or false, the values the renderer writes`);
-    return undefined;
-  };
-  const positionAllowed = read(POSITION_ALLOWED);
-  const rows = {};
-  for (const concept of LAUNCHER_ROWS) {
-    const value = read(concept);
-    if (omitted.includes(concept.id)) {
-      if (value === undefined) {
-        problems.push(`data/config-format.json per_game lists ${concept.id} for ${state.repo}, and ${file.committed} has no ${concept.key} line`);
-      }
-      continue;
-    }
-    if (value === undefined) continue;
-    if (concept === WORLD_SPACE_YAW && value !== concept.default) {
+  const perGame = {};
+  for (const id of perGameRows(state.repo)) {
+    const concept = SCHEMA.concepts.find((c) => c.id === id);
+    const held = committedText(bytes, doc, concept);
+    if (held === null) {
+      problems.push(`data/config-format.json per_game lists ${id} for ${state.repo}, and ${file.committed} has no ${concept.key} line`);
+    } else if (isDefaultToken(held.value)) {
       problems.push(
-        `${file.committed} has [${concept.section}] ${concept.key}=${value}, away from the fleet default ${concept.default}; a game whose default differs on purpose is listed in data/config-format.json per_game, so a launcher global never reaches it, and any other game commits the default`,
+        `${file.committed} line ${held.line}: [${concept.section}] ${concept.key}=${held.value}, and data/config-format.json per_game lists ${id} for ${state.repo}, so the file holds the game's own value there`,
       );
-      continue;
+    } else {
+      perGame[id] = held.value;
     }
-    if (positionAllowed === false && TRACKING_ROWS.includes(concept.id)) continue;
-    rows[concept.id] = value;
   }
-  return { rows: problems.length === 0 ? rows : null, problems };
+  return { perGame: problems.length === 0 ? perGame : null, problems };
 }
 
 // Every seed and files[] row, at the top level and in each variant, with a string target.
@@ -367,18 +362,28 @@ function repoProblems(man, root, state) {
     problems.push(`config.canonical_since is set, and ${state.repo} never published a pre-canonical build (it is not in data/config-format.json legacy)`);
   }
 
-  const expected = expectedRows(root, state);
+  const kept = perGameRows(state.repo);
+  const hint = "node cameraunlock-core/scripts/encode-seed.mjs, which render-config runs, rewrites per_game";
+  for (const id of kept) {
+    if (!(id in config.per_game)) problems.push(`config.per_game has no ${id}, which data/config-format.json per_game lists for ${state.repo}; ${hint}`);
+  }
+  for (const id of Object.keys(config.per_game)) {
+    if (!kept.includes(id)) {
+      problems.push(
+        `config.per_game names ${id}, which data/config-format.json per_game does not list for ${state.repo}; a game keeps a row for itself only with the owner's approval recorded there`,
+      );
+    }
+  }
+  const expected = expectedPerGame(root, state);
   problems.push(...expected.problems);
-  if (expected.rows !== null && !isDeepStrictEqual(config.rows, expected.rows)) {
-    problems.push(`config.rows is ${JSON.stringify(config.rows)}, and ${file.committed} gives ${JSON.stringify(expected.rows)}; ${fixHint(state)}`);
+  if (expected.perGame !== null) {
+    for (const [id, value] of Object.entries(expected.perGame)) {
+      if (id in config.per_game && config.per_game[id] !== value) {
+        problems.push(`config.per_game.${id} is ${JSON.stringify(config.per_game[id])}, and ${file.committed} holds ${JSON.stringify(value)} there; ${hint}`);
+      }
+    }
   }
   return problems;
-}
-
-function fixHint(state) {
-  const omits = perGameRows(state.repo).filter((row) => LAUNCHER_ROWS.some((r) => r.id === row));
-  const omitted = omits.length > 0 ? ` (data/config-format.json per_game leaves out ${omits.join(", ")})` : "";
-  return `node cameraunlock-core/scripts/encode-seed.mjs, which render-config runs, rewrites rows${omitted}`;
 }
 
 // Every rule for a manifest's descriptor. `root` is the repo the package was built from and
@@ -424,7 +429,7 @@ export function tagProblems(root, state, config) {
 // The rules compare the block with data/config-format.json, never with the mod's code, so the
 // hint puts the code first: a block written for a build that still reads the legacy file passes.
 const NO_BLOCK =
-  "converted, delivered by manifest, and launcher-manifest.json has no config block. The block names CameraUnlock.ini, so it lands with or after the change that makes the mod read CameraUnlock.ini, with the legacy file as the owner's legacy path; then write path and anchor by hand, legacy_source and canonical_since where the rules ask for them, and \"rows\": {}, and run render-config";
+  "converted, delivered by manifest, and launcher-manifest.json has no config block. The block names CameraUnlock.ini, so it lands with or after the change that makes the mod read CameraUnlock.ini, with the legacy file as the owner's legacy path; then write path and anchor by hand, legacy_source and canonical_since where the rules ask for them, and \"per_game\": {}, and run render-config";
 
 // What conformance's config-descriptor check reads for one repo's committed manifest.
 export function repoReport(root, state = repoState(root)) {
@@ -456,7 +461,7 @@ export function repoReport(root, state = repoState(root)) {
   report.manifest = "present";
   report.delivery_mode = man.delivery_mode ?? null;
   report.has_block = "config" in man;
-  // Rows are written from the committed file, so a repo data/config-format.json records none for
+  // per_game is written from the committed file, so a repo data/config-format.json records none for
   // cannot carry a block yet; config-format reports that.
   report.applies =
     state.converted && MANIFEST_MODES.includes(man.delivery_mode) && state.files.length === 1 && state.files[0].state === "stamped";

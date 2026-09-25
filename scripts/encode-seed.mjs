@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 
-// Writes the config descriptor's rows in a mod's launcher-manifest.json from its committed
-// canonical config: config.rows becomes the launcher rows the committed file holds, as
-// scripts/check-config-descriptor.mjs expectedRows() reads them. The rest of the block (path,
-// anchor, legacy_source, canonical_since) is written by hand at the conversion, with "rows": {}
-// for this to fill. Only the rows object changes: the rest of the manifest keeps its bytes.
+// Writes the config descriptor's per_game in a mod's launcher-manifest.json from
+// data/config-format.json and the committed canonical config: config.per_game becomes each row
+// per_game lists for the repo with the value text the committed file holds there, as
+// scripts/check-config-descriptor.mjs expectedPerGame() reads them. The rest of the block (path,
+// anchor, legacy_source, canonical_since) is written by hand at the conversion, with
+// "per_game": {} for this to fill. Only the per_game object changes: the rest of the manifest
+// keeps its bytes.
 //
 // It writes no seed. A converted release seeds nothing, and check-config-descriptor.mjs
 // configWriteProblems fails a seed of its config or legacy file.
 //
 //   node cameraunlock-core/scripts/encode-seed.mjs           # the repo vendoring this core
-//   node cameraunlock-core/scripts/encode-seed.mjs --check   # exit 1 when rows is stale
+//   node cameraunlock-core/scripts/encode-seed.mjs --check   # exit 1 when per_game is stale
 //   node scripts/encode-seed.mjs [--check] <repo root>
 //
-// The rows come from the repo's converted (stamped) committed file. A repo with no
+// The values come from the repo's converted (stamped) committed file. A repo with no
 // launcher-manifest.json, or with no config block, has nothing to write.
 
 import fs from "node:fs";
@@ -22,35 +24,42 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { repoState } from "./check-canonical-config.mjs";
-import { LAUNCHER_ROWS, expectedRows } from "./check-config-descriptor.mjs";
+import { expectedPerGame } from "./check-config-descriptor.mjs";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export function encodeRows(root) {
+// `given` stands in for repoState(root), for a test of an entry no real repo has yet.
+export function encodePerGame(root, given = null) {
   const manifestPath = path.join(root, "launcher-manifest.json");
-  if (!fs.existsSync(manifestPath)) return { manifestPath, text: null, rows: null };
+  if (!fs.existsSync(manifestPath)) return { manifestPath, text: null, perGame: null };
   const text = fs.readFileSync(manifestPath, "utf8");
   const man = JSON.parse(text.replace(/^\uFEFF/, ""));
-  const state = repoState(root);
+  const state = given ?? repoState(root);
   if (state.listing !== "legacy" && state.listing !== "mover") {
     throw new Error(`${state.folder} has no configs entry in data/config-format.json (it is ${state.listing})`);
   }
-  if (!("config" in man)) return { manifestPath, text, updated: text, rows: null };
-  if (typeof man.config !== "object" || man.config === null || !("rows" in man.config)) {
-    throw new Error(`${manifestPath} has a config block with no rows to write; add "rows": {} to it by hand`);
+  if (!("config" in man)) return { manifestPath, text, updated: text, perGame: null };
+  if (typeof man.config !== "object" || man.config === null) {
+    throw new Error(`${manifestPath} has a config block that is not an object`);
   }
-  const read = expectedRows(root, state);
-  if (read.rows === null) throw new Error(read.problems.join("; "));
-  const rows = { committed: state.files[0].committed, stale: !isDeepStrictEqual(man.config.rows, read.rows) };
-  if (!rows.stale) return { manifestPath, text, updated: text, rows };
+  if ("rows" in man.config) {
+    throw new Error(`${manifestPath} has config.rows, which the descriptor no longer carries; replace it with "per_game": {} by hand`);
+  }
+  if (!("per_game" in man.config)) {
+    throw new Error(`${manifestPath} has a config block with no per_game to write; add "per_game": {} to it by hand`);
+  }
+  const read = expectedPerGame(root, state);
+  if (read.perGame === null) throw new Error(read.problems.join("; "));
+  const perGame = { committed: state.files[0].committed, stale: !isDeepStrictEqual(man.config.per_game, read.perGame) };
+  if (!perGame.stale) return { manifestPath, text, updated: text, perGame };
 
-  const updated = replaceRows(text, read.rows);
+  const updated = replacePerGame(text, read.perGame);
   const expected = structuredClone(man);
-  expected.config.rows = read.rows;
+  expected.config.per_game = read.perGame;
   if (!isDeepStrictEqual(JSON.parse(updated.replace(/^\uFEFF/, "")), expected)) {
-    throw new Error(`${manifestPath} spells config.rows in a way encode-seed cannot rewrite in place (an escape in a string, or a repeated key?)`);
+    throw new Error(`${manifestPath} spells config.per_game in a way encode-seed cannot rewrite in place (an escape in a string, or a repeated key?)`);
   }
-  return { manifestPath, text, updated, rows };
+  return { manifestPath, text, updated, perGame };
 }
 
 const skipSpace = (t, i) => {
@@ -97,17 +106,17 @@ function member(t, open, name) {
   throw new Error(`launcher-manifest.json has no "${name}" member where encode-seed looks for it`);
 }
 
-// The manifest text with config.rows replaced and every other byte kept. The object is laid out
-// one row per line, indented one step deeper than the "rows" key, the step being the one between
-// "config" and "rows", in the file's own line ending.
-function replaceRows(text, rows) {
+// The manifest text with config.per_game replaced and every other byte kept. The object is laid
+// out one row per line, indented one step deeper than the "per_game" key, the step being the one
+// between "config" and "per_game", in the file's own line ending.
+function replacePerGame(text, perGame) {
   const indentAt = (i) => /^[ \t]*/.exec(text.slice(text.lastIndexOf("\n", i) + 1))[0];
   const config = member(text, skipSpace(text, text.charCodeAt(0) === 0xfeff ? 1 : 0), "config");
-  const target = member(text, config.start, "rows");
+  const target = member(text, config.start, "per_game");
   const outer = indentAt(target.key);
   const step = outer.slice(indentAt(config.key).length) || "  ";
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const entries = LAUNCHER_ROWS.filter((r) => r.id in rows).map((r) => `${outer}${step}"${r.id}": ${rows[r.id]}`);
+  const entries = Object.entries(perGame).map(([id, value]) => `${outer}${step}${JSON.stringify(id)}: ${JSON.stringify(value)}`);
   const body = entries.length === 0 ? "{}" : `{${eol}${entries.join(`,${eol}`)}${eol}${outer}}`;
   return text.slice(0, target.start) + body + text.slice(target.end);
 }
@@ -120,21 +129,22 @@ function main(argv) {
   if (rest.length > 1) throw new Error("encode-seed takes one repo root");
   const root = path.resolve(rest[0] ?? path.dirname(CORE_ROOT));
 
-  const result = encodeRows(root);
+  const result = encodePerGame(root);
   if (result.text === null) {
-    console.log(`${root} has no launcher-manifest.json, so there are no rows to write`);
+    console.log(`${root} has no launcher-manifest.json, so there is no per_game to write`);
     return 0;
   }
-  if (result.rows === null) {
-    console.log("launcher-manifest.json has no config block, so there are no rows to write");
+  if (result.perGame === null) {
+    console.log("launcher-manifest.json has no config block, so there is no per_game to write");
     return 0;
   }
+  const { committed, stale } = result.perGame;
   if (check) {
-    console.log(result.rows.stale ? `STALE config.rows: not the rows ${result.rows.committed} holds; run encode-seed` : `ok    config.rows match ${result.rows.committed}`);
-    return result.rows.stale ? 1 : 0;
+    console.log(stale ? `STALE config.per_game: not the per_game rows ${committed} holds; run encode-seed` : `ok    config.per_game matches ${committed}`);
+    return stale ? 1 : 0;
   }
   if (result.updated !== result.text) fs.writeFileSync(result.manifestPath, result.updated);
-  console.log(result.rows.stale ? `wrote   config.rows from ${result.rows.committed}` : `ok      config.rows already match ${result.rows.committed}`);
+  console.log(stale ? `wrote   config.per_game from ${committed}` : `ok      config.per_game already matches ${committed}`);
   return 0;
 }
 

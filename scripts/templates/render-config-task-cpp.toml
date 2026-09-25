@@ -9,9 +9,10 @@
 # comment or a default.
 #
 # The test binary owns the mode: given `--render-config <path>` it writes the rendered bytes
-# to <path> and exits 0 without running its tests. encode-seed then rewrites the rows of the
-# launcher-manifest.json config descriptor from the new file, and says so when the repo has
-# no manifest or no descriptor.
+# to <path> and exits 0 without running its tests. encode-seed then rewrites the
+# launcher-manifest.json config descriptor's per_game from data/config-format.json and the
+# new file, the value each row the game keeps for itself holds there, and says so when the
+# repo has no manifest or no descriptor.
 #
 # <test binary>     the test executable the build produces, e.g. build/tests/Release/<name>_tests.exe
 # <build task>      the task that builds it
