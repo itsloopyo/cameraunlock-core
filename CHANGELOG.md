@@ -313,6 +313,9 @@ Consuming repos: a converted repo takes both files out of `MOD_SEED_FILES` in `i
 - The Tooling section lists what `config-preserve` checks now (an unrecorded stamped file counts as
   the committed config, and the uninstall wrapper is checked only on the shared body) and that
   `validate-manifest` fails a converted repo's package that seeds or ships either config file.
+- The options table says `legacy_path` / `LegacySourcePath` is the file the game's last
+  pre-canonical build read, the entry's `legacy_source`, and gives `HeadTracking.ini` and a BepInEx
+  `<GUID>.cfg` as examples only. Many legacy files have other names.
 
 No library code changes.
 

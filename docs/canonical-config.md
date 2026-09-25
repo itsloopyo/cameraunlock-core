@@ -607,7 +607,7 @@ later changes no mod's code:
 | `path` | `Path` | The file's full path. Required. C++ takes it as a wide string, with no ANSI overload |
 | `table` | `Table` | The mod's table. Required |
 | `import` | `Import` | The frozen legacy import, empty (C++) or null (C#) for a mod that never published a pre-canonical build |
-| `legacy_path` | `LegacySourcePath` | The legacy file the import reads, as a full path, normally in the folder of `path`: `HeadTracking.ini` or a BepInEx plugin's `<GUID>.cfg`. Required with an import and refused without one |
+| `legacy_path` | `LegacySourcePath` | The legacy file the import reads, as a full path, normally in the folder of `path`: the file the game's last pre-canonical build read, which is the entry's `legacy_source` in `data/config-format.json`, for example `HeadTracking.ini` or a BepInEx plugin's `<GUID>.cfg`. Required with an import and refused without one |
 | `header` | `Header` | What the renderer writes above the settings: the display name. Required |
 | `status_sink` | `StatusSink` | Optional. Shows the player a one-line message, run after the owner releases its lock |
 
@@ -1117,10 +1117,11 @@ In a mod repo, and in conformance:
   `ParseIniFile` or BepInEx's `ConfigFile.Bind`, unless `allow_legacy_symbols` records a use that
   reads no config. `config-preserve` fails `CameraUnlock.ini`, the legacy file or the committed
   file's name (a stamped file `data/config-format.json` does not record counts as the committed
-  file) in `install.cmd`'s `MOD_DLLS` or `MOD_SEED_FILES`, and, where `uninstall.cmd` dispatches
-  to `uninstall-body.cmd`, in its `MOD_SEED_FILES`, and an installed path or the legacy file
-  beside one missing from its `PRESERVE_FILES`. `readme` fails a converted repo whose README config block is missing or
-  differs from the rendered one, and an unconverted repo that has one.
+  file) in `install.cmd`'s `MOD_DLLS` or `MOD_SEED_FILES`; and, where `uninstall.cmd` dispatches
+  to `uninstall-body.cmd`, the same names in its `MOD_SEED_FILES` and an installed path or the
+  legacy file beside one missing from its `PRESERVE_FILES`. `readme` fails a converted repo whose
+  README config block is missing or differs from the rendered one, and an unconverted repo that
+  has one.
   `config-descriptor` holds the committed manifest to the config descriptor's rules (see
   "The config descriptor") and fails a converted repo's manifest that seeds or ships its config.
 - **The README config block** sits between `<!-- cameraunlock:config -->` and
