@@ -3,7 +3,7 @@
 Every head-tracking mod converted to it keeps its settings in one INI dialect, read and written
 by one reader, one renderer and one editor per language, all in this library. This document is
 the format and the contract around it: what the file looks like, what a mod binds, what the
-config owner does at load, save and reload, what a player sees when an older file is converted,
+config owner does at load, save and reload, what a player sees when an older file is imported,
 the shared fixtures a port in another language runs, and the tooling that keeps the fleet on it.
 
 The data behind the format is checked in and generated from, never restated by hand:
@@ -194,12 +194,12 @@ one press runs the action once however many items it matches; C#
 
 ### The stamp and ConfigFormat
 
-`[CameraUnlock]` is the stamp. A file is canonical when it has a line that opens a section named
+`[CameraUnlock]` is the stamp. A file is stamped when it has a line that opens a section named
 `CameraUnlock` under the header rule above (so `[CameraUnlock] ; note` is stamped and
-`; [CameraUnlock]` is not). In a file that starts with a UTF-16 byte order mark the stamp is
-looked for in its UTF-16 text, the one place core decodes UTF-16, so a canonical file a player
-re-saved as UTF-16 is still recognised as canonical, and reported unreadable rather than converted
-again.
+`; [CameraUnlock]` is not). The owner reads `CameraUnlock.ini` as canonical with or without it and
+adds it at the next save that changes a row; core's tooling tells a repo's committed canonical
+file from a legacy one by it. In a file that starts with a UTF-16 byte order mark the stamp is
+looked for in its UTF-16 text, the one place core decodes UTF-16.
 
 `ConfigFormat` inside it is the dialect version, and 1 is the only version. It changes only when
 the grammar or a codec changes in a way an older reader would misread. Adding concepts, rows, keys
@@ -583,14 +583,19 @@ which `PluginMod::Initialize` then requires. `PluginConfigTable(schema)`
 hotkey lists, a local `DiagnosticMarkerKey` when the schema has a diagnostic marker key, and the
 light rows when the schema has a flashlight. The mode control has two states, so there is no
 `RotationEnabled`. `PluginConfigLegacyImport(schema)` is the import, and `PluginConfig::Read`,
-which it calls, is frozen. With the flag unset, a mod reads, migrates and writes as it did before.
+which it calls, is frozen. With the flag set, `PluginMod` keeps the settings in
+`reframework\plugins\CameraUnlock.ini`, beside the plugin DLL, and imports
+`PluginModDescriptor::configFileName` (`HeadTracking.ini` by default) from the same folder while
+`CameraUnlock.ini` is absent; that file is never written. With the flag unset, a mod reads,
+migrates and writes `configFileName` as it did before.
 
 ## The config owner
 
 `ConfigOwner<Config>` (C++ `config/config_owner.h`) and `ConfigOwner<TConfig>` (C#) are the one
 reader and writer of a config file. Each file has one owner, built before anything reads the file,
-and nothing else reads or writes it. The owner writes only through the checked file writer, which
-never opens the live file for writing: it writes a temporary beside it and swaps it in whole. The
+and nothing else reads or writes it. The owner writes only the config file, never the legacy file, and only through
+the checked file writer, which never opens the live file for writing: it writes a temporary beside
+it and swaps it in whole, or creates the file only where none is. The
 owner runs on Windows only; the reader, the table, the codecs and the renderer are pure and run
 anywhere.
 
@@ -602,13 +607,14 @@ later changes no mod's code:
 | `path` | `Path` | The file's full path. Required. C++ takes it as a wide string, with no ANSI overload |
 | `table` | `Table` | The mod's table. Required |
 | `import` | `Import` | The frozen legacy import, empty (C++) or null (C#) for a mod that never published a pre-canonical build |
-| | `LegacySourcePath` | BepInEx only: the `.cfg` the import reads when the `.ini` does not exist |
+| `legacy_path` | `LegacySourcePath` | The legacy file the import reads, as a full path, normally in the folder of `path`: `HeadTracking.ini` or a BepInEx plugin's `<GUID>.cfg`. Required with an import and refused without one |
 | `header` | `Header` | What the renderer writes above the settings: the display name. Required |
 | `status_sink` | `StatusSink` | Optional. Shows the player a one-line message, run after the owner releases its lock |
 
 The constructor throws for a missing or relative path, a table that has both `RotationEnabled`
-and `PositionEnabled` and marks only one Writable, or a header the renderer refuses. The C++ owner
-also throws for a table with no rows, and the C# owner for a `LegacySourcePath` with no `Import`.
+and `PositionEnabled` and marks only one Writable, a header the renderer refuses, an import without
+a legacy path, a legacy path without an import, or a legacy path naming the config file itself
+(compared without case). The C++ owner also throws for a table with no rows.
 
 ### Load
 
@@ -619,16 +625,17 @@ up and write them afterwards. The status numbers are the same in both languages.
 
 | Status | When | The session runs on | Saves this session |
 |--------|------|---------------------|--------------------|
-| `Canonical` (0) | The file is stamped and readable, or unstamped and not read by the import: a mod with no import, or a BepInEx mod, whose import reads the `.cfg` (the log says the next save stamps it) | the file | yes |
-| `Migrated` (1) | An unstamped file the import reads, or under BepInEx the `.cfg` with no `.ini` beside it, was converted this launch | the converted settings | yes |
-| `Created` (2) | There was no file, and the rendered defaults were written, never over a file that appeared meanwhile | the defaults | yes |
-| `Deferred` (3) | A conversion or creation could not finish, or the file could not be opened | what the import gave, or the defaults | no |
-| `LegacyRefused` (4) | The import refused the file, as the published build did | what the import gave; the mod does what its published build did on that refusal | no |
-| `Unreadable` (5) | A stamped file, or an unstamped one the import does not read, saved as UTF-16 or holding a NUL byte | the defaults | no |
+| `Canonical` (0) | The config file exists and is readable, stamped or not (for an unstamped one the log says the next save stamps it) | the file | yes |
+| `Migrated` (1) | There was no config file, and the legacy file was imported into a new one this launch | the imported settings | yes |
+| `Created` (2) | There was no config file and no legacy file, and the rendered defaults were written, never over a file that appeared meanwhile | the defaults | yes |
+| `Deferred` (3) | An import or creation could not finish, or the config file or the legacy file could not be opened | what the import gave, or the defaults | no |
+| `LegacyRefused` (4) | The import refused the legacy file, as the published build did | what the import gave; the mod does what its published build did on that refusal | no |
+| `Unreadable` (5) | The config file is saved as UTF-16 or holds a NUL byte | the defaults | no |
 
-The import never runs on a stamped file, and a file the owner cannot open is deferred on the
-defaults without running it, since the stamp that tells a legacy file from a canonical one is
-inside the file.
+While the config file exists the import never runs and the legacy file is never opened; when a
+legacy file is also present, the log says so:
+`<path>: settings are read from this file. <legacy path> is left as it was and is not read.`
+A config file the owner cannot open is deferred on the defaults, and nothing is imported.
 
 ### Save
 
@@ -646,10 +653,8 @@ was writes nothing and reports `Saved`.
 | `NotSaved` (1) | Nothing was written, and the file is as it was. The result has the reason and the OS error |
 | `Uncertain` (2) | Windows started replacing the file and did not finish, and the checked writer could not finish it either. The reason names the file and the kept temporary that holds the new contents |
 
-It saves only a readable file whose `ConfigFormat` is not newer than the build's and that is
-stamped or not read by the import; an unstamped one gets its `[CameraUnlock]` section in the same
-write. An unstamped file the import reads is a legacy file and is never edited. A BepInEx mod's
-import reads the `.cfg`, so an unstamped `.ini` is saved and stamped. A missing
+It saves only a readable file whose `ConfigFormat` is not newer than the build's; an unstamped
+one gets its `[CameraUnlock]` section in the same write. The legacy file is never edited. A missing
 file is not created by `Save`: the next `Load` creates it. After a `Deferred`, `LegacyRefused` or
 `Unreadable` load every save is `NotSaved` until a `Reload` applies a readable file. `Save` never
 rolls back and never retries: the mod applies the new value first, and a save that fails leaves
@@ -658,20 +663,23 @@ the session running on it.
 ### Reload and FileChanged
 
 `FileChanged()` compares the file's last write time with the one the owner recorded at its last
-load, reload or save, for a mod that watches its file. `Reload()` never writes and never converts:
+load, reload or save, for a mod that watches its file. `Reload()` reads only the config file, never
+writes, and never runs the import:
 
 | Status | Meaning |
 |--------|---------|
-| `Unchanged` (0) | The file holds the bytes the owner last created, converted or saved |
-| `Applied` (1) | The file was read, and the result holds its settings |
-| `LegacyReadOnly` (2) | An unstamped file the import reads, such as an old file copied back mid-session. It is read through the import, never written, and converted at the next launch |
-| `Unreadable` (3) | The file could not be read. The mod keeps the settings it has |
+| `Unchanged` (0) | The file holds the bytes the owner last created or saved |
+| `Applied` (1) | The file was read as canonical, stamped or not, and the result holds its settings |
+| `Unreadable` (3) | The file is missing or could not be read. The mod keeps the settings it has |
+
+There is no status 2: `LegacyReadOnly`, which read a legacy file mid-session, went with the
+conversion in place.
 
 ### Threading
 
 - One lock serialises `Load`, `Save`, `Reload` and `FileChanged`. It does not coordinate separate
   processes. The status sink runs after the lock is released.
-- `Load` converts files, so it must not run under the loader lock: call it from the mod's init
+- `Load` imports and creates files, so it must not run under the loader lock: call it from the mod's init
   thread, never from `DllMain`.
 - `Save` is synchronous. Call it from the `HotkeyPoller` thread or another thread that is not
   drawing a frame, never from a per-frame path. A Unity mod calls it on the main thread, one write
@@ -769,25 +777,23 @@ and in `dropped` as `PoseShaping`.
 
 ### What happens at the first launch
 
-When `Load` finds an unstamped file the import reads (for BepInEx, see [BepInEx](#bepinex)):
+When `Load` finds no config file and the legacy file exists:
 
-1. It opens the file for reading, sharing read and write but not delete, and holds it open while
-   it reads the bytes, runs the import on the live path and reads the bytes again. No program can
-   newly lock, rename or delete the file meanwhile, and a write in between is caught.
+1. It opens the legacy file for reading, sharing read and write but not delete, and holds it open
+   while it reads the bytes, runs the import on that path and reads the bytes again. No program
+   can newly lock, rename or delete the file meanwhile, and a write in between defers the import.
 2. It renders the imported settings, reads the render back through the table and requires every
    row to equal the import's (floats bit for bit).
-3. It keeps the original bytes (see the copies below), writing the copy through the checked writer
-   and reading it back.
-4. It replaces the file with the rendered bytes, only if the file still holds the bytes it read.
-   As in `Save`, the check and the replacement are two operations, so a write that lands between
-   them is overwritten.
+3. It creates the config file with the rendered bytes, only if no file has appeared at its path.
 
-A process killed at any point leaves the old file whole or the new file whole, and the next launch
-converts again from what is there. A stamped file is never converted, and the renderer is
-deterministic, so converting the same bytes twice gives the same file.
+The legacy file is never written, renamed, deleted or copied, whatever happens. A process killed
+at any point leaves the config file absent or whole, and a launch that finds it absent imports
+again. Once the config file exists, the legacy file is not read again; deleting only the config
+file makes the next launch import the legacy file again.
 
-The log names the file on every line. It lists every dropped value and every key line of the old
-file the import does not read, for example:
+The log names the file on every line. It says where the settings came from
+(`<path>: created from <legacy path>, which is left as it was.`) and lists every dropped value and
+every key line of the legacy file the import does not read, for example:
 
 ```text
 C:\Games\Example\HeadTracking.ini: not carried: [General] Smoothng=0.3 on line 5, this build does not read it
@@ -796,23 +802,13 @@ C:\Games\Example\HeadTracking.ini: not carried: [Smoothing] RemoteSmoothing=nan,
 
 Hand-written comments are not carried either: the new file's comments are the renderer's.
 
-### The copies
+### When an import does not happen
 
-- **`<file>.pre-canonical`** holds the bytes the first conversion read. It is written once and
-  never replaced.
-- **`<file>.pre-canonical.last`** holds the input of a later conversion whose input differs from
-  `.pre-canonical`: a file an older build rewrote in its old layout, or a canonical file whose
-  stamp a player deleted. Each such conversion replaces it.
-
-Nothing reads them. They are the evidence when a player reports changed settings, and the manual
-way back. A BepInEx mod gets neither, since its `.cfg` is left as it was.
-
-### When a conversion does not happen
-
-The file is left as it was, the session runs on what the import gave (or on the defaults), nothing
-is saved that session, the player is told once through the status sink, and the next launch tries
-again. The message is `<file> was not converted to the new settings format: <why>. The mod tries
-again at the next launch and saves nothing this session.`, where `<why>` is one of:
+The config file is not created, the legacy file is left as it was, the session runs on what the
+import gave (or on the defaults), nothing is saved that session, and the player is told once
+through the status sink. The message is `<legacy file> was not imported into <config file>:
+<why>. The mod tries again at the next launch and saves nothing this session.`, where `<why>` is
+one of:
 
 - `the file is in use by another program`
 - `the file is read-only`
@@ -821,37 +817,29 @@ again at the next launch and saves nothing this session.`, where `<why>` is one 
   the error in the brackets: `Windows error N:` and the system's text in C++, the exception's
   message in C#
 - `the file was changed by another program while it was read`
-- `the copy of the original file could not be written`
 - `[Section] Key=value cannot be converted`, for a value no codec writes or a render that does not
   read back
-- `the file was changed by another program at the same time`, `another program created the file at
-  the same time` or `the file was deleted at the same time`, when the file changed between the
-  conversion's read and its replacement
-- `Windows did not finish replacing <path>, so it may be missing; the new settings are in <temp>`,
-  where `<path>` is the full path of the config file or of its copy
-- `the old settings reader could not find the file`, when the import reports the file absent while
-  the owner holds it open
+- `another program created the file at the same time`, when a file appeared at the config path
+  before the owner created it
+- `Windows did not finish replacing <path>, so it may be missing; the new settings are in <temp>`
+- `the old settings reader could not find the file`, when the import reports the legacy file
+  absent while the owner holds it open
 - the import's own reason, for `Undecodable`, and for `LegacyRefused`, where the mod then does
   what its published build did on that refusal
 
-The texts about reading and writing can be about the copy as well as the config file. The one
-case where the config file is not left as it was is the unfinished replacement naming the config
-file itself: at step 4
-Windows started replacing it and did not finish, and the checked writer could not finish it
-either. The file may then be missing or renamed, the converted settings are in the named
-temporary, which is kept, and the original bytes are in the `.pre-canonical` or
-`.pre-canonical.last` that step 3 wrote or found holding them. The message still says the mod
-tries again, but a launch that finds no file creates the defaults rather than converting.
+When another program created the config file first, the next launch reads that file and does not
+import, and the message ends `The mod saves nothing this session and reads <config file>, not
+<legacy file>, at the next launch.` instead.
 
-In C++ the import is also handed the path in the ANSI code page. When that form lost a character
-and the import reports the file absent, the published build, handed the same ANSI path, never saw
-the file and ran on its defaults. The conversion then writes those defaults instead of deferring,
-keeps the file's content in `.pre-canonical`, and logs the case.
+In C++ the import is also handed the legacy path in the ANSI code page. When that form lost a
+character and the import reports the file absent, the published build, handed the same ANSI path,
+never saw the file and ran on its defaults. The owner then writes those defaults to the config
+file instead of deferring, leaves the legacy file as it was, and logs the case.
 
-A file `Load` cannot open at all, or cannot create, gives `<file> cannot be read: <why>.` or
+A config file `Load` cannot open at all, or cannot create, gives `<file> cannot be read: <why>.` or
 `<file> was not created: <why>.`, then `The mod runs on its default settings this session.`
 
-A stamped file that is unreadable gives `<file> cannot be read: it is saved as UTF-16; save it as
+A config file that is unreadable gives `<file> cannot be read: it is saved as UTF-16; save it as
 ANSI or UTF-8. The mod runs on its default settings and saves nothing until the file is fixed.`
 (or `line N holds a NUL byte`). A save that fails gives `Settings not saved: <why>.`, and an
 unfinished replacement `Settings may not be saved: <why>.`
@@ -881,19 +869,14 @@ conversion release of a repo in `legacy`. The untracked NEXUS_MODS.md is updated
 
 ### Rolling back and forward
 
-An older build reads the canonical file with its own reader. A key that moved section or changed
-spelling reads as that build's default, and a value now written as a name can be misread: an
-older build that reads hotkeys with core's `IniReader::ReadHex` reads `End` as 0x0E, which is not
-the End key, and `PageUp` as its default. An older build that saves may rewrite the whole file in
-its old layout. The way back is to copy `.pre-canonical` over the file before installing
-the older build. A BepInEx mod makes no copy and needs none: its older build reads the `.cfg`,
-which the conversion never writes (see [BepInEx](#bepinex)).
+An older build reads the legacy file, which the canonical build never writes, so rolling back
+needs no step: the older build runs on the settings the legacy file held when the player updated.
+A setting changed after updating is in `CameraUnlock.ini` only, and the older build does not read
+it. An older build that saves writes the legacy file as it always did.
 
-Rolling forward, a file an older build rewrote has lost its stamp and is converted again, with its
-input kept in `.pre-canonical.last`. A file that kept its stamp is read as canonical, and a key an
-older build appended to it draws an unknown-key diagnostic and is not read. A BepInEx mod reads
-an existing `.ini` as canonical, so a setting an older build saved to the `.cfg` is not carried
-over unless the `.ini` is deleted first.
+Rolling forward, `CameraUnlock.ini` is read as it was left, so a setting an older build saved to
+the legacy file in between is not carried over unless `CameraUnlock.ini` is deleted first, which
+imports the legacy file again at the next start.
 
 ### Install, uninstall and manual packages
 
@@ -908,28 +891,33 @@ over unless the `.ini` is deleted first.
   game folder, that `uninstall-body.cmd` leaves in place, including inside a loader folder the
   uninstall removes. A converted repo lists every `installed` path, and a repo in `legacy` also
   lists the legacy file in the folder of each one.
-- **Manual (Nexus) ZIPs** never carry the config. A ZIP extracted over the game folder would put
-  the stamped default over the player's file, and no conversion would run.
-- A conversion adds no launcher seed where the repo had none: the owner creates the file at first
-  launch. A repo that seeds its config re-encodes the seed from the committed file.
+- **Manual (Nexus) ZIPs** carry neither `CameraUnlock.ini` nor the legacy file. Extracted over the
+  game folder, the first would replace the player's settings with the defaults, and on an update
+  from a legacy build would stop the import; the second would replace the file an older build
+  reads, which is also what the mod imports while `CameraUnlock.ini` is absent.
+  `pixi run validate-manifest` fails a converted repo's Nexus ZIP that carries either.
+- **Launcher seeds**: a converted release seeds neither file in `launcher-manifest.json`; the owner
+  creates `CameraUnlock.ini` at first launch. Lopari v0.9.0 hash-checks seeded files and downloads
+  a drifted one again, and a file the mod or a launcher edits always drifts.
 
 ### BepInEx
 
-A BepInEx mod is a C# mod like any other: core's owner and reader on `BepInEx\config\<GUID>.ini`.
-The plugin binds nothing through BepInEx's `ConfigFile` at runtime, so BepInEx's ConfigurationManager
-no longer lists its settings, and the `.cfg` is never written again.
+A BepInEx mod is a C# mod like any other: core's owner and reader on
+`BepInEx\config\CameraUnlock.ini`, with the plugin's `BepInEx\config\<GUID>.cfg` as its legacy
+file. The plugin binds nothing through BepInEx's `ConfigFile` at runtime, so BepInEx's
+ConfigurationManager no longer lists its settings, and the `.cfg` is never written again.
 
-- `LegacySourcePath` names the `.cfg`. When the `.ini` is absent and the `.cfg` exists, the import
-  reads the `.cfg` and the owner creates the `.ini` from it. A file at the `.ini` path is always
-  read as canonical. Neither file present is `Created`.
+- `LegacySourcePath` names the `.cfg`. When `CameraUnlock.ini` is absent and the `.cfg` exists,
+  the import reads the `.cfg` and the owner creates `CameraUnlock.ini` from it. A file at
+  `CameraUnlock.ini` is always read as canonical. Neither file present is `Created`.
 - The import is the plugin's own `Bind` calls, frozen, run on the plugin's `Config`. BepInEx's
   `ConfigFile` read the `.cfg` in its constructor, before the owner held the file, so the import
   sets `Config.SaveOnConfigSet = false`, then calls `Config.Reload()`, then binds. Without the
   `Reload` its values come from a read the owner's snapshot does not cover; with `SaveOnConfigSet`
   off, no `Bind` writes the `.cfg`.
 - The `.cfg` stays byte for byte as the last pre-canonical build left it, so an older build still
-  reads it. Deleting only the `.ini` converts the `.cfg` again at the next start; deleting both
-  gives the defaults.
+  reads it. Deleting only `CameraUnlock.ini` imports the `.cfg` again at the next start; deleting
+  both gives the defaults.
 
 ## Shared fixtures
 
@@ -963,9 +951,9 @@ the lists exactly.
 The owner is not the only program that may edit a canonical file. A launcher or any other tool
 that edits one follows the owner's rules:
 
-- Edit only a file that carries the stamp and whose `ConfigFormat` the tool implements. An
-  unstamped file is a legacy file the mod has not converted yet, and the mod's first launch
-  converts it.
+- Edit only `CameraUnlock.ini`, never the legacy file, and only when it carries the stamp and a
+  `ConfigFormat` the tool implements. The legacy file is what an older build reads, and the mod
+  imports it only while `CameraUnlock.ini` is absent.
 - Change values with the editor's rules and nothing else: every other byte is kept, a replaced
   line keeps its key's spelling and the white space around `=`, a repeated key has its last
   occurrence replaced, a missing key goes after the last key line of its section, a missing
@@ -1134,7 +1122,8 @@ In a mod repo, and in conformance:
   `scripts/generate-readme.mjs` works on the folder above core, which is the mod when it runs from
   the mod's `cameraunlock-core` submodule.
 - **`pixi run validate-manifest`**, in a converted repo, also fails when the newest
-  `release/*-nexus.zip` carries a file at an `installed` path of the config, or at the tail of one.
+  `release/*-nexus.zip` carries a file at an `installed` path of the config or at the legacy file
+  beside one, or at the tail of either.
   A ZIP whose manifest carries a config descriptor is held to its rules.
 
 ## Changing the format

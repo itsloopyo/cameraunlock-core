@@ -160,6 +160,19 @@ around a loader folder removal check the listed path alone. `test-uninstall-pres
 the copies from its fixtures and the folder-named-as-a-copy case, and its BepInEx fixture keeps
 `BepInEx\config\CameraUnlock.ini` and the plugin's `.cfg`. The template tails are unchanged.
 
+### Changed - docs/canonical-config.md describes the import into `CameraUnlock.ini` throughout
+
+The sections the earlier entries left alone still described the conversion in place. The owner
+table has `legacy_path` / `LegacySourcePath` for every import, not BepInEx alone, and the
+constructor's refusals for it; the Load and Reload tables describe the config file and the legacy
+file (no `LegacyReadOnly`); "What happens at the first launch" and "When an import does not
+happen" describe the import and its player messages; "The copies" is gone; "Rolling back and
+forward" says an older build reads the untouched legacy file; the Nexus and seed bullets say a
+converted release ships and seeds neither file; the BepInEx section names
+`BepInEx\config\CameraUnlock.ini`; the stamp section says the owner reads an unstamped
+`CameraUnlock.ini` as canonical; and a launcher edits `CameraUnlock.ini` only, never the legacy
+file. No code changes.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's
