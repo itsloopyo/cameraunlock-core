@@ -83,10 +83,10 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-// The paths, relative to the game folder, a seed's or a files[] row's target can land on. The
-// launcher resolves exe_dir from the executable it detected, which is executable_relpath or, for
-// a Game Pass install, xbox_executable_relpath. A mod_home target is never in the game folder.
-export function gameRelativeTargets(item, man) {
+// The paths, relative to the game folder, an anchored target can land on. The launcher resolves
+// exe_dir from the executable it detected, which is executable_relpath or, for a Game Pass
+// install, xbox_executable_relpath. A mod_home target is never in the game folder.
+function gameRelativeTargets(item, man) {
   const anchor = anchorOf(item);
   if (anchor === "game_root") return [lower(item.target)];
   if (anchor === "mod_home") return [];

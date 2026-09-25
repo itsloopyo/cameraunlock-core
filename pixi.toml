@@ -182,12 +182,6 @@ check-canonical-ini-js = "node scripts/test-canonical-config.mjs"
 # block no longer matches the lines it names, or a C++ or C# block names none.
 check-doc-examples = "node scripts/check-doc-examples.mjs"
 
-# scripts/encode-seed.mjs re-encodes the launcher-manifest.json seeds that write a converted
-# repo's config, and the config descriptor's rows, from its committed file (a mod repo's
-# render-config task runs it; see scripts/templates/render-config-task-*.toml). This runs it
-# against copies of real manifests.
-test-encode-seed = "node scripts/test-encode-seed.mjs"
-
 # scripts/check-config-descriptor.mjs holds the launcher-manifest.json config descriptor to its
 # rules; validate-manifest runs them on a built ZIP and conformance (config-descriptor) on the
 # committed manifest. This checks that a good descriptor passes and that one mutation per rule
@@ -212,7 +206,7 @@ config-report = "node scripts/check-canonical-config.mjs --report"
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-encode-seed", "test-config-descriptor", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

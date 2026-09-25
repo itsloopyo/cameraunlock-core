@@ -215,6 +215,24 @@ file, and one with two recorded files or an unrecorded committed file was never 
 legacy file with no block: fallout-new-vegas, metro-exodus-enhanced-edition, no-mans-sky and
 starfield. No unconverted repo is checked.
 
+### Removed - `encode-seed.mjs` no longer re-encodes seeds
+
+`encode-seed` rewrote the `content_b64` of every seed whose target is an installed config path.
+Every installed path now names `CameraUnlock.ini`, and a converted release seeds nothing, which
+`configWriteProblems` fails, so that half wrote nothing in any repo that passes the gates. No
+committed `launcher-manifest.json` beside core names `CameraUnlock.ini`.
+
+- `scripts/encode-seed.mjs` writes the config descriptor's `rows` and nothing else; `--check`
+  exits 1 when they are stale. `encodeSeeds` is now `encodeRows`, and nothing outside the script
+  imported it. `gameRelativeTargets` in `check-config-descriptor.mjs` is no longer exported.
+- `scripts/test-encode-seed.mjs`, its pixi task and `data/fixtures/encode-seed/resident-evil-2-headtracking.launcher-manifest.json`
+  are gone. `test-config-descriptor` keeps the rows tests on the prey fixture and pins that the
+  fixture's seed is left as it was.
+- The render-config templates and docs/canonical-config.md describe `rows` only.
+
+Consuming repos: `render-config` runs the same command and no longer touches a seed. A converted
+repo takes any seed of its config out of `launcher-manifest.json` by hand.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

@@ -309,7 +309,8 @@ clean("rows in another order", abzuMan((c) => ({ ...c, rows: Object.fromEntries(
 // expectedRows is what the generator writes.
 check(isDeepStrictEqual(expectedRows(abzu.root, abzu.state).rows, ALL_ROWS), "expectedRows should read the five rows of all-concepts.ini");
 
-// The generator: encode-seed rewrites config.rows and nothing else.
+// The generator: encode-seed rewrites config.rows and nothing else, the fixture's seed of the
+// legacy file included.
 function runScript(script, ...args) {
   const r = spawnSync(process.execPath, [path.join(SCRIPTS, script), ...args], { encoding: "utf8" });
   return { status: r.status, out: r.stdout + r.stderr };
@@ -317,11 +318,8 @@ function runScript(script, ...args) {
 {
   const preyText = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "encode-seed", "prey-headtracking.launcher-manifest.json"), "utf8");
   const block = '  "config": {\n    "path": "CameraUnlock.ini",\n    "anchor": "exe_dir",\n    "legacy_source": "HeadTracking.ini",\n    "canonical_since": "1.1.0",\n    "rows": {}\n  },\n';
-  // The fixture seeds HeadTracking.ini, the legacy file; retargeted, it seeds the config.
-  const seeded = edit(preyText, '"target": "HeadTracking.ini"', '"target": "CameraUnlock.ini"');
-  const staleText = edit(seeded, '  "delivery_mode": "manifest",\n', `  "delivery_mode": "manifest",\n${block}`);
+  const staleText = edit(preyText, '  "delivery_mode": "manifest",\n', `  "delivery_mode": "manifest",\n${block}`);
   const root = repo("generator", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": staleText });
-  const seedsBefore = JSON.parse(staleText).loader.seed;
 
   const before = runScript("encode-seed.mjs", "--check", root);
   check(before.status === 1 && before.out.includes("STALE config.rows"), `generator: --check on stale rows should exit 1, got ${before.status}\n${before.out}`);
@@ -331,18 +329,14 @@ function runScript(script, ...args) {
   check(wrote.status === 0 && wrote.out.includes("wrote   config.rows"), `generator: encoding should exit 0, got ${wrote.status}\n${wrote.out}`);
   const text = fs.readFileSync(path.join(root, "launcher-manifest.json"), "utf8");
   const rowsText = '"rows": {\n      "EnableOnStartup": true,\n      "WorldSpaceYaw": true,\n      "RotationEnabled": true,\n      "PositionEnabled": true,\n      "TrueFreeLook": false\n    }';
-  const seedB64 = Buffer.from(ALL, "latin1").toString("base64");
-  const expectedText = edit(staleText, '"rows": {}', rowsText).split(`"${seedsBefore[0].content_b64}"`).join(`"${seedB64}"`);
-  check(text === expectedText, "generator: only config.rows and the stale seed should change, rows one per line at the file's indent");
+  const expectedText = edit(staleText, '"rows": {}', rowsText);
+  check(text === expectedText, "generator: only config.rows should change, the fixture's seed included, rows one per line at the file's indent");
 
   const after = runScript("encode-seed.mjs", "--check", root);
   check(after.status === 0 && after.out.includes("ok    config.rows match HeadTracking.ini"), `generator: --check after encoding should exit 0, got ${after.status}\n${after.out}`);
   runScript("encode-seed.mjs", root);
   check(fs.readFileSync(path.join(root, "launcher-manifest.json"), "utf8") === text, "generator: encoding current rows should change nothing");
-  // The seed is there to show both rewritten. A package with a block seeds neither file, so the
-  // rules run on the manifest without it.
-  const { loader: _seedOnly, ...unseeded } = JSON.parse(text);
-  const ruled = problemsOf(unseeded, { root, state: repoState(root) }, false);
+  const ruled = problemsOf(JSON.parse(text), { root, state: repoState(root) }, false);
   check(ruled.length === 0, `generator: the rows it writes should pass the rules, got ${JSON.stringify(ruled)}`);
 
   const crlf = repo("generator-crlf", "prey-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": staleText.replace(/\n/g, "\r\n") });
@@ -353,7 +347,7 @@ function runScript(script, ...args) {
   const noRowsRun = runScript("encode-seed.mjs", noRows);
   check(noRowsRun.status !== 0 && noRowsRun.out.includes('add "rows": {}'), `generator: a block without rows should be refused, got ${noRowsRun.status}\n${noRowsRun.out}`);
 
-  const unstamped = repo("generator-unstamped", "prey-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": edit(staleText, '"loader": {', '"loader_": {') });
+  const unstamped = repo("generator-unstamped", "prey-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": staleText });
   const unstampedRun = runScript("encode-seed.mjs", unstamped);
   check(unstampedRun.status !== 0 && unstampedRun.out.includes("which is unstamped"), `generator: rows from an unstamped file should be refused, got ${unstampedRun.status}\n${unstampedRun.out}`);
 }

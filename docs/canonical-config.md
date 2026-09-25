@@ -1081,7 +1081,6 @@ In core:
 | `pixi run check-config-format` | Checks the shape of `data/config-format.json` and pins its `legacy` names |
 | `pixi run check-canonical-ini-js` | Runs the reader and key fixtures through core's script grammar (`scripts/lib/canonical-ini.mjs`, `scripts/lib/key-bindings.mjs`) and holds the lint to its rules |
 | `pixi run check-doc-examples` | Fails when a C++ or C# block in `docs/` is not a run of lines of the test it names, or an ini block is not the fixture it names |
-| `pixi run test-encode-seed` | Runs encode-seed against copies of real manifests |
 | `pixi run test-config-descriptor` | Checks that a good config descriptor passes and one mutation per rule fails, and runs encode-seed's `rows`, validate-manifest and conformance on it |
 | `pixi run config-report` | The fleet report: game-local keys three or more canonical repos share, local section names in use, and concept values in committed files that differ from the schema default |
 
@@ -1091,10 +1090,9 @@ In a mod repo, and in conformance:
   `render-config-task-csharp.toml`, rewrites the committed file from the table (the C++ test
   binary's `--render-config <path>` mode, or the C# render test with
   `CAMERAUNLOCK_RENDER_CONFIG=write`) and then runs encode-seed.
-- **`scripts/encode-seed.mjs`** rewrites the `content_b64` of every `launcher-manifest.json` seed
-  that writes the repo's config from the committed file's bytes, and the config descriptor's
-  `rows` from its values, leaving every other byte of the manifest as it was. `--check` exits 1
-  when a seed or `rows` is stale.
+- **`scripts/encode-seed.mjs`** rewrites the config descriptor's `rows` in `launcher-manifest.json`
+  from the committed file's values, leaving every other byte of the manifest as it was, and writes
+  no seed. `--check` exits 1 when `rows` is stale.
 - **`node scripts/check-canonical-config.mjs [repo ...]`** lints each stamped committed file: the
   reader finds nothing to report; CRLF endings, no byte order mark, ASCII only; `Key=value` and
   `[Name]` written plainly, each section once; `[CameraUnlock]` holding `ConfigFormat=1` alone;
