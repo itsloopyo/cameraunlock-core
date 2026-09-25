@@ -105,6 +105,8 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("end-saves-nothing", EndSavesNothing),
             Scenario("a-save-after-defaults-ini-changed-keeps-default-rows", ASaveAfterDefaultsIniChangedKeepsDefaultRows),
             Scenario("reload-and-file-changed-follow-defaults-ini", ReloadAndFileChangedFollowDefaultsIni),
+            Scenario("a-defaults-ini-read-while-the-file-is-missing-is-applied-once-it-returns",
+                ADefaultsIniReadWhileTheFileIsMissingIsAppliedOnceItReturns),
             Scenario("a-table-off-the-schema-default-is-refused-unless-per-game", ATableOffTheSchemaDefaultIsRefusedUnlessPerGame),
             Scenario("read-only-over-a-config-file", ReadOnlyOverAConfigFile),
             Scenario("read-only-over-a-legacy-file", ReadOnlyOverALegacyFile),
@@ -1392,6 +1394,31 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectSaved(owner.Save(c => c.WorldSpaceYaw = true));
         }
 
+        private static void ADefaultsIniReadWhileTheFileIsMissingIsAppliedOnceItReturns(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
+            byte[] created = File.ReadAllBytes(rig.Path);
+            File.Delete(rig.Path);
+            File.WriteAllBytes(rig.DefaultsPath, Ascii("[Network]\r\nUdpPort=7000\r\n[Hotkeys]\r\nToggleKey=Mouse4\r\n"));
+            rig.Sink.Clear();
+            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Unreadable, "the missing file is Unreadable, got " + reload.Status);
+            ExpectSunkOnce(rig, "CameraUnlock.ini is missing, so the current settings stay. It is created again at the next launch.");
+
+            File.WriteAllBytes(rig.Path, created);
+            rig.Sink.Clear();
+            reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Applied && reload.Config.UdpPort == 7000,
+                "the bytes the owner wrote are read over the Defaults.ini the last reload could not apply, got " + reload.Status);
+            ExpectSunkOnce(rig, "Defaults.ini: 1 setting cannot be used (ToggleKey=Mouse4), so this game uses its built-in "
+                + "values for them. The log has the details.");
+            rig.Sink.Clear();
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unchanged && rig.Sink.Count == 0, "then nothing is new");
+            ExpectBytes(rig.Path, created);
+        }
+
         private static void ATableOffTheSchemaDefaultIsRefusedUnlessPerGame(string dir)
         {
             var rig = new Rig(dir);
@@ -1466,9 +1493,21 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectSame(load.Config, Defaults(), "the built-in values");
             ExpectSunkOnce(rig, ReadOnlyLine);
             ExpectReadOnlySaves(rig, owner);
-            Expect(owner.Reload().Status == ConfigReloadStatus.Unreadable, "a reload finds no file and writes none");
+            rig.Sink.Clear();
+            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Unreadable, "a reload finds no file and writes none");
+            ExpectSunkOnce(rig, "CameraUnlock.ini is missing, so the current settings stay.");
             ExpectListing(dir);
             Expect(!Directory.Exists(Path.GetDirectoryName(rig.DefaultsPath)), "no Defaults.ini folder is created");
+
+            byte[] utf16 = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(Encoding.ASCII.GetString(Fresh()))).ToArray();
+            File.WriteAllBytes(rig.Path, utf16);
+            rig.Sink.Clear();
+            ConfigLoadResult<HeadTrackingConfigData> unreadable = rig.Owner().Load();
+            ExpectStatus(unreadable, ConfigLoadStatus.Unreadable);
+            Expect(unreadable.Reason == "CameraUnlock.ini cannot be read: it is saved as UTF-16; save it as ANSI or UTF-8. The mod "
+                + "runs on its default settings this session.", "the reason promises no save, got: " + unreadable.Reason);
+            ExpectBytes(rig.Path, utf16);
         }
 
         private const string ReadOnlyLine = "Settings are read but not saved on this system: this version saves settings only on "
@@ -1491,6 +1530,10 @@ namespace CameraUnlock.Core.Tests.Config
                     "every save is NotSaved, got " + save.Status + " (" + save.Reason + ")");
             }
             Expect(rig.Sink.Count == 3, "each is shown");
+            InvalidOperationException e = ExpectThrows<InvalidOperationException>(
+                () => owner.Save(c => c.EnableOnStartup = !c.EnableOnStartup), "EnableOnStartup is not Writable");
+            ExpectContains(e.Message, "[General] EnableOnStartup");
+            Expect(rig.Sink.Count == 3, "a programming error is thrown, not reported");
             if (before == null) Expect(!File.Exists(rig.Path), "no file is created");
             else ExpectBytes(rig.Path, before);
         }
@@ -1506,6 +1549,8 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectContains(missing.Message, "DefaultsFile.At(path)");
             ExpectThrows<ArgumentException>(() => DefaultsFile.At("Defaults.ini"), "a relative Defaults.ini path");
             ExpectThrows<ArgumentException>(() => DefaultsFile.At(""), "an empty Defaults.ini path");
+            ExpectThrows<ArgumentException>(() => DefaultsFile.At(@"C:scratch\Defaults.ini"), "a drive-relative Defaults.ini path");
+            ExpectThrows<ArgumentException>(() => DefaultsFile.At(@"\scratch\Defaults.ini"), "a root-relative Defaults.ini path");
             ExpectThrows<ArgumentNullException>(() => DefaultsFile.At(null), "a null Defaults.ini path");
             ExpectThrows<ArgumentNullException>(() => new ConfigOwner<HeadTrackingConfigData>(null), "null options");
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(Options(dir, null)), "no path");

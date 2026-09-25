@@ -9,6 +9,7 @@
 #include <cameraunlock/input/key_bindings.h>
 #include <cameraunlock/reframework/plugin_config.h>
 #include <cameraunlock/reframework/plugin_config_table.h>
+#include <cameraunlock/reframework/plugin_mod.h>
 
 #include <windows.h>
 
@@ -855,6 +856,24 @@ void TestEverySchemaRendersFresh() {
     }
 }
 
+// Initialize throws before it touches a file or the network, so the process's one PluginMod stays
+// uninitialized.
+void TestPluginModRequiresDefaults() {
+    cameraunlock::reframework::PluginModDescriptor descriptor;
+    descriptor.config = kRe8Schema;
+    descriptor.config.canonicalConfig = true;
+    descriptor.gameName = "Resident Evil Village";
+    std::string error;
+    try {
+        cameraunlock::reframework::PluginMod::Instance().Initialize(descriptor);
+    } catch (const std::invalid_argument& e) {
+        error = e.what();
+    }
+    Check(Contains(error, "PluginModDescriptor::defaults is required") && Contains(error, "DefaultsFile::PerUser()") &&
+              Contains(error, "DefaultsFile::At(path)"),
+          "PluginMod::Initialize refuses a canonical config with no defaults, naming both factories: " + error);
+}
+
 void TestLoadIgnoresCanonicalConfig(const fs::path& root) {
     const std::string base = ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / kFixtures[4].file);
     PluginConfigSchema canonical = kRe8Schema;
@@ -885,6 +904,7 @@ int RunPluginConfigCanonicalTests() {
     TestReadPinned(root);
     TestTableRendersTheGamesRows();
     TestEverySchemaRendersFresh();
+    TestPluginModRequiresDefaults();
     TestImportKeysAreWhatReadReads();
     TestImportDropsAndCorrection(root);
     TestShippedShapingIsFolded(root);

@@ -91,6 +91,9 @@ namespace CameraUnlock.Core.Config
 #endif
         private bool _loaded;
         private bool _savesAllowed;
+        // A Defaults.ini a Reload read while the file could not be read: the next Reload that reads
+        // the file applies it, and tells its refused values then.
+        private bool _snapshotUnapplied;
         private DateTime _recordedWriteTime;
         private DateTime _defaultsWriteTime;
         private DefaultsIniSnapshot _snapshot;
@@ -307,7 +310,7 @@ namespace CameraUnlock.Core.Config
         /// replace the values it gives; a file that went missing or cannot be read keeps them, with
         /// one line in the log and one message. Unchanged when the file holds exactly the bytes the
         /// owner last wrote, the import's and creation's included, no Reload has applied other bytes
-        /// since, and Defaults.ini gave nothing new. Any other file is read as canonical, stamped or
+        /// since, and Defaults.ini gave nothing an Applied reload has not yet read over. Any other file is read as canonical, stamped or
         /// not, over Defaults.ini's current values (Applied). A missing file, or one the canonical
         /// reader cannot read, is Unreadable, which leaves the game's settings as they are and is
         /// handed to the status sink. Never writes, never imports and never opens the legacy file.
@@ -351,6 +354,7 @@ namespace CameraUnlock.Core.Config
             _savesAllowed = false;
             _committed = null;
             _sources = null;
+            _snapshotUnapplied = false;
             var log = new List<string>();
             string twoFiles;
             string unreadable = LoadDefaults(log, out twoFiles);
@@ -663,8 +667,8 @@ namespace CameraUnlock.Core.Config
                 string why = Unreadable(doc);
                 log.Add(_path + ": cannot be read: " + why);
                 return Result(ConfigLoadStatus.Unreadable, OnDefaults(), NoDiagnostics(), log,
-                    _name + " cannot be read: " + why + ". The mod runs on its default settings and saves nothing until "
-                        + "the file is fixed.");
+                    _name + " cannot be read: " + why + ". The mod runs on its default settings"
+                        + (_writes ? " and saves nothing until the file is fixed." : " this session."));
             }
             TConfig config = _table.CreateDefaults();
             List<CanonicalDiagnostic> diagnostics = Apply(doc, config, log);
@@ -836,6 +840,10 @@ namespace CameraUnlock.Core.Config
             var log = new List<string>();
             if (!_writes)
             {
+                TConfig before = OnEffectiveDefaults();
+                TConfig after = OnEffectiveDefaults();
+                change(after);
+                EditedRows(before, after);
                 log.Add(_path + ": not saved: " + SavesOnlyOnWindows);
                 return NotSaved(SavesOnlyOnWindows, null, log);
             }
@@ -893,20 +901,8 @@ namespace CameraUnlock.Core.Config
             change(changed);
 
             int count = _table.RowCount;
-            var edited = new bool[count];
-            bool any = false;
-            for (int i = 0; i < count; i++)
-            {
-                if (_table.RowEqual(i, baseline, changed)) continue;
-                if (!_table.RowWritable(i))
-                {
-                    throw new InvalidOperationException(_table.RowName(i)
-                        + " changed, but the table does not mark it Writable, so Save may not write it");
-                }
-                edited[i] = true;
-                any = true;
-            }
-            if (!any) return new ConfigSaveResult(ConfigSaveStatus.Saved, string.Empty, null, null, log);
+            bool[] edited = EditedRows(baseline, changed);
+            if (Array.IndexOf(edited, true) < 0) return new ConfigSaveResult(ConfigSaveStatus.Saved, string.Empty, null, null, log);
 
             int rotation = _table.RowOf(ConfigConcepts.RotationEnabled);
             int position = _table.RowOf(ConfigConcepts.PositionEnabled);
@@ -976,6 +972,29 @@ namespace CameraUnlock.Core.Config
             return new ConfigSaveResult(ConfigSaveStatus.Saved, string.Empty, null, null, log);
         }
 
+        private bool[] EditedRows(TConfig baseline, TConfig changed)
+        {
+            var edited = new bool[_table.RowCount];
+            for (int i = 0; i < edited.Length; i++)
+            {
+                if (_table.RowEqual(i, baseline, changed)) continue;
+                if (!_table.RowWritable(i))
+                {
+                    throw new InvalidOperationException(_table.RowName(i)
+                        + " changed, but the table does not mark it Writable, so Save may not write it");
+                }
+                edited[i] = true;
+            }
+            return edited;
+        }
+
+        private TConfig OnEffectiveDefaults()
+        {
+            TConfig config = _table.CreateDefaults();
+            _table.Apply(CanonicalIni.Parse(new byte[0]), config, _effective, _fromDefaultsIni);
+            return config;
+        }
+
         private static string SourceName(ConfigValueSource source)
         {
             switch (source)
@@ -1006,15 +1025,17 @@ namespace CameraUnlock.Core.Config
             _defaultsWriteTime = DefaultsWriteTime();
             bool snapshotChanged;
             string unreadable = ReloadDefaults(log, out snapshotChanged);
-            ConfigReloadResult<TConfig> reloaded = ReloadConfigFile(log, writeTime, snapshotChanged);
+            bool unapplied = snapshotChanged || _snapshotUnapplied;
+            ConfigReloadResult<TConfig> reloaded = ReloadConfigFile(log, writeTime, unapplied);
+            _snapshotUnapplied = unapplied && reloaded.Status != ConfigReloadStatus.Applied;
             var lines = new List<string>(reloaded.Log);
             string refused = DefaultsLines(lines);
-            defaultsMessage = unreadable.Length > 0 ? unreadable : snapshotChanged ? refused : string.Empty;
+            defaultsMessage = unreadable.Length > 0 ? unreadable : unapplied ? refused : string.Empty;
             return Reloaded(reloaded.Status, reloaded.Config, new List<CanonicalDiagnostic>(reloaded.Diagnostics), lines,
                 reloaded.Reason);
         }
 
-        private ConfigReloadResult<TConfig> ReloadConfigFile(List<string> log, DateTime writeTime, bool snapshotChanged)
+        private ConfigReloadResult<TConfig> ReloadConfigFile(List<string> log, DateTime writeTime, bool snapshotUnapplied)
         {
             byte[] bytes;
             try
@@ -1029,7 +1050,7 @@ namespace CameraUnlock.Core.Config
                     _recordedWriteTime = writeTime;
                     log.Add(_path + ": not reloaded: the file is missing");
                     return Reloaded(ConfigReloadStatus.Unreadable, null, NoDiagnostics(), log,
-                        _name + " is missing, so the current settings stay. It is created again at the next launch.");
+                        _name + " is missing, so the current settings stay." + (_writes ? " It is created again at the next launch." : string.Empty));
                 }
                 bytes = read;
             }
@@ -1047,7 +1068,7 @@ namespace CameraUnlock.Core.Config
             }
             _recordedWriteTime = writeTime;
 
-            if (_committed != null && Same(bytes, _committed) && !snapshotChanged)
+            if (_committed != null && Same(bytes, _committed) && !snapshotUnapplied)
             {
                 return Reloaded(ConfigReloadStatus.Unchanged, null, NoDiagnostics(), log, string.Empty);
             }

@@ -1668,6 +1668,31 @@ void ReloadAndFileChangedFollowDefaultsIni(const fs::path& dir) {
     ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }));
 }
 
+void ADefaultsIniReadWhileTheFileIsMissingIsAppliedOnceItReturns(const fs::path& dir) {
+    Rig rig(dir);
+    auto owner = rig.Make();
+    ExpectStatus(owner->Load(), ConfigLoadStatus::Created);
+    const std::string created = ReadBytes(rig.path);
+    fs::remove(rig.path);
+    WriteBytes(rig.defaults_path, "[Network]\r\nUdpPort=7000\r\n[Hotkeys]\r\nToggleKey=Mouse4\r\n");
+    rig.sink.clear();
+    Reload reload = owner->Reload();
+    Check(reload.status == ConfigReloadStatus::Unreadable, "the missing file is Unreadable");
+    ExpectSunkOnce(rig, "CameraUnlock.ini is missing, so the current settings stay. It is created again at the next launch.");
+
+    WriteBytes(rig.path, created);
+    rig.sink.clear();
+    reload = owner->Reload();
+    Check(reload.status == ConfigReloadStatus::Applied && reload.config && reload.config->udp_port == 7000,
+          "the bytes the owner wrote are read over the Defaults.ini the last reload could not apply");
+    ExpectSunkOnce(rig,
+                   "Defaults.ini: 1 setting cannot be used (ToggleKey=Mouse4), so this game uses its built-in values for "
+                   "them. The log has the details.");
+    rig.sink.clear();
+    Check(owner->Reload().status == ConfigReloadStatus::Unchanged && rig.sink.empty(), "then nothing is new");
+    Check(HoldsBytes(rig.path, created), "nothing is written");
+}
+
 void ATableOffTheSchemaDefaultIsRefusedUnlessPerGame(const fs::path& dir) {
     Rig rig(dir);
     HeadTrackingConfig off;
@@ -1707,6 +1732,10 @@ void OptionsAndCallOrderAreChecked(const fs::path& dir) {
           "a relative Defaults.ini path is refused");
     Check(Contains(Thrown<std::invalid_argument>([] { DefaultsFile::At(L""); }), "is not one"),
           "an empty Defaults.ini path is refused");
+    Check(Contains(Thrown<std::invalid_argument>([] { DefaultsFile::At(L"C:scratch\\Defaults.ini"); }), "is not one"),
+          "a drive-relative Defaults.ini path is refused");
+    Check(Contains(Thrown<std::invalid_argument>([] { DefaultsFile::At(L"\\scratch\\Defaults.ini"); }), "is not one"),
+          "a root-relative Defaults.ini path is refused");
     ConfigOwnerOptions<HeadTrackingConfig> no_path = options();
     no_path.path.clear();
     Check(Contains(Thrown<std::invalid_argument>([&] { Owner owner(no_path); }), "the options name no path"),
@@ -1961,6 +1990,8 @@ int RunConfigOwnerTests() {
     RunScenario("end-saves-nothing", EndSavesNothing);
     RunScenario("a-save-after-defaults-ini-changed-keeps-default-rows", ASaveAfterDefaultsIniChangedKeepsDefaultRows);
     RunScenario("reload-and-file-changed-follow-defaults-ini", ReloadAndFileChangedFollowDefaultsIni);
+    RunScenario("a-defaults-ini-read-while-the-file-is-missing-is-applied-once-it-returns",
+                ADefaultsIniReadWhileTheFileIsMissingIsAppliedOnceItReturns);
     RunScenario("a-table-off-the-schema-default-is-refused-unless-per-game", ATableOffTheSchemaDefaultIsRefusedUnlessPerGame);
     RunScenario("options-and-call-order-are-checked", OptionsAndCallOrderAreChecked);
     for (const std::string& label : InterruptionLabels()) {

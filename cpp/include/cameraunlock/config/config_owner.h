@@ -439,7 +439,7 @@ public:
     /// values it gives; a file that went missing or cannot be read keeps them, with one line in the
     /// log and one message. Unchanged when the file holds exactly the bytes the owner last wrote,
     /// the import's and creation's included, no Reload has applied other bytes since, and
-    /// Defaults.ini gave nothing new. Any other file is read as canonical, stamped or not, over
+    /// Defaults.ini gave nothing an Applied reload has not yet read over. Any other file is read as canonical, stamped or not, over
     /// Defaults.ini's current values (Applied). A missing file, or one the canonical reader cannot
     /// read, is Unreadable, which leaves the game's settings as they are and is handed to the
     /// status sink. Never writes, never imports and never opens the legacy file.
@@ -534,6 +534,7 @@ private:
         saves_allowed_ = false;
         committed_.reset();
         sources_.reset();
+        snapshot_unapplied_ = false;
         std::vector<std::string> log;
         std::string two_files;
         const std::string unreadable = LoadDefaults(log, two_files);
@@ -893,14 +894,16 @@ private:
         std::vector<std::string> log;
         bool changed = false;
         const std::string unreadable = ReloadDefaults(log, changed);
-        ConfigReloadResult<Config> result = ReloadConfigFile(std::move(log), write_time, changed);
+        const bool unapplied = changed || snapshot_unapplied_;
+        ConfigReloadResult<Config> result = ReloadConfigFile(std::move(log), write_time, unapplied);
+        snapshot_unapplied_ = unapplied && result.status != ConfigReloadStatus::Applied;
         const std::string refused = DefaultsLines(result.log);
-        defaults_message = !unreadable.empty() ? unreadable : changed ? refused : std::string();
+        defaults_message = !unreadable.empty() ? unreadable : unapplied ? refused : std::string();
         return result;
     }
 
     ConfigReloadResult<Config> ReloadConfigFile(std::vector<std::string> log, std::uint64_t write_time,
-                                                bool snapshot_changed) {
+                                                bool snapshot_unapplied) {
         const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
         if (read.error != 0) {
             log.push_back(path_text_ + ": not reloaded: " + detail::OwnerErrorText(read.error));
@@ -916,7 +919,7 @@ private:
         }
         const std::string& bytes = read.bytes;
 
-        if (committed_ && bytes == *committed_ && !snapshot_changed) {
+        if (committed_ && bytes == *committed_ && !snapshot_unapplied) {
             return Reloaded(ConfigReloadStatus::Unchanged, std::nullopt, {}, std::move(log), "");
         }
 
@@ -1272,6 +1275,9 @@ private:
     // Where each row of the config the last Load or Reload returned took its value, when it
     // was read over the effective defaults; none for a config the import gave.
     std::optional<std::vector<detail::ValueSource>> sources_;
+    // A Defaults.ini a Reload read while the file could not be read: the next Reload that reads
+    // the file applies it, and tells its refused values then.
+    bool snapshot_unapplied_ = false;
 
     std::mutex mutex_;
     bool loaded_ = false;

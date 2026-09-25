@@ -46,15 +46,31 @@ namespace CameraUnlock.Core.Config
         /// meanwhile. The log shows the path as it is.
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
-        /// <exception cref="ArgumentException"><paramref name="path"/> is empty or not absolute.</exception>
+        /// <exception cref="ArgumentException"><paramref name="path"/> is not fully qualified: on
+        /// Windows a drive letter and a separator, or a UNC path; elsewhere a leading /.</exception>
         public static DefaultsFile At(string path)
         {
             if (path == null) throw new ArgumentNullException("path");
-            if (path.Length == 0 || !System.IO.Path.IsPathRooted(path))
+            if (!IsFullyQualified(path))
             {
-                throw new ArgumentException("DefaultsFile.At takes an absolute path, and '" + path + "' is not one", "path");
+                throw new ArgumentException("DefaultsFile.At takes a fully qualified path, and '" + path + "' is not one", "path");
             }
             return new DefaultsFile(System.IO.Path.GetFullPath(path), null);
+        }
+
+        // Path.IsPathRooted also accepts C:x and \x, which GetFullPath resolves against the
+        // process's current drive and directory.
+        private static bool IsFullyQualified(string path)
+        {
+            if (System.IO.Path.DirectorySeparatorChar == '/') return path.Length > 0 && path[0] == '/';
+            char drive = path.Length > 0 ? char.ToUpperInvariant(path[0]) : ' ';
+            if (path.Length >= 3 && drive >= 'A' && drive <= 'Z' && path[1] == ':' && IsSeparator(path[2])) return true;
+            return path.Length >= 2 && IsSeparator(path[0]) && IsSeparator(path[1]);
+        }
+
+        private static bool IsSeparator(char c)
+        {
+            return c == '\\' || c == '/';
         }
 
         /// <summary>The resolver's input given, not probed, so a test can stand for any machine.</summary>
