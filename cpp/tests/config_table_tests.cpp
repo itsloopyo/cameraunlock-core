@@ -429,7 +429,8 @@ void TestConstructionChecks() {
               std::string("a local key named ") + key + " throws");
     }
     for (const char* key : {"Deadzone", "DeadzoneDeg", "YawDeadzone", "EnableDeadzone", "ResponseCurve", "RollCurve",
-                            "DeadzoneMin", "CurveStrength", "SignYaw", "RotScale"}) {
+                            "DeadzoneMin", "CurveStrength", "SignYaw", "RotScale", "YawGain", "PositionSensitivity",
+                            "Sensitivity", "LeanScale"}) {
         Check(Contains(Thrown([&] { ConfigTable<S>().Local("Camera", key, &S::value, IntCodec<int>(), "One."); }),
                        "names a setting a canonical file does not carry, so a game-local row cannot use it: The mod "
                        "applies the head pose as the tracker sends it"),

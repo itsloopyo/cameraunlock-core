@@ -600,8 +600,8 @@
     {
       "id": "Sensitivity",
       "sections": ["Sensitivity"],
-      "spellings": ["RotScale"],
-      "doc": "Rotation multipliers that are no concept's alias. [tuning] rot_scale is dead-rising-2's and mafia-ii-definitive-edition's, which scale all three rotation axes by it. The section is the schema's own [Sensitivity], listed so that a key in it no concept names (the bare Yaw, Pitch and Roll most mods wrote there) draws this group's reason too.",
+      "spellings": ["RotScale", "YawGain", "PitchGain", "RollGain", "PositionSensitivity", "Sensitivity", "RotationSensitivity", "RotationMultiplier", "RotationGain", "PositionMultiplier", "PositionGain", "LeanScale"],
+      "doc": "Rotation and position multipliers that are no concept's alias. Fleet spellings on 2026-09-25: [tuning] rot_scale (dead-rising-2, mafia-ii-definitive-edition), which scales all three rotation axes; [ExtendedView] YawGain and PitchGain (assassins-creed-origins), which amplify the head angles fed to the game's Extended View; [General] PositionSensitivity (south-park-the-stick-of-truth), one multiplier on all three position axes. RollGain is the third of that set, and the bare Sensitivity, RotationSensitivity, RotationMultiplier, RotationGain, PositionMultiplier, PositionGain and LeanScale are the plain names a mod would give one; no fleet config file read them on 2026-09-25. The gates match these spellings and nothing else, so a sensitivity under a spelling no group lists passes them as a game-local row. The section is the schema's own [Sensitivity], listed so that a key in it no concept names (the bare Yaw, Pitch and Roll most mods wrote there) draws this group's reason too.",
       "canonical_reason": "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."
     },
     {

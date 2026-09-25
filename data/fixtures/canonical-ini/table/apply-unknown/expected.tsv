@@ -1,11 +1,11 @@
 # Unknown sections draw one diagnostic each, however many headers; their plain keys draw none.
 # Unknown keys in a section the table reads draw one each. A key naming a retired or non-canonical
 # concept (by any alias, under the schema normalisation), or spelled as the schema's
-# non_canonical_keys lists (a deadzone, a response curve, a unit scale, an axis sign), says so in
-# any section. So does every other key in a section a non_canonical_keys group lists
-# ([Sensitivity], [Deadzone]), whatever it is spelled. So does a key naming a row of the table in
-# another section, or a concept row by an alias: it names the row. [CameraUnlock] keys are core's
-# and draw nothing. A concept key this table does not bind is an unknown key.
+# non_canonical_keys lists (a sensitivity, a deadzone, a response curve, a unit scale, an axis
+# sign), says so in any section. So does every other key in a section a non_canonical_keys group
+# lists ([Sensitivity], [Deadzone]), whatever it is spelled. So does a key naming a row of the
+# table in another section, or a concept row by an alias: it names the row. [CameraUnlock] keys
+# are core's and draw nothing. A concept key this table does not bind is an unknown key.
 field	ToggleKey	Insert
 field	UdpPort	4242
 field	PositionEnabled	true
@@ -57,3 +57,6 @@ diagnostic	NonCanonicalConcept	40	Line 40: [Deadzone] Threshold is ignored. The 
 diagnostic	UnknownSection	41	Line 41: [Tuning] is not a section this mod reads, so everything in it is ignored.
 diagnostic	NonCanonicalConcept	42	Line 42: [Tuning] rot_scale is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.
 diagnostic	NonCanonicalConcept	43	Line 43: [Tuning] SignYaw is ignored. The mod applies the head pose as the tracker sends it, with no axis inversion of its own.
+diagnostic	NonCanonicalConcept	45	Line 45: [Tuning] YawGain is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.
+diagnostic	NonCanonicalConcept	46	Line 46: [Tuning] PositionSensitivity is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.
+diagnostic	NonCanonicalConcept	47	Line 47: [Tuning] LeanScale is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.

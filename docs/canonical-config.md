@@ -357,7 +357,7 @@ reason whatever it is spelled, beside the section's own `UnknownSection`:
 
 | `non_canonical_keys` | Sections | Spellings | Reason |
 |----------------------|----------|-----------|--------|
-| `Sensitivity` | `[Sensitivity]` | `RotScale` | The mod applies the head pose as the tracker sends it, with no sensitivity of its own |
+| `Sensitivity` | `[Sensitivity]` | `RotScale`, `YawGain`, `PitchGain`, `RollGain`, `PositionSensitivity`, `Sensitivity`, `RotationSensitivity`, `RotationMultiplier`, `RotationGain`, `PositionMultiplier`, `PositionGain`, `LeanScale` | The mod applies the head pose as the tracker sends it, with no sensitivity of its own |
 | `Inversion` | `[Inversion]` | `SignYaw`, `SignPitch`, `SignRoll`, `SignX`, `SignY`, `SignZ` | The mod applies the head pose as the tracker sends it, with no axis inversion of its own |
 | `Deadzone` | `[Deadzone]` | `Deadzone`, `DeadzoneDeg`, `DeadzoneYaw`, `DeadzonePitch`, `DeadzoneRoll`, `YawDeadzone`, `PitchDeadzone`, `RollDeadzone`, `EnableDeadzone`, `DeadzoneMin`, `DeadzoneMax`, `Deadband`, `YawDeadband`, `PitchDeadband`, `RollDeadband` | The mod applies the head pose as the tracker sends it, with no deadzone of its own |
 | `ResponseCurve` | | `ResponseCurve`, `YawCurve`, `PitchCurve`, `RollCurve`, `SensitivityCurve`, `CurveStrength` | The mod applies the head pose as the tracker sends it, with no response curve of its own |
@@ -367,6 +367,10 @@ Matching is the schema's: ASCII case and `_` and `-` are ignored, so `deadzone_y
 `DeadzoneYaw` and `rot_scale` is `RotScale`; a section matches ASCII case-insensitively. The bare
 `Yaw`, `Pitch` and `Roll` that mods wrote under `[Sensitivity]` and `[Deadzone]` are in no list,
 because section-less they would be both; they draw the reason of the section they are in.
+
+The lists match these spellings and no others. A pose-shaping setting under a name no group lists
+passes the table, apply and the lint as a game-local row, so a conversion that meets a new
+spelling adds it to its group in the same change.
 
 The conversion from the tracker's metres to the game's units is the mod's boundary code, like its
 axis conversion. A scale the player can edit is a position sensitivity under another name, so a

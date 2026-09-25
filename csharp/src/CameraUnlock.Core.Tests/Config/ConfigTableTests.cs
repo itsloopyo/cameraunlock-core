@@ -134,6 +134,10 @@ namespace CameraUnlock.Core.Tests.Config
         [InlineData("CurveStrength")]
         [InlineData("SignYaw")]
         [InlineData("RotScale")]
+        [InlineData("YawGain")]
+        [InlineData("PositionSensitivity")]
+        [InlineData("Sensitivity")]
+        [InlineData("LeanScale")]
         public void LocalKeysNamingANonCanonicalSettingThrow(string key)
         {
             var e = Assert.Throws<ArgumentException>(() => WithOffset(NewTable(), "Camera", key, "One."));

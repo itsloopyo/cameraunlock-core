@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Changed - pose-shaping sections and the rest of the fleet's pose-shaping spellings are refused
+### Changed - pose-shaping sections and more pose-shaping spellings are refused
 
 The deadzone shape most of the fleet reads, a bare `Yaw`, `Pitch` and `Roll` under `[Deadzone]`
 (black-and-white, black-mesa, dorfromantik, fallout-new-vegas, half-life-2, portal, portal-2,
@@ -31,6 +31,14 @@ diagnostic either. And several pose-shaping spellings the fleet and core use wer
   `[tuning] rot_scale` and `sign_*`; `DeadzoneMin`, `DeadzoneMax` and the `Deadband` forms (group
   `Deadzone`); `SensitivityCurve` and `CurveStrength` (group `ResponseCurve`), the names core's own
   `AxisConfig` profile format writes.
+- More sensitivity spellings in group `Sensitivity`: `YawGain` and `PitchGain`
+  (assassins-creed-origins reads them under `[ExtendedView]`), `PositionSensitivity`
+  (south-park-the-stick-of-truth, `[General]`), and `RollGain`, the bare `Sensitivity`,
+  `RotationSensitivity`, `RotationMultiplier`, `RotationGain`, `PositionMultiplier`, `PositionGain`
+  and `LeanScale`, which no fleet config file reads. Before this a canonical file or table could
+  carry any of them as a game-local row with no diagnostic. The gates still match listed spellings
+  only, so a sensitivity under a name no group lists passes them; the group's doc and
+  docs/canonical-config.md say so.
 - New group `PositionScale`: `PositionScale`, `PositionScaleUU`, `PosScale`, `WorldScale`,
   `UnitsPerMeter`, `UnitsPerMetre`, `WorldUnitsPerMeter`, `WorldUnitsPerMetre`. Converting the
   tracker's metres to the game's units is the mod's boundary code; a scale the player can edit is a

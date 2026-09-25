@@ -442,6 +442,17 @@ struct NonCanonicalKey {
 
 inline constexpr NonCanonicalKey kNonCanonicalKeys[] = {
     {"Sensitivity", "rotscale", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "yawgain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "pitchgain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "rollgain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "positionsensitivity", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "sensitivity", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "rotationsensitivity", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "rotationmultiplier", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "rotationgain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "positionmultiplier", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "positiongain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
+    {"Sensitivity", "leanscale", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
     {"Inversion", "signyaw", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
     {"Inversion", "signpitch", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
     {"Inversion", "signroll", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},

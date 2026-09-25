@@ -235,6 +235,17 @@ namespace CameraUnlock.Core.Config
         internal static readonly Dictionary<string, string> NonCanonicalKeyReasons = new Dictionary<string, string>
         {
             { "rotscale", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "yawgain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "pitchgain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "rollgain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "positionsensitivity", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "sensitivity", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "rotationsensitivity", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "rotationmultiplier", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "rotationgain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "positionmultiplier", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "positiongain", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
+            { "leanscale", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
             { "signyaw", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
             { "signpitch", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
             { "signroll", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
