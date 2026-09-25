@@ -515,5 +515,9 @@ namespace CameraUnlock.Core.Config
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         internal static extern uint GetFileAttributesW(string name);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CreateDirectoryW(string name, IntPtr security);
     }
 }

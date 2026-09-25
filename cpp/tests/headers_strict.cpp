@@ -45,6 +45,7 @@
 #include "cameraunlock/config/config_owner.h"
 #include "cameraunlock/config/config_table.h"
 #include "cameraunlock/config/defaults_ini.h"
+#include "cameraunlock/config/defaults_location.h"
 #include "cameraunlock/config/head_tracking_config.h"
 #include "cameraunlock/config/head_tracking_config_table.h"
 #include "cameraunlock/config/hotkey_codec.h"

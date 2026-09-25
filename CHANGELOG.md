@@ -9,6 +9,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - where Defaults.ini is, internal to core
+
+The pieces the config owner will find Defaults.ini with. Nothing here is public API, and no owner
+looks for, reads or creates the file yet.
+
+- **The resolver**: C# internal `DefaultsLocation.Resolve(DefaultsProbe)`, C++
+  `detail::ResolveDefaults` in `cameraunlock/config/defaults_location.h`. Pure: from what the
+  probes found it gives the candidates in order, each with its path, kind, whether it may be
+  created and the path as the log shows it (`%AppData%\...`, `~\...`, `~/...`), or none with the
+  reason. On Windows the one candidate is under the roaming AppData known folder, and a packaged
+  process never creates it. Under Wine the host's config folder comes first where Wine maps it to
+  a drive letter, then the prefix's AppData. Natively, `$XDG_CONFIG_HOME` or `$HOME/.config`, then
+  `$HOME/Library/Application Support`, none created.
+- **The choice**: C# `DefaultsLocation.Choose`, C++ `detail::ChooseDefaults`. Pure: by which
+  candidates' files exist and what became of each creation tried, the file to read or the
+  candidate to create next, and then the one log line and, when two files exist, the in-game
+  message, in the design's words.
+- **The probes**: C# `DefaultsLocation.Probe`, C++ `detail::ProbeDefaults`. C++ finds
+  `SHGetKnownFolderPath` and `CoTaskMemFree` through `LoadLibraryW` and `GetProcAddress`, so no
+  mod gains a static import of shell32 or ole32; C# asks `Environment.GetFolderPath`. Neither reads
+  the `APPDATA` variable. `GetCurrentPackageFullName` and every wine export are found through
+  `GetProcAddress`; C# calls them through cdecl delegates, never a `DllImport` of a wine export.
+  Natively the C# probe reads `HOME` and `XDG_CONFIG_HOME` and calls no native code.
+- **The folder**: C# `DefaultsLocation.CreateFolder`, C++ `detail::CreateDefaultsFolder`, which
+  create only the `CameraUnlock` folder with `CreateDirectoryW`; a folder already there counts as
+  done and a missing parent is a failure. C# declares the call beside the checked writer's
+  kernel32 imports.
+- **Fixture**: `data/fixtures/canonical-ini/global/resolve.tsv`, run by the C++ suite, xunit and
+  both FrameworkTests targets, which compare the candidates, shown paths, reads, creations, lines
+  and messages. On Windows a test in each language also runs the real probe and checks it creates
+  nothing.
+
 ### Fixed - Defaults.ini's reasons and lines match in C# and C++ for bytes that are not UTF-8
 
 A Defaults.ini saved as ANSI is read, so a value can hold bytes that are not UTF-8, such as a `£`

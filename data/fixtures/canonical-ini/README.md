@@ -3,16 +3,17 @@
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
 editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs, `table/` for
 config tables, `head-tracking/` for core's table over its own config types, `global/` for
-Defaults.ini, `preferences/` for a launcher's preferences against the mod, `mutations/` for
+Defaults.ini and where it is, `preferences/` for a launcher's preferences against the mod, `mutations/` for
 the differential corpus generator and `example/` for the examples in docs/canonical-config.md. Core's C++ suite runs them unchanged
 (`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp`,
 `cpp/tests/key_bindings_tests.cpp`, `cpp/tests/value_codecs_tests.cpp`,
 `cpp/tests/config_table_tests.cpp`, `cpp/tests/head_tracking_config_table_tests.cpp`,
-`cpp/tests/defaults_ini_tests.cpp`, `cpp/tests/preferences_fixture_tests.cpp` and
+`cpp/tests/defaults_ini_tests.cpp`, `cpp/tests/defaults_location_tests.cpp`,
+`cpp/tests/preferences_fixture_tests.cpp` and
 `cpp/tests/ini_mutations_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures`,
 `IniEditorFixtures`, `KeyBindingFixtures`, `ValueCodecFixtures`, `ConfigTableFixtures`,
-`HeadTrackingConfigTableFixtures`, `DefaultsIniFixtures`, `PreferencesFixtures` and
-`IniMutationFixtures`, under xunit on
+`HeadTrackingConfigTableFixtures`, `DefaultsIniFixtures`, `DefaultsLocationFixtures`,
+`PreferencesFixtures` and `IniMutationFixtures`, under xunit on
 net8.0 and in
 `CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2). The expected files are
 written by hand from the rules, never produced by an implementation, except under
@@ -408,6 +409,134 @@ is three, since `80` cannot follow `F0`. The `value` row's value field stays the
 | `read-wrong-section` | concept keys in other sections, one of them invalid, beside a key in its own section: only that one is read |
 | `read-alias` | aliases, one after its key in the same section: not read, nothing said |
 | `read-unknown-key` | an unknown section, a concept the format does not write and an unknown key: nothing said |
+
+### resolve.tsv
+
+Where Defaults.ini is: which places a game looks in, and what it does with them. Core finds it
+with the internal C++ `detail::ResolveDefaults` and `detail::ChooseDefaults`
+(`cameraunlock/config/defaults_location.h`) and C# `DefaultsLocation.Resolve` and
+`DefaultsLocation.Choose`. Both are pure. The probes that fill the resolver's input and the
+creation of the folder call the operating system and are not in the file; the conversions a probe
+makes under Wine are given as inputs. Nothing reads or creates the file on disk yet.
+
+`resolve.tsv` is ASCII with the note rule of `expected.tsv`, fields separated by one tab, and
+every text field is the byte escape above of UTF-8 text. It holds cases one after another. A case
+starts with a `case` row and runs to the next `case` row; inside it, a `choice` row starts one
+choice over the case's candidates, which runs to the next `choice` or `case` row.
+
+| Row | Fields | Meaning |
+|-----|--------|---------|
+| `case` | name | The case's name, once in the file |
+| `input` | name, value | One input to the resolver, from the list below. An input with no row is empty |
+| `unix` | text | Under Wine, the host folder's Unix text the probe converts. No row when there is none |
+| `host` | reason | Under Wine, why there is no host candidate. No row when there is one, and off Wine |
+| `candidate` | kind, create, path, shown | One candidate, in the order they are tried: `windows`, `wine_host`, `wine_prefix` or `native`; `yes` or `no` for whether it may be created; the Defaults.ini path; the path as the log shows it |
+| `none` | reason | There is no candidate, and why |
+| `choice` | | Starts a choice |
+| `exists` | index | The file of the candidate with this 0-based index exists |
+| `outcome` | index, kind, why | What became of creating that candidate: `created`, `appeared` (another program created it at the same time), `parent_missing`, or `folder_failed` or `file_failed` followed by why, in the owner's words |
+| `read` | index or `-` | The candidate whose file is read |
+| `create` | index or `-` | The candidate to create next; the caller creates it and chooses again with its outcome |
+| `line` | text | The one log line. No row while `create` names a candidate |
+| `message` | text | The in-game message. No row when there is none |
+
+A case holds `case`, its `input` rows, then `unix`, `host`, and either the `candidate` rows or
+`none`, then its choices. A choice holds `choice`, its `exists` and `outcome` rows, then `read`,
+`create`, `line` and `message`. A runner takes the `case`, `input`, `exists` and `outcome` rows as
+they are, renders every other row from its own resolver and choice, and compares the case's rows
+exactly.
+
+| Input | Value |
+|-------|-------|
+| `platform` | `windows`, `wine` or `native` |
+| `known_folder` | The roaming AppData known folder (`FOLDERID_RoamingAppData`) |
+| `package` | What `GetCurrentPackageFullName` returned for a zero length, in decimal. No row when kernel32 has no such function |
+| `wine_version` | What `wine_get_version` returned |
+| `host` | The system name `wine_get_host_version` gave. No row when ntdll has no such function |
+| `WINEHOMEDIR`, `WINE_HOST_XDG_CONFIG_HOME`, `XDG_CONFIG_HOME`, `HOME` | The environment variables of those names |
+| `codepage` | `failed`: the Unix text could not be turned into bytes in Wine's Unix code page |
+| `dos_file_name` | What `wine_get_dos_file_name` returned for those bytes. No row when it returned NULL |
+
+The rules the cases hold. A folder's parent is the folder up to its last separator.
+
+- **Windows** reads `known_folder` and `package`. With no known folder there is no candidate,
+  `Windows reported no roaming AppData folder`. Otherwise the one candidate is
+  `<known_folder>\CameraUnlock\Defaults.ini`, shown `%AppData%\CameraUnlock\Defaults.ini`. It may be
+  created unless `package` is there and is not 15700: any other answer, 122 included, is a
+  packaged process.
+- **Wine** reads everything but `package` and `HOME`. The host candidate comes first when there is
+  one, then the prefix candidate, which is the Windows candidate for `known_folder`, may be
+  created, and is left out when the known folder is empty. The host candidate's folder:
+  - With no `host`: none, `Wine did not report the host system`.
+  - With `host` `Darwin`: the DOS home, then `\Library\Application Support\CameraUnlock`.
+  - With any other `host`, the first of `WINE_HOST_XDG_CONFIG_HOME` and `XDG_CONFIG_HOME` that
+    starts with `/`, with the `/` at its end removed, then `/CameraUnlock`, is the Unix text, and
+    `$<variable>/CameraUnlock` names it in a reason. With `codepage` failed there is none,
+    `$<variable>/CameraUnlock could not be converted to the Unix code page`; with no
+    `dos_file_name`, none, `Wine could not convert $<variable>/CameraUnlock to a Windows path`;
+    with one that does not start with a drive letter, `:` and `\`, none,
+    `$<variable>/CameraUnlock has no drive letter in this Wine prefix`; otherwise `dos_file_name`.
+  - With neither variable starting with `/`: the DOS home, then `\.config\CameraUnlock`.
+  - Where the DOS home is needed: with no `WINEHOMEDIR` there is none, `WINEHOMEDIR is not set`,
+    and with no DOS home none, `the home folder has no drive letter in this Wine prefix`.
+
+  The DOS home is `WINEHOMEDIR` after a leading `\??\`, with the `\` at its end removed, when
+  that starts with a drive letter, `:` and `\`, and there is none otherwise (`\??\unix\...`).
+  A host path is shown with its leading part replaced by `~` when that part equals the DOS home
+  and the path ends there or goes on with `\`; any other host path is shown as it is. With no
+  candidate at all the reason is `Windows reported no roaming AppData folder`.
+- **Native** reads `XDG_CONFIG_HOME` and `HOME`, each counted only when it starts with `/` and
+  taken with the `/` at its end removed. The first candidate is `<XDG_CONFIG_HOME>/CameraUnlock/Defaults.ini`,
+  or `<HOME>/.config/CameraUnlock/Defaults.ini` when `XDG_CONFIG_HOME` does not count; the second
+  is `<HOME>/Library/Application Support/CameraUnlock/Defaults.ini`. A candidate that needs `HOME`
+  is left out when it does not count, and with no candidate the reason is
+  `HOME is not set to an absolute path`. None may be created. A path is shown with its leading part
+  replaced by `~` when that part equals `HOME` and the path ends there or goes on with `/`.
+
+The choice, where `Settings` stands for ` Settings set to default use the built-in values.`, a
+candidate's name is its shown path with ` (this Wine prefix)` added for the prefix candidate, and
+`<W>` is `Wine <wine_version> on <host>`, or `Wine <wine_version>` with no `host`:
+
+- With no candidate: `Defaults.ini: no location: <reason>.`, then under Wine the host sentence
+  below, then `Settings`.
+- Otherwise, when a candidate's file exists, the first such is read. When a later one exists too,
+  the line is `Defaults.ini: <name> is read, and <other name> is not.` and the message
+  `Two Defaults.ini files: this game reads <name> and ignores <other name>.` Otherwise the line
+  is the found line below with `read`.
+- Otherwise natively: `Defaults.ini: no file at <shown>; on this system the mod reads Defaults.ini but does not create it.`
+  and `Settings`, the shown paths joined by ` or `.
+- Otherwise each candidate that may be created, in order: with no outcome it is the one to create;
+  `created` reads it, with the found line and `created with the built-in values`; `appeared`
+  reads it, with `created by another program at the same time, and read`; a failure moves on.
+- When none is left, on Windows: for a candidate that may not be created,
+  `Defaults.ini: not created, because this game runs as a packaged app (GetCurrentPackageFullName returned <package>); <shown> is created by the next game that is not packaged, or by Lopari.`,
+  and otherwise `Defaults.ini: <failure>` and `Settings`. Under Wine: `Defaults.ini: `, the prefix
+  candidate's failure with its name's ` (this Wine prefix)` after the shown folder or path, or
+  `no location: Windows reported no roaming AppData folder.` with no prefix candidate, then the
+  host sentence and `Settings`.
+
+The found line is `Defaults.ini: <shown> (<what>)` on Windows and natively,
+`Defaults.ini: <shown> (<W>, the host's config folder, <what>)` for the host candidate, and
+`Defaults.ini: <shown> (<W>, this Wine prefix, <what>): the host's config folder <host folder> could not be used: <host why>.`
+for the prefix candidate. The host sentence is
+` The host's config folder <host folder> could not be used: <host why>.` The host folder is the
+host candidate's shown folder, or `none`. The host why is the `host` reason with no host
+candidate; with one, `<shown parent> does not exist` after `parent_missing`,
+`it could not be created: <why>` after `folder_failed`, `Defaults.ini was not created there: <why>`
+after `file_failed`, and `it holds no Defaults.ini, and one there would be shared by every Wine prefix`
+when it was not tried. A failure is `<shown folder> was not created, because <shown parent> does not exist.`,
+`<shown folder> could not be created: <why>.` or `<shown> was not created: <why>.`
+
+The cases cover Windows with and without a known folder, packaged at 15700, 122, 87 and -1 and
+with no such function; under Wine each XDG spelling, both set, a relative value before an absolute
+one, both relative, a `/` at the end, a home with a non-ASCII name and a Unix text holding
+characters outside ASCII and outside the BMP, a path beside the home, no `WINEHOMEDIR` with and
+without XDG, a `\??\unix` home, a failed code-page conversion, a failed path conversion, a
+`\\?\unix\` result, Darwin with and without `WINEHOMEDIR`, a host other than Linux and Darwin, no
+host and an empty one, no known folder, and no location at all; every combination of existing
+host and prefix files and every creation outcome at each; and natively XDG set, unset, relative
+and outside the home, `/` at the end of both, `HOME` unset and relative, no location, and both
+native files present.
 
 ## preferences/
 

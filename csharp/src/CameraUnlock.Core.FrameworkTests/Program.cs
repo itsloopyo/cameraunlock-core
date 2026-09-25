@@ -116,6 +116,15 @@ namespace CameraUnlock.Core.Tests
             }
             failures += Report("the line functions refuse what is not refused", dir => DefaultsIniFixtures.RunLineArguments());
 
+            Console.WriteLine("Defaults.ini location fixtures (global/resolve.tsv)");
+            foreach (string name in DefaultsLocationFixtures.Cases(fixtures))
+            {
+                failures += Report(name, dir => DefaultsLocationFixtures.RunCase(fixtures, name));
+            }
+            failures += Report("Choose refuses arrays of the wrong length", dir => DefaultsLocationFixtures.RunChooseArguments());
+            failures += Report("the probe finds this machine's roaming folder and creates nothing", dir => DefaultsLocationFixtures.RunRealProbe());
+            failures += Report("the folder is created one level only", dir => DefaultsLocationFixtures.RunCreateFolder(dir));
+
             Console.WriteLine("Preferences fixtures");
             foreach (string name in PreferencesFixtures.Cases(fixtures))
             {

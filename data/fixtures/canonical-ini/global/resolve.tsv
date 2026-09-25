@@ -1,0 +1,610 @@
+# Where Defaults.ini is: the resolver and the choice. README.md defines every row.
+
+# Windows: the roaming AppData known folder, never the APPDATA variable.
+case	windows
+input	platform	windows
+input	known_folder	C:\\Users\\Ann\\AppData\\Roaming
+input	package	15700
+candidate	windows	yes	C:\\Users\\Ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (read)
+choice
+read	-
+create	0
+choice
+outcome	0	created
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (created with the built-in values)
+choice
+outcome	0	appeared
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (created by another program at the same time, and read)
+choice
+outcome	0	parent_missing
+read	-
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock was not created, because %AppData% does not exist. Settings set to default use the built-in values.
+choice
+outcome	0	folder_failed	the folder cannot be written
+read	-
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock could not be created: the folder cannot be written. Settings set to default use the built-in values.
+choice
+outcome	0	file_failed	the file is in use by another program
+read	-
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini was not created: the file is in use by another program. Settings set to default use the built-in values.
+
+case	windows-no-known-folder
+input	platform	windows
+input	package	15700
+none	Windows reported no roaming AppData folder
+choice
+read	-
+create	-
+line	Defaults.ini: no location: Windows reported no roaming AppData folder. Settings set to default use the built-in values.
+
+case	windows-empty-known-folder
+input	platform	windows
+input	known_folder	
+input	package	15700
+none	Windows reported no roaming AppData folder
+choice
+read	-
+create	-
+line	Defaults.ini: no location: Windows reported no roaming AppData folder. Settings set to default use the built-in values.
+
+# No GetCurrentPackageFullName in kernel32 (before Windows 8): not packaged.
+case	windows-no-package-function
+input	platform	windows
+input	known_folder	D:\\Profiles\\ann.smith\\AppData\\Roaming
+candidate	windows	yes	D:\\Profiles\\ann.smith\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+read	-
+create	0
+
+# ERROR_INSUFFICIENT_BUFFER: a packaged process. It reads the file and never creates it.
+case	windows-packaged-122
+input	platform	windows
+input	known_folder	C:\\Users\\Ann\\AppData\\Roaming
+input	package	122
+candidate	windows	no	C:\\Users\\Ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (read)
+choice
+read	-
+create	-
+line	Defaults.ini: not created, because this game runs as a packaged app (GetCurrentPackageFullName returned 122); %AppData%\\CameraUnlock\\Defaults.ini is created by the next game that is not packaged, or by Lopari.
+
+# Any answer other than 15700 counts as packaged.
+case	windows-packaged-other-code
+input	platform	windows
+input	known_folder	C:\\Users\\Ann\\AppData\\Roaming
+input	package	87
+candidate	windows	no	C:\\Users\\Ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+read	-
+create	-
+line	Defaults.ini: not created, because this game runs as a packaged app (GetCurrentPackageFullName returned 87); %AppData%\\CameraUnlock\\Defaults.ini is created by the next game that is not packaged, or by Lopari.
+
+case	windows-packaged-negative-code
+input	platform	windows
+input	known_folder	C:\\Users\\Ann\\AppData\\Roaming
+input	package	-1
+candidate	windows	no	C:\\Users\\Ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+read	-
+create	-
+line	Defaults.ini: not created, because this game runs as a packaged app (GetCurrentPackageFullName returned -1); %AppData%\\CameraUnlock\\Defaults.ini is created by the next game that is not packaged, or by Lopari.
+
+# Wine on Linux, upstream spelling: XDG_CONFIG_HOME reaches the program as WINE_HOST_XDG_CONFIG_HOME.
+# Every combination of existing files, and every creation outcome at H and then at P.
+case	wine-host-xdg
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	package	15700
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	/home/ann/.config
+input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
+unix	/home/ann/.config/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	~\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+read	-
+create	0
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: ~\\.config\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, the host's config folder, read)
+choice
+exists	1
+read	1
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, read): the host's config folder ~\\.config\\CameraUnlock could not be used: it holds no Defaults.ini, and one there would be shared by every Wine prefix.
+choice
+exists	0
+exists	1
+read	0
+create	-
+line	Defaults.ini: ~\\.config\\CameraUnlock\\Defaults.ini is read, and %AppData%\\CameraUnlock\\Defaults.ini (this Wine prefix) is not.
+message	Two Defaults.ini files: this game reads ~\\.config\\CameraUnlock\\Defaults.ini and ignores %AppData%\\CameraUnlock\\Defaults.ini (this Wine prefix).
+choice
+outcome	0	created
+read	0
+create	-
+line	Defaults.ini: ~\\.config\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, the host's config folder, created with the built-in values)
+choice
+outcome	0	appeared
+read	0
+create	-
+line	Defaults.ini: ~\\.config\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, the host's config folder, created by another program at the same time, and read)
+choice
+outcome	0	parent_missing
+read	-
+create	1
+choice
+outcome	0	folder_failed	the folder cannot be written
+read	-
+create	1
+choice
+outcome	0	file_failed	the file is in use by another program
+read	-
+create	1
+choice
+outcome	0	parent_missing
+outcome	1	created
+read	1
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, created with the built-in values): the host's config folder ~\\.config\\CameraUnlock could not be used: ~\\.config does not exist.
+choice
+outcome	0	folder_failed	the folder cannot be written
+outcome	1	appeared
+read	1
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, created by another program at the same time, and read): the host's config folder ~\\.config\\CameraUnlock could not be used: it could not be created: the folder cannot be written.
+choice
+outcome	0	file_failed	the file is in use by another program
+outcome	1	parent_missing
+read	-
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock (this Wine prefix) was not created, because %AppData% does not exist. The host's config folder ~\\.config\\CameraUnlock could not be used: Defaults.ini was not created there: the file is in use by another program. Settings set to default use the built-in values.
+choice
+outcome	0	parent_missing
+outcome	1	folder_failed	the folder cannot be written
+read	-
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock (this Wine prefix) could not be created: the folder cannot be written. The host's config folder ~\\.config\\CameraUnlock could not be used: ~\\.config does not exist. Settings set to default use the built-in values.
+choice
+outcome	0	folder_failed	the folder cannot be written
+outcome	1	file_failed	it could not be written (Access is denied.)
+read	-
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (this Wine prefix) was not created: it could not be written (Access is denied.). The host's config folder ~\\.config\\CameraUnlock could not be used: it could not be created: the folder cannot be written. Settings set to default use the built-in values.
+
+# Proton passes XDG_CONFIG_HOME unchanged; Flatpak Steam sets it inside its own folder.
+case	wine-xdg-flatpak
+input	platform	wine
+input	known_folder	C:\\users\\steamuser\\AppData\\Roaming
+input	wine_version	8.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	XDG_CONFIG_HOME	/home/ann/.var/app/com.valvesoftware.Steam/config
+input	dos_file_name	Z:\\home\\ann\\.var\\app\\com.valvesoftware.Steam\\config\\CameraUnlock
+unix	/home/ann/.var/app/com.valvesoftware.Steam/config/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\ann\\.var\\app\\com.valvesoftware.Steam\\config\\CameraUnlock\\Defaults.ini	~\\.var\\app\\com.valvesoftware.Steam\\config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\steamuser\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: ~\\.var\\app\\com.valvesoftware.Steam\\config\\CameraUnlock\\Defaults.ini (Wine 8.0 on Linux, the host's config folder, read)
+
+# WINE_HOST_XDG_CONFIG_HOME comes first when both are set.
+case	wine-both-xdg
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	/home/ann/.config
+input	XDG_CONFIG_HOME	/home/ann/elsewhere
+input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
+unix	/home/ann/.config/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	~\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+
+# A relative value is ignored, and the next spelling is read.
+case	wine-xdg-relative-then-absolute
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	.config
+input	XDG_CONFIG_HOME	/home/ann/.config
+input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
+unix	/home/ann/.config/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	~\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+
+# Both relative: the home rule, with nothing to convert.
+case	wine-xdg-relative
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	config
+input	XDG_CONFIG_HOME	~/.config
+input	dos_file_name	Z:\\unused
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	~\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+
+case	wine-xdg-trailing-slash
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	/home/ann/.config/
+input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
+unix	/home/ann/.config/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	~\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+
+# No XDG: the home in WINEHOMEDIR's DOS form, whose name is not ASCII.
+case	wine-home-non-ascii
+input	platform	wine
+input	known_folder	C:\\users\\jos\xC3\xA9\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\jos\xC3\xA9
+candidate	wine_host	yes	Z:\\home\\jos\xC3\xA9\\.config\\CameraUnlock\\Defaults.ini	~\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\jos\xC3\xA9\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+outcome	0	parent_missing
+outcome	1	created
+read	1
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, created with the built-in values): the host's config folder ~\\.config\\CameraUnlock could not be used: ~\\.config does not exist.
+
+# The Unix text handed to Wine holds characters outside ASCII and outside the BMP.
+case	wine-xdg-non-ascii
+input	platform	wine
+input	known_folder	C:\\users\\jos\xC3\xA9\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\jos\xC3\xA9
+input	WINE_HOST_XDG_CONFIG_HOME	/home/jos\xC3\xA9/.config-\xF0\x9F\x98\x80
+input	dos_file_name	Z:\\home\\jos\xC3\xA9\\.config-\xF0\x9F\x98\x80\\CameraUnlock
+unix	/home/jos\xC3\xA9/.config-\xF0\x9F\x98\x80/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\jos\xC3\xA9\\.config-\xF0\x9F\x98\x80\\CameraUnlock\\Defaults.ini	~\\.config-\xF0\x9F\x98\x80\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\jos\xC3\xA9\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: ~\\.config-\xF0\x9F\x98\x80\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, the host's config folder, read)
+
+# The home is only replaced by ~ where it ends at a folder boundary.
+case	wine-xdg-beside-home
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	/home/anna/.config
+input	dos_file_name	Z:\\home\\anna\\.config\\CameraUnlock
+unix	/home/anna/.config/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\anna\\.config\\CameraUnlock\\Defaults.ini	Z:\\home\\anna\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+
+case	wine-no-winehomedir
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+host	WINEHOMEDIR is not set
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+read	-
+create	0
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, read): the host's config folder none could not be used: WINEHOMEDIR is not set.
+choice
+outcome	0	created
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, created with the built-in values): the host's config folder none could not be used: WINEHOMEDIR is not set.
+choice
+outcome	0	folder_failed	the folder cannot be written
+read	-
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock (this Wine prefix) could not be created: the folder cannot be written. The host's config folder none could not be used: WINEHOMEDIR is not set. Settings set to default use the built-in values.
+
+# XDG does not need the home; the host path is then shown as it is.
+case	wine-no-winehomedir-with-xdg
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINE_HOST_XDG_CONFIG_HOME	/home/ann/.config
+input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
+unix	/home/ann/.config/CameraUnlock
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+outcome	0	parent_missing
+outcome	1	created
+read	1
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, created with the built-in values): the host's config folder Z:\\home\\ann\\.config\\CameraUnlock could not be used: Z:\\home\\ann\\.config does not exist.
+
+# No drive maps the home.
+case	wine-unix-home
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\unix\\home\\ann
+host	the home folder has no drive letter in this Wine prefix
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, read): the host's config folder none could not be used: the home folder has no drive letter in this Wine prefix.
+
+case	wine-codepage-failed
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	/home/ann/.config
+input	codepage	failed
+input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
+unix	/home/ann/.config/CameraUnlock
+host	$WINE_HOST_XDG_CONFIG_HOME/CameraUnlock could not be converted to the Unix code page
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+read	-
+create	0
+
+case	wine-path-failed
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	XDG_CONFIG_HOME	/home/ann/.config
+unix	/home/ann/.config/CameraUnlock
+host	Wine could not convert $XDG_CONFIG_HOME/CameraUnlock to a Windows path
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, this Wine prefix, read): the host's config folder none could not be used: Wine could not convert $XDG_CONFIG_HOME/CameraUnlock to a Windows path.
+
+# wine_get_dos_file_name gives \\?\unix\ when no drive maps the folder.
+case	wine-path-unix-form
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	/home/ann/.config
+input	dos_file_name	\\\\?\\unix\\home\\ann\\.config\\CameraUnlock
+unix	/home/ann/.config/CameraUnlock
+host	$WINE_HOST_XDG_CONFIG_HOME/CameraUnlock has no drive letter in this Wine prefix
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+
+# macOS: the home's Library folder, and XDG is not read.
+case	wine-darwin
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	10.0
+input	host	Darwin
+input	WINEHOMEDIR	\\??\\Z:\\Users\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	/Users/ann/.config
+input	dos_file_name	Z:\\Users\\ann\\.config\\CameraUnlock
+candidate	wine_host	yes	Z:\\Users\\ann\\Library\\Application Support\\CameraUnlock\\Defaults.ini	~\\Library\\Application Support\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: ~\\Library\\Application Support\\CameraUnlock\\Defaults.ini (Wine 10.0 on Darwin, the host's config folder, read)
+choice
+outcome	0	parent_missing
+outcome	1	created
+read	1
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 10.0 on Darwin, this Wine prefix, created with the built-in values): the host's config folder ~\\Library\\Application Support\\CameraUnlock could not be used: ~\\Library\\Application Support does not exist.
+
+case	wine-darwin-no-winehomedir
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	10.0
+input	host	Darwin
+input	WINE_HOST_XDG_CONFIG_HOME	/Users/ann/.config
+host	WINEHOMEDIR is not set
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+
+# Any host other than Darwin takes the XDG rule.
+case	wine-unknown-host
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	FreeBSD
+input	WINEHOMEDIR	\\??\\Z:\\usr\\home\\ann
+input	XDG_CONFIG_HOME	/usr/home/ann/.config
+input	dos_file_name	Z:\\usr\\home\\ann\\.config\\CameraUnlock
+unix	/usr/home/ann/.config/CameraUnlock
+candidate	wine_host	yes	Z:\\usr\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	~\\.config\\CameraUnlock\\Defaults.ini
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: ~\\.config\\CameraUnlock\\Defaults.ini (Wine 9.0 on FreeBSD, the host's config folder, read)
+
+# No wine_get_host_version in ntdll.
+case	wine-no-host-version
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+input	WINE_HOST_XDG_CONFIG_HOME	/home/ann/.config
+input	dos_file_name	Z:\\home\\ann\\.config\\CameraUnlock
+host	Wine did not report the host system
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: %AppData%\\CameraUnlock\\Defaults.ini (Wine 9.0, this Wine prefix, read): the host's config folder none could not be used: Wine did not report the host system.
+
+case	wine-empty-host
+input	platform	wine
+input	known_folder	C:\\users\\ann\\AppData\\Roaming
+input	wine_version	9.0
+input	host	
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+host	Wine did not report the host system
+candidate	wine_prefix	yes	C:\\users\\ann\\AppData\\Roaming\\CameraUnlock\\Defaults.ini	%AppData%\\CameraUnlock\\Defaults.ini
+
+# No roaming folder in the prefix: the host is the only candidate.
+case	wine-no-known-folder
+input	platform	wine
+input	wine_version	9.0
+input	host	Linux
+input	WINEHOMEDIR	\\??\\Z:\\home\\ann
+candidate	wine_host	yes	Z:\\home\\ann\\.config\\CameraUnlock\\Defaults.ini	~\\.config\\CameraUnlock\\Defaults.ini
+choice
+read	-
+create	0
+choice
+outcome	0	created
+read	0
+create	-
+line	Defaults.ini: ~\\.config\\CameraUnlock\\Defaults.ini (Wine 9.0 on Linux, the host's config folder, created with the built-in values)
+choice
+outcome	0	folder_failed	the folder cannot be written
+read	-
+create	-
+line	Defaults.ini: no location: Windows reported no roaming AppData folder. The host's config folder ~\\.config\\CameraUnlock could not be used: it could not be created: the folder cannot be written. Settings set to default use the built-in values.
+
+case	wine-no-location
+input	platform	wine
+input	wine_version	9.0
+input	host	Linux
+host	WINEHOMEDIR is not set
+none	Windows reported no roaming AppData folder
+choice
+read	-
+create	-
+line	Defaults.ini: no location: Windows reported no roaming AppData folder. The host's config folder none could not be used: WINEHOMEDIR is not set. Settings set to default use the built-in values.
+
+# Native Linux and macOS: read only, never created.
+case	native-xdg-set
+input	platform	native
+input	HOME	/home/ann
+input	XDG_CONFIG_HOME	/home/ann/.config
+candidate	native	no	/home/ann/.config/CameraUnlock/Defaults.ini	~/.config/CameraUnlock/Defaults.ini
+candidate	native	no	/home/ann/Library/Application Support/CameraUnlock/Defaults.ini	~/Library/Application Support/CameraUnlock/Defaults.ini
+choice
+read	-
+create	-
+line	Defaults.ini: no file at ~/.config/CameraUnlock/Defaults.ini or ~/Library/Application Support/CameraUnlock/Defaults.ini; on this system the mod reads Defaults.ini but does not create it. Settings set to default use the built-in values.
+choice
+exists	0
+read	0
+create	-
+line	Defaults.ini: ~/.config/CameraUnlock/Defaults.ini (read)
+choice
+exists	1
+read	1
+create	-
+line	Defaults.ini: ~/Library/Application Support/CameraUnlock/Defaults.ini (read)
+choice
+exists	0
+exists	1
+read	0
+create	-
+line	Defaults.ini: ~/.config/CameraUnlock/Defaults.ini is read, and ~/Library/Application Support/CameraUnlock/Defaults.ini is not.
+message	Two Defaults.ini files: this game reads ~/.config/CameraUnlock/Defaults.ini and ignores ~/Library/Application Support/CameraUnlock/Defaults.ini.
+
+case	native-xdg-unset
+input	platform	native
+input	HOME	/Users/ann
+candidate	native	no	/Users/ann/.config/CameraUnlock/Defaults.ini	~/.config/CameraUnlock/Defaults.ini
+candidate	native	no	/Users/ann/Library/Application Support/CameraUnlock/Defaults.ini	~/Library/Application Support/CameraUnlock/Defaults.ini
+choice
+exists	1
+read	1
+create	-
+line	Defaults.ini: ~/Library/Application Support/CameraUnlock/Defaults.ini (read)
+
+case	native-xdg-relative
+input	platform	native
+input	HOME	/home/ann
+input	XDG_CONFIG_HOME	.config
+candidate	native	no	/home/ann/.config/CameraUnlock/Defaults.ini	~/.config/CameraUnlock/Defaults.ini
+candidate	native	no	/home/ann/Library/Application Support/CameraUnlock/Defaults.ini	~/Library/Application Support/CameraUnlock/Defaults.ini
+
+case	native-xdg-outside-home
+input	platform	native
+input	HOME	/home/ann
+input	XDG_CONFIG_HOME	/home/anna/.config
+candidate	native	no	/home/anna/.config/CameraUnlock/Defaults.ini	/home/anna/.config/CameraUnlock/Defaults.ini
+candidate	native	no	/home/ann/Library/Application Support/CameraUnlock/Defaults.ini	~/Library/Application Support/CameraUnlock/Defaults.ini
+
+case	native-trailing-slashes
+input	platform	native
+input	HOME	/home/ann/
+input	XDG_CONFIG_HOME	/home/ann/.config/
+candidate	native	no	/home/ann/.config/CameraUnlock/Defaults.ini	~/.config/CameraUnlock/Defaults.ini
+candidate	native	no	/home/ann/Library/Application Support/CameraUnlock/Defaults.ini	~/Library/Application Support/CameraUnlock/Defaults.ini
+
+case	native-home-unset
+input	platform	native
+input	XDG_CONFIG_HOME	/home/ann/.config
+candidate	native	no	/home/ann/.config/CameraUnlock/Defaults.ini	/home/ann/.config/CameraUnlock/Defaults.ini
+choice
+read	-
+create	-
+line	Defaults.ini: no file at /home/ann/.config/CameraUnlock/Defaults.ini; on this system the mod reads Defaults.ini but does not create it. Settings set to default use the built-in values.
+
+case	native-home-relative
+input	platform	native
+input	HOME	ann
+input	XDG_CONFIG_HOME	.config
+none	HOME is not set to an absolute path
+choice
+read	-
+create	-
+line	Defaults.ini: no location: HOME is not set to an absolute path. Settings set to default use the built-in values.
+
+case	native-no-location
+input	platform	native
+none	HOME is not set to an absolute path
+choice
+read	-
+create	-
+line	Defaults.ini: no location: HOME is not set to an absolute path. Settings set to default use the built-in values.
