@@ -482,7 +482,8 @@ ConfigOwnerOptions<PluginConfig> OwnerOptions(const Fixture& f, const fs::path& 
 
 // Every corpus input: Load on one copy against the import on another, the import's copy
 // unchanged and alone in its folder. With `convert`, the owner then imports a third copy into
-// CameraUnlock.ini with the import's values; that pass costs about 16 s a fixture, so it runs
+// CameraUnlock.ini with the import's values, leaving that copy as it was and nothing but the
+// two files in its folder; that pass costs about 16 s a fixture, so it runs
 // where RE8's and Requiem's schemas between them bind every row of the table.
 void TestCorpus(const fs::path& root, const Fixture& f, bool convert) {
     const std::string base = ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / f.file);
@@ -503,6 +504,7 @@ void TestCorpus(const fs::path& root, const Fixture& f, bool convert) {
     int load_mismatches = 0;
     int changed_copies = 0;
     int unconverted = 0;
+    int changed_legacy = 0;
     for (const testing::IniMutation& input : inputs) {
         const fs::path load_file = Fresh(root, "load") / "HeadTracking.ini";
         const fs::path import_dir = Fresh(root, "import");
@@ -538,13 +540,23 @@ void TestCorpus(const fs::path& root, const Fixture& f, bool convert) {
                       << ConfigLoadStatusName(converted.status) << " " << Join(owner_differences) << " "
                       << Join(converted.log) << "\n";
         }
+        if (ReadBytes(owner_dir / "HeadTracking.ini") != input.bytes ||
+            Listing(owner_dir) != std::vector<std::string>{"CameraUnlock.ini", "HeadTracking.ini"}) {
+            ++changed_legacy;
+            std::cout << "  [FAIL] " << f.file << " " << input.name
+                      << ": the owner changed HeadTracking.ini or left more than the two files\n";
+        }
     }
     const auto seconds =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count() / 1000.0;
     const std::string label = std::string(f.file) + ", " + std::to_string(inputs.size()) + " inputs";
     Check(load_mismatches == 0, label + ": the import gives the fields PluginConfig::Load gives");
     Check(changed_copies == 0, label + ": the import leaves its copy and its folder unchanged");
-    if (convert) Check(unconverted == 0, label + ": the owner imports each with the import's values");
+    if (convert) {
+        Check(unconverted == 0, label + ": the owner imports each with the import's values");
+        Check(changed_legacy == 0,
+              label + ": into CameraUnlock.ini, leaving HeadTracking.ini as it was and nothing else beside them");
+    }
     std::cout << "  " << label << ": " << seconds << " s\n";
 }
 
