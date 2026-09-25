@@ -331,6 +331,50 @@ foreach ($tree in $trees) {
     Write-Host "PASS $($tree.Kind): installed_by_us true, false and /force, with and without the list, listed files kept through the tree removal"
 }
 
+# A <file>.pre-canonical beside a listed config is a file like any other now: a
+# removal list or a loader folder removal that covers it takes it. BepInEx has no
+# list reaching BepInEx\config, so there only the loader removal takes them; the
+# REFramework MOD_LEFTOVERS names two and the loader removal takes the third.
+$rp = 'reframework\plugins'
+$strays = @(
+    @{
+        Kind = 'bepinex'
+        Config = [ordered]@{ FRAMEWORK_TYPE = 'BepInEx'; MOD_DLLS = 'Fixture.dll'; PRESERVE_FILES = "$bepConfig $bepLegacy" }
+        Loader = @('winhttp.dll', 'BepInEx\core\BepInEx.dll')
+        ModFiles = @('BepInEx\plugins\Fixture.dll')
+        Kept = @($bepConfig, $bepLegacy)
+        Strays = @("$bepConfig.pre-canonical", "$bepLegacy.pre-canonical", "$bepLegacy.pre-canonical.last")
+        Listed = @()
+    },
+    @{
+        Kind = 'reframework'
+        Config = [ordered]@{ FRAMEWORK_TYPE = 'REFramework'; MOD_DLLS = 'HeadTracking.dll'
+            MOD_LEFTOVERS = 'CameraUnlock.ini.pre-canonical HeadTracking.ini.pre-canonical'; PRESERVE_FILES = "$rp\CameraUnlock.ini $rp\HeadTracking.ini" }
+        Loader = @('dinput8.dll', 'reframework_revision.txt', 'reframework\autorun\other.lua')
+        ModFiles = @("$rp\HeadTracking.dll")
+        Kept = @("$rp\CameraUnlock.ini", "$rp\HeadTracking.ini")
+        Strays = @("$rp\CameraUnlock.ini.pre-canonical", "$rp\HeadTracking.ini.pre-canonical", "$rp\HeadTracking.ini.pre-canonical.last")
+        Listed = @("$rp\CameraUnlock.ini.pre-canonical", "$rp\HeadTracking.ini.pre-canonical")
+    }
+)
+foreach ($stray in $strays) {
+    $files = [ordered]@{}
+    foreach ($rel in $stray.Loader + $stray.ModFiles + $stray.Kept + $stray.Strays + 'user.txt') { $files[$rel] = $rel }
+    foreach ($run in @(@{ By = 'true'; Flags = '/y' }, @{ By = 'false'; Flags = '/y' }, @{ By = 'false'; Flags = '/force /y' })) {
+        $removesLoader = $run.By -eq 'true' -or $run.Flags -like '*/force*'
+        $label = 'stray-{0}-{1}{2}' -f $stray.Kind, $run.By, $(if ($run.Flags -like '*/force*') { '-force' } else { '' })
+        $case = New-Case -Name $label -Config $stray.Config -Files $files -ExeRelPath 'fixture.exe' -InstalledByUs $run.By
+        $output = Invoke-Uninstall $case 0 $run.Flags
+        $remaining = @('fixture.exe', 'user.txt') + $stray.Kept
+        if (-not $removesLoader) { $remaining += @($stray.Loader + $stray.Strays | Where-Object { $stray.Listed -notcontains $_ }) }
+        Assert-Files $case $remaining
+        Assert-KeptLines $case $output @(if ($removesLoader) { $stray.Kept })
+        Assert-Output $case $output (@($stray.Listed | ForEach-Object { 'Removed: ' + (Split-Path $_ -Leaf) }) + '=== Uninstall Complete ===')
+        Assert-NoHolding $case
+    }
+    Write-Host "PASS $($stray.Kind) .pre-canonical beside a listed config: removed by the list that names it and by the loader folder removal, the listed configs kept"
+}
+
 # ---------------------------------------------------------------- failures
 $bepFiles = [ordered]@{}
 foreach ($rel in $trees[0].Files) { $bepFiles[$rel] = $rel }
