@@ -47,9 +47,9 @@
     "hotkey row, whose reason names the chord it replaces and the one it uses. An entry added",
     "after the repo's first converted release changes what default means in files already on",
     "players' disks, since those rows stop following Defaults.ini, so it is a breaking change for",
-    "that repo. scripts/check-config-descriptor.mjs leaves a listed launcher row out of the",
-    "descriptor's `rows`, and fails a committed WorldSpaceYaw away from the",
-    "data/config-schema.json default unless it is listed."
+    "that repo. scripts/check-config-descriptor.mjs requires a launcher-manifest.json config",
+    "descriptor's `per_game` to name exactly these rows, each with the value text the committed",
+    "file holds there."
   ],
   "legacy": {
     "abzu-headtracking": {},
