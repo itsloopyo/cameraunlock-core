@@ -1,7 +1,9 @@
 // ConfigOwner against real files and real Windows handles, scenario for scenario with the C#
 // ConfigOwnerScenarios, plus what only the C++ owner does: the held-handle test with the Win32
-// and CRT readers imports call, a path the ANSI code page cannot hold, and killed-child runs
-// through `--config-owner-interrupt <step>`.
+// and CRT readers imports call, a path the ANSI code page cannot hold, a config file pending
+// deletion, and killed-child runs through `--config-owner-interrupt <step>`. The config file is
+// CameraUnlock.ini and the legacy file HeadTracking.ini beside it; every import scenario checks
+// the legacy file's bytes and write time and the folder's listing.
 
 #include <cameraunlock/config/config_owner.h>
 #include <cameraunlock/config/head_tracking_config_table.h>
@@ -61,21 +63,26 @@ static_assert(static_cast<int>(ConfigSaveStatus::NotSaved) == 1, "NotSaved");
 static_assert(static_cast<int>(ConfigSaveStatus::Uncertain) == 2, "Uncertain");
 static_assert(static_cast<int>(ConfigReloadStatus::Unchanged) == 0, "Unchanged");
 static_assert(static_cast<int>(ConfigReloadStatus::Applied) == 1, "Applied");
-static_assert(static_cast<int>(ConfigReloadStatus::LegacyReadOnly) == 2, "LegacyReadOnly");
 static_assert(static_cast<int>(ConfigReloadStatus::Unreadable) == 3, "Unreadable");
 
 using Owner = ConfigOwner<HeadTrackingConfig>;
 using Load = ConfigLoadResult<HeadTrackingConfig>;
 using Reload = ConfigReloadResult<HeadTrackingConfig>;
 
-constexpr wchar_t kFileName[] = L"HeadTracking.ini";
-constexpr char kFileNameText[] = "HeadTracking.ini";
+constexpr wchar_t kFileName[] = L"CameraUnlock.ini";
+constexpr char kFileNameText[] = "CameraUnlock.ini";
+constexpr wchar_t kLegacyName[] = L"HeadTracking.ini";
+constexpr char kLegacyNameText[] = "HeadTracking.ini";
 constexpr char kDisplay[] = "Test Game";
 constexpr int kKilledExitCode = 3;
 
 // Line 5 holds a key the legacy reader does not read.
 const std::string kLegacyText =
     "; tuned by hand\r\n[General]\r\nPort = 5555\r\nYawWorld = false\r\nSmoothng = 0.3\r\n[Position]\r\nPosition = false\r\n";
+
+// Set on every legacy file a scenario writes, so any write to it shows as a new time.
+const fs::file_time_type kLegacyWriteTime =
+    std::chrono::floor<std::chrono::seconds>(fs::file_time_type::clock::now() - std::chrono::hours(24 * 400));
 
 int g_failures = 0;
 std::string g_scenario;
@@ -90,6 +97,12 @@ void Check(bool cond, const std::string& name) {
 }
 
 bool Contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+
+bool StartsWith(const std::string& text, const std::string& start) { return text.compare(0, start.size(), start) == 0; }
+
+bool EndsWith(const std::string& text, const std::string& end) {
+    return text.size() >= end.size() && text.compare(text.size() - end.size(), end.size(), end) == 0;
+}
 
 std::string Utf8(const std::wstring& text) { return detail::OwnerUtf8(text); }
 
@@ -109,14 +122,18 @@ void WriteBytes(const fs::path& path, const std::string& bytes) {
 
 bool HoldsBytes(const fs::path& path, const std::string& bytes) { return fs::exists(path) && ReadBytes(path) == bytes; }
 
-bool ListingIs(const fs::path& dir, std::vector<std::wstring> names) {
+std::vector<std::wstring> Listing(const fs::path& dir) {
     std::vector<std::wstring> actual;
     for (const auto& entry : fs::directory_iterator(dir)) {
         if (entry.is_regular_file()) actual.push_back(entry.path().filename().wstring());
     }
     std::sort(actual.begin(), actual.end());
+    return actual;
+}
+
+bool ListingIs(const fs::path& dir, std::vector<std::wstring> names) {
     std::sort(names.begin(), names.end());
-    return actual == names;
+    return Listing(dir) == names;
 }
 
 std::string Utf16(const std::string& ascii) {
@@ -236,22 +253,35 @@ struct Legacy {
 };
 
 struct Rig {
+    fs::path dir;
     fs::path path;
+    fs::path legacy_path;
+    std::string legacy_bytes;
     std::vector<std::string> sink;
     std::shared_ptr<Legacy> legacy = std::make_shared<Legacy>();
     std::function<std::uint32_t(const std::string&, const std::wstring&)> hook;
     bool with_import = true;
 
-    explicit Rig(const fs::path& dir) : path(dir / kFileName) {}
+    explicit Rig(const fs::path& folder) : dir(folder), path(folder / kFileName), legacy_path(folder / kLegacyName) {}
 
     std::string Text() const { return Utf8(path.wstring()); }
+    std::string LegacyText() const { return Utf8(legacy_path.wstring()); }
+
+    void PutLegacy(const std::string& bytes) {
+        WriteBytes(legacy_path, bytes);
+        fs::last_write_time(legacy_path, kLegacyWriteTime);
+        legacy_bytes = bytes;
+    }
 
     ConfigOwnerOptions<HeadTrackingConfig> Options() {
         ConfigOwnerOptions<HeadTrackingConfig> options;
         options.path = path.wstring();
         options.table = Table();
         options.header = RenderHeader{kDisplay};
-        if (with_import) options.import = legacy->Import();
+        if (with_import) {
+            options.import = legacy->Import();
+            options.legacy_path = legacy_path.wstring();
+        }
         options.status_sink = [this](const std::string& message) { sink.push_back(message); };
         return options;
     }
@@ -287,6 +317,10 @@ void ExpectLogLine(const std::vector<std::string>& log, const std::string& line)
     Check(HasLine(log, line), "the log holds \"" + line + "\"" + (HasLine(log, line) ? "" : Joined(log)));
 }
 
+void ExpectReason(const std::string& reason, const std::string& expected) {
+    Check(reason == expected, "the player is told \"" + expected + "\"" + (reason == expected ? "" : ", got \"" + reason + "\""));
+}
+
 void ExpectSaved(const ConfigSaveResult& save) {
     Check(save.status == ConfigSaveStatus::Saved && save.reason.empty(),
           std::string("Saved, got ") + ConfigSaveStatusName(save.status) + " (" + save.reason + ")");
@@ -301,10 +335,37 @@ void ExpectSunkOnce(const Rig& rig, const std::string& message) {
     Check(rig.sink.size() == 1 && rig.sink[0] == message, "the sink got the message once: " + message);
 }
 
-// A deferred conversion leaves the legacy file as it was and writes no copy.
-void ExpectUntouched(const Rig& rig) {
-    Check(HoldsBytes(rig.path, kLegacyText), "the legacy file is unchanged");
-    Check(ListingIs(rig.path.parent_path(), {kFileName}), "no copy is written");
+void ExpectLegacyKept(const Rig& rig, const std::string& when = "") {
+    const std::string prefix = when.empty() ? "" : when + ": ";
+    Check(HoldsBytes(rig.legacy_path, rig.legacy_bytes), prefix + "the legacy file holds its bytes");
+    Check(fs::exists(rig.legacy_path) && fs::last_write_time(rig.legacy_path) == kLegacyWriteTime,
+          prefix + "the legacy file keeps its write time");
+}
+
+// An import that did not complete leaves the legacy file as it was and creates nothing.
+void ExpectNotImported(const Rig& rig) {
+    ExpectLegacyKept(rig);
+    Check(ListingIs(rig.dir, {kLegacyName}), "nothing is created beside the legacy file");
+}
+
+void ExpectImported(const Rig& rig) {
+    Check(HoldsBytes(rig.path, MigratedBytes()), "the config file holds the rendered imported values");
+    ExpectLegacyKept(rig);
+    Check(ListingIs(rig.dir, {kFileName, kLegacyName}), "the folder holds the config and the legacy file only");
+}
+
+std::string SettingsReadLine(const Rig& rig) {
+    return rig.Text() + ": settings are read from this file. " + rig.LegacyText() + " is left as it was and is not read.";
+}
+
+std::string RetriedReason(const std::string& why) {
+    return std::string(kLegacyNameText) + " was not imported into " + kFileNameText + ": " + why +
+           ". The mod tries again at the next launch and saves nothing this session.";
+}
+
+std::string AppearedTail() {
+    return std::string(". The mod saves nothing this session and reads ") + kFileNameText + ", not " + kLegacyNameText +
+           ", at the next launch.";
 }
 
 template <class Exception, class F>
@@ -321,15 +382,13 @@ void SetReadOnly(const fs::path& path, bool read_only) {
     SetFileAttributesW(path.c_str(), read_only ? FILE_ATTRIBUTE_READONLY : FILE_ATTRIBUTE_NORMAL);
 }
 
-std::wstring WithSuffix(const fs::path& path, const wchar_t* suffix) { return path.wstring() + suffix; }
-
 void AnAbsentFileIsCreated(const fs::path& dir) {
     Rig rig(dir);
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Created);
     Check(HoldsBytes(rig.path, Render(Defaults())), "the file holds the rendered defaults");
     Check(Same(load.config, Defaults()), "the session runs on the defaults");
-    Check(rig.legacy->Runs() == 0, "no import runs for an absent file");
+    Check(rig.legacy->Runs() == 0, "no import runs when there is no legacy file");
     Check(rig.sink.empty(), "nothing is reported");
     Check(ListingIs(dir, {kFileName}), "nothing else is written");
 }
@@ -363,13 +422,13 @@ void AStampedFileIsCanonical(const fs::path& dir) {
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Canonical);
     Check(Same(load.config, chosen), "the file's values are read");
-    Check(load.diagnostics.empty() && load.log.empty(), "a clean file draws nothing");
-    Check(rig.legacy->Runs() == 0, "the import never runs on a stamped file");
+    Check(load.diagnostics.empty() && load.log.empty(), "a clean file with no legacy file beside it draws nothing");
+    Check(rig.legacy->Runs() == 0, "the import never runs while the config exists");
     Check(HoldsBytes(rig.path, canonical), "the file is not written");
     Check(ListingIs(dir, {kFileName}), "nothing else is written");
 }
 
-void AStampedUtf16FileIsUnreadableAndNeverMigrated(const fs::path& dir) {
+void AStampedUtf16FileIsUnreadable(const fs::path& dir) {
     Rig rig(dir);
     const std::string utf16 = Utf16(Render(Defaults()));
     WriteBytes(rig.path, utf16);
@@ -378,7 +437,7 @@ void AStampedUtf16FileIsUnreadableAndNeverMigrated(const fs::path& dir) {
     ExpectStatus(load, ConfigLoadStatus::Unreadable);
     Check(Contains(load.reason, "it is saved as UTF-16; save it as ANSI or UTF-8"), "the reason says what to do");
     Check(Same(load.config, Defaults()), "the session runs on the defaults");
-    Check(rig.legacy->Runs() == 0, "the import never runs on a stamped file");
+    Check(rig.legacy->Runs() == 0, "the import never runs while the config exists");
     ExpectSunkOnce(rig, load.reason);
     ExpectNotSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = false; }),
                    "the settings file could not be used this session");
@@ -394,35 +453,33 @@ void AStampedFileHoldingANulIsUnreadable(const fs::path& dir) {
     ExpectStatus(load, ConfigLoadStatus::Unreadable);
     const auto line = std::count(bytes.begin(), bytes.end(), '\n');
     Check(Contains(load.reason, "line " + std::to_string(line) + " holds a NUL byte"), "the reason names the line");
-    Check(rig.legacy->Runs() == 0, "the import never runs on a stamped file");
+    Check(rig.legacy->Runs() == 0, "the import never runs while the config exists");
     Check(HoldsBytes(rig.path, bytes), "the file is not written");
     Check(ListingIs(dir, {kFileName}), "nothing else is written");
 }
 
-void AnUnstampedFileWithAnImportIsMigrated(const fs::path& dir) {
+void ALegacyFileIsImportedAndLeftAsItWas(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Migrated);
     Check(Same(load.config, MigratedConfig()), "the session runs on the imported values");
-    Check(HoldsBytes(rig.path, MigratedBytes()), "the file holds the rendered values");
-    Check(HoldsBytes(WithSuffix(rig.path, L".pre-canonical"), kLegacyText), "the original is kept");
     Check(load.diagnostics.empty(), "the new file reads back clean");
-    ExpectLogLine(load.log, rig.Text() + ": converted to the canonical format. The original is kept in " + rig.Text() +
-                                ".pre-canonical.");
-    ExpectLogLine(load.log, rig.Text() + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
+    ExpectLogLine(load.log, rig.Text() + ": created from " + rig.LegacyText() + ", which is left as it was.");
+    ExpectLogLine(load.log,
+                  rig.LegacyText() + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
     Check(CountContaining(load.log, "not carried") == 1, "only the unread key is listed");
-    Check(rig.legacy->Runs() == 1 && rig.legacy->inputs[0].path == rig.path.wstring() &&
-              detail::OwnerAnsiForLog(rig.legacy->inputs[0].ansi_path) == rig.Text() && !rig.legacy->inputs[0].ansi_lossy,
-          "the import runs once, on the file itself, given its wide and ANSI paths");
+    Check(rig.legacy->Runs() == 1 && rig.legacy->inputs[0].path == rig.legacy_path.wstring() &&
+              detail::OwnerAnsiForLog(rig.legacy->inputs[0].ansi_path) == rig.LegacyText() &&
+              !rig.legacy->inputs[0].ansi_lossy,
+          "the import runs once, on the legacy file, given its wide and ANSI paths");
     Check(rig.sink.empty(), "nothing is reported");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "only the copy is added");
+    ExpectImported(rig);
 }
 
-void AnUnstampedUtf16FileWithAnImportIsMigrated(const fs::path& dir) {
+void AUtf16LegacyFileIsImported(const fs::path& dir) {
     Rig rig(dir);
-    const std::string utf16 = Utf16(kLegacyText);
-    WriteBytes(rig.path, utf16);
+    rig.PutLegacy(Utf16(kLegacyText));
     rig.legacy->result = [](HeadTrackingConfig& config) {
         config = MigratedConfig();
         return ImportResult::Imported({});
@@ -430,38 +487,34 @@ void AnUnstampedUtf16FileWithAnImportIsMigrated(const fs::path& dir) {
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Migrated);
     Check(Same(load.config, MigratedConfig()), "the session runs on the imported values");
-    Check(HoldsBytes(rig.path, MigratedBytes()), "the file holds the rendered values");
-    Check(HoldsBytes(WithSuffix(rig.path, L".pre-canonical"), utf16), "the original is kept");
-    ExpectLogLine(load.log, rig.Text() +
+    ExpectLogLine(load.log, rig.LegacyText() +
                                 ": is saved as UTF-16, so its lines this build does not read are not listed; the original "
                                 "keeps them.");
     Check(CountContaining(load.log, "not carried") == 0, "no line of a UTF-16 file is listed");
     Check(rig.legacy->Runs() == 1 && rig.sink.empty(), "one import and nothing reported");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "only the copy is added");
+    ExpectImported(rig);
 }
 
-void AnUnstampedFileHoldingANulWithAnImportIsMigrated(const fs::path& dir) {
+void ALegacyFileHoldingANulIsImported(const fs::path& dir) {
     Rig rig(dir);
-    const std::string nul = kLegacyText + "Extra=1\0\r\n"s;
-    WriteBytes(rig.path, nul);
+    rig.PutLegacy(kLegacyText + "Extra=1\0\r\n"s);
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Migrated);
     Check(Same(load.config, MigratedConfig()), "the session runs on the imported values");
-    Check(HoldsBytes(rig.path, MigratedBytes()), "the file holds the rendered values");
-    Check(HoldsBytes(WithSuffix(rig.path, L".pre-canonical"), nul), "the original is kept");
-    ExpectLogLine(load.log, rig.Text() + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
-    ExpectLogLine(load.log, rig.Text() + ": not carried: [Position] Extra=1\0 on line 8, this build does not read it"s);
+    ExpectLogLine(load.log,
+                  rig.LegacyText() + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
+    ExpectLogLine(load.log,
+                  rig.LegacyText() + ": not carried: [Position] Extra=1\0 on line 8, this build does not read it"s);
     Check(CountContaining(load.log, "not carried") == 2, "only the unread keys are listed");
     Check(rig.legacy->Runs() == 1 && rig.sink.empty(), "one import and nothing reported");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "only the copy is added");
+    ExpectImported(rig);
 }
 
 void ASecondLoadRewritesNothing(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
     const auto written = fs::last_write_time(rig.path);
-    const auto copied = fs::last_write_time(WithSuffix(rig.path, L".pre-canonical"));
 
     std::vector<std::string> steps;
     rig.hook = [&](const std::string& step, const std::wstring&) -> std::uint32_t {
@@ -470,14 +523,61 @@ void ASecondLoadRewritesNothing(const fs::path& dir) {
     };
     const Load again = rig.Make()->Load();
     ExpectStatus(again, ConfigLoadStatus::Canonical);
-    Check(Same(again.config, MigratedConfig()), "the migrated values are read");
-    Check(steps == std::vector<std::string>{"Open"}, "the second launch only opens the file");
+    Check(Same(again.config, MigratedConfig()), "the imported values are read");
+    Check(steps == std::vector<std::string>{"Open"}, "the second launch only opens the config");
     Check(rig.legacy->Runs() == 1, "the import does not run again");
-    Check(HoldsBytes(rig.path, MigratedBytes()), "the file is unchanged");
-    Check(fs::last_write_time(rig.path) == written &&
-              fs::last_write_time(WithSuffix(rig.path, L".pre-canonical")) == copied,
-          "neither file is rewritten");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "nothing else is written");
+    ExpectLogLine(again.log, SettingsReadLine(rig));
+    Check(again.log.size() == 1, "that is the only line" + Joined(again.log));
+    Check(fs::last_write_time(rig.path) == written, "the config is not rewritten");
+    ExpectImported(rig);
+}
+
+void AConfigBesideALegacyFileIsReadAndTheImportNeverRuns(const fs::path& dir) {
+    Rig rig(dir);
+    HeadTrackingConfig chosen = Defaults();
+    chosen.udp_port = 6000;
+    const std::string canonical = Render(chosen);
+    WriteBytes(rig.path, canonical);
+    rig.PutLegacy(kLegacyText);
+    std::vector<std::pair<std::string, std::wstring>> opened;
+    rig.hook = [&](const std::string& step, const std::wstring& at) -> std::uint32_t {
+        opened.emplace_back(step, at);
+        return 0;
+    };
+    const Load load = rig.Make()->Load();
+    ExpectStatus(load, ConfigLoadStatus::Canonical);
+    Check(Same(load.config, chosen), "the config's values, not the legacy file's");
+    Check(rig.legacy->Runs() == 0, "the import never runs while the config exists");
+    Check(opened.size() == 1 && opened[0].first == "Open" && opened[0].second == rig.path.wstring(),
+          "only the config is opened");
+    ExpectLogLine(load.log, SettingsReadLine(rig));
+    Check(load.log.size() == 1, "that is the only line" + Joined(load.log));
+    Check(rig.sink.empty(), "nothing is reported");
+    Check(HoldsBytes(rig.path, canonical), "the config is not written");
+    ExpectLegacyKept(rig);
+    Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
+}
+
+void AnUnstampedConfigBesideALegacyFileIsCanonicalAndStampedByASave(const fs::path& dir) {
+    Rig rig(dir);
+    rig.PutLegacy(kLegacyText);
+    WriteBytes(rig.path, "; mine\r\n[General]\r\nWorldSpaceYaw=false\r\n");
+    auto owner = rig.Make();
+    const Load load = owner->Load();
+    ExpectStatus(load, ConfigLoadStatus::Canonical);
+    Check(!load.config.world_space_yaw && load.config.udp_port != 5555, "the config's values, not the legacy file's");
+    Check(rig.legacy->Runs() == 0, "an unstamped config is never imported");
+    ExpectLogLine(load.log, SettingsReadLine(rig));
+    ExpectLogLine(load.log, rig.Text() +
+                                ": has no [CameraUnlock] section. It is read as the canonical format, and the next save "
+                                "adds the section.");
+
+    ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }));
+    Check(HoldsBytes(rig.path, "; mine\r\n[General]\r\nWorldSpaceYaw=true\r\n\r\n[CameraUnlock]\r\nConfigFormat=1\r\n"),
+          "the save stamps the file in the same edit");
+    Check(rig.legacy->Runs() == 0 && rig.sink.empty(), "no import and nothing reported");
+    ExpectLegacyKept(rig);
+    Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
 }
 
 void AnUnstampedFileWithoutAnImportIsCanonicalAndStampedByASave(const fs::path& dir) {
@@ -500,9 +600,9 @@ void AnUnstampedFileWithoutAnImportIsCanonicalAndStampedByASave(const fs::path& 
     Check(ListingIs(dir, {kFileName}), "nothing else is written");
 }
 
-void AnUnstampedUnreadableFileWithoutAnImportIsUnreadable(const fs::path& dir) {
+void AnUnreadableConfigBesideALegacyFileIsUnreadableAndNeverImported(const fs::path& dir) {
     Rig rig(dir);
-    rig.with_import = false;
+    rig.PutLegacy(kLegacyText);
     const std::string utf16 = Utf16("[General]\r\nWorldSpaceYaw=false\r\n");
     WriteBytes(rig.path, utf16);
     ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Unreadable);
@@ -513,107 +613,90 @@ void AnUnstampedUnreadableFileWithoutAnImportIsUnreadable(const fs::path& dir) {
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Unreadable);
     Check(Contains(load.reason, "line 2 holds a NUL byte"), "the reason names the line");
+    Check(Same(load.config, Defaults()), "the session runs on the defaults, not the legacy file's values");
+    Check(rig.legacy->Runs() == 0, "the legacy file is not imported while the config exists");
     Check(HoldsBytes(rig.path, nul), "the file is not written");
-    Check(ListingIs(dir, {kFileName}), "nothing else is written");
+    ExpectLegacyKept(rig);
+    Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
 }
 
 void ADroppedValueIsLogged(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText + "Light = NaN\r\n");
+    rig.PutLegacy(kLegacyText + "Light = NaN\r\n");
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Migrated);
     Check(load.config.light.multiplier == cameraunlock::effects::kDefaultLightMultiplier, "N2 gives the default");
-    ExpectLogLine(load.log, rig.Text() +
+    ExpectLogLine(load.log, rig.LegacyText() +
                                 ": not carried: [Light] LightMultiplier=nan, it is not a finite number, so the default is used");
     Check(CountContaining(load.log, "not carried") == 2, "the dropped value and the unread key");
+    ExpectLegacyKept(rig);
+    Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
 }
 
-void ADeletedStampMigratesAgainIntoPreCanonicalLast(const fs::path& dir) {
+void DeletingTheConfigImportsTheLegacyFileAgain(const fs::path& dir) {
     Rig rig(dir);
-    const std::wstring first = WithSuffix(rig.path, L".pre-canonical");
-    const std::wstring last = WithSuffix(rig.path, L".pre-canonical.last");
-    WriteBytes(rig.path, kLegacyText);
-    ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
+    rig.PutLegacy(kLegacyText);
+    auto owner = rig.Make();
+    ExpectStatus(owner->Load(), ConfigLoadStatus::Migrated);
+    ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }));
 
-    const std::string stampless = WithoutStamp(ReadBytes(rig.path));
-    WriteBytes(rig.path, stampless);
+    fs::remove(rig.path);
     const Load again = rig.Make()->Load();
     ExpectStatus(again, ConfigLoadStatus::Migrated);
-    ExpectLogLine(again.log, rig.Text() + ": converted to the canonical format. The original is kept in " + rig.Text() +
-                                 ".pre-canonical.last.");
-    Check(HoldsBytes(first, kLegacyText), ".pre-canonical keeps the first input");
-    Check(HoldsBytes(last, stampless), ".pre-canonical.last holds the second");
-    Check(HasCanonicalStamp(ReadBytes(rig.path)), "stamped again");
-
-    const std::string later = WithoutStamp(ReadBytes(rig.path)) + "[Extra]\r\nNote=1\r\n";
-    WriteBytes(rig.path, later);
-    ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
-    Check(HoldsBytes(first, kLegacyText), ".pre-canonical is never replaced");
-    Check(HoldsBytes(last, later), ".pre-canonical.last is replaced by a later input");
-
-    WriteBytes(rig.path, kLegacyText);
-    ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
-    Check(HoldsBytes(last, later), "an input equal to .pre-canonical leaves .pre-canonical.last");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical", L"HeadTracking.ini.pre-canonical.last"}),
-          "nothing else is written");
+    Check(rig.legacy->Runs() == 2, "the next load imports the legacy file again");
+    Check(Same(again.config, MigratedConfig()), "the legacy file's values, without the deleted save");
+    ExpectImported(rig);
 }
 
 void ARefusedImportIsLegacyRefused(const fs::path& dir) {
     Rig rig(dir);
     rig.legacy->result = [](HeadTrackingConfig&) { return ImportResult::Refused("Port=99999 is outside 1 to 65535"); };
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     auto owner = rig.Make();
     const Load load = owner->Load();
     ExpectStatus(load, ConfigLoadStatus::LegacyRefused);
-    Check(Contains(load.reason, "Port=99999 is outside 1 to 65535"), "the reason is the import's");
+    ExpectReason(load.reason, RetriedReason("Port=99999 is outside 1 to 65535"));
     ExpectSunkOnce(rig, load.reason);
     ExpectNotSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }),
                    "the settings file could not be used this session");
-    ExpectUntouched(rig);
+    ExpectNotImported(rig);
 }
 
 void AnUndecodableImportDefers(const fs::path& dir) {
     Rig rig(dir);
     rig.legacy->result = [](HeadTrackingConfig&) { return ImportResult::Undecodable("the file is not UTF-8"); };
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "the file is not UTF-8"), "the reason is the import's");
+    ExpectReason(load.reason, RetriedReason("the file is not UTF-8"));
     ExpectSunkOnce(rig, load.reason);
-    ExpectUntouched(rig);
+    ExpectNotImported(rig);
 }
 
 void AnAbsentImportDefers(const fs::path& dir) {
     Rig rig(dir);
     rig.legacy->result = [](HeadTrackingConfig&) { return ImportResult::Absent({}); };
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "the old settings reader could not find the file"), "the reason says why");
-    ExpectLogLine(load.log, rig.Text() + ": the old settings reader found no file, while the owner holds it open (" +
+    ExpectReason(load.reason, RetriedReason("the old settings reader could not find the file"));
+    ExpectLogLine(load.log, rig.LegacyText() + ": the old settings reader found no file, while the owner holds it open (" +
                                 std::to_string(kLegacyText.size()) + " bytes); the ANSI path it was given is " +
-                                rig.Text());
+                                rig.LegacyText());
     ExpectSunkOnce(rig, load.reason);
-    ExpectUntouched(rig);
+    ExpectNotImported(rig);
 }
 
-void AReadOnlyFileDefers(const fs::path& dir) {
+void AReadOnlyLegacyFileIsImportedAndLeftAsItWas(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
-    SetReadOnly(rig.path, true);
+    rig.PutLegacy(kLegacyText);
+    SetReadOnly(rig.legacy_path, true);
     const Load load = rig.Make()->Load();
-    ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "the file is read-only"), "the reason says why");
-    Check(Same(load.config, MigratedConfig()), "the session runs on what the import gave");
-    ExpectSunkOnce(rig, load.reason);
-    Check(HoldsBytes(rig.path, kLegacyText), "the legacy file is unchanged");
-    Check(HoldsBytes(WithSuffix(rig.path, L".pre-canonical"), kLegacyText), "the copy was written before the commit");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "nothing else is left");
-
-    SetReadOnly(rig.path, false);
-    ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
-    Check(HoldsBytes(rig.path, MigratedBytes()), "the next launch migrates");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "the copy is reused");
+    ExpectStatus(load, ConfigLoadStatus::Migrated);
+    Check(Same(load.config, MigratedConfig()), "the session runs on the imported values");
+    Check(rig.sink.empty(), "nothing is reported");
+    Check((GetFileAttributesW(rig.legacy_path.c_str()) & FILE_ATTRIBUTE_READONLY) != 0, "the legacy file is still read-only");
+    ExpectImported(rig);
 }
 
 // Denies the current user FILE_ADD_FILE on the folder until destroyed.
@@ -662,38 +745,68 @@ private:
 
 void AFolderThatCannotBeWrittenDefers(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     std::optional<Load> load;
     {
         DenyCreateFiles deny(dir);
         load = rig.Make()->Load();
     }
     ExpectStatus(*load, ConfigLoadStatus::Deferred);
-    Check(Contains(load->reason, "the folder cannot be written"), "the reason says why");
+    ExpectReason(load->reason, RetriedReason("the folder cannot be written"));
+    Check(Same(load->config, MigratedConfig()), "the session runs on what the import gave");
     ExpectSunkOnce(rig, load->reason);
-    ExpectUntouched(rig);
+    ExpectNotImported(rig);
+
+    ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
+    ExpectImported(rig);
 }
 
-void AFileHeldDenyingReadSharingDefers(const fs::path& dir) {
+void ALegacyFileHeldDenyingReadSharingDefers(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
-    const HANDLE exclusive = CreateFileW(rig.path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+    rig.PutLegacy(kLegacyText);
+    const HANDLE exclusive = CreateFileW(rig.legacy_path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                                          FILE_ATTRIBUTE_NORMAL, nullptr);
-    Check(exclusive != INVALID_HANDLE_VALUE, "another program holds the file with no sharing");
+    Check(exclusive != INVALID_HANDLE_VALUE, "another program holds the legacy file with no sharing");
     const Load load = rig.Make()->Load();
     CloseHandle(exclusive);
     ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "the file is in use by another program"), "the reason says why");
-    Check(Same(load.config, Defaults()), "a file that cannot be opened cannot be classified, so the defaults");
+    ExpectReason(load.reason, RetriedReason("the file is in use by another program"));
+    Check(std::any_of(load.log.begin(), load.log.end(),
+                      [&](const std::string& line) { return StartsWith(line, rig.LegacyText() + ": could not be opened: "); }),
+          "the log names the legacy file that could not be opened" + Joined(load.log));
+    Check(Same(load.config, Defaults()), "a legacy file that cannot be opened cannot be imported, so the defaults");
     Check(rig.legacy->Runs() == 0, "the import does not run");
     ExpectSunkOnce(rig, load.reason);
-    ExpectUntouched(rig);
+    ExpectNotImported(rig);
+
     ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Migrated);
+    ExpectImported(rig);
+}
+
+void AConfigHeldDenyingReadSharingDefersAndNothingIsImported(const fs::path& dir) {
+    Rig rig(dir);
+    const std::string canonical = Render(Defaults());
+    WriteBytes(rig.path, canonical);
+    rig.PutLegacy(kLegacyText);
+    const HANDLE exclusive = CreateFileW(rig.path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                         FILE_ATTRIBUTE_NORMAL, nullptr);
+    Check(exclusive != INVALID_HANDLE_VALUE, "another program holds the config with no sharing");
+    const Load load = rig.Make()->Load();
+    CloseHandle(exclusive);
+    ExpectStatus(load, ConfigLoadStatus::Deferred);
+    Check(Contains(load.reason, kFileNameText + " cannot be read: the file is in use by another program"s),
+          "the reason says why: " + load.reason);
+    Check(rig.legacy->Runs() == 0, "the legacy file is not imported in place of a config that cannot be read");
+    ExpectSunkOnce(rig, load.reason);
+    Check(HoldsBytes(rig.path, canonical), "the config is not written");
+    ExpectLegacyKept(rig);
+    Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
 }
 
 void AFilePendingDeletionDefers(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
+    WriteBytes(rig.path, Render(Defaults()));
     HANDLE doomed = CreateFileW(rig.path.c_str(), DELETE | GENERIC_READ,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
                                 FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -706,7 +819,7 @@ void AFilePendingDeletionDefers(const fs::path& dir) {
     FILE_DISPOSITION_INFO disposition{TRUE};
     Check(doomed != INVALID_HANDLE_VALUE &&
               SetFileInformationByHandle(doomed, FileDispositionInfo, &disposition, sizeof disposition),
-          "another program deletes the file while it holds it open");
+          "another program deletes the config while it holds it open");
     WIN32_FILE_ATTRIBUTE_DATA attributes{};
     const bool refused = !GetFileAttributesExW(rig.path.c_str(), GetFileExInfoStandard, &attributes);
     Check(refused && GetLastError() == ERROR_ACCESS_DENIED, "GetFileAttributesExW refuses the file with access denied");
@@ -717,7 +830,7 @@ void AFilePendingDeletionDefers(const fs::path& dir) {
     Check(Contains(load.reason, kFileNameText + " cannot be read: it could not be read (Windows error 5"s),
           "the reason says why: " + load.reason);
     Check(Same(load.config, Defaults()), "the session runs on the defaults");
-    Check(rig.legacy->Runs() == 0, "the import does not run");
+    Check(rig.legacy->Runs() == 0, "the legacy file is not imported in place of a config that cannot be read");
     ExpectSunkOnce(rig, load.reason);
     Check(!owner->FileChanged(), "FileChanged reads the write time the folder still lists");
     const Reload reload = owner->Reload();
@@ -725,50 +838,21 @@ void AFilePendingDeletionDefers(const fs::path& dir) {
 
     CloseHandle(doomed);
     doomed = INVALID_HANDLE_VALUE;
-    Check(!fs::exists(rig.path), "the file is gone once the other program closes it");
+    Check(!fs::exists(rig.path), "the config is gone once the other program closes it");
     Check(owner->FileChanged(), "the file going away is a change");
+    ExpectNotImported(rig);
 }
 
 void AnImportThatWritesTheFileDefers(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     rig.legacy->during = [&](const LegacyInput& input) { WriteBytes(input.path, kLegacyText + "Light = 2.0\r\n"); };
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "the file was changed by another program while it was read"), "the reason says why");
+    ExpectReason(load.reason, RetriedReason("the file was changed by another program while it was read"));
     ExpectSunkOnce(rig, load.reason);
-    Check(HoldsBytes(rig.path, kLegacyText + "Light = 2.0\r\n"), "the other program's write is kept");
-    Check(ListingIs(dir, {kFileName}), "no copy is written");
-}
-
-void AFailedCopyDefers(const fs::path& dir) {
-    Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
-    rig.hook = [](const std::string& step, const std::wstring&) -> std::uint32_t {
-        return step == "Copy.WriteTemporary" ? ERROR_GEN_FAILURE : 0;
-    };
-    const Load load = rig.Make()->Load();
-    ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "it could not be written (Windows error 31"), "the reason carries the error");
-    Check(CountContaining(load.log, "Writing " + rig.Text() + ".pre-canonical failed at WriteTemporary") == 1,
-          "the log names the copy and the step");
-    ExpectSunkOnce(rig, load.reason);
-    ExpectUntouched(rig);
-}
-
-void ACopyThatDoesNotReadBackDefers(const fs::path& dir) {
-    Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
-    rig.hook = [](const std::string& step, const std::wstring& path) -> std::uint32_t {
-        if (step == "ReadBack") WriteBytes(path, "damaged");
-        return 0;
-    };
-    const Load load = rig.Make()->Load();
-    ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "the copy of the original file could not be written"), "the reason says why");
-    ExpectLogLine(load.log, rig.Text() + ".pre-canonical: does not hold the bytes just written to it");
-    ExpectSunkOnce(rig, load.reason);
-    Check(HoldsBytes(rig.path, kLegacyText), "the legacy file is unchanged");
+    Check(HoldsBytes(rig.legacy_path, kLegacyText + "Light = 2.0\r\n"), "the other program's write is kept");
+    Check(ListingIs(dir, {kLegacyName}), "nothing is created");
 }
 
 void AVerifyMismatchDefers(const fs::path& dir) {
@@ -778,46 +862,93 @@ void AVerifyMismatchDefers(const fs::path& dir) {
         config.position_enabled = false;
         return ImportResult::Imported({});
     };
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "[General] RotationEnabled=false cannot be converted"), "the reason names the row");
-    ExpectLogLine(load.log, rig.Text() + ": [General] RotationEnabled reads back from the new format as true, not false");
+    ExpectReason(load.reason, RetriedReason("[General] RotationEnabled=false cannot be converted"));
+    ExpectLogLine(load.log,
+                  rig.LegacyText() + ": [General] RotationEnabled reads back from the new format as true, not false");
     Check(!load.config.rotation_enabled && !load.config.position_enabled, "the session runs on what the import gave");
-    ExpectUntouched(rig);
+    ExpectNotImported(rig);
 }
 
 void AValueNoCodecWritesDefers(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText + "Light = 7.5\r\n");
+    rig.PutLegacy(kLegacyText + "Light = 7.5\r\n");
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "[Light] LightMultiplier=7.5 cannot be converted"), "the reason names the row and value");
+    ExpectReason(load.reason, RetriedReason("[Light] LightMultiplier=7.5 cannot be converted"));
     Check(load.config.light.multiplier == 7.5f, "the session runs on what the import gave");
-    Check(HoldsBytes(rig.path, kLegacyText + "Light = 7.5\r\n"), "the legacy file is unchanged");
-    Check(ListingIs(dir, {kFileName}), "no copy is written");
+    ExpectNotImported(rig);
 }
 
-void AFileChangedBeforeTheCommitDefers(const fs::path& dir) {
+// Another program creating the config file between the import and the commit, at each point of
+// the create-if-absent write: before its first read, before its final check, and in the gap
+// between the check and the rename. The next launch reads that file and never imports.
+void AConfigAppearingBeforeTheCommitDefers(const fs::path& dir) {
+    for (const std::string label : {"Commit.ReadTarget", "Commit.RecheckTarget", "Commit.Commit"}) {
+        Rig rig(dir);
+        rig.PutLegacy(kLegacyText);
+        rig.hook = [&](const std::string& step, const std::wstring&) -> std::uint32_t {
+            if (step == label) WriteBytes(rig.path, "theirs");
+            return 0;
+        };
+        auto owner = rig.Make();
+        const Load load = owner->Load();
+        ExpectStatus(load, ConfigLoadStatus::Deferred);
+        ExpectReason(load.reason, std::string(kLegacyNameText) + " was not imported into " + kFileNameText +
+                                      ": another program created the file at the same time" + AppearedTail());
+        ExpectLogLine(load.log, rig.Text() + ": not created: TargetAppeared");
+        Check(Same(load.config, MigratedConfig()), label + ": the session runs on what the import gave");
+        ExpectSunkOnce(rig, load.reason);
+        ExpectNotSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }),
+                       "the settings file could not be used this session");
+        Check(HoldsBytes(rig.path, "theirs"), label + ": the other program's file is kept");
+        ExpectLegacyKept(rig, label);
+        Check(ListingIs(dir, {kFileName, kLegacyName}), label + ": nothing else is left");
+
+        rig.hook = nullptr;
+        ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Canonical);
+        Check(rig.legacy->Runs() == 1, label + ": the next launch reads the file that appeared and does not import");
+        Check(HoldsBytes(rig.path, "theirs"), label + ": and writes nothing");
+        ExpectLegacyKept(rig, label);
+        fs::remove(rig.path);
+    }
+}
+
+// A temporary that cannot be removed after a config appeared at the commit: the player is told
+// the next launch reads that config, not that it tries the import again.
+void AConfigAppearingWithATemporaryLeftBehindDefers(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     rig.hook = [&](const std::string& step, const std::wstring&) -> std::uint32_t {
-        if (step == "Commit.RecheckTarget") WriteBytes(rig.path, "edited");
-        return 0;
+        if (step == "Commit.RecheckTarget") WriteBytes(rig.path, "theirs");
+        return step == "Commit.RemoveTemporary" ? ERROR_GEN_FAILURE : 0;
     };
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Deferred);
-    Check(Contains(load.reason, "the file was changed by another program at the same time"), "the reason says why");
-    Check(HoldsBytes(rig.path, "edited"), "the other program's write is kept");
-    Check(HoldsBytes(WithSuffix(rig.path, L".pre-canonical"), kLegacyText), "the copy holds the input");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "nothing else is left");
+    Check(StartsWith(load.reason, std::string(kLegacyNameText) + " was not imported into " + kFileNameText +
+                                      ": it could not be written (Windows error 31") &&
+              EndsWith(load.reason, AppearedTail()),
+          "the player is told the next launch reads the config: " + load.reason);
+    ExpectSunkOnce(rig, load.reason);
+    Check(HoldsBytes(rig.path, "theirs"), "the other program's file is kept");
+    ExpectLegacyKept(rig);
+    std::vector<fs::path> temporaries;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        const std::string name = Utf8(entry.path().filename().wstring());
+        if (StartsWith(name, kFileNameText + "."s) && EndsWith(name, ".tmp")) temporaries.push_back(entry.path());
+    }
+    Check(temporaries.size() == 1, "one temporary is left, found " + std::to_string(temporaries.size()));
+    for (const fs::path& temporary : temporaries) fs::remove(temporary);
+    Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is left");
 }
 
 // Design 4.5 step 1 (R3-2): while the owner holds the legacy file, the readers imports use read
 // it, and nothing can newly open it denying read sharing, rename it or delete it.
 void TheHeldFileReadsAndRefusesExclusiveOpens(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     std::string profile;
     std::string crt;
     std::string wide_crt;
@@ -861,39 +992,44 @@ void TheHeldFileReadsAndRefusesExclusiveOpens(const fs::path& dir) {
     Check(exclusive_error == ERROR_SHARING_VIOLATION, "an open denying read sharing fails with a sharing violation");
     Check(delete_error == ERROR_SHARING_VIOLATION && move_error == ERROR_SHARING_VIOLATION,
           "a delete and a rename fail with a sharing violation");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "the file is still there, converted");
+    ExpectImported(rig);
 }
 
 // Design 4.7, last case: a folder the ANSI code page cannot name. The published build was handed
-// the ANSI path, found nothing and ran on its defaults, so those are what the conversion writes.
+// the ANSI path, found nothing and ran on its defaults, so those are what the import writes to
+// CameraUnlock.ini. The legacy file is left as it was.
 void APathOutsideTheAnsiCodePage(const fs::path& dir) {
     const wchar_t omega = 0x03A9;
     const fs::path folder = dir / std::wstring(1, omega);
     fs::create_directories(folder);
     Rig rig(folder);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Migrated);
     Check(rig.legacy->Runs() == 1 && rig.legacy->inputs[0].ansi_lossy, "the import is told the ANSI path is lossy");
     const std::string ansi = detail::OwnerAnsiForLog(rig.legacy->inputs[0].ansi_path);
     Check(Same(load.config, Defaults()), "the session runs on the defaults the published build ran on");
-    Check(HoldsBytes(rig.path, Render(Defaults())), "the defaults are written");
-    Check(HoldsBytes(WithSuffix(rig.path, L".pre-canonical"), kLegacyText), "the content is kept in the copy");
-    ExpectLogLine(load.log, rig.Text() + ": has a character the ANSI code page cannot hold, so a reader given its ANSI path, " +
+    Check(HoldsBytes(rig.path, Render(Defaults())), "the defaults are written to the config file");
+    ExpectLegacyKept(rig);
+    Check(ListingIs(folder, {kFileName, kLegacyName}), "nothing else is written");
+    ExpectLogLine(load.log, rig.LegacyText() +
+                                ": has a character the ANSI code page cannot hold, so a reader given its ANSI path, " +
                                 ansi + ", finds no file there.");
-    ExpectLogLine(load.log, rig.Text() +
+    ExpectLogLine(load.log, rig.LegacyText() +
                                 ": the old settings reader found no file, as the old build found none there and ran on its "
-                                "defaults. Those defaults are written, and the file's content is kept in the copy.");
+                                "defaults. Those defaults are written to " +
+                                rig.Text() + ", and this file is left as it was.");
     Check(rig.sink.empty(), "nothing is reported");
 
     const Load next = rig.Make()->Load();
     ExpectStatus(next, ConfigLoadStatus::Canonical);
-    Check(rig.legacy->Runs() == 1, "the next launch reads the file by its wide path, with no import");
+    Check(rig.legacy->Runs() == 1, "the next launch reads the config by its wide path, with no import");
+    ExpectLogLine(next.log, SettingsReadLine(rig));
 
     // A per-key import has no Absent to report: it reads nothing and gives its defaults.
-    WriteBytes(rig.path, kLegacyText);
-    fs::remove(WithSuffix(rig.path, L".pre-canonical"));
+    fs::remove(rig.path);
     Rig per_key(folder);
+    per_key.PutLegacy(kLegacyText);
     per_key.legacy->result = [](HeadTrackingConfig& config) {
         config.udp_port = 4242;
         return ImportResult::Imported({});
@@ -906,7 +1042,8 @@ void APathOutsideTheAnsiCodePage(const fs::path& dir) {
     const Load per_key_load = per_key.Make()->Load();
     ExpectStatus(per_key_load, ConfigLoadStatus::Migrated);
     Check(HoldsBytes(per_key.path, Render(Defaults())), "a per-key import's defaults are written");
-    Check(HoldsBytes(WithSuffix(per_key.path, L".pre-canonical"), kLegacyText), "the content is kept in the copy");
+    ExpectLegacyKept(per_key);
+    Check(ListingIs(folder, {kFileName, kLegacyName}), "nothing else is written by a per-key import");
     Check(CountContaining(per_key_load.log, "has a character the ANSI code page cannot hold") == 1, "the log names the case");
 }
 
@@ -1076,17 +1213,6 @@ void ASaveOfAMissingFileCreatesNothing(const fs::path& dir) {
     Check(ListingIs(dir, {}), "nothing is created");
 }
 
-void ASaveToALegacyFileIsRefused(const fs::path& dir) {
-    Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
-    auto owner = rig.Make();
-    ExpectStatus(owner->Load(), ConfigLoadStatus::Migrated);
-    WriteBytes(rig.path, kLegacyText);
-    ExpectNotSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }),
-                   std::string(kFileNameText) + " is in the old settings format; it is converted at the next launch");
-    Check(HoldsBytes(rig.path, kLegacyText), "the old file is not edited");
-}
-
 void ASaveToAReadOnlyFileIsNotSaved(const fs::path& dir) {
     Rig rig(dir);
     auto owner = rig.Make();
@@ -1121,11 +1247,11 @@ void AnUnfinishedSaveIsUncertain(const fs::path& dir) {
 
 void ReloadIgnoresTheOwnersOwnWrites(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     auto owner = rig.Make();
     ExpectStatus(owner->Load(), ConfigLoadStatus::Migrated);
-    Check(!owner->FileChanged(), "the conversion's write is recorded");
-    Check(owner->Reload().status == ConfigReloadStatus::Unchanged, "the conversion's bytes reload as Unchanged");
+    Check(!owner->FileChanged(), "the import's write is recorded");
+    Check(owner->Reload().status == ConfigReloadStatus::Unchanged, "the import's bytes reload as Unchanged");
 
     ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }));
     Check(!owner->FileChanged(), "the save's write is recorded");
@@ -1140,23 +1266,29 @@ void ReloadIgnoresTheOwnersOwnWrites(const fs::path& dir) {
           "an outside edit is applied");
     Check(!owner->FileChanged(), "the reload records the write time");
     Check(rig.legacy->Runs() == 1 && rig.sink.empty(), "no import and nothing reported");
+    ExpectLegacyKept(rig);
+    Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
 }
 
-void ReloadOfAnOldFileIsReadOnly(const fs::path& dir) {
+void ReloadReadsAnUnstampedConfigAndNeverImports(const fs::path& dir) {
     Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
+    rig.PutLegacy(kLegacyText);
     auto owner = rig.Make();
     ExpectStatus(owner->Load(), ConfigLoadStatus::Migrated);
-    const std::string old = Replace(kLegacyText, "5555", "7000");
-    WriteBytes(rig.path, old);
-    const Reload reload = owner->Reload();
-    Check(reload.status == ConfigReloadStatus::LegacyReadOnly && reload.config && reload.config->udp_port == 7000,
-          "an old file put back is read through the import");
-    Check(Contains(reload.reason, "converted at the next launch"), "the reason says when it is converted");
-    Check(rig.legacy->Runs() == 2, "the import ran again");
-    Check(HoldsBytes(rig.path, old), "the old file is not written");
-    Check(ListingIs(dir, {kFileName, L"HeadTracking.ini.pre-canonical"}), "nothing else is written");
-    Check(rig.sink.empty(), "a read-only reload is not a failure");
+
+    WriteBytes(rig.path, Replace(WithoutStamp(ReadBytes(rig.path)), "UdpPort=5555", "UdpPort=7000"));
+    Reload reload = owner->Reload();
+    Check(reload.status == ConfigReloadStatus::Applied && reload.config && reload.config->udp_port == 7000,
+          std::string("an unstamped config is read as canonical, got ") + ConfigReloadStatusName(reload.status));
+    Check(rig.legacy->Runs() == 1, "the reload does not import");
+
+    fs::remove(rig.path);
+    reload = owner->Reload();
+    Check(reload.status == ConfigReloadStatus::Unreadable && !reload.config, "a deleted config keeps the settings");
+    Check(Contains(reload.reason, kFileNameText + " is missing, so the current settings stay"s), "the reason says why");
+    Check(rig.legacy->Runs() == 1, "the reload does not import the legacy file in place of a deleted config");
+    ExpectSunkOnce(rig, reload.reason);
+    ExpectNotImported(rig);
 }
 
 void ReloadOfAnUnreadableFileKeepsTheSettings(const fs::path& dir) {
@@ -1169,49 +1301,8 @@ void ReloadOfAnUnreadableFileKeepsTheSettings(const fs::path& dir) {
     Check(reload.status == ConfigReloadStatus::Unreadable && !reload.config, "Unreadable, with no settings");
     Check(Contains(reload.reason, "it is saved as UTF-16"), "the reason says why");
     ExpectSunkOnce(rig, reload.reason);
-    Check(rig.legacy->Runs() == 0, "a stamped file is never imported");
+    Check(rig.legacy->Runs() == 0, "the config is never imported");
     Check(HoldsBytes(rig.path, utf16), "the file is not written");
-}
-
-void ReloadOfAnOldFileTheImportCannotFindKeepsTheSettings(const fs::path& dir) {
-    Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
-    auto owner = rig.Make();
-    ExpectStatus(owner->Load(), ConfigLoadStatus::Migrated);
-    WriteBytes(rig.path, kLegacyText);
-    rig.legacy->result = [](HeadTrackingConfig&) { return ImportResult::Absent({}); };
-    const Reload reload = owner->Reload();
-    Check(reload.status == ConfigReloadStatus::Unreadable && !reload.config, "an import that finds no file leaves the settings");
-    Check(Contains(reload.reason, "the old settings reader could not find the file"), "the reason says why");
-    ExpectLogLine(reload.log, rig.Text() + ": not reloaded: the old settings reader found no file, while the owner holds it "
-                                           "open (" +
-                                  std::to_string(kLegacyText.size()) + " bytes)");
-    ExpectSunkOnce(rig, reload.reason);
-    Check(rig.legacy->Runs() == 2, "the import ran on the reload");
-    Check(HoldsBytes(rig.path, kLegacyText), "the file is not written");
-}
-
-void ReloadOfAnOldFileChangedDuringTheImportKeepsTheSettings(const fs::path& dir) {
-    Rig rig(dir);
-    WriteBytes(rig.path, kLegacyText);
-    auto owner = rig.Make();
-    ExpectStatus(owner->Load(), ConfigLoadStatus::Migrated);
-    WriteBytes(rig.path, kLegacyText);
-    const std::string changed = Replace(kLegacyText, "5555", "7000");
-    rig.legacy->during = [&](const LegacyInput& input) { WriteBytes(input.path, changed); };
-    Reload reload = owner->Reload();
-    Check(reload.status == ConfigReloadStatus::Unreadable && !reload.config,
-          "a file changed while the import read it leaves the settings");
-    Check(Contains(reload.reason, "the file was changed by another program while it was read"), "the reason says why");
-    ExpectSunkOnce(rig, reload.reason);
-    Check(HoldsBytes(rig.path, changed), "the other program's write is kept");
-
-    rig.legacy->during = nullptr;
-    rig.sink.clear();
-    reload = owner->Reload();
-    Check(reload.status == ConfigReloadStatus::LegacyReadOnly && reload.config && reload.config->udp_port == 7000,
-          "the next reload reads the settled file");
-    Check(rig.sink.empty(), "nothing more is reported");
 }
 
 void OptionsAndCallOrderAreChecked(const fs::path& dir) {
@@ -1231,7 +1322,7 @@ void OptionsAndCallOrderAreChecked(const fs::path& dir) {
     relative.path = kFileName;
     Check(Contains(Thrown<std::invalid_argument>([&] { Owner owner(relative); }), "is not a fully qualified path"),
           "a relative path is refused");
-    relative.path = L"C:HeadTracking.ini";
+    relative.path = L"C:CameraUnlock.ini";
     Check(Contains(Thrown<std::invalid_argument>([&] { Owner owner(relative); }), "is not a fully qualified path"),
           "a drive-relative path is refused");
     ConfigOwnerOptions<HeadTrackingConfig> no_table = options();
@@ -1251,6 +1342,30 @@ void OptionsAndCallOrderAreChecked(const fs::path& dir) {
                    "the options' import names keys but has no run"),
           "an import with keys and no run is refused");
 
+    Legacy legacy;
+    ConfigOwnerOptions<HeadTrackingConfig> import_without_source = options();
+    import_without_source.import = legacy.Import();
+    Check(Thrown<std::invalid_argument>([&] { Owner owner(import_without_source); }) ==
+              "import is set, but no legacy_path names the file it reads",
+          "an import with no legacy file is refused");
+    ConfigOwnerOptions<HeadTrackingConfig> source_without_import = options();
+    source_without_import.legacy_path = (dir / kLegacyName).wstring();
+    Check(Thrown<std::invalid_argument>([&] { Owner owner(source_without_import); }) ==
+              "legacy_path is set, but no import reads it",
+          "a legacy file with no import is refused");
+    ConfigOwnerOptions<HeadTrackingConfig> relative_source = options();
+    relative_source.import = legacy.Import();
+    relative_source.legacy_path = kLegacyName;
+    Check(Thrown<std::invalid_argument>([&] { Owner owner(relative_source); }) ==
+              "legacy_path 'HeadTracking.ini' is not a fully qualified path",
+          "a relative legacy file is refused");
+    ConfigOwnerOptions<HeadTrackingConfig> source_is_path = options();
+    source_is_path.import = legacy.Import();
+    source_is_path.legacy_path = (dir / L"CAMERAUNLOCK.INI").wstring();
+    Check(Thrown<std::invalid_argument>([&] { Owner owner(source_is_path); }) == "legacy_path names the config file itself",
+          "a legacy file that is the config, in another case, is refused");
+    Check(legacy.Runs() == 0, "no refused owner imports");
+
     Owner owner(options());
     Check(Contains(Thrown<std::logic_error>([&] { owner.Save([](HeadTrackingConfig& c) { c.world_space_yaw = false; }); }),
                    "Save needs Load to have run first"),
@@ -1265,11 +1380,14 @@ void OptionsAndCallOrderAreChecked(const fs::path& dir) {
 
     Check(std::string(ConfigLoadStatusName(ConfigLoadStatus::LegacyRefused)) == "LegacyRefused" &&
               std::string(ConfigSaveStatusName(ConfigSaveStatus::Uncertain)) == "Uncertain" &&
-              std::string(ConfigReloadStatusName(ConfigReloadStatus::LegacyReadOnly)) == "LegacyReadOnly",
+              std::string(ConfigReloadStatusName(ConfigReloadStatus::Unreadable)) == "Unreadable",
           "status names are the C# spellings");
+    Check(Thrown<std::invalid_argument>([] { ConfigReloadStatusName(static_cast<ConfigReloadStatus>(2)); }) ==
+              "ConfigReloadStatus 2 has no name",
+          "reload status 2 has no name");
 }
 
-// The steps of an in-place conversion, as the owner's hook names them.
+// The steps of an import, as the owner's hook names them.
 std::vector<std::string> InterruptionLabels() {
     const CheckedWriteStep writer[] = {
         CheckedWriteStep::ReadTarget,     CheckedWriteStep::CreateTemporary, CheckedWriteStep::WriteTemporary,
@@ -1277,20 +1395,17 @@ std::vector<std::string> InterruptionLabels() {
         CheckedWriteStep::Commit,
     };
     std::vector<std::string> labels = {"Open", "Import", "Recheck"};
-    for (CheckedWriteStep step : writer) labels.push_back(std::string("Copy.") + cameraunlock::CheckedWriteStepName(step));
-    labels.push_back("ReadBack");
     for (CheckedWriteStep step : writer) labels.push_back(std::string("Commit.") + cameraunlock::CheckedWriteStepName(step));
     labels.push_back("Remember");
     return labels;
 }
 
-// The child is killed at the start of the labelled step. After it, the legacy file is whole or
-// the new file is, beside it at most the copy and the writer's temporaries, and the next launch
-// ends where an uninterrupted one does.
+// The child is killed at the start of the labelled step. After it, the legacy file is whole and
+// unwritten, the config file is absent before the commit and whole after it, beside them at most
+// the writer's temporaries, and the next launch ends where an uninterrupted one does.
 void KilledDuring(const std::string& label, const fs::path& dir) {
-    const fs::path target = dir / kFileName;
-    const std::wstring copy = WithSuffix(target, L".pre-canonical");
-    WriteBytes(target, kLegacyText);
+    Rig rig(dir);
+    rig.PutLegacy(kLegacyText);
 
     std::vector<wchar_t> exe(32768);
     const DWORD length = GetModuleFileNameW(nullptr, exe.data(), static_cast<DWORD>(exe.size()));
@@ -1311,29 +1426,26 @@ void KilledDuring(const std::string& label, const fs::path& dir) {
     CloseHandle(process.hProcess);
     Check(exited && code == kKilledExitCode, "the child was killed partway through");
 
+    ExpectLegacyKept(rig, "after the kill");
     const bool committed = label == "Remember";
-    Check(HoldsBytes(target, committed ? MigratedBytes() : kLegacyText),
-          committed ? "the new file is whole" : "the legacy file is whole");
-    const std::wstring temporary_prefix = std::wstring(kFileName) + L".";
-    bool strays_are_temporaries = true;
-    for (const auto& entry : fs::directory_iterator(dir)) {
-        const std::wstring name = entry.path().filename().wstring();
-        if (entry.path() == target) continue;
-        if (entry.path().wstring() == copy) {
-            Check(HoldsBytes(copy, kLegacyText), "a copy left behind is whole");
-            continue;
-        }
-        strays_are_temporaries = strays_are_temporaries && name.compare(0, temporary_prefix.size(), temporary_prefix) == 0 &&
-                                 name.size() > 4 && name.compare(name.size() - 4, 4, L".tmp") == 0;
+    if (committed) {
+        Check(HoldsBytes(rig.path, MigratedBytes()), "the config file is whole");
+    } else {
+        Check(!fs::exists(rig.path), "the config file is absent, since the child died before the commit");
     }
-    Check(strays_are_temporaries, "nothing but the copy and the writer's temporaries is beside it");
+    const std::string temporary_prefix = kFileNameText + "."s;
+    bool strays_are_temporaries = true;
+    for (const std::wstring& wide : Listing(dir)) {
+        if (wide == kFileName || wide == kLegacyName) continue;
+        const std::string name = Utf8(wide);
+        strays_are_temporaries = strays_are_temporaries && StartsWith(name, temporary_prefix) && EndsWith(name, ".tmp");
+    }
+    Check(strays_are_temporaries, "nothing but the writer's temporaries is beside them");
 
-    Rig rig(dir);
     const Load next = rig.Make()->Load();
     ExpectStatus(next, committed ? ConfigLoadStatus::Canonical : ConfigLoadStatus::Migrated);
-    Check(HoldsBytes(target, MigratedBytes()), "the next launch ends with the new file");
-    Check(HoldsBytes(copy, kLegacyText), "and the copy of the original");
-    Check(!fs::exists(WithSuffix(target, L".pre-canonical.last")), "and no .pre-canonical.last");
+    Check(HoldsBytes(rig.path, MigratedBytes()), "the next launch ends with the config file");
+    ExpectLegacyKept(rig, "after the next launch");
 }
 
 void RunScenario(const std::string& name, const std::function<void(const fs::path&)>& body) {
@@ -1372,32 +1484,36 @@ int RunConfigOwnerTests() {
     RunScenario("an-absent-file-is-created", AnAbsentFileIsCreated);
     RunScenario("a-file-appearing-during-creation-defers", AFileAppearingDuringCreationDefers);
     RunScenario("a-stamped-file-is-canonical", AStampedFileIsCanonical);
-    RunScenario("a-stamped-utf16-file-is-unreadable-and-never-migrated", AStampedUtf16FileIsUnreadableAndNeverMigrated);
+    RunScenario("a-stamped-utf16-file-is-unreadable", AStampedUtf16FileIsUnreadable);
     RunScenario("a-stamped-file-holding-a-nul-is-unreadable", AStampedFileHoldingANulIsUnreadable);
-    RunScenario("an-unstamped-file-with-an-import-is-migrated", AnUnstampedFileWithAnImportIsMigrated);
-    RunScenario("an-unstamped-utf16-file-with-an-import-is-migrated", AnUnstampedUtf16FileWithAnImportIsMigrated);
-    RunScenario("an-unstamped-file-holding-a-nul-with-an-import-is-migrated",
-                AnUnstampedFileHoldingANulWithAnImportIsMigrated);
+    RunScenario("a-legacy-file-is-imported-and-left-as-it-was", ALegacyFileIsImportedAndLeftAsItWas);
+    RunScenario("a-utf16-legacy-file-is-imported", AUtf16LegacyFileIsImported);
+    RunScenario("a-legacy-file-holding-a-nul-is-imported", ALegacyFileHoldingANulIsImported);
     RunScenario("a-second-load-rewrites-nothing", ASecondLoadRewritesNothing);
+    RunScenario("a-config-beside-a-legacy-file-is-read-and-the-import-never-runs",
+                AConfigBesideALegacyFileIsReadAndTheImportNeverRuns);
+    RunScenario("an-unstamped-config-beside-a-legacy-file-is-canonical-and-stamped-by-a-save",
+                AnUnstampedConfigBesideALegacyFileIsCanonicalAndStampedByASave);
     RunScenario("an-unstamped-file-without-an-import-is-canonical-and-stamped-by-a-save",
                 AnUnstampedFileWithoutAnImportIsCanonicalAndStampedByASave);
-    RunScenario("an-unstamped-unreadable-file-without-an-import-is-unreadable",
-                AnUnstampedUnreadableFileWithoutAnImportIsUnreadable);
+    RunScenario("an-unreadable-config-beside-a-legacy-file-is-unreadable-and-never-imported",
+                AnUnreadableConfigBesideALegacyFileIsUnreadableAndNeverImported);
     RunScenario("a-dropped-value-is-logged", ADroppedValueIsLogged);
-    RunScenario("a-deleted-stamp-migrates-again-into-pre-canonical-last", ADeletedStampMigratesAgainIntoPreCanonicalLast);
+    RunScenario("deleting-the-config-imports-the-legacy-file-again", DeletingTheConfigImportsTheLegacyFileAgain);
     RunScenario("a-refused-import-is-legacy-refused", ARefusedImportIsLegacyRefused);
     RunScenario("an-undecodable-import-defers", AnUndecodableImportDefers);
     RunScenario("an-absent-import-defers", AnAbsentImportDefers);
-    RunScenario("a-read-only-file-defers", AReadOnlyFileDefers);
+    RunScenario("a-read-only-legacy-file-is-imported-and-left-as-it-was", AReadOnlyLegacyFileIsImportedAndLeftAsItWas);
     RunScenario("a-folder-that-cannot-be-written-defers", AFolderThatCannotBeWrittenDefers);
-    RunScenario("a-file-held-denying-read-sharing-defers", AFileHeldDenyingReadSharingDefers);
+    RunScenario("a-legacy-file-held-denying-read-sharing-defers", ALegacyFileHeldDenyingReadSharingDefers);
+    RunScenario("a-config-held-denying-read-sharing-defers-and-nothing-is-imported",
+                AConfigHeldDenyingReadSharingDefersAndNothingIsImported);
     RunScenario("a-file-pending-deletion-defers", AFilePendingDeletionDefers);
     RunScenario("an-import-that-writes-the-file-defers", AnImportThatWritesTheFileDefers);
-    RunScenario("a-failed-copy-defers", AFailedCopyDefers);
-    RunScenario("a-copy-that-does-not-read-back-defers", ACopyThatDoesNotReadBackDefers);
     RunScenario("a-verify-mismatch-defers", AVerifyMismatchDefers);
     RunScenario("a-value-no-codec-writes-defers", AValueNoCodecWritesDefers);
-    RunScenario("a-file-changed-before-the-commit-defers", AFileChangedBeforeTheCommitDefers);
+    RunScenario("a-config-appearing-before-the-commit-defers", AConfigAppearingBeforeTheCommitDefers);
+    RunScenario("a-config-appearing-with-a-temporary-left-behind-defers", AConfigAppearingWithATemporaryLeftBehindDefers);
     RunScenario("the-held-file-reads-and-refuses-exclusive-opens", TheHeldFileReadsAndRefusesExclusiveOpens);
     RunScenario("a-path-outside-the-ansi-code-page", APathOutsideTheAnsiCodePage);
     RunScenario("a-newer-config-format-refuses-saves", ANewerConfigFormatRefusesSaves);
@@ -1409,16 +1525,11 @@ int RunConfigOwnerTests() {
     RunScenario("a-save-conflict-is-not-saved", ASaveConflictIsNotSaved);
     RunScenario("a-change-to-a-row-that-is-not-writable-throws", AChangeToARowThatIsNotWritableThrows);
     RunScenario("a-save-of-a-missing-file-creates-nothing", ASaveOfAMissingFileCreatesNothing);
-    RunScenario("a-save-to-a-legacy-file-is-refused", ASaveToALegacyFileIsRefused);
     RunScenario("a-save-to-a-read-only-file-is-not-saved", ASaveToAReadOnlyFileIsNotSaved);
     RunScenario("an-unfinished-save-is-uncertain", AnUnfinishedSaveIsUncertain);
     RunScenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites);
-    RunScenario("reload-of-an-old-file-is-read-only", ReloadOfAnOldFileIsReadOnly);
+    RunScenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports);
     RunScenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings);
-    RunScenario("reload-of-an-old-file-the-import-cannot-find-keeps-the-settings",
-                ReloadOfAnOldFileTheImportCannotFindKeepsTheSettings);
-    RunScenario("reload-of-an-old-file-changed-during-the-import-keeps-the-settings",
-                ReloadOfAnOldFileChangedDuringTheImportKeepsTheSettings);
     RunScenario("options-and-call-order-are-checked", OptionsAndCallOrderAreChecked);
     for (const std::string& label : InterruptionLabels()) {
         RunScenario("killed-during-" + label, [label](const fs::path& dir) { KilledDuring(label, dir); });

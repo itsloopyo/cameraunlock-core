@@ -73,10 +73,13 @@ struct PluginConfigSchema {
     // no migration.
     const char* modId = "";
 
-    // PluginMod reads and writes the config through config::ConfigOwner in the
-    // canonical format (PluginConfigTable), converting a legacy file once
-    // through PluginConfigLegacyImport. PluginModDescriptor::gameName is then
-    // required. Fields are only ever appended, and this one is last: every
+    // PluginMod reads and writes CameraUnlock.ini beside the plugin DLL through
+    // config::ConfigOwner in the canonical format (PluginConfigTable). While
+    // CameraUnlock.ini is absent it imports the legacy file,
+    // PluginModDescriptor::configFileName, once through
+    // PluginConfigLegacyImport; the legacy file is never written.
+    // PluginModDescriptor::gameName is then required. Fields are only ever
+    // appended, and this one is last: every
     // mod's schema is initialised positionally, so a field inserted above
     // silently rebinds the rest.
     bool canonicalConfig = false;

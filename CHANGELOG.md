@@ -46,6 +46,42 @@ Consuming repos (no converted mod has been released):
 - `ConfigReloadStatus.LegacyReadOnly` (2) is gone. `Unreadable` stays 3.
 - Nothing writes `.pre-canonical` or `.pre-canonical.last` any more.
 
+### Changed - BREAKING - the C++ config owner and REFramework mods import the legacy file into `CameraUnlock.ini`
+
+`cameraunlock::config::ConfigOwner<Config>` follows the C# owner above, with the same decisions,
+the same log lines and the same player messages. It no longer converts a file in place and writes
+no `.pre-canonical` or `.pre-canonical.last` copies.
+
+- **Load**: a file at `path` is read as canonical, stamped or not; the import never runs and the
+  legacy file is never opened. When the legacy file also exists (`GetFileAttributesW`, nothing
+  opened), the log holds `<path>: settings are read from this file. <legacy_path> is left as it
+  was and is not read.` When `path` is absent and `legacy_path` exists, the legacy file is held
+  open, imported, checked again, rendered and read back, and `path` is created from it with a
+  create-if-absent checked write; a file that appears at `path` meanwhile defers. When neither
+  exists, `path` is created from the defaults. The legacy file is never written, renamed, deleted
+  or copied.
+- **A legacy path outside the ANSI code page**: the published build found no file there and ran
+  on its defaults, so those defaults are written to `path` and the legacy file is left as it was.
+- **Save** no longer refuses an unstamped file; the first save that changes a row stamps it.
+  **Reload** reads only `path` and never runs the import.
+
+Consuming repos (no converted mod has been released):
+
+- A native mod with an import sets `path` to `CameraUnlock.ini` and the new
+  `ConfigOwnerOptions::legacy_path` to its legacy file, both fully qualified. `legacy_path` is
+  required with an import `run` and refused without one, when it is not fully qualified, and when
+  it names the file `path` names (compared without case); each throws `std::invalid_argument`
+  from the constructor.
+- `ConfigReloadStatus::LegacyReadOnly` (2) is gone. `Unreadable` stays 3.
+- `detail::OwnerKeepOriginal` and `detail::OwnerKept` are gone, and so are the hook's `Copy.` and
+  `ReadBack` steps.
+- **REFramework mods** with `PluginConfigSchema::canonicalConfig` now keep their settings in
+  `reframework\plugins\CameraUnlock.ini`, beside the plugin DLL, and import
+  `PluginModDescriptor::configFileName` (`HeadTracking.ini` by default) once, while
+  `CameraUnlock.ini` is absent. That file is never written. The non-canonical path, and RE8's
+  InvertX migration inside it, are unchanged. The mod's `PRESERVE_FILES` must list both
+  `CameraUnlock.ini` and the legacy file.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

@@ -23,7 +23,10 @@ struct PluginModDescriptor {
     // Log banner name, e.g. "RE9 Head Tracking".
     const char* displayName = "Head Tracking";
     const char* version = "0.0.0";
-    // File name of the INI, resolved beside the plugin DLL.
+    // File name of the INI, resolved beside the plugin DLL. With config.canonicalConfig it
+    // names the legacy file instead: settings live in CameraUnlock.ini beside the plugin DLL,
+    // and this file is imported into it once, while CameraUnlock.ini is absent. It is never
+    // written.
     const char* configFileName = "HeadTracking.ini";
     PluginConfigSchema config;
     // The game's name as data/games.json spells it, in printable ASCII, written at the

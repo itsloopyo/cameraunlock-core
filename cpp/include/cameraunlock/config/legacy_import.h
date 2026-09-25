@@ -10,9 +10,9 @@
 
 // What a game's legacy import hands the migration driver. The import is the game's own reader
 // as its last pre-canonical build ran it, frozen in the game's repo with a copy of that build's
-// Config struct and defaults, plus a map from that struct into the runtime Config. It runs once,
-// on a file that has no [CameraUnlock] stamp, and writes nothing. Pure, no <windows.h>. The C#
-// twins are in CameraUnlock.Core.Config.
+// Config struct and defaults, plus a map from that struct into the runtime Config. ConfigOwner
+// runs it on the game's legacy file while no config file exists, to create one, and it writes
+// nothing. Pure, no <windows.h>. The C# twins are in CameraUnlock.Core.Config.
 
 namespace cameraunlock::config {
 

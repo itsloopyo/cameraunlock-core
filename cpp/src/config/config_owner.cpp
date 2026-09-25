@@ -43,7 +43,6 @@ const char* ConfigReloadStatusName(ConfigReloadStatus status) {
     switch (status) {
         case ConfigReloadStatus::Unchanged: return "Unchanged";
         case ConfigReloadStatus::Applied: return "Applied";
-        case ConfigReloadStatus::LegacyReadOnly: return "LegacyReadOnly";
         case ConfigReloadStatus::Unreadable: return "Unreadable";
     }
     throw std::invalid_argument("ConfigReloadStatus " + std::to_string(static_cast<int>(status)) + " has no name");
@@ -55,8 +54,6 @@ namespace detail {
 
 namespace {
 
-constexpr wchar_t kCopySuffix[] = L".pre-canonical";
-constexpr wchar_t kLastCopySuffix[] = L".pre-canonical.last";
 constexpr DWORD kReadChunk = 64 * 1024;
 
 bool IsAbsent(DWORD error) { return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND; }
@@ -126,30 +123,6 @@ std::wstring Widen(const std::string& text, UINT code_page) {
     std::wstring wide(static_cast<std::size_t>(length), L'\0');
     MultiByteToWideChar(code_page, 0, text.data(), static_cast<int>(text.size()), &wide[0], length);
     return wide;
-}
-
-OwnerKept WriteCopy(const std::wstring& copy, const std::optional<std::string>& expected, const std::string& snapshot,
-                    const ConfigOwnerHook& hook, std::vector<std::string>& log) {
-    const CheckedWriteResult written = OwnerWrite(copy, expected, snapshot, hook, "Copy.");
-    if (OwnerWriteFailed(written)) {
-        log.push_back(OwnerWriteLog(copy, written));
-        return {std::wstring(), OwnerWriteWhy(copy, written)};
-    }
-    if (!written.Committed()) {
-        log.push_back(OwnerUtf8(copy) + ": not written: " + CheckedWriteStatusName(written.status));
-        return {std::wstring(), "the copy of the original file could not be written"};
-    }
-    OwnerStep(hook, "ReadBack", copy);
-    const OwnerFileRead back = OwnerReadFile(copy);
-    if (back.error != 0) {
-        log.push_back(OwnerUtf8(copy) + ": could not be read back: " + OwnerErrorText(back.error));
-        return {std::wstring(), OwnerReadWhy(copy, back.error)};
-    }
-    if (!back.present || back.bytes != snapshot) {
-        log.push_back(OwnerUtf8(copy) + ": does not hold the bytes just written to it");
-        return {std::wstring(), "the copy of the original file could not be written"};
-    }
-    return {copy, std::string()};
 }
 
 }  // namespace
@@ -227,6 +200,20 @@ std::wstring OwnerFullPath(const std::wstring& path, const char* option) {
     }
     full.resize(written);
     return full;
+}
+
+bool OwnerSamePath(const std::wstring& a, const std::wstring& b) {
+    const int compared =
+        CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()), TRUE);
+    if (compared == 0) {
+        throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "CompareStringOrdinal");
+    }
+    return compared == CSTR_EQUAL;
+}
+
+bool OwnerFileExists(const std::wstring& path) {
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
 LegacyInput OwnerLegacyInput(const std::wstring& path) {
@@ -348,28 +335,6 @@ std::string OwnerErrorText(std::uint32_t error) {
     LocalFree(message);
     while (!wide.empty() && (wide.back() == L'\r' || wide.back() == L'\n' || wide.back() == L' ')) wide.pop_back();
     return text + ": " + OwnerUtf8(wide);
-}
-
-OwnerKept OwnerKeepOriginal(const std::wstring& path, const std::string& snapshot, const ConfigOwnerHook& hook,
-                            std::vector<std::string>& log) {
-    const std::wstring first = path + kCopySuffix;
-    const OwnerFileRead existing = OwnerReadFile(first);
-    if (existing.error != 0) {
-        log.push_back(OwnerUtf8(first) + ": could not be read: " + OwnerErrorText(existing.error));
-        return {std::wstring(), OwnerReadWhy(first, existing.error)};
-    }
-    if (!existing.present) return WriteCopy(first, std::nullopt, snapshot, hook, log);
-    if (existing.bytes == snapshot) return {first, std::string()};
-
-    const std::wstring last = path + kLastCopySuffix;
-    const OwnerFileRead previous = OwnerReadFile(last);
-    if (previous.error != 0) {
-        log.push_back(OwnerUtf8(last) + ": could not be read: " + OwnerErrorText(previous.error));
-        return {std::wstring(), OwnerReadWhy(last, previous.error)};
-    }
-    if (previous.present && previous.bytes == snapshot) return {last, std::string()};
-    return WriteCopy(last, previous.present ? std::optional<std::string>(previous.bytes) : std::nullopt, snapshot, hook,
-                     log);
 }
 
 void OwnerLogNotCarried(const std::string& snapshot, const std::vector<LegacyKey>& keys, const std::string& input,

@@ -1,7 +1,7 @@
 // PluginConfig on the canonical format: the RE table, the RE legacy import against
 // PluginConfig::Load on every shipped RE config (data/fixtures/reframework-legacy) and the
-// corpus built from each, and the config owner converting each file and saving the two
-// Writable rows.
+// corpus built from each, and the config owner importing each file into CameraUnlock.ini beside
+// it and saving the two Writable rows.
 
 #include <cameraunlock/config/canonical_ini.h>
 #include <cameraunlock/config/config_owner.h>
@@ -468,19 +468,22 @@ std::vector<testing::MutationKey> CorpusKeys(const std::vector<LegacyKey>& reads
     return keys;
 }
 
-ConfigOwnerOptions<PluginConfig> OwnerOptions(const Fixture& f, const fs::path& file) {
+// The owner PluginMod builds with canonicalConfig: CameraUnlock.ini in `dir`, importing the
+// legacy HeadTracking.ini beside it.
+ConfigOwnerOptions<PluginConfig> OwnerOptions(const Fixture& f, const fs::path& dir) {
     ConfigOwnerOptions<PluginConfig> options;
-    options.path = file.wstring();
+    options.path = (dir / "CameraUnlock.ini").wstring();
     options.table = PluginConfigTable(f.schema);
     options.import = PluginConfigLegacyImport(f.schema);
+    options.legacy_path = (dir / "HeadTracking.ini").wstring();
     options.header.display_name = f.game;
     return options;
 }
 
 // Every corpus input: Load on one copy against the import on another, the import's copy
-// unchanged and alone in its folder. With `convert`, the owner then converts a third copy to the
-// import's values; that pass costs about 16 s a fixture, so it runs where RE8's and Requiem's
-// schemas between them bind every row of the table.
+// unchanged and alone in its folder. With `convert`, the owner then imports a third copy into
+// CameraUnlock.ini with the import's values; that pass costs about 16 s a fixture, so it runs
+// where RE8's and Requiem's schemas between them bind every row of the table.
 void TestCorpus(const fs::path& root, const Fixture& f, bool convert) {
     const std::string base = ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / f.file);
     const LegacyImport<PluginConfig> import = PluginConfigLegacyImport(f.schema);
@@ -523,9 +526,9 @@ void TestCorpus(const fs::path& root, const Fixture& f, bool convert) {
         }
 
         if (!convert) continue;
-        const fs::path owner_file = Fresh(root, "owner") / "HeadTracking.ini";
-        WriteBytes(owner_file, input.bytes);
-        ConfigOwner<PluginConfig> owner(OwnerOptions(f, owner_file));
+        const fs::path owner_dir = Fresh(root, "owner");
+        WriteBytes(owner_dir / "HeadTracking.ini", input.bytes);
+        ConfigOwner<PluginConfig> owner(OwnerOptions(f, owner_dir));
         const ConfigLoadResult<PluginConfig> converted = owner.Load();
         std::vector<std::string> owner_differences;
         CarriedDifferences(imported, converted.config, owner_differences);
@@ -541,13 +544,13 @@ void TestCorpus(const fs::path& root, const Fixture& f, bool convert) {
     const std::string label = std::string(f.file) + ", " + std::to_string(inputs.size()) + " inputs";
     Check(load_mismatches == 0, label + ": the import gives the fields PluginConfig::Load gives");
     Check(changed_copies == 0, label + ": the import leaves its copy and its folder unchanged");
-    if (convert) Check(unconverted == 0, label + ": the owner converts each to the import's values");
+    if (convert) Check(unconverted == 0, label + ": the owner imports each with the import's values");
     std::cout << "  " << label << ": " << seconds << " s\n";
 }
 
-// The shipped file through the owner: converted once to a canonical file that reads back as the
-// import gave it, the original kept, nothing written by a second load, and each Writable row saved
-// as one line.
+// The shipped file through the owner: imported once into CameraUnlock.ini, which reads back as the
+// import gave it, the legacy HeadTracking.ini left byte for byte as it was, nothing written by a
+// second load, and each Writable row saved as one line.
 void TestOwnerConvertsShippedFile(const fs::path& root, const Fixture& f) {
     const std::string base = ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / f.file);
     const std::string name = f.file;
@@ -558,11 +561,13 @@ void TestOwnerConvertsShippedFile(const fs::path& root, const Fixture& f) {
     PluginConfigLegacyImport(f.schema).run(detail::OwnerLegacyInput(import_file.wstring()), imported);
 
     const fs::path dir = Fresh(root, "convert");
-    const fs::path file = dir / "HeadTracking.ini";
-    WriteBytes(file, base);
-    ConfigOwner<PluginConfig> owner(OwnerOptions(f, file));
+    const fs::path file = dir / "CameraUnlock.ini";
+    const fs::path legacy = dir / "HeadTracking.ini";
+    const std::vector<std::string> both{"CameraUnlock.ini", "HeadTracking.ini"};
+    WriteBytes(legacy, base);
+    ConfigOwner<PluginConfig> owner(OwnerOptions(f, dir));
     const ConfigLoadResult<PluginConfig> loaded = owner.Load();
-    Check(loaded.status == ConfigLoadStatus::Migrated, name + ": converted");
+    Check(loaded.status == ConfigLoadStatus::Migrated, name + ": imported");
 
     const std::string converted = ReadBytes(file);
     const CanonicalIni doc = ParseCanonicalIni(converted);
@@ -584,16 +589,16 @@ void TestOwnerConvertsShippedFile(const fs::path& root, const Fixture& f) {
               !Contains(converted, "Sensitivity") && !Contains(converted, "Invert") &&
               !Contains(converted, "RotationEnabled") && !Contains(converted, "PositionLimitYDown"),
           name + ": and holds no legacy, pose-shaping or two-mode keys");
-    Check(ReadBytes(dir / "HeadTracking.ini.pre-canonical") == base, name + ": .pre-canonical equals the input");
-    Check(Listing(dir) == std::vector<std::string>{"HeadTracking.ini", "HeadTracking.ini.pre-canonical"},
-          name + ": and nothing else is beside it");
+    Check(ReadBytes(legacy) == base, name + ": HeadTracking.ini is left byte for byte as it was");
+    Check(Listing(dir) == both, name + ": and nothing else is beside them");
 
-    ConfigOwner<PluginConfig> again(OwnerOptions(f, file));
+    ConfigOwner<PluginConfig> again(OwnerOptions(f, dir));
     const ConfigLoadResult<PluginConfig> second = again.Load();
-    Check(second.status == ConfigLoadStatus::Canonical && second.log.empty(), name + ": a second load reads it as canonical");
-    Check(ReadBytes(file) == converted &&
-              Listing(dir) == std::vector<std::string>{"HeadTracking.ini", "HeadTracking.ini.pre-canonical"},
-          name + ": and writes nothing");
+    Check(second.status == ConfigLoadStatus::Canonical && second.log.size() == 1 &&
+              Contains(second.log[0], "CameraUnlock.ini: settings are read from this file. ") &&
+              Contains(second.log[0], "HeadTracking.ini is left as it was and is not read."),
+          name + ": a second load reads CameraUnlock.ini as canonical and says HeadTracking.ini is not read");
+    Check(ReadBytes(file) == converted && ReadBytes(legacy) == base && Listing(dir) == both, name + ": and writes nothing");
 
     const ConfigSaveResult position = again.Save([](PluginConfig& c) { c.positionEnabled = false; });
     const std::string after_position = ReadBytes(file);
@@ -607,10 +612,15 @@ void TestOwnerConvertsShippedFile(const fs::path& root, const Fixture& f) {
 
 void TestConversionLog(const fs::path& root) {
     const auto convert = [&](const Fixture& f) {
-        const fs::path file = Fresh(root, "log") / "HeadTracking.ini";
-        WriteBytes(file, ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / f.file));
-        ConfigOwner<PluginConfig> owner(OwnerOptions(f, file));
-        return Join(owner.Load().log);
+        const fs::path dir = Fresh(root, "log");
+        const std::string base = ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / f.file);
+        WriteBytes(dir / "HeadTracking.ini", base);
+        ConfigOwner<PluginConfig> owner(OwnerOptions(f, dir));
+        const ConfigLoadResult<PluginConfig> loaded = owner.Load();
+        Check(loaded.status == ConfigLoadStatus::Migrated && ReadBytes(dir / "HeadTracking.ini") == base &&
+                  Listing(dir) == std::vector<std::string>{"CameraUnlock.ini", "HeadTracking.ini"},
+              std::string(f.file) + ": imported into CameraUnlock.ini, HeadTracking.ini left as it was");
+        return Join(loaded.log);
     };
     const std::string re2 = convert(kFixtures[0]);
     Check(Contains(re2, "not carried: [Hotkeys] ReticleToggleKey=0x2D") && Contains(re2, "not carried: [Reticle] Enabled=true"),

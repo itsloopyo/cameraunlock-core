@@ -28,24 +28,29 @@ namespace cameraunlock::config {
 /// What ConfigOwner::Load found and did. The numbers match CameraUnlock.Core.Config's
 /// ConfigLoadStatus.
 enum class ConfigLoadStatus {
-    /// The file was read as a canonical file: stamped, or unstamped in a game with no legacy
-    /// import, which the first save stamps.
+    /// The file at `path` was read as a canonical file, stamped or not; the first save that
+    /// changes a row stamps an unstamped one. The legacy file is not read.
     Canonical = 0,
-    /// A legacy file was converted to the canonical format this launch.
+    /// The legacy file was imported into a new file at `path` this launch. The legacy file is
+    /// left as it was.
     Migrated = 1,
-    /// There was no file, and one holding the defaults was created.
+    /// There was no file at `path` and no legacy file, and a file holding the defaults was
+    /// created at `path`.
     Created = 2,
-    /// The file could not be converted, read or created this launch. It is left as it was, the
-    /// session runs on the settings the result holds, nothing is saved this session, and the
-    /// next launch tries again.
+    /// The file at `path` could not be read or created, or the legacy file could not be read or
+    /// imported, this launch. The legacy file is left as it was and the owner creates no file at
+    /// `path`; a file at `path` that could not be read is left as it was too. The session runs on
+    /// the settings the result holds and nothing is saved this session. The next launch loads
+    /// again: it reads a file another program created at `path` meanwhile, and otherwise imports
+    /// or creates the file again.
     Deferred = 3,
-    /// The legacy import refused the file, as the game's last pre-canonical build did. The game
-    /// does what that build did on the refusal; the file is left as it was and nothing is saved
-    /// this session.
+    /// The legacy import refused the legacy file, as the game's last pre-canonical build did.
+    /// The game does what that build did on the refusal. The legacy file is left as it was,
+    /// `path` is not created, and nothing is saved this session.
     LegacyRefused = 4,
-    /// A file the canonical reader cannot read (saved as UTF-16, or holding a NUL byte) that is
-    /// stamped, or that no legacy import reads. The session runs on the defaults and nothing is
-    /// saved until the file is fixed.
+    /// The file at `path` is one the canonical reader cannot read (saved as UTF-16, or holding a
+    /// NUL byte). The session runs on the defaults and nothing is saved until the file is fixed.
+    /// The legacy file is not read.
     Unreadable = 5,
 };
 
@@ -61,16 +66,12 @@ enum class ConfigSaveStatus {
 };
 
 /// What ConfigOwner::Reload found. Reload never writes. The numbers match
-/// CameraUnlock.Core.Config's ConfigReloadStatus.
+/// CameraUnlock.Core.Config's ConfigReloadStatus, where 2 is not used.
 enum class ConfigReloadStatus {
     /// The file holds the bytes the owner last wrote, so there is nothing to apply.
     Unchanged = 0,
     /// The file was read and ConfigReloadResult::config holds its settings.
     Applied = 1,
-    /// The file has no [CameraUnlock] stamp and the game's legacy import reads it: an old file
-    /// put back during the session. It was read through the import, is not written, and is
-    /// converted at the next launch.
-    LegacyReadOnly = 2,
     /// The file could not be read. The game keeps the settings it has.
     Unreadable = 3,
 };
@@ -85,19 +86,28 @@ const char* ConfigReloadStatusName(ConfigReloadStatus status);
 /// member added later changes no game's code. The owner copies it when it is built.
 template <class Config>
 struct ConfigOwnerOptions {
-    /// The config file, as a fully qualified path (`C:\...` or `\\server\...`). Required.
+    /// The config file, as a fully qualified path (`C:\...` or `\\server\...`):
+    /// `CameraUnlock.ini`, in the folder that holds the game's legacy file where it has one.
+    /// Required.
     std::wstring path;
     /// The game's table. Required: a table with no rows is refused.
     ConfigTable<Config> table;
     /// The game's frozen legacy import. An empty `run` means the game never published a build
-    /// reading a pre-canonical file. With an import, a file with no [CameraUnlock] stamp is a
-    /// legacy file: it is converted once, never edited. The import is handed the path in the
-    /// ANSI code page too, and whether that form lost a character (LegacyInput).
+    /// before the canonical format. A `run` needs `legacy_path`, the one file it reads. The
+    /// import is handed that path in the ANSI code page too, and whether that form lost a
+    /// character (LegacyInput).
     LegacyImport<Config> import;
+    /// The game's legacy file, as a fully qualified path, normally in the same folder as `path`:
+    /// `HeadTracking.ini` beside `CameraUnlock.ini`. Required with an import `run`, refused
+    /// without one, and refused when it names the file `path` names (compared without case).
+    /// Only while no file exists at `path` does the import read this file, and the owner then
+    /// creates `path` from what it gives. Once `path` exists this file is not read again. It is
+    /// never written, renamed, deleted or copied.
+    std::wstring legacy_path;
     /// What the renderer writes above the settings. Required.
     RenderHeader header;
     /// Shows the player a one-line message, e.g. through the game's overlay, when settings are
-    /// not converted, cannot be read or are not saved. Optional. It runs after the owner has
+    /// not imported, cannot be read or are not saved. Optional. It runs after the owner has
     /// released its lock.
     std::function<void(const std::string&)> status_sink;
 };
@@ -111,10 +121,13 @@ struct ConfigLoadResult {
     /// What the canonical reader and the table found in the file read, for a Canonical or a
     /// Migrated load; empty otherwise.
     std::vector<CanonicalDiagnostic> diagnostics;
-    /// Every line for the game's log, UTF-8, each naming the file, in order: the diagnostics'
-    /// sentences, the conversion's lines (values the import dropped, lines the new file does not
-    /// carry, where the original is kept) and the error behind a Deferred or Unreadable load.
-    /// Returned rather than logged, so a game can load before its logger is up.
+    /// Every line for the game's log, UTF-8, each naming the file. It can hold the line saying
+    /// the settings are read from `path` while a legacy file is also present, the line saying an
+    /// unstamped file gets its section at the next save, the diagnostics' sentences, the line
+    /// saying `path` was created and from what, the import's lines (values it dropped, lines of
+    /// the legacy file the new file does not carry) and the error behind a Deferred,
+    /// LegacyRefused or Unreadable load. Returned rather than logged, so a game can load before
+    /// its logger is up.
     std::vector<std::string> log;
     /// For Deferred, LegacyRefused and Unreadable, the message for the player, which the owner
     /// also hands its status sink once; empty otherwise.
@@ -140,15 +153,15 @@ struct ConfigSaveResult {
 template <class Config>
 struct ConfigReloadResult {
     ConfigReloadStatus status = ConfigReloadStatus::Unchanged;
-    /// For Applied and LegacyReadOnly, the settings read; empty for Unchanged and Unreadable,
-    /// where the game keeps the settings it has.
+    /// For Applied, the settings read; empty for Unchanged and Unreadable, where the game keeps
+    /// the settings it has.
     std::optional<Config> config;
     /// What the canonical reader and the table found, for Applied; empty otherwise.
     std::vector<CanonicalDiagnostic> diagnostics;
     /// Every line for the game's log, UTF-8, each naming the file, in order.
     std::vector<std::string> log;
     /// For Unreadable, the message for the player, which the owner also hands its status sink;
-    /// for LegacyReadOnly, the message saying the file is read but not saved; empty otherwise.
+    /// empty otherwise.
     std::string reason;
 };
 
@@ -158,9 +171,9 @@ namespace detail {
 
 // Not API: ConfigOwner's Windows half, in config_owner.cpp.
 
-// The test seam. Run before each step with a label and the path the step acts on: `Open`,
-// `Import`, `Recheck`, `ReadBack` (of the copy) and `Remember` for the conversion's own steps,
-// and `Copy.`, `Commit.`, `Create.` or `Save.` followed by a CheckedWriteStepName for the
+// The test seam. Run before each step with a label and the path the step acts on: `Open` (the
+// config file, then the legacy file), `Import`, `Recheck` and `Remember` for the import's own
+// steps, and `Commit.`, `Create.` or `Save.` followed by a CheckedWriteStepName for the
 // writer's. At a writer step a nonzero return fails that step with that Win32 error, as the
 // writer's own fault seam does; at the owner's steps it must return 0. A test ends the process
 // from it to interrupt a step, or changes the files to race one.
@@ -174,9 +187,9 @@ struct OwnerFileRead {
     std::string bytes;
 };
 
-// Design 4.5 step 1: the file held open for reading, sharing read and write but not delete,
-// so no program can newly open it denying read sharing, rename it or delete it while it is
-// held. ReplaceFileW fails while it is open, so it is closed before any commit.
+// Design 4.5 step 1: the legacy file held open for reading, sharing read and write but not
+// delete, so no program can newly open it denying read sharing, rename it or delete it while the
+// import reads it.
 class OwnerHeldFile {
 public:
     OwnerHeldFile() = default;
@@ -208,6 +221,12 @@ std::uint64_t OwnerLastWriteTime(const std::wstring& path);
 // for an empty or relative path.
 std::wstring OwnerFullPath(const std::wstring& path, const char* option);
 
+// True when two full paths are equal ignoring case, as CompareStringOrdinal compares them.
+bool OwnerSamePath(const std::wstring& a, const std::wstring& b);
+
+// True when GetFileAttributesW finds a file, not a folder, at the path. Nothing is opened.
+bool OwnerFileExists(const std::wstring& path);
+
 // Design 4.5 step 2: the path in the ANSI code page, converted with WC_NO_BEST_FIT_CHARS, and
 // whether a character had no representation there.
 LegacyInput OwnerLegacyInput(const std::wstring& path);
@@ -236,16 +255,6 @@ std::string OwnerConflict(CheckedWriteStatus status);
 // "Windows error N: <the system's message>".
 std::string OwnerErrorText(std::uint32_t error);
 
-// Design 4.6: keeps the snapshot in `<path>.pre-canonical`, or in `<path>.pre-canonical.last`
-// when the first copy holds other bytes, each written through the checked writer and read back.
-// Returns the copy's path, or an empty path with `why` set for the player.
-struct OwnerKept {
-    std::wstring path;
-    std::string why;
-};
-OwnerKept OwnerKeepOriginal(const std::wstring& path, const std::string& snapshot, const ConfigOwnerHook& hook,
-                            std::vector<std::string>& log);
-
 // Design 4.3 step 5: a line for every key line of the legacy file that the import does not read.
 void OwnerLogNotCarried(const std::string& snapshot, const std::vector<LegacyKey>& keys, const std::string& input,
                         std::vector<std::string>& log);
@@ -255,10 +264,11 @@ struct ConfigOwnerTestAccess;
 
 }  // namespace detail
 
-/// The one reader and writer of a game's canonical config file. It converts a legacy file once
-/// through the game's frozen import, creates a missing file from the table's defaults, saves the
-/// rows the table marks Writable, and reloads. It writes only through WriteFileChecked, so every
-/// write replaces the whole file or nothing. Windows only.
+/// The one reader and writer of a game's canonical config file. While that file is absent it
+/// imports the game's legacy file, a separate file it never writes, through the game's frozen
+/// import into a new config file, or creates the config file from the table's defaults. It saves
+/// the rows the table marks Writable, and reloads. It writes only the config file, and only
+/// through WriteFileChecked, so every write replaces the whole file or nothing. Windows only.
 ///
 /// Build it before anything reads the file, and read the file only through it. One mutex
 /// serializes Load, Reload, Save and FileChanged; the status sink runs after it is released.
@@ -266,8 +276,8 @@ struct ConfigOwnerTestAccess;
 /// drawing a frame, never from a per-frame path. The mutex does not coordinate separate
 /// processes.
 ///
-/// Load converts files, so it must not run under the loader lock: call it from the game's init
-/// thread, never from DllMain.
+/// Load reads and creates files, so it must not run under the loader lock: call it from the
+/// game's init thread, never from DllMain.
 ///
 /// Nothing here writes a row the table does not mark Writable, so the End toggle, which changes
 /// only the session, never reaches EnableOnStartup unless the game marks that row Writable and
@@ -277,44 +287,50 @@ template <class Config>
 class ConfigOwner {
 public:
     /// Throws std::invalid_argument when the path is empty or not fully qualified, the table has
-    /// no rows, the import names keys but has no run, the table has both RotationEnabled and
-    /// PositionEnabled and marks only one of them Writable, or the table cannot render its
+    /// no rows, the import names keys but has no run, the import has a run and legacy_path is
+    /// empty, legacy_path is set and the import has no run, legacy_path is not fully qualified or
+    /// names the file `path` names (compared without case), the table has both RotationEnabled
+    /// and PositionEnabled and marks only one of them Writable, or the table cannot render its
     /// defaults under the header.
     explicit ConfigOwner(ConfigOwnerOptions<Config> options) : ConfigOwner(std::move(options), nullptr) {}
 
     ConfigOwner(const ConfigOwner&) = delete;
     ConfigOwner& operator=(const ConfigOwner&) = delete;
 
-    /// Reads the file, and converts, creates or refuses it first where it has to:
-    /// - No file: the table's defaults are rendered and the file created, never over a file that
+    /// Reads the config file, first importing the legacy file or creating the config file where
+    /// there is none:
+    /// - A file at `path`: read as canonical (Canonical), stamped or not, or Unreadable when saved
+    ///   as UTF-16 or holding a NUL. An unstamped file gets a line in the log saying the next save
+    ///   adds the section; the first save that changes a row stamps it. The import never runs and
+    ///   the legacy file is never opened; when one exists (GetFileAttributesW), a line in the log
+    ///   says the settings are read from `path` and the legacy file is not read. A file at `path`
+    ///   that cannot be opened (held by a program denying read sharing, pending deletion, or
+    ///   denied by its permissions) is Deferred on the table's defaults, and nothing is imported.
+    /// - No file at `path` and a file at legacy_path: the legacy file is imported into a new file
+    ///   at `path` (Migrated).
+    /// - Neither: the table's defaults are rendered and the file created, never over a file that
     ///   appears meanwhile (Created). If one appears, or the folder cannot be written, the session
     ///   runs on the defaults and nothing retries (Deferred).
-    /// - A file that cannot be opened (held by a program denying read sharing, or denied by its
-    ///   permissions): Deferred on the table's defaults, and the import does not run, since the
-    ///   stamp that tells a legacy file from a canonical one is inside the file.
-    /// - A [CameraUnlock] stamp, looked for in a UTF-16 file's text too: read as canonical
-    ///   (Canonical), or Unreadable when saved as UTF-16 or holding a NUL. The import never runs.
-    /// - No stamp, and the game has an import: converted (Migrated).
-    /// - No stamp and no import: read as canonical with a line in the log saying the next save
-    ///   stamps it (Canonical), or Unreadable.
     ///
-    /// A conversion holds the legacy file open, readable and writable by others but not
-    /// deletable, while it reads the bytes, runs the import and reads the bytes again; bytes that
-    /// changed meanwhile defer it. The import is handed the path and its ANSI form. When the
-    /// import reports the file Absent although the owner holds it, the conversion goes ahead only
-    /// if the ANSI form lost a character: the published build, handed that form, never saw the
-    /// file and ran on the defaults the import gave, so those are written, the file's content is
-    /// kept in the copy, and the log says so. Otherwise it defers with both paths logged. Every
-    /// conversion of a path whose ANSI form lost a character logs that, so a per-key import that
-    /// read nothing there is named too.
+    /// An import holds the legacy file open, readable and writable by others but not deletable,
+    /// while it reads the bytes, runs the import and reads the bytes again; bytes that changed
+    /// meanwhile defer it. The import is handed the legacy path and its ANSI form. When the import
+    /// reports the file Absent although the owner holds it, the import goes ahead only if the ANSI
+    /// form lost a character: the published build, handed that form, never saw the file and ran
+    /// on the defaults the import gave, so those are written to `path`, the legacy file is left
+    /// as it was, and the log says so. Otherwise it defers with both paths logged. Every import of
+    /// a path whose ANSI form lost a character logs that, so a per-key import that read nothing
+    /// there is named too.
     ///
-    /// The conversion then renders the imported settings, reads the render back through the table
-    /// and requires every row to equal the import's (floats bitwise), keeps the original bytes in
-    /// `.pre-canonical` (or `.pre-canonical.last`) beside the file, reads that copy back, and
-    /// replaces the file only if it still holds the bytes the import read. Any failure defers: the
-    /// file is left as it was, the session runs on what the import gave, the player is told once
-    /// through the status sink, and the next launch tries again. A process killed at any point
-    /// leaves the legacy file whole, or the new file whole.
+    /// The import then renders the imported settings, reads the render back through the table and
+    /// requires every row to equal the import's (floats bitwise), and creates the file at `path`
+    /// only if no file has appeared there. Any failure defers: the owner creates no file at
+    /// `path`, the session runs on what the import gave, nothing is saved, and the player is told
+    /// once through the status sink. The next launch imports again, unless another program created
+    /// a file at `path` meanwhile: that file is read at the next launch and the import does not
+    /// run again, which the player message says. A legacy file that cannot be opened defers the
+    /// same way, on the defaults. The legacy file is never written, renamed, deleted or copied,
+    /// whatever happens. A process killed at any point leaves `path` absent or whole.
     ///
     /// Must not run under the loader lock. Ordinary I/O failures are reported through the result.
     /// An import that throws, or a table hook that throws, is a bug and the exception is not caught.
@@ -337,14 +353,15 @@ public:
     /// RotationEnabled or PositionEnabled changes, both are written, so a tracking mode is always
     /// one edit.
     ///
-    /// Saves only a file the canonical reader can read, whose ConfigFormat is not newer than this
-    /// build's, and that is stamped or belongs to a game with no legacy import; an unstamped file,
-    /// or a stamp with no ConfigFormat or one that is not a number, gets its [CameraUnlock]
-    /// ConfigFormat line in the same write. The edited bytes are read back through the table
-    /// before anything is written: only the changed rows may differ, and they must hold the new
-    /// values. Rows already holding the values write nothing and report Saved. A missing file is
-    /// not created here: Load creates it at the next launch. After a Deferred, LegacyRefused or
-    /// Unreadable load nothing is saved that session, until a Reload applies a readable file.
+    /// Saves only a file the canonical reader can read and whose ConfigFormat is not newer than
+    /// this build's; an unstamped file, or a stamp with no ConfigFormat or one that is not a
+    /// number, gets its [CameraUnlock] ConfigFormat line in the same write. The edited bytes are
+    /// read back through the table before anything is written: only the changed rows may differ,
+    /// and they must hold the new values. Rows already holding the values write nothing and report
+    /// Saved. A missing file is not created here: Load creates it at the next launch, importing
+    /// the legacy file if there is one. After a Deferred, LegacyRefused or Unreadable load nothing
+    /// is saved that session, until a Reload applies a readable file. The legacy file is never
+    /// written.
     ///
     /// Never rolls back and never retries. NotSaved and Uncertain are handed to the status sink
     /// once. An editor writing the file between the last check and the replacement is
@@ -367,13 +384,12 @@ public:
     }
 
     /// Reads the file again, for a watcher that saw FileChanged or a reload the player asked
-    /// for. Unchanged when the file holds exactly the bytes the owner last wrote, the
-    /// conversion's and creation's included, and no Reload has applied other bytes since. A file
-    /// with no stamp that the legacy import reads is read through it, held open as a conversion
-    /// holds it, and never written (LegacyReadOnly); the next launch converts it. An import that
-    /// refuses the file, cannot decode it or finds none, or a file that changes while the import
-    /// reads it, is Unreadable. Unreadable leaves the game's settings as they are and is handed
-    /// to the status sink. Never writes and never converts.
+    /// for. Unchanged when the file holds exactly the bytes the owner last wrote, the import's and
+    /// creation's included, and no Reload has applied other bytes since. Any other file is read as
+    /// canonical, stamped or not (Applied). A missing file, or one the canonical reader cannot
+    /// read, is Unreadable, which leaves the game's settings as they are and is handed to the
+    /// status sink. Reads only the file at `path`: never writes, never imports and never opens the
+    /// legacy file.
     ///
     /// Throws std::logic_error when Load has not run.
     ConfigReloadResult<Config> Reload() {
@@ -408,6 +424,9 @@ private:
         : path_(detail::OwnerFullPath(options.path, "path")),
           path_text_(detail::OwnerUtf8(path_)),
           name_(detail::OwnerFileName(path_)),
+          legacy_path_(LegacyPathOf(options, path_)),
+          legacy_text_(detail::OwnerUtf8(legacy_path_)),
+          legacy_name_(detail::OwnerFileName(legacy_path_)),
           table_(std::move(options.table)),
           import_(std::move(options.import)),
           header_(std::move(options.header)),
@@ -430,6 +449,19 @@ private:
 
     static constexpr const char* kChangedWhileRead = "the file was changed by another program while it was read";
 
+    // The legacy file's full path, empty for a game with no import. Runs in the member
+    // initializers, before `options.import` is moved.
+    static std::wstring LegacyPathOf(const ConfigOwnerOptions<Config>& options, const std::wstring& path) {
+        if (options.import.run && options.legacy_path.empty()) {
+            throw std::invalid_argument("import is set, but no legacy_path names the file it reads");
+        }
+        if (options.legacy_path.empty()) return std::wstring();
+        if (!options.import.run) throw std::invalid_argument("legacy_path is set, but no import reads it");
+        std::wstring legacy = detail::OwnerFullPath(options.legacy_path, "legacy_path");
+        if (detail::OwnerSamePath(legacy, path)) throw std::invalid_argument("legacy_path names the config file itself");
+        return legacy;
+    }
+
     ConfigLoadResult<Config> LoadLocked() {
         loaded_ = true;
         saves_allowed_ = false;
@@ -438,20 +470,31 @@ private:
         recorded_write_time_ = detail::OwnerLastWriteTime(path_);
 
         detail::OwnerStep(hook_, "Open", path_);
-        detail::OwnerHeldFile held;
-        const detail::OwnerFileRead opened = held.Open(path_);
-        if (opened.error != 0) {
-            log.push_back(path_text_ + ": could not be opened: " + detail::OwnerErrorText(opened.error));
+        const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
+        if (read.error != 0) {
+            log.push_back(path_text_ + ": could not be opened: " + detail::OwnerErrorText(read.error));
             return LoadResult(ConfigLoadStatus::Deferred, table_.defaults(), {}, std::move(log),
-                              name_ + " cannot be read: " + detail::OwnerReadWhy(path_, opened.error) +
+                              name_ + " cannot be read: " + detail::OwnerReadWhy(path_, read.error) +
                                   ". The mod runs on its default settings this session.");
         }
-        if (!opened.present) return Create(std::move(log));
+        if (read.present) {
+            if (!legacy_path_.empty() && detail::OwnerFileExists(legacy_path_)) {
+                log.push_back(path_text_ + ": settings are read from this file. " + legacy_text_ +
+                              " is left as it was and is not read.");
+            }
+            return ReadCanonical(read.bytes, HasCanonicalStamp(read.bytes), std::move(log));
+        }
+        if (legacy_path_.empty()) return Create(std::move(log));
 
-        const bool stamped = HasCanonicalStamp(opened.bytes);
-        if (!stamped && import_.run) return Migrate(held, opened.bytes, std::move(log));
-        held.Close();
-        return ReadCanonical(opened.bytes, stamped, std::move(log));
+        detail::OwnerStep(hook_, "Open", legacy_path_);
+        detail::OwnerHeldFile held;
+        const detail::OwnerFileRead opened = held.Open(legacy_path_);
+        if (opened.error != 0) {
+            log.push_back(legacy_text_ + ": could not be opened: " + detail::OwnerErrorText(opened.error));
+            return Defer(table_.defaults(), std::move(log), detail::OwnerReadWhy(legacy_path_, opened.error), true);
+        }
+        if (!opened.present) return Create(std::move(log));
+        return Migrate(held, opened.bytes, std::move(log));
     }
 
     ConfigLoadResult<Config> ReadCanonical(const std::string& bytes, bool stamped, std::vector<std::string> log) {
@@ -498,46 +541,49 @@ private:
     ConfigLoadResult<Config> Migrate(detail::OwnerHeldFile& held, const std::string& snapshot,
                                      std::vector<std::string> log) {
         Config imported = table_.defaults();
-        const LegacyInput input = detail::OwnerLegacyInput(path_);
-        detail::OwnerStep(hook_, "Import", path_);
+        const LegacyInput input = detail::OwnerLegacyInput(legacy_path_);
+        detail::OwnerStep(hook_, "Import", legacy_path_);
         const ImportResult legacy = import_.run(input, imported);
-        detail::OwnerStep(hook_, "Recheck", path_);
+        detail::OwnerStep(hook_, "Recheck", legacy_path_);
         std::string changed_why;
         std::string reread;
         const std::uint32_t reread_error = held.Reread(reread);
         if (reread_error != 0) {
-            changed_why = detail::OwnerReadWhy(path_, reread_error);
-            log.push_back(path_text_ + ": could not be read again after the import: " +
+            changed_why = detail::OwnerReadWhy(legacy_path_, reread_error);
+            log.push_back(legacy_text_ + ": could not be read again after the import: " +
                           detail::OwnerErrorText(reread_error));
         } else if (reread != snapshot) {
             changed_why = kChangedWhileRead;
         }
         held.Close();
-        if (!changed_why.empty()) return Defer(std::move(imported), std::move(log), changed_why);
+        if (!changed_why.empty()) return Defer(std::move(imported), std::move(log), changed_why, true);
 
         if (input.ansi_lossy) {
-            log.push_back(path_text_ + ": has a character the ANSI code page cannot hold, so a reader given its ANSI path, " +
+            log.push_back(legacy_text_ +
+                          ": has a character the ANSI code page cannot hold, so a reader given its ANSI path, " +
                           detail::OwnerAnsiForLog(input.ansi_path) + ", finds no file there.");
         }
         switch (legacy.status) {
             case ImportStatus::Refused:
-                log.push_back(path_text_ + ": the old settings reader refused the file: " + legacy.reason);
+                log.push_back(legacy_text_ + ": the old settings reader refused the file: " + legacy.reason);
                 return LoadResult(ConfigLoadStatus::LegacyRefused, std::move(imported), {}, std::move(log),
-                                  NotConverted(legacy.reason));
+                                  NotImported(legacy.reason, true));
             case ImportStatus::Undecodable:
-                log.push_back(path_text_ + ": the old settings reader could not decode the file: " + legacy.reason);
-                return Defer(std::move(imported), std::move(log), legacy.reason);
+                log.push_back(legacy_text_ + ": the old settings reader could not decode the file: " + legacy.reason);
+                return Defer(std::move(imported), std::move(log), legacy.reason, true);
             case ImportStatus::Absent:
                 if (!input.ansi_lossy) {
-                    log.push_back(path_text_ + ": the old settings reader found no file, while the owner holds it open (" +
+                    log.push_back(legacy_text_ + ": the old settings reader found no file, while the owner holds it open (" +
                                   std::to_string(snapshot.size()) + " bytes); the ANSI path it was given is " +
                                   detail::OwnerAnsiForLog(input.ansi_path));
                     LogDropped(legacy, log);
-                    return Defer(std::move(imported), std::move(log), "the old settings reader could not find the file");
+                    return Defer(std::move(imported), std::move(log), "the old settings reader could not find the file",
+                                 true);
                 }
-                log.push_back(path_text_ +
+                log.push_back(legacy_text_ +
                               ": the old settings reader found no file, as the old build found none there and ran on "
-                              "its defaults. Those defaults are written, and the file's content is kept in the copy.");
+                              "its defaults. Those defaults are written to " +
+                              path_text_ + ", and this file is left as it was.");
                 break;
             case ImportStatus::Imported:
                 break;
@@ -550,9 +596,9 @@ private:
         } catch (const std::invalid_argument& e) {
             const std::optional<std::size_t> row = FirstUnwritable(imported);
             if (!row) throw;
-            log.push_back(path_text_ + ": " + RowName(*row) + " cannot be written in the new format: " + e.what());
+            log.push_back(legacy_text_ + ": " + RowName(*row) + " cannot be written in the new format: " + e.what());
             std::string why = Unconvertible(*row, imported);
-            return Defer(std::move(imported), std::move(log), why);
+            return Defer(std::move(imported), std::move(log), why, true);
         }
 
         Config reread_config = table_.defaults();
@@ -560,44 +606,47 @@ private:
         std::vector<CanonicalDiagnostic> diagnostics = Apply(ParseCanonicalIni(rendered), reread_config, read_back);
         const std::optional<std::size_t> different = FirstDifference(imported, reread_config);
         if (different) {
-            log.push_back(path_text_ + ": " + RowName(*different) + " reads back from the new format as " +
+            log.push_back(legacy_text_ + ": " + RowName(*different) + " reads back from the new format as " +
                           RowValueText(*different, reread_config) + ", not " + RowValueText(*different, imported));
             std::string why = Unconvertible(*different, imported);
-            return Defer(std::move(imported), std::move(log), why);
+            return Defer(std::move(imported), std::move(log), why, true);
         }
 
-        const detail::OwnerKept kept = detail::OwnerKeepOriginal(path_, snapshot, hook_, log);
-        if (kept.path.empty()) return Defer(std::move(imported), std::move(log), kept.why);
-
-        const CheckedWriteResult written = detail::OwnerWrite(path_, snapshot, rendered, hook_, "Commit.");
+        const CheckedWriteResult written = detail::OwnerWrite(path_, std::nullopt, rendered, hook_, "Commit.");
         if (detail::OwnerWriteFailed(written)) {
             log.push_back(detail::OwnerWriteLog(path_, written));
-            return Defer(std::move(imported), std::move(log), detail::OwnerWriteWhy(path_, written));
+            // A conflict whose temporary could not be deleted means a file appeared at `path`
+            // first, and the next launch reads that file instead of importing.
+            return Defer(std::move(imported), std::move(log), detail::OwnerWriteWhy(path_, written),
+                         written.status == CheckedWriteStatus::Failed);
         }
         if (!written.Committed()) {
-            log.push_back(path_text_ + ": not replaced: " + CheckedWriteStatusName(written.status));
-            return Defer(std::move(imported), std::move(log), detail::OwnerConflict(written.status));
+            log.push_back(path_text_ + ": not created: " + CheckedWriteStatusName(written.status));
+            return Defer(std::move(imported), std::move(log), detail::OwnerConflict(written.status), false);
         }
 
         detail::OwnerStep(hook_, "Remember", path_);
         committed_ = rendered;
         recorded_write_time_ = detail::OwnerLastWriteTime(path_);
         saves_allowed_ = true;
-        log.push_back(path_text_ + ": converted to the canonical format. The original is kept in " +
-                      detail::OwnerUtf8(kept.path) + ".");
-        detail::OwnerLogNotCarried(snapshot, import_.keys, path_text_, log);
+        log.push_back(path_text_ + ": created from " + legacy_text_ + ", which is left as it was.");
+        detail::OwnerLogNotCarried(snapshot, import_.keys, legacy_text_, log);
         log.insert(log.end(), read_back.begin(), read_back.end());
         return LoadResult(ConfigLoadStatus::Migrated, std::move(reread_config), std::move(diagnostics), std::move(log),
                           "");
     }
 
-    ConfigLoadResult<Config> Defer(Config config, std::vector<std::string> log, const std::string& why) {
-        return LoadResult(ConfigLoadStatus::Deferred, std::move(config), {}, std::move(log), NotConverted(why));
+    // `retried` is false where the next launch reads a file another program created at `path`
+    // and does not import.
+    ConfigLoadResult<Config> Defer(Config config, std::vector<std::string> log, const std::string& why, bool retried) {
+        return LoadResult(ConfigLoadStatus::Deferred, std::move(config), {}, std::move(log), NotImported(why, retried));
     }
 
-    std::string NotConverted(const std::string& why) const {
-        return name_ + " was not converted to the new settings format: " + why +
-               ". The mod tries again at the next launch and saves nothing this session.";
+    std::string NotImported(const std::string& why, bool retried) const {
+        const std::string head = legacy_name_ + " was not imported into " + name_ + ": " + why;
+        if (retried) return head + ". The mod tries again at the next launch and saves nothing this session.";
+        return head + ". The mod saves nothing this session and reads " + name_ + ", not " + legacy_name_ +
+               ", at the next launch.";
     }
 
     std::string Unconvertible(std::size_t row, const Config& config) const {
@@ -634,11 +683,6 @@ private:
             return NotSaved(name_ + " was written by a newer version of the mod", 0, std::move(log));
         }
         const bool stamped = HasCanonicalStamp(snapshot);
-        if (!stamped && import_.run) {
-            log.push_back(path_text_ + ": not saved: it has no [CameraUnlock] section, so it is an old file");
-            return NotSaved(name_ + " is in the old settings format; it is converted at the next launch", 0,
-                            std::move(log));
-        }
 
         Config baseline = table_.defaults();
         ApplyCanonical(doc, table_, baseline);
@@ -757,7 +801,6 @@ private:
         if (committed_ && bytes == *committed_) {
             return Reloaded(ConfigReloadStatus::Unchanged, std::nullopt, {}, std::move(log), "");
         }
-        if (!HasCanonicalStamp(bytes) && import_.run) return ReloadLegacy(bytes, std::move(log));
 
         const CanonicalIni doc = ParseCanonicalIni(bytes);
         if (!doc.IsReadable()) {
@@ -773,66 +816,6 @@ private:
         return Reloaded(ConfigReloadStatus::Applied, std::move(config), std::move(diagnostics), std::move(log), "");
     }
 
-    // The import reads the file while it is held as a conversion holds it, so the settings it
-    // gives come from the bytes checked for a stamp.
-    ConfigReloadResult<Config> ReloadLegacy(const std::string& bytes, std::vector<std::string> log) {
-        detail::OwnerHeldFile held;
-        const detail::OwnerFileRead opened = held.Open(path_);
-        if (opened.error != 0) {
-            return NotReloaded(detail::OwnerReadWhy(path_, opened.error), detail::OwnerErrorText(opened.error),
-                               std::move(log));
-        }
-        if (!opened.present) {
-            return NotReloaded("the file was deleted while it was read", "the file is missing", std::move(log));
-        }
-        if (opened.bytes != bytes) return NotReloaded(kChangedWhileRead, kChangedWhileRead, std::move(log));
-
-        Config imported = table_.defaults();
-        const ImportResult legacy = import_.run(detail::OwnerLegacyInput(path_), imported);
-        std::string changed_why;
-        std::string reread;
-        const std::uint32_t reread_error = held.Reread(reread);
-        if (reread_error != 0) {
-            changed_why = detail::OwnerReadWhy(path_, reread_error);
-            log.push_back(path_text_ + ": could not be read again after the import: " +
-                          detail::OwnerErrorText(reread_error));
-        } else if (reread != bytes) {
-            changed_why = kChangedWhileRead;
-        }
-        held.Close();
-        if (!changed_why.empty()) return NotReloaded(changed_why, changed_why, std::move(log));
-
-        switch (legacy.status) {
-            case ImportStatus::Refused:
-            case ImportStatus::Undecodable:
-                return NotReloaded(legacy.reason, "the old settings reader refused the file: " + legacy.reason,
-                                   std::move(log));
-            case ImportStatus::Absent:
-                return NotReloaded("the old settings reader could not find the file",
-                                   "the old settings reader found no file, while the owner holds it open (" +
-                                       std::to_string(bytes.size()) + " bytes)",
-                                   std::move(log));
-            case ImportStatus::Imported:
-                break;
-        }
-        LogDropped(legacy, log);
-        log.push_back(path_text_ +
-                      ": has no [CameraUnlock] section, so it is an old file. It is read, not saved, and converted at "
-                      "the next launch.");
-        committed_.reset();
-        return Reloaded(ConfigReloadStatus::LegacyReadOnly, std::move(imported), {}, std::move(log),
-                        name_ +
-                            " is in the old settings format. It is read, changes are not saved, and it is converted at "
-                            "the next launch.");
-    }
-
-    ConfigReloadResult<Config> NotReloaded(const std::string& why, const std::string& detail_text,
-                                           std::vector<std::string> log) {
-        log.push_back(path_text_ + ": not reloaded: " + detail_text);
-        return Reloaded(ConfigReloadStatus::Unreadable, std::nullopt, {}, std::move(log),
-                        name_ + " cannot be read: " + why + ". The current settings stay.");
-    }
-
     std::vector<CanonicalDiagnostic> Apply(const CanonicalIni& doc, Config& config, std::vector<std::string>& log) {
         std::vector<CanonicalDiagnostic> diagnostics = doc.diagnostics;
         ApplyReport report = ApplyCanonical(doc, table_, config);
@@ -844,7 +827,9 @@ private:
     }
 
     void LogDropped(const ImportResult& import, std::vector<std::string>& log) const {
-        for (const DroppedValue& dropped : import.dropped) log.push_back(path_text_ + ": " + DescribeDroppedValue(dropped));
+        for (const DroppedValue& dropped : import.dropped) {
+            log.push_back(legacy_text_ + ": " + DescribeDroppedValue(dropped));
+        }
     }
 
     std::optional<std::size_t> FirstUnwritable(const Config& config) const {
@@ -922,6 +907,10 @@ private:
     const std::wstring path_;
     const std::string path_text_;
     const std::string name_;
+    // Empty for a game with no import.
+    const std::wstring legacy_path_;
+    const std::string legacy_text_;
+    const std::string legacy_name_;
     const ConfigTable<Config> table_;
     const LegacyImport<Config> import_;
     const RenderHeader header_;

@@ -179,12 +179,13 @@ bool PluginMod::LoadCanonicalConfig() {
                                         "' is not valid in the ANSI code page");
         }
         wideName.resize(static_cast<size_t>(length) - 1);
-        const std::wstring path = directory + L"\\" + wideName;
+        const std::wstring path = directory + L"\\CameraUnlock.ini";
 
         cameraunlock::config::ConfigOwnerOptions<PluginConfig> options;
         options.path = path;
         options.table = PluginConfigTable(m_descriptor.config);
         options.import = PluginConfigLegacyImport(m_descriptor.config);
+        options.legacy_path = directory + L"\\" + wideName;
         options.header.display_name = m_descriptor.gameName;
         m_configOwner = std::make_unique<cameraunlock::config::ConfigOwner<PluginConfig>>(std::move(options));
 
