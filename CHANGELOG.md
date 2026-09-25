@@ -9,6 +9,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `data/fixtures/canonical-ini/preferences/`: a launcher's preferences against the mod
+
+19 cases for the four preferences a launcher manages in a canonical file (tracking mode,
+`WorldSpaceYaw`, `TrueFreeLook`, `EnableOnStartup`), over a fixture mod that binds the five rows
+with a three-state mode control or the four without `RotationEnabled`. Each `case.tsv` gives, per
+preference, the raw value a launcher reads (a value, `invalid` or `missing`) and the value the mod
+runs on, and a case with a change has the `expected.ini` the owner's `Save` writes for it. The
+fixture README defines the raw decode, including the three-state mode read through
+`preference_modes`, false/false as `invalid`, and a two-state file's `RotationEnabled` never read.
+
+`cpp/tests/preferences_fixture_tests.cpp` and `PreferencesFixtures` (xunit, and
+`CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2) run every case through
+`HeadTrackingConfigTable` and `ConfigOwner` on a temporary copy. Tests and data only; no library
+code changes.
+
 ### Fixed - every wrapper sets every name its template's CONFIG BLOCK sets
 
 The `MOD_SEED_FILES` and `PRESERVE_FILES` fix below closed two names of a wider gap. A wrapper

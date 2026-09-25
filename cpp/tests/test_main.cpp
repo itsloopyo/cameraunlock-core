@@ -31,6 +31,7 @@ int RunKeyBindingsTests();
 int RunValueCodecsTests();
 int RunConfigTableTests();
 int RunHeadTrackingConfigTableTests();
+int RunPreferencesFixtureTests();
 int RunCheckedFileWriterInterruptChild(const char* step);
 int RunConfigOwnerTests();
 int RunConfigOwnerInterruptChild(const char* step);
@@ -91,6 +92,7 @@ int main(int argc, char** argv) {
     failures += RunValueCodecsTests();
     failures += RunConfigTableTests();
     failures += RunHeadTrackingConfigTableTests();
+    failures += RunPreferencesFixtureTests();
     failures += RunLegacyImportTests();
     failures += RunIniMutationsTests();
     failures += RunConfigOwnerTests();

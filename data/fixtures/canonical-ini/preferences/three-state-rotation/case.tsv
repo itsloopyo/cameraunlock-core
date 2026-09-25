@@ -1,0 +1,7 @@
+# true, false: rotation. A change to both writes both rows; RotationEnabled keeps its bytes.
+binds	three-state
+preference	tracking_mode	rotation	rotation
+preference	world_space_yaw	true	true
+preference	true_free_look	false	false
+preference	launch_enabled	true	true
+change	tracking_mode	both

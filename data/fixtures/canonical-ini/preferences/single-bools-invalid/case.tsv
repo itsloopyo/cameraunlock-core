@@ -1,0 +1,8 @@
+# enabled, an empty value and 2 are not bools: each single bool is invalid and the mod runs
+# on its default. A change to launch_enabled false replaces that line only.
+binds	three-state
+preference	tracking_mode	both	both
+preference	world_space_yaw	invalid	true
+preference	true_free_look	invalid	false
+preference	launch_enabled	invalid	true
+change	launch_enabled	false

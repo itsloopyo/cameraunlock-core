@@ -950,6 +950,7 @@ test. `data/fixtures/canonical-ini/README.md` defines every file byte for byte.
 | `codecs/` | the value codecs | `cases.tsv`: codec, input, `canonical` or `invalid`, canonical text, and the IEEE 754 bits for floats |
 | `table/` | tables, apply and render | a fixture table both suites declare, and per case `input.ini` with `expected.tsv`, or `values.tsv` with `expected.ini` |
 | `head-tracking/` | `HeadTrackingConfigTable` | `all-concepts.ini` and three apply cases |
+| `preferences/` | a launcher's four preferences against the mod: what it reads, what the mod runs on, what the owner's `Save` writes | per case, `case.tsv` of `binds`, `preference` and `change` rows, `input.ini`, and `expected.ini` for a case with a change |
 | `mutations/` | the differential corpus generator | per case `input.ini`, `keys.tsv` and `expected.tsv` of output names and SHA-256 hashes |
 | `example/` | the examples in this document | `HeadTracking.ini` |
 

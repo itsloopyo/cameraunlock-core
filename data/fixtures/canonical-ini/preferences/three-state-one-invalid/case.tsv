@@ -1,0 +1,9 @@
+# The input of table/apply-mode-off-one-invalid below a stamp. PositionEnabled=nope makes the
+# mode invalid; the mod reads it as its default, true, and runs position only. The single
+# bools are missing and run on their defaults. A change to both replaces both rows.
+binds	three-state
+preference	tracking_mode	invalid	position
+preference	world_space_yaw	missing	true
+preference	true_free_look	missing	false
+preference	launch_enabled	missing	true
+change	tracking_mode	both

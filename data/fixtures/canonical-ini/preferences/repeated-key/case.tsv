@@ -1,0 +1,8 @@
+# WorldSpaceYaw twice: the last occurrence, spelled worldspaceyaw with spaces around =, wins.
+# A change to false replaces that line, keeping its spelling and white space.
+binds	three-state
+preference	tracking_mode	both	both
+preference	world_space_yaw	true	true
+preference	true_free_look	false	false
+preference	launch_enabled	true	true
+change	world_space_yaw	false

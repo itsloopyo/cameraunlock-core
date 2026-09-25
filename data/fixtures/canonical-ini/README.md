@@ -2,14 +2,16 @@
 
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
 editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs, `table/` for
-config tables, `head-tracking/` for core's table over its own config types, `mutations/` for
+config tables, `head-tracking/` for core's table over its own config types, `preferences/` for
+a launcher's preferences against the mod, `mutations/` for
 the differential corpus generator and `example/` for the examples in docs/canonical-config.md. Core's C++ suite runs them unchanged
 (`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp`,
 `cpp/tests/key_bindings_tests.cpp`, `cpp/tests/value_codecs_tests.cpp`,
-`cpp/tests/config_table_tests.cpp`, `cpp/tests/head_tracking_config_table_tests.cpp` and
+`cpp/tests/config_table_tests.cpp`, `cpp/tests/head_tracking_config_table_tests.cpp`,
+`cpp/tests/preferences_fixture_tests.cpp` and
 `cpp/tests/ini_mutations_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures`,
 `IniEditorFixtures`, `KeyBindingFixtures`, `ValueCodecFixtures`, `ConfigTableFixtures`,
-`HeadTrackingConfigTableFixtures` and `IniMutationFixtures`, under xunit on
+`HeadTrackingConfigTableFixtures`, `PreferencesFixtures` and `IniMutationFixtures`, under xunit on
 net8.0 and in
 `CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2). The expected files are
 written by hand from the rules, never produced by an implementation, except under
@@ -262,6 +264,86 @@ Before applying, it sets fields no row binds (the recenter key, the position X s
 the position Y inversion) and requires them unchanged afterwards. It also renders the result,
 reads that back and requires the same fields and bytes. `apply-empty` is the defaults, and across
 the three cases every field is off its default at least once.
+
+## preferences/
+
+The four preferences a launcher manages in a canonical file: the tracking mode, world-space yaw,
+true free look and launch-enabled. Each case holds what a launcher reads for each of them, what
+the mod runs on, and what the mod's own `Save` writes when one changes. One directory per case,
+holding `case.tsv`, `input.ini` and, for a case with a change, `expected.ini`. Every input
+carries the `[CameraUnlock]` stamp, since a launcher edits only stamped files, so no save adds
+one.
+
+The fixture mod is `HeadTrackingConfigTable` binding one of two row sets, each row at the
+schema's default (`true`, except `TrueFreeLook`, `false`):
+
+| Row set | Rows |
+|---------|------|
+| `three-state` | `[General] EnableOnStartup`, `[General] WorldSpaceYaw`, `[General] RotationEnabled`, `[Position] PositionEnabled`, `[Position] TrueFreeLook` |
+| `two-state` | the same without `RotationEnabled`: a mode control with two states, as REFramework mods have |
+
+`case.tsv` is ASCII with the note rule of `expected.tsv`. Each other line is a row whose fields
+are separated by one tab:
+
+| Row | Fields | Meaning |
+|-----|--------|---------|
+| `binds` | `three-state` or `two-state` | The row set. First, once |
+| `preference` | preference, raw, mod | What a launcher reads for the preference and the value the mod runs on. One row per preference, in the order `tracking_mode`, `world_space_yaw`, `true_free_look`, `launch_enabled` |
+| `change` | preference, value | Optional, last: the value a save changes the preference to |
+
+A tracking mode is written as its name in `preference_modes.tracking_mode` of
+`data/pipeline-conformance.json`: `both` (`true, true`), `rotation` (`true, false`) or
+`position` (`false, true`). The other three preferences are `true` or `false`. A raw field may
+also be `invalid` or `missing`; a mod field is always a value.
+
+The raw value, which is what a launcher's authority rests on:
+
+- A row is found by its section and key under the reader's rules (names compare ASCII
+  case-insensitively, and the last occurrence of a key wins) and read with the `bool` codec of
+  `codecs/`. It is the value read, `invalid` when the key is there but its value is not a bool
+  (an empty value included), or `missing` when the key is not there.
+- `world_space_yaw`, `true_free_look` and `launch_enabled` are the raw values of
+  `WorldSpaceYaw`, `TrueFreeLook` and `EnableOnStartup`.
+- `tracking_mode` on `three-state`: an invalid row makes the mode `invalid`, whatever the other
+  row holds; otherwise a missing row makes it `missing`; otherwise the pair is read through
+  `preference_modes`, and a pair it does not list, false/false, is `invalid`.
+- `tracking_mode` on `two-state`: `PositionEnabled` true is `both` and false is `rotation`;
+  invalid and missing stay so. `RotationEnabled` is never read, even when the file holds one.
+
+The mod's value is what the table applied to the file gives, which a launcher shows the player.
+An invalid or missing row reads as its default, and then on `three-state` a false/false pair reads
+as both defaults (docs/canonical-config.md, on the tracking mode at startup), so the mod always
+runs on a listed mode. A `two-state` mod's rotation is always on.
+
+The change is saved through `ConfigOwner`'s `Save` on a copy of `input.ini`, with the table
+marking every row of the set Writable. A tracking mode is set as its `preference_modes` pair,
+both rows on `three-state` and `PositionEnabled` alone on `two-state`. The owner writes both mode
+rows when either changes, so on `three-state` a mode change always writes the pair, even a row
+whose value stays, and every value is written `true` or `false`. `expected.ini` is the file
+after the save, byte for byte. The new value always differs from the mod's value: a save that
+changes no row writes nothing, even over an invalid or missing row, so no case has a launcher
+write the value the mod already runs on.
+
+For every case a runner reads `input.ini`, renders its own four `preference` rows (the raw values
+by the rules above, the mod's values from the table applied to a new config) and compares them
+with `case.tsv` exactly. Core's runners then load a copy of `input.ini` through the owner, and
+require `Canonical`, the file unchanged and the same rows from the loaded config. With a change,
+they save it and require `Saved` and the bytes of `expected.ini`, and require `expected.ini` to
+read as the case's rows with the changed preference's raw and mod values both the new value. A
+case whose change is outside the preference's values (`two-state` has no `position`) or equals
+the mod's value fails. A launcher runs its raw decode, its reading of the mod's value, and its
+edit for the change against the same files, and its edit of `input.ini` must give `expected.ini`.
+
+The cases: every mode on both row sets (`three-state-both`, `-rotation`, `-position`,
+`two-state-both`, `-rotation`); false/false (`three-state-false-false`); the input of
+`table/apply-mode-off-one-invalid` below a stamp (`three-state-one-invalid`); a missing row,
+inserted by the change (`three-state-missing-position`, `three-state-missing-rotation` in LF, and
+`two-state-missing-section`, whose change appends the section); an invalid row beside a missing
+one (`three-state-invalid-and-missing`, the one case without a change); `yes` and `on`
+(`three-state-yes-on`); each single bool (`world-space-yaw`, `true-free-look`, `launch-enabled`)
+and all three invalid (`single-bools-invalid`); a repeated key (`repeated-key`); lone CR endings
+(`cr-only`); and a stray `RotationEnabled` in a two-state file (`two-state-stray-rotation`). Each
+`case.tsv` says what its case shows in its notes.
 
 ## example/
 

@@ -1,0 +1,9 @@
+# LF endings. No RotationEnabled line: the mode is missing and the mod runs true, false,
+# rotation. A change to position inserts RotationEnabled=false after the last key line of
+# [General] and rewrites PositionEnabled.
+binds	three-state
+preference	tracking_mode	missing	rotation
+preference	world_space_yaw	true	true
+preference	true_free_look	false	false
+preference	launch_enabled	true	true
+change	tracking_mode	position
