@@ -726,8 +726,9 @@ A value that is not folded is one the player changed, and the call also adds it 
 values as `PoseShaping`, which the migration logs as `not carried: [Section] Key=value, sensitivity,
 deadzones, response curves and axis inversion are set in the tracker now, not in this mod`. The map
 sets no runtime field from either, and a shipped value that is not finite throws. Core's REFramework
-import lists its nine (the three multipliers, the three position sensitivities and the three
-position inversions) against `PluginConfig::SetDefaults`, where an RE mod keeps the shaping it
+import lists the ones `PluginConfig::Read` reads (the three multipliers, the three position
+sensitivities and, for a schema with `positionInvertKeys`, the three position inversions) against
+`PluginConfig::SetDefaults`, where an RE mod keeps the shaping it
 ships and still applies.
 
 Core keeps two pieces of import code, frozen, because several repos share them: the Win32 helpers

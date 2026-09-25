@@ -171,8 +171,9 @@ void CarriedDifferences(const PluginConfig& a, const PluginConfig& b, std::vecto
 
 // What the import should give for a file PluginConfig::Load read as `loaded`: every carried field
 // as Load read it, the hotkey codes with the legacy chords, every other field at SetDefaults, the
-// nine sensitivities and inversions as Load read them beside their SetDefaults values, folded where
-// the two are equal, and those Load holds away from SetDefaults as dropped.
+// sensitivities and the inversions Read reads for the schema as Load read them beside their
+// SetDefaults values, folded where the two are equal, and those Load holds away from SetDefaults
+// as dropped.
 std::vector<std::string> ImportDifferences(const PluginConfigSchema& schema, const PluginConfig& loaded,
                                            const PluginConfig& imported, const ImportResult& result) {
     std::vector<std::string> out;
@@ -230,9 +231,11 @@ std::vector<std::string> ImportDifferences(const PluginConfigSchema& schema, con
     shaping("Position", "SensitivityX", Text(loaded.positionSensitivityX), Text(shipped.positionSensitivityX));
     shaping("Position", "SensitivityY", Text(loaded.positionSensitivityY), Text(shipped.positionSensitivityY));
     shaping("Position", "SensitivityZ", Text(loaded.positionSensitivityZ), Text(shipped.positionSensitivityZ));
-    shaping("Position", "InvertX", Text(loaded.positionInvertX), Text(shipped.positionInvertX));
-    shaping("Position", "InvertY", Text(loaded.positionInvertY), Text(shipped.positionInvertY));
-    shaping("Position", "InvertZ", Text(loaded.positionInvertZ), Text(shipped.positionInvertZ));
+    if (schema.positionInvertKeys) {
+        shaping("Position", "InvertX", Text(loaded.positionInvertX), Text(shipped.positionInvertX));
+        shaping("Position", "InvertY", Text(loaded.positionInvertY), Text(shipped.positionInvertY));
+        shaping("Position", "InvertZ", Text(loaded.positionInvertZ), Text(shipped.positionInvertZ));
+    }
     std::vector<std::string> got;
     for (const DroppedValue& d : result.dropped) {
         if (d.rule != DropRule::PoseShaping) out.push_back("dropped with rule " + std::to_string(static_cast<int>(d.rule)));
@@ -689,8 +692,9 @@ void TestShippedShapingIsFolded(const fs::path& root) {
             PluginConfigLegacyImport(f.schema).run(detail::OwnerLegacyInput(file.wstring()), out);
         const bool all_folded = std::all_of(result.pose_shaping.begin(), result.pose_shaping.end(),
                                             [](const PoseShapingValue& p) { return p.folded && p.value == p.shipped; });
-        Check(result.pose_shaping.size() == 9 && all_folded && result.dropped.empty(),
-              name + ": every pose-shaping value is the shipped one, folded, and nothing is dropped");
+        const std::size_t read = f.schema.positionInvertKeys ? 9 : 6;
+        Check(result.pose_shaping.size() == read && all_folded && result.dropped.empty(),
+              name + ": every pose-shaping value Read reads is the shipped one, folded, and nothing is dropped");
     }
 }
 

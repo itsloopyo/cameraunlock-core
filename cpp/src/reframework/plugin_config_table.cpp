@@ -136,9 +136,11 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
                           dropped);
         LegacyPoseShaping(legacy.positionSensitivityZ, shipped.positionSensitivityZ, "Position", "SensitivityZ", pose,
                           dropped);
-        LegacyPoseShaping(legacy.positionInvertX, shipped.positionInvertX, "Position", "InvertX", pose, dropped);
-        LegacyPoseShaping(legacy.positionInvertY, shipped.positionInvertY, "Position", "InvertY", pose, dropped);
-        LegacyPoseShaping(legacy.positionInvertZ, shipped.positionInvertZ, "Position", "InvertZ", pose, dropped);
+        if (schema.positionInvertKeys) {
+            LegacyPoseShaping(legacy.positionInvertX, shipped.positionInvertX, "Position", "InvertX", pose, dropped);
+            LegacyPoseShaping(legacy.positionInvertY, shipped.positionInvertY, "Position", "InvertY", pose, dropped);
+            LegacyPoseShaping(legacy.positionInvertZ, shipped.positionInvertZ, "Position", "InvertZ", pose, dropped);
+        }
 
         return found ? ImportResult::Imported(std::move(dropped), std::move(pose))
                      : ImportResult::Absent(std::move(dropped), std::move(pose));

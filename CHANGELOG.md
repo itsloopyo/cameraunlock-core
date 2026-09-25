@@ -46,6 +46,11 @@ diagnostic either. And several pose-shaping spellings the fleet and core use wer
   name, is `[Position] LeanTraceLength` now (float, 0 to 2, default `1.0`), and `LeanDelayMs`'s
   comment reads `Milliseconds before a lean starts, and the metres its wall trace reaches.` A port
   that declares the fixture table renames the row with it.
+- The REFramework import listed `[Position] InvertX`, `InvertY` and `InvertZ` in `pose_shaping`
+  for every schema, though Requiem's `Read` never reads them (`positionInvertKeys` false), against
+  the list's contract of settings the frozen reader read. It lists them only where
+  `positionInvertKeys` is set, so Requiem's import gives six values and RE2, RE3, RE4, RE7 and RE8
+  nine.
 
 None of these spellings is an alias, so the deprecated flat readers and `HeadTrackingConfigBase`
 read exactly what they read before.
@@ -79,12 +84,13 @@ nothing stopped a mod writing them as game-local rows.
   into the mod's axis code, and a differential test asserts that against it. A value the player
   changed is also dropped as `PoseShaping`, which the migration logs. `ImportResult::Imported` and
   `Absent` take the list as a second argument, defaulting to empty (C#: new overloads).
-- The REFramework import records its nine pose-shaping values (the three multipliers, the three
-  position sensitivities and the three position inversions) through `LegacyPoseShaping` against
-  `PluginConfig::SetDefaults`. A dropped float is now written as the float codec writes it, so
-  Requiem's seed logs `not carried: [Position] SensitivityX=2.0, ...` where it logged `=2`. Its
-  differential test compares the pose-shaping list on every corpus input and checks that each
-  shipped file folds all nine and drops nothing.
+- The REFramework import records the pose-shaping values `PluginConfig::Read` reads (the three
+  multipliers, the three position sensitivities and, for a schema with `positionInvertKeys`, the
+  three position inversions) through `LegacyPoseShaping` against `PluginConfig::SetDefaults`. A
+  dropped float is now written as the float codec writes it, so Requiem's seed logs `not carried:
+  [Position] SensitivityX=2.0, ...` where it logged `=2`. Its differential test compares the
+  pose-shaping list on every corpus input and checks that each shipped file folds every value
+  listed and drops nothing.
 - `HeadTrackingConfigTable` binds no pose shaping, as before; its documentation now says the
   sensitivity and inversion fields keep the defaults instance's values.
 
