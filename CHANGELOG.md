@@ -19,23 +19,24 @@ descriptor"). No mod carries one yet; a repo adds it at or after its conversion.
 - **`scripts/check-config-descriptor.mjs`** holds the block's rules: its shape, the tracking pair
   against `preference_modes`, `canonical_since` against `mod_info.version`, and the block against
   the repo's `data/config-format.json` entry, its seeds and `files[]`, and its committed file. A
-  package with a block seeds neither its config nor its legacy file, and an `exe_dir` path has to
-  land on an installed path beside each executable `data/games.json` records.
+  package with a block seeds neither its config nor its legacy file, `path` names
+  `CameraUnlock.ini`, and an `exe_dir` path has to land on an installed path beside each
+  executable `data/games.json` records.
   `pixi run validate-manifest` runs them on a built ZIP whose manifest carries a block.
 - **`Assert-LauncherManifestConfig`** in `ReleaseWorkflow.psm1` runs them on the committed
   manifest from `Copy-SharedBundle` when it has a block, so packaging refuses stale `rows` in the
   package scripts that never call validate-manifest. It needs `node` on `PATH` only then.
 - **Conformance `config-descriptor`** runs them on the committed manifest, fails a repo delivered
-  by manifest whose one recorded config file is stamped and that has no block, and, with tags, a
-  `canonical_since` not above every `v*` tag whose committed config lacks the stamp.
+  by manifest whose one recorded config file is stamped and installed as `CameraUnlock.ini` and
+  that has no block, and, with tags, a `canonical_since` not above every `v*` tag whose committed
+  config lacks the stamp.
 - **`scripts/encode-seed.mjs`** also rewrites `config.rows` from the committed file, leaving every
   other byte; `--check` fails stale rows. The `render-config` task command is unchanged.
 - **`data/config-format.json` `descriptor_omits`**: per repo, launcher rows the descriptor leaves
   out on purpose, with a reason and an approval date. Only `WorldSpaceYaw` may be listed; it lists
   subnautica-headtracking, whose mod defaults to camera-local yaw because swimming has no stable
-  up, and sonic-racing-crossworlds-headtracking, whose file recommends camera-local yaw for the
-  loops and walls. A committed `WorldSpaceYaw` away from the schema default fails the descriptor
-  rules unless the repo lists it. `check-config-format` validates the key.
+  up. A committed `WorldSpaceYaw` away from the schema default fails the descriptor rules unless
+  the repo lists it. `check-config-format` validates the key.
 - **`pixi run test-config-descriptor`**, part of `pixi run check`.
 
 ### Added - `data/fixtures/canonical-ini/preferences/`: a launcher's preferences against the mod

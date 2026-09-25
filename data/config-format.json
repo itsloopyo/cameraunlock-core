@@ -576,13 +576,6 @@
   "hotkey_exceptions": {},
   "allow_legacy_symbols": {},
   "descriptor_omits": {
-    "sonic-racing-crossworlds-headtracking": [
-      {
-        "row": "WorldSpaceYaw",
-        "reason": "The mod defaults to camera-local yaw, which its HeadTracking.ini recommends for the loops and walls, where the track has no stable up, so a launcher global for world-space yaw must not reach it.",
-        "approved": "2026-09-25"
-      }
-    ],
     "subnautica-headtracking": [
       {
         "row": "WorldSpaceYaw",

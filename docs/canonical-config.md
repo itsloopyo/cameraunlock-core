@@ -1006,7 +1006,8 @@ rows the mod binds, with a top-level `config` block in `launcher-manifest.json`:
 The paths and version above show the shape; each repo's come from its own entry in
 `data/config-format.json` and its own history.
 
-- `path` is the file, relative to `anchor`, with `/` between segments.
+- `path` is the file, relative to `anchor`, with `/` between segments. The file is named
+  `CameraUnlock.ini`.
 - `anchor` is `game_root` (the default when absent), `exe_dir` or `mod_home`, as for a seed.
 - `legacy_source` is the file the import reads, where `data/config-format.json` records one.
 - `canonical_since` is the first version of the mod that shipped the canonical file, present
@@ -1023,6 +1024,11 @@ on the built ZIP against the repo it was built from:
 
 - The block has those five fields and no other; `path` and `legacy_source` are relative, with no
   `\`, drive, root, empty, `.` or `..` segment; `anchor` is one of the three.
+- `path` names `CameraUnlock.ini`, the fleet's one config name. No `v*` release from before the
+  canonical format reads a file of that name, so a launcher that manages it leaves alone the file
+  an older version of the mod reads after a rollback. A repo converted in place, whose
+  `data/config-format.json` entry still records the file its old releases read, moves to
+  `CameraUnlock.ini` before it carries a block.
 - `rows` names only the five concepts, each `true` or `false`; `RotationEnabled` only beside
   `PositionEnabled`; and the two of them together are a pair `preference_modes` in
   `data/pipeline-conformance.json` lists.
@@ -1046,10 +1052,10 @@ on the built ZIP against the repo it was built from:
   `PositionEnabled`. And a row `data/config-format.json` `descriptor_omits` lists for the repo is
   left out, so a launcher never sets it: that list holds `WorldSpaceYaw` alone, for a game whose
   default differs from the fleet's on purpose because it has no stable up (Subnautica, where the
-  player swims; Sonic Racing: CrossWorlds, on its loops and walls), each with its reason and the
-  date the owner approved it. An omission has to be listed there, so a row dropped by accident
-  still fails, and a committed `WorldSpaceYaw` away from the `data/config-schema.json` default
-  fails unless it is listed, so a game that differs is not handed to a launcher's global.
+  player swims), each with its reason and the date the owner approved it. An omission has to be
+  listed there, so a row dropped by accident still fails, and a committed `WorldSpaceYaw` away
+  from the `data/config-schema.json` default fails unless it is listed, so a game that differs is
+  not handed to a launcher's global.
 
 `path`, `anchor`, `legacy_source` and `canonical_since` are written by hand at the conversion,
 with `"rows": {}`. `scripts/encode-seed.mjs`, which `render-config` runs, then writes `rows` from
@@ -1058,11 +1064,12 @@ stale.
 
 Conformance's `config-descriptor` check runs the same rules on the committed manifest, except
 the one against `mod_info.version`, which packaging stamps. It also fails a converted repo
-delivered by manifest whose one config file `data/config-format.json` records as stamped, and
-which has no block (a stamped file the entry does not record is config-format's finding), and, in
-a clone with its tags, a
-`canonical_since` that is not above every `v*` tag whose committed config carries no stamp. A
-shallow clone has no tags, and the check warns that it did not run.
+delivered by manifest whose one config file `data/config-format.json` records as stamped and
+installed as `CameraUnlock.ini`, and which has no block (a stamped file the entry does not record
+is config-format's finding, and a repo converted in place is not asked for a block until its entry
+records the new name), and, in a clone with its tags, a `canonical_since` that is not above every
+`v*` tag whose committed config carries no stamp. A shallow clone has no tags, and the check warns
+that it did not run.
 
 Packaging stamps `mod_info.version` by reading the manifest with `ConvertFrom-Json` and writing it
 with `ConvertTo-Json -Depth 10`; `pixi run test-config-descriptor` runs that round trip over a

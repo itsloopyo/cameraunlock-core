@@ -55,6 +55,9 @@ if (!isDeepStrictEqual(TRACKING_MODE.channels, TRACKING_ROWS)) {
 }
 
 const FIELDS = ["path", "anchor", "legacy_source", "canonical_since", "rows"];
+// The fleet's one config name. No v* release before the canonical format reads a file of that
+// name, so a launcher that manages it leaves alone the file an older version reads after a rollback.
+const CONFIG_NAME = "CameraUnlock.ini";
 const ANCHORS = ["game_root", "exe_dir", "mod_home"];
 const MANIFEST_MODES = ["manifest", "manifest_variants"];
 const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
@@ -131,6 +134,11 @@ export function shapeProblems(man, { checkVersion }) {
   else {
     const p = pathProblem("path", config.path);
     if (p) problems.push(p);
+    else if (config.path.split("/").pop() !== CONFIG_NAME) {
+      problems.push(
+        `config.path ${config.path} is not named ${CONFIG_NAME}; a converted mod keeps its settings in ${CONFIG_NAME}, which no pre-canonical release reads, so a launcher managing it never touches the file an older version of the mod reads after a rollback`,
+      );
+    }
   }
   if ("anchor" in config && !ANCHORS.includes(config.anchor)) {
     problems.push(`config.anchor ${JSON.stringify(config.anchor)} is not one of ${ANCHORS.join(", ")}`);
@@ -414,9 +422,13 @@ export function tagProblems(root, state, config) {
 const NO_BLOCK =
   "converted, delivered by manifest, and launcher-manifest.json has no config block; write path and anchor by hand, legacy_source and canonical_since where the rules ask for them, and \"rows\": {}, then run render-config";
 
+// A block is asked for only once data/config-format.json records the file under the fleet name.
+// A repo converted in place still keeps its settings in the file its pre-canonical builds read,
+// which no descriptor may name.
+const underFleetName = (file) => file.installed.length > 0 && file.installed.every((i) => slashes(i).split("/").pop() === CONFIG_NAME);
+
 // What conformance's config-descriptor check reads for one repo's committed manifest.
-export function repoReport(root) {
-  const state = repoState(root);
+export function repoReport(root, state = repoState(root)) {
   const report = {
     root,
     folder: state.folder,
@@ -447,7 +459,8 @@ export function repoReport(root) {
   report.has_block = "config" in man;
   // Rows are written from the committed file, so a repo data/config-format.json records none for
   // cannot carry a block yet; config-format reports that.
-  report.applies = state.converted && MANIFEST_MODES.includes(man.delivery_mode) && state.files.length === 1 && state.files[0].state === "stamped";
+  report.applies =
+    state.converted && MANIFEST_MODES.includes(man.delivery_mode) && state.files.length === 1 && state.files[0].state === "stamped" && underFleetName(state.files[0]);
   report.problems = descriptorProblems(man, { root, state, checkVersion: false });
   if (report.applies && !report.has_block) report.problems.push(NO_BLOCK);
   if (report.has_block && report.problems.length === 0) {
@@ -478,7 +491,7 @@ function main(argv) {
   const unknown = tokens.find((t) => t.startsWith("--"));
   if (unknown) throw new Error(`unknown option ${unknown}`);
   const roots = tokens.length > 0 ? tokens.map(resolveRoot) : [REPOS_ROOT];
-  const reports = roots.map(repoReport);
+  const reports = roots.map((root) => repoReport(root));
   if (json) {
     console.log(JSON.stringify(reports, null, 1));
     return 0;
