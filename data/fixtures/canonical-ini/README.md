@@ -2,16 +2,17 @@
 
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
 editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs, `table/` for
-config tables, `head-tracking/` for core's table over its own config types, `preferences/` for
-a launcher's preferences against the mod, `mutations/` for
+config tables, `head-tracking/` for core's table over its own config types, `global/` for
+Defaults.ini, `preferences/` for a launcher's preferences against the mod, `mutations/` for
 the differential corpus generator and `example/` for the examples in docs/canonical-config.md. Core's C++ suite runs them unchanged
 (`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp`,
 `cpp/tests/key_bindings_tests.cpp`, `cpp/tests/value_codecs_tests.cpp`,
 `cpp/tests/config_table_tests.cpp`, `cpp/tests/head_tracking_config_table_tests.cpp`,
-`cpp/tests/preferences_fixture_tests.cpp` and
+`cpp/tests/defaults_ini_tests.cpp`, `cpp/tests/preferences_fixture_tests.cpp` and
 `cpp/tests/ini_mutations_tests.cpp`), and so does its C# suite (`CanonicalIniFixtures`,
 `IniEditorFixtures`, `KeyBindingFixtures`, `ValueCodecFixtures`, `ConfigTableFixtures`,
-`HeadTrackingConfigTableFixtures`, `PreferencesFixtures` and `IniMutationFixtures`, under xunit on
+`HeadTrackingConfigTableFixtures`, `DefaultsIniFixtures`, `PreferencesFixtures` and
+`IniMutationFixtures`, under xunit on
 net8.0 and in
 `CameraUnlock.Core.FrameworkTests` on .NET Framework 3.5 and 4.7.2). The expected files are
 written by hand from the rules, never produced by an implementation, except under
@@ -303,6 +304,103 @@ Before applying, it sets fields no row binds (the recenter key, the position X s
 the position Y inversion) and requires them unchanged afterwards. It also renders the result,
 reads that back and requires the same fields and bytes. `apply-empty` is the defaults, and across
 the three cases every field is off its default at least once.
+
+## global/
+
+Defaults.ini, the file a game's concept rows take their default from when they are not marked
+`PerGame()`. Core renders a new one and reads one with the internal C++
+`detail::RenderDefaultsIni` and `detail::ReadDefaultsIni` (`cameraunlock/config/defaults_ini.h`)
+and C# `DefaultsIni.Render` and `DefaultsIni.Read`. Nothing reads or writes the file on disk yet.
+
+`Defaults.ini` is what core writes as a new Defaults.ini: core's global table,
+`HeadTrackingConfigTable` naming every canonical concept, at its defaults, with the four hotkey
+lists at their `canonical_default`. Every row is written as its value, `CollisionChannel` too,
+since a commented line in this file would only ever mean the built-in. The rows, sections and
+comments are those of `head-tracking/all-concepts.ini`. The header is its own, and carries none of
+the six game-file lines on `default`: four lines saying what the file is and who reads it, the
+comments line, the hotkeys line, and six lines listing the key names the file takes, the 104
+names in `data/keys.json` that have a `vk`, with `A to Z`, `Alpha0 to Alpha9`, `F1 to F24` and
+`Keypad0 to Keypad9` standing for their ranges. A runner renders the table and requires these
+bytes, reads them back and requires every concept accepted at the table's default with nothing
+else to say, and requires the header's key list, ranges written out, to be exactly the names in
+`data/keys.json` with a `vk`.
+
+Each `read-*` directory holds `input.ini`, Defaults.ini's bytes, and `expected.tsv`, what the
+reader makes of them, in the TSV shape and byte escape above:
+
+| Row | Fields | Meaning |
+|-----|--------|---------|
+| `unreadable` | reason | The file is not read: `it is saved as UTF-16; save it as ANSI or UTF-8`, or `line N holds a NUL byte`. It is the only row |
+| `format` | line | The one line for a ConfigFormat above this build's |
+| `value` | concept, `accepted`, line, value | A concept whose value passed every check |
+| `value` | concept, `refused`, line, section, key, value, reason | A concept whose value failed a check |
+| `line` | concept, text | The log line for a refused value, except the tracking-mode pair's |
+| `pair` | text | The one log line for a refused tracking-mode pair |
+
+The rows come in that order: `format` when there is one, then a `value` row for each concept that
+is not absent in the schema's concepts order, then a `line` row for each refused concept in the
+same order, then `pair`. A concept with no `value` row is absent. The section is spelled as its
+first header spells it, the key as its kept line spells it, and the value is its bytes. The
+built-in value a `line` or `pair` row names is the global table's, as its codec writes it, which a
+runner takes from reading `Defaults.ini`'s render. A runner reads `input.ini`, renders its own rows
+and compares the lists exactly.
+
+The rules the cases hold:
+
+- **Unreadable.** A file starting with a UTF-16 byte order mark, or holding a NUL, is not read at
+  all, whatever lines come before the NUL.
+- **The stamp.** The file is read whether or not it has `[CameraUnlock]`, and a `ConfigFormat`
+  that is missing, zero or not a number draws nothing. One above the build's draws
+  `Defaults.ini: line N: ConfigFormat=V was written by a newer version of the mod. This version reads format 1.`,
+  with the key and value as the file spells them, and the file is still read.
+- **Which line.** A concept is its section and key, compared ASCII case-insensitively, and the last
+  occurrence wins, across repeated headers too. An alias, the key in another section, and a key or
+  section no concept has are not read, and draw nothing.
+- **A value** is refused when the concept's codec, with the schema's range, does not read it
+  (`codecs/`), and the reason is the codec's. `default`, in any letter case, is refused the same
+  way.
+- **A hotkey value** is first split at `,` into items. The key of an item is its text after the
+  last `+`, trimmed of spaces and tabs. The first item whose key is not empty, not `Ctrl`, `Shift`
+  or `Alt`, and not one of the 104 names with a `vk` (ASCII case-insensitively; an alias does not
+  count) refuses the value with `<key> is not one of the key names this file takes`, the key as
+  the file spells it, so `Mouse4` and `0x23` are refused alike. A value that passes goes to the
+  codec, whose grammar and reasons both dialects share for these names (`keys/`).
+- **The tracking-mode pair.** Each of `RotationEnabled` and `PositionEnabled` is its accepted value,
+  or the schema's default, `true`, when absent. When either is refused, the reason is
+  `Key: reason` for each refused row, `RotationEnabled` first, joined by `; `, then
+  `, and the two are read together as the tracking mode`. Otherwise, when the pair is not a mode
+  `preference_modes` in data/pipeline-conformance.json lists (false/false), the reason is
+  `both false is not a tracking mode`. Either way each of the two that is not absent becomes
+  `refused` with that reason, and the pair has one `pair` row and no `line` rows.
+
+The line texts:
+
+- A refused value: `Defaults.ini: line N: [Section] Key=value is not read (reason), so the built-in B is used.`
+- A refused pair with one row in the file:
+  `Defaults.ini: line N: [Section] Key=value is not read (reason), so the built-in RotationEnabled=R and PositionEnabled=P are used.`
+- With both, in line order:
+  `Defaults.ini: lines N and M: [S1] K1=v1 and [S2] K2=v2 are not read (reason), so the built-in RotationEnabled=R and PositionEnabled=P are used.`
+
+| Case | What it holds |
+|------|---------------|
+| `read-empty` | an empty file: every concept absent, nothing said |
+| `read-utf16`, `read-nul` | the two unreadable files |
+| `read-no-stamp`, `read-format-missing`, `read-format-zero`, `read-format-not-a-number` | read with no line |
+| `read-format-newer` | `ConfigFormat=2`: the format line, and the file read |
+| `read-refused-values` | codec and range refusals on int, bool and float rows and the full-range int and float rows, a value with `; note`, each with its line; one value beside them accepted |
+| `read-hotkey-mouse4`, `read-hotkey-code` | `ToggleKey=Mouse4` and `ToggleKey=0x23` on line 12, refused alike, with the line the design gives |
+| `read-hotkeys` | names in any letter case with modifiers, an empty list, a grammar error with the codec's reason, and `Clear`, a Unity key with no `vk` |
+| `read-default-token` | `DEFAULT`, `Default` and `default` on an int, a bool, a float and a hotkey row |
+| `read-pair-both-false` | false/false: both refused, one line |
+| `read-pair-one-invalid` | one row the codec refuses takes the valid one with it; the line names the rows in line order |
+| `read-pair-both-invalid` | both reasons in one line |
+| `read-pair-one-absent-one-false` | `PositionEnabled=false` alone is rotation only with the built-in `RotationEnabled`: accepted |
+| `read-pair-one-absent-one-invalid` | the pair's line naming its one row |
+| `read-repeated-key` | the last of three occurrences wins across a repeated section |
+| `read-case` | section and key in other letter case: read, and the line spells them as the file does |
+| `read-wrong-section` | concept keys in other sections, one of them invalid, beside a key in its own section: only that one is read |
+| `read-alias` | aliases, one after its key in the same section: not read, nothing said |
+| `read-unknown-key` | an unknown section, a concept the format does not write and an unknown key: nothing said |
 
 ## preferences/
 

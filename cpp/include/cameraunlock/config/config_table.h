@@ -154,7 +154,10 @@ void CheckPairPerGame(const std::vector<TableRow>& rows);
 // Every row starts at its start and reports start_sources[row] until the file sets it.
 EffectiveApplyResult ApplyRows(const CanonicalIni& doc, const std::vector<TableRow>& rows, RowTarget& target,
                                const std::vector<ValueSource>& start_sources);
-std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& header, const RowSource& source,
+// The header lines a game's file starts with. Throws std::invalid_argument for a display name
+// that is empty, has a leading or trailing space, or holds a byte outside printable ASCII.
+std::vector<std::string> GameFileHeader(const std::vector<TableRow>& rows, const RenderHeader& header);
+std::string RenderRows(const std::vector<TableRow>& rows, const std::vector<std::string>& header, const RowSource& source,
                        const std::vector<RowForm>& forms);
 
 template <class T>
@@ -301,6 +304,10 @@ EffectiveApplyResult ApplyCanonicalEffective(const CanonicalIni& doc, const Conf
 template <class Config>
 std::string RenderCanonicalMigration(const ConfigTable<Config>& table, const Config& values, const Config& effective,
                                      const RenderHeader& header);
+
+template <class Config>
+std::string RenderCanonicalValues(const ConfigTable<Config>& table, const Config& values,
+                                  const std::vector<std::string>& header);
 
 }  // namespace detail
 
@@ -465,6 +472,8 @@ private:
                                                                                 const std::vector<schema::Concept>&);
     friend std::string detail::RenderCanonicalMigration<Config>(const ConfigTable&, const Config&, const Config&,
                                                                 const RenderHeader&);
+    friend std::string detail::RenderCanonicalValues<Config>(const ConfigTable&, const Config&,
+                                                             const std::vector<std::string>&);
 
     template <class Field>
     static auto MemberGetter(Field Config::*field) {
@@ -669,7 +678,17 @@ std::string RenderCanonicalMigration(const ConfigTable<Config>& table, const Con
         if (forms[position] == RowForm::kDefault) forms[position] = RowForm::kValue;
     }
     const ConfigRowSource<Config> source(rows, table.ops_, table.defaults_, values);
-    return RenderRows(rows, header, source, forms);
+    return RenderRows(rows, GameFileHeader(rows, header), source, forms);
+}
+
+/// Writes `values` as RenderCanonical does, except that every row is written as its value, an
+/// Engine row at its default included, and the header is `header`, each line written as it is.
+/// Throws std::invalid_argument, naming the row, for a value its codec cannot write.
+template <class Config>
+std::string RenderCanonicalValues(const ConfigTable<Config>& table, const Config& values,
+                                  const std::vector<std::string>& header) {
+    const ConfigRowSource<Config> source(table.rows_, table.ops_, table.defaults_, values);
+    return RenderRows(table.rows_, header, source, std::vector<RowForm>(table.rows_.size(), RowForm::kValue));
 }
 
 }  // namespace detail
@@ -713,7 +732,7 @@ ApplyReport ApplyCanonical(const CanonicalIni& doc, const ConfigTable<Config>& t
 template <class Config>
 std::string RenderCanonical(const ConfigTable<Config>& table, const Config& values, const RenderHeader& header) {
     const detail::ConfigRowSource<Config> source(table.rows_, table.ops_, table.defaults_, values);
-    return detail::RenderRows(table.rows_, header, source,
+    return detail::RenderRows(table.rows_, detail::GameFileHeader(table.rows_, header), source,
                               std::vector<detail::RowForm>(table.rows_.size(), detail::RowForm::kAsRender));
 }
 
@@ -739,7 +758,7 @@ std::string RenderCanonicalFresh(const ConfigTable<Config>& table, const RenderH
     detail::CheckFreshPair(rows);
     detail::CheckPairPerGame(rows);
     const detail::ConfigRowSource<Config> source(rows, table.ops_, table.defaults_, table.defaults_);
-    return detail::RenderRows(rows, header, source, forms);
+    return detail::RenderRows(rows, detail::GameFileHeader(rows, header), source, forms);
 }
 
 }  // namespace cameraunlock::config

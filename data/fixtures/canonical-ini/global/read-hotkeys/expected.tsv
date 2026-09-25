@@ -1,0 +1,9 @@
+# Names read in any letter case, with modifiers; an empty value is an empty list, which means
+# unbound. A grammar error keeps the codec's reason. Clear has a Unity key code and no Windows
+# one, so it is refused.
+value	ToggleKey	accepted	2	f8, ctrl+shift+end
+value	CycleTrackingModeKey	accepted	3	
+value	YawModeKey	refused	4	Hotkeys	YawModeKey	End,,F9	item 2 of 'End,,F9' is empty: expected a key such as End or Ctrl+Shift+Y between commas
+value	TrueFreeLookKey	refused	5	Hotkeys	TrueFreeLookKey	Ctrl+Clear	Clear is not one of the key names this file takes
+line	YawModeKey	Defaults.ini: line 4: [Hotkeys] YawModeKey=End,,F9 is not read (item 2 of 'End,,F9' is empty: expected a key such as End or Ctrl+Shift+Y between commas), so the built-in PageDown, Ctrl+Shift+H is used.
+line	TrueFreeLookKey	Defaults.ini: line 5: [Hotkeys] TrueFreeLookKey=Ctrl+Clear is not read (Clear is not one of the key names this file takes), so the built-in Insert, Ctrl+Shift+U is used.

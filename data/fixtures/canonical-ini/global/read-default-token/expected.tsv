@@ -1,0 +1,9 @@
+# default, in any letter case, is refused like any value the codec does not read.
+value	UdpPort	refused	2	Network	UdpPort	DEFAULT	expected a whole number from 1 to 65535
+value	EnableOnStartup	refused	4	General	EnableOnStartup	Default	expected true or false
+value	LocalSmoothing	refused	6	Smoothing	LocalSmoothing	default	expected a number from 0.0 to 1.0
+value	ToggleKey	refused	8	Hotkeys	ToggleKey	default	default is not one of the key names this file takes
+line	UdpPort	Defaults.ini: line 2: [Network] UdpPort=DEFAULT is not read (expected a whole number from 1 to 65535), so the built-in 4242 is used.
+line	EnableOnStartup	Defaults.ini: line 4: [General] EnableOnStartup=Default is not read (expected true or false), so the built-in true is used.
+line	LocalSmoothing	Defaults.ini: line 6: [Smoothing] LocalSmoothing=default is not read (expected a number from 0.0 to 1.0), so the built-in 0.0 is used.
+line	ToggleKey	Defaults.ini: line 8: [Hotkeys] ToggleKey=default is not read (default is not one of the key names this file takes), so the built-in End, Ctrl+Shift+Y is used.

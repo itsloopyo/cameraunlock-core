@@ -1,0 +1,6 @@
+# ToggleKey=Mouse4, a key only Unity mods read: refused alike in every mod, since Defaults.ini takes only the key names
+# with a Windows virtual-key code. The line is the one the design gives word for word.
+value	UdpPort	accepted	5	4242
+value	EnableOnStartup	accepted	8	true
+value	ToggleKey	refused	12	Hotkeys	ToggleKey	Mouse4	Mouse4 is not one of the key names this file takes
+line	ToggleKey	Defaults.ini: line 12: [Hotkeys] ToggleKey=Mouse4 is not read (Mouse4 is not one of the key names this file takes), so the built-in End, Ctrl+Shift+Y is used.

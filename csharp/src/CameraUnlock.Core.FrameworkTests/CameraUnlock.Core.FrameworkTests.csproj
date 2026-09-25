@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- The xunit suite runs on net8.0 only, so this console runs the file-system
-       scenarios (the checked writer and the config owner, with killed-child runs of both) and the canonical INI reader, editor, key binding, value codec, config table, head-tracking table, preferences and INI mutation fixtures, and the canonical config example, on the
+       scenarios (the checked writer and the config owner, with killed-child runs of both) and the canonical INI reader, editor, key binding, value codec, config table, head-tracking table, Defaults.ini, preferences and INI mutation fixtures, and the canonical config example, on the
        desktop Framework runtimes the library ships for: net35 runs on CLR 2.0, net472 on CLR 4.
        `pixi run test-framework` runs both. -->
   <PropertyGroup>
@@ -23,6 +23,7 @@
     <Compile Include="..\CameraUnlock.Core.Tests\Config\ValueCodecFixtures.cs" Link="ValueCodecFixtures.cs" />
     <Compile Include="..\CameraUnlock.Core.Tests\Config\ConfigTableFixtures.cs" Link="ConfigTableFixtures.cs" />
     <Compile Include="..\CameraUnlock.Core.Tests\Config\HeadTrackingConfigTableFixtures.cs" Link="HeadTrackingConfigTableFixtures.cs" />
+    <Compile Include="..\CameraUnlock.Core.Tests\Config\DefaultsIniFixtures.cs" Link="DefaultsIniFixtures.cs" />
     <Compile Include="..\CameraUnlock.Core.Tests\Config\PreferencesFixtures.cs" Link="PreferencesFixtures.cs" />
     <Compile Include="..\CameraUnlock.Core.Tests\Config\IniMutationFixtures.cs" Link="IniMutationFixtures.cs" />
     <Compile Include="..\CameraUnlock.Core.Tests\Config\CanonicalConfigExample.cs" Link="CanonicalConfigExample.cs" />

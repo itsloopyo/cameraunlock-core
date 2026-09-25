@@ -1,0 +1,4 @@
+# Aliases of UdpPort, ToggleKey and CollisionMargin are not read, and nothing is said, even where the
+# alias comes after the key in the same section.
+value	UdpPort	accepted	2	4242
+value	CollisionMargin	accepted	8	0.2

@@ -1,0 +1,4 @@
+# false/false is no mode preference_modes lists: both are refused, with one line.
+value	RotationEnabled	refused	2	General	RotationEnabled	false	both false is not a tracking mode
+value	PositionEnabled	refused	4	Position	PositionEnabled	false	both false is not a tracking mode
+pair	Defaults.ini: lines 2 and 4: [General] RotationEnabled=false and [Position] PositionEnabled=false are not read (both false is not a tracking mode), so the built-in RotationEnabled=true and PositionEnabled=true are used.

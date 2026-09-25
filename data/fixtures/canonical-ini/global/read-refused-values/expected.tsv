@@ -1,0 +1,19 @@
+# Values the codec or the schema range refuses: each keeps the built-in, with one line naming it.
+# RemoteSmoothing=0.25 is read. The built-ins are core's global table's values.
+value	UdpPort	refused	4	Network	UdpPort	0	expected a whole number from 1 to 65535
+value	EnableOnStartup	refused	6	General	EnableOnStartup	maybe	expected true or false
+value	LocalSmoothing	refused	9	Smoothing	LocalSmoothing	1.5	expected a number from 0.0 to 1.0
+value	RemoteSmoothing	accepted	10	0.25
+value	DataFreshnessMs	refused	7	General	DataFreshnessMs	0	expected a whole number from 1 to 2147483647
+value	PositionLimitX	refused	12	Position	PositionLimitX	0.5 ; note	expected a number from 0.0 to 10.0
+value	CollisionMargin	refused	13	Position	CollisionMargin	-1	expected a number from 0.0 to 3.4028235e+38
+value	CollisionChannel	refused	14	Position	CollisionChannel	1.5	expected a whole number from -2147483648 to 2147483647
+value	LightMultiplier	refused	16	Light	LightMultiplier	6	expected a number from 0.0 to 5.0
+line	UdpPort	Defaults.ini: line 4: [Network] UdpPort=0 is not read (expected a whole number from 1 to 65535), so the built-in 4242 is used.
+line	EnableOnStartup	Defaults.ini: line 6: [General] EnableOnStartup=maybe is not read (expected true or false), so the built-in true is used.
+line	LocalSmoothing	Defaults.ini: line 9: [Smoothing] LocalSmoothing=1.5 is not read (expected a number from 0.0 to 1.0), so the built-in 0.0 is used.
+line	DataFreshnessMs	Defaults.ini: line 7: [General] DataFreshnessMs=0 is not read (expected a whole number from 1 to 2147483647), so the built-in 500 is used.
+line	PositionLimitX	Defaults.ini: line 12: [Position] PositionLimitX=0.5 ; note is not read (expected a number from 0.0 to 10.0), so the built-in 0.3 is used.
+line	CollisionMargin	Defaults.ini: line 13: [Position] CollisionMargin=-1 is not read (expected a number from 0.0 to 3.4028235e+38), so the built-in 0.1 is used.
+line	CollisionChannel	Defaults.ini: line 14: [Position] CollisionChannel=1.5 is not read (expected a whole number from -2147483648 to 2147483647), so the built-in 0 is used.
+line	LightMultiplier	Defaults.ini: line 16: [Light] LightMultiplier=6 is not read (expected a number from 0.0 to 5.0), so the built-in 1.5 is used.

@@ -108,6 +108,14 @@ namespace CameraUnlock.Core.Tests
             }
             failures += Report("the cases move every field", dir => HeadTrackingConfigTableFixtures.RunCoverage(fixtures));
 
+            Console.WriteLine("Defaults.ini fixtures");
+            failures += Report("the global table renders global/Defaults.ini", dir => DefaultsIniFixtures.RunRender(fixtures));
+            foreach (string name in DefaultsIniFixtures.Cases(fixtures))
+            {
+                failures += Report(name, dir => DefaultsIniFixtures.RunCase(fixtures, name));
+            }
+            failures += Report("the line functions refuse what is not refused", dir => DefaultsIniFixtures.RunLineArguments());
+
             Console.WriteLine("Preferences fixtures");
             foreach (string name in PreferencesFixtures.Cases(fixtures))
             {

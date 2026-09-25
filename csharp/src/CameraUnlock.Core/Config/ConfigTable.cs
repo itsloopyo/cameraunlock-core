@@ -421,7 +421,7 @@ namespace CameraUnlock.Core.Config
         {
             if (values == null) throw new ArgumentNullException("values");
             if (header == null) throw new ArgumentNullException("header");
-            return RenderRows(values, header, new RowForm[rows.Count]);
+            return RenderRows(values, GameFileHeader(header), new RowForm[rows.Count]);
         }
 
         /// <summary>
@@ -458,7 +458,7 @@ namespace CameraUnlock.Core.Config
             {
                 if (rows[i].FollowsDefaultsIni) forms[i] = RowForm.Default;
             }
-            return RenderRows(NewDefaults(), header, forms);
+            return RenderRows(NewDefaults(), GameFileHeader(header), forms);
         }
 
         /// <summary>
@@ -489,10 +489,26 @@ namespace CameraUnlock.Core.Config
                 if (forms[rotation] == RowForm.Default) forms[rotation] = RowForm.Value;
                 if (forms[position] == RowForm.Default) forms[position] = RowForm.Value;
             }
+            return RenderRows(values, GameFileHeader(header), forms);
+        }
+
+        /// <summary>
+        /// Writes <paramref name="values"/> as <see cref="Render"/> does, except that every row is
+        /// written as its value, an Engine row at its default included, and the header is
+        /// <paramref name="header"/>, each line written as it is.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">An argument is null.</exception>
+        /// <exception cref="ArgumentException">A value its codec cannot write, naming the row.</exception>
+        internal byte[] RenderValues(TConfig values, IList<string> header)
+        {
+            if (values == null) throw new ArgumentNullException("values");
+            if (header == null) throw new ArgumentNullException("header");
+            var forms = new RowForm[rows.Count];
+            for (int i = 0; i < rows.Count; i++) forms[i] = RowForm.Value;
             return RenderRows(values, header, forms);
         }
 
-        private byte[] RenderRows(TConfig values, RenderHeader header, RowForm[] forms)
+        private List<string> GameFileHeader(RenderHeader header)
         {
             string name = header.DisplayName;
             if (name.Length == 0 || !IsPrintableAscii(name) || name[0] == ' ' || name[name.Length - 1] == ' ')
@@ -501,10 +517,11 @@ namespace CameraUnlock.Core.Config
                     + "' is not printable ASCII without a leading or trailing space", "header");
             }
 
-            TConfig fresh = NewDefaults();
-            var output = new List<byte>();
-            Line(output, "; " + name + " head tracking settings.");
-            Line(output, "; Comments start with ; and go on their own line. Text after a value is part of the value.");
+            var lines = new List<string>
+            {
+                "; " + name + " head tracking settings.",
+                "; Comments start with ; and go on their own line. Text after a value is part of the value.",
+            };
             bool hotkeys = false;
             bool followsDefaultsIni = false;
             foreach (Row row in rows)
@@ -514,13 +531,18 @@ namespace CameraUnlock.Core.Config
             }
             if (hotkeys)
             {
-                Line(output, "; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; "
+                lines.Add("; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; "
                     + "leave empty for none.");
             }
-            if (followsDefaultsIni)
-            {
-                foreach (string line in DefaultsIniHeader) Line(output, line);
-            }
+            if (followsDefaultsIni) lines.AddRange(DefaultsIniHeader);
+            return lines;
+        }
+
+        private byte[] RenderRows(TConfig values, IList<string> header, RowForm[] forms)
+        {
+            TConfig fresh = NewDefaults();
+            var output = new List<byte>();
+            foreach (string line in header) Line(output, line);
             Line(output, string.Empty);
             Line(output, "[" + StampSection + "]");
             Line(output, "; Written by the mod. Leave this section in place.");

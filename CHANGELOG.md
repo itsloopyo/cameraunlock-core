@@ -9,6 +9,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - Defaults.ini's render and reader, internal to core
+
+The pieces the config owner reads and creates Defaults.ini with. Nothing here is public API, and
+no owner reads or writes the file yet.
+
+- **Core's global table and the render**: C# internal `DefaultsIni.Table()` and
+  `DefaultsIni.Render()`, C++ `detail::DefaultsIniTable()` and `detail::RenderDefaultsIni()` in
+  `cameraunlock/config/defaults_ini.h`. The table is `HeadTrackingConfigTable` naming all 28
+  canonical concepts; the render writes its defaults, the four hotkey lists at their
+  `canonical_default`, every row as a value (`CollisionChannel` included), under a header of its
+  own that lists the 104 key names with a Windows virtual-key code, which is the only hotkey
+  dialect the file takes. Both languages give `data/fixtures/canonical-ini/global/Defaults.ini`
+  byte for byte, and a test in each holds the header's list to `data/keys.json`.
+- **The reader**: C# internal `DefaultsIni.Read(bytes)`, C++ `detail::ReadDefaultsIni(bytes)`. A
+  file saved as UTF-16 or holding a NUL is not read, with the owner's words for why. Any other file
+  is read whatever its stamp; a newer `ConfigFormat` draws one line. Each canonical concept is found
+  by section and key and comes out absent, accepted or refused. A value is refused when the
+  concept's codec with the schema's range does not read it, `default` included, and a hotkey list
+  also when a key is not one of the 104 names, so `ToggleKey=Mouse4` and `ToggleKey=0x23` are
+  refused alike in C# and C++. The tracking-mode pair is checked once on the file's own rows: when
+  either row is refused, or the two are both false, both are refused together.
+- **Line texts** shared by both languages: `DefaultsIni.RefusedLine` / `detail::DefaultsIniRefusedLine`,
+  which takes the game's built-in text, e.g. `Defaults.ini: line 12: [Hotkeys] ToggleKey=Mouse4 is
+  not read (Mouse4 is not one of the key names this file takes), so the built-in End, Ctrl+Shift+Y
+  is used.`, and `DefaultsIni.PairLine` / `detail::DefaultsIniPairLine` for a refused pair, e.g.
+  `Defaults.ini: lines 2 and 4: [General] RotationEnabled=false and [Position]
+  PositionEnabled=false are not read (both false is not a tracking mode), so the built-in
+  RotationEnabled=true and PositionEnabled=true are used.`
+- **Fixtures**: `global/Defaults.ini` and 23 `global/read-*` cases, run by the C++ suite, xunit and
+  both FrameworkTests targets. `data/fixtures/canonical-ini/README.md` defines them.
+- **Internal to the table**: C# `ConfigTable.RenderValues` and C++ `detail::RenderCanonicalValues`
+  write every row as its value under a given header, which the Defaults.ini render uses. `Render`,
+  `RenderFresh` and the migration render write the same bytes as before.
+
 ### Changed - BREAKING - a table with a concept row not marked `PerGame` renders six lines on `default`
 
 Every render of a config table (C# `ConfigTable.Render`, C++ `RenderCanonical`, and the new fresh

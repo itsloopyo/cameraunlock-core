@@ -63,6 +63,14 @@ namespace CameraUnlock.Core.Config
         // The schema's default as text the concept's codec reads: a hotkey concept's
         // canonical_default, else the schema's value as written there.
         internal string DefaultText { get; }
+
+        // What the concept's codec, with the schema's range, expected when it does not read the
+        // text; null when it does.
+#if NULLABLE_ENABLED
+        internal abstract string? CodecError(byte[] text);
+#else
+        internal abstract string CodecError(byte[] text);
+#endif
     }
 
     /// <summary>
@@ -87,5 +95,20 @@ namespace CameraUnlock.Core.Config
 
         // Carries the schema's range.
         internal IValueCodec<T> Codec { get; }
+
+#if NULLABLE_ENABLED
+        internal override string? CodecError(byte[] text)
+#else
+        internal override string CodecError(byte[] text)
+#endif
+        {
+            T value;
+#if NULLABLE_ENABLED
+            string? error;
+#else
+            string error;
+#endif
+            return Codec.TryParse(text, out value, out error) ? null : error;
+        }
     }
 }

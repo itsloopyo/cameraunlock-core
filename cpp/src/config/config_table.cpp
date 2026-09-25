@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -324,26 +325,31 @@ EffectiveApplyResult ApplyRows(const CanonicalIni& doc, const std::vector<TableR
     return result;
 }
 
-std::string RenderRows(const std::vector<TableRow>& rows, const RenderHeader& header, const RowSource& source,
-                       const std::vector<RowForm>& forms) {
+std::vector<std::string> GameFileHeader(const std::vector<TableRow>& rows, const RenderHeader& header) {
     const std::string& name = header.display_name;
     if (name.empty() || !IsPrintableAscii(name) || name.front() == ' ' || name.back() == ' ') {
         throw std::invalid_argument("display name '" + name +
                                     "' is not printable ASCII without a leading or trailing space");
     }
 
-    std::string out;
-    out.append("; ").append(name).append(" head tracking settings.").append(kCrlf);
-    out.append("; Comments start with ; and go on their own line. Text after a value is part of the value.")
-        .append(kCrlf);
+    std::vector<std::string> lines{
+        "; " + name + " head tracking settings.",
+        "; Comments start with ; and go on their own line. Text after a value is part of the value.",
+    };
     if (std::any_of(rows.begin(), rows.end(), [](const TableRow& row) { return row.hotkey; })) {
-        out.append("; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; "
-                   "leave empty for none.")
-            .append(kCrlf);
+        lines.emplace_back("; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; "
+                           "leave empty for none.");
     }
     if (std::any_of(rows.begin(), rows.end(), FollowsDefaultsIni)) {
-        for (const char* line : kDefaultsIniHeader) out.append(line).append(kCrlf);
+        lines.insert(lines.end(), std::begin(kDefaultsIniHeader), std::end(kDefaultsIniHeader));
     }
+    return lines;
+}
+
+std::string RenderRows(const std::vector<TableRow>& rows, const std::vector<std::string>& header, const RowSource& source,
+                       const std::vector<RowForm>& forms) {
+    std::string out;
+    for (const std::string& line : header) out.append(line).append(kCrlf);
     out.append(kCrlf).append("[CameraUnlock]").append(kCrlf);
     out.append("; Written by the mod. Leave this section in place.").append(kCrlf);
     out.append(kFormatKey).append("=").append(std::to_string(kConfigFormat)).append(kCrlf);

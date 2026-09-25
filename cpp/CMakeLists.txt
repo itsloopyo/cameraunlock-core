@@ -36,6 +36,7 @@ set(CAMERAUNLOCK_SOURCES
     src/config/config_table.cpp
     src/config/legacy_import.cpp
     src/config/config_owner.cpp
+    src/config/defaults_ini.cpp
     src/os/module_paths.cpp
     src/os/game_window.cpp
     src/discovery/probe_selection.cpp

@@ -33,6 +33,7 @@ add_executable(cameraunlock_tests
     value_codecs_tests.cpp
     config_table_tests.cpp
     head_tracking_config_table_tests.cpp
+    defaults_ini_tests.cpp
     preferences_fixture_tests.cpp
     legacy_import_tests.cpp
     ini_mutations_tests.cpp
