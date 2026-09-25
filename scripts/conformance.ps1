@@ -244,8 +244,22 @@ function Test-InstallWrapper {
         $theirs = Get-ScriptTail (Read-TextFile $templatePath)
         if ($null -eq $mine) {
             Add-Finding $Name 'install-wrapper' 'FAIL' "scripts/$($pair.Script) has no END CONFIG BLOCK marker, so nothing separates per-repo config from the shared tail"
-        } elseif ($mine -ne $theirs) {
+            continue
+        }
+        if ($mine -ne $theirs) {
             Add-Finding $Name 'install-wrapper' 'FAIL' "scripts/$($pair.Script) has edits below the CONFIG BLOCK; it no longer matches scripts/templates/$templateName"
+        }
+
+        # A wrapper sets its CONFIG BLOCK before its setlocal, so a name it leaves
+        # out keeps whatever another mod's wrapper set in the same console. For
+        # these two lists that is another mod's config: an install that fails on
+        # seeds its package does not ship, or an uninstall that keeps files it
+        # should remove. sync-templates.ps1 never writes a CONFIG BLOCK.
+        $templateVars = Get-ConfigBlockVars (Read-TextFile $templatePath)
+        $wrapperVars = Get-ConfigBlockVars $text
+        foreach ($var in @('MOD_SEED_FILES', 'PRESERVE_FILES')) {
+            if (-not $templateVars.Contains($var) -or $wrapperVars.Contains($var)) { continue }
+            Add-Finding $Name 'install-wrapper' 'FAIL' "scripts/$($pair.Script)'s CONFIG BLOCK does not set $var, so it runs with the value another mod's wrapper left in the console; add set `"$var=`" as scripts/templates/$templateName does"
         }
     }
 }

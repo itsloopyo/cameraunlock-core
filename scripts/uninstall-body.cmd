@@ -60,11 +60,10 @@
 ::                        takes them (see :del_one and :rmtree_one). Each
 ::                        entry names a file, never a folder. No wildcard,
 ::                        drive, leading or trailing \, .., /, !, parenthesis,
-::                        &, ^, <, > or |. A wrapper whose CONFIG BLOCK has no
-::                        PRESERVE_FILES line inherits the value from the
-::                        console that ran it, which may hold another mod's
-::                        list, so a wrapper that does not use it still sets
-::                        it blank
+::                        &, ^, <, > or |. The wrapper template sets it,
+::                        blank; a wrapper without the line inherits the
+::                        value from the console that ran it, which may hold
+::                        another mod's list
 ::   USER_FOLDER_EXTRAS - BeamNGUserMods only: files the mod writes at runtime
 ::                        into the per-user folder rather than into mods\.
 ::                        Entries may carry a relative subfolder

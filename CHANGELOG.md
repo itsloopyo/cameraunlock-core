@@ -9,6 +9,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - every wrapper sets `MOD_SEED_FILES` and `PRESERVE_FILES`, blank where unused
+
+A wrapper sets its CONFIG BLOCK before its `setlocal`, so a name its CONFIG BLOCK leaves out keeps
+whatever another mod's wrapper set in the same console, and the body cannot tell an inherited
+value from one the wrapper meant. An install wrapper without `MOD_SEED_FILES` that inherits another
+mod's list fails with exit 1 on a seed its own package does not ship; an uninstall wrapper without
+`PRESERVE_FILES` keeps files at the paths another mod listed, and one without `MOD_SEED_FILES`
+removes files by another mod's names. Lopari runs each script in its own `cmd /C` and was never
+affected.
+
+- `scripts/templates/uninstall-wrapper.cmd` sets `PRESERVE_FILES` in its CONFIG BLOCK, blank, after
+  `MOD_SEED_FILES`, with a comment saying why the line stays when blank. The install templates whose
+  body reads `MOD_SEED_FILES` (ASI, BeamNG, REFramework, shim, shim-forwarder, xNVSE) already set
+  it. The template tail is unchanged, so `sync-templates.ps1` rewrites nothing.
+- **`install-wrapper`** in `conformance.ps1` now FAILs a wrapper whose CONFIG BLOCK does not set
+  `MOD_SEED_FILES` or `PRESERVE_FILES` where its template does. `sync-templates.ps1` never writes
+  a CONFIG BLOCK, so this is what catches a wrapper that drops the line.
+- `scripts/test-uninstall-preserve.ps1` runs the uninstall wrapper template from a folder holding
+  `!`, from a console that already holds another mod's `PRESERVE_FILES` naming a file the template
+  removes, and expects the file removed. The template before this change keeps it.
+- The `uninstall-body.cmd` header points at the template line; the body is otherwise unchanged.
+
+Consuming repos: every wrapper repo checked out beside core has had the lines added to its
+CONFIG BLOCK by hand, blank except where `install.cmd` already seeds (amnesia-the-dark-descent's
+`uninstall.cmd` now lists `HeadTracking.ini` in `MOD_SEED_FILES`, which its `MOD_DLLS` already
+removed). A repo not in that sweep adds `set "PRESERVE_FILES="` to `uninstall.cmd`, and
+`set "MOD_SEED_FILES="` to either wrapper whose template sets it, or `install-wrapper` fails.
+
 ### Changed - pose-shaping sections and more pose-shaping spellings are refused
 
 The deadzone shape most of the fleet reads, a bare `Yaw`, `Pitch` and `Roll` under `[Deadzone]`
@@ -407,10 +435,9 @@ with `installed_by_us` true and with `/force`; given `-ReferenceInstallBody`, it
 install without the list against an older body. It also runs the wrapper template itself from a
 console that already holds another mod's `MOD_SEED_FILES`, and expects a clean install.
 
-Consuming repos: an REFramework repo adds `set "MOD_SEED_FILES="` to the CONFIG BLOCK of its
-`install.cmd` in the same change that moves its core pin past this entry, blank until it
-converts to the canonical config format. The CONFIG BLOCK is per-repo, so `sync-templates.ps1`
-does not carry the line over. The conversion then moves `HeadTracking.ini` from `MOD_DLLS` to
+Consuming repos: every REFramework repo's `install.cmd` now sets `MOD_SEED_FILES`, blank until it
+converts to the canonical config format (see the fix at the top of this section). The conversion
+then moves `HeadTracking.ini` from `MOD_DLLS` to
 `MOD_SEED_FILES` in `install.cmd` and, as the uninstall template asks, lists it the same way in
 `uninstall.cmd`. Until then every script install overwrites that INI, as it always has.
 
@@ -444,10 +471,10 @@ of the file it converted, are kept with it without being listed.
   before anything is touched: only files are set aside, so a listed folder would go with the
   loader folder around it.
 - The value is inherited like every CONFIG BLOCK variable, because the wrapper sets its CONFIG
-  BLOCK before its `setlocal`. A wrapper with no `PRESERVE_FILES` line, which is every wrapper
-  today, run from a console that already ran a converted mod's uninstall, keeps any of its own
-  files at the paths that mod listed. Lopari runs each script in its own `cmd /C` and is not
-  affected. A converted wrapper sets the line; one that keeps nothing sets it blank.
+  BLOCK before its `setlocal`. A wrapper with no `PRESERVE_FILES` line, run from a console that
+  already ran a converted mod's uninstall, keeps any of its own files at the paths that mod
+  listed. Lopari runs each script in its own `cmd /C` and is not affected. The uninstall wrapper
+  template sets the line, blank (see the fix at the top of this section).
 
 Unset or empty, the uninstall behaves exactly as before. `scripts/test-uninstall-preserve.ps1`
 runs the body through a real console against synthetic game trees under a path holding `!`
@@ -455,9 +482,8 @@ and a space, including every list type, BepInEx, REFramework and UE4SS trees wit
 `installed_by_us` true and false and `/force`, the failure paths and the pause on failure;
 given `-ReferenceBody`, it also checks the cases without the list against an older body.
 
-Consuming repos: nothing to change until a repo converts to the canonical config format, which
-adds `PRESERVE_FILES` to its own `scripts/uninstall.cmd` CONFIG BLOCK. The wrapper template is
-unchanged.
+Consuming repos: every uninstall wrapper now sets `PRESERVE_FILES` blank (see the fix at the top
+of this section). A repo fills it in when it converts to the canonical config format.
 
 ### Added - REFramework configs on the canonical format, behind `PluginConfigSchema::canonicalConfig`
 

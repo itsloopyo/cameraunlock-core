@@ -440,6 +440,26 @@ Invoke-Uninstall $case 0 '-y' | Out-Null
 Assert-Files $case (@('fixture.exe', 'user.txt') + $trees[0].Kept)
 Write-Host 'PASS arguments: unknown flag exit 2, -y completes'
 
+# The uninstall wrapper template itself, from a folder holding '!', run from a
+# console where another mod's wrapper already set PRESERVE_FILES to a path this
+# mod installs: its blank line has to win, so the file goes.
+$templateFiles = [ordered]@{}
+foreach ($rel in @('bin\winmm.dll', 'bin\Fixture.asi', 'bin\HeadTracking.ini', 'bin\user.txt')) { $templateFiles[$rel] = $rel }
+$case = New-Case -Name 'uninstall-template' -Config ([ordered]@{}) -Files $templateFiles -ExeRelPath 'bin\fixture.exe' -Under (Join-Path $root 'Wrapper ! Folder')
+$template = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'templates\uninstall-wrapper.cmd'))
+foreach ($pair in @(@('<games.json id>', 'fixture'), @('<Game Name> Head Tracking', 'Fixture'), @('<Mod>HeadTracking.dll', 'Fixture.asi HeadTracking.ini'),
+        @('<Mod>HeadTracking', 'Fixture'), @('.headtracking-state.json', '.fixture-state.json'), @('set "FRAMEWORK_TYPE=None"', 'set "FRAMEWORK_TYPE=ASILoader"'))) {
+    if (-not $template.Contains($pair[0])) { throw "uninstall-template: template no longer contains $($pair[0])" }
+    $template = $template.Replace($pair[0], $pair[1])
+}
+[IO.File]::WriteAllText((Join-Path $case.Root 'uninstall.cmd'), $template)
+$env:PRESERVE_FILES = 'bin\HeadTracking.ini'
+try { $output = Invoke-Uninstall $case 0 } finally { Remove-Item Env:PRESERVE_FILES }
+Assert-Files $case @('bin\fixture.exe', 'bin\user.txt')
+if ($output -match '(?m)^\s*Kept: ') { throw "uninstall-template: the inherited PRESERVE_FILES reached the body`n$output" }
+Assert-Output $case $output @('Removed: HeadTracking.ini', '=== Uninstall Complete ===')
+Write-Host 'PASS uninstall wrapper template: a PRESERVE_FILES left in the console by another wrapper is cleared'
+
 # ---------------------------------------------------------------- REFramework install
 # The package folder holds a '!' as well as the game folder: install.cmd reads
 # its payload from its own folder, so both paths go through the body.
