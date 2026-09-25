@@ -5,16 +5,16 @@ using System.Collections.ObjectModel;
 namespace CameraUnlock.Core.Config
 {
     /// <summary>
-    /// Runs a game's frozen legacy reader on the pre-canonical file, through the API the
-    /// published build read it with, into a copy of that build's config type from its own
-    /// defaults, then maps that into <paramref name="config"/>. Writes nothing.
+    /// Runs a game's frozen legacy reader on the legacy file, <see cref="LegacyImportInput.Path"/>,
+    /// through the API the published build read it with, into a copy of that build's config type
+    /// from its own defaults, then maps that into <paramref name="config"/>. Writes nothing.
     /// </summary>
     public delegate ImportResult LegacyImportRun<TConfig>(LegacyImportInput input, TConfig config) where TConfig : class;
 
     /// <summary>
     /// A game's legacy import: the reader its last pre-canonical build ran, frozen in the game's
-    /// repo, which the migration driver runs once on a file that has no [CameraUnlock] stamp. The
-    /// C++ twin is <c>cameraunlock::config::LegacyImport</c>.
+    /// repo, which <see cref="ConfigOwner{TConfig}"/> runs on the legacy file while no config file
+    /// exists, to create one. The C++ twin is <c>cameraunlock::config::LegacyImport</c>.
     /// </summary>
     public sealed class LegacyImport<TConfig> where TConfig : class
     {

@@ -24,8 +24,8 @@ namespace CameraUnlock.Core.Config
         public ConfigReloadStatus Status { get; }
 
         /// <summary>
-        /// For Applied and LegacyReadOnly, the settings read; null for Unchanged and Unreadable,
-        /// where the game keeps the settings it has.
+        /// For Applied, the settings read; null for Unchanged and Unreadable, where the game keeps
+        /// the settings it has.
         /// </summary>
 #if NULLABLE_ENABLED
         public TConfig? Config { get; }
@@ -41,7 +41,7 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// For Unreadable, the message for the player, which the owner also hands its status sink;
-        /// for LegacyReadOnly, the message saying the file is read but not saved; empty otherwise.
+        /// empty otherwise.
         /// </summary>
         public string Reason { get; }
     }

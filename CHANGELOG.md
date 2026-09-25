@@ -9,6 +9,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - BREAKING - the C# config owner imports a legacy file beside the config and never writes it
+
+Owner decision of 2026-09-25: settings live in `CameraUnlock.ini`, in the folder that holds the
+game's legacy file (`BepInEx\config\CameraUnlock.ini` for a BepInEx plugin). `ConfigOwner<TConfig>`
+no longer converts a file in place and no longer writes `.pre-canonical` or `.pre-canonical.last`
+copies. The C++ owner changes the same way in a following commit.
+
+- **Load**: a file at `Path` is read as canonical, stamped or not; the import never runs and the
+  legacy file is never opened. When `Path` is absent and `LegacySourcePath` exists, the legacy
+  file is imported and `Path` is created from it, never over a file that appears meanwhile. When
+  neither exists, `Path` is created from the defaults. The legacy file is never written, renamed,
+  deleted or copied, on any path, deferrals included. Deleting `CameraUnlock.ini` imports the
+  legacy file again at the next launch.
+- **Log**: when `Path` is read and a legacy file also exists, the log holds
+  `<Path>: settings are read from this file. <LegacySourcePath> is left as it was and is not read.`
+  An import that completes logs `<Path>: created from <LegacySourcePath>, which is left as it was.`
+- **Player message** for a Deferred or LegacyRefused import:
+  `<legacy file name> was not imported into <config file name>: <why>. The mod tries again at the
+  next launch and saves nothing this session.`
+- **Save** no longer refuses an unstamped file; it stamps it. **Reload** reads only `Path` and
+  never runs the import.
+
+Consuming repos (no converted mod has been released):
+
+- Set `Path` to `CameraUnlock.ini` and `LegacySourcePath` to the legacy file (`HeadTracking.ini`,
+  `<GUID>.cfg` or whatever the game's last build read). `LegacySourcePath` is now required with
+  `Import`: an `Import` without it throws `ArgumentException` from the constructor.
+- `LegacyImportInput` takes one path, the legacy file, as `Path`. `LegacyImportInput.LegacySourcePath`
+  is gone, so an import that read it no longer compiles; read `input.Path`.
+- `ConfigReloadStatus.LegacyReadOnly` (2) is gone. `Unreadable` stays 3.
+- Nothing writes `.pre-canonical` or `.pre-canonical.last` any more.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

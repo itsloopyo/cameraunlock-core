@@ -19,13 +19,14 @@ namespace CameraUnlock.Core.Tests.Config
     /// <summary>
     /// <see cref="ConfigOwner{TConfig}"/> against real files. The same source runs under xunit on
     /// net8.0 (ConfigOwnerTests) and in the CameraUnlock.Core.FrameworkTests console on .NET
-    /// Framework 3.5 and 4.7.2, which also kills a child copy of itself at each conversion step
+    /// Framework 3.5 and 4.7.2, which also kills a child copy of itself at each import step
     /// (<see cref="InterruptionLabels"/>). C# 7.3 and no test framework, so the net35 build can
     /// compile it.
     /// </summary>
     internal static class ConfigOwnerScenarios
     {
-        private const string FileName = "HeadTracking.ini";
+        private const string FileName = "CameraUnlock.ini";
+        private const string LegacyName = "HeadTracking.ini";
         private const string Display = "Test Game";
         private const int HResultGenFailure = unchecked((int)0x8007001F);
         private const int HResultUnableToMoveReplacement = unchecked((int)0x80070498);
@@ -34,36 +35,42 @@ namespace CameraUnlock.Core.Tests.Config
         private const string LegacyText = "; tuned by hand\r\n[General]\r\nPort = 5555\r\nYawWorld = false\r\n"
             + "Smoothng = 0.3\r\n[Position]\r\nPosition = false\r\n";
 
+        // Set on every legacy file a scenario writes, so any write to it shows as a new time.
+        private static readonly DateTime LegacyWriteTime = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+
         private static readonly List<KeyValuePair<string, Action<string>>> All = new List<KeyValuePair<string, Action<string>>>
         {
             Scenario("an-absent-file-is-created", AnAbsentFileIsCreated),
             Scenario("a-file-appearing-during-creation-defers", AFileAppearingDuringCreationDefers),
             Scenario("a-stamped-file-is-canonical", AStampedFileIsCanonical),
-            Scenario("a-stamped-utf16-file-is-unreadable-and-never-migrated", AStampedUtf16FileIsUnreadableAndNeverMigrated),
+            Scenario("a-stamped-utf16-file-is-unreadable", AStampedUtf16FileIsUnreadable),
             Scenario("a-stamped-file-holding-a-nul-is-unreadable", AStampedFileHoldingANulIsUnreadable),
-            Scenario("an-unstamped-file-with-an-import-is-migrated", AnUnstampedFileWithAnImportIsMigrated),
-            Scenario("an-unstamped-utf16-file-with-an-import-is-migrated", AnUnstampedUtf16FileWithAnImportIsMigrated),
-            Scenario("an-unstamped-file-holding-a-nul-with-an-import-is-migrated", AnUnstampedFileHoldingANulWithAnImportIsMigrated),
+            Scenario("a-legacy-file-is-imported-and-left-as-it-was", ALegacyFileIsImportedAndLeftAsItWas),
+            Scenario("a-utf16-legacy-file-is-imported", AUtf16LegacyFileIsImported),
+            Scenario("a-legacy-file-holding-a-nul-is-imported", ALegacyFileHoldingANulIsImported),
             Scenario("a-second-load-rewrites-nothing", ASecondLoadRewritesNothing),
+            Scenario("a-config-beside-a-legacy-file-is-read-and-the-import-never-runs",
+                AConfigBesideALegacyFileIsReadAndTheImportNeverRuns),
+            Scenario("an-unstamped-config-beside-a-legacy-file-is-canonical-and-stamped-by-a-save",
+                AnUnstampedConfigBesideALegacyFileIsCanonicalAndStampedByASave),
             Scenario("an-unstamped-file-without-an-import-is-canonical-and-stamped-by-a-save",
                 AnUnstampedFileWithoutAnImportIsCanonicalAndStampedByASave),
-            Scenario("an-unstamped-unreadable-file-without-an-import-is-unreadable", AnUnstampedUnreadableFileWithoutAnImportIsUnreadable),
+            Scenario("an-unreadable-config-beside-a-legacy-file-is-unreadable-and-never-imported",
+                AnUnreadableConfigBesideALegacyFileIsUnreadableAndNeverImported),
             Scenario("a-dropped-value-is-logged", ADroppedValueIsLogged),
-            Scenario("a-deleted-stamp-migrates-again-into-pre-canonical-last", ADeletedStampMigratesAgainIntoPreCanonicalLast),
-            Scenario("a-bepinex-source-is-migrated-and-left-byte-for-byte", ABepInExSourceIsMigratedAndLeftByteForByte),
-            Scenario("a-bepinex-ini-is-read-as-canonical-and-neither-file-is-created", ABepInExIniIsReadAsCanonicalAndNeitherFileIsCreated),
+            Scenario("deleting-the-config-imports-the-legacy-file-again", DeletingTheConfigImportsTheLegacyFileAgain),
             Scenario("a-refused-import-is-legacy-refused", ARefusedImportIsLegacyRefused),
             Scenario("an-undecodable-import-defers", AnUndecodableImportDefers),
             Scenario("an-absent-import-defers", AnAbsentImportDefers),
-            Scenario("a-read-only-file-defers", AReadOnlyFileDefers),
+            Scenario("a-read-only-legacy-file-is-imported-and-left-as-it-was", AReadOnlyLegacyFileIsImportedAndLeftAsItWas),
             Scenario("a-folder-that-cannot-be-written-defers", AFolderThatCannotBeWrittenDefers),
-            Scenario("a-file-held-denying-read-sharing-defers", AFileHeldDenyingReadSharingDefers),
+            Scenario("a-legacy-file-held-denying-read-sharing-defers", ALegacyFileHeldDenyingReadSharingDefers),
+            Scenario("a-config-held-denying-read-sharing-defers-and-nothing-is-imported",
+                AConfigHeldDenyingReadSharingDefersAndNothingIsImported),
             Scenario("an-import-that-writes-the-file-defers", AnImportThatWritesTheFileDefers),
-            Scenario("a-failed-copy-defers", AFailedCopyDefers),
-            Scenario("a-copy-that-does-not-read-back-defers", ACopyThatDoesNotReadBackDefers),
             Scenario("a-verify-mismatch-defers", AVerifyMismatchDefers),
             Scenario("a-value-no-codec-writes-defers", AValueNoCodecWritesDefers),
-            Scenario("a-file-changed-before-the-commit-defers", AFileChangedBeforeTheCommitDefers),
+            Scenario("a-config-appearing-before-the-commit-defers", AConfigAppearingBeforeTheCommitDefers),
             Scenario("the-held-file-reads-and-refuses-exclusive-opens", TheHeldFileReadsAndRefusesExclusiveOpens),
             Scenario("a-newer-config-format-refuses-saves", ANewerConfigFormatRefusesSaves),
             Scenario("a-save-writes-a-missing-or-unreadable-config-format", ASaveWritesAMissingOrUnreadableConfigFormat),
@@ -74,16 +81,11 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-save-conflict-is-not-saved", ASaveConflictIsNotSaved),
             Scenario("a-change-to-a-row-that-is-not-writable-throws", AChangeToARowThatIsNotWritableThrows),
             Scenario("a-save-of-a-missing-file-creates-nothing", ASaveOfAMissingFileCreatesNothing),
-            Scenario("a-save-to-a-legacy-file-is-refused", ASaveToALegacyFileIsRefused),
             Scenario("a-save-to-a-read-only-file-is-not-saved", ASaveToAReadOnlyFileIsNotSaved),
             Scenario("an-unfinished-save-is-uncertain", AnUnfinishedSaveIsUncertain),
             Scenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites),
-            Scenario("reload-of-an-old-file-is-read-only", ReloadOfAnOldFileIsReadOnly),
+            Scenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports),
             Scenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings),
-            Scenario("reload-of-an-old-file-the-import-cannot-find-keeps-the-settings",
-                ReloadOfAnOldFileTheImportCannotFindKeepsTheSettings),
-            Scenario("reload-of-an-old-file-changed-during-the-import-keeps-the-settings",
-                ReloadOfAnOldFileChangedDuringTheImportKeepsTheSettings),
             Scenario("options-and-call-order-are-checked", OptionsAndCallOrderAreChecked),
         };
 
@@ -92,7 +94,7 @@ namespace CameraUnlock.Core.Tests.Config
             get { return All.Select(s => s.Key); }
         }
 
-        /// <summary>The steps of an in-place conversion, as the owner's internal hook names them.</summary>
+        /// <summary>The steps of an import, as the owner's internal hook names them.</summary>
         public static IEnumerable<string> InterruptionLabels
         {
             get
@@ -104,8 +106,6 @@ namespace CameraUnlock.Core.Tests.Config
                     CheckedWriteStep.FlushTemporary, CheckedWriteStep.CloseTemporary, CheckedWriteStep.RecheckTarget,
                     CheckedWriteStep.Commit,
                 };
-                foreach (CheckedWriteStep step in writer) labels.Add("Copy." + step);
-                labels.Add("ReadBack");
                 foreach (CheckedWriteStep step in writer) labels.Add("Commit." + step);
                 labels.Add("Remember");
                 return labels;
@@ -127,7 +127,7 @@ namespace CameraUnlock.Core.Tests.Config
 
         public static void PrepareInterruption(string dir)
         {
-            File.WriteAllBytes(Path.Combine(dir, FileName), Ascii(LegacyText));
+            new Rig(dir).PutLegacy(Ascii(LegacyText));
         }
 
         /// <summary>The child's side: the process ends at the start of the labelled step.</summary>
@@ -143,35 +143,36 @@ namespace CameraUnlock.Core.Tests.Config
 
         /// <summary>
         /// The parent's side, after the child died at <paramref name="label"/>: the legacy file is
-        /// whole, or the new file is, and beside it at most the copy and the writer's temporaries.
-        /// The next launch then ends where an uninterrupted one does.
+        /// whole and unwritten, the config file is absent before the commit and whole after it, and
+        /// beside them at most the writer's temporaries. The next launch then ends where an
+        /// uninterrupted one does.
         /// </summary>
         public static void CheckAfterInterruption(string label, string dir)
         {
-            string target = Path.Combine(dir, FileName);
-            string copy = target + ".pre-canonical";
+            var rig = new Rig(dir);
+            rig.ExpectLegacyKept(Ascii(LegacyText), label);
             bool committed = label == "Remember";
-            ExpectBytes(target, committed ? MigratedBytes() : Ascii(LegacyText));
+            if (committed)
+            {
+                ExpectBytes(rig.Path, MigratedBytes());
+            }
+            else
+            {
+                Expect(!File.Exists(rig.Path), label + ": " + FileName + " exists though the child died before the commit");
+            }
             foreach (string file in Directory.GetFiles(dir))
             {
                 string name = Path.GetFileName(file);
-                if (file == target) continue;
-                if (file == copy)
-                {
-                    ExpectBytes(copy, Ascii(LegacyText));
-                    continue;
-                }
+                if (name == FileName || name == LegacyName) continue;
                 Expect(name.StartsWith(FileName + ".", StringComparison.Ordinal) && name.EndsWith(".tmp", StringComparison.Ordinal),
                     label + ": unexpected leftover " + name);
             }
 
-            var rig = new Rig(dir);
             ConfigLoadResult<HeadTrackingConfigData> next = rig.Owner().Load();
             Expect(next.Status == (committed ? ConfigLoadStatus.Canonical : ConfigLoadStatus.Migrated),
                 label + ": the next launch is " + next.Status);
-            ExpectBytes(target, MigratedBytes());
-            ExpectBytes(copy, Ascii(LegacyText));
-            Expect(!File.Exists(target + ".pre-canonical.last"), label + ": no .pre-canonical.last");
+            ExpectBytes(rig.Path, MigratedBytes());
+            rig.ExpectLegacyKept(Ascii(LegacyText), label + ", after the next launch");
         }
 
         public static string CreateScratchDirectory()
@@ -202,7 +203,7 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectStatus(load, ConfigLoadStatus.Created);
             ExpectBytes(rig.Path, Render(Defaults()));
             ExpectSame(load.Config, Defaults(), "the session runs on the defaults");
-            Expect(rig.Legacy.Runs == 0, "no import runs for an absent file");
+            Expect(rig.Legacy.Runs == 0, "no import runs when there is no legacy file");
             Expect(rig.Sink.Count == 0, "nothing is reported");
             ExpectListing(dir, FileName);
         }
@@ -237,13 +238,14 @@ namespace CameraUnlock.Core.Tests.Config
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Canonical);
             ExpectSame(load.Config, chosen, "the file's values");
-            Expect(load.Diagnostics.Count == 0 && load.Log.Count == 0, "a clean file draws nothing");
-            Expect(rig.Legacy.Runs == 0, "the import never runs on a stamped file");
+            Expect(load.Diagnostics.Count == 0 && load.Log.Count == 0,
+                "a clean file with no legacy file beside it draws nothing, got:\n" + string.Join("\n", load.Log.ToArray()));
+            Expect(rig.Legacy.Runs == 0, "the import never runs while the config exists");
             ExpectBytes(rig.Path, canonical);
             ExpectListing(dir, FileName);
         }
 
-        private static void AStampedUtf16FileIsUnreadableAndNeverMigrated(string dir)
+        private static void AStampedUtf16FileIsUnreadable(string dir)
         {
             var rig = new Rig(dir);
             byte[] utf16 = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(Encoding.ASCII.GetString(Render(Defaults()))))
@@ -254,7 +256,7 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectStatus(load, ConfigLoadStatus.Unreadable);
             ExpectContains(load.Reason, "it is saved as UTF-16; save it as ANSI or UTF-8");
             ExpectSame(load.Config, Defaults(), "the session runs on the defaults");
-            Expect(rig.Legacy.Runs == 0, "the import never runs on a stamped file");
+            Expect(rig.Legacy.Runs == 0, "the import never runs while the config exists");
             ExpectSunkOnce(rig, load.Reason);
             ExpectNotSaved(owner.Save(c => c.WorldSpaceYaw = false), "the settings file could not be used this session");
             ExpectBytes(rig.Path, utf16);
@@ -270,85 +272,119 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectStatus(load, ConfigLoadStatus.Unreadable);
             int line = Encoding.ASCII.GetString(bytes).Split('\n').Length - 1;
             ExpectContains(load.Reason, "line " + line.ToString(CultureInfo.InvariantCulture) + " holds a NUL byte");
-            Expect(rig.Legacy.Runs == 0, "the import never runs on a stamped file");
+            Expect(rig.Legacy.Runs == 0, "the import never runs while the config exists");
             ExpectBytes(rig.Path, bytes);
             ExpectListing(dir, FileName);
         }
 
-        private static void AnUnstampedFileWithAnImportIsMigrated(string dir)
+        private static void ALegacyFileIsImportedAndLeftAsItWas(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
-            ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
-            ExpectStatus(load, ConfigLoadStatus.Migrated);
-            ExpectSame(load.Config, MigratedConfig(), "the imported values");
-            ExpectBytes(rig.Path, MigratedBytes());
-            ExpectBytes(rig.Path + ".pre-canonical", Ascii(LegacyText));
-            Expect(load.Diagnostics.Count == 0, "the new file reads back clean");
-            ExpectLogLine(load, rig.Path + ": converted to the canonical format. The original is kept in " + rig.Path
-                + ".pre-canonical.");
-            ExpectLogLine(load, rig.Path + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
-            Expect(load.Log.Count(l => l.Contains("not carried")) == 1, "only the unread key is listed");
-            Expect(rig.Legacy.Runs == 1 && rig.Legacy.Inputs[0].Path == rig.Path && rig.Legacy.Inputs[0].LegacySourcePath == null,
-                "the import runs once on the file itself");
-            Expect(rig.Sink.Count == 0, "nothing is reported");
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
-        }
-
-        private static void AnUnstampedUtf16FileWithAnImportIsMigrated(string dir)
-        {
-            var rig = new Rig(dir);
-            byte[] utf16 = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(LegacyText)).ToArray();
-            File.WriteAllBytes(rig.Path, utf16);
+            rig.PutLegacy(Ascii(LegacyText));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Migrated);
             ExpectSame(load.Config, MigratedConfig(), "the imported values");
-            ExpectBytes(rig.Path, MigratedBytes());
-            ExpectBytes(rig.Path + ".pre-canonical", utf16);
-            ExpectLogLine(load, rig.Path + ": is saved as UTF-16, so its lines this build does not read are not listed; the "
+            Expect(load.Diagnostics.Count == 0, "the new file reads back clean");
+            ExpectLogLine(load, rig.Path + ": created from " + rig.LegacyPath + ", which is left as it was.");
+            ExpectLogLine(load, rig.LegacyPath + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
+            Expect(load.Log.Count(l => l.Contains("not carried")) == 1, "only the unread key is listed");
+            Expect(rig.Legacy.Runs == 1 && rig.Legacy.Inputs[0].Path == rig.LegacyPath, "the import runs once on the legacy file");
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+            ExpectImported(rig);
+        }
+
+        private static void AUtf16LegacyFileIsImported(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutLegacy(Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(LegacyText)).ToArray());
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            ExpectSame(load.Config, MigratedConfig(), "the imported values");
+            ExpectLogLine(load, rig.LegacyPath + ": is saved as UTF-16, so its lines this build does not read are not listed; the "
                 + "original keeps them.");
             Expect(!load.Log.Any(l => l.Contains("not carried")), "no line of a UTF-16 file is listed");
             Expect(rig.Legacy.Runs == 1 && rig.Sink.Count == 0, "one import and nothing reported");
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
+            ExpectImported(rig);
         }
 
-        private static void AnUnstampedFileHoldingANulWithAnImportIsMigrated(string dir)
+        private static void ALegacyFileHoldingANulIsImported(string dir)
         {
             var rig = new Rig(dir);
-            byte[] nul = Ascii(LegacyText + "Extra=1\0\r\n");
-            File.WriteAllBytes(rig.Path, nul);
+            rig.PutLegacy(Ascii(LegacyText + "Extra=1\0\r\n"));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Migrated);
             ExpectSame(load.Config, MigratedConfig(), "the imported values");
-            ExpectBytes(rig.Path, MigratedBytes());
-            ExpectBytes(rig.Path + ".pre-canonical", nul);
-            ExpectLogLine(load, rig.Path + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
-            ExpectLogLine(load, rig.Path + ": not carried: [Position] Extra=1\0 on line 8, this build does not read it");
+            ExpectLogLine(load, rig.LegacyPath + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
+            ExpectLogLine(load, rig.LegacyPath + ": not carried: [Position] Extra=1\0 on line 8, this build does not read it");
             Expect(load.Log.Count(l => l.Contains("not carried")) == 2, "only the unread keys are listed");
             Expect(rig.Legacy.Runs == 1 && rig.Sink.Count == 0, "one import and nothing reported");
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
+            ExpectImported(rig);
         }
 
         private static void ASecondLoadRewritesNothing(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
             DateTime written = File.GetLastWriteTimeUtc(rig.Path);
-            DateTime copied = File.GetLastWriteTimeUtc(rig.Path + ".pre-canonical");
 
             var steps = new List<string>();
             rig.Hook = (step, path) => steps.Add(step);
             ConfigLoadResult<HeadTrackingConfigData> again = rig.Owner().Load();
             ExpectStatus(again, ConfigLoadStatus.Canonical);
-            ExpectSame(again.Config, MigratedConfig(), "the migrated values");
+            ExpectSame(again.Config, MigratedConfig(), "the imported values");
             Expect(steps.SequenceEqual(new[] { "Open" }), "the second launch only opens the file, got " + string.Join(", ", steps.ToArray()));
             Expect(rig.Legacy.Runs == 1, "the import does not run again");
-            ExpectBytes(rig.Path, MigratedBytes());
-            Expect(File.GetLastWriteTimeUtc(rig.Path) == written && File.GetLastWriteTimeUtc(rig.Path + ".pre-canonical") == copied,
-                "neither file is rewritten");
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
+            ExpectLogLine(again, rig.Path + ": settings are read from this file. " + rig.LegacyPath + " is left as it was and is not read.");
+            Expect(again.Log.Count == 1, "that is the only line, got:\n" + string.Join("\n", again.Log.ToArray()));
+            Expect(File.GetLastWriteTimeUtc(rig.Path) == written, "the config is not rewritten");
+            ExpectImported(rig);
+        }
+
+        private static void AConfigBesideALegacyFileIsReadAndTheImportNeverRuns(string dir)
+        {
+            var rig = new Rig(dir);
+            HeadTrackingConfigData chosen = Defaults();
+            chosen.UdpPort = 6000;
+            byte[] canonical = Render(chosen);
+            File.WriteAllBytes(rig.Path, canonical);
+            rig.PutLegacy(Ascii(LegacyText));
+            var opened = new List<string>();
+            rig.Hook = (step, path) => opened.Add(step + " " + path);
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Canonical);
+            ExpectSame(load.Config, chosen, "the config's values, not the legacy file's");
+            Expect(rig.Legacy.Runs == 0, "the import never runs while the config exists");
+            Expect(opened.SequenceEqual(new[] { "Open " + rig.Path }),
+                "only the config is opened, got " + string.Join(", ", opened.ToArray()));
+            ExpectLogLine(load, rig.Path + ": settings are read from this file. " + rig.LegacyPath + " is left as it was and is not read.");
+            Expect(load.Log.Count == 1, "that is the only line, got:\n" + string.Join("\n", load.Log.ToArray()));
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+            ExpectBytes(rig.Path, canonical);
+            rig.ExpectLegacyKept();
+            ExpectListing(dir, FileName, LegacyName);
+        }
+
+        private static void AnUnstampedConfigBesideALegacyFileIsCanonicalAndStampedByASave(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutLegacy(Ascii(LegacyText));
+            const string text = "; mine\r\n[General]\r\nWorldSpaceYaw=false\r\n";
+            File.WriteAllBytes(rig.Path, Ascii(text));
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
+            ExpectStatus(load, ConfigLoadStatus.Canonical);
+            Expect(!load.Config.WorldSpaceYaw && load.Config.UdpPort != 5555, "the config's values, not the legacy file's");
+            Expect(rig.Legacy.Runs == 0, "an unstamped config is never imported");
+            ExpectLogLine(load, rig.Path + ": settings are read from this file. " + rig.LegacyPath + " is left as it was and is not read.");
+            ExpectLogLine(load, rig.Path + ": has no [CameraUnlock] section. It is read as the canonical format, and the next save "
+                + "adds the section.");
+
+            ExpectSaved(owner.Save(c => c.WorldSpaceYaw = true));
+            ExpectBytes(rig.Path, Ascii("; mine\r\n[General]\r\nWorldSpaceYaw=true\r\n\r\n[CameraUnlock]\r\nConfigFormat=1\r\n"));
+            Expect(rig.Legacy.Runs == 0 && rig.Sink.Count == 0, "no import and nothing reported");
+            rig.ExpectLegacyKept();
+            ExpectListing(dir, FileName, LegacyName);
         }
 
         private static void AnUnstampedFileWithoutAnImportIsCanonicalAndStampedByASave(string dir)
@@ -370,9 +406,10 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectListing(dir, FileName);
         }
 
-        private static void AnUnstampedUnreadableFileWithoutAnImportIsUnreadable(string dir)
+        private static void AnUnreadableConfigBesideALegacyFileIsUnreadableAndNeverImported(string dir)
         {
-            var rig = new Rig(dir) { WithImport = false };
+            var rig = new Rig(dir);
+            rig.PutLegacy(Ascii(LegacyText));
             byte[] utf16 = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes("[General]\r\nWorldSpaceYaw=false\r\n")).ToArray();
             File.WriteAllBytes(rig.Path, utf16);
             ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Unreadable);
@@ -383,161 +420,101 @@ namespace CameraUnlock.Core.Tests.Config
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Unreadable);
             ExpectContains(load.Reason, "line 2 holds a NUL byte");
+            ExpectSame(load.Config, Defaults(), "the session runs on the defaults, not the legacy file's values");
+            Expect(rig.Legacy.Runs == 0, "the legacy file is not imported while the config exists");
             ExpectBytes(rig.Path, nul);
-            ExpectListing(dir, FileName);
+            rig.ExpectLegacyKept();
+            ExpectListing(dir, FileName, LegacyName);
         }
 
         private static void ADroppedValueIsLogged(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText + "Light = NaN\r\n"));
+            rig.PutLegacy(Ascii(LegacyText + "Light = NaN\r\n"));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Migrated);
             Expect(load.Config.Light.Multiplier == HeadFollowLightSettings.DefaultMultiplier, "N2 gives the default");
-            ExpectLogLine(load, rig.Path + ": not carried: [Light] LightMultiplier=nan, it is not a finite number, so the default is used");
+            ExpectLogLine(load, rig.LegacyPath + ": not carried: [Light] LightMultiplier=nan, it is not a finite number, so the default is used");
             Expect(load.Log.Count(l => l.Contains("not carried")) == 2, "the dropped value and the unread key");
+            rig.ExpectLegacyKept();
+            ExpectListing(dir, FileName, LegacyName);
         }
 
-        private static void ADeletedStampMigratesAgainIntoPreCanonicalLast(string dir)
+        private static void DeletingTheConfigImportsTheLegacyFileAgain(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
-
-            byte[] stampless = WithoutStamp(File.ReadAllBytes(rig.Path));
-            File.WriteAllBytes(rig.Path, stampless);
-            ConfigLoadResult<HeadTrackingConfigData> again = rig.Owner().Load();
-            ExpectStatus(again, ConfigLoadStatus.Migrated);
-            ExpectLogLine(again, rig.Path + ": converted to the canonical format. The original is kept in " + rig.Path
-                + ".pre-canonical.last.");
-            ExpectBytes(rig.Path + ".pre-canonical", Ascii(LegacyText));
-            ExpectBytes(rig.Path + ".pre-canonical.last", stampless);
-            Expect(CanonicalIni.HasStamp(File.ReadAllBytes(rig.Path)), "stamped again");
-
-            byte[] later = WithoutStamp(File.ReadAllBytes(rig.Path)).Concat(Ascii("[Extra]\r\nNote=1\r\n")).ToArray();
-            File.WriteAllBytes(rig.Path, later);
-            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
-            ExpectBytes(rig.Path + ".pre-canonical", Ascii(LegacyText));
-            ExpectBytes(rig.Path + ".pre-canonical.last", later);
-
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
-            ExpectBytes(rig.Path + ".pre-canonical.last", later);
-            ExpectListing(dir, FileName, FileName + ".pre-canonical", FileName + ".pre-canonical.last");
-        }
-
-        private static void ABepInExSourceIsMigratedAndLeftByteForByte(string dir)
-        {
-            string cfg = Path.Combine(dir, "com.test.plugin.cfg");
-            var rig = new Rig(dir, "com.test.plugin.ini") { LegacySource = cfg };
-            File.WriteAllBytes(cfg, Ascii(LegacyText));
-            DateTime cfgTime = File.GetLastWriteTimeUtc(cfg);
-            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
-            ExpectStatus(load, ConfigLoadStatus.Migrated);
-            ExpectSame(load.Config, MigratedConfig(), "the imported values");
-            ExpectBytes(rig.Path, MigratedBytes());
-            ExpectBytes(cfg, Ascii(LegacyText));
-            Expect(File.GetLastWriteTimeUtc(cfg) == cfgTime, "the .cfg is not written");
-            Expect(rig.Legacy.Inputs[0].Path == rig.Path && rig.Legacy.Inputs[0].LegacySourcePath == cfg,
-                "the import is handed both paths");
-            ExpectLogLine(load, rig.Path + ": created from " + cfg + ", which is left as it was.");
-            ExpectLogLine(load, cfg + ": not carried: [General] Smoothng=0.3 on line 5, this build does not read it");
-            ExpectListing(dir, "com.test.plugin.cfg", "com.test.plugin.ini");
-
-            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Canonical);
-            Expect(rig.Legacy.Runs == 1, "a present .ini is never imported");
+            rig.PutLegacy(Ascii(LegacyText));
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
+            ExpectSaved(owner.Save(c => c.WorldSpaceYaw = true));
 
             File.Delete(rig.Path);
-            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
-            Expect(rig.Legacy.Runs == 2, "deleting the .ini converts the .cfg again");
-            ExpectBytes(cfg, Ascii(LegacyText));
-            ExpectListing(dir, "com.test.plugin.cfg", "com.test.plugin.ini");
-        }
-
-        private static void ABepInExIniIsReadAsCanonicalAndNeitherFileIsCreated(string dir)
-        {
-            string cfg = Path.Combine(dir, "com.test.plugin.cfg");
-            var rig = new Rig(dir, "com.test.plugin.ini") { LegacySource = cfg };
-            ConfigLoadResult<HeadTrackingConfigData> created = rig.Owner().Load();
-            ExpectStatus(created, ConfigLoadStatus.Created);
-            ExpectBytes(rig.Path, Render(Defaults()));
-            ExpectListing(dir, "com.test.plugin.ini");
-
-            File.WriteAllBytes(cfg, Ascii(LegacyText));
-            File.WriteAllBytes(rig.Path, WithoutStamp(Render(Defaults())));
-            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
-            ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
-            ExpectStatus(load, ConfigLoadStatus.Canonical);
-            Expect(rig.Legacy.Runs == 0, "the import reads only the .cfg");
-            ExpectSaved(owner.Save(c => c.WorldSpaceYaw = false));
-            Expect(CanonicalIni.HasStamp(File.ReadAllBytes(rig.Path)), "the save stamps the .ini");
-            ExpectBytes(cfg, Ascii(LegacyText));
+            ConfigLoadResult<HeadTrackingConfigData> again = rig.Owner().Load();
+            ExpectStatus(again, ConfigLoadStatus.Migrated);
+            Expect(rig.Legacy.Runs == 2, "the next load imports the legacy file again");
+            ExpectSame(again.Config, MigratedConfig(), "the legacy file's values, without the deleted save");
+            ExpectImported(rig);
         }
 
         private static void ARefusedImportIsLegacyRefused(string dir)
         {
             var rig = new Rig(dir);
             rig.Legacy.Result = config => ImportResult.Refused("Port=99999 is outside 1 to 65535");
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
             ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
             ExpectStatus(load, ConfigLoadStatus.LegacyRefused);
-            ExpectContains(load.Reason, "Port=99999 is outside 1 to 65535");
+            string message = LegacyName + " was not imported into " + FileName + ": Port=99999 is outside 1 to 65535. The mod "
+                + "tries again at the next launch and saves nothing this session.";
+            Expect(load.Reason == message, "the player is told \"" + load.Reason + "\", expected \"" + message + "\"");
             ExpectSunkOnce(rig, load.Reason);
             ExpectNotSaved(owner.Save(c => c.WorldSpaceYaw = true), "the settings file could not be used this session");
-            ExpectUntouched(rig);
+            ExpectNotImported(rig);
         }
 
         private static void AnUndecodableImportDefers(string dir)
         {
             var rig = new Rig(dir);
             rig.Legacy.Result = config => ImportResult.Undecodable("the file is not UTF-8");
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Deferred);
-            ExpectContains(load.Reason, "the file is not UTF-8");
+            ExpectContains(load.Reason, LegacyName + " was not imported into " + FileName + ": the file is not UTF-8.");
             ExpectSunkOnce(rig, load.Reason);
-            ExpectUntouched(rig);
+            ExpectNotImported(rig);
         }
 
         private static void AnAbsentImportDefers(string dir)
         {
             var rig = new Rig(dir);
             rig.Legacy.Result = config => ImportResult.Absent(new DroppedValue[0]);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Deferred);
             ExpectContains(load.Reason, "the old settings reader could not find the file");
-            ExpectLogLine(load, rig.Path + ": the old settings reader found no file, while the owner holds it open ("
+            ExpectLogLine(load, rig.LegacyPath + ": the old settings reader found no file, while the owner holds it open ("
                 + LegacyText.Length.ToString(CultureInfo.InvariantCulture) + " bytes)");
             ExpectSunkOnce(rig, load.Reason);
-            ExpectUntouched(rig);
+            ExpectNotImported(rig);
         }
 
-        private static void AReadOnlyFileDefers(string dir)
+        private static void AReadOnlyLegacyFileIsImportedAndLeftAsItWas(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            File.SetAttributes(rig.Path, FileAttributes.ReadOnly);
+            rig.PutLegacy(Ascii(LegacyText));
+            File.SetAttributes(rig.LegacyPath, FileAttributes.ReadOnly);
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
-            ExpectStatus(load, ConfigLoadStatus.Deferred);
-            ExpectContains(load.Reason, "the file is read-only");
-            ExpectSame(load.Config, MigratedConfig(), "the session runs on what the import gave");
-            ExpectSunkOnce(rig, load.Reason);
-            ExpectBytes(rig.Path, Ascii(LegacyText));
-            ExpectBytes(rig.Path + ".pre-canonical", Ascii(LegacyText));
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
-
-            File.SetAttributes(rig.Path, FileAttributes.Normal);
-            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
-            ExpectBytes(rig.Path, MigratedBytes());
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            ExpectSame(load.Config, MigratedConfig(), "the imported values");
+            Expect(rig.Sink.Count == 0, "nothing is reported");
+            Expect((File.GetAttributes(rig.LegacyPath) & FileAttributes.ReadOnly) != 0, "the legacy file is still read-only");
+            ExpectImported(rig);
         }
 
         private static void AFolderThatCannotBeWrittenDefers(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             var folder = new DirectoryInfo(dir);
             DirectorySecurity security = folder.GetAccessControl();
             var deny = new FileSystemAccessRule(WindowsIdentity.GetCurrent().User, FileSystemRights.CreateFiles, AccessControlType.Deny);
@@ -555,72 +532,65 @@ namespace CameraUnlock.Core.Tests.Config
             }
             ExpectStatus(load, ConfigLoadStatus.Deferred);
             ExpectContains(load.Reason, "the folder cannot be written");
+            ExpectSame(load.Config, MigratedConfig(), "the session runs on what the import gave");
             ExpectSunkOnce(rig, load.Reason);
-            ExpectUntouched(rig);
+            ExpectNotImported(rig);
+
+            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
+            ExpectImported(rig);
         }
 
-        private static void AFileHeldDenyingReadSharingDefers(string dir)
+        private static void ALegacyFileHeldDenyingReadSharingDefers(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
+            ConfigLoadResult<HeadTrackingConfigData> load;
+            using (new FileStream(rig.LegacyPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                load = rig.Owner().Load();
+            }
+            ExpectStatus(load, ConfigLoadStatus.Deferred);
+            ExpectContains(load.Reason, LegacyName + " cannot be read: the file is in use by another program");
+            ExpectSame(load.Config, Defaults(), "a legacy file that cannot be opened cannot be imported, so the defaults");
+            Expect(rig.Legacy.Runs == 0, "the import does not run");
+            ExpectSunkOnce(rig, load.Reason);
+            ExpectNotImported(rig);
+
+            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
+            ExpectImported(rig);
+        }
+
+        private static void AConfigHeldDenyingReadSharingDefersAndNothingIsImported(string dir)
+        {
+            var rig = new Rig(dir);
+            byte[] canonical = Render(Defaults());
+            File.WriteAllBytes(rig.Path, canonical);
+            rig.PutLegacy(Ascii(LegacyText));
             ConfigLoadResult<HeadTrackingConfigData> load;
             using (new FileStream(rig.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
                 load = rig.Owner().Load();
             }
             ExpectStatus(load, ConfigLoadStatus.Deferred);
-            ExpectContains(load.Reason, "the file is in use by another program");
-            ExpectSame(load.Config, Defaults(), "a file that cannot be opened cannot be classified, so the defaults");
-            Expect(rig.Legacy.Runs == 0, "the import does not run");
+            ExpectContains(load.Reason, FileName + " cannot be read: the file is in use by another program");
+            Expect(rig.Legacy.Runs == 0, "the legacy file is not imported in place of a config that cannot be read");
             ExpectSunkOnce(rig, load.Reason);
-            ExpectUntouched(rig);
-            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Migrated);
+            ExpectBytes(rig.Path, canonical);
+            rig.ExpectLegacyKept();
+            ExpectListing(dir, FileName, LegacyName);
         }
 
         private static void AnImportThatWritesTheFileDefers(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             rig.Legacy.During = input => File.WriteAllBytes(input.Path, Ascii(LegacyText + "Light = 2.0\r\n"));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Deferred);
             ExpectContains(load.Reason, "the file was changed by another program while it was read");
             ExpectSunkOnce(rig, load.Reason);
-            ExpectBytes(rig.Path, Ascii(LegacyText + "Light = 2.0\r\n"));
-            ExpectListing(dir, FileName);
-        }
-
-        private static void AFailedCopyDefers(string dir)
-        {
-            var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            rig.Hook = (step, path) =>
-            {
-                if (step == "Copy.WriteTemporary") throw new IOException("injected copy failure", HResultGenFailure);
-            };
-            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
-            ExpectStatus(load, ConfigLoadStatus.Deferred);
-            ExpectContains(load.Reason, "injected copy failure");
-            Expect(load.Log.Any(l => l.Contains(rig.Path + ".pre-canonical") && l.Contains("WriteTemporary")),
-                "the log names the copy and the step");
-            ExpectSunkOnce(rig, load.Reason);
-            ExpectUntouched(rig);
-        }
-
-        private static void ACopyThatDoesNotReadBackDefers(string dir)
-        {
-            var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            rig.Hook = (step, path) =>
-            {
-                if (step == "ReadBack") File.WriteAllBytes(path, Ascii("damaged"));
-            };
-            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
-            ExpectStatus(load, ConfigLoadStatus.Deferred);
-            ExpectContains(load.Reason, "the copy of the original file could not be written");
-            ExpectLogLine(load, rig.Path + ".pre-canonical: does not hold the bytes just written to it");
-            ExpectSunkOnce(rig, load.Reason);
-            ExpectBytes(rig.Path, Ascii(LegacyText));
+            ExpectBytes(rig.LegacyPath, Ascii(LegacyText + "Light = 2.0\r\n"));
+            ExpectListing(dir, LegacyName);
         }
 
         private static void AVerifyMismatchDefers(string dir)
@@ -632,41 +602,53 @@ namespace CameraUnlock.Core.Tests.Config
                 config.PositionEnabled = false;
                 return ImportResult.Imported(new DroppedValue[0]);
             };
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Deferred);
             ExpectContains(load.Reason, "[General] RotationEnabled=false cannot be converted");
-            ExpectLogLine(load, rig.Path + ": [General] RotationEnabled reads back from the new format as true, not false");
+            ExpectLogLine(load, rig.LegacyPath + ": [General] RotationEnabled reads back from the new format as true, not false");
             Expect(!load.Config.RotationEnabled && !load.Config.PositionEnabled, "the session runs on what the import gave");
-            ExpectUntouched(rig);
+            ExpectNotImported(rig);
         }
 
         private static void AValueNoCodecWritesDefers(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText + "Light = 7.5\r\n"));
+            rig.PutLegacy(Ascii(LegacyText + "Light = 7.5\r\n"));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Deferred);
             ExpectContains(load.Reason, "[Light] LightMultiplier=7.5 cannot be converted");
             Expect(load.Config.Light.Multiplier == 7.5f, "the session runs on what the import gave");
-            ExpectBytes(rig.Path, Ascii(LegacyText + "Light = 7.5\r\n"));
-            ExpectListing(dir, FileName);
+            ExpectNotImported(rig);
         }
 
-        private static void AFileChangedBeforeTheCommitDefers(string dir)
+        // Another program creating the config file between the import and the commit, at each point
+        // of the create-if-absent write: before its first read, before its final check, and in the
+        // gap between the check and the rename.
+        private static void AConfigAppearingBeforeTheCommitDefers(string dir)
         {
-            var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            rig.Hook = (step, path) =>
+            foreach (string label in new[] { "Commit.ReadTarget", "Commit.RecheckTarget", "Commit.Commit" })
             {
-                if (step == "Commit.RecheckTarget") File.WriteAllBytes(rig.Path, Ascii("edited"));
-            };
-            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
-            ExpectStatus(load, ConfigLoadStatus.Deferred);
-            ExpectContains(load.Reason, "the file was changed by another program at the same time");
-            ExpectBytes(rig.Path, Ascii("edited"));
-            ExpectBytes(rig.Path + ".pre-canonical", Ascii(LegacyText));
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
+                var rig = new Rig(dir);
+                rig.PutLegacy(Ascii(LegacyText));
+                rig.Hook = (step, path) =>
+                {
+                    if (step == label) File.WriteAllBytes(rig.Path, Ascii("theirs"));
+                };
+                ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+                ConfigLoadResult<HeadTrackingConfigData> load = owner.Load();
+                ExpectStatus(load, ConfigLoadStatus.Deferred);
+                ExpectContains(load.Reason, LegacyName + " was not imported into " + FileName
+                    + ": another program created the file at the same time.");
+                ExpectLogLine(load, rig.Path + ": not created: TargetAppeared");
+                ExpectSame(load.Config, MigratedConfig(), label + ": the session runs on what the import gave");
+                ExpectSunkOnce(rig, load.Reason);
+                ExpectNotSaved(owner.Save(c => c.WorldSpaceYaw = true), "the settings file could not be used this session");
+                ExpectBytes(rig.Path, Ascii("theirs"));
+                rig.ExpectLegacyKept();
+                ExpectListing(dir, FileName, LegacyName);
+                File.Delete(rig.Path);
+            }
         }
 
         // Design 4.5 step 1 (R3-2): while the owner holds the legacy file, the readers imports use
@@ -674,7 +656,7 @@ namespace CameraUnlock.Core.Tests.Config
         private static void TheHeldFileReadsAndRefusesExclusiveOpens(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             string[] lines = null;
             string streamed = null;
             var refused = new List<string>();
@@ -691,7 +673,7 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(streamed == LegacyText, "a StreamReader reads the held file");
             Expect(refused.All(r => r != null), "a FileShare.None open, a delete and a rename all fail: "
                 + string.Join(" | ", refused.Select(r => r ?? "succeeded").ToArray()));
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
+            ExpectImported(rig);
         }
 
         private static void ANewerConfigFormatRefusesSaves(string dir)
@@ -856,18 +838,6 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectListing(dir);
         }
 
-        private static void ASaveToALegacyFileIsRefused(string dir)
-        {
-            var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
-            ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            ExpectNotSaved(owner.Save(c => c.WorldSpaceYaw = true),
-                FileName + " is in the old settings format; it is converted at the next launch");
-            ExpectBytes(rig.Path, Ascii(LegacyText));
-        }
-
         private static void ASaveToAReadOnlyFileIsNotSaved(string dir)
         {
             var rig = new Rig(dir);
@@ -906,11 +876,11 @@ namespace CameraUnlock.Core.Tests.Config
         private static void ReloadIgnoresTheOwnersOwnWrites(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
             ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
-            Expect(!owner.FileChanged(), "the conversion's write is recorded");
-            Expect(owner.Reload().Status == ConfigReloadStatus.Unchanged, "the conversion's bytes reload as Unchanged");
+            Expect(!owner.FileChanged(), "the import's write is recorded");
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unchanged, "the import's bytes reload as Unchanged");
 
             ExpectSaved(owner.Save(c => c.WorldSpaceYaw = true));
             Expect(!owner.FileChanged(), "the save's write is recorded");
@@ -925,23 +895,33 @@ namespace CameraUnlock.Core.Tests.Config
                 "an outside edit is applied");
             Expect(!owner.FileChanged(), "the reload records the write time");
             Expect(rig.Legacy.Runs == 1 && rig.Sink.Count == 0, "no import and nothing reported");
+            rig.ExpectLegacyKept();
+            ExpectListing(dir, FileName, LegacyName);
         }
 
-        private static void ReloadOfAnOldFileIsReadOnly(string dir)
+        private static void ReloadReadsAnUnstampedConfigAndNeverImports(string dir)
         {
             var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
+            rig.PutLegacy(Ascii(LegacyText));
             ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
             ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText.Replace("5555", "7000")));
+
+            string unstamped = Encoding.ASCII.GetString(WithoutStamp(File.ReadAllBytes(rig.Path)));
+            File.WriteAllBytes(rig.Path, Ascii(unstamped.Replace("UdpPort=5555", "UdpPort=7000")));
             ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
-            Expect(reload.Status == ConfigReloadStatus.LegacyReadOnly && reload.Config.UdpPort == 7000,
-                "an old file put back is read through the import, got " + reload.Status);
-            ExpectContains(reload.Reason, "converted at the next launch");
-            Expect(rig.Legacy.Runs == 2, "the import ran again");
-            ExpectBytes(rig.Path, Ascii(LegacyText.Replace("5555", "7000")));
-            ExpectListing(dir, FileName, FileName + ".pre-canonical");
-            Expect(rig.Sink.Count == 0, "a read-only reload is not a failure");
+            Expect(reload.Status == ConfigReloadStatus.Applied && reload.Config.UdpPort == 7000,
+                "an unstamped config is read as canonical, got " + reload.Status);
+            Expect(rig.Legacy.Runs == 1, "the reload does not import");
+
+            File.Delete(rig.Path);
+            reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Unreadable && reload.Config == null,
+                "a deleted config keeps the settings, got " + reload.Status);
+            ExpectContains(reload.Reason, FileName + " is missing, so the current settings stay");
+            Expect(rig.Legacy.Runs == 1, "the reload does not import the legacy file in place of a deleted config");
+            ExpectSunkOnce(rig, reload.Reason);
+            rig.ExpectLegacyKept();
+            ExpectListing(dir, LegacyName);
         }
 
         private static void ReloadOfAnUnreadableFileKeepsTheSettings(string dir)
@@ -956,51 +936,8 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(reload.Status == ConfigReloadStatus.Unreadable && reload.Config == null, "Unreadable, with no settings");
             ExpectContains(reload.Reason, "it is saved as UTF-16");
             ExpectSunkOnce(rig, reload.Reason);
-            Expect(rig.Legacy.Runs == 0, "a stamped file is never imported");
+            Expect(rig.Legacy.Runs == 0, "the config is never imported");
             ExpectBytes(rig.Path, utf16);
-        }
-
-        private static void ReloadOfAnOldFileTheImportCannotFindKeepsTheSettings(string dir)
-        {
-            var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
-            ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            rig.Legacy.Result = config => ImportResult.Absent(new DroppedValue[0]);
-            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
-            Expect(reload.Status == ConfigReloadStatus.Unreadable && reload.Config == null,
-                "an import that finds no file leaves the settings, got " + reload.Status);
-            ExpectContains(reload.Reason, "the old settings reader could not find the file");
-            Expect(reload.Log.Contains(rig.Path + ": not reloaded: the old settings reader found no file, while the owner holds it "
-                + "open (" + LegacyText.Length.ToString(CultureInfo.InvariantCulture) + " bytes)"), "the log gives both views");
-            ExpectSunkOnce(rig, reload.Reason);
-            Expect(rig.Legacy.Runs == 2, "the import ran on the reload");
-            ExpectBytes(rig.Path, Ascii(LegacyText));
-        }
-
-        private static void ReloadOfAnOldFileChangedDuringTheImportKeepsTheSettings(string dir)
-        {
-            var rig = new Rig(dir);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
-            ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
-            File.WriteAllBytes(rig.Path, Ascii(LegacyText));
-            string changed = LegacyText.Replace("5555", "7000");
-            rig.Legacy.During = input => File.WriteAllBytes(input.Path, Ascii(changed));
-            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
-            Expect(reload.Status == ConfigReloadStatus.Unreadable && reload.Config == null,
-                "a file changed while the import read it leaves the settings, got " + reload.Status);
-            ExpectContains(reload.Reason, "the file was changed by another program while it was read");
-            ExpectSunkOnce(rig, reload.Reason);
-            ExpectBytes(rig.Path, Ascii(changed));
-
-            rig.Legacy.During = null;
-            rig.Sink.Clear();
-            reload = owner.Reload();
-            Expect(reload.Status == ConfigReloadStatus.LegacyReadOnly && reload.Config.UdpPort == 7000,
-                "the next reload reads the settled file, got " + reload.Status);
-            Expect(rig.Sink.Count == 0, "nothing more is reported");
         }
 
         private static void OptionsAndCallOrderAreChecked(string dir)
@@ -1018,14 +955,19 @@ namespace CameraUnlock.Core.Tests.Config
             ConfigOwnerOptions<HeadTrackingConfigData> badHeader = Options(path);
             badHeader.Header = new RenderHeader("ABZÛU");
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(badHeader), "a header the renderer refuses");
+            ConfigOwnerOptions<HeadTrackingConfigData> importWithoutSource = Options(path);
+            importWithoutSource.Import = new Legacy().Import;
+            ArgumentException e = ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(importWithoutSource),
+                "an import with no legacy file");
+            ExpectContains(e.Message, "Import is set, but no LegacySourcePath names the file it reads");
             ConfigOwnerOptions<HeadTrackingConfigData> sourceWithoutImport = Options(path);
-            sourceWithoutImport.LegacySourcePath = Path.Combine(dir, "x.cfg");
+            sourceWithoutImport.LegacySourcePath = Path.Combine(dir, LegacyName);
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(sourceWithoutImport),
-                "a legacy source with no import");
+                "a legacy file with no import");
             ConfigOwnerOptions<HeadTrackingConfigData> sourceIsPath = Options(path);
             sourceIsPath.Import = new Legacy().Import;
             sourceIsPath.LegacySourcePath = path;
-            ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(sourceIsPath), "a legacy source that is the file");
+            ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(sourceIsPath), "a legacy file that is the config");
 
             var owner = new ConfigOwner<HeadTrackingConfigData>(Options(path));
             ExpectThrows<InvalidOperationException>(() => owner.Save(c => c.WorldSpaceYaw = false), "Save before Load");
@@ -1087,27 +1029,46 @@ namespace CameraUnlock.Core.Tests.Config
 
         private sealed class Rig
         {
+            public readonly string Dir;
             public readonly string Path;
+            public readonly string LegacyPath;
             public readonly List<string> Sink = new List<string>();
             public readonly Legacy Legacy = new Legacy();
             public Action<string, string> Hook;
-            public string LegacySource;
             public bool WithImport = true;
+            private byte[] _legacyBytes;
 
-            public Rig(string dir) : this(dir, FileName)
+            public Rig(string dir)
             {
+                Dir = dir;
+                Path = System.IO.Path.Combine(dir, FileName);
+                LegacyPath = System.IO.Path.Combine(dir, LegacyName);
             }
 
-            public Rig(string dir, string name)
+            public void PutLegacy(byte[] bytes)
             {
-                Path = System.IO.Path.Combine(dir, name);
+                File.WriteAllBytes(LegacyPath, bytes);
+                File.SetLastWriteTimeUtc(LegacyPath, LegacyWriteTime);
+                _legacyBytes = bytes;
+            }
+
+            public void ExpectLegacyKept()
+            {
+                ExpectLegacyKept(_legacyBytes, "");
+            }
+
+            public void ExpectLegacyKept(byte[] bytes, string when)
+            {
+                ExpectBytes(LegacyPath, bytes);
+                Expect(File.GetLastWriteTimeUtc(LegacyPath) == LegacyWriteTime,
+                    when + (when.Length == 0 ? "" : ": ") + LegacyPath + " was written at " + File.GetLastWriteTimeUtc(LegacyPath).ToString("o"));
             }
 
             public ConfigOwner<HeadTrackingConfigData> Owner()
             {
                 ConfigOwnerOptions<HeadTrackingConfigData> options = Options(Path);
                 options.Import = WithImport ? Legacy.Import : null;
-                options.LegacySourcePath = LegacySource;
+                options.LegacySourcePath = WithImport ? LegacyPath : null;
                 options.StatusSink = message => Sink.Add(message);
                 return new ConfigOwner<HeadTrackingConfigData>(options, (step, path) =>
                 {
@@ -1147,13 +1108,12 @@ namespace CameraUnlock.Core.Tests.Config
                 if (During != null) During(input);
                 if (Result != null) return Result(config);
 
-                string path = input.LegacySourcePath ?? input.Path;
                 int port = 4242;
                 bool yawWorld = true;
                 bool position = true;
                 float light = HeadFollowLightSettings.DefaultMultiplier;
                 string section = "";
-                foreach (string raw in File.ReadAllLines(path))
+                foreach (string raw in File.ReadAllLines(input.Path))
                 {
                     string line = raw.Trim();
                     if (line.StartsWith("[", StringComparison.Ordinal) && line.EndsWith("]", StringComparison.Ordinal))
@@ -1207,11 +1167,18 @@ namespace CameraUnlock.Core.Tests.Config
                 "the sink got [" + string.Join(" | ", rig.Sink.ToArray()) + "], expected [" + message + "]");
         }
 
-        // A deferred conversion leaves the legacy file as it was and writes no copy.
-        private static void ExpectUntouched(Rig rig)
+        // An import that did not complete leaves the legacy file as it was and creates nothing.
+        private static void ExpectNotImported(Rig rig)
         {
-            ExpectBytes(rig.Path, Ascii(LegacyText));
-            ExpectListing(System.IO.Path.GetDirectoryName(rig.Path), FileName);
+            rig.ExpectLegacyKept();
+            ExpectListing(rig.Dir, LegacyName);
+        }
+
+        private static void ExpectImported(Rig rig)
+        {
+            ExpectBytes(rig.Path, MigratedBytes());
+            rig.ExpectLegacyKept();
+            ExpectListing(rig.Dir, FileName, LegacyName);
         }
 
         private static void ExpectLogLine(ConfigLoadResult<HeadTrackingConfigData> load, string line)

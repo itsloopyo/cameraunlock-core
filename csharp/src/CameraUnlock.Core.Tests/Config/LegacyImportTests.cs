@@ -238,12 +238,12 @@ namespace CameraUnlock.Core.Tests.Config
             }, new[] { new LegacyKey("Smoothing", "RemoteSmoothing"), new LegacyKey("", "ToggleKey") });
 
             var target = new RuntimeConfig();
-            ImportResult result = import.Run(new LegacyImportInput(@"C:\Game\BepInEx\config\a.ini", @"C:\Game\BepInEx\config\a.cfg"), target);
+            ImportResult result = import.Run(new LegacyImportInput(@"C:\Game\BepInEx\config\a.cfg"), target);
             Assert.Equal(ImportStatus.Imported, result.Status);
             Assert.Single(result.Dropped);
             Assert.Equal(0.15f, target.RemoteSmoothing);
             Assert.Equal("F9", target.ToggleKey);
-            Assert.Equal(@"C:\Game\BepInEx\config\a.cfg", seen!.LegacySourcePath);
+            Assert.Equal(@"C:\Game\BepInEx\config\a.cfg", seen!.Path);
             Assert.Equal(2, import.Keys.Count);
             Assert.Equal("", import.Keys[1].Section);
         }
@@ -257,10 +257,8 @@ namespace CameraUnlock.Core.Tests.Config
                 () => new LegacyImport<RuntimeConfig>((i, c) => ImportResult.Absent(new DroppedValue[0]), new LegacyKey[] { null! }));
             Assert.Throws<ArgumentException>(() => new LegacyKey("General", ""));
             Assert.Throws<ArgumentNullException>(() => new LegacyKey(null!, "Key"));
-            Assert.Throws<ArgumentNullException>(() => new LegacyImportInput(null!, null));
-            Assert.Throws<ArgumentException>(() => new LegacyImportInput("", null));
-            Assert.Throws<ArgumentException>(() => new LegacyImportInput("a.ini", ""));
-            Assert.Null(new LegacyImportInput("HeadTracking.ini", null).LegacySourcePath);
+            Assert.Throws<ArgumentNullException>(() => new LegacyImportInput(null!));
+            Assert.Throws<ArgumentException>(() => new LegacyImportInput(""));
         }
     }
 }

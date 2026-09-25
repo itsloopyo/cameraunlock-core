@@ -63,7 +63,7 @@ namespace CameraUnlock.Core.Tests
             }
             foreach (string label in ConfigOwnerScenarios.InterruptionLabels)
             {
-                failures += Report("conversion-killed-at-" + label, dir => ConversionKilledAt(label, dir));
+                failures += Report("import-killed-at-" + label, dir => ImportKilledAt(label, dir));
             }
 
             Console.WriteLine("Canonical INI reader fixtures");
@@ -189,8 +189,8 @@ namespace CameraUnlock.Core.Tests
             }
         }
 
-        // The child is killed at the start of the labelled conversion step, so every step before it has run.
-        private static void ConversionKilledAt(string label, string dir)
+        // The child is killed at the start of the labelled import step, so every step before it has run.
+        private static void ImportKilledAt(string label, string dir)
         {
             ConfigOwnerScenarios.PrepareInterruption(dir);
             var start = new ProcessStartInfo(Assembly.GetEntryAssembly().Location,

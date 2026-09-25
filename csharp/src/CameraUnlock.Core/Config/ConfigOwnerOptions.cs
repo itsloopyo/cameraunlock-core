@@ -9,7 +9,11 @@ namespace CameraUnlock.Core.Config
     /// </summary>
     public sealed class ConfigOwnerOptions<TConfig> where TConfig : class
     {
-        /// <summary>The config file, as an absolute path. Required.</summary>
+        /// <summary>
+        /// The config file, as an absolute path: <c>CameraUnlock.ini</c>, in the folder that holds
+        /// the game's legacy file where it has one (<c>BepInEx\config\CameraUnlock.ini</c> for a
+        /// BepInEx plugin). Required.
+        /// </summary>
 #if NULLABLE_ENABLED
         public string? Path { get; set; }
 #else
@@ -25,8 +29,8 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// The game's frozen legacy import, or null for a game that never published a build
-        /// reading a pre-canonical file. With an import, a file with no [CameraUnlock] stamp is a
-        /// legacy file: it is converted once, never edited.
+        /// before the canonical format. Needs <see cref="LegacySourcePath"/>, the one file it
+        /// reads.
         /// <para>
         /// A BepInEx import binds the plugin's frozen definitions on the plugin's own
         /// <c>Config</c>. BepInEx's ConfigFile already read the .cfg in its constructor, before
@@ -43,18 +47,14 @@ namespace CameraUnlock.Core.Config
 #endif
 
         /// <summary>
-        /// The pre-canonical file when it is not the file at <see cref="Path"/>, as an absolute
-        /// path: a BepInEx plugin's <c>&lt;GUID&gt;.cfg</c> beside its <c>&lt;GUID&gt;.ini</c>. Needs
-        /// <see cref="Import"/>. When <see cref="Path"/> is absent and this file exists, the import
-        /// reads this file and the owner creates <see cref="Path"/> from it; this file is never
-        /// written and no copy of it is made. The import reads only this file, so a file at
-        /// <see cref="Path"/> is always read as canonical, and one missing its stamp gets it at the
-        /// next save.
-        /// <para>
-        /// Null: the legacy file is the one at <see cref="Path"/>, and it is converted in place,
-        /// keeping its bytes in <c>&lt;Path&gt;.pre-canonical</c> (the first conversion) and
-        /// <c>&lt;Path&gt;.pre-canonical.last</c> (a later one whose input differs from the first).
-        /// </para>
+        /// The game's legacy file, as an absolute path, normally in the same folder as
+        /// <see cref="Path"/>: <c>HeadTracking.ini</c> beside <c>CameraUnlock.ini</c>, or a BepInEx
+        /// plugin's <c>BepInEx\config\&lt;GUID&gt;.cfg</c> beside
+        /// <c>BepInEx\config\CameraUnlock.ini</c>. Required with <see cref="Import"/>, refused
+        /// without it, and refused when it names <see cref="Path"/>. Only while no file exists at
+        /// <see cref="Path"/> does the import read this file, and the owner then creates
+        /// <see cref="Path"/> from what it gives. Once <see cref="Path"/> exists this file is not
+        /// read again. It is never written, renamed, deleted or copied.
         /// </summary>
 #if NULLABLE_ENABLED
         public string? LegacySourcePath { get; set; }
@@ -71,7 +71,7 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// Shows the player a one-line message, e.g. through the game's toast, when settings are
-        /// not converted, cannot be read or are not saved. Optional. It runs after the owner has
+        /// not imported, cannot be read or are not saved. Optional. It runs after the owner has
         /// released its lock.
         /// </summary>
 #if NULLABLE_ENABLED

@@ -9,11 +9,12 @@ using System.Text;
 namespace CameraUnlock.Core.Config
 {
     /// <summary>
-    /// The one reader and writer of a game's canonical config file. It converts a legacy file once
-    /// through the game's frozen import, creates a missing file from the table's defaults, saves
-    /// the rows the table marks Writable, and reloads. It writes only through
-    /// <see cref="CheckedFileWriter"/>, so every write replaces the whole file or nothing. The C++
-    /// twin is cameraunlock::config::ConfigOwner. Windows only.
+    /// The one reader and writer of a game's canonical config file. While that file is absent it
+    /// imports the game's legacy file, a separate file it never writes, through the game's frozen
+    /// import into a new config file, or creates the config file from the table's defaults. It
+    /// saves the rows the table marks Writable, and reloads. It writes only the config file, and
+    /// only through <see cref="CheckedFileWriter"/>, so every write replaces the whole file or
+    /// nothing. The C++ twin is cameraunlock::config::ConfigOwner. Windows only.
     /// <para>
     /// Build it before anything reads the file, and read the file only through it. One lock
     /// serializes <see cref="Load"/>, <see cref="Reload"/> and <see cref="Save"/>; the status sink
@@ -30,8 +31,6 @@ namespace CameraUnlock.Core.Config
     /// </summary>
     public sealed class ConfigOwner<TConfig> where TConfig : class
     {
-        private const string CopySuffix = ".pre-canonical";
-        private const string LastCopySuffix = ".pre-canonical.last";
         private const string StampSection = "CameraUnlock";
         private const string ChangedWhileRead = "the file was changed by another program while it was read";
         private const int HResultAccessDenied = unchecked((int)0x80070005);
@@ -70,9 +69,10 @@ namespace CameraUnlock.Core.Config
 
         /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
         /// <exception cref="ArgumentException">Path, Table or Header is missing; a path is not
-        /// absolute; LegacySourcePath is set without an Import, or names Path; the table has both
-        /// RotationEnabled and PositionEnabled and marks only one of them Writable; a legacy key's
-        /// name holds an unpaired surrogate; or the table cannot render its defaults under the header.</exception>
+        /// absolute; Import is set without a LegacySourcePath; LegacySourcePath is set without an
+        /// Import, or names Path; the table has both RotationEnabled and PositionEnabled and marks
+        /// only one of them Writable; a legacy key's name holds an unpaired surrogate; or the table
+        /// cannot render its defaults under the header.</exception>
         /// <exception cref="PlatformNotSupportedException">Not running on Windows.</exception>
         public ConfigOwner(ConfigOwnerOptions<TConfig> options)
             : this(options, null)
@@ -81,11 +81,11 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// <see cref="ConfigOwner{TConfig}(ConfigOwnerOptions{TConfig})"/> with a hook run before each
-        /// step, given a label and the path the step acts on: <c>Open</c>, <c>Import</c>,
-        /// <c>Recheck</c>, <c>ReadBack</c> (of the copy) and <c>Remember</c> for the conversion's own
-        /// steps, and <c>Copy.</c>, <c>Commit.</c>, <c>Create.</c> or <c>Save.</c> followed by a
-        /// <see cref="CheckedWriteStep"/> name for the writer's. A test throws from it to fail a step, or ends the process to
-        /// interrupt one.
+        /// step, given a label and the path the step acts on: <c>Open</c> (the config file, then the
+        /// legacy file), <c>Import</c>, <c>Recheck</c> and <c>Remember</c> for the import's own steps,
+        /// and <c>Commit.</c>, <c>Create.</c> or <c>Save.</c> followed by a
+        /// <see cref="CheckedWriteStep"/> name for the writer's. A test throws from it to fail a step,
+        /// or ends the process to interrupt one.
         /// </summary>
 #if NULLABLE_ENABLED
         internal ConfigOwner(ConfigOwnerOptions<TConfig> options, Action<string, string>? beforeStep)
@@ -101,6 +101,10 @@ namespace CameraUnlock.Core.Config
             if (options.Table == null) throw new ArgumentException("the options name no Table", "options");
             if (options.Header == null) throw new ArgumentException("the options name no Header", "options");
             _path = AbsolutePath(options.Path, "Path");
+            if (options.Import != null && options.LegacySourcePath == null)
+            {
+                throw new ArgumentException("Import is set, but no LegacySourcePath names the file it reads", "options");
+            }
             if (options.LegacySourcePath != null)
             {
                 if (options.Import == null)
@@ -140,37 +144,31 @@ namespace CameraUnlock.Core.Config
             }
         }
 
-        // The import reads the file at Path only when it has no separate source to read.
-        private bool ImportReadsPath
-        {
-            get { return _import != null && _legacySourcePath == null; }
-        }
-
         /// <summary>
-        /// Reads the file, and converts, creates or refuses it first where it has to:
+        /// Reads the config file, first importing the legacy file or creating the config file where
+        /// there is none:
         /// <list type="bullet">
-        /// <item>With LegacySourcePath set, no file at Path and a file at LegacySourcePath: that file
-        /// is converted into a new file at Path (Migrated).</item>
-        /// <item>No file: the table's defaults are rendered and the file created, never over a file
+        /// <item>A file at Path: read as canonical (Canonical), stamped or not, or Unreadable when
+        /// saved as UTF-16 or holding a NUL. An unstamped file gets a line in the log saying the
+        /// next save stamps it. The import never runs and the legacy file is never opened; when one
+        /// exists, a line in the log says the settings are read from Path and the legacy file is
+        /// not read.</item>
+        /// <item>No file at Path and a file at LegacySourcePath: the legacy file is imported into a
+        /// new file at Path (Migrated).</item>
+        /// <item>Neither: the table's defaults are rendered and the file created, never over a file
         /// that appears meanwhile (Created). If one appears, or the folder cannot be written, the
         /// session runs on the defaults and nothing retries (Deferred).</item>
-        /// <item>A [CameraUnlock] stamp, looked for in a UTF-16 file's text too: read as canonical
-        /// (Canonical), or Unreadable when saved as UTF-16 or holding a NUL. The import never runs.</item>
-        /// <item>No stamp, and the import reads this file: converted (Migrated).</item>
-        /// <item>No stamp and no import for it: read as canonical with a line in the log saying
-        /// the next save stamps it (Canonical), or Unreadable.</item>
         /// </list>
         /// <para>
-        /// A conversion holds the legacy file open, readable and writable by others but not
+        /// An import holds the legacy file open, readable and writable by others but not
         /// deletable, while it reads the bytes, runs the import and reads the bytes again; bytes
         /// that changed meanwhile defer it. It then renders the imported settings, reads the render
         /// back through the table and requires every row to equal the import's (floats bitwise),
-        /// keeps the original bytes in <c>.pre-canonical</c> (or <c>.pre-canonical.last</c>) beside
-        /// the file, reads that copy back, and replaces the file only if it still holds the bytes
-        /// the import read. Any failure defers: the file is left as it was, the session runs on
-        /// what the import gave, the player is told once through the status sink, and the next
-        /// launch tries again. A process killed at any point leaves the legacy file whole, or the
-        /// new file whole.
+        /// and creates the file at Path only if no file has appeared there. Any failure defers: Path
+        /// is not created, the session runs on what the import gave, the player is told once
+        /// through the status sink, and the next launch tries again. The legacy file is never
+        /// written, renamed, deleted or copied, whatever happens. A process killed at any point
+        /// leaves Path absent or whole.
         /// </para>
         /// <para>
         /// Ordinary I/O failures are reported through the result. An import that throws, or a
@@ -197,16 +195,15 @@ namespace CameraUnlock.Core.Config
         /// table, or this throws. When RotationEnabled or PositionEnabled changes, both are written,
         /// so a tracking mode is always one edit.
         /// <para>
-        /// Saves only a file the canonical reader can read, whose ConfigFormat is not newer than
-        /// this build's, and that is stamped or is read by no legacy import; an unstamped file, or
-        /// a stamp with no ConfigFormat or one that is not a number, gets its [CameraUnlock]
-        /// ConfigFormat line in the same write. The edited bytes are read back
-        /// through the table before anything is written: only the changed rows may differ, and they
-        /// must hold the new values. Rows already holding the values write nothing and report
-        /// Saved. A missing file is not created here: <see cref="Load"/> creates it at the next
-        /// launch, and for a BepInEx plugin that is where the .cfg is converted. After a Deferred,
-        /// LegacyRefused or Unreadable load nothing is saved that session, until a Reload applies a
-        /// readable file.
+        /// Saves only a file the canonical reader can read and whose ConfigFormat is not newer than
+        /// this build's; an unstamped file, or a stamp with no ConfigFormat or one that is not a
+        /// number, gets its [CameraUnlock] ConfigFormat line in the same write. The edited bytes are
+        /// read back through the table before anything is written: only the changed rows may
+        /// differ, and they must hold the new values. Rows already holding the values write nothing
+        /// and report Saved. A missing file is not created here: <see cref="Load"/> creates it at the
+        /// next launch, importing the legacy file if there is one. After a Deferred, LegacyRefused
+        /// or Unreadable load nothing is saved that session, until a Reload applies a readable file.
+        /// The legacy file is never written.
         /// </para>
         /// <para>
         /// Never rolls back and never retries. NotSaved and Uncertain are handed to the status sink
@@ -235,14 +232,11 @@ namespace CameraUnlock.Core.Config
         /// <summary>
         /// Reads the file again, for a watcher that saw <see cref="FileChanged"/> or a reload the
         /// player asked for. Unchanged when the file holds exactly the bytes the owner last wrote,
-        /// the conversion's and creation's included, and no Reload has applied other bytes since.
-        /// A file with no stamp that the legacy import
-        /// reads is read through it, held open as a conversion holds it, and never written
-        /// (LegacyReadOnly); the next launch converts it. An import that refuses the file, cannot
-        /// decode it or finds none, or a file that changes while the import reads it, is
-        /// Unreadable. Unreadable leaves the game's settings as they are and is handed to the
-        /// status sink.
-        /// Never writes and never converts.
+        /// the import's and creation's included, and no Reload has applied other bytes since. Any
+        /// other file is read as canonical, stamped or not (Applied). A missing file, or one the
+        /// canonical reader cannot read, is Unreadable, which leaves the game's settings as they
+        /// are and is handed to the status sink. Reads only the file at Path: never writes, never
+        /// imports and never opens the legacy file.
         /// </summary>
         /// <exception cref="InvalidOperationException">Load has not run.</exception>
         public ConfigReloadResult<TConfig> Reload()
@@ -281,21 +275,22 @@ namespace CameraUnlock.Core.Config
             _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
 
 #if NULLABLE_ENABLED
-            Held? held;
+            byte[]? bytes;
+            Held? held = null;
 #else
-            Held held;
+            byte[] bytes;
+            Held held = null;
 #endif
             string opening = _path;
             try
             {
                 Step("Open", opening);
-                held = Held.Open(opening);
-                if (held == null && _legacySourcePath != null)
+                bytes = ReadIfPresent(opening);
+                if (bytes == null && _legacySourcePath != null)
                 {
                     opening = _legacySourcePath;
                     Step("Open", opening);
                     held = Held.Open(opening);
-                    if (held != null) return Migrate(held, opening, false, log);
                 }
             }
             catch (IOException e)
@@ -306,13 +301,18 @@ namespace CameraUnlock.Core.Config
             {
                 return CannotRead(opening, e, log);
             }
-            if (held == null) return Create(log);
 
-            byte[] bytes = held.Snapshot;
-            bool stamped = CanonicalIni.HasStamp(bytes);
-            if (!stamped && ImportReadsPath) return Migrate(held, _path, true, log);
-            held.Dispose();
-            return ReadCanonical(bytes, stamped, log);
+            if (bytes != null)
+            {
+                if (_legacySourcePath != null && File.Exists(_legacySourcePath))
+                {
+                    log.Add(_path + ": settings are read from this file. " + _legacySourcePath
+                        + " is left as it was and is not read.");
+                }
+                return ReadCanonical(bytes, CanonicalIni.HasStamp(bytes), log);
+            }
+            if (held != null) return Migrate(held, opening, log);
+            return Create(log);
         }
 
         private ConfigLoadResult<TConfig> CannotRead(string path, Exception e, List<string> log)
@@ -372,7 +372,7 @@ namespace CameraUnlock.Core.Config
                 _name + " was not created: " + why + ". The mod runs on its default settings this session.");
         }
 
-        private ConfigLoadResult<TConfig> Migrate(Held held, string input, bool inPlace, List<string> log)
+        private ConfigLoadResult<TConfig> Migrate(Held held, string input, List<string> log)
         {
             byte[] snapshot = held.Snapshot;
             TConfig imported = _table.CreateDefaults();
@@ -385,7 +385,7 @@ namespace CameraUnlock.Core.Config
             try
             {
                 Step("Import", input);
-                import = RequireImport().Run(new LegacyImportInput(_path, inPlace ? null : _legacySourcePath), imported);
+                import = RequireImport().Run(new LegacyImportInput(input), imported);
                 if (import == null) throw new InvalidOperationException("the legacy import returned no result");
                 Step("Recheck", input);
                 try
@@ -403,20 +403,21 @@ namespace CameraUnlock.Core.Config
                 held.Dispose();
             }
 
-            if (changedWhy != null) return Defer(imported, log, changedWhy);
+            if (changedWhy != null) return Defer(imported, input, log, changedWhy);
             switch (import.Status)
             {
                 case ImportStatus.Refused:
                     log.Add(input + ": the old settings reader refused the file: " + import.Reason);
-                    return Result(ConfigLoadStatus.LegacyRefused, imported, NoDiagnostics(), log, NotConverted(import.Reason));
+                    return Result(ConfigLoadStatus.LegacyRefused, imported, NoDiagnostics(), log,
+                        NotImported(input, import.Reason));
                 case ImportStatus.Undecodable:
                     log.Add(input + ": the old settings reader could not decode the file: " + import.Reason);
-                    return Defer(imported, log, import.Reason);
+                    return Defer(imported, input, log, import.Reason);
                 case ImportStatus.Absent:
                     log.Add(input + ": the old settings reader found no file, while the owner holds it open ("
                         + snapshot.Length.ToString(CultureInfo.InvariantCulture) + " bytes)");
                     LogDropped(import, input, log);
-                    return Defer(imported, log, "the old settings reader could not find the file");
+                    return Defer(imported, input, log, "the old settings reader could not find the file");
             }
             LogDropped(import, input, log);
 
@@ -430,7 +431,7 @@ namespace CameraUnlock.Core.Config
                 int row = FirstUnwritable(imported);
                 if (row < 0) throw;
                 log.Add(input + ": " + _table.RowName(row) + " cannot be written in the new format: " + e.Message);
-                return Defer(imported, log, Unconvertible(row, imported));
+                return Defer(imported, input, log, Unconvertible(row, imported));
             }
 
             CanonicalIni doc = CanonicalIni.Parse(rendered);
@@ -442,116 +443,44 @@ namespace CameraUnlock.Core.Config
             {
                 log.Add(input + ": " + _table.RowName(different) + " reads back from the new format as "
                     + _table.RowValueText(different, reread) + ", not " + _table.RowValueText(different, imported));
-                return Defer(imported, log, Unconvertible(different, imported));
+                return Defer(imported, input, log, Unconvertible(different, imported));
             }
 
-#if NULLABLE_ENABLED
-            string? kept = null;
-#else
-            string kept = null;
-#endif
             try
             {
-                if (inPlace)
-                {
-                    kept = KeepOriginal(snapshot, log);
-                    if (kept == null) return Defer(imported, log, "the copy of the original file could not be written");
-                }
-
-                CheckedWriteOutcome outcome = CheckedFileWriter.Write(_path, inPlace ? snapshot : null, rendered,
-                    WriterHook("Commit."));
+                CheckedWriteOutcome outcome = CheckedFileWriter.Write(_path, null, rendered, WriterHook("Commit."));
                 if (outcome != CheckedWriteOutcome.Committed)
                 {
-                    log.Add(_path + ": not replaced: " + outcome);
-                    return Defer(imported, log, Conflict(outcome));
+                    log.Add(_path + ": not created: " + outcome);
+                    return Defer(imported, input, log, Conflict(outcome));
                 }
             }
             catch (CheckedWriteException e)
             {
                 log.Add(e.Message);
-                return Defer(imported, log, Why(e));
-            }
-            catch (IOException e)
-            {
-                log.Add(_path + ": " + e.Message);
-                return Defer(imported, log, Why(e));
-            }
-            catch (UnauthorizedAccessException e)
-            {
-                log.Add(_path + ": " + e.Message);
-                return Defer(imported, log, Why(e));
+                return Defer(imported, input, log, Why(e));
             }
 
             Step("Remember", _path);
             _committed = rendered;
             _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
             _savesAllowed = true;
-            log.Add(inPlace
-                ? _path + ": converted to the canonical format. The original is kept in " + kept + "."
-                : _path + ": created from " + input + ", which is left as it was.");
+            log.Add(_path + ": created from " + input + ", which is left as it was.");
             LogNotCarried(snapshot, input, log);
             log.AddRange(readBack);
             return Result(ConfigLoadStatus.Migrated, reread, diagnostics, log, string.Empty);
         }
 
-        // The file holding the snapshot, or null when the copy could not be written or does not read back.
-#if NULLABLE_ENABLED
-        private string? KeepOriginal(byte[] snapshot, List<string> log)
-#else
-        private string KeepOriginal(byte[] snapshot, List<string> log)
-#endif
+        private ConfigLoadResult<TConfig> Defer(TConfig config, string input, List<string> log, string why)
         {
-            string first = _path + CopySuffix;
-#if NULLABLE_ENABLED
-            byte[]? existing = ReadIfPresent(first);
-#else
-            byte[] existing = ReadIfPresent(first);
-#endif
-            if (existing == null) return WriteCopy(first, null, snapshot, log);
-            if (Same(existing, snapshot)) return first;
-
-            string last = _path + LastCopySuffix;
-#if NULLABLE_ENABLED
-            byte[]? previous = ReadIfPresent(last);
-#else
-            byte[] previous = ReadIfPresent(last);
-#endif
-            if (previous != null && Same(previous, snapshot)) return last;
-            return WriteCopy(last, previous, snapshot, log);
+            return Result(ConfigLoadStatus.Deferred, config, NoDiagnostics(), log, NotImported(input, why));
         }
 
-#if NULLABLE_ENABLED
-        private string? WriteCopy(string copy, byte[]? expected, byte[] snapshot, List<string> log)
-#else
-        private string WriteCopy(string copy, byte[] expected, byte[] snapshot, List<string> log)
-#endif
+        private string NotImported(string input, string why)
         {
-            CheckedWriteOutcome outcome = CheckedFileWriter.Write(copy, expected, snapshot, WriterHook("Copy."));
-            if (outcome != CheckedWriteOutcome.Committed)
-            {
-                log.Add(copy + ": not written: " + outcome);
-                return null;
-            }
-            Step("ReadBack", copy);
-            if (!Same(File.ReadAllBytes(copy), snapshot))
-            {
-                log.Add(copy + ": does not hold the bytes just written to it");
-                return null;
-            }
-            return copy;
+            return System.IO.Path.GetFileName(input) + " was not imported into " + _name + ": " + why
+                + ". The mod tries again at the next launch and saves nothing this session.";
         }
-
-        private ConfigLoadResult<TConfig> Defer(TConfig config, List<string> log, string why)
-        {
-            return Result(ConfigLoadStatus.Deferred, config, NoDiagnostics(), log, NotConverted(why));
-        }
-
-        private string NotConverted(string why)
-        {
-            return _name + " was not converted to the new settings format: " + why + ". The mod tries again at the next "
-                + "launch and saves nothing this session.";
-        }
-
         private string Unconvertible(int row, TConfig config)
         {
             return _table.RowName(row) + "=" + _table.RowValueText(row, config) + " cannot be converted";
@@ -606,11 +535,6 @@ namespace CameraUnlock.Core.Config
                 return NotSaved(_name + " was written by a newer version of the mod", null, log);
             }
             bool stamped = CanonicalIni.HasStamp(snapshot);
-            if (!stamped && ImportReadsPath)
-            {
-                log.Add(_path + ": not saved: it has no [CameraUnlock] section, so it is an old file");
-                return NotSaved(_name + " is in the old settings format; it is converted at the next launch", null, log);
-            }
 
             TConfig baseline = _table.CreateDefaults();
             _table.Apply(doc, baseline);
@@ -740,8 +664,6 @@ namespace CameraUnlock.Core.Config
                 return Reloaded(ConfigReloadStatus.Unchanged, null, NoDiagnostics(), log, string.Empty);
             }
 
-            if (!CanonicalIni.HasStamp(bytes) && ImportReadsPath) return ReloadLegacy(bytes, log);
-
             CanonicalIni doc = CanonicalIni.Parse(bytes);
             if (!doc.IsReadable)
             {
@@ -755,79 +677,6 @@ namespace CameraUnlock.Core.Config
             _committed = null;
             _savesAllowed = true;
             return Reloaded(ConfigReloadStatus.Applied, config, diagnostics, log, string.Empty);
-        }
-
-        // The import reads the file while it is held as a conversion holds it, so the settings it
-        // gives come from the bytes checked for a stamp.
-        private ConfigReloadResult<TConfig> ReloadLegacy(byte[] bytes, List<string> log)
-        {
-            TConfig imported = _table.CreateDefaults();
-            ImportResult import;
-#if NULLABLE_ENABLED
-            string? changedWhy = null;
-            Held? held;
-#else
-            string changedWhy = null;
-            Held held;
-#endif
-            try
-            {
-                held = Held.Open(_path);
-            }
-            catch (IOException e)
-            {
-                return NotReloaded(Why(e), e.Message, log);
-            }
-            catch (UnauthorizedAccessException e)
-            {
-                return NotReloaded(Why(e), e.Message, log);
-            }
-            if (held == null) return NotReloaded("the file was deleted while it was read", "the file is missing", log);
-            try
-            {
-                if (!Same(held.Snapshot, bytes)) return NotReloaded(ChangedWhileRead, ChangedWhileRead, log);
-                import = RequireImport().Run(new LegacyImportInput(_path, null), imported);
-                if (import == null) throw new InvalidOperationException("the legacy import returned no result");
-                try
-                {
-                    if (!Same(held.Reread(), bytes)) changedWhy = ChangedWhileRead;
-                }
-                catch (IOException e)
-                {
-                    changedWhy = Why(e);
-                    log.Add(_path + ": could not be read again after the import: " + e.Message);
-                }
-            }
-            finally
-            {
-                held.Dispose();
-            }
-
-            if (changedWhy != null) return NotReloaded(changedWhy, changedWhy, log);
-            switch (import.Status)
-            {
-                case ImportStatus.Refused:
-                case ImportStatus.Undecodable:
-                    return NotReloaded(import.Reason, "the old settings reader refused the file: " + import.Reason, log);
-                case ImportStatus.Absent:
-                    return NotReloaded("the old settings reader could not find the file",
-                        "the old settings reader found no file, while the owner holds it open ("
-                            + bytes.Length.ToString(CultureInfo.InvariantCulture) + " bytes)", log);
-            }
-            LogDropped(import, _path, log);
-            log.Add(_path + ": has no [CameraUnlock] section, so it is an old file. It is read, not saved, and "
-                + "converted at the next launch.");
-            _committed = null;
-            return Reloaded(ConfigReloadStatus.LegacyReadOnly, imported, NoDiagnostics(), log,
-                _name + " is in the old settings format. It is read, changes are not saved, and it is converted at the "
-                    + "next launch.");
-        }
-
-        private ConfigReloadResult<TConfig> NotReloaded(string why, string detail, List<string> log)
-        {
-            log.Add(_path + ": not reloaded: " + detail);
-            return Reloaded(ConfigReloadStatus.Unreadable, null, NoDiagnostics(), log,
-                _name + " cannot be read: " + why + ". The current settings stay.");
         }
 
         private List<CanonicalDiagnostic> Apply(CanonicalIni doc, TConfig config, List<string> log)
