@@ -38,7 +38,7 @@ namespace CameraUnlock.Core.Tests.Config
             public string CycleTrackingModeKey = "PageUp, Ctrl+Shift+G";
             public CameraMode Mode = CameraMode.UpdateCamera;
             public int LeanDelayMs = 50;
-            public float LeanScale = 1.0f;
+            public float LeanTraceLength = 1.0f;
             public double NearClip = 0.1;
             public int UpdateCameraSlot = 196;
             public uint PovOffset = 0x404;
@@ -83,9 +83,9 @@ namespace CameraUnlock.Core.Tests.Config
                 .Local("Camera", "Mode", c => c.Mode, (c, v) => c.Mode = v, ModeCodec(),
                     "ControlRotation or UpdateCamera (decoupled).")
                 .Local("Position", "LeanDelayMs", c => c.LeanDelayMs, (c, v) => c.LeanDelayMs = v, new IntCodec(),
-                    "Milliseconds before a lean starts, and how far it reaches.")
+                    "Milliseconds before a lean starts, and the metres its wall trace reaches.")
                 .Range(0, 1000)
-                .Local("Position", "LeanScale", c => c.LeanScale, (c, v) => c.LeanScale = v, new FloatCodec(), "")
+                .Local("Position", "LeanTraceLength", c => c.LeanTraceLength, (c, v) => c.LeanTraceLength = v, new FloatCodec(), "")
                 .Range(0, 2)
                 .Local("Camera", "NearClip", c => c.NearClip, (c, v) => c.NearClip = v, new DoubleCodec(),
                     "Near clip distance, in the game's units.")
@@ -249,7 +249,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "CycleTrackingModeKey", MakeField(new HotkeyCodec(), c => c.CycleTrackingModeKey, (c, v) => c.CycleTrackingModeKey = v) },
                 { "Mode", MakeField(ModeCodec(), c => c.Mode, (c, v) => c.Mode = v) },
                 { "LeanDelayMs", MakeField(new IntCodec(), c => c.LeanDelayMs, (c, v) => c.LeanDelayMs = v) },
-                { "LeanScale", MakeField(new FloatCodec(), c => c.LeanScale, (c, v) => c.LeanScale = v) },
+                { "LeanTraceLength", MakeField(new FloatCodec(), c => c.LeanTraceLength, (c, v) => c.LeanTraceLength = v) },
                 { "NearClip", MakeField(new DoubleCodec(), c => c.NearClip, (c, v) => c.NearClip = v) },
                 { "UpdateCameraSlot", MakeField(new IntCodec(), c => c.UpdateCameraSlot, (c, v) => c.UpdateCameraSlot = v) },
                 { "PovOffset", MakeField(new Hex32Codec(), c => c.PovOffset, (c, v) => c.PovOffset = v) },
@@ -267,7 +267,7 @@ namespace CameraUnlock.Core.Tests.Config
         private static readonly string[] FieldOrder =
         {
             "ToggleKey", "UdpPort", "PositionEnabled", "RotationEnabled", "EnableOnStartup", "LocalSmoothing",
-            "PositionLimitX", "CollisionChannel", "CycleTrackingModeKey", "Mode", "LeanDelayMs", "LeanScale", "NearClip",
+            "PositionLimitX", "CollisionChannel", "CycleTrackingModeKey", "Mode", "LeanDelayMs", "LeanTraceLength", "NearClip",
             "UpdateCameraSlot", "PovOffset", "CleanCameraReader", "HookOffsets", "AimCallers", "WidgetNames", "MarkerColor",
             "LogPath", "WriteLog", "ReloadKey",
         };

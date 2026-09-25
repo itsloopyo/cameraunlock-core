@@ -11,7 +11,7 @@ field	CollisionChannel	-1
 field	CycleTrackingModeKey	Ctrl+Alt+F12
 field	Mode	ControlRotation
 field	LeanDelayMs	0
-field	LeanScale	2.0
+field	LeanTraceLength	2.0
 field	NearClip	1e-05
 field	UpdateCameraSlot	0
 field	PovOffset	0x0

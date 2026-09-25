@@ -192,8 +192,8 @@ same text.
 | CollisionChannel | concept CollisionChannel | int | `3` | Engine |
 | CycleTrackingModeKey | concept CycleTrackingModeKey | hotkey | `PageUp, Ctrl+Shift+G` | |
 | Mode | local [Camera] Mode | enum `ControlRotation`, `UpdateCamera` | `UpdateCamera` | comment `ControlRotation or UpdateCamera (decoupled).` |
-| LeanDelayMs | local [Position] LeanDelayMs | int | `50` | comment `Milliseconds before a lean starts, and how far it reaches.`; Range(0, 1000) |
-| LeanScale | local [Position] LeanScale | float | `1.0` | no comment; Range(0, 2) |
+| LeanDelayMs | local [Position] LeanDelayMs | int | `50` | comment `Milliseconds before a lean starts, and the metres its wall trace reaches.`; Range(0, 1000) |
+| LeanTraceLength | local [Position] LeanTraceLength | float | `1.0` | no comment; Range(0, 2) |
 | NearClip | local [Camera] NearClip | double | `0.1` | comment `Near clip distance, in the game's units.` |
 | UpdateCameraSlot | local [Camera] UpdateCameraSlot | int | `196` | comment `Engine values. The commented lines show the built-in values.` and `Delete the ; to pin your own.`; Engine |
 | PovOffset | local [Camera] PovOffset | hex32 | `0x404` | no comment; Engine |

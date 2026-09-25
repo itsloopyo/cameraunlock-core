@@ -119,7 +119,7 @@ struct FixtureConfig {
     std::string cycle_key = "PageUp, Ctrl+Shift+G";
     CameraMode mode = CameraMode::kUpdateCamera;
     int lean_delay_ms = 50;
-    float lean_scale = 1.0f;
+    float lean_trace_length = 1.0f;
     double near_clip = 0.1;
     int update_camera_slot = 196;
     std::uint32_t pov_offset = 0x404;
@@ -161,9 +161,9 @@ ConfigTable<FixtureConfig> FixtureTable() {
         .Concept<Concept::CycleTrackingModeKey>(&F::cycle_key)
         .Local("Camera", "Mode", &F::mode, ModeCodec(), "ControlRotation or UpdateCamera (decoupled).")
         .Local("Position", "LeanDelayMs", &F::lean_delay_ms, IntCodec<int>(),
-               "Milliseconds before a lean starts, and how far it reaches.")
+               "Milliseconds before a lean starts, and the metres its wall trace reaches.")
         .Range(0, 1000)
-        .Local("Position", "LeanScale", &F::lean_scale, FloatCodec(), "")
+        .Local("Position", "LeanTraceLength", &F::lean_trace_length, FloatCodec(), "")
         .Range(0, 2)
         .Local("Camera", "NearClip", &F::near_clip, DoubleCodec(), "Near clip distance, in the game's units.")
         .Local("Camera", "UpdateCameraSlot", &F::update_camera_slot, IntCodec<int>(),
@@ -220,7 +220,7 @@ std::vector<FieldAccess> Fields() {
         FieldOf("CycleTrackingModeKey", HotkeyCodec(), &F::cycle_key),
         FieldOf("Mode", ModeCodec(), &F::mode),
         FieldOf("LeanDelayMs", IntCodec<int>(), &F::lean_delay_ms),
-        FieldOf("LeanScale", FloatCodec(), &F::lean_scale),
+        FieldOf("LeanTraceLength", FloatCodec(), &F::lean_trace_length),
         FieldOf("NearClip", DoubleCodec(), &F::near_clip),
         FieldOf("UpdateCameraSlot", IntCodec<int>(), &F::update_camera_slot),
         FieldOf("PovOffset", Hex32Codec(), &F::pov_offset),
@@ -410,10 +410,10 @@ void TestConstructionChecks() {
                        "head pose as the tracker sends it, with no deadzone of its own."),
               std::string("a local row in [") + section + "] throws");
     }
-    Check(Thrown([] { ConfigTable<S>().Local("Position", "LeanScale", &S::scale, FloatCodec(), "One."); }) ==
+    Check(Thrown([] { ConfigTable<S>().Local("Position", "LeanTraceLength", &S::scale, FloatCodec(), "One."); }) ==
               "(nothing thrown)",
           "a local row in [Position] is allowed");
-    Check(Contains(Thrown([] { ConfigTable<S>().Local("POSITION", "LeanScale", &S::scale, FloatCodec(), "One."); }),
+    Check(Contains(Thrown([] { ConfigTable<S>().Local("POSITION", "LeanTraceLength", &S::scale, FloatCodec(), "One."); }),
                    "the schema spells this section [Position]"),
           "a schema section in other letter case throws");
     Check(Contains(Thrown([] {
@@ -460,7 +460,7 @@ void TestConstructionChecks() {
           "a row with no comment after a row of another section throws");
     Check(Contains(Thrown([] {
                        ConfigTable<S>()
-                           .Local("Position", "LeanScale", &S::scale, FloatCodec(), "One.")
+                           .Local("Position", "LeanTraceLength", &S::scale, FloatCodec(), "One.")
                            .Concept<Concept::PositionEnabled>(&S::position)
                            .Local("Camera", "Offset", &S::value, IntCodec<int>(), "");
                    }),
@@ -469,7 +469,7 @@ void TestConstructionChecks() {
     Check(Contains(Thrown([] {
                        ConfigTable<S>()
                            .Concept<Concept::PositionEnabled>(&S::position)
-                           .Local("Position", "LeanScale", &S::scale, FloatCodec(), "");
+                           .Local("Position", "LeanTraceLength", &S::scale, FloatCodec(), "");
                    }),
                    "needs a comment"),
           "a concept row's comment does not cover a local row");

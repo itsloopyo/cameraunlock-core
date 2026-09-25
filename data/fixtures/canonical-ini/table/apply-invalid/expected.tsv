@@ -11,7 +11,7 @@ field	CollisionChannel	3
 field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
 field	Mode	UpdateCamera
 field	LeanDelayMs	50
-field	LeanScale	1.0
+field	LeanTraceLength	1.0
 field	NearClip	0.1
 field	UpdateCameraSlot	196
 field	PovOffset	0x404
@@ -28,7 +28,7 @@ diagnostic	InvalidValue	6	Line 6: [General] EnableOnStartup=maybe is not valid (
 diagnostic	InvalidValue	8	Line 8: [Smoothing] LocalSmoothing=1.5 is not valid (expected a number from 0.0 to 1.0), so the default is used.
 diagnostic	InvalidValue	10	Line 10: [Position] PositionLimitX=0.5 ; my note is not valid (expected a number from 0.0 to 10.0), so the default is used.
 diagnostic	InvalidValue	11	Line 11: [Position] LeanDelayMs=2000 is not valid (expected a whole number from 0 to 1000), so the default is used.
-diagnostic	InvalidValue	12	Line 12: [Position] LeanScale=3 is not valid (expected a number from 0.0 to 2.0), so the default is used.
+diagnostic	InvalidValue	12	Line 12: [Position] LeanTraceLength=3 is not valid (expected a number from 0.0 to 2.0), so the default is used.
 diagnostic	InvalidValue	14	Line 14: [Hotkeys] ToggleKey=Ctrl+Ctrl+Y is not valid ('Ctrl+Ctrl+Y' names Ctrl twice: expected each modifier at most once), so the default is used.
 diagnostic	InvalidValue	16	Line 16: [Camera] Mode=Sometimes is not valid (expected ControlRotation or UpdateCamera), so the default is used.
 diagnostic	InvalidValue	17	Line 17: [Camera] NearClip=abc is not valid (expected a number such as 1.0, 0.15 or 1e-05), so the default is used.

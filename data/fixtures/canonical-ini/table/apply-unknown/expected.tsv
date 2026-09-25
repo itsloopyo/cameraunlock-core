@@ -17,7 +17,7 @@ field	CollisionChannel	3
 field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
 field	Mode	UpdateCamera
 field	LeanDelayMs	50
-field	LeanScale	1.0
+field	LeanTraceLength	1.0
 field	NearClip	0.1
 field	UpdateCameraSlot	196
 field	PovOffset	0x404

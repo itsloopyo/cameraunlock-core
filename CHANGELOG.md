@@ -42,6 +42,10 @@ diagnostic either. And several pose-shaping spellings the fleet and core use wer
 - `data/fixtures/canonical-ini/table/apply-unknown` adds `[Sensitivity] Pitch`, `[Network]
   WorldScale`, `[Deadzone] Yaw` and `Threshold`, and a `[Tuning]` section with `rot_scale` and
   `SignYaw`.
+- The shared table fixture's `[Position] LeanScale` row, a position multiplier under another
+  name, is `[Position] LeanTraceLength` now (float, 0 to 2, default `1.0`), and `LeanDelayMs`'s
+  comment reads `Milliseconds before a lean starts, and the metres its wall trace reaches.` A port
+  that declares the fixture table renames the row with it.
 
 None of these spellings is an alias, so the deprecated flat readers and `HeadTrackingConfigBase`
 read exactly what they read before.

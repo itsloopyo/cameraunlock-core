@@ -198,7 +198,7 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Contains("needs a comment", Assert.Throws<ArgumentException>(() =>
                 NewTable()
                     .Concept(ConfigConcepts.PositionEnabled, s => s.Position, (s, v) => s.Position = v)
-                    .Local("Position", "LeanScale", s => s.Scale, (s, v) => s.Scale = v, new FloatCodec(), "")).Message);
+                    .Local("Position", "LeanTraceLength", s => s.Scale, (s, v) => s.Scale = v, new FloatCodec(), "")).Message);
             WithOffset(NewTable(), "Camera", "Offset", "One.")
                 .Local("Debug", "Flag", s => s.Flag, (s, v) => s.Flag = v, new BoolCodec(), "Two.")
                 .Local("Camera", "Other", s => s.Other, (s, v) => s.Other = v, new IntCodec(), "");
