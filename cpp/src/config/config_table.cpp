@@ -61,6 +61,16 @@ const char* NonCanonicalReason(const char* canonical) {
     return nullptr;
 }
 
+// The schema's reason for a spelling of a setting the canonical format does not write that is
+// no concept (a deadzone, a response curve), or nullptr.
+const char* NonCanonicalKeyReason(const std::string& key) {
+    const std::string normalized = NormalizeConfigKey(key);
+    for (const schema::NonCanonicalKey& other : schema::kNonCanonicalKeys) {
+        if (normalized == other.normalized) return other.reason;
+    }
+    return nullptr;
+}
+
 // The row a key names outside its own section or spelling: a row's key in any section, or a
 // concept row's key or alias. Every key name is used once in a file, so there is at most one.
 const TableRow* MisplacedRow(const std::vector<TableRow>& rows, const std::string& key, const char* canonical) {
@@ -86,7 +96,7 @@ void ReportUnread(const std::vector<TableRow>& rows, const CanonicalSection& sec
             MakeDiagnostic(CanonicalDiagnosticKind::RetiredKey, value.line, section.name, value.key, value.value, ""));
         return;
     }
-    const char* reason = canonical == nullptr ? nullptr : NonCanonicalReason(canonical);
+    const char* reason = canonical == nullptr ? NonCanonicalKeyReason(value.key) : NonCanonicalReason(canonical);
     if (reason != nullptr) {
         out.push_back(MakeDiagnostic(CanonicalDiagnosticKind::NonCanonicalConcept, value.line, section.name,
                                      value.key, value.value, reason));
@@ -165,6 +175,10 @@ void CheckLocalRow(const std::vector<TableRow>& rows, const TableRow& row) {
     if (canonical != nullptr) {
         throw std::invalid_argument(name + ": " + row.key + " is the key or an alias of the schema concept '" +
                                     canonical + "', so a game-local row cannot use it");
+    }
+    if (const char* reason = NonCanonicalKeyReason(row.key)) {
+        throw std::invalid_argument(name + ": " + row.key + " names a setting a canonical file does not carry, so a "
+                                    "game-local row cannot use it: " + reason);
     }
     if (EqualsAsciiIgnoreCase(row.key, kFormatKey)) {
         throw std::invalid_argument(name + ": [CameraUnlock] ConfigFormat already has that key, and a key name is used "

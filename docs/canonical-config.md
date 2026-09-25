@@ -348,6 +348,22 @@ So the schema sections `[Sensitivity]`, `[Inversion]` and `[Reticle]` hold no ca
 and no canonical file has them. The retired `Smoothing` key (and its alias `SmoothingFactor`) is
 not written either.
 
+Deadzones and response curves were never schema concepts, so the schema lists their spellings
+under `non_canonical_keys` instead. These are not aliases: neither flat reader resolves them, and
+no field is bound to them. A canonical file holding one draws the same `NonCanonicalConcept`
+diagnostic with the group's `canonical_reason`, in any section:
+
+| `non_canonical_keys` | Spellings | Reason |
+|----------------------|-----------|--------|
+| `Deadzone` | `Deadzone`, `DeadzoneDeg`, `DeadzoneYaw`, `DeadzonePitch`, `DeadzoneRoll`, `YawDeadzone`, `PitchDeadzone`, `RollDeadzone`, `EnableDeadzone` | The mod applies the head pose as the tracker sends it, with no deadzone of its own |
+| `ResponseCurve` | `ResponseCurve`, `YawCurve`, `PitchCurve`, `RollCurve` | The mod applies the head pose as the tracker sends it, with no response curve of its own |
+
+Matching is the schema's: ASCII case and `_` and `-` are ignored, so `deadzone_yaw` is
+`DeadzoneYaw`. The bare `Yaw`, `Pitch` and `Roll` that some mods wrote under `[Deadzone]` are not
+listed, because section-less they are also the sensitivity keys; the lint refuses them as bare
+nouns (see below). `LightMultiplier` is not pose shaping: it turns a carried light, not the view,
+and stays a canonical concept.
+
 ### Game-local rows
 
 Anything a mod reads that is not a concept is a local row: engine data, diagnostics, logging, a
@@ -356,7 +372,7 @@ feature of one game. The table refuses, when the row is added:
 - a key name used anywhere else in the file, whatever the section, compared ASCII
   case-insensitively and counting `ConfigFormat`;
 - a key that is any concept's key or alias under the schema's normalisation (case and `_` and `-`
-  ignored), canonical, non-canonical or retired;
+  ignored), canonical, non-canonical or retired, or a spelling `non_canonical_keys` lists;
 - a section or key that is not PascalCase ASCII letters and digits;
 - a row in `[CameraUnlock]`, in `[Sensitivity]`, `[Inversion]` or `[Reticle]`, or in a section
   spelled like a schema section or an earlier local section with other letter case;
@@ -412,7 +428,8 @@ mod's committed file. An empty list or a concept named twice throws.
 The defaults are the config type's own, with the four hotkey lists at their `canonical_default`.
 `CollisionChannel` is an Engine row. `LocalSmoothing` and `RemoteSmoothing` also set the copy the
 position settings carry. `PositionLimitY` never sets `PositionLimitYDown`: no key takes its value
-from another.
+from another. The sensitivity and inversion fields of core's types have no row, so a canonical
+file never sets them and they keep the defaults instance's values.
 
 ### Writable rows
 
@@ -670,8 +687,8 @@ nothing. It stays for the life of the repo, since a player can update from any o
   `LegacyImport<TConfig>(run, keys)` takes a `LegacyImportRun<TConfig>` delegate called with a
   `LegacyImportInput`. A `LegacyKey` with an empty section is a key the reader finds in any
   section.
-- `run` returns an `ImportResult`: `Imported` (0) and `Absent` (3) carry the values it dropped,
-  `Refused` (1) and `Undecodable` (2) carry a reason. An import that throws is a bug and the
+- `run` returns an `ImportResult`: `Imported` (0) and `Absent` (3) carry the values it dropped and
+  the pose-shaping values it read (below), `Refused` (1) and `Undecodable` (2) carry a reason. An import that throws is a bug and the
   exception reaches the caller.
 - A dropped value is a `DroppedValue` with its `DropRule`. The rules are the only differences a
   conversion may make between what the published build ran on and what the new file holds, and
@@ -687,6 +704,21 @@ nothing. It stays for the life of the repo, since a player can update from any o
 Normalisation N1, a legacy hotkey code outside 0x01-0xFE importing as unbound, is recorded with
 `approved` null: it waits on the owner, and no map may apply it.
 
+A map passes every sensitivity, deadzone, response curve and axis inversion its frozen reader read
+through C++ `LegacyPoseShaping` or C# `LegacyPoseShaping.Record` (bool, float and double), with the
+effective legacy value and the value the game shipped. Each call adds a `PoseShapingValue` to the
+result's `pose_shaping` (C# `PoseShaping`): section, key, both values written as the canonical codecs
+write them (`true`, `1.0`, `0.5`; `nan`, `inf` or `-inf` for a legacy value that is not finite),
+and `folded`, true when the two are equal as numbers. A folded value is what the game shipped, and
+the conversion moves it into the mod's own axis code, so the mod behaves as before with no setting.
+A value that is not folded is one the player changed, and the call also adds it to the dropped
+values as `PoseShaping`, which the migration logs as `not carried: [Section] Key=value, sensitivity,
+deadzones, response curves and axis inversion are set in the tracker now, not in this mod`. The map
+sets no runtime field from either, and a shipped value that is not finite throws. Core's REFramework
+import lists its nine (the three multipliers, the three position sensitivities and the three
+position inversions) against `PluginConfig::SetDefaults`, where an RE mod keeps the shaping it
+ships and still applies.
+
 Core keeps two pieces of import code, frozen, because several repos share them: the Win32 helpers
 the native imports call (`config/ini_reader.h` and `config/value_guards.h`, pinned by
 `cpp/tests/win32_profile_semantics_tests.cpp` and `cpp/tests/frozen_ini_helper_tests.cpp`), and
@@ -698,7 +730,13 @@ A repo proves its import with a differential test: the published build's reader 
 run on the shipped file and on every output of the corpus generator (C++ `GenerateIniMutations`
 in `config/testing/ini_mutations.h`, C# `IniMutations.Generate` in `csharp/testing/IniMutations.cs`,
 which a test project links as source), and their results may differ only as the rules above
-allow.
+allow. For pose shaping that means two things. On the shipped file every `pose_shaping` entry is
+folded, which is where the test holds the conversion's axis code to the shipped value it replaces.
+Where one build shipped two values for a setting (Requiem v0.4.0's installer and launcher seed
+disagree on the position sensitivity), only one can be the fold, and which is the owner's call.
+On every corpus input, a pose-shaping value the published build ran on and the new config does not
+hold is an expected difference exactly when the result lists it in `pose_shaping` with that value
+and in `dropped` as `PoseShaping`.
 
 ### What happens at the first launch
 
@@ -941,8 +979,8 @@ In a mod repo, and in conformance:
   reader finds nothing to report; CRLF endings, no byte order mark, ASCII only; `Key=value` and
   `[Name]` written plainly, each section once; `[CameraUnlock]` holding `ConfigFormat=1` alone;
   every concept at the schema's section and key, spelled as the schema spells it and not as an
-  alias; no non-canonical or retired concept, and no `[Sensitivity]`, `[Inversion]` or `[Reticle]`
-  section; a schema section spelled as the schema spells it; local sections and keys PascalCase,
+  alias; no non-canonical or retired concept, no spelling `non_canonical_keys` lists, and no
+  `[Sensitivity]`, `[Inversion]` or `[Reticle]` section; a schema section spelled as the schema spells it; local sections and keys PascalCase,
   each local key used once in the file, none of the bare nouns above and none starting with
   `Chord`; every hotkey concept, and
   every key in `[Hotkeys]`, a key list in the file's dialect, with the canonical hotkey concepts at

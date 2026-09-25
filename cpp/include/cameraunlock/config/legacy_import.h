@@ -62,6 +62,23 @@ struct DroppedValue {
 /// used`. Throws std::invalid_argument for a rule outside DropRule.
 std::string DescribeDroppedValue(const DroppedValue& dropped);
 
+/// The effective legacy value of one pose-shaping setting the frozen reader read: a sensitivity,
+/// deadzone, response curve or axis inversion, which the canonical format has no row for. A
+/// differential test reads these to check the conversion: where `folded` is true, the mod's own
+/// axis code now does what `shipped` did.
+struct PoseShapingValue {
+    std::string section;
+    std::string key;
+    /// The value the import read, written as the canonical codecs write one ("true", "1.0",
+    /// "0.5"), or "nan", "inf" or "-inf".
+    std::string value;
+    /// The value the game shipped, written the same way.
+    std::string shipped;
+    /// True when the value equals the shipped one, compared as numbers, so the conversion folds
+    /// it into the mod's axis code; false when the player changed it, and it is also dropped.
+    bool folded = false;
+};
+
 /// What an import returns. Build it with the factories, which hold each status to its fields.
 struct ImportResult {
     ImportStatus status = ImportStatus::Imported;
@@ -70,12 +87,15 @@ struct ImportResult {
     /// For Imported and Absent, the values the map dropped, in the order it met them; empty
     /// otherwise.
     std::vector<DroppedValue> dropped;
+    /// For Imported and Absent, every pose-shaping setting the frozen reader read, in the order
+    /// the map met them (LegacyPoseShaping); empty otherwise.
+    std::vector<PoseShapingValue> pose_shaping;
 
-    static ImportResult Imported(std::vector<DroppedValue> dropped) {
-        return ImportResult{ImportStatus::Imported, {}, std::move(dropped)};
+    static ImportResult Imported(std::vector<DroppedValue> dropped, std::vector<PoseShapingValue> pose_shaping = {}) {
+        return ImportResult{ImportStatus::Imported, {}, std::move(dropped), std::move(pose_shaping)};
     }
-    static ImportResult Absent(std::vector<DroppedValue> dropped) {
-        return ImportResult{ImportStatus::Absent, {}, std::move(dropped)};
+    static ImportResult Absent(std::vector<DroppedValue> dropped, std::vector<PoseShapingValue> pose_shaping = {}) {
+        return ImportResult{ImportStatus::Absent, {}, std::move(dropped), std::move(pose_shaping)};
     }
     /// Throws std::invalid_argument for an empty reason.
     static ImportResult Refused(std::string reason) { return WithReason(ImportStatus::Refused, std::move(reason)); }
@@ -87,7 +107,7 @@ struct ImportResult {
 private:
     static ImportResult WithReason(ImportStatus status, std::string reason) {
         if (reason.empty()) throw std::invalid_argument("a refused or undecodable import needs a reason");
-        return ImportResult{status, std::move(reason), {}};
+        return ImportResult{status, std::move(reason), {}, {}};
     }
 };
 
@@ -138,5 +158,18 @@ F LegacyFiniteOrDefault(F value, F row_default, const std::string& section, cons
     dropped.push_back({DropRule::NonFiniteNumber, section, key, std::isnan(value) ? "nan" : value > 0 ? "inf" : "-inf"});
     return row_default;
 }
+
+/// A pose-shaping setting the frozen reader read (approved change pose_shaping): records
+/// `value`, its effective legacy value, beside `shipped`, the value the game shipped, in
+/// `pose_shaping`. Equal, the conversion folds the shipped value into the mod's own axis code
+/// and nothing is dropped. Different, the player set it, and it is also recorded in `dropped` as
+/// DropRule::PoseShaping. The map sets no runtime field from it. Throws std::invalid_argument
+/// when a float or double `shipped` is not finite.
+void LegacyPoseShaping(bool value, bool shipped, const std::string& section, const std::string& key,
+                       std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped);
+void LegacyPoseShaping(float value, float shipped, const std::string& section, const std::string& key,
+                       std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped);
+void LegacyPoseShaping(double value, double shipped, const std::string& section, const std::string& key,
+                       std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped);
 
 }  // namespace cameraunlock::config

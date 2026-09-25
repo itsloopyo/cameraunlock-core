@@ -26,12 +26,19 @@
     "lists) and a `canonical_default`, the binding list a canonical file starts with. The",
     "`default` and the field initialisers of a key the flat readers read keep the single key",
     "name those readers have always shipped, because changing a default is a breaking change.",
-    "A hotkey concept no flat reader reads has its `canonical_default` as its `default`."
+    "A hotkey concept no flat reader reads has its `canonical_default` as its `default`.",
+    "",
+    "`non_canonical_keys` names settings no canonical file carries that are not concepts: the",
+    "tracker owns pose shaping, and deadzones and response curves were never schema concepts.",
+    "Their spellings are not aliases, so neither flat reader resolves them and nothing binds",
+    "them to a field. A canonical table refuses a game-local row named by one, applying a",
+    "canonical file reports one as NonCanonicalConcept with its `canonical_reason`, and the",
+    "canonical config lint fails a file holding one."
   ],
   "deliberately_unaliased": [
     {
       "spellings": ["Yaw", "Pitch", "Roll"],
-      "reason": "AMBIGUOUS UNDER SECTION-LESS MATCHING. 13 repos ship these under [Sensitivity] meaning a sensitivity multiplier, 4 ship them under [Deadzone] meaning degrees of deadzone, and black-and-white, fallout-new-vegas, dorfromantik and subnautica ship BOTH sections in one file. Normalisation throws the section away, so aliasing the bare names onto either concept would read one of them as the other. Anyone adding a Deadzone concept later must keep these out of it too."
+      "reason": "AMBIGUOUS UNDER SECTION-LESS MATCHING. 13 repos ship these under [Sensitivity] meaning a sensitivity multiplier, 4 ship them under [Deadzone] meaning degrees of deadzone, and black-and-white, fallout-new-vegas, dorfromantik and subnautica ship BOTH sections in one file. Normalisation throws the section away, so aliasing the bare names onto either concept would read one of them as the other. Deadzones are not settings any more (non_canonical_keys Deadzone), and these bare names stay out of that list too."
     },
     {
       "spellings": ["Position"],
@@ -50,7 +57,7 @@
       "reason": "Chord modifiers, not key names. A different concept from the *Key entries. A canonical file has no Chord* key at all: a chord is an ordinary item of its action's key list (ToggleKey=End, Ctrl+Shift+Y), and a game's legacy import folds a chord switch or letter row into that list. The canonical config lint refuses any key whose name starts with Chord."
     },
     {
-      "spellings": ["BindAddress", "DeadzoneDeg", "DeadzoneYaw", "CyclePort", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
+      "spellings": ["BindAddress", "CyclePort", "LogToFile", "ShowNotifications", "PositionScale", "WorldScale", "UnitsPerMeter", "FieldOfView", "FovOffset"],
       "reason": "Real cross-repo concepts with no field in HeadTrackingConfigData or its C++ twin to bind to. Aliasing a key onto nothing would advertise a setting that does not work. Each needs a concept and a field before it gets an alias."
     }
   ],
@@ -585,6 +592,20 @@
       "id": "Smoothing",
       "aliases": ["Smoothing", "SmoothingFactor"],
       "doc": "Retired and IGNORED. Replaced by LocalSmoothing and RemoteSmoothing. Not migrated: the old value carried a hidden 0.15 floor, so the number in an existing config does not mean what it used to."
+    }
+  ],
+  "non_canonical_keys": [
+    {
+      "id": "Deadzone",
+      "spellings": ["Deadzone", "DeadzoneDeg", "DeadzoneYaw", "DeadzonePitch", "DeadzoneRoll", "YawDeadzone", "PitchDeadzone", "RollDeadzone", "EnableDeadzone"],
+      "doc": "Deadzones are pose shaping, which the tracker owns. The spellings are the fleet's own on 2026-09-25: [Tracking] Deadzone (abzu, prey), [Rotation] Deadzone (quake-ii-rtx), [Smoothing] DeadzoneDeg (six repos), [Tracking] DeadzoneYaw/Pitch/Roll (homeworld-remastered-collection; deadzone_yaw in minecraft-java-edition), [Rotation] YawDeadzone/PitchDeadzone/RollDeadzone (control-ultimate-edition, fusion-360), and peak's Enable Deadzone in PascalCase. The bare Yaw, Pitch and Roll that nine repos read under [Deadzone] stay in deliberately_unaliased: section-less they are also the sensitivity keys, and the lint refuses them as bare nouns.",
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no deadzone of its own."
+    },
+    {
+      "id": "ResponseCurve",
+      "spellings": ["ResponseCurve", "YawCurve", "PitchCurve", "RollCurve"],
+      "doc": "Response curves are pose shaping, which the tracker owns. No fleet config read one on 2026-09-25; the spellings are the plain names a mod would give one.",
+      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no response curve of its own."
     }
   ]
 }

@@ -1,5 +1,5 @@
 // The legacy import support: ImportResult's factories, the dropped-value lines, N2
-// (LegacyFiniteOrDefault), and a LegacyImport over a Config.
+// (LegacyFiniteOrDefault), pose shaping (LegacyPoseShaping), and a LegacyImport over a Config.
 
 #include <cameraunlock/config/legacy_import.h>
 #include <cameraunlock/input/key_bindings.h>
@@ -119,6 +119,53 @@ void TestN2() {
           "a non-finite default throws");
 }
 
+std::string PoseLine(const PoseShapingValue& p) {
+    return "[" + p.section + "] " + p.key + "=" + p.value + " shipped " + p.shipped + (p.folded ? " folded" : "");
+}
+
+void TestPoseShaping() {
+    std::vector<PoseShapingValue> pose;
+    std::vector<DroppedValue> dropped;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    LegacyPoseShaping(true, true, "Tracking", "InvertRoll", pose, dropped);
+    LegacyPoseShaping(0.5f, 0.5f, "Tracking", "RollSensitivity", pose, dropped);
+    LegacyPoseShaping(-0.0f, 0.0f, "Tracking", "Deadzone", pose, dropped);
+    Check(pose.size() == 3 && dropped.empty() && PoseLine(pose[0]) == "[Tracking] InvertRoll=true shipped true folded" &&
+              PoseLine(pose[1]) == "[Tracking] RollSensitivity=0.5 shipped 0.5 folded" &&
+              PoseLine(pose[2]) == "[Tracking] Deadzone=-0.0 shipped 0.0 folded",
+          "a value equal to the shipped one, compared as a number, is folded and nothing is dropped");
+
+    pose.clear();
+    LegacyPoseShaping(false, true, "Tracking", "InvertRoll", pose, dropped);
+    LegacyPoseShaping(2.0f, 1.0f, "Position", "SensitivityX", pose, dropped);
+    LegacyPoseShaping(0.15, 0.0, "Rotation", "YawDeadzone", pose, dropped);
+    LegacyPoseShaping(nan, 1.0f, "Sensitivity", "YawSensitivity", pose, dropped);
+    LegacyPoseShaping(-std::numeric_limits<double>::infinity(), 1.0, "Sensitivity", "PitchSensitivity", pose, dropped);
+    Check(pose.size() == 5 && PoseLine(pose[0]) == "[Tracking] InvertRoll=false shipped true" &&
+              PoseLine(pose[1]) == "[Position] SensitivityX=2.0 shipped 1.0" &&
+              PoseLine(pose[2]) == "[Rotation] YawDeadzone=0.15 shipped 0.0" &&
+              PoseLine(pose[3]) == "[Sensitivity] YawSensitivity=nan shipped 1.0" &&
+              PoseLine(pose[4]) == "[Sensitivity] PitchSensitivity=-inf shipped 1.0",
+          "a value the player changed is listed with its shipped value, not folded");
+    Check(dropped.size() == 5 && SameDrop(dropped[0], DropRule::PoseShaping, "Tracking", "InvertRoll", "false") &&
+              SameDrop(dropped[1], DropRule::PoseShaping, "Position", "SensitivityX", "2.0") &&
+              SameDrop(dropped[2], DropRule::PoseShaping, "Rotation", "YawDeadzone", "0.15") &&
+              SameDrop(dropped[3], DropRule::PoseShaping, "Sensitivity", "YawSensitivity", "nan") &&
+              SameDrop(dropped[4], DropRule::PoseShaping, "Sensitivity", "PitchSensitivity", "-inf"),
+          "and dropped as pose shaping, in the canonical codecs' spelling");
+    Check(Thrown([&] { LegacyPoseShaping(1.0f, nan, "Tracking", "RollSensitivity", pose, dropped); }) ==
+              "[Tracking] RollSensitivity: the shipped value is not finite",
+          "a shipped value that is not finite throws");
+    Check(pose.size() == 5 && dropped.size() == 5, "and records nothing");
+
+    const ImportResult imported = ImportResult::Imported(dropped, pose);
+    const ImportResult absent = ImportResult::Absent({}, {pose[0]});
+    Check(imported.pose_shaping.size() == 5 && absent.pose_shaping.size() == 1 &&
+              ImportResult::Imported({}).pose_shaping.empty() && ImportResult::Refused("r").pose_shaping.empty() &&
+              ImportResult::Undecodable("u").pose_shaping.empty(),
+          "Imported and Absent carry the pose-shaping values; the other statuses carry none");
+}
+
 struct FrozenConfig {
     long long toggle_key = 0x23;
     float remote_smoothing = 0.15f;
@@ -166,6 +213,7 @@ int RunLegacyImportTests() {
         TestImportResult();
         TestDescribe();
         TestN2();
+        TestPoseShaping();
         TestLegacyImport();
     } catch (const std::exception& e) {
         std::cout << "  [FAIL] threw: " << e.what() << "\n";

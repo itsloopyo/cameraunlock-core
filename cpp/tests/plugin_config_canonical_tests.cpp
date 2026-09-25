@@ -135,6 +135,9 @@ std::string Bindings(int vk, int chord_letter) {
 
 std::string Text(bool value) { return value ? "true" : "false"; }
 
+// A pose-shaping float as the import writes it: the canonical float codec's text.
+std::string Text(float value) { return FloatCodec().Render(value); }
+
 // The fields the table carries, as `a` and `b` differ in them (floats bitwise).
 void CarriedDifferences(const PluginConfig& a, const PluginConfig& b, std::vector<std::string>& out) {
     const auto f = [&](const char* name, float x, float y) {
@@ -167,8 +170,9 @@ void CarriedDifferences(const PluginConfig& a, const PluginConfig& b, std::vecto
 }
 
 // What the import should give for a file PluginConfig::Load read as `loaded`: every carried field
-// as Load read it, the hotkey codes with the legacy chords, every other field at SetDefaults, and
-// the sensitivities and inversions Load holds away from SetDefaults as dropped.
+// as Load read it, the hotkey codes with the legacy chords, every other field at SetDefaults, the
+// nine sensitivities and inversions as Load read them beside their SetDefaults values, folded where
+// the two are equal, and those Load holds away from SetDefaults as dropped.
 std::vector<std::string> ImportDifferences(const PluginConfigSchema& schema, const PluginConfig& loaded,
                                            const PluginConfig& imported, const ImportResult& result) {
     std::vector<std::string> out;
@@ -214,33 +218,41 @@ std::vector<std::string> ImportDifferences(const PluginConfigSchema& schema, con
     same("configVersion", imported.configVersion == shipped.configVersion);
 
     std::vector<std::string> drops;
-    const auto drop_float = [&](const char* section, const char* key, float value, float shipped_value) {
-        if (value != shipped_value) drops.push_back(std::string(section) + " " + key + "=" + detail::DisplayValue(value));
+    std::vector<std::string> pose;
+    const auto shaping = [&](const char* section, const char* key, const std::string& value, const std::string& was) {
+        const bool folded = value == was;
+        pose.push_back(std::string(section) + " " + key + "=" + value + " shipped " + was + (folded ? " folded" : ""));
+        if (!folded) drops.push_back(std::string(section) + " " + key + "=" + value);
     };
-    const auto drop_bool = [&](const char* section, const char* key, bool value, bool shipped_value) {
-        if (value != shipped_value) drops.push_back(std::string(section) + " " + key + "=" + Text(value));
-    };
-    drop_float("Sensitivity", "YawMultiplier", loaded.yawMultiplier, shipped.yawMultiplier);
-    drop_float("Sensitivity", "PitchMultiplier", loaded.pitchMultiplier, shipped.pitchMultiplier);
-    drop_float("Sensitivity", "RollMultiplier", loaded.rollMultiplier, shipped.rollMultiplier);
-    drop_float("Position", "SensitivityX", loaded.positionSensitivityX, shipped.positionSensitivityX);
-    drop_float("Position", "SensitivityY", loaded.positionSensitivityY, shipped.positionSensitivityY);
-    drop_float("Position", "SensitivityZ", loaded.positionSensitivityZ, shipped.positionSensitivityZ);
-    drop_bool("Position", "InvertX", loaded.positionInvertX, shipped.positionInvertX);
-    drop_bool("Position", "InvertY", loaded.positionInvertY, shipped.positionInvertY);
-    drop_bool("Position", "InvertZ", loaded.positionInvertZ, shipped.positionInvertZ);
+    shaping("Sensitivity", "YawMultiplier", Text(loaded.yawMultiplier), Text(shipped.yawMultiplier));
+    shaping("Sensitivity", "PitchMultiplier", Text(loaded.pitchMultiplier), Text(shipped.pitchMultiplier));
+    shaping("Sensitivity", "RollMultiplier", Text(loaded.rollMultiplier), Text(shipped.rollMultiplier));
+    shaping("Position", "SensitivityX", Text(loaded.positionSensitivityX), Text(shipped.positionSensitivityX));
+    shaping("Position", "SensitivityY", Text(loaded.positionSensitivityY), Text(shipped.positionSensitivityY));
+    shaping("Position", "SensitivityZ", Text(loaded.positionSensitivityZ), Text(shipped.positionSensitivityZ));
+    shaping("Position", "InvertX", Text(loaded.positionInvertX), Text(shipped.positionInvertX));
+    shaping("Position", "InvertY", Text(loaded.positionInvertY), Text(shipped.positionInvertY));
+    shaping("Position", "InvertZ", Text(loaded.positionInvertZ), Text(shipped.positionInvertZ));
     std::vector<std::string> got;
     for (const DroppedValue& d : result.dropped) {
         if (d.rule != DropRule::PoseShaping) out.push_back("dropped with rule " + std::to_string(static_cast<int>(d.rule)));
         got.push_back(d.section + " " + d.key + "=" + d.value);
     }
-    if (got != drops) {
-        std::string text = "dropped [";
-        for (const std::string& d : got) text += d + "; ";
-        text += "] expected [";
-        for (const std::string& d : drops) text += d + "; ";
-        out.push_back(text + "]");
+    std::vector<std::string> got_pose;
+    for (const PoseShapingValue& p : result.pose_shaping) {
+        got_pose.push_back(p.section + " " + p.key + "=" + p.value + " shipped " + p.shipped + (p.folded ? " folded" : ""));
     }
+    const auto compare = [&](const char* what, const std::vector<std::string>& actual,
+                             const std::vector<std::string>& expected) {
+        if (actual == expected) return;
+        std::string text = std::string(what) + " [";
+        for (const std::string& d : actual) text += d + "; ";
+        text += "] expected [";
+        for (const std::string& d : expected) text += d + "; ";
+        out.push_back(text + "]");
+    };
+    compare("dropped", got, drops);
+    compare("pose shaping", got_pose, pose);
     return out;
 }
 
@@ -606,8 +618,8 @@ void TestConversionLog(const fs::path& root) {
     // v0.4.0 installer ships 1.0 and its v0.4.0 launcher seed 2.0. Both outcomes are checked, so
     // neither is fixed here.
     const std::string seed = convert(kFixtures[6]);
-    Check(Contains(seed, "not carried: [Position] SensitivityX=2, ") &&
-              Contains(seed, "not carried: [Position] SensitivityZ=2, "),
+    Check(Contains(seed, "not carried: [Position] SensitivityX=2.0, ") &&
+              Contains(seed, "not carried: [Position] SensitivityZ=2.0, "),
           "a position sensitivity of 2 against a schema positionSensitivity of 1 is logged as dropped");
     Fixture seed_at_two = kFixtures[6];
     seed_at_two.schema.positionSensitivity = 2.0f;
@@ -615,7 +627,7 @@ void TestConversionLog(const fs::path& root) {
           "and against a schema positionSensitivity of 2 it is the default, so nothing is dropped");
     Fixture shipped_at_two = kFixtures[5];
     shipped_at_two.schema.positionSensitivity = 2.0f;
-    Check(Contains(convert(shipped_at_two), "not carried: [Position] SensitivityX=1, "),
+    Check(Contains(convert(shipped_at_two), "not carried: [Position] SensitivityX=1.0, "),
           "while requiem's shipped 1.0 against a schema positionSensitivity of 2 is dropped");
 }
 
@@ -637,6 +649,16 @@ void TestImportDropsAndCorrection(const fs::path& root) {
               lines[2].rfind("not carried: [Position] SensitivityY=2.5, ", 0) == 0 &&
               lines[3].rfind("not carried: [Position] InvertZ=true, ", 0) == 0,
           "an unstamped RE8 file: sensitivities and InvertZ dropped, InvertX corrected " + Join(lines));
+    const auto entry = [&](std::size_t i) {
+        const PoseShapingValue& p = result.pose_shaping.at(i);
+        return p.section + " " + p.key + "=" + p.value + " shipped " + p.shipped + (p.folded ? " folded" : "");
+    };
+    Check(result.pose_shaping.size() == 9 && entry(0) == "Sensitivity YawMultiplier=1.4 shipped 1.0" &&
+              entry(2) == "Sensitivity RollMultiplier=1.0 shipped 1.0 folded" &&
+              entry(4) == "Position SensitivityY=2.5 shipped 1.0" &&
+              entry(6) == "Position InvertX=false shipped false folded" &&
+              entry(8) == "Position InvertZ=true shipped false",
+          "the import lists the nine pose-shaping values beside their SetDefaults values, the corrected InvertX folded");
     Check(out.toggleKeyBindings == "Y, Ctrl+Shift+Y" && out.diagnosticMarkerKeyBindings == "F11",
           "a key that is also the chord's letter lists both, and the marker key has no chord");
 
@@ -651,6 +673,25 @@ std::string KeysText(const PluginConfigSchema& schema) {
     std::string text;
     for (const LegacyKey& k : PluginConfigLegacyImport(schema).keys) text += "[" + k.section + "] " + k.key + "\n";
     return text;
+}
+
+// Each shipped file holds SetDefaults' shaping, which PluginMod applies, so the import folds every
+// pose-shaping value and drops none. Requiem's launcher seed is the exception its conversion
+// decides (TestConversionLog).
+void TestShippedShapingIsFolded(const fs::path& root) {
+    for (const Fixture& f : kFixtures) {
+        const std::string name = f.file;
+        if (name == "resident-evil-requiem/seed.ini") continue;
+        const fs::path file = Fresh(root, "folded") / "HeadTracking.ini";
+        WriteBytes(file, ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / f.file));
+        PluginConfig out = PluginConfigTable(f.schema).defaults();
+        const ImportResult result =
+            PluginConfigLegacyImport(f.schema).run(detail::OwnerLegacyInput(file.wstring()), out);
+        const bool all_folded = std::all_of(result.pose_shaping.begin(), result.pose_shaping.end(),
+                                            [](const PoseShapingValue& p) { return p.folded && p.value == p.shipped; });
+        Check(result.pose_shaping.size() == 9 && all_folded && result.dropped.empty(),
+              name + ": every pose-shaping value is the shipped one, folded, and nothing is dropped");
+    }
 }
 
 void TestImportKeysAreWhatReadReads() {
@@ -791,6 +832,7 @@ int RunPluginConfigCanonicalTests() {
     TestTableRendersTheGamesRows();
     TestImportKeysAreWhatReadReads();
     TestImportDropsAndCorrection(root);
+    TestShippedShapingIsFolded(root);
     TestImportAbsent(root);
     TestLoadIgnoresCanonicalConfig(root);
     TestConversionLog(root);

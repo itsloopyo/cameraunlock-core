@@ -9,6 +9,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - pose shaping leaves the canonical format: deadzone and curve keys, and the fold record
+
+The tracker owns pose shaping, so a canonical file carries no sensitivity multiplier (rotation or
+position), deadzone, response curve or user-facing axis inversion. The sensitivities and
+inversions were already non-canonical concepts; deadzones and curves were never concepts, so
+nothing stopped a mod writing them as game-local rows.
+
+- `data/config-schema.json` gains `non_canonical_keys`: groups of spellings with a
+  `canonical_reason`, for settings no canonical file carries that are not concepts. `Deadzone`
+  lists the fleet's deadzone spellings (`Deadzone`, `DeadzoneDeg`, `DeadzoneYaw`, `DeadzonePitch`,
+  `DeadzoneRoll`, `YawDeadzone`, `PitchDeadzone`, `RollDeadzone`, `EnableDeadzone`) and
+  `ResponseCurve` the plain curve names (`ResponseCurve`, `YawCurve`, `PitchCurve`, `RollCurve`).
+  They are not aliases, so the deprecated flat readers never resolve them and behave as before.
+  `DeadzoneDeg` and `DeadzoneYaw` leave `deliberately_unaliased`, whose reason for them (a concept
+  still to come) no longer holds.
+- The generator validates the groups (a spelling that the alias table resolves, or that two groups
+  list, fails) and emits C++ `schema::kNonCanonicalKeys` and C# `ConfigConcepts.NonCanonicalKeyReasons`.
+- A config table refuses a game-local row named by one of these spellings, applying a canonical
+  file reports such a key as `NonCanonicalConcept` with its reason in any section, and the
+  canonical config lint fails a file holding one. `data/fixtures/canonical-ini/table/apply-unknown`
+  carries a `ResponseCurve` and a `[Deadzone] DeadzoneYaw` line.
+- C++ `PoseShapingValue` and `LegacyPoseShaping` (bool, float, double) in `config/legacy_import.h`,
+  and C# `PoseShapingValue` and `LegacyPoseShaping.Record`. A map passes each pose-shaping value its
+  frozen reader read, with the value the game shipped. The call records both in the new
+  `ImportResult::pose_shaping` (C# `ImportResult.PoseShaping`), written as the canonical codecs
+  write them, and `folded` when they are equal as numbers: the conversion moves a folded value
+  into the mod's axis code, and a differential test asserts that against it. A value the player
+  changed is also dropped as `PoseShaping`, which the migration logs. `ImportResult::Imported` and
+  `Absent` take the list as a second argument, defaulting to empty (C#: new overloads).
+- The REFramework import records its nine pose-shaping values (the three multipliers, the three
+  position sensitivities and the three position inversions) through `LegacyPoseShaping` against
+  `PluginConfig::SetDefaults`. A dropped float is now written as the float codec writes it, so
+  Requiem's seed logs `not carried: [Position] SensitivityX=2.0, ...` where it logged `=2`. Its
+  differential test compares the pose-shaping list on every corpus input and checks that each
+  shipped file folds all nine and drops nothing.
+- `HeadTrackingConfigTable` binds no pose shaping, as before; its documentation now says the
+  sensitivity and inversion fields keep the defaults instance's values.
+
+`LightMultiplier` is not pose shaping and stays canonical. `SensitivitySettings` and
+`DeadzoneSettings` stay on the public API, bound to no canonical row. The legacy import support,
+`ImportResult` included, has no consumer yet, so its new member and factory argument change no
+mod.
+
 ### Added - `TrueFreeLook` and `TrueFreeLookKey` in the canonical concept set
 
 Aiming down sights has two lean modes in a shooter with positional tracking (the

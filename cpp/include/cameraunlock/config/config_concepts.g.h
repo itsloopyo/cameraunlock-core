@@ -430,4 +430,32 @@ inline constexpr NonCanonicalConcept kNonCanonicalConcepts[] = {
 inline constexpr std::size_t kNonCanonicalConceptCount =
     sizeof(kNonCanonicalConcepts) / sizeof(kNonCanonicalConcepts[0]);
 
+/// A spelling of a setting the canonical format does not write that is no concept (the schema's
+/// non_canonical_keys). ResolveConfigKey does not know it, so the flat readers never read it.
+/// `normalized` is the spelling under NormalizeConfigKey; `reason` is the line a player is shown
+/// for such a key.
+struct NonCanonicalKey {
+    const char* name;
+    const char* normalized;
+    const char* reason;
+};
+
+inline constexpr NonCanonicalKey kNonCanonicalKeys[] = {
+    {"Deadzone", "deadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "deadzonedeg", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "deadzoneyaw", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "deadzonepitch", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "deadzoneroll", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "yawdeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "pitchdeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "rolldeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"Deadzone", "enabledeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own."},
+    {"ResponseCurve", "responsecurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
+    {"ResponseCurve", "yawcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
+    {"ResponseCurve", "pitchcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
+    {"ResponseCurve", "rollcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own."},
+};
+
+inline constexpr std::size_t kNonCanonicalKeyCount = sizeof(kNonCanonicalKeys) / sizeof(kNonCanonicalKeys[0]);
+
 }  // namespace cameraunlock::config::schema

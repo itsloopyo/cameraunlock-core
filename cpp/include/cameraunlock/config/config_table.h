@@ -258,7 +258,8 @@ std::string RenderCanonical(const ConfigTable<Config>& table, const Config& valu
 /// concept ([Sensitivity], [Inversion], [Reticle]), or in a section spelled like a schema
 /// section or an earlier local section with other letter case; a local key that is a
 /// concept's key or alias, canonical, non-canonical or retired, under the
-/// schema's normalisation (ResolveConfigKey); a local row with no comment that follows no
+/// schema's normalisation (ResolveConfigKey), or a spelling the schema's non_canonical_keys
+/// lists (schema::kNonCanonicalKeys); a local row with no comment that follows no
 /// local row of its section; a default its row cannot write; RotationEnabled and
 /// PositionEnabled both defaulting to false. EnumCodec already refuses a token that is not
 /// PascalCase.
@@ -476,8 +477,9 @@ private:
 /// read section names one UnknownKey, and none is drawn in [CameraUnlock]. A key that names a
 /// row of the table in another section, or a concept row by an alias, draws MisplacedKey naming
 /// the row; one that names a retired concept draws RetiredKey, and one that names a concept the
-/// canonical format does not write draws NonCanonicalConcept with the schema's reason; all three
-/// in any section. No key takes its value from another. When the table binds RotationEnabled and
+/// canonical format does not write, or is a spelling the schema's non_canonical_keys lists (a
+/// deadzone, a response curve), draws NonCanonicalConcept with the schema's reason; all three in
+/// any section. No key takes its value from another. When the table binds RotationEnabled and
 /// PositionEnabled and both read false, both take their defaults and one NoTrackingMode names the
 /// lines that set them.
 ///

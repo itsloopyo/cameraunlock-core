@@ -7,7 +7,8 @@ namespace CameraUnlock.Core.Tests.Config
 {
     /// <summary>
     /// The legacy import support: ImportResult's factories, the dropped-value lines, N2
-    /// (LegacyNormalisations.FiniteOrDefault) and a LegacyImport over a config class. The C++ twin
+    /// (LegacyNormalisations.FiniteOrDefault), pose shaping (LegacyPoseShaping) and a LegacyImport
+    /// over a config class. The C++ twin
     /// is cpp/tests/legacy_import_tests.cpp.
     /// </summary>
     public class LegacyImportTests
@@ -131,6 +132,86 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, null!, "B", dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, "A", null!, dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, "A", "B", null!));
+        }
+
+        private static string PoseLine(PoseShapingValue p)
+        {
+            return "[" + p.Section + "] " + p.Key + "=" + p.Value + " shipped " + p.Shipped + (p.Folded ? " folded" : "");
+        }
+
+        [Fact]
+        public void PoseShapingEqualToTheShippedValueIsFolded()
+        {
+            var pose = new List<PoseShapingValue>();
+            var dropped = new List<DroppedValue>();
+            LegacyPoseShaping.Record(true, true, "Tracking", "InvertRoll", pose, dropped);
+            LegacyPoseShaping.Record(0.5f, 0.5f, "Tracking", "RollSensitivity", pose, dropped);
+            LegacyPoseShaping.Record(-0.0f, 0.0f, "Tracking", "Deadzone", pose, dropped);
+            Assert.Equal(new[]
+            {
+                "[Tracking] InvertRoll=true shipped true folded",
+                "[Tracking] RollSensitivity=0.5 shipped 0.5 folded",
+                "[Tracking] Deadzone=-0.0 shipped 0.0 folded",
+            }, pose.ConvertAll(PoseLine));
+            Assert.Empty(dropped);
+        }
+
+        [Fact]
+        public void PoseShapingAPlayerChangedIsListedAndDropped()
+        {
+            var pose = new List<PoseShapingValue>();
+            var dropped = new List<DroppedValue>();
+            LegacyPoseShaping.Record(false, true, "Tracking", "InvertRoll", pose, dropped);
+            LegacyPoseShaping.Record(2.0f, 1.0f, "Position", "SensitivityX", pose, dropped);
+            LegacyPoseShaping.Record(0.15, 0.0, "Rotation", "YawDeadzone", pose, dropped);
+            LegacyPoseShaping.Record(float.NaN, 1.0f, "Sensitivity", "YawSensitivity", pose, dropped);
+            LegacyPoseShaping.Record(double.NegativeInfinity, 1.0, "Sensitivity", "PitchSensitivity", pose, dropped);
+            Assert.Equal(new[]
+            {
+                "[Tracking] InvertRoll=false shipped true",
+                "[Position] SensitivityX=2.0 shipped 1.0",
+                "[Rotation] YawDeadzone=0.15 shipped 0.0",
+                "[Sensitivity] YawSensitivity=nan shipped 1.0",
+                "[Sensitivity] PitchSensitivity=-inf shipped 1.0",
+            }, pose.ConvertAll(PoseLine));
+            Assert.Equal(new[]
+            {
+                "PoseShaping [Tracking] InvertRoll=false",
+                "PoseShaping [Position] SensitivityX=2.0",
+                "PoseShaping [Rotation] YawDeadzone=0.15",
+                "PoseShaping [Sensitivity] YawSensitivity=nan",
+                "PoseShaping [Sensitivity] PitchSensitivity=-inf",
+            }, dropped.ConvertAll(d => d.Rule + " [" + d.Section + "] " + d.Key + "=" + d.Value));
+        }
+
+        [Fact]
+        public void PoseShapingRefusesANonFiniteShippedValueAndNulls()
+        {
+            var pose = new List<PoseShapingValue>();
+            var dropped = new List<DroppedValue>();
+            Assert.StartsWith("[Tracking] RollSensitivity: the shipped value is not finite", Assert.Throws<ArgumentException>(
+                () => LegacyPoseShaping.Record(1.0f, float.NaN, "Tracking", "RollSensitivity", pose, dropped)).Message);
+            Assert.Throws<ArgumentException>(() => LegacyPoseShaping.Record(1.0, double.PositiveInfinity, "A", "B", pose, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyPoseShaping.Record(true, false, null!, "B", pose, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyPoseShaping.Record(1.0f, 1.0f, "A", null!, pose, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyPoseShaping.Record(1.0f, 1.0f, "A", "B", null!, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyPoseShaping.Record(1.0, 2.0, "A", "B", pose, null!));
+            Assert.Empty(pose);
+            Assert.Empty(dropped);
+        }
+
+        [Fact]
+        public void ImportedAndAbsentCarryThePoseShapingValues()
+        {
+            var value = new PoseShapingValue("Tracking", "InvertRoll", "true", "true", true);
+            Assert.Single(ImportResult.Imported(new DroppedValue[0], new[] { value }).PoseShaping);
+            Assert.Single(ImportResult.Absent(new DroppedValue[0], new[] { value }).PoseShaping);
+            Assert.Empty(ImportResult.Imported(new DroppedValue[0]).PoseShaping);
+            Assert.Empty(ImportResult.Refused("r").PoseShaping);
+            Assert.Empty(ImportResult.Undecodable("u").PoseShaping);
+            Assert.Throws<ArgumentNullException>(() => ImportResult.Imported(new DroppedValue[0], null!));
+            Assert.Throws<ArgumentNullException>(() => ImportResult.Absent(new DroppedValue[0], new PoseShapingValue[] { null! }));
+            Assert.Throws<ArgumentNullException>(() => new PoseShapingValue("A", "B", "C", null!, false));
         }
 
         private sealed class RuntimeConfig

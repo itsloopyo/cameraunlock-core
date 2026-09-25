@@ -11,11 +11,12 @@
 namespace cameraunlock::reframework {
 namespace {
 
-using config::DropRule;
 using config::DroppedValue;
 using config::ImportResult;
 using config::LegacyInput;
 using config::LegacyKey;
+using config::LegacyPoseShaping;
+using config::PoseShapingValue;
 using Concept = config::schema::Concept;
 
 // The Ctrl+Shift letter plugin_bootstrap.cpp registers beside each legacy hotkey, or 0.
@@ -23,15 +24,6 @@ std::string LegacyBindings(int vk, int chordLetter) {
     std::vector<input::KeyBinding> bindings{{input::KeyModifiers::kNone, vk}};
     if (chordLetter != 0) bindings.push_back({input::KeyModifiers::kCtrl | input::KeyModifiers::kShift, chordLetter});
     return input::FormatKeyBindings(bindings);
-}
-
-void DropIfChanged(float value, float shipped, const char* section, const char* key,
-                   std::vector<DroppedValue>& dropped) {
-    if (value != shipped) dropped.push_back({DropRule::PoseShaping, section, key, config::detail::DisplayValue(value)});
-}
-
-void DropIfChanged(bool value, bool shipped, const char* section, const char* key, std::vector<DroppedValue>& dropped) {
-    if (value != shipped) dropped.push_back({DropRule::PoseShaping, section, key, value ? "true" : "false"});
 }
 
 std::vector<LegacyKey> ReadKeys(const PluginConfigSchema& schema) {
@@ -134,17 +126,22 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
         PluginConfig shipped;
         shipped.SetDefaults(schema);
         std::vector<DroppedValue> dropped;
-        DropIfChanged(legacy.yawMultiplier, shipped.yawMultiplier, "Sensitivity", "YawMultiplier", dropped);
-        DropIfChanged(legacy.pitchMultiplier, shipped.pitchMultiplier, "Sensitivity", "PitchMultiplier", dropped);
-        DropIfChanged(legacy.rollMultiplier, shipped.rollMultiplier, "Sensitivity", "RollMultiplier", dropped);
-        DropIfChanged(legacy.positionSensitivityX, shipped.positionSensitivityX, "Position", "SensitivityX", dropped);
-        DropIfChanged(legacy.positionSensitivityY, shipped.positionSensitivityY, "Position", "SensitivityY", dropped);
-        DropIfChanged(legacy.positionSensitivityZ, shipped.positionSensitivityZ, "Position", "SensitivityZ", dropped);
-        DropIfChanged(legacy.positionInvertX, shipped.positionInvertX, "Position", "InvertX", dropped);
-        DropIfChanged(legacy.positionInvertY, shipped.positionInvertY, "Position", "InvertY", dropped);
-        DropIfChanged(legacy.positionInvertZ, shipped.positionInvertZ, "Position", "InvertZ", dropped);
+        std::vector<PoseShapingValue> pose;
+        LegacyPoseShaping(legacy.yawMultiplier, shipped.yawMultiplier, "Sensitivity", "YawMultiplier", pose, dropped);
+        LegacyPoseShaping(legacy.pitchMultiplier, shipped.pitchMultiplier, "Sensitivity", "PitchMultiplier", pose, dropped);
+        LegacyPoseShaping(legacy.rollMultiplier, shipped.rollMultiplier, "Sensitivity", "RollMultiplier", pose, dropped);
+        LegacyPoseShaping(legacy.positionSensitivityX, shipped.positionSensitivityX, "Position", "SensitivityX", pose,
+                          dropped);
+        LegacyPoseShaping(legacy.positionSensitivityY, shipped.positionSensitivityY, "Position", "SensitivityY", pose,
+                          dropped);
+        LegacyPoseShaping(legacy.positionSensitivityZ, shipped.positionSensitivityZ, "Position", "SensitivityZ", pose,
+                          dropped);
+        LegacyPoseShaping(legacy.positionInvertX, shipped.positionInvertX, "Position", "InvertX", pose, dropped);
+        LegacyPoseShaping(legacy.positionInvertY, shipped.positionInvertY, "Position", "InvertY", pose, dropped);
+        LegacyPoseShaping(legacy.positionInvertZ, shipped.positionInvertZ, "Position", "InvertZ", pose, dropped);
 
-        return found ? ImportResult::Imported(std::move(dropped)) : ImportResult::Absent(std::move(dropped));
+        return found ? ImportResult::Imported(std::move(dropped), std::move(pose))
+                     : ImportResult::Absent(std::move(dropped), std::move(pose));
     };
     return import;
 }

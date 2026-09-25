@@ -20,7 +20,9 @@ namespace CameraUnlock.Core.Config
     /// <see cref="HeadTrackingConfigData.Light"/> with a copy carrying the new value, so a
     /// <see cref="HeadFollowLightSettings"/> instance another config shares is never changed.
     /// CollisionChannel is an Engine row: the channel is data about the game, so at its default it
-    /// is written as a comment.
+    /// is written as a comment. <see cref="HeadTrackingConfigData.Sensitivity"/> and the position
+    /// sensitivities and inversions have no row: the canonical format carries no pose shaping, so
+    /// they keep the defaults instance's values.
     /// </para>
     /// <para>
     /// The defaults instance is a new config with the four hotkey lists at the schema's

@@ -225,5 +225,28 @@ namespace CameraUnlock.Core.Config
             { "reticletogglekey", "The reticle has no toggle key." },
             { "recenterkey", "The mod keeps no centre of its own: centre the view in your tracker app." },
         };
+
+        /// <summary>
+        /// The line a player is shown for a spelling of a setting the canonical format does not
+        /// write that is no concept (the schema's non_canonical_keys), by the spelling under
+        /// <see cref="ConfigKeySchema.Normalize"/>. <see cref="ConfigKeySchema.Resolve"/> does not
+        /// know these spellings, so the flat readers never read them.
+        /// </summary>
+        internal static readonly Dictionary<string, string> NonCanonicalKeyReasons = new Dictionary<string, string>
+        {
+            { "deadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "deadzonedeg", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "deadzoneyaw", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "deadzonepitch", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "deadzoneroll", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "yawdeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "pitchdeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "rolldeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "enabledeadzone", "The mod applies the head pose as the tracker sends it, with no deadzone of its own." },
+            { "responsecurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
+            { "yawcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
+            { "pitchcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
+            { "rollcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
+        };
     }
 }

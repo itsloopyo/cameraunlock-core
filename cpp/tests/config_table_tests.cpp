@@ -3,6 +3,7 @@
 // only C++ has: field types the concept traits accept or refuse, getter and setter rows, and
 // the native hotkey dialect.
 
+#include <cameraunlock/config/config_key_schema.g.h>
 #include <cameraunlock/config/config_table.h>
 
 #include <algorithm>
@@ -420,6 +421,16 @@ void TestConstructionChecks() {
         Check(Contains(Thrown([&] { ConfigTable<S>().Local("Camera", key, &S::value, IntCodec<int>(), "One."); }),
                        "is the key or an alias of the schema concept"),
               std::string("a local key named ") + key + " throws");
+    }
+    for (const char* key : {"Deadzone", "DeadzoneDeg", "YawDeadzone", "EnableDeadzone", "ResponseCurve", "RollCurve"}) {
+        Check(Contains(Thrown([&] { ConfigTable<S>().Local("Camera", key, &S::value, IntCodec<int>(), "One."); }),
+                       "names a setting a canonical file does not carry, so a game-local row cannot use it: The mod "
+                       "applies the head pose as the tracker sends it"),
+              std::string("a local key named ") + key + " throws");
+    }
+    for (const schema::NonCanonicalKey& other : schema::kNonCanonicalKeys) {
+        Check(cameraunlock::ResolveConfigKey(other.normalized) == nullptr,
+              std::string("the flat readers' alias table does not know ") + other.normalized);
     }
     Check(Contains(Thrown([] { ConfigTable<S>().Local("Camera", "cb_size", &S::value, IntCodec<int>(), "One."); }),
                    "PascalCase"),

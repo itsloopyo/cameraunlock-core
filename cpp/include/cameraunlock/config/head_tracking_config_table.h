@@ -154,7 +154,9 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
 /// PositionLimitY never sets PositionLimitYDown: each key is read on its own. CollisionMargin and
 /// CollisionReleaseSmoothing live in `lean_clamp`, LightFollowsHead and LightMultiplier in
 /// `light`. CollisionChannel is an Engine row: the channel is data about the game, so at its
-/// default it is written as a comment.
+/// default it is written as a comment. The sensitivity and inversion fields, and those in
+/// `position`, have no row: the canonical format carries no pose shaping, so they keep the
+/// defaults instance's values.
 ///
 /// The defaults instance is Config{} with the four hotkey lists at the schema's canonical_default
 /// (`End, Ctrl+Shift+Y`, `PageUp, Ctrl+Shift+G`, `PageDown, Ctrl+Shift+H`, `Insert, Ctrl+Shift+U`);

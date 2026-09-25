@@ -32,9 +32,12 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
 /// migration (modId "re8", ConfigVersion below 1 and schema.positionInvertKeys: InvertX becomes
 /// false), and maps into the table's fields: each hotkey code becomes a list holding that key and
 /// the Ctrl+Shift chord the legacy bootstrap registers beside it (Y for ToggleKey, G for
-/// PositionToggleKey, H for YawModeKey; DiagnosticMarkerKey has none). A sensitivity or an
-/// inversion that differs from its SetDefaults value is recorded as dropped (PoseShaping). No
-/// other field of `out` is set. Imported, or Absent when Read finds no file; it never refuses,
+/// PositionToggleKey, H for YawModeKey; DiagnosticMarkerKey has none). The three multipliers, the
+/// three position sensitivities and the three position inversions go through
+/// config::LegacyPoseShaping against their SetDefaults values, so the result lists all nine in
+/// pose_shaping, and one that differs from SetDefaults is also dropped (PoseShaping). SetDefaults
+/// is where an RE mod keeps its shipped shaping, schema.positionSensitivity included, so a folded
+/// value is one PluginMod still applies. No other field of `out` is set. Imported, or Absent when Read finds no file; it never refuses,
 /// and writes nothing. `keys` lists every key Read reads for this schema, [Position] Smoothing
 /// (read only to warn that it is retired) and [General] ConfigVersion included.
 config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSchema& schema);

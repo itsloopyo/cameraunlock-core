@@ -25,7 +25,8 @@ namespace CameraUnlock.Core.Config
     /// that holds no canonical concept ([Sensitivity], [Inversion], [Reticle]), or in a section
     /// spelled like a schema section or an earlier local section with other letter case; a local key
     /// that is a concept's key or alias, canonical, non-canonical or retired, under the schema's
-    /// normalisation (<see cref="ConfigKeySchema.Resolve"/>); a local row with no comment that
+    /// normalisation (<see cref="ConfigKeySchema.Resolve"/>), or a spelling the schema's
+    /// non_canonical_keys lists; a local row with no comment that
     /// follows no local row of its section; a default its row cannot write; RotationEnabled and
     /// PositionEnabled both defaulting to false. <see cref="EnumCodec{TEnum}"/> already refuses a token that is
     /// not PascalCase. A modifier used on a row it does not apply to throws
@@ -212,7 +213,9 @@ namespace CameraUnlock.Core.Config
         /// UnknownKey, and none is drawn in [CameraUnlock]. A key that names a row of the table in
         /// another section, or a concept row by an alias, draws MisplacedKey naming the row; one that
         /// names a retired concept draws RetiredKey, and one that names a concept the canonical format
-        /// does not write draws NonCanonicalConcept with the schema's reason; all three in any section.
+        /// does not write, or is a spelling the schema's non_canonical_keys lists (a deadzone, a
+        /// response curve), draws NonCanonicalConcept with the schema's reason; all three in any
+        /// section.
         /// No key takes its value from another. When the table binds RotationEnabled and
         /// PositionEnabled and both read false, both take their defaults and one NoTrackingMode names
         /// the lines that set them.
@@ -540,6 +543,12 @@ namespace CameraUnlock.Core.Config
                 throw new ArgumentException(row.Name + ": " + row.Key + " is the key or an alias of the schema concept '"
                     + canonicalKey + "', so a game-local row cannot use it", "key");
             }
+            string nonCanonicalReason;
+            if (ConfigConcepts.NonCanonicalKeyReasons.TryGetValue(ConfigKeySchema.Normalize(row.Key), out nonCanonicalReason))
+            {
+                throw new ArgumentException(row.Name + ": " + row.Key + " names a setting a canonical file does not carry, so a "
+                    + "game-local row cannot use it: " + nonCanonicalReason, "key");
+            }
             if (CanonicalIni.EqualsAsciiIgnoreCase(row.KeyBytes, CanonicalIni.FormatKey))
             {
                 throw new ArgumentException(row.Name + ": [CameraUnlock] ConfigFormat already has that key, and a key name is "
@@ -601,7 +610,10 @@ namespace CameraUnlock.Core.Config
                     value.Key, value.Value));
                 return;
             }
-            if (canonical != null && ConfigConcepts.NonCanonicalReasons.TryGetValue(canonical, out reason))
+            bool nonCanonical = canonical != null
+                ? ConfigConcepts.NonCanonicalReasons.TryGetValue(canonical, out reason)
+                : ConfigConcepts.NonCanonicalKeyReasons.TryGetValue(ConfigKeySchema.Normalize(Encoding.UTF8.GetString(value.Key)), out reason);
+            if (nonCanonical)
             {
                 diagnostics.Add(new CanonicalDiagnostic(CanonicalDiagnosticKind.NonCanonicalConcept, new[] { value.Line },
                     section.Name, value.Key, value.Value, reason));

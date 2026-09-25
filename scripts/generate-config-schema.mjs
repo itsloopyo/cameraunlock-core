@@ -44,6 +44,8 @@ const spellingPattern = /^[A-Za-z0-9_-]+$/;
 const stringDefaultPattern = /^[A-Za-z0-9_-]*$/;
 const pascalCasePattern = /^[A-Z][A-Za-z0-9]*$/;
 
+const nonCanonicalKeyFields = new Set(['id', 'spellings', 'doc', 'canonical_reason']);
+
 const conceptFields = new Set([
     'id', 'section', 'key', 'type', 'default', 'aliases', 'doc',
     'canonical', 'canonical_reason', 'file_comment', 'range', 'codec', 'canonical_default',
@@ -306,6 +308,46 @@ function validateSchema(schema, keyTable) {
         claimId(where, concept.id);
         checkAliases(where, concept.aliases, 1);
     });
+
+    if (!Array.isArray(schema.non_canonical_keys)) schemaError('non_canonical_keys', 'missing, expected an array');
+    schema.non_canonical_keys.forEach((group, i) => {
+        const where = `non_canonical_keys[${i}]${typeof group?.id === 'string' ? ` ('${group.id}')` : ''}`;
+        if (group === null || typeof group !== 'object') schemaError(where, 'is not an object');
+        claimId(where, group.id);
+        for (const field of Object.keys(group)) {
+            if (!nonCanonicalKeyFields.has(field)) schemaError(where, `unknown field '${field}'`);
+        }
+        if (!Array.isArray(group.spellings) || group.spellings.length === 0) {
+            schemaError(where, `spellings is ${JSON.stringify(group.spellings)}, expected a non-empty array of strings`);
+        }
+        group.spellings.forEach((spelling, j) => checkSpelling(where, `spellings[${j}]`, spelling));
+        checkPlayerText(where, 'canonical_reason', group.canonical_reason);
+    });
+}
+
+// The normalised spellings of non_canonical_keys. None may be a concept's key or alias or a
+// retired spelling: section-less matching would read the key as that concept, and the flat
+// readers would apply it.
+function nonCanonicalKeyEntries(schema, entries) {
+    const owner = new Map(entries.map((e) => [e.normalized, e.canonical]));
+    const seen = new Map();
+    const out = [];
+    schema.non_canonical_keys.forEach((group, i) => {
+        const where = `non_canonical_keys[${i}] ('${group.id}')`;
+        for (const spelling of group.spellings) {
+            const normalized = normalize(spelling);
+            if (owner.has(normalized)) {
+                schemaError(where, `'${spelling}' normalizes to '${normalized}', which the alias table resolves to ` +
+                    `'${owner.get(normalized)}'`);
+            }
+            if (seen.has(normalized)) {
+                schemaError(where, `'${spelling}' normalizes to '${normalized}', already listed by '${seen.get(normalized)}'`);
+            }
+            seen.set(normalized, group.id);
+            out.push({ id: group.id, normalized, reason: group.canonical_reason });
+        }
+    });
+    return out;
 }
 
 function buildEntries(schema) {
@@ -583,7 +625,7 @@ function rangeBound(concept, field, language) {
 
 const canonicalConcepts = (schema) => schema.concepts.filter((c) => c.canonical);
 
-function renderConceptsCpp(schema) {
+function renderConceptsCpp(schema, nonCanonicalKeys) {
     const concepts = canonicalConcepts(schema);
     const cString = (text) => (text === undefined ? 'nullptr' : `"${text}"`);
     const enumerators = concepts.map((c) => `    ${c.id},`).join('\n');
@@ -617,6 +659,7 @@ function renderConceptsCpp(schema) {
     const others = schema.concepts.filter((c) => !c.canonical)
         .map((c) => `    {"${c.id}", "${c.section}", "${c.key}", "${normalize(c.key)}", "${c.canonical_reason}"},`)
         .join('\n');
+    const otherKeys = nonCanonicalKeys.map((k) => `    {"${k.id}", "${k.normalized}", "${k.reason}"},`).join('\n');
 
     return `${banner('//')}
 
@@ -690,11 +733,27 @@ ${others}
 inline constexpr std::size_t kNonCanonicalConceptCount =
     sizeof(kNonCanonicalConcepts) / sizeof(kNonCanonicalConcepts[0]);
 
+/// A spelling of a setting the canonical format does not write that is no concept (the schema's
+/// non_canonical_keys). ResolveConfigKey does not know it, so the flat readers never read it.
+/// \`normalized\` is the spelling under NormalizeConfigKey; \`reason\` is the line a player is shown
+/// for such a key.
+struct NonCanonicalKey {
+    const char* name;
+    const char* normalized;
+    const char* reason;
+};
+
+inline constexpr NonCanonicalKey kNonCanonicalKeys[] = {
+${otherKeys}
+};
+
+inline constexpr std::size_t kNonCanonicalKeyCount = sizeof(kNonCanonicalKeys) / sizeof(kNonCanonicalKeys[0]);
+
 }  // namespace cameraunlock::config::schema
 `;
 }
 
-function renderConceptsCsharp(schema) {
+function renderConceptsCsharp(schema, nonCanonicalKeys) {
     const concepts = canonicalConcepts(schema);
     const csString = (text) => (text === undefined ? 'null' : `"${text}"`);
     const types = { bool: 'bool', int: 'int', float: 'float', string: 'string' };
@@ -721,6 +780,7 @@ function renderConceptsCsharp(schema) {
     const reasons = schema.concepts.filter((c) => !c.canonical)
         .map((c) => `            { "${normalize(c.key)}", "${c.canonical_reason}" },`)
         .join('\n');
+    const keyReasons = nonCanonicalKeys.map((k) => `            { "${k.normalized}", "${k.reason}" },`).join('\n');
 
     return `${banner('//')}
 
@@ -757,6 +817,17 @@ ${sections}
         internal static readonly Dictionary<string, string> NonCanonicalReasons = new Dictionary<string, string>
         {
 ${reasons}
+        };
+
+        /// <summary>
+        /// The line a player is shown for a spelling of a setting the canonical format does not
+        /// write that is no concept (the schema's non_canonical_keys), by the spelling under
+        /// <see cref="ConfigKeySchema.Normalize"/>. <see cref="ConfigKeySchema.Resolve"/> does not
+        /// know these spellings, so the flat readers never read them.
+        /// </summary>
+        internal static readonly Dictionary<string, string> NonCanonicalKeyReasons = new Dictionary<string, string>
+        {
+${keyReasons}
         };
     }
 }
@@ -1165,6 +1236,7 @@ function main() {
     const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
     validateSchema(schema, keyTable);
     const entries = buildEntries(schema);
+    const nonCanonicalKeys = nonCanonicalKeyEntries(schema, entries);
     const trackingModes = validateTrackingModes(JSON.parse(readFileSync(conformancePath, 'utf8')), schema);
 
     const outputs = [
@@ -1174,8 +1246,8 @@ function main() {
         { path: conceptRangesTestPath, text: renderConceptRangesTest(schema) },
         { path: keyNamesCppPath, text: renderKeyNamesCpp(keyTable) },
         { path: keyNamesCsharpPath, text: renderKeyNamesCsharp(keyTable) },
-        { path: conceptsCppPath, text: renderConceptsCpp(schema) },
-        { path: conceptsCsharpPath, text: renderConceptsCsharp(schema) },
+        { path: conceptsCppPath, text: renderConceptsCpp(schema, nonCanonicalKeys) },
+        { path: conceptsCsharpPath, text: renderConceptsCsharp(schema, nonCanonicalKeys) },
     ];
 
     const check = process.argv.includes('--check');

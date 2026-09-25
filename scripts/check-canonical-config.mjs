@@ -58,6 +58,10 @@ const conceptByName = new Map();
 for (const concept of SCHEMA.concepts) {
   for (const name of [concept.key, ...concept.aliases]) conceptByName.set(normalise(name), concept);
 }
+const nonCanonicalKeyByName = new Map();
+for (const group of SCHEMA.non_canonical_keys) {
+  for (const name of group.spellings) nonCanonicalKeyByName.set(normalise(name), group);
+}
 const retiredByName = new Map();
 for (const retired of SCHEMA.retired) {
   for (const name of retired.aliases) retiredByName.set(normalise(name), retired);
@@ -222,6 +226,11 @@ export function lintCanonicalConfig(bytes, { dialect, exceptions }) {
       const retired = retiredByName.get(norm);
       if (retired) {
         problems.push(`${where} is retired (data/config-schema.json retired ${retired.id}), so a canonical file has no row for it`);
+        continue;
+      }
+      const nonCanonical = nonCanonicalKeyByName.get(norm);
+      if (nonCanonical) {
+        problems.push(`${where}: ${nonCanonical.canonical_reason}`);
         continue;
       }
       if (norm.startsWith("chord")) {

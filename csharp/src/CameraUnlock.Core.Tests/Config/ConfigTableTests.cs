@@ -120,6 +120,38 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Contains("is the key or an alias of the schema concept", e.Message);
         }
 
+        [Theory]
+        [InlineData("Deadzone")]
+        [InlineData("DeadzoneDeg")]
+        [InlineData("YawDeadzone")]
+        [InlineData("EnableDeadzone")]
+        [InlineData("ResponseCurve")]
+        [InlineData("RollCurve")]
+        public void LocalKeysNamingANonCanonicalSettingThrow(string key)
+        {
+            var e = Assert.Throws<ArgumentException>(() => WithOffset(NewTable(), "Camera", key, "One."));
+            Assert.Contains("names a setting a canonical file does not carry, so a game-local row cannot use it: The mod "
+                + "applies the head pose as the tracker sends it", e.Message);
+        }
+
+        [Fact]
+        public void TheNonCanonicalKeysAreTheSchemasAndNoFlatReaderResolvesThem()
+        {
+            var expected = new Dictionary<string, string>();
+            foreach (JsonElement group in Schema().GetProperty("non_canonical_keys").EnumerateArray())
+            {
+                foreach (JsonElement spelling in group.GetProperty("spellings").EnumerateArray())
+                {
+                    expected.Add(ConfigKeySchema.Normalize(spelling.GetString()!), group.GetProperty("canonical_reason").GetString()!);
+                }
+            }
+            Assert.Equal(expected, ConfigConcepts.NonCanonicalKeyReasons);
+            foreach (string normalized in ConfigConcepts.NonCanonicalKeyReasons.Keys)
+            {
+                Assert.Null(ConfigKeySchema.Resolve(normalized));
+            }
+        }
+
         [Fact]
         public void CommentRules()
         {
