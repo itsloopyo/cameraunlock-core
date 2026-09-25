@@ -5,8 +5,8 @@ namespace CameraUnlock.Core.Config
 {
     /// <summary>
     /// A pose-shaping setting a frozen legacy reader read (approved change pose_shaping): a
-    /// sensitivity, deadzone, response curve or axis inversion, which the canonical format has no
-    /// row for. <see cref="Record(bool, bool, string, string, ICollection{PoseShapingValue}, ICollection{DroppedValue})"/>
+    /// sensitivity, unit scale, deadzone, response curve or axis inversion, which the canonical
+    /// format has no row for. <see cref="Record(bool, bool, string, string, ICollection{PoseShapingValue}, ICollection{DroppedValue})"/>
     /// adds the effective legacy value beside the value the game shipped to the import's
     /// pose-shaping list. Equal, the conversion folds the shipped value into the mod's own axis
     /// code and nothing is dropped. Different, the player set it, and it is also added to the

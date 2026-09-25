@@ -13,9 +13,10 @@ namespace CameraUnlock.Core.Config
         NonFiniteNumber = 1,
 
         /// <summary>
-        /// A sensitivity, deadzone, response curve or axis inversion the player set away from the
-        /// shipped default. The tracker shapes the pose; the mod no longer does. A shipped default
-        /// that is not identity moves into the mod's axis conversion instead and is not dropped.
+        /// A sensitivity, unit scale, deadzone, response curve or axis inversion the player set away
+        /// from the shipped default. The tracker shapes the pose; the mod no longer does. A shipped
+        /// unit scale, and any other shipped default that is not identity, moves into the mod's axis
+        /// conversion instead and is not dropped.
         /// </summary>
         PoseShaping = 2,
 

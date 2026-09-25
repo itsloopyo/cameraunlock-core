@@ -14,8 +14,8 @@ const char* DropReason(DropRule rule) {
         case DropRule::NonFiniteNumber:
             return "it is not a finite number, so the default is used";
         case DropRule::PoseShaping:
-            return "sensitivity, deadzones, response curves and axis inversion are set in the tracker now, not in "
-                   "this mod";
+            return "sensitivity, scales, deadzones, response curves and axis inversion are set in the tracker now, "
+                   "not in this mod";
         case DropRule::Reticle:
             return "this mod no longer draws or toggles a reticle";
         case DropRule::FollowsDefault:

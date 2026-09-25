@@ -547,7 +547,7 @@
     },
     "pose_shaping": {
       "decision": 3,
-      "text": "The tracker owns pose shaping, so sensitivity multipliers, deadzones, response curves and user-facing axis inversion leave every mod and the canonical format has no rows for them. A value a player set away from the shipped default is dropped. A shipped default that is not identity (abzu InvertRoll=true, [Position] InvertX=true, a roll multiplier other than 1) was correcting the mod's axis conversion, so the conversion folds it into the mod's boundary code and default behaviour does not change.",
+      "text": "The tracker owns pose shaping, so sensitivity multipliers, deadzones, response curves and user-facing axis inversion leave every mod and the canonical format has no rows for them. A value a player set away from the shipped default is dropped. A shipped default that is not identity (abzu InvertRoll=true, [Position] InvertX=true, a roll multiplier other than 1) was correcting the mod's axis conversion, so the conversion folds it into the mod's boundary code and default behaviour does not change. Unit scales a player can edit (game units per metre of head movement: PositionScale, WorldScale, UnitsPerMeter and the other spellings of schema non_canonical_keys PositionScale) are covered too, by the owner's ruling of 2026-09-25 that axis signs and scales are correct in code: the conversion folds the shipped scale into the mod's code as a constant, and a scale a player changed is dropped like a sensitivity.",
       "approved": "2026-09-24",
       "drop_rule": "PoseShaping"
     },

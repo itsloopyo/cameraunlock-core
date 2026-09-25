@@ -215,7 +215,7 @@ function locationParagraph(entries, name) {
 // players' files without the README saying so. scripts/templates/canonical-config-changelog.md
 // repeats these lines and the paragraphs below for each conversion's changelog; change both.
 const APPROVED_CHANGE_LINES = {
-  pose_shaping: 'A sensitivity, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.',
+  pose_shaping: 'A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.',
   reticle: 'Reticle settings, and a key that toggled the reticle.',
   follows_default: "The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.",
 };

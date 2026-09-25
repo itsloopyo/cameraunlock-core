@@ -169,6 +169,8 @@ const mutations = [
   ["a position multiplier", replace("TrueFreeLook=false", "TrueFreeLook=false\r\nPositionMultiplier=1.0"), "[Position] PositionMultiplier: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
   ["a lean scale", replace("TrueFreeLook=false", "TrueFreeLook=false\r\nLeanScale=1.0"), "[Position] LeanScale: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."],
   ["an axis sign", append(["[Tuning]", "SignYaw=-1"]), "line 87: [Tuning] SignYaw: The mod applies the head pose as the tracker sends it, with no axis inversion of its own."],
+  ["a position scale", append(["[Camera]", "PositionScale=5000"]), "line 87: [Camera] PositionScale: The mod converts your head movement to the game's units itself"],
+  ["a world scale", replace("TrueFreeLook=false", "TrueFreeLook=false\r\nWorldScale=39.37"), "[Position] WorldScale: The mod converts your head movement to the game's units itself"],
   ["[Sensitivity]", append(["[Sensitivity]", "Deadband=1"]), ["line 86: [Sensitivity] holds no canonical setting", "line 87: [Sensitivity] Deadband: The mod applies the head pose as the tracker sends it, with no deadzone of its own."]],
   ["[Sensitivity] with a bare Yaw", append(["[Sensitivity]", "Yaw=1.0"]), ["line 86: [Sensitivity] holds no canonical setting", "line 87: [Sensitivity] Yaw: The mod applies the head pose as the tracker sends it, with no sensitivity of its own."]],
   ["[Inversion] with a bare Pitch", append(["[Inversion]", "Pitch=true"]), ["line 86: [Inversion] holds no canonical setting", "line 87: [Inversion] Pitch: The mod applies the head pose as the tracker sends it, with no axis inversion of its own."]],
@@ -198,16 +200,6 @@ for (const [label, text, expected, dialect = "native"] of mutations) {
     problems.length === want.length && want.every((w, i) => problems[i].includes(w)),
     `lint mutation "${label}": expected ${want.map((w) => `"${w}"`).join(", ")}, got\n    ${problems.join("\n    ") || "(none)"}`,
   );
-}
-
-// A unit scale waits on the owner, so a conversion can still keep one as a local or Engine row.
-const unitScales = [
-  ["a position scale", append(["[Camera]", "; Game units per metre of head movement.", "PositionScale=5000"])],
-  ["a world scale", replace("TrueFreeLook=false", "TrueFreeLook=false\r\nWorldScale=39.37")],
-];
-for (const [label, text] of unitScales) {
-  const problems = lintCanonicalConfig(Buffer.from(text, "latin1"), { dialect: "native", exceptions: undefined });
-  check(problems.length === 0, `lint: ${label} should pass, and says:\n    ${problems.join("\n    ")}`);
 }
 
 const exception = { ToggleKey: { replaces: "Ctrl+Shift+Y", with: "Ctrl+Shift+T", reason: "the game binds Ctrl+Shift+Y" } };

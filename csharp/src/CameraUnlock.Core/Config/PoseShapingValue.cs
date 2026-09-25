@@ -4,8 +4,8 @@ namespace CameraUnlock.Core.Config
 {
     /// <summary>
     /// The effective legacy value of one pose-shaping setting the frozen reader read: a
-    /// sensitivity, deadzone, response curve or axis inversion, which the canonical format has no
-    /// row for. A differential test reads these to check the conversion: where
+    /// sensitivity, unit scale, deadzone, response curve or axis inversion, which the canonical
+    /// format has no row for. A differential test reads these to check the conversion: where
     /// <see cref="Folded"/> is true, the mod's own axis code now does what <see cref="Shipped"/>
     /// did. Built by <see cref="LegacyPoseShaping"/>. The C++ twin is
     /// <c>cameraunlock::config::PoseShapingValue</c>.

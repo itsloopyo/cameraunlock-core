@@ -75,8 +75,8 @@ namespace CameraUnlock.Core.Tests.Config
         {
             Assert.Equal("not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the default is used",
                 new DroppedValue(DropRule.NonFiniteNumber, "Smoothing", "RemoteSmoothing", "nan").Describe());
-            Assert.Equal("not carried: [Sensitivity] YawSensitivity=1.5, sensitivity, deadzones, response curves and axis "
-                + "inversion are set in the tracker now, not in this mod",
+            Assert.Equal("not carried: [Sensitivity] YawSensitivity=1.5, sensitivity, scales, deadzones, response curves and "
+                + "axis inversion are set in the tracker now, not in this mod",
                 new DroppedValue(DropRule.PoseShaping, "Sensitivity", "YawSensitivity", "1.5").Describe());
             Assert.Equal("not carried: [Reticle] ShowReticle=false, this mod no longer draws or toggles a reticle",
                 new DroppedValue(DropRule.Reticle, "Reticle", "ShowReticle", "false").Describe());

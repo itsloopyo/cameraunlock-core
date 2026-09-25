@@ -85,8 +85,8 @@ void TestDescribe() {
               "not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the default is used",
           "N2 line");
     Check(DescribeDroppedValue({DropRule::PoseShaping, "Sensitivity", "YawSensitivity", "1.5"}) ==
-              "not carried: [Sensitivity] YawSensitivity=1.5, sensitivity, deadzones, response curves and axis "
-              "inversion are set in the tracker now, not in this mod",
+              "not carried: [Sensitivity] YawSensitivity=1.5, sensitivity, scales, deadzones, response curves and "
+              "axis inversion are set in the tracker now, not in this mod",
           "pose-shaping line");
     Check(DescribeDroppedValue({DropRule::Reticle, "Reticle", "ShowReticle", "false"}) ==
               "not carried: [Reticle] ShowReticle=false, this mod no longer draws or toggles a reticle",

@@ -37,9 +37,10 @@ enum class ImportStatus {
 enum class DropRule {
     /// N2: a non-finite float or double imports as the row's default (LegacyFiniteOrDefault).
     NonFiniteNumber = 1,
-    /// A sensitivity, deadzone, response curve or axis inversion the player set away from the
-    /// shipped default. The tracker shapes the pose; the mod no longer does. A shipped default
-    /// that is not identity moves into the mod's axis conversion instead and is not dropped.
+    /// A sensitivity, unit scale, deadzone, response curve or axis inversion the player set away
+    /// from the shipped default. The tracker shapes the pose; the mod no longer does. A shipped
+    /// unit scale, and any other shipped default that is not identity, moves into the mod's axis
+    /// conversion instead and is not dropped.
     PoseShaping = 2,
     /// A reticle setting: mods no longer draw or toggle a reticle.
     Reticle = 3,

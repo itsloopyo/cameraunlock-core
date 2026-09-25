@@ -273,6 +273,14 @@ namespace CameraUnlock.Core.Config
             { "rollcurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
             { "sensitivitycurve", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
             { "curvestrength", "The mod applies the head pose as the tracker sends it, with no response curve of its own." },
+            { "positionscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "positionscaleuu", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "posscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "worldscale", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "unitspermeter", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "unitspermetre", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "worldunitspermeter", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
+            { "worldunitspermetre", "The mod converts your head movement to the game's units itself, so the scale is not a setting." },
         };
 
         /// <summary>

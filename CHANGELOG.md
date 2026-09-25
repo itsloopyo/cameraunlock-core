@@ -37,6 +37,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sensitivities are logged as dropped against Requiem's schema, and the shipped file drops none.
 - **Tracker pivot range confirmed**: `TrackerPivotForward` and `TrackerPivotUp` keep the canonical
   range 0 to `config::kMaxPositionLimit` (10).
+- **Unit scales a player can edit leave player config**, by the doctrine rule that axis signs and
+  scales are correct in code. The eight spellings are group `PositionScale` of
+  `non_canonical_keys` (below), so a table refuses one as a local row, applying a canonical file
+  reports one as `NonCanonicalConcept` with `The mod converts your head movement to the game's
+  units itself, so the scale is not a setting.`, and the lint fails a file holding one. A
+  conversion folds the shipped scale into the mod's code as a constant and passes the legacy value
+  through `LegacyPoseShaping`, so a scale the player changed is dropped as `PoseShaping`. The
+  approval and every player-facing line name scales now: `approved_changes.pose_shaping` in
+  `data/config-format.json`, the README line `generate-readme.mjs` renders (`A sensitivity, scale,
+  deadzone, response curve or axis inversion you changed from its default.`), the three bullets of
+  `scripts/templates/canonical-config-changelog.md`, and the `PoseShaping` log line in both
+  languages, now `sensitivity, scales, deadzones, response curves and axis inversion are set in the
+  tracker now, not in this mod`. No mod has converted, so no README or log a player has seen
+  changes.
 
 ### Fixed - every wrapper sets `MOD_SEED_FILES` and `PRESERVE_FILES`, blank where unused
 
@@ -96,20 +110,18 @@ diagnostic either. And several pose-shaping spellings the fleet and core use wer
   carry any of them as a game-local row with no diagnostic. The gates still match listed spellings
   only, so a sensitivity under a name no group lists passes them; the group's doc and
   docs/canonical-config.md say so.
-- Unit scales (`PositionScale`, `PositionScaleUU`, `PosScale`, `WorldScale`, `UnitsPerMeter`,
-  `UnitsPerMetre`, `WorldUnitsPerMeter`, `WorldUnitsPerMetre`) have a `deliberately_unaliased`
-  entry of their own, with the fleet repos that read each, and are in no `non_canonical_keys`
-  group. The owner's `pose_shaping` approval names sensitivities, deadzones, response curves and
-  axis inversion, not unit scales, so whether a scale the player can edit is dropped like a
-  sensitivity waits on the owner; meanwhile a table accepts one as a local row and the lint passes
-  it, so a conversion can keep a game's scale as an Engine or local row. `PositionScale`,
-  `WorldScale` and `UnitsPerMeter` leave the entry whose reason promised them a concept.
+- New group `PositionScale`: `PositionScale`, `PositionScaleUU`, `PosScale`, `WorldScale`,
+  `UnitsPerMeter`, `UnitsPerMetre`, `WorldUnitsPerMeter`, `WorldUnitsPerMetre`, with the fleet
+  repos that read each in its doc. Converting the tracker's metres to the game's units is the
+  mod's boundary code; a scale the player can edit is a position sensitivity under another name.
+  `PositionScale`, `WorldScale` and `UnitsPerMeter` leave `deliberately_unaliased`, whose reason
+  (a concept still to come) pointed the other way.
 - `deliberately_unaliased` and the `Deadzone` group's doc no longer give conflicting counts: the
   nine repos that read `[Deadzone] Yaw` are named, and they all read `[Sensitivity] Yaw` too. The
   `DeadzoneDeg` and `ResponseCurve` docs say who reads what.
 - `data/fixtures/canonical-ini/table/apply-unknown` adds `[Sensitivity] Pitch`, `[Deadzone] Yaw`
   and `Threshold`, a `[Tuning]` section with `rot_scale`, `SignYaw`, `YawGain`,
-  `PositionSensitivity` and `LeanScale`, and `[Network] WorldScale`, an ordinary `UnknownKey`.
+  `PositionSensitivity` and `LeanScale`, and `[Network] WorldScale`.
 - The shared table fixture's `[Position] LeanScale` row, a position multiplier under another
   name, is `[Position] LeanTraceLength` now (float, 0 to 2, default `1.0`), and `LeanDelayMs`'s
   comment reads `Milliseconds before a lean starts, and the metres its wall trace reaches.` A port

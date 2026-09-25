@@ -348,9 +348,9 @@ So the schema sections `[Sensitivity]`, `[Inversion]` and `[Reticle]` hold no ca
 and no canonical file has them. The retired `Smoothing` key (and its alias `SmoothingFactor`) is
 not written either.
 
-Deadzones, response curves, axis signs a player can edit and some sensitivity spellings were
-never schema concepts, so the schema lists their spellings under `non_canonical_keys` instead. These are not
-aliases: neither flat reader resolves them, and no field is bound to them. A canonical file
+Deadzones, response curves, unit scales and axis signs a player can edit, and some sensitivity
+spellings, were never schema concepts, so the schema lists their spellings under
+`non_canonical_keys` instead. These are not aliases: neither flat reader resolves them, and no field is bound to them. A canonical file
 holding one draws the same `NonCanonicalConcept` diagnostic with the group's `canonical_reason`,
 in any section. A group's sections hold nothing else, so every key in one draws the group's
 reason whatever it is spelled, beside the section's own `UnknownSection`:
@@ -361,6 +361,7 @@ reason whatever it is spelled, beside the section's own `UnknownSection`:
 | `Inversion` | `[Inversion]` | `SignYaw`, `SignPitch`, `SignRoll`, `SignX`, `SignY`, `SignZ` | The mod applies the head pose as the tracker sends it, with no axis inversion of its own |
 | `Deadzone` | `[Deadzone]` | `Deadzone`, `DeadzoneDeg`, `DeadzoneYaw`, `DeadzonePitch`, `DeadzoneRoll`, `YawDeadzone`, `PitchDeadzone`, `RollDeadzone`, `EnableDeadzone`, `DeadzoneMin`, `DeadzoneMax`, `Deadband`, `YawDeadband`, `PitchDeadband`, `RollDeadband` | The mod applies the head pose as the tracker sends it, with no deadzone of its own |
 | `ResponseCurve` | | `ResponseCurve`, `YawCurve`, `PitchCurve`, `RollCurve`, `SensitivityCurve`, `CurveStrength` | The mod applies the head pose as the tracker sends it, with no response curve of its own |
+| `PositionScale` | | `PositionScale`, `PositionScaleUU`, `PosScale`, `WorldScale`, `UnitsPerMeter`, `UnitsPerMetre`, `WorldUnitsPerMeter`, `WorldUnitsPerMetre` | The mod converts your head movement to the game's units itself, so the scale is not a setting |
 
 Matching is the schema's: ASCII case and `_` and `-` are ignored, so `deadzone_yaw` is
 `DeadzoneYaw` and `rot_scale` is `RotScale`; a section matches ASCII case-insensitively. The bare
@@ -369,14 +370,12 @@ because section-less they would be both; they draw the reason of the section the
 
 The lists match these spellings and no others. A pose-shaping setting under a name no group lists
 passes the table, apply and the lint as a game-local row, so a conversion that meets a new
-spelling adds it to its group in the same change.
+spelling adds it to its group in core's schema, never as a list of the mod's own.
 
-A unit scale (game units per metre of head movement: `PositionScale`, `WorldScale`,
-`UnitsPerMeter` and the other spellings in `deliberately_unaliased`) is in no list. The owner's
-`pose_shaping` approval names sensitivities, deadzones, response curves and axis inversion, and
-whether a scale the player can edit is dropped like a sensitivity has not been decided. Until it
-is, a conversion can keep a game's scale as an Engine row or a local row, and as for every
-setting that remains, the import carries the player's value.
+The conversion from the tracker's metres to the game's units is the mod's boundary code, like its
+axis signs. A scale the player can edit is a position sensitivity under another name, so, by the
+owner's ruling of 2026-09-25, a conversion folds the shipped value into code as a constant and
+drops a value the player changed, as it does a sensitivity.
 
 `LightMultiplier` is not pose shaping: it turns a carried light, not the view, and stays a
 canonical concept.
@@ -714,7 +713,7 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | DropRule | Recorded as | What is dropped |
 |----------|-------------|-----------------|
 | `NonFiniteNumber` (1) | normalisation N2 | A NaN or infinite float, which imports as the row's default (C++ `LegacyFiniteOrDefault`, C# `LegacyNormalisations.FiniteOrDefault`) |
-| `PoseShaping` (2) | approved change `pose_shaping` | A sensitivity, deadzone, response curve or axis inversion a player set away from the shipped default. A shipped default that is not identity was correcting the mod's axis conversion, so the conversion moves it into the mod's own code |
+| `PoseShaping` (2) | approved change `pose_shaping` | A sensitivity, unit scale, deadzone, response curve or axis inversion a player set away from the shipped default. A shipped unit scale, and a shipped default that is not identity, belong to the mod's axis conversion, so the conversion moves them into the mod's own code |
 | `Reticle` (3) | approved change `reticle` | Reticle settings and a reticle toggle key |
 | `FollowsDefault` (4) | approved change `follows_default` | The setting of a feature shipped switched off while untested, which now follows the mod's default |
 | `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code outside 0x01-0xFE, 0xFF included, which imports as unbound (C++ `LegacyVirtualKeyToBindings`; no C# import reads virtual-key codes). Code 0, a legacy file's unbound, stays unbound and is not recorded |
@@ -723,8 +722,8 @@ nothing. It stays for the life of the repo, since a player can update from any o
 conversion, such as which of two shipped values is the default; the repo's conversion and its
 differential test follow it.
 
-A map passes every sensitivity, deadzone, response curve and axis inversion its frozen reader
-read through C++ `LegacyPoseShaping` or C# `LegacyPoseShaping.Record` (bool, float and double),
+A map passes every sensitivity, unit scale, deadzone, response curve and axis inversion its
+frozen reader read through C++ `LegacyPoseShaping` or C# `LegacyPoseShaping.Record` (bool, float and double),
 with the effective legacy value and the value the game shipped. Each call adds a `PoseShapingValue` to the
 result's `pose_shaping` (C# `PoseShaping`): section, key, both values written as the canonical codecs
 write them (`true`, `1.0`, `0.5`; `nan`, `inf` or `-inf` for a legacy value that is not finite),
@@ -732,7 +731,7 @@ and `folded`, true when the two are equal as numbers. A folded value is what the
 the conversion moves it into the mod's own axis code, so the mod behaves as before with no setting.
 A value that is not folded is one the player changed, and the call also adds it to the dropped
 values as `PoseShaping`, which the migration logs as `not carried: [Section] Key=value, sensitivity,
-deadzones, response curves and axis inversion are set in the tracker now, not in this mod`. The map
+scales, deadzones, response curves and axis inversion are set in the tracker now, not in this mod`. The map
 sets no runtime field from either, and a shipped value that is not finite throws. Core's REFramework
 import lists the ones `PluginConfig::Read` reads (the three multipliers, the three position
 sensitivities and, for a schema with `positionInvertKeys`, the three position inversions) against

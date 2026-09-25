@@ -37,7 +37,7 @@ APPROVED_CHANGE_LINES), so a player reads the same thing in both. Change the two
 
 - `<file>` has a new layout. The first time this version starts, it converts the file once into the new layout and keeps the file as it was beside it as `<file>.pre-canonical`. `<file>.pre-canonical.last`, when present, is the file as it was before the most recent conversion: the mod converts the file again when it finds the older layout later, for example after an older version of the mod rewrote it.
 - Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
-  - A sensitivity, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+  - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
   - Reticle settings, and a key that toggled the reticle.
   - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
 - Hotkeys are written as key names, and each hotkey lists every key that triggers it, the Ctrl+Shift chord included: `ToggleKey=End, Ctrl+Shift+Y`.
@@ -53,7 +53,7 @@ APPROVED_CHANGE_LINES), so a player reads the same thing in both. Change the two
 
 - Settings move from `BepInEx\config\<GUID>.cfg` to `BepInEx\config\<GUID>.ini`. The first time this version starts, it reads your settings from the `.cfg` and writes them into the `.ini`. The `.cfg` is left as it was, and an older version of the mod still reads it.
 - Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
-  - A sensitivity, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+  - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
   - Reticle settings, and a key that toggled the reticle.
   - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
 - BepInEx's ConfigurationManager no longer lists these settings. Edit `BepInEx\config\<GUID>.ini` with any text editor.
@@ -69,6 +69,6 @@ APPROVED_CHANGE_LINES), so a player reads the same thing in both. Change the two
 ### Removed
 
 - The key that toggled the reticle, and the reticle settings.
-- The sensitivity, deadzone, response curve and axis inversion settings. Set these in your tracker app instead.
+- The sensitivity, scale, deadzone, response curve and axis inversion settings. Set these in your tracker app instead.
 - Only where every copy of the config the mod shipped (installer, Nexus ZIP and launcher seed) had the same defaults for these settings:
   With these settings at their shipped defaults the camera moves as it did before.
