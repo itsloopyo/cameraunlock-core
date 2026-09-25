@@ -752,8 +752,10 @@ in `config/testing/ini_mutations.h`, C# `IniMutations.Generate` in `csharp/testi
 which a test project links as source), and their results may differ only as the rules above
 allow. For pose shaping that means two things. On the shipped file every `pose_shaping` entry is
 folded, which is where the test holds the conversion's axis code to the shipped value it replaces.
-Where one build shipped two values for a setting (Requiem v0.4.0's installer and launcher seed
-disagree on the position sensitivity), only one can be the fold, and which is the owner's call.
+Where one build shipped two values for a setting, only one can be the fold, and
+`conversion_notes` in data/config-format.json records which. Requiem v0.4.0's installer ships
+position sensitivity 1.0 and its launcher seed carried 2.0; the owner ruled 1.0 on 2026-09-25, so
+nothing is folded and the seed's 2.0 is dropped as `PoseShaping`.
 On every corpus input, a pose-shaping value the published build ran on and the new config does not
 hold is an expected difference exactly when the result lists it in `pose_shaping` with that value
 and in `dropped` as `PoseShaping`.
