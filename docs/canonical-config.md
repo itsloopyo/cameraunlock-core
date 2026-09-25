@@ -898,11 +898,12 @@ over unless the `.ini` is deleted first.
 ### Install, uninstall and manual packages
 
 - **`MOD_SEED_FILES`** in an install wrapper's CONFIG BLOCK lists files copied only when the game
-  folder does not already hold one of the same name. A converted repo never lists its config in
-  `MOD_DLLS`, which `copy /y` overwrites on every install: a repo whose install script copied the
-  config through `MOD_DLLS` moves it to `MOD_SEED_FILES`, and a repo whose install scripts never
-  copied the config does not start, since the owner creates it at first launch. The ASI, shim,
-  shim-forwarder, xNVSE, BeamNG and REFramework bodies read it.
+  folder does not already hold one of the same name. The ASI, shim, shim-forwarder, xNVSE, BeamNG
+  and REFramework bodies read it. A converted repo lists no config in it or in `MOD_DLLS`, which
+  `copy /y` overwrites on every install: not `CameraUnlock.ini`, not the legacy file and not the
+  committed file under another name. The owner creates `CameraUnlock.ini` at first launch. An
+  update from a legacy build finds no `CameraUnlock.ini`, so a seeded one would be written before
+  the mod starts and the mod would never import the player's legacy file.
 - **`PRESERVE_FILES`** in an uninstall wrapper's CONFIG BLOCK lists config paths, relative to the
   game folder, that `uninstall-body.cmd` leaves in place, together with each one's
   `.pre-canonical` and `.pre-canonical.last`, including inside a loader folder the uninstall
@@ -1115,8 +1116,9 @@ In a mod repo, and in conformance:
   `config-legacy-reader` fails a converted repo whose source outside its legacy folder uses
   `GetPrivateProfile*`, `WritePrivateProfile*`, `IniReader`, `IniWriter`, `ParseIniConfig`,
   `ParseIniFile` or BepInEx's `ConfigFile.Bind`, unless `allow_legacy_symbols` records a use that
-  reads no config. `config-preserve` fails a config in `MOD_DLLS` and an installed path or
-  `.cfg` missing from `PRESERVE_FILES`. `readme` fails a converted repo whose README config block
+  reads no config. `config-preserve` fails `CameraUnlock.ini`, the legacy file or the committed
+  file's name in `MOD_DLLS` or `MOD_SEED_FILES`, and an installed path or the legacy file beside
+  one missing from `PRESERVE_FILES`. `readme` fails a converted repo whose README config block
   is missing or differs from the rendered one, and an unconverted repo that has one.
   `config-descriptor` holds the committed manifest to the config descriptor's rules (see
   "The config descriptor").

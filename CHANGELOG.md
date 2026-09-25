@@ -110,6 +110,24 @@ included. `schema_version` stays 1: only core's own scripts read the file.
 Consuming repos: a converted repo moves its config to `CameraUnlock.ini`, lists the legacy file in
 `PRESERVE_FILES`, and re-renders its README block with `pixi run readme --write --sections config`.
 
+### Fixed - conformance `config-preserve` fails a converted install that ships its config
+
+A converted release seeds nothing (owner decision of 2026-09-25), and the install scripts are no
+exception. `MOD_SEED_FILES` writes a file only where none is, and an update from a legacy build
+has no `CameraUnlock.ini` yet, so a seeded one is written before the mod starts: the mod reads it
+and never imports the player's legacy file. The `MOD_DLLS` finding told a converted repo to move
+its config to `MOD_SEED_FILES`, which is that bug.
+
+- `config-preserve` fails a converted repo whose `install.cmd` lists, in `MOD_DLLS` or
+  `MOD_SEED_FILES`, `CameraUnlock.ini`, the legacy file (`legacy_source`) or the committed config
+  file's name, and tells it to take the file out.
+- docs/canonical-config.md says the same for `MOD_SEED_FILES`.
+
+`pixi run conformance -All -Check config-preserve`: 20 -> 26 FAIL, the six new ones in the repos
+converted in place: fallout-new-vegas, metro-exodus-enhanced-edition, no-mans-sky and starfield
+seed the legacy file; a-plague-tale-innocence and sleeping-dogs seed `headtrack.ini`, their
+committed file. No unconverted repo is checked.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

@@ -1107,14 +1107,32 @@ function Test-ConfigPreserve {
         }
     })
 
+    # A converted install ships no config: not CameraUnlock.ini, not the legacy file, and not the
+    # committed file under any other name. MOD_DLLS copies over the player's file on every
+    # install. MOD_SEED_FILES writes a file only where none is, and on an update from a legacy
+    # build CameraUnlock.ini is absent, so a seeded one stops the mod importing the player's
+    # legacy file; on a fresh install a seeded legacy file is imported as if an older build wrote it.
     $installPath = Join-Path $Root 'scripts/install.cmd'
     if (Test-Path $installPath) {
         $vars = Get-ConfigBlockVars (Read-TextFile $installPath)
-        if ($vars.Contains('MOD_DLLS')) {
-            $leaves = @($installed | ForEach-Object { Split-Path -Leaf $_ })
-            foreach ($item in @(Get-CmdListItems $vars['MOD_DLLS'])) {
-                if ((Split-Path -Leaf $item) -notin $leaves) { continue }
-                Add-Finding $Name 'config-preserve' 'FAIL' "install.cmd's MOD_DLLS lists $item, so every script install copies the default config over the player's; list it in MOD_SEED_FILES"
+        $configLeaves = @($installed | ForEach-Object { Split-Path -Leaf $_ })
+        $legacyLeaves = @($state.files | Where-Object { $_.legacy_source } | ForEach-Object { $_.legacy_source })
+        $committedLeaves = @($state.files | Where-Object { $_.committed } | ForEach-Object { Split-Path -Leaf $_.committed })
+        foreach ($var in @('MOD_DLLS', 'MOD_SEED_FILES')) {
+            if (-not $vars.Contains($var)) { continue }
+            foreach ($item in @(Get-CmdListItems $vars[$var])) {
+                $leaf = Split-Path -Leaf $item
+                $seeded = $var -eq 'MOD_SEED_FILES'
+                if ($leaf -in $configLeaves) {
+                    $why = if ($seeded) { 'which an update from a legacy build writes before the mod starts, so the mod finds CameraUnlock.ini and never imports the player''s legacy file' } else { 'so every script install copies the default over the player''s settings' }
+                } elseif ($leaf -in $legacyLeaves) {
+                    $why = if ($seeded) { 'the legacy file, so a fresh install gets a legacy file no older build wrote and the mod imports it' } else { 'the legacy file, so every script install copies a shipped file over the one an older build reads after a rollback' }
+                } elseif ($leaf -in $committedLeaves) {
+                    $why = 'a copy of the committed config, which a converted release does not ship'
+                } else {
+                    continue
+                }
+                Add-Finding $Name 'config-preserve' 'FAIL' "install.cmd's $var lists $item, $why; take it out, since the mod creates CameraUnlock.ini at first launch and never writes the legacy file"
             }
         }
     }
