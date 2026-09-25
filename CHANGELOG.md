@@ -152,19 +152,17 @@ file, before and after.
 
 ### Removed - `uninstall-body.cmd` no longer keeps `.pre-canonical` copies
 
-Nothing writes `<file>.pre-canonical` or `<file>.pre-canonical.last` any more. The 18 repos
-converted in place committed their conversion on 2026-09-25, after their newest GitHub release
-(`v*` or the `dev` pre-release), so no published build wrote one. `uninstall-body.cmd` keeps each
-`PRESERVE_FILES` path and nothing beside it: the folder refusal, `:is_preserved` and the set-aside
-around a loader folder removal check the listed path alone. `test-uninstall-preserve.ps1` drops
-the copies from its fixtures and the folder-named-as-a-copy case, and its BepInEx fixture keeps
-`BepInEx\config\CameraUnlock.ini` and the plugin's `.cfg`. The template tails are unchanged.
+Nothing writes `<file>.pre-canonical` or `<file>.pre-canonical.last` any more. The 19 repos the
+canonical config check reports as converted committed their conversion on 2026-09-25, after their
+newest GitHub release (`v*` or the `dev` pre-release), so no published build wrote one.
+`uninstall-body.cmd` keeps each `PRESERVE_FILES` path and nothing beside it: the folder refusal,
+`:is_preserved` and the set-aside around a loader folder removal check the listed path alone. The
+template tails are unchanged.
 
-### Fixed - `test-uninstall-preserve.ps1` proves a `.pre-canonical` file is no longer kept
-
-The entry above dropped the copies from the fixtures, but no case showed that a
-`<file>.pre-canonical` beside a listed config now goes like any other unlisted file. Two cases do
-now, each run with `installed_by_us` true, false and `/force`:
+`test-uninstall-preserve.ps1` drops the copies from its fixtures and the folder-named-as-a-copy
+case, and its BepInEx fixture keeps `BepInEx\config\CameraUnlock.ini` and the plugin's `.cfg`. Two
+cases show a copy beside a listed config now goes like any other unlisted file, each run with
+`installed_by_us` true, false and `/force`:
 
 - BepInEx, listing `BepInEx\config\CameraUnlock.ini` and the plugin's `.cfg`, with a
   `.pre-canonical` beside each and a `.pre-canonical.last` beside the `.cfg`. No removal list reaches
@@ -174,9 +172,7 @@ now, each run with `installed_by_us` true, false and `/force`:
   with `MOD_LEFTOVERS` naming the two `.pre-canonical` files and a third copy it does not name. The
   list removes its two on every run, and the loader folder removal takes the third.
 
-Both cases fail against the body from before that entry, which kept every copy. Of the 19 repos
-the canonical config check reports as converted, none has a `v*` or `dev` tag on GitHub that
-contains the commit adding its `[CameraUnlock]` stamp, so no published build wrote a copy.
+Both cases fail against the body from before this change, which kept every copy.
 
 ### Changed - docs/canonical-config.md describes the import into `CameraUnlock.ini` throughout
 
