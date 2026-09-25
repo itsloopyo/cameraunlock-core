@@ -32,6 +32,10 @@ Consuming repos: every converted repo's committed config and its render test com
 after bumping the pin, re-run `pixi run render-config` and commit the file. The example, the
 all-concepts file and the table fixtures under `data/fixtures/canonical-ini/` gained the lines.
 
+Do not release a mod built on a core pin from this commit until core's owner reads Defaults.ini.
+Until then the lines tell players about a file the mod does not read and a log line it does not
+write, so a player who follows them gets no effect.
+
 ### Added - the `default` token, `RenderFresh` / `RenderCanonicalFresh` and `PerGame()`
 
 Owner answers of 2026-09-25: all 28 canonical concepts are global, and migration writes `default`

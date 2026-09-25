@@ -116,7 +116,9 @@ An **Engine** row holds data about the game rather than a taste: an address, an 
 slot, a collision channel. At its default it is written as a comment showing the value,
 `; PovOffset=0x404`, which the reader skips, so the row reads its default and a later build that
 corrects the default reaches every player who never set it. Any other value is written as an
-active line.
+active line. A fresh file (`RenderFresh`) writes an Engine concept row that is not `PerGame`,
+such as `CollisionChannel` in core's own table, as the active line `Key=default` instead. Both
+forms read back as the row's default.
 
 ### Line grammar
 
