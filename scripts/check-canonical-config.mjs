@@ -354,6 +354,24 @@ export function repoState(root) {
   return result;
 }
 
+// The entries of a manual (Nexus) ZIP that land on one of the repo's config files when the ZIP is
+// extracted over the game folder: an installed CameraUnlock.ini or, where the entry records one,
+// the legacy file in the same folder, at its path or at a tail of it (a flat ZIP meant for the
+// exe folder). Compared with / separators and without case.
+export function manualZipConfigEntries(state, entries) {
+  const files = state.files.flatMap((f) =>
+    f.installed.flatMap((at) => {
+      const p = at.replace(/\\/g, "/");
+      const folder = p.slice(0, p.lastIndexOf("/") + 1);
+      return f.legacy_source === null ? [p] : [p, folder + f.legacy_source];
+    }),
+  ).map((p) => p.toLowerCase());
+  return entries
+    .map((e) => e.replace(/\\/g, "/"))
+    .filter((e) => !e.endsWith("/"))
+    .filter((e) => files.some((p) => p === e.toLowerCase() || p.endsWith(`/${e.toLowerCase()}`)));
+}
+
 function resolveRoot(token) {
   for (const candidate of [token, path.join(REPOS_ROOT, token), path.join(REPOS_ROOT, `${token}-headtracking`)]) {
     if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return path.resolve(candidate);

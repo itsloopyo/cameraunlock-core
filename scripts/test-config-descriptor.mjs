@@ -9,9 +9,9 @@
 // pre-canonical build, so no legacy file). The rest are synthetic: subnautica-headtracking's
 // BepInEx entry with a committed file, whose real entry records none yet, and shapes no repo has
 // (a mod_home file, two config files). It also runs the rows generator in encode-seed.mjs, the
-// rules in validate-manifest.mjs on built ZIPs, the report conformance reads, conformance's
-// config-descriptor check, and the packager's ConvertFrom-Json / ConvertTo-Json -Depth 10 round
-// trip.
+// rules in validate-manifest.mjs on built ZIPs, the Nexus ZIP config rule, the report conformance
+// reads, conformance's config-descriptor check, and the packager's ConvertFrom-Json /
+// ConvertTo-Json -Depth 10 round trip.
 //
 //   node scripts/test-config-descriptor.mjs      (pixi run test-config-descriptor, part of pixi run check)
 
@@ -22,7 +22,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { repoState } from "./check-canonical-config.mjs";
+import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
 import { descriptorProblems, expectedRows, repoReport } from "./check-config-descriptor.mjs";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -260,6 +260,20 @@ fails("a seed of one layout's legacy file", fnvMan(undefined, { seed: [{ target:
 fails("a config seed spelled another way", abzuMan(undefined, { seed: [{ target: "abzugame\\binaries\\win64\\cameraunlock.ini", content_b64: "" }] }), abzu, "writes the config");
 clean("a seed that writes another file", abzuMan(undefined, { loader: { seed: [{ target: "BepInEx/config/BepInEx.cfg", content_b64: "" }] } }), abzu);
 fails("exe_dir for a game data/games.json does not list", manifest("no-such-game", structuredClone(fnvConfig)), fnv, "is not in data/games.json");
+
+// The Nexus ZIP rule validate-manifest runs: an entry on the config or on the legacy file beside
+// any installed path, at its path or a tail of it, and nothing else.
+{
+  const zipHits = (base, entries) => manualZipConfigEntries(base.state, entries);
+  const same = (got, want, label) => check(isDeepStrictEqual(got, want), `nexus zip: ${label}, got ${JSON.stringify(got)}`);
+  same(zipHits(abzu, ["AbzuGame/Binaries/Win64/CameraUnlock.ini"]), ["AbzuGame/Binaries/Win64/CameraUnlock.ini"], "the config at its installed path");
+  same(zipHits(abzu, ["AbzuGame\\Binaries\\Win64\\HeadTracking.ini"]),["AbzuGame/Binaries/Win64/HeadTracking.ini"], "the legacy file beside it");
+  same(zipHits(abzu, ["headtracking.ini"]), ["headtracking.ini"], "the legacy file in a flat ZIP");
+  same(zipHits(fnv, ["Fallout New Vegas English/HeadTracking.ini"]), ["Fallout New Vegas English/HeadTracking.ini"], "the legacy file beside one layout's config");
+  same(zipHits(bep, [`BepInEx/config/${BEP_LEGACY}`, "BepInEx/config/", "BepInEx/plugins/Mod.dll"]), [`BepInEx/config/${BEP_LEGACY}`], "the BepInEx .cfg, and no folder or plugin");
+  same(zipHits(sd, ["headtrack.ini", "CameraUnlock.ini"]), ["CameraUnlock.ini"], "no legacy file where the entry records none");
+  same(zipHits(abzu, ["AbzuGame/Binaries/Win64/Other.ini", "Win64/HeadTracking.ini.bak"]), [], "another file");
+}
 
 // Every rule's mutation above changes one thing; so does each of these, which must stay clean.
 clean("rows in another order", abzuMan((c) => ({ ...c, rows: Object.fromEntries(Object.entries(c.rows).reverse()) })), abzu);

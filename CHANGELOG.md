@@ -128,6 +128,24 @@ converted in place: fallout-new-vegas, metro-exodus-enhanced-edition, no-mans-sk
 seed the legacy file; a-plague-tale-innocence and sleeping-dogs seed `headtrack.ini`, their
 committed file. No unconverted repo is checked.
 
+### Fixed - `validate-manifest` fails a Nexus ZIP that carries the legacy file
+
+`checkNexusConfig` matched a converted repo's Nexus ZIP against the installed paths only. Since
+every installed path names `CameraUnlock.ini`, a ZIP carrying the legacy file (`HeadTracking.ini`
+and the like) passed, and extracting it replaces the file an older build reads after a rollback,
+which is also what the mod imports while `CameraUnlock.ini` is absent.
+
+- `manualZipConfigEntries(state, entries)` in `scripts/check-canonical-config.mjs` gives the ZIP
+  entries that land on an installed `CameraUnlock.ini` or on the legacy file in the folder of any
+  installed path, at the path or a tail of it. `validate-manifest` fails a converted repo's Nexus
+  ZIP on any of them, and its comment no longer describes the in-place conversion.
+- `test-config-descriptor` holds the rule to the config, the legacy file beside one or each
+  layout's config, a flat ZIP, a BepInEx `.cfg`, an entry with no legacy file, and a file of
+  another name.
+
+The newest Nexus ZIP of each of the ten converted repos checked out beside core carries neither
+file, before and after.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's

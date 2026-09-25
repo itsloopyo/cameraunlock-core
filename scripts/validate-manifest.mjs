@@ -79,7 +79,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-import { repoState } from "./check-canonical-config.mjs";
+import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
 import { descriptorProblems } from "./check-config-descriptor.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -317,27 +317,23 @@ function validateExternal(label, zip, man, entryByLower) {
 }
 
 // A Nexus ZIP is extracted by hand over the game folder, or into the folder the
-// mod sits in, so a config in it lands on the player's file. Once the repo is
-// converted, the file it would land as carries the [CameraUnlock] stamp, so the
-// mod reads it as canonical and no migration runs: the player's settings are
-// replaced by the defaults with no .pre-canonical copy (design R3-8). An entry
-// fails when it is an installed path data/config-format.json records for the
-// repo, or a tail of one (a flat ZIP meant for the exe folder). A repo that is
-// not converted yet is not checked; its conversion takes the config out of the
-// Nexus staging.
+// mod sits in, so a file in it lands on the player's. Once the repo is
+// converted, a CameraUnlock.ini in it replaces the player's settings with the
+// defaults, and on an update from a legacy build it also stops the one-time
+// import of the legacy file. A legacy file in it replaces the file an older
+// build reads after a rollback and, while CameraUnlock.ini is absent, is what
+// the mod imports. An entry fails when it lands on either (see
+// manualZipConfigEntries). A repo that is not converted yet is not checked;
+// its conversion takes the config out of the Nexus staging.
 function checkNexusConfig(label) {
   const zip = newestNexus(path.join(ROOT, "release"));
   if (zip === null) return;
   const state = repoState(ROOT);
   if (!state.converted) return;
-  const installed = state.files.flatMap((f) => f.installed).map((p) => p.replace(/\\/g, "/").toLowerCase());
-  const live = listZip(zip)
-    .map((e) => e.replace(/\\/g, "/"))
-    .filter((e) => !e.endsWith("/"))
-    .filter((e) => installed.some((p) => p === e.toLowerCase() || p.endsWith(`/${e.toLowerCase()}`)));
+  const live = manualZipConfigEntries(state, listZip(zip));
   if (live.length > 0) {
     throw new Error(
-      `${path.basename(zip)} carries ${live.join(", ")}, which extracts over the config the mod keeps in the game folder. An update would replace the player's file with the stamped default and no migration would run. Take the config out of the Nexus staging.`,
+      `${path.basename(zip)} carries ${live.join(", ")}, which extracts over the player's CameraUnlock.ini or the legacy file beside it. The mod creates CameraUnlock.ini at first launch and never writes the legacy file. Take the config out of the Nexus staging.`,
     );
   }
   console.log(`OK   ${label}: ${path.basename(zip)} - carries no config`);

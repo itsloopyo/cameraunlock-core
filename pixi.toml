@@ -80,12 +80,14 @@ pack = "dotnet pack csharp -c Release -o dist"
 # (delivery_mode == "manifest" and every declared source exists in the zip).
 # No args (or "."): validates the host repo's own release/*-installer.zip - run after
 # packaging. In a repo converted to the canonical config format it also opens
-# the newest release/*-nexus.zip and fails when it carries a config at a path
-# data/config-format.json records as installed (or at a tail of one, for a ZIP
-# extracted into the exe folder): an update extracted over the game folder
-# would replace the player's file with the stamped default, and no migration
-# would run. Unconverted repos are not checked, so their Nexus ZIPs keep the
-# config until their conversion takes it out of the Nexus staging.
+# the newest release/*-nexus.zip and fails when it carries a file at a path
+# data/config-format.json records as installed, or at the legacy file beside
+# one (or at a tail of either, for a ZIP extracted into the exe folder): an
+# update extracted over the game folder would replace the player's
+# CameraUnlock.ini with the defaults, or the legacy file an older build reads
+# and the mod imports while CameraUnlock.ini is absent. Unconverted repos are
+# not checked, so their Nexus ZIPs keep the config until their conversion
+# takes it out of the Nexus staging.
 # A manifest with a config descriptor (the `config` block a launcher reads to find the mod's
 # canonical config and the preference rows it binds) has it held to every rule in
 # scripts/check-config-descriptor.mjs, against the repo the ZIP was built from.
