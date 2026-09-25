@@ -717,9 +717,11 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `PoseShaping` (2) | approved change `pose_shaping` | A sensitivity, deadzone, response curve or axis inversion a player set away from the shipped default. A shipped default that is not identity was correcting the mod's axis conversion, so the conversion moves it into the mod's own code |
 | `Reticle` (3) | approved change `reticle` | Reticle settings and a reticle toggle key |
 | `FollowsDefault` (4) | approved change `follows_default` | The setting of a feature shipped switched off while untested, which now follows the mod's default |
+| `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code outside 0x01-0xFE, 0xFF included, which imports as unbound (C++ `LegacyVirtualKeyToBindings`; no C# import reads virtual-key codes). Code 0, a legacy file's unbound, stays unbound and is not recorded |
 
-Normalisation N1, a legacy hotkey code outside 0x01-0xFE importing as unbound, is recorded with
-`approved` null: it waits on the owner, and no map may apply it.
+`conversion_notes` in `data/config-format.json` holds what the owner decided for one repo's
+conversion, such as which of two shipped values is the default; the repo's conversion and its
+differential test follow it.
 
 A map passes every sensitivity, deadzone, response curve and axis inversion its frozen reader
 read through C++ `LegacyPoseShaping` or C# `LegacyPoseShaping.Record` (bool, float and double),

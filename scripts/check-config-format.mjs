@@ -35,6 +35,7 @@ const TOP_LEVEL_KEYS = [
   "configs",
   "normalisations",
   "approved_changes",
+  "conversion_notes",
   "hotkey_exceptions",
   "allow_legacy_symbols",
 ];
@@ -204,6 +205,26 @@ for (const [id, c] of Object.entries(doc.approved_changes)) {
   if (!isText(c.text)) fail(`${where}.text must be a non-empty string`);
   if (typeof c.approved !== "string" || !DATE.test(c.approved)) fail(`${where}.approved must be a YYYY-MM-DD date`);
   noteDropRule(c.drop_rule, where);
+}
+
+for (const [name, notes] of Object.entries(doc.conversion_notes)) {
+  const where = `conversion_notes.${name}`;
+  if (!(name in configs)) fail(`${where}: ${name} is not a repo in configs`);
+  if (!Array.isArray(notes) || notes.length === 0) {
+    fail(`${where} must be a non-empty array`);
+    continue;
+  }
+  notes.forEach((note, i) => {
+    if (!isObject(note)) {
+      fail(`${where}[${i}] must be an object`);
+      return;
+    }
+    checkKeys(`${where}[${i}]`, note, ["text", "approved"], []);
+    if (!isText(note.text)) fail(`${where}[${i}].text must be a non-empty string`);
+    if (typeof note.approved !== "string" || !DATE.test(note.approved)) {
+      fail(`${where}[${i}].approved must be a YYYY-MM-DD date`);
+    }
+  });
 }
 
 for (const [name, byKey] of Object.entries(doc.hotkey_exceptions)) {

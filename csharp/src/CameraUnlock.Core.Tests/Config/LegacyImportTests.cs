@@ -67,6 +67,7 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(2, (int)DropRule.PoseShaping);
             Assert.Equal(3, (int)DropRule.Reticle);
             Assert.Equal(4, (int)DropRule.FollowsDefault);
+            Assert.Equal(5, (int)DropRule.KeyCodeOutOfRange);
         }
 
         [Fact]
@@ -81,6 +82,8 @@ namespace CameraUnlock.Core.Tests.Config
                 new DroppedValue(DropRule.Reticle, "Reticle", "ShowReticle", "false").Describe());
             Assert.Equal("not carried: [Position] CollisionEnabled=false, this setting now follows the mod's default",
                 new DroppedValue(DropRule.FollowsDefault, "Position", "CollisionEnabled", "false").Describe());
+            Assert.Equal("not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
+                new DroppedValue(DropRule.KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230").Describe());
         }
 
         [Fact]
@@ -88,7 +91,7 @@ namespace CameraUnlock.Core.Tests.Config
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)9, "A", "B", "C"));
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)0, "A", "B", "C"));
-            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)5, "A", "B", "C"));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)6, "A", "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, null!, "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", null!, "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", "B", null!));

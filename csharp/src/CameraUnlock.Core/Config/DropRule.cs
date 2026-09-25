@@ -27,5 +27,12 @@ namespace CameraUnlock.Core.Config
         /// The map records one only where the legacy value differs from that default.
         /// </summary>
         FollowsDefault = 4,
+
+        /// <summary>
+        /// N1: a hotkey code outside 0x01-0xFE imports as unbound (C++
+        /// <c>LegacyVirtualKeyToBindings</c>). Only native imports meet it: no C# import reads
+        /// virtual-key codes.
+        /// </summary>
+        KeyCodeOutOfRange = 5,
     }
 }

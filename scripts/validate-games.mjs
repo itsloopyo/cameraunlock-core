@@ -132,6 +132,12 @@ for (const [id, game] of Object.entries(games)) {
     }
   }
 
+  // The canonical config renderer writes display_name into the file's header, and it refuses
+  // anything but printable ASCII with no space at either end.
+  if (typeof game.display_name === "string" && !/^[\x21-\x7e]([\x20-\x7e]*[\x21-\x7e])?$/.test(game.display_name)) {
+    fail(`${id}.display_name ${JSON.stringify(game.display_name)} is not printable ASCII without a space at either end`);
+  }
+
   if (typeof game.env_var === "string") {
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(game.env_var)) {
       fail(`${id}.env_var ${JSON.stringify(game.env_var)} is not a usable environment variable name`);

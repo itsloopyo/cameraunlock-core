@@ -28,6 +28,9 @@
     "`approved` is the date the owner approved one; a normalisation with `approved` null is",
     "pending and no map may apply it. `drop_rule` names the DropRule the import records.",
     "",
+    "`conversion_notes`: per repo in `configs`, facts the owner decided that its conversion and",
+    "differential test follow: `text` and the `approved` date.",
+    "",
     "`hotkey_exceptions`: per repo, per canonical hotkey key, a chord the game binds itself:",
     "`replaces` is the binding of the key's canonical_default that the game takes, `with` the",
     "binding the repo's file holds in its place, and `reason` why (/c/data/prompts/controls.md,",
@@ -524,10 +527,10 @@
   },
   "normalisations": {
     "N1": {
-      "rule": "A legacy hotkey code outside 0x01-0xFE imports as unbound. Unguarded readers accept such codes: core's IniReader::ReadHex in fallout-4 and titanfall-2 reads -1, abc (0xABC), 1abc and 0x230, skyrim-special-edition reads hotkeys with strtol, and HotkeyPoller::AddHotkey stores any code. The canonical hotkey grammar holds 0x01-0xFE only.",
-      "approved": null,
-      "pending": "The owner's answer to open question 2 (design section 10) covers N1 only if GetAsyncKeyState never reports a code outside 0x01-0xFE, and the probe shows that 0xFF does report. Unbinding a legacy 0xFF hotkey would change that user's behaviour, so the owner chooses: (a) approve N1 as written, or (b) widen the canonical hotkey grammar to 0x01-0xFF so 0xFF carries and N1 unbinds only codes nothing can report. Until then no map uses N1, and design 4.3 defers a user holding such a code.",
-      "probe": "pixi run probe-n1 (cameraunlock_tests --probe-getasynckeystate), Windows 11 Pro 10.0.26200, interactive desktop, 2026-09-24: with F24 (0x87) held by SendInput, GetAsyncKeyState reported 0x87 down and reported up for 0x187, 0x287, 0x10087, -121, 0, 0xFF, 0x100 and -1, so no out-of-range code aliases a key in range. With VK 0xFF itself held, GetAsyncKeyState(0xFF) reported down. 0xFF is VK__none_, the code kbd.h gives to scan codes a layout leaves unmapped. A search of every tracked .ini and .cfg in the sibling repos found no key or toggle line holding 0xFF, 255, -1, 0 or 0x0."
+      "rule": "A legacy hotkey code outside 0x01-0xFE imports as unbound, 0xFF included. Unguarded readers accept such codes: core's IniReader::ReadHex in fallout-4 and titanfall-2 reads -1, abc (0xABC), 1abc and 0x230, skyrim-special-edition reads hotkeys with strtol, and HotkeyPoller::AddHotkey stores any code. The canonical hotkey grammar holds 0x01-0xFE only. A legacy 0xFF hotkey could fire (see probe), so N1 unbinds it for a player who bound one.",
+      "approved": "2026-09-25",
+      "probe": "pixi run probe-n1 (cameraunlock_tests --probe-getasynckeystate), Windows 11 Pro 10.0.26200, interactive desktop, 2026-09-24: with F24 (0x87) held by SendInput, GetAsyncKeyState reported 0x87 down and reported up for 0x187, 0x287, 0x10087, -121, 0, 0xFF, 0x100 and -1, so no out-of-range code aliases a key in range. With VK 0xFF itself held, GetAsyncKeyState(0xFF) reported down. 0xFF is VK__none_, the code kbd.h gives to scan codes a layout leaves unmapped. A search of every tracked .ini and .cfg in the sibling repos found no key or toggle line holding 0xFF, 255, -1, 0 or 0x0.",
+      "drop_rule": "KeyCodeOutOfRange"
     },
     "N2": {
       "rule": "A non-finite float imports as the row's default. IniReader::ReadDouble accepts nan, inf and 1e400, abzu reads its sensitivities and deadzone through it unguarded, and skyrim-special-edition's atof and std::clamp let NaN through, which gives a NaN view matrix every frame. Repos that already sanitise turn a non-finite value into their fallback on read and see no change.",
@@ -554,6 +557,14 @@
       "approved": "2026-09-24",
       "drop_rule": "FollowsDefault"
     }
+  },
+  "conversion_notes": {
+    "resident-evil-requiem-headtracking": [
+      {
+        "text": "Position sensitivity is 1.0. v0.4.0's installer ZIP and Nexus ZIP ship [Position] SensitivityX/Y/Z=1.0 in HeadTracking.ini; its launcher-manifest seed carried 2.0 from an older file, which was drift and was re-encoded from the shipped file on 2026-08-30 (ac80142). 1.0 is identity, so the conversion folds no position sensitivity into the mod's code, and a file Lopari seeded from v0.4.0 has its 2.0 dropped as PoseShaping, like any value set away from the shipped default. Those players' lean halves.",
+        "approved": "2026-09-25"
+      }
+    ]
   },
   "hotkey_exceptions": {},
   "allow_legacy_symbols": {}

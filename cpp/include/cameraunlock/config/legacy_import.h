@@ -46,6 +46,8 @@ enum class DropRule {
     /// A feature that shipped disabled pending verification now follows the mod's default. The
     /// map records one only where the legacy value differs from that default.
     FollowsDefault = 4,
+    /// N1: a hotkey code outside 0x01-0xFE imports as unbound (LegacyVirtualKeyToBindings).
+    KeyCodeOutOfRange = 5,
 };
 
 /// One legacy value the map did not carry, for the migration log.
@@ -142,6 +144,22 @@ struct LegacyImport {
     /// (testing::GenerateIniMutations) takes the same list and mutates each one.
     std::vector<LegacyKey> keys;
 };
+
+/// Normalisation N1: a legacy hotkey code as a hotkey value. A code from 0x01 to 0xFE gives its
+/// key name, or `0x` and hex for a code the key table does not name; any other code gives "",
+/// unbound. `pixi run probe-n1` shows GetAsyncKeyState reporting none of them for a key held in
+/// range, so such a hotkey never fired on one. The exception is 0xFF: kbd.h gives it to the scan
+/// codes a layout leaves unmapped (VK__none_), and GetAsyncKeyState(0xFF) reports down while that
+/// code is held, so a legacy 0xFF hotkey could fire, and N1 unbinds it (approved 2026-09-25). A
+/// map folding a legacy chord switch into the same action formats the whole list instead, with
+/// input::FormatKeyBindings: the code's binding when it is in range, then the chord.
+std::string LegacyVirtualKeyToBindings(long long code);
+
+/// LegacyVirtualKeyToBindings, recording the drop in `dropped` under `section` and `key` when
+/// the code is outside 0x01-0xFE. Code 0 is recorded as nothing: it is how a legacy file says
+/// unbound, and it stays unbound.
+std::string LegacyVirtualKeyToBindings(long long code, const std::string& section, const std::string& key,
+                                       std::vector<DroppedValue>& dropped);
 
 /// Normalisation N2: a legacy float or double that is not finite imports as `row_default`,
 /// the runtime row's default, and the drop is recorded in `dropped` under `section` and

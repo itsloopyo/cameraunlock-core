@@ -9,6 +9,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - owner rulings on the Stage 3 open issues (2026-09-25)
+
+- **N1 is approved and back**: a legacy hotkey code outside 0x01-0xFE, 0xFF included, imports as
+  unbound. C++ `LegacyVirtualKeyToBindings(long long code)` gives the key name for a code from
+  0x01 to 0xFE (`0x` and hex where the key table has no name) and "" for any other code; the
+  overload taking a section, key and `dropped` list also records the drop, except for code 0,
+  which is how a legacy file says unbound. `DropRule::KeyCodeOutOfRange` is 5 in both languages
+  (C# `DropRule.KeyCodeOutOfRange`), after the four existing rules, whose numbers do not move. Its
+  log line: `not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so
+  the action is unbound`. No C# import reads virtual-key codes, so C# has the rule and its line
+  but no mapping helper. `data/config-format.json` records N1 as approved on 2026-09-25 with
+  `drop_rule` `KeyCodeOutOfRange`. The one behaviour change is 0xFF: GetAsyncKeyState reports it
+  while VK 0xFF is held, so a player who bound a legacy hotkey to 0xFF loses it. No config the
+  fleet ships binds it. The REFramework import still needs no N1: `PluginConfig::Read` already
+  keeps the default for such a code.
+- **`data/games.json`**: abzu's `display_name` is `ABZU`. The canonical renderer writes the display
+  name into the file header and accepts printable ASCII only. `pixi run validate-games` now fails a
+  `display_name` that is not printable ASCII or that starts or ends with a space.
+- **`data/config-format.json` `conversion_notes`**: per repo in `configs`, facts the owner decided
+  that the repo's conversion and differential test follow, each with `text` and an `approved` date.
+  `check-config-format` requires a repo in `configs`, a non-empty array and both fields. The first
+  entry is Requiem's: its position sensitivity is 1.0, as v0.4.0's installer and Nexus ZIPs ship.
+  The 2.0 in v0.4.0's launcher seed was drift and was re-encoded from the shipped file on
+  2026-08-30. A file Lopari seeded from v0.4.0 has its 2.0 dropped as `PoseShaping` at conversion.
+  The REFramework conversion test now pins that outcome only: the seed's three position
+  sensitivities are logged as dropped against Requiem's schema, and the shipped file drops none.
+- **Tracker pivot range confirmed**: `TrackerPivotForward` and `TrackerPivotUp` keep the canonical
+  range 0 to `config::kMaxPositionLimit` (10).
+
 ### Fixed - every wrapper sets `MOD_SEED_FILES` and `PRESERVE_FILES`, blank where unused
 
 A wrapper sets its CONFIG BLOCK before its `setlocal`, so a name its CONFIG BLOCK leaves out keeps
@@ -388,10 +417,10 @@ config conformance checks and each game's conversion will.
   in. Game paths use backslashes, as install scripts and `PRESERVE_FILES` write them; repo paths use
   forward slashes, as git writes them.
 - **`normalisations`**: N2 (a non-finite float imports as the row's default), approved by the owner
-  on 2026-09-24, with `drop_rule` `NonFiniteNumber`. N1 (a legacy hotkey code outside 0x01-0xFE
-  imports as unbound) is recorded with `approved` null, a `pending` text and the probe result: it is
-  still with the owner (see the legacy import entry below), and a normalisation with `approved` null
-  may not name a DropRule.
+  on 2026-09-24, with `drop_rule` `NonFiniteNumber`, and N1 (a legacy hotkey code outside 0x01-0xFE
+  imports as unbound), approved on 2026-09-25 with `drop_rule` `KeyCodeOutOfRange` and the probe
+  result. A normalisation with `approved` null would carry a `pending` text and may not name a
+  DropRule.
 - **`approved_changes`**: the three docs-survey decisions a differential test also allows, each with
   its text, its decision number, the date 2026-09-24 and its DropRule: `reticle` (decision 2),
   `pose_shaping` (decision 3) and `follows_default` (decision 4).
@@ -555,8 +584,8 @@ those builds).
   reads back as imported, keeps `.pre-canonical`, is not rewritten by a second load, and edits
   one line per `PositionEnabled` or `WorldSpaceYaw` save. Requiem v0.4.0's installer ships position
   sensitivity 1.0 and its launcher seed 2.0, and core cannot tell a seeded 2.0 from a player's.
-  The tests check both outcomes (dropped against a `positionSensitivity` of 1, kept against 2);
-  which one Requiem declares is decided in its own conversion.
+  The owner ruled on 2026-09-25 that 1.0 stands (`data/config-format.json` `conversion_notes`),
+  so the seed's 2.0 is logged as dropped.
 
 ### Added - the C++ config owner and migration driver
 
@@ -715,9 +744,9 @@ the mods that call them build as before. They stay until a major version. A conv
 its config through `ConfigOwner` with `HeadTrackingConfigTable`, and a BepInEx game reads its `.cfg`
 only through its frozen legacy import.
 
-### Added - legacy import support, normalisation N2, and the differential corpus, in C# and C++
+### Added - legacy import support, normalisations N1 and N2, and the differential corpus, in C# and C++
 
-What a game's legacy import hands the migration driver, the normalisation its map applies, and the
+What a game's legacy import hands the migration driver, the normalisations its map applies, and the
 corpus generator its differential test runs. Nothing in the fleet uses them yet:
 the config owners (next) drive the imports, and each game's conversion writes its own.
 
@@ -736,24 +765,26 @@ the config owners (next) drive the imports, and each game's conversion writes it
   section in a `LegacyKey` means any section, for the readers that ignore sections.
 - **Dropped values.** `DroppedValue` (rule, section, key, the value as the import read it) and
   `DropRule`: `NonFiniteNumber` 1 (N2), `PoseShaping` 2 (a sensitivity, deadzone, curve or
-  inversion set away from the shipped default), `Reticle` 3 and `FollowsDefault` 4 (a feature
-  shipped off pending verification that now takes the mod's default). The last three are the
-  docs-survey decisions; `FollowsDefault` is added to the design's list so decision 4's changes
+  inversion set away from the shipped default), `Reticle` 3, `FollowsDefault` 4 (a feature
+  shipped off pending verification that now takes the mod's default) and `KeyCodeOutOfRange` 5
+  (N1). `PoseShaping`, `Reticle` and `FollowsDefault` are the docs-survey decisions; `FollowsDefault` is added to the design's list so decision 4's changes
   reach the log too. C++ `DescribeDroppedValue` and C# `DroppedValue.Describe()` give the log
   line, e.g. `not carried: [Smoothing] RemoteSmoothing=nan, it is not a finite number, so the
   default is used`.
-- **N1 is not shipped: it goes back to the owner.** N1 would import a legacy hotkey code outside
-  0x01-0xFE as unbound, and the design approves it without a decision only if GetAsyncKeyState
-  never reports a code outside that range. `pixi run probe-n1` runs `cameraunlock_tests
-  --probe-getasynckeystate`, outside `check` because it injects a key press with SendInput and
-  needs an interactive desktop. On Windows 11 Pro 10.0.26200 (2026-09-24), with F24 held,
-  GetAsyncKeyState reported F24 (0x87) down and reported up for 0x187, 0x287, 0x10087, -121, 0,
-  0xFF, 0x100 and -1, so no out-of-range code reports a key in range. But 0xFF reports on its own:
-  it is the code the SDK's kbd.h gives to scan codes a layout leaves unmapped (`VK__none_`), and
-  with VK 0xFF itself held GetAsyncKeyState(0xFF) reported down. A legacy 0xFF hotkey can
-  therefore fire, the canonical hotkey grammar (0x01-0xFE) cannot hold it, and unbinding it would
-  change that user's behaviour, so the rule needs the owner's decision before a map may use it.
-  Until a rule exists, design 4.3 defers the migration of a user holding a value no rule covers.
+- **N1**, C++ only, approved by the owner on 2026-09-25: `LegacyVirtualKeyToBindings(long long
+  code)` gives the key name for a code from 0x01 to 0xFE (hex where the table has no name) and ""
+  (unbound) for any other code; an overload records the drop, except for code 0, which is how a
+  legacy file says unbound. A chord switch folds into the same list through
+  `input::FormatKeyBindings`. No C# import reads virtual-key codes, so C# has no N1 helper.
+- **N1 probe.** `pixi run probe-n1` runs `cameraunlock_tests --probe-getasynckeystate`, outside
+  `check` because it injects a key press with SendInput and needs an interactive desktop. On
+  Windows 11 Pro 10.0.26200 (2026-09-24), with F24 held, GetAsyncKeyState reported F24 (0x87) down
+  and reported up for 0x187, 0x287, 0x10087, -121, 0, 0xFF, 0x100 and -1, so no out-of-range code
+  reports a key in range. But 0xFF reports on its own: it is the code the SDK's kbd.h gives to
+  scan codes a layout leaves unmapped (`VK__none_`), and with VK 0xFF itself held
+  GetAsyncKeyState(0xFF) reported down. N1 therefore unbinds a legacy 0xFF hotkey that could fire,
+  a change for a player who bound one, which the owner approved; no config the fleet ships binds
+  0xFF.
 - **N2**: C++ `LegacyFiniteOrDefault` (float and double), C#
   `LegacyNormalisations.FiniteOrDefault`: a NaN or infinite legacy value gives the runtime row's
   default and records the drop; a non-finite default throws.
@@ -971,7 +1002,8 @@ and nothing changes for the flat readers: every concept, alias and default parse
   `config::kMaxPositionLimit` (10), `LightMultiplier` 0 to `effects::kMaxLightMultiplier`
   (5), `CollisionMargin` 0 with no upper bound. `CollisionChannel` has none. The C# flat
   reader has always refused a tracker pivot outside 0-10; the C++ one takes any finite
-  number, and the range follows the C# side.
+  number, and the range follows the C# side. The owner confirmed the pivots' 0-10 range for
+  both languages on 2026-09-25; the deprecated C++ flat reader keeps taking any finite pivot.
 - `codec: "hotkey"` on the canonical key lists, and `canonical_default`, the binding list a
   canonical file starts with: `ToggleKey` `End, Ctrl+Shift+Y`, `CycleTrackingModeKey`
   `PageUp, Ctrl+Shift+G`, `YawModeKey` `PageDown, Ctrl+Shift+H`. The `default` values and

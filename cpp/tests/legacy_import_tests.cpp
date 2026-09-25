@@ -1,9 +1,11 @@
-// The legacy import support: ImportResult's factories, the dropped-value lines, N2
-// (LegacyFiniteOrDefault), pose shaping (LegacyPoseShaping), and a LegacyImport over a Config.
+// The legacy import support: ImportResult's factories, the dropped-value lines, N1
+// (LegacyVirtualKeyToBindings), N2 (LegacyFiniteOrDefault), pose shaping (LegacyPoseShaping),
+// and a LegacyImport over a Config.
 
 #include <cameraunlock/config/legacy_import.h>
 #include <cameraunlock/input/key_bindings.h>
 
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -16,7 +18,11 @@
 namespace {
 
 using namespace cameraunlock::config;
+using cameraunlock::input::FormatKeyBindings;
 using cameraunlock::input::FormatVirtualKey;
+using cameraunlock::input::KeyBinding;
+using cameraunlock::input::KeyModifiers;
+using cameraunlock::input::ParseKeyBindings;
 
 int g_failures = 0;
 
@@ -69,7 +75,8 @@ void TestImportResult() {
               static_cast<int>(ImportStatus::Undecodable) == 2 && static_cast<int>(ImportStatus::Absent) == 3,
           "ImportStatus numbers match the C# enum");
     Check(static_cast<int>(DropRule::NonFiniteNumber) == 1 && static_cast<int>(DropRule::PoseShaping) == 2 &&
-              static_cast<int>(DropRule::Reticle) == 3 && static_cast<int>(DropRule::FollowsDefault) == 4,
+              static_cast<int>(DropRule::Reticle) == 3 && static_cast<int>(DropRule::FollowsDefault) == 4 &&
+              static_cast<int>(DropRule::KeyCodeOutOfRange) == 5,
           "DropRule numbers match the C# enum");
 }
 
@@ -87,9 +94,55 @@ void TestDescribe() {
     Check(DescribeDroppedValue({DropRule::FollowsDefault, "Position", "CollisionEnabled", "false"}) ==
               "not carried: [Position] CollisionEnabled=false, this setting now follows the mod's default",
           "follows-default line");
+    Check(DescribeDroppedValue({DropRule::KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230"}) ==
+              "not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
+          "N1 line");
     Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(9), "A", "B", "C"}); }) ==
               "drop rule 9 is not a DropRule",
           "a rule outside DropRule throws");
+}
+
+void TestN1() {
+    Check(LegacyVirtualKeyToBindings(0x23) == "End", "0x23 is End");
+    Check(LegacyVirtualKeyToBindings(0x87) == "F24", "0x87 is F24");
+    Check(LegacyVirtualKeyToBindings(0xBA) == "0xBA", "0xBA has no name, so hex");
+    Check(LegacyVirtualKeyToBindings(0x11) == "0x11", "a bare modifier code has no name, so hex");
+    bool every = true;
+    for (long long code = 0x01; code <= 0xFE; ++code) {
+        const std::string text = LegacyVirtualKeyToBindings(code);
+        const auto read = ParseKeyBindings(text);
+        every = every && text == FormatVirtualKey(static_cast<int>(code)) && read.ok() && read.bindings.size() == 1 &&
+                read.bindings[0].vk == code && read.bindings[0].modifiers == KeyModifiers::kNone;
+    }
+    Check(every, "every code from 0x01 to 0xFE reads back as that one key");
+    bool none = true;
+    for (const long long code : {0LL, 0xFFLL, 0x100LL, 0x187LL, 0x230LL, -1LL, -0x79LL, 0x1000000FFLL,
+                                 static_cast<long long>(LLONG_MAX), static_cast<long long>(LLONG_MIN)}) {
+        none = none && LegacyVirtualKeyToBindings(code).empty();
+    }
+    Check(none, "codes outside 0x01-0xFE are unbound, 0xFF, 0x230, -1 and the long long limits among them");
+
+    std::vector<DroppedValue> dropped;
+    Check(LegacyVirtualKeyToBindings(0x23, "Hotkeys", "ToggleKey", dropped) == "End" && dropped.empty(),
+          "an in-range code records nothing");
+    Check(LegacyVirtualKeyToBindings(0xFE, "Hotkeys", "ToggleKey", dropped) == "0xFE" && dropped.empty(),
+          "0xFE, the top of the range, records nothing");
+    Check(LegacyVirtualKeyToBindings(0, "Hotkeys", "YawModeKey", dropped).empty() && dropped.empty(),
+          "code 0, a legacy file's way of saying unbound, records nothing");
+    Check(LegacyVirtualKeyToBindings(0xFF, "Hotkeys", "PositionToggleKey", dropped).empty(),
+          "0xFF, which GetAsyncKeyState can report, is unbound");
+    LegacyVirtualKeyToBindings(0x230, "Hotkeys", "ToggleKey", dropped);
+    LegacyVirtualKeyToBindings(-1, "General", "CycleKey", dropped);
+    LegacyVirtualKeyToBindings(LLONG_MIN, "General", "Min", dropped);
+    Check(dropped.size() == 4 && SameDrop(dropped[0], DropRule::KeyCodeOutOfRange, "Hotkeys", "PositionToggleKey", "0xFF") &&
+              SameDrop(dropped[1], DropRule::KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230") &&
+              SameDrop(dropped[2], DropRule::KeyCodeOutOfRange, "General", "CycleKey", "-1") &&
+              SameDrop(dropped[3], DropRule::KeyCodeOutOfRange, "General", "Min", "-9223372036854775808"),
+          "out-of-range codes record the drop in hex, or in decimal when negative");
+
+    Check(FormatKeyBindings({KeyBinding{KeyModifiers::kNone, 0x23}, KeyBinding{KeyModifiers::kCtrl | KeyModifiers::kShift, 'Y'}}) ==
+              "End, Ctrl+Shift+Y",
+          "a chord switch folds into the list through FormatKeyBindings");
 }
 
 void TestN2() {
@@ -183,20 +236,21 @@ void TestLegacyImport() {
     import.run = [](const LegacyInput& input, RuntimeConfig& out) {
         if (input.ansi_lossy) return ImportResult::Absent({});
         FrozenConfig legacy;
-        legacy.toggle_key = 0x24;
+        legacy.toggle_key = 0xFF;
         legacy.remote_smoothing = std::numeric_limits<float>::quiet_NaN();
         std::vector<DroppedValue> dropped;
-        out.toggle_key = FormatVirtualKey(static_cast<int>(legacy.toggle_key));
+        out.toggle_key = LegacyVirtualKeyToBindings(legacy.toggle_key, "General", "ToggleKey", dropped);
         out.remote_smoothing =
             LegacyFiniteOrDefault(legacy.remote_smoothing, RuntimeConfig{}.remote_smoothing, "Smoothing", "RemoteSmoothing", dropped);
         return ImportResult::Imported(std::move(dropped));
     };
     RuntimeConfig config;
     const ImportResult result = import.run(LegacyInput{L"C:\\Games\\HeadTracking.ini", "C:\\Games\\HeadTracking.ini", false}, config);
-    Check(result.status == ImportStatus::Imported && config.toggle_key == "Home" && config.remote_smoothing == 0.15f &&
-              result.dropped.size() == 1 &&
-              SameDrop(result.dropped[0], DropRule::NonFiniteNumber, "Smoothing", "RemoteSmoothing", "nan"),
-          "an import maps the frozen Config, through N2, and returns what it dropped");
+    Check(result.status == ImportStatus::Imported && config.toggle_key.empty() && config.remote_smoothing == 0.15f &&
+              result.dropped.size() == 2 &&
+              SameDrop(result.dropped[0], DropRule::KeyCodeOutOfRange, "General", "ToggleKey", "0xFF") &&
+              SameDrop(result.dropped[1], DropRule::NonFiniteNumber, "Smoothing", "RemoteSmoothing", "nan"),
+          "an import maps the frozen Config through N1 and N2 and returns what it dropped");
     Check(import.keys.size() == 3 && import.keys[2].section.empty(), "keys hold a section-less entry");
     RuntimeConfig untouched;
     Check(import.run(LegacyInput{L"C:\\Spiele\\\x00DC\\HeadTracking.ini", "C:\\Spiele\\?\\HeadTracking.ini", true}, untouched)
@@ -212,6 +266,7 @@ int RunLegacyImportTests() {
     try {
         TestImportResult();
         TestDescribe();
+        TestN1();
         TestN2();
         TestPoseShaping();
         TestLegacyImport();

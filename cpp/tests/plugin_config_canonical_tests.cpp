@@ -617,21 +617,14 @@ void TestConversionLog(const fs::path& root) {
           "RE2: the reticle toggle's lines are logged as not carried");
     const std::string village = convert(kFixtures[4]);
     Check(!Contains(village, "InvertX"), "RE8: the shipped InvertX=true is corrected, not dropped");
-    // Which positionSensitivity Requiem declares when it converts is the owner's decision: its
-    // v0.4.0 installer ships 1.0 and its v0.4.0 launcher seed 2.0. Both outcomes are checked, so
-    // neither is fixed here.
+    // Requiem's position sensitivity is 1.0, what v0.4.0's installer ships; the 2.0 its v0.4.0
+    // launcher seed carried was drift (data/config-format.json conversion_notes).
     const std::string seed = convert(kFixtures[6]);
     Check(Contains(seed, "not carried: [Position] SensitivityX=2.0, ") &&
+              Contains(seed, "not carried: [Position] SensitivityY=2.0, ") &&
               Contains(seed, "not carried: [Position] SensitivityZ=2.0, "),
-          "a position sensitivity of 2 against a schema positionSensitivity of 1 is logged as dropped");
-    Fixture seed_at_two = kFixtures[6];
-    seed_at_two.schema.positionSensitivity = 2.0f;
-    Check(!Contains(convert(seed_at_two), "[Position] Sensitivity"),
-          "and against a schema positionSensitivity of 2 it is the default, so nothing is dropped");
-    Fixture shipped_at_two = kFixtures[5];
-    shipped_at_two.schema.positionSensitivity = 2.0f;
-    Check(Contains(convert(shipped_at_two), "not carried: [Position] SensitivityX=1.0, "),
-          "while requiem's shipped 1.0 against a schema positionSensitivity of 2 is dropped");
+          "Requiem's launcher seed: each position sensitivity of 2 is logged as dropped");
+    Check(!Contains(convert(kFixtures[5]), "[Position] Sensitivity"), "Requiem's shipped 1.0 drops nothing");
 }
 
 void TestImportDropsAndCorrection(const fs::path& root) {
@@ -679,8 +672,8 @@ std::string KeysText(const PluginConfigSchema& schema) {
 }
 
 // Each shipped file holds SetDefaults' shaping, which PluginMod applies, so the import folds every
-// pose-shaping value and drops none. Requiem's launcher seed is the exception its conversion
-// decides (TestConversionLog).
+// pose-shaping value and drops none. Requiem's launcher seed is not a shipped file: its drifted
+// position sensitivities are dropped (TestConversionLog).
 void TestShippedShapingIsFolded(const fs::path& root) {
     for (const Fixture& f : kFixtures) {
         const std::string name = f.file;
