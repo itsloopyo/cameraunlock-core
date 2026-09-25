@@ -11,7 +11,7 @@
 // (a mod_home file, two config files). It also holds the rule that a converted repo's manifest
 // seeds and ships no config, block or not, and runs the rows generator in encode-seed.mjs, the
 // rules in validate-manifest.mjs on built ZIPs, the Nexus ZIP config rule, the report conformance
-// reads, conformance's config-descriptor check, and the packager's ConvertFrom-Json /
+// reads, conformance's config-descriptor and config-preserve checks, and the packager's ConvertFrom-Json /
 // ConvertTo-Json -Depth 10 round trip.
 //
 //   node scripts/test-config-descriptor.mjs      (pixi run test-config-descriptor, part of pixi run check)
@@ -263,13 +263,13 @@ const SEEDS_NOTHING = "a converted release seeds nothing";
 writes("files[] over the config", abzuMan(undefined, { files: [{ source: "CameraUnlock.ini", target: "AbzuGame/Binaries/Win64/CameraUnlock.ini" }] }), abzu, "lands on CameraUnlock.ini");
 writes("files[] in a variant over the config", abzuMan(undefined, { delivery_mode: "manifest_variants", files: undefined, variants: [{ id: "steam", files: [{ source: "a", target: "AbzuGame\\Binaries\\Win64\\CameraUnlock.ini" }] }] }), abzu, "lands on CameraUnlock.ini");
 writes("files[] over the legacy file", bepMan(undefined, { files: [{ source: "a", target: `BepInEx/config/${BEP_LEGACY}` }] }), bep, `lands on the legacy file ${BEP_LEGACY}`);
-writes("a seed of the config", fnvMan(undefined, { loader: { seed: [seed("CameraUnlock.ini", "exe_dir")] } }), fnv, `seed CameraUnlock.ini (exe_dir) writes CameraUnlock.ini; ${SEEDS_NOTHING}`);
+writes("a seed of the config", fnvMan(undefined, { loader: { seed: [seed("CameraUnlock.ini", "exe_dir")] } }), fnv, `seed CameraUnlock.ini (exe_dir) writes CameraUnlock.ini, and ${SEEDS_NOTHING}`);
 writes("a config seed in a variant", abzuMan(undefined, { delivery_mode: "manifest_variants", variants: [{ id: "steam", loader: { seed: [seed("AbzuGame/Binaries/Win64/CameraUnlock.ini")] } }] }), abzu, SEEDS_NOTHING);
 writes("a top-level loader seed beside variants", abzuMan(undefined, { delivery_mode: "manifest_variants", loader: { seed: [seed("AbzuGame/Binaries/Win64/CameraUnlock.ini")] }, variants: [{ id: "steam" }] }), abzu, SEEDS_NOTHING);
 writes("a config seed spelled another way", abzuMan(undefined, { seed: [seed("abzugame\\binaries\\win64\\cameraunlock.ini")] }), abzu, SEEDS_NOTHING);
 writes("a seed of the legacy file", bepMan(undefined, { seed: [seed(`BepInEx\\config\\${BEP_LEGACY}`)] }), bep, `writes the legacy file ${BEP_LEGACY}`);
 writes("a seed of one layout's legacy file", fnvMan(undefined, { seed: [seed("Fallout New Vegas English\\HeadTracking.ini")] }), fnv, "writes the legacy file HeadTracking.ini");
-writes("a legacy seed with no config block", manifest("fallout-new-vegas", undefined, { loader: { seed: [seed("HeadTracking.ini", "exe_dir")] } }), fnv, `writes the legacy file HeadTracking.ini; ${SEEDS_NOTHING}`);
+writes("a legacy seed with no config block", manifest("fallout-new-vegas", undefined, { loader: { seed: [seed("HeadTracking.ini", "exe_dir")] } }), fnv, `writes the legacy file HeadTracking.ini, and ${SEEDS_NOTHING}`);
 writes("a seed at mod_home", manifest("abzu", undefined, { seed: [seed("CameraUnlock.ini", "mod_home")] }), home, SEEDS_NOTHING);
 writes("a seed named like the committed file", manifest("sleeping-dogs", undefined, { seed: [seed("headtrack.ini")] }), sd, "writes headtrack.ini, the committed config's name");
 {
@@ -353,10 +353,20 @@ function runScript(script, ...args) {
 }
 
 // validate-manifest runs the rules on a built ZIP, against the repo whose release/ folder holds it,
-// which it reads through the real data/config-format.json entry, abzu-headtracking's.
-function zipRepo(label, config, extra = {}) {
+// which it reads through the real data/config-format.json entry, abzu-headtracking's. The repo is
+// converted unless its committed HeadTracking.ini is given as a legacy file.
+const ABZU_BIN = "AbzuGame/Binaries/Win64";
+const shipping = (target) => ({ files: [{ source: "plugins/Mod.dll", target: "Mod.dll" }, { source: "plugins/Mod.dll", target }] });
+// [case, manifest fields, message] for a converted abzu-headtracking manifest with no block.
+const BLOCKLESS_WRITES = [
+  ["a legacy seed", { loader: { seed: [seed(`${ABZU_BIN}/HeadTracking.ini`)] } }, `seed ${ABZU_BIN}/HeadTracking.ini (game_root) writes the legacy file HeadTracking.ini, and ${SEEDS_NOTHING}`],
+  ["a config seed", { seed: [seed(`${ABZU_BIN}/CameraUnlock.ini`)] }, `seed ${ABZU_BIN}/CameraUnlock.ini (game_root) writes CameraUnlock.ini, and ${SEEDS_NOTHING}`],
+  ["files[] on the config", shipping(`${ABZU_BIN}/CameraUnlock.ini`), `files[] ${ABZU_BIN}/CameraUnlock.ini (game_root) lands on CameraUnlock.ini`],
+  ["files[] on the legacy file", shipping(`${ABZU_BIN}/HeadTracking.ini`), `files[] ${ABZU_BIN}/HeadTracking.ini (game_root) lands on the legacy file HeadTracking.ini`],
+];
+function zipRepo(label, config, extra = {}, committedText = ALL) {
   const man = abzuMan(() => config, extra);
-  const root = repo(label, "abzu-headtracking", { "HeadTracking.ini": ALL });
+  const root = repo(label, "abzu-headtracking", { "HeadTracking.ini": committedText });
   const staging = path.join(scratch, label, "staging");
   fs.mkdirSync(path.join(staging, "plugins"), { recursive: true });
   fs.writeFileSync(path.join(staging, "launcher-manifest.json"), JSON.stringify(man, null, 2));
@@ -376,8 +386,12 @@ function zipRepo(label, config, extra = {}) {
   check(stale.status === 1 && stale.out.includes("config.rows is"), `validate-manifest: stale rows should fail, got ${stale.status}\n${stale.out}`);
   const version = runScript("validate-manifest.mjs", zipRepo("zip-version", { ...structuredClone(abzuConfig), canonical_since: "2.0.0" }));
   check(version.status === 1 && version.out.includes("is above mod_info.version 1.2.0"), `validate-manifest: canonical_since above the ZIP's version should fail, got ${version.status}\n${version.out}`);
-  const seeded = runScript("validate-manifest.mjs", zipRepo("zip-seeded", undefined, { loader: { seed: [{ target: "AbzuGame/Binaries/Win64/HeadTracking.ini", content_b64: "" }] } }));
-  check(seeded.status === 1 && seeded.out.includes("writes the legacy file HeadTracking.ini; a converted release seeds nothing"), `validate-manifest: a converted repo seeding its legacy file without a block should fail, got ${seeded.status}\n${seeded.out}`);
+  for (const [i, [what, extra, expected]] of BLOCKLESS_WRITES.entries()) {
+    const run = runScript("validate-manifest.mjs", zipRepo(`zip-blockless-${i}`, undefined, extra));
+    check(run.status === 1 && run.out.includes(expected), `validate-manifest: a converted repo with no block and ${what} should fail with "${expected}", got ${run.status}\n${run.out}`);
+  }
+  const unconvertedSeed = runScript("validate-manifest.mjs", zipRepo("zip-unconverted-seed", undefined, BLOCKLESS_WRITES[0][1], LEGACY_INI));
+  check(unconvertedSeed.status === 0, `validate-manifest: an unconverted repo seeding its config should pass, got ${unconvertedSeed.status}\n${unconvertedSeed.out}`);
   const loose = zipRepo("zip-loose", structuredClone(abzuConfig));
   const moved = path.join(scratch, "zip-loose", "Mod-v1.2.0-installer.zip");
   fs.renameSync(loose, moved);
@@ -423,12 +437,16 @@ function zipRepo(label, config, extra = {}) {
   const shallow = repoReport(shallowRoot);
   check(shallow.shallow && shallow.problems.length === 0, `tags: a shallow clone should be reported as such, got ${JSON.stringify(shallow)}`);
 
-  // conformance's config-descriptor check over real entries: for a converted repo with no block
-  // that seeds its legacy file, a FAIL for each; one for a block that names the legacy file; and
-  // nothing for a block that meets every rule.
-  const noBlock = repo("conformance-no-block", "abzu-headtracking", {
-    "HeadTracking.ini": ALL,
-    "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined, { loader: { seed: [{ target: "AbzuGame/Binaries/Win64/HeadTracking.ini", content_b64: "" }] } })),
+  // conformance's config-descriptor check over real entries: for each converted repo with no
+  // block that seeds or ships either file, a FAIL for the missing block and one for the write;
+  // one for a block that names the legacy file; and nothing for a block that meets every rule or
+  // for an unconverted repo that seeds its config.
+  const noBlock = BLOCKLESS_WRITES.map(([, extra], i) =>
+    repo(`conformance-no-block-${i}`, "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined, extra)) }),
+  );
+  const unconvertedSeed = repo("conformance-unconverted-seed", "abzu-headtracking", {
+    "HeadTracking.ini": LEGACY_INI,
+    "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined, BLOCKLESS_WRITES[0][1])),
   });
   const legacyBlock = repo("conformance-legacy-path", "abzu-headtracking", {
     "HeadTracking.ini": ALL,
@@ -437,16 +455,46 @@ function zipRepo(label, config, extra = {}) {
   const goodBlock = repo("conformance-good", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan()) });
   const conformance = spawnSync(
     "powershell",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo '${noBlock}','${legacyBlock}','${goodBlock}' -Check config-descriptor -Json; exit $LASTEXITCODE`],
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo ${[...noBlock, unconvertedSeed, legacyBlock, goodBlock].map((r) => `'${r}'`).join(",")} -Check config-descriptor -Json; exit $LASTEXITCODE`],
     { encoding: "utf8" },
   );
   const findings = JSON.parse(conformance.stdout.replace(/^\uFEFF/, "") || "[]");
   const list = (Array.isArray(findings) ? findings : [findings]).filter((x) => x.check === "config-descriptor" && x.severity === "FAIL");
+  const count = (needle) => list.filter((x) => x.message.includes(needle)).length;
   check(
-    conformance.status === 1 && list.length === 3 &&
-      list.some((x) => x.message.includes("has no config block")) && list.some((x) => x.message.includes("a converted release seeds nothing")) &&
-      list.some((x) => x.message.includes("is not named CameraUnlock.ini")),
-    `conformance: config-descriptor should fail the repo with no block and a legacy seed on both, and the block that names the legacy file, and nothing else, got ${conformance.status}\n${conformance.stdout}${conformance.stderr}`,
+    conformance.status === 1 && list.length === 2 * BLOCKLESS_WRITES.length + 1 && count("has no config block") === BLOCKLESS_WRITES.length &&
+      BLOCKLESS_WRITES.every(([, , expected]) => count(expected) === 1) && count("is not named CameraUnlock.ini") === 1,
+    `conformance: config-descriptor should fail each converted repo with no block on the block and on its write, and the block that names the legacy file, and nothing else, got ${conformance.status}\n${conformance.stdout}${conformance.stderr}`,
+  );
+
+  // conformance's config-preserve check: a converted repo's install.cmd lists neither file in
+  // MOD_DLLS or MOD_SEED_FILES, and its uninstall.cmd neither in MOD_SEED_FILES. The same scripts
+  // in an unconverted repo, and the lists without them in a converted one, draw nothing.
+  const PRESERVE = `"AbzuGame\\Binaries\\Win64\\CameraUnlock.ini" "AbzuGame\\Binaries\\Win64\\HeadTracking.ini"`;
+  const scripts = (dlls, seeds, uninstallSeeds = seeds) => ({
+    "scripts/install.cmd": `@echo off\r\n:: --- CONFIG BLOCK ---\r\nset "MOD_DLLS=${dlls}"\r\nset "MOD_SEED_FILES=${seeds}"\r\n:: --- END CONFIG BLOCK ---\r\n`,
+    "scripts/uninstall.cmd": `@echo off\r\n:: --- CONFIG BLOCK ---\r\nset "MOD_DLLS=${dlls}"\r\nset "MOD_SEED_FILES=${uninstallSeeds}"\r\nset "PRESERVE_FILES=${PRESERVE}"\r\n:: --- END CONFIG BLOCK ---\r\nset "_BODY=%WRAPPER_DIR%shared\\uninstall-body.cmd"\r\n`,
+  });
+  const listed = repo("preserve-listed", "abzu-headtracking", { "HeadTracking.ini": ALL, ...scripts("Mod.asi HeadTracking.ini", "CameraUnlock.ini", "CameraUnlock.ini HeadTracking.ini") });
+  const unlisted = repo("preserve-unlisted", "abzu-headtracking", { "HeadTracking.ini": ALL, ...scripts("Mod.asi", "") });
+  const legacyListed = repo("preserve-unconverted", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, ...scripts("Mod.asi HeadTracking.ini", "CameraUnlock.ini") });
+  const preserve = spawnSync(
+    "powershell",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo '${listed}','${unlisted}','${legacyListed}' -Check config-preserve -Json; exit $LASTEXITCODE`],
+    { encoding: "utf8" },
+  );
+  const preserveFindings = JSON.parse(preserve.stdout.replace(/^\uFEFF/, "") || "[]");
+  const messages = (Array.isArray(preserveFindings) ? preserveFindings : [preserveFindings]).map((x) => `${x.severity} ${x.message}`);
+  const expected = [
+    "FAIL install.cmd's MOD_DLLS lists HeadTracking.ini, the legacy file,",
+    "FAIL install.cmd's MOD_SEED_FILES lists CameraUnlock.ini, which an update from a legacy build writes",
+    "FAIL uninstall.cmd's MOD_SEED_FILES lists CameraUnlock.ini, the player's settings,",
+    "FAIL uninstall.cmd's MOD_SEED_FILES lists HeadTracking.ini, the legacy file an older build reads after a rollback,",
+  ];
+  check(
+    preserve.status === 1 && messages.length === expected.length &&
+      expected.every((e) => messages.filter((m) => m.startsWith(e) && m.endsWith("The mod creates CameraUnlock.ini at first launch; list neither file.")).length === 1),
+    `conformance: config-preserve should fail the converted repo's four listings and nothing else, got ${preserve.status}\n${preserve.stdout}${preserve.stderr}`,
   );
 }
 

@@ -277,7 +277,7 @@ export function configWriteProblems(man, state) {
     const what = hit(seed);
     if (what) {
       problems.push(
-        `seed ${seed.target} (${anchorOf(seed)}) writes ${what}; a converted release seeds nothing. The mod creates CameraUnlock.ini at first launch and imports the legacy file only while CameraUnlock.ini is absent, so a seeded CameraUnlock.ini stops the import on an update and a seeded legacy file is imported on a fresh install. Lopari v0.9.0 also records a seeded file's hash and, once the file has changed or is gone, reinstalls the mod before launching`,
+        `seed ${seed.target} (${anchorOf(seed)}) writes ${what}, and a converted release seeds nothing: the mod creates CameraUnlock.ini at first launch and imports the legacy file only while CameraUnlock.ini is absent, so a seeded CameraUnlock.ini stops the import on an update, a seeded legacy file is imported on a fresh install, and Lopari v0.9.0 reinstalls the mod before launching once a seeded file has changed or is gone`,
       );
     }
   }

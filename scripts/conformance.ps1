@@ -1111,13 +1111,15 @@ function Test-ConfigPreserve {
     # committed file under any other name. MOD_DLLS copies over the player's file on every
     # install. MOD_SEED_FILES writes a file only where none is, and on an update from a legacy
     # build CameraUnlock.ini is absent, so a seeded one stops the mod importing the player's
-    # legacy file; on a fresh install a seeded legacy file is imported as if an older build wrote it.
+    # legacy file; on a fresh install a seeded legacy file is imported as if an older build wrote
+    # it. The uninstall wrapper's MOD_SEED_FILES mirrors install.cmd's and deletes what it lists.
+    $configLeaves = @($installed | ForEach-Object { Split-Path -Leaf $_ })
+    $legacyLeaves = @($state.files | Where-Object { $_.legacy_source } | ForEach-Object { $_.legacy_source })
+    $committedLeaves = @($state.files | Where-Object { $_.committed } | ForEach-Object { Split-Path -Leaf $_.committed })
+    $listNeither = 'The mod creates CameraUnlock.ini at first launch; list neither file.'
     $installPath = Join-Path $Root 'scripts/install.cmd'
     if (Test-Path $installPath) {
         $vars = Get-ConfigBlockVars (Read-TextFile $installPath)
-        $configLeaves = @($installed | ForEach-Object { Split-Path -Leaf $_ })
-        $legacyLeaves = @($state.files | Where-Object { $_.legacy_source } | ForEach-Object { $_.legacy_source })
-        $committedLeaves = @($state.files | Where-Object { $_.committed } | ForEach-Object { Split-Path -Leaf $_.committed })
         foreach ($var in @('MOD_DLLS', 'MOD_SEED_FILES')) {
             if (-not $vars.Contains($var)) { continue }
             foreach ($item in @(Get-CmdListItems $vars[$var])) {
@@ -1132,18 +1134,34 @@ function Test-ConfigPreserve {
                 } else {
                     continue
                 }
-                Add-Finding $Name 'config-preserve' 'FAIL' "install.cmd's $var lists $item, $why; take it out, since the mod creates CameraUnlock.ini at first launch and never writes the legacy file"
+                Add-Finding $Name 'config-preserve' 'FAIL' "install.cmd's $var lists $item, $why. $listNeither"
             }
         }
     }
 
-    # Only the shared uninstall body reads PRESERVE_FILES. A repo whose uninstall is its own
-    # script, or that has none because only the launcher installs it, keeps its config there.
+    # Only the shared uninstall body reads MOD_SEED_FILES and PRESERVE_FILES. A repo whose
+    # uninstall is its own script, or that has none because only the launcher installs it, keeps
+    # its config there.
     $uninstallPath = Join-Path $Root 'scripts/uninstall.cmd'
     if (-not (Test-Path $uninstallPath)) { return }
     $uninstallText = Read-TextFile $uninstallPath
     if ((Get-WrapperBodyName $uninstallText) -ne 'uninstall-body.cmd') { return }
     $vars = Get-ConfigBlockVars $uninstallText
+    if ($vars.Contains('MOD_SEED_FILES')) {
+        foreach ($item in @(Get-CmdListItems $vars['MOD_SEED_FILES'])) {
+            $leaf = Split-Path -Leaf $item
+            if ($leaf -in $configLeaves) {
+                $what = 'the player''s settings'
+            } elseif ($leaf -in $legacyLeaves) {
+                $what = 'the legacy file an older build reads after a rollback'
+            } elseif ($leaf -in $committedLeaves) {
+                $what = 'a file named like the committed config'
+            } else {
+                continue
+            }
+            Add-Finding $Name 'config-preserve' 'FAIL' "uninstall.cmd's MOD_SEED_FILES lists $item, $what, which the uninstall deletes as a file install.cmd seeded unless PRESERVE_FILES names it. $listNeither"
+        }
+    }
     $preserved = @(if ($vars.Contains('PRESERVE_FILES')) { Get-CmdListItems $vars['PRESERVE_FILES'] })
     foreach ($path in @($installed + $legacyPaths)) {
         if ($path -in $preserved) { continue }

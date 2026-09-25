@@ -889,7 +889,9 @@ imports the legacy file again at the next start.
   `copy /y` overwrites on every install: not `CameraUnlock.ini`, not the legacy file and not the
   committed file under another name. The owner creates `CameraUnlock.ini` at first launch. An
   update from a legacy build finds no `CameraUnlock.ini`, so a seeded one would be written before
-  the mod starts and the mod would never import the player's legacy file.
+  the mod starts and the mod would never import the player's legacy file. The uninstall wrapper's
+  `MOD_SEED_FILES`, which `uninstall-body.cmd` deletes as files the install seeded, names neither
+  file either.
 - **`PRESERVE_FILES`** in an uninstall wrapper's CONFIG BLOCK lists config paths, relative to the
   game folder, that `uninstall-body.cmd` leaves in place, including inside a loader folder the
   uninstall removes. A converted repo lists every `installed` path, and a repo in `legacy` also
@@ -1081,7 +1083,7 @@ In core:
 | `pixi run check-config-format` | Checks the shape of `data/config-format.json` and pins its `legacy` names |
 | `pixi run check-canonical-ini-js` | Runs the reader and key fixtures through core's script grammar (`scripts/lib/canonical-ini.mjs`, `scripts/lib/key-bindings.mjs`) and holds the lint to its rules |
 | `pixi run check-doc-examples` | Fails when a C++ or C# block in `docs/` is not a run of lines of the test it names, or an ini block is not the fixture it names |
-| `pixi run test-config-descriptor` | Checks that a good config descriptor passes and one mutation per rule fails, and runs encode-seed's `rows`, validate-manifest and conformance on it |
+| `pixi run test-config-descriptor` | Checks that a good config descriptor passes and one mutation per rule fails, and runs encode-seed's `rows`, validate-manifest and conformance on it. It also checks that a converted repo seeds and ships neither `CameraUnlock.ini` nor its legacy file, in the manifest or the install scripts |
 | `pixi run config-report` | The fleet report: game-local keys three or more canonical repos share, local section names in use, and concept values in committed files that differ from the schema default |
 
 In a mod repo, and in conformance:
@@ -1113,9 +1115,10 @@ In a mod repo, and in conformance:
   `GetPrivateProfile*`, `WritePrivateProfile*`, `IniReader`, `IniWriter`, `ParseIniConfig`,
   `ParseIniFile` or BepInEx's `ConfigFile.Bind`, unless `allow_legacy_symbols` records a use that
   reads no config. `config-preserve` fails `CameraUnlock.ini`, the legacy file or the committed
-  file's name in `MOD_DLLS` or `MOD_SEED_FILES`, and an installed path or the legacy file beside
-  one missing from `PRESERVE_FILES`. `readme` fails a converted repo whose README config block
-  is missing or differs from the rendered one, and an unconverted repo that has one.
+  file's name in `install.cmd`'s `MOD_DLLS` or `MOD_SEED_FILES` or in `uninstall.cmd`'s
+  `MOD_SEED_FILES`, and an installed path or the legacy file beside one missing from
+  `PRESERVE_FILES`. `readme` fails a converted repo whose README config block is missing or
+  differs from the rendered one, and an unconverted repo that has one.
   `config-descriptor` holds the committed manifest to the config descriptor's rules (see
   "The config descriptor") and fails a converted repo's manifest that seeds or ships its config.
 - **The README config block** sits between `<!-- cameraunlock:config -->` and

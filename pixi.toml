@@ -186,6 +186,8 @@ check-doc-examples = "node scripts/check-doc-examples.mjs"
 # rules; validate-manifest runs them on a built ZIP and conformance (config-descriptor) on the
 # committed manifest. This checks that a good descriptor passes and that one mutation per rule
 # fails, and runs the rows generator, both callers and the packager's ConvertTo-Json round trip.
+# It also holds a converted repo's manifest and install scripts to seeding and shipping no config
+# (validate-manifest, conformance config-descriptor and config-preserve).
 # Windows: it runs conformance.ps1 and Windows PowerShell.
 test-config-descriptor = "node scripts/test-config-descriptor.mjs"
 

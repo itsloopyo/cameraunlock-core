@@ -233,6 +233,33 @@ committed `launcher-manifest.json` beside core names `CameraUnlock.ini`.
 Consuming repos: `render-config` runs the same command and no longer touches a seed. A converted
 repo takes any seed of its config out of `launcher-manifest.json` by hand.
 
+### Fixed - a converted repo's uninstall wrapper lists neither config file in `MOD_SEED_FILES`
+
+`config-preserve` held `install.cmd`'s `MOD_DLLS` and `MOD_SEED_FILES` to the no-seed rule, and
+left the uninstall wrapper's `MOD_SEED_FILES`, which `uninstall-body.cmd` deletes as files the
+install seeded, unchecked. A repo that took its config out of `install.cmd` passed with the same
+file still listed there, and only `PRESERVE_FILES` stood between the uninstall and the player's
+settings.
+
+- `config-preserve` fails a converted repo whose `uninstall.cmd` (on the shared body) lists
+  `CameraUnlock.ini`, the legacy file or the committed file's name in `MOD_SEED_FILES`.
+- Every `config-preserve` seed finding ends "The mod creates CameraUnlock.ini at first launch;
+  list neither file." The seed finding of `configWriteProblems` is one sentence.
+- `MOD_SEED_FILES` stays in every install body, wrapper template and uninstall body: every
+  wrapper sets it and unconverted repos still use it.
+- `test-config-descriptor` runs `validate-manifest` and conformance's `config-descriptor` over a
+  converted repo with no block that seeds `CameraUnlock.ini`, seeds the legacy file, or carries a
+  `files[]` row on either, each of which fails, and an unconverted repo seeding its config, which
+  passes. It runs `config-preserve` over wrappers listing either file.
+
+`pixi run conformance -All`: 238 -> 244 FAIL (config-preserve 26 -> 32). The six new ones are the
+uninstall wrappers of the repos converted in place: a-plague-tale-innocence and sleeping-dogs list
+`headtrack.ini`, fallout-new-vegas, metro-exodus-enhanced-edition, no-mans-sky and starfield their
+legacy file. No unconverted repo is checked.
+
+Consuming repos: a converted repo takes both files out of `MOD_SEED_FILES` in `install.cmd` and
+`uninstall.cmd`, and out of `install.cmd`'s `MOD_DLLS`.
+
 ### Added - the `config` descriptor in `launcher-manifest.json`
 
 A converted package can tell a launcher where its canonical file is and which of the launcher's
