@@ -9,6 +9,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - an import can leave a row to Defaults.ini
+
+A map that applied `follows_default` set the field to the table's built-in default, so the
+migration wrote that value explicitly wherever Defaults.ini held another one. A player whose
+Defaults.ini says `CollisionEnabled=false` got `CollisionEnabled=true` pinned in the new file,
+although the legacy file only held the value the build shipped.
+
+- **C++** `ImportResult::follows_defaults_ini` (`std::vector<schema::Concept>`), and a third,
+  defaulted parameter of the same type on `ImportResult::Imported` and `ImportResult::Absent`.
+- **C#** `ImportResult.FollowsDefaultsIni`, and `Imported` and `Absent` overloads taking
+  `IEnumerable<ConceptDescriptor> followsDefaultsIni`.
+- **Migration**: `ConfigOwner` gives each named row the value `default` gives it at that `Load`,
+  then renders, so the row is written `default`. A concept that is not a row of the table following
+  Defaults.ini throws `std::invalid_argument` (C# `ArgumentException`).
+- Nothing changes for an import that names no concept. A map using `FollowsDefault` names the
+  row's concept wherever it records that drop (docs/canonical-config.md, "The legacy import").
+
 ### Changed - a package below `canonical_since` is a pre-release and warns; only a release below it fails
 
 A converted repo writes the config descriptor's `canonical_since` as the version it will be

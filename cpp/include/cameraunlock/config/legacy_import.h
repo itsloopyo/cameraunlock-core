@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cameraunlock/config/config_concepts.g.h>
+
 #include <cmath>
 #include <functional>
 #include <stdexcept>
@@ -93,12 +95,23 @@ struct ImportResult {
     /// For Imported and Absent, every pose-shaping setting the frozen reader read, in the order
     /// the map met them (LegacyPoseShaping); empty otherwise.
     std::vector<PoseShapingValue> pose_shaping;
+    /// For Imported and Absent, the concepts the map leaves to Defaults.ini because the legacy
+    /// value is the one a build shipped switched off pending verification, which no player chose
+    /// (approved change follows_default); empty otherwise. The migration gives each the value
+    /// `default` gives it at that start and writes it `default`, so it follows Defaults.ini from
+    /// then on. Each must be a row of the table that follows Defaults.ini, or the migration
+    /// throws. The map still sets the field, to the value it holds when the import runs alone.
+    std::vector<schema::Concept> follows_defaults_ini;
 
-    static ImportResult Imported(std::vector<DroppedValue> dropped, std::vector<PoseShapingValue> pose_shaping = {}) {
-        return ImportResult{ImportStatus::Imported, {}, std::move(dropped), std::move(pose_shaping)};
+    static ImportResult Imported(std::vector<DroppedValue> dropped, std::vector<PoseShapingValue> pose_shaping = {},
+                                 std::vector<schema::Concept> follows_defaults_ini = {}) {
+        return ImportResult{ImportStatus::Imported, {}, std::move(dropped), std::move(pose_shaping),
+                            std::move(follows_defaults_ini)};
     }
-    static ImportResult Absent(std::vector<DroppedValue> dropped, std::vector<PoseShapingValue> pose_shaping = {}) {
-        return ImportResult{ImportStatus::Absent, {}, std::move(dropped), std::move(pose_shaping)};
+    static ImportResult Absent(std::vector<DroppedValue> dropped, std::vector<PoseShapingValue> pose_shaping = {},
+                               std::vector<schema::Concept> follows_defaults_ini = {}) {
+        return ImportResult{ImportStatus::Absent, {}, std::move(dropped), std::move(pose_shaping),
+                            std::move(follows_defaults_ini)};
     }
     /// Throws std::invalid_argument for an empty reason.
     static ImportResult Refused(std::string reason) { return WithReason(ImportStatus::Refused, std::move(reason)); }
@@ -110,7 +123,7 @@ struct ImportResult {
 private:
     static ImportResult WithReason(ImportStatus status, std::string reason) {
         if (reason.empty()) throw std::invalid_argument("a refused or undecodable import needs a reason");
-        return ImportResult{status, std::move(reason), {}, {}};
+        return ImportResult{status, std::move(reason), {}, {}, {}};
     }
 };
 

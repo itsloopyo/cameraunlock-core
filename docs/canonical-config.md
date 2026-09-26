@@ -1342,6 +1342,16 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `FollowsDefault` (4) | approved change `follows_default` | The setting of a feature shipped switched off while untested, which now follows the mod's default |
 | `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code outside 0x01-0xFE, 0xFF included, which imports as unbound (C++ `LegacyVirtualKeyToBindings`; no C# import reads virtual-key codes). Code 0, a legacy file's unbound, stays unbound and is not recorded |
 
+A `FollowsDefault` value is the one the build shipped, which no player chose, so the map also
+names the row's concept in the result's `follows_defaults_ini` (C# `FollowsDefaultsIni`, passed
+to the `Imported` or `Absent` factory). The migration then gives that row the value `default`
+gives it at that start and writes it `default`, so it follows Defaults.ini from then on, whatever
+Defaults.ini holds. The map still sets the field to the row's built-in default, which is what the
+import gives when it runs alone. A value the player set away from the shipped one is carried as
+usual, and is written `default` only where it equals what `default` gives. A concept named there
+that is not a row of the table following Defaults.ini makes the migration throw
+std::invalid_argument (C# `ArgumentException`).
+
 `conversion_notes` in `data/config-format.json` holds what the owner decided for one repo's
 conversion, such as which of two shipped values is the default; the repo's conversion and its
 differential test follow it.
@@ -1390,8 +1400,9 @@ When `Load` finds no config file and the legacy file exists:
 1. It opens the legacy file for reading, sharing read and write but not delete, and holds it open
    while it reads the bytes, runs the import on that path and reads the bytes again. No program
    can newly lock, rename or delete the file meanwhile, and a write in between defers the import.
-2. It renders the imported settings, reads the render back through the table and requires every
-   row to equal the import's (floats bit for bit). The render writes `default` on a global concept
+2. It gives each row the import names in `follows_defaults_ini` the value `default` gives it at
+   this `Load`. It renders the imported settings, reads the render back through the table and
+   requires every row to equal the import's (floats bit for bit). The render writes `default` on a global concept
    row not marked `PerGame` where the imported value equals what `default` gives that row at this
    `Load` (floats by their bits, hotkey lists by their canonical text), and the value otherwise;
    the tracking-mode pair is `default` on both rows only when both are equal. The read-back uses

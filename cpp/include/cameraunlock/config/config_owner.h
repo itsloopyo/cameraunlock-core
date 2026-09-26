@@ -348,7 +348,9 @@ public:
     /// - No file at `path` and a file at legacy_path: the legacy file is imported into a new file
     ///   at `path` (Migrated). A row that follows Defaults.ini is written `default` where the
     ///   imported value equals what `default` gives it at this Load, and the tracking mode pair
-    ///   only when both rows do.
+    ///   only when both rows do. A row the import names in follows_defaults_ini takes what
+    ///   `default` gives it first, so it is written `default`; std::invalid_argument is thrown
+    ///   when it names a concept that is not a row of the table following Defaults.ini.
     /// - Neither: the table's fresh render is written, never over a file that appears meanwhile
     ///   (Created). If one appears, or the folder cannot be written, the session runs on the
     ///   defaults and nothing retries (Deferred).
@@ -623,6 +625,7 @@ private:
         const LegacyInput input = detail::OwnerLegacyInput(legacy_path_);
         detail::OwnerStep(hook_, "Import", legacy_path_);
         const ImportResult legacy = import_.run(input, imported);
+        FollowDefaultsIni(legacy, imported);
         detail::OwnerStep(hook_, "Recheck", legacy_path_);
         std::string changed_why;
         std::string reread;
@@ -714,6 +717,20 @@ private:
         log.insert(log.end(), read_back.begin(), read_back.end());
         return LoadResult(ConfigLoadStatus::Migrated, std::move(reread_config), std::move(diagnostics), std::move(log),
                           "");
+    }
+
+    // The import's follows_defaults_ini rows take the value `default` gives them at this start, so
+    // the migration writes them `default`.
+    void FollowDefaultsIni(const ImportResult& legacy, Config& imported) const {
+        for (const schema::Concept id : legacy.follows_defaults_ini) {
+            const std::optional<std::size_t> row = RowOf(id);
+            if (!row || !detail::FollowsDefaultsIni(table_.rows_[*row])) {
+                throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
+                                            " is left to Defaults.ini by the import, and is not a row of this "
+                                            "table that follows Defaults.ini");
+            }
+            table_.ops_[*row]->Assign(imported, effective_);
+        }
     }
 
     // `retried` is false where the next launch reads a file another program created at `path`

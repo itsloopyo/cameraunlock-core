@@ -1567,6 +1567,45 @@ void AMigratedGameWritesAValueWhereDefaultsIniDiffers(const fs::path& dir) {
     ExpectLegacyKept(rig);
 }
 
+void ARowTheImportLeavesToDefaultsIniIsWrittenDefault(const fs::path& dir) {
+    for (const bool defaults_value : {false, true}) {
+        const std::string when = std::string("Defaults.ini EnableOnStartup=") + (defaults_value ? "true" : "false");
+        const fs::path sub = dir / (defaults_value ? L"on" : L"off");
+        fs::create_directories(sub);
+        Rig rig(sub);
+        rig.PutLegacy(kLegacyText);
+        rig.PutDefaults(std::string("[General]\r\nEnableOnStartup=") + (defaults_value ? "true" : "false") + "\r\n");
+        rig.legacy->result = [](HeadTrackingConfig& config) {
+            config = MigratedConfig();
+            return ImportResult::Imported({}, {}, {Concept::EnableOnStartup});
+        };
+        const Load load = rig.Make()->Load();
+        ExpectStatus(load, ConfigLoadStatus::Migrated);
+        Check(Contains(ReadBytes(rig.path), "\r\nEnableOnStartup=default\r\n"), when + ": the row is written default");
+        Check(load.config.enable_on_startup == defaults_value, when + ": the session takes Defaults.ini's value");
+        ExpectLegacyKept(rig, when);
+    }
+}
+
+void ARowTheImportLeavesToDefaultsIniThatDoesNotFollowItThrows(const fs::path& dir) {
+    Rig rig(dir);
+    rig.PutLegacy(kLegacyText);
+    rig.legacy->result = [](HeadTrackingConfig& config) {
+        config = MigratedConfig();
+        return ImportResult::Imported({}, {}, {Concept::CollisionEnabled});
+    };
+    std::string message;
+    try {
+        rig.Make()->Load();
+    } catch (const std::invalid_argument& e) {
+        message = e.what();
+    }
+    Check(message == "CollisionEnabled is left to Defaults.ini by the import, and is not a row of this table that "
+                     "follows Defaults.ini",
+          "a concept the table has no row for throws: " + message);
+    ExpectNotImported(rig);
+}
+
 void AToggleOnADefaultRowWritesItsValue(const fs::path& dir) {
     Rig rig(dir);
     auto owner = rig.Make();
@@ -2015,6 +2054,10 @@ int RunConfigOwnerTests() {
     RunScenario("defaults-ini-appearing-during-creation-is-read", DefaultsIniAppearingDuringCreationIsRead);
     RunScenario("a-migrated-game-writes-default-where-the-import-equals-it", AMigratedGameWritesDefaultWhereTheImportEqualsIt);
     RunScenario("a-migrated-game-writes-a-value-where-defaults-ini-differs", AMigratedGameWritesAValueWhereDefaultsIniDiffers);
+    RunScenario("a-row-the-import-leaves-to-defaults-ini-is-written-default",
+                ARowTheImportLeavesToDefaultsIniIsWrittenDefault);
+    RunScenario("a-row-the-import-leaves-to-defaults-ini-that-does-not-follow-it-throws",
+                ARowTheImportLeavesToDefaultsIniThatDoesNotFollowItThrows);
     RunScenario("a-toggle-on-a-default-row-writes-its-value", AToggleOnADefaultRowWritesItsValue);
     RunScenario("a-mode-change-from-default-writes-both-rows", AModeChangeFromDefaultWritesBothRows);
     RunScenario("end-saves-nothing", EndSavesNothing);

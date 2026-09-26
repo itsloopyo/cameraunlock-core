@@ -211,7 +211,10 @@ namespace CameraUnlock.Core.Config
         /// <item>No file at Path and a file at LegacySourcePath: the legacy file is imported into a
         /// new file at Path (Migrated). A row that follows Defaults.ini is written <c>default</c>
         /// where the imported value equals what <c>default</c> gives it at this Load, and the
-        /// tracking mode pair only when both rows do.</item>
+        /// tracking mode pair only when both rows do. A row the import names in
+        /// <see cref="ImportResult.FollowsDefaultsIni"/> takes what <c>default</c> gives it first,
+        /// so it is written <c>default</c>; an <see cref="ArgumentException"/> is thrown when it
+        /// names a concept that is not a row of the table following Defaults.ini.</item>
         /// <item>Neither: the table's fresh render is written, never over a file that appears
         /// meanwhile (Created). If one appears, or the folder cannot be written, the session runs on
         /// the defaults and nothing retries (Deferred).</item>
@@ -724,6 +727,7 @@ namespace CameraUnlock.Core.Config
                 Step("Import", input);
                 import = RequireImport().Run(new LegacyImportInput(input), imported);
                 if (import == null) throw new InvalidOperationException("the legacy import returned no result");
+                FollowDefaultsIni(import, imported);
                 Step("Recheck", input);
                 try
                 {
@@ -815,6 +819,22 @@ namespace CameraUnlock.Core.Config
             LogNotCarried(snapshot, input, log);
             log.AddRange(readBack);
             return Result(ConfigLoadStatus.Migrated, reread, diagnostics, log, string.Empty);
+        }
+
+        // The import's FollowsDefaultsIni rows take the value default gives them at this start, so
+        // the migration writes them default.
+        private void FollowDefaultsIni(ImportResult import, TConfig imported)
+        {
+            foreach (ConceptDescriptor concept in import.FollowsDefaultsIni)
+            {
+                int row = _table.RowOf(concept);
+                if (row < 0 || !_table.RowFollowsDefaultsIni(row))
+                {
+                    throw new ArgumentException(concept.Key + " is left to Defaults.ini by the import, and is not a row "
+                        + "of this table that follows Defaults.ini");
+                }
+                _table.RowAssign(row, imported, _effective);
+            }
         }
 
         private ConfigLoadResult<TConfig> Defer(TConfig config, string input, List<string> log, string why, bool retried)

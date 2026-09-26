@@ -100,6 +100,9 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("defaults-ini-appearing-during-creation-is-read", DefaultsIniAppearingDuringCreationIsRead),
             Scenario("a-migrated-game-writes-default-where-the-import-equals-it", AMigratedGameWritesDefaultWhereTheImportEqualsIt),
             Scenario("a-migrated-game-writes-a-value-where-defaults-ini-differs", AMigratedGameWritesAValueWhereDefaultsIniDiffers),
+            Scenario("a-row-the-import-leaves-to-defaults-ini-is-written-default", ARowTheImportLeavesToDefaultsIniIsWrittenDefault),
+            Scenario("a-row-the-import-leaves-to-defaults-ini-that-does-not-follow-it-throws",
+                ARowTheImportLeavesToDefaultsIniThatDoesNotFollowItThrows),
             Scenario("a-toggle-on-a-default-row-writes-its-value", AToggleOnADefaultRowWritesItsValue),
             Scenario("a-mode-change-from-default-writes-both-rows", AModeChangeFromDefaultWritesBothRows),
             Scenario("end-saves-nothing", EndSavesNothing),
@@ -1300,6 +1303,57 @@ namespace CameraUnlock.Core.Tests.Config
                 "the untouched key list is not what default gives here, so it is written as a value:\n" + migrated);
             Expect(load.Config.ToggleKeyName == "End, Ctrl+Shift+Y", "the player keeps the keys they had");
             rig.ExpectLegacyKept();
+        }
+
+        private static void ARowTheImportLeavesToDefaultsIniIsWrittenDefault(string dir)
+        {
+            foreach (bool defaultsValue in new[] { false, true })
+            {
+                string value = defaultsValue ? "true" : "false";
+                string when = "Defaults.ini EnableOnStartup=" + value;
+                string sub = Path.Combine(dir, defaultsValue ? "on" : "off");
+                Directory.CreateDirectory(sub);
+                var rig = new Rig(sub);
+                rig.PutLegacy(Ascii(LegacyText));
+                rig.PutDefaults(Ascii("[General]\r\nEnableOnStartup=" + value + "\r\n"));
+                rig.Legacy.Result = config =>
+                {
+                    ImportMigratedValues(config);
+                    return ImportResult.Imported(new DroppedValue[0], new PoseShapingValue[0],
+                        new ConceptDescriptor[] { ConfigConcepts.EnableOnStartup });
+                };
+                ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+                ExpectStatus(load, ConfigLoadStatus.Migrated);
+                string migrated = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+                Expect(migrated.Contains("\r\nEnableOnStartup=default\r\n"), when + ": the row is written default:\n" + migrated);
+                Expect(load.Config.EnableOnStartup == defaultsValue, when + ": the session takes Defaults.ini's value");
+                rig.ExpectLegacyKept();
+            }
+        }
+
+        private static void ARowTheImportLeavesToDefaultsIniThatDoesNotFollowItThrows(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutLegacy(Ascii(LegacyText));
+            rig.Legacy.Result = config =>
+            {
+                ImportMigratedValues(config);
+                return ImportResult.Imported(new DroppedValue[0], new PoseShapingValue[0],
+                    new ConceptDescriptor[] { ConfigConcepts.CollisionEnabled });
+            };
+            ArgumentException e = ExpectThrows<ArgumentException>(() => rig.Owner().Load(), "a concept the table has no row for");
+            ExpectContains(e.Message,
+                "CollisionEnabled is left to Defaults.ini by the import, and is not a row of this table that follows Defaults.ini");
+            ExpectNotImported(rig);
+        }
+
+        private static void ImportMigratedValues(HeadTrackingConfigData config)
+        {
+            HeadTrackingConfigData migrated = MigratedConfig();
+            config.UdpPort = migrated.UdpPort;
+            config.WorldSpaceYaw = migrated.WorldSpaceYaw;
+            config.RotationEnabled = migrated.RotationEnabled;
+            config.PositionEnabled = migrated.PositionEnabled;
         }
 
         private static void AToggleOnADefaultRowWritesItsValue(string dir)

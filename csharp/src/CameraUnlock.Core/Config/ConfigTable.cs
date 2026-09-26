@@ -685,6 +685,11 @@ namespace CameraUnlock.Core.Config
             return rows[row].Apply(text, config);
         }
 
+        internal void RowAssign(int row, TConfig to, TConfig from)
+        {
+            rows[row].Assign(to, from);
+        }
+
         private TConfig NewDefaults()
         {
             TConfig made = defaults();
