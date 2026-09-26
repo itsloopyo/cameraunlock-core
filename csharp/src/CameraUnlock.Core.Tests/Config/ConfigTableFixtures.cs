@@ -78,8 +78,6 @@ namespace CameraUnlock.Core.Tests.Config
                 .Concept(ConfigConcepts.PositionLimitX, c => c.PositionLimitX, (c, v) => c.PositionLimitX = v)
                 .Comment("How far, in metres, leaning sideways moves the view.\nThe fixture's own wording.")
                 .Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v)
-                .Engine()
-                .PerGame()
                 .Concept(ConfigConcepts.CycleTrackingModeKey, c => c.CycleTrackingModeKey, (c, v) => c.CycleTrackingModeKey = v)
                 .Local("Camera", "Mode", c => c.Mode, (c, v) => c.Mode = v, ModeCodec(),
                     "ControlRotation or UpdateCamera (decoupled).")
@@ -207,6 +205,31 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectMessage<InvalidOperationException>(() => SmallTable()
                 .Local("Camera", "Offset", s => s.Value, (s, v) => s.Value = v, new IntCodec(), "One.")
                 .PerGame(), "[Camera] Offset is a local row, which never takes a value from Defaults.ini");
+
+            ConfigTable<SmallConfig> engine = SmallTable()
+                .Concept(ConfigConcepts.CollisionMargin, s => s.Scale, (s, v) => s.Scale = v)
+                .Concept(ConfigConcepts.CollisionChannel, s => s.Value, (s, v) => s.Value = v);
+            string engineFresh = Encoding.ASCII.GetString(engine.RenderFresh(header));
+            if (!engineFresh.Contains("\r\n; CollisionMargin=1.0\r\n") || !engineFresh.Contains("\r\n; CollisionChannel=5\r\n")
+                || engineFresh.Contains("Defaults.ini"))
+            {
+                throw new InvalidOperationException("CollisionMargin and CollisionChannel off the schema's defaults render "
+                    + "commented at the game's own, and a table with no global row has no Defaults.ini lines:\n" + engineFresh);
+            }
+            var engineConfig = new SmallConfig();
+            TableApplyResult engineResult = engine.Apply(
+                CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Position]\r\nCollisionMargin=default\r\nCollisionChannel=7\r\n")),
+                engineConfig, new SmallConfig { Scale = 0.1f, Value = 0 }, new ConceptDescriptor[0]);
+            if (engineConfig.Scale != 1.0f || engineConfig.Value != 7 || engineResult.Sources[0] != ConfigValueSource.BuiltIn
+                || engineResult.Report.Diagnostics.Count != 0)
+            {
+                throw new InvalidOperationException("default on CollisionMargin reads the game's own default, never the "
+                    + "effective one, and CollisionChannel=7 reads 7");
+            }
+            ExpectMessage<InvalidOperationException>(() => SmallTable()
+                .Concept(ConfigConcepts.CollisionChannel, s => s.Value, (s, v) => s.Value = v)
+                .PerGame(), "[Position] CollisionChannel is not global in data/config-schema.json, so every game keeps its own "
+                + "value and Defaults.ini never reaches it; PerGame() is for a global concept");
 
             const string pairMessage = "[Position] PositionEnabled is marked PerGame() and [General] RotationEnabled is not. "
                 + "The two are one setting, the tracking mode, so PerGame() marks both or neither.";

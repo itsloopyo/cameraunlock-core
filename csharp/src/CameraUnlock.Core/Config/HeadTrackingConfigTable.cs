@@ -19,16 +19,18 @@ namespace CameraUnlock.Core.Config
     /// replace <see cref="HeadTrackingConfigData.Position"/> and
     /// <see cref="HeadTrackingConfigData.Light"/> with a copy carrying the new value, so a
     /// <see cref="HeadFollowLightSettings"/> instance another config shares is never changed.
-    /// CollisionChannel is an Engine row: the channel is data about the game, so at its default it
-    /// is written as a comment. <see cref="HeadTrackingConfigData.Sensitivity"/> and the position
+    /// CollisionMargin and CollisionChannel are not global in the schema, so their rows are Engine
+    /// rows at the game's own default, written as a comment there, and never follow Defaults.ini.
+    /// <see cref="HeadTrackingConfigData.Sensitivity"/> and the position
     /// sensitivities and inversions have no row: the canonical format carries no pose shaping, so
     /// they keep the defaults instance's values.
     /// </para>
     /// <para>
-    /// The defaults instance is a new config with the four hotkey lists at the schema's
-    /// canonical_default (<c>End, Ctrl+Shift+Y</c>, <c>PageUp, Ctrl+Shift+G</c>,
-    /// <c>PageDown, Ctrl+Shift+H</c>, <c>Insert, Ctrl+Shift+U</c>); the properties' own initialisers, which
-    /// <see cref="HeadTrackingConfigData.LoadFromFile"/> uses, stay single keys.
+    /// The defaults instance is a new config with the four hotkey lists and CollisionEnabled at the
+    /// schema's canonical_default (<c>End, Ctrl+Shift+Y</c>, <c>PageUp, Ctrl+Shift+G</c>,
+    /// <c>PageDown, Ctrl+Shift+H</c>, <c>Insert, Ctrl+Shift+U</c>, <c>true</c>); the properties' own
+    /// initialisers, which <see cref="HeadTrackingConfigData.LoadFromFile"/> uses, stay single keys and
+    /// <c>false</c>.
     /// </para>
     /// </summary>
     public static class HeadTrackingConfigTable
@@ -68,21 +70,22 @@ namespace CameraUnlock.Core.Config
                 }
             }
 
-            var table = new ConfigTable<TConfig>(() => WithCanonicalHotkeys(new TConfig()));
+            var table = new ConfigTable<TConfig>(() => WithCanonicalDefaults(new TConfig()));
             foreach (ConceptDescriptor concept in implemented) Bind(table, concept);
             return table;
         }
 
-        private static TConfig WithCanonicalHotkeys<TConfig>(TConfig config) where TConfig : HeadTrackingConfigData
+        private static TConfig WithCanonicalDefaults<TConfig>(TConfig config) where TConfig : HeadTrackingConfigData
         {
             config.ToggleKeyName = CanonicalDefault(ConfigConcepts.ToggleKey);
             config.CycleTrackingModeKeyName = CanonicalDefault(ConfigConcepts.CycleTrackingModeKey);
             config.YawModeKeyName = CanonicalDefault(ConfigConcepts.YawModeKey);
             config.TrueFreeLookKeyName = CanonicalDefault(ConfigConcepts.TrueFreeLookKey);
+            config.CollisionEnabled = CanonicalDefault(ConfigConcepts.CollisionEnabled) == "true";
             return config;
         }
 
-        private static string CanonicalDefault(ConceptDescriptor<string> concept)
+        private static string CanonicalDefault(ConceptDescriptor concept)
         {
             var value = concept.CanonicalDefault;
             if (value == null) throw new InvalidOperationException(concept.Id + " has no canonical_default in data/config-schema.json");
@@ -177,8 +180,7 @@ namespace CameraUnlock.Core.Config
                     table.Concept(ConfigConcepts.CollisionMargin, c => c.CollisionMargin, (c, v) => c.CollisionMargin = v);
                     return;
                 case nameof(ConfigConcepts.CollisionChannel):
-                    table.Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v)
-                        .Engine();
+                    table.Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v);
                     return;
                 case nameof(ConfigConcepts.CollisionReleaseSmoothing):
                     table.Concept(ConfigConcepts.CollisionReleaseSmoothing, c => c.CollisionReleaseSmoothing,

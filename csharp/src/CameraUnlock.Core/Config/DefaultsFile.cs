@@ -3,8 +3,8 @@ using System;
 namespace CameraUnlock.Core.Config
 {
     /// <summary>
-    /// Where a <see cref="ConfigOwner{TConfig}"/> finds Defaults.ini, the file every concept row
-    /// not marked PerGame takes its default from. A mod passes <see cref="PerUser"/>; a test passes
+    /// Where a <see cref="ConfigOwner{TConfig}"/> finds Defaults.ini, the file every global concept
+    /// row not marked PerGame takes its default from. A mod passes <see cref="PerUser"/>; a test passes
     /// <see cref="At"/> with a scratch path, so no test reads or creates the player's own file. The
     /// C++ twin is cameraunlock::config::DefaultsFile.
     /// </summary>

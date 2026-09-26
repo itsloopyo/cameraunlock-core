@@ -56,6 +56,14 @@ namespace CameraUnlock.Core.Tests.Config
             foreach (ConceptDescriptor concept in ConfigConcepts.All)
             {
                 DefaultsIniValue value = snapshot.Value(concept);
+                if (!concept.Global)
+                {
+                    if (value.State != DefaultsIniValueState.Absent)
+                    {
+                        throw new InvalidOperationException(concept.Id + " is not global and read back as " + value.State);
+                    }
+                    continue;
+                }
                 byte[] builtIn = table.RowRender(table.RowOf(concept), defaults);
                 if (value.State != DefaultsIniValueState.Accepted || !value.Value.SequenceEqual(builtIn))
                 {

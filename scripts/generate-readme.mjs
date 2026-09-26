@@ -283,9 +283,10 @@ function nativeParagraph(legacy) {
 }
 
 // Floats as the canonical codec writes them, which data/fixtures/canonical-ini/global/Defaults.ini
-// shows; scripts/test-generate-readme.mjs holds every concept to that file.
+// shows; scripts/test-generate-readme.mjs holds every concept to that file. A canonical_default (the
+// hotkey lists, CollisionEnabled) is what the global table starts with.
 function builtInText(concept) {
-  if (concept.codec === 'hotkey') return concept.canonical_default;
+  if ('canonical_default' in concept) return String(concept.canonical_default);
   if (concept.type === 'float' && Number.isInteger(concept.default)) return concept.default.toFixed(1);
   return String(concept.default);
 }

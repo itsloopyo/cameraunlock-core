@@ -541,8 +541,8 @@ void TestSchemaDefaultsMatchTheShippedDefaults() {
 
 // A config table's fresh render compares a row's default with the concept's kDefaultText as the
 // row's codec reads it, so every canonical concept's text reads, and reads as the schema's default:
-// the canonical_default of a hotkey concept. The C++ twin of ConfigSchemaDefaultsTests'
-// EachCanonicalConceptsDefaultTextReadsAsItsSchemaDefault.
+// the canonical_default where the concept has one (the hotkey lists, CollisionEnabled), else the
+// default. The C++ twin of ConfigSchemaDefaultsTests' EachCanonicalConceptsDefaultTextReadsAsItsSchemaDefault.
 template <cameraunlock::config::schema::Concept Id>
 void CheckDefaultText() {
     namespace config = cameraunlock::config;
@@ -565,7 +565,9 @@ void CheckDefaultText() {
     if constexpr (Traits::kFamily == config::schema::ValueFamily::kBool) {
         const auto read = config::BoolCodec().Parse(Traits::kDefaultText);
         error = read.error;
-        same = read.ok() && read.value == declared->bool_value;
+        const bool expected = Traits::kCanonicalDefault == nullptr ? declared->bool_value
+                                                                   : std::strcmp(Traits::kCanonicalDefault, "true") == 0;
+        same = read.ok() && read.value == expected;
     } else if constexpr (Traits::kFamily == config::schema::ValueFamily::kInteger) {
         const auto read = config::IntCodec<int>(static_cast<int>(Traits::kMin), static_cast<int>(Traits::kMax))
                               .Parse(Traits::kDefaultText);

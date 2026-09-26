@@ -89,8 +89,11 @@ struct TableRow {
     bool per_game = false;
 };
 
-// A concept row that is not PerGame, whose default is the effective default.
-inline bool FollowsDefaultsIni(const TableRow& row) { return row.concept_id.has_value() && !row.per_game; }
+// A global concept row that is not PerGame, whose default is the effective default.
+inline bool FollowsDefaultsIni(const TableRow& row) {
+    return row.concept_id.has_value() && schema::kConcepts[static_cast<std::size_t>(*row.concept_id)].global &&
+           !row.per_game;
+}
 
 // Where a row's value came from when ApplyCanonicalEffective read a file: the file's own value,
 // or the row's start, the effective default, which Defaults.ini or the table gave.
@@ -430,12 +433,19 @@ public:
     /// default, and RenderCanonicalFresh writes the row's value. Each use needs an entry, approved
     /// by the owner, in the repo's `per_game` list in data/config-format.json. RotationEnabled and
     /// PositionEnabled are one setting, the tracking mode, so a table that binds both marks both or
-    /// neither; ApplyCanonical and RenderCanonicalFresh throw on one without the other.
+    /// neither; ApplyCanonical and RenderCanonicalFresh throw on one without the other. Throws
+    /// std::invalid_argument on a local row, and on a concept that is not global, which every game
+    /// keeps already.
     ConfigTable& PerGame() {
         const std::size_t row = Last("PerGame");
         if (!rows_[row].concept_id) {
             throw std::invalid_argument(detail::RowName(rows_[row]) +
                                         " is a local row, which never takes a value from Defaults.ini");
+        }
+        if (!schema::kConcepts[static_cast<std::size_t>(*rows_[row].concept_id)].global) {
+            throw std::invalid_argument(detail::RowName(rows_[row]) +
+                                        " is not global in data/config-schema.json, so every game keeps its own "
+                                        "value and Defaults.ini never reaches it; PerGame() is for a global concept");
         }
         rows_[row].per_game = true;
         return *this;
@@ -516,6 +526,7 @@ private:
         row.comment.assign(info.file_comment, info.file_comment + info.file_comment_lines);
         row.concept_id = Id;
         row.hotkey = info.family == schema::ValueFamily::kHotkey;
+        row.engine = !info.global;
         detail::CheckConceptRow(rows_, row);
         auto ops = std::make_shared<detail::CodecRow<Config, Codec, Get, Set>>(ConceptCodec<Id, Field>(),
                                                                                std::move(get), std::move(set));
@@ -604,8 +615,8 @@ private:
     const Config& values_;
 };
 
-/// ApplyCanonical over effective defaults. A concept row that is not PerGame starts from its value
-/// in `effective`, every other row from the table's defaults; `default`, a missing key and an
+/// ApplyCanonical over effective defaults. A global concept row that is not PerGame starts from its
+/// value in `effective`, every other row from the table's defaults; `default`, a missing key and an
 /// invalid value leave a row at its start, and a pair naming no tracking mode takes both starts.
 /// `from_defaults_ini` names the concepts whose effective default Defaults.ini gave, which the
 /// result reports as the source of such a row left at its start.
@@ -649,7 +660,7 @@ EffectiveApplyResult ApplyCanonicalEffective(const CanonicalIni& doc, const Conf
     return ApplyRows(doc, rows, target, start_sources);
 }
 
-/// Writes a migrated file: RenderCanonical of `values`, except that a concept row that is not
+/// Writes a migrated file: RenderCanonical of `values`, except that a global concept row that is not
 /// PerGame is written `Key=default` when its value equals its value in `effective`, and otherwise
 /// as its value, never in the commented form of an Engine row, which would read back as the
 /// effective default. RotationEnabled and PositionEnabled are written default only when both equal
@@ -722,7 +733,7 @@ ApplyReport ApplyCanonical(const CanonicalIni& doc, const ConfigTable<Config>& t
 /// with its concept rows in the schema's concepts order and then its local rows in table order,
 /// then the local sections in table order. Each row is its comment lines as `; text`, then
 /// `Key=value`, or `; Key=value` for an Engine row holding its default. A blank line separates
-/// sections. CRLF line endings with a final CRLF, no byte order mark. When the table has a
+/// sections. CRLF line endings with a final CRLF, no byte order mark. When the table has a global
 /// concept row that is not PerGame, six header lines say what `default` means and where
 /// Defaults.ini is.
 ///
@@ -736,10 +747,11 @@ std::string RenderCanonical(const ConfigTable<Config>& table, const Config& valu
                               std::vector<detail::RowForm>(table.rows_.size(), detail::RowForm::kAsRender));
 }
 
-/// Writes the file a game starts with: RenderCanonical of the defaults, except that every concept
-/// row that is not PerGame is written `Key=default`, an Engine row included.
+/// Writes the file a game starts with: RenderCanonical of the defaults, except that every global
+/// concept row that is not PerGame is written `Key=default`, an Engine row included. A row of a
+/// concept that is not global holds the game's own default, commented.
 ///
-/// Throws std::invalid_argument when a concept row that is not PerGame defaults to a value other
+/// Throws std::invalid_argument when a global concept row that is not PerGame defaults to a value other
 /// than the schema's, naming the row; when the table binds RotationEnabled without
 /// PositionEnabled, or marks one of them PerGame and not the other; and for a display name
 /// RenderCanonical refuses.

@@ -1,4 +1,5 @@
-# Aliases of UdpPort, ToggleKey and CollisionMargin are not read, and nothing is said, even where the
-# alias comes after the key in the same section.
+# Aliases of UdpPort, ToggleKey and CollisionReleaseSmoothing are not read, and nothing is said, even
+# where the alias comes after the key in the same section. CollisionMargin is not global, so neither
+# its alias nor its key is read.
 value	UdpPort	accepted	2	4242
-value	CollisionMargin	accepted	8	0.2
+value	CollisionReleaseSmoothing	accepted	8	0.2

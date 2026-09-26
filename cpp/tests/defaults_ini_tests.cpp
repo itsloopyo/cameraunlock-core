@@ -136,13 +136,18 @@ void TestRender() {
     const ConfigTable<cameraunlock::HeadTrackingConfig> table = detail::DefaultsIniTable();
     const std::string values = RenderCanonical(table, table.defaults(), RenderHeader{"Fixture Game"});
     bool accepted = true;
+    bool absent = true;
     for (const schema::ConceptInfo& info : schema::kConcepts) {
         const DefaultsIniValue& value = snapshot.Value(info.id);
+        if (!info.global) {
+            absent = absent && value.state == DefaultsIniValueState::kAbsent && rendered.find(info.key) == std::string::npos;
+            continue;
+        }
         const std::string row = std::string(info.key) + "=" + value.value + "\r\n";
-        accepted = accepted && value.state == DefaultsIniValueState::kAccepted &&
-                   (values.find("\r\n" + row) != std::string::npos || values.find("; " + row) != std::string::npos);
+        accepted = accepted && value.state == DefaultsIniValueState::kAccepted && values.find("\r\n" + row) != std::string::npos;
     }
-    Check(accepted, "every concept reads back accepted, at the global table's default");
+    Check(accepted, "every global concept reads back accepted, at the global table's default");
+    Check(absent, "a concept that is not global has no line and reads back absent");
 
     cameraunlock::HeadTrackingConfig config;
     const CanonicalIni doc = ParseCanonicalIni(rendered);

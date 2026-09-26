@@ -1,4 +1,4 @@
-# The effective defaults hold another CollisionChannel, which a PerGame row never reads, and
+# The effective defaults hold another CollisionChannel, which a row that is not global never reads, and
 # Defaults.ini gave PositionLimitX.
 field	PositionLimitX	0.35
 field	CollisionChannel	7

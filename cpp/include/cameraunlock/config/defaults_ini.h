@@ -10,8 +10,8 @@
 #include <string>
 #include <string_view>
 
-// Defaults.ini, the file a concept row that is not PerGame takes its default from: core's table of
-// every canonical concept, the bytes a new file holds, and the reader. Internal to core, for the
+// Defaults.ini, the file a global concept row that is not PerGame takes its default from: core's
+// table of every global concept, the bytes a new file holds, and the reader. Internal to core, for the
 // config owner. CameraUnlock.Core.Config.DefaultsIni is the C# twin, and
 // data/fixtures/canonical-ini/global holds both to the same bytes and lines.
 
@@ -50,22 +50,24 @@ struct DefaultsIniSnapshot {
     const DefaultsIniValue& Value(schema::Concept id) const { return values[static_cast<std::size_t>(id)]; }
 };
 
-// Core's global table: HeadTrackingConfigTable naming every canonical concept, whose defaults are
-// the built-in values a new Defaults.ini holds.
+// Core's global table: HeadTrackingConfigTable naming every global concept, whose defaults are the
+// built-in values a new Defaults.ini holds. CollisionMargin and CollisionChannel are not global, so
+// it has no row for them.
 ConfigTable<HeadTrackingConfig> DefaultsIniTable();
 
-// The bytes a new Defaults.ini holds: the global table's defaults, the four hotkey lists at their
-// canonical_default, every row written as its value (CollisionChannel too, since a commented line
-// here would only ever mean the built-in), under Defaults.ini's own header.
+// The bytes a new Defaults.ini holds: the global table's defaults, the four hotkey lists and
+// CollisionEnabled at their canonical_default, every row written as its value, under Defaults.ini's
+// own header.
 std::string RenderDefaultsIni();
 
 // Reads Defaults.ini's bytes. Pure, and never throws for any input.
 //
 // A file saved as UTF-16 or holding a NUL is unreadable. Any other file is read by the canonical
 // reader, whatever its stamp: no [CameraUnlock], or a ConfigFormat missing, zero or not a number,
-// draws nothing, and a newer ConfigFormat draws `format_line`. Each canonical concept is found by
-// its section and key, ASCII case-insensitively, the last occurrence winning; an alias, a key in
-// another section and a key no concept has are not read and draw nothing. A value is refused when
+// draws nothing, and a newer ConfigFormat draws `format_line`. Each global concept is found by its
+// section and key, ASCII case-insensitively, the last occurrence winning; an alias, a key in another
+// section, a key no concept has and the key of a concept that is not global are not read and draw
+// nothing, and such a concept is absent. A value is refused when
 // the concept's codec with the schema's range does not read it, `default` included, and a hotkey
 // list also when an item's key is not one of the names with a Windows virtual-key code, which every
 // mod reads. Then the tracking-mode pair: each of RotationEnabled and PositionEnabled is its

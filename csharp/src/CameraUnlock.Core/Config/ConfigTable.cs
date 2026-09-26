@@ -82,7 +82,9 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// A concept row. The accessors' type is the concept's, so a field of another type does
-        /// not compile.
+        /// not compile. The row of a concept that is not <see cref="ConceptDescriptor.Global"/>
+        /// (CollisionMargin, CollisionChannel) is an Engine row whose default is the table's own:
+        /// Defaults.ini never reaches it, whatever the table marks.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
         /// <exception cref="ArgumentException">A check above fails.</exception>
@@ -94,6 +96,7 @@ namespace CameraUnlock.Core.Config
 
             var row = new CodecRow<T>(concept.Section, concept.Key, ToArray(concept.FileComment), concept,
                 concept.Family == ConceptValueFamily.Hotkey, concept.Codec, get, set);
+            row.Engine = !concept.Global;
             CheckUniqueKey(row);
             ConceptDescriptor descriptor = concept;
             if (descriptor == ConfigConcepts.RotationEnabled || descriptor == ConfigConcepts.PositionEnabled)
@@ -206,13 +209,19 @@ namespace CameraUnlock.Core.Config
         /// RotationEnabled and PositionEnabled are one setting, the tracking mode, so a table that
         /// binds both marks both or neither; Apply and RenderFresh throw on one without the other.
         /// </summary>
-        /// <exception cref="InvalidOperationException">There is no row, or it is a local row.</exception>
+        /// <exception cref="InvalidOperationException">There is no row, it is a local row, or its
+        /// concept is not <see cref="ConceptDescriptor.Global"/>, so every game keeps it already.</exception>
         public ConfigTable<TConfig> PerGame()
         {
             Row row = Last("PerGame");
             if (row.Concept == null)
             {
                 throw new InvalidOperationException(row.Name + " is a local row, which never takes a value from Defaults.ini");
+            }
+            if (!row.Concept.Global)
+            {
+                throw new InvalidOperationException(row.Name + " is not global in data/config-schema.json, so every game "
+                    + "keeps its own value and Defaults.ini never reaches it; PerGame() is for a global concept");
             }
             row.PerGame = true;
             return this;
@@ -275,8 +284,8 @@ namespace CameraUnlock.Core.Config
         }
 
         /// <summary>
-        /// <see cref="Apply(CanonicalIni, TConfig)"/> over effective defaults. A concept row that is
-        /// not PerGame starts from its value in <paramref name="effective"/>, every other row from the
+        /// <see cref="Apply(CanonicalIni, TConfig)"/> over effective defaults. A global concept row
+        /// that is not PerGame starts from its value in <paramref name="effective"/>, every other row from the
         /// table's defaults; <c>default</c>, a missing key and an invalid value leave a row at its
         /// start, and a pair naming no tracking mode takes both starts. <paramref name="fromDefaultsIni"/>
         /// names the concepts whose effective default Defaults.ini gave, which the result reports as
@@ -410,8 +419,8 @@ namespace CameraUnlock.Core.Config
         /// order, then the local sections in table order. Each row is its comment lines as
         /// <c>; text</c>, then <c>Key=value</c>, or <c>; Key=value</c> for an Engine row holding its
         /// default. A blank line separates sections. CRLF line endings with a final CRLF, no byte
-        /// order mark. When the table has a concept row that is not PerGame, six header lines say
-        /// what <c>default</c> means and where Defaults.ini is.
+        /// order mark. When the table has a global concept row that is not PerGame, six header lines
+        /// say what <c>default</c> means and where Defaults.ini is.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
         /// <exception cref="ArgumentException">A value its codec cannot write, naming the row; or a
@@ -426,11 +435,12 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// Writes the file a game starts with: <see cref="Render"/> of the defaults, except that every
-        /// concept row that is not PerGame is written <c>Key=default</c>, an Engine row included.
+        /// global concept row that is not PerGame is written <c>Key=default</c>, an Engine row
+        /// included. A row of a concept that is not global holds the game's own default, commented.
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="header"/> is null.</exception>
-        /// <exception cref="ArgumentException">A concept row that is not PerGame defaults to a value
-        /// other than the schema's, naming the row; the table binds RotationEnabled without
+        /// <exception cref="ArgumentException">A global concept row that is not PerGame defaults to a
+        /// value other than the schema's, naming the row; the table binds RotationEnabled without
         /// PositionEnabled, or marks one of them PerGame and not the other; or the display name breaks
         /// <see cref="Render"/>'s rule.</exception>
         public byte[] RenderFresh(RenderHeader header)
@@ -439,7 +449,7 @@ namespace CameraUnlock.Core.Config
             foreach (Row row in rows)
             {
                 var concept = row.Concept;
-                if (concept == null || row.PerGame) continue;
+                if (concept == null || !row.FollowsDefaultsIni) continue;
                 string schema;
                 if (row.Holds(checkDefaults, concept.DefaultText, out schema)) continue;
                 throw new ArgumentException(row.Name + " defaults to " + Encoding.ASCII.GetString(row.Render(checkDefaults))
@@ -463,7 +473,7 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// Writes a migrated file: <see cref="Render"/> of <paramref name="values"/>, except that a
-        /// concept row that is not PerGame is written <c>Key=default</c> when its value equals its
+        /// global concept row that is not PerGame is written <c>Key=default</c> when its value equals its
         /// value in <paramref name="effective"/>, and otherwise as its value, never in the commented
         /// form of an Engine row, which would read back as the effective default. RotationEnabled and
         /// PositionEnabled are written default only when both equal their effective values.
@@ -658,7 +668,7 @@ namespace CameraUnlock.Core.Config
             return rows[row].Concept;
         }
 
-        /// <summary>A concept row not marked PerGame, whose default is the effective default.</summary>
+        /// <summary>A global concept row not marked PerGame, whose default is the effective default.</summary>
         internal bool RowFollowsDefaultsIni(int row)
         {
             return rows[row].FollowsDefaultsIni;
@@ -1038,10 +1048,10 @@ namespace CameraUnlock.Core.Config
 
             public bool PerGame { get; set; }
 
-            // A concept row that is not PerGame, whose default is the effective default.
+            // A global concept row that is not PerGame, whose default is the effective default.
             public bool FollowsDefaultsIni
             {
-                get { return Concept != null && !PerGame; }
+                get { return Concept != null && Concept.Global && !PerGame; }
             }
 
             public string Name

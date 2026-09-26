@@ -23,10 +23,12 @@
     "Every canonical concept has a `file_comment`, the one or two lines written above its key",
     "for players (`doc` is the developer text), and may have a `range` (`min`, `max`, either",
     "optional; a value outside it is invalid, never clamped), a `codec` ('hotkey' on the key",
-    "lists) and a `canonical_default`, the binding list a canonical file starts with. The",
-    "`default` and the field initialisers of a key the flat readers read keep the single key",
-    "name those readers have always shipped, because changing a default is a breaking change.",
-    "A hotkey concept no flat reader reads has its `canonical_default` as its `default`.",
+    "lists) and a `canonical_default`, the value a canonical file starts with where it differs",
+    "from `default`: the binding list of a hotkey concept, and `true` for CollisionEnabled. The",
+    "`default` and the field initialisers of a key the flat readers read keep the value those",
+    "readers have always shipped (a single key name, `false`), because changing a default is a",
+    "breaking change. A hotkey concept no flat reader reads has its `canonical_default` as its",
+    "`default`.",
     "",
     "`non_canonical_keys` names settings no canonical file carries that are not concepts: the",
     "tracker owns pose shaping, and deadzones, response curves and unit scales were never schema",
@@ -37,13 +39,15 @@
     "NonCanonicalConcept with the group's `canonical_reason`, and the canonical config lint fails",
     "a file holding one.",
     "",
-    "Every canonical concept is global: a canonical file's row for it may hold `default`, which",
-    "reads the value from Defaults.ini, and Defaults.ini carries every canonical concept. A game",
-    "keeps its own value for one only through the table's PerGame(). So a concept that must never",
-    "follow Defaults.ini needs a schema change before it is added. A row whose default is in the",
-    "engine's own units or is engine data, such as a CollisionMargin in centimetres or a",
-    "CollisionChannel naming one engine's trace channel, has a default the schema's number cannot",
-    "stand for, so it needs PerGame() or a schema change."
+    "A canonical concept is global unless it says `\"global\": false`: a canonical file's row for a",
+    "global concept may hold `default`, which reads the value from Defaults.ini, and Defaults.ini",
+    "carries every global concept. A game keeps its own value for one only through the table's",
+    "PerGame(), with an approved per_game entry in data/config-format.json. A concept with",
+    "`\"global\": false` holds engine data, a number in the engine's own units or a channel it",
+    "names: every game keeps its own value, a config table writes the row as an Engine row",
+    "(commented at the game's default), no canonical file holds `default` on it, and Defaults.ini",
+    "never carries it. CollisionMargin and CollisionChannel are the two (collision rows ruling of",
+    "2026-09-26). A concept moving between the two kinds is a breaking change."
   ],
   "deliberately_unaliased": [
     {
@@ -392,9 +396,10 @@
       "type": "bool",
       "default": false,
       "aliases": ["LeanCollision", "LeanCollisionEnabled", "CameraCollision", "ClampLean"],
-      "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. Ships off in a mod whose trace has not been confirmed in game, because an unverified channel either blocks on nothing or blocks on everything; a mod turns it on once its log shows the sweep engaging on real geometry. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice.",
+      "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. A canonical file starts it on (canonical_default true, collision rows ruling of 2026-09-26): it is global, so Defaults.ini's value reaches every game that binds the row, and a game without a lean collision sweep does not bind it. The flat readers' default stays false. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice.",
       "canonical": true,
-      "file_comment": ["true: leaning stops at walls instead of moving the view through them."]
+      "file_comment": ["true: leaning stops at walls instead of moving the view through them."],
+      "canonical_default": true
     },
     {
       "id": "CollisionMargin",
@@ -403,10 +408,11 @@
       "type": "float",
       "default": 0.1,
       "aliases": ["CollisionRadius", "LeanCollisionMargin", "CollisionSkin", "CameraCollisionRadius"],
-      "doc": "How far off a blocking surface the eye is held, in the engine's own units. It must EXCEED the camera's near clip distance or geometry is culled before the eye reaches it and the wall goes transparent anyway. CollisionRadius is the spelling where the standoff IS a sweep radius; CollisionMargin where the query is a line and the standoff lives in the clamp.",
+      "doc": "How far off a blocking surface the eye is held, in the engine's own units. It must EXCEED the camera's near clip distance or geometry is culled before the eye reaches it and the wall goes transparent anyway. CollisionRadius is the spelling where the standoff IS a sweep radius; CollisionMargin where the query is a line and the standoff lives in the clamp. Not global: a number in one engine's units means something else in another, so each game keeps its own default and Defaults.ini never carries it.",
       "canonical": true,
       "file_comment": ["How far the view is held off a wall when you lean into it, in the game's own units."],
-      "range": {"min": 0}
+      "range": {"min": 0},
+      "global": false
     },
     {
       "id": "CollisionChannel",
@@ -415,9 +421,10 @@
       "type": "int",
       "default": 0,
       "aliases": ["LeanCollisionChannel", "TraceChannel", "CollisionTraceChannel"],
-      "doc": "Which trace channel the sweep runs on, for engines whose query needs one. Which channel a level's geometry blocks is a project setting rather than an engine constant, so it is a value to try and read back out of the log. Omitted by mods whose cast takes no channel.",
+      "doc": "Which trace channel the sweep runs on, for engines whose query needs one. Which channel a level's geometry blocks is a project setting rather than an engine constant, so it is a value to try and read back out of the log. Omitted by mods whose cast takes no channel. Not global: a channel number names something different in each engine, so each game keeps its own default and Defaults.ini never carries it.",
       "canonical": true,
-      "file_comment": ["Which of the game's collision channels the wall check tests against."]
+      "file_comment": ["Which of the game's collision channels the wall check tests against."],
+      "global": false
     },
     {
       "id": "CollisionReleaseSmoothing",

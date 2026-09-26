@@ -9,6 +9,66 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - BREAKING - `CollisionMargin` and `CollisionChannel` are per game in every mod, and `CollisionEnabled` starts on
+
+Collision rows ruling of 2026-09-26. A margin in the engine's own units and a trace channel number
+mean something different in every engine, so neither can be one value for every game; whether the
+wall check runs is a preference, so it stays global and starts on.
+
+- **Schema.** `data/config-schema.json` gains `"global": false` on `CollisionMargin` and
+  `CollisionChannel`; every other canonical concept is global, as before.
+  `scripts/generate-config-schema.mjs` refuses the field on a concept that is not canonical and
+  any value but `false`. `CollisionEnabled`
+  gains `"canonical_default": true`, which a canonical file and Defaults.ini start with; its
+  `default`, the value the deprecated flat readers (`HeadTrackingConfigData.LoadFromFile`,
+  `HeadTrackingConfig`'s parser) and the field initialisers use, stays `false`. The generator now
+  takes a `canonical_default` on a bool concept, where it must differ from `default`, as well as
+  on a hotkey concept.
+- **Generated descriptors.** C# `ConceptDescriptor.Global` (new, public) and C++
+  `ConceptTraits<Id>::kGlobal` and `ConceptInfo::global`, appended as the struct's last member so
+  existing aggregate initialisation still compiles. `ConceptDescriptor.CanonicalDefault` and
+  `kCanonicalDefault` are `"true"` for `CollisionEnabled`, and its default text is `true`.
+- **Config tables.** The row of a concept that is not global is an Engine row with no modifier,
+  and its default is the table's own: Defaults.ini never reaches it, `default` on it reads the
+  table's default, the fresh render's schema-default gate skips it, and `RenderFresh` writes it as
+  `Render` does, commented at its default (`; CollisionMargin=10.0`) and active anywhere else. So a
+  table whose margin is in centimetres or whose channel is its engine's own number renders fresh,
+  and the config owners no longer throw from the constructor over it. `PerGame()` on such a row
+  throws `InvalidOperationException` (C++ `std::invalid_argument`): `[Position] CollisionChannel is
+  not global in data/config-schema.json, so every game keeps its own value and Defaults.ini never
+  reaches it; PerGame() is for a global concept`.
+- **`HeadTrackingConfigTable`** starts `CollisionEnabled` at `true`, as it starts the hotkey lists
+  at their `canonical_default`, and no longer marks `CollisionChannel` `Engine()` itself, since the
+  schema does. `CollisionMargin` is an Engine row too now, so `all-concepts.ini` writes
+  `; CollisionMargin=0.1` and `all-concepts-fresh.ini` comments both rows instead of writing
+  `default`.
+- **Defaults.ini.** Core's global table names the 26 global concepts, so a new Defaults.ini has no
+  `CollisionMargin` or `CollisionChannel` line and holds `CollisionEnabled=true`. The reader never
+  reads either key: a line for one is absent, with no log line and no message.
+- **Scripts.** `check-config-format` refuses a `per_game` entry for a concept that is not global.
+  The canonical config lint takes a value or the commented Engine form on a `CollisionMargin` or
+  `CollisionChannel` row and refuses `default` there, and its message says a committed file holds
+  `default` on every global concept row. The README config block lists `CollisionEnabled=true` as
+  the built-in value of a `CollisionEnabled=default` row.
+- **Fixtures and tests.** `global/Defaults.ini`, `head-tracking/all-concepts*.ini`, the
+  `head-tracking/apply-*` cases and the `global/read-alias` and `global/read-refused-values` cases
+  follow; the fixture table's `CollisionChannel` row drops `.Engine().PerGame()`, which its
+  concept now implies. New checks in both languages: a table over the two rows renders fresh at
+  engine values, `default` on them ignores the effective defaults, `PerGame()` on them throws,
+  `HeadTrackingConfigTable` starts `CollisionEnabled` at true and the flat default stays false,
+  and an owner over a table with `CollisionMargin` 10 and `CollisionChannel` 3 creates the file
+  with both commented at those values while `CollisionEnabled` follows Defaults.ini.
+
+What a consuming repo changes at its pin bump. Keep the `CollisionMargin` and `CollisionChannel`
+defaults the mod ships, in whatever unit and channel its engine uses; drop a `PerGame()` on either
+row (none is in the fleet today) and leave an `Engine()` on either (it changes nothing). A table
+that binds `CollisionEnabled` defaults it to `true`; a mod without a lean collision sweep does not
+bind it. Re-run `pixi run render-config`: the committed file holds `CollisionEnabled=default` and
+the two engine rows commented at the mod's own values. The seven converted repos that were waiting
+on this (deus-ex-human-revolution, outer-worlds-spacers-choice-edition, ready-or-not,
+sniper-elite-v2-remastered, stalker-shadow-of-chornobyl-enhanced-edition, the-forest, thief) can
+bump past the entry where the owners read Defaults.ini.
+
 ### Changed - docs/canonical-config.md describes Defaults.ini in full
 
 - **docs/canonical-config.md** gains "The global defaults file": who reads Defaults.ini, that every
@@ -32,11 +92,12 @@ change in order (each step is the earlier entry it links):
    with a scratch path in every test that builds an owner or initialises `PluginMod`; a helper
    shared by the mod and its tests takes the `DefaultsFile` as a parameter
    ([the config owners read and create Defaults.ini](#changed---breaking---the-config-owners-read-and-create-defaultsini)).
-2. **Move every concept row's default to the schema's value**, or get the owner's approval for a
-   `per_game` entry in core's `data/config-format.json` (a core commit) and mark the row
-   `PerGame()`, both rows of the tracking mode pair or neither
+2. **Move every global concept row's default to the schema's value** (`CollisionEnabled`'s is
+   `true`), or get the owner's approval for a `per_game` entry in core's `data/config-format.json`
+   (a core commit) and mark the row `PerGame()`, both rows of the tracking mode pair or neither
    ([`PerGame()` and `RenderFresh`](#added---the-default-token-renderfresh--rendercanonicalfresh-and-pergame)).
-   The collision rows of a repo that defaults them off the schema wait for the owner's decision.
+   `CollisionMargin` and `CollisionChannel` keep the mod's own defaults and need neither
+   ([per game in every mod](#changed---breaking---collisionmargin-and-collisionchannel-are-per-game-in-every-mod-and-collisionenabled-starts-on)).
 3. **Re-run `pixi run render-config`** and commit the file: `default` on every concept row except
    the `per_game` ones, and the config descriptor's `per_game` filled by encode-seed
    ([committed configs hold `default` rows](#changed---breaking---committed-configs-hold-default-rows-and-per_game-replaces-descriptor_omits-and-hotkey_exceptions),
@@ -446,10 +507,9 @@ where the imported value equals what `default` gives at that launch.
   `HeadTrackingConfigTable` naming every concept passes it
   (`data/fixtures/canonical-ini/head-tracking/all-concepts-fresh.ini`). Seven converted repos
   default `CollisionEnabled`, `CollisionMargin` or `CollisionChannel` off the schema, several in the
-  engine's own units, so their tables fail it as they stand, and since the owner renders its fresh
-  file when it is built, their owners throw from the constructor at a pin with the Defaults.ini
-  entry above. The owner has not yet decided whether those rows become `PerGame` or collision
-  leaves the global set, so those repos do not bump past that entry until the decision.
+  engine's own units; the gate no longer applies to the margin and the channel, which are per game
+  in every mod, and `CollisionEnabled` now starts on
+  ([per game in every mod](#changed---breaking---collisionmargin-and-collisionchannel-are-per-game-in-every-mod-and-collisionenabled-starts-on)).
 - **Internal, for the owner's later adoption**: an `Apply` overload over effective defaults that
   reports where each row's value came from (the file, Defaults.ini or the table), and a migration
   render that writes `default` where a value equals its effective default (C++

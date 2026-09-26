@@ -351,8 +351,13 @@ namespace CameraUnlock.Core.Tests.Config
                 Assert.Equal(c.GetProperty("section").GetString(), d.Section);
                 Assert.Equal(c.GetProperty("key").GetString(), d.Key);
                 Assert.Equal(c.GetProperty("file_comment").EnumerateArray().Select(l => l.GetString()), d.FileComment);
-                Assert.Equal(c.TryGetProperty("canonical_default", out JsonElement def) ? def.GetString() : null,
-                    d.CanonicalDefault);
+                string? canonicalDefault = null;
+                if (c.TryGetProperty("canonical_default", out JsonElement def))
+                {
+                    canonicalDefault = def.ValueKind == JsonValueKind.String ? def.GetString() : def.GetBoolean() ? "true" : "false";
+                }
+                Assert.Equal(canonicalDefault, d.CanonicalDefault);
+                Assert.Equal(!c.TryGetProperty("global", out JsonElement global) || global.GetBoolean(), d.Global);
                 string type = c.GetProperty("type").GetString()!;
                 bool hasRange = c.TryGetProperty("range", out JsonElement range);
                 switch (type)

@@ -4,7 +4,6 @@
 
 #include <cameraunlock/config/head_tracking_config_table.h>
 
-#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
@@ -238,9 +237,10 @@ void TestFreshRender() {
     Check(clean && FieldRows(reread) == FieldRows(table.defaults()), "the fresh file reads back as the defaults");
 }
 
-// Effective LocalSmoothing and RemoteSmoothing reach the position settings' copy, and the migration
-// render writes CollisionChannel, an Engine row that follows Defaults.ini, as an active value where
-// it differs from its effective default. The C# twin is HeadTrackingConfigTableFixtures.RunEffectiveDefaults.
+// Effective LocalSmoothing and RemoteSmoothing reach the position settings' copy, and CollisionChannel,
+// which is not global, keeps the game's own default whatever the effective defaults hold and migrates
+// as an Engine row: commented at that default, and as a value away from it. The C# twin is
+// HeadTrackingConfigTableFixtures.RunEffectiveDefaults.
 void TestEffectiveDefaults() {
     std::cout << "\n[effective defaults]\n";
     const ConfigTable<HeadTrackingConfig> table =
@@ -249,24 +249,29 @@ void TestEffectiveDefaults() {
     effective.local_smoothing = 0.25f;
     effective.remote_smoothing = 0.5f;
     effective.collision_channel = 2;
-    const std::vector<Concept> from_defaults_ini{Concept::LocalSmoothing, Concept::RemoteSmoothing,
-                                                 Concept::CollisionChannel};
+    const std::vector<Concept> from_defaults_ini{Concept::LocalSmoothing, Concept::RemoteSmoothing};
     HeadTrackingConfig config;
     const detail::EffectiveApplyResult result =
         detail::ApplyCanonicalEffective(ParseCanonicalIni(""), table, config, effective, from_defaults_ini);
     Check(config.local_smoothing == 0.25f && config.remote_smoothing == 0.5f && config.position.local_smoothing == 0.25f &&
-              config.position.remote_smoothing == 0.5f && config.collision_channel == 2,
+              config.position.remote_smoothing == 0.5f,
           "the effective defaults reach every field, the position copy included");
-    Check(std::all_of(result.sources.begin(), result.sources.end(),
-                      [](detail::ValueSource s) { return s == detail::ValueSource::kDefaultsIni; }),
-          "each row's source is Defaults.ini");
+    Check(config.collision_channel == 0, "CollisionChannel keeps the game's own default");
+    Check(result.sources == std::vector<detail::ValueSource>{detail::ValueSource::kDefaultsIni,
+                                                            detail::ValueSource::kDefaultsIni,
+                                                            detail::ValueSource::kBuiltIn},
+          "the smoothing rows' source is Defaults.ini and CollisionChannel's the table");
 
     HeadTrackingConfig values = table.defaults();
     values.local_smoothing = 0.25f;
     const std::string migrated = detail::RenderCanonicalMigration(table, values, effective, kHeader);
     Check(Contains(migrated, "\r\nLocalSmoothing=default\r\n") && Contains(migrated, "\r\nRemoteSmoothing=0.15\r\n") &&
-              Contains(migrated, "\r\nCollisionChannel=0\r\n") && !Contains(migrated, "; CollisionChannel"),
-          "the migration render writes default, a value, and the Engine row as an active value");
+              Contains(migrated, "\r\n; CollisionChannel=0\r\n"),
+          "the migration render writes default, a value, and the Engine row commented at the game's default");
+    values.collision_channel = 4;
+    const std::string pinned = detail::RenderCanonicalMigration(table, values, effective, kHeader);
+    Check(Contains(pinned, "\r\nCollisionChannel=4\r\n") && !Contains(pinned, "; CollisionChannel"),
+          "and CollisionChannel away from it as a value");
     HeadTrackingConfig reread;
     const detail::EffectiveApplyResult back =
         detail::ApplyCanonicalEffective(ParseCanonicalIni(migrated), table, reread, effective, from_defaults_ini);
@@ -311,6 +316,45 @@ void TestHotkeyDefaults() {
           "the flat reader's field defaults are single keys");
     Check(flat.true_free_look_key_name == schema::ConceptTraits<Concept::TrueFreeLookKey>::kCanonicalDefault,
           "true_free_look_key_name's initialiser is its canonical_default");
+
+    const ConfigTable<HeadTrackingConfig> collision = HeadTrackingConfigTable({Concept::CollisionEnabled});
+    Check(collision.defaults().collision_enabled &&
+              std::string(schema::ConceptTraits<Concept::CollisionEnabled>::kCanonicalDefault) == "true",
+          "CollisionEnabled defaults to its canonical_default, true");
+    Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
+}
+
+// CollisionMargin and CollisionChannel are the only concepts that are not global. Their rows are
+// Engine rows: a fresh file comments them at the game's default, and any other value is written.
+// The C# twin is HeadTrackingConfigTableTests.CollisionMarginAndChannelAreEngineRowsOutsideDefaultsIni.
+void TestEngineCollisionRows() {
+    std::cout << "\n[CollisionMargin and CollisionChannel are Engine rows outside Defaults.ini]\n";
+    for (const schema::ConceptInfo& info : schema::kConcepts) {
+        const bool engine = info.id == Concept::CollisionMargin || info.id == Concept::CollisionChannel;
+        Check(info.global != engine, std::string(info.name) + (engine ? " is not global" : " is global"));
+    }
+    static_assert(!schema::ConceptTraits<Concept::CollisionMargin>::kGlobal &&
+                  !schema::ConceptTraits<Concept::CollisionChannel>::kGlobal &&
+                  schema::ConceptTraits<Concept::CollisionEnabled>::kGlobal);
+
+    const ConfigTable<HeadTrackingConfig> table =
+        HeadTrackingConfigTable({Concept::CollisionEnabled, Concept::CollisionMargin, Concept::CollisionChannel});
+    const std::string fresh = RenderCanonicalFresh(table, kHeader);
+    Check(Contains(fresh, "\r\nCollisionEnabled=default\r\n") && Contains(fresh, "\r\n; CollisionMargin=0.1\r\n") &&
+              Contains(fresh, "\r\n; CollisionChannel=0\r\n"),
+          "the fresh file holds CollisionEnabled=default and comments the two engine rows at their defaults");
+    HeadTrackingConfig pinned = table.defaults();
+    pinned.collision_enabled = false;
+    pinned.lean_clamp.skin = 10.0f;
+    pinned.collision_channel = 3;
+    std::string expected = fresh;
+    for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
+             {"CollisionEnabled=default", "CollisionEnabled=false"},
+             {"; CollisionMargin=0.1", "CollisionMargin=10.0"},
+             {"; CollisionChannel=0", "CollisionChannel=3"}}) {
+        expected.replace(expected.find(from), from.size(), to);
+    }
+    Check(RenderCanonical(table, pinned, kHeader) == expected, "values away from the defaults are written as values");
 }
 
 void TestTrueFreeLookSpellings() {
@@ -391,6 +435,7 @@ int RunHeadTrackingConfigTableTests() {
         TestFreshRender();
         TestEffectiveDefaults();
         TestHotkeyDefaults();
+        TestEngineCollisionRows();
         TestTrueFreeLookSpellings();
         TestArguments();
         TestOnlyNamedConcepts();

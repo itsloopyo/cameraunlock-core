@@ -17,142 +17,170 @@ namespace CameraUnlock.Core.Config
         /// <summary>[Network] UdpPort.</summary>
         public static readonly ConceptDescriptor<int> UdpPort = new ConceptDescriptor<int>(
             "UdpPort", "Network", "UdpPort", ConceptValueFamily.Integer,
-            new IntCodec(1, 65535), new[] { "UDP port the mod receives tracker data on (OpenTrack protocol)." }, null, "4242");
+            new IntCodec(1, 65535), new[] { "UDP port the mod receives tracker data on (OpenTrack protocol)." }, null, "4242",
+            true);
 
         /// <summary>[General] EnableOnStartup.</summary>
         public static readonly ConceptDescriptor<bool> EnableOnStartup = new ConceptDescriptor<bool>(
             "EnableOnStartup", "General", "EnableOnStartup", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: head tracking is on when the game starts. ToggleKey turns it on and off." }, null, "true");
+            new BoolCodec(), new[] { "true: head tracking is on when the game starts. ToggleKey turns it on and off." }, null, "true",
+            true);
 
         /// <summary>[Smoothing] LocalSmoothing.</summary>
         public static readonly ConceptDescriptor<float> LocalSmoothing = new ConceptDescriptor<float>(
             "LocalSmoothing", "Smoothing", "LocalSmoothing", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 1f), new[] { "Smoothing when the tracker runs on this PC. 0 is the least, 1 the most." }, null, "0");
+            new FloatCodec(0f, 1f), new[] { "Smoothing when the tracker runs on this PC. 0 is the least, 1 the most." }, null, "0",
+            true);
 
         /// <summary>[Smoothing] RemoteSmoothing.</summary>
         public static readonly ConceptDescriptor<float> RemoteSmoothing = new ConceptDescriptor<float>(
             "RemoteSmoothing", "Smoothing", "RemoteSmoothing", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 1f), new[] { "Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most." }, null, "0.15");
+            new FloatCodec(0f, 1f), new[] { "Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most." }, null, "0.15",
+            true);
 
         /// <summary>[General] WorldSpaceYaw.</summary>
         public static readonly ConceptDescriptor<bool> WorldSpaceYaw = new ConceptDescriptor<bool>(
             "WorldSpaceYaw", "General", "WorldSpaceYaw", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: yaw turns around the world's up axis. false: around the camera's own up axis." }, null, "true");
+            new BoolCodec(), new[] { "true: yaw turns around the world's up axis. false: around the camera's own up axis." }, null, "true",
+            true);
 
         /// <summary>[General] AimDecoupling.</summary>
         public static readonly ConceptDescriptor<bool> AimDecoupling = new ConceptDescriptor<bool>(
             "AimDecoupling", "General", "AimDecoupling", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: your aim stays with the mouse or controller while your head moves the view." }, null, "true");
+            new BoolCodec(), new[] { "true: your aim stays with the mouse or controller while your head moves the view." }, null, "true",
+            true);
 
         /// <summary>[General] RotationEnabled.</summary>
         public static readonly ConceptDescriptor<bool> RotationEnabled = new ConceptDescriptor<bool>(
             "RotationEnabled", "General", "RotationEnabled", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both." }, null, "true");
+            new BoolCodec(), new[] { "true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both." }, null, "true",
+            true);
 
         /// <summary>[General] DataFreshnessMs.</summary>
         public static readonly ConceptDescriptor<int> DataFreshnessMs = new ConceptDescriptor<int>(
             "DataFreshnessMs", "General", "DataFreshnessMs", ConceptValueFamily.Integer,
-            new IntCodec(1, 2147483647), new[] { "Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again." }, null, "500");
+            new IntCodec(1, 2147483647), new[] { "Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again." }, null, "500",
+            true);
 
         /// <summary>[Position] PositionEnabled.</summary>
         public static readonly ConceptDescriptor<bool> PositionEnabled = new ConceptDescriptor<bool>(
             "PositionEnabled", "Position", "PositionEnabled", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both." }, null, "true");
+            new BoolCodec(), new[] { "true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both." }, null, "true",
+            true);
 
         /// <summary>[Position] PositionAllowed.</summary>
         public static readonly ConceptDescriptor<bool> PositionAllowed = new ConceptDescriptor<bool>(
             "PositionAllowed", "Position", "PositionAllowed", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position." }, null, "true");
+            new BoolCodec(), new[] { "false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position." }, null, "true",
+            true);
 
         /// <summary>[Position] TrueFreeLook.</summary>
         public static readonly ConceptDescriptor<bool> TrueFreeLook = new ConceptDescriptor<bool>(
             "TrueFreeLook", "Position", "TrueFreeLook", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)." }, null, "false");
+            new BoolCodec(), new[] { "false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)." }, null, "false",
+            true);
 
         /// <summary>[Position] PositionLimitX.</summary>
         public static readonly ConceptDescriptor<float> PositionLimitX = new ConceptDescriptor<float>(
             "PositionLimitX", "Position", "PositionLimitX", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "How far, in metres, leaning left or right can move the view." }, null, "0.3");
+            new FloatCodec(0f, 10f), new[] { "How far, in metres, leaning left or right can move the view." }, null, "0.3",
+            true);
 
         /// <summary>[Position] PositionLimitY.</summary>
         public static readonly ConceptDescriptor<float> PositionLimitY = new ConceptDescriptor<float>(
             "PositionLimitY", "Position", "PositionLimitY", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "How far, in metres, raising your head can move the view." }, null, "0.2");
+            new FloatCodec(0f, 10f), new[] { "How far, in metres, raising your head can move the view." }, null, "0.2",
+            true);
 
         /// <summary>[Position] PositionLimitYDown.</summary>
         public static readonly ConceptDescriptor<float> PositionLimitYDown = new ConceptDescriptor<float>(
             "PositionLimitYDown", "Position", "PositionLimitYDown", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "How far, in metres, lowering your head can move the view." }, null, "0.2");
+            new FloatCodec(0f, 10f), new[] { "How far, in metres, lowering your head can move the view." }, null, "0.2",
+            true);
 
         /// <summary>[Position] PositionLimitZ.</summary>
         public static readonly ConceptDescriptor<float> PositionLimitZ = new ConceptDescriptor<float>(
             "PositionLimitZ", "Position", "PositionLimitZ", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "How far, in metres, leaning forward can move the view." }, null, "0.4");
+            new FloatCodec(0f, 10f), new[] { "How far, in metres, leaning forward can move the view." }, null, "0.4",
+            true);
 
         /// <summary>[Position] PositionLimitZBack.</summary>
         public static readonly ConceptDescriptor<float> PositionLimitZBack = new ConceptDescriptor<float>(
             "PositionLimitZBack", "Position", "PositionLimitZBack", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "How far, in metres, leaning back can move the view." }, null, "0.1");
+            new FloatCodec(0f, 10f), new[] { "How far, in metres, leaning back can move the view." }, null, "0.1",
+            true);
 
         /// <summary>[Position] CollisionEnabled.</summary>
         public static readonly ConceptDescriptor<bool> CollisionEnabled = new ConceptDescriptor<bool>(
             "CollisionEnabled", "Position", "CollisionEnabled", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: leaning stops at walls instead of moving the view through them." }, null, "false");
+            new BoolCodec(), new[] { "true: leaning stops at walls instead of moving the view through them." }, "true", "true",
+            true);
 
         /// <summary>[Position] CollisionMargin.</summary>
         public static readonly ConceptDescriptor<float> CollisionMargin = new ConceptDescriptor<float>(
             "CollisionMargin", "Position", "CollisionMargin", ConceptValueFamily.Floating,
-            new FloatCodec(0f, float.MaxValue), new[] { "How far the view is held off a wall when you lean into it, in the game's own units." }, null, "0.1");
+            new FloatCodec(0f, float.MaxValue), new[] { "How far the view is held off a wall when you lean into it, in the game's own units." }, null, "0.1",
+            false);
 
         /// <summary>[Position] CollisionChannel.</summary>
         public static readonly ConceptDescriptor<int> CollisionChannel = new ConceptDescriptor<int>(
             "CollisionChannel", "Position", "CollisionChannel", ConceptValueFamily.Integer,
-            new IntCodec(int.MinValue, int.MaxValue), new[] { "Which of the game's collision channels the wall check tests against." }, null, "0");
+            new IntCodec(int.MinValue, int.MaxValue), new[] { "Which of the game's collision channels the wall check tests against." }, null, "0",
+            false);
 
         /// <summary>[Position] CollisionReleaseSmoothing.</summary>
         public static readonly ConceptDescriptor<float> CollisionReleaseSmoothing = new ConceptDescriptor<float>(
             "CollisionReleaseSmoothing", "Position", "CollisionReleaseSmoothing", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 1f), new[] { "How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest." }, null, "0.9");
+            new FloatCodec(0f, 1f), new[] { "How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest." }, null, "0.9",
+            true);
 
         /// <summary>[Position] TrackerPivotForward.</summary>
         public static readonly ConceptDescriptor<float> TrackerPivotForward = new ConceptDescriptor<float>(
             "TrackerPivotForward", "Position", "TrackerPivotForward", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off." }, null, "0");
+            new FloatCodec(0f, 10f), new[] { "Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off." }, null, "0",
+            true);
 
         /// <summary>[Position] TrackerPivotUp.</summary>
         public static readonly ConceptDescriptor<float> TrackerPivotUp = new ConceptDescriptor<float>(
             "TrackerPivotUp", "Position", "TrackerPivotUp", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "Metres from the pivot of your neck up to the point the tracker follows." }, null, "0");
+            new FloatCodec(0f, 10f), new[] { "Metres from the pivot of your neck up to the point the tracker follows." }, null, "0",
+            true);
 
         /// <summary>[Hotkeys] ToggleKey.</summary>
         public static readonly ConceptDescriptor<string> ToggleKey = new ConceptDescriptor<string>(
             "ToggleKey", "Hotkeys", "ToggleKey", ConceptValueFamily.Hotkey,
-            new HotkeyCodec(), new[] { "Turns head tracking on and off." }, "End, Ctrl+Shift+Y", "End, Ctrl+Shift+Y");
+            new HotkeyCodec(), new[] { "Turns head tracking on and off." }, "End, Ctrl+Shift+Y", "End, Ctrl+Shift+Y",
+            true);
 
         /// <summary>[Hotkeys] CycleTrackingModeKey.</summary>
         public static readonly ConceptDescriptor<string> CycleTrackingModeKey = new ConceptDescriptor<string>(
             "CycleTrackingModeKey", "Hotkeys", "CycleTrackingModeKey", ConceptValueFamily.Hotkey,
-            new HotkeyCodec(), new[] { "Changes the tracking mode: rotation and position, rotation only, position only." }, "PageUp, Ctrl+Shift+G", "PageUp, Ctrl+Shift+G");
+            new HotkeyCodec(), new[] { "Changes the tracking mode: rotation and position, rotation only, position only." }, "PageUp, Ctrl+Shift+G", "PageUp, Ctrl+Shift+G",
+            true);
 
         /// <summary>[Hotkeys] YawModeKey.</summary>
         public static readonly ConceptDescriptor<string> YawModeKey = new ConceptDescriptor<string>(
             "YawModeKey", "Hotkeys", "YawModeKey", ConceptValueFamily.Hotkey,
-            new HotkeyCodec(), new[] { "Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw)." }, "PageDown, Ctrl+Shift+H", "PageDown, Ctrl+Shift+H");
+            new HotkeyCodec(), new[] { "Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw)." }, "PageDown, Ctrl+Shift+H", "PageDown, Ctrl+Shift+H",
+            true);
 
         /// <summary>[Hotkeys] TrueFreeLookKey.</summary>
         public static readonly ConceptDescriptor<string> TrueFreeLookKey = new ConceptDescriptor<string>(
             "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ConceptValueFamily.Hotkey,
-            new HotkeyCodec(), new[] { "Switches between keeping your eye on the sights and true free look (TrueFreeLook)." }, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U");
+            new HotkeyCodec(), new[] { "Switches between keeping your eye on the sights and true free look (TrueFreeLook)." }, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U",
+            true);
 
         /// <summary>[Light] LightFollowsHead.</summary>
         public static readonly ConceptDescriptor<bool> LightFollowsHead = new ConceptDescriptor<bool>(
             "LightFollowsHead", "Light", "LightFollowsHead", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: a light you carry points where you look instead of where you aim." }, null, "true");
+            new BoolCodec(), new[] { "true: a light you carry points where you look instead of where you aim." }, null, "true",
+            true);
 
         /// <summary>[Light] LightMultiplier.</summary>
         public static readonly ConceptDescriptor<float> LightMultiplier = new ConceptDescriptor<float>(
             "LightMultiplier", "Light", "LightMultiplier", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 5f), new[] { "How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim." }, null, "1.5");
+            new FloatCodec(0f, 5f), new[] { "How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim." }, null, "1.5",
+            true);
 
         /// <summary>In the schema's concepts order, which is the order a section's concept rows are written in.</summary>
         internal static readonly ConceptDescriptor[] All =

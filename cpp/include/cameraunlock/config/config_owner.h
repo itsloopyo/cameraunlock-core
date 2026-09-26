@@ -295,7 +295,7 @@ struct ConfigOwnerTestAccess;
 /// Defaults.ini that is absent, and only through WriteFileChecked, so every write replaces the
 /// whole file or nothing. Windows only, Wine and Proton included.
 ///
-/// Every concept row the table does not mark PerGame takes its default from Defaults.ini
+/// Every global concept row the table does not mark PerGame takes its default from Defaults.ini
 /// (`options.defaults`): `default`, a missing key and an invalid value on such a row read
 /// Defaults.ini's value, or the row's own default where Defaults.ini gives none. Load finds the
 /// file, creates it with the built-in values where none exists and it may, and reads it once;
@@ -323,8 +323,8 @@ public:
     /// empty, legacy_path is set and the import has no run, legacy_path is not fully qualified or
     /// names the file `path` names (compared without case), the table has both RotationEnabled
     /// and PositionEnabled and marks only one of them Writable, `defaults` names no file, or the
-    /// table cannot render its fresh file under the header (RenderCanonicalFresh: a concept row
-    /// not marked PerGame whose default is not the schema's, RotationEnabled without
+    /// table cannot render its fresh file under the header (RenderCanonicalFresh: a global concept
+    /// row not marked PerGame whose default is not the schema's, RotationEnabled without
     /// PositionEnabled, or a header the renderer refuses).
     explicit ConfigOwner(ConfigOwnerOptions<Config> options) : ConfigOwner(std::move(options), nullptr) {}
 

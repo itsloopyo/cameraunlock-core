@@ -108,6 +108,7 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-defaults-ini-read-while-the-file-is-missing-is-applied-once-it-returns",
                 ADefaultsIniReadWhileTheFileIsMissingIsAppliedOnceItReturns),
             Scenario("a-table-off-the-schema-default-is-refused-unless-per-game", ATableOffTheSchemaDefaultIsRefusedUnlessPerGame),
+            Scenario("a-games-collision-margin-and-channel-are-its-own", AGamesCollisionMarginAndChannelAreItsOwn),
             Scenario("read-only-over-a-config-file", ReadOnlyOverAConfigFile),
             Scenario("read-only-over-a-legacy-file", ReadOnlyOverALegacyFile),
             Scenario("read-only-over-nothing", ReadOnlyOverNothing),
@@ -1452,6 +1453,34 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(File.ReadAllText(rig.Path).Contains("\r\nUdpPort=5000\r\n"), "and a fresh file writes its value");
             Expect(!load.Log.Any(l => l.StartsWith(rig.Path + ": ", StringComparison.Ordinal) && l.Contains("Defaults.ini")),
                 "a PerGame row is named in no Defaults.ini line");
+        }
+
+        private static void AGamesCollisionMarginAndChannelAreItsOwn(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.Table = new ConfigTable<HeadTrackingConfigData>(() => new HeadTrackingConfigData
+                {
+                    CollisionEnabled = true,
+                    CollisionMargin = 10f,
+                    CollisionChannel = 3,
+                })
+                .Concept(ConfigConcepts.CollisionEnabled, c => c.CollisionEnabled, (c, v) => c.CollisionEnabled = v)
+                .Concept(ConfigConcepts.CollisionMargin, c => c.CollisionMargin, (c, v) => c.CollisionMargin = v)
+                .Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v);
+            rig.PutDefaults(Ascii("[Position]\r\nCollisionEnabled=false\r\nCollisionMargin=0.5\r\nCollisionChannel=7\r\n"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Created);
+            Expect(!load.Config.CollisionEnabled, "CollisionEnabled follows Defaults.ini");
+            Expect(load.Config.CollisionMargin == 10f && load.Config.CollisionChannel == 3,
+                "the margin and channel keep the game's own defaults, got " + load.Config.CollisionMargin + " and "
+                + load.Config.CollisionChannel);
+            string text = File.ReadAllText(rig.Path);
+            Expect(text.Contains("\r\nCollisionEnabled=default\r\n") && text.Contains("\r\n; CollisionMargin=10.0\r\n")
+                && text.Contains("\r\n; CollisionChannel=3\r\n"),
+                "the created file holds CollisionEnabled=default and comments the margin and channel at the game's values:\n" + text);
+            ExpectLogLine(load, rig.Path + ": from Defaults.ini: CollisionEnabled=false");
+            Expect(!load.Log.Any(l => l.Contains("CollisionMargin") || l.Contains("CollisionChannel")),
+                "no line names the margin or the channel:\n" + string.Join("\n", load.Log.ToArray()));
         }
 
         private static void ReadOnlyOverAConfigFile(string dir)

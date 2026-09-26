@@ -157,8 +157,6 @@ ConfigTable<FixtureConfig> FixtureTable() {
         .Concept<Concept::PositionLimitX>(&F::position_limit_x)
         .Comment("How far, in metres, leaning sideways moves the view.\nThe fixture's own wording.")
         .Concept<Concept::CollisionChannel>(&F::collision_channel)
-        .Engine()
-        .PerGame()
         .Concept<Concept::CycleTrackingModeKey>(&F::cycle_key)
         .Local("Camera", "Mode", &F::mode, ModeCodec(), "ControlRotation or UpdateCamera (decoupled).")
         .Local("Position", "LeanDelayMs", &F::lean_delay_ms, IntCodec<int>(),
@@ -762,6 +760,29 @@ void TestGlobalChecks() {
     Check(Thrown([] { ConfigTable<S>().Local("Camera", "Offset", &S::value, IntCodec<int>(), "One.").PerGame(); }) ==
               "[Camera] Offset is a local row, which never takes a value from Defaults.ini",
           "PerGame on a local row throws");
+
+    ConfigTable<S> engine;
+    engine.Concept<Concept::CollisionMargin>(&S::scale).Concept<Concept::CollisionChannel>(&S::value);
+    const std::string engine_fresh = RenderCanonicalFresh(engine, header);
+    Check(Contains(engine_fresh, "\r\n; CollisionMargin=1.0\r\n") && Contains(engine_fresh, "\r\n; CollisionChannel=5\r\n") &&
+              !Contains(engine_fresh, "Defaults.ini"),
+          "CollisionMargin and CollisionChannel off the schema's defaults render commented at the game's own, and a "
+          "table with no global row has no Defaults.ini lines");
+    S engine_effective;
+    engine_effective.scale = 0.1f;
+    engine_effective.value = 0;
+    S engine_config;
+    const detail::EffectiveApplyResult engine_result = detail::ApplyCanonicalEffective(
+        ParseCanonicalIni("[Position]\r\nCollisionMargin=default\r\nCollisionChannel=7\r\n"), engine, engine_config,
+        engine_effective, {});
+    Check(engine_config.scale == 1.0f && engine_config.value == 7 &&
+              engine_result.sources[0] == detail::ValueSource::kBuiltIn && engine_result.report.diagnostics.empty(),
+          "default on CollisionMargin reads the game's own default, never the effective one, and CollisionChannel=7 "
+          "reads 7");
+    Check(Thrown([] { ConfigTable<S>().Concept<Concept::CollisionChannel>(&S::value).PerGame(); }) ==
+              "[Position] CollisionChannel is not global in data/config-schema.json, so every game keeps its own value "
+              "and Defaults.ini never reaches it; PerGame() is for a global concept",
+          "PerGame on a concept that is not global throws");
 
     const std::string pair_message =
         "[Position] PositionEnabled is marked PerGame() and [General] RotationEnabled is not. The two are one setting, "

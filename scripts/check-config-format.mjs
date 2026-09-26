@@ -43,6 +43,7 @@ const REPLACED_KEYS = {
 };
 const DIALECTS = new Set(["native", "unity"]);
 const CANONICAL_IDS = new Set(SCHEMA.concepts.filter((c) => c.canonical).map((c) => c.id));
+const NOT_GLOBAL_IDS = new Set(SCHEMA.concepts.filter((c) => c.canonical && c.global === false).map((c) => c.id));
 const REPO_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const BAD_PATH_CHARS = /[<>:"|?*\x00-\x1f]/;
@@ -271,6 +272,7 @@ for (const [name, entries] of Object.entries(doc.per_game)) {
     }
     checkKeys(`${where}[${i}]`, entry, ["row", "reason", "approved"], []);
     if (!CANONICAL_IDS.has(entry.row)) fail(`${where}[${i}].row ${JSON.stringify(entry.row)} is not the id of a canonical concept in data/config-schema.json`);
+    else if (NOT_GLOBAL_IDS.has(entry.row)) fail(`${where}[${i}].row ${entry.row} is not global in data/config-schema.json, so every game keeps its own value already and it is never a per_game entry`);
     else if (rows.has(entry.row)) fail(`${where}[${i}].row ${entry.row} is listed twice`);
     rows.add(entry.row);
     if (!isText(entry.reason)) fail(`${where}[${i}].reason must be a non-empty string`);

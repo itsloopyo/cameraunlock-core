@@ -109,7 +109,8 @@ function describeDiagnostic(d) {
 
 // The problems of one committed canonical file, as sentences. `dialect` is the repo's hotkey
 // dialect, `perGame` the concept ids data/config-format.json per_game lists for the repo: those
-// rows hold the game's own value, and every other concept row holds default.
+// rows hold the game's own value, and every other global concept row holds default. A concept the
+// schema marks "global": false holds the game's own value too, commented at its default.
 export function lintCanonicalConfig(bytes, { dialect, perGame }) {
   if (!Array.isArray(perGame)) throw new Error("lintCanonicalConfig needs perGame, the repo's per_game concept ids");
   const doc = parseCanonicalIni(bytes);
@@ -138,7 +139,13 @@ export function lintCanonicalConfig(bytes, { dialect, perGame }) {
     if (line[0] === ";") {
       const commented = COMMENTED_ROW.exec(line);
       const concept = commented === null ? undefined : canonicalByKey.get(commented[1]);
-      if (concept !== undefined && current !== null && equalsAsciiIgnoreCase(current, concept.section) && !perGame.includes(concept.id)) {
+      if (
+        concept !== undefined &&
+        current !== null &&
+        equalsAsciiIgnoreCase(current, concept.section) &&
+        concept.global !== false &&
+        !perGame.includes(concept.id)
+      ) {
         problems.push(
           `line ${number}: [${current}] ${concept.key} is commented out, the form render-config gives an Engine row marked PerGame() at its default, and data/config-format.json per_game does not list ${concept.id} for this repo; a committed file writes ${concept.key}=${DEFAULT_TOKEN} there`,
         );
@@ -224,6 +231,14 @@ export function lintCanonicalConfig(bytes, { dialect, perGame }) {
           problems.push(`${where} belongs in [${concept.section}]`);
           continue;
         }
+        if (concept.global === false) {
+          if (isDefaultToken(v.value)) {
+            problems.push(
+              `${where}=${v.value}: ${concept.id} is not global in data/config-schema.json, so the file holds the game's own value there, commented at its default as render-config writes it`,
+            );
+          }
+          continue;
+        }
         const kept = perGame.includes(concept.id);
         if (isDefaultToken(v.value)) {
           if (kept) {
@@ -279,8 +294,8 @@ export function lintCanonicalConfig(bytes, { dialect, perGame }) {
     const lines = someLines(valued.map((v) => v.line));
     problems.push(
       valued.length === 1
-        ? `${lines}: ${keys} holds a value, and data/config-format.json per_game does not list it for this repo; a committed file holds ${DEFAULT_TOKEN} on every concept row but the ones per_game lists, as render-config writes it`
-        : `${lines}: ${keys} hold values, and data/config-format.json per_game lists none of them for this repo; a committed file holds ${DEFAULT_TOKEN} on every concept row but the ones per_game lists, as render-config writes it`,
+        ? `${lines}: ${keys} holds a value, and data/config-format.json per_game does not list it for this repo; a committed file holds ${DEFAULT_TOKEN} on every global concept row but the ones per_game lists, as render-config writes it`
+        : `${lines}: ${keys} hold values, and data/config-format.json per_game lists none of them for this repo; a committed file holds ${DEFAULT_TOKEN} on every global concept row but the ones per_game lists, as render-config writes it`,
     );
   }
   return problems;

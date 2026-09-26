@@ -6,6 +6,7 @@
 #include "cameraunlock/input/key_names.g.h"
 #include "cameraunlock/tracking/tracking_mode.h"
 
+#include <array>
 #include <cstddef>
 #include <iterator>
 #include <stdexcept>
@@ -179,9 +180,24 @@ std::string PairReason(const DefaultsIniValue& rotation, const DefaultsIniValue&
     return DecodeTrackingMode(rotation_enabled, position_enabled) ? std::string() : "both false is not a tracking mode";
 }
 
+constexpr std::size_t kGlobalConceptCount = [] {
+    std::size_t count = 0;
+    for (const schema::ConceptInfo& info : schema::kConcepts) count += info.global ? 1 : 0;
+    return count;
+}();
+
+constexpr std::array<schema::Concept, kGlobalConceptCount> kGlobalConcepts = [] {
+    std::array<schema::Concept, kGlobalConceptCount> ids{};
+    std::size_t next = 0;
+    for (const schema::ConceptInfo& info : schema::kConcepts) {
+        if (info.global) ids[next++] = info.id;
+    }
+    return ids;
+}();
+
 template <std::size_t... I>
-ConfigTable<HeadTrackingConfig> EveryConceptTable(std::index_sequence<I...>) {
-    return HeadTrackingConfigTable({schema::kConcepts[I].id...});
+ConfigTable<HeadTrackingConfig> GlobalConceptTable(std::index_sequence<I...>) {
+    return HeadTrackingConfigTable({kGlobalConcepts[I]...});
 }
 
 std::string Setting(const DefaultsIniValue& value) {
@@ -191,7 +207,7 @@ std::string Setting(const DefaultsIniValue& value) {
 }  // namespace
 
 ConfigTable<HeadTrackingConfig> DefaultsIniTable() {
-    return EveryConceptTable(std::make_index_sequence<schema::kConceptCount>{});
+    return GlobalConceptTable(std::make_index_sequence<kGlobalConceptCount>{});
 }
 
 std::string RenderDefaultsIni() {
@@ -219,7 +235,7 @@ DefaultsIniSnapshot ReadDefaultsIni(std::string_view bytes) {
     }
 
     for (const schema::ConceptInfo& info : schema::kConcepts) {
-        snapshot.values[static_cast<std::size_t>(info.id)] = ReadValue(doc, info);
+        if (info.global) snapshot.values[static_cast<std::size_t>(info.id)] = ReadValue(doc, info);
     }
 
     DefaultsIniValue& rotation = snapshot.values[static_cast<std::size_t>(schema::Concept::RotationEnabled)];

@@ -16,7 +16,7 @@ namespace CameraUnlock.Core.Config
     /// Defaults.ini that is absent, and only through <see cref="CheckedFileWriter"/>, so every write
     /// replaces the whole file or nothing. The C++ twin is cameraunlock::config::ConfigOwner.
     /// <para>
-    /// Every concept row the table does not mark PerGame takes its default from Defaults.ini
+    /// Every global concept row the table does not mark PerGame takes its default from Defaults.ini
     /// (<see cref="ConfigOwnerOptions{TConfig}.Defaults"/>): <c>default</c>, a missing key and an
     /// invalid value on such a row read Defaults.ini's value, or the row's own default where
     /// Defaults.ini gives none. Load finds the file, creates it with the built-in values where none
@@ -106,7 +106,7 @@ namespace CameraUnlock.Core.Config
         /// Import, or names Path; the table has both RotationEnabled and PositionEnabled and marks
         /// only one of them Writable; a legacy key's name holds an unpaired surrogate; or the table
         /// cannot render its fresh file under the header (<see cref="ConfigTable{TConfig}.RenderFresh"/>:
-        /// a concept row not marked PerGame whose default is not the schema's, RotationEnabled
+        /// a global concept row not marked PerGame whose default is not the schema's, RotationEnabled
         /// without PositionEnabled, or a header the renderer refuses).</exception>
         public ConfigOwner(ConfigOwnerOptions<TConfig> options)
             : this(options, null, Environment.OSVersion.Platform)

@@ -48,7 +48,7 @@ const nonCanonicalKeyFields = new Set(['id', 'sections', 'spellings', 'doc', 'ca
 
 const conceptFields = new Set([
     'id', 'section', 'key', 'type', 'default', 'aliases', 'doc',
-    'canonical', 'canonical_reason', 'file_comment', 'range', 'codec', 'canonical_default',
+    'canonical', 'canonical_reason', 'file_comment', 'range', 'codec', 'canonical_default', 'global',
 ]);
 
 const valueTypes = {
@@ -172,7 +172,7 @@ function checkCanonicalFields(where, concept, keyTable) {
             schemaError(where, 'is not canonical and has no canonical_reason, the line a player is shown for its key');
         }
         checkPlayerText(where, 'canonical_reason', concept.canonical_reason);
-        for (const field of ['file_comment', 'range', 'codec', 'canonical_default']) {
+        for (const field of ['file_comment', 'range', 'codec', 'canonical_default', 'global']) {
             if (field in concept) {
                 schemaError(where, `is not canonical, so it has no ${field}: no canonical file writes its key`);
             }
@@ -203,11 +203,29 @@ function checkCanonicalFields(where, concept, keyTable) {
     }
 
     if ('canonical_default' in concept) {
-        if (concept.codec !== 'hotkey') schemaError(where, 'has a canonical_default, which only hotkey concepts take');
-        if (typeof concept.canonical_default !== 'string') {
-            schemaError(where, `canonical_default is ${JSON.stringify(concept.canonical_default)}, expected a string`);
+        if (concept.codec === 'hotkey') {
+            if (typeof concept.canonical_default !== 'string') {
+                schemaError(where, `canonical_default is ${JSON.stringify(concept.canonical_default)}, expected a string`);
+            }
+            checkCanonicalBindings(where, concept.canonical_default, keyTable);
+        } else if (concept.type === 'bool') {
+            // A bool's canonical_default exists only where a canonical file starts other than the
+            // flat readers' shipped default, so it always differs from `default`.
+            if (typeof concept.canonical_default !== 'boolean' || concept.canonical_default === concept.default) {
+                schemaError(where, `canonical_default is ${JSON.stringify(concept.canonical_default)}, expected ` +
+                    `${!concept.default}, the value a canonical file starts with where it differs from the default`);
+            }
+        } else {
+            schemaError(where, 'has a canonical_default, which only hotkey and bool concepts take');
         }
-        checkCanonicalBindings(where, concept.canonical_default, keyTable);
+    }
+
+    // A concept that is not global holds engine data (the engine's own units, a channel number):
+    // every game keeps its own value, Defaults.ini never carries it, and a table writes its row as
+    // an Engine row. Global is the rule, so the field is only ever written false.
+    if ('global' in concept && concept.global !== false) {
+        schemaError(where, `global is ${JSON.stringify(concept.global)}; a canonical concept is global unless it says ` +
+            '"global": false, so the field is written only as false');
     }
 }
 
@@ -660,10 +678,12 @@ function rangeBound(concept, field, language) {
 
 const canonicalConcepts = (schema) => schema.concepts.filter((c) => c.canonical);
 
-// The schema's default as text the concept's canonical codec reads: a hotkey concept's
-// canonical_default, and the JSON value as it stands for the rest. A config table's fresh render
-// compares a row's own default with it.
-const defaultText = (c) => (c.type === 'string' ? c.canonical_default ?? c.default : String(c.default));
+// The schema's default as text the concept's canonical codec reads: the concept's
+// canonical_default where it has one, and the JSON value as it stands for the rest. A config
+// table's fresh render compares a row's own default with it.
+const defaultText = (c) => String(c.canonical_default ?? c.default);
+const isGlobal = (c) => c.global !== false;
+const canonicalDefaultText = (c) => (c.canonical_default === undefined ? undefined : String(c.canonical_default));
 
 function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
     const concepts = canonicalConcepts(schema);
@@ -686,15 +706,17 @@ function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
             lines.push(`    static constexpr float kMax = ${rangeBound(c, 'max', 'cpp')};`);
         }
         lines.push(`    static constexpr const char* kFileComment[] = {${c.file_comment.map(cString).join(', ')}};`);
-        lines.push(`    static constexpr const char* kCanonicalDefault = ${cString(c.canonical_default)};`);
+        lines.push(`    static constexpr const char* kCanonicalDefault = ${cString(canonicalDefaultText(c))};`);
         lines.push(`    static constexpr const char* kDefaultText = ${cString(defaultText(c))};`);
+        lines.push(`    static constexpr bool kGlobal = ${isGlobal(c)};`);
         lines.push('};');
         return lines.join('\n');
     }).join('\n\n');
     const infos = concepts.map((c) => {
         const comment = [c.file_comment[0], c.file_comment[1]].map(cString).join(', ');
         return `    {Concept::${c.id}, "${c.id}", "${c.section}", "${c.key}", ValueFamily::k${canonicalFamilies[c.type]}, ` +
-            `{${comment}}, ${c.file_comment.length}, ${cString(c.canonical_default)}, ${cString(defaultText(c))}},`;
+            `{${comment}}, ${c.file_comment.length}, ${cString(canonicalDefaultText(c))}, ${cString(defaultText(c))}, ` +
+            `${isGlobal(c)}},`;
     }).join('\n');
     const sections = schema.sections.map((s) => `    "${s}",`).join('\n');
     const others = schema.concepts.filter((c) => !c.canonical)
@@ -725,10 +747,13 @@ enum class ValueFamily { kBool, kInteger, kFloating, kHotkey };
 
 /// The schema's facts about one canonical concept. kMin and kMax, both inclusive, exist for the
 /// kInteger family (within int) and the kFloating family (as float); a bound the schema leaves
-/// open is the limit of the schema type. kCanonicalDefault is the binding list a canonical file
-/// starts with, where the schema gives one, else nullptr. kDefaultText is the schema's default as
-/// text the concept's codec reads: the canonical_default of a hotkey concept, else the schema's
-/// value as it is written there.
+/// open is the limit of the schema type. kCanonicalDefault is the value a canonical file starts
+/// with where it differs from the flat readers' default (a hotkey concept's binding list,
+/// CollisionEnabled's true), else nullptr. kDefaultText is the schema's default as text the
+/// concept's codec reads: the canonical_default where there is one, else the schema's value as it
+/// is written there. kGlobal is false for a concept that holds engine data (the engine's own
+/// units, a channel number): every game keeps its own value, Defaults.ini never carries it, and a
+/// config table writes its row as an Engine row.
 template <Concept Id>
 struct ConceptTraits;
 
@@ -736,7 +761,7 @@ ${traits}
 
 /// One canonical concept, for code that walks them all. kConcepts[static_cast<std::size_t>(id)]
 /// describes id. \`file_comment\` holds \`file_comment_lines\` lines; the rest are nullptr.
-/// \`default_text\` is ConceptTraits<id>::kDefaultText.
+/// \`default_text\` is ConceptTraits<id>::kDefaultText, and \`global\` ConceptTraits<id>::kGlobal.
 struct ConceptInfo {
     Concept id;
     const char* name;
@@ -747,6 +772,7 @@ struct ConceptInfo {
     std::size_t file_comment_lines;
     const char* canonical_default;
     const char* default_text;
+    bool global;
 };
 
 inline constexpr ConceptInfo kConcepts[] = {
@@ -834,7 +860,8 @@ function renderConceptsCsharp(schema, nonCanonicalKeys, nonCanonicalSections) {
             `        /// <summary>[${c.section}] ${c.key}.</summary>`,
             `        public static readonly ConceptDescriptor<${type}> ${c.id} = new ConceptDescriptor<${type}>(`,
             `            "${c.id}", "${c.section}", "${c.key}", ConceptValueFamily.${canonicalFamilies[c.type]},`,
-            `            ${codec(c)}, new[] { ${comment} }, ${csString(c.canonical_default)}, ${csString(defaultText(c))});`,
+            `            ${codec(c)}, new[] { ${comment} }, ${csString(canonicalDefaultText(c))}, ${csString(defaultText(c))},`,
+            `            ${isGlobal(c)});`,
         ].join('\n');
     }).join('\n\n');
     const all = concepts.map((c) => `            ${c.id},`).join('\n');

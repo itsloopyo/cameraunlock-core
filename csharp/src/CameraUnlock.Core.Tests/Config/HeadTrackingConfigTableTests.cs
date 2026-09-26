@@ -84,6 +84,39 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
+        public void CollisionEnabledStartsAtItsCanonicalDefaultAndTheFlatReaderAtFalse()
+        {
+            HeadTrackingConfigData defaults = HeadTrackingConfigTableFixtures.Defaults(
+                HeadTrackingConfigTable.Create(ConfigConcepts.CollisionEnabled));
+            Assert.True(defaults.CollisionEnabled);
+            Assert.Equal("true", ConfigConcepts.CollisionEnabled.CanonicalDefault);
+            Assert.False(new HeadTrackingConfigData().CollisionEnabled);
+        }
+
+        [Fact]
+        public void CollisionMarginAndChannelAreEngineRowsOutsideDefaultsIni()
+        {
+            Assert.False(ConfigConcepts.CollisionMargin.Global);
+            Assert.False(ConfigConcepts.CollisionChannel.Global);
+            foreach (ConceptDescriptor concept in ConfigConcepts.All)
+            {
+                if (concept != ConfigConcepts.CollisionMargin && concept != ConfigConcepts.CollisionChannel) Assert.True(concept.Global, concept.Id);
+            }
+
+            var pinned = new HeadTrackingConfigData { CollisionMargin = 10f, CollisionChannel = 3 };
+            ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
+                ConfigConcepts.CollisionEnabled, ConfigConcepts.CollisionMargin, ConfigConcepts.CollisionChannel);
+            string fresh = Encoding.ASCII.GetString(table.RenderFresh(new RenderHeader("G")));
+            Assert.Contains("\r\nCollisionEnabled=default\r\n", fresh);
+            Assert.Contains("\r\n; CollisionMargin=0.1\r\n", fresh);
+            Assert.Contains("\r\n; CollisionChannel=0\r\n", fresh);
+            Assert.Equal(Encoding.ASCII.GetString(table.Render(pinned, new RenderHeader("G"))),
+                fresh.Replace("CollisionEnabled=default", "CollisionEnabled=false")
+                    .Replace("; CollisionMargin=0.1", "CollisionMargin=10.0")
+                    .Replace("; CollisionChannel=0", "CollisionChannel=3"));
+        }
+
+        [Fact]
         public void TheFlatReadersFieldDefaultsAreSingleKeys()
         {
             var flat = new HeadTrackingConfigData();

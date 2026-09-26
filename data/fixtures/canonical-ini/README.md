@@ -205,7 +205,7 @@ same text.
 | EnableOnStartup | concept EnableOnStartup | bool | `true` | |
 | LocalSmoothing | concept LocalSmoothing | float, 0 to 1 | `0.0` | |
 | PositionLimitX | concept PositionLimitX | float, 0 to 10 | `0.3` | Comment: `How far, in metres, leaning sideways moves the view.` and `The fixture's own wording.` |
-| CollisionChannel | concept CollisionChannel | int | `3` | Engine, PerGame |
+| CollisionChannel | concept CollisionChannel | int | `3` | none: the concept is not global, so the row is an Engine row whatever the table marks |
 | CycleTrackingModeKey | concept CycleTrackingModeKey | hotkey | `PageUp, Ctrl+Shift+G` | |
 | Mode | local [Camera] Mode | enum `ControlRotation`, `UpdateCamera` | `UpdateCamera` | comment `ControlRotation or UpdateCamera (decoupled).` |
 | LeanDelayMs | local [Position] LeanDelayMs | int | `50` | comment `Milliseconds before a lean starts, and the metres its wall trace reaches.`; Range(0, 1000) |
@@ -226,10 +226,11 @@ A `\n` in a comment above separates its lines. The render header's display name 
 `Fixture Game`. Every hotkey value in the cases reads the same in the native and the Unity
 dialect, so the C++ suite's native `HotkeyCodec` and the C# suite's Unity one agree on each.
 
-`CollisionChannel` is the table's one PerGame row and its one Engine concept row, so every other
-concept row follows Defaults.ini: the table passes the fresh render's gate, its renders carry the
-six header lines on `default`, and the cases pin that a PerGame Engine row keeps the commented
-form.
+`CollisionChannel` is the table's one concept row that does not follow Defaults.ini: the schema
+marks it `"global": false`, which makes it an Engine row whose default is the table's own. Every
+other concept row follows Defaults.ini, so the table passes the fresh render's gate, its renders
+carry the six header lines on `default`, and the cases pin that such a row keeps the commented
+form at its default.
 
 A case directory holds `input.ini`, or one or more of the render files below:
 
@@ -272,12 +273,12 @@ renders:
 | `global-default-case` | `Default`, `DEFAULT` and `default` with spaces the reader trims are the token |
 | `global-default-not-token` | `"default"` and `default ; note` go to the codec, which refuses them: the effective default and an InvalidValue |
 | `global-missing-invalid` | a missing key and an invalid value both read the effective default; the invalid value also draws InvalidValue |
-| `global-per-game` | `default` on the PerGame `CollisionChannel` reads the table's own 3 though the effective defaults hold 7; on `PositionLimitX` it reads Defaults.ini's 0.35 |
+| `global-per-game` | `default` on `CollisionChannel`, which is not global, reads the table's own 3 though the effective defaults hold 7; on `PositionLimitX` it reads Defaults.ini's 0.35 |
 | `global-local` | on a local row the word is data: `LogPath=default` stores it, `WriteLog=default` is an InvalidValue |
 | `global-pair-one-default` | `RotationEnabled=default` reads the effective false beside `PositionEnabled=false`: no tracking mode, so both take the effective pair, rotation off and position on, and NoTrackingMode names only the line that set a value |
 | `global-pair-off` | both false, with an effective pair of rotation off and position on: both take the effective pair |
 | `global-render-fresh` | the fresh render (`fresh.ini`: every concept row but `CollisionChannel` is `default`, and `CollisionChannel` is commented at 3) and a values render of the same table (`values.tsv` and `expected.ini`) |
-| `global-migration` | the migration render: rows equal to their effective default are `default`, the others values; `RotationEnabled` equals its effective default and `PositionEnabled` does not, so both are values; the PerGame `CollisionChannel` and the local rows are written as Render writes them |
+| `global-migration` | the migration render: rows equal to their effective default are `default`, the others values; `RotationEnabled` equals its effective default and `PositionEnabled` does not, so both are values; `CollisionChannel` and the local rows are written as Render writes them |
 | `global-migration-pair` | imported values equal to the effective defaults, the pair included, migrate to the bytes of `fresh.ini` |
 
 ## head-tracking/
@@ -286,12 +287,14 @@ Core's `HeadTrackingConfigTable` naming every canonical concept, over C++ `HeadT
 and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Game`.
 
 - `all-concepts.ini`: the table's defaults instance rendered. It holds every canonical concept at
-  its default, the four hotkey lists at their `canonical_default`, so it pins each concept's
-  default rendering in both languages. `CollisionChannel` is the table's one Engine row, so it is
-  the commented line `; CollisionChannel=0`.
-- `all-concepts-fresh.ini`: the same table's fresh render, every concept `Key=default`, the Engine
-  row too. It proves core's own table passes the fresh render's gate: every concept defaults to
-  the schema's `default`, and the table binds `PositionEnabled` beside `RotationEnabled`.
+  its default, the four hotkey lists and `CollisionEnabled` at their `canonical_default`, so it
+  pins each concept's default rendering in both languages. `CollisionMargin` and
+  `CollisionChannel` are not global, so they are Engine rows, the commented lines
+  `; CollisionMargin=0.1` and `; CollisionChannel=0`.
+- `all-concepts-fresh.ini`: the same table's fresh render, every global concept `Key=default` and
+  the two Engine rows commented as above. It proves core's own table passes the fresh render's
+  gate: every global concept defaults to the schema's `default` (its `canonical_default` where it
+  has one), and the table binds `PositionEnabled` beside `RotationEnabled`.
 - `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose
   rows are `field`, a name and the value as the concept's codec writes it. The names are the 28
   concepts in the schema's order, then `PositionLocalSmoothing` and `PositionRemoteSmoothing`,
@@ -308,23 +311,24 @@ the three cases every field is off its default at least once.
 
 ## global/
 
-Defaults.ini, the file a game's concept rows take their default from when they are not marked
-`PerGame()`. Core renders a new one and reads one with the internal C++
+Defaults.ini, the file a game's global concept rows take their default from when they are not
+marked `PerGame()`. Core renders a new one and reads one with the internal C++
 `detail::RenderDefaultsIni` and `detail::ReadDefaultsIni` (`cameraunlock/config/defaults_ini.h`)
 and C# `DefaultsIni.Render` and `DefaultsIni.Read`, which the config owners use to create and read
 the file on disk (docs/canonical-config.md, "The global defaults file").
 
 `Defaults.ini` is what core writes as a new Defaults.ini: core's global table,
-`HeadTrackingConfigTable` naming every canonical concept, at its defaults, with the four hotkey
-lists at their `canonical_default`. Every row is written as its value, `CollisionChannel` too,
-since a commented line in this file would only ever mean the built-in. The rows, sections and
-comments are those of `head-tracking/all-concepts.ini`. The header is its own, and carries none of
-the six game-file lines on `default`: four lines saying what the file is and who reads it, the
-comments line, the hotkeys line, and six lines listing the key names the file takes, the 104
-names in `data/keys.json` that have a `vk`, with `A to Z`, `Alpha0 to Alpha9`, `F1 to F24` and
-`Keypad0 to Keypad9` standing for their ranges. A runner renders the table and requires these
-bytes, reads them back and requires every concept accepted at the table's default with nothing
-else to say, and requires the header's key list, ranges written out, to be exactly the names in
+`HeadTrackingConfigTable` naming every global concept, at its defaults, with the four hotkey
+lists and `CollisionEnabled` at their `canonical_default`. Every row is written as its value. The
+rows, sections and comments are those of `head-tracking/all-concepts.ini` without
+`CollisionMargin` and `CollisionChannel`, which are not global and have no line here. The header
+is its own, and carries none of the six game-file lines on `default`: four lines saying what the
+file is and who reads it, the comments line, the hotkeys line, and six lines listing the key names
+the file takes, the 104 names in `data/keys.json` that have a `vk`, with `A to Z`,
+`Alpha0 to Alpha9`, `F1 to F24` and `Keypad0 to Keypad9` standing for their ranges. A runner
+renders the table and requires these bytes, reads them back and requires every global concept
+accepted at the table's default, and the two that are not global absent, with nothing else to
+say, and requires the header's key list, ranges written out, to be exactly the names in
 `data/keys.json` with a `vk`.
 
 Each `read-*` directory holds `input.ini`, Defaults.ini's bytes, and `expected.tsv`, what the
@@ -396,7 +400,7 @@ is three, since `80` cannot follow `F0`. The `value` row's value field stays the
 | `read-utf16`, `read-nul` | the two unreadable files |
 | `read-no-stamp`, `read-format-missing`, `read-format-zero`, `read-format-not-a-number` | read with no line |
 | `read-format-newer` | `ConfigFormat=2`: the format line, and the file read |
-| `read-refused-values` | codec and range refusals on int, bool and float rows and the full-range int and float rows, a value with `; note`, each with its line; one value beside them accepted |
+| `read-refused-values` | codec and range refusals on int, bool and float rows and a value with `; note`, each with its line; one value beside them accepted; invalid `CollisionMargin` and `CollisionChannel` lines, not read at all since neither is global |
 | `read-hotkey-mouse4`, `read-hotkey-code` | `ToggleKey=Mouse4` and `ToggleKey=0x23` on line 12, refused alike, with the line the design gives |
 | `read-hotkeys` | names in any letter case with modifiers, an empty list, a grammar error with the codec's reason, and `Clear`, a Unity key with no `vk` |
 | `read-default-token` | `DEFAULT`, `Default` and `default` on an int, a bool, a float and a hotkey row |
@@ -408,7 +412,7 @@ is three, since `80` cannot follow `F0`. The `value` row's value field stays the
 | `read-repeated-key` | the last of three occurrences wins across a repeated section |
 | `read-case` | section and key in other letter case: read, and the line spells them as the file does |
 | `read-wrong-section` | concept keys in other sections, one of them invalid, beside a key in its own section: only that one is read |
-| `read-alias` | aliases, one after its key in the same section: not read, nothing said |
+| `read-alias` | aliases, one after its key in the same section: not read, nothing said; `CollisionMargin` and its alias `CollisionRadius`, not read since it is not global |
 | `read-unknown-key` | an unknown section, a concept the format does not write and an unknown key: nothing said |
 
 ### resolve.tsv

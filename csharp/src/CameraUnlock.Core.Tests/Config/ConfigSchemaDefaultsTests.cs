@@ -147,7 +147,8 @@ namespace CameraUnlock.Core.Tests.Config
 
         // A config table's fresh render compares a row's default with the concept's DefaultText as
         // the row's codec reads it, so every canonical concept's text reads, and reads as the schema's
-        // default: the canonical_default of a hotkey concept.
+        // default: the canonical_default where the concept has one (the hotkey lists,
+        // CollisionEnabled), else the default.
         [Fact]
         public void EachCanonicalConceptsDefaultTextReadsAsItsSchemaDefault()
         {
@@ -167,7 +168,9 @@ namespace CameraUnlock.Core.Tests.Config
                     {
                         case ConceptDescriptor<bool> b:
                             Assert.True(b.Codec.TryParse(text, out bool flag, out error), descriptor.Id + ": " + error);
-                            Assert.Equal(declared.GetProperty("default").GetBoolean(), flag);
+                            Assert.Equal(declared.TryGetProperty("canonical_default", out JsonElement start)
+                                ? start.GetBoolean()
+                                : declared.GetProperty("default").GetBoolean(), flag);
                             break;
                         case ConceptDescriptor<int> i:
                             Assert.True(i.Codec.TryParse(text, out int whole, out error), descriptor.Id + ": " + error);

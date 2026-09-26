@@ -1713,6 +1713,34 @@ void ATableOffTheSchemaDefaultIsRefusedUnlessPerGame(const fs::path& dir) {
           "a PerGame row is named in no Defaults.ini line" + Joined(load.log));
 }
 
+// The C# twin is ConfigOwnerScenarios.AGamesCollisionMarginAndChannelAreItsOwn.
+void AGamesCollisionMarginAndChannelAreItsOwn(const fs::path& dir) {
+    Rig rig(dir);
+    HeadTrackingConfig shipped;
+    shipped.collision_enabled = true;
+    shipped.lean_clamp.skin = 10.0f;
+    shipped.collision_channel = 3;
+    rig.table = ConfigTable<HeadTrackingConfig>(shipped);
+    rig.table->Concept<Concept::CollisionEnabled>(&HeadTrackingConfig::collision_enabled)
+        .Concept<Concept::CollisionMargin>([](const HeadTrackingConfig& c) { return c.lean_clamp.skin; },
+                                           [](HeadTrackingConfig& c, float v) { c.lean_clamp.skin = v; })
+        .Concept<Concept::CollisionChannel>(&HeadTrackingConfig::collision_channel);
+    rig.PutDefaults("[Position]\r\nCollisionEnabled=false\r\nCollisionMargin=0.5\r\nCollisionChannel=7\r\n");
+    const Load load = rig.Make()->Load();
+    ExpectStatus(load, ConfigLoadStatus::Created);
+    Check(!load.config.collision_enabled, "CollisionEnabled follows Defaults.ini");
+    Check(load.config.lean_clamp.skin == 10.0f && load.config.collision_channel == 3,
+          "the margin and channel keep the game's own defaults");
+    const std::string text = ReadBytes(rig.path);
+    Check(Contains(text, "\r\nCollisionEnabled=default\r\n") && Contains(text, "\r\n; CollisionMargin=10.0\r\n") &&
+              Contains(text, "\r\n; CollisionChannel=3\r\n"),
+          "the created file holds CollisionEnabled=default and comments the margin and channel at the game's values");
+    Check(CountContaining(load.log, rig.Text() + ": from Defaults.ini: CollisionEnabled=false") == 1,
+          "CollisionEnabled is named as taken from Defaults.ini" + Joined(load.log));
+    Check(CountContaining(load.log, "CollisionMargin") == 0 && CountContaining(load.log, "CollisionChannel") == 0,
+          "no line names the margin or the channel" + Joined(load.log));
+}
+
 void OptionsAndCallOrderAreChecked(const fs::path& dir) {
     const fs::path path = dir / kFileName;
     const auto options = [&]() {
@@ -1993,6 +2021,7 @@ int RunConfigOwnerTests() {
     RunScenario("a-defaults-ini-read-while-the-file-is-missing-is-applied-once-it-returns",
                 ADefaultsIniReadWhileTheFileIsMissingIsAppliedOnceItReturns);
     RunScenario("a-table-off-the-schema-default-is-refused-unless-per-game", ATableOffTheSchemaDefaultIsRefusedUnlessPerGame);
+    RunScenario("a-games-collision-margin-and-channel-are-its-own", AGamesCollisionMarginAndChannelAreItsOwn);
     RunScenario("options-and-call-order-are-checked", OptionsAndCallOrderAreChecked);
     for (const std::string& label : InterruptionLabels()) {
         RunScenario("killed-during-" + label, [label](const fs::path& dir) { KilledDuring(label, dir); });

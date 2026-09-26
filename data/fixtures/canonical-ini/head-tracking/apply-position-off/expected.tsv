@@ -16,7 +16,7 @@ field	PositionLimitY	0.5
 field	PositionLimitYDown	0.2
 field	PositionLimitZ	0.4
 field	PositionLimitZBack	0.1
-field	CollisionEnabled	false
+field	CollisionEnabled	true
 field	CollisionMargin	0.1
 field	CollisionChannel	0
 field	CollisionReleaseSmoothing	0.9

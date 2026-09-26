@@ -60,37 +60,49 @@ namespace CameraUnlock.Core.Tests.Config
 
         /// <summary>
         /// Throws unless effective LocalSmoothing and RemoteSmoothing values also reach the position
-        /// settings' copy, and the migration render writes CollisionChannel, an Engine row that follows
-        /// Defaults.ini, as an active value where it differs from its effective default.
+        /// settings' copy, and CollisionChannel, which is not global, keeps the game's own default
+        /// whatever the effective defaults hold and migrates as an Engine row: commented at that
+        /// default, and as a value away from it.
         /// </summary>
         public static void RunEffectiveDefaults()
         {
             ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
                 ConfigConcepts.LocalSmoothing, ConfigConcepts.RemoteSmoothing, ConfigConcepts.CollisionChannel);
             var effective = new HeadTrackingConfigData { LocalSmoothing = 0.25f, RemoteSmoothing = 0.5f, CollisionChannel = 2 };
-            ConceptDescriptor[] fromDefaultsIni =
-            {
-                ConfigConcepts.LocalSmoothing, ConfigConcepts.RemoteSmoothing, ConfigConcepts.CollisionChannel,
-            };
+            ConceptDescriptor[] fromDefaultsIni = { ConfigConcepts.LocalSmoothing, ConfigConcepts.RemoteSmoothing };
             var config = new HeadTrackingConfigData();
             TableApplyResult result = table.Apply(CanonicalIni.Parse(new byte[0]), config, effective, fromDefaultsIni);
             if (config.LocalSmoothing != 0.25f || config.RemoteSmoothing != 0.5f || config.Position.LocalSmoothing != 0.25f
-                || config.Position.RemoteSmoothing != 0.5f || config.CollisionChannel != 2)
+                || config.Position.RemoteSmoothing != 0.5f)
             {
                 throw new InvalidOperationException("the effective defaults did not reach every field, the position copy included");
             }
-            foreach (ConfigValueSource source in result.Sources)
+            if (config.CollisionChannel != 0)
             {
-                if (source != ConfigValueSource.DefaultsIni) throw new InvalidOperationException("a row's source is " + source);
+                throw new InvalidOperationException("CollisionChannel took " + config.CollisionChannel + " from the effective defaults");
+            }
+            var expectedSources = new[] { ConfigValueSource.DefaultsIni, ConfigValueSource.DefaultsIni, ConfigValueSource.BuiltIn };
+            for (int i = 0; i < expectedSources.Length; i++)
+            {
+                if (result.Sources[i] != expectedSources[i])
+                {
+                    throw new InvalidOperationException("row " + i + "'s source is " + result.Sources[i] + ", expected " + expectedSources[i]);
+                }
             }
 
             HeadTrackingConfigData values = Defaults(table);
             values.LocalSmoothing = 0.25f;
             string migrated = Encoding.ASCII.GetString(table.RenderMigration(values, effective, Header));
             if (!migrated.Contains("\r\nLocalSmoothing=default\r\n") || !migrated.Contains("\r\nRemoteSmoothing=0.15\r\n")
-                || !migrated.Contains("\r\nCollisionChannel=0\r\n") || migrated.Contains("; CollisionChannel"))
+                || !migrated.Contains("\r\n; CollisionChannel=0\r\n"))
             {
                 throw new InvalidOperationException("the migration render wrote:\n" + migrated);
+            }
+            values.CollisionChannel = 4;
+            string pinned = Encoding.ASCII.GetString(table.RenderMigration(values, effective, Header));
+            if (!pinned.Contains("\r\nCollisionChannel=4\r\n") || pinned.Contains("; CollisionChannel"))
+            {
+                throw new InvalidOperationException("the migration render of CollisionChannel=4 wrote:\n" + pinned);
             }
             var reread = new HeadTrackingConfigData();
             TableApplyResult back = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes(migrated)), reread, effective,

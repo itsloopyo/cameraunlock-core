@@ -121,7 +121,10 @@ for (const committed of [FRESH, ALL_FRESH]) {
     check(text === inDefaultsIni(key), `${committed}: ${key}=${text} in the block, ${inDefaultsIni(key)} in global/Defaults.ini`);
   }
 }
-check(defaultKeys(ALL_FRESH).length === SCHEMA.concepts.filter((c) => c.canonical).length, `${ALL_FRESH} no longer sets every canonical concept to default`);
+check(
+  defaultKeys(ALL_FRESH).length === SCHEMA.concepts.filter((c) => c.canonical && c.global !== false).length,
+  `${ALL_FRESH} no longer sets every global concept to default`,
+);
 
 // On a game's local row the word is data: the block lists only concept rows and still renders.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "readme-"));

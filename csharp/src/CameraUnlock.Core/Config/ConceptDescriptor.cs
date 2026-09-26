@@ -28,7 +28,7 @@ namespace CameraUnlock.Core.Config
 #else
             string canonicalDefault,
 #endif
-            string defaultText)
+            string defaultText, bool global)
         {
             Id = id;
             Section = section;
@@ -37,6 +37,7 @@ namespace CameraUnlock.Core.Config
             FileComment = new ReadOnlyCollection<string>(fileComment);
             CanonicalDefault = canonicalDefault;
             DefaultText = defaultText;
+            Global = global;
         }
 
         /// <summary>The schema's id for the concept.</summary>
@@ -53,15 +54,27 @@ namespace CameraUnlock.Core.Config
         /// <summary>The one or two lines written above the key.</summary>
         public ReadOnlyCollection<string> FileComment { get; }
 
-        /// <summary>The binding list a canonical file starts with, where the schema gives one; else null.</summary>
+        /// <summary>
+        /// The value a canonical file starts with where it differs from the flat readers' default, as
+        /// its codec writes it: a hotkey concept's binding list, and <c>true</c> for CollisionEnabled.
+        /// Null for every other concept.
+        /// </summary>
 #if NULLABLE_ENABLED
         public string? CanonicalDefault { get; }
 #else
         public string CanonicalDefault { get; }
 #endif
 
-        // The schema's default as text the concept's codec reads: a hotkey concept's
-        // canonical_default, else the schema's value as written there.
+        /// <summary>
+        /// False for a concept that holds engine data, a number in the engine's own units or a
+        /// channel it names (CollisionMargin, CollisionChannel): every game keeps its own value,
+        /// Defaults.ini never carries it, and a config table writes its row as an Engine row. True
+        /// for every other concept, whose row follows Defaults.ini unless the table marks it PerGame.
+        /// </summary>
+        public bool Global { get; }
+
+        // The schema's default as text the concept's codec reads: the canonical_default where there
+        // is one, else the schema's value as written there.
         internal string DefaultText { get; }
 
         // What the concept's codec, with the schema's range, expected when it does not read the
@@ -87,8 +100,8 @@ namespace CameraUnlock.Core.Config
 #else
             string canonicalDefault,
 #endif
-            string defaultText)
-            : base(id, section, key, family, fileComment, canonicalDefault, defaultText)
+            string defaultText, bool global)
+            : base(id, section, key, family, fileComment, canonicalDefault, defaultText, global)
         {
             Codec = codec;
         }

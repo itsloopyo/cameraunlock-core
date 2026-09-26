@@ -98,8 +98,8 @@ One renderer writes every file, so every file has the same shape:
 1. A header of comment lines: `; <display name> head tracking settings.`, where the display name
    is the game's name as `data/games.json` spells it; a line saying comments go on their own line;
    when the file holds a hotkey row, a line on how hotkeys are written; and, when it holds a
-   concept row not marked `PerGame`, six lines on what a setting set to `default` means and where
-   Defaults.ini is, the lines of the example above. `Render`, `RenderFresh` and the migration
+   global concept row not marked `PerGame`, six lines on what a setting set to `default` means
+   and where Defaults.ini is, the lines of the example above. `Render`, `RenderFresh` and the migration
    render all write them.
 2. `[CameraUnlock]`, a comment asking the player to leave it in place, and `ConfigFormat=1`.
 3. The schema sections the mod has rows in, in the order of the schema's `sections` array
@@ -113,21 +113,24 @@ order mark.
 
 A file holds only the rows the mod binds: a mod with no carried light has no `[Light]`, and one
 whose mode control has two states has no `RotationEnabled`. Every bound row is written. A new
-file writes `default` on each concept row not marked `PerGame`, which then takes Defaults.ini's
-value, or the row's own default where Defaults.ini gives none; a key the player deleted or one a
+file writes `default` on each global concept row not marked `PerGame`, which then takes
+Defaults.ini's value, or the row's own default where Defaults.ini gives none; a key the player deleted or one a
 later version added reads the same way. A migrated file writes `default` on such a row where the
 imported value equals what `default` gives it at that start, and the value otherwise (see
-[What happens at the first launch](#what-happens-at-the-first-launch)). A `PerGame` row and a
-local row are never written as the token: they hold their value, or, for an Engine row at its
-default, the comment below.
+[What happens at the first launch](#what-happens-at-the-first-launch)). A `PerGame` row, a row of
+a concept that is not global (`CollisionMargin`, `CollisionChannel`) and a local row are never
+written as the token: they hold their value, or, for an Engine row at its default, the comment
+below.
 
 An **Engine** row holds data about the game rather than a taste: an address, an offset, a vtable
 slot, a collision channel. At its default it is written as a comment showing the value,
 `; PovOffset=0x404`, which the reader skips, so the row reads its default and a later build that
 corrects the default reaches every player who never set it. Any other value is written as an
-active line. A fresh file (`RenderFresh`) writes an Engine concept row that is not `PerGame`,
-such as `CollisionChannel` in core's own table, as the active line `Key=default` instead. Both
-forms read back as the row's default.
+active line. The rows of `CollisionMargin` and `CollisionChannel` are Engine rows in every table,
+since the schema marks both concepts not global, so a game's file shows its own margin and
+channel as `; CollisionMargin=10.0` or `; CollisionChannel=3`. A fresh file (`RenderFresh`)
+writes a global concept row that a table marks Engine and not `PerGame` as the active line
+`Key=default`, like every such row; both forms read back as the row's default.
 
 ### Line grammar
 
@@ -163,8 +166,8 @@ the file.
 On a concept row, one more value is read: `default`, in any ASCII letter case, which no codec
 sees. It reads as the row's default with no diagnostic, as a missing key does. A row's default is
 its [effective default](#the-effective-default) when the row follows Defaults.ini, and the
-table's own default on a `PerGame` row. On a local row the word is an ordinary value, which a
-string row stores and a bool row refuses. See [The `default` token](#the-default-token).
+table's own default on a `PerGame` row and on a row of a concept that is not global. On a local
+row the word is an ordinary value, which a string row stores and a bool row refuses. See [The `default` token](#the-default-token).
 
 | Codec | Written as | Read |
 |-------|------------|------|
@@ -241,14 +244,15 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way, and every one of them is global: a
-game's row for it follows Defaults.ini unless the table marks it `PerGame()` (see
-[Which rows follow it](#which-rows-follow-it)). A concept that must never follow Defaults.ini
-would need a schema change before it is added. This is core's table naming all 28
-of them at their defaults, which both languages render byte for byte
-(`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with `Render`, so
-every row shows its value, the Engine row `CollisionChannel` as a comment; the same table's fresh
-render writes `default` on every row
+The concepts are the settings every mod spells the same way. 26 of them are global: a game's row
+for one follows Defaults.ini unless the table marks it `PerGame()` (see
+[Which rows follow it](#which-rows-follow-it)). `CollisionMargin` and `CollisionChannel` are not:
+each holds a number in one engine's own units or channels, so the schema marks them
+`"global": false`, every game keeps its own value, and a table writes their rows as Engine rows.
+This is core's table naming all 28 of them at their defaults, which both languages render byte
+for byte (`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with
+`Render`, so every row shows its value, the two Engine rows as comments; the same table's fresh
+render writes `default` on every global row and the same two comments
 (`all-concepts-fresh.ini` beside it). The comments are the schema's
 `file_comment`, and a mod can replace one where its unit or behaviour differs.
 
@@ -314,9 +318,9 @@ PositionLimitZ=0.4
 ; How far, in metres, leaning back can move the view.
 PositionLimitZBack=0.1
 ; true: leaning stops at walls instead of moving the view through them.
-CollisionEnabled=false
+CollisionEnabled=true
 ; How far the view is held off a wall when you lean into it, in the game's own units.
-CollisionMargin=0.1
+; CollisionMargin=0.1
 ; Which of the game's collision channels the wall check tests against.
 ; CollisionChannel=0
 ; How gently the view eases back out after a wall stopped a lean.
@@ -349,11 +353,15 @@ LightMultiplier=1.5
 The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFreshnessMs` 1 to
 2147483647, the smoothing pair and `CollisionReleaseSmoothing` 0 to 1, the five limits and the two
 tracker pivots 0 to 10, `LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its
-unit is the engine's own), and `CollisionChannel` none. The four hotkey lists start at the
-schema's `canonical_default`. The `default` field and core's field initialisers, which the older
-flat readers use, keep `End` for `ToggleKey` and `PageDown` for `YawModeKey`, and leave
-`CycleTrackingModeKey` empty. No flat reader reads `TrueFreeLookKey`, so its `default` and field
-initialisers are its `canonical_default`.
+unit is the engine's own), and `CollisionChannel` none. The four hotkey lists and
+`CollisionEnabled` start at the schema's `canonical_default`. The `default` field and core's field
+initialisers, which the older flat readers use, keep `End` for `ToggleKey` and `PageDown` for
+`YawModeKey`, leave `CycleTrackingModeKey` empty and keep `CollisionEnabled` false. No flat reader
+reads `TrueFreeLookKey`, so its `default` and field initialisers are its `canonical_default`.
+
+`CollisionEnabled` starts on (collision rows ruling of 2026-09-26): it is global, so the value in
+Defaults.ini reaches every game whose table binds the row, and a game without a lean collision
+sweep does not bind it. The margin and the channel a sweep uses stay each game's own.
 
 The tracking mode at startup is the pair `RotationEnabled` and `PositionEnabled`: both true is
 rotation and position, `true, false` rotation only, `false, true` position only. Both false names
@@ -465,13 +473,15 @@ built with, so the defaults live in the config type, as they always have.
 - **Modifiers** apply to the last row added, or to the concept row `Select` names: `Comment`
   replaces a concept's comment, `Range` bounds an int, float or double local row, `Engine` makes
   the row an Engine row, `Writable` marks a row the owner's `Save` may change, and `PerGame` marks
-  a concept row whose default stays the game's own and never follows Defaults.ini. `PerGame` throws
-  on a local row, and each use needs an owner-approved `per_game` entry for the repo in
-  `data/config-format.json`. A concept row whose default is in the engine's own units or is engine
-  data (a `CollisionMargin` in centimetres, a `CollisionChannel` naming one engine's trace channel)
-  has a default the schema's number cannot stand for, and the fresh render refuses it unless the
-  row is `PerGame`. `RotationEnabled` and `PositionEnabled` are one setting, so a table
-  that binds both marks both `PerGame` or neither; apply and the fresh render throw on one alone.
+  a global concept row whose default stays the game's own and never follows Defaults.ini.
+  `PerGame` throws on a local row and on a concept that is not global, and each use needs an
+  owner-approved `per_game` entry for the repo in `data/config-format.json`. `RotationEnabled` and
+  `PositionEnabled` are one setting, so a table that binds both marks both `PerGame` or neither;
+  apply and the fresh render throw on one alone.
+- **Concepts that are not global.** A concept row for `CollisionMargin` or `CollisionChannel` is
+  an Engine row whose default is the table's own, with no modifier: a margin in centimetres or one
+  engine's trace channel number is the game's value, Defaults.ini never reaches it, and the fresh
+  render's gate does not apply to it.
 
 `ApplyCanonical(doc, table, config)` / `table.Apply(doc, config)` reads a parsed file into a
 config: every row starts from its default, fields no row binds are left alone, and it returns the
@@ -481,7 +491,7 @@ concept row, the value `default` in any ASCII letter case reads as the row's def
 diagnostic; `default ; note` and `"default"` are values like any other, and on a local row the
 word is data. `RenderCanonical(table, config, header)` / `table.Render(config, header)` writes a
 config as a canonical file. `RenderCanonicalFresh(table, header)` / `table.RenderFresh(header)`
-writes the defaults with every concept row that is not `PerGame` as `Key=default`, and throws,
+writes the defaults with every global concept row that is not `PerGame` as `Key=default`, and throws,
 naming the row, when such a row defaults to anything but the schema's `default` (a hotkey list's
 `canonical_default`), when the table binds `RotationEnabled` without `PositionEnabled`, and when
 it marks one of that pair `PerGame` and not the other.
@@ -499,8 +509,9 @@ The list is explicit because a file carries only what the mod binds, and because
 adds later then reaches a mod's file only when that mod names it, so it never breaks an existing
 mod's committed file. An empty list or a concept named twice throws.
 
-The defaults are the config type's own, with the four hotkey lists at their `canonical_default`.
-`CollisionChannel` is an Engine row. `LocalSmoothing` and `RemoteSmoothing` also set the copy the
+The defaults are the config type's own, with the four hotkey lists and `CollisionEnabled` at
+their `canonical_default`. `CollisionMargin` and `CollisionChannel` are Engine rows, as in every
+table. `LocalSmoothing` and `RemoteSmoothing` also set the copy the
 position settings carry. `PositionLimitY` never sets `PositionLimitYDown`: no key takes its value
 from another. The sensitivity and inversion fields of core's types have no row, so a canonical
 file never sets them and they keep the defaults instance's values.
@@ -675,7 +686,7 @@ later changes no mod's code:
 
 The constructor throws for a missing or relative path, missing `defaults`, a table that has both
 `RotationEnabled` and `PositionEnabled` and marks only one Writable, a table whose fresh render
-refuses it (a concept row not marked `PerGame` whose default is not the schema's, or
+refuses it (a global concept row not marked `PerGame` whose default is not the schema's, or
 `RotationEnabled` without `PositionEnabled`), a header the renderer refuses, an import without a
 legacy path, a legacy path without an import, or a legacy path naming the config file itself
 (compared without case). The C++ owner also throws for a table with no rows.
@@ -798,7 +809,7 @@ Defaults.ini that changed, went missing or cannot be read is under
 ### What it is and who reads it
 
 Defaults.ini is a file in the player's profile or config folder (see [Where it is](#where-it-is))
-holding a value for every canonical concept. A concept row of a
+holding a value for every global concept. A global concept row of a
 game's `CameraUnlock.ini` that holds `default`, has no line, or holds a value its codec refuses
 takes its value from Defaults.ini, so a player sets a preference once for every game that reads
 the file. A value written in a game's `CameraUnlock.ini` changes that game only.
@@ -814,18 +825,23 @@ file, the README config block and the changelog template.
 
 ### Which rows follow it
 
-Every canonical concept is global, all 28 of [the canonical concept set](#the-canonical-concept-set),
-`PositionAllowed` and the collision rows included (owner answers of 2026-09-25). The schema has no
-field for it: a concept with `canonical: true` is global. The only exception is a row the table
-marks `PerGame()`, which needs an entry the owner approved in `data/config-format.json`
-`per_game` for that repo. Such a row's default is the table's own, `default` on it reads that
-default, and Defaults.ini never reaches it. A table that binds both `RotationEnabled` and
-`PositionEnabled` marks both `PerGame()` or neither. A game's local rows never take a value from
-Defaults.ini.
+26 of the 28 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
+`PositionAllowed`, `CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of
+2026-09-25, collision rows ruling of 2026-09-26). A canonical concept is global unless the schema
+says `"global": false`, which `CollisionMargin` and `CollisionChannel` do: a margin in the
+engine's own units or a channel number means something else in every engine, so each game keeps
+its own, Defaults.ini has no line for either, and their rows are Engine rows. The only other
+exception is a row the table marks `PerGame()`, which needs an entry the owner approved in
+`data/config-format.json` `per_game` for that repo. Such a row's default is the table's own,
+`default` on it reads that default, and Defaults.ini never reaches it. A concept that is not global
+is never a `per_game` entry, and `PerGame()` throws on its row. A table that binds both
+`RotationEnabled` and `PositionEnabled` marks both `PerGame()` or neither. A game's local rows
+never take a value from Defaults.ini.
 
-A row that follows Defaults.ini must default, in the table, to the schema's value: that is what
-the game runs on whenever Defaults.ini gives nothing, so a different number would give one value
-on every failure path and another whenever the file is read. `RenderFresh` refuses such a table,
+A row that follows Defaults.ini must default, in the table, to the schema's value (its
+`canonical_default` where it has one): that is what the game runs on whenever Defaults.ini gives
+nothing, so a different number would give one value on every failure path and another whenever
+the file is read. `RenderFresh` refuses such a table,
 and the owner's constructor renders the fresh file, so it throws too (see
 [Config tables](#config-tables)).
 
@@ -904,7 +920,8 @@ path, choice, line and message above.
   No canonical concept holds a string other than the four hotkey lists, so the token never meets
   a value a concept can hold.
 - **What it means.** Leave this row at its default: the effective default below on a row that
-  follows Defaults.ini, and the table's own default on a `PerGame()` row.
+  follows Defaults.ini, and the table's own default on a `PerGame()` row and on a row of a
+  concept that is not global.
 
 ### The effective default
 
@@ -929,9 +946,9 @@ always a mode.
 
 ### What a new Defaults.ini holds
 
-The owner creates it from core's own table, `HeadTrackingConfigTable` naming every canonical
-concept, at the built-in values, with the four hotkey lists at their `canonical_default`. Every
-row is a value, `CollisionChannel` too. The header is the file's own: what the file is, the
+The owner creates it from core's own table, `HeadTrackingConfigTable` naming every global
+concept, at the built-in values, with the four hotkey lists and `CollisionEnabled` at their
+`canonical_default`. Every row is a value. The header is the file's own: what the file is, the
 comment and hotkey lines of every canonical file, and the 104 key names it takes. Both languages
 render it byte for byte:
 
@@ -1000,11 +1017,7 @@ PositionLimitZ=0.4
 ; How far, in metres, leaning back can move the view.
 PositionLimitZBack=0.1
 ; true: leaning stops at walls instead of moving the view through them.
-CollisionEnabled=false
-; How far the view is held off a wall when you lean into it, in the game's own units.
-CollisionMargin=0.1
-; Which of the game's collision channels the wall check tests against.
-CollisionChannel=0
+CollisionEnabled=true
 ; How gently the view eases back out after a wall stopped a lean.
 ; 0 is the quickest, 1 the slowest.
 CollisionReleaseSmoothing=0.9
@@ -1032,11 +1045,11 @@ LightFollowsHead=true
 LightMultiplier=1.5
 ```
 
-`CollisionMargin` and `CollisionChannel` are numbers in each engine's own units and channels, so a
-value set here means something different in each game that follows it. A mod whose wall check
-has not been confirmed in game ships with it off, because a channel nobody verified blocks on
-nothing or on everything; `CollisionEnabled=true` here turns the check on in every game that
-follows it, those included, and in such a game it can stop leaning altogether.
+`CollisionMargin` and `CollisionChannel` have no line: they are not global, so each game keeps its
+own in its `CameraUnlock.ini`, and a line for either in Defaults.ini is not read.
+`CollisionEnabled=false` here turns the wall check off in every game that binds the row and does
+not set it in its own file, and `true` turns it on there, each game with its own margin and
+channel.
 
 ### Creating it
 
@@ -1076,7 +1089,8 @@ Defaults.ini has the grammar, codecs and stamp of every canonical file. What dif
   the in-game message, but only for a row the game takes from Defaults.ini: one its table binds,
   that is not `PerGame()`, and that its own file does not set.
 - **Not read, and nothing said**: a key in the wrong section, an alias, a key or section no
-  canonical concept has, and a concept the game's table does not bind. The file serves every
+  canonical concept has, the key of a concept that is not global (`CollisionMargin`,
+  `CollisionChannel`), and a concept the game's table does not bind. The file serves every
   game, and a Defaults.ini created by a newer core carries concepts an older mod does not know, so
   a line for them would appear at every start of every older mod. A misspelt key of a row the game
   uses shows up in the line naming the rows that took the built-in value.
@@ -1365,8 +1379,8 @@ When `Load` finds no config file and the legacy file exists:
    while it reads the bytes, runs the import on that path and reads the bytes again. No program
    can newly lock, rename or delete the file meanwhile, and a write in between defers the import.
 2. It renders the imported settings, reads the render back through the table and requires every
-   row to equal the import's (floats bit for bit). The render writes `default` on a concept row
-   not marked `PerGame` where the imported value equals what `default` gives that row at this
+   row to equal the import's (floats bit for bit). The render writes `default` on a global concept
+   row not marked `PerGame` where the imported value equals what `default` gives that row at this
    `Load` (floats by their bits, hotkey lists by their canonical text), and the value otherwise;
    the tracking-mode pair is `default` on both rows only when both are equal. The read-back uses
    the same Defaults.ini values, so a `default` row reads back as the value it replaced. Where
@@ -1570,9 +1584,10 @@ owner's rules:
 
 - Edit a game's `CameraUnlock.ini`, never the legacy file, and only when it carries the stamp and
   a `ConfigFormat` the tool implements. The legacy file is what an older build reads, and the mod
-  imports it only while `CameraUnlock.ini` is absent. On a concept row not marked `PerGame`, a
-  tool may write `default` to make that game follow Defaults.ini again; the config descriptor's
-  `per_game` names the rows where `default` means the game's own value instead.
+  imports it only while `CameraUnlock.ini` is absent. On a global concept row not marked
+  `PerGame`, a tool may write `default` to make that game follow Defaults.ini again; the config
+  descriptor's `per_game` names the rows where `default` means the game's own value instead, and
+  `CollisionMargin` and `CollisionChannel`, which are not global, never follow it.
 - Change values with the editor's rules and nothing else: every other byte is kept, a replaced
   line keeps its key's spelling and the white space around `=`, a repeated key has its last
   occurrence replaced, a missing key goes after the last key line of its section, a missing
@@ -1644,7 +1659,9 @@ The paths and version above show the shape; each repo's come from its own entry 
 A launcher writes no game file. It edits Defaults.ini, and reads a game's `CameraUnlock.ini` for
 display only: `per_game` tells it which of the game's rows are the game's own and what they hold
 when the file says `default`, leaves the row out or holds a value the mod refuses. Every other
-concept row in the file follows Defaults.ini unless the file sets a value on it.
+global concept row in the file follows Defaults.ini unless the file sets a value on it.
+`CollisionMargin` and `CollisionChannel` are not global and are never in `per_game`: every game
+keeps its own, and Defaults.ini, the only file a launcher writes, has no line for either.
 
 There is no format field: the file's `[CameraUnlock] ConfigFormat` names the dialect. A package
 with more than one config file carries no block, and no variant carries one.
@@ -1675,7 +1692,7 @@ on the built ZIP against the repo it was built from:
 - `per_game` names exactly the ids `data/config-format.json` `per_game` lists for the repo: a
   missing id and an extra one both fail. Each value is the committed file's text on the row, as
   the reader returns it, so a stale value fails, and the committed file holds a value there, never
-  `default`. A row the renderer comments out (`; CollisionChannel=3`, an Engine row marked
+  `default`. A row the renderer comments out (`; Key=value`, an Engine row marked
   `PerGame()` at its default) holds the commented value. An entry in `data/config-format.json`
   needs the owner's approval date, so a game cannot keep a row for itself by accident.
 
@@ -1691,8 +1708,8 @@ legacy file moves its owner to `CameraUnlock.ini`, with the legacy file as the o
 path, before it adds the block or re-renders its README config block, or in the same change.
 Either one written first passes every check and describes a file the build does not read. That the rows the
 block lists are the rows the table marks `PerGame()` is held through the committed file:
-`render-config` writes a value on a `PerGame()` row and `default` on every other concept row, and
-the lint fails a value on a row `per_game` does not list and `default` on one it lists.
+`render-config` writes a value on a `PerGame()` row and `default` on every other global concept
+row, and the lint fails a value on a row `per_game` does not list and `default` on one it lists.
 
 Conformance's `config-descriptor` check runs the same rules on the committed manifest, except
 the one against `mod_info.version`, which packaging stamps. It also fails a converted repo
@@ -1744,12 +1761,14 @@ In a mod repo, and in conformance:
   `[Sensitivity]`, `[Inversion]`, `[Reticle]` or `[Deadzone]` section, and no key in one of the
   sections `non_canonical_keys` lists; a schema section spelled as the schema spells it; local sections and keys PascalCase,
   each local key used once in the file, none of the bare nouns above and none starting with
-  `Chord`; every concept row holding `default` (compared without case), except the rows
+  `Chord`; every global concept row holding `default` (compared without case), except the rows
   `data/config-format.json` `per_game` lists for the repo, which hold the game's own value and
-  never the token, a hotkey one as a key list in the file's dialect; every local key in
+  never the token, a hotkey one as a key list in the file's dialect; a `CollisionMargin` or
+  `CollisionChannel` row holding a value or commented, never `default`; every local key in
   `[Hotkeys]` a key list in the file's dialect, where `default` is an ordinary value like any
-  other; no concept row commented out under its own section (`; CollisionChannel=3`, the form the
-  renderer gives an Engine row marked `PerGame()` at its default) unless `per_game` lists it; the
+  other; no global concept row commented out under its own section (`; Key=value`, the
+  form the renderer gives an Engine row marked `PerGame()` at its default) unless `per_game` lists
+  it; the
   file tracked by git and `-text`. It checks no other comment. A chord a game binds itself is a
   `per_game` hotkey row, whose reason names the chord it replaces and the one it uses.
 - **Conformance** (`pixi run conformance`) runs the lint as `config-format`, which also fails a
@@ -1804,9 +1823,12 @@ In a mod repo, and in conformance:
   players' disks mean. Changing a default in core's types is breaking too: it changes every new
   file, and every file that leaves the key out. It also never reaches a player whose Defaults.ini
   already exists, since that file keeps the value it was created with and no mod changes it.
-- **A concept that stops being global** would need a schema change, since every canonical concept
-  is global today, and it is breaking: rows holding `default` in files already on players' disks
-  would read the game's own default instead of Defaults.ini's. So is **a `per_game` entry added
+- **A concept that stops being global** (`"global": false` in the schema) is breaking: rows
+  holding `default` in files already on players' disks would read the game's own default instead
+  of Defaults.ini's. `CollisionMargin` and `CollisionChannel` left the global set before any
+  converted release, so no file on a player's disk holds `default` on them. A concept that
+  becomes global is breaking the same way from the other side, for every game whose own default
+  differs from the schema's. So is **a `per_game` entry added
   after a repo's first converted release**, for the same rows of that repo: for `UdpPort` it stops
   tracking for a player whose tracker sends to the port Defaults.ini names. Such an entry is
   approved as a breaking change and named in the repo's changelog.

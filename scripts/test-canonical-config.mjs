@@ -103,12 +103,13 @@ for (const [dialect, input, result, canonical = ""] of keyRows) {
   check(JSON.stringify(reread.bindings) === JSON.stringify(parsed.bindings), `${label}: '${written}' reads back differently`);
 }
 
-// The lint. Every file below is a fresh render, `default` on every concept row but the ones its
-// table marks PerGame(), so it has to pass with those rows as per_game; each mutation breaks one
-// rule and must draw exactly the problem named.
+// The lint. Every file below is a fresh render, `default` on every global concept row but the ones
+// its table marks PerGame(), and CollisionMargin and CollisionChannel, which are not global,
+// commented at the game's own default, so it has to pass with the PerGame() rows as per_game; each
+// mutation breaks one rule and must draw exactly the problem named.
 const fresh = [
   ["head-tracking/all-concepts-fresh.ini", []],
-  ["table/global-render-fresh/fresh.ini", ["CollisionChannel"]],
+  ["table/global-render-fresh/fresh.ini", []],
   ["example/CameraUnlock.ini", []],
 ];
 for (const [rel, perGame] of fresh) {
@@ -117,31 +118,24 @@ for (const [rel, perGame] of fresh) {
     check(problems.length === 0, `lint ${rel} (${dialect}) should pass, and says:\n    ${problems.join("\n    ")}`);
   }
 }
-{
-  const problems = lintCanonicalConfig(fs.readFileSync(path.join(FIXTURES, "table", "global-render-fresh", "fresh.ini")), { dialect: "native", perGame: [] });
-  check(
-    problems.length === 1 && problems[0].startsWith("line 38: [Position] CollisionChannel is commented out") &&
-      problems[0].includes("per_game does not list CollisionChannel for this repo"),
-    `lint table/global-render-fresh/fresh.ini with no per_game row should fail once for its commented PerGame() row, got\n    ${problems.join("\n    ")}`,
-  );
-}
 
-// A values render holds a value on every concept row, which passes only where per_game lists them all.
-const everyConcept = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, "data", "config-schema.json"), "utf8"))
-  .concepts.filter((c) => c.canonical)
+// A values render holds a value on every concept row, which passes only where per_game lists every
+// global one.
+const everyGlobalConcept = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, "data", "config-schema.json"), "utf8"))
+  .concepts.filter((c) => c.canonical && c.global !== false)
   .map((c) => c.id);
 const values = fs.readFileSync(path.join(FIXTURES, "head-tracking", "all-concepts.ini"));
 for (const dialect of ["native", "unity"]) {
-  const problems = lintCanonicalConfig(values, { dialect, perGame: everyConcept });
-  check(problems.length === 0, `lint head-tracking/all-concepts.ini (${dialect}) with every concept per_game should pass, and says:\n    ${problems.join("\n    ")}`);
+  const problems = lintCanonicalConfig(values, { dialect, perGame: everyGlobalConcept });
+  check(problems.length === 0, `lint head-tracking/all-concepts.ini (${dialect}) with every global concept per_game should pass, and says:\n    ${problems.join("\n    ")}`);
 }
 {
   const problems = lintCanonicalConfig(values, { dialect: "native", perGame: [] });
   check(
-    problems.length === 2 && problems[0].startsWith("line 65: [Position] CollisionChannel is commented out") &&
-      problems[1].startsWith("lines 17, 21, 23 and 24 more: UdpPort, EnableOnStartup, WorldSpaceYaw, AimDecoupling,") &&
-      problems[1].includes(" hold values, and data/config-format.json per_game lists none of them for this repo"),
-    `lint head-tracking/all-concepts.ini with no per_game row should fail for its commented CollisionChannel and once for its 27 active concept rows, got\n    ${problems.join("\n    ")}`,
+    problems.length === 1 &&
+      problems[0].startsWith("lines 17, 21, 23 and 23 more: UdpPort, EnableOnStartup, WorldSpaceYaw, AimDecoupling,") &&
+      problems[0].includes(" hold values, and data/config-format.json per_game lists none of them for this repo"),
+    `lint head-tracking/all-concepts.ini with no per_game row should fail once for its 26 active global concept rows, got\n    ${problems.join("\n    ")}`,
   );
 }
 
@@ -151,7 +145,7 @@ const replace = (from, to) => {
   return base.replace(from, to);
 };
 const append = (lines) => `${base}\r\n${lines.join("\r\n")}\r\n`;
-const unlisted = "per_game does not list it for this repo; a committed file holds default on every concept row but the ones per_game lists";
+const unlisted = "per_game does not list it for this repo; a committed file holds default on every global concept row but the ones per_game lists";
 
 // [label, text, expected problems, dialect, per_game rows]
 const mutations = [
@@ -237,9 +231,14 @@ const mutations = [
   ["a per_game hotkey row that is no key", replace("ToggleKey=default", "ToggleKey=Endd, Ctrl+Shift+Y"), "ToggleKey=Endd, Ctrl+Shift+Y is not a native key list: 'Endd' is not a key name", "native", ["ToggleKey"]],
   ["a hex per_game hotkey in a Unity mod", replace("YawModeKey=default", "YawModeKey=0x22, Ctrl+Shift+H"), "YawModeKey=0x22, Ctrl+Shift+H is not a unity key list", "unity", ["YawModeKey"]],
   ["a hex per_game hotkey in a native mod", replace("YawModeKey=default", "YawModeKey=0x22, Ctrl+Shift+H"), [], "native", ["YawModeKey"]],
-  ["a commented concept row", replace("CollisionChannel=default", "; CollisionChannel=3"), "line 65: [Position] CollisionChannel is commented out, the form render-config gives an Engine row marked PerGame() at its default, and data/config-format.json per_game does not list CollisionChannel"],
-  ["a commented concept row with no space", replace("CollisionChannel=default", ";CollisionChannel=3"), "line 65: [Position] CollisionChannel is commented out"],
-  ["a commented per_game row", replace("CollisionChannel=default", "; CollisionChannel=3"), [], "native", ["CollisionChannel"]],
+  ["a commented concept row", replace("CollisionReleaseSmoothing=default", "; CollisionReleaseSmoothing=0.9"), "line 68: [Position] CollisionReleaseSmoothing is commented out, the form render-config gives an Engine row marked PerGame() at its default, and data/config-format.json per_game does not list CollisionReleaseSmoothing"],
+  ["a commented concept row with no space", replace("CollisionReleaseSmoothing=default", ";CollisionReleaseSmoothing=0.9"), "line 68: [Position] CollisionReleaseSmoothing is commented out"],
+  ["a commented per_game row", replace("CollisionReleaseSmoothing=default", "; CollisionReleaseSmoothing=0.5"), [], "native", ["CollisionReleaseSmoothing"]],
+  ["an engine concept row commented at another value", replace("; CollisionChannel=0", "; CollisionChannel=3"), []],
+  ["an engine concept row commented with no space", replace("; CollisionMargin=0.1", ";CollisionMargin=10.0"), []],
+  ["an engine concept row holding a value", replace("; CollisionMargin=0.1", "CollisionMargin=10.0").replace("; CollisionChannel=0", "CollisionChannel=3"), []],
+  ["an engine concept row holding the token", replace("; CollisionChannel=0", "CollisionChannel=default"), "line 65: [Position] CollisionChannel=default: CollisionChannel is not global in data/config-schema.json, so the file holds the game's own value there, commented at its default as render-config writes it"],
+  ["an engine concept row holding DEFAULT", replace("; CollisionMargin=0.1", "CollisionMargin=DEFAULT"), "line 63: [Position] CollisionMargin=DEFAULT: CollisionMargin is not global"],
   ["a commented concept key in another section", replace("[Light]\r\n", "[Light]\r\n; CollisionChannel=3\r\n"), []],
   ["a comment naming a local key", replace("[Light]\r\n", "[Light]\r\n; Mode=3\r\n"), []],
 ];

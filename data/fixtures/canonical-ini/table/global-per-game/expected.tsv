@@ -1,4 +1,4 @@
-# default on the PerGame CollisionChannel reads the table's own 3; on PositionLimitX it reads
+# default on CollisionChannel, which is not global, reads the table's own 3; on PositionLimitX it reads
 # Defaults.ini's value.
 field	ToggleKey	End, Ctrl+Shift+Y
 field	UdpPort	4242

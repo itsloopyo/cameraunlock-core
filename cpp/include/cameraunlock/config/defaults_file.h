@@ -22,8 +22,8 @@ DefaultsResolution ResolveDefaultsFile(const DefaultsFile& file);
 
 }  // namespace detail
 
-/// Where a ConfigOwner finds Defaults.ini, the file every concept row not marked PerGame takes its
-/// default from. A mod passes PerUser(); a test passes At() with a scratch path, so no test reads
+/// Where a ConfigOwner finds Defaults.ini, the file every global concept row not marked PerGame
+/// takes its default from. A mod passes PerUser(); a test passes At() with a scratch path, so no test reads
 /// or creates the player's own file. A default-constructed DefaultsFile names no file, and an owner
 /// or a PluginMod given one throws. CameraUnlock.Core.Config.DefaultsFile is the C# twin.
 class DefaultsFile {

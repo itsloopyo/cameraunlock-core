@@ -1,8 +1,8 @@
 # The imported values. UdpPort, ToggleKey and LocalSmoothing equal their effective defaults and are
 # written default; EnableOnStartup, PositionLimitX and CycleTrackingModeKey do not and are written as
 # values. RotationEnabled equals its effective default and PositionEnabled does not, so both are
-# written as values. The PerGame CollisionChannel and the local rows are written as Render writes
-# them.
+# written as values. CollisionChannel, which is not global, and the local rows are written as Render
+# writes them.
 field	UdpPort	5000
 field	EnableOnStartup	true
 field	PositionLimitX	0.25

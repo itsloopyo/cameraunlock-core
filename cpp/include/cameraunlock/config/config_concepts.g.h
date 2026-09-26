@@ -49,10 +49,13 @@ enum class ValueFamily { kBool, kInteger, kFloating, kHotkey };
 
 /// The schema's facts about one canonical concept. kMin and kMax, both inclusive, exist for the
 /// kInteger family (within int) and the kFloating family (as float); a bound the schema leaves
-/// open is the limit of the schema type. kCanonicalDefault is the binding list a canonical file
-/// starts with, where the schema gives one, else nullptr. kDefaultText is the schema's default as
-/// text the concept's codec reads: the canonical_default of a hotkey concept, else the schema's
-/// value as it is written there.
+/// open is the limit of the schema type. kCanonicalDefault is the value a canonical file starts
+/// with where it differs from the flat readers' default (a hotkey concept's binding list,
+/// CollisionEnabled's true), else nullptr. kDefaultText is the schema's default as text the
+/// concept's codec reads: the canonical_default where there is one, else the schema's value as it
+/// is written there. kGlobal is false for a concept that holds engine data (the engine's own
+/// units, a channel number): every game keeps its own value, Defaults.ini never carries it, and a
+/// config table writes its row as an Engine row.
 template <Concept Id>
 struct ConceptTraits;
 
@@ -66,6 +69,7 @@ struct ConceptTraits<Concept::UdpPort> {
     static constexpr const char* kFileComment[] = {"UDP port the mod receives tracker data on (OpenTrack protocol)."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "4242";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -76,6 +80,7 @@ struct ConceptTraits<Concept::EnableOnStartup> {
     static constexpr const char* kFileComment[] = {"true: head tracking is on when the game starts. ToggleKey turns it on and off."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -88,6 +93,7 @@ struct ConceptTraits<Concept::LocalSmoothing> {
     static constexpr const char* kFileComment[] = {"Smoothing when the tracker runs on this PC. 0 is the least, 1 the most."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -100,6 +106,7 @@ struct ConceptTraits<Concept::RemoteSmoothing> {
     static constexpr const char* kFileComment[] = {"Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.15";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -110,6 +117,7 @@ struct ConceptTraits<Concept::WorldSpaceYaw> {
     static constexpr const char* kFileComment[] = {"true: yaw turns around the world's up axis. false: around the camera's own up axis."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -120,6 +128,7 @@ struct ConceptTraits<Concept::AimDecoupling> {
     static constexpr const char* kFileComment[] = {"true: your aim stays with the mouse or controller while your head moves the view."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -130,6 +139,7 @@ struct ConceptTraits<Concept::RotationEnabled> {
     static constexpr const char* kFileComment[] = {"true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -142,6 +152,7 @@ struct ConceptTraits<Concept::DataFreshnessMs> {
     static constexpr const char* kFileComment[] = {"Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "500";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -152,6 +163,7 @@ struct ConceptTraits<Concept::PositionEnabled> {
     static constexpr const char* kFileComment[] = {"true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -162,6 +174,7 @@ struct ConceptTraits<Concept::PositionAllowed> {
     static constexpr const char* kFileComment[] = {"false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -172,6 +185,7 @@ struct ConceptTraits<Concept::TrueFreeLook> {
     static constexpr const char* kFileComment[] = {"false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "false";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -184,6 +198,7 @@ struct ConceptTraits<Concept::PositionLimitX> {
     static constexpr const char* kFileComment[] = {"How far, in metres, leaning left or right can move the view."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.3";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -196,6 +211,7 @@ struct ConceptTraits<Concept::PositionLimitY> {
     static constexpr const char* kFileComment[] = {"How far, in metres, raising your head can move the view."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.2";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -208,6 +224,7 @@ struct ConceptTraits<Concept::PositionLimitYDown> {
     static constexpr const char* kFileComment[] = {"How far, in metres, lowering your head can move the view."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.2";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -220,6 +237,7 @@ struct ConceptTraits<Concept::PositionLimitZ> {
     static constexpr const char* kFileComment[] = {"How far, in metres, leaning forward can move the view."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.4";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -232,6 +250,7 @@ struct ConceptTraits<Concept::PositionLimitZBack> {
     static constexpr const char* kFileComment[] = {"How far, in metres, leaning back can move the view."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.1";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -240,8 +259,9 @@ struct ConceptTraits<Concept::CollisionEnabled> {
     static constexpr const char* kKey = "CollisionEnabled";
     static constexpr ValueFamily kFamily = ValueFamily::kBool;
     static constexpr const char* kFileComment[] = {"true: leaning stops at walls instead of moving the view through them."};
-    static constexpr const char* kCanonicalDefault = nullptr;
-    static constexpr const char* kDefaultText = "false";
+    static constexpr const char* kCanonicalDefault = "true";
+    static constexpr const char* kDefaultText = "true";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -254,6 +274,7 @@ struct ConceptTraits<Concept::CollisionMargin> {
     static constexpr const char* kFileComment[] = {"How far the view is held off a wall when you lean into it, in the game's own units."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.1";
+    static constexpr bool kGlobal = false;
 };
 
 template <>
@@ -266,6 +287,7 @@ struct ConceptTraits<Concept::CollisionChannel> {
     static constexpr const char* kFileComment[] = {"Which of the game's collision channels the wall check tests against."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0";
+    static constexpr bool kGlobal = false;
 };
 
 template <>
@@ -278,6 +300,7 @@ struct ConceptTraits<Concept::CollisionReleaseSmoothing> {
     static constexpr const char* kFileComment[] = {"How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.9";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -290,6 +313,7 @@ struct ConceptTraits<Concept::TrackerPivotForward> {
     static constexpr const char* kFileComment[] = {"Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -302,6 +326,7 @@ struct ConceptTraits<Concept::TrackerPivotUp> {
     static constexpr const char* kFileComment[] = {"Metres from the pivot of your neck up to the point the tracker follows."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -312,6 +337,7 @@ struct ConceptTraits<Concept::ToggleKey> {
     static constexpr const char* kFileComment[] = {"Turns head tracking on and off."};
     static constexpr const char* kCanonicalDefault = "End, Ctrl+Shift+Y";
     static constexpr const char* kDefaultText = "End, Ctrl+Shift+Y";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -322,6 +348,7 @@ struct ConceptTraits<Concept::CycleTrackingModeKey> {
     static constexpr const char* kFileComment[] = {"Changes the tracking mode: rotation and position, rotation only, position only."};
     static constexpr const char* kCanonicalDefault = "PageUp, Ctrl+Shift+G";
     static constexpr const char* kDefaultText = "PageUp, Ctrl+Shift+G";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -332,6 +359,7 @@ struct ConceptTraits<Concept::YawModeKey> {
     static constexpr const char* kFileComment[] = {"Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw)."};
     static constexpr const char* kCanonicalDefault = "PageDown, Ctrl+Shift+H";
     static constexpr const char* kDefaultText = "PageDown, Ctrl+Shift+H";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -342,6 +370,7 @@ struct ConceptTraits<Concept::TrueFreeLookKey> {
     static constexpr const char* kFileComment[] = {"Switches between keeping your eye on the sights and true free look (TrueFreeLook)."};
     static constexpr const char* kCanonicalDefault = "Insert, Ctrl+Shift+U";
     static constexpr const char* kDefaultText = "Insert, Ctrl+Shift+U";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -352,6 +381,7 @@ struct ConceptTraits<Concept::LightFollowsHead> {
     static constexpr const char* kFileComment[] = {"true: a light you carry points where you look instead of where you aim."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
+    static constexpr bool kGlobal = true;
 };
 
 template <>
@@ -364,11 +394,12 @@ struct ConceptTraits<Concept::LightMultiplier> {
     static constexpr const char* kFileComment[] = {"How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "1.5";
+    static constexpr bool kGlobal = true;
 };
 
 /// One canonical concept, for code that walks them all. kConcepts[static_cast<std::size_t>(id)]
 /// describes id. `file_comment` holds `file_comment_lines` lines; the rest are nullptr.
-/// `default_text` is ConceptTraits<id>::kDefaultText.
+/// `default_text` is ConceptTraits<id>::kDefaultText, and `global` ConceptTraits<id>::kGlobal.
 struct ConceptInfo {
     Concept id;
     const char* name;
@@ -379,37 +410,38 @@ struct ConceptInfo {
     std::size_t file_comment_lines;
     const char* canonical_default;
     const char* default_text;
+    bool global;
 };
 
 inline constexpr ConceptInfo kConcepts[] = {
-    {Concept::UdpPort, "UdpPort", "Network", "UdpPort", ValueFamily::kInteger, {"UDP port the mod receives tracker data on (OpenTrack protocol).", nullptr}, 1, nullptr, "4242"},
-    {Concept::EnableOnStartup, "EnableOnStartup", "General", "EnableOnStartup", ValueFamily::kBool, {"true: head tracking is on when the game starts. ToggleKey turns it on and off.", nullptr}, 1, nullptr, "true"},
-    {Concept::LocalSmoothing, "LocalSmoothing", "Smoothing", "LocalSmoothing", ValueFamily::kFloating, {"Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.", nullptr}, 1, nullptr, "0"},
-    {Concept::RemoteSmoothing, "RemoteSmoothing", "Smoothing", "RemoteSmoothing", ValueFamily::kFloating, {"Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."}, 2, nullptr, "0.15"},
-    {Concept::WorldSpaceYaw, "WorldSpaceYaw", "General", "WorldSpaceYaw", ValueFamily::kBool, {"true: yaw turns around the world's up axis. false: around the camera's own up axis.", nullptr}, 1, nullptr, "true"},
-    {Concept::AimDecoupling, "AimDecoupling", "General", "AimDecoupling", ValueFamily::kBool, {"true: your aim stays with the mouse or controller while your head moves the view.", nullptr}, 1, nullptr, "true"},
-    {Concept::RotationEnabled, "RotationEnabled", "General", "RotationEnabled", ValueFamily::kBool, {"true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both."}, 2, nullptr, "true"},
-    {Concept::DataFreshnessMs, "DataFreshnessMs", "General", "DataFreshnessMs", ValueFamily::kInteger, {"Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."}, 2, nullptr, "500"},
-    {Concept::PositionEnabled, "PositionEnabled", "Position", "PositionEnabled", ValueFamily::kBool, {"true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."}, 2, nullptr, "true"},
-    {Concept::PositionAllowed, "PositionAllowed", "Position", "PositionAllowed", ValueFamily::kBool, {"false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."}, 2, nullptr, "true"},
-    {Concept::TrueFreeLook, "TrueFreeLook", "Position", "TrueFreeLook", ValueFamily::kBool, {"false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."}, 2, nullptr, "false"},
-    {Concept::PositionLimitX, "PositionLimitX", "Position", "PositionLimitX", ValueFamily::kFloating, {"How far, in metres, leaning left or right can move the view.", nullptr}, 1, nullptr, "0.3"},
-    {Concept::PositionLimitY, "PositionLimitY", "Position", "PositionLimitY", ValueFamily::kFloating, {"How far, in metres, raising your head can move the view.", nullptr}, 1, nullptr, "0.2"},
-    {Concept::PositionLimitYDown, "PositionLimitYDown", "Position", "PositionLimitYDown", ValueFamily::kFloating, {"How far, in metres, lowering your head can move the view.", nullptr}, 1, nullptr, "0.2"},
-    {Concept::PositionLimitZ, "PositionLimitZ", "Position", "PositionLimitZ", ValueFamily::kFloating, {"How far, in metres, leaning forward can move the view.", nullptr}, 1, nullptr, "0.4"},
-    {Concept::PositionLimitZBack, "PositionLimitZBack", "Position", "PositionLimitZBack", ValueFamily::kFloating, {"How far, in metres, leaning back can move the view.", nullptr}, 1, nullptr, "0.1"},
-    {Concept::CollisionEnabled, "CollisionEnabled", "Position", "CollisionEnabled", ValueFamily::kBool, {"true: leaning stops at walls instead of moving the view through them.", nullptr}, 1, nullptr, "false"},
-    {Concept::CollisionMargin, "CollisionMargin", "Position", "CollisionMargin", ValueFamily::kFloating, {"How far the view is held off a wall when you lean into it, in the game's own units.", nullptr}, 1, nullptr, "0.1"},
-    {Concept::CollisionChannel, "CollisionChannel", "Position", "CollisionChannel", ValueFamily::kInteger, {"Which of the game's collision channels the wall check tests against.", nullptr}, 1, nullptr, "0"},
-    {Concept::CollisionReleaseSmoothing, "CollisionReleaseSmoothing", "Position", "CollisionReleaseSmoothing", ValueFamily::kFloating, {"How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest."}, 2, nullptr, "0.9"},
-    {Concept::TrackerPivotForward, "TrackerPivotForward", "Position", "TrackerPivotForward", ValueFamily::kFloating, {"Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off."}, 2, nullptr, "0"},
-    {Concept::TrackerPivotUp, "TrackerPivotUp", "Position", "TrackerPivotUp", ValueFamily::kFloating, {"Metres from the pivot of your neck up to the point the tracker follows.", nullptr}, 1, nullptr, "0"},
-    {Concept::ToggleKey, "ToggleKey", "Hotkeys", "ToggleKey", ValueFamily::kHotkey, {"Turns head tracking on and off.", nullptr}, 1, "End, Ctrl+Shift+Y", "End, Ctrl+Shift+Y"},
-    {Concept::CycleTrackingModeKey, "CycleTrackingModeKey", "Hotkeys", "CycleTrackingModeKey", ValueFamily::kHotkey, {"Changes the tracking mode: rotation and position, rotation only, position only.", nullptr}, 1, "PageUp, Ctrl+Shift+G", "PageUp, Ctrl+Shift+G"},
-    {Concept::YawModeKey, "YawModeKey", "Hotkeys", "YawModeKey", ValueFamily::kHotkey, {"Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).", nullptr}, 1, "PageDown, Ctrl+Shift+H", "PageDown, Ctrl+Shift+H"},
-    {Concept::TrueFreeLookKey, "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ValueFamily::kHotkey, {"Switches between keeping your eye on the sights and true free look (TrueFreeLook).", nullptr}, 1, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U"},
-    {Concept::LightFollowsHead, "LightFollowsHead", "Light", "LightFollowsHead", ValueFamily::kBool, {"true: a light you carry points where you look instead of where you aim.", nullptr}, 1, nullptr, "true"},
-    {Concept::LightMultiplier, "LightMultiplier", "Light", "LightMultiplier", ValueFamily::kFloating, {"How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."}, 2, nullptr, "1.5"},
+    {Concept::UdpPort, "UdpPort", "Network", "UdpPort", ValueFamily::kInteger, {"UDP port the mod receives tracker data on (OpenTrack protocol).", nullptr}, 1, nullptr, "4242", true},
+    {Concept::EnableOnStartup, "EnableOnStartup", "General", "EnableOnStartup", ValueFamily::kBool, {"true: head tracking is on when the game starts. ToggleKey turns it on and off.", nullptr}, 1, nullptr, "true", true},
+    {Concept::LocalSmoothing, "LocalSmoothing", "Smoothing", "LocalSmoothing", ValueFamily::kFloating, {"Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.", nullptr}, 1, nullptr, "0", true},
+    {Concept::RemoteSmoothing, "RemoteSmoothing", "Smoothing", "RemoteSmoothing", ValueFamily::kFloating, {"Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."}, 2, nullptr, "0.15", true},
+    {Concept::WorldSpaceYaw, "WorldSpaceYaw", "General", "WorldSpaceYaw", ValueFamily::kBool, {"true: yaw turns around the world's up axis. false: around the camera's own up axis.", nullptr}, 1, nullptr, "true", true},
+    {Concept::AimDecoupling, "AimDecoupling", "General", "AimDecoupling", ValueFamily::kBool, {"true: your aim stays with the mouse or controller while your head moves the view.", nullptr}, 1, nullptr, "true", true},
+    {Concept::RotationEnabled, "RotationEnabled", "General", "RotationEnabled", ValueFamily::kBool, {"true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both."}, 2, nullptr, "true", true},
+    {Concept::DataFreshnessMs, "DataFreshnessMs", "General", "DataFreshnessMs", ValueFamily::kInteger, {"Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."}, 2, nullptr, "500", true},
+    {Concept::PositionEnabled, "PositionEnabled", "Position", "PositionEnabled", ValueFamily::kBool, {"true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."}, 2, nullptr, "true", true},
+    {Concept::PositionAllowed, "PositionAllowed", "Position", "PositionAllowed", ValueFamily::kBool, {"false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."}, 2, nullptr, "true", true},
+    {Concept::TrueFreeLook, "TrueFreeLook", "Position", "TrueFreeLook", ValueFamily::kBool, {"false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."}, 2, nullptr, "false", true},
+    {Concept::PositionLimitX, "PositionLimitX", "Position", "PositionLimitX", ValueFamily::kFloating, {"How far, in metres, leaning left or right can move the view.", nullptr}, 1, nullptr, "0.3", true},
+    {Concept::PositionLimitY, "PositionLimitY", "Position", "PositionLimitY", ValueFamily::kFloating, {"How far, in metres, raising your head can move the view.", nullptr}, 1, nullptr, "0.2", true},
+    {Concept::PositionLimitYDown, "PositionLimitYDown", "Position", "PositionLimitYDown", ValueFamily::kFloating, {"How far, in metres, lowering your head can move the view.", nullptr}, 1, nullptr, "0.2", true},
+    {Concept::PositionLimitZ, "PositionLimitZ", "Position", "PositionLimitZ", ValueFamily::kFloating, {"How far, in metres, leaning forward can move the view.", nullptr}, 1, nullptr, "0.4", true},
+    {Concept::PositionLimitZBack, "PositionLimitZBack", "Position", "PositionLimitZBack", ValueFamily::kFloating, {"How far, in metres, leaning back can move the view.", nullptr}, 1, nullptr, "0.1", true},
+    {Concept::CollisionEnabled, "CollisionEnabled", "Position", "CollisionEnabled", ValueFamily::kBool, {"true: leaning stops at walls instead of moving the view through them.", nullptr}, 1, "true", "true", true},
+    {Concept::CollisionMargin, "CollisionMargin", "Position", "CollisionMargin", ValueFamily::kFloating, {"How far the view is held off a wall when you lean into it, in the game's own units.", nullptr}, 1, nullptr, "0.1", false},
+    {Concept::CollisionChannel, "CollisionChannel", "Position", "CollisionChannel", ValueFamily::kInteger, {"Which of the game's collision channels the wall check tests against.", nullptr}, 1, nullptr, "0", false},
+    {Concept::CollisionReleaseSmoothing, "CollisionReleaseSmoothing", "Position", "CollisionReleaseSmoothing", ValueFamily::kFloating, {"How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest."}, 2, nullptr, "0.9", true},
+    {Concept::TrackerPivotForward, "TrackerPivotForward", "Position", "TrackerPivotForward", ValueFamily::kFloating, {"Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off."}, 2, nullptr, "0", true},
+    {Concept::TrackerPivotUp, "TrackerPivotUp", "Position", "TrackerPivotUp", ValueFamily::kFloating, {"Metres from the pivot of your neck up to the point the tracker follows.", nullptr}, 1, nullptr, "0", true},
+    {Concept::ToggleKey, "ToggleKey", "Hotkeys", "ToggleKey", ValueFamily::kHotkey, {"Turns head tracking on and off.", nullptr}, 1, "End, Ctrl+Shift+Y", "End, Ctrl+Shift+Y", true},
+    {Concept::CycleTrackingModeKey, "CycleTrackingModeKey", "Hotkeys", "CycleTrackingModeKey", ValueFamily::kHotkey, {"Changes the tracking mode: rotation and position, rotation only, position only.", nullptr}, 1, "PageUp, Ctrl+Shift+G", "PageUp, Ctrl+Shift+G", true},
+    {Concept::YawModeKey, "YawModeKey", "Hotkeys", "YawModeKey", ValueFamily::kHotkey, {"Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).", nullptr}, 1, "PageDown, Ctrl+Shift+H", "PageDown, Ctrl+Shift+H", true},
+    {Concept::TrueFreeLookKey, "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ValueFamily::kHotkey, {"Switches between keeping your eye on the sights and true free look (TrueFreeLook).", nullptr}, 1, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U", true},
+    {Concept::LightFollowsHead, "LightFollowsHead", "Light", "LightFollowsHead", ValueFamily::kBool, {"true: a light you carry points where you look instead of where you aim.", nullptr}, 1, nullptr, "true", true},
+    {Concept::LightMultiplier, "LightMultiplier", "Light", "LightMultiplier", ValueFamily::kFloating, {"How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."}, 2, nullptr, "1.5", true},
 };
 
 inline constexpr std::size_t kConceptCount = sizeof(kConcepts) / sizeof(kConcepts[0]);
