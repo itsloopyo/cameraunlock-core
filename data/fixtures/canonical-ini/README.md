@@ -400,7 +400,7 @@ is three, since `80` cannot follow `F0`. The `value` row's value field stays the
 | `read-utf16`, `read-nul` | the two unreadable files |
 | `read-no-stamp`, `read-format-missing`, `read-format-zero`, `read-format-not-a-number` | read with no line |
 | `read-format-newer` | `ConfigFormat=2`: the format line, and the file read |
-| `read-refused-values` | codec and range refusals on int, bool and float rows and a value with `; note`, each with its line; one value beside them accepted; invalid `CollisionMargin` and `CollisionChannel` lines, not read at all since neither is global |
+| `read-refused-values` | codec and range refusals on int, bool and float rows and a value with `; note`, each with its line; a refused `CollisionEnabled` whose line names the built-in `true`, its `canonical_default`; one value beside them accepted; invalid `CollisionMargin` and `CollisionChannel` lines, not read at all since neither is global |
 | `read-hotkey-mouse4`, `read-hotkey-code` | `ToggleKey=Mouse4` and `ToggleKey=0x23` on line 12, refused alike, with the line the design gives |
 | `read-hotkeys` | names in any letter case with modifiers, an empty list, a grammar error with the codec's reason, and `Clear`, a Unity key with no `vk` |
 | `read-default-token` | `DEFAULT`, `Default` and `default` on an int, a bool, a float and a hotkey row |

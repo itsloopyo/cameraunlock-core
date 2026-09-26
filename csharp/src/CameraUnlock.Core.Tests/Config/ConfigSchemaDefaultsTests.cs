@@ -41,9 +41,8 @@ namespace CameraUnlock.Core.Tests.Config
 
         // Every concept in the schema, bound to the field that holds it. A concept
         // added without an entry here fails the test rather than shipping an unchecked default.
-        private static Dictionary<string, object> ShippedDefaults()
+        private static Dictionary<string, object> ShippedDefaults(HeadTrackingConfigData config)
         {
-            var config = new HeadTrackingConfigData();
             return new Dictionary<string, object>
             {
                 { "UdpPort", config.UdpPort },
@@ -97,7 +96,7 @@ namespace CameraUnlock.Core.Tests.Config
         [Fact]
         public void SchemaDefaults_MatchTheShippedDefaults()
         {
-            Dictionary<string, object> shipped = ShippedDefaults();
+            Dictionary<string, object> shipped = ShippedDefaults(new HeadTrackingConfigData());
 
             using (JsonDocument schema = ReadSchema())
             {
@@ -143,6 +142,40 @@ namespace CameraUnlock.Core.Tests.Config
                     }
                 }
             }
+        }
+
+        // The canonical_default is where core's table starts a row, while the default above stays on the
+        // field initialisers the flat readers use. A table starting CollisionEnabled at the flat false
+        // would give every converted mod's fresh file a row its gate refuses.
+        [Fact]
+        public void TheCanonicalTableStartsEachConceptAtItsCanonicalDefault()
+        {
+            Dictionary<string, object> started = ShippedDefaults(
+                HeadTrackingConfigTableFixtures.Defaults(HeadTrackingConfigTableFixtures.AllConceptsTable()));
+            var withCanonicalDefault = new List<string>();
+
+            using (JsonDocument schema = ReadSchema())
+            {
+                foreach (JsonElement concept in schema.RootElement.GetProperty("concepts").EnumerateArray())
+                {
+                    if (!concept.TryGetProperty("canonical_default", out JsonElement start)) continue;
+                    string id = concept.GetProperty("id").GetString()!;
+                    withCanonicalDefault.Add(id);
+                    if (start.ValueKind == JsonValueKind.String)
+                    {
+                        Assert.True(start.GetString() == (string)started[id], Mismatch(id, start, started[id]));
+                    }
+                    else
+                    {
+                        Assert.True(start.GetBoolean() == (bool)started[id], Mismatch(id, start, started[id]));
+                    }
+                }
+            }
+
+            Assert.Equal(new[] { "CollisionEnabled", "ToggleKey", "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey" },
+                withCanonicalDefault);
+            Assert.True((bool)started["CollisionEnabled"]);
+            Assert.False(new HeadTrackingConfigData().CollisionEnabled);
         }
 
         // A config table's fresh render compares a row's default with the concept's DefaultText as

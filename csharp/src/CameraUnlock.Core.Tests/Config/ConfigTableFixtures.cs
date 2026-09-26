@@ -164,6 +164,7 @@ namespace CameraUnlock.Core.Tests.Config
             public float Scale = 1.0f;
             public string Key = "End";
             public string Keys = "End, Ctrl+Shift+Y";
+            public bool Flag;
         }
 
         private const string FreshRowTail = ". A fresh file writes default on this row, which takes Defaults.ini's value, so "
@@ -183,6 +184,17 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectMessage<ArgumentException>(() => SmallTable()
                 .Concept(ConfigConcepts.LocalSmoothing, s => s.Scale, (s, v) => s.Scale = v)
                 .RenderFresh(header), "[Smoothing] LocalSmoothing defaults to 1.0, and the schema to 0.0" + FreshRowTail);
+            ExpectMessage<ArgumentException>(() => SmallTable()
+                .Concept(ConfigConcepts.CollisionEnabled, s => s.Flag, (s, v) => s.Flag = v)
+                .RenderFresh(header), "[Position] CollisionEnabled defaults to false, and the schema to true" + FreshRowTail);
+            string collisionOn = Encoding.ASCII.GetString(SmallTable()
+                .Concept(ConfigConcepts.CollisionEnabled, s => s.Rotation, (s, v) => s.Rotation = v)
+                .RenderFresh(header));
+            if (!collisionOn.Contains("\r\nCollisionEnabled=default\r\n"))
+            {
+                throw new InvalidOperationException("a CollisionEnabled row starting at true, its canonical_default, renders "
+                    + "default:\n" + collisionOn);
+            }
 
             string perGame = Encoding.ASCII.GetString(SmallTable()
                 .Concept(ConfigConcepts.UdpPort, s => s.Value, (s, v) => s.Value = v)

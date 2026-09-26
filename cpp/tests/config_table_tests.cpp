@@ -744,6 +744,12 @@ void TestGlobalChecks() {
     Check(Thrown([&] { RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::LocalSmoothing>(&S::scale), header); }) ==
               std::string("[Smoothing] LocalSmoothing defaults to 1.0, and the schema to 0.0") + kFreshRowTail,
           "a float row off the schema's default throws");
+    Check(Thrown([&] { RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::CollisionEnabled>(&S::flag), header); }) ==
+              std::string("[Position] CollisionEnabled defaults to false, and the schema to true") + kFreshRowTail,
+          "a CollisionEnabled row starting at false, off its canonical_default, throws");
+    Check(Contains(RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::CollisionEnabled>(&S::rotation), header),
+                   "\r\nCollisionEnabled=default\r\n"),
+          "a CollisionEnabled row starting at true, its canonical_default, renders default");
 
     const std::string per_game =
         RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::UdpPort>(&S::value).PerGame(), header);

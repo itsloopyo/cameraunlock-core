@@ -8,6 +8,7 @@
 
 #include <cameraunlock/config/config_concepts.g.h>
 #include <cameraunlock/config/head_tracking_config.h>
+#include <cameraunlock/config/head_tracking_config_table.h>
 #include <cameraunlock/config/hotkey_codec.h>
 #include <cameraunlock/config/value_codecs.h>
 
@@ -26,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -596,6 +598,38 @@ void TestCanonicalDefaultTexts() {
     CheckDefaultTexts(std::make_index_sequence<cameraunlock::config::schema::kConceptCount>{});
 }
 
+template <std::size_t... I>
+cameraunlock::config::ConfigTable<cameraunlock::HeadTrackingConfig> AllConceptsTable(std::index_sequence<I...>) {
+    return cameraunlock::config::HeadTrackingConfigTable({cameraunlock::config::schema::kConcepts[I].id...});
+}
+
+// The canonical_default is where core's table starts a row, while the default above stays on the
+// field initialisers the flat reader uses. A table starting CollisionEnabled at the flat false would
+// give every converted mod's fresh file a row its gate refuses. The C++ twin of
+// ConfigSchemaDefaultsTests.TheCanonicalTableStartsEachConceptAtItsCanonicalDefault.
+void TestCanonicalTableStartsAtTheCanonicalDefaults() {
+    namespace schema = cameraunlock::config::schema;
+    const auto table = AllConceptsTable(std::make_index_sequence<schema::kConceptCount>{});
+    const std::map<std::string, ShippedDefault> started = ShippedDefaults(table.defaults());
+    std::vector<std::string> with_canonical_default;
+    for (const schema::ConceptInfo& info : schema::kConcepts) {
+        if (info.canonical_default == nullptr) continue;
+        with_canonical_default.push_back(info.name);
+        const ShippedDefault& start = started.at(info.name);
+        const bool same = start.type == cameraunlock::ConfigValueType::kBool
+                              ? start.bool_value == (std::strcmp(info.canonical_default, "true") == 0)
+                              : start.string_value == info.canonical_default;
+        Check(same, (std::string(info.name) + ": the canonical table starts it at its canonical_default " +
+                     info.canonical_default + ", and holds " + DescribeShipped(start))
+                        .c_str());
+    }
+    Check(with_canonical_default == std::vector<std::string>{"CollisionEnabled", "ToggleKey", "CycleTrackingModeKey",
+                                                              "YawModeKey", "TrueFreeLookKey"},
+          "the concepts with a canonical_default are CollisionEnabled and the four hotkey lists");
+    Check(started.at("CollisionEnabled").bool_value && !cameraunlock::HeadTrackingConfig{}.collision_enabled,
+          "the canonical table starts CollisionEnabled at true and the flat reader's field stays false");
+}
+
 void TestIniParsing() {
     const std::string path = "config_schema_tests.ini";
     {
@@ -640,6 +674,7 @@ int RunConfigSchemaTests() {
     TestSchemaRangesMatchTheGuards();
     TestSchemaDefaultsMatchTheShippedDefaults();
     TestCanonicalDefaultTexts();
+    TestCanonicalTableStartsAtTheCanonicalDefaults();
     TestIniParsing();
     return g_failures;
 }

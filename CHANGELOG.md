@@ -59,18 +59,31 @@ wall check runs is a preference, so it stays global and starts on.
   them ignores the effective defaults, `PerGame()` on them throws, `HeadTrackingConfigTable` starts
   `CollisionEnabled` at true and the flat default stays false, and an owner over a table with
   `CollisionMargin` 10 and `CollisionChannel` 3 creates the file with both at those values while
-  `CollisionEnabled` follows Defaults.ini.
+  `CollisionEnabled` follows Defaults.ini. `ConfigSchemaDefaultsTests` (C++ `config_schema_tests`)
+  holds every `canonical_default` in the schema to where core's all-concepts table starts the row,
+  and names the five concepts that carry one, beside the existing check that `default` matches the
+  flat field. The fresh render's gate refuses a `CollisionEnabled` row starting at `false` and
+  writes one starting at `true` as `default`, and `global/read-refused-values` gains a refused
+  `CollisionEnabled` line whose message names the built-in `true`.
 
 What a consuming repo changes at its pin bump. Keep the `CollisionMargin` and `CollisionChannel`
 defaults the mod ships, in whatever unit and channel its engine uses; drop a `PerGame()` on either
 row (none is in the fleet today), and keep or add `Engine()` where the row should be written
 commented at its default. A table
 that binds `CollisionEnabled` defaults it to `true`; a mod without a lean collision sweep does not
-bind it. Re-run `pixi run render-config`: the committed file holds `CollisionEnabled=default` and
-the two rows at the mod's own values, an `Engine()` row commented. The seven converted repos that were waiting
-on this (deus-ex-human-revolution, outer-worlds-spacers-choice-edition, ready-or-not,
-sniper-elite-v2-remastered, stalker-shadow-of-chornobyl-enhanced-edition, the-forest, thief) can
-bump past the entry where the owners read Defaults.ini.
+bind it. A converted repo whose own table starts the row at `false`, such as a C++ mod's
+`ConfigTable` over a field initialised `false`, fails `RenderFresh` at its pin bump with
+`[Position] CollisionEnabled defaults to false, and the schema to true. A fresh file writes default
+on this row, ...`, and moves that default to `true` or marks the row `PerGame()` under an
+owner-approved `per_game` entry. `HeadTrackingConfigTable` starts the row at `true` whatever the
+config type's own initialiser holds. A mod whose wall check has not been confirmed in game then runs
+it wherever the row follows Defaults.ini, where a new file holds `true`. Re-run
+`pixi run render-config`: the committed file holds `CollisionEnabled=default` and
+the two rows at the mod's own values, an `Engine()` row commented. The seven converted repos that
+were waiting on this (deus-ex-human-revolution, outer-worlds-spacers-choice-edition, ready-or-not,
+sniper-elite-v2-remastered, stalker-shadow-of-chornobyl-enhanced-edition, the-forest, thief) have
+bumped their pin to def74d7, and each starts `CollisionEnabled` at `true` and commits
+`CollisionEnabled=default` (read at each repo's HEAD on 2026-09-26).
 
 ### Changed - docs/canonical-config.md describes Defaults.ini in full
 

@@ -415,7 +415,7 @@
       "type": "bool",
       "default": false,
       "aliases": ["LeanCollision", "LeanCollisionEnabled", "CameraCollision", "ClampLean"],
-      "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. A canonical file starts it on (canonical_default true, collision rows ruling of 2026-09-26): it is global, so Defaults.ini's value reaches every game that binds the row, and a game without a lean collision sweep does not bind it. The flat readers' default stays false. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice.",
+      "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. A canonical file starts it on (canonical_default true, collision rows ruling of 2026-09-26): it is global, so Defaults.ini's value reaches every game that binds the row, and a game without a lean collision sweep does not bind it. A table whose row starts at false fails the fresh render's gate, so unless the owner approves a per_game entry, a mod whose trace has not been confirmed in game runs the sweep wherever its row follows Defaults.ini, where an unverified channel can block on nothing or on everything. The flat readers' default stays false. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice.",
       "canonical": true,
       "global": true,
       "file_comment": ["true: leaning stops at walls instead of moving the view through them."],

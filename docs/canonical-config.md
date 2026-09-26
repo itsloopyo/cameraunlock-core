@@ -363,7 +363,13 @@ reads `TrueFreeLookKey`, so its `default` and field initialisers are its `canoni
 
 `CollisionEnabled` starts on (collision rows ruling of 2026-09-26): it is global, so the value in
 Defaults.ini reaches every game whose table binds the row, and a game without a lean collision
-sweep does not bind it. The margin and the channel a sweep uses stay each game's own.
+sweep does not bind it. The margin and the channel a sweep uses stay each game's own. A table
+whose `CollisionEnabled` row starts at `false` fails the fresh render's gate (`[Position]
+CollisionEnabled defaults to false, and the schema to true`), so the mod moves that default to
+`true` or marks the row `PerGame()` under an owner-approved `per_game` entry.
+`HeadTrackingConfigTable` starts the row at `true` whatever the config type's own initialiser
+holds. A mod whose wall check has not been confirmed in game runs it wherever the row follows
+Defaults.ini ([The global defaults file](#the-global-defaults-file) has the hazard).
 
 The tracking mode at startup is the pair `RotationEnabled` and `PositionEnabled`: both true is
 rotation and position, `true, false` rotation only, `false, true` position only. Both false names
@@ -1052,7 +1058,10 @@ LightMultiplier=1.5
 own in its `CameraUnlock.ini`, and a line for either in Defaults.ini is not read.
 `CollisionEnabled=false` here turns the wall check off in every game that binds the row and does
 not set it in its own file, and `true` turns it on there, each game with its own margin and
-channel.
+channel. A new Defaults.ini holds `true`, so a mod whose wall check has not been confirmed in game
+runs the sweep wherever its row follows Defaults.ini. A trace channel nobody verified blocks on
+nothing or on everything, and in a game where it blocks on everything the check can stop leaning
+altogether.
 
 ### Creating it
 
