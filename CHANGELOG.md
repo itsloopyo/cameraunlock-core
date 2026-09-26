@@ -54,6 +54,16 @@ Approved by the owner on 2026-09-26 and recorded as `normalisations.N3` in
   carried over. A normalisation approved later stops the block rendering until it has a line or
   is marked as having none.
 
+### Changed - trepang2-headtracking keeps its own CycleTrackingModeKey and YawModeKey
+
+`data/config-format.json` `per_game` lists `CycleTrackingModeKey` and `YawModeKey` for
+trepang2-headtracking, approved 2026-09-26: in Trepang2 the fleet chords clash with the game's own
+bindings, Ctrl+Shift+G throws a grenade and Ctrl+Shift+H dual wields. Its committed file is to hold
+`CycleTrackingModeKey=PageUp, Ctrl+Shift+J` and `YawModeKey=PageDown`, its table marks both rows
+`PerGame()`, and render-config writes both into its descriptor's `per_game`. The repo still holds
+`default` on both rows and an empty `per_game`, so its `config-format` and `config-descriptor`
+conformance fail until it changes.
+
 ### Added - an import can leave a row to Defaults.ini
 
 A map that applied `follows_default` set the field to the table's built-in default, so the

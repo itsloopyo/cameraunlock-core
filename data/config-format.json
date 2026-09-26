@@ -594,6 +594,18 @@
         "reason": "The mod defaults to camera-local yaw because swimming has no stable up, so Defaults.ini's WorldSpaceYaw must not reach it.",
         "approved": "2026-09-25"
       }
+    ],
+    "trepang2-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: in Trepang2 Ctrl+Shift+G throws a grenade. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-09-26"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: in Trepang2 Ctrl+Shift+H dual wields. The committed file holds YawModeKey=PageDown.",
+        "approved": "2026-09-26"
+      }
     ]
   }
 }
