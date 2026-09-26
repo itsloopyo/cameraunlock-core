@@ -82,8 +82,9 @@ it wherever the row follows Defaults.ini, where a new file holds `true`. Re-run
 the two rows at the mod's own values, an `Engine()` row commented. The seven converted repos that
 were waiting on this (deus-ex-human-revolution, outer-worlds-spacers-choice-edition, ready-or-not,
 sniper-elite-v2-remastered, stalker-shadow-of-chornobyl-enhanced-edition, the-forest, thief) have
-bumped their pin to def74d7, and each starts `CollisionEnabled` at `true` and commits
-`CollisionEnabled=default` (read at each repo's HEAD on 2026-09-26).
+bumped their pin to def74d7 or later (six at def74d7, thief at 49f5fec), and each starts
+`CollisionEnabled` at `true` and commits `CollisionEnabled=default` (read at each repo's HEAD on
+2026-09-26).
 
 ### Changed - docs/canonical-config.md describes Defaults.ini in full
 
