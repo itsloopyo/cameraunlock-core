@@ -15,25 +15,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   says, once, after the file's location: that a setting set to `default` takes its value from
   Defaults.ini, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads,
   that head tracking mods keeping their settings in another file do not, nor (in a `legacy` repo)
-  earlier versions of the mod, and that writing a value changes that game only; the three
-  locations the file's header names, and that the mod's log names the file it read; that the mod
-  creates Defaults.ini with the built-in values when it finds none, unless Windows runs the game
-  as a packaged app, and never changes it afterwards. For a repo whose `dialect` is `unity`, the
-  repos whose config owner is core's C# one, it adds that on Linux and macOS without Wine or
-  Proton the mod creates no Defaults.ini and reads its settings and saves none, so a change made
-  in game lasts until the game closes. A `legacy` repo's paragraphs add what the import writes
-  (`default` where the imported value equals the row's default at that start, the tracking-mode
-  pair together) and that the rows the reset sets to `default` follow Defaults.ini. Before the
-  file, the block lists the built-in value of each `default` row, from `data/config-schema.json`
-  (the hotkeys at `canonical_default`). A committed file with no `default` row renders exactly the
-  block it rendered before. `configBlock` is exported and the command line runs only when the
-  script is run directly.
+  earlier versions of the mod, that writing a value changes that game only, and that a hotkey
+  change the mod saves writes a value over `default`, so that row stops following Defaults.ini in
+  that game; the three locations the file's header names, and that the mod's log names the file it
+  read; that the mod creates Defaults.ini with the built-in values when it finds none, unless
+  Windows runs the game as a packaged app, and never changes it afterwards. A `legacy` repo's
+  paragraphs add what the import writes (`default` where the imported value equals the row's
+  default at that start, the tracking-mode pair together) and that the rows the reset sets to
+  `default` follow Defaults.ini. For a repo whose `dialect` is `unity`, the repos whose config
+  owner is core's C# one, the block adds that on Linux and macOS without Wine or Proton the mod
+  reads its settings and saves none: it creates neither Defaults.ini nor `CameraUnlock.ini`, in a
+  `legacy` repo imports the legacy file again at every start, and a change made in game lasts until
+  the game closes. Before the file, the block lists the built-in value of each concept row
+  set to `default`, from `data/config-schema.json` (the hotkeys at `canonical_default`); a game's
+  local row may hold the word as data and is not listed. A committed file with no `default` row
+  renders exactly the block it rendered before. `configBlock` is exported and the command line
+  runs only when the script is run directly, by its real path, so a run through a junction or
+  symlink still runs it (as `check-canonical-config.mjs`, `check-config-descriptor.mjs` and
+  `encode-seed.mjs` now do too).
 - **`scripts/templates/canonical-config-changelog.md`**: the Legacy bullets gain the import's
   `default` rule and the reset sentence's Defaults.ini clause; an Outside legacy bullet says a new
   `CameraUnlock.ini` sets those rows to `default`; every converted repo takes the Defaults.ini
-  bullets (what `default` means and who reads the file, where it is, that the mod creates it and
-  never changes it), and a repo whose `dialect` is `unity` the native Linux and macOS read-only
-  bullet.
+  bullets (what `default` means and who reads the file, that a saved hotkey change stops a row
+  following it, where it is, that the mod creates it and never changes it), and a repo whose
+  `dialect` is `unity` the native Linux and macOS read-only bullet for its listing.
 - **`pixi run test-generate-readme`**, part of `pixi run check`, renders the block for synthetic
   repo states over the fresh example file and checks the Defaults.ini text and every built-in value
   against `data/fixtures/canonical-ini/global/Defaults.ini`, and over a file of values against the

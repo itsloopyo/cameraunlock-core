@@ -64,8 +64,9 @@ data/config-format.json's `approved_changes`), that an older version of the mod
 reads only the legacy file, and how to import again or reset; for a BepInEx
 mod, that ConfigurationManager does not list the settings; where the committed
 file holds `default` rows, what `default` means, where Defaults.ini is, who
-reads it, that the mod creates it and never changes it, for a C# mod what
-happens on Linux and macOS without Wine, and the built-in value of each
+reads it, that a hotkey change the mod saves stops a row following it, that
+the mod creates it and never changes it, for a C# mod what happens on Linux
+and macOS without Wine, and the built-in value of each
 `default` row; then the committed file itself in an ini code fence. It replaces any hand-written key listing,
 since the file's own comments describe every key.
 

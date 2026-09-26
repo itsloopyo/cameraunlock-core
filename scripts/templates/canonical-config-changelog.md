@@ -9,8 +9,8 @@ Outside legacy bullet, the Removed bullets it needs, and where it is a BepInEx m
 ConfigurationManager bullet with "does not list" in place of "no longer lists". Every
 converted repo takes the Defaults.ini bullets. A repo whose `dialect` is `unity` has core's C#
 config owner, the one owner that runs natively on Linux and macOS, and takes the C# owner
-variant of the creation bullet and the read-only bullet, under Changed in a `legacy` repo,
-whose earlier versions saved settings there, and under Added outside it.
+variant of the creation bullet and the read-only bullet for its listing, under Changed in a
+`legacy` repo, whose earlier versions saved settings there, and under Added outside it.
 
 Then:
 
@@ -76,7 +76,7 @@ writes no seed because REFramework is already there.
 
 ### Added
 
-- A setting set to `default` in `CameraUnlock.ini` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only.
+- A setting set to `default` in `CameraUnlock.ini` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
 - `Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
 - Only where the `dialect` is `native`:
   When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that.
@@ -87,7 +87,10 @@ writes no seed because REFramework is already there.
 
 ### Changed in a `legacy` repo, Added outside it
 
-- On Linux and macOS without Wine or Proton, this version reads its settings and saves none, so a change made in game lasts until the game closes.
+- Only where the repo is in `legacy`:
+  On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no `CameraUnlock.ini`, reads your settings from `<legacy>` again at every start while there is no `CameraUnlock.ini`, and a change made in game lasts until the game closes.
+- Only where the repo is outside `legacy`:
+  On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no `CameraUnlock.ini` and a change made in game lasts until the game closes.
 
 ## Removed, with or without the Legacy bullets
 

@@ -268,11 +268,18 @@ function defaultsParagraphs(legacy, csharp) {
   const followed = code(DEFAULTS_NAME);
   const config = code(CONFIG_NAME);
   return [
-    `A setting set to \`default\` takes its value from ${followed}, which every head tracking mod that keeps its settings in ${config} reads. Head tracking mods that keep their settings in another file do not read it${legacy ? ', and neither do earlier versions of this mod' : ''}. Writing a value in place of \`default\` changes that setting for this game only.`,
+    `A setting set to \`default\` takes its value from ${followed}, which every head tracking mod that keeps its settings in ${config} reads. Head tracking mods that keep their settings in another file do not read it${legacy ? ', and neither do earlier versions of this mod' : ''}. Writing a value in place of \`default\` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of \`default\`, so that setting no longer follows ${followed} in this game until you set it to \`default\` again.`,
     `${followed} is ${code('%AppData%\\CameraUnlock\\Defaults.ini')} on Windows; ${code('$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini')} on Linux, or ${code('~/.config/CameraUnlock/Defaults.ini')} where \`XDG_CONFIG_HOME\` is not set, under Wine and Proton too; and ${code('~/Library/Application Support/CameraUnlock/Defaults.ini')} on macOS. The mod's log, where it writes one, names the file it read.`,
     `When the mod starts and finds no ${followed}, it creates one holding the built-in values, unless Windows runs the game as a packaged app${csharp ? ', or the game runs on Linux or macOS without Wine or Proton' : ''}. The mod never changes ${followed} after that. ${EDIT}`,
-    ...(csharp ? ['On Linux and macOS without Wine or Proton, this version reads its settings and saves none, so a change made in game lasts until the game closes.'] : []),
   ];
+}
+
+// The C# owner off Windows: it reads the config file, imports the legacy file in memory at every
+// start, and writes nothing, so the sentences above about creating and writing files do not hold.
+function nativeParagraph(legacy) {
+  const config = code(CONFIG_NAME);
+  const imports = legacy === null ? '' : `, reads your settings from ${code(legacy)} again at every start while there is no ${config},`;
+  return `On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no ${config}${imports} and a change made in game lasts until the game closes.`;
 }
 
 // Floats as the canonical codec writes them, which data/fixtures/canonical-ini/global/Defaults.ini
@@ -283,15 +290,14 @@ function builtInText(concept) {
   return String(concept.default);
 }
 
-// Each row the committed file sets to default, in file order, with its built-in value.
+// Each concept row the committed file sets to default, in file order, with its built-in value. On a
+// game's local row the word is data (a Unity layer can be called Default), as the reader and the
+// lint treat it.
 function defaultRows(root, committed) {
   const doc = parseCanonicalIni(fs.readFileSync(path.join(root, ...committed.split('/'))));
-  return doc.sections.flatMap((section) => section.values.filter((v) => isDefaultToken(v.value)).map((v) => {
+  return doc.sections.flatMap((section) => section.values.filter((v) => isDefaultToken(v.value)).flatMap((v) => {
     const concept = CANONICAL_CONCEPTS.find((c) => equalsAsciiIgnoreCase(c.section, section.name) && equalsAsciiIgnoreCase(c.key, v.key));
-    if (concept === undefined) {
-      throw new Error(`${committed} line ${v.line}: [${section.name}] ${v.key} holds ${v.value}, which only a canonical concept's row takes`);
-    }
-    return { key: concept.key, text: builtInText(concept) };
+    return concept === undefined ? [] : [{ key: concept.key, text: builtInText(concept) }];
   }));
 }
 
@@ -344,12 +350,15 @@ export function configBlock(state) {
       throw new Error(`data/config-format.json gives ${committed} several entries in a legacy or BepInEx repo; the config block has no wording for that`);
     }
     const defaults = defaultRows(state.root, committed);
+    const explain = defaults.length > 0 && !explained;
+    const csharp = explain && csharpOwner(state.files);
     parts.push(locationParagraph(entries));
-    if (defaults.length > 0 && !explained) {
-      parts.push(...defaultsParagraphs(legacy, csharpOwner(state.files)));
+    if (explain) {
+      parts.push(...defaultsParagraphs(legacy, csharp));
       explained = true;
     }
     if (legacy) parts.push(...legacyParagraphs(entries[0].legacy_source, defaults));
+    if (csharp) parts.push(nativeParagraph(legacy ? entries[0].legacy_source : null));
     if (bepinex) parts.push(`BepInEx's ConfigurationManager ${legacy ? 'no longer lists' : 'does not list'} these settings.`);
     if (defaults.length > 0) parts.push(builtInList(defaults));
     parts.push('With every setting at its default, the file reads:');

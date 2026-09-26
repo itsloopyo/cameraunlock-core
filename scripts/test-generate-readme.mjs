@@ -53,7 +53,11 @@ const WHERE = "`Defaults.ini` is `%AppData%\\CameraUnlock\\Defaults.ini` on Wind
 const NEVER = "The mod never changes `Defaults.ini` after that.";
 const THIS_GAME = "Writing a value in place of `default` changes that setting for this game only.";
 const EARLIER = ", and neither do earlier versions of this mod.";
-const NATIVE = "On Linux and macOS without Wine or Proton, this version reads its settings and saves none, so a change made in game lasts until the game closes.";
+const HOTKEY = "When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.";
+const NATIVE = "On Linux and macOS without Wine or Proton, this version reads its settings";
+const nativeSentence = (legacy) => legacy === null
+  ? "On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no `CameraUnlock.ini` and a change made in game lasts until the game closes."
+  : `On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no \`CameraUnlock.ini\`, reads your settings from \`${legacy}\` again at every start while there is no \`CameraUnlock.ini\`, and a change made in game lasts until the game closes.`;
 const NATIVE_CREATE = ", or the game runs on Linux or macOS without Wine or Proton.";
 const MIGRATED = "is written as `default` when the value imported for it equals its default at that start";
 const PAIR = "`RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.";
@@ -66,14 +70,17 @@ for (const name of Object.keys(CASES)) {
 
   const fresh = block(name, FRESH);
   const legacy = name.startsWith("legacy");
-  const csharp = CASES[name][1](FRESH)[0].dialect === "unity";
+  const [{ dialect, legacy_source: legacySource }] = CASES[name][1](FRESH);
+  const csharp = dialect === "unity";
   for (const [text, want, what] of [
     [WHO, true, "who reads Defaults.ini"],
+    [HOTKEY, true, "that a saved hotkey change stops the row following Defaults.ini"],
     [WHERE, true, "where Defaults.ini is"],
     [NEVER, true, "that the mod never changes Defaults.ini"],
     [THIS_GAME, true, "what a value in place of default does"],
     [EARLIER, legacy, "that earlier versions do not read Defaults.ini"],
     [NATIVE, csharp, "the native Linux and macOS read-only sentence"],
+    [nativeSentence(legacySource), csharp, "the native read-only sentence for this repo's legacy file or its absence"],
     [NATIVE_CREATE, csharp, "the native exception to creating Defaults.ini"],
     [MIGRATED, legacy, "what the import writes as default"],
     [PAIR, legacy, "the tracking-mode pair of the import"],
@@ -82,6 +89,9 @@ for (const name of Object.keys(CASES)) {
     check(fresh.includes(text) === want, `${name}: the fresh block ${want ? "lacks" : "has"} ${what}`);
   }
   check(fresh.split("`Defaults.ini` is `%AppData%").length === 2, `${name}: the fresh block says where Defaults.ini is other than once`);
+  if (csharp && legacy) {
+    check(fresh.indexOf(NATIVE) > fresh.indexOf("Earlier versions of the mod kept these settings"), `${name}: the native sentence names the legacy file before the block introduces it`);
+  }
 }
 
 // Every built-in value the block lists is the one Defaults.ini holds when the mod creates it.
@@ -113,18 +123,16 @@ for (const committed of [FRESH, ALL_FRESH]) {
 }
 check(defaultKeys(ALL_FRESH).length === SCHEMA.concepts.filter((c) => c.canonical).length, `${ALL_FRESH} no longer sets every canonical concept to default`);
 
-// default on a row that is not a concept's stops the block.
+// On a game's local row the word is data: the block lists only concept rows and still renders.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "readme-"));
-let local = null;
+let local;
 try {
-  fs.writeFileSync(path.join(scratch, "bad.ini"), "[CameraUnlock]\r\nConfigFormat=1\r\n\r\n[Camera]\r\nMode=default\r\n");
-  block("new-one-path", "bad.ini", scratch);
-} catch (e) {
-  local = e.message;
+  fs.writeFileSync(path.join(scratch, "local.ini"), "[CameraUnlock]\r\nConfigFormat=1\r\n\r\n[Network]\r\nUdpPort=default\r\n\r\n[Camera]\r\nMode=Default\r\n");
+  local = builtIns(block("new-one-path", "local.ini", scratch));
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });
 }
-check(local === "bad.ini line 5: [Camera] Mode holds default, which only a canonical concept's row takes", `default on a local row: ${local ?? "no error"}`);
+check(JSON.stringify(local) === JSON.stringify([["UdpPort", "4242"]]), `a local row holding Default: the built-in list is ${JSON.stringify(local)}`);
 
 // A C# repo and a C++ one never share a README block.
 let mixed = null;

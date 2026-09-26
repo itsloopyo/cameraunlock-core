@@ -907,20 +907,26 @@ in `legacy`:
   The block never tells a player to delete the legacy file: a Lopari v0.9.0 receipt can record it
   as a seed (resident-evil-requiem-headtracking v0.4.0 seeds `reframework/plugins/HeadTracking.ini`
   beside REFramework), and with that file gone Lopari reinstalls the mod before every launch.
-- **Outside `legacy`**: nothing beyond the location and the file.
+- **Outside `legacy`**: nothing about a legacy file.
 - **A BepInEx mod**, installed under `BepInEx\config\`, adds that BepInEx's ConfigurationManager
   no longer lists these settings, or for a repo outside `legacy`, does not list them.
-- **A committed file with `default` rows** adds, once, after the location: that a `default` row
-  takes its value from Defaults.ini, which every head tracking mod that keeps its settings in
-  `CameraUnlock.ini` reads and no other mod or earlier version does, and that a value changes
-  that game only; the three locations of the file's header, and that the log names the file read;
-  that the mod creates Defaults.ini with the built-in values when it finds none, except in a
-  packaged game, and never changes it afterwards; and for a repo whose `dialect` is `unity` (core's
-  C# owner), that on Linux and macOS without Wine or Proton the mod reads its settings and saves
-  none. A `legacy` repo's paragraphs add that the import writes `default` where the imported value
-  equals the row's default at that start, and that the reset rows follow Defaults.ini. The file
-  is preceded by the built-in value of each `default` row, from `data/config-schema.json`. A
-  committed file that holds values gets none of this, so its block is the one it had before.
+- **A committed file with `default` rows**, in a repo in `legacy` or outside it, adds, once, after
+  the location: that a `default` row takes its value from Defaults.ini, which every head tracking
+  mod that keeps its settings in `CameraUnlock.ini` reads, that head tracking mods keeping their
+  settings in another file do not read it, nor, in a `legacy` repo, earlier versions of the mod,
+  that a value changes that game only, and that a hotkey change the mod saves writes a value over
+  `default`, so the row stops following Defaults.ini in that game; the three locations of the
+  file's header, and that the log names the file read; and that the mod creates Defaults.ini with
+  the built-in values when it finds none, except in a packaged game, and never changes it
+  afterwards. A `legacy` repo's paragraphs add that the import writes `default` where the imported
+  value equals the row's default at that start, and that the reset rows follow Defaults.ini. For
+  a repo whose `dialect` is `unity` (core's C# owner), the block then says that on Linux and macOS
+  without Wine or Proton the mod reads its settings and saves none: it creates no
+  `CameraUnlock.ini`, in a `legacy` repo imports the legacy file again at every start, and a change
+  made in game lasts until the game closes. The file is preceded by the built-in value of each
+  `default` row, from `data/config-schema.json`; a row that is not a concept's may hold the word as
+  data and is not listed. A committed file that holds values gets none of this, so its block is the
+  one it had before.
 
 `scripts/templates/canonical-config-changelog.md` holds the matching changelog bullets for a
 conversion release, the Legacy ones for a repo in `legacy`. The untracked NEXUS_MODS.md is updated by hand from
