@@ -7,7 +7,8 @@
 // data/fixtures/readme/values.ini (a copy of table/render-defaults/expected.ini, a file that
 // holds values) at 8c83941, before it knew Defaults.ini. A repo whose committed file still holds
 // values must keep that block byte for byte, or every converted README drifts at the next pin
-// bump.
+// bump. values-legacy-reframework.md came later, when the block began leaving the N3 line out for
+// an REFramework repo.
 //
 //   node scripts/test-generate-readme.mjs
 
@@ -31,6 +32,7 @@ const entry = (committed, installed, legacy_source, dialect, extra = {}) =>
 const CASES = {
   "legacy-bepinex": ["legacy", (c) => [entry(c, ["BepInEx\\config\\CameraUnlock.ini"], "com.example.headtracking.cfg", "unity")]],
   "legacy-stores": ["legacy", (c) => [entry(c, ["CameraUnlock.ini", "Game\\Binaries\\Win64\\CameraUnlock.ini"], "HeadTracking.ini", "native")]],
+  "legacy-reframework": ["legacy", (c) => [entry(c, ["reframework\\plugins\\CameraUnlock.ini"], "HeadTracking.ini", "native")]],
   "new-bepinex": ["mover", (c) => [entry(c, ["BepInEx\\config\\CameraUnlock.ini"], null, "unity")]],
   "new-one-path": ["mover", (c) => [entry(c, ["CameraUnlock.ini"], null, "native")]],
   "new-no-installed": ["mover", (c) => [entry(c, [], null, "native", { no_installed_reason: "It sits in the folder the plugin loader names." })]],
@@ -61,7 +63,8 @@ const nativeSentence = (legacy) => legacy === null
 const NATIVE_CREATE = ", or the game runs on Linux or macOS without Wine or Proton.";
 const MIGRATED = "is written as `default` when the value imported for it equals its default at that start";
 const PAIR = "`RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.";
-const RESET = "replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.";
+const N3 = "- A hotkey set to Ctrl, Shift or Alt on its own.";
+const RESET ="replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.";
 
 for (const name of Object.keys(CASES)) {
   const expected = fs.readFileSync(path.join(CORE_ROOT, "data/fixtures/readme", `values-${name}.md`), "utf8");
@@ -85,6 +88,7 @@ for (const name of Object.keys(CASES)) {
     [MIGRATED, legacy, "what the import writes as default"],
     [PAIR, legacy, "the tracking-mode pair of the import"],
     [RESET, legacy, "that the reset rows follow Defaults.ini"],
+    [N3, legacy && name !== "legacy-reframework", "the N3 line, which core's REFramework import does not apply"],
   ]) {
     check(fresh.includes(text) === want, `${name}: the fresh block ${want ? "lacks" : "has"} ${what}`);
   }

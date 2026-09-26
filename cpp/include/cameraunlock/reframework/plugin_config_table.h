@@ -32,7 +32,9 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
 /// migration (modId "re8", ConfigVersion below 1 and schema.positionInvertKeys: InvertX becomes
 /// false), and maps into the table's fields: each hotkey code becomes a list holding that key and
 /// the Ctrl+Shift chord the legacy bootstrap registers beside it (Y for ToggleKey, G for
-/// PositionToggleKey, H for YawModeKey; DiagnosticMarkerKey has none). The three multipliers, the
+/// PositionToggleKey, H for YawModeKey; DiagnosticMarkerKey has none). Read has already replaced a
+/// code IsBindableVirtualKey refuses, a Ctrl, Shift or Alt key included, with the row's default, so
+/// the import applies neither normalisation N1 nor N3 and records no drop for a hotkey. The three multipliers, the
 /// three position sensitivities and, where schema.positionInvertKeys lets Read read them, the three
 /// position inversions go through config::LegacyPoseShaping against their SetDefaults values, so
 /// the result lists those nine, or six, in pose_shaping, and one that differs from SetDefaults is

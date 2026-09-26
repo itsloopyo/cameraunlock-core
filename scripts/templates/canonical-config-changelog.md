@@ -57,7 +57,8 @@ writes no seed because REFramework is already there.
   - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
   - Reticle settings, and a key that toggled the reticle.
   - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
-  - A hotkey set to Ctrl, Shift or Alt on its own. It fired at the start of every Ctrl+Shift chord, so it is left unbound, and the hotkey keeps its Ctrl+Shift chord where it has one.
+  - Only where the mod is not an REFramework mod:
+    A hotkey set to Ctrl, Shift or Alt on its own. That key goes down before the key of any chord made with it, so the hotkey is left unbound, and it keeps its Ctrl+Shift chord where it has one.
 - An older version of the mod reads `<legacy>` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `<legacy>`.
 - Deleting only `CameraUnlock.ini` makes the next start read `<legacy>` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults the README shows. Every setting they set to `default` then follows `Defaults.ini`.
 - Only where the mod is a BepInEx mod:

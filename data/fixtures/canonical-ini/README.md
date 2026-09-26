@@ -406,6 +406,7 @@ is three, since `80` cannot follow `F0`. The `value` row's value field stays the
 | `read-refused-values` | codec and range refusals on int, bool and float rows and a value with `; note`, each with its line; a refused `CollisionEnabled` whose line names the built-in `true`, its `canonical_default`; one value beside them accepted; invalid `CollisionMargin` and `CollisionChannel` lines, not read at all since neither is global |
 | `read-hotkey-mouse4`, `read-hotkey-code` | `ToggleKey=Mouse4` and `ToggleKey=0x23` on line 12, refused alike, with the line the design gives |
 | `read-hotkeys` | names in any letter case with modifiers, an empty list, a grammar error with the codec's reason, and `Clear`, a Unity key with no `vk` |
+| `read-hotkey-modifier-keys` | `LeftShift` alone, `rightcontrol` and `RIGHTALT` after modifiers, and `Ctrl+Shift+0x10`: each refused as not one of the key names the file takes, since no hotkey's key is a Ctrl, Shift or Alt key, each with its line |
 | `read-default-token` | `DEFAULT`, `Default` and `default` on an int, a bool, a float and a hotkey row |
 | `read-pair-both-false` | false/false: both refused, one line |
 | `read-pair-one-invalid` | one row the codec refuses takes the valid one with it; the line names the rows in line order |

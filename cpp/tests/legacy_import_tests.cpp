@@ -99,8 +99,8 @@ void TestDescribe() {
               "not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
           "N1 line");
     Check(DescribeDroppedValue({DropRule::ModifierKey, "Hotkeys", "YawModeKey", "0x11"}) ==
-              "not carried: [Hotkeys] YawModeKey=0x11, it is a Ctrl, Shift or Alt key, which fires at the start of "
-              "every Ctrl+Shift chord, so it is unbound",
+              "not carried: [Hotkeys] YawModeKey=0x11, it is a Ctrl, Shift or Alt key, which goes down before the key of "
+              "any chord made with it, so it is unbound",
           "N3 line");
     Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(9), "A", "B", "C"}); }) ==
               "drop rule 9 is not a DropRule",

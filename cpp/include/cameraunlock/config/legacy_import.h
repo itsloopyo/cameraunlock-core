@@ -169,8 +169,8 @@ struct LegacyImport {
 /// to the scan codes a layout leaves unmapped (VK__none_), and GetAsyncKeyState(0xFF) reports down
 /// while that code is held, so a legacy 0xFF hotkey could fire, and N1 unbinds it (approved
 /// 2026-09-25). A Ctrl, Shift or Alt key (0x10-0x12, 0xA0-0xA5) gives "" too (N3, approved
-/// 2026-09-26): no hotkey value binds one, because it goes down before the key of any chord it
-/// starts, so a binding on it fires at the start of every Ctrl+Shift chord. A map folding a
+/// 2026-09-26): no hotkey value binds one, because it goes down before the key of any chord made
+/// with it, so a binding on it fires on the way into every such chord. A map folding a
 /// legacy chord switch into the same action appends the chord to what this gives, so the player
 /// keeps the chord when the code is unbound.
 std::string LegacyVirtualKeyToBindings(long long code);

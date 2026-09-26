@@ -85,8 +85,8 @@ namespace CameraUnlock.Core.Tests.Config
                 new DroppedValue(DropRule.FollowsDefault, "Position", "CollisionEnabled", "false").Describe());
             Assert.Equal("not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
                 new DroppedValue(DropRule.KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230").Describe());
-            Assert.Equal("not carried: [Hotkeys] YawModeKey=LeftShift, it is a Ctrl, Shift or Alt key, which fires at the "
-                + "start of every Ctrl+Shift chord, so it is unbound",
+            Assert.Equal("not carried: [Hotkeys] YawModeKey=LeftShift, it is a Ctrl, Shift or Alt key, which goes down before the "
+                + "key of any chord made with it, so it is unbound",
                 new DroppedValue(DropRule.ModifierKey, "Hotkeys", "YawModeKey", "LeftShift").Describe());
         }
 

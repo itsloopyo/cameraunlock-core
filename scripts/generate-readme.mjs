@@ -234,10 +234,16 @@ const APPROVED_CHANGE_LINES = {
 const NORMALISATION_LINES = {
   N1: null,
   N2: null,
-  N3: 'A hotkey set to Ctrl, Shift or Alt on its own. It fired at the start of every Ctrl+Shift chord, so it is left unbound, and the hotkey keeps its Ctrl+Shift chord where it has one.',
+  N3: 'A hotkey set to Ctrl, Shift or Alt on its own. That key goes down before the key of any chord made with it, so the hotkey is left unbound, and it keeps its Ctrl+Shift chord where it has one.',
 };
 
-function droppedSettings() {
+// Core's REFramework import reads legacy hotkeys through the frozen PluginConfig::Read, which
+// replaces a code it cannot bind, a Ctrl, Shift or Alt key among them, with the row's default, so
+// an REFramework repo imports such a hotkey as its default and N3 unbinds nothing there. The owner
+// kept that reader for N1 on 2026-09-25.
+const NOT_APPLIED_BY_REFRAMEWORK = new Set(['N3']);
+
+function droppedSettings(reframework) {
   const changes = Object.keys(FORMAT.approved_changes).map((id) => {
     if (!(id in APPROVED_CHANGE_LINES)) {
       throw new Error(`data/config-format.json approved_changes.${id} has no line in the config block; add one to APPROVED_CHANGE_LINES in scripts/generate-readme.mjs`);
@@ -245,7 +251,7 @@ function droppedSettings() {
     return APPROVED_CHANGE_LINES[id];
   });
   const normalisations = Object.entries(FORMAT.normalisations)
-    .filter(([, n]) => n.approved !== null)
+    .filter(([id, n]) => n.approved !== null && !(reframework && NOT_APPLIED_BY_REFRAMEWORK.has(id)))
     .map(([id]) => {
       if (!(id in NORMALISATION_LINES)) {
         throw new Error(`data/config-format.json normalisations.${id} has no line in the config block; add one to NORMALISATION_LINES in scripts/generate-readme.mjs, or null where no player sets that value`);
@@ -259,7 +265,7 @@ function droppedSettings() {
 
 // legacy is the bare name of the file the repo's pre-canonical builds read, in the same folder.
 // defaults is what defaultRows gives for the committed file.
-function legacyParagraphs(legacy, defaults) {
+function legacyParagraphs(legacy, defaults, reframework) {
   const old = code(legacy);
   const config = code(CONFIG_NAME);
   const followed = code(DEFAULTS_NAME);
@@ -277,7 +283,7 @@ function legacyParagraphs(legacy, defaults) {
   }
   return [
     ...imported,
-    droppedSettings(),
+    droppedSettings(reframework),
     `An older version of the mod reads ${old} and never reads ${config}, so a setting you change after updating is not in ${old}.`,
     reset,
   ];
@@ -338,6 +344,7 @@ function csharpOwner(files) {
 }
 
 const isBepInEx = (entry) => entry.installed.some((p) => p.toLowerCase().startsWith('bepinex\\config\\'));
+const isReframework = (entry) => entry.installed.some((p) => p.toLowerCase().startsWith('reframework\\plugins\\'));
 
 function fencedIni(root, committed) {
   const text = fs.readFileSync(path.join(root, ...committed.split('/')), 'utf8').replace(/\r\n/g, '\n');
@@ -379,7 +386,7 @@ export function configBlock(state) {
       parts.push(...defaultsParagraphs(legacy, csharp));
       explained = true;
     }
-    if (legacy) parts.push(...legacyParagraphs(entries[0].legacy_source, defaults));
+    if (legacy) parts.push(...legacyParagraphs(entries[0].legacy_source, defaults, entries.some(isReframework)));
     if (csharp) parts.push(nativeParagraph(legacy ? entries[0].legacy_source : null));
     if (bepinex) parts.push(`BepInEx's ConfigurationManager ${legacy ? 'no longer lists' : 'does not list'} these settings.`);
     if (defaults.length > 0) parts.push(builtInList(defaults));

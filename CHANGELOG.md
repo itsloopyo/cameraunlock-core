@@ -13,7 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Both hotkey codecs read a Ctrl, Shift or Alt key as the key of a binding: `LeftShift` to
 `RightAlt` in either dialect, and natively `0x10` to `0x12` and `0xA0` to `0xA5`. Such a key goes
-down before the key of any chord it starts, so with `YawModeKey=LeftShift, Ctrl+Shift+H` a player
+down before the key of any chord made with it, so with `YawModeKey=LeftShift, Ctrl+Shift+H` a player
 who pressed Shift, then Ctrl, then H fired the action twice.
 
 - **Parsers**: C++ `input::ParseKeyBindings` and C# `KeyBindings.TryParse` refuse such a key, with
@@ -48,11 +48,15 @@ Approved by the owner on 2026-09-26 and recorded as `normalisations.N3` in
   a `ModifierKey` drop under the key name for `LeftShift` to `RightAlt`, the key's name otherwise,
   and `ArgumentException` for a code with no name, as `KeyBindings.Format` throws.
 - The migration log line is `not carried: [Hotkeys] YawModeKey=0x11, it is a Ctrl, Shift or Alt
-  key, which fires at the start of every Ctrl+Shift chord, so it is unbound`.
+  key, which goes down before the key of any chord made with it, so it is unbound`.
 - The README config block of a legacy repo, rendered by `scripts/generate-readme.mjs`, and
   `scripts/templates/canonical-config-changelog.md` gain a line for it among the settings not
   carried over. A normalisation approved later stops the block rendering until it has a line or
   is marked as having none.
+- Core's REFramework import (`PluginConfigLegacyImport`) does not apply N3, as it does not apply
+  N1: the frozen `PluginConfig::Read` it calls already replaces a Ctrl, Shift or Alt code with the
+  row's default. The README config block of an REFramework repo, and the changelog template for
+  one, leave the N3 line out.
 
 ### Changed - trepang2-headtracking keeps its own CycleTrackingModeKey and YawModeKey
 

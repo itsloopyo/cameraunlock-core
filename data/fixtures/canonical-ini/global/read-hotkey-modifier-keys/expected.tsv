@@ -1,0 +1,12 @@
+# A Ctrl, Shift or Alt key is never a hotkey's key, so Defaults.ini takes none of LeftShift,
+# RightShift, LeftControl, RightControl, LeftAlt or RightAlt, alone or after modifiers, in any
+# letter case. It refuses them as it refuses a name with no Windows virtual-key code, and 0x10 as
+# it refuses any code.
+value	ToggleKey	refused	2	Hotkeys	ToggleKey	LeftShift	LeftShift is not one of the key names this file takes
+value	CycleTrackingModeKey	refused	3	Hotkeys	CycleTrackingModeKey	F8, Ctrl+Shift+rightcontrol	rightcontrol is not one of the key names this file takes
+value	YawModeKey	refused	4	Hotkeys	YawModeKey	Ctrl+Shift+0x10	0x10 is not one of the key names this file takes
+value	TrueFreeLookKey	refused	5	Hotkeys	TrueFreeLookKey	Alt+RIGHTALT	RIGHTALT is not one of the key names this file takes
+line	ToggleKey	Defaults.ini: line 2: [Hotkeys] ToggleKey=LeftShift is not read (LeftShift is not one of the key names this file takes), so the built-in End, Ctrl+Shift+Y is used.
+line	CycleTrackingModeKey	Defaults.ini: line 3: [Hotkeys] CycleTrackingModeKey=F8, Ctrl+Shift+rightcontrol is not read (rightcontrol is not one of the key names this file takes), so the built-in PageUp, Ctrl+Shift+G is used.
+line	YawModeKey	Defaults.ini: line 4: [Hotkeys] YawModeKey=Ctrl+Shift+0x10 is not read (0x10 is not one of the key names this file takes), so the built-in PageDown, Ctrl+Shift+H is used.
+line	TrueFreeLookKey	Defaults.ini: line 5: [Hotkeys] TrueFreeLookKey=Alt+RIGHTALT is not read (RIGHTALT is not one of the key names this file takes), so the built-in Insert, Ctrl+Shift+U is used.

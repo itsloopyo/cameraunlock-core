@@ -43,8 +43,8 @@ namespace CameraUnlock.Core.Config
         /// KeyCode.None, gives "", unbound, and records nothing. A Ctrl, Shift or Alt key
         /// (LeftShift to RightAlt) gives "" too, and the drop is added to
         /// <paramref name="dropped"/> under its key name: no hotkey value binds one, because it
-        /// goes down before the key of any chord it starts, so a binding on it fires at the start
-        /// of every Ctrl+Shift chord. Any other code gives its key name. A map folding the
+        /// goes down before the key of any chord made with it, so a binding on it fires on the way
+        /// into every such chord. Any other code gives its key name. A map folding the
         /// action's Ctrl+Shift chord into the same list appends the chord to what this gives, so
         /// the player keeps the chord when the key is unbound.
         /// </summary>

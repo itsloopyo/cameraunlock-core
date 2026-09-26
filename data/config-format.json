@@ -553,7 +553,7 @@
       "drop_rule": "NonFiniteNumber"
     },
     "N3": {
-      "rule": "A legacy hotkey bound to a Ctrl, Shift or Alt key on its own imports as unbound, and the drop is logged. That is 0x10-0x12 or 0xA0-0xA5 in a native mod (C++ LegacyVirtualKeyToBindings) and LeftShift, RightShift, LeftControl, RightControl, LeftAlt or RightAlt in a Unity mod (C# LegacyNormalisations.KeyCodeToBindings). Such a key goes down before the key of any chord it starts, so a binding on it fires at the start of every Ctrl+Shift chord, and the canonical hotkey grammar refuses it as a key. Where the import adds the action's Ctrl+Shift chord to the list, the player keeps the chord.",
+      "rule": "A legacy hotkey bound to a Ctrl, Shift or Alt key on its own imports as unbound, and the drop is logged. That is 0x10-0x12 or 0xA0-0xA5 in a native mod (C++ LegacyVirtualKeyToBindings) and LeftShift, RightShift, LeftControl, RightControl, LeftAlt or RightAlt in a Unity mod (C# LegacyNormalisations.KeyCodeToBindings). Such a key goes down before the key of any chord made with it, so a binding on it fires on the way into every such chord, and the canonical hotkey grammar refuses it as a key. Where the import adds the action's Ctrl+Shift chord to the list, the player keeps the chord. Core's REFramework import (PluginConfigLegacyImport) applies neither N3 nor N1: it reads hotkeys through the frozen PluginConfig::Read, which replaces any code IsBindableVirtualKey refuses with the row's default, so an REFramework repo imports such a hotkey as its default, records no drop, and its README config block leaves out the N3 line.",
       "approved": "2026-09-26",
       "drop_rule": "ModifierKey"
     }

@@ -199,8 +199,8 @@ and in any order, then one key, joined by `+`. Names read ASCII case-insensitive
 binding twice in one list is invalid. The key is never a Ctrl, Shift or Alt key, however it is
 spelled: not `LeftShift`, `RightShift`, `LeftControl`, `RightControl`, `LeftAlt` or `RightAlt`,
 and in a native mod not `0x10` to `0x12` or `0xA0` to `0xA5` either, with modifiers before it
-(`Ctrl+LeftControl`) or without. Such a key goes down before the key of any chord it starts, so a
-binding on it alone would fire whenever a player starts that chord, and the chord's own binding
+(`Ctrl+LeftControl`) or without. Such a key goes down before the key of any chord made with it, so a
+binding on it alone would fire on the way into that chord, and the chord's own binding
 would fire again. The canonical text writes the modifiers as `Ctrl+Shift+Alt+` in that order, the
 key as `data/keys.json` spells it, and `, ` between items, so `end,shift+ctrl+y` is written
 `End, Ctrl+Shift+Y`. C++ `input::FormatKeyBindings` and C# `KeyBindings.Format` throw for a
@@ -668,7 +668,10 @@ which `PluginMod::Initialize` then requires. `PluginConfigTable(schema)`
 hotkey lists, a local `DiagnosticMarkerKey` when the schema has a diagnostic marker key, and the
 light rows when the schema has a flashlight. The mode control has two states, so there is no
 `RotationEnabled`. `PluginConfigLegacyImport(schema)` is the import, and `PluginConfig::Read`,
-which it calls, is frozen. With the flag set, `PluginMod` keeps the settings in
+which it calls, is frozen. Read replaces a hotkey code that `IsBindableVirtualKey` refuses, one
+outside 0x01-0xFE or a Ctrl, Shift or Alt key, with the row's default, so the import gives that
+default beside the chord and applies neither N1 nor N3, and the README config block of an
+REFramework repo leaves out the N3 line. With the flag set, `PluginMod` keeps the settings in
 `reframework\plugins\CameraUnlock.ini`, beside the plugin DLL, and imports
 `PluginModDescriptor::configFileName` (`HeadTracking.ini` by default) from the same folder while
 `CameraUnlock.ini` is absent; that file is never written. With the flag unset, a mod reads,
@@ -1346,7 +1349,7 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `Reticle` (3) | approved change `reticle` | Reticle settings and a reticle toggle key |
 | `FollowsDefault` (4) | approved change `follows_default` | The setting of a feature shipped switched off while untested, which now follows the mod's default |
 | `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code outside 0x01-0xFE, 0xFF included, which imports as unbound (C++ `LegacyVirtualKeyToBindings`; no C# import reads virtual-key codes). Code 0, a legacy file's unbound, stays unbound and is not recorded |
-| `ModifierKey` (6) | normalisation N3 | A hotkey bound to a Ctrl, Shift or Alt key on its own, which imports as unbound, since no hotkey value can hold one (C++ `LegacyVirtualKeyToBindings` for 0x10-0x12 and 0xA0-0xA5, recorded as the code in hex; C# `LegacyNormalisations.KeyCodeToBindings` for `LeftShift` to `RightAlt`, recorded as the key name). A map that folds the action's Ctrl+Shift chord into the list appends it to what these give, so the player keeps the chord |
+| `ModifierKey` (6) | normalisation N3 | A hotkey bound to a Ctrl, Shift or Alt key on its own, which imports as unbound, since no hotkey value can hold one (C++ `LegacyVirtualKeyToBindings` for 0x10-0x12 and 0xA0-0xA5, recorded as the code in hex; C# `LegacyNormalisations.KeyCodeToBindings` for `LeftShift` to `RightAlt`, recorded as the key name). A map that folds the action's Ctrl+Shift chord into the list appends it to what these give, so the player keeps the chord. Core's REFramework import does not apply it (see REFramework mods) |
 
 A `FollowsDefault` value is the one the build shipped, which no player chose, so the map also
 names the row's concept in the result's `follows_defaults_ini` (C# `FollowsDefaultsIni`, passed

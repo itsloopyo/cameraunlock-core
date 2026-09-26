@@ -1,9 +1,4 @@
-The mod reads its settings from `CameraUnlock.ini` in the game folder, at one of these paths depending on the store the game came from:
-
-- `CameraUnlock.ini`
-- `Game\Binaries\Win64\CameraUnlock.ini`
-
-It creates the file when it starts and finds none. Edit it with any text editor.
+The mod reads its settings from `reframework\plugins\CameraUnlock.ini` in the game folder, and creates the file when it starts and finds none. Edit it with any text editor.
 
 Earlier versions of the mod kept these settings in `HeadTracking.ini`, in the same folder. The first time this version starts and finds no `CameraUnlock.ini`, it reads your settings from `HeadTracking.ini` and writes them into `CameraUnlock.ini`. It never changes `HeadTracking.ini`, and does not read it again while `CameraUnlock.ini` exists.
 
@@ -12,7 +7,6 @@ Comments, and keys the mod never read, are not carried over. Nor are these, wher
 - Reticle settings, and a key that toggled the reticle.
 - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
 - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
-- A hotkey set to Ctrl, Shift or Alt on its own. That key goes down before the key of any chord made with it, so the hotkey is left unbound, and it keeps its Ctrl+Shift chord where it has one.
 
 An older version of the mod reads `HeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `HeadTracking.ini`.
 
