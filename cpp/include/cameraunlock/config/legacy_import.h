@@ -61,12 +61,12 @@ enum class DropRule {
     /// A position switch set to false, one that also kept the mode hotkey off the position modes
     /// (the setting PositionAllowed was added for). The tracking mode is the only way position is
     /// switched off now, so the map writes the rotation-only mode (RotationEnabled true,
-    /// PositionEnabled false) and records the switch. A true value changes nothing and is not
-    /// recorded.
+    /// PositionEnabled false) and records the switch (LegacyPositionSwitch). A true value changes
+    /// nothing and is not recorded.
     PositionSwitchOff = 8,
     /// A neck pivot distance (TrackerPivotForward, TrackerPivotUp or another spelling) the player
-    /// set away from 0. The tracker is authoritative and 0 was compensation off, so the setting
-    /// has no row. A 0 changes nothing and is not recorded.
+    /// changed from the value the game shipped. The tracker is authoritative, so the setting has
+    /// no row (LegacyTrackerPivot). A value equal to the shipped one is not recorded.
     TrackerPivot = 9,
 };
 
@@ -224,5 +224,23 @@ void LegacyPoseShaping(float value, float shipped, const std::string& section, c
                        std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped);
 void LegacyPoseShaping(double value, double shipped, const std::string& section, const std::string& key,
                        std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped);
+
+/// A legacy position switch that also kept the mode hotkey off the position modes (approved change
+/// position_switch_off, the setting PositionAllowed stood for). Call it after the map has written
+/// the tracking mode. For a `value` of false it writes the rotation-only mode (`rotation_enabled`
+/// true, `position_enabled` false), whatever the map wrote there, and records the switch in
+/// `dropped` as DropRule::PositionSwitchOff. True changes nothing and records nothing.
+void LegacyPositionSwitch(bool value, const std::string& section, const std::string& key, bool& rotation_enabled,
+                          bool& position_enabled, std::vector<DroppedValue>& dropped);
+
+/// A legacy neck pivot distance (approved change tracker_pivot): TrackerPivotForward,
+/// TrackerPivotUp or another spelling of either, which the canonical format has no row for.
+/// `value` is the effective legacy pivot and `shipped` the effective pivot the game shipped, both
+/// the distance the pipeline ran on, so 0 where the game's own switch had compensation off. Equal,
+/// the player never changed it and nothing is recorded. Different, it is recorded in `dropped` as
+/// DropRule::TrackerPivot. The map sets no runtime field from it. Throws std::invalid_argument
+/// when `shipped` is not finite.
+void LegacyTrackerPivot(float value, float shipped, const std::string& section, const std::string& key,
+                        std::vector<DroppedValue>& dropped);
 
 }  // namespace cameraunlock::config

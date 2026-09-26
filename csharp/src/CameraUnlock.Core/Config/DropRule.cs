@@ -53,15 +53,16 @@ namespace CameraUnlock.Core.Config
         /// A position switch set to false, one that also kept the mode hotkey off the position
         /// modes (the setting PositionAllowed was added for). The tracking mode is the only way
         /// position is switched off now, so the map writes the rotation-only mode (RotationEnabled
-        /// true, PositionEnabled false) and records the switch. A true value changes nothing and
-        /// is not recorded.
+        /// true, PositionEnabled false) and records the switch (<see cref="LegacyPositionSwitch"/>).
+        /// A true value changes nothing and is not recorded.
         /// </summary>
         PositionSwitchOff = 8,
 
         /// <summary>
         /// A neck pivot distance (TrackerPivotForward, TrackerPivotUp or another spelling) the
-        /// player set away from 0. The tracker is authoritative and 0 was compensation off, so the
-        /// setting has no row. A 0 changes nothing and is not recorded.
+        /// player changed from the value the game shipped. The tracker is authoritative, so the
+        /// setting has no row (<see cref="LegacyTrackerPivot"/>). A value equal to the shipped one
+        /// is not recorded.
         /// </summary>
         TrackerPivot = 9,
     }

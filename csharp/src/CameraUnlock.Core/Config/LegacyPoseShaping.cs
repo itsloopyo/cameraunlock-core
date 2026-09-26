@@ -40,7 +40,7 @@ namespace CameraUnlock.Core.Config
             Add(Text(value), DoubleCodec.RenderFinite(shipped), value == shipped, section, key, poseShaping, dropped);
         }
 
-        private static string Text(float value)
+        internal static string Text(float value)
         {
             if (float.IsNaN(value)) return "nan";
             if (float.IsInfinity(value)) return value > 0 ? "inf" : "-inf";

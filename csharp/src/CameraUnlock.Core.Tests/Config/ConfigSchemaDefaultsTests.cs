@@ -8,6 +8,10 @@ using Xunit;
 using CameraUnlock.Core.Config;
 using CameraUnlock.Core.Effects;
 
+// The flat reader still fills the deprecated PositionAllowed and tracker pivot members, and
+// these tests pin that.
+#pragma warning disable 618
+
 namespace CameraUnlock.Core.Tests.Config
 {
     /// <summary>

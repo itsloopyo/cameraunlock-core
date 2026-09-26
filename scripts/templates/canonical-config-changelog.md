@@ -59,7 +59,7 @@ writes no seed because REFramework is already there.
   - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
   - The aim decoupling setting. Aim is always decoupled now, so your aim stays with the mouse or controller while your head moves the view, even if your old file had decoupling turned off.
   - A setting that kept positional tracking off whatever the tracking mode said. Where your old file had it off, the mod starts in the rotation-only tracking mode instead, and the mode hotkey can now turn positional tracking back on.
-  - A neck pivot distance you changed from 0. The mod applies the head pose as your tracker sends it, so it no longer removes the lean that turning your head adds.
+  - A neck pivot distance you changed from its default. The neck pivot is not a setting now.
   - Only where the mod is not an REFramework mod:
     A hotkey set to Ctrl, Shift or Alt on its own. That key goes down before the key of any chord made with it, so the hotkey is left unbound, and it keeps its Ctrl+Shift chord where it has one.
 - An older version of the mod reads `<legacy>` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `<legacy>`.
@@ -107,7 +107,7 @@ writes no seed because REFramework is already there.
 - Only where the mod had a setting that kept positional tracking off whatever the tracking mode said:
   That setting. The tracking mode is what turns positional tracking off: `PositionEnabled=false` in `CameraUnlock.ini`, or the mode hotkey.
 - Only where the mod read a neck pivot distance:
-  The neck pivot settings. The mod applies the head pose as your tracker sends it.
+  The neck pivot settings. A distance you changed from the default is not carried over.
 - The sensitivity, scale, deadzone, response curve and axis inversion settings. Set these in your tracker app instead.
 - Only where every copy of the config the mod shipped (installer, Nexus ZIP and launcher seed) had the same defaults for these settings:
   With these settings at their shipped defaults the camera moves as it did before.

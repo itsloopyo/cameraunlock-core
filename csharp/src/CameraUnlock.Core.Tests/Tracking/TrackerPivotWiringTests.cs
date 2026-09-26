@@ -6,6 +6,10 @@ using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 using CameraUnlock.Core.Tracking;
 
+// The flat reader still fills the deprecated PositionAllowed and tracker pivot members, and
+// these tests pin that.
+#pragma warning disable 618
+
 namespace CameraUnlock.Core.Tests.Tracking
 {
     /// <summary>

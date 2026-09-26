@@ -33,7 +33,7 @@ const char* DropReason(DropRule rule) {
             return "positional tracking is switched off by the tracking mode now, so the mod starts in rotation only "
                    "and the mode hotkey can turn position back on";
         case DropRule::TrackerPivot:
-            return "the mod applies the head pose as the tracker sends it, with no neck pivot of its own";
+            return "the neck pivot is not a setting now, so a distance you set is not carried over";
     }
     throw std::invalid_argument("drop rule " + std::to_string(static_cast<int>(rule)) + " is not a DropRule");
 }
@@ -107,6 +107,23 @@ void LegacyPoseShaping(float value, float shipped, const std::string& section, c
 void LegacyPoseShaping(double value, double shipped, const std::string& section, const std::string& key,
                        std::vector<PoseShapingValue>& pose_shaping, std::vector<DroppedValue>& dropped) {
     RecordPoseShaping(value, shipped, section, key, pose_shaping, dropped);
+}
+
+void LegacyPositionSwitch(bool value, const std::string& section, const std::string& key, bool& rotation_enabled,
+                          bool& position_enabled, std::vector<DroppedValue>& dropped) {
+    if (value) return;
+    rotation_enabled = true;
+    position_enabled = false;
+    dropped.push_back({DropRule::PositionSwitchOff, section, key, BoolCodec().Render(false)});
+}
+
+void LegacyTrackerPivot(float value, float shipped, const std::string& section, const std::string& key,
+                        std::vector<DroppedValue>& dropped) {
+    if (!std::isfinite(shipped)) {
+        throw std::invalid_argument("[" + section + "] " + key + ": the shipped value is not finite");
+    }
+    if (value == shipped) return;
+    dropped.push_back({DropRule::TrackerPivot, section, key, PoseShapingText(value)});
 }
 
 }  // namespace cameraunlock::config

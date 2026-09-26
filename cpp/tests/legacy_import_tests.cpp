@@ -1,6 +1,7 @@
 // The legacy import support: ImportResult's factories, the dropped-value lines, N1 and N3
-// (LegacyVirtualKeyToBindings), N2 (LegacyFiniteOrDefault), pose shaping (LegacyPoseShaping),
-// and a LegacyImport over a Config.
+// (LegacyVirtualKeyToBindings), N2 (LegacyFiniteOrDefault), pose shaping (LegacyPoseShaping), the
+// position switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot) and a LegacyImport
+// over a Config.
 
 #include <cameraunlock/config/legacy_import.h>
 #include <cameraunlock/config/value_guards.h>
@@ -113,8 +114,8 @@ void TestDescribe() {
               "the mod starts in rotation only and the mode hotkey can turn position back on",
           "position-switch line");
     Check(DescribeDroppedValue({DropRule::TrackerPivot, "Position", "TrackerPivotForward", "0.1"}) ==
-              "not carried: [Position] TrackerPivotForward=0.1, the mod applies the head pose as the tracker sends it, "
-              "with no neck pivot of its own",
+              "not carried: [Position] TrackerPivotForward=0.1, the neck pivot is not a setting now, so a distance you "
+              "set is not carried over",
           "tracker-pivot line");
     Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(10), "A", "B", "C"}); }) ==
               "drop rule 10 is not a DropRule",
@@ -264,6 +265,45 @@ void TestPoseShaping() {
           "Imported and Absent carry the pose-shaping values; the other statuses carry none");
 }
 
+void TestPositionSwitch() {
+    for (bool rotation : {true, false}) {
+        bool rotation_enabled = rotation;
+        bool position_enabled = true;
+        std::vector<DroppedValue> dropped;
+        LegacyPositionSwitch(false, "Position", "Enabled", rotation_enabled, position_enabled, dropped);
+        Check(rotation_enabled && !position_enabled && dropped.size() == 1 &&
+                  SameDrop(dropped[0], DropRule::PositionSwitchOff, "Position", "Enabled", "false"),
+              std::string("a switch that was off writes rotation only over rotation_enabled=") +
+                  (rotation ? "true" : "false") + " and is recorded");
+    }
+    bool rotation_enabled = false;
+    bool position_enabled = true;
+    std::vector<DroppedValue> dropped;
+    LegacyPositionSwitch(true, "Position", "Enabled", rotation_enabled, position_enabled, dropped);
+    Check(!rotation_enabled && position_enabled && dropped.empty(), "a switch that was on changes nothing");
+}
+
+void TestTrackerPivot() {
+    std::vector<DroppedValue> dropped;
+    LegacyTrackerPivot(0.0f, 0.0f, "Position", "TrackerPivotForward", dropped);
+    LegacyTrackerPivot(-0.0f, 0.0f, "Position", "TrackerPivotUp", dropped);
+    LegacyTrackerPivot(0.08f, 0.08f, "Position", "TrackerPivotForward", dropped);
+    Check(dropped.empty(), "a pivot equal to the shipped one, compared as a number, is not recorded");
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    LegacyTrackerPivot(0.1f, 0.0f, "Position", "TrackerPivotForward", dropped);
+    LegacyTrackerPivot(0.0f, 0.08f, "Position", "TrackerPivotForward", dropped);
+    LegacyTrackerPivot(nan, 0.08f, "Position", "PivotUp", dropped);
+    Check(dropped.size() == 3 && SameDrop(dropped[0], DropRule::TrackerPivot, "Position", "TrackerPivotForward", "0.1") &&
+              SameDrop(dropped[1], DropRule::TrackerPivot, "Position", "TrackerPivotForward", "0.0") &&
+              SameDrop(dropped[2], DropRule::TrackerPivot, "Position", "PivotUp", "nan"),
+          "a pivot the player changed from the shipped one is recorded, in the canonical codecs' spelling");
+    Check(Thrown([&] { LegacyTrackerPivot(0.1f, nan, "Position", "TrackerPivotForward", dropped); }) ==
+              "[Position] TrackerPivotForward: the shipped value is not finite",
+          "a shipped pivot that is not finite throws");
+    Check(dropped.size() == 3, "and records nothing");
+}
+
 struct FrozenConfig {
     long long toggle_key = 0x23;
     float remote_smoothing = 0.15f;
@@ -315,6 +355,8 @@ int RunLegacyImportTests() {
         TestN3();
         TestN2();
         TestPoseShaping();
+        TestPositionSwitch();
+        TestTrackerPivot();
         TestLegacyImport();
     } catch (const std::exception& e) {
         std::cout << "  [FAIL] threw: " << e.what() << "\n";

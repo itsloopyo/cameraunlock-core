@@ -14,7 +14,7 @@ Comments, and keys the mod never read, are not carried over. Nor are these, wher
 - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
 - The aim decoupling setting. Aim is always decoupled now, so your aim stays with the mouse or controller while your head moves the view, even if your old file had decoupling turned off.
 - A setting that kept positional tracking off whatever the tracking mode said. Where your old file had it off, the mod starts in the rotation-only tracking mode instead, and the mode hotkey can now turn positional tracking back on.
-- A neck pivot distance you changed from 0. The mod applies the head pose as your tracker sends it, so it no longer removes the lean that turning your head adds.
+- A neck pivot distance you changed from its default. The neck pivot is not a setting now.
 - A hotkey set to Ctrl, Shift or Alt on its own. That key goes down before the key of any chord made with it, so the hotkey is left unbound, and it keeps its Ctrl+Shift chord where it has one.
 
 An older version of the mod reads `HeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `HeadTracking.ini`.

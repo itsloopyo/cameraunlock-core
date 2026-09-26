@@ -59,12 +59,18 @@ struct HeadTrackingConfig {
     /// Deprecated, kept so existing callers compile: the tracking mode (rotation_enabled with
     /// position_enabled) is the only way position is switched off. ApplyValues still parses
     /// PositionAllowed into it, but it is not a setting, no table binds it, and a mod never reads it.
+    [[deprecated("not a setting: the tracking mode (rotation_enabled with position_enabled) is the only way "
+                 "positional tracking is switched off; read position_enabled instead")]]
     bool position_allowed = true;
     PositionSettings position = PositionSettings::Default();
     /// Deprecated, kept so existing callers compile: the tracker is authoritative, so the neck
     /// pivot is not a setting and no table binds either field. ApplyValues still parses both, and
     /// PositionProcessor keeps its pivot properties. 0 is compensation off.
+    [[deprecated("not a setting: the tracker is authoritative over the neck pivot; a game that keeps a pivot calls "
+                 "PositionProcessor::SetTrackerPivotForward in code")]]
     float tracker_pivot_forward = 0.0f;
+    [[deprecated("not a setting: the tracker is authoritative over the neck pivot; a game that keeps a pivot calls "
+                 "PositionProcessor::SetTrackerPivotUp in code")]]
     float tracker_pivot_up = 0.0f;
 
     /// A carried light that follows the head rather than the aim. Inert in a mod

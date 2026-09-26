@@ -125,6 +125,7 @@ namespace CameraUnlock.Core.Config
         /// it, but it is not a setting, <see cref="HeadTrackingConfigTable"/> has no row for it,
         /// and a mod never reads it.
         /// </summary>
+        [Obsolete("Not a setting: the tracking mode (RotationEnabled with PositionEnabled) is the only way positional tracking is switched off. Read PositionEnabled instead.")]
         public bool PositionAllowed { get; set; } = true;
 
         /// <summary>
@@ -155,6 +156,7 @@ namespace CameraUnlock.Core.Config
         /// neck pivot is not a setting and <see cref="HeadTrackingConfigTable"/> has no row for
         /// it. <see cref="ApplyValues"/> still parses it. 0 is compensation off.
         /// </summary>
+        [Obsolete("Not a setting: the tracker is authoritative over the neck pivot. A game that keeps a pivot sets PositionProcessor.TrackerPivotForward in code.")]
         public float TrackerPivotForward { get; set; } = 0.0f;
 
         /// <summary>
@@ -162,6 +164,7 @@ namespace CameraUnlock.Core.Config
         /// <see cref="CameraUnlock.Core.Processing.PositionProcessor.TrackerPivotUp"/>.
         /// Deprecated with <see cref="TrackerPivotForward"/>: not a setting, and no table row.
         /// </summary>
+        [Obsolete("Not a setting: the tracker is authoritative over the neck pivot. A game that keeps a pivot sets PositionProcessor.TrackerPivotUp in code.")]
         public float TrackerPivotUp { get; set; } = 0.0f;
 
         /// <summary>
@@ -464,8 +467,10 @@ namespace CameraUnlock.Core.Config
                         break;
 
                     case ConfigKeySchema.Keys.PositionAllowed:
+#pragma warning disable 618
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))
                             PositionAllowed = boolVal;
+#pragma warning restore 618
                         break;
 
                     case ConfigKeySchema.Keys.PositionSensitivityX:
@@ -530,6 +535,7 @@ namespace CameraUnlock.Core.Config
                             invertPosZ = boolVal;
                         break;
 
+#pragma warning disable 618
                     case ConfigKeySchema.Keys.TrackerPivotForward:
                         if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotForward, MaxDistanceMetres, out floatVal))
                             TrackerPivotForward = floatVal;
@@ -539,6 +545,7 @@ namespace CameraUnlock.Core.Config
                         if (TryParseMagnitude(log, kvp.Key, value, TrackerPivotUp, MaxDistanceMetres, out floatVal))
                             TrackerPivotUp = floatVal;
                         break;
+#pragma warning restore 618
 
                     case ConfigKeySchema.Keys.LightFollowsHead:
                         if (ConfigParsingUtils.TryParseBool(value, out boolVal))

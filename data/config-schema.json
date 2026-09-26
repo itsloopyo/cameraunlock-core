@@ -292,7 +292,7 @@
       "type": "bool",
       "default": true,
       "aliases": [],
-      "doc": "Retained so existing callers keep parsing: the deprecated flat readers still read it into HeadTrackingConfigData.PositionAllowed and HeadTrackingConfig::position_allowed. It is not a setting. Owner ruling 2026-09-26: the tracking mode (RotationEnabled with PositionEnabled) is the only way position is switched off, so no mod reads this, no canonical file or Defaults.ini carries it and Lopari never offers it. It was added for the games whose old [Position] Enabled key also switched features off (amnesia-rebirth, soma, bully-scholarship-edition, a-plague-tale-innocence, the-painscreek-killings). A legacy import maps such a switch that was off to the rotation-only tracking mode (approved change position_switch_off in data/config-format.json).",
+      "doc": "Retained so existing callers keep parsing: the deprecated flat readers still read it into HeadTrackingConfigData.PositionAllowed and HeadTrackingConfig::position_allowed. It is not a setting. Owner ruling 2026-09-26: the tracking mode (RotationEnabled with PositionEnabled) is the only way position is switched off, so no mod reads this, no canonical file or Defaults.ini carries it and Lopari never offers it. It was added for the games whose old [Position] Enabled key also switched features off (amnesia-rebirth, soma, bully-scholarship-edition, a-plague-tale-innocence, the-painscreek-killings). A legacy import maps such a switch that was off to the rotation-only tracking mode (LegacyPositionSwitch, approved change position_switch_off in data/config-format.json).",
       "canonical": false,
       "canonical_reason": "Turn positional tracking off with the tracking mode: PositionEnabled=false, or the mode hotkey."
     },
@@ -497,9 +497,9 @@
       "type": "float",
       "default": 0.0,
       "aliases": ["PivotForward", "NeckPivotForward", "PivotArm", "TrackerPivot", "NeckModelForward"],
-      "doc": "Metres from the neck pivot forward to the point the tracker watches. 0 disables pivot compensation. Retained so existing callers keep parsing: the deprecated flat readers still read it into HeadTrackingConfigData.TrackerPivotForward and HeadTrackingConfig::tracker_pivot_forward, and PositionProcessor keeps its pivot properties. It is not a setting. Owner ruling 2026-09-26: the tracker is authoritative, like the rest of pose shaping, and the default of 0 was compensation off everywhere, so no canonical file or Defaults.ini carries it and Lopari never offers it. A legacy import drops a player-set nonzero value as DropRule TrackerPivot (approved change tracker_pivot in data/config-format.json).",
+      "doc": "Metres from the neck pivot forward to the point the tracker watches. 0 disables pivot compensation. Retained so existing callers keep parsing: the deprecated flat readers still read it into HeadTrackingConfigData.TrackerPivotForward and HeadTrackingConfig::tracker_pivot_forward, and PositionProcessor keeps its pivot properties. It is not a setting. Owner ruling 2026-09-26: the tracker is authoritative, like the rest of pose shaping, so no canonical file or Defaults.ini carries it and Lopari never offers it. A game that shipped a pivot other than 0 keeps it in its own code; a legacy import drops a value the player changed from the shipped one as DropRule TrackerPivot (LegacyTrackerPivot, approved change tracker_pivot in data/config-format.json).",
       "canonical": false,
-      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no neck pivot of its own."
+      "canonical_reason": "The neck pivot is not a setting."
     },
     {
       "id": "TrackerPivotUp",
@@ -508,9 +508,9 @@
       "type": "float",
       "default": 0.0,
       "aliases": ["PivotUp", "NeckPivotUp", "NeckModelHeight"],
-      "doc": "Metres from the neck pivot up to the point the tracker watches. Retained and retired with TrackerPivotForward: the flat readers still read it into HeadTrackingConfigData.TrackerPivotUp and HeadTrackingConfig::tracker_pivot_up, and it is not a setting (owner ruling 2026-09-26). A legacy import drops a player-set nonzero value as DropRule TrackerPivot.",
+      "doc": "Metres from the neck pivot up to the point the tracker watches. Retained and retired with TrackerPivotForward: the flat readers still read it into HeadTrackingConfigData.TrackerPivotUp and HeadTrackingConfig::tracker_pivot_up, and it is not a setting (owner ruling 2026-09-26). A legacy import drops a value the player changed from the shipped one as DropRule TrackerPivot.",
       "canonical": false,
-      "canonical_reason": "The mod applies the head pose as the tracker sends it, with no neck pivot of its own."
+      "canonical_reason": "The neck pivot is not a setting."
     },
     {
       "id": "ToggleKey",

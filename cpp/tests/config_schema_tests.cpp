@@ -29,6 +29,14 @@
 #include <utility>
 #include <vector>
 
+// The flat reader still fills the deprecated position_allowed and tracker pivot fields, and these
+// tests pin that.
+#if defined(_MSC_VER)
+#pragma warning(disable : 4996)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 namespace {
 
 int g_failures = 0;

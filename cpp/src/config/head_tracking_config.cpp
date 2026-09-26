@@ -231,6 +231,15 @@ std::vector<std::pair<std::string, std::string>> ParseIniConfig(const std::strin
     return result;
 }
 
+// ApplyValues still parses the deprecated position_allowed and tracker pivot fields for existing
+// callers.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 void HeadTrackingConfig::ApplyValues(
     const std::vector<std::pair<std::string, std::string>>& values, const LogFn& log) {
     // Warned once per process rather than once per load: mods reload config on a hotkey or
@@ -459,6 +468,11 @@ void HeadTrackingConfig::ApplyValues(
     position.local_smoothing = local_smoothing;
     position.remote_smoothing = remote_smoothing;
 }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 HeadTrackingConfig HeadTrackingConfig::LoadFromFile(const std::string& path, const LogFn& log) {
     HeadTrackingConfig config;

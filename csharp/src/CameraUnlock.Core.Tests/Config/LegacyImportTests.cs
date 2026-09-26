@@ -7,7 +7,8 @@ namespace CameraUnlock.Core.Tests.Config
 {
     /// <summary>
     /// The legacy import support: ImportResult's factories, the dropped-value lines, N2
-    /// (LegacyNormalisations.FiniteOrDefault), N3 (LegacyNormalisations.KeyCodeToBindings), pose shaping (LegacyPoseShaping) and a LegacyImport
+    /// (LegacyNormalisations.FiniteOrDefault), N3 (LegacyNormalisations.KeyCodeToBindings), pose shaping (LegacyPoseShaping), the position
+    /// switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot) and a LegacyImport
     /// over a config class. The C++ twin
     /// is cpp/tests/legacy_import_tests.cpp.
     /// </summary>
@@ -97,8 +98,8 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal("not carried: [Position] Enabled=false, positional tracking is switched off by the tracking mode now, so "
                 + "the mod starts in rotation only and the mode hotkey can turn position back on",
                 new DroppedValue(DropRule.PositionSwitchOff, "Position", "Enabled", "false").Describe());
-            Assert.Equal("not carried: [Position] TrackerPivotForward=0.1, the mod applies the head pose as the tracker sends it, "
-                + "with no neck pivot of its own",
+            Assert.Equal("not carried: [Position] TrackerPivotForward=0.1, the neck pivot is not a setting now, so a distance you "
+                + "set is not carried over",
                 new DroppedValue(DropRule.TrackerPivot, "Position", "TrackerPivotForward", "0.1").Describe());
         }
 
@@ -191,6 +192,87 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, null!, "B", dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, "A", null!, dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, "A", "B", null!));
+            Assert.Empty(dropped);
+        }
+
+        private static string DropLine(DroppedValue d)
+        {
+            return d.Rule + " [" + d.Section + "] " + d.Key + "=" + d.Value;
+        }
+
+        [Fact]
+        public void APositionSwitchThatWasOffWritesTheRotationOnlyModeAndIsRecorded()
+        {
+            foreach (bool rotation in new[] { true, false })
+            {
+                var config = new HeadTrackingConfigData { RotationEnabled = rotation, PositionEnabled = true };
+                var dropped = new List<DroppedValue>();
+                LegacyPositionSwitch.Record(false, "Position", "Enabled", config, dropped);
+                Assert.True(config.RotationEnabled);
+                Assert.False(config.PositionEnabled);
+                Assert.Equal(new[] { "PositionSwitchOff [Position] Enabled=false" }, dropped.ConvertAll(DropLine));
+            }
+        }
+
+        [Fact]
+        public void APositionSwitchThatWasOnChangesNothing()
+        {
+            var config = new HeadTrackingConfigData { RotationEnabled = false, PositionEnabled = true };
+            var dropped = new List<DroppedValue>();
+            LegacyPositionSwitch.Record(true, "Position", "Enabled", config, dropped);
+            Assert.False(config.RotationEnabled);
+            Assert.True(config.PositionEnabled);
+            Assert.Empty(dropped);
+        }
+
+        [Fact]
+        public void LegacyPositionSwitchRefusesNulls()
+        {
+            var config = new HeadTrackingConfigData();
+            var dropped = new List<DroppedValue>();
+            Assert.Throws<ArgumentNullException>(() => LegacyPositionSwitch.Record(false, null!, "B", config, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyPositionSwitch.Record(false, "A", null!, config, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyPositionSwitch.Record(false, "A", "B", null!, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyPositionSwitch.Record(false, "A", "B", config, null!));
+            Assert.True(config.PositionEnabled);
+            Assert.Empty(dropped);
+        }
+
+        [Fact]
+        public void APivotEqualToTheShippedOneIsNotRecorded()
+        {
+            var dropped = new List<DroppedValue>();
+            LegacyTrackerPivot.Record(0.0f, 0.0f, "Position", "TrackerPivotForward", dropped);
+            LegacyTrackerPivot.Record(-0.0f, 0.0f, "Position", "TrackerPivotUp", dropped);
+            LegacyTrackerPivot.Record(0.08f, 0.08f, "Position", "TrackerPivotForward", dropped);
+            Assert.Empty(dropped);
+        }
+
+        [Fact]
+        public void APivotThePlayerChangedIsRecorded()
+        {
+            var dropped = new List<DroppedValue>();
+            LegacyTrackerPivot.Record(0.1f, 0.0f, "Position", "TrackerPivotForward", dropped);
+            LegacyTrackerPivot.Record(0.0f, 0.08f, "Position", "TrackerPivotForward", dropped);
+            LegacyTrackerPivot.Record(float.NaN, 0.08f, "Position", "PivotUp", dropped);
+            Assert.Equal(new[]
+            {
+                "TrackerPivot [Position] TrackerPivotForward=0.1",
+                "TrackerPivot [Position] TrackerPivotForward=0.0",
+                "TrackerPivot [Position] PivotUp=nan",
+            }, dropped.ConvertAll(DropLine));
+        }
+
+        [Fact]
+        public void LegacyTrackerPivotRefusesANonFiniteShippedValueAndNulls()
+        {
+            var dropped = new List<DroppedValue>();
+            Assert.StartsWith("[Position] TrackerPivotForward: the shipped value is not finite", Assert.Throws<ArgumentException>(
+                () => LegacyTrackerPivot.Record(0.1f, float.NaN, "Position", "TrackerPivotForward", dropped)).Message);
+            Assert.Throws<ArgumentException>(() => LegacyTrackerPivot.Record(0.1f, float.PositiveInfinity, "A", "B", dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyTrackerPivot.Record(0.1f, 0.0f, null!, "B", dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyTrackerPivot.Record(0.1f, 0.0f, "A", null!, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyTrackerPivot.Record(0.1f, 0.0f, "A", "B", null!));
             Assert.Empty(dropped);
         }
 

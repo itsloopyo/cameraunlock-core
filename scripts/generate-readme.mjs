@@ -228,7 +228,7 @@ const APPROVED_CHANGE_LINES = {
   follows_default: "The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.",
   coupled_aim: 'The aim decoupling setting. Aim is always decoupled now, so your aim stays with the mouse or controller while your head moves the view, even if your old file had decoupling turned off.',
   position_switch_off: 'A setting that kept positional tracking off whatever the tracking mode said. Where your old file had it off, the mod starts in the rotation-only tracking mode instead, and the mode hotkey can now turn positional tracking back on.',
-  tracker_pivot: 'A neck pivot distance you changed from 0. The mod applies the head pose as your tracker sends it, so it no longer removes the lean that turning your head adds.',
+  tracker_pivot: 'A neck pivot distance you changed from its default. The neck pivot is not a setting now.',
 };
 
 // null marks a normalisation the block does not explain: the README said nothing of N1 (a hotkey
