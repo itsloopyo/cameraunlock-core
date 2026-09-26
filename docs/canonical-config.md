@@ -118,7 +118,8 @@ value, or the row's own default where Defaults.ini gives none; a key the player 
 later version added reads the same way. A migrated file writes `default` on such a row where the
 imported value equals what `default` gives it at that start, and the value otherwise (see
 [What happens at the first launch](#what-happens-at-the-first-launch)). A `PerGame` row and a
-local row are always written as values.
+local row are never written as the token: they hold their value, or, for an Engine row at its
+default, the comment below.
 
 An **Engine** row holds data about the game rather than a taste: an address, an offset, a vtable
 slot, a collision channel. At its default it is written as a comment showing the value,
@@ -796,7 +797,8 @@ Defaults.ini that changed, went missing or cannot be read is under
 
 ### What it is and who reads it
 
-Defaults.ini is one file per user holding a value for every canonical concept. A concept row of a
+Defaults.ini is a file in the player's profile or config folder (see [Where it is](#where-it-is))
+holding a value for every canonical concept. A concept row of a
 game's `CameraUnlock.ini` that holds `default`, has no line, or holds a value its codec refuses
 takes its value from Defaults.ini, so a player sets a preference once for every game that reads
 the file. A value written in a game's `CameraUnlock.ini` changes that game only.
@@ -863,8 +865,8 @@ program, so for it Linux means Wine or Proton.
   a converted path with no drive letter, or a failed conversion, there is no host candidate, and
   the log line says which. All the wine exports are called through cdecl delegates or function
   pointers, never a `DllImport`, so Windows never meets a missing one.
-- **Which file under Wine.** The files that exist decide, so the choice cannot move from one start
-  to the next unless a file appears. The host file exists: it is read, and a prefix file that also
+- **Which file under Wine.** The files that exist decide, so the choice moves from one start to
+  the next only when a file appears or is removed. The host file exists: it is read, and a prefix file that also
   exists is not, which the log and the player are told. Otherwise the prefix file exists: it is
   read and nothing is created. Otherwise the host file is created, and if there is no host
   candidate or that fails, the prefix file. If both fail the game runs on the built-in values.
@@ -1031,7 +1033,10 @@ LightMultiplier=1.5
 ```
 
 `CollisionMargin` and `CollisionChannel` are numbers in each engine's own units and channels, so a
-value set here means something different in each game that follows it.
+value set here means something different in each game that follows it. A mod whose wall check
+has not been confirmed in game ships with it off, because a channel nobody verified blocks on
+nothing or on everything; `CollisionEnabled=true` here turns the check on in every game that
+follows it, those included, and in such a game it can stop leaning altogether.
 
 ### Creating it
 
@@ -1046,7 +1051,7 @@ value set here means something different in each game that follows it.
   `(created by another program at the same time, and read)`.
 - **A killed launch** leaves no Defaults.ini or a whole one, and at worst a
   `Defaults.ini.<32 hex digits>.tmp` beside it, which nothing reads.
-- **Afterwards nothing changes it.** No mod writes, renames, deletes or appends to Defaults.ini
+- **Afterwards no mod changes it.** No mod writes, renames, deletes or appends to Defaults.ini
   once it exists. The owner opens it only to read it, sharing read, write and delete, and closes it
   once it has the bytes. Core's install and uninstall bodies never name the folder.
 
@@ -1107,6 +1112,9 @@ is up. C# and C++ write the same words. At every `Load`, in this order:
      reads Defaults.ini but does not create it. Settings set to default use the built-in values.`
    - No location: `Defaults.ini: no location: Windows reported no roaming AppData folder.` or
      `Defaults.ini: no location: HOME is not set to an absolute path.`, then the built-in sentence.
+     Under Wine the first is followed by ` The host's config folder <folder or none> could not be
+     used: <why>.` before the built-in sentence, both when there is no candidate at all and when
+     the host file could not be created and the prefix gave no roaming AppData folder.
    - A creation that failed: `Defaults.ini: <folder> was not created, because <parent> does not
      exist.`, `Defaults.ini: <folder> could not be created: <why>.` or `Defaults.ini: <path> was
      not created: <why>.`, then the built-in sentence. Under Wine the prefix's failure comes first,
@@ -1120,8 +1128,11 @@ is up. C# and C++ write the same words. At every `Load`, in this order:
    - A newer format adds `Defaults.ini: line N: ConfigFormat=V was written by a newer version of
      the mod. This version reads format 1.`
 2. **The game file's own lines**, as [Load](#load) describes.
-3. **Where this game's rows came from**, each line only when it names something, and not when the
-   session runs on what an import that did not finish gave:
+3. **Where this game's rows came from**, each line only when it names something. They are not
+   written when the session runs on the values of a legacy import that stopped before its file
+   read back the same: one the old reader refused, could not decode or could not find, a file that changed while
+   it was read, a value the new format cannot hold, or a read-back that differs. An import whose
+   file read back the same but could not then be created writes them:
    - `<game path>: from Defaults.ini: UdpPort=4242; ToggleKey=End, Ctrl+Shift+Y`
    - `<game path>: set in this file, so Defaults.ini does not change them: UdpPort, WorldSpaceYaw.`
    - `<game path>: built-in, not set in Defaults.ini: TrueFreeLookKey=Insert, Ctrl+Shift+U`
@@ -1195,7 +1206,10 @@ reached yet take the built-in value until its last write moves the write time ag
   built on the newer core uses its built-in value and names the row in its built-in line. An
   older mod never reads the key. The mods never append the missing key: that would be a change to
   the file, and it would put mods of different core versions in a write race over the player's own
-  file. A player learns of the new key from the game file's comments, the log and the README.
+  file. A game file the newer mod creates carries the key and its comment. An existing game file
+  is never rendered again, and a save writes only the rows it changes, so it gains neither the
+  comment nor, unless a save sets that row, the key. A player with one learns of the key from the
+  log's built-in line and the README.
 - **A Defaults.ini created by a newer core** carries keys an older mod does not know, and the
   older mod reads the rest and says nothing about them.
 - **A built-in default changes in core.** A Defaults.ini already on disk keeps the old value, so
@@ -1576,8 +1590,14 @@ Defaults.ini adds its own rules, since every mod that reads it reads it the same
 [Reading it](#reading-it)):
 
 - Read it with the reader's rules, refuse to edit a file saved as UTF-16, holding a NUL byte or of
-  a newer `ConfigFormat`, and never delete it or replace it with a new one: it holds the player's
-  own values, and an uninstall leaves it in place.
+  a newer `ConfigFormat`, and never delete it, regenerate it from scratch or drop keys and
+  comments the tool does not know: it holds the player's own values, and an uninstall leaves it in
+  place.
+- Write the whole file at once: the new bytes go to a temporary file beside it, which then takes
+  its place by a rename or `File.Replace`, as the checked writer does. The owner reads whatever
+  bytes are on disk at `Load`, so a game that starts while a tool truncates the file and writes
+  it in place can read it halfway, and runs on the built-in value of every row not yet written,
+  `UdpPort` included, until it reads the file again.
 - Write values as the canonical codecs write them, within the schema's ranges, hotkeys only from
   the 104 key names the file's header lists, and `RotationEnabled` and `PositionEnabled` together
   as a mode `preference_modes` in `data/pipeline-conformance.json` lists. `default` is refused

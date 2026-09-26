@@ -547,9 +547,10 @@ native files present.
 
 ## preferences/
 
-The four preferences a mod saves from its in-game controls: the tracking mode pair, world-space
-yaw, true free look and launch-enabled. The cases pin the config owner's `Save` of each of them,
-with what the file holds for it and what the mod runs on before and after. No launcher writes a
+The config owner's `Save` of four preferences: the tracking mode pair, world-space yaw, true free
+look and launch-enabled. In-game hotkeys save the first three; launch-enabled (`EnableOnStartup`)
+is saved only by a mod that marks that row Writable, since End never persists. The cases pin the
+save of each, with what the file holds for it and what the mod runs on before and after. No launcher writes a
 game file: a launcher edits Defaults.ini, and reads a game's `CameraUnlock.ini` for display only.
 One directory per case, holding `case.tsv`, `input.ini` and, for a case with a change,
 `expected.ini`. Every input carries the `[CameraUnlock]` stamp, so no save adds one.
