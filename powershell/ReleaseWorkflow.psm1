@@ -990,9 +990,17 @@ function Set-CsprojVersion {
     submodule pointer.
 .DESCRIPTION
     This is the commit whose source is compiled into the mod binary, which
-    is what THIRD-PARTY-NOTICES.md has to name. It is read from the index
-    entry, not from the submodule working tree, because a working tree that
-    has been moved but not committed is not what a release ships.
+    is what THIRD-PARTY-NOTICES.md has to name. It is read from the parent
+    repo's index entry, not from the submodule working tree, because a
+    working tree that has been moved but not staged is not what a release
+    ships. It is not read from HEAD's tree either: mid-merge, or after a
+    bump that is staged but not committed, HEAD still names the old pointer
+    while the index holds the one the next commit records.
+
+    HEAD's tree is read only when the index has no entry for the path at
+    all. An unresolved merge conflict on the pointer throws: there is no
+    pinned commit until someone picks one, and falling back to either side
+    would stamp a guess.
 
     Returns $null for a repo that does not consume core as a submodule -
     a real layout in this fleet, not an error.
@@ -1005,13 +1013,34 @@ function Get-PinnedCoreCommit {
 
     if (-not (Test-Path (Join-Path $RepoRoot '.gitmodules'))) { return $null }
 
-    # --quiet --verify, not `2>$null`: under Windows PowerShell 5.1 a native
-    # command's stderr becomes a NativeCommandError record, which an
-    # $ErrorActionPreference = 'Stop' caller turns into a terminating error. A
-    # repo that vendors no core is an ordinary answer here, not a failure.
-    $pin = & git -C $RepoRoot rev-parse --quiet --verify 'HEAD:cameraunlock-core'
-    if ($LASTEXITCODE -ne 0 -or -not $pin) { return $null }
-    return $pin.Trim()
+    # ls-files and ls-tree answer an absent path with empty output and exit 0,
+    # not with stderr: under Windows PowerShell 5.1 a native command's stderr
+    # becomes a NativeCommandError record, which an $ErrorActionPreference =
+    # 'Stop' caller turns into a terminating error. A repo that vendors no core
+    # is an ordinary answer here, not a failure. Mode 160000 is a gitlink; a
+    # plain cameraunlock-core directory is not a submodule pin.
+    $staged = @(& git -C $RepoRoot ls-files --stage -- cameraunlock-core |
+                ForEach-Object {
+                    if ($_ -match '^160000 ([0-9a-f]+) ([0-3])\tcameraunlock-core$') {
+                        [PSCustomObject]@{ Commit = $Matches[1]; Stage = $Matches[2] }
+                    }
+                })
+    if ($LASTEXITCODE -ne 0) { throw "git ls-files failed in $RepoRoot." }
+
+    if (@($staged | Where-Object { $_.Stage -ne '0' }).Count -gt 0) {
+        throw "cameraunlock-core has an unresolved merge conflict in $RepoRoot, so no commit is pinned yet. Stage the commit the merge should keep (git add cameraunlock-core), then re-run."
+    }
+    if ($staged.Count -gt 0) { return $staged[0].Commit }
+
+    $head = & git -C $RepoRoot rev-parse --quiet --verify HEAD
+    if ($LASTEXITCODE -ne 0 -or -not $head) { return $null }
+    $recorded = @(& git -C $RepoRoot ls-tree HEAD -- cameraunlock-core |
+                  ForEach-Object {
+                      if ($_ -match '^160000 commit ([0-9a-f]+)\tcameraunlock-core$') { $Matches[1] }
+                  })
+    if ($LASTEXITCODE -ne 0) { throw "git ls-tree failed in $RepoRoot." }
+    if ($recorded.Count -eq 0) { return $null }
+    return $recorded[0]
 }
 
 <#
@@ -1053,7 +1082,7 @@ function Sync-CoreCommitInNotices {
     # $Commit exists for the bump path: immediately after `git submodule
     # update --remote` the working tree holds the new commit while the index
     # still holds the old one, so the pointer the notices must name is not yet
-    # readable from HEAD. Both get committed together.
+    # readable from the parent's index. Both get committed together.
     $pin = if ($Commit) { $Commit } else { Get-PinnedCoreCommit -RepoRoot $RepoRoot }
     if (-not $pin) {
         throw "$RepoRoot does not pin cameraunlock-core as a submodule, so there is no commit to record."
@@ -1170,7 +1199,7 @@ function Assert-CoreCommitInNotices {
     if (-not (Get-PinnedCoreCommit -RepoRoot $RepoRoot)) { return }
 
     # Packaging consumes the checkout, including a submodule bump waiting for
-    # the parent commit. HEAD:cameraunlock-core still names the previous build.
+    # the parent commit. The parent's index still names the previous build.
     $compiledCommit = & git -C (Join-Path $RepoRoot 'cameraunlock-core') rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { throw "Cannot read the core checkout at $RepoRoot." }
     $state = Sync-CoreCommitInNotices -RepoRoot $RepoRoot -Commit $compiledCommit.Trim() -ReadOnly

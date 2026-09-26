@@ -11,6 +11,10 @@
 # does not touch it, which is how the two drift apart without anyone seeing:
 # a wrong hash reads exactly like a right one. Run this after any bump.
 #
+# The commit stamped is the gitlink in the mod repo's index, so a merge in
+# progress or a staged bump gets the pointer its next commit will record, not
+# the one HEAD had before it.
+#
 #   pwsh scripts/sync-core-notices.ps1              # every sibling mod repo
 #   pwsh scripts/sync-core-notices.ps1 -Repo .      # one repo
 #   pwsh scripts/sync-core-notices.ps1 -Check       # report only, exit 1 on drift
