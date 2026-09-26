@@ -54,8 +54,8 @@ enum class ValueFamily { kBool, kInteger, kFloating, kHotkey };
 /// CollisionEnabled's true), else nullptr. kDefaultText is the schema's default as text the
 /// concept's codec reads: the canonical_default where there is one, else the schema's value as it
 /// is written there. kGlobal is false for a concept that holds engine data (the engine's own
-/// units, a channel number): every game keeps its own value, Defaults.ini never carries it, and a
-/// config table writes its row as an Engine row.
+/// units, a channel number): every game keeps its own default, Defaults.ini never carries it and
+/// PerGame() refuses it.
 template <Concept Id>
 struct ConceptTraits;
 

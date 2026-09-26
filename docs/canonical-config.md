@@ -126,9 +126,10 @@ An **Engine** row holds data about the game rather than a taste: an address, an 
 slot, a collision channel. At its default it is written as a comment showing the value,
 `; PovOffset=0x404`, which the reader skips, so the row reads its default and a later build that
 corrects the default reaches every player who never set it. Any other value is written as an
-active line. The rows of `CollisionMargin` and `CollisionChannel` are Engine rows in every table,
-since the schema marks both concepts not global, so a game's file shows its own margin and
-channel as `; CollisionMargin=10.0` or `; CollisionChannel=3`. A fresh file (`RenderFresh`)
+active line. Engine is a mark on the row, set with the table's `Engine()`, and whether a concept
+is global does not set it. `HeadTrackingConfigTable` marks `CollisionChannel` Engine, so a game's
+file shows its channel at its default as `; CollisionChannel=3`, while `CollisionMargin`, which is
+not global either, is written as a value, `CollisionMargin=10.0`. A fresh file (`RenderFresh`)
 writes a global concept row that a table marks Engine and not `PerGame` as the active line
 `Key=default`, like every such row; both forms read back as the row's default.
 
@@ -248,12 +249,13 @@ The concepts are the settings every mod spells the same way. 26 of them are glob
 for one follows Defaults.ini unless the table marks it `PerGame()` (see
 [Which rows follow it](#which-rows-follow-it)). `CollisionMargin` and `CollisionChannel` are not:
 each holds a number in one engine's own units or channels, so the schema marks them
-`"global": false`, every game keeps its own value, and a table writes their rows as Engine rows.
-This is core's table naming all 28 of them at their defaults, which both languages render byte
-for byte (`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with
-`Render`, so every row shows its value, the two Engine rows as comments; the same table's fresh
-render writes `default` on every global row and the same two comments
-(`all-concepts-fresh.ini` beside it). The comments are the schema's
+`"global": false`, and every game keeps its own value. The schema writes `global`, true or false,
+on every canonical concept, and the generator refuses one without it. This is core's table naming
+all 28 of them at their defaults, which both languages render byte for byte
+(`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with `Render`, so
+every row shows its value, `CollisionChannel`, the table's one Engine row, as a comment; the same
+table's fresh render writes `default` on every global row, `CollisionMargin` as its value and the
+same comment (`all-concepts-fresh.ini` beside it). The comments are the schema's
 `file_comment`, and a mod can replace one where its unit or behaviour differs.
 
 <!-- file: data/fixtures/canonical-ini/head-tracking/all-concepts.ini -->
@@ -320,7 +322,7 @@ PositionLimitZBack=0.1
 ; true: leaning stops at walls instead of moving the view through them.
 CollisionEnabled=true
 ; How far the view is held off a wall when you lean into it, in the game's own units.
-; CollisionMargin=0.1
+CollisionMargin=0.1
 ; Which of the game's collision channels the wall check tests against.
 ; CollisionChannel=0
 ; How gently the view eases back out after a wall stopped a lean.
@@ -478,10 +480,11 @@ built with, so the defaults live in the config type, as they always have.
   owner-approved `per_game` entry for the repo in `data/config-format.json`. `RotationEnabled` and
   `PositionEnabled` are one setting, so a table that binds both marks both `PerGame` or neither;
   apply and the fresh render throw on one alone.
-- **Concepts that are not global.** A concept row for `CollisionMargin` or `CollisionChannel` is
-  an Engine row whose default is the table's own, with no modifier: a margin in centimetres or one
-  engine's trace channel number is the game's value, Defaults.ini never reaches it, and the fresh
-  render's gate does not apply to it.
+- **Concepts that are not global.** A concept row for `CollisionMargin` or `CollisionChannel`
+  defaults to the table's own value with no modifier: a margin in centimetres or one engine's trace
+  channel number is the game's value, Defaults.ini never reaches it, and the fresh render's gate
+  does not apply to it. Whether such a row is an Engine row is the table's `Engine()` mark, as for
+  any other row.
 
 `ApplyCanonical(doc, table, config)` / `table.Apply(doc, config)` reads a parsed file into a
 config: every row starts from its default, fields no row binds are left alone, and it returns the
@@ -510,8 +513,8 @@ adds later then reaches a mod's file only when that mod names it, so it never br
 mod's committed file. An empty list or a concept named twice throws.
 
 The defaults are the config type's own, with the four hotkey lists and `CollisionEnabled` at
-their `canonical_default`. `CollisionMargin` and `CollisionChannel` are Engine rows, as in every
-table. `LocalSmoothing` and `RemoteSmoothing` also set the copy the
+their `canonical_default`. `CollisionChannel` is an Engine row, and `CollisionMargin` is not.
+`LocalSmoothing` and `RemoteSmoothing` also set the copy the
 position settings carry. `PositionLimitY` never sets `PositionLimitYDown`: no key takes its value
 from another. The sensitivity and inversion fields of core's types have no row, so a canonical
 file never sets them and they keep the defaults instance's values.
@@ -827,10 +830,10 @@ file, the README config block and the changelog template.
 
 26 of the 28 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
 `PositionAllowed`, `CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of
-2026-09-25, collision rows ruling of 2026-09-26). A canonical concept is global unless the schema
-says `"global": false`, which `CollisionMargin` and `CollisionChannel` do: a margin in the
+2026-09-25, collision rows ruling of 2026-09-26). The schema says `global`, true or false, on
+every canonical concept, and `CollisionMargin` and `CollisionChannel` say false: a margin in the
 engine's own units or a channel number means something else in every engine, so each game keeps
-its own, Defaults.ini has no line for either, and their rows are Engine rows. The only other
+its own and Defaults.ini has no line for either. The only other
 exception is a row the table marks `PerGame()`, which needs an entry the owner approved in
 `data/config-format.json` `per_game` for that repo. Such a row's default is the table's own,
 `default` on it reads that default, and Defaults.ini never reaches it. A concept that is not global

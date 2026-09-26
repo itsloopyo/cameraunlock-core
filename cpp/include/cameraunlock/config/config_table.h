@@ -526,7 +526,6 @@ private:
         row.comment.assign(info.file_comment, info.file_comment + info.file_comment_lines);
         row.concept_id = Id;
         row.hotkey = info.family == schema::ValueFamily::kHotkey;
-        row.engine = !info.global;
         detail::CheckConceptRow(rows_, row);
         auto ops = std::make_shared<detail::CodecRow<Config, Codec, Get, Set>>(ConceptCodec<Id, Field>(),
                                                                                std::move(get), std::move(set));
@@ -748,8 +747,9 @@ std::string RenderCanonical(const ConfigTable<Config>& table, const Config& valu
 }
 
 /// Writes the file a game starts with: RenderCanonical of the defaults, except that every global
-/// concept row that is not PerGame is written `Key=default`, an Engine row included. A row of a
-/// concept that is not global holds the game's own default, commented.
+/// concept row that is not PerGame is written `Key=default`, an Engine row included. Every other
+/// row is written as RenderCanonical writes it, so the row of a concept that is not global holds the
+/// game's own default, commented only when it is an Engine row.
 ///
 /// Throws std::invalid_argument when a global concept row that is not PerGame defaults to a value other
 /// than the schema's, naming the row; when the table binds RotationEnabled without

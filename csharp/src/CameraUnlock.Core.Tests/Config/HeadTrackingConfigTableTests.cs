@@ -94,25 +94,33 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void CollisionMarginAndChannelAreEngineRowsOutsideDefaultsIni()
+        public void TheGlobalConceptsAreThe26TheSchemaNames()
         {
-            Assert.False(ConfigConcepts.CollisionMargin.Global);
-            Assert.False(ConfigConcepts.CollisionChannel.Global);
-            foreach (ConceptDescriptor concept in ConfigConcepts.All)
+            string[] global =
             {
-                if (concept != ConfigConcepts.CollisionMargin && concept != ConfigConcepts.CollisionChannel) Assert.True(concept.Global, concept.Id);
-            }
+                "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw", "AimDecoupling",
+                "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "PositionAllowed", "TrueFreeLook",
+                "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
+                "CollisionEnabled", "CollisionReleaseSmoothing", "TrackerPivotForward", "TrackerPivotUp", "ToggleKey",
+                "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightFollowsHead", "LightMultiplier",
+            };
+            Assert.Equal(global, ConfigConcepts.All.Where(c => c.Global).Select(c => c.Id));
+            Assert.Equal(new[] { "CollisionMargin", "CollisionChannel" }, ConfigConcepts.All.Where(c => !c.Global).Select(c => c.Id));
+        }
 
+        [Fact]
+        public void CollisionMarginAndChannelKeepTheGamesOwnDefaultAndChannelIsAnEngineRow()
+        {
             var pinned = new HeadTrackingConfigData { CollisionMargin = 10f, CollisionChannel = 3 };
             ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
                 ConfigConcepts.CollisionEnabled, ConfigConcepts.CollisionMargin, ConfigConcepts.CollisionChannel);
             string fresh = Encoding.ASCII.GetString(table.RenderFresh(new RenderHeader("G")));
             Assert.Contains("\r\nCollisionEnabled=default\r\n", fresh);
-            Assert.Contains("\r\n; CollisionMargin=0.1\r\n", fresh);
+            Assert.Contains("\r\nCollisionMargin=0.1\r\n", fresh);
             Assert.Contains("\r\n; CollisionChannel=0\r\n", fresh);
             Assert.Equal(Encoding.ASCII.GetString(table.Render(pinned, new RenderHeader("G"))),
                 fresh.Replace("CollisionEnabled=default", "CollisionEnabled=false")
-                    .Replace("; CollisionMargin=0.1", "CollisionMargin=10.0")
+                    .Replace("CollisionMargin=0.1", "CollisionMargin=10.0")
                     .Replace("; CollisionChannel=0", "CollisionChannel=3"));
         }
 

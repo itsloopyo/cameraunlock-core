@@ -19,8 +19,9 @@ namespace CameraUnlock.Core.Config
     /// replace <see cref="HeadTrackingConfigData.Position"/> and
     /// <see cref="HeadTrackingConfigData.Light"/> with a copy carrying the new value, so a
     /// <see cref="HeadFollowLightSettings"/> instance another config shares is never changed.
-    /// CollisionMargin and CollisionChannel are not global in the schema, so their rows are Engine
-    /// rows at the game's own default, written as a comment there, and never follow Defaults.ini.
+    /// CollisionMargin and CollisionChannel are not global in the schema, so their rows hold the
+    /// game's own default and never follow Defaults.ini. CollisionChannel is also an Engine row: the
+    /// channel is data about the game, so at its default it is written as a comment.
     /// <see cref="HeadTrackingConfigData.Sensitivity"/> and the position
     /// sensitivities and inversions have no row: the canonical format carries no pose shaping, so
     /// they keep the defaults instance's values.
@@ -180,7 +181,8 @@ namespace CameraUnlock.Core.Config
                     table.Concept(ConfigConcepts.CollisionMargin, c => c.CollisionMargin, (c, v) => c.CollisionMargin = v);
                     return;
                 case nameof(ConfigConcepts.CollisionChannel):
-                    table.Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v);
+                    table.Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v)
+                        .Engine();
                     return;
                 case nameof(ConfigConcepts.CollisionReleaseSmoothing):
                     table.Concept(ConfigConcepts.CollisionReleaseSmoothing, c => c.CollisionReleaseSmoothing,

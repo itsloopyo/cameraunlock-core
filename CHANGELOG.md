@@ -15,10 +15,11 @@ Collision rows ruling of 2026-09-26. A margin in the engine's own units and a tr
 mean something different in every engine, so neither can be one value for every game; whether the
 wall check runs is a preference, so it stays global and starts on.
 
-- **Schema.** `data/config-schema.json` gains `"global": false` on `CollisionMargin` and
-  `CollisionChannel`; every other canonical concept is global, as before.
-  `scripts/generate-config-schema.mjs` refuses the field on a concept that is not canonical and
-  any value but `false`. `CollisionEnabled`
+- **Schema.** `data/config-schema.json` gains a `global` field on every canonical concept: `false`
+  on `CollisionMargin` and `CollisionChannel`, `true` on the other 26, which were global before.
+  `scripts/generate-config-schema.mjs` refuses a canonical concept without a boolean `global`, so
+  a new concept cannot arrive undecided, and refuses the field on a concept that is not canonical.
+  `CollisionEnabled`
   gains `"canonical_default": true`, which a canonical file and Defaults.ini start with; its
   `default`, the value the deprecated flat readers (`HeadTrackingConfigData.LoadFromFile`,
   `HeadTrackingConfig`'s parser) and the field initialisers use, stays `false`. The generator now
@@ -28,20 +29,20 @@ wall check runs is a preference, so it stays global and starts on.
   `ConceptTraits<Id>::kGlobal` and `ConceptInfo::global`, appended as the struct's last member so
   existing aggregate initialisation still compiles. `ConceptDescriptor.CanonicalDefault` and
   `kCanonicalDefault` are `"true"` for `CollisionEnabled`, and its default text is `true`.
-- **Config tables.** The row of a concept that is not global is an Engine row with no modifier,
-  and its default is the table's own: Defaults.ini never reaches it, `default` on it reads the
-  table's default, the fresh render's schema-default gate skips it, and `RenderFresh` writes it as
-  `Render` does, commented at its default (`; CollisionMargin=10.0`) and active anywhere else. So a
+- **Config tables.** The row of a concept that is not global defaults to the table's own value:
+  Defaults.ini never reaches it, `default` on it reads the table's default, the fresh render's
+  schema-default gate skips it, and `RenderFresh` writes it as `Render` does, as its value
+  (`CollisionMargin=10.0`), or commented at its default where the table marks the row `Engine()`
+  (`; CollisionChannel=3`). Whether a row is global does not make it an Engine row. So a
   table whose margin is in centimetres or whose channel is its engine's own number renders fresh,
   and the config owners no longer throw from the constructor over it. `PerGame()` on such a row
   throws `InvalidOperationException` (C++ `std::invalid_argument`): `[Position] CollisionChannel is
   not global in data/config-schema.json, so every game keeps its own value and Defaults.ini never
   reaches it; PerGame() is for a global concept`.
 - **`HeadTrackingConfigTable`** starts `CollisionEnabled` at `true`, as it starts the hotkey lists
-  at their `canonical_default`, and no longer marks `CollisionChannel` `Engine()` itself, since the
-  schema does. `CollisionMargin` is an Engine row too now, so `all-concepts.ini` writes
-  `; CollisionMargin=0.1` and `all-concepts-fresh.ini` comments both rows instead of writing
-  `default`.
+  at their `canonical_default`. `CollisionChannel` stays an `Engine()` row and `CollisionMargin`
+  is not one, so `all-concepts-fresh.ini` writes `CollisionMargin=0.1` and `; CollisionChannel=0`
+  instead of `default` on both.
 - **Defaults.ini.** Core's global table names the 26 global concepts, so a new Defaults.ini has no
   `CollisionMargin` or `CollisionChannel` line and holds `CollisionEnabled=true`. The reader never
   reads either key: a line for one is absent, with no log line and no message.
@@ -52,19 +53,21 @@ wall check runs is a preference, so it stays global and starts on.
   the built-in value of a `CollisionEnabled=default` row.
 - **Fixtures and tests.** `global/Defaults.ini`, `head-tracking/all-concepts*.ini`, the
   `head-tracking/apply-*` cases and the `global/read-alias` and `global/read-refused-values` cases
-  follow; the fixture table's `CollisionChannel` row drops `.Engine().PerGame()`, which its
-  concept now implies. New checks in both languages: a table over the two rows renders fresh at
-  engine values, `default` on them ignores the effective defaults, `PerGame()` on them throws,
-  `HeadTrackingConfigTable` starts `CollisionEnabled` at true and the flat default stays false,
-  and an owner over a table with `CollisionMargin` 10 and `CollisionChannel` 3 creates the file
-  with both commented at those values while `CollisionEnabled` follows Defaults.ini.
+  follow; the fixture table's `CollisionChannel` row drops `.PerGame()`, which `PerGame()` now
+  refuses there, and keeps `.Engine()`. New checks in both languages: the 26 global ids are pinned
+  to the schema by name, a table over the two rows renders fresh at engine values, `default` on
+  them ignores the effective defaults, `PerGame()` on them throws, `HeadTrackingConfigTable` starts
+  `CollisionEnabled` at true and the flat default stays false, and an owner over a table with
+  `CollisionMargin` 10 and `CollisionChannel` 3 creates the file with both at those values while
+  `CollisionEnabled` follows Defaults.ini.
 
 What a consuming repo changes at its pin bump. Keep the `CollisionMargin` and `CollisionChannel`
 defaults the mod ships, in whatever unit and channel its engine uses; drop a `PerGame()` on either
-row (none is in the fleet today) and leave an `Engine()` on either (it changes nothing). A table
+row (none is in the fleet today), and keep or add `Engine()` where the row should be written
+commented at its default. A table
 that binds `CollisionEnabled` defaults it to `true`; a mod without a lean collision sweep does not
 bind it. Re-run `pixi run render-config`: the committed file holds `CollisionEnabled=default` and
-the two engine rows commented at the mod's own values. The seven converted repos that were waiting
+the two rows at the mod's own values, an `Engine()` row commented. The seven converted repos that were waiting
 on this (deus-ex-human-revolution, outer-worlds-spacers-choice-edition, ready-or-not,
 sniper-elite-v2-remastered, stalker-shadow-of-chornobyl-enhanced-edition, the-forest, thief) can
 bump past the entry where the owners read Defaults.ini.

@@ -62,6 +62,7 @@ const TAG_VERSION = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const perGameRows = (repo) => (FORMAT.per_game[repo] ?? []).map((e) => e.row);
+const NOT_GLOBAL_IDS = new Set(SCHEMA.concepts.filter((c) => c.canonical && !c.global).map((c) => c.id));
 const slashes = (p) => p.replace(/\\/g, "/");
 const lower = (p) => slashes(p).toLowerCase();
 const anchorOf = (item) => item.anchor ?? "game_root";
@@ -368,7 +369,11 @@ function repoProblems(man, root, state) {
     if (!(id in config.per_game)) problems.push(`config.per_game has no ${id}, which data/config-format.json per_game lists for ${state.repo}; ${hint}`);
   }
   for (const id of Object.keys(config.per_game)) {
-    if (!kept.includes(id)) {
+    if (NOT_GLOBAL_IDS.has(id)) {
+      problems.push(
+        `config.per_game names ${id}, which is not global in data/config-schema.json: every game keeps its own value there already, so it is never a per_game row`,
+      );
+    } else if (!kept.includes(id)) {
       problems.push(
         `config.per_game names ${id}, which data/config-format.json per_game does not list for ${state.repo}; a game keeps a row for itself only with the owner's approval recorded there`,
       );

@@ -110,7 +110,8 @@ function describeDiagnostic(d) {
 // The problems of one committed canonical file, as sentences. `dialect` is the repo's hotkey
 // dialect, `perGame` the concept ids data/config-format.json per_game lists for the repo: those
 // rows hold the game's own value, and every other global concept row holds default. A concept the
-// schema marks "global": false holds the game's own value too, commented at its default.
+// schema marks "global": false holds the game's own value too, commented at its default where the
+// table marks the row Engine().
 export function lintCanonicalConfig(bytes, { dialect, perGame }) {
   if (!Array.isArray(perGame)) throw new Error("lintCanonicalConfig needs perGame, the repo's per_game concept ids");
   const doc = parseCanonicalIni(bytes);
@@ -143,7 +144,7 @@ export function lintCanonicalConfig(bytes, { dialect, perGame }) {
         concept !== undefined &&
         current !== null &&
         equalsAsciiIgnoreCase(current, concept.section) &&
-        concept.global !== false &&
+        concept.global &&
         !perGame.includes(concept.id)
       ) {
         problems.push(
@@ -231,10 +232,10 @@ export function lintCanonicalConfig(bytes, { dialect, perGame }) {
           problems.push(`${where} belongs in [${concept.section}]`);
           continue;
         }
-        if (concept.global === false) {
+        if (!concept.global) {
           if (isDefaultToken(v.value)) {
             problems.push(
-              `${where}=${v.value}: ${concept.id} is not global in data/config-schema.json, so the file holds the game's own value there, commented at its default as render-config writes it`,
+              `${where}=${v.value}: ${concept.id} is not global in data/config-schema.json, so the file holds the game's own value there, as render-config writes it`,
             );
           }
           continue;

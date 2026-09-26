@@ -67,8 +67,8 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// False for a concept that holds engine data, a number in the engine's own units or a
-        /// channel it names (CollisionMargin, CollisionChannel): every game keeps its own value,
-        /// Defaults.ini never carries it, and a config table writes its row as an Engine row. True
+        /// channel it names (CollisionMargin, CollisionChannel): every game keeps its own default,
+        /// Defaults.ini never carries it and <see cref="ConfigTable{TConfig}.PerGame"/> refuses it. True
         /// for every other concept, whose row follows Defaults.ini unless the table marks it PerGame.
         /// </summary>
         public bool Global { get; }

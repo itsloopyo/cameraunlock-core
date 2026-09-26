@@ -1466,7 +1466,8 @@ namespace CameraUnlock.Core.Tests.Config
                 })
                 .Concept(ConfigConcepts.CollisionEnabled, c => c.CollisionEnabled, (c, v) => c.CollisionEnabled = v)
                 .Concept(ConfigConcepts.CollisionMargin, c => c.CollisionMargin, (c, v) => c.CollisionMargin = v)
-                .Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v);
+                .Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v)
+                .Engine();
             rig.PutDefaults(Ascii("[Position]\r\nCollisionEnabled=false\r\nCollisionMargin=0.5\r\nCollisionChannel=7\r\n"));
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Created);
@@ -1475,9 +1476,10 @@ namespace CameraUnlock.Core.Tests.Config
                 "the margin and channel keep the game's own defaults, got " + load.Config.CollisionMargin + " and "
                 + load.Config.CollisionChannel);
             string text = File.ReadAllText(rig.Path);
-            Expect(text.Contains("\r\nCollisionEnabled=default\r\n") && text.Contains("\r\n; CollisionMargin=10.0\r\n")
+            Expect(text.Contains("\r\nCollisionEnabled=default\r\n") && text.Contains("\r\nCollisionMargin=10.0\r\n")
                 && text.Contains("\r\n; CollisionChannel=3\r\n"),
-                "the created file holds CollisionEnabled=default and comments the margin and channel at the game's values:\n" + text);
+                "the created file holds CollisionEnabled=default, the game's margin, and the Engine channel commented at the "
+                + "game's value:\n" + text);
             ExpectLogLine(load, rig.Path + ": from Defaults.ini: CollisionEnabled=false");
             Expect(!load.Log.Any(l => l.Contains("CollisionMargin") || l.Contains("CollisionChannel")),
                 "no line names the margin or the channel:\n" + string.Join("\n", load.Log.ToArray()));

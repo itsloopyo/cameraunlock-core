@@ -1724,7 +1724,8 @@ void AGamesCollisionMarginAndChannelAreItsOwn(const fs::path& dir) {
     rig.table->Concept<Concept::CollisionEnabled>(&HeadTrackingConfig::collision_enabled)
         .Concept<Concept::CollisionMargin>([](const HeadTrackingConfig& c) { return c.lean_clamp.skin; },
                                            [](HeadTrackingConfig& c, float v) { c.lean_clamp.skin = v; })
-        .Concept<Concept::CollisionChannel>(&HeadTrackingConfig::collision_channel);
+        .Concept<Concept::CollisionChannel>(&HeadTrackingConfig::collision_channel)
+        .Engine();
     rig.PutDefaults("[Position]\r\nCollisionEnabled=false\r\nCollisionMargin=0.5\r\nCollisionChannel=7\r\n");
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Created);
@@ -1732,9 +1733,10 @@ void AGamesCollisionMarginAndChannelAreItsOwn(const fs::path& dir) {
     Check(load.config.lean_clamp.skin == 10.0f && load.config.collision_channel == 3,
           "the margin and channel keep the game's own defaults");
     const std::string text = ReadBytes(rig.path);
-    Check(Contains(text, "\r\nCollisionEnabled=default\r\n") && Contains(text, "\r\n; CollisionMargin=10.0\r\n") &&
+    Check(Contains(text, "\r\nCollisionEnabled=default\r\n") && Contains(text, "\r\nCollisionMargin=10.0\r\n") &&
               Contains(text, "\r\n; CollisionChannel=3\r\n"),
-          "the created file holds CollisionEnabled=default and comments the margin and channel at the game's values");
+          "the created file holds CollisionEnabled=default, the game's margin, and the Engine channel commented at the "
+          "game's value");
     Check(CountContaining(load.log, rig.Text() + ": from Defaults.ini: CollisionEnabled=false") == 1,
           "CollisionEnabled is named as taken from Defaults.ini" + Joined(load.log));
     Check(CountContaining(load.log, "CollisionMargin") == 0 && CountContaining(load.log, "CollisionChannel") == 0,

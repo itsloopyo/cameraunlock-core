@@ -225,6 +225,7 @@ fails("legacy repo without canonical_since", abzuMan(({ canonical_since: _, ...c
 fails("canonical_since in a repo with no pre-canonical build", manifest("sleeping-dogs", { ...structuredClone(sdConfig), canonical_since: "1.0.0" }), sd, "never published a pre-canonical build");
 fails("a per_game id data/config-format.json lists, missing", bepMan((c) => ({ ...c, per_game: {} })), bep, "config.per_game has no WorldSpaceYaw, which data/config-format.json per_game lists for subnautica-headtracking");
 fails("a per_game id data/config-format.json does not list", abzuMan((c) => ({ ...c, per_game: { WorldSpaceYaw: "false" } })), abzu, "config.per_game names WorldSpaceYaw, which data/config-format.json per_game does not list for abzu-headtracking");
+fails("a per_game id that is not global", abzuMan((c) => ({ ...c, per_game: { CollisionMargin: "10.0" } })), abzu, "config.per_game names CollisionMargin, which is not global in data/config-schema.json");
 fails("an extra per_game id beside a listed one", bepMan((c) => ({ ...c, per_game: { ...c.per_game, UdpPort: "4243" } })), bep, "config.per_game names UdpPort");
 fails("a stale per_game value", bepMan((c) => ({ ...c, per_game: { WorldSpaceYaw: "true" } })), bep, 'config.per_game.WorldSpaceYaw is "true", and Config.ini holds "false" there');
 fails("a per_game value spelled another way", bepMan((c) => ({ ...c, per_game: { WorldSpaceYaw: "False" } })), bep, 'config.per_game.WorldSpaceYaw is "False", and Config.ini holds "false" there');

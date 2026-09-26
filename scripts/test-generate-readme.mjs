@@ -122,7 +122,7 @@ for (const committed of [FRESH, ALL_FRESH]) {
   }
 }
 check(
-  defaultKeys(ALL_FRESH).length === SCHEMA.concepts.filter((c) => c.canonical && c.global !== false).length,
+  defaultKeys(ALL_FRESH).length === SCHEMA.concepts.filter((c) => c.canonical && c.global).length,
   `${ALL_FRESH} no longer sets every global concept to default`,
 );
 

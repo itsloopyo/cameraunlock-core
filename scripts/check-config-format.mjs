@@ -43,7 +43,7 @@ const REPLACED_KEYS = {
 };
 const DIALECTS = new Set(["native", "unity"]);
 const CANONICAL_IDS = new Set(SCHEMA.concepts.filter((c) => c.canonical).map((c) => c.id));
-const NOT_GLOBAL_IDS = new Set(SCHEMA.concepts.filter((c) => c.canonical && c.global === false).map((c) => c.id));
+const NOT_GLOBAL_IDS = new Set(SCHEMA.concepts.filter((c) => c.canonical && !c.global).map((c) => c.id));
 const REPO_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const BAD_PATH_CHARS = /[<>:"|?*\x00-\x1f]/;

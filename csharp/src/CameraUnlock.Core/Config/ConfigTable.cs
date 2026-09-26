@@ -83,8 +83,8 @@ namespace CameraUnlock.Core.Config
         /// <summary>
         /// A concept row. The accessors' type is the concept's, so a field of another type does
         /// not compile. The row of a concept that is not <see cref="ConceptDescriptor.Global"/>
-        /// (CollisionMargin, CollisionChannel) is an Engine row whose default is the table's own:
-        /// Defaults.ini never reaches it, whatever the table marks.
+        /// (CollisionMargin, CollisionChannel) defaults to the table's own value: Defaults.ini never
+        /// reaches it.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
         /// <exception cref="ArgumentException">A check above fails.</exception>
@@ -96,7 +96,6 @@ namespace CameraUnlock.Core.Config
 
             var row = new CodecRow<T>(concept.Section, concept.Key, ToArray(concept.FileComment), concept,
                 concept.Family == ConceptValueFamily.Hotkey, concept.Codec, get, set);
-            row.Engine = !concept.Global;
             CheckUniqueKey(row);
             ConceptDescriptor descriptor = concept;
             if (descriptor == ConfigConcepts.RotationEnabled || descriptor == ConfigConcepts.PositionEnabled)
@@ -436,7 +435,8 @@ namespace CameraUnlock.Core.Config
         /// <summary>
         /// Writes the file a game starts with: <see cref="Render"/> of the defaults, except that every
         /// global concept row that is not PerGame is written <c>Key=default</c>, an Engine row
-        /// included. A row of a concept that is not global holds the game's own default, commented.
+        /// included. Every other row is written as Render writes it, so the row of a concept that is
+        /// not global holds the game's own default, commented only when it is an Engine row.
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="header"/> is null.</exception>
         /// <exception cref="ArgumentException">A global concept row that is not PerGame defaults to a

@@ -220,12 +220,9 @@ function checkCanonicalFields(where, concept, keyTable) {
         }
     }
 
-    // A concept that is not global holds engine data (the engine's own units, a channel number):
-    // every game keeps its own value, Defaults.ini never carries it, and a table writes its row as
-    // an Engine row. Global is the rule, so the field is only ever written false.
-    if ('global' in concept && concept.global !== false) {
-        schemaError(where, `global is ${JSON.stringify(concept.global)}; a canonical concept is global unless it says ` +
-            '"global": false, so the field is written only as false');
+    if (typeof concept.global !== 'boolean') {
+        schemaError(where, `global is ${JSON.stringify(concept.global)}, expected true or false: every canonical ` +
+            'concept says whether Defaults.ini carries it, so a new one cannot arrive undecided');
     }
 }
 
@@ -682,7 +679,7 @@ const canonicalConcepts = (schema) => schema.concepts.filter((c) => c.canonical)
 // canonical_default where it has one, and the JSON value as it stands for the rest. A config
 // table's fresh render compares a row's own default with it.
 const defaultText = (c) => String(c.canonical_default ?? c.default);
-const isGlobal = (c) => c.global !== false;
+const isGlobal = (c) => c.global;
 const canonicalDefaultText = (c) => (c.canonical_default === undefined ? undefined : String(c.canonical_default));
 
 function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
@@ -752,8 +749,8 @@ enum class ValueFamily { kBool, kInteger, kFloating, kHotkey };
 /// CollisionEnabled's true), else nullptr. kDefaultText is the schema's default as text the
 /// concept's codec reads: the canonical_default where there is one, else the schema's value as it
 /// is written there. kGlobal is false for a concept that holds engine data (the engine's own
-/// units, a channel number): every game keeps its own value, Defaults.ini never carries it, and a
-/// config table writes its row as an Engine row.
+/// units, a channel number): every game keeps its own default, Defaults.ini never carries it and
+/// PerGame() refuses it.
 template <Concept Id>
 struct ConceptTraits;
 

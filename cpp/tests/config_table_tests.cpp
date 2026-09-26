@@ -157,6 +157,7 @@ ConfigTable<FixtureConfig> FixtureTable() {
         .Concept<Concept::PositionLimitX>(&F::position_limit_x)
         .Comment("How far, in metres, leaning sideways moves the view.\nThe fixture's own wording.")
         .Concept<Concept::CollisionChannel>(&F::collision_channel)
+        .Engine()
         .Concept<Concept::CycleTrackingModeKey>(&F::cycle_key)
         .Local("Camera", "Mode", &F::mode, ModeCodec(), "ControlRotation or UpdateCamera (decoupled).")
         .Local("Position", "LeanDelayMs", &F::lean_delay_ms, IntCodec<int>(),
@@ -762,12 +763,12 @@ void TestGlobalChecks() {
           "PerGame on a local row throws");
 
     ConfigTable<S> engine;
-    engine.Concept<Concept::CollisionMargin>(&S::scale).Concept<Concept::CollisionChannel>(&S::value);
+    engine.Concept<Concept::CollisionMargin>(&S::scale).Concept<Concept::CollisionChannel>(&S::value).Engine();
     const std::string engine_fresh = RenderCanonicalFresh(engine, header);
-    Check(Contains(engine_fresh, "\r\n; CollisionMargin=1.0\r\n") && Contains(engine_fresh, "\r\n; CollisionChannel=5\r\n") &&
+    Check(Contains(engine_fresh, "\r\nCollisionMargin=1.0\r\n") && Contains(engine_fresh, "\r\n; CollisionChannel=5\r\n") &&
               !Contains(engine_fresh, "Defaults.ini"),
-          "CollisionMargin and CollisionChannel off the schema's defaults render commented at the game's own, and a "
-          "table with no global row has no Defaults.ini lines");
+          "CollisionMargin and CollisionChannel off the schema's defaults render at the game's own, the Engine row "
+          "commented, and a table with no global row has no Defaults.ini lines");
     S engine_effective;
     engine_effective.scale = 0.1f;
     engine_effective.value = 0;

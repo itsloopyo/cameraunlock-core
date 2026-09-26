@@ -39,15 +39,18 @@
     "NonCanonicalConcept with the group's `canonical_reason`, and the canonical config lint fails",
     "a file holding one.",
     "",
-    "A canonical concept is global unless it says `\"global\": false`: a canonical file's row for a",
-    "global concept may hold `default`, which reads the value from Defaults.ini, and Defaults.ini",
-    "carries every global concept. A game keeps its own value for one only through the table's",
-    "PerGame(), with an approved per_game entry in data/config-format.json. A concept with",
-    "`\"global\": false` holds engine data, a number in the engine's own units or a channel it",
-    "names: every game keeps its own value, a config table writes the row as an Engine row",
-    "(commented at the game's default), no canonical file holds `default` on it, and Defaults.ini",
-    "never carries it. CollisionMargin and CollisionChannel are the two (collision rows ruling of",
-    "2026-09-26). A concept moving between the two kinds is a breaking change."
+    "Every canonical concept says `global`, true or false, and a concept that is not canonical",
+    "has no `global`, so no concept arrives undecided. A canonical file's row for a global concept",
+    "may hold `default`, which reads the value from Defaults.ini, and Defaults.ini carries every",
+    "global concept. A game keeps its own value for one only through the table's PerGame(), with",
+    "an approved per_game entry in data/config-format.json. A concept with `\"global\": false` holds",
+    "engine data, a number in the engine's own units or a channel it names: every game keeps its",
+    "own default, Defaults.ini never carries it, PerGame() refuses it and per_game never lists it.",
+    "A fresh file writes its value like any other row the game keeps (an Engine row still",
+    "commented at its default), a committed file holds a value on it, never `default`, and",
+    "`default` in a player's file means the game's own default. CollisionMargin and",
+    "CollisionChannel are the two (collision rows ruling of 2026-09-26). A concept moving between",
+    "the two kinds is a breaking change."
   ],
   "deliberately_unaliased": [
     {
@@ -92,6 +95,7 @@
       "aliases": ["Port", "OpenTrackPort", "ListenPort", "TrackingPort"],
       "doc": "UDP port the OpenTrack receiver binds. 1-65535.",
       "canonical": true,
+      "global": true,
       "file_comment": ["UDP port the mod receives tracker data on (OpenTrack protocol)."],
       "range": {"min": 1, "max": 65535}
     },
@@ -104,6 +108,7 @@
       "aliases": ["EnableAtStartup", "EnabledOnStartup", "StartEnabled", "EnableHeadTracking", "AutoEnable"],
       "doc": "Whether head tracking is active when the game loads.",
       "canonical": true,
+      "global": true,
       "file_comment": ["true: head tracking is on when the game starts. ToggleKey turns it on and off."]
     },
     {
@@ -181,6 +186,7 @@
       "aliases": ["SmoothingLocal"],
       "doc": "Smoothing applied when the tracker runs on this machine. 0-1.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Smoothing when the tracker runs on this PC. 0 is the least, 1 the most."],
       "range": {"min": 0, "max": 1}
     },
@@ -193,6 +199,7 @@
       "aliases": ["SmoothingRemote"],
       "doc": "Smoothing applied when the tracker is a device on the network. 0-1.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."],
       "range": {"min": 0, "max": 1}
     },
@@ -205,6 +212,7 @@
       "aliases": ["HorizonLockedYaw", "WorldLockedYaw", "HorizonLock", "LockHorizon", "WorldYaw"],
       "doc": "true rotates yaw around world up (horizon locked); false around the camera's own up.",
       "canonical": true,
+      "global": true,
       "file_comment": ["true: yaw turns around the world's up axis. false: around the camera's own up axis."]
     },
     {
@@ -216,6 +224,7 @@
       "aliases": ["DecoupleAim", "AimDecouple", "EnableAimDecoupling", "DecoupledAim"],
       "doc": "Keep the aim direction on the mouse rather than on the head.",
       "canonical": true,
+      "global": true,
       "file_comment": ["true: your aim stays with the mouse or controller while your head moves the view."]
     },
     {
@@ -249,6 +258,7 @@
       "aliases": [],
       "doc": "Whether rotational (yaw, pitch, roll) tracking is applied. Together with PositionEnabled it records the tracking mode. There is no alias: no config in the fleet named a rotation switch when this key was added, and a bare Enabled stays unmatched; see deliberately_unaliased.",
       "canonical": true,
+      "global": true,
       "file_comment": ["true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both."]
     },
     {
@@ -260,6 +270,7 @@
       "aliases": [],
       "doc": "How long, in milliseconds, the newest tracker packet counts as current. The mods that read it compare the age of the last packet with it every frame and stop following the tracker once the packet is older: most hold the last pose (bioshock-infinite, dead-space, dying-light, outlast), mirrors-edge hands the camera back to the game. 500 is the fixed liveness window of core's UdpReceiver (kConnectionTimeoutMs), which is where the fleet's default came from. A window of 0 or less never counts a packet as current, so tracking never applies: refused below 1. No aliases: every fleet reader spells it DataFreshnessMs, under [General] in all but stormworks ([Advanced]) and fusion-360 ([Tracking]), and beamng keeps dataFreshnessMs in JSON.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."],
       "range": {"min": 1, "max": 2147483647}
     },
@@ -272,6 +283,7 @@
       "aliases": ["EnablePosition", "PositionTracking", "EnablePositionTracking", "PositionTrackingEnabled", "Enable6Dof", "SixDofEnabled"],
       "doc": "Whether positional (6DOF) tracking is applied.",
       "canonical": true,
+      "global": true,
       "file_comment": ["true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."]
     },
     {
@@ -283,6 +295,7 @@
       "aliases": [],
       "doc": "false means the game never applies positional tracking and the tracking-mode control skips the position modes, so head tracking runs rotation only whatever RotationEnabled and PositionEnabled say. For a game where position cannot work. One spelling fleet-wide: a game-local key may not reuse a concept name, so only a concept keeps every game on this one. No aliases: no config in the fleet named the switch when it was added. Core only parses it.",
       "canonical": true,
+      "global": true,
       "file_comment": ["false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."]
     },
     {
@@ -294,6 +307,7 @@
       "aliases": [],
       "doc": "The lean while aiming down sights, in a shooter with an aim state and positional tracking (the shooter-ads-handling skill). false is sights locked: the lean never takes the eye off the sight line, because the mod draws the weapon from the clean eye or eases the lean out through AdsFade while aiming. true is true free look: the lean stays in full, the weapon stays put in the world and the head moves around it. A persisted preference: the TrueFreeLookKey toggle saves it, so a mod marks the row Writable. A mod without positional tracking has one mode and binds neither concept. It sits under [Position] because the lean is all it changes and it exists only where positional tracking does, and a key goes in the schema section of its subject (docs/canonical-config.md), as CollisionEnabled does. No aliases: true_free_look is read only by a game's legacy import. Section-less matching resolves that spelling to this concept, so a canonical file that holds it draws MisplacedKey and is not read. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
       "canonical": true,
+      "global": true,
       "file_comment": ["false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."]
     },
     {
@@ -338,6 +352,7 @@
       "aliases": ["LimitX", "MaxX", "PositionMaxX"],
       "doc": "Maximum lateral displacement in metres, applied symmetrically.",
       "canonical": true,
+      "global": true,
       "file_comment": ["How far, in metres, leaning left or right can move the view."],
       "range": {"min": 0, "max": 10}
     },
@@ -350,6 +365,7 @@
       "aliases": ["LimitY", "MaxY", "PositionMaxY", "LimitYUp", "PositionLimitYUp"],
       "doc": "Maximum UPWARD displacement in metres.",
       "canonical": true,
+      "global": true,
       "file_comment": ["How far, in metres, raising your head can move the view."],
       "range": {"min": 0, "max": 10}
     },
@@ -362,6 +378,7 @@
       "aliases": ["LimitYDown", "MaxYDown", "PositionMaxYDown", "LimitDown"],
       "doc": "Maximum DOWNWARD displacement in metres. Usually tighter than the upward limit so the camera does not clip into the player body. When a file names PositionLimitY and NOT this key, the up limit is mirrored into it: one vertical limit in the file means one vertical limit in the clamp. Leaving the down side at its default is what caps a raised LimitY at 0.20m downward.",
       "canonical": true,
+      "global": true,
       "file_comment": ["How far, in metres, lowering your head can move the view."],
       "range": {"min": 0, "max": 10}
     },
@@ -374,6 +391,7 @@
       "aliases": ["LimitZ", "MaxZ", "PositionMaxZ", "LimitZForward", "PositionLimitZForward", "PositionLimitZFwd", "LimitZFwd"],
       "doc": "Maximum FORWARD displacement in metres. Negative z is forward, so this is the lower bound of the z clamp.",
       "canonical": true,
+      "global": true,
       "file_comment": ["How far, in metres, leaning forward can move the view."],
       "range": {"min": 0, "max": 10}
     },
@@ -386,6 +404,7 @@
       "aliases": ["LimitZBack", "MaxZBack", "PositionMaxZBack", "LimitZBackward", "PositionLimitZBackward"],
       "doc": "Maximum BACKWARD displacement in metres, the upper bound of the z clamp.",
       "canonical": true,
+      "global": true,
       "file_comment": ["How far, in metres, leaning back can move the view."],
       "range": {"min": 0, "max": 10}
     },
@@ -398,6 +417,7 @@
       "aliases": ["LeanCollision", "LeanCollisionEnabled", "CameraCollision", "ClampLean"],
       "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. A canonical file starts it on (canonical_default true, collision rows ruling of 2026-09-26): it is global, so Defaults.ini's value reaches every game that binds the row, and a game without a lean collision sweep does not bind it. The flat readers' default stays false. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice.",
       "canonical": true,
+      "global": true,
       "file_comment": ["true: leaning stops at walls instead of moving the view through them."],
       "canonical_default": true
     },
@@ -410,9 +430,9 @@
       "aliases": ["CollisionRadius", "LeanCollisionMargin", "CollisionSkin", "CameraCollisionRadius"],
       "doc": "How far off a blocking surface the eye is held, in the engine's own units. It must EXCEED the camera's near clip distance or geometry is culled before the eye reaches it and the wall goes transparent anyway. CollisionRadius is the spelling where the standoff IS a sweep radius; CollisionMargin where the query is a line and the standoff lives in the clamp. Not global: a number in one engine's units means something else in another, so each game keeps its own default and Defaults.ini never carries it.",
       "canonical": true,
+      "global": false,
       "file_comment": ["How far the view is held off a wall when you lean into it, in the game's own units."],
-      "range": {"min": 0},
-      "global": false
+      "range": {"min": 0}
     },
     {
       "id": "CollisionChannel",
@@ -423,8 +443,8 @@
       "aliases": ["LeanCollisionChannel", "TraceChannel", "CollisionTraceChannel"],
       "doc": "Which trace channel the sweep runs on, for engines whose query needs one. Which channel a level's geometry blocks is a project setting rather than an engine constant, so it is a value to try and read back out of the log. Omitted by mods whose cast takes no channel. Not global: a channel number names something different in each engine, so each game keeps its own default and Defaults.ini never carries it.",
       "canonical": true,
-      "file_comment": ["Which of the game's collision channels the wall check tests against."],
-      "global": false
+      "global": false,
+      "file_comment": ["Which of the game's collision channels the wall check tests against."]
     },
     {
       "id": "CollisionReleaseSmoothing",
@@ -435,6 +455,7 @@
       "aliases": ["LeanReleaseSmoothing", "CollisionRelease", "LeanClampRelease"],
       "doc": "How quickly the lean reopens once an obstruction clears, on the same 0-1 scale as every other smoothing value in the fleet. 0.9 is a 200ms time constant. Tightening is never smoothed: easing INTO a smaller allowance leaves the eye inside the geometry for the length of the ease, which is the whole bug.",
       "canonical": true,
+      "global": true,
       "file_comment": ["How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest."],
       "range": {"min": 0, "max": 1}
     },
@@ -480,6 +501,7 @@
       "aliases": ["PivotForward", "NeckPivotForward", "PivotArm", "TrackerPivot", "NeckModelForward"],
       "doc": "Metres from the neck pivot forward to the point the tracker watches. 0 disables pivot compensation.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off."],
       "range": {"min": 0, "max": 10}
     },
@@ -492,6 +514,7 @@
       "aliases": ["PivotUp", "NeckPivotUp", "NeckModelHeight"],
       "doc": "Metres from the neck pivot up to the point the tracker watches.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Metres from the pivot of your neck up to the point the tracker follows."],
       "range": {"min": 0, "max": 10}
     },
@@ -504,6 +527,7 @@
       "aliases": ["ToggleTrackingKey", "TrackingToggleKey", "EnableKey", "Toggle", "ToggleTracking", "KeyToggle"],
       "doc": "Key that toggles head tracking on and off.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Turns head tracking on and off."],
       "codec": "hotkey",
       "canonical_default": "End, Ctrl+Shift+Y"
@@ -539,6 +563,7 @@
       "aliases": ["TrackingModeKey", "CycleModeKey", "ModeKey", "CycleTrackingMode", "CycleMode", "ModeCycle", "KeyCycleMode"],
       "doc": "Key that cycles the tracking mode. Empty leaves it unbound.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Changes the tracking mode: rotation and position, rotation only, position only."],
       "codec": "hotkey",
       "canonical_default": "PageUp, Ctrl+Shift+G"
@@ -552,6 +577,7 @@
       "aliases": ["ToggleYawModeKey", "WorldYawKey", "YawMode", "ToggleYawMode", "KeyYawMode", "ToggleYawKey"],
       "doc": "Key that toggles world-locked versus camera-local yaw.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw)."],
       "codec": "hotkey",
       "canonical_default": "PageDown, Ctrl+Shift+H"
@@ -565,6 +591,7 @@
       "aliases": [],
       "doc": "Key list that toggles TrueFreeLook, between sights locked and true free look. Only in a mod that binds TrueFreeLook. The deprecated flat readers do not read it, so nothing holds its default to a single key name: the default and the field initialisers are the canonical_default.",
       "canonical": true,
+      "global": true,
       "file_comment": ["Switches between keeping your eye on the sights and true free look (TrueFreeLook)."],
       "codec": "hotkey",
       "canonical_default": "Insert, Ctrl+Shift+U"
@@ -589,6 +616,7 @@
       "aliases": ["FlashlightFollowsHead", "CompensateFlashlight"],
       "doc": "Point a carried light where the head is looking rather than where the body is aiming. The two aliases are the spellings actually shipped - repo (FlashlightFollowsHead) and prey (CompensateFlashlight). The bare Enabled that still-wakes-the-deep and resident-evil-requiem ship under their own section stays unmatched on purpose, because section-less it is the master switch; see deliberately_unaliased.",
       "canonical": true,
+      "global": true,
       "file_comment": ["true: a light you carry points where you look instead of where you aim."]
     },
     {
@@ -600,6 +628,7 @@
       "aliases": ["FlashlightMultiplier", "FlashlightScale"],
       "doc": "How far the light turns relative to the head. 1.5 leads the view; 1.0 matches it; 0 pins the beam to the aim. A value outside [0, 5] is rejected with a log line and the previous one stands - not clamped. The two aliases are the spellings actually shipped: repo (FlashlightMultiplier) and prey (FlashlightScale). See cameraunlock::effects::kDefaultLightMultiplier for why it leads.",
       "canonical": true,
+      "global": true,
       "file_comment": ["How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."],
       "range": {"min": 0, "max": 5}
     }

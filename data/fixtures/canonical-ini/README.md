@@ -205,7 +205,7 @@ same text.
 | EnableOnStartup | concept EnableOnStartup | bool | `true` | |
 | LocalSmoothing | concept LocalSmoothing | float, 0 to 1 | `0.0` | |
 | PositionLimitX | concept PositionLimitX | float, 0 to 10 | `0.3` | Comment: `How far, in metres, leaning sideways moves the view.` and `The fixture's own wording.` |
-| CollisionChannel | concept CollisionChannel | int | `3` | none: the concept is not global, so the row is an Engine row whatever the table marks |
+| CollisionChannel | concept CollisionChannel | int | `3` | Engine. The concept is not global, so the row keeps this default whatever Defaults.ini holds |
 | CycleTrackingModeKey | concept CycleTrackingModeKey | hotkey | `PageUp, Ctrl+Shift+G` | |
 | Mode | local [Camera] Mode | enum `ControlRotation`, `UpdateCamera` | `UpdateCamera` | comment `ControlRotation or UpdateCamera (decoupled).` |
 | LeanDelayMs | local [Position] LeanDelayMs | int | `50` | comment `Milliseconds before a lean starts, and the metres its wall trace reaches.`; Range(0, 1000) |
@@ -227,7 +227,7 @@ A `\n` in a comment above separates its lines. The render header's display name 
 dialect, so the C++ suite's native `HotkeyCodec` and the C# suite's Unity one agree on each.
 
 `CollisionChannel` is the table's one concept row that does not follow Defaults.ini: the schema
-marks it `"global": false`, which makes it an Engine row whose default is the table's own. Every
+marks it `"global": false`, so its default is the table's own, and the table marks it Engine. Every
 other concept row follows Defaults.ini, so the table passes the fresh render's gate, its renders
 carry the six header lines on `default`, and the cases pin that such a row keeps the commented
 form at its default.
@@ -288,11 +288,11 @@ and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Ga
 
 - `all-concepts.ini`: the table's defaults instance rendered. It holds every canonical concept at
   its default, the four hotkey lists and `CollisionEnabled` at their `canonical_default`, so it
-  pins each concept's default rendering in both languages. `CollisionMargin` and
-  `CollisionChannel` are not global, so they are Engine rows, the commented lines
-  `; CollisionMargin=0.1` and `; CollisionChannel=0`.
-- `all-concepts-fresh.ini`: the same table's fresh render, every global concept `Key=default` and
-  the two Engine rows commented as above. It proves core's own table passes the fresh render's
+  pins each concept's default rendering in both languages. `CollisionChannel` is the table's one
+  Engine row, the commented line `; CollisionChannel=0`.
+- `all-concepts-fresh.ini`: the same table's fresh render, every global concept `Key=default`,
+  `CollisionMargin=0.1`, which is not global, and `CollisionChannel`, not global either, commented
+  as above. It proves core's own table passes the fresh render's
   gate: every global concept defaults to the schema's `default` (its `canonical_default` where it
   has one), and the table binds `PositionEnabled` beside `RotationEnabled`.
 - `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose

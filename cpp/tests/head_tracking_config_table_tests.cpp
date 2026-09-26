@@ -324,15 +324,29 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// CollisionMargin and CollisionChannel are the only concepts that are not global. Their rows are
-// Engine rows: a fresh file comments them at the game's default, and any other value is written.
-// The C# twin is HeadTrackingConfigTableTests.CollisionMarginAndChannelAreEngineRowsOutsideDefaultsIni.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe26TheSchemaNames.
+void TestGlobalConcepts() {
+    std::cout << "\n[the global concepts are the 26 the schema names]\n";
+    const std::vector<std::string> expected{
+        "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw", "AimDecoupling",
+        "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "PositionAllowed", "TrueFreeLook",
+        "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
+        "CollisionEnabled", "CollisionReleaseSmoothing", "TrackerPivotForward", "TrackerPivotUp", "ToggleKey",
+        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightFollowsHead", "LightMultiplier"};
+    std::vector<std::string> global;
+    std::vector<std::string> not_global;
+    for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
+    Check(global == expected, "the global concepts are the 26 listed, in schema order");
+    Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
+          "CollisionMargin and CollisionChannel are the concepts that are not global");
+}
+
+// CollisionMargin and CollisionChannel keep the game's own default. A fresh file writes the margin as
+// a value and comments CollisionChannel, an Engine row, at its default; any other value is written.
+// The C# twin is
+// HeadTrackingConfigTableTests.CollisionMarginAndChannelKeepTheGamesOwnDefaultAndChannelIsAnEngineRow.
 void TestEngineCollisionRows() {
-    std::cout << "\n[CollisionMargin and CollisionChannel are Engine rows outside Defaults.ini]\n";
-    for (const schema::ConceptInfo& info : schema::kConcepts) {
-        const bool engine = info.id == Concept::CollisionMargin || info.id == Concept::CollisionChannel;
-        Check(info.global != engine, std::string(info.name) + (engine ? " is not global" : " is global"));
-    }
+    std::cout << "\n[CollisionMargin and CollisionChannel keep the game's own default]\n";
     static_assert(!schema::ConceptTraits<Concept::CollisionMargin>::kGlobal &&
                   !schema::ConceptTraits<Concept::CollisionChannel>::kGlobal &&
                   schema::ConceptTraits<Concept::CollisionEnabled>::kGlobal);
@@ -340,9 +354,10 @@ void TestEngineCollisionRows() {
     const ConfigTable<HeadTrackingConfig> table =
         HeadTrackingConfigTable({Concept::CollisionEnabled, Concept::CollisionMargin, Concept::CollisionChannel});
     const std::string fresh = RenderCanonicalFresh(table, kHeader);
-    Check(Contains(fresh, "\r\nCollisionEnabled=default\r\n") && Contains(fresh, "\r\n; CollisionMargin=0.1\r\n") &&
+    Check(Contains(fresh, "\r\nCollisionEnabled=default\r\n") && Contains(fresh, "\r\nCollisionMargin=0.1\r\n") &&
               Contains(fresh, "\r\n; CollisionChannel=0\r\n"),
-          "the fresh file holds CollisionEnabled=default and comments the two engine rows at their defaults");
+          "the fresh file holds CollisionEnabled=default, the game's CollisionMargin, and CollisionChannel commented "
+          "at its default");
     HeadTrackingConfig pinned = table.defaults();
     pinned.collision_enabled = false;
     pinned.lean_clamp.skin = 10.0f;
@@ -350,7 +365,7 @@ void TestEngineCollisionRows() {
     std::string expected = fresh;
     for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
              {"CollisionEnabled=default", "CollisionEnabled=false"},
-             {"; CollisionMargin=0.1", "CollisionMargin=10.0"},
+             {"CollisionMargin=0.1", "CollisionMargin=10.0"},
              {"; CollisionChannel=0", "CollisionChannel=3"}}) {
         expected.replace(expected.find(from), from.size(), to);
     }
@@ -435,6 +450,7 @@ int RunHeadTrackingConfigTableTests() {
         TestFreshRender();
         TestEffectiveDefaults();
         TestHotkeyDefaults();
+        TestGlobalConcepts();
         TestEngineCollisionRows();
         TestTrueFreeLookSpellings();
         TestArguments();

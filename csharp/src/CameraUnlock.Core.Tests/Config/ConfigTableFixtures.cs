@@ -78,6 +78,7 @@ namespace CameraUnlock.Core.Tests.Config
                 .Concept(ConfigConcepts.PositionLimitX, c => c.PositionLimitX, (c, v) => c.PositionLimitX = v)
                 .Comment("How far, in metres, leaning sideways moves the view.\nThe fixture's own wording.")
                 .Concept(ConfigConcepts.CollisionChannel, c => c.CollisionChannel, (c, v) => c.CollisionChannel = v)
+                .Engine()
                 .Concept(ConfigConcepts.CycleTrackingModeKey, c => c.CycleTrackingModeKey, (c, v) => c.CycleTrackingModeKey = v)
                 .Local("Camera", "Mode", c => c.Mode, (c, v) => c.Mode = v, ModeCodec(),
                     "ControlRotation or UpdateCamera (decoupled).")
@@ -208,13 +209,15 @@ namespace CameraUnlock.Core.Tests.Config
 
             ConfigTable<SmallConfig> engine = SmallTable()
                 .Concept(ConfigConcepts.CollisionMargin, s => s.Scale, (s, v) => s.Scale = v)
-                .Concept(ConfigConcepts.CollisionChannel, s => s.Value, (s, v) => s.Value = v);
+                .Concept(ConfigConcepts.CollisionChannel, s => s.Value, (s, v) => s.Value = v)
+                .Engine();
             string engineFresh = Encoding.ASCII.GetString(engine.RenderFresh(header));
-            if (!engineFresh.Contains("\r\n; CollisionMargin=1.0\r\n") || !engineFresh.Contains("\r\n; CollisionChannel=5\r\n")
+            if (!engineFresh.Contains("\r\nCollisionMargin=1.0\r\n") || !engineFresh.Contains("\r\n; CollisionChannel=5\r\n")
                 || engineFresh.Contains("Defaults.ini"))
             {
-                throw new InvalidOperationException("CollisionMargin and CollisionChannel off the schema's defaults render "
-                    + "commented at the game's own, and a table with no global row has no Defaults.ini lines:\n" + engineFresh);
+                throw new InvalidOperationException("CollisionMargin and CollisionChannel off the schema's defaults render at "
+                    + "the game's own, the Engine row commented, and a table with no global row has no Defaults.ini lines:\n"
+                    + engineFresh);
             }
             var engineConfig = new SmallConfig();
             TableApplyResult engineResult = engine.Apply(
