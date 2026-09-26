@@ -3,7 +3,7 @@
 Byte fixtures for the canonical INI format: `reader/` for the reader, `editor/` for the
 editor, `keys/` for the hotkey binding codec, `codecs/` for the value codecs, `table/` for
 config tables, `head-tracking/` for core's table over its own config types, `global/` for
-Defaults.ini and where it is, `preferences/` for a launcher's preferences against the mod, `mutations/` for
+Defaults.ini and where it is, `preferences/` for the owner's save of the four preferences, `mutations/` for
 the differential corpus generator and `example/` for the examples in docs/canonical-config.md. Core's C++ suite runs them unchanged
 (`cpp/tests/canonical_ini_tests.cpp`, `cpp/tests/ini_editor_tests.cpp`,
 `cpp/tests/key_bindings_tests.cpp`, `cpp/tests/value_codecs_tests.cpp`,
@@ -311,7 +311,8 @@ the three cases every field is off its default at least once.
 Defaults.ini, the file a game's concept rows take their default from when they are not marked
 `PerGame()`. Core renders a new one and reads one with the internal C++
 `detail::RenderDefaultsIni` and `detail::ReadDefaultsIni` (`cameraunlock/config/defaults_ini.h`)
-and C# `DefaultsIni.Render` and `DefaultsIni.Read`. Nothing reads or writes the file on disk yet.
+and C# `DefaultsIni.Render` and `DefaultsIni.Read`, which the config owners use to create and read
+the file on disk (docs/canonical-config.md, "The global defaults file").
 
 `Defaults.ini` is what core writes as a new Defaults.ini: core's global table,
 `HeadTrackingConfigTable` naming every canonical concept, at its defaults, with the four hotkey
@@ -417,7 +418,8 @@ with the internal C++ `detail::ResolveDefaults` and `detail::ChooseDefaults`
 (`cameraunlock/config/defaults_location.h`) and C# `DefaultsLocation.Resolve` and
 `DefaultsLocation.Choose`. Both are pure. The probes that fill the resolver's input and the
 creation of the folder call the operating system and are not in the file; the conversions a probe
-makes under Wine are given as inputs. Nothing reads or creates the file on disk yet.
+makes under Wine are given as inputs. The config owners run the probes, this resolver and this
+choice at every `Load`.
 
 `resolve.tsv` is ASCII with the note rule of `expected.tsv`, fields separated by one tab, and
 every text field is the byte escape above of UTF-8 text. It holds cases one after another. A case
@@ -545,12 +547,12 @@ native files present.
 
 ## preferences/
 
-The four preferences a launcher manages in a canonical file: the tracking mode, world-space yaw,
-true free look and launch-enabled. Each case holds what a launcher reads for each of them, what
-the mod runs on, and what the mod's own `Save` writes when one changes. One directory per case,
-holding `case.tsv`, `input.ini` and, for a case with a change, `expected.ini`. Every input
-carries the `[CameraUnlock]` stamp, since a launcher edits only stamped files, so no save adds
-one.
+The four preferences a mod saves from its in-game controls: the tracking mode pair, world-space
+yaw, true free look and launch-enabled. The cases pin the config owner's `Save` of each of them,
+with what the file holds for it and what the mod runs on before and after. No launcher writes a
+game file: a launcher edits Defaults.ini, and reads a game's `CameraUnlock.ini` for display only.
+One directory per case, holding `case.tsv`, `input.ini` and, for a case with a change,
+`expected.ini`. Every input carries the `[CameraUnlock]` stamp, so no save adds one.
 
 The fixture mod is `HeadTrackingConfigTable` binding one of two row sets, each row at the
 schema's default (`true`, except `TrueFreeLook`, `false`):
@@ -566,7 +568,7 @@ are separated by one tab:
 | Row | Fields | Meaning |
 |-----|--------|---------|
 | `binds` | `three-state` or `two-state` | The row set. First, once |
-| `preference` | preference, raw, mod | What a launcher reads for the preference and the value the mod runs on. One row per preference, in the order `tracking_mode`, `world_space_yaw`, `true_free_look`, `launch_enabled` |
+| `preference` | preference, raw, mod | What the file holds for the preference and the value the mod runs on. One row per preference, in the order `tracking_mode`, `world_space_yaw`, `true_free_look`, `launch_enabled` |
 | `change` | preference, value | Optional, last: the value a save changes the preference to |
 
 A tracking mode is written as its name in `preference_modes.tracking_mode` of
@@ -574,7 +576,7 @@ A tracking mode is written as its name in `preference_modes.tracking_mode` of
 `position` (`false, true`). The other three preferences are `true` or `false`. A raw field may
 also be `invalid` or `missing`; a mod field is always a value.
 
-The raw value, which is what a launcher's authority rests on:
+The raw value, what the file holds:
 
 - A row is found by its section and key under the reader's rules (names compare ASCII
   case-insensitively, and the last occurrence of a key wins) and read with the `bool` codec of
@@ -588,10 +590,10 @@ The raw value, which is what a launcher's authority rests on:
 - `tracking_mode` on `two-state`: `PositionEnabled` true is `both` and false is `rotation`;
   invalid and missing stay so. `RotationEnabled` is never read, even when the file holds one.
 
-The mod's value is what the table applied to the file gives, which a launcher shows the player.
-An invalid or missing row reads as its default, and then on `three-state` a false/false pair reads
-as both defaults (docs/canonical-config.md, on the tracking mode at startup), so the mod always
-runs on a listed mode. A `two-state` mod's rotation is always on.
+The mod's value is what the table applied to the file gives. An invalid or missing row reads as
+its default, and then on `three-state` a false/false pair reads as both defaults
+(docs/canonical-config.md, on the tracking mode at startup), so the mod always runs on a listed
+mode. A `two-state` mod's rotation is always on.
 
 The change is saved through `ConfigOwner`'s `Save` on a copy of `input.ini`, with the table
 marking every row of the set Writable. A tracking mode is set as its `preference_modes` pair,
@@ -599,18 +601,19 @@ both rows on `three-state` and `PositionEnabled` alone on `two-state`. The owner
 rows when either changes, so on `three-state` a mode change always writes the pair, even a row
 whose value stays, and every value is written `true` or `false`. `expected.ini` is the file
 after the save, byte for byte. The new value always differs from the mod's value: a save that
-changes no row writes nothing, even over an invalid or missing row, so no case has a launcher
-write the value the mod already runs on.
+changes no row writes nothing, even over an invalid or missing row, so no case saves the value
+the mod already runs on.
 
 For every case a runner reads `input.ini`, renders its own four `preference` rows (the raw values
 by the rules above, the mod's values from the table applied to a new config) and compares them
-with `case.tsv` exactly. Core's runners then load a copy of `input.ini` through the owner, and
-require `Canonical`, the file unchanged and the same rows from the loaded config. With a change,
+with `case.tsv` exactly. Core's runners then load a copy of `input.ini` through the owner, whose
+Defaults.ini is a scratch file it creates with the built-in values, so a row's default there is
+the schema's, and require `Canonical`, the file unchanged and the same rows from the loaded config. With a change,
 they save it and require `Saved` and the bytes of `expected.ini`, and require `expected.ini` to
 read as the case's rows with the changed preference's raw and mod values both the new value. A
 case whose change is outside the preference's values (`two-state` has no `position`) or equals
-the mod's value fails. A launcher runs its raw decode, its reading of the mod's value, and its
-edit for the change against the same files, and its edit of `input.ini` must give `expected.ini`.
+the mod's value fails. A port of the owner runs the same files, and its save of `input.ini` must
+give `expected.ini`.
 
 The cases: every mode on both row sets (`three-state-both`, `-rotation`, `-position`,
 `two-state-both`, `-rotation`); false/false (`three-state-false-false`); the input of

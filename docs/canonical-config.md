@@ -3,7 +3,8 @@
 Every head-tracking mod converted to it keeps its settings in one INI dialect, read and written
 by one reader, one renderer and one editor per language, all in this library. This document is
 the format and the contract around it: what the file looks like, what a mod binds, what the
-config owner does at load, save and reload, what a player sees when an older file is imported,
+config owner does at load, save and reload, the global defaults file (Defaults.ini) that the rows
+set to `default` read, what a player sees when an older file is imported,
 the shared fixtures a port in another language runs, and the tooling that keeps the fleet on it.
 
 The data behind the format is checked in and generated from, never restated by hand:
@@ -40,7 +41,8 @@ A game with several config files gives each its own entry and its own owner.
 
 This is the file the C++ and C# examples [below](#what-a-mod-binds) create at first launch, byte
 for byte. Each setting set to `default` takes its value from Defaults.ini, the file every mod that
-keeps its settings in `CameraUnlock.ini` reads for those rows:
+keeps its settings in `CameraUnlock.ini` reads for those rows (see
+[The global defaults file](#the-global-defaults-file)):
 
 <!-- file: data/fixtures/canonical-ini/example/CameraUnlock.ini -->
 ```ini
@@ -97,7 +99,8 @@ One renderer writes every file, so every file has the same shape:
    is the game's name as `data/games.json` spells it; a line saying comments go on their own line;
    when the file holds a hotkey row, a line on how hotkeys are written; and, when it holds a
    concept row not marked `PerGame`, six lines on what a setting set to `default` means and where
-   Defaults.ini is.
+   Defaults.ini is, the lines of the example above. `Render`, `RenderFresh` and the migration
+   render all write them.
 2. `[CameraUnlock]`, a comment asking the player to leave it in place, and `ConfigFormat=1`.
 3. The schema sections the mod has rows in, in the order of the schema's `sections` array
    (Network, General, Smoothing, Position, Hotkeys, Light), each with its concept rows in the order
@@ -112,7 +115,10 @@ A file holds only the rows the mod binds: a mod with no carried light has no `[L
 whose mode control has two states has no `RotationEnabled`. Every bound row is written. A new
 file writes `default` on each concept row not marked `PerGame`, which then takes Defaults.ini's
 value, or the row's own default where Defaults.ini gives none; a key the player deleted or one a
-later version added reads the same way.
+later version added reads the same way. A migrated file writes `default` on such a row where the
+imported value equals what `default` gives it at that start, and the value otherwise (see
+[What happens at the first launch](#what-happens-at-the-first-launch)). A `PerGame` row and a
+local row are always written as values.
 
 An **Engine** row holds data about the game rather than a taste: an address, an offset, a vtable
 slot, a collision channel. At its default it is written as a comment showing the value,
@@ -152,6 +158,12 @@ does not read keeps the row's default and draws a diagnostic naming the line, th
 was expected. Nothing is clamped: a number outside the row's range is invalid in the same way.
 The reader never refuses a file over a value, so one bad value never costs the player the rest of
 the file.
+
+On a concept row, one more value is read: `default`, in any ASCII letter case, which no codec
+sees. It reads as the row's default with no diagnostic, as a missing key does. A row's default is
+its [effective default](#the-effective-default) when the row follows Defaults.ini, and the
+table's own default on a `PerGame` row. On a local row the word is an ordinary value, which a
+string row stores and a bool row refuses. See [The `default` token](#the-default-token).
 
 | Codec | Written as | Read |
 |-------|------------|------|
@@ -228,9 +240,15 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way. This is core's table naming all 28
+The concepts are the settings every mod spells the same way, and every one of them is global: a
+game's row for it follows Defaults.ini unless the table marks it `PerGame()` (see
+[Which rows follow it](#which-rows-follow-it)). A concept that must never follow Defaults.ini
+would need a schema change before it is added. This is core's table naming all 28
 of them at their defaults, which both languages render byte for byte
-(`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). The comments are the schema's
+(`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with `Render`, so
+every row shows its value, the Engine row `CollisionChannel` as a comment; the same table's fresh
+render writes `default` on every row
+(`all-concepts-fresh.ini` beside it). The comments are the schema's
 `file_comment`, and a mod can replace one where its unit or behaviour differs.
 
 <!-- file: data/fixtures/canonical-ini/head-tracking/all-concepts.ini -->
@@ -661,6 +679,15 @@ refuses it (a concept row not marked `PerGame` whose default is not the schema's
 legacy path, a legacy path without an import, or a legacy path naming the config file itself
 (compared without case). The C++ owner also throws for a table with no rows.
 
+`DefaultsFile.PerUser()` / `DefaultsFile::PerUser()` finds the player's own Defaults.ini by the
+rules of [Where it is](#where-it-is). `DefaultsFile.At(path)` / `DefaultsFile::At(path)` names one
+file for a test, a fully qualified path used as it is, and throws (C# `ArgumentException`, C++
+`std::invalid_argument`) for any other path; C# also throws `ArgumentNullException` for null, and
+C++ throws for an empty path. A default-constructed C++ `DefaultsFile` names no file, and an owner
+or a `PluginMod` given one throws. The owner reads the file wherever it runs, and creates it only
+where it writes: on Windows, under Wine included. Off Windows the C# owner is read only, so it
+creates neither Defaults.ini nor the config file, even at an `At` path.
+
 ### Load
 
 `Load()` returns the status, the config the session runs on, the reader's and table's
@@ -677,6 +704,22 @@ up and write them afterwards. The status numbers are the same in both languages.
 | `LegacyRefused` (4) | The import refused the legacy file, as the published build did | what the import gave; the mod does what its published build did on that refusal | no |
 | `Unreadable` (5) | The config file is saved as UTF-16 or holds a NUL byte | the defaults | no |
 | `ReadOnly` (6) | C# only, off Windows: the config file was read, the legacy file imported in memory, or neither exists; nothing is written | the file, the import or the defaults | no |
+
+`Load` finds, creates where it may, and reads Defaults.ini before it opens the config file, and
+"the defaults" in the table are the effective defaults: Defaults.ini's values on the rows that
+follow it, the table's own on the rest. Its log starts with the Defaults.ini line and ends with
+the lines naming where this game's rows came from and each refused value the game would take (see
+[What the log and the player are told](#what-the-log-and-the-player-are-told)). The status sink
+gets the config file's message for `Deferred`, `LegacyRefused`, `Unreadable` and `ReadOnly`, and
+then at most one message about Defaults.ini, so it can be called twice in one `Load`. No
+Defaults.ini outcome changes the status.
+
+`ReadOnly` replaces `Canonical`, `Migrated` and `Created` when the C# owner runs where
+`Environment.OSVersion.Platform` is not `Win32NT`; the other statuses keep their numbers there. A
+legacy file is imported and read back in memory at every start, since nothing is created. The
+log line and the message are both `Settings are read but not saved on this system: this version
+saves settings only on Windows, including under Wine and Proton. Changes made in game last until
+the game closes.`
 
 While the config file exists the import never runs and the legacy file is never opened; when a
 legacy file is also present, the log says so:
@@ -706,6 +749,16 @@ file is not created by `Save`: the next `Load` creates it. After a `Deferred`, `
 rolls back and never retries: the mod applies the new value first, and a save that fails leaves
 the session running on it.
 
+The file is read over the session's Defaults.ini values, for the starting point the change is
+given and for the read-back, where every row the save did not edit must also read from where it
+did before, so a row holding `default` stays `default`. A row that held `default`, or had no line,
+is written as its value, and the result's log, which a mod writes for `Saved` too, says
+`<path>: WorldSpaceYaw=false is now set for this game, and no longer follows Defaults.ini.`
+Defaults.ini is never written, and an unreadable or missing Defaults.ini changes nothing about
+saving. After a C# `ReadOnly` load every save is `NotSaved` with `Settings not saved: this version
+saves settings only on Windows.`; the change still runs first, so one that edits a row not marked
+Writable throws there as it does on Windows. See [Saves and toggles](#saves-and-toggles).
+
 ### Reload and FileChanged
 
 `FileChanged()` compares the last write times of the file and of Defaults.ini with the ones the
@@ -715,12 +768,14 @@ never runs the import:
 
 | Status | Meaning |
 |--------|---------|
-| `Unchanged` (0) | The file holds the bytes the owner last created or saved, and Defaults.ini gave nothing new |
-| `Applied` (1) | The file was read as canonical, stamped or not, and the result holds its settings |
-| `Unreadable` (3) | The file is missing or could not be read. The mod keeps the settings it has |
+| `Unchanged` (0) | The file holds the bytes the owner last created or saved, and Defaults.ini gave no values an `Applied` reload has not yet read the file over |
+| `Applied` (1) | The file was read as canonical, stamped or not, over Defaults.ini's current values, and the result holds its settings |
+| `Unreadable` (3) | The file is missing or could not be read. The mod keeps the settings it has, whatever Defaults.ini did |
 
 There is no status 2. `Reload` never reads the legacy file, so it has no status for one, and the
-number stays unused so the others keep theirs in both languages.
+number stays unused so the others keep theirs in both languages. What `Reload` does with a
+Defaults.ini that changed, went missing or cannot be read is under
+[Reload, FileChanged and Defaults.ini](#reload-filechanged-and-defaultsini).
 
 ### Threading
 
@@ -736,6 +791,472 @@ number stays unused so the others keep theirs in both languages.
   applied, stores it as the desired mode, requests the apply, and saves. Computing from the
   applied mode keeps two presses before one frame to one step. Core's REFramework `PluginMod` does
   exactly this.
+
+## The global defaults file
+
+### What it is and who reads it
+
+Defaults.ini is one file per user holding a value for every canonical concept. A concept row of a
+game's `CameraUnlock.ini` that holds `default`, has no line, or holds a value its codec refuses
+takes its value from Defaults.ini, so a player sets a preference once for every game that reads
+the file. A value written in a game's `CameraUnlock.ini` changes that game only.
+
+Every head tracking mod that keeps its settings in `CameraUnlock.ini` through core's config owner
+reads it: a C# or C++ `ConfigOwner`, or core's REFramework `PluginMod` with `canonicalConfig` set.
+No other mod does. The nine repos `data/config-format.json` lists as `exempt` (beamng-drive,
+cyberpunk-2077, firewatch, fusion-360, green-hell, minecraft-java-edition,
+ni-no-kuni-wrath-of-the-white-witch, outer-wilds and the-pathless) never read it, and neither
+does a repo that has not converted, or a build of a converted repo from before its conversion.
+Every text a player is given states it that way, as a condition: the header of every rendered
+file, the README config block and the changelog template.
+
+### Which rows follow it
+
+Every canonical concept is global, all 28 of [the canonical concept set](#the-canonical-concept-set),
+`PositionAllowed` and the collision rows included (owner answers of 2026-09-25). The schema has no
+field for it: a concept with `canonical: true` is global. The only exception is a row the table
+marks `PerGame()`, which needs an entry the owner approved in `data/config-format.json`
+`per_game` for that repo. Such a row's default is the table's own, `default` on it reads that
+default, and Defaults.ini never reaches it. A table that binds both `RotationEnabled` and
+`PositionEnabled` marks both `PerGame()` or neither. A game's local rows never take a value from
+Defaults.ini.
+
+A row that follows Defaults.ini must default, in the table, to the schema's value: that is what
+the game runs on whenever Defaults.ini gives nothing, so a different number would give one value
+on every failure path and another whenever the file is read. `RenderFresh` refuses such a table,
+and the owner's constructor renders the fresh file, so it throws too (see
+[Config tables](#config-tables)).
+
+### Where it is
+
+| Where the mod runs | Where it looks, in order | Created when none exists |
+|--------------------|--------------------------|--------------------------|
+| Windows | `CameraUnlock\Defaults.ini` in the roaming AppData known folder, shown `%AppData%\CameraUnlock\Defaults.ini` | yes, except in a packaged app |
+| Wine and Proton | the host's config folder, where Wine maps it to a drive letter; then the Wine prefix's own `%AppData%\CameraUnlock\Defaults.ini` | yes: at the host folder, else in the prefix |
+| Linux and macOS without Wine (the C# owner only) | `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` when `XDG_CONFIG_HOME` is an absolute path, else `~/.config/CameraUnlock/Defaults.ini`; then `~/Library/Application Support/CameraUnlock/Defaults.ini` | never |
+
+The location is found once, at `Load`, and kept for the session. A C++ mod always runs as a Windows
+program, so for it Linux means Wine or Proton.
+
+- **Windows.** C++ calls `SHGetKnownFolderPath(FOLDERID_RoamingAppData)` and `CoTaskMemFree`,
+  both found through `LoadLibraryW` and `GetProcAddress`, so no mod gains a static import of
+  shell32 or ole32. C# asks `Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)`.
+  Neither reads the `APPDATA` variable. With no known folder there is no location.
+- **Creating the folder.** Both languages call `CreateDirectoryW` on the `CameraUnlock` folder
+  alone, so its parent must already exist, and a missing parent is a failure. `ERROR_ALREADY_EXISTS`
+  counts as done. A file named `CameraUnlock` gives that error too, and creating Defaults.ini in
+  it then fails.
+- **Packaged apps.** On Windows, before creating anything, the owner calls
+  `GetCurrentPackageFullName` with a zero length, found through `GetProcAddress`. 15700
+  (`APPMODEL_ERROR_NO_PACKAGE`), or no such function, means the process is not packaged, and any
+  other answer, 122 included, means it is. A packaged game reads a Defaults.ini that exists and
+  never creates the folder or the file.
+- **Wine and Proton.** The owner finds `wine_get_version` in ntdll through `GetProcAddress`; a
+  Wine that hides it is taken for Windows. The packaged check is skipped. The host's folder comes
+  from `wine_get_host_version`: on `Darwin` it is the home folder's
+  `Library\Application Support\CameraUnlock`; on any other host it is `<xdg>/CameraUnlock`, where
+  `<xdg>` is the first of `WINE_HOST_XDG_CONFIG_HOME` and `XDG_CONFIG_HOME` that starts with `/`,
+  turned into bytes with `WideCharToMultiByte` in Wine's Unix code page (`CP_UNIXCP`, 65010) and
+  into a Windows path by `wine_get_dos_file_name`; with neither starting with `/`, it is the home folder's
+  `.config\CameraUnlock`. The home folder is `WINEHOMEDIR` without its leading `\??\`. The host
+  folder counts only as a drive-letter path. With no host system name, no `WINEHOMEDIR`, a home or
+  a converted path with no drive letter, or a failed conversion, there is no host candidate, and
+  the log line says which. All the wine exports are called through cdecl delegates or function
+  pointers, never a `DllImport`, so Windows never meets a missing one.
+- **Which file under Wine.** The files that exist decide, so the choice cannot move from one start
+  to the next unless a file appears. The host file exists: it is read, and a prefix file that also
+  exists is not, which the log and the player are told. Otherwise the prefix file exists: it is
+  read and nothing is created. Otherwise the host file is created, and if there is no host
+  candidate or that fails, the prefix file. If both fail the game runs on the built-in values.
+- **Linux and macOS without Wine.** When `Environment.OSVersion.Platform` is not `Win32NT`, the C#
+  owner reads `HOME` and `XDG_CONFIG_HOME` and calls no native code. A candidate that needs `HOME`
+  is left out when `HOME` is unset or not absolute; with `XDG_CONFIG_HOME` absolute, `~/.config` is
+  not a candidate. The first file that exists is read, and a later one that also exists draws the
+  two-files line and message. Nothing is created, not even a folder.
+- **`DefaultsFile.At(path)`**, for tests: one candidate, the path as it is, created by the same
+  rules when it is absent on Windows and under Wine, and only read elsewhere. It takes a fully
+  qualified path (a drive letter and a separator, or a UNC path; off Windows in C#, a leading `/`)
+  and throws for any other.
+
+The Defaults.ini lines name the profile or home folder by a short form, not by its path, so they
+carry no account name into a bug report. A path in the roaming known folder is shown as
+`%AppData%\...`, and in the Wine prefix with ` (this Wine prefix)` after it. A host or native path
+under the home folder is shown with the home as `~` (`~\.config\CameraUnlock\Defaults.ini` under
+Wine, `~/.config/CameraUnlock/Defaults.ini` natively). With no home known, a path from an XDG
+variable is shown with that folder as the variable (`$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini`).
+An XDG folder outside a known home is shown as it is, and can hold an account name, and so is a
+path given to `At`.
+`data/fixtures/canonical-ini/global/resolve.tsv` holds both languages to every candidate, shown
+path, choice, line and message above.
+
+### The `default` token
+
+- **Spelling.** The value, after the reader trims spaces and tabs, equals `default` compared ASCII
+  case-insensitively, so `default`, `Default` and `DEFAULT` are the token. Everything core writes
+  spells it `default`.
+- **Nothing else is.** There are no inline comments, so `default ; note` is a value, and so are
+  `"default"` and `End, default`. Each goes to the row's codec, which refuses it, and the row then
+  reads as it would for `default`, with an `InvalidValue` diagnostic.
+- **Concept rows only.** A local row never takes the token: a local string row may hold the word
+  as data (a Unity layer list can start with the layer `Default`), and a local bool row refuses it.
+  No canonical concept holds a string other than the four hotkey lists, so the token never meets
+  a value a concept can hold.
+- **What it means.** Leave this row at its default: the effective default below on a row that
+  follows Defaults.ini, and the table's own default on a `PerGame()` row.
+
+### The effective default
+
+Before it applies the game's file, the owner takes a new defaults instance and, for each row that
+follows Defaults.ini, applies Defaults.ini's accepted value through the row's own codec and setter.
+That is the row's effective default. The setter matters: `LocalSmoothing` and `RemoteSmoothing`
+also set the copy the position settings carry. A row Defaults.ini gives nothing for, because the
+file has no line for it, refuses its value, or could not be found, created or read, keeps the
+table's default, which is the built-in value.
+
+| The game's `CameraUnlock.ini` holds | The row reads |
+|-------------------------------------|---------------|
+| a value the codec reads | that value |
+| `default` | the effective default |
+| no line for the key | the effective default. A later build that binds a new concept reads an existing file this way |
+| a value the codec refuses | the effective default, with the `InvalidValue` diagnostic it always drew |
+
+The tracking-mode pair resolves each of its two rows that way, and then the table's rule for a
+pair that names no mode (both false) puts both rows back to their effective defaults. The owner
+reads the rows of Defaults.ini with the pair already checked (below), so the effective pair is
+always a mode.
+
+### What a new Defaults.ini holds
+
+The owner creates it from core's own table, `HeadTrackingConfigTable` naming every canonical
+concept, at the built-in values, with the four hotkey lists at their `canonical_default`. Every
+row is a value, `CollisionChannel` too. The header is the file's own: what the file is, the
+comment and hotkey lines of every canonical file, and the 104 key names it takes. Both languages
+render it byte for byte:
+
+<!-- file: data/fixtures/canonical-ini/global/Defaults.ini -->
+```ini
+; CameraUnlock head tracking defaults, read by every head tracking mod that keeps its
+; settings in CameraUnlock.ini. A game uses the value here for each setting its
+; CameraUnlock.ini sets to default. A value in a game's CameraUnlock.ini changes that game
+; only. The mods never change this file.
+; Comments start with ; and go on their own line. Text after a value is part of the value.
+; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; Only these key names are read here: A to Z, Alpha0 to Alpha9, F1 to F24, Keypad0 to Keypad9,
+; KeypadPeriod, KeypadDivide, KeypadMultiply, KeypadMinus, KeypadPlus, UpArrow, DownArrow,
+; LeftArrow, RightArrow, Insert, Delete, Home, End, PageUp, PageDown, Backspace, Tab, Return,
+; Space, Escape, Pause, Print, Menu, Numlock, CapsLock, ScrollLock, LeftShift, RightShift,
+; LeftControl, RightControl, LeftAlt, RightAlt, LeftWindows, RightWindows. A value holding any
+; other key makes every game use its built-in keys for that action.
+
+[CameraUnlock]
+; Written by the mod. Leave this section in place.
+ConfigFormat=1
+
+[Network]
+; UDP port the mod receives tracker data on (OpenTrack protocol).
+UdpPort=4242
+
+[General]
+; true: head tracking is on when the game starts. ToggleKey turns it on and off.
+EnableOnStartup=true
+; true: yaw turns around the world's up axis. false: around the camera's own up axis.
+WorldSpaceYaw=true
+; true: your aim stays with the mouse or controller while your head moves the view.
+AimDecoupling=true
+; true: turning your head turns the view.
+; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
+RotationEnabled=true
+; Milliseconds a tracker packet stays current. Once the tracker has sent nothing
+; for this long, the mod stops following it until data arrives again.
+DataFreshnessMs=500
+
+[Smoothing]
+; Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.
+LocalSmoothing=0.0
+; Smoothing when the tracker is another device on the network, such as a phone.
+; 0 is the least, 1 the most.
+RemoteSmoothing=0.15
+
+[Position]
+; true: moving your head moves the view.
+; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
+PositionEnabled=true
+; false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,
+; and the mode hotkey skips the modes that use position.
+PositionAllowed=true
+; false: while you aim down the sights, leaning keeps your eye on the sights.
+; true: the weapon stays put and your head moves freely around it (true free look).
+TrueFreeLook=false
+; How far, in metres, leaning left or right can move the view.
+PositionLimitX=0.3
+; How far, in metres, raising your head can move the view.
+PositionLimitY=0.2
+; How far, in metres, lowering your head can move the view.
+PositionLimitYDown=0.2
+; How far, in metres, leaning forward can move the view.
+PositionLimitZ=0.4
+; How far, in metres, leaning back can move the view.
+PositionLimitZBack=0.1
+; true: leaning stops at walls instead of moving the view through them.
+CollisionEnabled=false
+; How far the view is held off a wall when you lean into it, in the game's own units.
+CollisionMargin=0.1
+; Which of the game's collision channels the wall check tests against.
+CollisionChannel=0
+; How gently the view eases back out after a wall stopped a lean.
+; 0 is the quickest, 1 the slowest.
+CollisionReleaseSmoothing=0.9
+; Metres from the pivot of your neck forward to the point the tracker follows.
+; Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off.
+TrackerPivotForward=0.0
+; Metres from the pivot of your neck up to the point the tracker follows.
+TrackerPivotUp=0.0
+
+[Hotkeys]
+; Turns head tracking on and off.
+ToggleKey=End, Ctrl+Shift+Y
+; Changes the tracking mode: rotation and position, rotation only, position only.
+CycleTrackingModeKey=PageUp, Ctrl+Shift+G
+; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
+YawModeKey=PageDown, Ctrl+Shift+H
+; Switches between keeping your eye on the sights and true free look (TrueFreeLook).
+TrueFreeLookKey=Insert, Ctrl+Shift+U
+
+[Light]
+; true: a light you carry points where you look instead of where you aim.
+LightFollowsHead=true
+; How far the light turns for each degree your head turns.
+; 1 matches the view, 0 keeps the light on your aim.
+LightMultiplier=1.5
+```
+
+`CollisionMargin` and `CollisionChannel` are numbers in each engine's own units and channels, so a
+value set here means something different in each game that follows it.
+
+### Creating it
+
+- **When.** At every `Load` on Windows (not in a packaged app) or under Wine, when no candidate's
+  file exists. It happens whatever becomes of the game's own file, so a migrated game creates it
+  too, and a player finds it after running any mod that reads it.
+- **How.** The folder by the one-level rule above, then the checked writer with no expected bytes:
+  a temporary beside the target, flushed and renamed into place only while no file is there. The
+  owner reads the bytes it wrote without opening the file again.
+- **Two first launches at once**, two games or two processes of one game: one creates the file,
+  and the other finds that a file appeared, reads it, and logs
+  `(created by another program at the same time, and read)`.
+- **A killed launch** leaves no Defaults.ini or a whole one, and at worst a
+  `Defaults.ini.<32 hex digits>.tmp` beside it, which nothing reads.
+- **Afterwards nothing changes it.** No mod writes, renames, deletes or appends to Defaults.ini
+  once it exists. The owner opens it only to read it, sharing read, write and delete, and closes it
+  once it has the bytes. Core's install and uninstall bodies never name the folder.
+
+### Reading it
+
+Defaults.ini has the grammar, codecs and stamp of every canonical file. What differs:
+
+- **One hotkey dialect for every mod.** A hotkey value is refused unless the key of every item is
+  `Ctrl`, `Shift`, `Alt` or one of the 104 names in `data/keys.json` that have a Windows
+  virtual-key code, the list the header prints. An alias does not count, and neither does a `0x`
+  code, so `ToggleKey=Mouse4` and `ToggleKey=0x23` are refused alike, in a Unity mod and a native
+  one. A global key then works in every game or in none. A game's own `CameraUnlock.ini` keeps its
+  mod's dialect.
+- **The tracking-mode pair is one setting.** Each of `RotationEnabled` and `PositionEnabled` is
+  its accepted value, or the built-in `true` when the key is absent. When either is refused, or
+  the two are both false, both are refused together, with one log line. This runs once, on
+  Defaults.ini's own rows, so a mode control with two states (no `RotationEnabled`) and one with
+  three take the same checked pair.
+- **Everything else** is the concept's codec and the schema's range. `default` is refused here,
+  like any other value the codec does not read.
+- **A refused value** leaves the row at its built-in value. It draws a log line and counts toward
+  the in-game message, but only for a row the game takes from Defaults.ini: one its table binds,
+  that is not `PerGame()`, and that its own file does not set.
+- **Not read, and nothing said**: a key in the wrong section, an alias, a key or section no
+  canonical concept has, and a concept the game's table does not bind. The file serves every
+  game, and a Defaults.ini created by a newer core carries concepts an older mod does not know, so
+  a line for them would appear at every start of every older mod. A misspelt key of a row the game
+  uses shows up in the line naming the rows that took the built-in value.
+- **The stamp.** The file is read with or without `[CameraUnlock]`, and a `ConfigFormat` that is
+  missing, zero or not a number draws nothing, since nobody saves this file. A newer
+  `ConfigFormat` is read too, with one line.
+- **Unreadable.** A file saved as UTF-16 or holding a NUL byte, one the owner cannot open, or a
+  folder named `Defaults.ini`, gives the built-in values, one line and one in-game message.
+
+Sections and keys match ASCII case-insensitively, and the last occurrence of a key wins.
+
+### What the log and the player are told
+
+The owner returns the lines with the rest of `Load`'s log, and the mod writes them once its logger
+is up. C# and C++ write the same words. At every `Load`, in this order:
+
+1. **Where Defaults.ini is and what happened to it**, one line:
+   - `Defaults.ini: <path> (read)`, `(created with the built-in values)` or
+     `(created by another program at the same time, and read)`.
+   - Under Wine, `Defaults.ini: <path> (Wine <version> on <host>, the host's config folder, read)`,
+     or for the prefix file `Defaults.ini: <path> (Wine <version> on <host>, this Wine prefix, read):
+     the host's config folder <folder or none> could not be used: <why>.`, with the same three
+     endings, and without ` on <host>` when Wine gives no host name. `<why>` is the reason there
+     is no host candidate, `<parent> does not exist`,
+     `it could not be created: <why>`, `Defaults.ini was not created there: <why>`, or, when the
+     prefix file was simply found first, `it holds no Defaults.ini, and one there would be shared
+     by every Wine prefix`.
+   - Two files: `Defaults.ini: <path> is read, and <other path> is not.`
+   - Packaged, with no file: `Defaults.ini: not created, because this game runs as a packaged app
+     (GetCurrentPackageFullName returned <n>); %AppData%\CameraUnlock\Defaults.ini is created by
+     the next game that is not packaged, or by Lopari.`
+   - Natively, with no file: `Defaults.ini: no file at <path> or <path>; on this system the mod
+     reads Defaults.ini but does not create it. Settings set to default use the built-in values.`
+   - No location: `Defaults.ini: no location: Windows reported no roaming AppData folder.` or
+     `Defaults.ini: no location: HOME is not set to an absolute path.`, then the built-in sentence.
+   - A creation that failed: `Defaults.ini: <folder> was not created, because <parent> does not
+     exist.`, `Defaults.ini: <folder> could not be created: <why>.` or `Defaults.ini: <path> was
+     not created: <why>.`, then the built-in sentence. Under Wine the prefix's failure comes first,
+     then ` The host's config folder <folder or none> could not be used: <why>.`
+   - A file that cannot be read replaces the location line: `Defaults.ini: <path> cannot be read:
+     <why>. Settings set to default use the built-in values.`, where `<why>` is
+     `it is saved as UTF-16; save it as ANSI or UTF-8`, `line N holds a NUL byte`, or the owner's
+     words for an I/O error (`the file is in use by another program`, `it could not be read (...)`).
+     A file deleted between the check and the read gives `the file was deleted at the same time`,
+     and no message.
+   - A newer format adds `Defaults.ini: line N: ConfigFormat=V was written by a newer version of
+     the mod. This version reads format 1.`
+2. **The game file's own lines**, as [Load](#load) describes.
+3. **Where this game's rows came from**, each line only when it names something, and not when the
+   session runs on what an import that did not finish gave:
+   - `<game path>: from Defaults.ini: UdpPort=4242; ToggleKey=End, Ctrl+Shift+Y`
+   - `<game path>: set in this file, so Defaults.ini does not change them: UdpPort, WorldSpaceYaw.`
+   - `<game path>: built-in, not set in Defaults.ini: TrueFreeLookKey=Insert, Ctrl+Shift+U`
+
+   Entries are separated by `; ` because a key list holds `, `.
+4. **A line per refused value** the game would take:
+   `Defaults.ini: line 12: [Hotkeys] ToggleKey=Mouse4 is not read (Mouse4 is not one of the key names this file takes), so the built-in End, Ctrl+Shift+Y is used.`
+   A refused pair gives one line naming both rows:
+   `Defaults.ini: lines 2 and 4: [General] RotationEnabled=false and [Position] PositionEnabled=false are not read (both false is not a tracking mode), so the built-in RotationEnabled=true and PositionEnabled=true are used.`
+5. **Off Windows, in C#**, the read-only line of [Load](#load).
+
+The built-in sentence is ` Settings set to default use the built-in values.` Paths are shown by
+the rule under [Where it is](#where-it-is).
+
+The status sink gets at most one Defaults.ini message per `Load` or `Reload`, after the game
+file's own message. It speaks only where the player can fix the cause, and the first that applies
+wins:
+
+1. `Defaults.ini cannot be read: <why>. Settings that use it take the built-in values.`
+2. `Defaults.ini: 2 settings cannot be used (ToggleKey=Mouse4; YawModeKey=0x22), so this game uses its built-in values for them. The log has the details.`
+   (`1 setting cannot be used` for one; a refused pair is one entry,
+   `RotationEnabled=false and PositionEnabled=false`).
+3. `Two Defaults.ini files: this game reads <path> and ignores <other path>.`
+
+At `Load`, a missing or uncreatable file, a packaged game and an unusual Wine setup go to the log
+only.
+
+### Reload, FileChanged and Defaults.ini
+
+`Reload` reads Defaults.ini again at the location `Load` chose, then the game's file over it:
+
+- The same bytes as last seen: the values stay.
+- Different, readable bytes: they replace the values, with the line `Defaults.ini: <path> (read)`,
+  and a refused value's message is sent again.
+- Missing, or unreadable: the values it gave stay, whatever they were, with a line and a message,
+  `Defaults.ini is missing. Settings that use it keep the values they had until the game
+  restarts.` or `Defaults.ini cannot be read: <why>. Settings that use it keep the values they had
+  until the game restarts.` The log line names the file: `Defaults.ini: <path> is missing. ...` or
+  `Defaults.ini: <path> cannot be read: <why>. ...`, with the same ending. A file
+  that was absent at `Load` and is still absent draws nothing, and the same unreadable bytes draw
+  the message once.
+- A Defaults.ini read while the game's file is missing or cannot be read (status `Unreadable`) is
+  kept, and the next `Reload` that reads the game's file applies it, even over the bytes the owner
+  last wrote.
+
+`FileChanged` is true when the last write time of the game's file or of Defaults.ini differs from
+the one recorded, so a mod that already watches its file picks up an edit to Defaults.ini with no
+new code. A Defaults.ini whose write time cannot be read counts as one fixed time, so it never
+throws and never flaps. A mod that does not watch reads Defaults.ini again at the next start. An
+editor that truncates the file and writes it in place can be caught halfway: the rows it has not
+reached yet take the built-in value until its last write moves the write time again.
+
+### Saves and toggles
+
+- A toggle applies the new value to the running game and calls `Save` for its Writable row. If the
+  row held `default` or had no line, the save writes the value, and from then on that game keeps
+  it: the save's log has `<game path>: WorldSpaceYaw=false is now set for this game, and no longer
+  follows Defaults.ini.` Pressing the key again writes the other value, and nothing turns a row
+  back into `default` except the player editing the file.
+- A mode change writes both rows of the pair, so the pair stops following Defaults.ini together.
+- End never persists and never calls `Save`.
+- `Save` reads the file over the session's Defaults.ini values for both its starting point and its
+  read-back, and requires every row it did not edit to read from where it did before, so `default`
+  stays `default` and an edit to Defaults.ini during the session cannot make an untouched row look
+  changed. `Save` never touches Defaults.ini and does not depend on it.
+- Off Windows, in C#, every save is `NotSaved` (see [Load](#load)).
+
+### Forward compatibility
+
+- **A newer core adds a concept.** A Defaults.ini created earlier has no line for it, and a mod
+  built on the newer core uses its built-in value and names the row in its built-in line. An
+  older mod never reads the key. The mods never append the missing key: that would be a change to
+  the file, and it would put mods of different core versions in a write race over the player's own
+  file. A player learns of the new key from the game file's comments, the log and the README.
+- **A Defaults.ini created by a newer core** carries keys an older mod does not know, and the
+  older mod reads the rest and says nothing about them.
+- **A built-in default changes in core.** A Defaults.ini already on disk keeps the old value, so
+  the change reaches only players who have none. Core does not change defaults (see
+  [Changing the format](#changing-the-format)).
+- **A concept stops being global, or a repo gains a `per_game` entry after its first converted
+  release.** Rows holding `default` in files already on players' disks then read the game's own
+  default instead of Defaults.ini's; for `UdpPort` that stops tracking for a player whose tracker
+  sends to another port. Both are breaking changes.
+
+### What has been run, and what has not
+
+`pixi run test-linux-probe` in core runs the owner and the resolver in Linux containers, through
+the probe modes of the C++ test binary and of `CameraUnlock.Core.FrameworkTests` (net35 and
+net472), over `DefaultsFile.PerUser()`. At core 122c6da it passed 50 of 50 cases (45 of 45 at
+ec43c08, before the migration case was added). The image: Debian 13.6 (trixie) pinned by digest
+with apt pinned to snapshot.debian.org at 2026-09-11, Wine `10.0 (Debian 10.0~repack-6)` with a
+64-bit prefix only, wine-mono 9.4.0, and Mono `6.12.0.199+dfsg-6`. Both C# builds ran on the 4.0
+runtime (4.0.30319.42000) under Mono and under wine-mono.
+
+- **Under Wine**, the C++ probe and both C# builds, with a home named `jösé-日本`: `XDG_CONFIG_HOME`
+  unset (the host file created at `~\.config\CameraUnlock\Defaults.ini`, bytes equal to the
+  fixture, a second start and a save leaving it untouched), set, relative (ignored), and below a
+  missing parent with Wine's menu builder off (the prefix file created); the host folder
+  unwritable (the prefix file created, with its reason); two prefixes sharing one home (the second
+  reads the first's host file and creates nothing); and a prefix file made before a host file (the
+  host file read, the two-files line and message once). The C# builds also migrated a legacy file
+  against a host Defaults.ini, writing `default` where the two agreed.
+- **Natively under Mono**, both C# builds over a legacy file, a `CameraUnlock.ini` and nothing, with
+  Defaults.ini at each native candidate, at the first with the second, the second with the third,
+  at none of them, and with `HOME` unset with and without `XDG_CONFIG_HOME`: `ReadOnly`, the
+  read-only line and message, `NotSaved`, and no file or folder changed.
+- **What Wine 10.0 showed.** It passes `XDG_CONFIG_HOME` to the Windows environment unchanged, with
+  `WINE_HOST_XDG_CONFIG_HOME` unset, and `WINEHOMEDIR` was `\??\Z:\home\jösé-日本`. A Wine session
+  start runs its menu builder, which creates `$XDG_CONFIG_HOME/menus` (or `~/.config/menus`), so
+  with Wine as it starts by default the host folder's parent exists before the mod runs, and the
+  missing-parent fallback to the prefix is reached only with the menu builder turned off.
+
+On Windows, core's suites run the owner against scratch files, and a test in each language runs
+the real probe and checks it creates nothing.
+
+Not verified, because nobody has run it:
+
+- Proton of any version, Steam's Linux runtime container (pressure-vessel) and whether it passes
+  the host's `XDG_CONFIG_HOME` and `WINEHOMEDIR` and lets a game write `~/.config`, Proton-GE, and a
+  Steam Deck.
+- Sandboxed launchers: Flatpak Steam, Snap Steam, Bottles, Heroic and Lutris, each of which may
+  give its games its own config folder and so its own Defaults.ini, and whether they turn off
+  Wine's menu builder.
+- CrossOver, Whisky and Apple's Game Porting Toolkit, and Wine on macOS.
+- A 32-bit prefix or a 32-bit game under Wine, a host locale that is not UTF-8, and any Wine but
+  10.0 for the C++ owner.
+- Whether a Wine build that hides its exports (wine-staging's `HideWineExports`) is used by any
+  Proton.
+- How the checked writer's `File.Replace`, `File.Move`, `ReplaceFileW` and
+  `GetFileInformationByHandle` behave on the host's file system under Proton.
+- A packaged (Microsoft Store or Xbox app) game, and whether a mod in one reads the real
+  Defaults.ini.
+- Unity's own Mono on Windows, Linux or macOS, and a native Unity game on Linux or macOS: wine-mono
+  and Debian's Mono are not Unity's. The first conversion of each runtime family is where a mod
+  first runs the owner in game.
 
 ## Migration
 
@@ -830,7 +1351,13 @@ When `Load` finds no config file and the legacy file exists:
    while it reads the bytes, runs the import on that path and reads the bytes again. No program
    can newly lock, rename or delete the file meanwhile, and a write in between defers the import.
 2. It renders the imported settings, reads the render back through the table and requires every
-   row to equal the import's (floats bit for bit).
+   row to equal the import's (floats bit for bit). The render writes `default` on a concept row
+   not marked `PerGame` where the imported value equals what `default` gives that row at this
+   `Load` (floats by their bits, hotkey lists by their canonical text), and the value otherwise;
+   the tracking-mode pair is `default` on both rows only when both are equal. The read-back uses
+   the same Defaults.ini values, so a `default` row reads back as the value it replaced. Where
+   Defaults.ini holds the built-in values, a player who never changed a setting gets the file a
+   new player gets, apart from a default the conversion moved, which imports as a value.
 3. It creates the config file with the rendered bytes, only if no file has appeared at its path.
 
 The legacy file is never written, renamed, deleted or copied, whatever happens. A process killed
@@ -1007,7 +1534,7 @@ test. `data/fixtures/canonical-ini/README.md` defines every file byte for byte.
 | `table/` | tables, apply and render | a fixture table both suites declare, and per case `input.ini` with `expected.tsv`, or `values.tsv` with `expected.ini` |
 | `head-tracking/` | `HeadTrackingConfigTable` | `all-concepts.ini` and three apply cases |
 | `global/` | Defaults.ini: core's render of a new file, the reader, and where the file is | `Defaults.ini`; per case `input.ini` with `expected.tsv` of `unreadable`, `format`, `value`, `line` and `pair` rows; and `resolve.tsv`, whose cases give the resolver's inputs, its candidates, and the choice's reads, creations, log lines and messages |
-| `preferences/` | a launcher's four preferences against the mod: what it reads, what the mod runs on, what the owner's `Save` writes | per case, `case.tsv` of `binds`, `preference` and `change` rows, `input.ini`, and `expected.ini` for a case with a change |
+| `preferences/` | the four preferences a mod saves (the tracking mode pair, world-space yaw, true free look and launch-enabled): what the file holds, what the mod runs on, what the owner's `Save` writes | per case, `case.tsv` of `binds`, `preference` and `change` rows, `input.ini`, and `expected.ini` for a case with a change |
 | `mutations/` | the differential corpus generator | per case `input.ini`, `keys.tsv` and `expected.tsv` of output names and SHA-256 hashes |
 | `example/` | the examples in this document | `CameraUnlock.ini` |
 
@@ -1020,12 +1547,18 @@ the lists exactly.
 
 ## For a launcher or another tool that edits the file
 
-The owner is not the only program that may edit a canonical file. A launcher or any other tool
-that edits one follows the owner's rules:
+The owner is not the only program that may edit a canonical file. A launcher edits Defaults.ini
+and writes no game file: Lopari's part is to edit Defaults.ini only (owner answer of 2026-09-25),
+and a per-game value other than the in-game toggles is set by editing that game's
+`CameraUnlock.ini` by hand. The owner reads any valid edit to either file, so a tool that later
+edits a game's file changes nothing in the mods. A tool that edits either file follows the
+owner's rules:
 
-- Edit only `CameraUnlock.ini`, never the legacy file, and only when it carries the stamp and a
-  `ConfigFormat` the tool implements. The legacy file is what an older build reads, and the mod
-  imports it only while `CameraUnlock.ini` is absent.
+- Edit a game's `CameraUnlock.ini`, never the legacy file, and only when it carries the stamp and
+  a `ConfigFormat` the tool implements. The legacy file is what an older build reads, and the mod
+  imports it only while `CameraUnlock.ini` is absent. On a concept row not marked `PerGame`, a
+  tool may write `default` to make that game follow Defaults.ini again; the config descriptor's
+  `per_game` names the rows where `default` means the game's own value instead.
 - Change values with the editor's rules and nothing else: every other byte is kept, a replaced
   line keeps its key's spelling and the white space around `=`, a repeated key has its last
   occurrence replaced, a missing key goes after the last key line of its section, a missing
@@ -1038,6 +1571,23 @@ that edits one follows the owner's rules:
   game is not running, or accept losing that edit.
 - Take section and key names from `data/config-schema.json`. A hotkey value written by a tool
   must be one the mod's dialect reads.
+
+Defaults.ini adds its own rules, since every mod that reads it reads it the same way (see
+[Reading it](#reading-it)):
+
+- Read it with the reader's rules, refuse to edit a file saved as UTF-16, holding a NUL byte or of
+  a newer `ConfigFormat`, and never delete it or replace it with a new one: it holds the player's
+  own values, and an uninstall leaves it in place.
+- Write values as the canonical codecs write them, within the schema's ranges, hotkeys only from
+  the 104 key names the file's header lists, and `RotationEnabled` and `PositionEnabled` together
+  as a mode `preference_modes` in `data/pipeline-conformance.json` lists. `default` is refused
+  there. A key the file lacks is inserted by the editor's rule, and keys and comments the tool
+  does not know stay as they are.
+- A tool may edit it while games run. No mod writes it once it exists, so there is no lost
+  update; each game reads the new values at its next start, or at its next `Reload`.
+- A tool that creates it where none exists writes it only where no file has appeared, and holds
+  its own copy of the header lines to `data/fixtures/canonical-ini/global/Defaults.ini`. A key it
+  leaves out reads as the built-in value.
 
 ### The config descriptor
 
@@ -1232,7 +1782,14 @@ In a mod repo, and in conformance:
   when that mod names it.
 - **Removing** a concept or an alias, or moving an alias between concepts, changes what files on
   players' disks mean. Changing a default in core's types is breaking too: it changes every new
-  file, and every file that leaves the key out.
+  file, and every file that leaves the key out. It also never reaches a player whose Defaults.ini
+  already exists, since that file keeps the value it was created with and no mod changes it.
+- **A concept that stops being global** would need a schema change, since every canonical concept
+  is global today, and it is breaking: rows holding `default` in files already on players' disks
+  would read the game's own default instead of Defaults.ini's. So is **a `per_game` entry added
+  after a repo's first converted release**, for the same rows of that repo: for `UdpPort` it stops
+  tracking for a player whose tracker sends to the port Defaults.ini names. Such an entry is
+  approved as a breaking change and named in the repo's changelog.
 - **A changed grammar or codec** that an older reader would misread needs a new `ConfigFormat`
   and a conversion from the old one, in core, for every mod at once. Nothing like that exists yet.
 - The frozen code (`ini_reader`, `value_guards`, `PluginConfig::Read` and every repo's legacy

@@ -9,6 +9,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - docs/canonical-config.md describes Defaults.ini in full
+
+- **docs/canonical-config.md** gains "The global defaults file": who reads Defaults.ini, that every
+  canonical concept follows it unless the table marks the row `PerGame()` with an owner-approved
+  `per_game` entry, where it is on Windows, in a packaged app, under Wine and Proton and natively,
+  the `default` token, the effective default, what a new file holds, how it is created and read,
+  every log line and in-game message, `Reload` and `FileChanged`, saves and toggles, forward
+  compatibility, and what has been run under Wine and Mono and what has not. "Values", "Layout",
+  "The canonical concept set", "The config owner", "Load", "Save", "Reload and FileChanged", the
+  migration's first launch, "For a launcher or another tool that edits the file" and "Changing the
+  format" describe the same behaviour where it touches them.
+- **`data/fixtures/canonical-ini/README.md`**: the `preferences/` cases are described as what they
+  pin, the owner's `Save` of the four preferences and the tracking mode pair, since no launcher
+  writes a game file. The `global/` text no longer says nothing reads the file on disk.
+
+Nothing in the code changes. What a converted repo does at its pin bump, the whole Defaults.ini
+change in order (each step is the earlier entry it links):
+
+1. **Set where Defaults.ini is.** `DefaultsFile.PerUser()` / `DefaultsFile::PerUser()` in the mod
+   (`PluginModDescriptor::defaults` for REFramework), and `DefaultsFile.At` / `DefaultsFile::At`
+   with a scratch path in every test that builds an owner or initialises `PluginMod`; a helper
+   shared by the mod and its tests takes the `DefaultsFile` as a parameter
+   ([the config owners read and create Defaults.ini](#changed---breaking---the-config-owners-read-and-create-defaultsini)).
+2. **Move every concept row's default to the schema's value**, or get the owner's approval for a
+   `per_game` entry in core's `data/config-format.json` (a core commit) and mark the row
+   `PerGame()`, both rows of the tracking mode pair or neither
+   ([`PerGame()` and `RenderFresh`](#added---the-default-token-renderfresh--rendercanonicalfresh-and-pergame)).
+   The collision rows of a repo that defaults them off the schema wait for the owner's decision.
+3. **Re-run `pixi run render-config`** and commit the file: `default` on every concept row except
+   the `per_game` ones, and the config descriptor's `per_game` filled by encode-seed
+   ([committed configs hold `default` rows](#changed---breaking---committed-configs-hold-default-rows-and-per_game-replaces-descriptor_omits-and-hotkey_exceptions),
+   [the config descriptor lists per-game rows](#changed---breaking---the-config-descriptor-lists-per-game-rows-not-preference-values)).
+4. **Re-render the README config block** with `pixi run readme --write --sections config` and paste
+   `pixi run readme --print config` into NEXUS_MODS.md by hand
+   ([the README config block explains Defaults.ini](#changed---the-readme-config-block-and-the-changelog-template-explain-defaultsini)).
+5. **Take the changelog bullets** for the repo's kind from
+   `scripts/templates/canonical-config-changelog.md` into its `[Unreleased]`.
+
 ### Changed - the README config block and the changelog template explain Defaults.ini
 
 - **`scripts/generate-readme.mjs`**: where the committed file holds `default` rows, the config block
