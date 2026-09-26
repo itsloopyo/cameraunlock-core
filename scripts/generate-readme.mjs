@@ -53,6 +53,7 @@ import { fileURLToPath } from 'node:url';
 
 import { repoState } from './check-canonical-config.mjs';
 import { equalsAsciiIgnoreCase, isDefaultToken, parseCanonicalIni } from './lib/canonical-ini.mjs';
+import { readConfigFormat } from './lib/config-format-file.mjs';
 
 const CORE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const REPOS_ROOT = path.dirname(CORE_ROOT);
@@ -174,7 +175,7 @@ const CONFIG_HEADING = 'Configuration';
 const CONFIG_HEADING_RE = /^(\d+\.\s+)?configuration$/i;
 const CONFIG_INSERT_AFTER = ['Controls', OPENTRACK_HEADING, 'Installation'];
 
-const FORMAT = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, 'data', 'config-format.json'), 'utf8'));
+const FORMAT = readConfigFormat();
 const CANONICAL_CONCEPTS = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, 'data', 'config-schema.json'), 'utf8'))
   .concepts.filter((c) => c.canonical);
 

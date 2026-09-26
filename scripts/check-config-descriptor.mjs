@@ -47,12 +47,13 @@ import {
   splitLines,
   trimSpaceTab,
 } from "./lib/canonical-ini.mjs";
+import { readConfigFormat } from "./lib/config-format-file.mjs";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPOS_ROOT = path.dirname(CORE_ROOT);
 const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(CORE_ROOT, rel), "utf8"));
 const SCHEMA = readJson("data/config-schema.json");
-const FORMAT = readJson("data/config-format.json");
+const FORMAT = readConfigFormat();
 const GAMES = readJson("data/games.json").games;
 
 const FIELDS = ["path", "anchor", "legacy_source", "canonical_since", "per_game"];

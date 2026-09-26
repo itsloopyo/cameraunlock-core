@@ -7,8 +7,9 @@
 // fallout-new-vegas-headtracking and prey-headtracking (two, beside two executables), each with
 // its legacy file beside CameraUnlock.ini, and sleeping-dogs-headtracking (never published a
 // pre-canonical build, so no legacy file). The rest are synthetic: subnautica-headtracking's
-// BepInEx entry with a committed file, whose real entry records none yet, and shapes no repo has
-// (a mod_home file, two config files). It also holds the rule that a converted repo's manifest
+// BepInEx entry with a committed file at a path of the test's choosing, shapes no repo has (a
+// mod_home file, two config files), and unrecorded-headtracking, an entry the test adds to its
+// own copy of data/config-format.json for a converted repo that records no committed file. It also holds the rule that a converted repo's manifest
 // seeds and ships no config, block or not, and runs the per_game generator in encode-seed.mjs, the
 // rules in validate-manifest.mjs on built ZIPs, the Nexus ZIP config rule, the report conformance
 // reads, conformance's config-descriptor and config-preserve checks, and the packager's ConvertFrom-Json /
@@ -26,18 +27,6 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
-import {
-  configWriteProblems,
-  descriptorProblems,
-  expectedPerGame,
-  preReleaseWarning,
-  releaseProblems,
-  releaseVersionFromEnv,
-  repoReport,
-} from "./check-config-descriptor.mjs";
-import { encodePerGame } from "./encode-seed.mjs";
-
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPTS = path.join(CORE_ROOT, "scripts");
 // What render-config commits: default on every concept row a table does not mark PerGame().
@@ -45,7 +34,29 @@ const ALL = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "canonical-
 // The same file for subnautica-headtracking, whose per_game lists WorldSpaceYaw.
 const YAW_KEPT = ALL.replace("WorldSpaceYaw=default", "WorldSpaceYaw=false");
 const LEGACY_INI = "[General]\r\nEnabled=1\r\n";
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "config-descriptor-"));
+
+// data/config-format.json with one entry of this test's own: a converted repo whose committed
+// file is not recorded, a shape the fleet's entries stop having as conversions record theirs.
+// Every script the test runs, in this process or a child, reads this file in its place.
+const UNRECORDED = "unrecorded-headtracking";
 const FORMAT = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, "data", "config-format.json"), "utf8"));
+if (UNRECORDED in FORMAT.configs) throw new Error(`data/config-format.json has an entry named ${UNRECORDED}, the name this test gives its own`);
+FORMAT.configs[UNRECORDED] = [{ committed: null, installed: ["retail\\CameraUnlock.ini"], legacy_source: null, dialect: "native" }];
+process.env.CAMERAUNLOCK_CONFIG_FORMAT = path.join(scratch, "config-format.json");
+fs.writeFileSync(process.env.CAMERAUNLOCK_CONFIG_FORMAT, JSON.stringify(FORMAT));
+
+const { manualZipConfigEntries, repoState } = await import("./check-canonical-config.mjs");
+const {
+  configWriteProblems,
+  descriptorProblems,
+  expectedPerGame,
+  preReleaseWarning,
+  releaseProblems,
+  releaseVersionFromEnv,
+  repoReport,
+} = await import("./check-config-descriptor.mjs");
+const { encodePerGame } = await import("./encode-seed.mjs");
 
 // The environment of an ordinary build, wherever this test runs, and of a GitHub Actions build
 // for a release tag.
@@ -59,7 +70,6 @@ const check = (ok, message) => {
   if (!ok) failures.push(message);
 };
 
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "config-descriptor-"));
 const edit = (text, from, to) => {
   if (!text.includes(from)) throw new Error(`the fixture has no ${JSON.stringify(from)}`);
   return text.replace(from, to);
@@ -505,7 +515,7 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   check(r.applies && !r.has_block && r.problems.length === 1 && r.problems[0].includes("has no config block"), `report: a converted manifest repo without a block should fail for it, got ${JSON.stringify(r)}`);
   const unconverted = repoReport(repo("report-unconverted", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) }));
   check(!unconverted.applies && unconverted.problems.length === 0, `report: an unconverted repo without a block should not apply, got ${JSON.stringify(unconverted)}`);
-  const unrecordedRoot = repo("report-unrecorded", "far-cry-6-headtracking", { "config/FarCry6HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(manifest("far-cry-6", undefined)) });
+  const unrecordedRoot = repo("report-unrecorded", UNRECORDED, { "config/HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(manifest("unrecorded", undefined)) });
   git(unrecordedRoot, "add", "-A");
   const unrecorded = repoReport(unrecordedRoot);
   check(unrecorded.converted && !unrecorded.applies && unrecorded.problems.length === 0, `report: a stamped file data/config-format.json does not record should leave the block to config-format, got ${JSON.stringify(unrecorded)}`);
@@ -582,7 +592,7 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   });
   const listed = repo("preserve-listed", "abzu-headtracking", { "HeadTracking.ini": ALL, ...scripts("Mod.asi HeadTracking.ini", "CameraUnlock.ini", "CameraUnlock.ini HeadTracking.ini") });
   const swapped = repo("preserve-swapped", "abzu-headtracking", { "HeadTracking.ini": ALL, ...scripts("Mod.asi CameraUnlock.ini", "HeadTracking.ini", "") });
-  const stampOnly = repo("preserve-stamp-only", "deus-ex-mankind-divided-headtracking", { "config/HeadTracking.ini": ALL, ...scripts("Mod.asi", "HeadTracking.ini", "HeadTracking.ini", "retail\\CameraUnlock.ini") });
+  const stampOnly = repo("preserve-stamp-only", UNRECORDED, { "config/HeadTracking.ini": ALL, ...scripts("Mod.asi", "HeadTracking.ini", "HeadTracking.ini", "retail\\CameraUnlock.ini") });
   git(stampOnly, "add", "config/HeadTracking.ini");
   check(
     isDeepStrictEqual(repoState(stampOnly).unrecorded_stamped, ["config/HeadTracking.ini"]),

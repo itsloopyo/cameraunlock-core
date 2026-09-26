@@ -36,13 +36,14 @@ import {
   splitLines,
   trimSpaceTab,
 } from "./lib/canonical-ini.mjs";
+import { readConfigFormat } from "./lib/config-format-file.mjs";
 import { parseKeyBindings } from "./lib/key-bindings.mjs";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPOS_ROOT = path.dirname(CORE_ROOT);
 const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(CORE_ROOT, rel), "utf8"));
 const SCHEMA = readJson("data/config-schema.json");
-const FORMAT = readJson("data/config-format.json");
+const FORMAT = readConfigFormat();
 
 // Design 1.6 rule 3: the bare nouns of the schema's deliberately_unaliased list.
 const BARE_NOUNS = ["Enabled", "Enable", "Amount", "Factor", "Scale", "Limit", "Multiplier", "Yaw", "Pitch", "Roll", "Position"];
