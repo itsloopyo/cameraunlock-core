@@ -49,7 +49,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { repoState } from './check-canonical-config.mjs';
 import { equalsAsciiIgnoreCase, isDefaultToken, parseCanonicalIni } from './lib/canonical-ini.mjs';
@@ -711,4 +711,4 @@ function main() {
   process.exit(failed > 0 || (!write && drift > 0) ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main();
+if (fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main();

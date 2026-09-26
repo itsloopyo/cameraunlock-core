@@ -20,7 +20,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import {
   CONFIG_FORMAT,
@@ -545,6 +545,6 @@ function main(argv) {
   return lintMain(roots);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }
