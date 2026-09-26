@@ -41,5 +41,12 @@ namespace CameraUnlock.Core.Config
         /// <c>LegacyVirtualKeyToBindings</c>, C# <see cref="LegacyNormalisations.KeyCodeToBindings"/>).
         /// </summary>
         ModifierKey = 6,
+
+        /// <summary>
+        /// An aim decoupling switch set to false, which ran coupled aim. Aim is always decoupled
+        /// now, so the setting has no row. The map records one only where the legacy value is
+        /// false; a true value changes nothing.
+        /// </summary>
+        CoupledAim = 7,
     }
 }

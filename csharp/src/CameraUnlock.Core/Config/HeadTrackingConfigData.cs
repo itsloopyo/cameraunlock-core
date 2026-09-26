@@ -89,7 +89,12 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         public bool WorldSpaceYaw { get; set; } = true;
 
-        /// <inheritdoc />
+        /// <summary>
+        /// Deprecated, kept so existing callers compile: aim is always decoupled.
+        /// <see cref="ApplyValues"/> still parses AimDecoupling into it, but it is not a setting,
+        /// <see cref="HeadTrackingConfigTable"/> has no row for it, and a mod never reads it to
+        /// couple the aim to the head.
+        /// </summary>
         public bool AimDecouplingEnabled { get; set; } = true;
 
         /// <inheritdoc />

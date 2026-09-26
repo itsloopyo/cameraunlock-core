@@ -94,11 +94,11 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe26TheSchemaNames()
+        public void TheGlobalConceptsAreThe25TheSchemaNames()
         {
             string[] global =
             {
-                "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw", "AimDecoupling",
+                "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
                 "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "PositionAllowed", "TrueFreeLook",
                 "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "TrackerPivotForward", "TrackerPivotUp", "ToggleKey",

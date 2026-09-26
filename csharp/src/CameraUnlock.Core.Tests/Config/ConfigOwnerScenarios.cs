@@ -1182,7 +1182,7 @@ namespace CameraUnlock.Core.Tests.Config
         private static void DefaultsIniPresentIsRead(string dir)
         {
             var rig = new Rig(dir);
-            byte[] global = Ascii("[Network]\r\nUdpPort=5000\r\n[General]\r\nAimDecoupling=false\r\n[Hotkeys]\r\nToggleKey=F8\r\n");
+            byte[] global = Ascii("[Network]\r\nUdpPort=5000\r\n[General]\r\nDataFreshnessMs=250\r\n[Hotkeys]\r\nToggleKey=F8\r\n");
             rig.PutDefaults(global);
             ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
             ExpectStatus(load, ConfigLoadStatus.Created);
@@ -1193,7 +1193,7 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectLogLine(load, rig.Path + ": from Defaults.ini: UdpPort=5000; ToggleKey=F8");
             ExpectLogLine(load, rig.Path + ": built-in, not set in Defaults.ini: EnableOnStartup=true; WorldSpaceYaw=true; "
                 + "RotationEnabled=true; PositionEnabled=true; LightMultiplier=1.5");
-            Expect(!load.Log.Any(l => l.Contains("AimDecoupling")), "a key this table does not bind draws nothing");
+            Expect(!load.Log.Any(l => l.Contains("DataFreshnessMs")), "a key this table does not bind draws nothing");
             Expect(rig.Sink.Count == 0, "nothing is reported");
 
             File.WriteAllBytes(rig.Path, Encoding.ASCII.GetBytes(Encoding.ASCII.GetString(Fresh())

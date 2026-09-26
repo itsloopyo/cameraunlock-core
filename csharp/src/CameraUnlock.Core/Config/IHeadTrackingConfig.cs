@@ -29,7 +29,10 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         string ToggleKeyName { get; }
 
-        /// <summary>Whether aim decoupling is enabled.</summary>
+        /// <summary>
+        /// Deprecated, kept so existing implementations compile: aim is always decoupled, so this
+        /// is not a setting and a mod never reads it to couple the aim to the head.
+        /// </summary>
         bool AimDecouplingEnabled { get; }
 
         /// <summary>Whether to show the decoupled crosshair/reticle.</summary>

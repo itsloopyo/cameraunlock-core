@@ -121,9 +121,6 @@ namespace CameraUnlock.Core.Config
                 case nameof(ConfigConcepts.WorldSpaceYaw):
                     table.Concept(ConfigConcepts.WorldSpaceYaw, c => c.WorldSpaceYaw, (c, v) => c.WorldSpaceYaw = v);
                     return;
-                case nameof(ConfigConcepts.AimDecoupling):
-                    table.Concept(ConfigConcepts.AimDecoupling, c => c.AimDecouplingEnabled, (c, v) => c.AimDecouplingEnabled = v);
-                    return;
                 case nameof(ConfigConcepts.RotationEnabled):
                     table.Concept(ConfigConcepts.RotationEnabled, c => c.RotationEnabled, (c, v) => c.RotationEnabled = v);
                     return;

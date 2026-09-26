@@ -9,6 +9,53 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed - BREAKING - aim decoupling is not a setting: aim is always decoupled
+
+Owner ruling of 2026-09-26: decoupled aim is the only supported behaviour. The aim stays with the
+mouse or controller while the head moves the view, and no mod offers, reads or documents a way to
+couple it to the head. The decoupling machinery (`AimDecoupler`, `AimDecouplingState` and the rest)
+is the feature and does not change; only the switch goes.
+
+- **Schema.** `data/config-schema.json` marks `AimDecoupling` `canonical: false`, with the
+  `canonical_reason` `Your aim always stays with the mouse or controller while your head moves the
+  view.`, and drops its `global` and `file_comment`. Its aliases stay (`DecoupleAim`,
+  `AimDecouple`, `EnableAimDecoupling`, `DecoupledAim`), so the deprecated flat readers parse every
+  spelling as before. A canonical file holding any of them draws `NonCanonicalConcept` with that
+  reason (`[General] AimDecoupling is ignored. Your aim always stays with the mouse or controller
+  while your head moves the view.`), and the canonical config lint fails it.
+- **BREAKING, generated code.** C# `ConfigConcepts.AimDecoupling` and C++
+  `schema::Concept::AimDecoupling` and `ConceptTraits<Concept::AimDecoupling>` are gone, and every
+  `schema::Concept` value after `WorldSpaceYaw` moves down by one. A converted mod that names the
+  concept in `HeadTrackingConfigTable` no longer compiles: delete it from the list, delete the mod's
+  coupled-aim code path so the aim is always decoupled, and run `pixi run render-config` and
+  `pixi run test`.
+- **Config tables and Defaults.ini.** `HeadTrackingConfigTable` has no `AimDecoupling` row. The
+  canonical set is 27 concepts, 25 of them global. A new Defaults.ini has no `AimDecoupling` line
+  and is two lines shorter; an existing one that holds the line is read as before, and the line is
+  not read and draws nothing, like any key of a concept the format does not write.
+- **Kept for existing callers**, and documented as deprecated: `IHeadTrackingConfig` and
+  `HeadTrackingConfigData.AimDecouplingEnabled`, C++ `HeadTrackingConfig::aim_decoupling_enabled`,
+  which `ApplyValues` and `LoadFromFile` still fill, and `HeadTrackingConfigBase.EnableAimDecoupling`
+  and `CachedEnableAimDecoupling`, still bound so a subclass reads a non-null entry. No mod reads
+  any of them to couple the aim.
+- **Legacy import.** Approved change `coupled_aim` in `data/config-format.json`, recorded as the new
+  C++ `DropRule::CoupledAim` and C# `DropRule.CoupledAim` (7). A map records it where the legacy
+  switch, under any spelling, is false; a true value changes nothing and is not recorded. The log
+  line is `not carried: [General] AimDecoupling=false, aim is always decoupled now, so your aim
+  stays with the mouse or controller while your head moves the view`.
+- **README and changelog.** The README config block of a legacy repo, rendered by
+  `scripts/generate-readme.mjs`, lists `The aim decoupling setting. Aim is always decoupled now, so
+  your aim stays with the mouse or controller while your head moves the view, even if your old file
+  had decoupling turned off.` among the settings not carried over, and
+  `scripts/templates/canonical-config-changelog.md` carries the same line and a Removed bullet.
+- **Fixtures.** `global/Defaults.ini`, `head-tracking/all-concepts.ini` and
+  `all-concepts-fresh.ini` lose the `AimDecoupling` comment and row; the three `head-tracking/apply-*`
+  cases lose the field; `table/apply-unknown` gains `AimDecoupling` and `EnableAimDecoupling`,
+  each drawing `NonCanonicalConcept`; `global/read-unknown-key` gains an `AimDecoupling` line that is
+  not read; the `readme/values-legacy-*` blocks gain the dropped-settings line.
+- **Lopari must follow**: its Defaults.ini rows, its restated Defaults.ini render and header, its
+  global-defaults view and its copies of these fixtures.
+
 ### Fixed - BREAKING - a Ctrl, Shift or Alt key is never a hotkey's key
 
 Both hotkey codecs read a Ctrl, Shift or Alt key as the key of a binding: `LeftShift` to

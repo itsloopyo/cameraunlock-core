@@ -222,10 +222,9 @@
       "type": "bool",
       "default": true,
       "aliases": ["DecoupleAim", "AimDecouple", "EnableAimDecoupling", "DecoupledAim"],
-      "doc": "Keep the aim direction on the mouse rather than on the head.",
-      "canonical": true,
-      "global": true,
-      "file_comment": ["true: your aim stays with the mouse or controller while your head moves the view."]
+      "doc": "Retained so existing callers keep parsing: the deprecated flat readers and HeadTrackingConfigBase still read it. It is not a setting. Owner ruling 2026-09-26: decoupled aim is the only supported behaviour, so the aim stays on the mouse or controller while the head moves the view, and no mod offers, reads or documents a way to couple it to the head. A legacy import drops a player's old value as DropRule CoupledAim (approved change coupled_aim in data/config-format.json).",
+      "canonical": false,
+      "canonical_reason": "Your aim always stays with the mouse or controller while your head moves the view."
     },
     {
       "id": "ShowReticle",

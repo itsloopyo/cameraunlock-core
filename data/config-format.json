@@ -576,6 +576,12 @@
       "text": "A feature shipped disabled pending verification (CollisionEnabled, for example) takes its intended default in the conversion and follows core's default from then on, instead of keeping the value a legacy file holds.",
       "approved": "2026-09-24",
       "drop_rule": "FollowsDefault"
+    },
+    "coupled_aim": {
+      "decision": 5,
+      "text": "Decoupled aim is the only supported behaviour (owner ruling of 2026-09-26): the aim stays with the mouse or controller while the head moves the view. No mod offers, reads or documents an aim decoupling switch, so the canonical format has no AimDecoupling row, and a conversion deletes the mod's coupled-aim code path with the setting. A legacy AimDecoupling (or any other spelling of the switch, EnableAimDecoupling in a BepInEx .cfg included) that is false is dropped and logged: that player now gets decoupled aim. A true value changes nothing and is not recorded.",
+      "approved": "2026-09-26",
+      "drop_rule": "CoupledAim"
     }
   },
   "conversion_notes": {

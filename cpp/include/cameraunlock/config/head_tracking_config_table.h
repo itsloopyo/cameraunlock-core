@@ -58,9 +58,6 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
         case C::WorldSpaceYaw:
             BindHeadTrackingMember<C::WorldSpaceYaw>(table, &H::world_space_yaw);
             return;
-        case C::AimDecoupling:
-            BindHeadTrackingMember<C::AimDecoupling>(table, &H::aim_decoupling_enabled);
-            return;
         case C::RotationEnabled:
             BindHeadTrackingMember<C::RotationEnabled>(table, &H::rotation_enabled);
             return;

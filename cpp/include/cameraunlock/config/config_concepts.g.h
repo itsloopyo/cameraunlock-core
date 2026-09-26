@@ -17,7 +17,6 @@ enum class Concept {
     LocalSmoothing,
     RemoteSmoothing,
     WorldSpaceYaw,
-    AimDecoupling,
     RotationEnabled,
     DataFreshnessMs,
     PositionEnabled,
@@ -115,17 +114,6 @@ struct ConceptTraits<Concept::WorldSpaceYaw> {
     static constexpr const char* kKey = "WorldSpaceYaw";
     static constexpr ValueFamily kFamily = ValueFamily::kBool;
     static constexpr const char* kFileComment[] = {"true: yaw turns around the world's up axis. false: around the camera's own up axis."};
-    static constexpr const char* kCanonicalDefault = nullptr;
-    static constexpr const char* kDefaultText = "true";
-    static constexpr bool kGlobal = true;
-};
-
-template <>
-struct ConceptTraits<Concept::AimDecoupling> {
-    static constexpr const char* kSection = "General";
-    static constexpr const char* kKey = "AimDecoupling";
-    static constexpr ValueFamily kFamily = ValueFamily::kBool;
-    static constexpr const char* kFileComment[] = {"true: your aim stays with the mouse or controller while your head moves the view."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
     static constexpr bool kGlobal = true;
@@ -419,7 +407,6 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::LocalSmoothing, "LocalSmoothing", "Smoothing", "LocalSmoothing", ValueFamily::kFloating, {"Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.", nullptr}, 1, nullptr, "0", true},
     {Concept::RemoteSmoothing, "RemoteSmoothing", "Smoothing", "RemoteSmoothing", ValueFamily::kFloating, {"Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."}, 2, nullptr, "0.15", true},
     {Concept::WorldSpaceYaw, "WorldSpaceYaw", "General", "WorldSpaceYaw", ValueFamily::kBool, {"true: yaw turns around the world's up axis. false: around the camera's own up axis.", nullptr}, 1, nullptr, "true", true},
-    {Concept::AimDecoupling, "AimDecoupling", "General", "AimDecoupling", ValueFamily::kBool, {"true: your aim stays with the mouse or controller while your head moves the view.", nullptr}, 1, nullptr, "true", true},
     {Concept::RotationEnabled, "RotationEnabled", "General", "RotationEnabled", ValueFamily::kBool, {"true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both."}, 2, nullptr, "true", true},
     {Concept::DataFreshnessMs, "DataFreshnessMs", "General", "DataFreshnessMs", ValueFamily::kInteger, {"Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."}, 2, nullptr, "500", true},
     {Concept::PositionEnabled, "PositionEnabled", "Position", "PositionEnabled", ValueFamily::kBool, {"true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."}, 2, nullptr, "true", true},
@@ -478,6 +465,7 @@ inline constexpr NonCanonicalConcept kNonCanonicalConcepts[] = {
     {"InvertYaw", "Inversion", "InvertYaw", "invertyaw", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
     {"InvertPitch", "Inversion", "InvertPitch", "invertpitch", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
     {"InvertRoll", "Inversion", "InvertRoll", "invertroll", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
+    {"AimDecoupling", "General", "AimDecoupling", "aimdecoupling", "Your aim always stays with the mouse or controller while your head moves the view."},
     {"ShowReticle", "Reticle", "ShowReticle", "showreticle", "Whether a reticle is shown is not a setting."},
     {"ReticleColor", "Reticle", "ReticleColor", "reticlecolor", "The reticle colour is not a setting."},
     {"PositionSensitivityX", "Position", "PositionSensitivityX", "positionsensitivityx", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},

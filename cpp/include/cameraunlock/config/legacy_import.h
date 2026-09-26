@@ -54,6 +54,10 @@ enum class DropRule {
     /// N3: a hotkey bound to a Ctrl, Shift or Alt key on its own imports as unbound
     /// (LegacyVirtualKeyToBindings).
     ModifierKey = 6,
+    /// An aim decoupling switch set to false, which ran coupled aim. Aim is always decoupled now,
+    /// so the setting has no row. The map records one only where the legacy value is false; a
+    /// true value changes nothing.
+    CoupledAim = 7,
 };
 
 /// One legacy value the map did not carry, for the migration log.

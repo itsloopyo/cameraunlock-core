@@ -45,6 +45,10 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         public ConfigEntry<KeyCode> ReticleToggleKey { get; private set; }
 
         // Aim decoupling settings
+        /// <summary>
+        /// Deprecated, still bound so existing subclasses compile and read a non-null entry: aim is
+        /// always decoupled, so a mod never reads it to couple the aim to the head.
+        /// </summary>
         public ConfigEntry<bool> EnableAimDecoupling { get; private set; }
         public ConfigEntry<bool> ShowDecoupledCrosshair { get; private set; }
 
@@ -55,6 +59,7 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         public bool CachedInvertYaw { get; private set; }
         public bool CachedInvertPitch { get; private set; }
         public bool CachedInvertRoll { get; private set; }
+        /// <summary>Deprecated with <see cref="EnableAimDecoupling"/>: aim is always decoupled.</summary>
         public bool CachedEnableAimDecoupling { get; private set; }
         public bool CachedShowDecoupledCrosshair { get; private set; }
 

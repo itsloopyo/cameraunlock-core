@@ -6,7 +6,6 @@ field	EnableOnStartup	false
 field	LocalSmoothing	0.25
 field	RemoteSmoothing	0.5
 field	WorldSpaceYaw	false
-field	AimDecoupling	false
 field	RotationEnabled	false
 field	DataFreshnessMs	750
 field	PositionEnabled	true

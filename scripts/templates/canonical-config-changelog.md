@@ -57,6 +57,7 @@ writes no seed because REFramework is already there.
   - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
   - Reticle settings, and a key that toggled the reticle.
   - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
+  - The aim decoupling setting. Aim is always decoupled now, so your aim stays with the mouse or controller while your head moves the view, even if your old file had decoupling turned off.
   - Only where the mod is not an REFramework mod:
     A hotkey set to Ctrl, Shift or Alt on its own. That key goes down before the key of any chord made with it, so the hotkey is left unbound, and it keeps its Ctrl+Shift chord where it has one.
 - An older version of the mod reads `<legacy>` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `<legacy>`.
@@ -100,6 +101,7 @@ writes no seed because REFramework is already there.
 ### Removed
 
 - The key that toggled the reticle, and the reticle settings.
+- The aim decoupling setting, and the coupled aim it could turn on. Aim is always decoupled: your aim stays with the mouse or controller while your head moves the view.
 - The sensitivity, scale, deadzone, response curve and axis inversion settings. Set these in your tracker app instead.
 - Only where every copy of the config the mod shipped (installer, Nexus ZIP and launcher seed) had the same defaults for these settings:
   With these settings at their shipped defaults the camera moves as it did before.

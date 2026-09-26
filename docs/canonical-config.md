@@ -251,13 +251,13 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way. 26 of them are global: a game's row
+The concepts are the settings every mod spells the same way. 25 of them are global: a game's row
 for one follows Defaults.ini unless the table marks it `PerGame()` (see
 [Which rows follow it](#which-rows-follow-it)). `CollisionMargin` and `CollisionChannel` are not:
 each holds a number in one engine's own units or channels, so the schema marks them
 `"global": false`, and every game keeps its own value. The schema writes `global`, true or false,
 on every canonical concept, and the generator refuses one without it. This is core's table naming
-all 28 of them at their defaults, which both languages render byte for byte
+all 27 of them at their defaults, which both languages render byte for byte
 (`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with `Render`, so
 every row shows its value, `CollisionChannel`, the table's one Engine row, as a comment; the same
 table's fresh render writes `default` on every global row, `CollisionMargin` as its value and the
@@ -289,8 +289,6 @@ UdpPort=4242
 EnableOnStartup=true
 ; true: yaw turns around the world's up axis. false: around the camera's own up axis.
 WorldSpaceYaw=true
-; true: your aim stays with the mouse or controller while your head moves the view.
-AimDecoupling=true
 ; true: turning your head turns the view.
 ; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
 RotationEnabled=true
@@ -403,6 +401,7 @@ the canonical format never writes them. Each carries a `canonical_reason`, which
 | `ReticleToggleKey` | The reticle has no toggle key |
 | `PositionToggleKey` | `CycleTrackingModeKey` is the hotkey that switches positional tracking |
 | `RecenterKey` | The mod keeps no centre of its own: the player centres the view in the tracker app |
+| `AimDecoupling` | Aim is always decoupled: the aim stays with the mouse or controller while the head moves the view (owner ruling of 2026-09-26). No mod offers a way to couple it to the head |
 
 So the schema sections `[Sensitivity]`, `[Inversion]` and `[Reticle]` hold no canonical concept,
 and no canonical file has them. The retired `Smoothing` key (and its alias `SmoothingFactor`) is
@@ -843,7 +842,7 @@ file, the README config block and the changelog template.
 
 ### Which rows follow it
 
-26 of the 28 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
+25 of the 27 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
 `PositionAllowed`, `CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of
 2026-09-25, collision rows ruling of 2026-09-26). The schema says `global`, true or false, on
 every canonical concept, and `CollisionMargin` and `CollisionChannel` say false: a margin in the
@@ -997,8 +996,6 @@ UdpPort=4242
 EnableOnStartup=true
 ; true: yaw turns around the world's up axis. false: around the camera's own up axis.
 WorldSpaceYaw=true
-; true: your aim stays with the mouse or controller while your head moves the view.
-AimDecoupling=true
 ; true: turning your head turns the view.
 ; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
 RotationEnabled=true
@@ -1350,6 +1347,7 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `FollowsDefault` (4) | approved change `follows_default` | The setting of a feature shipped switched off while untested, which now follows the mod's default |
 | `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code outside 0x01-0xFE, 0xFF included, which imports as unbound (C++ `LegacyVirtualKeyToBindings`; no C# import reads virtual-key codes). Code 0, a legacy file's unbound, stays unbound and is not recorded |
 | `ModifierKey` (6) | normalisation N3 | A hotkey bound to a Ctrl, Shift or Alt key on its own, which imports as unbound, since no hotkey value can hold one (C++ `LegacyVirtualKeyToBindings` for 0x10-0x12 and 0xA0-0xA5, recorded as the code in hex; C# `LegacyNormalisations.KeyCodeToBindings` for `LeftShift` to `RightAlt`, recorded as the key name). A map that folds the action's Ctrl+Shift chord into the list appends it to what these give, so the player keeps the chord. Core's REFramework import does not apply it (see REFramework mods) |
+| `CoupledAim` (7) | approved change `coupled_aim` | An aim decoupling switch (`AimDecoupling`, a BepInEx `EnableAimDecoupling`, or any other spelling of it) whose legacy value is false. Aim is always decoupled now, so that player gets decoupled aim, and the map records the value it read. A true value changes nothing and is not recorded. The conversion also deletes the mod's coupled-aim code path |
 
 A `FollowsDefault` value is the one the build shipped, which no player chose, so the map also
 names the row's concept in the result's `follows_defaults_ini` (C# `FollowsDefaultsIni`, passed

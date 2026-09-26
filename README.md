@@ -219,7 +219,7 @@ public interface IHeadTrackingConfig
     SensitivitySettings Sensitivity { get; }
     string RecenterKeyName { get; }
     string ToggleKeyName { get; }
-    bool AimDecouplingEnabled { get; }
+    bool AimDecouplingEnabled { get; }  // deprecated: aim is always decoupled, so no mod reads it
     bool ShowDecoupledReticle { get; }
     float[] ReticleColorRgba { get; }
     float LocalSmoothing { get; }

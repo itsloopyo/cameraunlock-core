@@ -47,6 +47,9 @@ struct HeadTrackingConfig {
     float remote_smoothing = static_cast<float>(math::kDefaultRemoteSmoothing);
 
     bool world_space_yaw = true;
+    /// Deprecated, kept so existing callers compile: aim is always decoupled. ApplyValues still
+    /// parses AimDecoupling into it, but it is not a setting, no table binds it, and a mod never
+    /// reads it to couple the aim to the head.
     bool aim_decoupling_enabled = true;
     bool show_decoupled_reticle = true;
     float reticle_color_rgba[4] = {1.0f, 1.0f, 1.0f, 1.0f};

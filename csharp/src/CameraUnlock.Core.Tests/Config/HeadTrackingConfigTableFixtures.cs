@@ -231,7 +231,6 @@ namespace CameraUnlock.Core.Tests.Config
                 new FieldRead("LocalSmoothing", c => f.Render(c.LocalSmoothing)),
                 new FieldRead("RemoteSmoothing", c => f.Render(c.RemoteSmoothing)),
                 new FieldRead("WorldSpaceYaw", c => b.Render(c.WorldSpaceYaw)),
-                new FieldRead("AimDecoupling", c => b.Render(c.AimDecouplingEnabled)),
                 new FieldRead("RotationEnabled", c => b.Render(c.RotationEnabled)),
                 new FieldRead("DataFreshnessMs", c => i.Render(c.DataFreshnessMs)),
                 new FieldRead("PositionEnabled", c => b.Render(c.PositionEnabled)),

@@ -226,6 +226,7 @@ const APPROVED_CHANGE_LINES = {
   pose_shaping: 'A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.',
   reticle: 'Reticle settings, and a key that toggled the reticle.',
   follows_default: "The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.",
+  coupled_aim: 'The aim decoupling setting. Aim is always decoupled now, so your aim stays with the mouse or controller while your head moves the view, even if your old file had decoupling turned off.',
 };
 
 // null marks a normalisation the block does not explain: the README said nothing of N1 (a hotkey

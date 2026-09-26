@@ -77,7 +77,8 @@ void TestImportResult() {
           "ImportStatus numbers match the C# enum");
     Check(static_cast<int>(DropRule::NonFiniteNumber) == 1 && static_cast<int>(DropRule::PoseShaping) == 2 &&
               static_cast<int>(DropRule::Reticle) == 3 && static_cast<int>(DropRule::FollowsDefault) == 4 &&
-              static_cast<int>(DropRule::KeyCodeOutOfRange) == 5 && static_cast<int>(DropRule::ModifierKey) == 6,
+              static_cast<int>(DropRule::KeyCodeOutOfRange) == 5 && static_cast<int>(DropRule::ModifierKey) == 6 &&
+              static_cast<int>(DropRule::CoupledAim) == 7,
           "DropRule numbers match the C# enum");
 }
 
@@ -102,6 +103,10 @@ void TestDescribe() {
               "not carried: [Hotkeys] YawModeKey=0x11, it is a Ctrl, Shift or Alt key, which goes down before the key of "
               "any chord made with it, so it is unbound",
           "N3 line");
+    Check(DescribeDroppedValue({DropRule::CoupledAim, "General", "AimDecoupling", "false"}) ==
+              "not carried: [General] AimDecoupling=false, aim is always decoupled now, so your aim stays with the "
+              "mouse or controller while your head moves the view",
+          "coupled-aim line");
     Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(9), "A", "B", "C"}); }) ==
               "drop rule 9 is not a DropRule",
           "a rule outside DropRule throws");

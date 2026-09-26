@@ -44,12 +44,6 @@ namespace CameraUnlock.Core.Config
             new BoolCodec(), new[] { "true: yaw turns around the world's up axis. false: around the camera's own up axis." }, null, "true",
             true);
 
-        /// <summary>[General] AimDecoupling.</summary>
-        public static readonly ConceptDescriptor<bool> AimDecoupling = new ConceptDescriptor<bool>(
-            "AimDecoupling", "General", "AimDecoupling", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: your aim stays with the mouse or controller while your head moves the view." }, null, "true",
-            true);
-
         /// <summary>[General] RotationEnabled.</summary>
         public static readonly ConceptDescriptor<bool> RotationEnabled = new ConceptDescriptor<bool>(
             "RotationEnabled", "General", "RotationEnabled", ConceptValueFamily.Bool,
@@ -190,7 +184,6 @@ namespace CameraUnlock.Core.Config
             LocalSmoothing,
             RemoteSmoothing,
             WorldSpaceYaw,
-            AimDecoupling,
             RotationEnabled,
             DataFreshnessMs,
             PositionEnabled,
@@ -241,6 +234,7 @@ namespace CameraUnlock.Core.Config
             { "invertyaw", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
             { "invertpitch", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
             { "invertroll", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
+            { "aimdecoupling", "Your aim always stays with the mouse or controller while your head moves the view." },
             { "showreticle", "Whether a reticle is shown is not a setting." },
             { "reticlecolor", "The reticle colour is not a setting." },
             { "positionsensitivityx", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },

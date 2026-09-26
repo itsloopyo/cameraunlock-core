@@ -26,6 +26,9 @@ const char* DropReason(DropRule rule) {
         case DropRule::ModifierKey:
             return "it is a Ctrl, Shift or Alt key, which goes down before the key of any chord made with it, "
                    "so it is unbound";
+        case DropRule::CoupledAim:
+            return "aim is always decoupled now, so your aim stays with the mouse or controller while your head "
+                   "moves the view";
     }
     throw std::invalid_argument("drop rule " + std::to_string(static_cast<int>(rule)) + " is not a DropRule");
 }

@@ -1456,7 +1456,7 @@ void APackagedGameReadsDefaultsIniAndNeverCreatesIt(const fs::path& dir) {
 
 void DefaultsIniPresentIsRead(const fs::path& dir) {
     Rig rig(dir);
-    const std::string global = "[Network]\r\nUdpPort=5000\r\n[General]\r\nAimDecoupling=false\r\n[Hotkeys]\r\nToggleKey=F8\r\n";
+    const std::string global = "[Network]\r\nUdpPort=5000\r\n[General]\r\nDataFreshnessMs=250\r\n[Hotkeys]\r\nToggleKey=F8\r\n";
     rig.PutDefaults(global);
     const Load load = rig.Make()->Load();
     ExpectStatus(load, ConfigLoadStatus::Created);
@@ -1467,7 +1467,7 @@ void DefaultsIniPresentIsRead(const fs::path& dir) {
     ExpectLogLine(load.log, rig.Text() +
                                 ": built-in, not set in Defaults.ini: EnableOnStartup=true; WorldSpaceYaw=true; "
                                 "RotationEnabled=true; PositionEnabled=true; LightMultiplier=1.5");
-    Check(CountContaining(load.log, "AimDecoupling") == 0, "a key this table does not bind draws nothing");
+    Check(CountContaining(load.log, "DataFreshnessMs") == 0, "a key this table does not bind draws nothing");
     Check(rig.sink.empty(), "nothing is reported");
 
     WriteBytes(rig.path, Changed(Changed(Fresh(), "UdpPort=default", "UdpPort=6000"), "WorldSpaceYaw=default", "WorldSpaceYaw=true"));

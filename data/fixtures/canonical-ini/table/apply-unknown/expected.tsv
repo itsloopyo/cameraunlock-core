@@ -60,3 +60,5 @@ diagnostic	NonCanonicalConcept	43	Line 43: [Tuning] SignYaw is ignored. The mod 
 diagnostic	NonCanonicalConcept	45	Line 45: [Tuning] YawGain is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.
 diagnostic	NonCanonicalConcept	46	Line 46: [Tuning] PositionSensitivity is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.
 diagnostic	NonCanonicalConcept	47	Line 47: [Tuning] LeanScale is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.
+diagnostic	NonCanonicalConcept	48	Line 48: [Tuning] AimDecoupling is ignored. Your aim always stays with the mouse or controller while your head moves the view.
+diagnostic	NonCanonicalConcept	49	Line 49: [Tuning] EnableAimDecoupling is ignored. Your aim always stays with the mouse or controller while your head moves the view.

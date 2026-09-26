@@ -7,6 +7,7 @@ Comments, and keys the mod never read, are not carried over. Nor are these, wher
 - Reticle settings, and a key that toggled the reticle.
 - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
 - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
+- The aim decoupling setting. Aim is always decoupled now, so your aim stays with the mouse or controller while your head moves the view, even if your old file had decoupling turned off.
 
 An older version of the mod reads `HeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `HeadTracking.ini`.
 

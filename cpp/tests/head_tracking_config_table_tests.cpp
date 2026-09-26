@@ -118,7 +118,6 @@ std::vector<FieldRead> Fields() {
         {"LocalSmoothing", [f](const H& c) { return f(c.local_smoothing); }},
         {"RemoteSmoothing", [f](const H& c) { return f(c.remote_smoothing); }},
         {"WorldSpaceYaw", [b](const H& c) { return b(c.world_space_yaw); }},
-        {"AimDecoupling", [b](const H& c) { return b(c.aim_decoupling_enabled); }},
         {"RotationEnabled", [b](const H& c) { return b(c.rotation_enabled); }},
         {"DataFreshnessMs", [i](const H& c) { return i(c.data_freshness_ms); }},
         {"PositionEnabled", [b](const H& c) { return b(c.position_enabled); }},
@@ -324,11 +323,11 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe26TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe25TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 26 the schema names]\n";
+    std::cout << "\n[the global concepts are the 25 the schema names]\n";
     const std::vector<std::string> expected{
-        "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw", "AimDecoupling",
+        "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "PositionAllowed", "TrueFreeLook",
         "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "TrackerPivotForward", "TrackerPivotUp", "ToggleKey",
@@ -336,7 +335,7 @@ void TestGlobalConcepts() {
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 26 listed, in schema order");
+    Check(global == expected, "the global concepts are the 25 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }

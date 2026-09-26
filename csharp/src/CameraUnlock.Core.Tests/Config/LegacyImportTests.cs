@@ -69,6 +69,7 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(4, (int)DropRule.FollowsDefault);
             Assert.Equal(5, (int)DropRule.KeyCodeOutOfRange);
             Assert.Equal(6, (int)DropRule.ModifierKey);
+            Assert.Equal(7, (int)DropRule.CoupledAim);
         }
 
         [Fact]
@@ -88,6 +89,9 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal("not carried: [Hotkeys] YawModeKey=LeftShift, it is a Ctrl, Shift or Alt key, which goes down before the "
                 + "key of any chord made with it, so it is unbound",
                 new DroppedValue(DropRule.ModifierKey, "Hotkeys", "YawModeKey", "LeftShift").Describe());
+            Assert.Equal("not carried: [General] AimDecoupling=false, aim is always decoupled now, so your aim stays with the "
+                + "mouse or controller while your head moves the view",
+                new DroppedValue(DropRule.CoupledAim, "General", "AimDecoupling", "false").Describe());
         }
 
         [Fact]
@@ -95,7 +99,7 @@ namespace CameraUnlock.Core.Tests.Config
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)9, "A", "B", "C"));
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)0, "A", "B", "C"));
-            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)7, "A", "B", "C"));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)8, "A", "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, null!, "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", null!, "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", "B", null!));
