@@ -9,6 +9,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - a package below `canonical_since` is a pre-release and warns; only a release below it fails
+
+A converted repo writes the config descriptor's `canonical_since` as the version it will be
+released in and keeps its last release's version until the release bumps it. Between the two,
+`pixi run validate-manifest`, and `pixi run package` wherever packaging runs it, failed with
+`config.canonical_since 0.3.0 is above mod_info.version 0.2.0` (seen in snowrunner, roadcraft and
+minecraft-bedrock-edition), which also stopped Lopari's go-local, since it runs `pixi run package`.
+
+- **validate-manifest** passes such a package and prints `WARN <zip>: config.canonical_since 0.3.0
+  is above mod_info.version 0.2.0, so this package is a pre-release of 0.3.0; releasing any version
+  below 0.3.0 fails`. A pre-release version (`1.1.0-dev.3` under `1.1.0`) is treated the same way.
+  Every other descriptor rule is unchanged, the tag rule included: `canonical_since` is still above
+  every `v*` tag whose committed config has no stamp.
+- **A release below `canonical_since` fails.** In a GitHub Actions build for a `v<x.y.z>` tag,
+  validate-manifest and `Copy-SharedBundle` (`check-config-descriptor.mjs --package`) fail a
+  `canonical_since` above `x.y.z`. The first release at `canonical_since` passes.
+- **Added** `scripts/check-config-descriptor.mjs --release <x.y.z> [repo]`, which runs that rule on
+  the committed manifest, and `Assert-ReleaseNotBelowCanonicalSince -RepoRoot -Version [-CoreRoot]`
+  in `ReleaseWorkflow.psm1`, which runs it and needs `node` on `PATH` where the repo has a
+  `launcher-manifest.json`. `New-ReleaseTag` runs it before it creates the tag.
+  `check-config-descriptor.mjs` also exports `preReleaseWarning`, `releaseProblems` and
+  `releaseVersionFromEnv`, and `repoReport` takes an optional release version.
+- **For a converted mod:** a release below `canonical_since` from a release script that does not
+  call `New-ReleaseTag` is stopped only in CI, after the tag is pushed, and only once the mod's
+  core pin includes this change. Call `Assert-ReleaseNotBelowCanonicalSince -RepoRoot $projectDir
+  -Version $newVersion` right after the version is resolved, before any file is written.
+
 ### Changed - BREAKING - `CollisionMargin` and `CollisionChannel` are per game in every mod, and `CollisionEnabled` starts on
 
 Collision rows ruling of 2026-09-26. A margin in the engine's own units and a trace channel number

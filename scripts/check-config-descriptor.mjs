@@ -12,18 +12,24 @@
 //   node scripts/check-config-descriptor.mjs <repo> [...]     # repo paths or sibling names
 //   node scripts/check-config-descriptor.mjs --json --roots-file <file>
 //   node scripts/check-config-descriptor.mjs --package <repo>
+//   node scripts/check-config-descriptor.mjs --release <x.y.z> <repo>
 //
 // The default run prints each repo's problems, a converted repo delivered by manifest that
 // carries no block among them, and exits 1 when there is one. --json prints what
 // scripts/conformance.ps1 decides its config-descriptor check from, and always exits 0.
 // --package is what Copy-SharedBundle runs on a mod's committed manifest: every problem but the
 // missing block, which conformance reports, since the block lands in its own change and a
-// converted repo has to be able to release before it does.
+// converted repo has to be able to release before it does. In a GitHub Actions build for a
+// v<x.y.z> tag it also holds canonical_since to x.y.z (releaseProblems). --release runs that one
+// rule for a release of <x.y.z>, which is what New-ReleaseTag runs before it tags.
 //
-// The committed manifest carries a placeholder mod_info.version that packaging stamps, so the
-// rule holding canonical_since to that version runs on a built ZIP only. The rule holding it
-// above every v* tag whose committed config lacks the stamp needs the tags, so it runs on a full
-// clone only.
+// A converted repo writes canonical_since as the version it converts in and keeps the last
+// release's version until the release bumps it, so a package whose mod_info.version is below
+// canonical_since is a pre-release of it: validate-manifest warns there, and only a release
+// below canonical_since fails. The committed manifest carries a placeholder mod_info.version
+// that packaging stamps, so that warning comes from a built ZIP only. The rule holding
+// canonical_since above every v* tag whose committed config lacks the stamp needs the tags, so
+// it runs on a full clone only.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -58,7 +64,9 @@ const CONFIG_NAME = "CameraUnlock.ini";
 const ANCHORS = ["game_root", "exe_dir", "mod_home"];
 const MANIFEST_MODES = ["manifest", "manifest_variants"];
 const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
+const VERSION = /^\d+\.\d+\.\d+(-.+)?$/;
 const TAG_VERSION = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
+const RELEASE_TAG = /^v(\d+\.\d+\.\d+)$/;
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const perGameRows = (repo) => (FORMAT.per_game[repo] ?? []).map((e) => e.row);
@@ -158,10 +166,8 @@ export function shapeProblems(man, { checkVersion }) {
       problems.push(`config.canonical_since ${JSON.stringify(since)} is not a version written x.y.z`);
     } else if (checkVersion) {
       const version = man.mod_info?.version;
-      if (typeof version !== "string" || !/^\d+\.\d+\.\d+(-.+)?$/.test(version)) {
+      if (typeof version !== "string" || !VERSION.test(version)) {
         problems.push(`config.canonical_since needs mod_info.version to compare with, and it is ${JSON.stringify(version)}`);
-      } else if (compareVersions(since, version) > 0) {
-        problems.push(`config.canonical_since ${since} is above mod_info.version ${version}; it names a version that shipped the canonical file`);
       }
     }
   }
@@ -180,6 +186,39 @@ export function shapeProblems(man, { checkVersion }) {
     }
   }
   return problems;
+}
+
+const sinceOf = (man) => {
+  const since = isObject(man.config) ? man.config.canonical_since : undefined;
+  return typeof since === "string" && RELEASE_VERSION.test(since) ? since : null;
+};
+
+// What validate-manifest warns about a package whose mod_info.version is below canonical_since:
+// the build is a pre-release of canonical_since. null when it is not, and when shapeProblems
+// reports either field.
+export function preReleaseWarning(man) {
+  const since = sinceOf(man);
+  const version = man.mod_info?.version;
+  if (since === null || typeof version !== "string" || !VERSION.test(version) || compareVersions(since, version) <= 0) return null;
+  return `config.canonical_since ${since} is above mod_info.version ${version}, so this package is a pre-release of ${since}; releasing any version below ${since} fails`;
+}
+
+// A release of `version` ships the canonical file its manifest declares, so it is at or above
+// canonical_since, the first version that shipped it.
+export function releaseProblems(man, version) {
+  if (!RELEASE_VERSION.test(version)) throw new Error(`${JSON.stringify(version)} is not a release version written x.y.z`);
+  const since = sinceOf(man);
+  if (since === null || compareVersions(since, version) <= 0) return [];
+  return [
+    `releasing ${version}, and config.canonical_since is ${since}, the first version that ships CameraUnlock.ini; release ${since} or later, or, if ${version} is the release that first ships it, set canonical_since to ${version}`,
+  ];
+}
+
+// The version a build cuts when GitHub Actions runs it for a v<x.y.z> tag, the trigger of every
+// release workflow in the fleet; null for any other build.
+export function releaseVersionFromEnv(env = process.env) {
+  if (env.GITHUB_ACTIONS !== "true" || env.GITHUB_REF_TYPE !== "tag") return null;
+  return RELEASE_TAG.exec(env.GITHUB_REF_NAME ?? "")?.[1] ?? null;
 }
 
 // The value text a committed file holds on a concept row: the active line's value, or, with no
@@ -436,8 +475,9 @@ export function tagProblems(root, state, config) {
 const NO_BLOCK =
   "converted, delivered by manifest, and launcher-manifest.json has no config block. The block names CameraUnlock.ini, so it lands with or after the change that makes the mod read CameraUnlock.ini, with the legacy file as the owner's legacy path; then write path and anchor by hand, legacy_source and canonical_since where the rules ask for them, and \"per_game\": {}, and run render-config";
 
-// What conformance's config-descriptor check reads for one repo's committed manifest.
-export function repoReport(root, state = repoState(root)) {
+// What conformance's config-descriptor check reads for one repo's committed manifest. With a
+// release version, the manifest is also held to releaseProblems for it.
+export function repoReport(root, state = repoState(root), release = null) {
   const report = {
     root,
     folder: state.folder,
@@ -477,6 +517,7 @@ export function repoReport(root, state = repoState(root)) {
     report.shallow = tags.shallow;
     report.problems.push(...tags.problems);
   }
+  if (release !== null) report.problems.push(...releaseProblems(man, release));
   return report;
 }
 
@@ -495,14 +536,32 @@ function main(argv) {
     if (file === undefined) throw new Error("--roots-file takes a file of repo paths, one per line");
     tokens = [...argv.filter((_, i) => i !== rootsFileAt && i !== rootsFileAt + 1), ...fs.readFileSync(file, "utf8").split(/\r?\n/).filter((l) => l !== "")];
   }
+  const releaseAt = tokens.indexOf("--release");
+  let release = null;
+  if (releaseAt >= 0) {
+    release = tokens[releaseAt + 1];
+    if (release === undefined || !RELEASE_VERSION.test(release)) throw new Error("--release takes the version being released, written x.y.z");
+    tokens = tokens.filter((_, i) => i !== releaseAt && i !== releaseAt + 1);
+  }
   const json = tokens.includes("--json");
   const packaging = tokens.includes("--package");
-  if (json && packaging) throw new Error("--json and --package are separate runs");
+  if ([json, packaging, release !== null].filter(Boolean).length > 1) throw new Error("--json, --package and --release are separate runs");
   tokens = tokens.filter((t) => t !== "--json" && t !== "--package");
   const unknown = tokens.find((t) => t.startsWith("--"));
   if (unknown) throw new Error(`unknown option ${unknown}`);
   const roots = tokens.length > 0 ? tokens.map(resolveRoot) : [REPOS_ROOT];
-  const reports = roots.map((root) => repoReport(root));
+  if (release !== null) {
+    let refused = false;
+    for (const root of roots) {
+      const manifestPath = path.join(root, "launcher-manifest.json");
+      if (!fs.existsSync(manifestPath)) continue;
+      const problems = releaseProblems(JSON.parse(fs.readFileSync(manifestPath, "utf8").replace(/^\uFEFF/, "")), release);
+      for (const p of problems) console.log(`FAIL ${path.basename(root)}: ${p}`);
+      refused ||= problems.length > 0;
+    }
+    return refused ? 1 : 0;
+  }
+  const reports = roots.map((root) => repoReport(root, repoState(root), packaging ? releaseVersionFromEnv() : null));
   if (packaging) for (const r of reports) r.problems = r.problems.filter((p) => p !== NO_BLOCK);
   if (json) {
     console.log(JSON.stringify(reports, null, 1));

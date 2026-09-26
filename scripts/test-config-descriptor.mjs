@@ -12,7 +12,10 @@
 // seeds and ships no config, block or not, and runs the per_game generator in encode-seed.mjs, the
 // rules in validate-manifest.mjs on built ZIPs, the Nexus ZIP config rule, the report conformance
 // reads, conformance's config-descriptor and config-preserve checks, and the packager's ConvertFrom-Json /
-// ConvertTo-Json -Depth 10 round trip.
+// ConvertTo-Json -Depth 10 round trip. And canonical_since against the version: a package below it
+// warns, and a release below it fails, in validate-manifest and packaging in a build for a release
+// tag, in check-config-descriptor.mjs --release, Assert-ReleaseNotBelowCanonicalSince and
+// New-ReleaseTag.
 //
 //   node scripts/test-config-descriptor.mjs      (pixi run test-config-descriptor, part of pixi run check)
 
@@ -24,7 +27,15 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
-import { configWriteProblems, descriptorProblems, expectedPerGame, repoReport } from "./check-config-descriptor.mjs";
+import {
+  configWriteProblems,
+  descriptorProblems,
+  expectedPerGame,
+  preReleaseWarning,
+  releaseProblems,
+  releaseVersionFromEnv,
+  repoReport,
+} from "./check-config-descriptor.mjs";
 import { encodePerGame } from "./encode-seed.mjs";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -35,6 +46,11 @@ const ALL = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "canonical-
 const YAW_KEPT = ALL.replace("WorldSpaceYaw=default", "WorldSpaceYaw=false");
 const LEGACY_INI = "[General]\r\nEnabled=1\r\n";
 const FORMAT = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, "data", "config-format.json"), "utf8"));
+
+// The environment of an ordinary build, wherever this test runs, and of a GitHub Actions build
+// for a release tag.
+const { GITHUB_ACTIONS: _actions, GITHUB_REF_TYPE: _refType, GITHUB_REF_NAME: _refName, ...BUILD_ENV } = process.env;
+const tagEnv = (version) => ({ ...BUILD_ENV, GITHUB_ACTIONS: "true", GITHUB_REF_TYPE: "tag", GITHUB_REF_NAME: `v${version}` });
 
 const failures = [];
 let checks = 0;
@@ -185,9 +201,58 @@ for (const token of ["default", "Default", "DEFAULT", " default\t"]) {
   fails(`per_game value ${JSON.stringify(token)}`, bepMan((c) => ({ ...c, per_game: { WorldSpaceYaw: token } })), bep, "never the default token");
 }
 fails("canonical_since not x.y.z", abzuMan((c) => ({ ...c, canonical_since: "1.1" })), abzu, 'config.canonical_since "1.1" is not a version');
-fails("canonical_since above the version", abzuMan((c) => ({ ...c, canonical_since: "1.3.0" })), abzu, "is above mod_info.version 1.2.0");
+// A package below canonical_since is a pre-release of it: clean, with a warning. A release below it
+// fails.
+{
+  const ahead = abzuMan((c) => ({ ...c, canonical_since: "1.3.0" }));
+  clean("canonical_since above the version, a pre-release of it", ahead, abzu);
+  check(
+    preReleaseWarning(ahead) === "config.canonical_since 1.3.0 is above mod_info.version 1.2.0, so this package is a pre-release of 1.3.0; releasing any version below 1.3.0 fails",
+    `pre-release: canonical_since above the version should warn, got ${JSON.stringify(preReleaseWarning(ahead))}`,
+  );
+  const rc = abzuMan(undefined, { mod_info: { name: "Mod", version: "1.1.0-dev.3", game_id: "abzu" } });
+  clean("canonical_since above a pre-release of it", rc, abzu);
+  check(
+    preReleaseWarning(rc)?.includes("above mod_info.version 1.1.0-dev.3, so this package is a pre-release of 1.1.0"),
+    `pre-release: a 1.1.0-dev.3 package under canonical_since 1.1.0 should warn, got ${JSON.stringify(preReleaseWarning(rc))}`,
+  );
+  for (const [label, man] of [
+    ["at canonical_since", abzuMan((c) => ({ ...c, canonical_since: "1.2.0" }))],
+    ["above canonical_since", abzuMan()],
+    ["with no block", abzuMan(() => undefined)],
+    ["with a canonical_since the shape rules refuse", abzuMan((c) => ({ ...c, canonical_since: "1.3" }))],
+    ["with no mod_info.version", abzuMan(undefined, { mod_info: { name: "Mod", game_id: "abzu" } })],
+  ]) {
+    check(preReleaseWarning(man) === null, `pre-release: a package ${label} should not warn, got ${JSON.stringify(preReleaseWarning(man))}`);
+  }
+  check(
+    isDeepStrictEqual(releaseProblems(ahead, "1.2.0"), [
+      "releasing 1.2.0, and config.canonical_since is 1.3.0, the first version that ships CameraUnlock.ini; release 1.3.0 or later, or, if 1.2.0 is the release that first ships it, set canonical_since to 1.2.0",
+    ]),
+    `release: 1.2.0 under canonical_since 1.3.0 should fail, got ${JSON.stringify(releaseProblems(ahead, "1.2.0"))}`,
+  );
+  check(releaseProblems(ahead, "1.3.0").length === 0, "release: the first release at canonical_since should pass");
+  check(releaseProblems(ahead, "2.0.0").length === 0, "release: a release above canonical_since should pass");
+  check(releaseProblems(abzuMan(() => undefined), "0.1.0").length === 0, "release: a manifest with no block has no canonical_since to hold");
+  let threw = false;
+  try {
+    releaseProblems(ahead, "1.3.0-rc1");
+  } catch {
+    threw = true;
+  }
+  check(threw, "release: a release version that is not x.y.z should throw");
+  check(releaseVersionFromEnv(tagEnv("1.3.0")) === "1.3.0", "release env: a GitHub Actions build for v1.3.0 releases 1.3.0");
+  for (const [label, env] of [
+    ["an ordinary build", BUILD_ENV],
+    ["a branch build", { ...tagEnv("1.3.0"), GITHUB_REF_TYPE: "branch", GITHUB_REF_NAME: "main" }],
+    ["a tag that is not v<x.y.z>", { ...tagEnv("1.3.0"), GITHUB_REF_NAME: "nightly" }],
+    ["a pre-release tag", tagEnv("1.3.0-rc1")],
+    ["a tag outside GitHub Actions", { ...tagEnv("1.3.0"), GITHUB_ACTIONS: undefined }],
+  ]) {
+    check(releaseVersionFromEnv(env) === null, `release env: ${label} releases nothing, got ${releaseVersionFromEnv(env)}`);
+  }
+}
 clean("canonical_since above a committed placeholder version, which conformance does not compare", abzuMan((c) => ({ ...c, canonical_since: "1.3.0" }), { mod_info: { name: "Mod", version: "0.0.0", game_id: "abzu" } }), abzu, false);
-fails("canonical_since above a pre-release of it", abzuMan(undefined, { mod_info: { name: "Mod", version: "1.1.0-dev.3", game_id: "abzu" } }), abzu, "is above mod_info.version 1.1.0-dev.3");
 fails("no mod_info.version", abzuMan(undefined, { mod_info: { name: "Mod", game_id: "abzu" } }), abzu, "needs mod_info.version");
 fails("config in a variant", abzuMan(undefined, { delivery_mode: "manifest_variants", variants: [{ id: "steam", config: {} }] }), abzu, 'variant "steam" carries a config block');
 {
@@ -305,10 +370,11 @@ check(isDeepStrictEqual(expectedPerGame(abzu.root, abzu.state).perGame, {}), "ex
 
 // The generator: encode-seed rewrites config.per_game and nothing else, the fixture's seed of the
 // legacy file included.
-function runScript(script, ...args) {
-  const r = spawnSync(process.execPath, [path.join(SCRIPTS, script), ...args], { encoding: "utf8" });
+function runScriptIn(env, script, ...args) {
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS, script), ...args], { encoding: "utf8", env });
   return { status: r.status, out: r.stdout + r.stderr };
 }
+const runScript = (script, ...args) => runScriptIn(BUILD_ENV, script, ...args);
 {
   const preyText = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "encode-seed", "prey-headtracking.launcher-manifest.json"), "utf8");
   const blockWith = (perGame) =>
@@ -404,8 +470,20 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   check(rows.status === 1 && rows.out.includes(ROWS_REFUSED), `validate-manifest: a block with rows should fail, got ${rows.status}\n${rows.out}`);
   const extra = runScript("validate-manifest.mjs", zipRepo("zip-extra-per-game", { ...structuredClone(abzuConfig), per_game: { WorldSpaceYaw: "false" } }));
   check(extra.status === 1 && extra.out.includes("config.per_game names WorldSpaceYaw"), `validate-manifest: a per_game id the repo does not keep should fail, got ${extra.status}\n${extra.out}`);
-  const version = runScript("validate-manifest.mjs", zipRepo("zip-version", { ...structuredClone(abzuConfig), canonical_since: "2.0.0" }));
-  check(version.status === 1 && version.out.includes("is above mod_info.version 1.2.0"), `validate-manifest: canonical_since above the ZIP's version should fail, got ${version.status}\n${version.out}`);
+  check(!good.out.includes("WARN"), `validate-manifest: a ZIP above canonical_since should not warn, got\n${good.out}`);
+  const ahead = zipRepo("zip-pre-release", { ...structuredClone(abzuConfig), canonical_since: "2.0.0" });
+  const preRelease = runScript("validate-manifest.mjs", ahead);
+  check(
+    preRelease.status === 0 && preRelease.out.includes(": config.canonical_since 2.0.0 is above mod_info.version 1.2.0, so this package is a pre-release of 2.0.0"),
+    `validate-manifest: canonical_since above the ZIP's version should pass with a warning, got ${preRelease.status}\n${preRelease.out}`,
+  );
+  const released = runScriptIn(tagEnv("1.2.0"), "validate-manifest.mjs", ahead);
+  check(
+    released.status === 1 && released.out.includes("releasing 1.2.0, and config.canonical_since is 2.0.0"),
+    `validate-manifest: a release of 1.2.0 under canonical_since 2.0.0 should fail, got ${released.status}\n${released.out}`,
+  );
+  const first = runScriptIn(tagEnv("1.2.0"), "validate-manifest.mjs", zipRepo("zip-first-release", { ...structuredClone(abzuConfig), canonical_since: "1.2.0" }));
+  check(first.status === 0 && !first.out.includes("WARN"), `validate-manifest: the first release at canonical_since should pass, got ${first.status}\n${first.out}`);
   for (const [i, [what, extra, expected]] of BLOCKLESS_WRITES.entries()) {
     const run = runScript("validate-manifest.mjs", zipRepo(`zip-blockless-${i}`, undefined, extra));
     check(run.status === 1 && run.out.includes(expected), `validate-manifest: a converted repo with no block and ${what} should fail with "${expected}", got ${run.status}\n${run.out}`);
@@ -603,11 +681,11 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
 // row of the config in a converted repo, block or not.
 {
   const module = path.join(CORE_ROOT, "powershell", "ReleaseWorkflow.psm1");
-  const assertConfig = (root) =>
+  const assertConfig = (root, env = BUILD_ENV) =>
     spawnSync(
       "powershell",
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `Import-Module '${module}' -Force; try { Assert-LauncherManifestConfig -RepoRoot '${root}' -CoreRoot '${CORE_ROOT}'; exit 0 } catch { Write-Output $_.Exception.Message; exit 1 }`],
-      { encoding: "utf8" },
+      { encoding: "utf8", env },
     );
   const legacyPath = assertConfig(repo("assert-legacy-path", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, path: "AbzuGame/Binaries/Win64/HeadTracking.ini" }))) }));
   check(legacyPath.status === 1 && legacyPath.stdout.includes("is not named CameraUnlock.ini"), `packaging: a block naming the legacy file should fail, got ${legacyPath.status}\n${legacyPath.stdout}${legacyPath.stderr}`);
@@ -629,6 +707,71 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   check(blockless.status === 0, `packaging: a converted repo with no block and no seed should pass, got ${blockless.status}\n${blockless.stdout}${blockless.stderr}`);
   const unconvertedSeed = assertConfig(repo("assert-unconverted-seed", "abzu-headtracking", { "HeadTracking.ini": LEGACY_INI, "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined, BLOCKLESS_WRITES[0][1])) }));
   check(unconvertedSeed.status === 0, `packaging: an unconverted repo seeding its config should pass, got ${unconvertedSeed.status}\n${unconvertedSeed.stdout}${unconvertedSeed.stderr}`);
+  // Below canonical_since, packaging is a pre-release and passes, except in a build for a release
+  // tag below it.
+  const ahead = repo("assert-ahead", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, canonical_since: "2.0.0" }))) });
+  const aheadBuild = assertConfig(ahead);
+  check(aheadBuild.status === 0, `packaging: a pre-release below canonical_since should pass, got ${aheadBuild.status}\n${aheadBuild.stdout}${aheadBuild.stderr}`);
+  const aheadRelease = assertConfig(ahead, tagEnv("1.9.0"));
+  check(
+    aheadRelease.status === 1 && aheadRelease.stdout.includes("releasing 1.9.0, and config.canonical_since is 2.0.0"),
+    `packaging: a v1.9.0 tag build under canonical_since 2.0.0 should fail, got ${aheadRelease.status}\n${aheadRelease.stdout}${aheadRelease.stderr}`,
+  );
+  const firstRelease = assertConfig(ahead, tagEnv("2.0.0"));
+  check(firstRelease.status === 0, `packaging: the v2.0.0 tag build under canonical_since 2.0.0 should pass, got ${firstRelease.status}\n${firstRelease.stdout}${firstRelease.stderr}`);
+}
+
+// The release gate a machine runs before it tags: check-config-descriptor.mjs --release, which
+// Assert-ReleaseNotBelowCanonicalSince runs and New-ReleaseTag runs before it creates the tag.
+{
+  const root = repo("release-gate", "abzu-headtracking", { "HeadTracking.ini": ALL, "launcher-manifest.json": JSON.stringify(abzuMan((c) => ({ ...c, canonical_since: "2.0.0" }))) });
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "canonical");
+
+  const below = runScript("check-config-descriptor.mjs", "--release", "1.9.0", root);
+  check(
+    below.status === 1 && below.out.includes("FAIL abzu-headtracking: releasing 1.9.0, and config.canonical_since is 2.0.0"),
+    `--release: 1.9.0 under canonical_since 2.0.0 should fail, got ${below.status}\n${below.out}`,
+  );
+  const at = runScript("check-config-descriptor.mjs", "--release", "2.0.0", root);
+  check(at.status === 0 && at.out === "", `--release: 2.0.0 at canonical_since 2.0.0 should pass silently, got ${at.status}\n${at.out}`);
+  const loose = runScript("check-config-descriptor.mjs", "--release", "2.0", root);
+  check(loose.status !== 0 && loose.out.includes("--release takes the version being released, written x.y.z"), `--release: a version that is not x.y.z should be refused, got ${loose.status}\n${loose.out}`);
+  const together = runScript("check-config-descriptor.mjs", "--package", "--release", "2.0.0", root);
+  check(together.status !== 0 && together.out.includes("are separate runs"), `--release: with --package it should be refused, got ${together.status}\n${together.out}`);
+  const bare = repo("release-gate-no-manifest", "abzu-headtracking", { "HeadTracking.ini": ALL });
+  const none = runScript("check-config-descriptor.mjs", "--release", "0.1.0", bare);
+  check(none.status === 0, `--release: a repo with no launcher-manifest.json has nothing to hold, got ${none.status}\n${none.out}`);
+
+  const module = path.join(CORE_ROOT, "powershell", "ReleaseWorkflow.psm1");
+  const identity = { GIT_AUTHOR_NAME: "test", GIT_AUTHOR_EMAIL: "test@example.invalid", GIT_COMMITTER_NAME: "test", GIT_COMMITTER_EMAIL: "test@example.invalid" };
+  const powershell = (cwd, command) =>
+    spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `Import-Module '${module}' -Force; try { ${command}; exit 0 } catch { Write-Output $_.Exception.Message; exit 1 }`], {
+      cwd,
+      encoding: "utf8",
+      env: { ...BUILD_ENV, ...identity },
+    });
+  const assertBelow = powershell(root, `Assert-ReleaseNotBelowCanonicalSince -RepoRoot '${root}' -Version 1.9.0`);
+  check(
+    assertBelow.status === 1 && assertBelow.stdout.includes("Refusing to release v1.9.0; nothing was tagged or pushed") && assertBelow.stdout.includes("config.canonical_since is 2.0.0"),
+    `Assert-ReleaseNotBelowCanonicalSince: 1.9.0 under canonical_since 2.0.0 should throw, got ${assertBelow.status}\n${assertBelow.stdout}${assertBelow.stderr}`,
+  );
+  const assertNone = powershell(bare, `Assert-ReleaseNotBelowCanonicalSince -RepoRoot '${bare}' -Version 0.1.0`);
+  check(assertNone.status === 0, `Assert-ReleaseNotBelowCanonicalSince: a repo with no manifest should pass, got ${assertNone.status}\n${assertNone.stdout}${assertNone.stderr}`);
+
+  const tags = () => git(root, "tag", "-l").trim();
+  const tagBelow = powershell(root, "New-ReleaseTag -Version 1.9.0 -Message 'Release v1.9.0'");
+  check(
+    tagBelow.status === 1 && tagBelow.stdout.includes("releasing 1.9.0, and config.canonical_since is 2.0.0") && tags() === "",
+    `New-ReleaseTag: 1.9.0 under canonical_since 2.0.0 should be refused before the tag, got ${tagBelow.status}, tags ${JSON.stringify(tags())}\n${tagBelow.stdout}${tagBelow.stderr}`,
+  );
+  // The checkout has no origin, so the first release at canonical_since is tagged and then fails
+  // at the push.
+  const tagAt = powershell(root, "New-ReleaseTag -Version 2.0.0 -Message 'Release v2.0.0'");
+  check(
+    tagAt.status === 1 && tagAt.stdout.includes("Failed to push commits") && tags() === "v2.0.0",
+    `New-ReleaseTag: 2.0.0 at canonical_since 2.0.0 should be tagged, got ${tagAt.status}, tags ${JSON.stringify(tags())}\n${tagAt.stdout}${tagAt.stderr}`,
+  );
 }
 
 // Packaging stamps the version through ConvertFrom-Json and ConvertTo-Json -Depth 10 in Windows

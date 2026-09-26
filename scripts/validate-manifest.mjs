@@ -74,7 +74,10 @@
 // was built from: the host repo, the sibling a token names, or the repo whose
 // release/ folder holds a ZIP named by path. The package of a converted repo
 // fails a seed or files[] row that writes its config or legacy file, with a
-// block or without one.
+// block or without one. A package whose version is below the block's
+// canonical_since is a pre-release of it and gets a warning; in a GitHub
+// Actions build for a v<x.y.z> tag, a canonical_since above x.y.z fails
+// (check-config-descriptor.mjs releaseProblems).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -82,7 +85,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
-import { configWriteProblems, descriptorProblems } from "./check-config-descriptor.mjs";
+import { configWriteProblems, descriptorProblems, preReleaseWarning, releaseProblems, releaseVersionFromEnv } from "./check-config-descriptor.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // core lives at <root>/cameraunlock-core/scripts. Two levels up is the repo
@@ -229,6 +232,8 @@ function validate(label, zip, repo) {
   console.log(
     `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${variants}${descriptor}`,
   );
+  const preRelease = preReleaseWarning(man);
+  if (preRelease !== null) console.log(`WARN ${label}: ${preRelease}`);
   warnMiscased(label, miscased);
   warnUndeployed(label, undeclared.cosmetic);
 }
@@ -243,6 +248,8 @@ function checkDescriptor(man, repo) {
     throw new Error("the manifest has a config descriptor, which is checked against the repo the ZIP was built from; name the repo, or a ZIP in its release/ folder");
   }
   const problems = descriptorProblems(man, { root: repo, checkVersion: true });
+  const release = releaseVersionFromEnv();
+  if (release !== null) problems.push(...releaseProblems(man, release));
   if (problems.length > 0) throw new Error(`config descriptor: ${problems.join("; ")}`);
   return ", config descriptor";
 }

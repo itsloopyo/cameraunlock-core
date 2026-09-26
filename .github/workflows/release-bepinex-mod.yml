@@ -181,6 +181,8 @@ jobs:
             $params.CreateNexusZip = $true
           }
 
+          # Copy-SharedBundle, which the script runs, refuses a
+          # config.canonical_since above the tag's version on a tag build.
           # The script returns one object; read the paths by property name so a
           # future stray write to the success stream cannot shift an index and
           # silently make zip_path a garbage value.

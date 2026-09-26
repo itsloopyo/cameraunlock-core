@@ -207,7 +207,10 @@ jobs:
         run: |
           # The only build command in this file, and it is the same one a
           # developer runs. Anything the mod needs doing first belongs in that
-          # task's depends-on chain, not in a step here.
+          # task's depends-on chain, not in a step here. On a tag build the
+          # manifest checks it runs (Copy-SharedBundle, validate-manifest) also
+          # refuse a config.canonical_since above the tag's version, which any
+          # other build packages as a pre-release.
           if ($env:PIXI_ENVIRONMENT) {
             pixi run -e $env:PIXI_ENVIRONMENT $env:PACKAGE_TASK
           } else {

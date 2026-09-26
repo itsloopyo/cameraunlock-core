@@ -766,6 +766,8 @@ function New-ReleaseTag {
 
     $tag = "v$Version"
 
+    Assert-ReleaseNotBelowCanonicalSince -RepoRoot (git rev-parse --show-toplevel).Trim() -Version $Version
+
     git tag -a $tag -m $Message
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create git tag"
@@ -1332,6 +1334,9 @@ function Assert-LauncherManifestDelivery {
     and a seeded legacy file is imported on a fresh install. The same rules
     run in validate-manifest on the built ZIP, which most package scripts
     never call; this runs from Copy-SharedBundle so they hold in every one.
+    In a GitHub Actions build for a v<x.y.z> tag it also fails a
+    canonical_since above x.y.z. Any other build below canonical_since is a
+    pre-release of it and packages, and validate-manifest warns.
 
     Whether a repo is converted is decided by the [CameraUnlock] stamp in its
     committed config, which only the node checker reads, so every repo with a
@@ -1364,6 +1369,53 @@ function Assert-LauncherManifestConfig {
     if ($output) { Write-Host $output }
 }
 
+<#
+.SYNOPSIS
+    Fails a release whose version is below the canonical_since of the
+    committed launcher-manifest.json's config block.
+.DESCRIPTION
+    canonical_since names the first version that ships CameraUnlock.ini. A
+    converted repo sets it to the version it converts in and keeps the last
+    release's version until the release bumps it, so packaging below it only
+    warns (the build is a pre-release of that version). A release below it is
+    refused here, by scripts/check-config-descriptor.mjs --release, which
+    holds the rule. New-ReleaseTag runs this before it tags. Call it from a
+    release script as soon as the version is resolved, before any file is
+    written, so a refused release leaves no version bump behind. A GitHub
+    Actions build for a v<x.y.z> tag runs the same rule in packaging.
+
+    A repo with no launcher-manifest.json has no config block and is skipped.
+.PARAMETER RepoRoot
+    Root of the mod repository.
+.PARAMETER Version
+    The version being released, x.y.z.
+.PARAMETER CoreRoot
+    Root of the cameraunlock-core checkout the repo vendors. Defaults to the
+    checkout this module was loaded from.
+#>
+function Assert-ReleaseNotBelowCanonicalSince {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [Parameter(Mandatory=$true)][string]$Version,
+        [string]$CoreRoot
+    )
+
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'launcher-manifest.json'))) { return }
+    if (-not $CoreRoot) { $CoreRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')) }
+
+    $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $node) {
+        throw "Releasing v$Version holds launcher-manifest.json's canonical_since to it with scripts/check-config-descriptor.mjs, and running that needs node on PATH."
+    }
+    $script = Join-Path $CoreRoot 'scripts\check-config-descriptor.mjs'
+    $global:LASTEXITCODE = 0
+    $output = (& $node.Source $script --release $Version $RepoRoot | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Refusing to release v${Version}; nothing was tagged or pushed.`n$output"
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Update-CameraUnlockCoreToRemoteTip',
@@ -1383,6 +1435,7 @@ Export-ModuleMember -Function @(
     'Assert-ManifestSeedsMatchShipped',
     'Assert-LauncherManifestDelivery',
     'Assert-LauncherManifestConfig',
+    'Assert-ReleaseNotBelowCanonicalSince',
     'New-ChangelogFromCommits',
     'Get-ChangelogSection',
     'Invoke-VersionCommit',

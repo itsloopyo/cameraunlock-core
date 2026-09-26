@@ -1255,8 +1255,8 @@ function Test-ConfigDefaults {
 # The config descriptor, the launcher-manifest.json block a launcher reads to find a converted
 # mod's config and the rows the game keeps for itself. scripts/check-config-descriptor.mjs --json fails
 # a repo delivered by manifest whose one recorded config file is stamped and that has no block,
-# holds the committed manifest to every rule in that script except the one comparing
-# canonical_since with mod_info.version, which packaging stamps, and holds canonical_since above
+# holds the committed manifest to every rule in that script except the ones reading
+# mod_info.version, which packaging stamps, and holds canonical_since above
 # every v* tag whose committed config lacks the stamp, which needs a clone with its tags. It also
 # fails a converted repo's manifest, block or not, that seeds or ships through files[] its config,
 # its legacy file or a file named like its committed config.

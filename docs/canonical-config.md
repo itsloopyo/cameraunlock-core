@@ -1689,8 +1689,10 @@ on the built ZIP against the repo it was built from:
   canonical format reads a file of that name, so a launcher that reads it never mistakes it for
   the file an older version of the mod reads after a rollback.
 - `per_game` is an object whose values are text, and no value is `default` in any case.
-- `canonical_since` is written `x.y.z` and is not above `mod_info.version`. A pre-release sorts
-  below its release, so a `1.1.0-rc1` build cannot carry `canonical_since` `1.1.0`.
+- `canonical_since` is written `x.y.z`, and the built ZIP carries a `mod_info.version` to compare
+  it with. A package whose version is below `canonical_since` is a pre-release of it, and passes
+  with a warning; a pre-release version sorts below its release, so a `1.1.0-rc1` build under
+  `canonical_since` `1.1.0` warns too. Only a release below `canonical_since` fails (below).
 - `delivery_mode` is `manifest` or `manifest_variants`.
 - The repo is converted and `data/config-format.json` records one config file for it. `game_root`
   needs exactly one `installed` path, and `path` is it; `exe_dir` needs `path` to be the tail of
@@ -1723,8 +1725,24 @@ block lists are the rows the table marks `PerGame()` is held through the committ
 `render-config` writes a value on a `PerGame()` row and `default` on every other global concept
 row, and the lint fails a value on a row `per_game` does not list and `default` on one it lists.
 
+A conversion writes `canonical_since` as the version it will be released in, and the repo keeps
+its last release's version until the release bumps it, so every package built in between, a
+local `pixi run package` or a CI build of a branch, is below `canonical_since`. That is why
+packaging only warns. A release below `canonical_since` fails, since the block says the canonical
+file first shipped in a later version, and the first release at `canonical_since` passes:
+
+- `scripts/check-config-descriptor.mjs --release <x.y.z> <repo>` holds the committed manifest's
+  `canonical_since` to the version being released, and `Assert-ReleaseNotBelowCanonicalSince`
+  (`powershell/ReleaseWorkflow.psm1`) runs it. `New-ReleaseTag` runs it before it creates the
+  tag. A release script that calls it as soon as it has resolved the version, before it writes
+  a file, leaves nothing behind when the release is refused.
+- In a GitHub Actions build for a `v<x.y.z>` tag, the trigger of every release workflow in the
+  fleet, validate-manifest and `Copy-SharedBundle` (`check-config-descriptor.mjs --package`) fail a
+  `canonical_since` above `x.y.z`. That holds a release whose script never ran the check, and a
+  mod's own release workflow that packages through `Copy-SharedBundle` or runs validate-manifest.
+
 Conformance's `config-descriptor` check runs the same rules on the committed manifest, except
-the one against `mod_info.version`, which packaging stamps. It also fails a converted repo
+the check of `mod_info.version`, which packaging stamps. It also fails a converted repo
 delivered by manifest whose one config file `data/config-format.json` records as stamped, and
 which has no block (a stamped file the entry does not record is config-format's finding), and, in
 a clone with its tags, a `canonical_since` that is not above every `v*` tag whose committed config
