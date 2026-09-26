@@ -187,25 +187,25 @@
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "assetto-corsa-rally-headtracking": [
-      {"committed": null, "installed": ["acr\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["acr\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "battlefield-bad-company-2-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "bioshock-infinite-headtracking": [
-      {"committed": null, "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/HeadTracking.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "bioshock-remastered-headtracking": [
-      {"committed": null, "installed": ["Build\\Final\\CameraUnlock.ini"], "legacy_source": "bioshock_headtrack.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Build\\Final\\CameraUnlock.ini"], "legacy_source": "bioshock_headtrack.ini", "dialect": "native"}
     ],
     "black-and-white-headtracking": [
       {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "black-mesa-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "blue-prince-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.blueprince.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.blueprince.headtracking.cfg", "dialect": "unity"}
     ],
     "bodycam-headtracking": [
       {"committed": null, "installed": ["Bodycam\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -229,10 +229,10 @@
       {"committed": null, "installed": ["FSD\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "deus-ex-human-revolution-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "DeusExHumanRevolutionHeadTracking.ini", "dialect": "native"}
+      {"committed": "DeusExHumanRevolutionHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "DeusExHumanRevolutionHeadTracking.ini", "dialect": "native"}
     ],
     "deus-ex-mankind-divided-headtracking": [
-      {"committed": null, "installed": ["retail\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "HeadTracking.ini", "installed": ["retail\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "dishonored-2-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -256,13 +256,13 @@
       {"committed": "DyingLightHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "DyingLightHeadTracking.ini", "dialect": "native"}
     ],
     "easy-delivery-co-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.easydeliveryco.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.easydeliveryco.headtracking.cfg", "dialect": "unity"}
     ],
     "elite-dangerous-headtracking": [
       {"committed": null, "installed": ["Products\\elite-dangerous-odyssey-64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "eternal-afternoon-headtracking": [
-      {"committed": null, "installed": ["Eternal Afternoon_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Eternal Afternoon_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
     ],
     "fallout-4-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -271,7 +271,7 @@
       {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini", "Fallout New Vegas English\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "far-cry-6-headtracking": [
-      {"committed": null, "installed": ["bin\\CameraUnlock.ini"], "legacy_source": "FarCry6HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/FarCry6HeadTracking.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": "FarCry6HeadTracking.ini", "dialect": "native"}
     ],
     "ghostrunner-2-headtracking": [
       {"committed": null, "installed": ["Ghostrunner2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -280,13 +280,13 @@
       {"committed": null, "installed": ["Ghostrunner\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "gone-home-headtracking": [
-      {"committed": null, "installed": ["GoneHome_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["GoneHome_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
     ],
     "half-life-2-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "high-on-life-headtracking": [
-      {"committed": null, "installed": ["Oregon\\Binaries\\Win64\\CameraUnlock.ini", "Oregon\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/HeadTracking.ini", "installed": ["Oregon\\Binaries\\Win64\\CameraUnlock.ini", "Oregon\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "homeworld-remastered-collection-headtracking": [
       {"committed": "HomeworldHeadTracking.ini", "installed": ["HomeworldRM\\bin\\Release\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -298,7 +298,7 @@
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
     ],
     "kingdom-come-deliverance-2-headtracking": [
-      {"committed": null, "installed": ["Bin\\Win64MasterMasterSteamPGO\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "HeadTracking.ini", "installed": ["Bin\\Win64MasterMasterSteamPGO\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "kingdom-come-deliverance-headtracking": [
       {"committed": null, "installed": ["Bin\\Win64\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -327,7 +327,7 @@
       {"committed": "MetroExodusHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "MetroExodusHeadTracking.ini", "dialect": "native"}
     ],
     "minecraft-bedrock-edition-headtracking": [
-      {"committed": null, "installed": [], "legacy_source": "MinecraftHeadTracking.ini", "dialect": "native", "no_installed_reason": "The file sits beside MinecraftHeadTracking.dll, in Lopari's mod_home folder or wherever a manual install was extracted, never in the game folder."}
+      {"committed": "config/MinecraftHeadTracking.ini", "installed": [], "legacy_source": "MinecraftHeadTracking.ini", "dialect": "native", "no_installed_reason": "The file sits beside MinecraftHeadTracking.dll, in Lopari's mod_home folder or wherever a manual install was extracted, never in the game folder."}
     ],
     "mirrors-edge-headtracking": [
       {"committed": "assets/MirrorsEdgeHeadTracking.ini", "installed": ["Binaries\\CameraUnlock.ini"], "legacy_source": "MirrorsEdgeHeadTracking.ini", "dialect": "native"}
@@ -339,10 +339,10 @@
       {"committed": "HeadTracking.ini", "installed": ["Binaries\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "obra-dinn-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.headtracking.obradinn.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.headtracking.obradinn.cfg", "dialect": "unity"}
     ],
     "outer-worlds-spacers-choice-edition-headtracking": [
-      {"committed": null, "installed": ["Indiana\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/HeadTracking.ini", "installed": ["Indiana\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "outlast-headtracking": [
       {"committed": null, "installed": ["Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -354,7 +354,7 @@
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.pathologic2.headtracking.cfg", "dialect": "unity"}
     ],
     "peak-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.peak.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.peak.headtracking.cfg", "dialect": "unity"}
     ],
     "persona-5-royal-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -372,7 +372,7 @@
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "portal-with-rtx-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "prey-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["Binaries\\Danielle\\x64\\Release\\CameraUnlock.ini", "Binaries\\Danielle\\Gaming.Desktop.x64\\Release\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -381,10 +381,10 @@
       {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "ready-or-not-headtracking": [
-      {"committed": null, "installed": ["ReadyOrNot\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/HeadTracking.ini", "installed": ["ReadyOrNot\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "red-eclipse-headtracking": [
-      {"committed": null, "installed": ["bin\\amd64\\CameraUnlock.ini"], "legacy_source": "RedEclipseHeadTracking.ini", "dialect": "native"}
+      {"committed": "config/RedEclipseHeadTracking.ini", "installed": ["bin\\amd64\\CameraUnlock.ini"], "legacy_source": "RedEclipseHeadTracking.ini", "dialect": "native"}
     ],
     "repo-headtracking": [
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.repo.headtracking.cfg", "dialect": "unity"}
@@ -426,7 +426,7 @@
       {"committed": "config/headtrack.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "sniper-elite-v2-remastered-headtracking": [
-      {"committed": null, "installed": ["bin\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "SniperEliteV2RemasteredHeadTracking.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "snowrunner-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["Sources\\Bin\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -450,28 +450,28 @@
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "stalker-shadow-of-chornobyl-enhanced-edition-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "StalkerShadowOfChornobylHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "starfield-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "still-wakes-the-deep-headtracking": [
-      {"committed": null, "installed": ["Habitat\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["Habitat\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "stormworks-build-and-rescue-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "StormworksHeadTracking.ini", "dialect": "native"}
     ],
     "subliminal-headtracking": [
-      {"committed": null, "installed": ["Subliminal\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["Subliminal\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "subnautica-2-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["Subnautica2\\Binaries\\Win64\\CameraUnlock.ini", "Subnautica2\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "subnautica-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.subnautica.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.subnautica.headtracking.cfg", "dialect": "unity"}
     ],
     "superliminal-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.superliminal.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.superliminal.headtracking.cfg", "dialect": "unity"}
     ],
     "system-shock-2-25th-anniversary-remaster-headtracking": [
       {"committed": "dist_assets/SystemShock2HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -480,10 +480,10 @@
       {"committed": null, "installed": ["SystemShock\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "the-forest-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+      {"committed": "config/com.cameraunlock.theforest.headtracking.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
     ],
     "the-painscreek-killings-headtracking": [
-      {"committed": null, "installed": ["Painscreek_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Painscreek_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
     ],
     "the-vanishing-of-ethan-carter-redux-headtracking": [
       {"committed": null, "installed": ["EthanCarter\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -492,31 +492,31 @@
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "thief-headtracking": [
-      {"committed": null, "installed": ["Binaries2\\Win64\\CameraUnlock.ini"], "legacy_source": "ThiefHeadTracking.ini", "dialect": "native"}
+      {"committed": "config/ThiefHeadTracking.ini", "installed": ["Binaries2\\Win64\\CameraUnlock.ini"], "legacy_source": "ThiefHeadTracking.ini", "dialect": "native"}
     ],
     "tiny-tinas-wonderlands-headtracking": [
-      {"committed": null, "installed": ["OakGame\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/HeadTracking.ini", "installed": ["OakGame\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "titanfall-2-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "trepang2-headtracking": [
-      {"committed": null, "installed": ["CPPFPS\\Binaries\\Win64\\CameraUnlock.ini", "CPPFPS\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["CPPFPS\\Binaries\\Win64\\CameraUnlock.ini", "CPPFPS\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "tt-isle-of-man-ride-on-the-edge-3-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "valheim-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.valheim.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.valheim.headtracking.cfg", "dialect": "unity"}
     ],
     "viewfinder-headtracking": [
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.viewfinder.headtracking.cfg", "dialect": "unity"}
     ],
     "voices-of-the-void-headtracking": [
-      {"committed": null, "installed": ["VotV\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["VotV\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "what-remains-of-edith-finch-headtracking": [
-      {"committed": null, "installed": ["FinchGame\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["FinchGame\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "witcher-3-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["bin\\x64_dx12\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -525,7 +525,7 @@
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.wobblylife.headtracking.cfg", "dialect": "unity"}
     ],
     "wolfenstein-the-new-order-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "wreckfest-2-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -537,7 +537,7 @@
       {"committed": null, "installed": ["media\\CameraUnlock.ini"], "legacy_source": "Yakuza0HeadTracking.ini", "dialect": "native"}
     ],
     "yapyap-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.yapyap.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.yapyap.headtracking.cfg", "dialect": "unity"}
     ]
   },
   "normalisations": {
