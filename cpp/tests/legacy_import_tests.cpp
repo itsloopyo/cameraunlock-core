@@ -78,7 +78,8 @@ void TestImportResult() {
     Check(static_cast<int>(DropRule::NonFiniteNumber) == 1 && static_cast<int>(DropRule::PoseShaping) == 2 &&
               static_cast<int>(DropRule::Reticle) == 3 && static_cast<int>(DropRule::FollowsDefault) == 4 &&
               static_cast<int>(DropRule::KeyCodeOutOfRange) == 5 && static_cast<int>(DropRule::ModifierKey) == 6 &&
-              static_cast<int>(DropRule::CoupledAim) == 7,
+              static_cast<int>(DropRule::CoupledAim) == 7 && static_cast<int>(DropRule::PositionSwitchOff) == 8 &&
+              static_cast<int>(DropRule::TrackerPivot) == 9,
           "DropRule numbers match the C# enum");
 }
 
@@ -107,8 +108,16 @@ void TestDescribe() {
               "not carried: [General] AimDecoupling=false, aim is always decoupled now, so your aim stays with the "
               "mouse or controller while your head moves the view",
           "coupled-aim line");
-    Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(9), "A", "B", "C"}); }) ==
-              "drop rule 9 is not a DropRule",
+    Check(DescribeDroppedValue({DropRule::PositionSwitchOff, "Position", "Enabled", "false"}) ==
+              "not carried: [Position] Enabled=false, positional tracking is switched off by the tracking mode now, so "
+              "the mod starts in rotation only and the mode hotkey can turn position back on",
+          "position-switch line");
+    Check(DescribeDroppedValue({DropRule::TrackerPivot, "Position", "TrackerPivotForward", "0.1"}) ==
+              "not carried: [Position] TrackerPivotForward=0.1, the mod applies the head pose as the tracker sends it, "
+              "with no neck pivot of its own",
+          "tracker-pivot line");
+    Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(10), "A", "B", "C"}); }) ==
+              "drop rule 10 is not a DropRule",
           "a rule outside DropRule throws");
 }
 

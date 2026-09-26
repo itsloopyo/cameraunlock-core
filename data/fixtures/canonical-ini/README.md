@@ -298,7 +298,7 @@ and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Ga
   gate: every global concept defaults to the schema's `default` (its `canonical_default` where it
   has one), and the table binds `PositionEnabled` beside `RotationEnabled`.
 - `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose
-  rows are `field`, a name and the value as the concept's codec writes it. The names are the 27
+  rows are `field`, a name and the value as the concept's codec writes it. The names are the 24
   concepts in the schema's order, then `PositionLocalSmoothing` and `PositionRemoteSmoothing`,
   the copy of the smoothing pair the position settings carry (C++ `position.local_smoothing`,
   C# `Position.LocalSmoothing`). A runner reads each field straight off the config, not through
@@ -417,7 +417,7 @@ is three, since `80` cannot follow `F0`. The `value` row's value field stays the
 | `read-case` | section and key in other letter case: read, and the line spells them as the file does |
 | `read-wrong-section` | concept keys in other sections, one of them invalid, beside a key in its own section: only that one is read |
 | `read-alias` | aliases, one after its key in the same section: not read, nothing said; `CollisionMargin` and its alias `CollisionRadius`, not read since it is not global |
-| `read-unknown-key` | an unknown section, two concepts the format does not write (`AimDecoupling` among them, which Defaults.ini carried until aim decoupling stopped being a setting) and an unknown key: nothing said |
+| `read-unknown-key` | an unknown section, concepts the format does not write (`AimDecoupling`, `PositionAllowed`, `TrackerPivotForward` and `TrackerPivotUp` among them, which Defaults.ini carried until they stopped being settings) and an unknown key: nothing said |
 
 ### resolve.tsv
 

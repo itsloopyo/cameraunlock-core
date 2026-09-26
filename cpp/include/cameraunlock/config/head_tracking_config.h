@@ -56,11 +56,14 @@ struct HeadTrackingConfig {
 
     bool rotation_enabled = true;
     bool position_enabled = true;
-    /// false: the game never applies positional tracking and the tracking-mode control
-    /// skips the position modes, so tracking runs rotation only whatever rotation_enabled
-    /// and position_enabled say. Core only parses it.
+    /// Deprecated, kept so existing callers compile: the tracking mode (rotation_enabled with
+    /// position_enabled) is the only way position is switched off. ApplyValues still parses
+    /// PositionAllowed into it, but it is not a setting, no table binds it, and a mod never reads it.
     bool position_allowed = true;
     PositionSettings position = PositionSettings::Default();
+    /// Deprecated, kept so existing callers compile: the tracker is authoritative, so the neck
+    /// pivot is not a setting and no table binds either field. ApplyValues still parses both, and
+    /// PositionProcessor keeps its pivot properties. 0 is compensation off.
     float tracker_pivot_forward = 0.0f;
     float tracker_pivot_up = 0.0f;
 

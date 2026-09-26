@@ -130,9 +130,6 @@ namespace CameraUnlock.Core.Config
                 case nameof(ConfigConcepts.PositionEnabled):
                     table.Concept(ConfigConcepts.PositionEnabled, c => c.PositionEnabled, (c, v) => c.PositionEnabled = v);
                     return;
-                case nameof(ConfigConcepts.PositionAllowed):
-                    table.Concept(ConfigConcepts.PositionAllowed, c => c.PositionAllowed, (c, v) => c.PositionAllowed = v);
-                    return;
                 case nameof(ConfigConcepts.TrueFreeLook):
                     table.Concept(ConfigConcepts.TrueFreeLook, c => c.TrueFreeLook, (c, v) => c.TrueFreeLook = v);
                     return;
@@ -184,12 +181,6 @@ namespace CameraUnlock.Core.Config
                 case nameof(ConfigConcepts.CollisionReleaseSmoothing):
                     table.Concept(ConfigConcepts.CollisionReleaseSmoothing, c => c.CollisionReleaseSmoothing,
                         (c, v) => c.CollisionReleaseSmoothing = v);
-                    return;
-                case nameof(ConfigConcepts.TrackerPivotForward):
-                    table.Concept(ConfigConcepts.TrackerPivotForward, c => c.TrackerPivotForward, (c, v) => c.TrackerPivotForward = v);
-                    return;
-                case nameof(ConfigConcepts.TrackerPivotUp):
-                    table.Concept(ConfigConcepts.TrackerPivotUp, c => c.TrackerPivotUp, (c, v) => c.TrackerPivotUp = v);
                     return;
                 case nameof(ConfigConcepts.ToggleKey):
                     table.Concept(ConfigConcepts.ToggleKey, c => c.ToggleKeyName, (c, v) => c.ToggleKeyName = v);

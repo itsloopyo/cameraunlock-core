@@ -20,7 +20,6 @@ enum class Concept {
     RotationEnabled,
     DataFreshnessMs,
     PositionEnabled,
-    PositionAllowed,
     TrueFreeLook,
     PositionLimitX,
     PositionLimitY,
@@ -31,8 +30,6 @@ enum class Concept {
     CollisionMargin,
     CollisionChannel,
     CollisionReleaseSmoothing,
-    TrackerPivotForward,
-    TrackerPivotUp,
     ToggleKey,
     CycleTrackingModeKey,
     YawModeKey,
@@ -149,17 +146,6 @@ struct ConceptTraits<Concept::PositionEnabled> {
     static constexpr const char* kKey = "PositionEnabled";
     static constexpr ValueFamily kFamily = ValueFamily::kBool;
     static constexpr const char* kFileComment[] = {"true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."};
-    static constexpr const char* kCanonicalDefault = nullptr;
-    static constexpr const char* kDefaultText = "true";
-    static constexpr bool kGlobal = true;
-};
-
-template <>
-struct ConceptTraits<Concept::PositionAllowed> {
-    static constexpr const char* kSection = "Position";
-    static constexpr const char* kKey = "PositionAllowed";
-    static constexpr ValueFamily kFamily = ValueFamily::kBool;
-    static constexpr const char* kFileComment[] = {"false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "true";
     static constexpr bool kGlobal = true;
@@ -292,32 +278,6 @@ struct ConceptTraits<Concept::CollisionReleaseSmoothing> {
 };
 
 template <>
-struct ConceptTraits<Concept::TrackerPivotForward> {
-    static constexpr const char* kSection = "Position";
-    static constexpr const char* kKey = "TrackerPivotForward";
-    static constexpr ValueFamily kFamily = ValueFamily::kFloating;
-    static constexpr float kMin = 0.0f;
-    static constexpr float kMax = 10.0f;
-    static constexpr const char* kFileComment[] = {"Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off."};
-    static constexpr const char* kCanonicalDefault = nullptr;
-    static constexpr const char* kDefaultText = "0";
-    static constexpr bool kGlobal = true;
-};
-
-template <>
-struct ConceptTraits<Concept::TrackerPivotUp> {
-    static constexpr const char* kSection = "Position";
-    static constexpr const char* kKey = "TrackerPivotUp";
-    static constexpr ValueFamily kFamily = ValueFamily::kFloating;
-    static constexpr float kMin = 0.0f;
-    static constexpr float kMax = 10.0f;
-    static constexpr const char* kFileComment[] = {"Metres from the pivot of your neck up to the point the tracker follows."};
-    static constexpr const char* kCanonicalDefault = nullptr;
-    static constexpr const char* kDefaultText = "0";
-    static constexpr bool kGlobal = true;
-};
-
-template <>
 struct ConceptTraits<Concept::ToggleKey> {
     static constexpr const char* kSection = "Hotkeys";
     static constexpr const char* kKey = "ToggleKey";
@@ -410,7 +370,6 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::RotationEnabled, "RotationEnabled", "General", "RotationEnabled", ValueFamily::kBool, {"true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both."}, 2, nullptr, "true", true},
     {Concept::DataFreshnessMs, "DataFreshnessMs", "General", "DataFreshnessMs", ValueFamily::kInteger, {"Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."}, 2, nullptr, "500", true},
     {Concept::PositionEnabled, "PositionEnabled", "Position", "PositionEnabled", ValueFamily::kBool, {"true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both."}, 2, nullptr, "true", true},
-    {Concept::PositionAllowed, "PositionAllowed", "Position", "PositionAllowed", ValueFamily::kBool, {"false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position."}, 2, nullptr, "true", true},
     {Concept::TrueFreeLook, "TrueFreeLook", "Position", "TrueFreeLook", ValueFamily::kBool, {"false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."}, 2, nullptr, "false", true},
     {Concept::PositionLimitX, "PositionLimitX", "Position", "PositionLimitX", ValueFamily::kFloating, {"How far, in metres, leaning left or right can move the view.", nullptr}, 1, nullptr, "0.3", true},
     {Concept::PositionLimitY, "PositionLimitY", "Position", "PositionLimitY", ValueFamily::kFloating, {"How far, in metres, raising your head can move the view.", nullptr}, 1, nullptr, "0.2", true},
@@ -421,8 +380,6 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::CollisionMargin, "CollisionMargin", "Position", "CollisionMargin", ValueFamily::kFloating, {"How far the view is held off a wall when you lean into it, in the game's own units.", nullptr}, 1, nullptr, "0.1", false},
     {Concept::CollisionChannel, "CollisionChannel", "Position", "CollisionChannel", ValueFamily::kInteger, {"Which of the game's collision channels the wall check tests against.", nullptr}, 1, nullptr, "0", false},
     {Concept::CollisionReleaseSmoothing, "CollisionReleaseSmoothing", "Position", "CollisionReleaseSmoothing", ValueFamily::kFloating, {"How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest."}, 2, nullptr, "0.9", true},
-    {Concept::TrackerPivotForward, "TrackerPivotForward", "Position", "TrackerPivotForward", ValueFamily::kFloating, {"Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off."}, 2, nullptr, "0", true},
-    {Concept::TrackerPivotUp, "TrackerPivotUp", "Position", "TrackerPivotUp", ValueFamily::kFloating, {"Metres from the pivot of your neck up to the point the tracker follows.", nullptr}, 1, nullptr, "0", true},
     {Concept::ToggleKey, "ToggleKey", "Hotkeys", "ToggleKey", ValueFamily::kHotkey, {"Turns head tracking on and off.", nullptr}, 1, "End, Ctrl+Shift+Y", "End, Ctrl+Shift+Y", true},
     {Concept::CycleTrackingModeKey, "CycleTrackingModeKey", "Hotkeys", "CycleTrackingModeKey", ValueFamily::kHotkey, {"Changes the tracking mode: rotation and position, rotation only, position only.", nullptr}, 1, "PageUp, Ctrl+Shift+G", "PageUp, Ctrl+Shift+G", true},
     {Concept::YawModeKey, "YawModeKey", "Hotkeys", "YawModeKey", ValueFamily::kHotkey, {"Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).", nullptr}, 1, "PageDown, Ctrl+Shift+H", "PageDown, Ctrl+Shift+H", true},
@@ -468,12 +425,15 @@ inline constexpr NonCanonicalConcept kNonCanonicalConcepts[] = {
     {"AimDecoupling", "General", "AimDecoupling", "aimdecoupling", "Your aim always stays with the mouse or controller while your head moves the view."},
     {"ShowReticle", "Reticle", "ShowReticle", "showreticle", "Whether a reticle is shown is not a setting."},
     {"ReticleColor", "Reticle", "ReticleColor", "reticlecolor", "The reticle colour is not a setting."},
+    {"PositionAllowed", "Position", "PositionAllowed", "positionallowed", "Turn positional tracking off with the tracking mode: PositionEnabled=false, or the mode hotkey."},
     {"PositionSensitivityX", "Position", "PositionSensitivityX", "positionsensitivityx", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
     {"PositionSensitivityY", "Position", "PositionSensitivityY", "positionsensitivityy", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
     {"PositionSensitivityZ", "Position", "PositionSensitivityZ", "positionsensitivityz", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own."},
     {"InvertPositionX", "Inversion", "InvertPositionX", "invertpositionx", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
     {"InvertPositionY", "Inversion", "InvertPositionY", "invertpositiony", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
     {"InvertPositionZ", "Inversion", "InvertPositionZ", "invertpositionz", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own."},
+    {"TrackerPivotForward", "Position", "TrackerPivotForward", "trackerpivotforward", "The mod applies the head pose as the tracker sends it, with no neck pivot of its own."},
+    {"TrackerPivotUp", "Position", "TrackerPivotUp", "trackerpivotup", "The mod applies the head pose as the tracker sends it, with no neck pivot of its own."},
     {"PositionToggleKey", "Hotkeys", "PositionToggleKey", "positiontogglekey", "CycleTrackingModeKey is the hotkey that switches positional tracking."},
     {"ReticleToggleKey", "Hotkeys", "ReticleToggleKey", "reticletogglekey", "The reticle has no toggle key."},
     {"RecenterKey", "Hotkeys", "RecenterKey", "recenterkey", "The mod keeps no centre of its own: centre the view in your tracker app."},

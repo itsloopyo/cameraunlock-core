@@ -119,10 +119,11 @@ namespace CameraUnlock.Core.Config
         public bool PositionEnabled { get; set; } = true;
 
         /// <summary>
-        /// false: the game never applies positional tracking and the tracking-mode control
-        /// skips the position modes, so tracking runs rotation only whatever
-        /// <see cref="RotationEnabled"/> and <see cref="PositionEnabled"/> say. Core only
-        /// parses it.
+        /// Deprecated, kept so existing callers compile: the tracking mode
+        /// (<see cref="RotationEnabled"/> with <see cref="PositionEnabled"/>) is the only way
+        /// position is switched off. <see cref="ApplyValues"/> still parses PositionAllowed into
+        /// it, but it is not a setting, <see cref="HeadTrackingConfigTable"/> has no row for it,
+        /// and a mod never reads it.
         /// </summary>
         public bool PositionAllowed { get; set; } = true;
 
@@ -150,12 +151,16 @@ namespace CameraUnlock.Core.Config
         /// <summary>
         /// Metres from the neck pivot forward to the point the tracker watches. Feeds
         /// <see cref="CameraUnlock.Core.Processing.PositionProcessor.TrackerPivotForward"/>.
+        /// Deprecated, kept so existing callers compile: the tracker is authoritative, so the
+        /// neck pivot is not a setting and <see cref="HeadTrackingConfigTable"/> has no row for
+        /// it. <see cref="ApplyValues"/> still parses it. 0 is compensation off.
         /// </summary>
         public float TrackerPivotForward { get; set; } = 0.0f;
 
         /// <summary>
         /// Metres from the neck pivot up to the point the tracker watches. Feeds
         /// <see cref="CameraUnlock.Core.Processing.PositionProcessor.TrackerPivotUp"/>.
+        /// Deprecated with <see cref="TrackerPivotForward"/>: not a setting, and no table row.
         /// </summary>
         public float TrackerPivotUp { get; set; } = 0.0f;
 

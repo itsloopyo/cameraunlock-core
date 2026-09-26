@@ -62,3 +62,6 @@ diagnostic	NonCanonicalConcept	46	Line 46: [Tuning] PositionSensitivity is ignor
 diagnostic	NonCanonicalConcept	47	Line 47: [Tuning] LeanScale is ignored. The mod applies the head pose as the tracker sends it, with no sensitivity of its own.
 diagnostic	NonCanonicalConcept	48	Line 48: [Tuning] AimDecoupling is ignored. Your aim always stays with the mouse or controller while your head moves the view.
 diagnostic	NonCanonicalConcept	49	Line 49: [Tuning] EnableAimDecoupling is ignored. Your aim always stays with the mouse or controller while your head moves the view.
+diagnostic	NonCanonicalConcept	50	Line 50: [Tuning] PositionAllowed is ignored. Turn positional tracking off with the tracking mode: PositionEnabled=false, or the mode hotkey.
+diagnostic	NonCanonicalConcept	51	Line 51: [Tuning] TrackerPivotForward is ignored. The mod applies the head pose as the tracker sends it, with no neck pivot of its own.
+diagnostic	NonCanonicalConcept	52	Line 52: [Tuning] PivotUp is ignored. The mod applies the head pose as the tracker sends it, with no neck pivot of its own.

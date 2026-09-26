@@ -62,12 +62,6 @@ namespace CameraUnlock.Core.Config
             new BoolCodec(), new[] { "true: moving your head moves the view.", "Tracking mode at startup, with RotationEnabled. The mode hotkey changes both." }, null, "true",
             true);
 
-        /// <summary>[Position] PositionAllowed.</summary>
-        public static readonly ConceptDescriptor<bool> PositionAllowed = new ConceptDescriptor<bool>(
-            "PositionAllowed", "Position", "PositionAllowed", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,", "and the mode hotkey skips the modes that use position." }, null, "true",
-            true);
-
         /// <summary>[Position] TrueFreeLook.</summary>
         public static readonly ConceptDescriptor<bool> TrueFreeLook = new ConceptDescriptor<bool>(
             "TrueFreeLook", "Position", "TrueFreeLook", ConceptValueFamily.Bool,
@@ -128,18 +122,6 @@ namespace CameraUnlock.Core.Config
             new FloatCodec(0f, 1f), new[] { "How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest." }, null, "0.9",
             true);
 
-        /// <summary>[Position] TrackerPivotForward.</summary>
-        public static readonly ConceptDescriptor<float> TrackerPivotForward = new ConceptDescriptor<float>(
-            "TrackerPivotForward", "Position", "TrackerPivotForward", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "Metres from the pivot of your neck forward to the point the tracker follows.", "Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off." }, null, "0",
-            true);
-
-        /// <summary>[Position] TrackerPivotUp.</summary>
-        public static readonly ConceptDescriptor<float> TrackerPivotUp = new ConceptDescriptor<float>(
-            "TrackerPivotUp", "Position", "TrackerPivotUp", ConceptValueFamily.Floating,
-            new FloatCodec(0f, 10f), new[] { "Metres from the pivot of your neck up to the point the tracker follows." }, null, "0",
-            true);
-
         /// <summary>[Hotkeys] ToggleKey.</summary>
         public static readonly ConceptDescriptor<string> ToggleKey = new ConceptDescriptor<string>(
             "ToggleKey", "Hotkeys", "ToggleKey", ConceptValueFamily.Hotkey,
@@ -187,7 +169,6 @@ namespace CameraUnlock.Core.Config
             RotationEnabled,
             DataFreshnessMs,
             PositionEnabled,
-            PositionAllowed,
             TrueFreeLook,
             PositionLimitX,
             PositionLimitY,
@@ -198,8 +179,6 @@ namespace CameraUnlock.Core.Config
             CollisionMargin,
             CollisionChannel,
             CollisionReleaseSmoothing,
-            TrackerPivotForward,
-            TrackerPivotUp,
             ToggleKey,
             CycleTrackingModeKey,
             YawModeKey,
@@ -237,12 +216,15 @@ namespace CameraUnlock.Core.Config
             { "aimdecoupling", "Your aim always stays with the mouse or controller while your head moves the view." },
             { "showreticle", "Whether a reticle is shown is not a setting." },
             { "reticlecolor", "The reticle colour is not a setting." },
+            { "positionallowed", "Turn positional tracking off with the tracking mode: PositionEnabled=false, or the mode hotkey." },
             { "positionsensitivityx", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
             { "positionsensitivityy", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
             { "positionsensitivityz", "The mod applies the head pose as the tracker sends it, with no sensitivity of its own." },
             { "invertpositionx", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
             { "invertpositiony", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
             { "invertpositionz", "The mod applies the head pose as the tracker sends it, with no axis inversion of its own." },
+            { "trackerpivotforward", "The mod applies the head pose as the tracker sends it, with no neck pivot of its own." },
+            { "trackerpivotup", "The mod applies the head pose as the tracker sends it, with no neck pivot of its own." },
             { "positiontogglekey", "CycleTrackingModeKey is the hotkey that switches positional tracking." },
             { "reticletogglekey", "The reticle has no toggle key." },
             { "recenterkey", "The mod keeps no centre of its own: centre the view in your tracker app." },

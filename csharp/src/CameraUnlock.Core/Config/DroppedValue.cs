@@ -56,6 +56,10 @@ namespace CameraUnlock.Core.Config
                     return "it is a Ctrl, Shift or Alt key, which goes down before the key of any chord made with it, so it is unbound";
                 case DropRule.CoupledAim:
                     return "aim is always decoupled now, so your aim stays with the mouse or controller while your head moves the view";
+                case DropRule.PositionSwitchOff:
+                    return "positional tracking is switched off by the tracking mode now, so the mod starts in rotation only and the mode hotkey can turn position back on";
+                case DropRule.TrackerPivot:
+                    return "the mod applies the head pose as the tracker sends it, with no neck pivot of its own";
                 default:
                     throw new ArgumentOutOfRangeException("rule", rule, "drop rule " + (int)rule + " is not a DropRule");
             }

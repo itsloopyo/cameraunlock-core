@@ -31,8 +31,6 @@ inline constexpr ConceptRange kConceptRanges[] = {
     { "PositionLimitZBack", true, 0, true, 10 },
     { "CollisionMargin", true, 0, false, 0 },
     { "CollisionReleaseSmoothing", true, 0, true, 1 },
-    { "TrackerPivotForward", true, 0, true, 10 },
-    { "TrackerPivotUp", true, 0, true, 10 },
     { "LightMultiplier", true, 0, true, 5 },
 };
 

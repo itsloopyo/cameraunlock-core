@@ -9,7 +9,6 @@ field	WorldSpaceYaw	false
 field	RotationEnabled	false
 field	DataFreshnessMs	750
 field	PositionEnabled	true
-field	PositionAllowed	false
 field	TrueFreeLook	true
 field	PositionLimitX	0.35
 field	PositionLimitY	0.25
@@ -20,8 +19,6 @@ field	CollisionEnabled	false
 field	CollisionMargin	10.0
 field	CollisionChannel	2
 field	CollisionReleaseSmoothing	0.5
-field	TrackerPivotForward	0.08
-field	TrackerPivotUp	0.12
 field	ToggleKey	Home
 field	CycleTrackingModeKey	Insert, Ctrl+Alt+F9
 field	YawModeKey	

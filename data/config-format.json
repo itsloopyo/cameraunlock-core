@@ -582,6 +582,18 @@
       "text": "Decoupled aim is the only supported behaviour (owner ruling of 2026-09-26): the aim stays with the mouse or controller while the head moves the view. No mod offers, reads or documents an aim decoupling switch, so the canonical format has no AimDecoupling row, and a conversion deletes the mod's coupled-aim code path with the setting. A legacy AimDecoupling (or any other spelling of the switch, EnableAimDecoupling in a BepInEx .cfg included) that is false is dropped and logged: that player now gets decoupled aim. A true value changes nothing and is not recorded.",
       "approved": "2026-09-26",
       "drop_rule": "CoupledAim"
+    },
+    "position_switch_off": {
+      "decision": 6,
+      "text": "The tracking mode (RotationEnabled with PositionEnabled) is the only way positional tracking is switched off (owner ruling of 2026-09-26), so the canonical format has no PositionAllowed row. The setting was added for the games whose old position switch also kept the mode hotkey off the position modes: amnesia-rebirth, soma, bully-scholarship-edition, a-plague-tale-innocence and the-painscreek-killings. A legacy position switch that is false imports as the rotation-only tracking mode (RotationEnabled true, PositionEnabled false), which keeps the player's view as it was, and is recorded; nothing else carries it, so the mode hotkey can now switch positional tracking back on. A true value changes nothing and is not recorded. A converted mod reads the tracking mode's position channel wherever it read the switch.",
+      "approved": "2026-09-26",
+      "drop_rule": "PositionSwitchOff"
+    },
+    "tracker_pivot": {
+      "decision": 7,
+      "text": "The tracker is authoritative, like the rest of pose shaping (owner ruling of 2026-09-26), so the canonical format has no TrackerPivotForward or TrackerPivotUp row. Their default of 0 was compensation off in every mod. A legacy neck pivot distance, under any spelling, that the player set away from 0 is dropped and logged: that player's view no longer removes the lean that turning the head adds. A 0 changes nothing and is not recorded.",
+      "approved": "2026-09-26",
+      "drop_rule": "TrackerPivot"
     }
   },
   "conversion_notes": {

@@ -58,6 +58,16 @@ enum class DropRule {
     /// so the setting has no row. The map records one only where the legacy value is false; a
     /// true value changes nothing.
     CoupledAim = 7,
+    /// A position switch set to false, one that also kept the mode hotkey off the position modes
+    /// (the setting PositionAllowed was added for). The tracking mode is the only way position is
+    /// switched off now, so the map writes the rotation-only mode (RotationEnabled true,
+    /// PositionEnabled false) and records the switch. A true value changes nothing and is not
+    /// recorded.
+    PositionSwitchOff = 8,
+    /// A neck pivot distance (TrackerPivotForward, TrackerPivotUp or another spelling) the player
+    /// set away from 0. The tracker is authoritative and 0 was compensation off, so the setting
+    /// has no row. A 0 changes nothing and is not recorded.
+    TrackerPivot = 9,
 };
 
 /// One legacy value the map did not carry, for the migration log.

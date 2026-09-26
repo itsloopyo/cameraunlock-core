@@ -67,9 +67,6 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
         case C::PositionEnabled:
             BindHeadTrackingMember<C::PositionEnabled>(table, &H::position_enabled);
             return;
-        case C::PositionAllowed:
-            BindHeadTrackingMember<C::PositionAllowed>(table, &H::position_allowed);
-            return;
         case C::TrueFreeLook:
             BindHeadTrackingMember<C::TrueFreeLook>(table, &H::true_free_look);
             return;
@@ -108,12 +105,6 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
             table.template Concept<C::CollisionReleaseSmoothing>(
                 [](const Config& c) { return c.lean_clamp.release_smoothing; },
                 [](Config& c, float v) { c.lean_clamp.release_smoothing = v; });
-            return;
-        case C::TrackerPivotForward:
-            BindHeadTrackingMember<C::TrackerPivotForward>(table, &H::tracker_pivot_forward);
-            return;
-        case C::TrackerPivotUp:
-            BindHeadTrackingMember<C::TrackerPivotUp>(table, &H::tracker_pivot_up);
             return;
         case C::ToggleKey:
             BindHeadTrackingMember<C::ToggleKey>(table, &H::toggle_key_name);

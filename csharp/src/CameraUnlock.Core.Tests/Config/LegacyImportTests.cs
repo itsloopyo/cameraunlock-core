@@ -70,6 +70,8 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(5, (int)DropRule.KeyCodeOutOfRange);
             Assert.Equal(6, (int)DropRule.ModifierKey);
             Assert.Equal(7, (int)DropRule.CoupledAim);
+            Assert.Equal(8, (int)DropRule.PositionSwitchOff);
+            Assert.Equal(9, (int)DropRule.TrackerPivot);
         }
 
         [Fact]
@@ -92,14 +94,20 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal("not carried: [General] AimDecoupling=false, aim is always decoupled now, so your aim stays with the "
                 + "mouse or controller while your head moves the view",
                 new DroppedValue(DropRule.CoupledAim, "General", "AimDecoupling", "false").Describe());
+            Assert.Equal("not carried: [Position] Enabled=false, positional tracking is switched off by the tracking mode now, so "
+                + "the mod starts in rotation only and the mode hotkey can turn position back on",
+                new DroppedValue(DropRule.PositionSwitchOff, "Position", "Enabled", "false").Describe());
+            Assert.Equal("not carried: [Position] TrackerPivotForward=0.1, the mod applies the head pose as the tracker sends it, "
+                + "with no neck pivot of its own",
+                new DroppedValue(DropRule.TrackerPivot, "Position", "TrackerPivotForward", "0.1").Describe());
         }
 
         [Fact]
         public void ADroppedValueRefusesAnUnknownRuleAndNulls()
         {
-            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)9, "A", "B", "C"));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)11, "A", "B", "C"));
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)0, "A", "B", "C"));
-            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)8, "A", "B", "C"));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)10, "A", "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, null!, "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", null!, "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", "B", null!));

@@ -225,7 +225,7 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         // Every range the schema declares, held to the number it stands for. The position
-        // limits, the tracker pivots and the light multiplier name the guard constants, so the
+        // limits and the light multiplier name the guard constants, so the
         // schema and the guards cannot move apart. Null is a side the range leaves open.
         private static Dictionary<string, double?[]> ExpectedRanges()
         {
@@ -243,8 +243,6 @@ namespace CameraUnlock.Core.Tests.Config
                 { "PositionLimitYDown", metres },
                 { "PositionLimitZ", metres },
                 { "PositionLimitZBack", metres },
-                { "TrackerPivotForward", metres },
-                { "TrackerPivotUp", metres },
                 { "CollisionMargin", new double?[] { 0, null } },
                 { "LightMultiplier", new double?[] { 0, HeadFollowLightSettings.MaxMultiplier } },
             };

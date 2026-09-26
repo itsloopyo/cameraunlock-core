@@ -315,9 +315,8 @@ fails("a per_game value spelled another way", bepMan((c) => ({ ...c, per_game: {
   fails("a per_game row commented out under another section", bepMan(), commentedElsewhere, "Config.ini has no WorldSpaceYaw line");
 }
 // The rows a launcher once read no longer draw anything from the descriptor: a value on a row
-// per_game does not list is the lint's finding, and PositionAllowed no longer changes the block.
+// per_game does not list is the lint's finding.
 clean("a value on a row per_game does not list", abzuMan(), abzuWith("yaw-value", edit(ALL, "WorldSpaceYaw=default", "WorldSpaceYaw=false")));
-clean("PositionAllowed=false", abzuMan(), abzuWith("position-not-allowed", edit(ALL, "PositionAllowed=default", "PositionAllowed=false")));
 fails("exe_dir for a game data/games.json does not list", manifest("no-such-game", structuredClone(fnvConfig)), fnv, "is not in data/games.json");
 
 // The write rule, which runs on a converted repo's manifest with a config block or without one:

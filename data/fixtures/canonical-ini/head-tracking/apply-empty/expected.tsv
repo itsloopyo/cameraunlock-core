@@ -7,7 +7,6 @@ field	WorldSpaceYaw	true
 field	RotationEnabled	true
 field	DataFreshnessMs	500
 field	PositionEnabled	true
-field	PositionAllowed	true
 field	TrueFreeLook	false
 field	PositionLimitX	0.3
 field	PositionLimitY	0.2
@@ -18,8 +17,6 @@ field	CollisionEnabled	true
 field	CollisionMargin	0.1
 field	CollisionChannel	0
 field	CollisionReleaseSmoothing	0.9
-field	TrackerPivotForward	0.0
-field	TrackerPivotUp	0.0
 field	ToggleKey	End, Ctrl+Shift+Y
 field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
 field	YawModeKey	PageDown, Ctrl+Shift+H

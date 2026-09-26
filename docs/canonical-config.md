@@ -251,13 +251,13 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way. 25 of them are global: a game's row
+The concepts are the settings every mod spells the same way. 22 of them are global: a game's row
 for one follows Defaults.ini unless the table marks it `PerGame()` (see
 [Which rows follow it](#which-rows-follow-it)). `CollisionMargin` and `CollisionChannel` are not:
 each holds a number in one engine's own units or channels, so the schema marks them
 `"global": false`, and every game keeps its own value. The schema writes `global`, true or false,
 on every canonical concept, and the generator refuses one without it. This is core's table naming
-all 27 of them at their defaults, which both languages render byte for byte
+all 24 of them at their defaults, which both languages render byte for byte
 (`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with `Render`, so
 every row shows its value, `CollisionChannel`, the table's one Engine row, as a comment; the same
 table's fresh render writes `default` on every global row, `CollisionMargin` as its value and the
@@ -307,9 +307,6 @@ RemoteSmoothing=0.15
 ; true: moving your head moves the view.
 ; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
 PositionEnabled=true
-; false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,
-; and the mode hotkey skips the modes that use position.
-PositionAllowed=true
 ; false: while you aim down the sights, leaning keeps your eye on the sights.
 ; true: the weapon stays put and your head moves freely around it (true free look).
 TrueFreeLook=false
@@ -332,11 +329,6 @@ CollisionMargin=0.1
 ; How gently the view eases back out after a wall stopped a lean.
 ; 0 is the quickest, 1 the slowest.
 CollisionReleaseSmoothing=0.9
-; Metres from the pivot of your neck forward to the point the tracker follows.
-; Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off.
-TrackerPivotForward=0.0
-; Metres from the pivot of your neck up to the point the tracker follows.
-TrackerPivotUp=0.0
 
 [Hotkeys]
 ; Turns head tracking on and off.
@@ -357,9 +349,9 @@ LightMultiplier=1.5
 ```
 
 The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFreshnessMs` 1 to
-2147483647, the smoothing pair and `CollisionReleaseSmoothing` 0 to 1, the five limits and the two
-tracker pivots 0 to 10, `LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its
-unit is the engine's own), and `CollisionChannel` none. The four hotkey lists and
+2147483647, the smoothing pair and `CollisionReleaseSmoothing` 0 to 1, the five limits 0 to 10,
+`LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its unit is the engine's own),
+and `CollisionChannel` none. The four hotkey lists and
 `CollisionEnabled` start at the schema's `canonical_default`. The `default` field and core's field
 initialisers, which the older flat readers use, keep `End` for `ToggleKey` and `PageDown` for
 `YawModeKey`, leave `CycleTrackingModeKey` empty and keep `CollisionEnabled` false. No flat reader
@@ -378,7 +370,9 @@ Defaults.ini ([The global defaults file](#the-global-defaults-file) has the haza
 The tracking mode at startup is the pair `RotationEnabled` and `PositionEnabled`: both true is
 rotation and position, `true, false` rotation only, `false, true` position only. Both false names
 no mode, so the table reads both as their defaults and reports both lines. A mode change always
-writes the pair.
+writes the pair. The mode is the only way positional tracking is switched off: no setting keeps a
+game on rotation only whatever the pair says (owner ruling of 2026-09-26), and a mod reads the
+mode's position channel wherever it would have read such a switch.
 
 `TrueFreeLook` is the lean while aiming down sights, in a shooter with an aim state and positional
 tracking. `false`, sights locked, keeps the eye on the sight line; `true`, true free look, leaves
@@ -402,6 +396,8 @@ the canonical format never writes them. Each carries a `canonical_reason`, which
 | `PositionToggleKey` | `CycleTrackingModeKey` is the hotkey that switches positional tracking |
 | `RecenterKey` | The mod keeps no centre of its own: the player centres the view in the tracker app |
 | `AimDecoupling` | Aim is always decoupled: the aim stays with the mouse or controller while the head moves the view (owner ruling of 2026-09-26). No mod offers a way to couple it to the head |
+| `PositionAllowed` | The tracking mode is the only way positional tracking is switched off: `PositionEnabled=false`, or the mode hotkey (owner ruling of 2026-09-26). The five games it was added for read the tracking mode's position channel instead |
+| `TrackerPivotForward`, `TrackerPivotUp` | The mod applies the head pose as the tracker sends it, with no neck pivot of its own (owner ruling of 2026-09-26). The default of 0 was compensation off in every mod. `PositionProcessor` keeps its pivot properties, so a mod that sets them in code still can |
 
 So the schema sections `[Sensitivity]`, `[Inversion]` and `[Reticle]` hold no canonical concept,
 and no canonical file has them. The retired `Smoothing` key (and its alias `SmoothingFactor`) is
@@ -842,9 +838,9 @@ file, the README config block and the changelog template.
 
 ### Which rows follow it
 
-25 of the 27 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
-`PositionAllowed`, `CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of
-2026-09-25, collision rows ruling of 2026-09-26). The schema says `global`, true or false, on
+22 of the 24 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
+`CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of 2026-09-25,
+collision rows ruling of 2026-09-26). The schema says `global`, true or false, on
 every canonical concept, and `CollisionMargin` and `CollisionChannel` say false: a margin in the
 engine's own units or a channel number means something else in every engine, so each game keeps
 its own and Defaults.ini has no line for either. The only other
@@ -1014,9 +1010,6 @@ RemoteSmoothing=0.15
 ; true: moving your head moves the view.
 ; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
 PositionEnabled=true
-; false: head tracking runs rotation only, whatever RotationEnabled and PositionEnabled say,
-; and the mode hotkey skips the modes that use position.
-PositionAllowed=true
 ; false: while you aim down the sights, leaning keeps your eye on the sights.
 ; true: the weapon stays put and your head moves freely around it (true free look).
 TrueFreeLook=false
@@ -1035,11 +1028,6 @@ CollisionEnabled=true
 ; How gently the view eases back out after a wall stopped a lean.
 ; 0 is the quickest, 1 the slowest.
 CollisionReleaseSmoothing=0.9
-; Metres from the pivot of your neck forward to the point the tracker follows.
-; Used to remove the lean that turning your head adds. 0 here and in TrackerPivotUp turns it off.
-TrackerPivotForward=0.0
-; Metres from the pivot of your neck up to the point the tracker follows.
-TrackerPivotUp=0.0
 
 [Hotkeys]
 ; Turns head tracking on and off.
@@ -1348,6 +1336,8 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code outside 0x01-0xFE, 0xFF included, which imports as unbound (C++ `LegacyVirtualKeyToBindings`; no C# import reads virtual-key codes). Code 0, a legacy file's unbound, stays unbound and is not recorded |
 | `ModifierKey` (6) | normalisation N3 | A hotkey bound to a Ctrl, Shift or Alt key on its own, which imports as unbound, since no hotkey value can hold one (C++ `LegacyVirtualKeyToBindings` for 0x10-0x12 and 0xA0-0xA5, recorded as the code in hex; C# `LegacyNormalisations.KeyCodeToBindings` for `LeftShift` to `RightAlt`, recorded as the key name). A map that folds the action's Ctrl+Shift chord into the list appends it to what these give, so the player keeps the chord. Core's REFramework import does not apply it (see REFramework mods) |
 | `CoupledAim` (7) | approved change `coupled_aim` | An aim decoupling switch (`AimDecoupling`, a BepInEx `EnableAimDecoupling`, or any other spelling of it) whose legacy value is false. Aim is always decoupled now, so that player gets decoupled aim, and the map records the value it read. A true value changes nothing and is not recorded. The conversion also deletes the mod's coupled-aim code path |
+| `PositionSwitchOff` (8) | approved change `position_switch_off` | A position switch whose legacy value is false, where it also kept the mode hotkey off the position modes (the setting `PositionAllowed` stood for: amnesia-rebirth, soma, bully-scholarship-edition, a-plague-tale-innocence, the-painscreek-killings). The map writes the rotation-only tracking mode, `RotationEnabled` true and `PositionEnabled` false, which keeps the view the player had, and records the switch. Nothing else carries it, so the mode hotkey can now turn positional tracking back on. A true value changes nothing and is not recorded |
+| `TrackerPivot` (9) | approved change `tracker_pivot` | A neck pivot distance (`TrackerPivotForward`, `TrackerPivotUp`, or any other spelling of either) whose legacy value is not 0. The tracker is authoritative, so the setting has no row and that player loses the compensation. A 0, compensation off, changes nothing and is not recorded |
 
 A `FollowsDefault` value is the one the build shipped, which no player chose, so the map also
 names the row's concept in the result's `follows_defaults_ini` (C# `FollowsDefaultsIni`, passed

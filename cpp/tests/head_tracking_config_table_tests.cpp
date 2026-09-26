@@ -121,7 +121,6 @@ std::vector<FieldRead> Fields() {
         {"RotationEnabled", [b](const H& c) { return b(c.rotation_enabled); }},
         {"DataFreshnessMs", [i](const H& c) { return i(c.data_freshness_ms); }},
         {"PositionEnabled", [b](const H& c) { return b(c.position_enabled); }},
-        {"PositionAllowed", [b](const H& c) { return b(c.position_allowed); }},
         {"TrueFreeLook", [b](const H& c) { return b(c.true_free_look); }},
         {"PositionLimitX", [f](const H& c) { return f(c.position.limit_x); }},
         {"PositionLimitY", [f](const H& c) { return f(c.position.limit_y); }},
@@ -132,8 +131,6 @@ std::vector<FieldRead> Fields() {
         {"CollisionMargin", [f](const H& c) { return f(c.lean_clamp.skin); }},
         {"CollisionChannel", [i](const H& c) { return i(c.collision_channel); }},
         {"CollisionReleaseSmoothing", [f](const H& c) { return f(c.lean_clamp.release_smoothing); }},
-        {"TrackerPivotForward", [f](const H& c) { return f(c.tracker_pivot_forward); }},
-        {"TrackerPivotUp", [f](const H& c) { return f(c.tracker_pivot_up); }},
         {"ToggleKey", [k](const H& c) { return k(c.toggle_key_name); }},
         {"CycleTrackingModeKey", [k](const H& c) { return k(c.cycle_tracking_mode_key_name); }},
         {"YawModeKey", [k](const H& c) { return k(c.yaw_mode_key_name); }},
@@ -323,19 +320,19 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe25TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe22TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 25 the schema names]\n";
+    std::cout << "\n[the global concepts are the 22 the schema names]\n";
     const std::vector<std::string> expected{
         "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
-        "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "PositionAllowed", "TrueFreeLook",
+        "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook",
         "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
-        "CollisionEnabled", "CollisionReleaseSmoothing", "TrackerPivotForward", "TrackerPivotUp", "ToggleKey",
+        "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
         "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightFollowsHead", "LightMultiplier"};
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 25 listed, in schema order");
+    Check(global == expected, "the global concepts are the 22 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }

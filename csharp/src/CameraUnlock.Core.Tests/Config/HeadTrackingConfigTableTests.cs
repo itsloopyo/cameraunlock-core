@@ -94,14 +94,14 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe25TheSchemaNames()
+        public void TheGlobalConceptsAreThe22TheSchemaNames()
         {
             string[] global =
             {
                 "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
-                "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "PositionAllowed", "TrueFreeLook",
+                "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook",
                 "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
-                "CollisionEnabled", "CollisionReleaseSmoothing", "TrackerPivotForward", "TrackerPivotUp", "ToggleKey",
+                "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
                 "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightFollowsHead", "LightMultiplier",
             };
             Assert.Equal(global, ConfigConcepts.All.Where(c => c.Global).Select(c => c.Id));

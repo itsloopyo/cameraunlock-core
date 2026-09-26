@@ -1,3 +1,4 @@
 # A section no concept is in, a concept the format does not write (YawSensitivity, and AimDecoupling,
-# which an earlier core wrote here) and a key no concept has: not read, and nothing is said.
+# PositionAllowed, TrackerPivotForward and TrackerPivotUp, which an earlier core wrote here) and a key
+# no concept has: not read, and nothing is said.
 value	UdpPort	accepted	7	5000

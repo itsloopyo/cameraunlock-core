@@ -357,9 +357,8 @@ struct ExpectedRange {
     double max;
 };
 
-// Every range the schema declares, held to the number it stands for. The position limits,
-// the tracker pivots and the light multiplier name the guard constants, so the schema and the
-// guards cannot move apart.
+// Every range the schema declares, held to the number it stands for. The position limits and
+// the light multiplier name the guard constants, so the schema and the guards cannot move apart.
 void TestSchemaRangesMatchTheGuards() {
     using cameraunlock::config::kMaxPositionLimit;
     using cameraunlock::effects::kMaxLightMultiplier;
@@ -376,8 +375,6 @@ void TestSchemaRangesMatchTheGuards() {
         {"PositionLimitYDown", metres},
         {"PositionLimitZ", metres},
         {"PositionLimitZBack", metres},
-        {"TrackerPivotForward", metres},
-        {"TrackerPivotUp", metres},
         {"CollisionMargin", {true, 0.0, false, 0.0}},
         {"LightMultiplier", {true, 0.0, true, static_cast<double>(kMaxLightMultiplier)}},
     };

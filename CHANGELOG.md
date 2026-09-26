@@ -9,6 +9,72 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed - BREAKING - PositionAllowed and the tracker pivot are not settings
+
+Two owner rulings of 2026-09-26. The tracking mode (`RotationEnabled` with `PositionEnabled`: both,
+rotation only, position only) is the only way positional tracking is switched off, so
+`PositionAllowed` goes. And the tracker is authoritative over the neck pivot, like the rest of pose
+shaping, so `TrackerPivotForward` and `TrackerPivotUp` go too; their default of 0 was compensation
+off in every mod. `PositionProcessor`'s pivot properties (C# `TrackerPivotForward` and
+`TrackerPivotUp`, C++ `Get/SetTrackerPivotForward` and `Get/SetTrackerPivotUp`) and
+`HeadTrackingSession`'s pass-throughs do not change.
+
+- **Schema.** `data/config-schema.json` marks all three `canonical: false` and drops their `global`,
+  `file_comment` and (on the pivots) `range`. `PositionAllowed` carries the `canonical_reason` `Turn
+  positional tracking off with the tracking mode: PositionEnabled=false, or the mode hotkey.`, the
+  two pivots `The mod applies the head pose as the tracker sends it, with no neck pivot of its
+  own.` The pivot aliases stay (`PivotForward`, `NeckPivotForward`, `PivotArm`, `TrackerPivot`,
+  `NeckModelForward`, `PivotUp`, `NeckPivotUp`, `NeckModelHeight`), so the deprecated flat readers
+  parse every spelling as before. A canonical file holding any of them draws `NonCanonicalConcept`
+  with that reason, and the canonical config lint fails it.
+- **BREAKING, generated code.** C# `ConfigConcepts.PositionAllowed`, `ConfigConcepts.TrackerPivotForward`
+  and `ConfigConcepts.TrackerPivotUp`, and C++ `schema::Concept::PositionAllowed`,
+  `schema::Concept::TrackerPivotForward`, `schema::Concept::TrackerPivotUp` and their
+  `ConceptTraits`, are gone. Every `schema::Concept` value after `PositionEnabled` moves down by one,
+  and every value after `CollisionReleaseSmoothing` by three. A converted mod that names one of them
+  no longer compiles: delete it from the table, switch any code that read `PositionAllowed` to the
+  tracking mode's position channel, and run `pixi run render-config` and `pixi run test`.
+- **Config tables and Defaults.ini.** `HeadTrackingConfigTable` has no row for any of the three. The
+  canonical set is 24 concepts, 22 of them global. A new Defaults.ini has none of their lines and is
+  eight lines shorter; an existing one that holds them is read as before, and those lines are not
+  read and draw nothing, like any key of a concept the format does not write.
+- **Kept for existing callers**, and documented as deprecated: `HeadTrackingConfigData.PositionAllowed`,
+  `TrackerPivotForward` and `TrackerPivotUp`, and C++ `HeadTrackingConfig::position_allowed`,
+  `tracker_pivot_forward` and `tracker_pivot_up`, which `ApplyValues` and `LoadFromFile` still fill.
+- **Legacy import.** Two approved changes in `data/config-format.json`, recorded as new DropRules in
+  both languages:
+  - `position_switch_off`, C++ `DropRule::PositionSwitchOff` and C# `DropRule.PositionSwitchOff` (8).
+    A legacy position switch that also kept the mode hotkey off the position modes (the games
+    `PositionAllowed` was added for: amnesia-rebirth, soma, bully-scholarship-edition,
+    a-plague-tale-innocence, the-painscreek-killings) and is false imports as the rotation-only
+    tracking mode, `RotationEnabled` true and `PositionEnabled` false, and is recorded. Nothing else
+    carries it. A true value changes nothing and is not recorded. The log line is `not carried:
+    [Position] Enabled=false, positional tracking is switched off by the tracking mode now, so the
+    mod starts in rotation only and the mode hotkey can turn position back on`.
+  - `tracker_pivot`, C++ `DropRule::TrackerPivot` and C# `DropRule.TrackerPivot` (9). A legacy neck
+    pivot distance under any spelling that is not 0 is dropped and recorded; a 0 is not recorded.
+    The log line is `not carried: [Position] TrackerPivotForward=0.1, the mod applies the head pose
+    as the tracker sends it, with no neck pivot of its own`.
+- **README and changelog.** The README config block of a legacy repo, rendered by
+  `scripts/generate-readme.mjs`, lists two more settings not carried over: `A setting that kept
+  positional tracking off whatever the tracking mode said. Where your old file had it off, the mod
+  starts in the rotation-only tracking mode instead, and the mode hotkey can now turn positional
+  tracking back on.` and `A neck pivot distance you changed from 0. The mod applies the head pose as
+  your tracker sends it, so it no longer removes the lean that turning your head adds.`
+  `scripts/templates/canonical-config-changelog.md` carries the same lines and two conditional
+  Removed bullets.
+- **Fixtures.** `global/Defaults.ini`, `head-tracking/all-concepts.ini` and `all-concepts-fresh.ini`
+  lose the three comments-and-rows; the three `head-tracking/apply-*` cases lose the three fields;
+  `table/apply-unknown` gains `PositionAllowed`, `TrackerPivotForward` and the alias `PivotUp`, each
+  drawing `NonCanonicalConcept`; `global/read-unknown-key` gains a `[Position]` section with the
+  three keys, none read; the `readme/values-legacy-*` blocks gain the two lines. The canonical lint's
+  mutations gain the three keys, and its line numbers follow the shorter fresh file.
+- **Consumers must follow.** a-plague-tale-innocence binds `C::PositionAllowed`; easy-delivery-co,
+  obra-dinn, superliminal, the-forest and yapyap bind `ConfigConcepts.TrackerPivotForward` and
+  their committed config holds `TrackerPivotForward=default`. Each needs the concept deleted and
+  its config re-rendered at the pin bump. Lopari must drop the three rows from its Defaults.ini
+  rows, global-defaults view and tests.
+
 ### Removed - BREAKING - aim decoupling is not a setting: aim is always decoupled
 
 Owner ruling of 2026-09-26: decoupled aim is the only supported behaviour. The aim stays with the
