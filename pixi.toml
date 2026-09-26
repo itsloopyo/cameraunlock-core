@@ -141,6 +141,10 @@ conformance = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/confo
 #   pixi run readme --print config         # this repo's config block, for NEXUS_MODS.md
 readme = "node scripts/generate-readme.mjs"
 
+# Holds the README config block to what it says about Defaults.ini for a committed file with
+# default rows, and to the block it rendered before Defaults.ini for a file of values.
+test-generate-readme = "node scripts/test-generate-readme.mjs"
+
 # Push core's templates back out across the fleet: install/uninstall wrapper
 # tails, the mechanical half of update-deps.ps1, GitHub Actions pins from
 # scripts/templates/action-pins.json, and the `sync` pixi task. Reports by
@@ -215,7 +219,7 @@ config-report = "node scripts/check-canonical-config.mjs --report"
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-generate-readme", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

@@ -5,8 +5,12 @@ and never repurpose an existing bullet.
 
 A repo in data/config-format.json's `legacy` takes the Legacy bullets. A repo with no
 published build (outside `legacy`) has no legacy file and takes none of them, only the
-Removed bullets it needs, and where it is a BepInEx mod, the ConfigurationManager bullet
-with "does not list" in place of "no longer lists".
+Outside legacy bullet, the Removed bullets it needs, and where it is a BepInEx mod, the
+ConfigurationManager bullet with "does not list" in place of "no longer lists". Every
+converted repo takes the Defaults.ini bullets. A repo whose `dialect` is `unity` has core's C#
+config owner, the one owner that runs natively on Linux and macOS, and takes the C# owner
+variant of the creation bullet and the read-only bullet, under Changed in a `legacy` repo,
+whose earlier versions saved settings there, and under Added outside it.
 
 Then:
 
@@ -23,10 +27,13 @@ Then:
   records (comparison 1, design 6.2), one bullet each with the commit that made it.
 - Add each Removed bullet where the mod had that setting or key before the conversion,
   whether or not it published a build.
+- Outside `legacy`, end the first Defaults.ini bullet's second sentence at "do not read it":
+  there are no earlier versions.
 
-The migration bullets take their wording from the README config block that
-scripts/generate-readme.mjs renders (legacyParagraphs, the ConfigurationManager line and
-APPROVED_CHANGE_LINES), so a player reads the same thing in both. Change the two together.
+The migration and Defaults.ini bullets take their wording from the README config block that
+scripts/generate-readme.mjs renders (legacyParagraphs, defaultsParagraphs, the
+ConfigurationManager line and APPROVED_CHANGE_LINES), so a player reads the same thing in both.
+Change the two together.
 
 The reset bullet has the player replace what CameraUnlock.ini holds and never tells them to
 delete the legacy file. A Lopari v0.9.0 receipt can record the legacy file as a seed:
@@ -42,12 +49,15 @@ writes no seed because REFramework is already there.
 ### Changed
 
 - Settings move to `<path>`. Earlier versions of the mod kept these settings in `<legacy>`, in the same folder. The first time this version starts and finds no `CameraUnlock.ini`, it reads your settings from `<legacy>` and writes them into `CameraUnlock.ini`. It never changes `<legacy>`, and does not read it again while `CameraUnlock.ini` exists.
+- A setting that the defaults the README shows set to `default` is written as `default` when the value imported for it equals its default at that start, which is the value `Defaults.ini` gives it, or the built-in value where `Defaults.ini` gives none. It then follows `Defaults.ini`. Every other setting is written with the value imported for it.
+- Only where the defaults set both `RotationEnabled` and `PositionEnabled` to `default`:
+  `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.
 - Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
   - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
   - Reticle settings, and a key that toggled the reticle.
   - The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
 - An older version of the mod reads `<legacy>` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `<legacy>`.
-- Deleting only `CameraUnlock.ini` makes the next start read `<legacy>` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults the README shows.
+- Deleting only `CameraUnlock.ini` makes the next start read `<legacy>` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults the README shows. Every setting they set to `default` then follows `Defaults.ini`.
 - Only where the mod is a BepInEx mod:
   BepInEx's ConfigurationManager no longer lists these settings. Edit `<path>` with any text editor.
 - Hotkeys are written as key names, and each hotkey lists every key that triggers it, the Ctrl+Shift chord included: `ToggleKey=End, Ctrl+Shift+Y`.
@@ -55,6 +65,29 @@ writes no seed because REFramework is already there.
   A hotkey bound to a plain key no longer fires while Ctrl and Shift are both held, so Ctrl+Shift with that key reaches only a binding that names the chord.
 - Only where End saved its state before:
   Turning head tracking on or off with End no longer changes the file. The mod starts with head tracking on or off as `EnableOnStartup` says.
+
+## Outside legacy
+
+### Added
+
+- The mod keeps its settings in `<path>`, and creates the file when it starts and finds none. A new `CameraUnlock.ini` sets to `default` each setting the README lists with a built-in value, so that setting takes its value from `Defaults.ini`.
+
+## Defaults.ini, in every converted repo
+
+### Added
+
+- A setting set to `default` in `CameraUnlock.ini` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only.
+- `Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
+- Only where the `dialect` is `native`:
+  When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that.
+- Only where the `dialect` is `unity`:
+  When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app, or the game runs on Linux or macOS without Wine or Proton. The mod never changes `Defaults.ini` after that.
+
+## C# owner, where the `dialect` is `unity`
+
+### Changed in a `legacy` repo, Added outside it
+
+- On Linux and macOS without Wine or Proton, this version reads its settings and saves none, so a change made in game lasts until the game closes.
 
 ## Removed, with or without the Legacy bullets
 

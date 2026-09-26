@@ -9,6 +9,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - the README config block and the changelog template explain Defaults.ini
+
+- **`scripts/generate-readme.mjs`**: where the committed file holds `default` rows, the config block
+  says, once, after the file's location: that a setting set to `default` takes its value from
+  Defaults.ini, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads,
+  that head tracking mods keeping their settings in another file do not, nor (in a `legacy` repo)
+  earlier versions of the mod, and that writing a value changes that game only; the three
+  locations the file's header names, and that the mod's log names the file it read; that the mod
+  creates Defaults.ini with the built-in values when it finds none, unless Windows runs the game
+  as a packaged app, and never changes it afterwards. For a repo whose `dialect` is `unity`, the
+  repos whose config owner is core's C# one, it adds that on Linux and macOS without Wine or
+  Proton the mod creates no Defaults.ini and reads its settings and saves none, so a change made
+  in game lasts until the game closes. A `legacy` repo's paragraphs add what the import writes
+  (`default` where the imported value equals the row's default at that start, the tracking-mode
+  pair together) and that the rows the reset sets to `default` follow Defaults.ini. Before the
+  file, the block lists the built-in value of each `default` row, from `data/config-schema.json`
+  (the hotkeys at `canonical_default`). A committed file with no `default` row renders exactly the
+  block it rendered before. `configBlock` is exported and the command line runs only when the
+  script is run directly.
+- **`scripts/templates/canonical-config-changelog.md`**: the Legacy bullets gain the import's
+  `default` rule and the reset sentence's Defaults.ini clause; an Outside legacy bullet says a new
+  `CameraUnlock.ini` sets those rows to `default`; every converted repo takes the Defaults.ini
+  bullets (what `default` means and who reads the file, where it is, that the mod creates it and
+  never changes it), and a repo whose `dialect` is `unity` the native Linux and macOS read-only
+  bullet.
+- **`pixi run test-generate-readme`**, part of `pixi run check`, renders the block for synthetic
+  repo states over the fresh example file and checks the Defaults.ini text and every built-in value
+  against `data/fixtures/canonical-ini/global/Defaults.ini`, and over a file of values against the
+  blocks captured before this change (`data/fixtures/readme/`).
+- `data/config-format.json`'s `_comment` records that `dialect` `unity` is how the block knows a
+  repo's owner is C#.
+
+What a consuming repo changes. This is the last core change a converted repo waits on before its
+pin bump (C7 to C9). After the bump and `render-config`, run
+`pixi run readme --write --sections config`, take the changelog template's new bullets into
+`[Unreleased]`, and paste `--print config` into NEXUS_MODS.md by hand. A repo whose committed file
+still holds values keeps the block it has.
+
 ### Changed - BREAKING - the config descriptor lists per-game rows, not preference values
 
 A launcher now writes no game file: it edits Defaults.ini and reads a game's `CameraUnlock.ini`

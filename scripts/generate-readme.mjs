@@ -49,9 +49,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { repoState } from './check-canonical-config.mjs';
+import { equalsAsciiIgnoreCase, isDefaultToken, parseCanonicalIni } from './lib/canonical-ini.mjs';
 
 const CORE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const REPOS_ROOT = path.dirname(CORE_ROOT);
@@ -161,7 +162,9 @@ const SECTIONS = {
 // owner does for every converted mod: the installed path, the one-time import
 // of the legacy file in the same folder, which the mod never writes, what an
 // older build reads, and for BepInEx that ConfigurationManager does not list the
-// settings. Nothing here knows which game it is describing.
+// settings. A committed file with default rows adds what the owner does with
+// Defaults.ini and the built-in value of each such row. Nothing here knows which
+// game it is describing.
 // ---------------------------------------------------------------------------
 
 const CONFIG_ID = 'config';
@@ -172,8 +175,11 @@ const CONFIG_HEADING_RE = /^(\d+\.\s+)?configuration$/i;
 const CONFIG_INSERT_AFTER = ['Controls', OPENTRACK_HEADING, 'Installation'];
 
 const FORMAT = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, 'data', 'config-format.json'), 'utf8'));
+const CANONICAL_CONCEPTS = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, 'data', 'config-schema.json'), 'utf8'))
+  .concepts.filter((c) => c.canonical);
 
 const CONFIG_NAME = 'CameraUnlock.ini';
+const DEFAULTS_NAME = 'Defaults.ini';
 
 const code = (p) => `\`${p}\``;
 const EDIT = 'Edit it with any text editor.';
@@ -231,15 +237,76 @@ function droppedSettings() {
 }
 
 // legacy is the bare name of the file the repo's pre-canonical builds read, in the same folder.
-function legacyParagraphs(legacy) {
+// defaults is what defaultRows gives for the committed file.
+function legacyParagraphs(legacy, defaults) {
   const old = code(legacy);
   const config = code(CONFIG_NAME);
-  return [
+  const followed = code(DEFAULTS_NAME);
+  const imported = [
     `Earlier versions of the mod kept these settings in ${old}, in the same folder. The first time this version starts and finds no ${config}, it reads your settings from ${old} and writes them into ${config}. It never changes ${old}, and does not read it again while ${config} exists.`,
+  ];
+  let reset = `Deleting only ${config} makes the next start read ${old} again. To go back to the defaults, replace everything in ${config} with the defaults below.`;
+  if (defaults.length > 0) {
+    const keys = new Set(defaults.map((r) => r.key));
+    const pair = keys.has('RotationEnabled') && keys.has('PositionEnabled')
+      ? ' `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.'
+      : '';
+    imported.push(`A setting that the defaults below set to \`default\` is written as \`default\` when the value imported for it equals its default at that start, which is the value ${followed} gives it, or the built-in value where ${followed} gives none. It then follows ${followed}. Every other setting is written with the value imported for it.${pair}`);
+    reset += ` Every setting they set to \`default\` then follows ${followed}.`;
+  }
+  return [
+    ...imported,
     droppedSettings(),
     `An older version of the mod reads ${old} and never reads ${config}, so a setting you change after updating is not in ${old}.`,
-    `Deleting only ${config} makes the next start read ${old} again. To go back to the defaults, replace everything in ${config} with the defaults below.`,
+    reset,
   ];
+}
+
+// What core's config owners do with Defaults.ini. csharp: the owner is core's C# one, the only
+// owner that runs natively on Linux and macOS, where it reads and never writes.
+function defaultsParagraphs(legacy, csharp) {
+  const followed = code(DEFAULTS_NAME);
+  const config = code(CONFIG_NAME);
+  return [
+    `A setting set to \`default\` takes its value from ${followed}, which every head tracking mod that keeps its settings in ${config} reads. Head tracking mods that keep their settings in another file do not read it${legacy ? ', and neither do earlier versions of this mod' : ''}. Writing a value in place of \`default\` changes that setting for this game only.`,
+    `${followed} is ${code('%AppData%\\CameraUnlock\\Defaults.ini')} on Windows; ${code('$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini')} on Linux, or ${code('~/.config/CameraUnlock/Defaults.ini')} where \`XDG_CONFIG_HOME\` is not set, under Wine and Proton too; and ${code('~/Library/Application Support/CameraUnlock/Defaults.ini')} on macOS. The mod's log, where it writes one, names the file it read.`,
+    `When the mod starts and finds no ${followed}, it creates one holding the built-in values, unless Windows runs the game as a packaged app${csharp ? ', or the game runs on Linux or macOS without Wine or Proton' : ''}. The mod never changes ${followed} after that. ${EDIT}`,
+    ...(csharp ? ['On Linux and macOS without Wine or Proton, this version reads its settings and saves none, so a change made in game lasts until the game closes.'] : []),
+  ];
+}
+
+// Floats as the canonical codec writes them, which data/fixtures/canonical-ini/global/Defaults.ini
+// shows; scripts/test-generate-readme.mjs holds every concept to that file.
+function builtInText(concept) {
+  if (concept.codec === 'hotkey') return concept.canonical_default;
+  if (concept.type === 'float' && Number.isInteger(concept.default)) return concept.default.toFixed(1);
+  return String(concept.default);
+}
+
+// Each row the committed file sets to default, in file order, with its built-in value.
+function defaultRows(root, committed) {
+  const doc = parseCanonicalIni(fs.readFileSync(path.join(root, ...committed.split('/'))));
+  return doc.sections.flatMap((section) => section.values.filter((v) => isDefaultToken(v.value)).map((v) => {
+    const concept = CANONICAL_CONCEPTS.find((c) => equalsAsciiIgnoreCase(c.section, section.name) && equalsAsciiIgnoreCase(c.key, v.key));
+    if (concept === undefined) {
+      throw new Error(`${committed} line ${v.line}: [${section.name}] ${v.key} holds ${v.value}, which only a canonical concept's row takes`);
+    }
+    return { key: concept.key, text: builtInText(concept) };
+  }));
+}
+
+function builtInList(defaults) {
+  return ['The built-in value of each setting set to `default` below:', '', ...defaults.map((r) => `- ${code(`${r.key}=${r.text}`)}`)].join('\n');
+}
+
+// data/config-format.json records dialect unity for exactly the repos whose owner is core's C# one
+// (checked against the sources of every checkout on 2026-09-26).
+function csharpOwner(files) {
+  const dialects = new Set(files.map((f) => f.dialect));
+  if (dialects.size !== 1) {
+    throw new Error(`data/config-format.json gives one repo's config files the dialects ${[...dialects].join(' and ')}; the config block needs one owner language`);
+  }
+  return dialects.has('unity');
 }
 
 const isBepInEx = (entry) => entry.installed.some((p) => p.toLowerCase().startsWith('bepinex\\config\\'));
@@ -253,7 +320,7 @@ function fencedIni(root, committed) {
 // The block between the markers, or null for a repo that is not converted. A converted repo
 // whose config cannot be rendered yet (a file unstamped or unrecorded) throws; config-format in
 // conformance reports the same state.
-function configBlock(state) {
+export function configBlock(state) {
   if (!state.converted) return null;
   if (state.unrecorded_stamped.length > 0) {
     throw new Error(`${state.unrecorded_stamped.join(', ')} carries the [CameraUnlock] stamp, and data/config-format.json records no committed file for it`);
@@ -270,14 +337,21 @@ function configBlock(state) {
     groups.get(f.committed).push(f);
   }
   const parts = [];
+  let explained = false;
   for (const [committed, entries] of groups) {
     const bepinex = entries.some(isBepInEx);
     if (entries.length > 1 && (legacy || bepinex)) {
       throw new Error(`data/config-format.json gives ${committed} several entries in a legacy or BepInEx repo; the config block has no wording for that`);
     }
+    const defaults = defaultRows(state.root, committed);
     parts.push(locationParagraph(entries));
-    if (legacy) parts.push(...legacyParagraphs(entries[0].legacy_source));
+    if (defaults.length > 0 && !explained) {
+      parts.push(...defaultsParagraphs(legacy, csharpOwner(state.files)));
+      explained = true;
+    }
+    if (legacy) parts.push(...legacyParagraphs(entries[0].legacy_source, defaults));
     if (bepinex) parts.push(`BepInEx's ConfigurationManager ${legacy ? 'no longer lists' : 'does not list'} these settings.`);
+    if (defaults.length > 0) parts.push(builtInList(defaults));
     parts.push('With every setting at its default, the file reads:');
     parts.push(fencedIni(state.root, committed));
   }
@@ -494,143 +568,147 @@ function applySection(doc, id, rendered, force) {
 // CLI
 // ---------------------------------------------------------------------------
 
-const argv = process.argv.slice(2);
-const VALUE_FLAGS = ['--sections', '--print', '--roots-file'];
-const flags = new Set(argv.filter((a) => a.startsWith('--')));
-const valueOf = (name) => {
-  const i = argv.indexOf(`--${name}`);
-  if (i < 0) return null;
-  if (argv[i + 1] === undefined || argv[i + 1].startsWith('--')) {
-    console.error(`--${name} takes a value`);
+function main() {
+  const argv = process.argv.slice(2);
+  const VALUE_FLAGS = ['--sections', '--print', '--roots-file'];
+  const flags = new Set(argv.filter((a) => a.startsWith('--')));
+  const valueOf = (name) => {
+    const i = argv.indexOf(`--${name}`);
+    if (i < 0) return null;
+    if (argv[i + 1] === undefined || argv[i + 1].startsWith('--')) {
+      console.error(`--${name} takes a value`);
+      process.exit(2);
+    }
+    return argv[i + 1];
+  };
+  const tokens = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && VALUE_FLAGS.includes(argv[i - 1])));
+
+  const KNOWN = [...Object.keys(SECTIONS), CONFIG_ID];
+  const write = flags.has('--write');
+  const json = flags.has('--json');
+  const printOnly = valueOf('print');
+  const rootsFile = valueOf('roots-file');
+  const sectionFilter = valueOf('sections');
+  const selected = sectionFilter
+    ? sectionFilter.split(',').map((s) => s.trim()).filter(Boolean)
+    : (write ? DEFAULT_WRITE : KNOWN);
+  for (const id of [...selected, ...(printOnly ? [printOnly] : [])]) {
+    if (!KNOWN.includes(id)) {
+      console.error(`Unknown section '${id}'. Known: ${KNOWN.join(', ')}`);
+      process.exit(2);
+    }
+  }
+  if (json && write) {
+    console.error('--json reports and does not write');
     process.exit(2);
   }
-  return argv[i + 1];
-};
-const tokens = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && VALUE_FLAGS.includes(argv[i - 1])));
 
-const KNOWN = [...Object.keys(SECTIONS), CONFIG_ID];
-const write = flags.has('--write');
-const json = flags.has('--json');
-const printOnly = valueOf('print');
-const rootsFile = valueOf('roots-file');
-const sectionFilter = valueOf('sections');
-const selected = sectionFilter
-  ? sectionFilter.split(',').map((s) => s.trim()).filter(Boolean)
-  : (write ? DEFAULT_WRITE : KNOWN);
-for (const id of [...selected, ...(printOnly ? [printOnly] : [])]) {
-  if (!KNOWN.includes(id)) {
-    console.error(`Unknown section '${id}'. Known: ${KNOWN.join(', ')}`);
-    process.exit(2);
+  if (printOnly && printOnly !== CONFIG_ID) {
+    const ctx = { port: DEFAULT_PORT };
+    console.log(`## ${SECTIONS[printOnly].heading}\n\n${SECTIONS[printOnly].render(ctx)}`);
+    process.exit(0);
   }
-}
-if (json && write) {
-  console.error('--json reports and does not write');
-  process.exit(2);
-}
 
-if (printOnly && printOnly !== CONFIG_ID) {
-  const ctx = { port: DEFAULT_PORT };
-  console.log(`## ${SECTIONS[printOnly].heading}\n\n${SECTIONS[printOnly].render(ctx)}`);
-  process.exit(0);
-}
-
-function resolveRepo(token) {
-  for (const candidate of [token, path.join(REPOS_ROOT, token), path.join(REPOS_ROOT, `${token}-headtracking`), path.join(REPOS_ROOT, `${token}-head-tracking`)]) {
-    if (fs.existsSync(path.join(candidate, 'README.md'))) return path.resolve(candidate);
+  function resolveRepo(token) {
+    for (const candidate of [token, path.join(REPOS_ROOT, token), path.join(REPOS_ROOT, `${token}-headtracking`), path.join(REPOS_ROOT, `${token}-head-tracking`)]) {
+      if (fs.existsSync(path.join(candidate, 'README.md'))) return path.resolve(candidate);
+    }
+    throw new Error(`No repo with a README.md found for '${token}'.`);
   }
-  throw new Error(`No repo with a README.md found for '${token}'.`);
-}
 
-let roots;
-if (rootsFile !== null) {
-  if (flags.has('--all') || tokens.length) {
-    console.error('--roots-file takes the place of --all and repo names');
-    process.exit(2);
+  let roots;
+  if (rootsFile !== null) {
+    if (flags.has('--all') || tokens.length) {
+      console.error('--roots-file takes the place of --all and repo names');
+      process.exit(2);
+    }
+    roots = fs.readFileSync(rootsFile, 'utf8').split(/\r?\n/).filter((line) => line !== '');
+  } else if (flags.has('--all')) {
+    roots = fs.readdirSync(REPOS_ROOT, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && /-(headtracking|head-tracking)$/.test(d.name))
+      .map((d) => path.join(REPOS_ROOT, d.name))
+      .filter((p) => fs.existsSync(path.join(p, '.git')) && fs.existsSync(path.join(p, 'cameraunlock-core')) && fs.existsSync(path.join(p, 'README.md')));
+  } else if (tokens.length) {
+    roots = tokens.map(resolveRepo);
+  } else {
+    roots = [path.dirname(CORE_ROOT)];
   }
-  roots = fs.readFileSync(rootsFile, 'utf8').split(/\r?\n/).filter((line) => line !== '');
-} else if (flags.has('--all')) {
-  roots = fs.readdirSync(REPOS_ROOT, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && /-(headtracking|head-tracking)$/.test(d.name))
-    .map((d) => path.join(REPOS_ROOT, d.name))
-    .filter((p) => fs.existsSync(path.join(p, '.git')) && fs.existsSync(path.join(p, 'cameraunlock-core')) && fs.existsSync(path.join(p, 'README.md')));
-} else if (tokens.length) {
-  roots = tokens.map(resolveRepo);
-} else {
-  roots = [path.dirname(CORE_ROOT)];
-}
 
-// NEXUS_MODS.md is untracked, so no check reaches it: its config block is pasted from here.
-if (printOnly === CONFIG_ID) {
-  if (roots.length !== 1) {
-    console.error('--print config prints one repo\'s block; name one repo, or run it from the repo');
-    process.exit(2);
+  // NEXUS_MODS.md is untracked, so no check reaches it: its config block is pasted from here.
+  if (printOnly === CONFIG_ID) {
+    if (roots.length !== 1) {
+      console.error('--print config prints one repo\'s block; name one repo, or run it from the repo');
+      process.exit(2);
+    }
+    const block = configBlock(repoState(roots[0]));
+    if (block === null) {
+      console.error(`${path.basename(roots[0])} is not converted to the canonical config format, so it has no config block`);
+      process.exit(1);
+    }
+    console.log(block);
+    process.exit(0);
   }
-  const block = configBlock(repoState(roots[0]));
-  if (block === null) {
-    console.error(`${path.basename(roots[0])} is not converted to the canonical config format, so it has no config block`);
-    process.exit(1);
-  }
-  console.log(block);
-  process.exit(0);
-}
 
-let drift = 0;
-let failed = 0;
-const report = [];
-for (const root of roots) {
-  const readme = path.join(root, 'README.md');
-  if (!fs.existsSync(readme)) {
-    if (!json) throw new Error(`${root} has no README.md`);
-    report.push({ root, readme: false, sections: {}, error: null });
-    continue;
-  }
-  const ctx = repoContext(root);
-  const original = fs.readFileSync(readme, 'utf8');
-  const doc = splitSections(original);
-  const notes = [];
-  const results = {};
-  let error = null;
+  let drift = 0;
+  let failed = 0;
+  const report = [];
+  for (const root of roots) {
+    const readme = path.join(root, 'README.md');
+    if (!fs.existsSync(readme)) {
+      if (!json) throw new Error(`${root} has no README.md`);
+      report.push({ root, readme: false, sections: {}, error: null });
+      continue;
+    }
+    const ctx = repoContext(root);
+    const original = fs.readFileSync(readme, 'utf8');
+    const doc = splitSections(original);
+    const notes = [];
+    const results = {};
+    let error = null;
 
-  for (const id of selected) {
-    if (id === CONFIG_ID) {
-      try {
-        results[id] = applyConfigBlock(doc, configBlock(repoState(root)));
-      } catch (e) {
-        error = e.message;
-        failed++;
-        notes.push(`${id}: cannot render, ${e.message}`);
+    for (const id of selected) {
+      if (id === CONFIG_ID) {
+        try {
+          results[id] = applyConfigBlock(doc, configBlock(repoState(root)));
+        } catch (e) {
+          error = e.message;
+          failed++;
+          notes.push(`${id}: cannot render, ${e.message}`);
+          continue;
+        }
+        if (results[id] !== 'unchanged') notes.push(`${id}: ${results[id]}`);
         continue;
       }
+      const rendered = SECTIONS[id].render(ctx);
+      if (rendered === null) {
+        if (!write) notes.push(`${id}: no data to render from, left alone`);
+        continue;
+      }
+      results[id] = applySection(doc, id, rendered, flags.has('--force'));
       if (results[id] !== 'unchanged') notes.push(`${id}: ${results[id]}`);
+    }
+
+    if (json) {
+      report.push({ root, readme: true, sections: results, error });
       continue;
     }
-    const rendered = SECTIONS[id].render(ctx);
-    if (rendered === null) {
-      if (!write) notes.push(`${id}: no data to render from, left alone`);
-      continue;
-    }
-    results[id] = applySection(doc, id, rendered, flags.has('--force'));
-    if (results[id] !== 'unchanged') notes.push(`${id}: ${results[id]}`);
+
+    const updated = joinSections(doc);
+    const changed = updated !== original.replace(/\r\n/g, '\n');
+    if (write && changed) fs.writeFileSync(readme, updated, 'utf8');
+    if (changed && !write) drift++;
+
+    const verb = error !== null ? 'fail ' : write ? (changed ? 'wrote' : 'ok   ') : (changed ? 'drift' : 'ok   ');
+    if (notes.length || changed) console.log(`${verb} ${ctx.name}${notes.length ? `  (${notes.join('; ')})` : ''}`);
   }
 
   if (json) {
-    report.push({ root, readme: true, sections: results, error });
-    continue;
+    console.log(JSON.stringify(report, null, 1));
+    process.exit(0);
   }
-
-  const updated = joinSections(doc);
-  const changed = updated !== original.replace(/\r\n/g, '\n');
-  if (write && changed) fs.writeFileSync(readme, updated, 'utf8');
-  if (changed && !write) drift++;
-
-  const verb = error !== null ? 'fail ' : write ? (changed ? 'wrote' : 'ok   ') : (changed ? 'drift' : 'ok   ');
-  if (notes.length || changed) console.log(`${verb} ${ctx.name}${notes.length ? `  (${notes.join('; ')})` : ''}`);
+  console.log(`\n${roots.length} repos, ${drift} with drift.`);
+  if (failed > 0) console.log(`${failed} config block${failed > 1 ? 's' : ''} could not be rendered.`);
+  process.exit(failed > 0 || (!write && drift > 0) ? 1 : 0);
 }
 
-if (json) {
-  console.log(JSON.stringify(report, null, 1));
-  process.exit(0);
-}
-console.log(`\n${roots.length} repos, ${drift} with drift.`);
-if (failed > 0) console.log(`${failed} config block${failed > 1 ? 's' : ''} could not be rendered.`);
-process.exit(failed > 0 || (!write && drift > 0) ? 1 : 0);
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main();

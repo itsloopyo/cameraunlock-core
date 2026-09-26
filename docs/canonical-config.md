@@ -910,9 +910,20 @@ in `legacy`:
 - **Outside `legacy`**: nothing beyond the location and the file.
 - **A BepInEx mod**, installed under `BepInEx\config\`, adds that BepInEx's ConfigurationManager
   no longer lists these settings, or for a repo outside `legacy`, does not list them.
+- **A committed file with `default` rows** adds, once, after the location: that a `default` row
+  takes its value from Defaults.ini, which every head tracking mod that keeps its settings in
+  `CameraUnlock.ini` reads and no other mod or earlier version does, and that a value changes
+  that game only; the three locations of the file's header, and that the log names the file read;
+  that the mod creates Defaults.ini with the built-in values when it finds none, except in a
+  packaged game, and never changes it afterwards; and for a repo whose `dialect` is `unity` (core's
+  C# owner), that on Linux and macOS without Wine or Proton the mod reads its settings and saves
+  none. A `legacy` repo's paragraphs add that the import writes `default` where the imported value
+  equals the row's default at that start, and that the reset rows follow Defaults.ini. The file
+  is preceded by the built-in value of each `default` row, from `data/config-schema.json`. A
+  committed file that holds values gets none of this, so its block is the one it had before.
 
 `scripts/templates/canonical-config-changelog.md` holds the matching changelog bullets for a
-conversion release of a repo in `legacy`. The untracked NEXUS_MODS.md is updated by hand from
+conversion release, the Legacy ones for a repo in `legacy`. The untracked NEXUS_MODS.md is updated by hand from
 `pixi run readme --print config`.
 
 ### Rolling back and forward
