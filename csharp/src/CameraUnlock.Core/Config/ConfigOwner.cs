@@ -213,8 +213,11 @@ namespace CameraUnlock.Core.Config
         /// where the imported value equals what <c>default</c> gives it at this Load, and the
         /// tracking mode pair only when both rows do. A row the import names in
         /// <see cref="ImportResult.FollowsDefaultsIni"/> takes what <c>default</c> gives it first,
-        /// so it is written <c>default</c>; an <see cref="ArgumentException"/> is thrown when it
-        /// names a concept that is not a row of the table following Defaults.ini.</item>
+        /// so it is written <c>default</c>. RotationEnabled or PositionEnabled there names the
+        /// tracking mode, and every row of the pair the table has takes it. An
+        /// <see cref="ArgumentException"/> is thrown when it names a concept that is not a row of
+        /// the table following Defaults.ini, or a half of the mode where the table has no
+        /// PositionEnabled.</item>
         /// <item>Neither: the table's fresh render is written, never over a file that appears
         /// meanwhile (Created). If one appears, or the folder cannot be written, the session runs on
         /// the defaults and nothing retries (Deferred).</item>
@@ -822,18 +825,23 @@ namespace CameraUnlock.Core.Config
         }
 
         // The import's FollowsDefaultsIni rows take the value default gives them at this start, so
-        // the migration writes them default.
+        // the migration writes them default. RotationEnabled or PositionEnabled names the tracking
+        // mode, which takes every row of the pair the table has, so a two-state table without
+        // RotationEnabled takes an import that names both, and a mode is never half left.
         private void FollowDefaultsIni(ImportResult import, TConfig imported)
         {
             foreach (ConceptDescriptor concept in import.FollowsDefaultsIni)
             {
-                int row = _table.RowOf(concept);
+                bool pair = concept == ConfigConcepts.RotationEnabled || concept == ConfigConcepts.PositionEnabled;
+                int row = _table.RowOf(pair ? ConfigConcepts.PositionEnabled : concept);
                 if (row < 0 || !_table.RowFollowsDefaultsIni(row))
                 {
                     throw new ArgumentException(concept.Key + " is left to Defaults.ini by the import, and is not a row "
                         + "of this table that follows Defaults.ini");
                 }
                 _table.RowAssign(row, imported, _effective);
+                int rotation = _table.RowOf(ConfigConcepts.RotationEnabled);
+                if (pair && rotation >= 0) _table.RowAssign(rotation, imported, _effective);
             }
         }
 

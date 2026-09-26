@@ -281,7 +281,7 @@ function legacyParagraphs(legacy, defaults, reframework) {
     const pair = keys.has('RotationEnabled') && keys.has('PositionEnabled')
       ? ' `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.'
       : '';
-    imported.push(`A setting that the defaults below set to \`default\` is written as \`default\` when the value imported for it equals its default at that start, which is the value ${followed} gives it, or the built-in value where ${followed} gives none. It then follows ${followed}. Every other setting is written with the value imported for it.${pair}`);
+    imported.push(`A setting that the defaults below set to \`default\` is written as \`default\` when you never changed it from the default earlier versions used, because ${old} does not hold it or holds that default. It then follows ${followed}, so it takes the value ${followed} gives it, or the built-in value where ${followed} gives none, which can differ from the default earlier versions used. A setting you changed is written with the value imported for it, or as \`default\` where that value equals its default at that start.${pair}`);
     reset += ` Every setting they set to \`default\` then follows ${followed}.`;
   }
   return [

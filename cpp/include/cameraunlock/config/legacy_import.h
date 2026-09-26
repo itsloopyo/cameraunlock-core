@@ -112,12 +112,13 @@ struct ImportResult {
     /// For Imported and Absent, every pose-shaping setting the frozen reader read, in the order
     /// the map met them (LegacyPoseShaping); empty otherwise.
     std::vector<PoseShapingValue> pose_shaping;
-    /// For Imported and Absent, the concepts the map leaves to Defaults.ini because the legacy
-    /// value is the one a build shipped switched off pending verification, which no player chose
-    /// (approved change follows_default); empty otherwise. The migration gives each the value
-    /// `default` gives it at that start and writes it `default`, so it follows Defaults.ini from
-    /// then on. Each must be a row of the table that follows Defaults.ini, or the migration
-    /// throws. The map still sets the field, to the value it holds when the import runs alone.
+    /// For Imported and Absent, the concepts the map leaves to Defaults.ini because the player
+    /// never changed them from what the legacy build shipped, which LegacyFollowsDefaultsIni
+    /// collects; empty otherwise. The migration gives each the value `default` gives it at that
+    /// start and writes it `default`, so it follows Defaults.ini from then on. RotationEnabled or
+    /// PositionEnabled names the tracking mode, and every row of the pair the table has takes it.
+    /// Each must be a row of the table that follows Defaults.ini, or the migration throws. The map
+    /// still sets the field, to the value it holds when the import runs alone.
     std::vector<schema::Concept> follows_defaults_ini;
 
     static ImportResult Imported(std::vector<DroppedValue> dropped, std::vector<PoseShapingValue> pose_shaping = {},
@@ -242,5 +243,63 @@ void LegacyPositionSwitch(bool value, const std::string& section, const std::str
 /// when `shipped` is not finite.
 void LegacyTrackerPivot(float value, float shipped, const std::string& section, const std::string& key,
                         std::vector<DroppedValue>& dropped);
+
+/// The rows a legacy import leaves to Defaults.ini (owner rule of 2026-09-26). A setting the player
+/// never changed from what the legacy build shipped, because the legacy file does not hold it or
+/// holds the shipped value, is no player's choice, so the migration writes it `default` and it
+/// follows Defaults.ini. A setting the player changed is carried as a value, written `default`
+/// only where it equals what `default` gives at that start. Every legacy import gives each row of
+/// its table that follows Defaults.ini (a global concept row not marked PerGame) one call, and
+/// passes Concepts() to ImportResult::Imported or Absent as follows_defaults_ini. The map still
+/// sets every field from the legacy value.
+class LegacyFollowsDefaultsIni {
+public:
+    /// A setting the legacy build read: left to Defaults.ini when `value`, the effective legacy
+    /// value, equals `shipped`, the effective value the legacy build shipped, compared with ==.
+    /// Throws std::invalid_argument for RotationEnabled or PositionEnabled (TrackingMode), a
+    /// concept that is not global or was given before, or a float or double `shipped` that is not
+    /// finite.
+    template <class T>
+    void Setting(schema::Concept id, const T& value, const T& shipped) {
+        if constexpr (std::is_floating_point_v<T>) {
+            if (!std::isfinite(shipped)) {
+                throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
+                                            ": the shipped value is not finite");
+            }
+        }
+        Setting(id, value == shipped);
+    }
+
+    /// A setting the import compares itself, such as a hotkey code together with its chord
+    /// switch: left to Defaults.ini when `unchanged`. Throws as the comparing overload does.
+    void Setting(schema::Concept id, bool unchanged);
+
+    /// A concept the legacy build had no setting for, which no player can have changed: always
+    /// left to Defaults.ini. Throws as Setting does.
+    void NotInLegacy(schema::Concept id);
+
+    /// The tracking mode, RotationEnabled and PositionEnabled as one unit: both are left to
+    /// Defaults.ini when `value`, the legacy mode, equals `shipped`, the mode the legacy build
+    /// shipped, compared with ==. Throws std::invalid_argument when the mode was given before.
+    template <class T>
+    void TrackingMode(const T& value, const T& shipped) {
+        TrackingMode(value == shipped);
+    }
+
+    /// The tracking mode, compared by the import over every legacy setting it derives the mode
+    /// from, a position switch included: both rows are left to Defaults.ini when `unchanged`.
+    /// Throws std::invalid_argument when the mode was given before.
+    void TrackingMode(bool unchanged);
+
+    /// The concepts left to Defaults.ini, in the order given, for ImportResult's
+    /// follows_defaults_ini.
+    const std::vector<schema::Concept>& Concepts() const { return concepts_; }
+
+private:
+    void Given(schema::Concept id);
+
+    std::vector<schema::Concept> given_;
+    std::vector<schema::Concept> concepts_;
+};
 
 }  // namespace cameraunlock::config

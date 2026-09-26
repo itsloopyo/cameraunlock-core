@@ -349,8 +349,10 @@ public:
     ///   at `path` (Migrated). A row that follows Defaults.ini is written `default` where the
     ///   imported value equals what `default` gives it at this Load, and the tracking mode pair
     ///   only when both rows do. A row the import names in follows_defaults_ini takes what
-    ///   `default` gives it first, so it is written `default`; std::invalid_argument is thrown
-    ///   when it names a concept that is not a row of the table following Defaults.ini.
+    ///   `default` gives it first, so it is written `default`. RotationEnabled or PositionEnabled
+    ///   there names the tracking mode, and every row of the pair the table has takes it.
+    ///   std::invalid_argument is thrown when it names a concept that is not a row of the table
+    ///   following Defaults.ini, or a half of the mode where the table has no PositionEnabled.
     /// - Neither: the table's fresh render is written, never over a file that appears meanwhile
     ///   (Created). If one appears, or the folder cannot be written, the session runs on the
     ///   defaults and nothing retries (Deferred).
@@ -720,16 +722,21 @@ private:
     }
 
     // The import's follows_defaults_ini rows take the value `default` gives them at this start, so
-    // the migration writes them `default`.
+    // the migration writes them `default`. RotationEnabled or PositionEnabled names the tracking
+    // mode, which takes every row of the pair the table has, so a two-state table without
+    // RotationEnabled takes an import that names both, and a mode is never half left.
     void FollowDefaultsIni(const ImportResult& legacy, Config& imported) const {
         for (const schema::Concept id : legacy.follows_defaults_ini) {
-            const std::optional<std::size_t> row = RowOf(id);
+            const bool pair = id == schema::Concept::RotationEnabled || id == schema::Concept::PositionEnabled;
+            const std::optional<std::size_t> row = RowOf(pair ? schema::Concept::PositionEnabled : id);
             if (!row || !detail::FollowsDefaultsIni(table_.rows_[*row])) {
                 throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
                                             " is left to Defaults.ini by the import, and is not a row of this "
                                             "table that follows Defaults.ini");
             }
             table_.ops_[*row]->Assign(imported, effective_);
+            const std::optional<std::size_t> rotation = RowOf(schema::Concept::RotationEnabled);
+            if (pair && rotation) table_.ops_[*rotation]->Assign(imported, effective_);
         }
     }
 

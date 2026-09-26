@@ -9,6 +9,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - a setting the player never changed migrates as default, with LegacyFollowsDefaultsIni
+
+Owner rule of 2026-09-26, from testing assetto-corsa-evo: with Defaults.ini set to position only,
+a migrated `HeadTracking.ini` whose `[Position] Enabled=1` was only the old build's shipped default
+imported the mode "both", which differed from Defaults.ini, so the migration wrote
+`RotationEnabled=true` and `PositionEnabled=true` and the game ignored the global. A value equal to
+the old build's default is no player's choice. Now a setting the legacy file does not hold, or holds
+at the old build's default, is migrated as `default` and follows Defaults.ini; only a value the
+player changed is written explicitly, and still as `default` where it equals what `default` gives.
+
+- **Added, C++** `LegacyFollowsDefaultsIni` (`config/legacy_import.h`): `Setting(concept, value,
+  shipped)` (compared with `==`), `Setting(concept, unchanged)`, `NotInLegacy(concept)`,
+  `TrackingMode(value, shipped)`, `TrackingMode(unchanged)` and `Concepts()`, which a map passes to
+  `ImportResult::Imported` or `Absent` as `follows_defaults_ini`. It throws `std::invalid_argument`
+  for either half of the tracking mode outside `TrackingMode`, a concept that is not global or was
+  given before, and from `Setting`, a float or double `shipped` that is not finite.
+- **Added, C#** `LegacyFollowsDefaultsIni`, the same members, `Concepts` a
+  `ReadOnlyCollection<ConceptDescriptor>`, comparing with `EqualityComparer<T>.Default` and throwing
+  `ArgumentException`.
+- **Changed, owners.** `RotationEnabled` or `PositionEnabled` in `follows_defaults_ini` (C#
+  `FollowsDefaultsIni`) now names the tracking mode, and every row of the pair the table has takes
+  what `default` gives. Naming `RotationEnabled` for a two-state table, which has no
+  `RotationEnabled` row, no longer throws; naming one half on a table with both rows no longer
+  leaves the other half at the imported value.
+- **Changed, REFramework.** `PluginConfigLegacyImport` compares every row but `DiagnosticMarkerKey`
+  with `PluginConfig::SetDefaults` through `LegacyFollowsDefaultsIni`, so a REFramework mod's
+  untouched rows migrate as `default`. With Defaults.ini at the built-in values the migrated bytes
+  do not change, since the table's defaults are the schema's.
+- **README and changelog wording.** `generate-readme.mjs` and
+  `scripts/templates/canonical-config-changelog.md` describe the new rule. A converted repo's README
+  config block is stale until `generate-readme.mjs --write` runs in it.
+- **Every converted repo with a legacy import adopts it**: each map gives every row of its table that
+  follows Defaults.ini one `LegacyFollowsDefaultsIni` call against the frozen defaults, and its
+  differential test asserts the untouched rows migrate as `default` (docs/canonical-config.md, "The
+  legacy import").
+
 ### Removed - BREAKING - PositionAllowed and the tracker pivot are not settings
 
 Two owner rulings of 2026-09-26. The tracking mode (`RotationEnabled` with `PositionEnabled`: both,

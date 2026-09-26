@@ -3,6 +3,8 @@
 #include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/input/key_bindings.h>
 
+#include <algorithm>
+
 namespace cameraunlock::config {
 
 namespace {
@@ -124,6 +126,40 @@ void LegacyTrackerPivot(float value, float shipped, const std::string& section, 
     }
     if (value == shipped) return;
     dropped.push_back({DropRule::TrackerPivot, section, key, PoseShapingText(value)});
+}
+
+void LegacyFollowsDefaultsIni::Setting(schema::Concept id, bool unchanged) {
+    if (id == schema::Concept::RotationEnabled || id == schema::Concept::PositionEnabled) {
+        throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
+                                    " is half of the tracking mode, which TrackingMode takes as one unit");
+    }
+    Given(id);
+    if (unchanged) concepts_.push_back(id);
+}
+
+void LegacyFollowsDefaultsIni::NotInLegacy(schema::Concept id) { Setting(id, true); }
+
+void LegacyFollowsDefaultsIni::TrackingMode(bool unchanged) {
+    if (std::find(given_.begin(), given_.end(), schema::Concept::PositionEnabled) != given_.end()) {
+        throw std::invalid_argument("the tracking mode was given before");
+    }
+    given_.push_back(schema::Concept::RotationEnabled);
+    given_.push_back(schema::Concept::PositionEnabled);
+    if (!unchanged) return;
+    concepts_.push_back(schema::Concept::RotationEnabled);
+    concepts_.push_back(schema::Concept::PositionEnabled);
+}
+
+void LegacyFollowsDefaultsIni::Given(schema::Concept id) {
+    const schema::ConceptInfo& info = schema::kConcepts[static_cast<std::size_t>(id)];
+    if (!info.global) {
+        throw std::invalid_argument(std::string(info.name) +
+                                    " is not a global concept, so no row of it follows Defaults.ini");
+    }
+    if (std::find(given_.begin(), given_.end(), id) != given_.end()) {
+        throw std::invalid_argument(std::string(info.name) + " was given before");
+    }
+    given_.push_back(id);
 }
 
 }  // namespace cameraunlock::config

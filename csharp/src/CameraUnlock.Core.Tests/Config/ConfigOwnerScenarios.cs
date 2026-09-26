@@ -103,6 +103,12 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-row-the-import-leaves-to-defaults-ini-is-written-default", ARowTheImportLeavesToDefaultsIniIsWrittenDefault),
             Scenario("a-row-the-import-leaves-to-defaults-ini-that-does-not-follow-it-throws",
                 ARowTheImportLeavesToDefaultsIniThatDoesNotFollowItThrows),
+            Scenario("an-old-default-in-the-legacy-file-follows-defaults-ini", AnOldDefaultInTheLegacyFileFollowsDefaultsIni),
+            Scenario("an-old-default-absent-from-the-legacy-file-follows-defaults-ini",
+                AnOldDefaultAbsentFromTheLegacyFileFollowsDefaultsIni),
+            Scenario("a-value-the-player-changed-is-written", AValueThePlayerChangedIsWritten),
+            Scenario("an-untouched-tracking-mode-follows-defaults-ini-as-one-unit",
+                AnUntouchedTrackingModeFollowsDefaultsIniAsOneUnit),
             Scenario("a-toggle-on-a-default-row-writes-its-value", AToggleOnADefaultRowWritesItsValue),
             Scenario("a-mode-change-from-default-writes-both-rows", AModeChangeFromDefaultWritesBothRows),
             Scenario("end-saves-nothing", EndSavesNothing),
@@ -1300,7 +1306,8 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectStatus(load, ConfigLoadStatus.Migrated);
             string migrated = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
             Expect(migrated.Contains("\r\nToggleKey=End, Ctrl+Shift+Y\r\n") && migrated.Contains("\r\nEnableOnStartup=default\r\n"),
-                "the untouched key list is not what default gives here, so it is written as a value:\n" + migrated);
+                "a key list the import does not leave to Defaults.ini, and default gives another, is written as a value:\n"
+                + migrated);
             Expect(load.Config.ToggleKeyName == "End, Ctrl+Shift+Y", "the player keeps the keys they had");
             rig.ExpectLegacyKept();
         }
@@ -1345,6 +1352,114 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectContains(e.Message,
                 "CollisionEnabled is left to Defaults.ini by the import, and is not a row of this table that follows Defaults.ini");
             ExpectNotImported(rig);
+        }
+
+        // The owner's case of 2026-09-26: the legacy file holds a value only because the old build
+        // shipped it, and Defaults.ini says otherwise.
+        private static void AnOldDefaultInTheLegacyFileFollowsDefaultsIni(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.Legacy.FollowsDefaultsIni = true;
+            rig.PutLegacy(Ascii("[General]\r\nPort = 4242\r\nYawWorld = true\r\n"));
+            rig.PutDefaults(Ascii("[Network]\r\nUdpPort=6000\r\n[General]\r\nEnableOnStartup=false\r\nWorldSpaceYaw=false\r\n"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            string migrated = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+            foreach (string line in new[]
+            {
+                "UdpPort=default", "EnableOnStartup=default", "WorldSpaceYaw=default", "RotationEnabled=default",
+                "PositionEnabled=default", "ToggleKey=default", "LightMultiplier=default",
+            })
+            {
+                Expect(migrated.Contains("\r\n" + line + "\r\n"), "the migrated file holds " + line + ":\n" + migrated);
+            }
+            Expect(load.Config.UdpPort == 6000 && !load.Config.EnableOnStartup && !load.Config.WorldSpaceYaw,
+                "the session takes Defaults.ini's values");
+            rig.ExpectLegacyKept();
+        }
+
+        private static void AnOldDefaultAbsentFromTheLegacyFileFollowsDefaultsIni(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.Legacy.FollowsDefaultsIni = true;
+            rig.PutLegacy(Ascii("; nothing set\r\n[General]\r\n"));
+            rig.PutDefaults(Ascii("[Network]\r\nUdpPort=6000\r\n[Light]\r\nLightMultiplier=2.5\r\n"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            string migrated = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+            Expect(migrated.Contains("\r\nUdpPort=default\r\n") && migrated.Contains("\r\nLightMultiplier=default\r\n"),
+                "the rows the file does not hold are written default:\n" + migrated);
+            Expect(load.Config.UdpPort == 6000 && load.Config.Light.Multiplier == 2.5f, "the session takes Defaults.ini's values");
+            rig.ExpectLegacyKept();
+        }
+
+        private static void AValueThePlayerChangedIsWritten(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.Legacy.FollowsDefaultsIni = true;
+            rig.PutLegacy(Ascii("[General]\r\nPort = 5555\r\nYawWorld = false\r\n"));
+            rig.PutDefaults(Ascii("[Network]\r\nUdpPort=6000\r\n[General]\r\nWorldSpaceYaw=false\r\n"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            string migrated = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+            Expect(migrated.Contains("\r\nUdpPort=5555\r\n"),
+                "a changed value Defaults.ini does not hold is written as a value:\n" + migrated);
+            Expect(migrated.Contains("\r\nWorldSpaceYaw=default\r\n"),
+                "a changed value Defaults.ini holds is written default:\n" + migrated);
+            Expect(load.Config.UdpPort == 5555 && !load.Config.WorldSpaceYaw, "the player keeps the values they set");
+            rig.ExpectLegacyKept();
+        }
+
+        private static void AnUntouchedTrackingModeFollowsDefaultsIniAsOneUnit(string dir)
+        {
+            byte[] positionOnly = Ascii("[General]\r\nRotationEnabled=false\r\n[Position]\r\nPositionEnabled=true\r\n");
+
+            var untouched = new Rig(Sub(dir, "untouched"));
+            untouched.Legacy.FollowsDefaultsIni = true;
+            untouched.PutLegacy(Ascii("[Position]\r\nPosition = true\r\n"));
+            untouched.PutDefaults(positionOnly);
+            ConfigLoadResult<HeadTrackingConfigData> load = untouched.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            string migrated = Encoding.ASCII.GetString(File.ReadAllBytes(untouched.Path));
+            Expect(migrated.Contains("\r\nRotationEnabled=default\r\n") && migrated.Contains("\r\nPositionEnabled=default\r\n"),
+                "an old default mode is written default on both rows:\n" + migrated);
+            Expect(!load.Config.RotationEnabled && load.Config.PositionEnabled, "the session takes Defaults.ini's mode");
+            untouched.ExpectLegacyKept();
+
+            var changed = new Rig(Sub(dir, "changed"));
+            changed.Legacy.FollowsDefaultsIni = true;
+            changed.PutLegacy(Ascii("[Position]\r\nPosition = false\r\n"));
+            changed.PutDefaults(positionOnly);
+            load = changed.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            migrated = Encoding.ASCII.GetString(File.ReadAllBytes(changed.Path));
+            Expect(migrated.Contains("\r\nRotationEnabled=true\r\n") && migrated.Contains("\r\nPositionEnabled=false\r\n"),
+                "a mode the player changed is written on both rows:\n" + migrated);
+            Expect(load.Config.RotationEnabled && !load.Config.PositionEnabled, "the player keeps rotation only");
+            changed.ExpectLegacyKept();
+
+            var twoState = new Rig(Sub(dir, "two-state"));
+            twoState.Legacy.FollowsDefaultsIni = true;
+            twoState.Table = HeadTrackingConfigTable.Create(ConfigConcepts.UdpPort, ConfigConcepts.EnableOnStartup,
+                    ConfigConcepts.WorldSpaceYaw, ConfigConcepts.PositionEnabled, ConfigConcepts.ToggleKey,
+                    ConfigConcepts.LightMultiplier)
+                .Select(ConfigConcepts.PositionEnabled).Writable();
+            twoState.PutLegacy(Ascii("[Position]\r\nPosition = true\r\n"));
+            twoState.PutDefaults(Ascii("[Position]\r\nPositionEnabled=false\r\n"));
+            load = twoState.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Migrated);
+            migrated = Encoding.ASCII.GetString(File.ReadAllBytes(twoState.Path));
+            Expect(migrated.Contains("\r\nPositionEnabled=default\r\n") && !migrated.Contains("\r\nRotationEnabled="),
+                "a table without RotationEnabled takes the mode on PositionEnabled:\n" + migrated);
+            Expect(!load.Config.PositionEnabled, "the session takes Defaults.ini's PositionEnabled");
+            twoState.ExpectLegacyKept();
+        }
+
+        private static string Sub(string dir, string name)
+        {
+            string sub = Path.Combine(dir, name);
+            Directory.CreateDirectory(sub);
+            return sub;
         }
 
         private static void ImportMigratedValues(HeadTrackingConfigData config)
@@ -1835,6 +1950,10 @@ namespace CameraUnlock.Core.Tests.Config
             public Func<HeadTrackingConfigData, ImportResult> Result;
             public Action<LegacyImportInput> During;
 
+            // Leaves each row the file does not change from the frozen defaults to Defaults.ini, as
+            // every import does now (LegacyFollowsDefaultsIni).
+            public bool FollowsDefaultsIni;
+
             public Legacy()
             {
                 Import = new LegacyImport<HeadTrackingConfigData>(Run, new[]
@@ -1857,10 +1976,14 @@ namespace CameraUnlock.Core.Tests.Config
                 if (During != null) During(input);
                 if (Result != null) return Result(config);
 
-                int port = 4242;
-                bool yawWorld = true;
-                bool position = true;
-                float light = HeadFollowLightSettings.DefaultMultiplier;
+                const int shippedPort = 4242;
+                const bool shippedYawWorld = true;
+                const bool shippedPosition = true;
+                const float shippedLight = HeadFollowLightSettings.DefaultMultiplier;
+                int port = shippedPort;
+                bool yawWorld = shippedYawWorld;
+                bool position = shippedPosition;
+                float light = shippedLight;
                 string section = "";
                 foreach (string raw in File.ReadAllLines(input.Path))
                 {
@@ -1888,7 +2011,17 @@ namespace CameraUnlock.Core.Tests.Config
                 float multiplier = LegacyNormalisations.FiniteOrDefault(light, HeadFollowLightSettings.DefaultMultiplier, "Light",
                     "LightMultiplier", dropped);
                 config.Light = new HeadFollowLightSettings { FollowsHead = config.Light.FollowsHead, Multiplier = multiplier };
-                return ImportResult.Imported(dropped);
+                var follows = new LegacyFollowsDefaultsIni();
+                if (FollowsDefaultsIni)
+                {
+                    follows.Setting(ConfigConcepts.UdpPort, port, shippedPort);
+                    follows.NotInLegacy(ConfigConcepts.EnableOnStartup);
+                    follows.Setting(ConfigConcepts.WorldSpaceYaw, yawWorld, shippedYawWorld);
+                    follows.TrackingMode(position, shippedPosition);
+                    follows.NotInLegacy(ConfigConcepts.ToggleKey);
+                    follows.Setting(ConfigConcepts.LightMultiplier, light, shippedLight);
+                }
+                return ImportResult.Imported(dropped, new PoseShapingValue[0], follows.Concepts);
             }
         }
 

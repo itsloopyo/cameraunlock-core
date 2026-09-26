@@ -13,6 +13,7 @@ namespace {
 
 using config::DroppedValue;
 using config::ImportResult;
+using config::LegacyFollowsDefaultsIni;
 using config::LegacyInput;
 using config::LegacyKey;
 using config::LegacyPoseShaping;
@@ -142,8 +143,27 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
             LegacyPoseShaping(legacy.positionInvertZ, shipped.positionInvertZ, "Position", "InvertZ", pose, dropped);
         }
 
-        return found ? ImportResult::Imported(std::move(dropped), std::move(pose))
-                     : ImportResult::Absent(std::move(dropped), std::move(pose));
+        LegacyFollowsDefaultsIni follows;
+        follows.Setting(Concept::UdpPort, legacy.udpPort, shipped.udpPort);
+        follows.Setting(Concept::EnableOnStartup, legacy.autoEnable, shipped.autoEnable);
+        follows.Setting(Concept::WorldSpaceYaw, legacy.worldSpaceYaw, shipped.worldSpaceYaw);
+        follows.Setting(Concept::LocalSmoothing, legacy.localSmoothing, shipped.localSmoothing);
+        follows.Setting(Concept::RemoteSmoothing, legacy.remoteSmoothing, shipped.remoteSmoothing);
+        follows.TrackingMode(legacy.positionEnabled, shipped.positionEnabled);
+        follows.Setting(Concept::PositionLimitX, legacy.positionLimitX, shipped.positionLimitX);
+        follows.Setting(Concept::PositionLimitY, legacy.positionLimitY, shipped.positionLimitY);
+        follows.Setting(Concept::PositionLimitZ, legacy.positionLimitZ, shipped.positionLimitZ);
+        follows.Setting(Concept::PositionLimitZBack, legacy.positionLimitZBack, shipped.positionLimitZBack);
+        follows.Setting(Concept::ToggleKey, legacy.toggleKey, shipped.toggleKey);
+        follows.Setting(Concept::CycleTrackingModeKey, legacy.positionToggleKey, shipped.positionToggleKey);
+        follows.Setting(Concept::YawModeKey, legacy.yawModeKey, shipped.yawModeKey);
+        if (schema.flashlight) {
+            follows.Setting(Concept::LightFollowsHead, legacy.flashlightTracking, shipped.flashlightTracking);
+            follows.Setting(Concept::LightMultiplier, legacy.flashlightMultiplier, shipped.flashlightMultiplier);
+        }
+
+        return found ? ImportResult::Imported(std::move(dropped), std::move(pose), follows.Concepts())
+                     : ImportResult::Absent(std::move(dropped), std::move(pose), follows.Concepts());
     };
     return import;
 }

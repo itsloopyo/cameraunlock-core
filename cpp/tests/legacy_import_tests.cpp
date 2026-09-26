@@ -1,7 +1,7 @@
 // The legacy import support: ImportResult's factories, the dropped-value lines, N1 and N3
 // (LegacyVirtualKeyToBindings), N2 (LegacyFiniteOrDefault), pose shaping (LegacyPoseShaping), the
-// position switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot) and a LegacyImport
-// over a Config.
+// position switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot), the rows left to
+// Defaults.ini (LegacyFollowsDefaultsIni) and a LegacyImport over a Config.
 
 #include <cameraunlock/config/legacy_import.h>
 #include <cameraunlock/config/value_guards.h>
@@ -304,6 +304,54 @@ void TestTrackerPivot() {
     Check(dropped.size() == 3, "and records nothing");
 }
 
+void TestFollowsDefaultsIni() {
+    using Concept = schema::Concept;
+    LegacyFollowsDefaultsIni follows;
+    follows.Setting(Concept::UdpPort, 4242, 4242);
+    follows.Setting(Concept::WorldSpaceYaw, false, true);
+    follows.Setting(Concept::RemoteSmoothing, -0.0f, 0.0f);
+    follows.Setting(Concept::LocalSmoothing, std::numeric_limits<float>::quiet_NaN(), 0.0f);
+    follows.Setting(Concept::ToggleKey, 0x23LL, 0x23LL);
+    follows.Setting(Concept::YawModeKey, false);
+    follows.Setting(Concept::LightMultiplier, true);
+    follows.NotInLegacy(Concept::TrueFreeLook);
+    Check(follows.Concepts() == std::vector<Concept>{Concept::UdpPort, Concept::RemoteSmoothing, Concept::ToggleKey,
+                                                      Concept::LightMultiplier, Concept::TrueFreeLook},
+          "a setting equal to the shipped one, compared with ==, and one the legacy build lacked are left to "
+          "Defaults.ini, in the order given");
+
+    LegacyFollowsDefaultsIni unchanged_mode;
+    unchanged_mode.TrackingMode(1, 1);
+    Check(unchanged_mode.Concepts() == std::vector<Concept>{Concept::RotationEnabled, Concept::PositionEnabled},
+          "a tracking mode equal to the shipped one leaves both rows to Defaults.ini");
+    LegacyFollowsDefaultsIni changed_mode;
+    changed_mode.TrackingMode(false);
+    Check(changed_mode.Concepts().empty(), "a changed tracking mode leaves neither row");
+
+    LegacyFollowsDefaultsIni refused;
+    const float inf = std::numeric_limits<float>::infinity();
+    Check(Thrown([&] { refused.Setting(Concept::PositionEnabled, true, true); }) ==
+              "PositionEnabled is half of the tracking mode, which TrackingMode takes as one unit",
+          "PositionEnabled is refused outside TrackingMode");
+    Check(Thrown([&] { refused.NotInLegacy(Concept::RotationEnabled); }) ==
+              "RotationEnabled is half of the tracking mode, which TrackingMode takes as one unit",
+          "and RotationEnabled");
+    Check(Thrown([&] { refused.Setting(Concept::CollisionMargin, 0.1f, 0.1f); }) ==
+              "CollisionMargin is not a global concept, so no row of it follows Defaults.ini",
+          "a concept that is not global is refused");
+    Check(Thrown([&] { refused.Setting(Concept::LocalSmoothing, 0.0, static_cast<double>(inf)); }) ==
+              "LocalSmoothing: the shipped value is not finite",
+          "a shipped value that is not finite is refused");
+    refused.Setting(Concept::UdpPort, 1, 2);
+    Check(Thrown([&] { refused.NotInLegacy(Concept::UdpPort); }) == "UdpPort was given before",
+          "a concept given twice is refused");
+    refused.TrackingMode(true);
+    Check(Thrown([&] { refused.TrackingMode(1, 1); }) == "the tracking mode was given before",
+          "the tracking mode given twice is refused");
+    Check(refused.Concepts() == std::vector<Concept>{Concept::RotationEnabled, Concept::PositionEnabled},
+          "a refused call adds nothing");
+}
+
 struct FrozenConfig {
     long long toggle_key = 0x23;
     float remote_smoothing = 0.15f;
@@ -357,6 +405,7 @@ int RunLegacyImportTests() {
         TestPoseShaping();
         TestPositionSwitch();
         TestTrackerPivot();
+        TestFollowsDefaultsIni();
         TestLegacyImport();
     } catch (const std::exception& e) {
         std::cout << "  [FAIL] threw: " << e.what() << "\n";

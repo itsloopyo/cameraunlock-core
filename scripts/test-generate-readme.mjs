@@ -61,7 +61,7 @@ const nativeSentence = (legacy) => legacy === null
   ? "On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no `CameraUnlock.ini` and a change made in game lasts until the game closes."
   : `On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no \`CameraUnlock.ini\`, reads your settings from \`${legacy}\` again at every start while there is no \`CameraUnlock.ini\`, and a change made in game lasts until the game closes.`;
 const NATIVE_CREATE = ", or the game runs on Linux or macOS without Wine or Proton.";
-const MIGRATED = "is written as `default` when the value imported for it equals its default at that start";
+const MIGRATED = "is written as `default` when you never changed it from the default earlier versions used";
 const PAIR = "`RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.";
 const N3 = "- A hotkey set to Ctrl, Shift or Alt on its own.";
 const RESET ="replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.";

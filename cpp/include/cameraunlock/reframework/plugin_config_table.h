@@ -40,7 +40,11 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
 /// the result lists those nine, or six, in pose_shaping, and one that differs from SetDefaults is
 /// also dropped (PoseShaping). SetDefaults
 /// is where an RE mod keeps its shipped shaping, schema.positionSensitivity included, so a folded
-/// value is one PluginMod still applies. No other field of `out` is set. Imported, or Absent when Read finds no file; it never refuses,
+/// value is one PluginMod still applies. No other field of `out` is set. Every row of the table
+/// but DiagnosticMarkerKey goes through config::LegacyFollowsDefaultsIni against SetDefaults (the
+/// tracking mode as PositionEnabled, a hotkey as its code), so a row the file does not hold or
+/// holds at the SetDefaults value is listed in follows_defaults_ini and migrates as `default`.
+/// Imported, or Absent when Read finds no file; it never refuses,
 /// and writes nothing. `keys` lists every key Read reads for this schema, [Position] Smoothing
 /// (read only to warn that it is retired) and [General] ConfigVersion included.
 config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSchema& schema);

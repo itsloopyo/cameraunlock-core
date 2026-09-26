@@ -116,7 +116,8 @@ whose mode control has two states has no `RotationEnabled`. Every bound row is w
 file writes `default` on each global concept row not marked `PerGame`, which then takes
 Defaults.ini's value, or the row's own default where Defaults.ini gives none; a key the player deleted or one a
 later version added reads the same way. A migrated file writes `default` on such a row where the
-imported value equals what `default` gives it at that start, and the value otherwise (see
+player never changed the setting from the legacy build's default or the imported value equals
+what `default` gives it at that start, and the value otherwise (see
 [What happens at the first launch](#what-happens-at-the-first-launch)). A `PerGame` row, a row of
 a concept that is not global (`CollisionMargin`, `CollisionChannel`) and a local row are never
 written as the token: they hold their value, or, for an Engine row at its default, the comment
@@ -669,8 +670,11 @@ default beside the chord and applies neither N1 nor N3, and the README config bl
 REFramework repo leaves out the N3 line. With the flag set, `PluginMod` keeps the settings in
 `reframework\plugins\CameraUnlock.ini`, beside the plugin DLL, and imports
 `PluginModDescriptor::configFileName` (`HeadTracking.ini` by default) from the same folder while
-`CameraUnlock.ini` is absent; that file is never written. With the flag unset, a mod reads,
-migrates and writes `configFileName` as it did before.
+`CameraUnlock.ini` is absent; that file is never written. The import compares every row but
+`DiagnosticMarkerKey` with `PluginConfig::SetDefaults` through `LegacyFollowsDefaultsIni` (the
+mode as `PositionEnabled`, a hotkey as its code), so a row the legacy file does not hold, or holds
+at that value, migrates as `default`. With the flag unset, a mod reads, migrates and writes
+`configFileName` as it did before.
 
 ## The config owner
 
@@ -1339,15 +1343,46 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `PositionSwitchOff` (8) | approved change `position_switch_off` | A position switch whose legacy value is false, where it also kept the mode hotkey off the position modes (the setting `PositionAllowed` stood for: amnesia-rebirth, soma, bully-scholarship-edition, a-plague-tale-innocence, the-painscreek-killings). The map writes the rotation-only tracking mode, `RotationEnabled` true and `PositionEnabled` false, which keeps the view the player had, and records the switch (C++ `LegacyPositionSwitch`, C# `LegacyPositionSwitch.Record`, called after the map has written the tracking mode). Nothing else carries it, so the mode hotkey can now turn positional tracking back on. A true value changes nothing and is not recorded |
 | `TrackerPivot` (9) | approved change `tracker_pivot` | A neck pivot distance (`TrackerPivotForward`, `TrackerPivotUp`, or any other spelling of either) the player changed from the value the game shipped (C++ `LegacyTrackerPivot`, C# `LegacyTrackerPivot.Record`). Both are compared as the pipeline ran them, so a pivot behind the game's own switch set to off, or a key its code never read, counts as 0. The tracker is authoritative, so the setting has no row. The pivot the game shipped is no player's choice: the conversion keeps it in the mod's code, and a legacy value equal to it is not recorded |
 
-A `FollowsDefault` value is the one the build shipped, which no player chose, so the map also
-names the row's concept in the result's `follows_defaults_ini` (C# `FollowsDefaultsIni`, passed
-to the `Imported` or `Absent` factory). The migration then gives that row the value `default`
-gives it at that start and writes it `default`, so it follows Defaults.ini from then on, whatever
-Defaults.ini holds. The map still sets the field to the row's built-in default, which is what the
-import gives when it runs alone. A value the player set away from the shipped one is carried as
-usual, and is written `default` only where it equals what `default` gives. A concept named there
-that is not a row of the table following Defaults.ini makes the migration throw
-std::invalid_argument (C# `ArgumentException`).
+**A setting the player never changed follows Defaults.ini** (owner rule of 2026-09-26). A
+setting left at the legacy build's default is no player's choice, so it is migrated as `default`
+and follows Defaults.ini. That covers a key the legacy file does not hold, a key it holds at the
+value the build shipped (a shipped `[Position] Enabled=1` is the build's default, not a choice),
+and a concept the legacy build had no setting for. Only a value the player changed from the old
+default is written explicitly, and even that is written `default` where it equals what `default`
+gives at that start. The rule it replaces compared the imported value with Defaults.ini alone, so
+an old build's shipped value pinned the row wherever Defaults.ini held another one.
+
+Every legacy import applies it the same way, through `LegacyFollowsDefaultsIni` (C++
+`config/legacy_import.h`, C# `CameraUnlock.Core.Config`), one call for each row of its table that
+follows Defaults.ini:
+
+- `Setting(concept, value, shipped)` compares the effective legacy value with the effective value
+  the legacy build shipped, with `==` (C# `EqualityComparer<T>.Default`), and leaves the row to
+  Defaults.ini when they are equal. `shipped` is the frozen struct's default, or the value the
+  build's shipped file set where that file set another one; `conversion_notes` records which where
+  one build shipped two.
+- `Setting(concept, unchanged)` takes a comparison the import makes itself, for a row read from
+  more than one legacy key, such as a hotkey code and its chord switch.
+- `NotInLegacy(concept)` is a concept the legacy build had no setting for, always left to
+  Defaults.ini.
+- `TrackingMode(value, shipped)` and `TrackingMode(unchanged)` take the tracking mode as one unit:
+  `RotationEnabled` and `PositionEnabled` are both left to Defaults.ini, or neither. The comparison
+  covers every legacy setting the map derives the mode from, a position switch included. `Setting`
+  refuses either half.
+
+Each throws std::invalid_argument (C# `ArgumentException`) for a concept that is not global or was
+given before, or a tracking mode given twice, and `Setting` also for a float or double `shipped`
+that is not finite. `Concepts()` (C# `Concepts`) is what the map passes to the `Imported` or
+`Absent` factory as `follows_defaults_ini` (C# `FollowsDefaultsIni`). The migration gives each
+row named there the value `default` gives it at that start and writes it `default`, so it follows
+Defaults.ini from then on, whatever Defaults.ini holds. `RotationEnabled` or `PositionEnabled` there names the tracking mode, and every row of the
+pair the table has takes it, so a two-state table with no `RotationEnabled` row takes the pair. The
+map still sets every field from the legacy value, which is what the import gives when it runs
+alone. A concept named there that is not a row of the table following Defaults.ini makes the
+migration throw std::invalid_argument (C# `ArgumentException`).
+
+A `FollowsDefault` value is the one the build shipped, so the row it drops is left to Defaults.ini
+by the same `Setting` call.
 
 `conversion_notes` in `data/config-format.json` holds what the owner decided for one repo's
 conversion, such as which of two shipped values is the default; the repo's conversion and its
@@ -1390,6 +1425,15 @@ On every corpus input, a pose-shaping value the published build ran on and the n
 hold is an expected difference exactly when the result lists it in `pose_shaping` with that value
 and in `dropped` as `PoseShaping`.
 
+The test also holds the import to the rule above. On the shipped file and an empty file, every
+row that follows Defaults.ini is in `follows_defaults_ini` and migrates as `default`, the mode pair
+on both rows. On each corpus input that changes one key to another valid value, the row it maps to
+is not listed, and it migrates as that value wherever Defaults.ini gives another. A migration run
+against a Defaults.ini holding a value other than the built-in one for every such row shows it:
+the untouched rows take Defaults.ini's values, and the changed row keeps the player's. Comparison 2
+allows the difference this makes: a row in `follows_defaults_ini` holds what `default` gives, not
+what the import read, where the two differ.
+
 ### What happens at the first launch
 
 When `Load` finds no config file and the legacy file exists:
@@ -1403,9 +1447,9 @@ When `Load` finds no config file and the legacy file exists:
    row not marked `PerGame` where the imported value equals what `default` gives that row at this
    `Load` (floats by their bits, hotkey lists by their canonical text), and the value otherwise;
    the tracking-mode pair is `default` on both rows only when both are equal. The read-back uses
-   the same Defaults.ini values, so a `default` row reads back as the value it replaced. Where
-   Defaults.ini holds the built-in values, a player who never changed a setting gets the file a
-   new player gets, apart from a default the conversion moved, which imports as a value.
+   the same Defaults.ini values, so a `default` row reads back as the value it replaced. A player
+   who never changed a setting gets the file a new player gets, and takes Defaults.ini's values,
+   which can differ from the defaults the legacy build ran on.
 3. It creates the config file with the rendered bytes, only if no file has appeared at its path.
 
 The legacy file is never written, renamed, deleted or copied, whatever happens. A process killed

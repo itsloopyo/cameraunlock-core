@@ -38,13 +38,14 @@ namespace CameraUnlock.Core.Config
         public ReadOnlyCollection<PoseShapingValue> PoseShaping { get; }
 
         /// <summary>
-        /// For Imported and Absent, the concepts the map leaves to Defaults.ini because the legacy
-        /// value is the one a build shipped switched off pending verification, which no player chose
-        /// (approved change follows_default); empty otherwise. The migration gives each the value
-        /// <c>default</c> gives it at that start and writes it <c>default</c>, so it follows
-        /// Defaults.ini from then on. Each must be a row of the table that follows Defaults.ini, or
-        /// the migration throws. The map still sets the field, to the value it holds when the import
-        /// runs alone.
+        /// For Imported and Absent, the concepts the map leaves to Defaults.ini because the player
+        /// never changed them from what the legacy build shipped, which
+        /// <see cref="LegacyFollowsDefaultsIni"/> collects; empty otherwise. The migration gives each
+        /// the value <c>default</c> gives it at that start and writes it <c>default</c>, so it
+        /// follows Defaults.ini from then on. RotationEnabled or PositionEnabled names the tracking
+        /// mode, and every row of the pair the table has takes it. Each must be a row of the table
+        /// that follows Defaults.ini, or the migration throws. The map still sets the field, to the
+        /// value it holds when the import runs alone.
         /// </summary>
         public ReadOnlyCollection<ConceptDescriptor> FollowsDefaultsIni { get; }
 

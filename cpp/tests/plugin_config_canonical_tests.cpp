@@ -688,6 +688,14 @@ void TestImportDropsAndCorrection(const fs::path& root) {
           "the import lists the nine pose-shaping values beside their SetDefaults values, the corrected InvertX folded");
     Check(out.toggleKeyBindings == "Y, Ctrl+Shift+Y" && out.diagnosticMarkerKeyBindings == "F11",
           "a key that is also the chord's letter lists both, and the marker key has no chord");
+    const auto listed = [&](schema::Concept id) {
+        return std::find(result.follows_defaults_ini.begin(), result.follows_defaults_ini.end(), id) !=
+               result.follows_defaults_ini.end();
+    };
+    Check(!listed(schema::Concept::ToggleKey) && listed(schema::Concept::CycleTrackingModeKey) &&
+              listed(schema::Concept::UdpPort) && listed(schema::Concept::RotationEnabled) &&
+              listed(schema::Concept::PositionEnabled),
+          "the ToggleKey the file changed is not left to Defaults.ini, and the rows it does not hold are");
 
     WriteBytes(file, text + "[General]\nConfigVersion=1\n");
     out = PluginConfigTable(kRe8Schema).defaults();
@@ -752,6 +760,8 @@ void TestImportAbsent(const fs::path& root) {
     Check(result.status == ImportStatus::Absent && result.dropped.empty() && differences.empty() &&
               out.toggleKeyBindings == "End, Ctrl+Shift+Y",
           "no file: Absent on the defaults, the chords included " + Join(differences));
+    Check(result.follows_defaults_ini.size() == (kRe8Schema.flashlight ? 16u : 14u),
+          "no file: every row but DiagnosticMarkerKey is left to Defaults.ini, the mode as both halves");
 
     WriteBytes(dir / "HeadTracking.ini", "[Network]\nUDPPort=5555\n");
     LegacyInput lossy = detail::OwnerLegacyInput((dir / "HeadTracking.ini").wstring());

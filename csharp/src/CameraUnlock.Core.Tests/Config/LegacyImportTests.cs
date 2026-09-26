@@ -8,8 +8,8 @@ namespace CameraUnlock.Core.Tests.Config
     /// <summary>
     /// The legacy import support: ImportResult's factories, the dropped-value lines, N2
     /// (LegacyNormalisations.FiniteOrDefault), N3 (LegacyNormalisations.KeyCodeToBindings), pose shaping (LegacyPoseShaping), the position
-    /// switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot) and a LegacyImport
-    /// over a config class. The C++ twin
+    /// switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot), the rows left to
+    /// Defaults.ini (LegacyFollowsDefaultsIni) and a LegacyImport over a config class. The C++ twin
     /// is cpp/tests/legacy_import_tests.cpp.
     /// </summary>
     public class LegacyImportTests
@@ -360,6 +360,61 @@ namespace CameraUnlock.Core.Tests.Config
         {
             public float RemoteSmoothing = 0.15f;
             public string ToggleKey = "End";
+        }
+
+        [Fact]
+        public void ASettingEqualToTheShippedOneAndOneTheLegacyBuildLackedFollowDefaultsIni()
+        {
+            var follows = new LegacyFollowsDefaultsIni();
+            follows.Setting(ConfigConcepts.UdpPort, 4242, 4242);
+            follows.Setting(ConfigConcepts.WorldSpaceYaw, false, true);
+            follows.Setting(ConfigConcepts.RemoteSmoothing, -0.0f, 0.0f);
+            follows.Setting(ConfigConcepts.LocalSmoothing, float.NaN, 0.0f);
+            follows.Setting(ConfigConcepts.ToggleKey, "End", "End");
+            follows.Setting(ConfigConcepts.YawModeKey, false);
+            follows.Setting(ConfigConcepts.LightMultiplier, true);
+            follows.NotInLegacy(ConfigConcepts.TrueFreeLook);
+            Assert.Equal(new ConceptDescriptor[]
+            {
+                ConfigConcepts.UdpPort, ConfigConcepts.RemoteSmoothing, ConfigConcepts.ToggleKey, ConfigConcepts.LightMultiplier,
+                ConfigConcepts.TrueFreeLook,
+            }, follows.Concepts);
+        }
+
+        [Fact]
+        public void TheTrackingModeFollowsDefaultsIniAsOneUnit()
+        {
+            var unchanged = new LegacyFollowsDefaultsIni();
+            unchanged.TrackingMode(1, 1);
+            Assert.Equal(new ConceptDescriptor[] { ConfigConcepts.RotationEnabled, ConfigConcepts.PositionEnabled },
+                unchanged.Concepts);
+            var changed = new LegacyFollowsDefaultsIni();
+            changed.TrackingMode(false);
+            Assert.Empty(changed.Concepts);
+        }
+
+        [Fact]
+        public void LegacyFollowsDefaultsIniRefusesHalfTheModeALocalConceptARepeatAndANonFiniteShippedValue()
+        {
+            var follows = new LegacyFollowsDefaultsIni();
+            Assert.StartsWith("PositionEnabled is half of the tracking mode, which TrackingMode takes as one unit",
+                Assert.Throws<ArgumentException>(() => follows.Setting(ConfigConcepts.PositionEnabled, true, true)).Message);
+            Assert.StartsWith("RotationEnabled is half of the tracking mode, which TrackingMode takes as one unit",
+                Assert.Throws<ArgumentException>(() => follows.NotInLegacy(ConfigConcepts.RotationEnabled)).Message);
+            Assert.StartsWith("CollisionMargin is not a global concept, so no row of it follows Defaults.ini",
+                Assert.Throws<ArgumentException>(() => follows.Setting(ConfigConcepts.CollisionMargin, 0.1f, 0.1f)).Message);
+            Assert.StartsWith("LocalSmoothing: the shipped value is not finite", Assert.Throws<ArgumentException>(
+                () => follows.Setting(ConfigConcepts.LocalSmoothing, 0.0, double.PositiveInfinity)).Message);
+            Assert.Throws<ArgumentNullException>(() => follows.Setting(null!, 1, 1));
+            Assert.Throws<ArgumentNullException>(() => follows.NotInLegacy(null!));
+            follows.Setting(ConfigConcepts.UdpPort, 1, 2);
+            Assert.StartsWith("UdpPort was given before",
+                Assert.Throws<ArgumentException>(() => follows.NotInLegacy(ConfigConcepts.UdpPort)).Message);
+            follows.TrackingMode(true);
+            Assert.StartsWith("the tracking mode was given before",
+                Assert.Throws<ArgumentException>(() => follows.TrackingMode(1, 1)).Message);
+            Assert.Equal(new ConceptDescriptor[] { ConfigConcepts.RotationEnabled, ConfigConcepts.PositionEnabled },
+                follows.Concepts);
         }
 
         [Fact]

@@ -211,6 +211,9 @@ struct Legacy {
     std::vector<LegacyInput> inputs;
     std::function<ImportResult(HeadTrackingConfig&)> result;
     std::function<void(const LegacyInput&)> during;
+    // Leaves each row the file does not change from the frozen defaults to Defaults.ini, as every
+    // import does now (LegacyFollowsDefaultsIni).
+    bool follows_defaults_ini = false;
 
     LegacyImport<HeadTrackingConfig> Import() {
         LegacyImport<HeadTrackingConfig> import;
@@ -226,10 +229,17 @@ struct Legacy {
         if (during) during(input);
         if (result) return result(config);
 
-        int port = 4242;
-        bool yaw_world = true;
-        bool position = true;
-        float light = cameraunlock::effects::kDefaultLightMultiplier;
+        struct Frozen {
+            int port = 4242;
+            bool yaw_world = true;
+            bool position = true;
+            float light = cameraunlock::effects::kDefaultLightMultiplier;
+        };
+        const Frozen shipped;
+        int port = shipped.port;
+        bool yaw_world = shipped.yaw_world;
+        bool position = shipped.position;
+        float light = shipped.light;
         FILE* file = std::fopen(input.ansi_path.c_str(), "r");
         if (file != nullptr) {
             std::string section;
@@ -259,7 +269,17 @@ struct Legacy {
         config.position_enabled = position;
         config.light.multiplier =
             LegacyFiniteOrDefault(light, cameraunlock::effects::kDefaultLightMultiplier, "Light", "LightMultiplier", dropped);
-        return file != nullptr ? ImportResult::Imported(std::move(dropped)) : ImportResult::Absent(std::move(dropped));
+        LegacyFollowsDefaultsIni follows;
+        if (follows_defaults_ini) {
+            follows.Setting(Concept::UdpPort, port, shipped.port);
+            follows.NotInLegacy(Concept::EnableOnStartup);
+            follows.Setting(Concept::WorldSpaceYaw, yaw_world, shipped.yaw_world);
+            follows.TrackingMode(position, shipped.position);
+            follows.NotInLegacy(Concept::ToggleKey);
+            follows.Setting(Concept::LightMultiplier, light, shipped.light);
+        }
+        return file != nullptr ? ImportResult::Imported(std::move(dropped), {}, follows.Concepts())
+                               : ImportResult::Absent(std::move(dropped), {}, follows.Concepts());
     }
 };
 
@@ -1562,7 +1582,7 @@ void AMigratedGameWritesAValueWhereDefaultsIniDiffers(const fs::path& dir) {
     ExpectStatus(load, ConfigLoadStatus::Migrated);
     const std::string migrated = ReadBytes(rig.path);
     Check(Contains(migrated, "\r\nToggleKey=End, Ctrl+Shift+Y\r\n") && Contains(migrated, "\r\nEnableOnStartup=default\r\n"),
-          "the untouched key list is not what default gives here, so it is written as a value");
+          "a key list the import does not leave to Defaults.ini, and default gives another, is written as a value");
     Check(load.config.toggle_key_name == "End, Ctrl+Shift+Y", "the player keeps the keys they had");
     ExpectLegacyKept(rig);
 }
@@ -1604,6 +1624,107 @@ void ARowTheImportLeavesToDefaultsIniThatDoesNotFollowItThrows(const fs::path& d
                      "follows Defaults.ini",
           "a concept the table has no row for throws: " + message);
     ExpectNotImported(rig);
+}
+
+// The owner's case of 2026-09-26: the legacy file holds a value only because the old build shipped
+// it, and Defaults.ini says otherwise.
+void AnOldDefaultInTheLegacyFileFollowsDefaultsIni(const fs::path& dir) {
+    Rig rig(dir);
+    rig.legacy->follows_defaults_ini = true;
+    rig.PutLegacy("[General]\r\nPort = 4242\r\nYawWorld = true\r\n");
+    rig.PutDefaults("[Network]\r\nUdpPort=6000\r\n[General]\r\nEnableOnStartup=false\r\nWorldSpaceYaw=false\r\n");
+    const Load load = rig.Make()->Load();
+    ExpectStatus(load, ConfigLoadStatus::Migrated);
+    const std::string migrated = ReadBytes(rig.path);
+    for (const char* line : {"UdpPort=default", "EnableOnStartup=default", "WorldSpaceYaw=default", "RotationEnabled=default",
+                             "PositionEnabled=default", "ToggleKey=default", "LightMultiplier=default"}) {
+        Check(Contains(migrated, "\r\n"s + line + "\r\n"), std::string("the migrated file holds ") + line);
+    }
+    Check(load.config.udp_port == 6000 && !load.config.enable_on_startup && !load.config.world_space_yaw,
+          "the session takes Defaults.ini's values");
+    ExpectLegacyKept(rig);
+}
+
+void AnOldDefaultAbsentFromTheLegacyFileFollowsDefaultsIni(const fs::path& dir) {
+    Rig rig(dir);
+    rig.legacy->follows_defaults_ini = true;
+    rig.PutLegacy("; nothing set\r\n[General]\r\n");
+    rig.PutDefaults("[Network]\r\nUdpPort=6000\r\n[Light]\r\nLightMultiplier=2.5\r\n");
+    const Load load = rig.Make()->Load();
+    ExpectStatus(load, ConfigLoadStatus::Migrated);
+    const std::string migrated = ReadBytes(rig.path);
+    Check(Contains(migrated, "\r\nUdpPort=default\r\n") && Contains(migrated, "\r\nLightMultiplier=default\r\n"),
+          "the rows the file does not hold are written default");
+    Check(load.config.udp_port == 6000 && load.config.light.multiplier == 2.5f, "the session takes Defaults.ini's values");
+    ExpectLegacyKept(rig);
+}
+
+void AValueThePlayerChangedIsWritten(const fs::path& dir) {
+    Rig rig(dir);
+    rig.legacy->follows_defaults_ini = true;
+    rig.PutLegacy("[General]\r\nPort = 5555\r\nYawWorld = false\r\n");
+    rig.PutDefaults("[Network]\r\nUdpPort=6000\r\n[General]\r\nWorldSpaceYaw=false\r\n");
+    const Load load = rig.Make()->Load();
+    ExpectStatus(load, ConfigLoadStatus::Migrated);
+    const std::string migrated = ReadBytes(rig.path);
+    Check(Contains(migrated, "\r\nUdpPort=5555\r\n"), "a changed value Defaults.ini does not hold is written as a value");
+    Check(Contains(migrated, "\r\nWorldSpaceYaw=default\r\n"), "a changed value Defaults.ini holds is written default");
+    Check(load.config.udp_port == 5555 && !load.config.world_space_yaw, "the player keeps the values they set");
+    ExpectLegacyKept(rig);
+}
+
+void AnUntouchedTrackingModeFollowsDefaultsIniAsOneUnit(const fs::path& dir) {
+    const std::string position_only = "[General]\r\nRotationEnabled=false\r\n[Position]\r\nPositionEnabled=true\r\n";
+    {
+        const fs::path sub = dir / L"untouched";
+        fs::create_directories(sub);
+        Rig rig(sub);
+        rig.legacy->follows_defaults_ini = true;
+        rig.PutLegacy("[Position]\r\nPosition = true\r\n");
+        rig.PutDefaults(position_only);
+        const Load load = rig.Make()->Load();
+        ExpectStatus(load, ConfigLoadStatus::Migrated);
+        const std::string migrated = ReadBytes(rig.path);
+        Check(Contains(migrated, "\r\nRotationEnabled=default\r\n") && Contains(migrated, "\r\nPositionEnabled=default\r\n"),
+              "an old default mode is written default on both rows");
+        Check(!load.config.rotation_enabled && load.config.position_enabled, "the session takes Defaults.ini's mode");
+        ExpectLegacyKept(rig, "untouched");
+    }
+    {
+        const fs::path sub = dir / L"changed";
+        fs::create_directories(sub);
+        Rig rig(sub);
+        rig.legacy->follows_defaults_ini = true;
+        rig.PutLegacy("[Position]\r\nPosition = false\r\n");
+        rig.PutDefaults(position_only);
+        const Load load = rig.Make()->Load();
+        ExpectStatus(load, ConfigLoadStatus::Migrated);
+        const std::string migrated = ReadBytes(rig.path);
+        Check(Contains(migrated, "\r\nRotationEnabled=true\r\n") && Contains(migrated, "\r\nPositionEnabled=false\r\n"),
+              "a mode the player changed is written on both rows");
+        Check(load.config.rotation_enabled && !load.config.position_enabled, "the player keeps rotation only");
+        ExpectLegacyKept(rig, "changed");
+    }
+    {
+        const fs::path sub = dir / L"two-state";
+        fs::create_directories(sub);
+        Rig rig(sub);
+        rig.legacy->follows_defaults_ini = true;
+        ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable<HeadTrackingConfig>(
+            {Concept::UdpPort, Concept::EnableOnStartup, Concept::WorldSpaceYaw, Concept::PositionEnabled, Concept::ToggleKey,
+             Concept::LightMultiplier});
+        table.Select(Concept::PositionEnabled).Writable();
+        rig.table = table;
+        rig.PutLegacy("[Position]\r\nPosition = true\r\n");
+        rig.PutDefaults("[Position]\r\nPositionEnabled=false\r\n");
+        const Load load = rig.Make()->Load();
+        ExpectStatus(load, ConfigLoadStatus::Migrated);
+        const std::string migrated = ReadBytes(rig.path);
+        Check(Contains(migrated, "\r\nPositionEnabled=default\r\n") && !Contains(migrated, "\r\nRotationEnabled="),
+              "a table without RotationEnabled takes the mode on PositionEnabled");
+        Check(!load.config.position_enabled, "the session takes Defaults.ini's PositionEnabled");
+        ExpectLegacyKept(rig, "two-state");
+    }
 }
 
 void AToggleOnADefaultRowWritesItsValue(const fs::path& dir) {
@@ -2058,6 +2179,12 @@ int RunConfigOwnerTests() {
                 ARowTheImportLeavesToDefaultsIniIsWrittenDefault);
     RunScenario("a-row-the-import-leaves-to-defaults-ini-that-does-not-follow-it-throws",
                 ARowTheImportLeavesToDefaultsIniThatDoesNotFollowItThrows);
+    RunScenario("an-old-default-in-the-legacy-file-follows-defaults-ini", AnOldDefaultInTheLegacyFileFollowsDefaultsIni);
+    RunScenario("an-old-default-absent-from-the-legacy-file-follows-defaults-ini",
+                AnOldDefaultAbsentFromTheLegacyFileFollowsDefaultsIni);
+    RunScenario("a-value-the-player-changed-is-written", AValueThePlayerChangedIsWritten);
+    RunScenario("an-untouched-tracking-mode-follows-defaults-ini-as-one-unit",
+                AnUntouchedTrackingModeFollowsDefaultsIniAsOneUnit);
     RunScenario("a-toggle-on-a-default-row-writes-its-value", AToggleOnADefaultRowWritesItsValue);
     RunScenario("a-mode-change-from-default-writes-both-rows", AModeChangeFromDefaultWritesBothRows);
     RunScenario("end-saves-nothing", EndSavesNothing);
