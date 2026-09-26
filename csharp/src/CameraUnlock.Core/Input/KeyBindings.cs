@@ -21,9 +21,12 @@ namespace CameraUnlock.Core.Input
         /// into trimmed tokens: any of Ctrl, Shift and Alt, each at most once and in any
         /// order, then exactly one key. A key is a name from data/keys.json that has a Unity
         /// KeyCode value; a number is not read, because a KeyCode value is not a Windows
-        /// virtual-key code and the same number would mean another key in a native mod.
-        /// Names and modifiers read ASCII case-insensitively. A list naming the same binding
-        /// twice is invalid.
+        /// virtual-key code and the same number would mean another key in a native mod. The key
+        /// is never a Ctrl, Shift or Alt key (LeftShift to RightAlt), however spelled: it goes
+        /// down before the key a chord holds it with, so bound alone it would fire whenever a
+        /// player starts a chord with it, and the chord's own binding would fire again. Names
+        /// and modifiers read ASCII case-insensitively. A list naming the same binding twice is
+        /// invalid.
         /// </para>
         /// </summary>
         /// <param name="bindings">The list read, empty on failure.</param>
@@ -87,6 +90,12 @@ namespace CameraUnlock.Core.Input
                 }
                 int code = ReadKey(key, out error);
                 if (code == 0) return false;
+                if (IsModifierKey(code))
+                {
+                    error = Quote(key) + " is a Ctrl, Shift or Alt key: expected a key such as End, F9 or A, "
+                        + "with Ctrl, Shift or Alt before it";
+                    return false;
+                }
 
                 var binding = new KeyBinding(modifiers, code);
                 if (read.Contains(binding))
@@ -107,7 +116,7 @@ namespace CameraUnlock.Core.Input
         /// data/keys.json, items joined by ", ". An empty list is "".
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="bindings"/> is null.</exception>
-        /// <exception cref="ArgumentException">A code has no name in the table, or a binding is listed twice; neither reads back.</exception>
+        /// <exception cref="ArgumentException">A code has no name in the table or is a Ctrl, Shift or Alt key, or a binding is listed twice; none of them reads back.</exception>
         public static string Format(IList<KeyBinding> bindings)
         {
             if (bindings == null) throw new ArgumentNullException("bindings");
@@ -125,6 +134,13 @@ namespace CameraUnlock.Core.Input
                     }
                 }
 
+                if (IsModifierKey(binding.UnityKeyCode))
+                {
+                    throw new ArgumentException("binding " + (n + 1).ToString(CultureInfo.InvariantCulture) + " binds "
+                        + NameOf(binding.UnityKeyCode) + ", a Ctrl, Shift or Alt key, which a binding names only before its key",
+                        "bindings");
+                }
+
                 if (n > 0) text.Append(", ");
                 for (int i = 0; i < KeyNames.Modifiers.Length; i++)
                 {
@@ -135,7 +151,7 @@ namespace CameraUnlock.Core.Input
             return text.ToString();
         }
 
-        private static string NameOf(int unityKeyCode)
+        internal static string NameOf(int unityKeyCode)
         {
             foreach (KeyNames.Key key in KeyNames.Keys)
             {
@@ -185,6 +201,17 @@ namespace CameraUnlock.Core.Input
                 if (EqualsAsciiIgnoreCase(token, alias.Name)) return alias.KeyIndex;
             }
             return -1;
+        }
+
+        // True for LeftShift to RightAlt, the keys data/keys.json names as a modifier's Unity left
+        // and right.
+        internal static bool IsModifierKey(int unityKeyCode)
+        {
+            foreach (KeyNames.Modifier modifier in KeyNames.Modifiers)
+            {
+                if (unityKeyCode == modifier.UnityLeft || unityKeyCode == modifier.UnityRight) return true;
+            }
+            return false;
         }
 
         // The index into KeyNames.Modifiers of the modifier a token names, or -1. Its flag is 1 << index.

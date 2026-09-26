@@ -228,29 +228,45 @@ std::vector<std::string> HeaderKeyNames(const std::string& rendered) {
     return names;
 }
 
-// data/keys.json's key names, each with whether it has a Windows virtual-key code, and its aliases,
-// none of which the header lists.
+// data/keys.json's key names, split into the ones Defaults.ini takes, those with a Windows
+// virtual-key code that are not a Ctrl, Shift or Alt key, and the rest with every alias, none of
+// which the header lists.
 struct KeyTable {
-    std::set<std::string> with_vk;
-    std::set<std::string> without_vk;
+    std::set<std::string> taken;
+    std::set<std::string> not_taken;
 };
 
 KeyTable ReadKeyTable() {
     const std::string json = ReadBytes(Root().parent_path().parent_path() / "keys.json");
     const std::size_t keys = json.find("\"keys\"");
     if (keys == std::string::npos) throw std::runtime_error("data/keys.json has no keys array");
+    const std::size_t modifiers = json.find("\"modifiers\"");
+    if (modifiers == std::string::npos || modifiers > keys) {
+        throw std::runtime_error("data/keys.json has no modifiers before its keys");
+    }
+    std::set<std::string> modifier_keys;
+    const std::string modifier_text = json.substr(modifiers, keys - modifiers);
+    const std::regex sides(R"re("unity"\s*:\s*\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\])re");
+    for (std::sregex_iterator it(modifier_text.begin(), modifier_text.end(), sides), end; it != end; ++it) {
+        modifier_keys.insert((*it)[1].str());
+        modifier_keys.insert((*it)[2].str());
+    }
+    if (modifier_keys.size() != 6) throw std::runtime_error("data/keys.json's modifiers do not name six keys");
+
     KeyTable table;
     const std::regex entry(R"re(\{\s*"name"\s*:\s*"([^"]+)"([^}]*)\})re");
     const std::regex alias(R"re("([^"]+)")re");
     const std::string rest = json.substr(keys);
     for (std::sregex_iterator it(rest.begin(), rest.end(), entry), end; it != end; ++it) {
+        const std::string name = (*it)[1].str();
         const std::string fields = (*it)[2].str();
-        (fields.find("\"vk\"") != std::string::npos ? table.with_vk : table.without_vk).insert((*it)[1].str());
+        const bool vk = fields.find("\"vk\"") != std::string::npos;
+        (vk && modifier_keys.count(name) == 0 ? table.taken : table.not_taken).insert(name);
         const std::size_t aliases = fields.find("\"aliases\"");
         if (aliases == std::string::npos) continue;
         const std::string list = fields.substr(aliases + 9);
         for (std::sregex_iterator a(list.begin(), list.end(), alias), none; a != none; ++a) {
-            table.without_vk.insert((*a)[1].str());
+            table.not_taken.insert((*a)[1].str());
         }
     }
     return table;
@@ -261,24 +277,30 @@ DefaultsIniValue ToggleKey(const std::string& keys) {
 }
 
 void TestKeyNames() {
-    std::cout << "\n[the key names Defaults.ini takes are data/keys.json's names with a virtual-key code]\n";
+    std::cout << "\n[the key names Defaults.ini takes are data/keys.json's names with a virtual-key code, "
+                 "less the Ctrl, Shift and Alt keys]\n";
     const KeyTable keys = ReadKeyTable();
     const std::vector<std::string> listed = HeaderKeyNames(detail::RenderDefaultsIni());
     const std::set<std::string> listed_set(listed.begin(), listed.end());
-    Check(keys.with_vk.size() == 104 && keys.without_vk.size() > 200, "data/keys.json reads as 104 names with a code");
-    Check(listed.size() == 104 && listed_set.size() == listed.size(), "the header lists 104 names, none twice");
-    Check(listed_set == keys.with_vk, "the header lists exactly the names with a Windows virtual-key code");
+    Check(keys.taken.size() == 98 && keys.not_taken.size() > 200,
+          "data/keys.json reads as 98 names with a code that are not a Ctrl, Shift or Alt key");
+    Check(listed.size() == 98 && listed_set.size() == listed.size(), "the header lists 98 names, none twice");
+    Check(listed_set == keys.taken,
+          "the header lists exactly the names with a Windows virtual-key code that are not a Ctrl, Shift or Alt key");
 
     bool read = true;
-    for (const std::string& name : keys.with_vk) read = read && ToggleKey(name).state == DefaultsIniValueState::kAccepted;
-    Check(read, "every name with a virtual-key code is read");
+    for (const std::string& name : keys.taken) read = read && ToggleKey(name).state == DefaultsIniValueState::kAccepted;
+    Check(read, "every name the header lists is read");
+    Check(keys.not_taken.count("LeftShift") == 1 && keys.not_taken.count("RightAlt") == 1,
+          "the Ctrl, Shift and Alt keys are among the names not taken");
     bool refused = true;
-    for (const std::string& name : keys.without_vk) {
+    for (const std::string& name : keys.not_taken) {
         const DefaultsIniValue value = ToggleKey(name);
         refused = refused && value.state == DefaultsIniValueState::kRefused &&
                   value.reason == name + " is not one of the key names this file takes";
     }
-    Check(refused, "every other name and every alias is refused as not one of the key names this file takes");
+    Check(refused, "every other name, the Ctrl, Shift and Alt keys among them, and every alias is refused as not one "
+                   "of the key names this file takes");
 }
 
 }  // namespace

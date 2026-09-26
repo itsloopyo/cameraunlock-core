@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CameraUnlock.Core.Input;
 
 namespace CameraUnlock.Core.Config
 {
@@ -35,6 +36,34 @@ namespace CameraUnlock.Core.Config
             if (!double.IsNaN(value) && !double.IsInfinity(value)) return value;
             dropped.Add(new DroppedValue(DropRule.NonFiniteNumber, section, key, Text(double.IsNaN(value), value > 0)));
             return rowDefault;
+        }
+
+        /// <summary>
+        /// N3: a legacy hotkey held as a UnityEngine.KeyCode value, as a hotkey value. 0,
+        /// KeyCode.None, gives "", unbound, and records nothing. A Ctrl, Shift or Alt key
+        /// (LeftShift to RightAlt) gives "" too, and the drop is added to
+        /// <paramref name="dropped"/> under its key name: no hotkey value binds one, because it
+        /// goes down before the key of any chord it starts, so a binding on it fires at the start
+        /// of every Ctrl+Shift chord. Any other code gives its key name. A map folding the
+        /// action's Ctrl+Shift chord into the same list appends the chord to what this gives, so
+        /// the player keeps the chord when the key is unbound.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">A text or <paramref name="dropped"/> is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="unityKeyCode"/> is not 0 and has no
+        /// name in data/keys.json, so no hotkey value can hold it.</exception>
+        public static string KeyCodeToBindings(int unityKeyCode, string section, string key,
+            ICollection<DroppedValue> dropped)
+        {
+            if (section == null) throw new ArgumentNullException("section");
+            if (key == null) throw new ArgumentNullException("key");
+            if (dropped == null) throw new ArgumentNullException("dropped");
+            if (unityKeyCode == 0) return string.Empty;
+            if (KeyBindings.IsModifierKey(unityKeyCode))
+            {
+                dropped.Add(new DroppedValue(DropRule.ModifierKey, section, key, KeyBindings.NameOf(unityKeyCode)));
+                return string.Empty;
+            }
+            return KeyBindings.Format(new[] { new KeyBinding(KeyModifiers.None, unityKeyCode) });
         }
 
         private static string Text(bool nan, bool positive)

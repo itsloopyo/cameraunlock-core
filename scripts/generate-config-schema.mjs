@@ -128,6 +128,9 @@ function checkCanonicalBindings(where, text, keyTable) {
         }
         if (entry.vk === 0) schemaError(where, `canonical_default names '${key}', which has no Windows key code`);
         if (entry.unity === 0) schemaError(where, `canonical_default names '${key}', which has no Unity KeyCode`);
+        if (keyTable.modifiers.some((m) => entry.unity === m.left || entry.unity === m.right)) {
+            schemaError(where, `canonical_default names '${key}', a Ctrl, Shift or Alt key, which a binding names only before its key`);
+        }
         if (seen.has(item)) schemaError(where, `canonical_default lists '${item}' twice`);
         seen.add(item);
     }
@@ -1169,7 +1172,7 @@ function validateKeys(doc) {
         const vk = parseVk(where, modifier.vk);
         if (byVk.has(vk)) {
             keysError(where, `vk ${modifier.vk} is also the code of key '${byVk.get(vk)}'. A modifier's own code has ` +
-                'no key name, so a native value that binds it as a key writes it in hex');
+                'no key name: no binding names it as its key, and FormatVirtualKey spells it in hex');
         }
         if (!Array.isArray(modifier.unity) || modifier.unity.length !== 2) {
             keysError(where, 'unity must name the left and the right key, in that order');

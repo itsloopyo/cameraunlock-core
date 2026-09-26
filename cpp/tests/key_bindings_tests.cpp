@@ -2,6 +2,7 @@
 // data/fixtures/canonical-ini/keys/cases.tsv, which the C# KeyBindingFixtures runs the unity
 // rows of, plus the key table and, on Windows, RegisterKeyBindings.
 
+#include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/input/hotkey_poller.h>
 #include <cameraunlock/input/key_bindings.h>
 #include <cameraunlock/input/key_names.g.h>
@@ -54,6 +55,16 @@ bool Throws(F&& f) {
         return true;
     }
     return false;
+}
+
+template <class F>
+std::string Thrown(F&& f) {
+    try {
+        f();
+    } catch (const std::invalid_argument& e) {
+        return e.what();
+    }
+    return "(nothing thrown)";
 }
 
 std::string ReadBytes(const fs::path& path) {
@@ -151,6 +162,18 @@ void TestErrorsNameTheExpectation() {
     Check(ParseKeyBindings("Mouse0").error.find("Windows key code") != std::string::npos,
           "a Unity-only name says it has no Windows key code");
     Check(ParseKeyBindings("End").ok() && ParseKeyBindings("End").error.empty(), "success has no error");
+
+    const std::string modifier_key =
+        "is a Ctrl, Shift or Alt key: expected a key such as End, F9 or A, with Ctrl, Shift or Alt before it";
+    Check(ParseKeyBindings("LeftShift").error == "'LeftShift' " + modifier_key, "a Ctrl, Shift or Alt key is named");
+    Check(ParseKeyBindings("End, Ctrl+Shift+rightcontrol").error == "'rightcontrol' " + modifier_key,
+          "the key is quoted as written");
+    Check(ParseKeyBindings("Ctrl+0x11").error == "'0x11' " + modifier_key, "a modifier's own code is named the same way");
+    bool agrees = true;
+    for (int vk = 0x01; vk <= 0xFE; ++vk) {
+        agrees = agrees && ParseKeyBindings(FormatVirtualKey(vk)).ok() == cameraunlock::config::IsBindableVirtualKey(vk);
+    }
+    Check(agrees, "the parser refuses exactly the codes config::IsBindableVirtualKey refuses in 0x01-0xFE");
 }
 
 void TestParsedValues() {
@@ -185,6 +208,19 @@ void TestFormat() {
     Check(Throws([] { FormatKeyBindings({{KeyModifiers::kNone, 0}}); }), "code 0 throws");
     Check(Throws([] { FormatKeyBindings({{static_cast<KeyModifiers>(8), 0x23}}); }),
           "a modifier value outside the flags throws");
+    Check(FormatVirtualKey(0xA0) == "LeftShift" && FormatVirtualKey(0x11) == "0x11",
+          "FormatVirtualKey still spells a Ctrl, Shift or Alt key");
+    Check(Thrown([] { FormatKeyBindings({{KeyModifiers::kNone, 0x23}, {KeyModifiers::kNone, 0xA2}}); }) ==
+              "binding 2 binds LeftControl, a Ctrl, Shift or Alt key, which a binding names only before its key",
+          "a Ctrl, Shift or Alt key throws, naming the binding");
+    Check(Thrown([] { FormatKeyBindings({{KeyModifiers::kCtrl | KeyModifiers::kShift, 0x10}}); }) ==
+              "binding 1 binds 0x10, a Ctrl, Shift or Alt key, which a binding names only before its key",
+          "a modifier's own code throws with modifiers held too");
+    bool every = true;
+    for (const int vk : {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}) {
+        every = every && Throws([vk] { FormatKeyBindings({{KeyModifiers::kNone, vk}}); });
+    }
+    Check(every, "every Ctrl, Shift and Alt key throws");
 }
 
 void TestTable() {

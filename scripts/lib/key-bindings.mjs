@@ -14,6 +14,14 @@ const { modifiers: MODIFIERS, keys: KEYS } = JSON.parse(fs.readFileSync(KEYS_PAT
 
 export const DIALECTS = Object.freeze(["native", "unity"]);
 
+// The codes of the Ctrl, Shift and Alt keys, which no binding holds as its key: each modifier's own
+// virtual-key code and both of its sides.
+const MODIFIER_SIDES = MODIFIERS.flatMap((m) => m.unity.map((name) => KEYS.find((k) => k.name === name)));
+const MODIFIER_KEYS = {
+  native: new Set([...MODIFIERS.map((m) => parseInt(m.vk, 16)), ...MODIFIER_SIDES.map((k) => parseInt(k.vk, 16))]),
+  unity: new Set(MODIFIER_SIDES.map((k) => k.unity)),
+};
+
 const quote = (text) => `'${text}'`;
 
 function modifierIndex(token) {
@@ -86,6 +94,9 @@ export function parseKeyBindings(text, dialect) {
     if (modifierIndex(keyToken) >= 0) return { error: `${quote(item)} has no key: expected a key after the modifiers` };
     const read = readKey(keyToken, dialect);
     if (read.error) return { error: read.error };
+    if (MODIFIER_KEYS[dialect].has(read.code)) {
+      return { error: `${quote(keyToken)} is a Ctrl, Shift or Alt key: expected a key such as End, F9 or A, with Ctrl, Shift or Alt before it` };
+    }
     if (bindings.some((b) => b.modifiers === modifiers && b.code === read.code)) {
       return { error: `${quote(item)} is listed twice: expected each binding once` };
     }
@@ -96,7 +107,10 @@ export function parseKeyBindings(text, dialect) {
 
 export function formatKeyBindings(bindings, dialect) {
   return bindings
-    .map(({ modifiers, code }) => {
+    .map(({ modifiers, code }, n) => {
+      if (MODIFIER_KEYS[dialect].has(code)) {
+        throw new Error(`binding ${n + 1} binds ${keyName(code, dialect)}, a Ctrl, Shift or Alt key, which a binding names only before its key`);
+      }
       const names = MODIFIERS.filter((_, i) => modifiers & (1 << i)).map((m) => `${m.name}+`);
       return names.join("") + keyName(code, dialect);
     })

@@ -127,8 +127,10 @@ no bindings.
 The syntax both dialects share: a value that is empty after trimming spaces and tabs is an
 empty list, which means unbound. Otherwise it is split at `,` into items, each trimmed and
 non-empty. An item is split at `+` into trimmed tokens: any of `Ctrl`, `Shift` and `Alt`,
-each at most once and in any order, then exactly one key. Names and modifiers read ASCII
-case-insensitively; nothing else is folded. The same binding twice in one list is invalid.
+each at most once and in any order, then exactly one key, which is never a Ctrl, Shift or Alt
+key (`LeftShift` to `RightAlt`, and natively `0x10` to `0x12` and `0xA0` to `0xA5`), with or
+without modifiers before it. Names and modifiers read ASCII case-insensitively; nothing else is
+folded. The same binding twice in one list is invalid.
 The canonical text writes the modifiers as `Ctrl+Shift+Alt+` in that order, the key as
 `data/keys.json` spells it (an alias as the key's name), a native code with no name as `0x`
 and upper-case hex without padding, and joins the items with `, `.
@@ -323,13 +325,14 @@ lists and `CollisionEnabled` at their `canonical_default`. Every row is written 
 rows, sections and comments are those of `head-tracking/all-concepts.ini` without
 `CollisionMargin` and `CollisionChannel`, which are not global and have no line here. The header
 is its own, and carries none of the six game-file lines on `default`: four lines saying what the
-file is and who reads it, the comments line, the hotkeys line, and six lines listing the key names
-the file takes, the 104 names in `data/keys.json` that have a `vk`, with `A to Z`,
+file is and who reads it, the comments line, the hotkeys line, and five lines listing the key names
+the file takes, the 98 names in `data/keys.json` that have a `vk` and are not a Ctrl, Shift or Alt
+key (`LeftShift` to `RightAlt`, the names `modifiers` gives as `unity`), with `A to Z`,
 `Alpha0 to Alpha9`, `F1 to F24` and `Keypad0 to Keypad9` standing for their ranges. A runner
 renders the table and requires these bytes, reads them back and requires every global concept
 accepted at the table's default, and the two that are not global absent, with nothing else to
 say, and requires the header's key list, ranges written out, to be exactly the names in
-`data/keys.json` with a `vk`.
+`data/keys.json` with a `vk`, less those six.
 
 Each `read-*` directory holds `input.ini`, Defaults.ini's bytes, and `expected.tsv`, what the
 reader makes of them, in the TSV shape and byte escape above:
@@ -367,9 +370,9 @@ The rules the cases hold:
   way.
 - **A hotkey value** is first split at `,` into items. The key of an item is its text after the
   last `+`, trimmed of spaces and tabs. The first item whose key is not empty, not `Ctrl`, `Shift`
-  or `Alt`, and not one of the 104 names with a `vk` (ASCII case-insensitively; an alias does not
-  count) refuses the value with `<key> is not one of the key names this file takes`, the key as
-  the file spells it, so `Mouse4` and `0x23` are refused alike. A value that passes goes to the
+  or `Alt`, and not one of the 98 names the header lists (ASCII case-insensitively; an alias does
+  not count) refuses the value with `<key> is not one of the key names this file takes`, the key as
+  the file spells it, so `Mouse4`, `0x23` and `LeftShift` are refused alike. A value that passes goes to the
   codec, whose grammar and reasons both dialects share for these names (`keys/`).
 - **The tracking-mode pair.** Each of `RotationEnabled` and `PositionEnabled` is its accepted value,
   or the schema's default, `true`, when absent. When either is refused, the reason is

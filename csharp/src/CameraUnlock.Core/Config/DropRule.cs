@@ -35,5 +35,11 @@ namespace CameraUnlock.Core.Config
         /// virtual-key codes.
         /// </summary>
         KeyCodeOutOfRange = 5,
+
+        /// <summary>
+        /// N3: a hotkey bound to a Ctrl, Shift or Alt key on its own imports as unbound (C++
+        /// <c>LegacyVirtualKeyToBindings</c>, C# <see cref="LegacyNormalisations.KeyCodeToBindings"/>).
+        /// </summary>
+        ModifierKey = 6,
     }
 }

@@ -60,7 +60,8 @@ stops the block rendering. The block says where
 build, that the first start with no `CameraUnlock.ini` imports the settings
 once from the legacy file in the same folder and never changes that file, what
 is not carried over (comments, unread keys, and one line for each entry in
-data/config-format.json's `approved_changes`), that an older version of the mod
+data/config-format.json's `approved_changes` and for N3, a hotkey on Ctrl, Shift or Alt
+alone, among its `normalisations`), that an older version of the mod
 reads only the legacy file, and how to import again or reset; for a BepInEx
 mod, that ConfigurationManager does not list the settings; where the committed
 file holds `default` rows, what `default` means, where Defaults.ini is, who

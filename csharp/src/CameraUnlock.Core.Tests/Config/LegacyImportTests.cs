@@ -7,7 +7,7 @@ namespace CameraUnlock.Core.Tests.Config
 {
     /// <summary>
     /// The legacy import support: ImportResult's factories, the dropped-value lines, N2
-    /// (LegacyNormalisations.FiniteOrDefault), pose shaping (LegacyPoseShaping) and a LegacyImport
+    /// (LegacyNormalisations.FiniteOrDefault), N3 (LegacyNormalisations.KeyCodeToBindings), pose shaping (LegacyPoseShaping) and a LegacyImport
     /// over a config class. The C++ twin
     /// is cpp/tests/legacy_import_tests.cpp.
     /// </summary>
@@ -68,6 +68,7 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(3, (int)DropRule.Reticle);
             Assert.Equal(4, (int)DropRule.FollowsDefault);
             Assert.Equal(5, (int)DropRule.KeyCodeOutOfRange);
+            Assert.Equal(6, (int)DropRule.ModifierKey);
         }
 
         [Fact]
@@ -84,6 +85,9 @@ namespace CameraUnlock.Core.Tests.Config
                 new DroppedValue(DropRule.FollowsDefault, "Position", "CollisionEnabled", "false").Describe());
             Assert.Equal("not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
                 new DroppedValue(DropRule.KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230").Describe());
+            Assert.Equal("not carried: [Hotkeys] YawModeKey=LeftShift, it is a Ctrl, Shift or Alt key, which fires at the "
+                + "start of every Ctrl+Shift chord, so it is unbound",
+                new DroppedValue(DropRule.ModifierKey, "Hotkeys", "YawModeKey", "LeftShift").Describe());
         }
 
         [Fact]
@@ -91,7 +95,7 @@ namespace CameraUnlock.Core.Tests.Config
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)9, "A", "B", "C"));
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)0, "A", "B", "C"));
-            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)6, "A", "B", "C"));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)7, "A", "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, null!, "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", null!, "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", "B", null!));
@@ -135,6 +139,47 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, null!, "B", dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, "A", null!, dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, "A", "B", null!));
+        }
+
+        [Fact]
+        public void N3KeepsAKeyAndLeavesNoneUnbound()
+        {
+            var dropped = new List<DroppedValue>();
+            Assert.Equal("End", LegacyNormalisations.KeyCodeToBindings(279, "Hotkeys", "ToggleKey", dropped));
+            Assert.Equal("F9", LegacyNormalisations.KeyCodeToBindings(290, "Hotkeys", "ToggleKey", dropped));
+            Assert.Equal("LeftWindows", LegacyNormalisations.KeyCodeToBindings(311, "Hotkeys", "ToggleKey", dropped));
+            Assert.Equal("", LegacyNormalisations.KeyCodeToBindings(0, "Hotkeys", "YawModeKey", dropped));
+            Assert.Empty(dropped);
+        }
+
+        [Fact]
+        public void N3UnbindsACtrlShiftOrAltKeyAndRecordsIt()
+        {
+            var dropped = new List<DroppedValue>();
+            foreach (int code in new[] { 303, 304, 305, 306, 307, 308 })
+            {
+                Assert.Equal("", LegacyNormalisations.KeyCodeToBindings(code, "Hotkeys", "YawModeKey", dropped));
+            }
+            Assert.Equal(new[]
+            {
+                "ModifierKey [Hotkeys] YawModeKey=RightShift",
+                "ModifierKey [Hotkeys] YawModeKey=LeftShift",
+                "ModifierKey [Hotkeys] YawModeKey=RightControl",
+                "ModifierKey [Hotkeys] YawModeKey=LeftControl",
+                "ModifierKey [Hotkeys] YawModeKey=RightAlt",
+                "ModifierKey [Hotkeys] YawModeKey=LeftAlt",
+            }, dropped.ConvertAll(d => d.Rule + " [" + d.Section + "] " + d.Key + "=" + d.Value));
+        }
+
+        [Fact]
+        public void N3RefusesAnUnnamedCodeAndNulls()
+        {
+            var dropped = new List<DroppedValue>();
+            Assert.Throws<ArgumentException>(() => LegacyNormalisations.KeyCodeToBindings(999, "Hotkeys", "ToggleKey", dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, null!, "B", dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, "A", null!, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, "A", "B", null!));
+            Assert.Empty(dropped);
         }
 
         private static string PoseLine(PoseShapingValue p)

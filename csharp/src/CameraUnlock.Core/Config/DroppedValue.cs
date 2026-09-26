@@ -52,6 +52,8 @@ namespace CameraUnlock.Core.Config
                     return "this setting now follows the mod's default";
                 case DropRule.KeyCodeOutOfRange:
                     return "it is not a key code from 0x01 to 0xFE, so the action is unbound";
+                case DropRule.ModifierKey:
+                    return "it is a Ctrl, Shift or Alt key, which fires at the start of every Ctrl+Shift chord, so it is unbound";
                 default:
                     throw new ArgumentOutOfRangeException("rule", rule, "drop rule " + (int)rule + " is not a DropRule");
             }

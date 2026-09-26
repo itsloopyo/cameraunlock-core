@@ -71,6 +71,26 @@ const KeyNameEntry* KeyNamed(std::string_view token) {
     return nullptr;
 }
 
+// A modifier's own code, or the code of either side of one: the keys data/keys.json names as
+// the modifier's Unity left and right.
+bool IsModifierKey(int vk) {
+    for (std::size_t m = 0; m < kKeyModifierCount; ++m) {
+        if (vk == kKeyModifiers[m].vk) return true;
+        for (std::size_t i = 0; i < kKeyNameCount; ++i) {
+            const int unity = kKeyNames[i].unity;
+            if (kKeyNames[i].vk == vk && (unity == kKeyModifiers[m].unity_left || unity == kKeyModifiers[m].unity_right)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::string ModifierKeyError(std::string_view token) {
+    return Quote(token) + " is a Ctrl, Shift or Alt key: expected a key such as End, F9 or A, "
+           "with Ctrl, Shift or Alt before it";
+}
+
 int HexDigit(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -155,6 +175,7 @@ KeyBindingsParseResult ParseKeyBindings(std::string_view text) {
         std::string error;
         binding.vk = ReadKey(key, error);
         if (binding.vk == 0) return Fail(error);
+        if (IsModifierKey(binding.vk)) return Fail(ModifierKeyError(key));
 
         if (std::find(result.bindings.begin(), result.bindings.end(), binding) != result.bindings.end()) {
             return Fail(Quote(item) + " is listed twice: expected each binding once");
@@ -189,6 +210,10 @@ std::string FormatKeyBindings(const std::vector<KeyBinding>& bindings) {
         if (std::find(bindings.begin(), bindings.begin() + static_cast<std::ptrdiff_t>(n), binding) !=
             bindings.begin() + static_cast<std::ptrdiff_t>(n)) {
             throw std::invalid_argument("binding " + std::to_string(n + 1) + " repeats an earlier one");
+        }
+        if (IsModifierKey(binding.vk)) {
+            throw std::invalid_argument("binding " + std::to_string(n + 1) + " binds " + FormatVirtualKey(binding.vk) +
+                                        ", a Ctrl, Shift or Alt key, which a binding names only before its key");
         }
 
         if (n > 0) text += ", ";

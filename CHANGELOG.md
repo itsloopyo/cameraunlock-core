@@ -9,6 +9,51 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - BREAKING - a Ctrl, Shift or Alt key is never a hotkey's key
+
+Both hotkey codecs read a Ctrl, Shift or Alt key as the key of a binding: `LeftShift` to
+`RightAlt` in either dialect, and natively `0x10` to `0x12` and `0xA0` to `0xA5`. Such a key goes
+down before the key of any chord it starts, so with `YawModeKey=LeftShift, Ctrl+Shift+H` a player
+who pressed Shift, then Ctrl, then H fired the action twice.
+
+- **Parsers**: C++ `input::ParseKeyBindings` and C# `KeyBindings.TryParse` refuse such a key, with
+  or without modifiers before it (`Ctrl+LeftControl`, `Ctrl+0x11`), with
+  `'<key>' is a Ctrl, Shift or Alt key: expected a key such as End, F9 or A, with Ctrl, Shift or Alt before it`.
+  A `CameraUnlock.ini` or `Defaults.ini` row holding one is refused like any other value the codec
+  refuses.
+- **BREAKING, formatters**: C++ `input::FormatKeyBindings` throws `std::invalid_argument` and C#
+  `KeyBindings.Format` throws `ArgumentException` for such a binding, since nothing they could write
+  reads back. `FormatVirtualKey` still spells the key. A legacy import that formats a legacy key
+  code itself (`{{KeyModifiers::kNone, vk}, chord}`, or C# `new KeyBinding(KeyModifiers.None,
+  code)`) now throws on a legacy file that bound one; take the key's text from
+  `LegacyVirtualKeyToBindings` (C++) or `LegacyNormalisations.KeyCodeToBindings` (C#) instead, which
+  apply N3 below, and append the chord to it.
+- **Defaults.ini**: the header lists the 98 key names the file takes, not 104, and a `LeftShift`
+  to `RightAlt` key is refused as `<key> is not one of the key names this file takes`. A new
+  Defaults.ini's header is one line shorter. Lopari restates the header and must follow.
+- `data/fixtures/canonical-ini/keys/cases.tsv` makes every such key `invalid` in both dialects
+  (native 208 rows, unity 140). `scripts/lib/key-bindings.mjs` follows, and
+  `scripts/generate-config-schema.mjs` refuses a `canonical_default` that names one.
+
+### Added - N3: a legacy hotkey on Ctrl, Shift or Alt alone imports as unbound
+
+Approved by the owner on 2026-09-26 and recorded as `normalisations.N3` in
+`data/config-format.json`, with `drop_rule` `ModifierKey`.
+
+- **C++** `DropRule::ModifierKey` (6). `LegacyVirtualKeyToBindings(code)` gives "" for 0x10-0x12
+  and 0xA0-0xA5, and the recording overload adds a `ModifierKey` drop with the code in hex. The
+  numbers of the existing rules do not move.
+- **C#** `DropRule.ModifierKey` (6), and `LegacyNormalisations.KeyCodeToBindings(int unityKeyCode,
+  string section, string key, ICollection<DroppedValue> dropped)`: "" for 0 (`KeyCode.None`), "" and
+  a `ModifierKey` drop under the key name for `LeftShift` to `RightAlt`, the key's name otherwise,
+  and `ArgumentException` for a code with no name, as `KeyBindings.Format` throws.
+- The migration log line is `not carried: [Hotkeys] YawModeKey=0x11, it is a Ctrl, Shift or Alt
+  key, which fires at the start of every Ctrl+Shift chord, so it is unbound`.
+- The README config block of a legacy repo, rendered by `scripts/generate-readme.mjs`, and
+  `scripts/templates/canonical-config-changelog.md` gain a line for it among the settings not
+  carried over. A normalisation approved later stops the block rendering until it has a line or
+  is marked as having none.
+
 ### Added - an import can leave a row to Defaults.ini
 
 A map that applied `follows_default` set the field to the table's built-in default, so the

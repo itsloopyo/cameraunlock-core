@@ -57,8 +57,12 @@ struct KeyBindingsParseResult {
 /// trimmed tokens: any of Ctrl, Shift and Alt, each at most once and in any order, then
 /// exactly one key. A key is a name from data/keys.json that has a virtual-key code, or
 /// `0x` / `0X` and one or two hex digits from 0x01 to 0xFE, so every code a legacy file
-/// can hold is expressible. Names and modifiers read ASCII case-insensitively. A list
-/// naming the same binding twice is invalid.
+/// can hold is expressible. The key is never a Ctrl, Shift or Alt key: not a modifier's own
+/// code (0x10-0x12) and not either side of one (LeftShift to RightAlt, 0xA0-0xA5), however
+/// spelled. Such a key goes down before the key a chord holds it with, so bound alone it
+/// would fire whenever a player starts a chord with it, and the chord's own binding would
+/// fire again. Names and modifiers read ASCII case-insensitively. A list naming the same
+/// binding twice is invalid.
 KeyBindingsParseResult ParseKeyBindings(std::string_view text);
 
 /// The canonical text of a hotkey list, as ParseKeyBindings reads it back: modifiers as
@@ -66,11 +70,12 @@ KeyBindingsParseResult ParseKeyBindings(std::string_view text);
 /// with no name, `0x` and upper-case hex without padding, items joined by ", ". An empty
 /// list is "".
 ///
-/// Throws std::invalid_argument for a code outside 0x01-0xFE, a modifier value outside
-/// KeyModifiers, or a binding listed twice, none of which reads back.
+/// Throws std::invalid_argument for a code outside 0x01-0xFE, a Ctrl, Shift or Alt key, a
+/// modifier value outside KeyModifiers, or a binding listed twice, none of which reads back.
 std::string FormatKeyBindings(const std::vector<KeyBinding>& bindings);
 
-/// One key as FormatKeyBindings writes it: `End`, `F9`, `0xBA`. Throws
+/// One key's spelling, as FormatKeyBindings writes it: `End`, `F9`, `0xBA`. It spells a
+/// Ctrl, Shift or Alt key too (`LeftShift`, `0x10`), which no binding may name. Throws
 /// std::invalid_argument for a code outside 0x01-0xFE.
 std::string FormatVirtualKey(int vk);
 

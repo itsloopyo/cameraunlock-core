@@ -217,23 +217,43 @@ function locationParagraph(entries) {
   ].join('\n');
 }
 
-// Settings the conversion drops although the mod read them, one line per approved_changes entry.
-// An entry with no line here stops the block rendering, so a newly approved change cannot reach
-// players' files without the README saying so. scripts/templates/canonical-config-changelog.md
-// repeats these lines and the paragraphs below for each conversion's changelog; change both.
+// Settings the conversion drops although the mod read them, one line per approved_changes entry
+// and one per approved normalisation a player could have set. An entry with no line here stops
+// the block rendering, so a newly approved change cannot reach players' files without the README
+// saying so. scripts/templates/canonical-config-changelog.md repeats these lines and the
+// paragraphs below for each conversion's changelog; change both.
 const APPROVED_CHANGE_LINES = {
   pose_shaping: 'A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.',
   reticle: 'Reticle settings, and a key that toggled the reticle.',
   follows_default: "The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.",
 };
 
+// null marks a normalisation the block does not explain: the README said nothing of N1 (a hotkey
+// code outside 0x01-0xFE) or N2 (a number that is not finite) before N3 came, and the migration log
+// names each value they drop.
+const NORMALISATION_LINES = {
+  N1: null,
+  N2: null,
+  N3: 'A hotkey set to Ctrl, Shift or Alt on its own. It fired at the start of every Ctrl+Shift chord, so it is left unbound, and the hotkey keeps its Ctrl+Shift chord where it has one.',
+};
+
 function droppedSettings() {
-  const lines = Object.keys(FORMAT.approved_changes).map((id) => {
+  const changes = Object.keys(FORMAT.approved_changes).map((id) => {
     if (!(id in APPROVED_CHANGE_LINES)) {
       throw new Error(`data/config-format.json approved_changes.${id} has no line in the config block; add one to APPROVED_CHANGE_LINES in scripts/generate-readme.mjs`);
     }
-    return `- ${APPROVED_CHANGE_LINES[id]}`;
+    return APPROVED_CHANGE_LINES[id];
   });
+  const normalisations = Object.entries(FORMAT.normalisations)
+    .filter(([, n]) => n.approved !== null)
+    .map(([id]) => {
+      if (!(id in NORMALISATION_LINES)) {
+        throw new Error(`data/config-format.json normalisations.${id} has no line in the config block; add one to NORMALISATION_LINES in scripts/generate-readme.mjs, or null where no player sets that value`);
+      }
+      return NORMALISATION_LINES[id];
+    })
+    .filter((line) => line !== null);
+  const lines = [...changes, ...normalisations].map((line) => `- ${line}`);
   return ['Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:', '', ...lines].join('\n');
 }
 

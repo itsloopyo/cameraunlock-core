@@ -3,6 +3,7 @@
 #include "cameraunlock/config/head_tracking_config_table.h"
 #include "cameraunlock/config/hotkey_codec.h"
 #include "cameraunlock/config/value_codecs.h"
+#include "cameraunlock/config/value_guards.h"
 #include "cameraunlock/input/key_names.g.h"
 #include "cameraunlock/tracking/tracking_mode.h"
 
@@ -29,9 +30,8 @@ constexpr const char* kHeader[] = {
     "; Only these key names are read here: A to Z, Alpha0 to Alpha9, F1 to F24, Keypad0 to Keypad9,",
     "; KeypadPeriod, KeypadDivide, KeypadMultiply, KeypadMinus, KeypadPlus, UpArrow, DownArrow,",
     "; LeftArrow, RightArrow, Insert, Delete, Home, End, PageUp, PageDown, Backspace, Tab, Return,",
-    "; Space, Escape, Pause, Print, Menu, Numlock, CapsLock, ScrollLock, LeftShift, RightShift,",
-    "; LeftControl, RightControl, LeftAlt, RightAlt, LeftWindows, RightWindows. A value holding any",
-    "; other key makes every game use its built-in keys for that action.",
+    "; Space, Escape, Pause, Print, Menu, Numlock, CapsLock, ScrollLock, LeftWindows, RightWindows.",
+    "; A value holding any other key makes every game use its built-in keys for that action.",
 };
 
 std::string_view Trim(std::string_view text) {
@@ -93,13 +93,14 @@ bool IsModifier(std::string_view token) {
 
 bool IsVirtualKeyName(std::string_view token) {
     for (const input::KeyNameEntry& key : input::kKeyNames) {
-        if (key.vk != 0 && EqualsAsciiIgnoreCase(token, key.name)) return true;
+        if (key.vk != 0 && IsBindableVirtualKey(key.vk) && EqualsAsciiIgnoreCase(token, key.name)) return true;
     }
     return false;
 }
 
-// The first item whose key is not a name with a Windows virtual-key code, or empty. An item this
-// cannot split into modifiers and a key is left to the codec, which names what it expected.
+// The first item whose key is not a name with a Windows virtual-key code that a binding can hold,
+// or empty. An item this cannot split into modifiers and a key is left to the codec, which names
+// what it expected.
 std::string KeyNameError(std::string_view text) {
     std::size_t start = 0;
     for (;;) {

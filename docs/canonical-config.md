@@ -196,9 +196,15 @@ the double `3e-324` as 0. Each language's own tests hold those three values.
 A hotkey value is a list of bindings separated by commas, and empty means unbound:
 `ToggleKey=End, Ctrl+Shift+Y`. A binding is any of `Ctrl`, `Shift` and `Alt`, each at most once
 and in any order, then one key, joined by `+`. Names read ASCII case-insensitively, and the same
-binding twice in one list is invalid. The canonical text writes the modifiers as
-`Ctrl+Shift+Alt+` in that order, the key as `data/keys.json` spells it, and `, ` between items,
-so `end,shift+ctrl+y` is written `End, Ctrl+Shift+Y`.
+binding twice in one list is invalid. The key is never a Ctrl, Shift or Alt key, however it is
+spelled: not `LeftShift`, `RightShift`, `LeftControl`, `RightControl`, `LeftAlt` or `RightAlt`,
+and in a native mod not `0x10` to `0x12` or `0xA0` to `0xA5` either, with modifiers before it
+(`Ctrl+LeftControl`) or without. Such a key goes down before the key of any chord it starts, so a
+binding on it alone would fire whenever a player starts that chord, and the chord's own binding
+would fire again. The canonical text writes the modifiers as `Ctrl+Shift+Alt+` in that order, the
+key as `data/keys.json` spells it, and `, ` between items, so `end,shift+ctrl+y` is written
+`End, Ctrl+Shift+Y`. C++ `input::FormatKeyBindings` and C# `KeyBindings.Format` throw for a
+binding whose key is a Ctrl, Shift or Alt key, since no text they could write reads back.
 
 The key names are Unity's `KeyCode` member names (`End`, `PageUp`, `F9`, `Alpha1`, `Keypad0`,
 `UpArrow`), 334 of them in `data/keys.json`. A name has a Windows virtual-key code only where both
@@ -958,7 +964,7 @@ always a mode.
 The owner creates it from core's own table, `HeadTrackingConfigTable` naming every global
 concept, at the built-in values, with the four hotkey lists and `CollisionEnabled` at their
 `canonical_default`. Every row is a value. The header is the file's own: what the file is, the
-comment and hotkey lines of every canonical file, and the 104 key names it takes. Both languages
+comment and hotkey lines of every canonical file, and the 98 key names it takes. Both languages
 render it byte for byte:
 
 <!-- file: data/fixtures/canonical-ini/global/Defaults.ini -->
@@ -972,9 +978,8 @@ render it byte for byte:
 ; Only these key names are read here: A to Z, Alpha0 to Alpha9, F1 to F24, Keypad0 to Keypad9,
 ; KeypadPeriod, KeypadDivide, KeypadMultiply, KeypadMinus, KeypadPlus, UpArrow, DownArrow,
 ; LeftArrow, RightArrow, Insert, Delete, Home, End, PageUp, PageDown, Backspace, Tab, Return,
-; Space, Escape, Pause, Print, Menu, Numlock, CapsLock, ScrollLock, LeftShift, RightShift,
-; LeftControl, RightControl, LeftAlt, RightAlt, LeftWindows, RightWindows. A value holding any
-; other key makes every game use its built-in keys for that action.
+; Space, Escape, Pause, Print, Menu, Numlock, CapsLock, ScrollLock, LeftWindows, RightWindows.
+; A value holding any other key makes every game use its built-in keys for that action.
 
 [CameraUnlock]
 ; Written by the mod. Leave this section in place.
@@ -1085,10 +1090,10 @@ altogether.
 Defaults.ini has the grammar, codecs and stamp of every canonical file. What differs:
 
 - **One hotkey dialect for every mod.** A hotkey value is refused unless the key of every item is
-  `Ctrl`, `Shift`, `Alt` or one of the 104 names in `data/keys.json` that have a Windows
-  virtual-key code, the list the header prints. An alias does not count, and neither does a `0x`
-  code, so `ToggleKey=Mouse4` and `ToggleKey=0x23` are refused alike, in a Unity mod and a native
-  one. A global key then works in every game or in none. A game's own `CameraUnlock.ini` keeps its
+  `Ctrl`, `Shift`, `Alt` or one of the 98 names in `data/keys.json` that have a Windows
+  virtual-key code and are not a Ctrl, Shift or Alt key, the list the header prints. An alias
+  does not count, and neither does a `0x` code, so `ToggleKey=Mouse4`, `ToggleKey=0x23` and
+  `ToggleKey=LeftShift` are refused alike, in a Unity mod and a native one. A global key then works in every game or in none. A game's own `CameraUnlock.ini` keeps its
   mod's dialect.
 - **The tracking-mode pair is one setting.** Each of `RotationEnabled` and `PositionEnabled` is
   its accepted value, or the built-in `true` when the key is absent. When either is refused, or
@@ -1341,6 +1346,7 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `Reticle` (3) | approved change `reticle` | Reticle settings and a reticle toggle key |
 | `FollowsDefault` (4) | approved change `follows_default` | The setting of a feature shipped switched off while untested, which now follows the mod's default |
 | `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code outside 0x01-0xFE, 0xFF included, which imports as unbound (C++ `LegacyVirtualKeyToBindings`; no C# import reads virtual-key codes). Code 0, a legacy file's unbound, stays unbound and is not recorded |
+| `ModifierKey` (6) | normalisation N3 | A hotkey bound to a Ctrl, Shift or Alt key on its own, which imports as unbound, since no hotkey value can hold one (C++ `LegacyVirtualKeyToBindings` for 0x10-0x12 and 0xA0-0xA5, recorded as the code in hex; C# `LegacyNormalisations.KeyCodeToBindings` for `LeftShift` to `RightAlt`, recorded as the key name). A map that folds the action's Ctrl+Shift chord into the list appends it to what these give, so the player keeps the chord |
 
 A `FollowsDefault` value is the one the build shipped, which no player chose, so the map also
 names the row's concept in the result's `follows_defaults_ini` (C# `FollowsDefaultsIni`, passed
@@ -1637,7 +1643,7 @@ Defaults.ini adds its own rules, since every mod that reads it reads it the same
   it in place can read it halfway, and runs on the built-in value of every row not yet written,
   `UdpPort` included, until it reads the file again.
 - Write values as the canonical codecs write them, within the schema's ranges, hotkeys only from
-  the 104 key names the file's header lists, and `RotationEnabled` and `PositionEnabled` together
+  the 98 key names the file's header lists, and `RotationEnabled` and `PositionEnabled` together
   as a mode `preference_modes` in `data/pipeline-conformance.json` lists. `default` is refused
   there. A key the file lacks is inserted by the editor's rule, and keys and comments the tool
   does not know stay as they are.

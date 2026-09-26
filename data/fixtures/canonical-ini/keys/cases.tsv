@@ -74,12 +74,6 @@ native	LeftWindows	canonical	LeftWindows
 unity	LeftWindows	canonical	LeftWindows
 native	RightWindows	canonical	RightWindows
 unity	RightWindows	canonical	RightWindows
-native	LeftControl	canonical	LeftControl
-unity	LeftControl	canonical	LeftControl
-native	rightshift	canonical	RightShift
-unity	rightshift	canonical	RightShift
-native	LeftAlt	canonical	LeftAlt
-unity	LeftAlt	canonical	LeftAlt
 
 # Empty is unbound
 native		canonical	
@@ -108,8 +102,6 @@ native	Alt+Home	canonical	Alt+Home
 unity	Alt+Home	canonical	Alt+Home
 native	Shift+End	canonical	Shift+End
 unity	Shift+End	canonical	Shift+End
-native	Ctrl+LeftControl	canonical	Ctrl+LeftControl
-unity	Ctrl+LeftControl	canonical	Ctrl+LeftControl
 
 # Lists keep their order and are joined by comma and space
 native	end,ctrl+shift+y	canonical	End, Ctrl+Shift+Y
@@ -180,12 +172,6 @@ native	0x5C	canonical	RightWindows
 native	0x5d	canonical	Menu
 native	0x90	canonical	Numlock
 native	0x91	canonical	ScrollLock
-native	0xA0	canonical	LeftShift
-native	0xA1	canonical	RightShift
-native	0xA2	canonical	LeftControl
-native	0xA3	canonical	RightControl
-native	0xA4	canonical	LeftAlt
-native	0xA5	canonical	RightAlt
 
 # Native codes with no name are written in upper-case hex without padding
 native	0x1	canonical	0x1
@@ -200,12 +186,47 @@ native	0xDE	canonical	0xDE
 native	0xFE	canonical	0xFE
 native	0x1F	canonical	0x1F
 native	End, 0xBA	canonical	End, 0xBA
+native	0x0F	canonical	0xF
+native	0x9F	canonical	0x9F
+native	0xA6	canonical	0xA6
 
-# A modifier's own code is a key, written in hex
-native	0x10	canonical	0x10
-native	0x11	canonical	0x11
-native	0x12	canonical	0x12
-native	Ctrl+0x11	canonical	Ctrl+0x11
+# A Ctrl, Shift or Alt key is never the key, however spelled: it goes down before the key a
+# chord holds it with, so bound alone it would fire whenever a player starts the chord with it
+native	LeftShift	invalid
+unity	LeftShift	invalid
+native	rightshift	invalid
+unity	rightshift	invalid
+native	LeftControl	invalid
+unity	LeftControl	invalid
+native	RIGHTCONTROL	invalid
+unity	RIGHTCONTROL	invalid
+native	LeftAlt	invalid
+unity	LeftAlt	invalid
+native	RightAlt	invalid
+unity	RightAlt	invalid
+native	Ctrl+LeftControl	invalid
+unity	Ctrl+LeftControl	invalid
+native	Ctrl+Shift+LeftShift	invalid
+unity	Ctrl+Shift+LeftShift	invalid
+native	Alt+RightShift	invalid
+unity	Alt+RightShift	invalid
+native	End, LeftShift	invalid
+unity	End, LeftShift	invalid
+native	LeftAlt, Ctrl+Shift+Y	invalid
+unity	LeftAlt, Ctrl+Shift+Y	invalid
+native	0x10	invalid
+native	0x11	invalid
+native	0x12	invalid
+native	0xA0	invalid
+native	0xa1	invalid
+native	0XA2	invalid
+native	0xA3	invalid
+native	0xA4	invalid
+native	0xA5	invalid
+native	Ctrl+0x11	invalid
+native	Ctrl+Shift+0x10	invalid
+native	End, 0x12	invalid
+native	0x10, Ctrl+Shift+Y	invalid
 
 # Native codes that are not codes
 native	0x0	invalid

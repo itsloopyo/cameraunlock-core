@@ -66,6 +66,8 @@ namespace CameraUnlock.Core.Tests.Input
         [InlineData("Page Up", "is not a key name")]
         [InlineData("0x23", "is a key code")]
         [InlineData("End, end", "is listed twice")]
+        [InlineData("LeftShift", "'LeftShift' is a Ctrl, Shift or Alt key")]
+        [InlineData("End, Ctrl+Shift+rightcontrol", "'rightcontrol' is a Ctrl, Shift or Alt key")]
         public void AnErrorNamesTheExpectation(string input, string says)
         {
             Assert.False(KeyBindings.TryParse(input, out KeyBinding[] bindings, out string? error));
@@ -90,6 +92,24 @@ namespace CameraUnlock.Core.Tests.Input
             Assert.Throws<ArgumentException>(() => KeyBindings.Format(new[] { new KeyBinding(KeyModifiers.None, 999) }));
             Assert.Throws<ArgumentException>(() => KeyBindings.Format(new[] { new KeyBinding(KeyModifiers.None, 0) }));
             Assert.Throws<ArgumentException>(() => KeyBindings.Format(new[] { new KeyBinding(KeyModifiers.None, 279), new KeyBinding(KeyModifiers.None, 279) }));
+        }
+
+        [Fact]
+        public void ACtrlShiftOrAltKeyIsNeverTheKey()
+        {
+            Assert.False(KeyBindings.TryParse("Alt+LeftAlt", out KeyBinding[] bindings, out string? error));
+            Assert.Empty(bindings);
+            Assert.Equal("'LeftAlt' is a Ctrl, Shift or Alt key: expected a key such as End, F9 or A, with Ctrl, Shift or Alt before it",
+                error);
+
+            ArgumentException thrown = Assert.Throws<ArgumentException>(() => KeyBindings.Format(
+                new[] { new KeyBinding(KeyModifiers.None, 279), new KeyBinding(KeyModifiers.None, 306) }));
+            Assert.StartsWith("binding 2 binds LeftControl, a Ctrl, Shift or Alt key, which a binding names only before its key",
+                thrown.Message);
+            foreach (int code in new[] { 303, 304, 305, 306, 307, 308 })
+            {
+                Assert.Throws<ArgumentException>(() => KeyBindings.Format(new[] { new KeyBinding(KeyModifiers.Ctrl | KeyModifiers.Shift, code) }));
+            }
         }
 
         [Fact]

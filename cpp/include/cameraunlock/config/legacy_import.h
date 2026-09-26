@@ -51,6 +51,9 @@ enum class DropRule {
     FollowsDefault = 4,
     /// N1: a hotkey code outside 0x01-0xFE imports as unbound (LegacyVirtualKeyToBindings).
     KeyCodeOutOfRange = 5,
+    /// N3: a hotkey bound to a Ctrl, Shift or Alt key on its own imports as unbound
+    /// (LegacyVirtualKeyToBindings).
+    ModifierKey = 6,
 };
 
 /// One legacy value the map did not carry, for the migration log.
@@ -159,19 +162,23 @@ struct LegacyImport {
     std::vector<LegacyKey> keys;
 };
 
-/// Normalisation N1: a legacy hotkey code as a hotkey value. A code from 0x01 to 0xFE gives its
-/// key name, or `0x` and hex for a code the key table does not name; any other code gives "",
-/// unbound. `pixi run probe-n1` shows GetAsyncKeyState reporting none of them for a key held in
-/// range, so such a hotkey never fired on one. The exception is 0xFF: kbd.h gives it to the scan
-/// codes a layout leaves unmapped (VK__none_), and GetAsyncKeyState(0xFF) reports down while that
-/// code is held, so a legacy 0xFF hotkey could fire, and N1 unbinds it (approved 2026-09-25). A
-/// map folding a legacy chord switch into the same action formats the whole list instead, with
-/// input::FormatKeyBindings: the code's binding when it is in range, then the chord.
+/// Normalisations N1 and N3: a legacy hotkey code as a hotkey value. A code from 0x01 to 0xFE
+/// gives its key name, or `0x` and hex for a code the key table does not name. Any other code
+/// gives "", unbound (N1). `pixi run probe-n1` shows GetAsyncKeyState reporting none of them for a
+/// key held in range, so such a hotkey never fired on one. The exception is 0xFF: kbd.h gives it
+/// to the scan codes a layout leaves unmapped (VK__none_), and GetAsyncKeyState(0xFF) reports down
+/// while that code is held, so a legacy 0xFF hotkey could fire, and N1 unbinds it (approved
+/// 2026-09-25). A Ctrl, Shift or Alt key (0x10-0x12, 0xA0-0xA5) gives "" too (N3, approved
+/// 2026-09-26): no hotkey value binds one, because it goes down before the key of any chord it
+/// starts, so a binding on it fires at the start of every Ctrl+Shift chord. A map folding a
+/// legacy chord switch into the same action appends the chord to what this gives, so the player
+/// keeps the chord when the code is unbound.
 std::string LegacyVirtualKeyToBindings(long long code);
 
 /// LegacyVirtualKeyToBindings, recording the drop in `dropped` under `section` and `key` when
-/// the code is outside 0x01-0xFE. Code 0 is recorded as nothing: it is how a legacy file says
-/// unbound, and it stays unbound.
+/// the code is outside 0x01-0xFE (DropRule::KeyCodeOutOfRange) or a Ctrl, Shift or Alt key
+/// (DropRule::ModifierKey). Code 0 is recorded as nothing: it is how a legacy file says unbound,
+/// and it stays unbound.
 std::string LegacyVirtualKeyToBindings(long long code, const std::string& section, const std::string& key,
                                        std::vector<DroppedValue>& dropped);
 

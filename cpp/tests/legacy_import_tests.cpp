@@ -1,8 +1,9 @@
-// The legacy import support: ImportResult's factories, the dropped-value lines, N1
+// The legacy import support: ImportResult's factories, the dropped-value lines, N1 and N3
 // (LegacyVirtualKeyToBindings), N2 (LegacyFiniteOrDefault), pose shaping (LegacyPoseShaping),
 // and a LegacyImport over a Config.
 
 #include <cameraunlock/config/legacy_import.h>
+#include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/input/key_bindings.h>
 
 #include <climits>
@@ -76,7 +77,7 @@ void TestImportResult() {
           "ImportStatus numbers match the C# enum");
     Check(static_cast<int>(DropRule::NonFiniteNumber) == 1 && static_cast<int>(DropRule::PoseShaping) == 2 &&
               static_cast<int>(DropRule::Reticle) == 3 && static_cast<int>(DropRule::FollowsDefault) == 4 &&
-              static_cast<int>(DropRule::KeyCodeOutOfRange) == 5,
+              static_cast<int>(DropRule::KeyCodeOutOfRange) == 5 && static_cast<int>(DropRule::ModifierKey) == 6,
           "DropRule numbers match the C# enum");
 }
 
@@ -97,6 +98,10 @@ void TestDescribe() {
     Check(DescribeDroppedValue({DropRule::KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230"}) ==
               "not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
           "N1 line");
+    Check(DescribeDroppedValue({DropRule::ModifierKey, "Hotkeys", "YawModeKey", "0x11"}) ==
+              "not carried: [Hotkeys] YawModeKey=0x11, it is a Ctrl, Shift or Alt key, which fires at the start of "
+              "every Ctrl+Shift chord, so it is unbound",
+          "N3 line");
     Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(9), "A", "B", "C"}); }) ==
               "drop rule 9 is not a DropRule",
           "a rule outside DropRule throws");
@@ -106,15 +111,15 @@ void TestN1() {
     Check(LegacyVirtualKeyToBindings(0x23) == "End", "0x23 is End");
     Check(LegacyVirtualKeyToBindings(0x87) == "F24", "0x87 is F24");
     Check(LegacyVirtualKeyToBindings(0xBA) == "0xBA", "0xBA has no name, so hex");
-    Check(LegacyVirtualKeyToBindings(0x11) == "0x11", "a bare modifier code has no name, so hex");
     bool every = true;
     for (long long code = 0x01; code <= 0xFE; ++code) {
+        if (!IsBindableVirtualKey(static_cast<int>(code))) continue;
         const std::string text = LegacyVirtualKeyToBindings(code);
         const auto read = ParseKeyBindings(text);
         every = every && text == FormatVirtualKey(static_cast<int>(code)) && read.ok() && read.bindings.size() == 1 &&
                 read.bindings[0].vk == code && read.bindings[0].modifiers == KeyModifiers::kNone;
     }
-    Check(every, "every code from 0x01 to 0xFE reads back as that one key");
+    Check(every, "every code from 0x01 to 0xFE but a Ctrl, Shift or Alt key reads back as that one key");
     bool none = true;
     for (const long long code : {0LL, 0xFFLL, 0x100LL, 0x187LL, 0x230LL, -1LL, -0x79LL, 0x1000000FFLL,
                                  static_cast<long long>(LLONG_MAX), static_cast<long long>(LLONG_MIN)}) {
@@ -143,6 +148,32 @@ void TestN1() {
     Check(FormatKeyBindings({KeyBinding{KeyModifiers::kNone, 0x23}, KeyBinding{KeyModifiers::kCtrl | KeyModifiers::kShift, 'Y'}}) ==
               "End, Ctrl+Shift+Y",
           "a chord switch folds into the list through FormatKeyBindings");
+}
+
+void TestN3() {
+    const long long modifiers[] = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5};
+    bool unbound = true;
+    for (const long long code : modifiers) unbound = unbound && LegacyVirtualKeyToBindings(code).empty();
+    Check(unbound, "each Ctrl, Shift and Alt key, 0x10-0x12 and 0xA0-0xA5, is unbound");
+    int kept = 0;
+    for (long long code = 0x01; code <= 0xFE; ++code) kept += LegacyVirtualKeyToBindings(code).empty() ? 0 : 1;
+    Check(kept == 0xFE - 9, "they are the only codes from 0x01 to 0xFE that are unbound");
+
+    std::vector<DroppedValue> dropped;
+    Check(LegacyVirtualKeyToBindings(0x11, "Hotkeys", "YawModeKey", dropped).empty(), "0x11, Ctrl, is unbound");
+    LegacyVirtualKeyToBindings(0x10, "Hotkeys", "ToggleKey", dropped);
+    LegacyVirtualKeyToBindings(0xA0, "General", "CycleKey", dropped);
+    LegacyVirtualKeyToBindings(0xA5, "General", "PositionKey", dropped);
+    Check(dropped.size() == 4 && SameDrop(dropped[0], DropRule::ModifierKey, "Hotkeys", "YawModeKey", "0x11") &&
+              SameDrop(dropped[1], DropRule::ModifierKey, "Hotkeys", "ToggleKey", "0x10") &&
+              SameDrop(dropped[2], DropRule::ModifierKey, "General", "CycleKey", "0xA0") &&
+              SameDrop(dropped[3], DropRule::ModifierKey, "General", "PositionKey", "0xA5"),
+          "each records the drop as ModifierKey, the code in hex");
+
+    const std::string code = LegacyVirtualKeyToBindings(0xA2, "Hotkeys", "YawModeKey", dropped);
+    const std::string chord = FormatKeyBindings({KeyBinding{KeyModifiers::kCtrl | KeyModifiers::kShift, 'H'}});
+    Check((code.empty() ? chord : code + ", " + chord) == "Ctrl+Shift+H",
+          "a map that appends the action's chord keeps the chord alone");
 }
 
 void TestN2() {
@@ -267,6 +298,7 @@ int RunLegacyImportTests() {
         TestImportResult();
         TestDescribe();
         TestN1();
+        TestN3();
         TestN2();
         TestPoseShaping();
         TestLegacyImport();

@@ -551,6 +551,11 @@
       "rule": "A non-finite float imports as the row's default. IniReader::ReadDouble accepts nan, inf and 1e400, abzu reads its sensitivities and deadzone through it unguarded, and skyrim-special-edition's atof and std::clamp let NaN through, which gives a NaN view matrix every frame. Repos that already sanitise turn a non-finite value into their fallback on read and see no change.",
       "approved": "2026-09-24",
       "drop_rule": "NonFiniteNumber"
+    },
+    "N3": {
+      "rule": "A legacy hotkey bound to a Ctrl, Shift or Alt key on its own imports as unbound, and the drop is logged. That is 0x10-0x12 or 0xA0-0xA5 in a native mod (C++ LegacyVirtualKeyToBindings) and LeftShift, RightShift, LeftControl, RightControl, LeftAlt or RightAlt in a Unity mod (C# LegacyNormalisations.KeyCodeToBindings). Such a key goes down before the key of any chord it starts, so a binding on it fires at the start of every Ctrl+Shift chord, and the canonical hotkey grammar refuses it as a key. Where the import adds the action's Ctrl+Shift chord to the list, the player keeps the chord.",
+      "approved": "2026-09-26",
+      "drop_rule": "ModifierKey"
     }
   },
   "approved_changes": {

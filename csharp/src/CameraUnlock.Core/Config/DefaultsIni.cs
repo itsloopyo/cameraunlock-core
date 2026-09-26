@@ -26,9 +26,8 @@ namespace CameraUnlock.Core.Config
             "; Only these key names are read here: A to Z, Alpha0 to Alpha9, F1 to F24, Keypad0 to Keypad9,",
             "; KeypadPeriod, KeypadDivide, KeypadMultiply, KeypadMinus, KeypadPlus, UpArrow, DownArrow,",
             "; LeftArrow, RightArrow, Insert, Delete, Home, End, PageUp, PageDown, Backspace, Tab, Return,",
-            "; Space, Escape, Pause, Print, Menu, Numlock, CapsLock, ScrollLock, LeftShift, RightShift,",
-            "; LeftControl, RightControl, LeftAlt, RightAlt, LeftWindows, RightWindows. A value holding any",
-            "; other key makes every game use its built-in keys for that action.",
+            "; Space, Escape, Pause, Print, Menu, Numlock, CapsLock, ScrollLock, LeftWindows, RightWindows.",
+            "; A value holding any other key makes every game use its built-in keys for that action.",
         };
 
         /// <summary>
@@ -202,9 +201,9 @@ namespace CameraUnlock.Core.Config
                 : new DefaultsIniValue(DefaultsIniValueState.Refused, found.Line, section.Name, found.Key, found.Value, error);
         }
 
-        // The first item whose key is not a name with a Windows virtual-key code, or null. An item
-        // this cannot split into modifiers and a key is left to the codec, which names what it
-        // expected.
+        // The first item whose key is not a name with a Windows virtual-key code that a binding can
+        // hold, or null. An item this cannot split into modifiers and a key is left to the codec,
+        // which names what it expected.
 #if NULLABLE_ENABLED
         private static string? KeyNameError(byte[] text)
 #else
@@ -234,7 +233,7 @@ namespace CameraUnlock.Core.Config
         {
             foreach (KeyNames.Key key in KeyNames.Keys)
             {
-                if (key.VirtualKey != 0 && EqualsAsciiIgnoreCase(token, key.Name)) return true;
+                if (key.VirtualKey != 0 && !KeyBindings.IsModifierKey(key.UnityKeyCode) && EqualsAsciiIgnoreCase(token, key.Name)) return true;
             }
             return false;
         }

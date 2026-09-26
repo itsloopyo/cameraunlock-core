@@ -1,5 +1,6 @@
 #include <cameraunlock/config/legacy_import.h>
 #include <cameraunlock/config/value_codecs.h>
+#include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/input/key_bindings.h>
 
 namespace cameraunlock::config {
@@ -22,6 +23,9 @@ const char* DropReason(DropRule rule) {
             return "this setting now follows the mod's default";
         case DropRule::KeyCodeOutOfRange:
             return "it is not a key code from 0x01 to 0xFE, so the action is unbound";
+        case DropRule::ModifierKey:
+            return "it is a Ctrl, Shift or Alt key, which fires at the start of every Ctrl+Shift chord, so it is "
+                   "unbound";
     }
     throw std::invalid_argument("drop rule " + std::to_string(static_cast<int>(rule)) + " is not a DropRule");
 }
@@ -68,14 +72,16 @@ std::string DescribeDroppedValue(const DroppedValue& dropped) {
 }
 
 std::string LegacyVirtualKeyToBindings(long long code) {
-    if (code < kMinCode || code > kMaxCode) return {};
-    return input::FormatVirtualKey(static_cast<int>(code));
+    if (code < kMinCode || code > kMaxCode || !IsBindableVirtualKey(static_cast<int>(code))) return {};
+    return input::FormatKeyBindings({{input::KeyModifiers::kNone, static_cast<int>(code)}});
 }
 
 std::string LegacyVirtualKeyToBindings(long long code, const std::string& section, const std::string& key,
                                        std::vector<DroppedValue>& dropped) {
     if (code != 0 && (code < kMinCode || code > kMaxCode)) {
         dropped.push_back({DropRule::KeyCodeOutOfRange, section, key, CodeText(code)});
+    } else if (code != 0 && !IsBindableVirtualKey(static_cast<int>(code))) {
+        dropped.push_back({DropRule::ModifierKey, section, key, CodeText(code)});
     }
     return LegacyVirtualKeyToBindings(code);
 }
