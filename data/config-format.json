@@ -179,7 +179,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "arx-fatalis-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini", "EN\\CameraUnlock.ini"], "legacy_source": "ArxFatalisHeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini", "EN\\CameraUnlock.ini"], "legacy_source": "ArxFatalisHeadTracking.ini", "dialect": "native"}
     ],
     "assassins-creed-origins-headtracking": [
       {"committed": "AssassinsCreedOriginsHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -230,7 +230,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "deep-rock-galactic-headtracking": [
-      {"committed": null, "installed": ["FSD\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["FSD\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "deus-ex-human-revolution-headtracking": [
       {"committed": "DeusExHumanRevolutionHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "DeusExHumanRevolutionHeadTracking.ini", "dialect": "native"}
