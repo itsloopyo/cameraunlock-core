@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 
-// Holds scripts/validate-manifest.mjs to its patches[].tool rule on built ZIPs.
+// Holds scripts/validate-manifest.mjs to two rules on built ZIPs.
 //
 // patches[].tool: the launcher runs a Cecil mod's patch tool in place from the package root, with
 // the tool's folder as its working directory. The tool has to be in the ZIP, and it and the files
 // beside it in its folder are declared payload, while an undeclared binary anywhere else still
 // fails. ZIPs here are named by a path outside any release/ folder, so no repo rule applies.
+//
+// The Nexus ZIP: with no arguments the validator checks the Nexus ZIP of the installer ZIP it just
+// validated, the same name with -nexus.zip, and warns about and skips any other one as stale. That
+// runs from a throwaway abzu-headtracking checkout (a converted data/config-format.json entry) with
+// a copy of core's scripts and data in its cameraunlock-core folder, the layout a mod has.
 //
 //   node scripts/test-validate-manifest.mjs      (pixi run test-validate-manifest, part of pixi run check)
 
@@ -125,6 +130,66 @@ const patchCase = (label, man, files) => run(VALIDATOR, zip(path.join(scratch, "
     inVariant.status === 1 && inVariant.out.includes('variant "only" has patches, which the launcher reads only at the top level'),
     `patches: a variant's patches should fail, got ${inVariant.status}\n${inVariant.out}`,
   );
+}
+
+// The Nexus ZIP. The mod is abzu-headtracking, converted: its committed HeadTracking.ini is the
+// rendered canonical file, and its config installs at AbzuGame/Binaries/Win64/CameraUnlock.ini.
+const ALL = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "canonical-ini", "head-tracking", "all-concepts-fresh.ini"));
+const INSTALLED = "AbzuGame/Binaries/Win64/CameraUnlock.ini";
+const abzuMan = (version) => ({
+  schema_version: 2,
+  mod_info: { name: "Mod", version, game_id: "abzu" },
+  delivery_mode: "manifest",
+  files: [{ source: "plugins/Mod.dll", target: "Mod.dll" }],
+});
+
+// A mod checkout holding release/<name> for each ZIP given, with core's scripts and data copied
+// into its cameraunlock-core folder. Returns the result of validating it with no arguments.
+function selfRun(label, zips) {
+  const root = path.join(scratch, "nexus", label, "abzu-headtracking");
+  fs.mkdirSync(root, { recursive: true });
+  const git = spawnSync("git", ["-C", root, "init", "-q"], { encoding: "utf8" });
+  if (git.status !== 0) throw new Error(`git init failed: ${git.stderr}`);
+  fs.writeFileSync(path.join(root, "HeadTracking.ini"), ALL);
+  const core = path.join(root, "cameraunlock-core");
+  fs.cpSync(path.join(CORE_ROOT, "data"), path.join(core, "data"), { recursive: true });
+  fs.cpSync(path.join(CORE_ROOT, "scripts", "lib"), path.join(core, "scripts", "lib"), { recursive: true });
+  for (const name of fs.readdirSync(path.join(CORE_ROOT, "scripts")).filter((n) => n.endsWith(".mjs"))) {
+    fs.copyFileSync(path.join(CORE_ROOT, "scripts", name), path.join(core, "scripts", name));
+  }
+  for (const [name, [man, files]] of Object.entries(zips)) zip(path.join(root, "release", name), man, files);
+  return run(path.join(core, "scripts", "validate-manifest.mjs"));
+}
+const installer = (version) => [abzuMan(version), { "plugins/Mod.dll": "dll" }];
+const nexus = (files) => [null, files];
+
+{
+  const carries = selfRun("carries", {
+    "Mod-v1.2.0-installer.zip": installer("1.2.0"),
+    "Mod-v1.2.0-nexus.zip": nexus({ "Mod.dll": "dll", [INSTALLED]: "[CameraUnlock]\r\n" }),
+  });
+  check(
+    carries.status === 1 && carries.out.includes(`Mod-v1.2.0-nexus.zip carries ${INSTALLED}`),
+    `nexus: the Nexus ZIP of the same build carrying the config should fail, got ${carries.status}\n${carries.out}`,
+  );
+
+  const clean = selfRun("clean", {
+    "Mod-v1.2.0-installer.zip": installer("1.2.0"),
+    "Mod-v1.2.0-nexus.zip": nexus({ "Mod.dll": "dll" }),
+  });
+  check(clean.status === 0 && clean.out.includes("Mod-v1.2.0-nexus.zip - carries no config"), `nexus: a clean Nexus ZIP of the same build should pass, got ${clean.status}\n${clean.out}`);
+
+  const stale = selfRun("stale", {
+    "Mod-v1.3.0-installer.zip": installer("1.3.0"),
+    "Mod-v1.2.0-nexus.zip": nexus({ "Mod.dll": "dll", [INSTALLED]: "[CameraUnlock]\r\n" }),
+  });
+  check(
+    stale.status === 0 && stale.out.includes("WARN abzu-headtracking: Mod-v1.2.0-nexus.zip is not the Nexus ZIP of Mod-v1.3.0-installer.zip, so it is stale and its config is not checked"),
+    `nexus: a Nexus ZIP of another build should be skipped with a warning, got ${stale.status}\n${stale.out}`,
+  );
+
+  const none = selfRun("none", { "Mod-v1.2.0-installer.zip": installer("1.2.0") });
+  check(none.status === 0 && !none.out.includes("nexus"), `nexus: a repo with no Nexus ZIP should say nothing about one, got ${none.status}\n${none.out}`);
 }
 
 fs.rmSync(scratch, { recursive: true, force: true });

@@ -205,7 +205,8 @@ check-doc-examples = "node scripts/check-doc-examples.mjs"
 test-config-descriptor = "node scripts/test-config-descriptor.mjs"
 
 # scripts/validate-manifest.mjs on built ZIPs: a patches[].tool must be in the ZIP, and it and the
-# files beside it in its folder are declared payload.
+# files beside it in its folder are declared payload; with no arguments, only the Nexus ZIP of the
+# installer ZIP just validated is checked, and any other one is skipped as stale with a warning.
 test-validate-manifest = "node scripts/test-validate-manifest.mjs"
 
 # The fleet report over every canonical repo checked out beside this core: game-local

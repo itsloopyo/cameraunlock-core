@@ -67,7 +67,7 @@
 //
 // With no args it validates the host repo's newest release/*-installer.zip
 // (run it right after packaging), and, in a repo converted to the canonical
-// config format, checks its newest release/*-nexus.zip for the config (see
+// config format, checks the Nexus ZIP of the same build for the config (see
 // checkNexusConfig). A bare repo token (e.g. dying-light-2, or
 // dying-light-2-headtracking) resolves to a sibling repo's newest
 // release/*-installer.zip, for validating across a full checkout. A repo that
@@ -124,7 +124,7 @@ for (const token of jobs) {
   }
   if (isSelf) {
     try {
-      checkNexusConfig(label);
+      checkNexusConfig(label, zip);
     } catch (e) {
       console.error(`FAIL ${label}: ${e.message}`);
       failures += 1;
@@ -376,6 +376,15 @@ function patchTools(man) {
   });
 }
 
+// The Nexus ZIP of the build just validated: the installer ZIP's name with -nexus.zip for
+// -installer.zip. The newest Nexus ZIP in release/ belongs to an older build wherever the repo has
+// stopped making one, or has not made one this time, and checking that would pass or fail this
+// build on a file it did not produce.
+function nexusFor(installer) {
+  const paired = installer.replace(/(-installer)?\.zip$/i, "-nexus.zip");
+  return fs.existsSync(paired) ? paired : null;
+}
+
 // A Nexus ZIP is extracted by hand over the game folder, or into the folder the
 // mod sits in, so a file in it lands on the player's. Once the repo is
 // converted, a CameraUnlock.ini in it replaces the player's settings with the
@@ -385,11 +394,17 @@ function patchTools(man) {
 // the mod imports. An entry fails when it lands on either (see
 // manualZipConfigEntries). A repo that is not converted yet is not checked;
 // its conversion takes the config out of the Nexus staging.
-function checkNexusConfig(label) {
-  const zip = newestNexus(path.join(ROOT, "release"));
-  if (zip === null) return;
+function checkNexusConfig(label, installer) {
   const state = repoState(ROOT);
   if (!state.converted) return;
+  const zip = nexusFor(installer);
+  if (zip === null) {
+    const stale = newestNexus(path.join(ROOT, "release"));
+    if (stale !== null) {
+      console.log(`WARN ${label}: ${path.basename(stale)} is not the Nexus ZIP of ${path.basename(installer)}, so it is stale and its config is not checked`);
+    }
+    return;
+  }
   const live = manualZipConfigEntries(state, listZip(zip));
   if (live.length > 0) {
     throw new Error(

@@ -9,6 +9,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - validate-manifest checks only the Nexus ZIP of the build it validated
+
+With no arguments, validate-manifest checked the newest `release/*-nexus.zip` of a converted repo
+for the config, whatever build it came from. A mod that no longer builds a Nexus ZIP, or did not
+build one this time, passed or failed on an older build's file.
+
+- `scripts/validate-manifest.mjs` checks the Nexus ZIP named like the installer ZIP it just
+  validated, with `-nexus.zip` for `-installer.zip`. When there is none and `release/` holds another
+  Nexus ZIP, it prints a `WARN` line naming it as stale and does not check it. A repo with no Nexus
+  ZIP gets no line, as before.
+
 ### Fixed - validate-manifest counts a patch tool as declared, and fails a package without it
 
 Lopari runs a Cecil mod's `patches[].tool` in place from the package root, with the tool's folder

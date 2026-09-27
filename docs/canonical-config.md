@@ -1873,9 +1873,10 @@ In a mod repo, and in conformance:
   the mod's `cameraunlock-core` submodule.
 - **`pixi run validate-manifest`**, in a converted repo, fails a package whose manifest seeds, or
   ships through `files[]`, `CameraUnlock.ini`, the legacy file or a file named like the committed
-  config, with a config block or without one. It also fails when the newest `release/*-nexus.zip`
-  carries a file at an `installed` path of the config or at the legacy file beside one, or at the
-  tail of either. A ZIP whose manifest carries a config descriptor is held to its rules.
+  config, with a config block or without one. It also fails when the Nexus ZIP of the same build,
+  the installer ZIP's name with `-nexus.zip`, carries a file at an `installed` path of the config or
+  at the legacy file beside one, or at the tail of either. Another `release/*-nexus.zip` is from an
+  older build, so it gets a warning and is not checked. A ZIP whose manifest carries a config descriptor is held to its rules.
 
 ## Changing the format
 
