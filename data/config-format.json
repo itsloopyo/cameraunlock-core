@@ -313,9 +313,9 @@
       {"committed": "HeadTracking.ini", "installed": ["pc\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "mass-effect-legendary-edition-headtracking": [
-      {"committed": null, "installed": ["Game\\ME1\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"},
-      {"committed": null, "installed": ["Game\\ME2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"},
-      {"committed": null, "installed": ["Game\\ME3\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Game\\ME1\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"},
+      {"committed": "config/CameraUnlock.ini", "installed": ["Game\\ME2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"},
+      {"committed": "config/CameraUnlock.ini", "installed": ["Game\\ME3\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "metaphor-refantazio-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "MetaphorHeadTracking.ini", "dialect": "native"}
@@ -441,7 +441,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.sonsoftheforest.headtracking.cfg", "dialect": "unity"}
     ],
     "south-park-the-stick-of-truth-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "spec-ops-the-line-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "SpecOpsTheLineHeadTracking.ini", "dialect": "native"}
