@@ -318,7 +318,7 @@
       {"committed": null, "installed": ["Game\\ME3\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "metaphor-refantazio-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "MetaphorHeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "MetaphorHeadTracking.ini", "dialect": "native"}
     ],
     "metro-2033-redux-headtracking": [
       {"committed": "Metro2033ReduxHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
