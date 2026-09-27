@@ -307,7 +307,7 @@
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "little-nightmares-enhanced-edition-headtracking": [
-      {"committed": null, "installed": ["Atlas\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["Atlas\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "mafia-ii-definitive-edition-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["pc\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
