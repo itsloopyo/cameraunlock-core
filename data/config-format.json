@@ -438,13 +438,13 @@
       {"committed": "HeadTracking.ini", "installed": ["UNION\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "sons-of-the-forest-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.sonsoftheforest.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.sonsoftheforest.headtracking.cfg", "dialect": "unity"}
     ],
     "south-park-the-stick-of-truth-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "spec-ops-the-line-headtracking": [
-      {"committed": null, "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "SpecOpsTheLineHeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "SpecOpsTheLineHeadTracking.ini", "dialect": "native"}
     ],
     "stalker-call-of-prypiat-enhanced-edition-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
