@@ -49,5 +49,7 @@ if ($LASTEXITCODE -eq 0) {
     exit 0
 }
 
-& git -C $repoRoot commit -m 'Update submodule to latest main' -- $paths
+$short = (& git -C $coreRoot rev-parse --short HEAD).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Cannot read the cameraunlock-core checkout at $coreRoot." }
+& git -C $repoRoot commit -m "chore(deps): bump cameraunlock-core to $short" -- $paths
 if ($LASTEXITCODE -ne 0) { throw 'git commit failed.' }

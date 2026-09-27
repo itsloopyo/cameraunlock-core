@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - update-submodule commits a conventional subject
+
+- `scripts/update-submodule.ps1` commits the pointer and the restamped notices as
+  `chore(deps): bump cameraunlock-core to <short sha>` instead of `Update submodule to latest main`.
+  `Test-NoiseCommit` drops both from changelogs and release notes: the new one through its `chore`
+  prefix, the old one, still in every mod's history, through its `Update submodule` pattern, which
+  stays.
+
 ### Fixed - validate-manifest checks only the Nexus ZIP of the build it validated
 
 With no arguments, validate-manifest checked the newest `release/*-nexus.zip` of a converted repo
