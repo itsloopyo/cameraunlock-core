@@ -615,6 +615,42 @@
   },
   "allow_legacy_symbols": {},
   "per_game": {
+    "arx-fatalis-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: in Arx Fatalis G drinks a mana potion, so Ctrl+Shift+G would drink one. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-09-27"
+      }
+    ],
+    "deep-rock-galactic-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: in Deep Rock Galactic G throws a grenade, and the game fires it with Ctrl+Shift held. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-09-27"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: in Deep Rock Galactic H toggles the HUD, and the game fires it with Ctrl+Shift held. The committed file holds YawModeKey=PageDown.",
+        "approved": "2026-09-27"
+      }
+    ],
+    "mudrunner-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "The fleet chord clashes with the game's own binding: MudRunner reads Y (text chat) without checking Ctrl or Shift, so Ctrl+Shift+Y also opens the chat. The old build used U, and MudRunner has no aim state, so it binds no TrueFreeLookKey and U is free. The committed file holds ToggleKey=End, Ctrl+Shift+U.",
+        "approved": "2026-09-27"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: MudRunner reads G (horn) without checking Ctrl or Shift, so Ctrl+Shift+G also sounds the horn. The old build used J. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-09-27"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chord clashes with the game's own binding: MudRunner reads H (headlights) without checking Ctrl or Shift, so Ctrl+Shift+H also switches the headlights. The old build used K. The committed file holds YawModeKey=PageDown, Ctrl+Shift+K.",
+        "approved": "2026-09-27"
+      }
+    ],
     "subnautica-headtracking": [
       {
         "row": "WorldSpaceYaw",

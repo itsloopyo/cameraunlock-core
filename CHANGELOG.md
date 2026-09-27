@@ -9,6 +9,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - arx-fatalis, deep-rock-galactic and mudrunner keep their own hotkey rows
+
+`data/config-format.json` `per_game` lists hotkey rows for three repos, approved 2026-09-27, in
+trepang2-headtracking's shape, because the fleet chords clash with each game's own bindings:
+
+- **arx-fatalis-headtracking**: `CycleTrackingModeKey=PageUp, Ctrl+Shift+J`. In Arx Fatalis G
+  drinks a mana potion, so Ctrl+Shift+G would drink one. `YawModeKey` stays the fleet default.
+- **deep-rock-galactic-headtracking**: `CycleTrackingModeKey=PageUp, Ctrl+Shift+J` and
+  `YawModeKey=PageDown`. In Deep Rock Galactic G throws a grenade and H toggles the HUD, and the
+  game fires them with Ctrl+Shift held.
+- **mudrunner-headtracking**: `ToggleKey=End, Ctrl+Shift+U`, `CycleTrackingModeKey=PageUp,
+  Ctrl+Shift+J` and `YawModeKey=PageDown, Ctrl+Shift+K`. MudRunner reads Y (text chat), G (horn)
+  and H (headlights) without checking Ctrl or Shift, so the fleet chords fire those too; the old
+  build used U, J and K. MudRunner has no aim state, so it binds no `TrueFreeLookKey` and U is free.
+
+Each repo's committed file is to hold those values, its table marks the rows `PerGame()`, and
+render-config writes them into its descriptor's `per_game`. Until each repo does, its
+`config-format` and `config-descriptor` conformance fail.
+
 ### Changed - N1 in a Unity import: a key code with no name imports as unbound
 
 Owner ruling of 2026-09-27, recorded in `normalisations.N1` of `data/config-format.json`.
