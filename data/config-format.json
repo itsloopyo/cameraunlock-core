@@ -351,7 +351,7 @@
       {"committed": "PacificDriveHeadTracking.ini", "installed": ["PenDriverPro\\Binaries\\Win64\\CameraUnlock.ini", "PenDriverPro\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "PacificDriveHeadTracking.ini", "dialect": "native"}
     ],
     "pathologic-2-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.pathologic2.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.pathologic2.headtracking.cfg", "dialect": "unity"}
     ],
     "peak-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.peak.headtracking.cfg", "dialect": "unity"}
@@ -459,7 +459,7 @@
       {"committed": "CameraUnlock.ini", "installed": ["Habitat\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "stormworks-build-and-rescue-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "StormworksHeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "StormworksHeadTracking.ini", "dialect": "native"}
     ],
     "subliminal-headtracking": [
       {"committed": "CameraUnlock.ini", "installed": ["Subliminal\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
