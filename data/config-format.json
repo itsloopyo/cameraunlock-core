@@ -274,7 +274,7 @@
       {"committed": "config/FarCry6HeadTracking.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": "FarCry6HeadTracking.ini", "dialect": "native"}
     ],
     "ghostrunner-2-headtracking": [
-      {"committed": null, "installed": ["Ghostrunner2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["Ghostrunner2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "ghostrunner-headtracking": [
       {"committed": "CameraUnlock.ini", "installed": ["Ghostrunner\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
