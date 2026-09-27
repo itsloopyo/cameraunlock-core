@@ -357,7 +357,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.peak.headtracking.cfg", "dialect": "unity"}
     ],
     "persona-5-royal-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "pinball-fx-headtracking": [
       {"committed": null, "installed": ["PinballFX\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -477,7 +477,7 @@
       {"committed": "dist_assets/SystemShock2HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "system-shock-headtracking": [
-      {"committed": null, "installed": ["SystemShock\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["SystemShock\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "the-forest-headtracking": [
       {"committed": "config/com.cameraunlock.theforest.headtracking.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
