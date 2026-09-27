@@ -606,10 +606,22 @@
     }
   },
   "conversion_notes": {
+    "gone-home-headtracking": [
+      {
+        "text": "WorldSpaceYaw: v1.0.0 to v1.2.0 wrote no WorldSpaceYaw key; v1.3.0 to v1.3.2 shipped false; v1.4.0 and later shipped true. Evidence: v1.3.x wrote the line '# false = camera-local yaw (default; matches dying-light-2/obra-dinn)' above the key at first run, no other build wrote it, and no build rewrites HeadTracking.cfg after its first start. The import compares WorldSpaceYaw with false in a file holding that line and with true in every other file, so a file without the line holding false carries false as the player's.",
+        "approved": "2026-09-27"
+      }
+    ],
     "resident-evil-requiem-headtracking": [
       {
         "text": "Position sensitivity is 1.0. v0.4.0's installer ZIP and Nexus ZIP ship [Position] SensitivityX/Y/Z=1.0 in HeadTracking.ini; its launcher-manifest seed carried 2.0 from an older file, which was drift and was re-encoded from the shipped file on 2026-08-30 (ac80142). 1.0 is identity, so the conversion folds no position sensitivity into the mod's code, and a file Lopari seeded from v0.4.0 has its 2.0 dropped as PoseShaping, like any value set away from the shipped default. Those players' lean halves.",
         "approved": "2026-09-25"
+      }
+    ],
+    "subnautica-2-headtracking": [
+      {
+        "text": "[Position] LimitZ, LimitZBack and InvertZ: v0.1.0 to v0.6.0 shipped InvertZ true, LimitZ 0.10 and LimitZBack 0.40 (v0.1.0 to v0.3.0 did not read them); v0.6.1 and v0.6.2 shipped InvertZ false, LimitZ 0.40 and LimitZBack 0.10. The legacy processor applied InvertZ before its clamp, so the file's own InvertZ tells which key bounded which lean, and the import compares each canonical row with the limit of the lean it bounded, which every published build shipped at 0.40 forward and 0.10 backward. No list of shipped values is needed.",
+        "approved": "2026-09-27"
       }
     ]
   },
