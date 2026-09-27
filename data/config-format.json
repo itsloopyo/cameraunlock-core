@@ -345,7 +345,7 @@
       {"committed": "config/HeadTracking.ini", "installed": ["Indiana\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "outlast-headtracking": [
-      {"committed": null, "installed": ["Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "pacific-drive-headtracking": [
       {"committed": "PacificDriveHeadTracking.ini", "installed": ["PenDriverPro\\Binaries\\Win64\\CameraUnlock.ini", "PenDriverPro\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "PacificDriveHeadTracking.ini", "dialect": "native"}
@@ -387,7 +387,7 @@
       {"committed": "config/RedEclipseHeadTracking.ini", "installed": ["bin\\amd64\\CameraUnlock.ini"], "legacy_source": "RedEclipseHeadTracking.ini", "dialect": "native"}
     ],
     "repo-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.repo.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.repo.headtracking.cfg", "dialect": "unity"}
     ],
     "resident-evil-2-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["reframework\\plugins\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
