@@ -51,7 +51,8 @@ enum class DropRule {
     /// A feature that shipped disabled pending verification now follows the mod's default. The
     /// map records one only where the legacy value differs from that default.
     FollowsDefault = 4,
-    /// N1: a hotkey code outside 0x01-0xFE imports as unbound (LegacyVirtualKeyToBindings).
+    /// N1: a hotkey code outside 0x01-0xFE imports as unbound (LegacyVirtualKeyToBindings). The C#
+    /// twin also records a Unity KeyCode value with no name, in its own words.
     KeyCodeOutOfRange = 5,
     /// N3: a hotkey bound to a Ctrl, Shift or Alt key on its own imports as unbound
     /// (LegacyVirtualKeyToBindings).

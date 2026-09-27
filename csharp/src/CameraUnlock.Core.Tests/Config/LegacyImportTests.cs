@@ -1,13 +1,15 @@
 using System;
 using System.Collections.Generic;
 using CameraUnlock.Core.Config;
+using CameraUnlock.Core.Input;
 using Xunit;
 
 namespace CameraUnlock.Core.Tests.Config
 {
     /// <summary>
     /// The legacy import support: ImportResult's factories, the dropped-value lines, N2
-    /// (LegacyNormalisations.FiniteOrDefault), N3 (LegacyNormalisations.KeyCodeToBindings), pose shaping (LegacyPoseShaping), the position
+    /// (LegacyNormalisations.FiniteOrDefault), N4 (LegacyNormalisations.ClampToRange), N1 and N3
+    /// (LegacyNormalisations.KeyCodeToBindings, KeyBindings.HasName), pose shaping (LegacyPoseShaping), the position
     /// switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot), the rows left to
     /// Defaults.ini (LegacyFollowsDefaultsIni) and a LegacyImport over a config class. The C++ twin
     /// is cpp/tests/legacy_import_tests.cpp.
@@ -88,8 +90,8 @@ namespace CameraUnlock.Core.Tests.Config
                 new DroppedValue(DropRule.Reticle, "Reticle", "ShowReticle", "false").Describe());
             Assert.Equal("not carried: [Position] CollisionEnabled=false, this setting now follows the mod's default",
                 new DroppedValue(DropRule.FollowsDefault, "Position", "CollisionEnabled", "false").Describe());
-            Assert.Equal("not carried: [Hotkeys] ToggleKey=0x230, it is not a key code from 0x01 to 0xFE, so the action is unbound",
-                new DroppedValue(DropRule.KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "0x230").Describe());
+            Assert.Equal("not carried: [Hotkeys] ToggleKey=999, it is not a key code Unity names, so the action is unbound",
+                new DroppedValue(DropRule.KeyCodeOutOfRange, "Hotkeys", "ToggleKey", "999").Describe());
             Assert.Equal("not carried: [Hotkeys] YawModeKey=LeftShift, it is a Ctrl, Shift or Alt key, which goes down before the "
                 + "key of any chord made with it, so it is unbound",
                 new DroppedValue(DropRule.ModifierKey, "Hotkeys", "YawModeKey", "LeftShift").Describe());
@@ -250,10 +252,43 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void N3RefusesAnUnnamedCodeAndNulls()
+        public void N1UnbindsACodeWithNoNameAndRecordsIt()
         {
             var dropped = new List<DroppedValue>();
-            Assert.Throws<ArgumentException>(() => LegacyNormalisations.KeyCodeToBindings(999, "Hotkeys", "ToggleKey", dropped));
+            Assert.Equal("", LegacyNormalisations.KeyCodeToBindings(999, "Hotkeys", "ToggleKey", dropped));
+            Assert.Equal("", LegacyNormalisations.KeyCodeToBindings(-1, "Hotkeys", "YawModeKey", dropped));
+            Assert.Equal("", LegacyNormalisations.KeyCodeToBindings(int.MaxValue, "Hotkeys", "CycleTrackingModeKey", dropped));
+            Assert.Equal(new[]
+            {
+                "KeyCodeOutOfRange [Hotkeys] ToggleKey=999",
+                "KeyCodeOutOfRange [Hotkeys] YawModeKey=-1",
+                "KeyCodeOutOfRange [Hotkeys] CycleTrackingModeKey=2147483647",
+            }, dropped.ConvertAll(DropLine));
+        }
+
+        [Fact]
+        public void HasNameIsTrueForEveryNamedKeyCodeOnly()
+        {
+            Assert.True(KeyBindings.HasName(279));
+            Assert.True(KeyBindings.HasName(304));
+            Assert.False(KeyBindings.HasName(0));
+            Assert.False(KeyBindings.HasName(999));
+            Assert.False(KeyBindings.HasName(-1));
+            for (int code = 1; code < 1000; code++)
+            {
+                if (!KeyBindings.HasName(code) || (code >= 303 && code <= 308)) continue;
+                var dropped = new List<DroppedValue>();
+                string text = LegacyNormalisations.KeyCodeToBindings(code, "Hotkeys", "ToggleKey", dropped);
+                Assert.True(KeyBindings.TryParse(text, out KeyBinding[] read, out _), text);
+                Assert.Equal(new[] { new KeyBinding(KeyModifiers.None, code) }, read);
+                Assert.Empty(dropped);
+            }
+        }
+
+        [Fact]
+        public void KeyCodeToBindingsRefusesNulls()
+        {
+            var dropped = new List<DroppedValue>();
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, null!, "B", dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, "A", null!, dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.KeyCodeToBindings(279, "A", "B", null!));

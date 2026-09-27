@@ -51,7 +51,7 @@ namespace CameraUnlock.Core.Config
                 case DropRule.FollowsDefault:
                     return "this setting now follows the mod's default";
                 case DropRule.KeyCodeOutOfRange:
-                    return "it is not a key code from 0x01 to 0xFE, so the action is unbound";
+                    return "it is not a key code Unity names, so the action is unbound";
                 case DropRule.ModifierKey:
                     return "it is a Ctrl, Shift or Alt key, which goes down before the key of any chord made with it, so it is unbound";
                 case DropRule.CoupledAim:

@@ -151,6 +151,22 @@ namespace CameraUnlock.Core.Input
             return text.ToString();
         }
 
+        /// <summary>
+        /// True when data/keys.json names <paramref name="unityKeyCode"/>, a UnityEngine.KeyCode
+        /// value, so a hotkey value can spell it. Every member of the enum but None (0) has a name,
+        /// the Ctrl, Shift and Alt keys included, which <see cref="Format"/> still refuses as a
+        /// binding's key.
+        /// </summary>
+        public static bool HasName(int unityKeyCode)
+        {
+            if (unityKeyCode == 0) return false;
+            foreach (KeyNames.Key key in KeyNames.Keys)
+            {
+                if (key.UnityKeyCode == unityKeyCode) return true;
+            }
+            return false;
+        }
+
         internal static string NameOf(int unityKeyCode)
         {
             foreach (KeyNames.Key key in KeyNames.Keys)

@@ -9,6 +9,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - N1 in a Unity import: a key code with no name imports as unbound
+
+Owner ruling of 2026-09-27, recorded in `normalisations.N1` of `data/config-format.json`.
+`LegacyNormalisations.KeyCodeToBindings` threw `ArgumentException` for a legacy `KeyCode` value
+that `data/keys.json` has no name for, so a Unity map had no way to import one.
+
+- **C#** `LegacyNormalisations.KeyCodeToBindings` gives "" for such a code and adds a
+  `KeyCodeOutOfRange` drop with the code in decimal. Its signature does not change; it no longer
+  throws `ArgumentException`.
+- **C#** `KeyBindings.HasName(int unityKeyCode)` (added): true when `data/keys.json` names the code,
+  the Ctrl, Shift and Alt keys included, false for 0 and for any value no `KeyCode` member has.
+- **C#** the `KeyCodeOutOfRange` log line is `not carried: [Hotkeys] ToggleKey=999, it is not a key
+  code Unity names, so the action is unbound`. No C# import recorded the rule before. The C++ line
+  does not change.
+- A Unity repo adopts it at its next pin bump: a map that guarded `KeyCodeToBindings` against the
+  throw can drop the guard, and a map that appends the action's Ctrl+Shift chord keeps the chord
+  when the code is unbound.
+
 ### Added - N4: a legacy number outside the row's range is clamped
 
 Approved by the owner on 2026-09-27 and recorded as `normalisations.N4` in

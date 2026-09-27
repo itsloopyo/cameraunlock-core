@@ -118,8 +118,11 @@ namespace CameraUnlock.Core.Config
         }
 
         /// <summary>
-        /// N3: a legacy hotkey held as a UnityEngine.KeyCode value, as a hotkey value. 0,
-        /// KeyCode.None, gives "", unbound, and records nothing. A Ctrl, Shift or Alt key
+        /// N1 and N3: a legacy hotkey held as a UnityEngine.KeyCode value, as a hotkey value. 0,
+        /// KeyCode.None, gives "", unbound, and records nothing. A code data/keys.json has no name
+        /// for (<see cref="KeyBindings.HasName"/>) gives "" too, and the drop is added to
+        /// <paramref name="dropped"/> as <see cref="DropRule.KeyCodeOutOfRange"/> with the code in
+        /// decimal (N1, owner ruling of 2026-09-27): no hotkey value can spell it. A Ctrl, Shift or Alt key
         /// (LeftShift to RightAlt) gives "" too, and the drop is added to
         /// <paramref name="dropped"/> under its key name: no hotkey value binds one, because it
         /// goes down before the key of any chord made with it, so a binding on it fires on the way
@@ -128,8 +131,6 @@ namespace CameraUnlock.Core.Config
         /// the player keeps the chord when the key is unbound.
         /// </summary>
         /// <exception cref="ArgumentNullException">A text or <paramref name="dropped"/> is null.</exception>
-        /// <exception cref="ArgumentException"><paramref name="unityKeyCode"/> is not 0 and has no
-        /// name in data/keys.json, so no hotkey value can hold it.</exception>
         public static string KeyCodeToBindings(int unityKeyCode, string section, string key,
             ICollection<DroppedValue> dropped)
         {
@@ -137,6 +138,12 @@ namespace CameraUnlock.Core.Config
             if (key == null) throw new ArgumentNullException("key");
             if (dropped == null) throw new ArgumentNullException("dropped");
             if (unityKeyCode == 0) return string.Empty;
+            if (!KeyBindings.HasName(unityKeyCode))
+            {
+                dropped.Add(new DroppedValue(DropRule.KeyCodeOutOfRange, section, key,
+                    unityKeyCode.ToString(CultureInfo.InvariantCulture)));
+                return string.Empty;
+            }
             if (KeyBindings.IsModifierKey(unityKeyCode))
             {
                 dropped.Add(new DroppedValue(DropRule.ModifierKey, section, key, KeyBindings.NameOf(unityKeyCode)));

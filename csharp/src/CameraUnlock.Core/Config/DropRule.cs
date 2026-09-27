@@ -31,9 +31,10 @@ namespace CameraUnlock.Core.Config
         FollowsDefault = 4,
 
         /// <summary>
-        /// N1: a hotkey code outside 0x01-0xFE imports as unbound (C++
-        /// <c>LegacyVirtualKeyToBindings</c>). Only native imports meet it: no C# import reads
-        /// virtual-key codes.
+        /// N1: a hotkey code no hotkey value can spell imports as unbound: a Windows virtual-key code
+        /// outside 0x01-0xFE in a native import (C++ <c>LegacyVirtualKeyToBindings</c>), a Unity
+        /// KeyCode value with no name in data/keys.json in a Unity one
+        /// (<see cref="LegacyNormalisations.KeyCodeToBindings"/>).
         /// </summary>
         KeyCodeOutOfRange = 5,
 
