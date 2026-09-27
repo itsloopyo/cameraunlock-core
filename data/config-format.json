@@ -163,7 +163,7 @@
       {"committed": "HeadTracking.ini", "installed": ["AbzuGame\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "alien-isolation-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "AlienIsolationHeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "AlienIsolationHeadTracking.ini", "dialect": "native"}
     ],
     "amnesia-rebirth-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -217,7 +217,7 @@
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "control-ultimate-edition-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "dead-rising-2-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
