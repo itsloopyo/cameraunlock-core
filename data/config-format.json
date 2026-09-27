@@ -366,7 +366,7 @@
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
     ],
     "portal-2-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "portal-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -417,7 +417,7 @@
       {"committed": "HeadTracking.ini", "installed": ["Ride\\Binaries\\Win64\\CameraUnlock.ini", "Ride\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "shadows-of-doubt-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.headtracking.shadowsofdoubt.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.headtracking.shadowsofdoubt.cfg", "dialect": "unity"}
     ],
     "skyrim-special-edition-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -432,7 +432,7 @@
       {"committed": "HeadTracking.ini", "installed": ["Sources\\Bin\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "soma-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "sonic-racing-crossworlds-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["UNION\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
