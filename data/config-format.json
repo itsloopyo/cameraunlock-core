@@ -411,7 +411,7 @@
       {"committed": "HeadTracking.ini", "installed": ["root\\bin\\pc\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "routine-headtracking": [
-      {"committed": null, "installed": ["Routine\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["Routine\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "rv-there-yet-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["Ride\\Binaries\\Win64\\CameraUnlock.ini", "Ride\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -447,7 +447,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "SpecOpsTheLineHeadTracking.ini", "dialect": "native"}
     ],
     "stalker-call-of-prypiat-enhanced-edition-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "StalkerCallOfPrypiatHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "stalker-shadow-of-chornobyl-enhanced-edition-headtracking": [
       {"committed": "StalkerShadowOfChornobylHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
