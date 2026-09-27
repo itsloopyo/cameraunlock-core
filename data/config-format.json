@@ -166,7 +166,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "AlienIsolationHeadTracking.ini", "dialect": "native"}
     ],
     "amnesia-rebirth-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "amnesia-the-dark-descent-headtracking": [
       {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -486,7 +486,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["Painscreek_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
     ],
     "the-vanishing-of-ethan-carter-redux-headtracking": [
-      {"committed": null, "installed": ["EthanCarter\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["EthanCarter\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "the-witness-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
