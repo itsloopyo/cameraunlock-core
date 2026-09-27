@@ -8,7 +8,9 @@ namespace CameraUnlock.Core.Config
     /// The rows a legacy import leaves to Defaults.ini (owner rule of 2026-09-26). A setting the
     /// player never changed from what the legacy build shipped, because the legacy file does not
     /// hold it or holds the shipped value, is no player's choice, so the migration writes it
-    /// <c>default</c> and it follows Defaults.ini. A setting the player changed is carried as a
+    /// <c>default</c> and it follows Defaults.ini. The legacy build is the published build that
+    /// wrote the file, an older one included, where the file shows which (owner ruling of
+    /// 2026-09-27). A setting the player changed is carried as a
     /// value, written <c>default</c> only where it equals what <c>default</c> gives at that start.
     /// Every legacy import gives each row of its table that follows Defaults.ini (a global concept
     /// row not marked PerGame) one call, and passes <see cref="Concepts"/> to <see cref="ImportResult.Imported(IEnumerable{DroppedValue}, IEnumerable{PoseShapingValue}, IEnumerable{ConceptDescriptor})"/>
@@ -28,8 +30,11 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// A setting the legacy build read: left to Defaults.ini when <paramref name="value"/>, the
-        /// effective legacy value, equals <paramref name="shipped"/>, the effective value the legacy
-        /// build shipped, compared by <see cref="EqualityComparer{T}.Default"/>.
+        /// effective legacy value, equals <paramref name="shipped"/>, compared by
+        /// <see cref="EqualityComparer{T}.Default"/>. <paramref name="shipped"/> is the effective
+        /// value the published build that wrote the file shipped, which is not always the newest
+        /// build's: where the default changed between published builds and the file shows which
+        /// build wrote it, it is that build's (owner ruling of 2026-09-27).
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="concept"/> is null.</exception>
         /// <exception cref="ArgumentException">The concept is RotationEnabled or PositionEnabled
@@ -38,8 +43,32 @@ namespace CameraUnlock.Core.Config
         public void Setting<T>(ConceptDescriptor concept, T value, T shipped)
         {
             if (concept == null) throw new ArgumentNullException("concept");
-            if (!Finite(shipped)) throw new ArgumentException(concept.Key + ": the shipped value is not finite", "shipped");
+            CheckShipped(concept, shipped);
             Setting(concept, EqualityComparer<T>.Default.Equals(value, shipped));
+        }
+
+        /// <summary>
+        /// A setting whose default changed between published builds, where the file narrows the
+        /// build that wrote it to several whose defaults differ: left to Defaults.ini when
+        /// <paramref name="value"/> equals any of <paramref name="shipped"/>, the effective value
+        /// each of those builds shipped, compared by <see cref="EqualityComparer{T}.Default"/>.
+        /// </summary>
+        /// <exception cref="ArgumentNullException"><paramref name="concept"/> or
+        /// <paramref name="shipped"/> is null.</exception>
+        /// <exception cref="ArgumentException">As <see cref="Setting{T}(ConceptDescriptor, T, T)"/>,
+        /// for any value of <paramref name="shipped"/>, or <paramref name="shipped"/> is empty.</exception>
+        public void Setting<T>(ConceptDescriptor concept, T value, IList<T> shipped)
+        {
+            if (concept == null) throw new ArgumentNullException("concept");
+            if (shipped == null) throw new ArgumentNullException("shipped");
+            if (shipped.Count == 0) throw new ArgumentException(concept.Key + ": no shipped value is given", "shipped");
+            bool unchanged = false;
+            foreach (T one in shipped)
+            {
+                CheckShipped(concept, one);
+                if (EqualityComparer<T>.Default.Equals(value, one)) unchanged = true;
+            }
+            Setting(concept, unchanged);
         }
 
         /// <summary>
@@ -108,10 +137,15 @@ namespace CameraUnlock.Core.Config
             _concepts.Add(ConfigConcepts.PositionEnabled);
         }
 
-        private static bool Finite<T>(T shipped)
+        private static void CheckShipped<T>(ConceptDescriptor concept, T shipped)
         {
-            if (shipped is float f) return !float.IsNaN(f) && !float.IsInfinity(f);
-            if (shipped is double d) return !double.IsNaN(d) && !double.IsInfinity(d);
+            if (!Finite(shipped)) throw new ArgumentException(concept.Key + ": the shipped value is not finite", "shipped");
+        }
+
+        private static bool Finite<T>(T value)
+        {
+            if (value is float f) return !float.IsNaN(f) && !float.IsInfinity(f);
+            if (value is double d) return !double.IsNaN(d) && !double.IsInfinity(d);
             return true;
         }
     }

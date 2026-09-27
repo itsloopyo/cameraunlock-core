@@ -247,7 +247,8 @@ void LegacyTrackerPivot(float value, float shipped, const std::string& section, 
 /// The rows a legacy import leaves to Defaults.ini (owner rule of 2026-09-26). A setting the player
 /// never changed from what the legacy build shipped, because the legacy file does not hold it or
 /// holds the shipped value, is no player's choice, so the migration writes it `default` and it
-/// follows Defaults.ini. A setting the player changed is carried as a value, written `default`
+/// follows Defaults.ini. The legacy build is the published build that wrote the file, an older one
+/// included, where the file shows which (owner ruling of 2026-09-27). A setting the player changed is carried as a value, written `default`
 /// only where it equals what `default` gives at that start. Every legacy import gives each row of
 /// its table that follows Defaults.ini (a global concept row not marked PerGame) one call, and
 /// passes Concepts() to ImportResult::Imported or Absent as follows_defaults_ini. The map still
@@ -255,19 +256,34 @@ void LegacyTrackerPivot(float value, float shipped, const std::string& section, 
 class LegacyFollowsDefaultsIni {
 public:
     /// A setting the legacy build read: left to Defaults.ini when `value`, the effective legacy
-    /// value, equals `shipped`, the effective value the legacy build shipped, compared with ==.
-    /// Throws std::invalid_argument for RotationEnabled or PositionEnabled (TrackingMode), a
-    /// concept that is not global or was given before, or a float or double `shipped` that is not
-    /// finite.
+    /// value, equals `shipped`, compared with ==. `shipped` is the effective value the published
+    /// build that wrote the file shipped, which is not always the newest build's: where the default
+    /// changed between published builds and the file shows which build wrote it, it is that build's
+    /// (owner ruling of 2026-09-27). Throws std::invalid_argument for RotationEnabled or
+    /// PositionEnabled (TrackingMode), a concept that is not global or was given before, or a float
+    /// or double `shipped` that is not finite.
     template <class T>
     void Setting(schema::Concept id, const T& value, const T& shipped) {
-        if constexpr (std::is_floating_point_v<T>) {
-            if (!std::isfinite(shipped)) {
-                throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
-                                            ": the shipped value is not finite");
-            }
-        }
+        CheckShipped(id, shipped);
         Setting(id, value == shipped);
+    }
+
+    /// A setting whose default changed between published builds, where the file narrows the build
+    /// that wrote it to several whose defaults differ: left to Defaults.ini when `value` equals any
+    /// of `shipped`, the effective value each of those builds shipped, compared with ==. Throws as
+    /// the overload above does, for any `shipped` value, and for an empty `shipped`.
+    template <class T>
+    void Setting(schema::Concept id, const T& value, const std::vector<T>& shipped) {
+        if (shipped.empty()) {
+            throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
+                                        ": no shipped value is given");
+        }
+        bool unchanged = false;
+        for (const T& one : shipped) {
+            CheckShipped(id, one);
+            if (value == one) unchanged = true;
+        }
+        Setting(id, unchanged);
     }
 
     /// A setting the import compares itself, such as a hotkey code together with its chord
@@ -296,6 +312,16 @@ public:
     const std::vector<schema::Concept>& Concepts() const { return concepts_; }
 
 private:
+    template <class T>
+    static void CheckShipped(schema::Concept id, const T& shipped) {
+        if constexpr (std::is_floating_point_v<T>) {
+            if (!std::isfinite(shipped)) {
+                throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
+                                            ": the shipped value is not finite");
+            }
+        }
+    }
+
     void Given(schema::Concept id);
 
     std::vector<schema::Concept> given_;

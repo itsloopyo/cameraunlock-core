@@ -9,6 +9,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - an untouched default of an older build follows Defaults.ini
+
+Owner ruling of 2026-09-27. `LegacyFollowsDefaultsIni`'s "shipped" is the default of whichever
+published build wrote the legacy file, not only the newest one. Where a setting's default changed
+between published builds, a value equal to an older build's default is untouched when the import
+can tell that build wrote the file, from evidence the file carries; where it cannot, the import
+compares with the newest build's value as before.
+
+- **C++** `LegacyFollowsDefaultsIni::Setting(concept, value, const std::vector<T>& shipped)`: the row
+  is left to Defaults.ini when the value equals any of the listed values, for a file the evidence
+  narrows to several builds whose defaults differ. `Setting(concept, value, {a, b})` binds to it. It
+  throws `std::invalid_argument` for an empty list, and for a float or double in it that is not
+  finite.
+- **C#** `LegacyFollowsDefaultsIni.Setting<T>(ConceptDescriptor concept, T value, IList<T> shipped)`,
+  the same, throwing `ArgumentException`.
+- **Records.** A repo records each setting whose default changed between published builds in
+  `conversion_notes`: each range of versions with the value it shipped, and the evidence the import
+  reads (docs/canonical-config.md, "The legacy import"). `data/config-format.json`'s `_comment` says
+  so.
+- `scripts/templates/canonical-config-changelog.md` words its second Legacy bullet for the build that
+  wrote the file.
+- Nothing changes for an import that passes the newest build's defaults. A repo with a default that
+  changed between published builds adopts it at its next pin bump: it reads the evidence, passes the
+  shipped value of the build that wrote the file, and adds a `conversion_notes` entry.
+
 ### Changed - update-submodule commits a conventional subject
 
 - `scripts/update-submodule.ps1` commits the pointer and the restamped notices as

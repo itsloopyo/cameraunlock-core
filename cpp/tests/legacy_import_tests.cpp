@@ -320,6 +320,25 @@ void TestFollowsDefaultsIni() {
           "a setting equal to the shipped one, compared with ==, and one the legacy build lacked are left to "
           "Defaults.ini, in the order given");
 
+    LegacyFollowsDefaultsIni by_build;
+    by_build.Setting(Concept::PositionLimitZ, 0.1f, {0.4f, 0.1f});
+    by_build.Setting(Concept::PositionLimitZBack, 0.25f, std::vector<float>{0.1f, 0.4f});
+    by_build.Setting(Concept::WorldSpaceYaw, false, {true, false});
+    by_build.Setting(Concept::UdpPort, 4242, {4242});
+    Check(by_build.Concepts() == std::vector<Concept>{Concept::PositionLimitZ, Concept::WorldSpaceYaw, Concept::UdpPort},
+          "a setting equal to the value any of several builds shipped is left to Defaults.ini, one equal to none "
+          "is not");
+    LegacyFollowsDefaultsIni no_build;
+    Check(Thrown([&] { no_build.Setting(Concept::LocalSmoothing, 0.0f, std::vector<float>{}); }) ==
+              "LocalSmoothing: no shipped value is given",
+          "an empty list of shipped values is refused");
+    Check(Thrown([&] {
+              no_build.Setting(Concept::LocalSmoothing, 0.0f, {0.0f, std::numeric_limits<float>::quiet_NaN()});
+          }) == "LocalSmoothing: the shipped value is not finite",
+          "a shipped value in the list that is not finite is refused, even after one that matches");
+    no_build.Setting(Concept::LocalSmoothing, true);
+    Check(no_build.Concepts() == std::vector<Concept>{Concept::LocalSmoothing}, "a refused list adds nothing");
+
     LegacyFollowsDefaultsIni unchanged_mode;
     unchanged_mode.TrackingMode(1, 1);
     Check(unchanged_mode.Concepts() == std::vector<Concept>{Concept::RotationEnabled, Concept::PositionEnabled},

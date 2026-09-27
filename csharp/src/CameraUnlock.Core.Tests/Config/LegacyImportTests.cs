@@ -382,6 +382,32 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
+        public void ASettingEqualToTheValueAnyOfSeveralBuildsShippedFollowsDefaultsIni()
+        {
+            var follows = new LegacyFollowsDefaultsIni();
+            follows.Setting(ConfigConcepts.PositionLimitZ, 0.1f, new[] { 0.4f, 0.1f });
+            follows.Setting(ConfigConcepts.PositionLimitZBack, 0.25f, new List<float> { 0.1f, 0.4f });
+            follows.Setting(ConfigConcepts.WorldSpaceYaw, false, new[] { true, false });
+            follows.Setting(ConfigConcepts.UdpPort, 4242, new[] { 4242 });
+            Assert.Equal(new ConceptDescriptor[] { ConfigConcepts.PositionLimitZ, ConfigConcepts.WorldSpaceYaw, ConfigConcepts.UdpPort },
+                follows.Concepts);
+        }
+
+        [Fact]
+        public void SeveralShippedValuesRefuseAnEmptyListANonFiniteValueAndNulls()
+        {
+            var follows = new LegacyFollowsDefaultsIni();
+            Assert.StartsWith("LocalSmoothing: no shipped value is given", Assert.Throws<ArgumentException>(
+                () => follows.Setting(ConfigConcepts.LocalSmoothing, 0.0f, new float[0])).Message);
+            Assert.StartsWith("LocalSmoothing: the shipped value is not finite", Assert.Throws<ArgumentException>(
+                () => follows.Setting(ConfigConcepts.LocalSmoothing, 0.0f, new[] { 0.0f, float.NaN })).Message);
+            Assert.Throws<ArgumentNullException>(() => follows.Setting(ConfigConcepts.LocalSmoothing, 0.0f, (IList<float>)null!));
+            Assert.Throws<ArgumentNullException>(() => follows.Setting(null!, 0.0f, new[] { 0.0f }));
+            follows.Setting(ConfigConcepts.LocalSmoothing, true);
+            Assert.Equal(new ConceptDescriptor[] { ConfigConcepts.LocalSmoothing }, follows.Concepts);
+        }
+
+        [Fact]
         public void TheTrackingModeFollowsDefaultsIniAsOneUnit()
         {
             var unchanged = new LegacyFollowsDefaultsIni();

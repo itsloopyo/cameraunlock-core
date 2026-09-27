@@ -1359,7 +1359,11 @@ follows Defaults.ini:
   the legacy build shipped, with `==` (C# `EqualityComparer<T>.Default`), and leaves the row to
   Defaults.ini when they are equal. `shipped` is the frozen struct's default, or the value the
   build's shipped file set where that file set another one; `conversion_notes` records which where
-  one build shipped two.
+  one build shipped two. The legacy build is the one that wrote the file (below).
+- `Setting(concept, value, {a, b})` (C++ `const std::vector<T>&`, C# `IList<T>`) leaves the row to
+  Defaults.ini when the value equals any of the listed shipped values, for a file that could have
+  been written by any of several builds whose defaults differ. It throws for an empty list and, as
+  `Setting` does, for a float or double in it that is not finite.
 - `Setting(concept, unchanged)` takes a comparison the import makes itself, for a row read from
   more than one legacy key, such as a hotkey code and its chord switch.
 - `NotInLegacy(concept)` is a concept the legacy build had no setting for, always left to
@@ -1382,6 +1386,25 @@ migration throw std::invalid_argument (C# `ArgumentException`).
 
 A `FollowsDefault` value is the one the build shipped, so the row it drops is left to Defaults.ini
 by the same `Setting` call.
+
+**The build that wrote the file is the one compared** (owner ruling of 2026-09-27). "Shipped" means
+the default of whichever published build wrote the legacy file, not only the newest build's. Where a
+setting's default changed between published builds, a value equal to an older build's default is
+untouched when the import can tell that build wrote the file, and the import passes that build's
+value as `shipped`. The evidence is in the file: gone-home v1.3.x files carry a comment naming false
+as the default, and subnautica-2 v0.1.0 to v0.6.0 shipped `InvertZ` true with `LimitZ` 0.10 and
+`LimitZBack` 0.40. Where the evidence narrows
+the file to several builds whose defaults differ, the import passes each of their values to the
+list overload. Where the file shows nothing of which build wrote it, the import cannot tell an older
+build's untouched default from a value a player set on a newer build, so it compares with the newest
+published build's value.
+
+A repo records each setting whose default changed between published builds in `conversion_notes`
+in `data/config-format.json`, one note per setting: the setting as the legacy file spells it, each
+published range of versions with the value it shipped (`v1.0.0 to v1.2.3 shipped false; v1.3.0 and
+later shipped true`), the evidence in the file the import reads to tell them apart, or that there is
+none, and `approved`, the date of the owner ruling the note applies. The repo's differential test
+runs the import on the file each such build shipped and checks the setting is left to Defaults.ini.
 
 `conversion_notes` in `data/config-format.json` holds what the owner decided for one repo's
 conversion, such as which of two shipped values is the default; the repo's conversion and its
