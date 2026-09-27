@@ -295,7 +295,7 @@
       {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "jump-space-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
     ],
     "kingdom-come-deliverance-2-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["Bin\\Win64MasterMasterSteamPGO\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
