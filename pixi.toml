@@ -204,6 +204,10 @@ check-doc-examples = "node scripts/check-doc-examples.mjs"
 # Windows: it runs conformance.ps1 and Windows PowerShell.
 test-config-descriptor = "node scripts/test-config-descriptor.mjs"
 
+# scripts/validate-manifest.mjs on built ZIPs: a patches[].tool must be in the ZIP, and it and the
+# files beside it in its folder are declared payload.
+test-validate-manifest = "node scripts/test-validate-manifest.mjs"
+
 # The fleet report over every canonical repo checked out beside this core: game-local
 # (section, key) pairs shared by three or more repos (candidates for a concept), the
 # game-local section names in use, and concept values that differ from the schema default.
@@ -215,13 +219,13 @@ config-report = "node scripts/check-canonical-config.mjs --report"
 #
 # Ordered cheapest and most deterministic first, because pixi aborts on the first
 # failing dependency and the order decides how long a developer (and CI) waits to
-# find out. The seven node gates need no compiler and finish in seconds;
+# find out. The eight node gates need no compiler and finish in seconds;
 # they used to sit at the END, behind a full C# build and both test suites, so a
 # stale generated alias table cost several minutes to discover. The vectors come
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-generate-readme", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-validate-manifest", "test-generate-readme", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

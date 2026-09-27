@@ -18,6 +18,12 @@
 //                every gate, because everything declared is still present. See
 //                undeclaredPayload() for what does not count as payload.
 //
+//                A Cecil-patched mod also names a patch tool in patches[].tool,
+//                which the engine runs in place from the package, with its own
+//                folder as the working directory, and never deploys. The tool
+//                has to be in the ZIP, and it and the files beside it in its
+//                folder (Mono.Cecil.dll) are payload the manifest declares.
+//
 //   install_cmd  The launcher shells out to install.cmd instead. Some mods
 //                cannot be expressed as a manifest at all - rv-there-yet
 //                deploys to a Steam and an Xbox/Game Pass install in the same
@@ -212,12 +218,20 @@ function validate(label, zip, repo) {
     throw new Error(`manifest sources missing from zip: ${missing.join(", ")}`);
   }
 
+  const tools = patchTools(man);
+  const toolsFound = resolveSources(tools, entryByLower);
+  if (toolsFound.missing.length > 0) {
+    throw new Error(
+      `patches[].tool missing from zip, so the launcher stops the install at "patch tool ... is not in the package": ${toolsFound.missing.join(", ")}`,
+    );
+  }
+
   // The converse, which is the half that used to be silent. Everything the
   // engine deploys comes off loader.archives[] and files[]; a payload file that
   // is in the ZIP but on neither list is simply never written to the game. That
   // ships an installer which succeeds and leaves the mod incomplete, and the
   // forward check above passes it, because everything declared is still there.
-  const undeclared = undeclaredPayload(entries, sources, man);
+  const undeclared = undeclaredPayload(entries, sources, tools, man);
   if (undeclared.fatal.length > 0) {
     throw new Error(
       `zip carries binaries no manifest row deploys, so a launcher install would leave them out and the mod would not run: ${undeclared.fatal.join(", ")}. Add a files[] row for each, or drop it from packaging staging.`,
@@ -229,12 +243,13 @@ function validate(label, zip, repo) {
   const variants = (man.variants ?? []).length
     ? `, ${man.variants.length} variant(s) (${man.variants.map((v) => v.id).join(", ")})`
     : "";
+  const patches = tools.length ? `, ${tools.length} patch(es)` : "";
   console.log(
-    `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${variants}${descriptor}`,
+    `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${patches}${variants}${descriptor}`,
   );
   const preRelease = preReleaseWarning(man);
   if (preRelease !== null) console.log(`WARN ${label}: ${preRelease}`);
-  warnMiscased(label, miscased);
+  warnMiscased(label, [...miscased, ...toolsFound.miscased]);
   warnUndeployed(label, undeclared.cosmetic);
 }
 
@@ -335,6 +350,32 @@ function validateExternal(label, zip, man, entryByLower) {
   warnMiscased(label, miscased);
 }
 
+// Lopari's PatchSpec (deploy/manifest.rs): target, tool and marker are required strings, and the
+// engine (deploy/engine.rs apply_patch) resolves tool against the package root through safe_join,
+// which refuses an absolute path and a `..`, then refuses a tool that is not a file. An empty
+// marker never matches the patched output, so the install fails there instead. Only the top-level
+// patches are read: Variant has no such field, and serde drops one a variant carries.
+function patchTools(man) {
+  for (const v of man.variants ?? []) {
+    if ("patches" in v) {
+      throw new Error(`variant "${v.id}" has patches, which the launcher reads only at the top level, so they would never run`);
+    }
+  }
+  if (man.patches === undefined) return [];
+  if (!Array.isArray(man.patches)) throw new Error('manifest "patches" must be an array');
+  return man.patches.map((p) => {
+    for (const key of ["target", "tool", "marker"]) {
+      if (typeof p?.[key] !== "string" || !p[key].trim()) {
+        throw new Error(`patches[] entry has no nonempty string "${key}": ${JSON.stringify(p)}`);
+      }
+    }
+    if (path.win32.isAbsolute(p.tool) || p.tool.includes(":") || p.tool.split(/[\\/]/).includes("..")) {
+      throw new Error(`patches[].tool ${p.tool} must stay relative to the package root`);
+    }
+    return p.tool;
+  });
+}
+
 // A Nexus ZIP is extracted by hand over the game folder, or into the folder the
 // mod sits in, so a file in it lands on the player's. Once the repo is
 // converted, a CameraUnlock.ini in it replaces the player's settings with the
@@ -402,11 +443,17 @@ function scriptDependencies(text) {
 //                               engine does not need a files[] row for
 //   the profile/ tree           deployed by the launcher's own AsiLoader
 //                               strategy rather than from files[], see below
+//   a patch tool and its folder patches[].tool is run in place from the
+//                               package with its folder as the working
+//                               directory, so the tool and the files beside it
+//                               (Mono.Cecil.dll) are declared by that row. At
+//                               the package root only the tool itself counts,
+//                               or every root file would be exempt
 //
 // Declared inside the function, not at module scope: this file runs its job
 // loop at the top and declares its helpers below, so a top-level `const` here
 // is still in the temporal dead zone when the first package is validated.
-function undeclaredPayload(entries, sources, man) {
+function undeclaredPayload(entries, sources, tools, man) {
   // profile/ is the launcher's own staging convention rather than a files[] target:
   // its AsiLoader strategy reads `<profile>/asi/*` out of the package, so a DLL mirrored
   // there is deployed by the launcher without a manifest row naming it. See
@@ -417,7 +464,9 @@ function undeclaredPayload(entries, sources, man) {
   const installScripts = /^(un)?install[a-z0-9._-]*\.(cmd|ps1|bat|sh)$/i;
   const vendorProvenance = /^vendor\/[^/]+\/(licence|license|notice|readme)[^/]*$|\.nupkg$/i;
 
-  const declared = new Set(sources.map((s) => s.replace(/\\/g, "/").toLowerCase()));
+  const declared = new Set([...sources, ...tools].map((s) => s.replace(/\\/g, "/").toLowerCase()));
+  const folderOf = (p) => p.slice(0, Math.max(p.lastIndexOf("/"), 0));
+  const toolFolders = new Set(tools.map((t) => folderOf(t.replace(/\\/g, "/").toLowerCase())).filter(Boolean));
   // Seed targets name the path in the GAME directory, not in the ZIP, so the
   // two only ever agree on the leaf.
   const seeded = new Set(
@@ -443,6 +492,7 @@ function undeclaredPayload(entries, sources, man) {
   for (const entry of entries) {
     if (entry.endsWith("/")) continue;
     if (declared.has(entry.toLowerCase())) continue;
+    if (toolFolders.has(folderOf(entry.toLowerCase()))) continue;
     const base = entry.split("/").pop();
     if (entry.toLowerCase() === "launcher-manifest.json") continue;
     if (exemptDirs.test(entry)) continue;

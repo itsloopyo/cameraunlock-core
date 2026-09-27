@@ -9,6 +9,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - validate-manifest counts a patch tool as declared, and fails a package without it
+
+Lopari runs a Cecil mod's `patches[].tool` in place from the package root, with the tool's folder
+as its working directory, and never deploys it. validate-manifest read `tools/BootstrapPatcher.exe`
+and the `tools/Mono.Cecil.dll` beside it as binaries no manifest row deploys, and failed
+gone-home-headtracking's package, which is correct as it is. It also passed a package whose manifest names
+a tool the ZIP does not carry, which Lopari refuses at install with "patch tool ... is not in the
+package".
+
+- `scripts/validate-manifest.mjs`, in `manifest` and `manifest_variants` delivery: the file
+  `patches[].tool` names, and each file beside it in its folder, is declared payload. At the
+  package root only the tool itself counts. A package fails when the tool is missing from the ZIP,
+  when `patches` is not an array, when an entry has no nonempty string `target`, `tool` or
+  `marker` (Lopari's `PatchSpec` requires all three, and an empty marker never matches), when
+  `tool` is absolute or holds `..`, and when a variant carries `patches`, which Lopari reads only
+  at the top level. A tool matched only without case passes with the casing warning.
+- `scripts/test-validate-manifest.mjs`, `pixi run test-validate-manifest`, part of `pixi run
+  check`.
+- Mod side: a Cecil mod whose manifest names a tool it does not package now fails
+  validate-manifest. Stage the tool at the path the manifest names, as gone-home-headtracking's
+  `package-release.ps1` does.
+
 ### Changed - a setting the player never changed migrates as default, with LegacyFollowsDefaultsIni
 
 Owner rule of 2026-09-26, from testing assetto-corsa-evo: with Defaults.ini set to position only,
