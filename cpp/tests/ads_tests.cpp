@@ -4,6 +4,7 @@
 // switches instead of easing, or steps when it is reversed.
 
 #include <cameraunlock/ads/ads_fade.h>
+#include <cameraunlock/ads/lean_handover.h>
 
 #include <cmath>
 #include <iostream>
@@ -127,6 +128,90 @@ void TestFadeResetReturnsToHip() {
     Check(Near(fade.Update(false, 5000), 1.0f), "Reset drops straight back to the hip");
 }
 
+
+// ---- the lean hand-over --------------------------------------------------------
+
+using cameraunlock::ads::LeanHandover;
+using cameraunlock::ads::LeanShares;
+using cameraunlock::math::Vec3;
+
+bool NearVec(const Vec3& a, const Vec3& b, float eps = 1e-4f) {
+    return Near(a.x, b.x, eps) && Near(a.y, b.y, eps) && Near(a.z, b.z, eps);
+}
+
+void TestHandoverHipLeavesTheRigAlone() {
+    std::cout << "Lean hand-over:\n";
+    LeanHandover handover;
+    const Vec3 lean(0.25f, -0.05f, 0.1f);
+    const LeanShares hip = handover.Update(lean, false, false, true, 1000);
+    Check(NearVec(hip.camera, lean), "at the hip the camera carries the whole lean");
+    Check(NearVec(hip.rig, Vec3()), "at the hip the rig carries nothing");
+    Check(!handover.Stop(), "stopping from the hip has no rig to put back");
+}
+
+void TestHandoverSightsUpMovesTheLeanToTheRig() {
+    LeanHandover handover;
+    const Vec3 lean(0.25f, -0.05f, 0.1f);
+    handover.Update(lean, true, false, true, 0);
+    const LeanShares up = handover.Update(lean, true, false, true, AdsFade::kLowerMs + 1);
+    Check(NearVec(up.rig, lean), "sights up: the rig carries the whole lean");
+    Check(NearVec(up.camera, Vec3()), "sights up: the camera, and so the aim hook and reticle, carry none");
+}
+
+void TestHandoverSharesAlwaysSumToTheLean() {
+    LeanHandover handover;
+    const Vec3 lean(0.25f, -0.05f, 0.1f);
+    bool summed = true;
+    bool split = false;
+    for (unsigned long long t = 0; t <= AdsFade::kLowerMs + 10; t += 5) {
+        const LeanShares s = handover.Update(lean, true, false, true, t);
+        summed = summed && NearVec(s.camera + s.rig, lean);
+        split = split || (s.camera.x > 0.01f && s.rig.x > 0.01f);
+    }
+    for (unsigned long long t = 1000; t <= 1000 + AdsFade::kRaiseMs + 10; t += 5) {
+        const LeanShares s = handover.Update(lean, false, false, true, t);
+        summed = summed && NearVec(s.camera + s.rig, lean);
+    }
+    Check(split, "the hand-over passes through frames where both carriers hold part of it");
+    Check(summed, "on every frame of the hand-over the eye lands where the whole lean puts it");
+}
+
+void TestHandoverTrueFreeLookKeepsTheLeanOnTheCamera() {
+    LeanHandover handover;
+    const Vec3 lean(0.25f, 0.0f, 0.0f);
+    handover.Update(lean, true, true, true, 0);
+    const LeanShares up = handover.Update(lean, true, true, true, AdsFade::kLowerMs + 1);
+    Check(NearVec(up.camera, lean) && NearVec(up.rig, Vec3()),
+          "true free look: the camera keeps the lean through the aim");
+
+    // Switching to sights locked mid-aim slides the lean onto the rig, not in a step.
+    const LeanShares first = handover.Update(lean, true, false, true, 1000);
+    Check(Near(first.camera.x, 0.25f), "the switch does not step on its first frame");
+    const LeanShares mid = handover.Update(lean, true, false, true, 1000 + AdsFade::kLowerMs / 2);
+    Check(mid.camera.x > 0.01f && mid.rig.x > 0.01f, "the switch hands the lean over gradually");
+}
+
+void TestHandoverWithoutARigEasesTheLeanOut() {
+    LeanHandover handover;
+    const Vec3 lean(0.25f, 0.0f, 0.0f);
+    handover.Update(lean, true, false, false, 0);
+    const LeanShares up = handover.Update(lean, true, false, false, AdsFade::kLowerMs + 1);
+    Check(NearVec(up.camera, Vec3()) && NearVec(up.rig, Vec3()),
+          "with no rig to carry it the lean eases out on the sights");
+    Check(!handover.Stop(), "a rig that carried nothing has nothing to put back");
+}
+
+void TestHandoverStopReleasesTheRig() {
+    LeanHandover handover;
+    const Vec3 lean(0.25f, 0.0f, 0.0f);
+    handover.Update(lean, true, false, true, 0);
+    handover.Update(lean, true, false, true, AdsFade::kLowerMs + 1);
+    Check(handover.Stop(), "stopping with the rig holding the lean asks for it to be put back");
+    Check(!handover.Stop(), "and asks once");
+    const LeanShares after = handover.Update(lean, false, false, true, 5000);
+    Check(NearVec(after.camera, lean) && NearVec(after.rig, Vec3()), "after a stop the next frame starts at the hip");
+}
+
 }  // namespace
 
 int RunAdsTests() {
@@ -139,6 +224,12 @@ int RunAdsTests() {
     TestFadeReversalIsScaledToTheDistanceLeft();
     TestFadeSurvivesABackwardsClock();
     TestFadeResetReturnsToHip();
+    TestHandoverHipLeavesTheRigAlone();
+    TestHandoverSightsUpMovesTheLeanToTheRig();
+    TestHandoverSharesAlwaysSumToTheLean();
+    TestHandoverTrueFreeLookKeepsTheLeanOnTheCamera();
+    TestHandoverWithoutARigEasesTheLeanOut();
+    TestHandoverStopReleasesTheRig();
 
     if (g_failures == 0) {
         std::cout << "ADS tests: all passed\n";

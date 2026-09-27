@@ -1,4 +1,5 @@
 using CameraUnlock.Core.Ads;
+using CameraUnlock.Core.Data;
 using Xunit;
 
 namespace CameraUnlock.Core.Tests.Ads
@@ -119,6 +120,98 @@ namespace CameraUnlock.Core.Tests.Ads
             fade.Update(true, AdsFade.LowerMs);
             fade.Reset();
             Assert.Equal(1.0f, fade.Update(false, 5000), 4);
+        }
+
+        // ---- the lean hand-over ----------------------------------------------------
+
+        private static void AssertVec(Vec3 expected, Vec3 actual)
+        {
+            Assert.Equal(expected.X, actual.X, 4);
+            Assert.Equal(expected.Y, actual.Y, 4);
+            Assert.Equal(expected.Z, actual.Z, 4);
+        }
+
+        private static readonly Vec3 Lean = new Vec3(0.25f, -0.05f, 0.1f);
+
+        [Fact]
+        public void Handover_HipLeavesTheRigAlone()
+        {
+            var handover = new LeanHandover();
+            LeanShares hip = handover.Update(Lean, false, false, true, 1000);
+            AssertVec(Lean, hip.Camera);
+            AssertVec(Vec3.Zero, hip.Rig);
+            Assert.False(handover.Stop());
+        }
+
+        [Fact]
+        public void Handover_SightsUpMovesTheLeanToTheRig()
+        {
+            var handover = new LeanHandover();
+            handover.Update(Lean, true, false, true, 0);
+            LeanShares up = handover.Update(Lean, true, false, true, AdsFade.LowerMs + 1);
+            AssertVec(Lean, up.Rig);
+            AssertVec(Vec3.Zero, up.Camera);
+        }
+
+        [Fact]
+        public void Handover_SharesAlwaysSumToTheLean()
+        {
+            var handover = new LeanHandover();
+            bool split = false;
+            for (ulong t = 0; t <= AdsFade.LowerMs + 10; t += 5)
+            {
+                LeanShares s = handover.Update(Lean, true, false, true, t);
+                AssertVec(Lean, s.Camera + s.Rig);
+                split |= s.Camera.X > 0.01f && s.Rig.X > 0.01f;
+            }
+            for (ulong t = 1000; t <= 1000 + AdsFade.RaiseMs + 10; t += 5)
+            {
+                LeanShares s = handover.Update(Lean, false, false, true, t);
+                AssertVec(Lean, s.Camera + s.Rig);
+            }
+            Assert.True(split);
+        }
+
+        [Fact]
+        public void Handover_TrueFreeLookKeepsTheLeanOnTheCamera()
+        {
+            var handover = new LeanHandover();
+            var lean = new Vec3(0.25f, 0f, 0f);
+            handover.Update(lean, true, true, true, 0);
+            LeanShares up = handover.Update(lean, true, true, true, AdsFade.LowerMs + 1);
+            AssertVec(lean, up.Camera);
+            AssertVec(Vec3.Zero, up.Rig);
+
+            LeanShares first = handover.Update(lean, true, false, true, 1000);
+            Assert.Equal(0.25f, first.Camera.X, 4);
+            LeanShares mid = handover.Update(lean, true, false, true, 1000 + AdsFade.LowerMs / 2);
+            Assert.True(mid.Camera.X > 0.01f && mid.Rig.X > 0.01f);
+        }
+
+        [Fact]
+        public void Handover_WithoutARigEasesTheLeanOut()
+        {
+            var handover = new LeanHandover();
+            var lean = new Vec3(0.25f, 0f, 0f);
+            handover.Update(lean, true, false, false, 0);
+            LeanShares up = handover.Update(lean, true, false, false, AdsFade.LowerMs + 1);
+            AssertVec(Vec3.Zero, up.Camera);
+            AssertVec(Vec3.Zero, up.Rig);
+            Assert.False(handover.Stop());
+        }
+
+        [Fact]
+        public void Handover_StopReleasesTheRig()
+        {
+            var handover = new LeanHandover();
+            var lean = new Vec3(0.25f, 0f, 0f);
+            handover.Update(lean, true, false, true, 0);
+            handover.Update(lean, true, false, true, AdsFade.LowerMs + 1);
+            Assert.True(handover.Stop());
+            Assert.False(handover.Stop());
+            LeanShares after = handover.Update(lean, false, false, true, 5000);
+            AssertVec(lean, after.Camera);
+            AssertVec(Vec3.Zero, after.Rig);
         }
     }
 }
