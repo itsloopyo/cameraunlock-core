@@ -534,7 +534,7 @@
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "yakuza-0-headtracking": [
-      {"committed": null, "installed": ["media\\CameraUnlock.ini"], "legacy_source": "Yakuza0HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["media\\CameraUnlock.ini"], "legacy_source": "Yakuza0HeadTracking.ini", "dialect": "native"}
     ],
     "yapyap-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.yapyap.headtracking.cfg", "dialect": "unity"}
