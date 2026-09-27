@@ -315,10 +315,17 @@ void TestFollowsDefaultsIni() {
     follows.Setting(Concept::YawModeKey, false);
     follows.Setting(Concept::LightMultiplier, true);
     follows.NotInLegacy(Concept::TrueFreeLook);
-    Check(follows.Concepts() == std::vector<Concept>{Concept::UdpPort, Concept::RemoteSmoothing, Concept::ToggleKey,
-                                                      Concept::LightMultiplier, Concept::TrueFreeLook},
-          "a setting equal to the shipped one, compared with ==, and one the legacy build lacked are left to "
-          "Defaults.ini, in the order given");
+    Check(follows.Concepts() == std::vector<Concept>{Concept::UdpPort, Concept::RemoteSmoothing, Concept::LocalSmoothing,
+                                                      Concept::ToggleKey, Concept::LightMultiplier, Concept::TrueFreeLook},
+          "a setting equal to the shipped one, compared with ==, one read as a number that is not finite (N2) and "
+          "one the legacy build lacked are left to Defaults.ini, in the order given");
+    LegacyFollowsDefaultsIni non_finite;
+    non_finite.Setting(Concept::PositionLimitX, std::numeric_limits<float>::infinity(), 0.3f);
+    non_finite.Setting(Concept::PositionLimitY, -std::numeric_limits<double>::infinity(), 0.2);
+    non_finite.Setting(Concept::PositionLimitZ, std::numeric_limits<float>::quiet_NaN(), {0.4f, 0.1f});
+    Check(non_finite.Concepts() ==
+              std::vector<Concept>{Concept::PositionLimitX, Concept::PositionLimitY, Concept::PositionLimitZ},
+          "inf, -inf and nan leave the row to Defaults.ini, against one shipped value or several");
 
     LegacyFollowsDefaultsIni by_build;
     by_build.Setting(Concept::PositionLimitZ, 0.1f, {0.4f, 0.1f});

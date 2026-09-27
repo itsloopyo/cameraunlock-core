@@ -52,6 +52,7 @@ writes no seed because REFramework is already there.
 - A setting that the defaults the README shows set to `default` is written as `default` when you never changed it from the default of the earlier version that wrote `<legacy>`, as far as the file shows which version that was, because `<legacy>` does not hold it or holds that default. It then follows `Defaults.ini`, so it takes the value `Defaults.ini` gives it, or the built-in value where `Defaults.ini` gives none, which can differ from the default earlier versions used. A setting you changed is written with the value imported for it, or as `default` where that value equals its default at that start.
 - Only where the defaults set both `RotationEnabled` and `PositionEnabled` to `default`:
   `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.
+- A number in `<legacy>` that is not a number the mod can use (`nan`, `inf`) is written as `default` where the defaults the README shows set that setting to `default`, and as the built-in value elsewhere.
 - Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
   - A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
   - Reticle settings, and a key that toggled the reticle.

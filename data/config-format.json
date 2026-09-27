@@ -552,7 +552,7 @@
       "drop_rule": "KeyCodeOutOfRange"
     },
     "N2": {
-      "rule": "A non-finite float imports as the row's default. IniReader::ReadDouble accepts nan, inf and 1e400, abzu reads its sensitivities and deadzone through it unguarded, and skyrim-special-edition's atof and std::clamp let NaN through, which gives a NaN view matrix every frame. Repos that already sanitise turn a non-finite value into their fallback on read and see no change.",
+      "rule": "A non-finite float imports as the row's default. IniReader::ReadDouble accepts nan, inf and 1e400, abzu reads its sensitivities and deadzone through it unguarded, and skyrim-special-edition's atof and std::clamp let NaN through, which gives a NaN view matrix every frame. Repos that already sanitise turn a non-finite value into their fallback on read and see no change. On a row that follows Defaults.ini the value follows Defaults.ini and is written default, not the built-in number (owner ruling of 2026-09-27): LegacyFollowsDefaultsIni's Setting(concept, value, shipped) leaves the row to Defaults.ini for a value read that is not finite, so a map gets it by passing the value as read. A PerGame row, or one of a concept that is not global, keeps the row's default.",
       "approved": "2026-09-24",
       "drop_rule": "NonFiniteNumber"
     },

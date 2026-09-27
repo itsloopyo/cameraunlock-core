@@ -37,7 +37,8 @@ enum class ImportStatus {
 /// The approved rule by which a map left a legacy value out of the migrated file. The numbers
 /// match CameraUnlock.Core.Config.DropRule.
 enum class DropRule {
-    /// N2: a non-finite float or double imports as the row's default (LegacyFiniteOrDefault).
+    /// N2: a non-finite float or double imports as the row's default (LegacyFiniteOrDefault), and on
+    /// a row that follows Defaults.ini is written `default`.
     NonFiniteNumber = 1,
     /// A sensitivity, unit scale, deadzone, response curve or axis inversion the player set away
     /// from the shipped default. The tracker shapes the pose; the mod no longer does. A shipped
@@ -200,7 +201,9 @@ std::string LegacyVirtualKeyToBindings(long long code, const std::string& sectio
 /// Normalisation N2: a legacy float or double that is not finite imports as `row_default`,
 /// the runtime row's default, and the drop is recorded in `dropped` under `section` and
 /// `key`. A finite value is returned as it is. Throws std::invalid_argument when
-/// `row_default` is not finite.
+/// `row_default` is not finite. On a row that follows Defaults.ini the migration writes such a
+/// value `default` (owner ruling of 2026-09-27): LegacyFollowsDefaultsIni::Setting leaves the row
+/// to Defaults.ini when handed the value as read.
 template <class F>
 F LegacyFiniteOrDefault(F value, F row_default, const std::string& section, const std::string& key,
                         std::vector<DroppedValue>& dropped) {
@@ -259,26 +262,29 @@ public:
     /// value, equals `shipped`, compared with ==. `shipped` is the effective value the published
     /// build that wrote the file shipped, which is not always the newest build's: where the default
     /// changed between published builds and the file shows which build wrote it, it is that build's
-    /// (owner ruling of 2026-09-27). Throws std::invalid_argument for RotationEnabled or
+    /// (owner ruling of 2026-09-27). A float or double `value` that is not finite is left to
+    /// Defaults.ini too (N2, owner ruling of 2026-09-27): pass the value as the frozen reader read it,
+    /// not what LegacyFiniteOrDefault gave. Throws std::invalid_argument for RotationEnabled or
     /// PositionEnabled (TrackingMode), a concept that is not global or was given before, or a float
     /// or double `shipped` that is not finite.
     template <class T>
     void Setting(schema::Concept id, const T& value, const T& shipped) {
         CheckShipped(id, shipped);
-        Setting(id, value == shipped);
+        Setting(id, !Finite(value) || value == shipped);
     }
 
     /// A setting whose default changed between published builds, where the file narrows the build
     /// that wrote it to several whose defaults differ: left to Defaults.ini when `value` equals any
-    /// of `shipped`, the effective value each of those builds shipped, compared with ==. Throws as
-    /// the overload above does, for any `shipped` value, and for an empty `shipped`.
+    /// of `shipped`, the effective value each of those builds shipped, compared with ==, or is a
+    /// float or double that is not finite. Throws as the overload above does, for any `shipped`
+    /// value, and for an empty `shipped`.
     template <class T>
     void Setting(schema::Concept id, const T& value, const std::vector<T>& shipped) {
         if (shipped.empty()) {
             throw std::invalid_argument(std::string(schema::kConcepts[static_cast<std::size_t>(id)].name) +
                                         ": no shipped value is given");
         }
-        bool unchanged = false;
+        bool unchanged = !Finite(value);
         for (const T& one : shipped) {
             CheckShipped(id, one);
             if (value == one) unchanged = true;
@@ -287,7 +293,8 @@ public:
     }
 
     /// A setting the import compares itself, such as a hotkey code together with its chord
-    /// switch: left to Defaults.ini when `unchanged`. Throws as the comparing overload does.
+    /// switch: left to Defaults.ini when `unchanged`, which the import also sets for a number read
+    /// that is not finite (N2). Throws as the comparing overload does.
     void Setting(schema::Concept id, bool unchanged);
 
     /// A concept the legacy build had no setting for, which no player can have changed: always
@@ -312,6 +319,15 @@ public:
     const std::vector<schema::Concept>& Concepts() const { return concepts_; }
 
 private:
+    template <class T>
+    static bool Finite(const T& value) {
+        if constexpr (std::is_floating_point_v<T>) {
+            return std::isfinite(value);
+        } else {
+            return true;
+        }
+    }
+
     template <class T>
     static void CheckShipped(schema::Concept id, const T& shipped) {
         if constexpr (std::is_floating_point_v<T>) {

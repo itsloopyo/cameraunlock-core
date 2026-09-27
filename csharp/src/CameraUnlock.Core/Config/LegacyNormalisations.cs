@@ -13,7 +13,10 @@ namespace CameraUnlock.Core.Config
         /// <summary>
         /// N2: a legacy float that is not finite imports as <paramref name="rowDefault"/>, the
         /// runtime row's default, and the drop is added to <paramref name="dropped"/>. A finite
-        /// value is returned as it is.
+        /// value is returned as it is. On a row that follows Defaults.ini the migration writes such
+        /// a value <c>default</c> (owner ruling of 2026-09-27):
+        /// <see cref="LegacyFollowsDefaultsIni.Setting{T}(ConceptDescriptor, T, T)"/> leaves the row
+        /// to Defaults.ini when handed the value as read.
         /// </summary>
         /// <exception cref="ArgumentNullException">A text or <paramref name="dropped"/> is null.</exception>
         /// <exception cref="ArgumentException"><paramref name="rowDefault"/> is not finite.</exception>

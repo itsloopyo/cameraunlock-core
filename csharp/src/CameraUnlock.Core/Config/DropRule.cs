@@ -8,7 +8,8 @@ namespace CameraUnlock.Core.Config
     {
         /// <summary>
         /// N2: a non-finite float or double imports as the row's default
-        /// (<see cref="LegacyNormalisations"/>).
+        /// (<see cref="LegacyNormalisations"/>), and on a row that follows Defaults.ini is written
+        /// <c>default</c>.
         /// </summary>
         NonFiniteNumber = 1,
 

@@ -9,6 +9,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - a legacy number that is not finite (N2) is written `default`
+
+Owner ruling of 2026-09-27. N2 imported a NaN or infinite legacy value as the row's built-in
+default and the migration wrote that number, so the row stopped following Defaults.ini although the
+player never chose it.
+
+- **C++ and C#** `LegacyFollowsDefaultsIni.Setting(concept, value, shipped)` and the list overload
+  leave the row to Defaults.ini when `value` is a float or double that is not finite. A map that
+  passes the value as the frozen reader read it gets `default` on that row with no other change;
+  one that passes what `LegacyFiniteOrDefault` returned still compares the built-in number. The
+  `NonFiniteNumber` drop and its log line do not change.
+- `normalisations.N2` in `data/config-format.json` records the ruling, docs/canonical-config.md
+  ("The legacy import") describes it, and the changelog template gains a bullet for it.
+- A repo adopts it at its next pin bump: check each `Setting` call on a float row passes the value
+  as read, and re-run its differential test, where a non-finite corpus input now lists the row in
+  `follows_defaults_ini`.
+
 ### Added - an untouched default of an older build follows Defaults.ini
 
 Owner ruling of 2026-09-27. `LegacyFollowsDefaultsIni`'s "shipped" is the default of whichever

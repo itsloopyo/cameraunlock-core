@@ -376,9 +376,20 @@ namespace CameraUnlock.Core.Tests.Config
             follows.NotInLegacy(ConfigConcepts.TrueFreeLook);
             Assert.Equal(new ConceptDescriptor[]
             {
-                ConfigConcepts.UdpPort, ConfigConcepts.RemoteSmoothing, ConfigConcepts.ToggleKey, ConfigConcepts.LightMultiplier,
-                ConfigConcepts.TrueFreeLook,
+                ConfigConcepts.UdpPort, ConfigConcepts.RemoteSmoothing, ConfigConcepts.LocalSmoothing, ConfigConcepts.ToggleKey,
+                ConfigConcepts.LightMultiplier, ConfigConcepts.TrueFreeLook,
             }, follows.Concepts);
+        }
+
+        [Fact]
+        public void ANumberReadThatIsNotFiniteFollowsDefaultsIni()
+        {
+            var follows = new LegacyFollowsDefaultsIni();
+            follows.Setting(ConfigConcepts.PositionLimitX, float.PositiveInfinity, 0.3f);
+            follows.Setting(ConfigConcepts.PositionLimitY, double.NegativeInfinity, 0.2);
+            follows.Setting(ConfigConcepts.PositionLimitZ, float.NaN, new[] { 0.4f, 0.1f });
+            Assert.Equal(new ConceptDescriptor[] { ConfigConcepts.PositionLimitX, ConfigConcepts.PositionLimitY, ConfigConcepts.PositionLimitZ },
+                follows.Concepts);
         }
 
         [Fact]

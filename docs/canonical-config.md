@@ -1332,7 +1332,7 @@ nothing. It stays for the life of the repo, since a player can update from any o
 
 | DropRule | Recorded as | What is dropped |
 |----------|-------------|-----------------|
-| `NonFiniteNumber` (1) | normalisation N2 | A NaN or infinite float, which imports as the row's default (C++ `LegacyFiniteOrDefault`, C# `LegacyNormalisations.FiniteOrDefault`) |
+| `NonFiniteNumber` (1) | normalisation N2 | A NaN or infinite float, which imports as the row's default (C++ `LegacyFiniteOrDefault`, C# `LegacyNormalisations.FiniteOrDefault`). On a row that follows Defaults.ini it is written `default` (below) |
 | `PoseShaping` (2) | approved change `pose_shaping` | A sensitivity, unit scale, deadzone, response curve or axis inversion a player set away from the shipped default. A shipped unit scale, and a shipped default that is not identity, belong to the mod's axis conversion, so the conversion moves them into the mod's own code |
 | `Reticle` (3) | approved change `reticle` | Reticle settings and a reticle toggle key |
 | `FollowsDefault` (4) | approved change `follows_default` | The setting of a feature shipped switched off while untested, which now follows the mod's default |
@@ -1372,6 +1372,16 @@ follows Defaults.ini:
   `RotationEnabled` and `PositionEnabled` are both left to Defaults.ini, or neither. The comparison
   covers every legacy setting the map derives the mode from, a position switch included. `Setting`
   refuses either half.
+
+**A number that is not finite follows Defaults.ini** (N2, owner ruling of 2026-09-27). A legacy
+value that is NaN or infinite was no player's choice either, so on a row that follows Defaults.ini
+the migration writes it `default`, not the built-in number. `Setting(concept, value, shipped)` and
+the list overload leave the row to Defaults.ini for a float or double `value` that is not finite, so
+the map passes the value as the frozen reader read it and gets this with no other call; handing it
+what `LegacyFiniteOrDefault` returned would compare the built-in number instead. An import that
+compares a row itself counts such a value as unchanged in `Setting(concept, unchanged)`. A row
+that does not follow Defaults.ini, a `PerGame` row or one of a concept that is not global, keeps
+the row's default that `LegacyFiniteOrDefault` gives.
 
 Each throws std::invalid_argument (C# `ArgumentException`) for a concept that is not global or was
 given before, or a tracking mode given twice, and `Setting` also for a float or double `shipped`

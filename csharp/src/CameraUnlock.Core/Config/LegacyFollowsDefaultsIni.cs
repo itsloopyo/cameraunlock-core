@@ -34,7 +34,10 @@ namespace CameraUnlock.Core.Config
         /// <see cref="EqualityComparer{T}.Default"/>. <paramref name="shipped"/> is the effective
         /// value the published build that wrote the file shipped, which is not always the newest
         /// build's: where the default changed between published builds and the file shows which
-        /// build wrote it, it is that build's (owner ruling of 2026-09-27).
+        /// build wrote it, it is that build's (owner ruling of 2026-09-27). A float or double
+        /// <paramref name="value"/> that is not finite is left to Defaults.ini too (N2, owner ruling
+        /// of 2026-09-27): pass the value as the frozen reader read it, not what
+        /// <see cref="LegacyNormalisations.FiniteOrDefault(float, float, string, string, ICollection{DroppedValue})"/> gave.
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="concept"/> is null.</exception>
         /// <exception cref="ArgumentException">The concept is RotationEnabled or PositionEnabled
@@ -44,14 +47,15 @@ namespace CameraUnlock.Core.Config
         {
             if (concept == null) throw new ArgumentNullException("concept");
             CheckShipped(concept, shipped);
-            Setting(concept, EqualityComparer<T>.Default.Equals(value, shipped));
+            Setting(concept, !Finite(value) || EqualityComparer<T>.Default.Equals(value, shipped));
         }
 
         /// <summary>
         /// A setting whose default changed between published builds, where the file narrows the
         /// build that wrote it to several whose defaults differ: left to Defaults.ini when
         /// <paramref name="value"/> equals any of <paramref name="shipped"/>, the effective value
-        /// each of those builds shipped, compared by <see cref="EqualityComparer{T}.Default"/>.
+        /// each of those builds shipped, compared by <see cref="EqualityComparer{T}.Default"/>, or is
+        /// a float or double that is not finite.
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="concept"/> or
         /// <paramref name="shipped"/> is null.</exception>
@@ -62,7 +66,7 @@ namespace CameraUnlock.Core.Config
             if (concept == null) throw new ArgumentNullException("concept");
             if (shipped == null) throw new ArgumentNullException("shipped");
             if (shipped.Count == 0) throw new ArgumentException(concept.Key + ": no shipped value is given", "shipped");
-            bool unchanged = false;
+            bool unchanged = !Finite(value);
             foreach (T one in shipped)
             {
                 CheckShipped(concept, one);
@@ -73,7 +77,8 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// A setting the import compares itself, such as a hotkey together with its chord switch:
-        /// left to Defaults.ini when <paramref name="unchanged"/>.
+        /// left to Defaults.ini when <paramref name="unchanged"/>, which the import also sets for a
+        /// number read that is not finite (N2).
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="concept"/> is null.</exception>
         /// <exception cref="ArgumentException">The concept is RotationEnabled or PositionEnabled
