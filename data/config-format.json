@@ -241,7 +241,7 @@
       {"committed": null, "installed": ["Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "dishonored-headtracking": [
-      {"committed": null, "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "DishonoredHeadTracking.ini", "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "DishonoredHeadTracking.ini", "dialect": "native"}
     ],
     "dorfromantik-headtracking": [
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
@@ -277,7 +277,7 @@
       {"committed": null, "installed": ["Ghostrunner2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "ghostrunner-headtracking": [
-      {"committed": null, "installed": ["Ghostrunner\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["Ghostrunner\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "gone-home-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["GoneHome_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
@@ -292,7 +292,7 @@
       {"committed": "HomeworldHeadTracking.ini", "installed": ["HomeworldRM\\bin\\Release\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "indiana-jones-and-the-great-circle-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "jump-space-headtracking": [
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
@@ -301,7 +301,7 @@
       {"committed": "HeadTracking.ini", "installed": ["Bin\\Win64MasterMasterSteamPGO\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "kingdom-come-deliverance-headtracking": [
-      {"committed": null, "installed": ["Bin\\Win64\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["Bin\\Win64\\CameraUnlock.ini", "CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "la-noire-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
