@@ -91,6 +91,13 @@ struct CameraPipelineDescriptor {
     // Run at the top of the post-render callback, before the clean restore, so
     // a game that moved something else (a light, a weapon) can put it back.
     void (*onPostRestore)() = nullptr;
+
+    // The game's own aim state, polled once per gameplay frame, never latched.
+    // Set, the lean eases out while this is true and PluginMod::IsTrueFreeLook
+    // is false (sights locked), on ads/ads_fade.h's timing, and stays in full in
+    // true free look. Rotation is never touched. A frame it cannot read reports
+    // false, so the lean returns. Null leaves the lean alone.
+    bool (*isAiming)() = nullptr;
 };
 
 // Install the descriptor. Call once, from plugin initialization.

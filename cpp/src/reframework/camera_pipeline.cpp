@@ -1,6 +1,7 @@
 #include <cameraunlock/reframework/camera_pipeline.h>
 
 #include <cameraunlock/math/smoothing_utils.h>
+#include <cameraunlock/ads/lean_handover.h>
 #include <cameraunlock/memory/safe_memory.h>
 #include <cameraunlock/reframework/camera_controller_hook.h>
 #include <cameraunlock/reframework/log_callback.h>
@@ -44,6 +45,11 @@ static struct {
 
 static bool g_trackingAppliedThisFrame = false;
 
+// The pipeline has no rig to hand the lean to, so the handover runs with the
+// rig unavailable and eases the lean out on the camera alone.
+static cameraunlock::ads::LeanHandover g_leanHandover;
+static bool g_loggedAiming = false;
+
 // Per-frame transform + camera cache. Both are invalidated together at the
 // camera-controller update pre-hook and at the end of the post-render callback,
 // so within one render frame they hold the live primary camera and its
@@ -82,6 +88,24 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
 
     float px, py, pz;
     bool hasPosition = PluginMod::Instance().GetPositionOffset(px, py, pz);
+
+    if (g_descriptor.isAiming) {
+        if (hasPosition) {
+            const bool aiming = g_descriptor.isAiming();
+            if (aiming != g_loggedAiming) {
+                g_loggedAiming = aiming;
+                LogInfo("Aim state: %s", aiming ? "sights up" : "sights down");
+            }
+            const cameraunlock::ads::LeanShares shares = g_leanHandover.Update(
+                cameraunlock::math::Vec3(px, py, pz), aiming, PluginMod::Instance().IsTrueFreeLook(),
+                /*rigAvailable*/ false, cameraunlock::time::QpcNowMicros() / 1000ull);
+            px = shares.camera.x;
+            py = shares.camera.y;
+            pz = shares.camera.z;
+        } else {
+            g_leanHandover.Stop();
+        }
+    }
 
     if (!hasRotation && !hasPosition) return;
 
@@ -353,6 +377,7 @@ void CameraPipelinePreRender() {
         g_projection.markerValid = false;
         g_projection.aimValid = false;
         g_projection.cleanToHeadValid = false;
+        g_leanHandover.Stop();
         return;
     }
     EnsureCameraControllerHooked();

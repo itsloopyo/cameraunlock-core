@@ -63,6 +63,14 @@ public:
     void CycleTrackingMode();
     void ToggleYawMode();
 
+    // Sights locked <-> true free look (the shooter-ads-handling skill), for a
+    // schema with trueFreeLook. Applies the new mode, logs it and saves
+    // [Position] TrueFreeLook, on the calling thread. The camera pipeline reads
+    // it each frame, so a press mid-aim rides the lean fade rather than
+    // stepping.
+    void ToggleTrueFreeLook();
+    bool IsTrueFreeLook() const { return m_trueFreeLook.load(std::memory_order_relaxed); }
+
     // Hotkey callbacks fire on the HotkeyPoller's background thread, but
     // CycleTrackingMode mutates the session's non-atomic
     // processor/interpolator smoothing state owned by the render thread. The
@@ -123,6 +131,7 @@ private:
 
     // Read on the render thread, toggled on the hotkey thread.
     std::atomic<bool> m_worldSpaceYaw{false};
+    std::atomic<bool> m_trueFreeLook{false};
 
     cameraunlock::input::DeferredAction m_cycleModeRequested;
     // Written on the render thread by ApplyTrackingMode. In canonical mode the

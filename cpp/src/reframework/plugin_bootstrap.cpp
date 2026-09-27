@@ -85,6 +85,11 @@ bool InitializePlugin(const REFrameworkPluginInitializeParam* param,
         RegisterKeyBindings(g_hotkeyPoller, CanonicalBindings(config.yawModeKeyBindings), []() {
             PluginMod::Instance().ToggleYawMode();
         });
+        if (descriptor.mod.config.trueFreeLook) {
+            RegisterKeyBindings(g_hotkeyPoller, CanonicalBindings(config.trueFreeLookKeyBindings), []() {
+                PluginMod::Instance().ToggleTrueFreeLook();
+            });
+        }
     } else {
         // Nav-cluster bindings. Suppressed while Ctrl+Shift is held so the chord
         // path below is the sole trigger for Ctrl+Shift+<nav> combos.

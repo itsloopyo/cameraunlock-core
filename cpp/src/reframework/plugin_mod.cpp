@@ -59,6 +59,10 @@ void PluginMod::Initialize(const PluginModDescriptor& descriptor) {
     m_session.SetMode(startMode);
     m_appliedMode.store(startMode);
     m_worldSpaceYaw.store(m_config.worldSpaceYaw, std::memory_order_relaxed);
+    if (m_descriptor.config.trueFreeLook) {
+        m_trueFreeLook.store(m_config.trueFreeLook, std::memory_order_relaxed);
+        LogInfo("Aim: %s", m_config.trueFreeLook ? "true free look" : "sights locked");
+    }
 
     // Assigned by name rather than through the positional constructor.
     // PositionSettings takes nine floats before its three inversion bools, so a
@@ -324,6 +328,13 @@ void PluginMod::ToggleYawMode() {
     m_worldSpaceYaw.store(now, std::memory_order_relaxed);
     LogInfo("Yaw mode: %s", now ? "world-space (horizon-locked)" : "camera-local");
     SaveConfig("[General] WorldSpaceYaw", [now](PluginConfig& config) { config.worldSpaceYaw = now; });
+}
+
+void PluginMod::ToggleTrueFreeLook() {
+    bool now = !m_trueFreeLook.load(std::memory_order_relaxed);
+    m_trueFreeLook.store(now, std::memory_order_relaxed);
+    LogInfo("%s", now ? "True free look: ON" : "True free look: OFF (sights locked)");
+    SaveConfig("[Position] TrueFreeLook", [now](PluginConfig& config) { config.trueFreeLook = now; });
 }
 
 } // namespace cameraunlock::reframework

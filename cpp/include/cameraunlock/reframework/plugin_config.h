@@ -78,11 +78,16 @@ struct PluginConfigSchema {
     // CameraUnlock.ini is absent it imports the legacy file,
     // PluginModDescriptor::configFileName, once through
     // PluginConfigLegacyImport; the legacy file is never written.
-    // PluginModDescriptor::gameName is then required. Fields are only ever
-    // appended, and this one is last: every
-    // mod's schema is initialised positionally, so a field inserted above
-    // silently rebinds the rest.
+    // PluginModDescriptor::gameName is then required.
     bool canonicalConfig = false;
+
+    // A shooter with an aim state: with canonicalConfig, the table binds
+    // [Position] TrueFreeLook (Writable) and [Hotkeys] TrueFreeLookKey, and the
+    // bootstrap registers the key list on PluginMod::ToggleTrueFreeLook. Fields
+    // are only ever appended, and this one is last: every mod's schema is
+    // initialised positionally, so a field inserted above silently rebinds the
+    // rest.
+    bool trueFreeLook = false;
 };
 
 struct PluginConfig {
@@ -147,6 +152,12 @@ struct PluginConfig {
     std::string yawModeKeyBindings =
         config::schema::ConceptTraits<config::schema::Concept::YawModeKey>::kCanonicalDefault;
     std::string diagnosticMarkerKeyBindings = "F9";
+
+    // [Position] TrueFreeLook and [Hotkeys] TrueFreeLookKey, bound only with
+    // PluginConfigSchema::trueFreeLook. No legacy file ever held either.
+    bool trueFreeLook = false;
+    std::string trueFreeLookKeyBindings =
+        config::schema::ConceptTraits<config::schema::Concept::TrueFreeLookKey>::kCanonicalDefault;
 
     // SetDefaults, then every key the schema names, then Validate: what Load reads,
     // without Load's log line or its ConfigVersion migration. False, on the defaults,

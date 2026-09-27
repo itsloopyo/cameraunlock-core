@@ -91,6 +91,10 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
         table.Concept<Concept::LightFollowsHead>(&PluginConfig::flashlightTracking);
         table.Concept<Concept::LightMultiplier>(&PluginConfig::flashlightMultiplier);
     }
+    if (schema.trueFreeLook) {
+        table.Concept<Concept::TrueFreeLook>(&PluginConfig::trueFreeLook).Writable();
+        table.Concept<Concept::TrueFreeLookKey>(&PluginConfig::trueFreeLookKeyBindings);
+    }
     return table;
 }
 
@@ -160,6 +164,11 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
         if (schema.flashlight) {
             follows.Setting(Concept::LightFollowsHead, legacy.flashlightTracking, shipped.flashlightTracking);
             follows.Setting(Concept::LightMultiplier, legacy.flashlightMultiplier, shipped.flashlightMultiplier);
+        }
+        if (schema.trueFreeLook) {
+            // No legacy build had either setting, so both follow Defaults.ini.
+            follows.Setting(Concept::TrueFreeLook, true);
+            follows.Setting(Concept::TrueFreeLookKey, true);
         }
 
         return found ? ImportResult::Imported(std::move(dropped), std::move(pose), follows.Concepts())

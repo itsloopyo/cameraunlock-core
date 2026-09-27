@@ -903,6 +903,61 @@ void TestLoadIgnoresCanonicalConfig(const fs::path& root) {
           "PluginConfig::Load reads and migrates the same with canonicalConfig set or not");
 }
 
+// A shooter's schema binds TrueFreeLook (default false, Writable) and TrueFreeLookKey, both
+// written default; the import of a legacy file, which never held either, leaves both to
+// Defaults.ini; the toggle's save edits one line; and a canonical file still carrying the retired
+// ads_mode loads with free look off.
+void TestTrueFreeLook(const fs::path& root) {
+    const Fixture& re3 = kFixtures[1];
+    Fixture shooter = re3;
+    shooter.schema.trueFreeLook = true;
+
+    const ConfigTable<PluginConfig> table = PluginConfigTable(shooter.schema);
+    Check(!table.defaults().trueFreeLook && table.defaults().trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U",
+          "TrueFreeLook defaults to false, on Insert and Ctrl+Shift+U");
+    const std::string fresh = RenderCanonicalFresh(table, RenderHeader{shooter.game});
+    const std::size_t position = fresh.find("\r\n[Position]\r\n");
+    const std::size_t hotkeys = fresh.find("\r\n[Hotkeys]\r\n");
+    const std::size_t row = fresh.find("\r\nTrueFreeLook=default\r\n");
+    const std::size_t key = fresh.find("\r\nTrueFreeLookKey=default\r\n");
+    Check(position < row && row < hotkeys && hotkeys < key,
+          "a shooter's fresh file holds TrueFreeLook=default under [Position] and TrueFreeLookKey=default under [Hotkeys]");
+    const std::string plain = RenderCanonicalFresh(PluginConfigTable(re3.schema), RenderHeader{re3.game});
+    Check(!Contains(plain, "TrueFreeLook"), "a schema without trueFreeLook binds neither row");
+
+    const fs::path dir = Fresh(root, "true-free-look");
+    const fs::path file = dir / "CameraUnlock.ini";
+    WriteBytes(dir / "HeadTracking.ini", ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / re3.file));
+    ConfigOwner<PluginConfig> owner(OwnerOptions(shooter, dir));
+    const ConfigLoadResult<PluginConfig> loaded = owner.Load();
+    const std::string converted = ReadBytes(file);
+    Check(loaded.status == ConfigLoadStatus::Migrated && !loaded.config.trueFreeLook &&
+              loaded.config.trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U" &&
+              Contains(converted, "\r\nTrueFreeLook=default\r\n") &&
+              Contains(converted, "\r\nTrueFreeLookKey=default\r\n"),
+          "the legacy import leaves TrueFreeLook and its key to Defaults.ini, sights locked on Insert");
+
+    const ConfigSaveResult saved = owner.Save([](PluginConfig& c) { c.trueFreeLook = true; });
+    const std::string after = ReadBytes(file);
+    Check(saved.status == ConfigSaveStatus::Saved && OnlyChangedLine(converted, after) == "TrueFreeLook=true",
+          "the toggle's save edits the TrueFreeLook line and nothing else");
+    ConfigOwner<PluginConfig> restarted(OwnerOptions(shooter, dir));
+    Check(restarted.Load().config.trueFreeLook, "and a restart comes back in true free look");
+
+    const std::string with_ads_mode = [&] {
+        std::string text = converted;
+        const std::string at = "\r\n[Position]\r\n";
+        text.insert(text.find(at) + at.size(), "ads_mode=tracked\r\n");
+        return text;
+    }();
+    WriteBytes(file, with_ads_mode);
+    ConfigOwner<PluginConfig> old(OwnerOptions(shooter, dir));
+    const ConfigLoadResult<PluginConfig> old_loaded = old.Load();
+    Check(old_loaded.status == ConfigLoadStatus::Canonical && !old_loaded.config.trueFreeLook &&
+              ReadBytes(file) == with_ads_mode,
+          "a file still carrying ads_mode=tracked loads with free look off, and is not rewritten");
+}
+
 }  // namespace
 
 int RunPluginConfigCanonicalTests() {
@@ -921,6 +976,7 @@ int RunPluginConfigCanonicalTests() {
     TestImportAbsent(root);
     TestLoadIgnoresCanonicalConfig(root);
     TestConversionLog(root);
+    TestTrueFreeLook(root);
     for (const Fixture& f : kFixtures) TestOwnerConvertsShippedFile(root, f);
     for (const Fixture& f : kFixtures) {
         const std::string file = f.file;
