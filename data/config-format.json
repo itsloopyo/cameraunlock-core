@@ -172,13 +172,13 @@
       {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "arkham-city-headtracking": [
-      {"committed": null, "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "arx-fatalis-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini", "EN\\CameraUnlock.ini"], "legacy_source": "ArxFatalisHeadTracking.ini", "dialect": "native"}
     ],
     "assassins-creed-origins-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "AssassinsCreedOriginsHeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "assassins-creed-unity-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -211,7 +211,7 @@
       {"committed": null, "installed": ["Bodycam\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "bully-scholarship-edition-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "burnout-paradise-the-ultimate-box-headtracking": [
       {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -522,7 +522,7 @@
       {"committed": "HeadTracking.ini", "installed": ["bin\\x64_dx12\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "wobbly-life-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.wobblylife.headtracking.cfg", "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.wobblylife.headtracking.cfg", "dialect": "unity"}
     ],
     "wolfenstein-the-new-order-headtracking": [
       {"committed": "CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
