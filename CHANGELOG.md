@@ -9,6 +9,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - N4: a legacy number outside the row's range is clamped
+
+Approved by the owner on 2026-09-27 and recorded as `normalisations.N4` in
+`data/config-format.json`, with `drop_rule` `NumberOutOfRange`. A legacy reader that checked no
+range could hand the map a finite number no canonical file holds, and the migration could not write
+the row.
+
+- **C++** `DropRule::NumberOutOfRange` (10), `LegacyClampToRange(value, lo, hi, section, key,
+  dropped)` for any number type but `bool`, and `LegacyClampToRange<schema::Concept::X>(value,
+  section, key, dropped)` on the schema's range. A value outside the range gives the nearest end and
+  a `NumberOutOfRange` drop with the value read; a value that is not finite, a bound that is not
+  finite, or a low end above the high end throws `std::invalid_argument`.
+- **C#** `DropRule.NumberOutOfRange` (10), and `LegacyNormalisations.ClampToRange` for `int`, `float`
+  and `double` bounds, and for a `ConceptDescriptor<int>` or `ConceptDescriptor<float>`, throwing
+  `ArgumentException`.
+- The migration log line is `not carried: [Position] LimitZ=25.0, it is outside the range this
+  setting takes, so the nearest end of the range is used`. The numbers of the existing rules do not
+  move.
+- A map hands `LegacyFollowsDefaultsIni` the value read, not the clamped one, so a clamp that lands
+  on the shipped default is still carried as the player's value.
+- The changelog template gains a bullet for it. A repo adopts it at its next pin bump by clamping
+  each number its frozen reader does not bound, after N2.
+
 ### Changed - a legacy number that is not finite (N2) is written `default`
 
 Owner ruling of 2026-09-27. N2 imported a NaN or infinite legacy value as the row's built-in

@@ -60,6 +60,8 @@ namespace CameraUnlock.Core.Config
                     return "positional tracking is switched off by the tracking mode now, so the mod starts in rotation only and the mode hotkey can turn position back on";
                 case DropRule.TrackerPivot:
                     return "the neck pivot is not a setting now, so a distance you set is not carried over";
+                case DropRule.NumberOutOfRange:
+                    return "it is outside the range this setting takes, so the nearest end of the range is used";
                 default:
                     throw new ArgumentOutOfRangeException("rule", rule, "drop rule " + (int)rule + " is not a DropRule");
             }

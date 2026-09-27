@@ -1341,6 +1341,7 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `CoupledAim` (7) | approved change `coupled_aim` | An aim decoupling switch (`AimDecoupling`, a BepInEx `EnableAimDecoupling`, or any other spelling of it) whose legacy value is false. Aim is always decoupled now, so that player gets decoupled aim, and the map records the value it read. A true value changes nothing and is not recorded. The conversion also deletes the mod's coupled-aim code path |
 | `PositionSwitchOff` (8) | approved change `position_switch_off` | A position switch whose legacy value is false, where it also kept the mode hotkey off the position modes (the setting `PositionAllowed` stood for: amnesia-rebirth, soma, bully-scholarship-edition, a-plague-tale-innocence, the-painscreek-killings). The map writes the rotation-only tracking mode, `RotationEnabled` true and `PositionEnabled` false, which keeps the view the player had, and records the switch (C++ `LegacyPositionSwitch`, C# `LegacyPositionSwitch.Record`, called after the map has written the tracking mode). Nothing else carries it, so the mode hotkey can now turn positional tracking back on. A true value changes nothing and is not recorded |
 | `TrackerPivot` (9) | approved change `tracker_pivot` | A neck pivot distance (`TrackerPivotForward`, `TrackerPivotUp`, or any other spelling of either) the player changed from the value the game shipped (C++ `LegacyTrackerPivot`, C# `LegacyTrackerPivot.Record`). Both are compared as the pipeline ran them, so a pivot behind the game's own switch set to off, or a key its code never read, counts as 0. The tracker is authoritative, so the setting has no row. The pivot the game shipped is no player's choice: the conversion keeps it in the mod's code, and a legacy value equal to it is not recorded |
+| `NumberOutOfRange` (10) | normalisation N4 | A finite number outside the canonical row's range, which imports as the nearest end of the range and is recorded with the value read (C++ `LegacyClampToRange`, C# `LegacyNormalisations.ClampToRange`) |
 
 **A setting the player never changed follows Defaults.ini** (owner rule of 2026-09-26). A
 setting left at the legacy build's default is no player's choice, so it is migrated as `default`
@@ -1372,6 +1373,25 @@ follows Defaults.ini:
   `RotationEnabled` and `PositionEnabled` are both left to Defaults.ini, or neither. The comparison
   covers every legacy setting the map derives the mode from, a position switch included. `Setting`
   refuses either half.
+
+**A number outside the row's range is clamped** (N4, owner ruling of 2026-09-27). A legacy reader
+that checked no range can hand the map a finite number no canonical file can hold, which would
+leave the migration unable to write the row. The map clamps it to the nearest end of the range and
+records the clamp as `NumberOutOfRange`, which the migration logs as `not carried: [Position]
+LimitZ=25.0, it is outside the range this setting takes, so the nearest end of the range is used`.
+
+- C++ `LegacyClampToRange(value, lo, hi, section, key, dropped)` takes any number type but `bool`,
+  and `LegacyClampToRange<schema::Concept::X>(value, section, key, dropped)` takes the concept's
+  range from `schema::ConceptTraits` (an integral type that holds the range for an int concept, float
+  or double for a float concept, checked at compile time).
+- C# `LegacyNormalisations.ClampToRange(value, min, max, section, key, dropped)` for `int`, `float`
+  and `double`, and `ClampToRange(ConfigConcepts.X, value, section, key, dropped)` for an int or float
+  concept.
+- N2 comes first: a value that is not finite throws, as do a bound that is not finite and a low end
+  above the high end. A local row's range is the one its table's `Range` gives, passed as bounds.
+- The player set the value, so it is not untouched even where the clamped value equals the shipped
+  default: the map hands `LegacyFollowsDefaultsIni` the value read, not the clamped one, and the row
+  is carried as a value the player changed.
 
 **A number that is not finite follows Defaults.ini** (N2, owner ruling of 2026-09-27). A legacy
 value that is NaN or infinite was no player's choice either, so on a row that follows Defaults.ini

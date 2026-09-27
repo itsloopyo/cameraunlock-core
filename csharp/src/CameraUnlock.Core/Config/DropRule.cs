@@ -66,5 +66,12 @@ namespace CameraUnlock.Core.Config
         /// is not recorded.
         /// </summary>
         TrackerPivot = 9,
+
+        /// <summary>
+        /// N4: a finite number outside the canonical row's range imports as the nearest end of the
+        /// range (<see cref="LegacyNormalisations.ClampToRange(float, float, float, string, string, System.Collections.Generic.ICollection{DroppedValue})"/>).
+        /// The value recorded is the one read.
+        /// </summary>
+        NumberOutOfRange = 10,
     }
 }

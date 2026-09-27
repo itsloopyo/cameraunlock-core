@@ -73,6 +73,7 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(7, (int)DropRule.CoupledAim);
             Assert.Equal(8, (int)DropRule.PositionSwitchOff);
             Assert.Equal(9, (int)DropRule.TrackerPivot);
+            Assert.Equal(10, (int)DropRule.NumberOutOfRange);
         }
 
         [Fact]
@@ -101,6 +102,9 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal("not carried: [Position] TrackerPivotForward=0.1, the neck pivot is not a setting now, so a distance you "
                 + "set is not carried over",
                 new DroppedValue(DropRule.TrackerPivot, "Position", "TrackerPivotForward", "0.1").Describe());
+            Assert.Equal("not carried: [Position] LimitZ=25.0, it is outside the range this setting takes, so the nearest end "
+                + "of the range is used",
+                new DroppedValue(DropRule.NumberOutOfRange, "Position", "LimitZ", "25.0").Describe());
         }
 
         [Fact]
@@ -108,7 +112,7 @@ namespace CameraUnlock.Core.Tests.Config
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)11, "A", "B", "C"));
             Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)0, "A", "B", "C"));
-            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)10, "A", "B", "C"));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DroppedValue((DropRule)12, "A", "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, null!, "B", "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", null!, "C"));
             Assert.Throws<ArgumentNullException>(() => new DroppedValue(DropRule.Reticle, "A", "B", null!));
@@ -152,6 +156,67 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, null!, "B", dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, "A", null!, dropped));
             Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.FiniteOrDefault(1.0f, 0.0f, "A", "B", null!));
+        }
+
+        [Fact]
+        public void N4KeepsAValueInTheRange()
+        {
+            var dropped = new List<DroppedValue>();
+            Assert.Equal(0.5f, LegacyNormalisations.ClampToRange(0.5f, 0f, 1f, "Smoothing", "RemoteSmoothing", dropped));
+            Assert.Equal(0f, LegacyNormalisations.ClampToRange(0f, 0f, 1f, "Smoothing", "LocalSmoothing", dropped));
+            Assert.Equal(10.0, LegacyNormalisations.ClampToRange(10.0, 0.0, 10.0, "Position", "LimitX", dropped));
+            Assert.Equal(4242, LegacyNormalisations.ClampToRange(4242, 1, 65535, "Network", "UdpPort", dropped));
+            Assert.Equal(3f, LegacyNormalisations.ClampToRange(ConfigConcepts.LightMultiplier, 3f, "Light", "Multiplier", dropped));
+            Assert.Empty(dropped);
+        }
+
+        [Fact]
+        public void N4ClampsToTheNearestEndAndRecordsTheValueRead()
+        {
+            var dropped = new List<DroppedValue>();
+            Assert.Equal(10f, LegacyNormalisations.ClampToRange(25f, 0f, 10f, "Position", "LimitZ", dropped));
+            Assert.Equal(0.0, LegacyNormalisations.ClampToRange(-0.5, 0.0, 1.0, "Smoothing", "RemoteSmoothing", dropped));
+            Assert.Equal(65535, LegacyNormalisations.ClampToRange(70000, 1, 65535, "Network", "UdpPort", dropped));
+            Assert.Equal(10f, LegacyNormalisations.ClampToRange(ConfigConcepts.PositionLimitY, 12.5f, "Position", "LimitY", dropped));
+            Assert.Equal(1, LegacyNormalisations.ClampToRange(ConfigConcepts.UdpPort, 0, "Network", "UdpPort", dropped));
+            Assert.Equal(new[]
+            {
+                "NumberOutOfRange [Position] LimitZ=25.0",
+                "NumberOutOfRange [Smoothing] RemoteSmoothing=-0.5",
+                "NumberOutOfRange [Network] UdpPort=70000",
+                "NumberOutOfRange [Position] LimitY=12.5",
+                "NumberOutOfRange [Network] UdpPort=0",
+            }, dropped.ConvertAll(DropLine));
+        }
+
+        [Fact]
+        public void N4RefusesANonFiniteValueOrBoundAnInvertedRangeAndNulls()
+        {
+            var dropped = new List<DroppedValue>();
+            Assert.StartsWith("[Smoothing] LocalSmoothing: the value is not finite, which N2 imports", Assert.Throws<ArgumentException>(
+                () => LegacyNormalisations.ClampToRange(float.NaN, 0f, 1f, "Smoothing", "LocalSmoothing", dropped)).Message);
+            Assert.Throws<ArgumentException>(() => LegacyNormalisations.ClampToRange(double.PositiveInfinity, 0.0, 1.0, "A", "B", dropped));
+            Assert.StartsWith("[A] B: a bound of the range is not finite", Assert.Throws<ArgumentException>(
+                () => LegacyNormalisations.ClampToRange(0.5f, 0f, float.PositiveInfinity, "A", "B", dropped)).Message);
+            Assert.StartsWith("[A] B: the range's low end is above its high end", Assert.Throws<ArgumentException>(
+                () => LegacyNormalisations.ClampToRange(5, 10, 1, "A", "B", dropped)).Message);
+            Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.ClampToRange(1, 0, 2, null!, "B", dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.ClampToRange(1, 0, 2, "A", null!, dropped));
+            Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.ClampToRange(1, 0, 2, "A", "B", null!));
+            Assert.Throws<ArgumentNullException>(() => LegacyNormalisations.ClampToRange((ConceptDescriptor<float>)null!, 1f, "A", "B", dropped));
+            Assert.Empty(dropped);
+        }
+
+        [Fact]
+        public void AClampedValueEqualToTheShippedDefaultIsStillThePlayers()
+        {
+            var dropped = new List<DroppedValue>();
+            const float read = 25f;
+            const float shipped = 10f;
+            Assert.Equal(shipped, LegacyNormalisations.ClampToRange(read, 0f, 10f, "Position", "LimitZ", dropped));
+            var follows = new LegacyFollowsDefaultsIni();
+            follows.Setting(ConfigConcepts.PositionLimitZ, read, shipped);
+            Assert.Empty(follows.Concepts);
         }
 
         [Fact]

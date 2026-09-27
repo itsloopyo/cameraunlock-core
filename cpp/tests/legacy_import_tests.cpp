@@ -1,5 +1,5 @@
 // The legacy import support: ImportResult's factories, the dropped-value lines, N1 and N3
-// (LegacyVirtualKeyToBindings), N2 (LegacyFiniteOrDefault), pose shaping (LegacyPoseShaping), the
+// (LegacyVirtualKeyToBindings), N2 (LegacyFiniteOrDefault), N4 (LegacyClampToRange), pose shaping (LegacyPoseShaping), the
 // position switch (LegacyPositionSwitch), the neck pivot (LegacyTrackerPivot), the rows left to
 // Defaults.ini (LegacyFollowsDefaultsIni) and a LegacyImport over a Config.
 
@@ -80,7 +80,7 @@ void TestImportResult() {
               static_cast<int>(DropRule::Reticle) == 3 && static_cast<int>(DropRule::FollowsDefault) == 4 &&
               static_cast<int>(DropRule::KeyCodeOutOfRange) == 5 && static_cast<int>(DropRule::ModifierKey) == 6 &&
               static_cast<int>(DropRule::CoupledAim) == 7 && static_cast<int>(DropRule::PositionSwitchOff) == 8 &&
-              static_cast<int>(DropRule::TrackerPivot) == 9,
+              static_cast<int>(DropRule::TrackerPivot) == 9 && static_cast<int>(DropRule::NumberOutOfRange) == 10,
           "DropRule numbers match the C# enum");
 }
 
@@ -117,8 +117,12 @@ void TestDescribe() {
               "not carried: [Position] TrackerPivotForward=0.1, the neck pivot is not a setting now, so a distance you "
               "set is not carried over",
           "tracker-pivot line");
-    Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(10), "A", "B", "C"}); }) ==
-              "drop rule 10 is not a DropRule",
+    Check(DescribeDroppedValue({DropRule::NumberOutOfRange, "Position", "LimitZ", "25.0"}) ==
+              "not carried: [Position] LimitZ=25.0, it is outside the range this setting takes, so the nearest end "
+              "of the range is used",
+          "N4 line");
+    Check(Thrown([] { DescribeDroppedValue({static_cast<DropRule>(11), "A", "B", "C"}); }) ==
+              "drop rule 11 is not a DropRule",
           "a rule outside DropRule throws");
 }
 
@@ -216,6 +220,56 @@ void TestN2() {
     Check(Thrown([&] { LegacyFiniteOrDefault(1.0f, nan, "Smoothing", "RemoteSmoothing", dropped); }) ==
               "[Smoothing] RemoteSmoothing: the row default is not finite",
           "a non-finite default throws");
+}
+
+void TestN4() {
+    using Concept = schema::Concept;
+    std::vector<DroppedValue> dropped;
+    Check(LegacyClampToRange(0.5f, 0.0f, 1.0f, "Smoothing", "RemoteSmoothing", dropped) == 0.5f &&
+              LegacyClampToRange(0.0f, 0.0f, 1.0f, "Smoothing", "LocalSmoothing", dropped) == 0.0f &&
+              LegacyClampToRange(10.0, 0.0, 10.0, "Position", "LimitX", dropped) == 10.0 &&
+              LegacyClampToRange(4242, 1, 65535, "Network", "UdpPort", dropped) == 4242 && dropped.empty(),
+          "a value in the range, either end included, is kept and records nothing");
+    Check(LegacyClampToRange(25.0f, 0.0f, 10.0f, "Position", "LimitZ", dropped) == 10.0f, "above the range gives the high end");
+    Check(LegacyClampToRange(-0.5, 0.0, 1.0, "Smoothing", "RemoteSmoothing", dropped) == 0.0, "below it gives the low end");
+    Check(LegacyClampToRange(70000LL, 1LL, 65535LL, "Network", "UdpPort", dropped) == 65535LL, "an integer works the same");
+    Check(LegacyClampToRange<Concept::PositionLimitY>(12.5f, "Position", "LimitY", dropped) == 10.0f &&
+              LegacyClampToRange<Concept::LocalSmoothing>(-1.0, "Smoothing", "LocalSmoothing", dropped) == 0.0 &&
+              LegacyClampToRange<Concept::UdpPort>(0, "Network", "UdpPort", dropped) == 1 &&
+              LegacyClampToRange<Concept::UdpPort>(99999LL, "Network", "UDPPort", dropped) == 65535LL &&
+              LegacyClampToRange<Concept::LightMultiplier>(3.0f, "Light", "Multiplier", dropped) == 3.0f,
+          "the concept overload takes the schema's range");
+    Check(dropped.size() == 7 && SameDrop(dropped[0], DropRule::NumberOutOfRange, "Position", "LimitZ", "25.0") &&
+              SameDrop(dropped[1], DropRule::NumberOutOfRange, "Smoothing", "RemoteSmoothing", "-0.5") &&
+              SameDrop(dropped[2], DropRule::NumberOutOfRange, "Network", "UdpPort", "70000") &&
+              SameDrop(dropped[3], DropRule::NumberOutOfRange, "Position", "LimitY", "12.5") &&
+              SameDrop(dropped[4], DropRule::NumberOutOfRange, "Smoothing", "LocalSmoothing", "-1.0") &&
+              SameDrop(dropped[5], DropRule::NumberOutOfRange, "Network", "UdpPort", "0") &&
+              SameDrop(dropped[6], DropRule::NumberOutOfRange, "Network", "UDPPort", "99999"),
+          "each clamp records the value read");
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    Check(Thrown([&] { LegacyClampToRange(nan, 0.0f, 1.0f, "Smoothing", "LocalSmoothing", dropped); }) ==
+              "[Smoothing] LocalSmoothing: the value is not finite, which N2 imports",
+          "a value that is not finite throws: N2 comes first");
+    Check(Thrown([&] { LegacyClampToRange(inf, 0.0f, 1.0f, "Smoothing", "LocalSmoothing", dropped); }) ==
+              "[Smoothing] LocalSmoothing: the value is not finite, which N2 imports",
+          "and inf");
+    Check(Thrown([&] { LegacyClampToRange(0.5f, 0.0f, inf, "A", "B", dropped); }) ==
+              "[A] B: a bound of the range is not finite",
+          "a bound that is not finite throws");
+    Check(Thrown([&] { LegacyClampToRange(5, 10, 1, "A", "B", dropped); }) ==
+              "[A] B: the range's low end is above its high end",
+          "a low end above the high end throws");
+    Check(dropped.size() == 7, "and records nothing");
+
+    LegacyFollowsDefaultsIni follows;
+    const float read = 25.0f;
+    const float shipped = 10.0f;
+    Check(LegacyClampToRange(read, 0.0f, 10.0f, "Position", "LimitZ", dropped) == shipped,
+          "a clamp can land on the shipped default");
+    follows.Setting(Concept::PositionLimitZ, read, shipped);
+    Check(follows.Concepts().empty(), "the value read, which the player set, keeps the row off Defaults.ini");
 }
 
 std::string PoseLine(const PoseShapingValue& p) {
@@ -428,6 +482,7 @@ int RunLegacyImportTests() {
         TestN1();
         TestN3();
         TestN2();
+        TestN4();
         TestPoseShaping();
         TestPositionSwitch();
         TestTrackerPivot();

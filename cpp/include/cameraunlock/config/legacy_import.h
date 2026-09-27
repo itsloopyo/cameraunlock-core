@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -69,6 +70,9 @@ enum class DropRule {
     /// changed from the value the game shipped. The tracker is authoritative, so the setting has
     /// no row (LegacyTrackerPivot). A value equal to the shipped one is not recorded.
     TrackerPivot = 9,
+    /// N4: a finite number outside the canonical row's range imports as the nearest end of the
+    /// range (LegacyClampToRange). The value recorded is the one read.
+    NumberOutOfRange = 10,
 };
 
 /// One legacy value the map did not carry, for the migration log.
@@ -214,6 +218,73 @@ F LegacyFiniteOrDefault(F value, F row_default, const std::string& section, cons
     if (std::isfinite(value)) return value;
     dropped.push_back({DropRule::NonFiniteNumber, section, key, std::isnan(value) ? "nan" : value > 0 ? "inf" : "-inf"});
     return row_default;
+}
+
+namespace detail {
+
+std::string LegacyNumberText(float value);
+std::string LegacyNumberText(double value);
+
+template <class T>
+std::string LegacyNumberText(T value) {
+    return std::to_string(value);
+}
+
+template <class T>
+constexpr bool HoldsRange(long long lo, long long hi) {
+    if constexpr (std::is_signed_v<T>) {
+        return lo >= static_cast<long long>(std::numeric_limits<T>::min()) &&
+               hi <= static_cast<long long>(std::numeric_limits<T>::max());
+    } else {
+        return lo >= 0 && static_cast<unsigned long long>(hi) <= std::numeric_limits<T>::max();
+    }
+}
+
+}  // namespace detail
+
+/// Normalisation N4 (approved 2026-09-27): a finite legacy number outside the inclusive range
+/// `lo` to `hi` imports as the nearest end of it, and the clamp is recorded in `dropped` under
+/// `section` and `key` as DropRule::NumberOutOfRange, with the value read. A value in the range is
+/// returned as it is. Apply N2 first: a float or double `value` that is not finite throws, as do
+/// bounds that are not finite or `lo` above `hi`. Hand LegacyFollowsDefaultsIni::Setting the value
+/// read, not the clamped one: a player set it, so the row is not left to Defaults.ini even where
+/// the clamped value equals the shipped default.
+template <class T>
+T LegacyClampToRange(T value, T lo, T hi, const std::string& section, const std::string& key,
+                     std::vector<DroppedValue>& dropped) {
+    static_assert(std::is_arithmetic_v<T> && !std::is_same_v<T, bool>, "N4 applies to numbers");
+    if constexpr (std::is_floating_point_v<T>) {
+        if (!std::isfinite(lo) || !std::isfinite(hi)) {
+            throw std::invalid_argument("[" + section + "] " + key + ": a bound of the range is not finite");
+        }
+        if (!std::isfinite(value)) {
+            throw std::invalid_argument("[" + section + "] " + key + ": the value is not finite, which N2 imports");
+        }
+    }
+    if (lo > hi) throw std::invalid_argument("[" + section + "] " + key + ": the range's low end is above its high end");
+    if (value >= lo && value <= hi) return value;
+    dropped.push_back({DropRule::NumberOutOfRange, section, key, detail::LegacyNumberText(value)});
+    return value < lo ? lo : hi;
+}
+
+/// N4 on the range data/config-schema.json gives the canonical concept `Id` (schema::ConceptTraits
+/// kMin and kMax). `T` is an integral type that holds the range for an int concept, float or
+/// double for a float concept. Throws as the overload above does.
+template <schema::Concept Id, class T>
+T LegacyClampToRange(T value, const std::string& section, const std::string& key, std::vector<DroppedValue>& dropped) {
+    using Traits = schema::ConceptTraits<Id>;
+    if constexpr (Traits::kFamily == schema::ValueFamily::kInteger) {
+        static_assert(std::is_integral_v<T> && !std::is_same_v<T, bool>, "an int concept's value is an integral type");
+        static_assert(detail::HoldsRange<T>(Traits::kMin, Traits::kMax), "the type does not hold the concept's range");
+        return LegacyClampToRange<T>(value, static_cast<T>(Traits::kMin), static_cast<T>(Traits::kMax), section, key,
+                                     dropped);
+    } else if constexpr (Traits::kFamily == schema::ValueFamily::kFloating) {
+        static_assert(std::is_floating_point_v<T>, "a float concept's value is float or double");
+        return LegacyClampToRange<T>(value, static_cast<T>(Traits::kMin), static_cast<T>(Traits::kMax), section, key,
+                                     dropped);
+    } else {
+        static_assert(sizeof(T) == 0, "N4 applies to an int or float concept");
+    }
 }
 
 /// A pose-shaping setting the frozen reader read (approved change pose_shaping): records

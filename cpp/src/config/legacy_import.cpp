@@ -36,6 +36,8 @@ const char* DropReason(DropRule rule) {
                    "and the mode hotkey can turn position back on";
         case DropRule::TrackerPivot:
             return "the neck pivot is not a setting now, so a distance you set is not carried over";
+        case DropRule::NumberOutOfRange:
+            return "it is outside the range this setting takes, so the nearest end of the range is used";
     }
     throw std::invalid_argument("drop rule " + std::to_string(static_cast<int>(rule)) + " is not a DropRule");
 }
@@ -75,6 +77,14 @@ void RecordPoseShaping(T value, T shipped, const std::string& section, const std
 }
 
 }  // namespace
+
+namespace detail {
+
+std::string LegacyNumberText(float value) { return FloatingCodec<float>().Render(value); }
+
+std::string LegacyNumberText(double value) { return FloatingCodec<double>().Render(value); }
+
+}  // namespace detail
 
 std::string DescribeDroppedValue(const DroppedValue& dropped) {
     const char* reason = DropReason(dropped.rule);
