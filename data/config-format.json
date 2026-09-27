@@ -223,7 +223,7 @@
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "dead-space-headtracking": [
-      {"committed": null, "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "deep-rock-galactic-headtracking": [
       {"committed": null, "installed": ["FSD\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -238,7 +238,7 @@
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "dishonored-definitive-edition-headtracking": [
-      {"committed": null, "installed": ["Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "dishonored-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "DishonoredHeadTracking.ini", "dialect": "native"}
