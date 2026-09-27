@@ -244,7 +244,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["Binaries\\Win32\\CameraUnlock.ini"], "legacy_source": "DishonoredHeadTracking.ini", "dialect": "native"}
     ],
     "dorfromantik-headtracking": [
-      {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
     ],
     "dragon-age-inquisition-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -259,7 +259,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.easydeliveryco.headtracking.cfg", "dialect": "unity"}
     ],
     "elite-dangerous-headtracking": [
-      {"committed": null, "installed": ["Products\\elite-dangerous-odyssey-64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+      {"committed": "config/CameraUnlock.ini", "installed": ["Products\\elite-dangerous-odyssey-64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "eternal-afternoon-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["Eternal Afternoon_Data\\Managed\\CameraUnlock.ini"], "legacy_source": "HeadTracking.cfg", "dialect": "unity"}
