@@ -30,11 +30,10 @@ Then:
 - Outside `legacy`, end the first Defaults.ini bullet's second sentence at "do not read it":
   there are no earlier versions.
 
-The migration and Defaults.ini bullets take their wording from the README config block that
-scripts/generate-readme.mjs renders (legacyParagraphs, defaultsParagraphs, the
-ConfigurationManager line, APPROVED_CHANGE_LINES and NORMALISATION_LINES), so a player reads the
-same thing in both.
-Change the two together.
+The Defaults.ini bullets and the ConfigurationManager line take their wording from the README
+config block that scripts/generate-readme.mjs renders (defaultsParagraphs), so a player reads the
+same thing in both. Change the two together. The migration bullets live here only: the README
+describes the mod as it is and says nothing about the import.
 
 The reset bullet has the player replace what CameraUnlock.ini holds and never tells them to
 delete the legacy file. A Lopari v0.9.0 receipt can record the legacy file as a seed:

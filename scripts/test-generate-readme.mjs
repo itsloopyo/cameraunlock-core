@@ -7,8 +7,8 @@
 // data/fixtures/readme/values.ini (a copy of table/render-defaults/expected.ini, a file that
 // holds values) at 8c83941, before it knew Defaults.ini. A repo whose committed file still holds
 // values must keep that block byte for byte, or every converted README drifts at the next pin
-// bump. values-legacy-reframework.md came later, when the block began leaving the N3 line out for
-// an REFramework repo.
+// bump. The values-legacy-*.md blocks were re-rendered when the block stopped describing the
+// legacy import, which a README no longer mentions.
 //
 //   node scripts/test-generate-readme.mjs
 
@@ -54,17 +54,10 @@ const WHO = "A setting set to `default` takes its value from `Defaults.ini`, whi
 const WHERE = "`Defaults.ini` is `%AppData%\\CameraUnlock\\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.";
 const NEVER = "The mod never changes `Defaults.ini` after that.";
 const THIS_GAME = "Writing a value in place of `default` changes that setting for this game only.";
-const EARLIER = ", and neither do earlier versions of this mod.";
 const HOTKEY = "When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.";
-const NATIVE = "On Linux and macOS without Wine or Proton, this version reads its settings";
-const nativeSentence = (legacy) => legacy === null
-  ? "On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no `CameraUnlock.ini` and a change made in game lasts until the game closes."
-  : `On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no \`CameraUnlock.ini\`, reads your settings from \`${legacy}\` again at every start while there is no \`CameraUnlock.ini\`, and a change made in game lasts until the game closes.`;
+const NATIVE_SENTENCE = "On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no `CameraUnlock.ini` and a change made in game lasts until the game closes.";
 const NATIVE_CREATE = ", or the game runs on Linux or macOS without Wine or Proton.";
-const MIGRATED = "is written as `default` when you never changed it from the default earlier versions used";
-const PAIR = "`RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.";
-const N3 = "- A hotkey set to Ctrl, Shift or Alt on its own.";
-const RESET ="replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.";
+const EARLIER = "earlier versions";
 
 for (const name of Object.keys(CASES)) {
   const expected = fs.readFileSync(path.join(CORE_ROOT, "data/fixtures/readme", `values-${name}.md`), "utf8");
@@ -72,7 +65,6 @@ for (const name of Object.keys(CASES)) {
   check(values + "\n" === expected, `${name}: the block for a file of values differs from data/fixtures/readme/values-${name}.md`);
 
   const fresh = block(name, FRESH);
-  const legacy = name.startsWith("legacy");
   const [{ dialect, legacy_source: legacySource }] = CASES[name][1](FRESH);
   const csharp = dialect === "unity";
   for (const [text, want, what] of [
@@ -81,20 +73,15 @@ for (const name of Object.keys(CASES)) {
     [WHERE, true, "where Defaults.ini is"],
     [NEVER, true, "that the mod never changes Defaults.ini"],
     [THIS_GAME, true, "what a value in place of default does"],
-    [EARLIER, legacy, "that earlier versions do not read Defaults.ini"],
-    [NATIVE, csharp, "the native Linux and macOS read-only sentence"],
-    [nativeSentence(legacySource), csharp, "the native read-only sentence for this repo's legacy file or its absence"],
+    [NATIVE_SENTENCE, csharp, "the native Linux and macOS read-only sentence"],
     [NATIVE_CREATE, csharp, "the native exception to creating Defaults.ini"],
-    [MIGRATED, legacy, "what the import writes as default"],
-    [PAIR, legacy, "the tracking-mode pair of the import"],
-    [RESET, legacy, "that the reset rows follow Defaults.ini"],
-    [N3, legacy && name !== "legacy-reframework", "the N3 line, which core's REFramework import does not apply"],
   ]) {
     check(fresh.includes(text) === want, `${name}: the fresh block ${want ? "lacks" : "has"} ${what}`);
   }
   check(fresh.split("`Defaults.ini` is `%AppData%").length === 2, `${name}: the fresh block says where Defaults.ini is other than once`);
-  if (csharp && legacy) {
-    check(fresh.indexOf(NATIVE) > fresh.indexOf("Earlier versions of the mod kept these settings"), `${name}: the native sentence names the legacy file before the block introduces it`);
+  for (const text of [values, fresh]) {
+    check(!text.toLowerCase().includes(EARLIER), `${name}: the block mentions earlier versions`);
+    check(legacySource === null || !text.includes(legacySource), `${name}: the block names the legacy file ${legacySource}`);
   }
 }
 

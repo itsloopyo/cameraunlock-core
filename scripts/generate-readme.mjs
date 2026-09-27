@@ -53,7 +53,6 @@ import { fileURLToPath } from 'node:url';
 
 import { repoState } from './check-canonical-config.mjs';
 import { equalsAsciiIgnoreCase, isDefaultToken, parseCanonicalIni } from './lib/canonical-ini.mjs';
-import { readConfigFormat } from './lib/config-format-file.mjs';
 
 const CORE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const REPOS_ROOT = path.dirname(CORE_ROOT);
@@ -160,12 +159,12 @@ const SECTIONS = {
 // The config block
 //
 // Every sentence is a fact data/config-format.json records or core's config
-// owner does for every converted mod: the installed path, the one-time import
-// of the legacy file in the same folder, which the mod never writes, what an
-// older build reads, and for BepInEx that ConfigurationManager does not list the
-// settings. A committed file with default rows adds what the owner does with
-// Defaults.ini and the built-in value of each such row. Nothing here knows which
-// game it is describing.
+// owner does for every converted mod: the installed path, and for BepInEx that
+// ConfigurationManager does not list the settings. A committed file with default
+// rows adds what the owner does with Defaults.ini and the built-in value of each
+// such row. Nothing here knows which game it is describing. The block describes
+// the mod as it is, so it says nothing about the one-time import of a legacy
+// file or what earlier versions read: a README is not upgrade notes.
 // ---------------------------------------------------------------------------
 
 const CONFIG_ID = 'config';
@@ -175,7 +174,6 @@ const CONFIG_HEADING = 'Configuration';
 const CONFIG_HEADING_RE = /^(\d+\.\s+)?configuration$/i;
 const CONFIG_INSERT_AFTER = ['Controls', OPENTRACK_HEADING, 'Installation'];
 
-const FORMAT = readConfigFormat();
 const CANONICAL_CONCEPTS = JSON.parse(fs.readFileSync(path.join(CORE_ROOT, 'data', 'config-schema.json'), 'utf8'))
   .concepts.filter((c) => c.canonical);
 
@@ -217,99 +215,22 @@ function locationParagraph(entries) {
   ].join('\n');
 }
 
-// Settings the conversion drops although the mod read them, one line per approved_changes entry
-// and one per approved normalisation a player could have set. An entry with no line here stops
-// the block rendering, so a newly approved change cannot reach players' files without the README
-// saying so. scripts/templates/canonical-config-changelog.md repeats these lines and the
-// paragraphs below for each conversion's changelog; change both.
-const APPROVED_CHANGE_LINES = {
-  pose_shaping: 'A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.',
-  reticle: 'Reticle settings, and a key that toggled the reticle.',
-  follows_default: "The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.",
-  coupled_aim: 'The aim decoupling setting. Aim is always decoupled now, so your aim stays with the mouse or controller while your head moves the view, even if your old file had decoupling turned off.',
-  position_switch_off: 'A setting that kept positional tracking off whatever the tracking mode said. Where your old file had it off, the mod starts in the rotation-only tracking mode instead, and the mode hotkey can now turn positional tracking back on.',
-  tracker_pivot: 'A neck pivot distance you changed from its default. The neck pivot is not a setting now.',
-};
-
-// null marks a normalisation the block does not explain: the README said nothing of N1 (a hotkey
-// code outside 0x01-0xFE) or N2 (a number that is not finite) before N3 came, and the migration log
-// names each value they drop.
-const NORMALISATION_LINES = {
-  N1: null,
-  N2: null,
-  N3: 'A hotkey set to Ctrl, Shift or Alt on its own. That key goes down before the key of any chord made with it, so the hotkey is left unbound, and it keeps its Ctrl+Shift chord where it has one.',
-};
-
-// Core's REFramework import reads legacy hotkeys through the frozen PluginConfig::Read, which
-// replaces a code it cannot bind, a Ctrl, Shift or Alt key among them, with the row's default, so
-// an REFramework repo imports such a hotkey as its default and N3 unbinds nothing there. The owner
-// kept that reader for N1 on 2026-09-25.
-const NOT_APPLIED_BY_REFRAMEWORK = new Set(['N3']);
-
-function droppedSettings(reframework) {
-  const changes = Object.keys(FORMAT.approved_changes).map((id) => {
-    if (!(id in APPROVED_CHANGE_LINES)) {
-      throw new Error(`data/config-format.json approved_changes.${id} has no line in the config block; add one to APPROVED_CHANGE_LINES in scripts/generate-readme.mjs`);
-    }
-    return APPROVED_CHANGE_LINES[id];
-  });
-  const normalisations = Object.entries(FORMAT.normalisations)
-    .filter(([id, n]) => n.approved !== null && !(reframework && NOT_APPLIED_BY_REFRAMEWORK.has(id)))
-    .map(([id]) => {
-      if (!(id in NORMALISATION_LINES)) {
-        throw new Error(`data/config-format.json normalisations.${id} has no line in the config block; add one to NORMALISATION_LINES in scripts/generate-readme.mjs, or null where no player sets that value`);
-      }
-      return NORMALISATION_LINES[id];
-    })
-    .filter((line) => line !== null);
-  const lines = [...changes, ...normalisations].map((line) => `- ${line}`);
-  return ['Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:', '', ...lines].join('\n');
-}
-
-// legacy is the bare name of the file the repo's pre-canonical builds read, in the same folder.
-// defaults is what defaultRows gives for the committed file.
-function legacyParagraphs(legacy, defaults, reframework) {
-  const old = code(legacy);
-  const config = code(CONFIG_NAME);
-  const followed = code(DEFAULTS_NAME);
-  const imported = [
-    `Earlier versions of the mod kept these settings in ${old}, in the same folder. The first time this version starts and finds no ${config}, it reads your settings from ${old} and writes them into ${config}. It never changes ${old}, and does not read it again while ${config} exists.`,
-  ];
-  let reset = `Deleting only ${config} makes the next start read ${old} again. To go back to the defaults, replace everything in ${config} with the defaults below.`;
-  if (defaults.length > 0) {
-    const keys = new Set(defaults.map((r) => r.key));
-    const pair = keys.has('RotationEnabled') && keys.has('PositionEnabled')
-      ? ' `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.'
-      : '';
-    imported.push(`A setting that the defaults below set to \`default\` is written as \`default\` when you never changed it from the default earlier versions used, because ${old} does not hold it or holds that default. It then follows ${followed}, so it takes the value ${followed} gives it, or the built-in value where ${followed} gives none, which can differ from the default earlier versions used. A setting you changed is written with the value imported for it, or as \`default\` where that value equals its default at that start.${pair}`);
-    reset += ` Every setting they set to \`default\` then follows ${followed}.`;
-  }
-  return [
-    ...imported,
-    droppedSettings(reframework),
-    `An older version of the mod reads ${old} and never reads ${config}, so a setting you change after updating is not in ${old}.`,
-    reset,
-  ];
-}
-
 // What core's config owners do with Defaults.ini. csharp: the owner is core's C# one, the only
 // owner that runs natively on Linux and macOS, where it reads and never writes.
-function defaultsParagraphs(legacy, csharp) {
+function defaultsParagraphs(csharp) {
   const followed = code(DEFAULTS_NAME);
   const config = code(CONFIG_NAME);
   return [
-    `A setting set to \`default\` takes its value from ${followed}, which every head tracking mod that keeps its settings in ${config} reads. Head tracking mods that keep their settings in another file do not read it${legacy ? ', and neither do earlier versions of this mod' : ''}. Writing a value in place of \`default\` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of \`default\`, so that setting no longer follows ${followed} in this game until you set it to \`default\` again.`,
+    `A setting set to \`default\` takes its value from ${followed}, which every head tracking mod that keeps its settings in ${config} reads. Head tracking mods that keep their settings in another file do not read it. Writing a value in place of \`default\` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of \`default\`, so that setting no longer follows ${followed} in this game until you set it to \`default\` again.`,
     `${followed} is ${code('%AppData%\\CameraUnlock\\Defaults.ini')} on Windows; ${code('$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini')} on Linux, or ${code('~/.config/CameraUnlock/Defaults.ini')} where \`XDG_CONFIG_HOME\` is not set, under Wine and Proton too; and ${code('~/Library/Application Support/CameraUnlock/Defaults.ini')} on macOS. The mod's log, where it writes one, names the file it read.`,
     `When the mod starts and finds no ${followed}, it creates one holding the built-in values, unless Windows runs the game as a packaged app${csharp ? ', or the game runs on Linux or macOS without Wine or Proton' : ''}. The mod never changes ${followed} after that. ${EDIT}`,
   ];
 }
 
-// The C# owner off Windows: it reads the config file, imports the legacy file in memory at every
-// start, and writes nothing, so the sentences above about creating and writing files do not hold.
-function nativeParagraph(legacy) {
-  const config = code(CONFIG_NAME);
-  const imports = legacy === null ? '' : `, reads your settings from ${code(legacy)} again at every start while there is no ${config},`;
-  return `On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no ${config}${imports} and a change made in game lasts until the game closes.`;
+// The C# owner off Windows reads the config file and writes nothing, so the sentences above about
+// creating and writing files do not hold.
+function nativeParagraph() {
+  return `On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no ${code(CONFIG_NAME)} and a change made in game lasts until the game closes.`;
 }
 
 // Floats as the canonical codec writes them, which data/fixtures/canonical-ini/global/Defaults.ini
@@ -347,7 +268,6 @@ function csharpOwner(files) {
 }
 
 const isBepInEx = (entry) => entry.installed.some((p) => p.toLowerCase().startsWith('bepinex\\config\\'));
-const isReframework = (entry) => entry.installed.some((p) => p.toLowerCase().startsWith('reframework\\plugins\\'));
 
 function fencedIni(root, committed) {
   const text = fs.readFileSync(path.join(root, ...committed.split('/')), 'utf8').replace(/\r\n/g, '\n');
@@ -368,7 +288,6 @@ export function configBlock(state) {
     throw new Error(`converted, and ${unready.map((f) => f.committed ?? f.installed[0]).join(', ')} is ${unready[0].state}; one conversion switches every config file of a repo`);
   }
 
-  const legacy = state.listing === 'legacy';
   const groups = new Map();
   for (const f of state.files) {
     if (!groups.has(f.committed)) groups.set(f.committed, []);
@@ -378,20 +297,19 @@ export function configBlock(state) {
   let explained = false;
   for (const [committed, entries] of groups) {
     const bepinex = entries.some(isBepInEx);
-    if (entries.length > 1 && (legacy || bepinex)) {
-      throw new Error(`data/config-format.json gives ${committed} several entries in a legacy or BepInEx repo; the config block has no wording for that`);
+    if (entries.length > 1 && bepinex) {
+      throw new Error(`data/config-format.json gives ${committed} several entries in a BepInEx repo; the config block has no wording for that`);
     }
     const defaults = defaultRows(state.root, committed);
     const explain = defaults.length > 0 && !explained;
     const csharp = explain && csharpOwner(state.files);
     parts.push(locationParagraph(entries));
     if (explain) {
-      parts.push(...defaultsParagraphs(legacy, csharp));
+      parts.push(...defaultsParagraphs(csharp));
       explained = true;
     }
-    if (legacy) parts.push(...legacyParagraphs(entries[0].legacy_source, defaults, entries.some(isReframework)));
-    if (csharp) parts.push(nativeParagraph(legacy ? entries[0].legacy_source : null));
-    if (bepinex) parts.push(`BepInEx's ConfigurationManager ${legacy ? 'no longer lists' : 'does not list'} these settings.`);
+    if (csharp) parts.push(nativeParagraph());
+    if (bepinex) parts.push("BepInEx's ConfigurationManager does not list these settings.");
     if (defaults.length > 0) parts.push(builtInList(defaults));
     parts.push('With every setting at its default, the file reads:');
     parts.push(fencedIni(state.root, committed));
