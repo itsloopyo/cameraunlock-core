@@ -15,7 +15,7 @@
 :: in the same console, and the body acts on that value.
 ::
 :: Mono.Cecil patcher: no external loader. The install body compiles
-:: PATCHER_FILE and rewrites ASSEMBLY_DLL in place, keeping a pristine
+:: tools\PATCHER_FILE and rewrites ASSEMBLY_DLL in place, keeping a pristine
 :: .original beside it. PATCH_MARKER is what stops a second install from
 :: capturing an already-patched assembly as that backup.
 :: ============================================

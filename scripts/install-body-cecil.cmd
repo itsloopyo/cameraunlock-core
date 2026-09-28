@@ -24,7 +24,8 @@
 ::   FRAMEWORK_TYPE     - state-file `framework.type` (always "MonoCecil" here)
 ::   MANAGED_SUBFOLDER  - relative path under GAME_PATH containing Assembly-CSharp.dll
 ::   ASSEMBLY_DLL       - target assembly to patch (usually Assembly-CSharp.dll)
-::   PATCHER_FILE       - C# patcher source filename in mod/
+::   PATCHER_FILE       - C# patcher source filename in tools/, beside the
+::                        patch tool the launcher manifest names
 ::   MOD_CONTROLS       - optional post-install help text (hotkeys etc.)
 ::
 :: Launcher CLI (passed through %*): [GAME_PATH] [/y] [/force]
@@ -232,6 +233,7 @@ set "MANAGED_PATH=!GAME_PATH!\%MANAGED_SUBFOLDER%"
 set "ASSEMBLY_PATH=!MANAGED_PATH!\%ASSEMBLY_DLL%"
 set "BACKUP_PATH=!MANAGED_PATH!\%ASSEMBLY_DLL%.original"
 set "MOD_DIR=!SCRIPT_DIR!mod"
+set "PATCHER_PATH=!SCRIPT_DIR!tools\%PATCHER_FILE%"
 
 if not exist "!MANAGED_PATH!" (
     echo ERROR: %MANAGED_SUBFOLDER% folder not found.
@@ -256,8 +258,8 @@ for %%f in (%MOD_DLLS%) do (
     )
 )
 
-if not exist "!MOD_DIR!\%PATCHER_FILE%" (
-    echo ERROR: %PATCHER_FILE% not found in mod folder.
+if not exist "!PATCHER_PATH!" (
+    echo ERROR: %PATCHER_FILE% not found in tools folder.
     echo   Make sure all files from the release package are intact.
     echo.
     exit /b 1
@@ -356,7 +358,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 echo Patching %ASSEMBLY_DLL%...
 
 set "CECIL_PATH=!MANAGED_PATH!\Mono.Cecil.dll"
-set "PATCHER_PATH=!MOD_DIR!\%PATCHER_FILE%"
 
 set "CUL_CECIL_PATH=!CECIL_PATH!"
 set "CUL_PATCHER_PATH=!PATCHER_PATH!"
