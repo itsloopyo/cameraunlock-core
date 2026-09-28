@@ -8,7 +8,8 @@
 # mod's own repo:
 #   1. Verify clean tree (caller can pass -AllowDirty through) and that
 #      HEAD is on the remote (the release tags this commit).
-#   2. Run the mod's build + package commands.
+#   2. Run the mod's build + package commands, then `pixi run
+#      test-differential` where the repo has tests/config_differential.
 #   3. Stamp a dev version: <version>-nightly.<utc-date>.<sha>.
 #   4. SHA-256 each ZIP (surfaced in the release notes).
 #   5. Replace the `dev` pre-release (delete + recreate at HEAD) with the
@@ -172,6 +173,14 @@ function Publish-NightlyBuild {
         $global:LASTEXITCODE = 0
         Invoke-Expression $PackageCommand
         if ($LASTEXITCODE -ne 0) { throw "$PackageCommand failed" }
+
+        # package runs test-unit and leaves the slow legacy config differential to the
+        # release paths, this one included, so a dev build runs the full suite once.
+        if (Test-Path -LiteralPath 'tests/config_differential') {
+            Write-Host 'Config differential test...' -ForegroundColor Cyan
+            & pixi run test-differential
+            if ($LASTEXITCODE -ne 0) { throw 'pixi run test-differential failed' }
+        }
     } finally { Pop-Location }
 
     if (-not $InstallerZipPath) {

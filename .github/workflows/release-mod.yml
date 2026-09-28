@@ -86,10 +86,10 @@ on:
         type: string
         default: "windows-latest"
       timeout-minutes:
-        description: "Job timeout. The catalog pin sync alone can wait 10 minutes, so leave headroom above the build"
+        description: "Job timeout. The config differential test can take 30 minutes and the catalog pin sync can wait 10, so leave headroom above both"
         required: false
         type: number
-        default: 30
+        default: 60
 
 jobs:
   release:
@@ -98,6 +98,12 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: write
+    # A release is never cancelled: a second run for the same tag waits for this one.
+    # The group is not the caller's `${{ github.workflow }}-${{ github.ref }}`, because a
+    # caller that declared that group too would wait on itself for the whole timeout.
+    concurrency:
+      group: release-mod-${{ github.ref }}
+      cancel-in-progress: false
 
     steps:
       - name: Require release announcement prerequisites
@@ -218,6 +224,29 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::'pixi run $($env:PACKAGE_TASK)' failed."
+            exit 1
+          }
+
+      # `package` runs the fast suite, test-unit, and leaves out the legacy config
+      # differential so that a push build does not spend ten to thirty minutes on a
+      # frozen import. `test` is test-unit plus test-differential, so running the
+      # differential here makes a release run the full suite, each half once.
+      - name: Config differential test
+        shell: pwsh
+        env:
+          PIXI_ENVIRONMENT: ${{ inputs.pixi-environment }}
+        run: |
+          if (-not (Test-Path -LiteralPath 'tests/config_differential')) {
+            Write-Host 'No tests/config_differential, so package ran the whole suite.'
+            exit 0
+          }
+          if ($env:PIXI_ENVIRONMENT) {
+            pixi run -e $env:PIXI_ENVIRONMENT test-differential
+          } else {
+            pixi run test-differential
+          }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::'pixi run test-differential' failed. A repo with tests/config_differential declares that task; see cameraunlock-core scripts/templates/pixi-test-tasks.toml."
             exit 1
           }
 

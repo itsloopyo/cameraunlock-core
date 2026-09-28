@@ -28,8 +28,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same ref supersedes this run. No paths-ignore: docs/*.md is
+# checked against the tests it quotes (check-doc-examples), so a docs-only push
+# still has something to fail.
 concurrency:
-  group: check-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
