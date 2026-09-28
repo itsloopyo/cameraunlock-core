@@ -381,7 +381,8 @@ the lean in full while the weapon stays put in the world. It is in `[Position]` 
 all it changes and it exists only where positional tracking does, and a key belongs in the section
 of its subject, as `CollisionEnabled` does. A shooter binds both it and `TrueFreeLookKey` where
 the mod can keep the sight line in sights locked, either from the game's aim state or by drawing the
-weapon from the un-leaned eye all the time (no-mans-sky), and binds neither where it can do neither.
+weapon from the leaned eye all the time, so it moves with the head (no-mans-sky), and binds neither
+where it can do neither.
 It has no alias: `true_free_look` is read only by a mod's legacy import, and in a
 canonical file it draws `MisplacedKey` and is not read. The older flat readers read neither
 `TrueFreeLook` nor `TrueFreeLookKey`.
