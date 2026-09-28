@@ -317,6 +317,101 @@ $run = Invoke-ChangelogRelease 'crlf-none' ("# Changelog`n`n$older" -replace "`n
 $expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n`n$older" -replace "`n", "`r`n"
 Check 'a CRLF file with no [Unreleased] gets the generated entry under the header' ($run.Text -ceq $expected) "got:`n$($run.Text)"
 
+# The entry went after the first blank line below "# Changelog", which with no
+# blank line under the header is the one inside the newest entry: the release
+# landed between 1.0.0's heading and its notes (indiana-jones, wolfenstein).
+$run = Invoke-ChangelogRelease 'no-blank-under-header' "# Changelog`n$older"
+$expected = "# Changelog`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n`n$older"
+Check 'with no blank line under the header the entry goes above the newest version' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogRelease 'crlf-no-blank-under-header' ("# Changelog`n$older" -replace "`n", "`r`n")
+$expected = "# Changelog`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n`n$older" -replace "`n", "`r`n"
+Check 'a CRLF file with no blank line under the header gets the entry above the newest version' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogRelease 'preamble' "# Changelog`n`nAll notable changes.`n`nThe format follows Keep a Changelog.`n`n$older"
+$expected = "# Changelog`n`nAll notable changes.`n`nThe format follows Keep a Changelog.`n`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n`n$older"
+Check 'a preamble of several paragraphs stays above the entry' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogRelease 'no-version-yet' "# Changelog`n`nAll notable changes.`n"
+$expected = "# Changelog`n`nAll notable changes.`n`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n"
+Check 'a file with no version heading gets the entry after the text it holds' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+# --- what the fleet's release scripts did for themselves ---------------------
+
+# A repo's release script wrote these itself (Add-MaintenanceChangelogEntry in
+# about 125 repos, first-release stubs and retitles, a date restamp), each copy
+# with its own line endings and anchor, so core does them for everyone.
+function Invoke-ChangelogCase {
+    param(
+        [string]$Name,
+        [string]$Changelog,
+        [bool]$Tagged = $true,
+        [string]$Subject = 'feat: generated feature',
+        [string]$File = 'src\a.txt',
+        [switch]$Maintenance
+    )
+    $dir = New-GitRepo $Name
+    $path = Join-Path $dir 'CHANGELOG.md'
+    [System.IO.File]::WriteAllText($path, $Changelog, (New-Object System.Text.UTF8Encoding($false)))
+    & git -C $dir add -A
+    & git -C $dir -c user.email=t@t -c user.name=t commit -q -m 'chore: changelog'
+    if ($Tagged) { & git -C $dir tag v1.0.0 }
+    if ($Subject) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $dir $File)) -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir $File) -Value 'a'
+        & git -C $dir add -A
+        & git -C $dir -c user.email=t@t -c user.name=t commit -q -m $Subject
+    }
+    Push-Location $dir
+    try {
+        $err = Get-ThrownId { $script:caseResult = New-ChangelogFromCommits -ChangelogPath $path -Version '1.1.0' -ArtifactPaths @('src/') -Maintenance:$Maintenance }
+    } finally {
+        Pop-Location
+    }
+    return @{ Error = $err; Result = $script:caseResult; Text = [System.IO.File]::ReadAllText($path) }
+}
+
+$run = Invoke-ChangelogCase 'maintenance' "# Changelog`n`n$older" -Subject 'fix: outside the artifacts' -File 'docs\a.txt' -Maintenance
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Changed`n`n- Maintenance release (no user-facing changes).`n`n$older"
+Check 'with -Maintenance an empty range gets the maintenance entry' ($run.Error -eq '' -and $run.Text -ceq $expected) "threw '$($run.Error)', got:`n$($run.Text)"
+Check 'a maintenance entry reports Maintenance' ($run.Result.Maintenance -eq $true -and $run.Result.Generic -eq $false -and $run.Result.Changes -eq 1) "got Maintenance=$($run.Result.Maintenance)"
+
+$run = Invoke-ChangelogCase 'maintenance-crlf' ("# Changelog`n`n$older" -replace "`n", "`r`n") -Subject 'fix: outside the artifacts' -File 'docs\a.txt' -Maintenance
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Changed`n`n- Maintenance release (no user-facing changes).`n`n$older" -replace "`n", "`r`n"
+Check 'a CRLF file gets the maintenance entry with CRLF lines' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogCase 'maintenance-unset' "# Changelog`n`n$older" -Subject 'fix: outside the artifacts' -File 'docs\a.txt'
+Check 'without -Maintenance an empty range still throws' ($run.Error -match 'No commits found') "got '$($run.Error)'"
+
+$run = Invoke-ChangelogCase 'maintenance-curated' "# Changelog`n`n## [Unreleased]$curatedBody$older" -Subject 'fix: outside the artifacts' -File 'docs\a.txt' -Maintenance
+Check 'a curated [Unreleased] is promoted, not replaced, under -Maintenance' ($run.Result.Promoted -eq $true -and $run.Text -match 'first curated' -and $run.Text -notmatch 'Maintenance release') "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogCase 'first-release-maintenance' "# Changelog`n" -Tagged $false -Subject 'chore: tidy' -Maintenance
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`nFirst release.`n"
+Check 'a first release with no user-facing commit gets First release. under -Maintenance' ($run.Error -eq '' -and $run.Text -ceq $expected) "threw '$($run.Error)', got:`n$($run.Text)"
+
+$run = Invoke-ChangelogCase 'first-release-untagged-section' "# Changelog`n`n## [0.0.0]`n`n### Added`n`n- head tracking`n" -Tagged $false
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Added`n`n- head tracking`n"
+Check 'a first release renames the untagged version section' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+Check 'the renamed section is reported as promoted' ($run.Result.Promoted -eq $true -and $run.Result.Features -eq 1) "got Promoted=$($run.Result.Promoted) Features=$($run.Result.Features)"
+
+$run = Invoke-ChangelogCase 'first-release-unreleased-wins' "# Changelog`n`n## [Unreleased]`n`n### Fixed`n`n- since the dev build`n`n## [0.0.0]`n`n### Added`n`n- head tracking`n" -Tagged $false
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Fixed`n`n- since the dev build`n`n## [0.0.0]`n`n### Added`n`n- head tracking`n"
+Check 'on a first release a curated [Unreleased] is the release, not the section below it' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogCase 'later-release-keeps-versions' "# Changelog`n`n$older"
+Check 'a later release never renames a released section' ($run.Text -match '## \[1\.0\.0\] - 2026-01-01' -and $run.Text -match 'generated feature') "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogCase 'restamp' "# Changelog`n`n## [1.1.0] - 2026-01-05`n`n### Added`n`n- written ahead`n`n$older"
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Added`n`n- written ahead`n`n$older"
+Check 'an entry written ahead of the release takes the release date' ($run.Result.AlreadyExists -eq $true -and $run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogCase 'no-title' "Some notes`n"
+Check 'a file with no title line is refused' ($run.Error -match "has no '# ' title line") "got '$($run.Error)'"
+
+$run = Invoke-ChangelogCase 'empty-file' ''
+Check 'an empty file is refused' ($run.Error -match "has no '# ' title line") "got '$($run.Error)'"
+
 # --- cleanup ---------------------------------------------------------------
 
 Remove-Item $sandbox -Recurse -Force -ErrorAction SilentlyContinue

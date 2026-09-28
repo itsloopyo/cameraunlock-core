@@ -9,6 +9,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - `New-ChangelogFromCommits` puts the entry above the newest version, and does what release scripts did for themselves
+
+With no `## [Unreleased]`, the generated entry went after the first blank line below
+`# Changelog`. In a changelog with no blank line under the header that blank line is the one
+inside the newest entry, so the release landed between that entry's heading and its notes
+(indiana-jones and wolfenstein describe it). The entry now goes directly above the first `## [`
+heading, or at the end of a file with none, with the file's line endings. A file with no `# ` title
+line, an empty one included, now throws; it used to be rewritten with no entry in it.
+
+The fleet's release scripts carried their own changelog code for cases core did not handle, each
+copy with its own anchor and line endings. Core now handles them:
+
+- `-Maintenance` (a new switch, off by default): where the function would throw because there is
+  nothing to list, an empty range or a first release with no user-facing commit, it writes
+  `- Maintenance release (no user-facing changes).` under `### Changed`, or `First release.` on a
+  first release. This is what `Add-MaintenanceChangelogEntry` wrote in the `-Force` catch of about
+  125 release scripts; a script passes `-Maintenance:$Force` and drops the catch.
+- On a first release (no `v*` tag) with no curated `## [Unreleased]`, the first `## [x.y.z]`
+  section was never released, so its heading is renamed `## [Version] - date` in place and it is
+  reported as `Promoted`, as arx-fatalis, thief, viewfinder and superliminal did.
+- An entry for the version already there keeps its content, and a `## [Version] - yyyy-mm-dd`
+  heading takes today's date, as amnesia-rebirth and soma did. It still returns `AlreadyExists`.
+
+The returned hashtable gains `Maintenance`. No parameter changed position.
+
 ### Fixed - a Defaults.ini value only a float reads no longer throws in a game that binds a double
 
 Defaults.ini checked a float concept's value with the float codec, but a C++ row bound to a `double`

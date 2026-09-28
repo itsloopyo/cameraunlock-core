@@ -495,23 +495,32 @@ function Write-ChangelogText {
 .SYNOPSIS
     Writes the changelog entry for a release.
 .DESCRIPTION
-    A `## [Unreleased]` section holding any non-blank line is the release's
-    notes: its heading becomes `## [Version] - date` where it stands, its content
-    is kept as written, and no commit is read. An empty `## [Unreleased]` is
-    replaced by an entry generated from the commit subjects since the last
-    version tag. With no `## [Unreleased]`, the generated entry goes directly
-    under the `# Changelog` header. No new `## [Unreleased]` is written.
+    An entry for Version already there is left as written, except that a
+    `## [Version] - yyyy-mm-dd` heading takes today's date: it was written ahead
+    of the release. A `## [Unreleased]` section holding any non-blank line is the
+    release's notes: its heading becomes `## [Version] - date` where it stands,
+    its content is kept as written, and no commit is read. On a first release (no
+    `v*` tag), with no such [Unreleased], the first `## [x.y.z]` section was never
+    released, so it is renamed the same way. Otherwise an entry is generated from
+    the commit subjects since the last version tag. It replaces an empty
+    `## [Unreleased]`, or goes directly above the first `## [` heading, or at the
+    end of a file that has none. No new `## [Unreleased]` is written.
 .PARAMETER ChangelogPath
-    Path to the CHANGELOG.md file.
+    Path to the CHANGELOG.md file. It must exist and hold a `# ` title line.
 .PARAMETER Version
     Version for the new changelog entry.
+.PARAMETER Maintenance
+    Where there is nothing to list (no commit in range, or a first release with
+    no user-facing commit), write a maintenance entry instead of throwing:
+    `- Maintenance release (no user-facing changes).` under `### Changed`, or
+    `First release.` on a first release.
 .OUTPUTS
-    Hashtable: AlreadyExists, Promoted (true when [Unreleased] was renamed),
-    Generic, and the counts Features, Fixes and Changes. For a generated entry
-    these count the bullets written under Added, Fixed and Changed. For a
-    promoted section they count the lines starting `- ` under its `### Added`,
-    `### Fixed` and `### Changed` headings; bullets under any other heading are
-    not counted.
+    Hashtable: AlreadyExists, Promoted (true when a section was renamed),
+    Maintenance, Generic, and the counts Features, Fixes and Changes. For a
+    generated entry these count the bullets written under Added, Fixed and
+    Changed. For a promoted section they count the lines starting `- ` under its
+    `### Added`, `### Fixed` and `### Changed` headings; bullets under any other
+    heading are not counted.
 #>
 function New-ChangelogFromCommits {
     param(
@@ -520,7 +529,8 @@ function New-ChangelogFromCommits {
         [Parameter(Mandatory=$true)]
         [string]$Version,
         [string[]]$ArtifactPaths,
-        [switch]$IncludeAll
+        [switch]$IncludeAll,
+        [switch]$Maintenance
     )
 
     if (-not (Test-Path -LiteralPath $ChangelogPath)) {
@@ -538,9 +548,19 @@ function New-ChangelogFromCommits {
     # by default, so an existing entry with an en dash or an accented name comes
     # back mojibaked and is rewritten that way.
     $changelog = Get-Content -LiteralPath $ChangelogPath -Raw -Encoding UTF8
+    if ($null -eq $changelog -or $changelog -notmatch '(?m)^# ') {
+        throw "$ChangelogPath has no '# ' title line such as '# Changelog', so no entry is written to it"
+    }
 
-    # Check if entry already exists
-    if ($changelog -match "\[$Version\]") {
+    $nl = if ($changelog.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $date = Get-Date -Format 'yyyy-MM-dd'
+    $escaped = [regex]::Escape($Version)
+
+    if ($changelog -match "\[$escaped\]") {
+        $stamped = [regex]::Replace($changelog, '(?m)^(## \[' + $escaped + '\] - )\d{4}-\d{2}-\d{2}(?=[ \t]*\r?$)', "`${1}$date", 1)
+        if ($stamped -cne $changelog) {
+            Write-ChangelogText -ChangelogPath $ChangelogPath -Text ($stamped.TrimEnd() + $nl)
+        }
         return @{
             AlreadyExists = $true
             Features = 0
@@ -549,24 +569,43 @@ function New-ChangelogFromCommits {
         }
     }
 
-    $nl = if ($changelog.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $date = Get-Date -Format 'yyyy-MM-dd'
-    $unreleased = [regex]::Match($changelog, '(?ms)^(?<heading>## \[Unreleased\][^\r\n]*?)\r?$(?<body>.*?)(?=^## |\z)')
+    # Match version tags only. The nightly publisher moves the rolling `dev` tag
+    # to the tip on every build, so an unfiltered describe resolves to `dev`
+    # sitting at or just behind HEAD: a first release is not seen as one, and a
+    # later one diffs against last night's build instead of the previous version.
+    # Both surface as the empty-range throw further down.
+    # generate-release-notes.ps1 already filters this way. Errors are allowed so
+    # git describe doesn't throw when there are no tags.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $lastTag = git describe --tags --abbrev=0 --match 'v[0-9]*' 2>$null
+    $ErrorActionPreference = $prevPref
+    $firstRelease = $LASTEXITCODE -ne 0
 
+    $unreleased = [regex]::Match($changelog, '(?ms)^(?<heading>## \[Unreleased\][^\r\n]*?)\r?$(?<body>.*?)(?=^## |\z)')
+    $release = $null
     if ($unreleased.Success -and $unreleased.Groups['body'].Value.Trim()) {
-        $body = $unreleased.Groups['body'].Value
+        $release = $unreleased
+    } elseif ($firstRelease) {
+        $untagged = [regex]::Match($changelog, '(?ms)^(?<heading>## \[\d+\.\d+\.\d+\][^\r\n]*?)\r?$(?<body>.*?)(?=^## |\z)')
+        if ($untagged.Success) { $release = $untagged }
+    }
+
+    if ($release) {
+        $body = $release.Groups['body'].Value
         $countUnder = {
             param([string]$Heading)
             $section = [regex]::Match($body, '(?ms)^### ' + $Heading + '[ \t]*\r?$(.*?)(?=^### |\z)')
             if (-not $section.Success) { return 0 }
             return [regex]::Matches($section.Groups[1].Value, '(?m)^- ').Count
         }
-        $heading = $unreleased.Groups['heading']
+        $heading = $release.Groups['heading']
         $changelog = $changelog.Remove($heading.Index, $heading.Length).Insert($heading.Index, "## [$Version] - $date")
         Write-ChangelogText -ChangelogPath $ChangelogPath -Text ($changelog.TrimEnd() + $nl)
         return @{
             AlreadyExists = $false
             Promoted = $true
+            Maintenance = $false
             Features = & $countUnder 'Added'
             Fixes = & $countUnder 'Fixed'
             Changes = & $countUnder 'Changed'
@@ -574,25 +613,10 @@ function New-ChangelogFromCommits {
         }
     }
 
-    # Get commits since last tag
-    # Match version tags only. The nightly publisher moves the rolling `dev` tag
-    # to the tip on every build, so an unfiltered describe resolves to `dev`
-    # sitting at or just behind HEAD: a first release never reaches the
-    # first-release branch below, and a later one diffs against last night's
-    # build instead of the previous version. Both surface as the empty-range
-    # throw further down. generate-release-notes.ps1 already filters this way.
-    # Temporarily allow errors so git describe doesn't throw when there are no tags
-    $prevPref = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    $lastTag = git describe --tags --abbrev=0 --match 'v[0-9]*' 2>$null
-    $ErrorActionPreference = $prevPref
-    if ($LASTEXITCODE -ne 0) {
-        # First release - use all commits
+    if ($firstRelease) {
         $commitRange = "HEAD"
-        $useAllCommits = $true
     } else {
         $commitRange = "$lastTag..HEAD"
-        $useAllCommits = $false
     }
 
     # git emits UTF-8, but a native command's output is decoded with
@@ -602,18 +626,10 @@ function New-ChangelogFromCommits {
     $prevConsoleEncoding = [Console]::OutputEncoding
     [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
     try {
-        if ($useAllCommits) {
-            if ($ArtifactPaths) {
-                $commits = git log --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
-            } else {
-                $commits = git log --pretty=format:"%s" --reverse --no-merges
-            }
+        if ($ArtifactPaths) {
+            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
         } else {
-            if ($ArtifactPaths) {
-                $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges -- $ArtifactPaths
-            } else {
-                $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
-            }
+            $commits = git log $commitRange --pretty=format:"%s" --reverse --no-merges
         }
     } finally {
         [Console]::OutputEncoding = $prevConsoleEncoding
@@ -622,20 +638,29 @@ function New-ChangelogFromCommits {
         throw "git log failed (exit code $LASTEXITCODE) for range '$commitRange'. Check that the range is valid and the repository is not corrupt."
     }
 
+    $isMaintenance = $false
     if (-not $commits) {
         # An empty range means a re-tag of an already-released commit or a bad
         # pathspec, never a core-only release (those still carry the submodule
         # pointer bump), so the generic fallback below must not apply.
-        throw "No commits found in range '$commitRange'. If this is the first release, create a RELEASE_NOTES.md override instead."
+        if (-not $Maintenance) {
+            throw "No commits found in range '$commitRange'. If this is the first release, create a RELEASE_NOTES.md override instead."
+        }
+        $isMaintenance = $true
     }
 
     # Filter out noise commits before categorization
-    if (-not $IncludeAll) {
+    if ($IncludeAll) {
+        $commits = @($commits)
+    } else {
         $commits = @($commits | Where-Object { -not (Test-NoiseCommit $_) })
     }
 
-    if ($commits.Count -eq 0 -and $useAllCommits) {
-        throw "No user-facing commits found for the first release. Use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
+    if ($commits.Count -eq 0 -and $firstRelease) {
+        if (-not $Maintenance) {
+            throw "No user-facing commits found for the first release. Use conventional commit prefixes (feat:, fix:, perf:) or create a RELEASE_NOTES.md override."
+        }
+        $isMaintenance = $true
     }
 
     # Categorize commits using conventional commit format
@@ -644,13 +669,16 @@ function New-ChangelogFromCommits {
     $changes = @()
     $other = @()
 
-    $generic = ($commits.Count -eq 0)
+    $generic = ($commits.Count -eq 0 -and -not $isMaintenance)
     if ($generic) {
         # Core-only release: everything since the last tag is a submodule
         # pointer bump or other noise-filtered commit, so there is nothing
         # mod-local to list. The shared bundle still picks up the new core at
         # package time, so release with a generic entry instead of blocking.
         $changes += '- Performance and stability improvements'
+    }
+    if ($isMaintenance -and -not $firstRelease) {
+        $changes += '- Maintenance release (no user-facing changes).'
     }
 
     foreach ($commit in $commits) {
@@ -667,6 +695,10 @@ function New-ChangelogFromCommits {
 
     # Build new entry
     $newEntry = "## [$Version] - $date$nl$nl"
+
+    if ($isMaintenance -and $firstRelease) {
+        $newEntry += "First release.$nl$nl"
+    }
 
     if ($features.Count -gt 0) {
         $newEntry += "### Added$nl$nl"
@@ -691,17 +723,14 @@ function New-ChangelogFromCommits {
     if ($unreleased.Success) {
         $changelog = $changelog.Remove($unreleased.Index, $unreleased.Length).Insert($unreleased.Index, $newEntry)
     } else {
-        # $newEntry is built from raw commit subjects and is about to be used as a -replace
-        # REPLACEMENT string, where .NET expands $_, $&, $1, $` and $'. A commit subject like
-        # "fix: use $_ instead of $PSItem" would otherwise splice the entire existing
-        # changelog into the new entry, and that gets committed and shipped as the release
-        # body. Doubling every $ makes the regex engine emit it literally.
-        $safeEntry = $newEntry -replace '\$', '$$$$'
-
-        if ($changelog -match '(?s)(# Changelog.*?)(## \[)') {
-            $changelog = $changelog -replace '(?s)(# Changelog.*?\r?\n\r?\n)', "`$1$safeEntry"
+        # Before the newest version's heading, found by the heading itself: the entry once went
+        # after the first blank line below "# Changelog", which in a changelog with no blank
+        # line under the header is the one inside the newest entry.
+        $firstVersion = [regex]::Match($changelog, '(?m)^## \[')
+        if ($firstVersion.Success) {
+            $changelog = $changelog.Insert($firstVersion.Index, $newEntry)
         } else {
-            $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$safeEntry"
+            $changelog = $changelog.TrimEnd() + $nl + $nl + $newEntry
         }
     }
 
@@ -710,6 +739,7 @@ function New-ChangelogFromCommits {
     return @{
         AlreadyExists = $false
         Promoted = $false
+        Maintenance = $isMaintenance
         Features = $features.Count
         Fixes = $fixes.Count
         Changes = $changes.Count
