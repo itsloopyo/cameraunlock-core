@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - conformance check `release-canonical-since`
+
+`scripts/conformance.ps1` fails a repo whose `launcher-manifest.json` config block carries
+`canonical_since` when `scripts/release.ps1` is missing or calls neither
+`Assert-ReleaseNotBelowCanonicalSince` nor `New-ReleaseTag` (a call in a comment does not count).
+Without either, the only stop on a release below `canonical_since` is validate-manifest in the tag's
+CI build, after the tag is pushed. All 81 repos that carry `canonical_since` pass today.
+
 ### Fixed - a config that stays unreadable is reported once, and Load no longer throws on its write time
 
 C++ `ConfigOwner::Reload` and C# `ConfigOwner.Reload`: a config file that cannot be opened (held by a

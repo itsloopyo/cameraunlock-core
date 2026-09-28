@@ -12,8 +12,8 @@
 // own copy of data/config-format.json for a converted repo that records no committed file. It also holds the rule that a converted repo's manifest
 // seeds and ships no config, block or not, and runs the per_game generator in encode-seed.mjs, the
 // rules in validate-manifest.mjs on built ZIPs, the Nexus ZIP config rule, the report conformance
-// reads, conformance's config-descriptor and config-preserve checks, and the packager's ConvertFrom-Json /
-// ConvertTo-Json -Depth 10 round trip. And canonical_since against the version: a package below it
+// reads, conformance's config-descriptor, config-preserve, config-defaults and release-canonical-since checks, and
+// the packager's ConvertFrom-Json / ConvertTo-Json -Depth 10 round trip. And canonical_since against the version: a package below it
 // warns, and a release below it fails, in validate-manifest and packaging in a build for a release
 // tag, in check-config-descriptor.mjs --release, Assert-ReleaseNotBelowCanonicalSince and
 // New-ReleaseTag.
@@ -682,6 +682,37 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
   check(
     defaults.status === 1 && isDeepStrictEqual([...defaultsMessages].sort(), [...expectedDefaults].sort()),
     `conformance: config-defaults should fail each wrong use and nothing else, got ${defaults.status}\n${defaults.stdout}${defaults.stderr}`,
+  );
+
+  // conformance's release-canonical-since check: a manifest with canonical_since needs
+  // scripts/release.ps1 to call Assert-ReleaseNotBelowCanonicalSince or New-ReleaseTag, and a
+  // commented-out call does not count. A manifest with no block needs neither.
+  const gated = (label, release) =>
+    repo(`release-${label}`, "abzu-headtracking", {
+      "launcher-manifest.json": JSON.stringify(abzuMan()),
+      ...(release === null ? {} : { "scripts/release.ps1": release }),
+    });
+  const noScript = gated("no-script", null);
+  const commented = gated(
+    "commented",
+    "# Assert-ReleaseNotBelowCanonicalSince -RepoRoot $projectDir -Version $Version\r\n<#\r\nNew-ReleaseTag -Version $Version\r\n#>\r\ngit tag \"v$Version\"\r\n",
+  );
+  const asserted = gated("asserted", "Import-Module $core\r\nAssert-ReleaseNotBelowCanonicalSince -RepoRoot $projectDir -Version $Version\r\n");
+  const viaTag = gated("tagged", "New-ReleaseTag -Version $Version\r\n");
+  const unblocked = repo("release-no-block", "abzu-headtracking", { "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) });
+  const release = spawnSync(
+    "powershell",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo ${[noScript, commented, asserted, viaTag, unblocked].map((r) => `'${r}'`).join(",")} -Check release-canonical-since -Json; exit $LASTEXITCODE`],
+    { encoding: "utf8" },
+  );
+  const releaseFindings = JSON.parse(release.stdout.replace(/^﻿/, "") || "[]");
+  const releaseList = (Array.isArray(releaseFindings) ? releaseFindings : [releaseFindings]).map((x) => `${x.severity} ${x.message}`);
+  const releaseCount = (prefix) => releaseList.filter((m) => m.startsWith(prefix)).length;
+  check(
+    release.status === 1 && releaseList.length === 2 &&
+      releaseCount("FAIL launcher-manifest.json carries config.canonical_since and there is no scripts/release.ps1") === 1 &&
+      releaseCount("FAIL launcher-manifest.json carries config.canonical_since and scripts/release.ps1 calls neither") === 1,
+    `conformance: release-canonical-since should fail the repo with no release script and the one whose calls are commented out, and nothing else, got ${release.status}\n${release.stdout}${release.stderr}`,
   );
 }
 

@@ -58,7 +58,8 @@ $CHECK_IDS = @(
     'install-wrapper', 'delayed-expansion', 'arg-parser', 'config-block', 'config-pairing',
     'shim-marker', 'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
     'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme',
-    'config-format', 'config-legacy-reader', 'config-preserve', 'config-descriptor', 'config-defaults'
+    'config-format', 'config-legacy-reader', 'config-preserve', 'config-descriptor', 'config-defaults',
+    'release-canonical-since'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -1274,6 +1275,28 @@ function Test-ConfigDescriptor {
     }
 }
 
+# A manifest whose config block carries canonical_since needs scripts/release.ps1 to refuse a
+# version below it before it tags: Assert-ReleaseNotBelowCanonicalSince, or New-ReleaseTag, which
+# runs it. Without either, the only stop is validate-manifest in the tag's CI build, after the
+# tag is already pushed. Commented-out calls do not count.
+function Test-ReleaseCanonicalSince {
+    param([string]$Name, [string]$Root)
+
+    $manifest = Get-LauncherManifest $Root
+    if (-not $manifest) { return }
+    $config = $manifest.PSObject.Properties['config']
+    if (-not $config -or -not $config.Value -or -not $config.Value.PSObject.Properties['canonical_since']) { return }
+
+    $release = Join-Path $Root 'scripts/release.ps1'
+    if (-not (Test-Path -LiteralPath $release)) {
+        Add-Finding $Name 'release-canonical-since' 'FAIL' 'launcher-manifest.json carries config.canonical_since and there is no scripts/release.ps1 to refuse a release below it before tagging'
+        return
+    }
+    $code = (Read-TextFile $release) -replace '(?s)<#.*?#>', '' -replace '(?m)^\s*#.*$', ''
+    if ($code -match '\b(Assert-ReleaseNotBelowCanonicalSince|New-ReleaseTag)\b') { return }
+    Add-Finding $Name 'release-canonical-since' 'FAIL' "launcher-manifest.json carries config.canonical_since and scripts/release.ps1 calls neither Assert-ReleaseNotBelowCanonicalSince nor New-ReleaseTag, so a version below it is tagged and pushed before CI refuses it. Call Assert-ReleaseNotBelowCanonicalSince -RepoRoot `$projectDir -Version `$Version as soon as the version is resolved"
+}
+
 $CHECK_TABLE = [ordered]@{
     'install-wrapper'   = ${function:Test-InstallWrapper}
     'delayed-expansion' = ${function:Test-DelayedExpansion}
@@ -1298,6 +1321,7 @@ $CHECK_TABLE = [ordered]@{
     'config-preserve'      = ${function:Test-ConfigPreserve}
     'config-descriptor'    = ${function:Test-ConfigDescriptor}
     'config-defaults'      = ${function:Test-ConfigDefaults}
+    'release-canonical-since' = ${function:Test-ReleaseCanonicalSince}
 }
 
 # ---------------------------------------------------------------------------
