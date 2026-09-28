@@ -248,7 +248,6 @@ namespace CameraUnlock.Core.Tests.Config
                 new FieldRead("CycleTrackingModeKey", c => k.Render(c.CycleTrackingModeKeyName)),
                 new FieldRead("YawModeKey", c => k.Render(c.YawModeKeyName)),
                 new FieldRead("TrueFreeLookKey", c => k.Render(c.TrueFreeLookKeyName)),
-                new FieldRead("LightFollowsHead", c => b.Render(c.Light.FollowsHead)),
                 new FieldRead("LightMultiplier", c => f.Render(c.Light.Multiplier)),
                 new FieldRead("PositionLocalSmoothing", c => f.Render(c.Position.LocalSmoothing)),
                 new FieldRead("PositionRemoteSmoothing", c => f.Render(c.Position.RemoteSmoothing)),

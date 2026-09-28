@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <locale>
+#include <set>
 #include <sstream>
 
 namespace cameraunlock {
@@ -97,6 +98,19 @@ bool AcceptSensitivity(const std::string& key, const std::string& raw, float par
                        const HeadTrackingConfig::LogFn& log, float& out) {
     return AcceptInRange(key, raw, parsed, -config::kMaxSensitivity, config::kMaxSensitivity, log,
                          out);
+}
+
+// Warned once per process per key rather than once per load: mods reload config on a
+// hotkey or a file watcher, and repeating this every reload buries it. Latched only
+// once the warning is actually emitted, so a caller with no sink cannot burn the one
+// chance a later caller had of seeing it.
+void WarnRetiredKey(const std::string& as_written, const std::string& canonical,
+                    const HeadTrackingConfig::LogFn& log) {
+    static std::set<std::string> warned;
+    if (!log) return;
+    if (!warned.insert(canonical).second) return;
+    log("Config key '" + as_written + "' has been retired and is IGNORED. " +
+        RetiredConfigKeyAdvice(canonical.c_str()));
 }
 
 }  // namespace
@@ -242,10 +256,6 @@ std::vector<std::pair<std::string, std::string>> ParseIniConfig(const std::strin
 #endif
 void HeadTrackingConfig::ApplyValues(
     const std::vector<std::pair<std::string, std::string>>& values, const LogFn& log) {
-    // Warned once per process rather than once per load: mods reload config on a hotkey or
-    // a file watcher, and repeating this every reload buries it.
-    static bool warned_retired_smoothing = false;
-
     bool saw_limit_y = false;
     bool saw_limit_y_down = false;
 
@@ -255,6 +265,13 @@ void HeadTrackingConfig::ApplyValues(
 
         const std::string& value = entry.second;
         const std::string canonical(key);
+
+        // Ahead of the branches, so a retired concept needs no branch of its own and
+        // any number of them behave alike. The advice is generated from the schema.
+        if (IsRetiredConfigKey(key)) {
+            WarnRetiredKey(entry.first, canonical, log);
+            continue;
+        }
 
         int int_val = 0;
         float float_val = 0.0f;
@@ -393,8 +410,6 @@ void HeadTrackingConfig::ApplyValues(
             if (TryParseConfigFloat(value, float_val)) tracker_pivot_forward = float_val;
         } else if (canonical == config_keys::kTrackerPivotUp) {
             if (TryParseConfigFloat(value, float_val)) tracker_pivot_up = float_val;
-        } else if (canonical == config_keys::kLightFollowsHead) {
-            if (TryParseConfigBool(value, bool_val)) light.follows_head = bool_val;
         } else if (canonical == config_keys::kLightMultiplier) {
             if (TryParseConfigFloat(value, float_val)) {
                 if (float_val >= 0.0f && float_val <= effects::kMaxLightMultiplier) {
@@ -438,20 +453,6 @@ void HeadTrackingConfig::ApplyValues(
             reticle_toggle_key_name = value;
         } else if (canonical == config_keys::kCycleTrackingModeKey) {
             cycle_tracking_mode_key_name = value;
-        } else if (canonical == config_keys::kSmoothing) {
-            // Deliberately NOT migrated. The old single value carried a hidden 0.15 floor,
-            // so the number in an existing config does not mean what it used to.
-            if (!warned_retired_smoothing) {
-                warned_retired_smoothing = true;
-                if (log) {
-                    log("Config key '" + entry.first +
-                        "' has been retired and is IGNORED. Smoothing is now two keys: "
-                        "LocalSmoothing (a tracker on this machine) and RemoteSmoothing (a "
-                        "tracker on the network). The old value is not migrated because the "
-                        "semantics changed - it carried a hidden floor that no longer exists. "
-                        "Set the two new keys.");
-                }
-            }
         }
     }
 

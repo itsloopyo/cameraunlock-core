@@ -30,6 +30,7 @@ set(CAMERAUNLOCK_SOURCES
     src/config/ini_editor.cpp
     src/config/canonical_ini.cpp
     src/config/checked_file_writer.cpp
+    src/config/retired_keys.cpp
     src/config/value_guards.cpp
     src/config/value_codecs.cpp
     src/config/hotkey_codec.cpp

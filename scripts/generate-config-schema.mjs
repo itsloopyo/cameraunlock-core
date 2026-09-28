@@ -35,6 +35,12 @@ const conceptsCsharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 
 
 const normalize = (key) => key.toLowerCase().replace(/[_-]/g, '');
 
+// A string literal C++ and C# both accept verbatim. Only used for prose
+// lifted out of the schema, where a stray quote would otherwise emit a
+// generated file that does not compile.
+const quoteLiteral = (text) =>
+    `"${text.replace(/[\\"]/g, '\\$&')}"`;
+
 // Every id becomes a C# `const` name and, prefixed with 'k', a C++ `constexpr` name.
 const identifierPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // Every key and alias is emitted verbatim into a C# and a C++ string literal. Nothing is
@@ -245,17 +251,14 @@ function validateSchema(schema, keyTable) {
     if (!Array.isArray(schema.concepts)) schemaError('concepts', 'missing, expected an array');
     if (!Array.isArray(schema.retired)) schemaError('retired', 'missing, expected an array');
 
-    // Both parsers dispatch the retired-key warning from one hardcoded branch
-    // (HeadTrackingConfigData.ApplyValues 'case ConfigKeySchema.Keys.Smoothing',
-    // head_tracking_config.cpp 'canonical == config_keys::kSmoothing'). A second retired
-    // concept resolves through the alias table, matches no branch, and is dropped with
-    // nothing in the log. Make both parsers test IsRetired / IsRetiredConfigKey ahead of
-    // the switch, then this check goes.
-    if (schema.retired.length > 1) {
-        schemaError('retired', `${schema.retired.length} retired concepts, but the C# and C++ parsers ` +
-            'each handle exactly one, named in a hardcoded branch. The extra concept would parse, ' +
-            'resolve, match no branch and be ignored with no warning');
-    }
+    // Both parsers test IsRetired / IsRetiredConfigKey and log the `advice`
+    // carried below, so a retired concept needs no branch in either language
+    // and any number of them behave the same.
+    schema.retired.forEach((concept, i) => {
+        if (typeof concept?.advice !== 'string' || concept.advice.trim() === '') {
+            schemaError(`retired[${i}]`, 'missing `advice`, the sentence a player is shown when the key is found');
+        }
+    });
 
     const ids = new Map();
 
@@ -450,8 +453,8 @@ function renderCSharp(schema, entries) {
     const retiredConsts = schema.retired
         .map((c) => `            public const string ${c.id} = "${normalize(c.aliases[0])}";`)
         .join('\n');
-    const retiredRows = schema.retired
-        .map((c) => `            "${normalize(c.aliases[0])}",`)
+    const retiredAdviceRows = schema.retired
+        .map((c) => `            { "${normalize(c.aliases[0])}", ${quoteLiteral(c.advice)} },`)
         .join('\n');
 
     return `${banner('//')}
@@ -482,9 +485,14 @@ ${retiredConsts}
 ${rows}
         };
 
-        private static readonly HashSet<string> Retired = new HashSet<string>
+        /// <summary>
+        /// Retired canonical names, each mapped to the sentence a player is shown when
+        /// the key is found in their config. Keyed rather than a set so a parser needs
+        /// no branch per retired concept.
+        /// </summary>
+        private static readonly Dictionary<string, string> Retired = new Dictionary<string, string>
         {
-${retiredRows}
+${retiredAdviceRows}
         };
 
         /// <summary>
@@ -528,7 +536,18 @@ ${retiredRows}
         /// </summary>
         public static bool IsRetired(string canonicalKey)
         {
-            return canonicalKey != null && Retired.Contains(canonicalKey);
+            return RetiredAdvice(canonicalKey) != null;
+        }
+
+        /// <summary>
+        /// What to tell a player who still has this key, or null when the name names
+        /// no retired concept.
+        /// </summary>
+        public static string RetiredAdvice(string canonicalKey)
+        {
+            if (canonicalKey == null) return null;
+            string advice;
+            return Retired.TryGetValue(canonicalKey, out advice) ? advice : null;
         }
     }
 }
@@ -563,6 +582,9 @@ function renderCpp(schema, entries) {
         .join('\n');
     const retiredConsts = schema.retired
         .map((c) => `inline constexpr const char* k${c.id} = "${normalize(c.aliases[0])}";`)
+        .join('\n');
+    const retiredAdviceRows = schema.retired
+        .map((c) => `    { "${normalize(c.aliases[0])}", ${quoteLiteral(c.advice)} },`)
         .join('\n');
 
     return `${banner('//')}
@@ -637,6 +659,33 @@ inline const char* ResolveConfigKey(const std::string& key) {
     const std::string normalized = NormalizeConfigKey(key);
     for (size_t i = 0; i < kConfigKeyAliasCount; ++i) {
         if (normalized == kConfigKeyAliases[i].normalized) return kConfigKeyAliases[i].canonical;
+    }
+    return nullptr;
+}
+
+/// A retired concept and the sentence a player is shown when the key is found in
+/// their config. Looked up by canonical name so a parser needs no branch per
+/// retired concept.
+struct RetiredConfigKeyAdviceEntry {
+    const char* canonical;
+    const char* advice;
+};
+
+inline constexpr RetiredConfigKeyAdviceEntry kRetiredConfigKeyAdvice[] = {
+${retiredAdviceRows}
+};
+
+inline constexpr std::size_t kRetiredConfigKeyAdviceCount =
+    sizeof(kRetiredConfigKeyAdvice) / sizeof(kRetiredConfigKeyAdvice[0]);
+
+/// What to tell a player who still has this key, or nullptr when the name names no
+/// retired concept. The returned pointer is static storage.
+inline const char* RetiredConfigKeyAdvice(const char* canonical_key) {
+    if (canonical_key == nullptr) return nullptr;
+    for (std::size_t i = 0; i < kRetiredConfigKeyAdviceCount; ++i) {
+        if (std::string(canonical_key) == kRetiredConfigKeyAdvice[i].canonical) {
+            return kRetiredConfigKeyAdvice[i].advice;
+        }
     }
     return nullptr;
 }

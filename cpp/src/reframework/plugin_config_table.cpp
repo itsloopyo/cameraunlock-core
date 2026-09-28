@@ -98,7 +98,6 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
                     "Hides and shows the game's world-anchored markers.");
     }
     if (schema.flashlight) {
-        table.Concept<Concept::LightFollowsHead>(&PluginConfig::flashlightTracking);
         table.Concept<Concept::LightMultiplier>(&PluginConfig::flashlightMultiplier);
     }
     if (schema.trueFreeLook) {
@@ -136,7 +135,6 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
         out.positionLimitY = legacy.positionLimitY;
         out.positionLimitZ = legacy.positionLimitZ;
         out.positionLimitZBack = legacy.positionLimitZBack;
-        out.flashlightTracking = legacy.flashlightTracking;
         out.flashlightMultiplier = legacy.flashlightMultiplier;
         out.toggleKeyBindings = LegacyBindings(legacy.toggleKey, 'Y');
         out.cycleTrackingModeKeyBindings = LegacyBindings(legacy.positionToggleKey, 'G');
@@ -177,7 +175,6 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
         follows.Setting(Concept::CycleTrackingModeKey, legacy.positionToggleKey, shipped.positionToggleKey);
         follows.Setting(Concept::YawModeKey, legacy.yawModeKey, shipped.yawModeKey);
         if (schema.flashlight) {
-            follows.Setting(Concept::LightFollowsHead, legacy.flashlightTracking, shipped.flashlightTracking);
             follows.Setting(Concept::LightMultiplier, legacy.flashlightMultiplier, shipped.flashlightMultiplier);
         }
         if (schema.trueFreeLook) {

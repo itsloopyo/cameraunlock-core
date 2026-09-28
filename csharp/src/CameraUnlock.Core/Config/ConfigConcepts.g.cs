@@ -101,7 +101,7 @@ namespace CameraUnlock.Core.Config
         /// <summary>[Position] CollisionEnabled.</summary>
         public static readonly ConceptDescriptor<bool> CollisionEnabled = new ConceptDescriptor<bool>(
             "CollisionEnabled", "Position", "CollisionEnabled", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: leaning stops at walls instead of moving the view through them." }, "true", "true",
+            new BoolCodec(), new[] { "true: leaning stops at walls instead of moving the view through them.", "Only games whose mod sweeps the level for walls read this; the rest ignore it." }, "true", "true",
             true);
 
         /// <summary>[Position] CollisionMargin.</summary>
@@ -146,12 +146,6 @@ namespace CameraUnlock.Core.Config
             new HotkeyCodec(), new[] { "Switches between keeping your eye on the sights and true free look (TrueFreeLook)." }, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U",
             true);
 
-        /// <summary>[Light] LightFollowsHead.</summary>
-        public static readonly ConceptDescriptor<bool> LightFollowsHead = new ConceptDescriptor<bool>(
-            "LightFollowsHead", "Light", "LightFollowsHead", ConceptValueFamily.Bool,
-            new BoolCodec(), new[] { "true: a light you carry points where you look instead of where you aim." }, null, "true",
-            true);
-
         /// <summary>[Light] LightMultiplier.</summary>
         public static readonly ConceptDescriptor<float> LightMultiplier = new ConceptDescriptor<float>(
             "LightMultiplier", "Light", "LightMultiplier", ConceptValueFamily.Floating,
@@ -183,7 +177,6 @@ namespace CameraUnlock.Core.Config
             CycleTrackingModeKey,
             YawModeKey,
             TrueFreeLookKey,
-            LightFollowsHead,
             LightMultiplier,
         };
 

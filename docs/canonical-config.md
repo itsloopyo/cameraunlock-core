@@ -322,6 +322,7 @@ PositionLimitZ=0.4
 ; How far, in metres, leaning back can move the view.
 PositionLimitZBack=0.1
 ; true: leaning stops at walls instead of moving the view through them.
+; Only games whose mod sweeps the level for walls read this; the rest ignore it.
 CollisionEnabled=true
 ; How far the view is held off a wall when you lean into it, in the game's own units.
 CollisionMargin=0.1
@@ -342,8 +343,6 @@ YawModeKey=PageDown, Ctrl+Shift+H
 TrueFreeLookKey=Insert, Ctrl+Shift+U
 
 [Light]
-; true: a light you carry points where you look instead of where you aim.
-LightFollowsHead=true
 ; How far the light turns for each degree your head turns.
 ; 1 matches the view, 0 keeps the light on your aim.
 LightMultiplier=1.5
@@ -404,8 +403,12 @@ the canonical format never writes them. Each carries a `canonical_reason`, which
 | `TrackerPivotForward`, `TrackerPivotUp` | The neck pivot is not a setting: the tracker is authoritative (owner ruling of 2026-09-26). A game that shipped a pivot other than 0 (repo ships 0.08) keeps it in its own code through `PositionProcessor`'s pivot properties, as a shipped pose-shaping default that is not identity moves into the mod's code |
 
 So the schema sections `[Sensitivity]`, `[Inversion]` and `[Reticle]` hold no canonical concept,
-and no canonical file has them. The retired `Smoothing` key (and its alias `SmoothingFactor`) is
-not written either.
+and no canonical file has them. A retired key is not written either: `Smoothing` (and its alias
+`SmoothingFactor`), and `LightFollowsHead` (with `FlashlightFollowsHead` and
+`CompensateFlashlight`). Each still resolves, so a file that carries one draws the schema's
+`advice` for it in the log and is otherwise ignored - a carried light always follows the head
+now, and `LightMultiplier=0` pins the beam to the aim, which is what the switch turned off
+ever meant.
 
 Deadzones, response curves, unit scales and axis signs a player can edit, and some sensitivity
 spellings, were never schema concepts, so the schema lists their spellings under
@@ -1041,6 +1044,7 @@ PositionLimitZ=0.4
 ; How far, in metres, leaning back can move the view.
 PositionLimitZBack=0.1
 ; true: leaning stops at walls instead of moving the view through them.
+; Only games whose mod sweeps the level for walls read this; the rest ignore it.
 CollisionEnabled=true
 ; How gently the view eases back out after a wall stopped a lean.
 ; 0 is the quickest, 1 the slowest.
@@ -1057,8 +1061,6 @@ YawModeKey=PageDown, Ctrl+Shift+H
 TrueFreeLookKey=Insert, Ctrl+Shift+U
 
 [Light]
-; true: a light you carry points where you look instead of where you aim.
-LightFollowsHead=true
 ; How far the light turns for each degree your head turns.
 ; 1 matches the view, 0 keeps the light on your aim.
 LightMultiplier=1.5

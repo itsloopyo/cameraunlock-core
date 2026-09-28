@@ -162,7 +162,6 @@ void CarriedDifferences(const PluginConfig& a, const PluginConfig& b, std::vecto
     f("positionLimitY", a.positionLimitY, b.positionLimitY);
     f("positionLimitZ", a.positionLimitZ, b.positionLimitZ);
     f("positionLimitZBack", a.positionLimitZBack, b.positionLimitZBack);
-    t("flashlightTracking", a.flashlightTracking, b.flashlightTracking);
     f("flashlightMultiplier", a.flashlightMultiplier, b.flashlightMultiplier);
     s("toggleKeyBindings", a.toggleKeyBindings, b.toggleKeyBindings);
     s("cycleTrackingModeKeyBindings", a.cycleTrackingModeKeyBindings, b.cycleTrackingModeKeyBindings);
@@ -193,7 +192,6 @@ std::vector<std::string> ImportDifferences(const PluginConfigSchema& schema, con
     expected.positionLimitY = loaded.positionLimitY;
     expected.positionLimitZ = loaded.positionLimitZ;
     expected.positionLimitZBack = loaded.positionLimitZBack;
-    expected.flashlightTracking = loaded.flashlightTracking;
     expected.flashlightMultiplier = loaded.flashlightMultiplier;
     expected.toggleKeyBindings = Bindings(loaded.toggleKey, 'Y');
     expected.cycleTrackingModeKeyBindings = Bindings(loaded.positionToggleKey, 'G');
@@ -279,7 +277,6 @@ struct ReadPin {
     float limitX = 0.3f, limitY = 0.2f, limitZ = 0.4f, limitZBack = 0.1f;
     bool invertX = false, invertY = false, invertZ = false;
     bool positionEnabled = true;
-    bool flashlightTracking = true;
     float flashlightMultiplier = 1.5f;
     bool autoEnable = true, worldSpaceYaw = true;
     int configVersion = 0;
@@ -324,7 +321,6 @@ std::vector<std::string> ReadPinDifferences(const PluginConfig& c, bool found, c
     t("positionInvertY", c.positionInvertY, p.invertY);
     t("positionInvertZ", c.positionInvertZ, p.invertZ);
     t("positionEnabled", c.positionEnabled, p.positionEnabled);
-    t("flashlightTracking", c.flashlightTracking, p.flashlightTracking);
     f("flashlightMultiplier", c.flashlightMultiplier, p.flashlightMultiplier);
     t("autoEnable", c.autoEnable, p.autoEnable);
     t("worldSpaceYaw", c.worldSpaceYaw, p.worldSpaceYaw);
@@ -384,8 +380,9 @@ void TestReadPinned(const fs::path& root) {
     all.invertX = true;
     all.invertZ = true;
     all.positionEnabled = false;
-    all.flashlightTracking = false;
-    all.flashlightMultiplier = 5.0f;
+    // Multiplier=7 clamps to the maximum, then the retired Enabled=false folds in on top
+    // of it: turning the light's tracking off always meant pinning the beam to the aim.
+    all.flashlightMultiplier = 0.0f;
     all.autoEnable = false;
     all.worldSpaceYaw = false;
     all.configVersion = 3;
@@ -397,7 +394,6 @@ void TestReadPinned(const fs::path& root) {
     none.diagnosticMarkerKey = 0x78;
     none.sensZ = 1.0f;
     none.invertX = none.invertZ = false;
-    none.flashlightTracking = true;
     none.flashlightMultiplier = 1.5f;
     PluginConfig bare;
     CheckRead(bare, file, PluginConfigSchema{"Pin", false, false, false, 1.0f, ""}, none,
@@ -451,7 +447,9 @@ std::vector<testing::MutationKey> CorpusKeys(const std::vector<LegacyKey>& reads
         } else if (s == "Position" && key == "Enabled") {
             k.alternate = Text(!base.positionEnabled);
         } else if (s == "Flashlight" && key == "Enabled") {
-            k.alternate = Text(!base.flashlightTracking);
+            // Retired, and read only to fold into Multiplier. Still a key the import reads, so
+            // it still needs a corpus row, and false is still observable - as Multiplier=0.
+            k.alternate = "false";
         } else if (s == "Flashlight" && key == "Multiplier") {
             k.alternate = "2.5";
             k.out_of_range = {"6", "-1"};
@@ -839,8 +837,8 @@ void TestTableRendersTheGamesRows() {
     if (village != expected) std::cout << village;
 
     const std::string requiem = RenderDefaults(kFixtures[5].schema, "Resident Evil Requiem");
-    Check(Contains(requiem, "\r\n[Light]\r\n") && Contains(requiem, "\r\nLightFollowsHead=true\r\n") &&
-              Contains(requiem, "\r\nLightMultiplier=1.5\r\n") && !Contains(requiem, "DiagnosticMarkerKey"),
+    Check(Contains(requiem, "\r\n[Light]\r\n") && Contains(requiem, "\r\nLightMultiplier=1.5\r\n") &&
+              !Contains(requiem, "DiagnosticMarkerKey"),
           "Requiem's defaults carry [Light] and no marker key");
     Check(!Contains(RenderDefaults(kFixtures[0].schema, "Resident Evil 2"), "[Light]"), "RE2's carry no [Light]");
 }

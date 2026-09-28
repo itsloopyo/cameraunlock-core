@@ -92,7 +92,6 @@ namespace CameraUnlock.Core.Tests.Config
                 { "YawModeKey", config.YawModeKeyName },
                 { "TrueFreeLookKey", config.TrueFreeLookKeyName },
                 { "RecenterKey", config.RecenterKeyName },
-                { "LightFollowsHead", config.Light.FollowsHead },
                 { "LightMultiplier", config.Light.Multiplier },
             };
         }
@@ -303,20 +302,20 @@ namespace CameraUnlock.Core.Tests.Config
             }
             return Convert.ToString(value, CultureInfo.InvariantCulture)!;
         }
-
-        // Regression: the generator built the retired set by mapping over ALIASES, so the one
-        // retired concept emitted two identical rows. HashSet swallowed the duplicate, which
-        // is why it survived; the generated source is the artifact that has to be right.
+        // Regression: the generator built the retired table by mapping over ALIASES, so the one
+        // retired concept emitted two identical rows. Dictionary would now throw on the
+        // duplicate key, but the generated source is the artifact that has to be right, and
+        // the row count is what says each concept is named once and carries its own advice.
         [Fact]
-        public void GeneratedSchema_ListsEachRetiredConceptOnce()
+        public void GeneratedSchema_ListsEachRetiredConceptOnceWithItsAdvice()
         {
             string root = RepoRoot();
             string generated = File.ReadAllText(Path.Combine(
                 root, "csharp", "src", "CameraUnlock.Core", "Config", "ConfigKeySchema.g.cs"));
 
-            const string opener = "HashSet<string> Retired = new HashSet<string>";
+            const string opener = "Dictionary<string, string> Retired = new Dictionary<string, string>";
             int start = generated.IndexOf(opener, StringComparison.Ordinal);
-            Assert.True(start >= 0, "ConfigKeySchema.g.cs no longer declares a Retired set");
+            Assert.True(start >= 0, "ConfigKeySchema.g.cs no longer declares a Retired table");
             int begin = generated.IndexOf('{', start + opener.Length) + 1;
             int end = generated.IndexOf("};", begin, StringComparison.Ordinal);
 
@@ -329,10 +328,19 @@ namespace CameraUnlock.Core.Tests.Config
 
             using (JsonDocument schema = ReadSchema())
             {
-                int retiredConcepts = schema.RootElement.GetProperty("retired").GetArrayLength();
-                Assert.Equal(retiredConcepts, rows.Count);
+                JsonElement retired = schema.RootElement.GetProperty("retired");
+                Assert.Equal(retired.GetArrayLength(), rows.Count);
+                foreach (JsonElement concept in retired.EnumerateArray())
+                {
+                    string canonical = concept.GetProperty("aliases")[0].GetString()!
+                        .Replace("_", string.Empty).Replace("-", string.Empty).ToLowerInvariant();
+                    string advice = concept.GetProperty("advice").GetString()!;
+                    Assert.Equal(advice, ConfigKeySchema.RetiredAdvice(canonical));
+                    Assert.True(ConfigKeySchema.IsRetired(canonical));
+                }
             }
             Assert.Equal(rows.Count, new HashSet<string>(rows).Count);
+            Assert.Null(ConfigKeySchema.RetiredAdvice(ConfigKeySchema.Keys.LocalSmoothing));
         }
     }
 }

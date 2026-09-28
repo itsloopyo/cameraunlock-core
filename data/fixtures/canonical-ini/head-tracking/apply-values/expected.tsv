@@ -23,7 +23,6 @@ field	ToggleKey	Home
 field	CycleTrackingModeKey	Insert, Ctrl+Alt+F9
 field	YawModeKey	
 field	TrueFreeLookKey	Delete, Alt+U
-field	LightFollowsHead	false
 field	LightMultiplier	1.0
 field	PositionLocalSmoothing	0.25
 field	PositionRemoteSmoothing	0.5

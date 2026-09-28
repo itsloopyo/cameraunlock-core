@@ -102,7 +102,7 @@ namespace CameraUnlock.Core.Tests.Config
                 "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook",
                 "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
-                "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightFollowsHead", "LightMultiplier",
+                "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightMultiplier",
             };
             Assert.Equal(global, ConfigConcepts.All.Where(c => c.Global).Select(c => c.Id));
             Assert.Equal(new[] { "CollisionMargin", "CollisionChannel" }, ConfigConcepts.All.Where(c => !c.Global).Select(c => c.Id));
@@ -205,16 +205,10 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void EachLightRowReplacesTheLightInsteadOfChangingAShared()
+        public void TheLightRowReplacesTheLightInsteadOfChangingAShared()
         {
             var shared = new HeadFollowLightSettings();
             var config = new HeadTrackingConfigData { Light = shared };
-            HeadTrackingConfigTable.Create(ConfigConcepts.LightFollowsHead)
-                .Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Light]\r\nLightFollowsHead=false\r\n")), config);
-            Assert.False(config.Light.FollowsHead);
-            Assert.True(shared.FollowsHead);
-
-            config = new HeadTrackingConfigData { Light = shared };
             HeadTrackingConfigTable.Create(ConfigConcepts.LightMultiplier)
                 .Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Light]\r\nLightMultiplier=2.0\r\n")), config);
             Assert.Equal(2.0f, config.Light.Multiplier);

@@ -81,16 +81,17 @@ constexpr float kDefaultLightMultiplier = 1.5f;
 /// the aim, which is what the game does unmodded.
 constexpr float kMaxLightMultiplier = 5.0f;
 
-/// The config surface, in one place so the two keys mean the same thing in every
-/// mod. Wired to the shared vocabulary as LightFollowsHead and LightMultiplier
-/// (data/config-schema.json), which alias the spellings actually shipped:
-/// CompensateFlashlight and FlashlightScale (prey), FlashlightFollowsHead and
-/// FlashlightMultiplier (repo). The bare `Enabled` and `Multiplier` that
-/// still-wakes-the-deep and resident-evil-requiem ship under their own section
-/// are deliberately NOT aliased - section-less, `Enabled` is the master switch -
-/// so those two read their own keys.
+/// The config surface, in one place so the key means the same thing in every
+/// mod. Wired to the shared vocabulary as LightMultiplier
+/// (data/config-schema.json), which aliases the spellings actually shipped:
+/// FlashlightScale (prey) and FlashlightMultiplier (repo). The bare `Multiplier`
+/// that still-wakes-the-deep and resident-evil-requiem ship under their own
+/// section is deliberately NOT aliased, so those two read their own key.
+///
+/// There is no switch beside it. A carried light always follows the head, and a
+/// multiplier of 0 pins the beam to the aim, which is what a switch turned off
+/// ever meant.
 struct HeadFollowLightSettings {
-    bool follows_head = true;
     float multiplier = kDefaultLightMultiplier;
 };
 

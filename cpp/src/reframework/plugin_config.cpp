@@ -3,6 +3,7 @@
 #include <cameraunlock/config/checked_file_writer.h>
 #include <cameraunlock/config/ini_editor.h>
 #include <cameraunlock/config/ini_reader.h>
+#include <cameraunlock/config/retired_keys.h>
 #include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/math/finite_utils.h>
 #include <cameraunlock/protocol/port_utils.h>
@@ -518,7 +519,7 @@ bool PluginConfig::Read(const char* path, const PluginConfigSchema& schema) {
     localSmoothing = ReadFloat(reader, "Smoothing", "LocalSmoothing", localSmoothing, 0.0f, 1.0f);
     remoteSmoothing = ReadFloat(reader, "Smoothing", "RemoteSmoothing", remoteSmoothing, 0.0f, 1.0f);
 
-    cameraunlock::config::WarnRetiredSmoothingKey(reader, "Position", "Smoothing", &LogWarning);
+    cameraunlock::config::WarnRetiredConfigKey(reader, "Position", "Smoothing", &LogWarning);
 
     toggleKey = ReadHotkey(reader, "ToggleKey", toggleKey);
     positionToggleKey = ReadHotkey(reader, "PositionToggleKey", positionToggleKey);
@@ -549,9 +550,12 @@ bool PluginConfig::Read(const char* path, const PluginConfigSchema& schema) {
     positionEnabled = reader.ReadBool("Position", "Enabled", positionEnabled);
 
     if (schema.flashlight) {
-        flashlightTracking = reader.ReadBool("Flashlight", "Enabled", flashlightTracking);
         flashlightMultiplier = ReadFloat(reader, "Flashlight", "Multiplier", flashlightMultiplier,
                                          0.0f, kMaxFlashlightMultiplier);
+        // [Flashlight] Enabled is retired. Turning it off meant pinning the beam to the
+        // aim, which Multiplier=0 says exactly, so a file that still carries false keeps
+        // behaving as whoever wrote it meant rather than silently losing the setting.
+        if (!reader.ReadBool("Flashlight", "Enabled", true)) flashlightMultiplier = 0.0f;
     }
 
     autoEnable = reader.ReadBool("General", "AutoEnable", autoEnable);
@@ -619,9 +623,7 @@ bool PluginConfig::Save(const char* path, const PluginConfigSchema& schema) cons
 
     if (schema.flashlight) {
         file << "[Flashlight]\n";
-        file << "; Head tracking moves the flashlight beam as well as the view.\n";
-        file << "Enabled=" << (flashlightTracking ? "true" : "false") << "\n";
-        file << "; How far the beam leads the view (1.0 = matches the head, 1.5 = default)\n";
+        file << "; How far the beam leads the view (0 = pinned to the aim, 1.5 = default)\n";
         file << "Multiplier=" << flashlightMultiplier << "\n\n";
     }
 

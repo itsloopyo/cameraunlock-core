@@ -416,7 +416,10 @@
       "doc": "Sweep the level between the clean eye and the lean target and cut the lean to what the room leaves. A canonical file starts it on (canonical_default true, collision rows ruling of 2026-09-26): it is global, so Defaults.ini's value reaches every game that binds the row, and a game without a lean collision sweep does not bind it. A table whose row starts at false fails the fresh render's gate, so unless the owner approves a per_game entry, a mod whose trace has not been confirmed in game runs the sweep wherever its row follows Defaults.ini, where an unverified channel can block on nothing or on everything. The flat readers' default stays false. Mods spell the section differently - amnesia-rebirth carries it under [Camera] - and core's alias matching is section-less, so the section here is a readability choice.",
       "canonical": true,
       "global": true,
-      "file_comment": ["true: leaning stops at walls instead of moving the view through them."],
+      "file_comment": [
+        "true: leaning stops at walls instead of moving the view through them.",
+        "Only games whose mod sweeps the level for walls read this; the rest ignore it."
+      ],
       "canonical_default": true
     },
     {
@@ -602,18 +605,6 @@
       "canonical_reason": "The mod keeps no centre of its own: centre the view in your tracker app."
     },
     {
-      "id": "LightFollowsHead",
-      "section": "Light",
-      "key": "LightFollowsHead",
-      "type": "bool",
-      "default": true,
-      "aliases": ["FlashlightFollowsHead", "CompensateFlashlight"],
-      "doc": "Point a carried light where the head is looking rather than where the body is aiming. The two aliases are the spellings actually shipped - repo (FlashlightFollowsHead) and prey (CompensateFlashlight). The bare Enabled that still-wakes-the-deep and resident-evil-requiem ship under their own section stays unmatched on purpose, because section-less it is the master switch; see deliberately_unaliased.",
-      "canonical": true,
-      "global": true,
-      "file_comment": ["true: a light you carry points where you look instead of where you aim."]
-    },
-    {
       "id": "LightMultiplier",
       "section": "Light",
       "key": "LightMultiplier",
@@ -629,9 +620,20 @@
   ],
   "retired": [
     {
+      "id": "LightFollowsHead",
+      "aliases": [
+        "LightFollowsHead",
+        "FlashlightFollowsHead",
+        "CompensateFlashlight"
+      ],
+      "doc": "Retired and IGNORED. A carried light always follows the head now. Not migrated, and it does not need to be: LightMultiplier is the same switch with a range, and 0 pins the beam to the aim, which is exactly what LightFollowsHead=false did. A player who had turned it off sets LightMultiplier=0 instead, the next key in the same section.",
+      "advice": "A carried light always follows the head now. To pin the beam to the aim, which is what this key did when it was off, set LightMultiplier=0 in the same section."
+    },
+    {
       "id": "Smoothing",
       "aliases": ["Smoothing", "SmoothingFactor"],
-      "doc": "Retired and IGNORED. Replaced by LocalSmoothing and RemoteSmoothing. Not migrated: the old value carried a hidden 0.15 floor, so the number in an existing config does not mean what it used to."
+      "doc": "Retired and IGNORED. Replaced by LocalSmoothing and RemoteSmoothing. Not migrated: the old value carried a hidden 0.15 floor, so the number in an existing config does not mean what it used to.",
+      "advice": "Smoothing is now two keys: LocalSmoothing (a tracker on this machine) and RemoteSmoothing (a tracker on the network). The old value is not migrated because the semantics changed - it carried a hidden floor that no longer exists. Set the two new keys."
     }
   ],
   "non_canonical_keys": [

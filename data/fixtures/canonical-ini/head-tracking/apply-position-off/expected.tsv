@@ -22,7 +22,6 @@ field	ToggleKey	End, Ctrl+Shift+Y
 field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
 field	YawModeKey	PageDown, Ctrl+Shift+H
 field	TrueFreeLookKey	Insert, Ctrl+Shift+U
-field	LightFollowsHead	true
 field	LightMultiplier	1.5
 field	PositionLocalSmoothing	0.0
 field	PositionRemoteSmoothing	0.15

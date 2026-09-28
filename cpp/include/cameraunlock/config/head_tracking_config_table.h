@@ -118,10 +118,6 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
         case C::TrueFreeLookKey:
             BindHeadTrackingMember<C::TrueFreeLookKey>(table, &H::true_free_look_key_name);
             return;
-        case C::LightFollowsHead:
-            table.template Concept<C::LightFollowsHead>([](const Config& c) { return c.light.follows_head; },
-                                                        [](Config& c, bool v) { c.light.follows_head = v; });
-            return;
         case C::LightMultiplier:
             table.template Concept<C::LightMultiplier>([](const Config& c) { return c.light.multiplier; },
                                                        [](Config& c, float v) { c.light.multiplier = v; });
@@ -141,8 +137,7 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
 ///
 /// LocalSmoothing and RemoteSmoothing write the top-level field and its copy in `position`.
 /// PositionLimitY never sets PositionLimitYDown: each key is read on its own. CollisionMargin and
-/// CollisionReleaseSmoothing live in `lean_clamp`, LightFollowsHead and LightMultiplier in
-/// `light`. CollisionMargin and CollisionChannel are not global in the schema, so their rows hold
+/// CollisionReleaseSmoothing live in `lean_clamp`, LightMultiplier in `light`. CollisionMargin and CollisionChannel are not global in the schema, so their rows hold
 /// the game's own default and never follow Defaults.ini. CollisionChannel is also an Engine row: the
 /// channel is data about the game, so at its default it is written as a comment.
 /// The sensitivity and inversion fields, and those in

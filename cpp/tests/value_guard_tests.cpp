@@ -13,6 +13,8 @@
 //   - A negative position limit, which inverts PositionProcessor's clamp bounds
 //     and pins the lean at a fixed offset instead of freeing it.
 
+#include <cameraunlock/config/config_key_schema.g.h>
+#include <cameraunlock/config/retired_keys.h>
 #include <cameraunlock/config/value_guards.h>
 
 #include <cmath>
@@ -328,9 +330,9 @@ void TestReadFloatChecked() {
     DeleteFileA(path.c_str());
 }
 
-void TestWarnRetiredSmoothingKey() {
-    using cameraunlock::config::WarnRetiredSmoothingKey;
-    std::cout << "WarnRetiredSmoothingKey:\n";
+void TestWarnRetiredConfigKey() {
+    using cameraunlock::config::WarnRetiredConfigKey;
+    std::cout << "WarnRetiredConfigKey:\n";
 
     const std::string path = TempIniPath();
 
@@ -341,8 +343,12 @@ void TestWarnRetiredSmoothingKey() {
         cameraunlock::IniReader ini;
         ini.Open(path);
         ResetLog();
-        WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing", &CapturingLog);
+        WarnRetiredConfigKey(ini, "Tracking", "Smoothing", &CapturingLog);
         Check(g_logCalls == 0, "an absent retired key is silent");
+        WarnRetiredConfigKey(ini, "Tracking", "LocalSmoothing", &CapturingLog);
+        Check(g_logCalls == 0, "a key that names a live concept is silent");
+        WarnRetiredConfigKey(ini, "Tracking", "NotAKeyAtAll", &CapturingLog);
+        Check(g_logCalls == 0, "a key that names no concept at all is silent");
     }
 
     WriteIni(path, "[Tracking]\r\nSmoothing= ; old value\r\n");
@@ -350,7 +356,7 @@ void TestWarnRetiredSmoothingKey() {
         cameraunlock::IniReader ini;
         ini.Open(path);
         ResetLog();
-        WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing", &CapturingLog);
+        WarnRetiredConfigKey(ini, "Tracking", "Smoothing", &CapturingLog);
         Check(g_logCalls == 0, "a retired key holding only a comment counts as absent");
     }
 
@@ -358,26 +364,41 @@ void TestWarnRetiredSmoothingKey() {
     {
         cameraunlock::IniReader ini;
         ini.Open(path);
-        WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing", nullptr);
+        WarnRetiredConfigKey(ini, "Tracking", "Smoothing", nullptr);
 
         ResetLog();
-        WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing", &CapturingLog);
+        WarnRetiredConfigKey(ini, "Tracking", "Smoothing", &CapturingLog);
         Check(g_logCalls == 1, "a present retired key warns, and a null sink before it spent nothing");
         Check(g_lastMessage.find("IGNORED") != std::string::npos &&
                   g_lastMessage.find("not migrated") != std::string::npos,
               "the warning says the value is ignored AND not migrated");
         Check(g_lastMessage ==
-                  "Config key [Tracking] Smoothing has been retired and is IGNORED. Smoothing is now two "
-                  "keys: LocalSmoothing (default 0, applies to a tracker on this machine) and "
-                  "RemoteSmoothing (default 0.15, applies to a tracker on the network). The old value "
-                  "is not migrated because the semantics changed - it carried a hidden 0.15 floor that "
-                  "no longer exists. Set the two new keys.",
-              "the warning text is exactly the frozen one");
+                  std::string("Config key [Tracking] Smoothing has been retired and is IGNORED. ") +
+                      cameraunlock::RetiredConfigKeyAdvice(cameraunlock::config_keys::kSmoothing),
+              "the warning is the frozen sentence plus the schema's advice for that key");
 
         // Config is reloadable, and repeating this on every reload buries it.
         ResetLog();
-        WarnRetiredSmoothingKey(ini, "Tracking", "Smoothing", &CapturingLog);
+        WarnRetiredConfigKey(ini, "Tracking", "Smoothing", &CapturingLog);
         Check(g_logCalls == 0, "the warning is once per process, not once per load");
+    }
+
+    // The whole point of looking the advice up rather than branching per key: a
+    // second retired concept warns on its own latch, with its own sentence, and
+    // needed no code here to do it.
+    WriteIni(path, "[Light]\r\nFlashlightFollowsHead=false\r\n");
+    {
+        cameraunlock::IniReader ini;
+        ini.Open(path);
+        ResetLog();
+        WarnRetiredConfigKey(ini, "Light", "FlashlightFollowsHead", &CapturingLog);
+        Check(g_logCalls == 1, "a different retired key has its own latch");
+        Check(g_lastMessage ==
+                  std::string("Config key [Light] FlashlightFollowsHead has been retired and is IGNORED. ") +
+                      cameraunlock::RetiredConfigKeyAdvice(cameraunlock::config_keys::kLightFollowsHead),
+              "an alias of a retired key resolves to that key's advice");
+        Check(g_lastMessage.find("LightMultiplier=0") != std::string::npos,
+              "the advice names what to set instead");
     }
 
     DeleteFileA(path.c_str());
@@ -397,7 +418,7 @@ int RunValueGuardTests() {
 #ifdef _WIN32
     TestReadRawValue();
     TestReadFloatChecked();
-    TestWarnRetiredSmoothingKey();
+    TestWarnRetiredConfigKey();
 #endif
     return g_failures;
 }

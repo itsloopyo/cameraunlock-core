@@ -467,7 +467,6 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"YawModeKey", ShippedString(c.yaw_mode_key_name)},
         {"TrueFreeLookKey", ShippedString(c.true_free_look_key_name)},
         {"RecenterKey", ShippedString(c.recenter_key_name)},
-        {"LightFollowsHead", ShippedBool(c.light.follows_head)},
         {"LightMultiplier", ShippedFloat(c.light.multiplier)},
     };
 }

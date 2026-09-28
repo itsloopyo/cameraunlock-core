@@ -300,6 +300,14 @@ namespace CameraUnlock.Core.Config
                     firstSpellingOf[key] = kvp.Key;
                 }
 
+                // Ahead of the switch, so a retired concept needs no case of its own and any
+                // number of them behave alike. The advice is generated from the schema.
+                if (ConfigKeySchema.IsRetired(key))
+                {
+                    WarnRetiredKey(log, kvp.Key, key);
+                    continue;
+                }
+
                 string value = kvp.Value;
 
                 int intVal;
@@ -547,11 +555,6 @@ namespace CameraUnlock.Core.Config
                         break;
 #pragma warning restore 618
 
-                    case ConfigKeySchema.Keys.LightFollowsHead:
-                        if (ConfigParsingUtils.TryParseBool(value, out boolVal))
-                            Light.FollowsHead = boolVal;
-                        break;
-
                     case ConfigKeySchema.Keys.LightMultiplier:
                         if (ConfigParsingUtils.TryParseFloat(value, out floatVal))
                         {
@@ -615,9 +618,6 @@ namespace CameraUnlock.Core.Config
                         }
                         break;
 
-                    case ConfigKeySchema.Keys.Smoothing:
-                        WarnRetiredSmoothingKey(log, kvp.Key);
-                        break;
                 }
             }
 
@@ -729,33 +729,27 @@ namespace CameraUnlock.Core.Config
                 key, value, fallback.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
 
-        // Warned once per process rather than once per load: mods reload config on a
-        // hotkey or a file watcher, and repeating this every reload buries it.
-        private static bool _warnedRetiredSmoothingKey;
+        // Warned once per process per key rather than once per load: mods reload config on
+        // a hotkey or a file watcher, and repeating this every reload buries it.
+        private static readonly HashSet<string> _warnedRetiredKeys = new HashSet<string>();
 
 #if NULLABLE_ENABLED
-        private static void WarnRetiredSmoothingKey(Action<string>? log, string key)
+        private static void WarnRetiredKey(Action<string>? log, string asWritten, string canonical)
 #else
-        private static void WarnRetiredSmoothingKey(Action<string> log, string key)
+        private static void WarnRetiredKey(Action<string> log, string asWritten, string canonical)
 #endif
         {
-            if (_warnedRetiredSmoothingKey) return;
-            _warnedRetiredSmoothingKey = true;
+            // Latched only once the warning is actually emitted, so a caller with no sink
+            // cannot burn the one chance a later caller had of seeing it.
+            if (log == null) return;
+            if (!_warnedRetiredKeys.Add(canonical)) return;
 
-            // Deliberately NOT migrated into the new keys. The old single value carried a
-            // hidden 0.15 floor, so the number in an existing config does not mean what it
-            // used to: copying 0.8 across would silently hand a local user smoothing they
-            // never chose under the new semantics, and copying it into only one of the two
-            // would be a guess about which connection they were on.
-            log?.Invoke(string.Format(
-                "Config key '{0}' has been retired and is IGNORED. Smoothing is now two keys: " +
-                "LocalSmoothing (default {1}, applies to a tracker on this machine) and " +
-                "RemoteSmoothing (default {2}, applies to a tracker on the network). The old " +
-                "value is not migrated because the semantics changed - it carried a hidden " +
-                "{2} floor that no longer exists. Set the two new keys.",
-                key,
-                SmoothingUtils.DefaultLocalSmoothing.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                SmoothingUtils.DefaultRemoteSmoothing.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            // A retired value is deliberately never migrated: each one was retired because
+            // what it meant changed, so carrying the number across would hand the player a
+            // setting they never chose. The advice names what to set instead.
+            log(string.Format(
+                "Config key '{0}' has been retired and is IGNORED. {1}",
+                asWritten, ConfigKeySchema.RetiredAdvice(canonical)));
         }
 
         /// <summary>

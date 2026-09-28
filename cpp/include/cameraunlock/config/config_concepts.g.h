@@ -34,7 +34,6 @@ enum class Concept {
     CycleTrackingModeKey,
     YawModeKey,
     TrueFreeLookKey,
-    LightFollowsHead,
     LightMultiplier,
 };
 
@@ -232,7 +231,7 @@ struct ConceptTraits<Concept::CollisionEnabled> {
     static constexpr const char* kSection = "Position";
     static constexpr const char* kKey = "CollisionEnabled";
     static constexpr ValueFamily kFamily = ValueFamily::kBool;
-    static constexpr const char* kFileComment[] = {"true: leaning stops at walls instead of moving the view through them."};
+    static constexpr const char* kFileComment[] = {"true: leaning stops at walls instead of moving the view through them.", "Only games whose mod sweeps the level for walls read this; the rest ignore it."};
     static constexpr const char* kCanonicalDefault = "true";
     static constexpr const char* kDefaultText = "true";
     static constexpr bool kGlobal = true;
@@ -322,17 +321,6 @@ struct ConceptTraits<Concept::TrueFreeLookKey> {
 };
 
 template <>
-struct ConceptTraits<Concept::LightFollowsHead> {
-    static constexpr const char* kSection = "Light";
-    static constexpr const char* kKey = "LightFollowsHead";
-    static constexpr ValueFamily kFamily = ValueFamily::kBool;
-    static constexpr const char* kFileComment[] = {"true: a light you carry points where you look instead of where you aim."};
-    static constexpr const char* kCanonicalDefault = nullptr;
-    static constexpr const char* kDefaultText = "true";
-    static constexpr bool kGlobal = true;
-};
-
-template <>
 struct ConceptTraits<Concept::LightMultiplier> {
     static constexpr const char* kSection = "Light";
     static constexpr const char* kKey = "LightMultiplier";
@@ -376,7 +364,7 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::PositionLimitYDown, "PositionLimitYDown", "Position", "PositionLimitYDown", ValueFamily::kFloating, {"How far, in metres, lowering your head can move the view.", nullptr}, 1, nullptr, "0.2", true},
     {Concept::PositionLimitZ, "PositionLimitZ", "Position", "PositionLimitZ", ValueFamily::kFloating, {"How far, in metres, leaning forward can move the view.", nullptr}, 1, nullptr, "0.4", true},
     {Concept::PositionLimitZBack, "PositionLimitZBack", "Position", "PositionLimitZBack", ValueFamily::kFloating, {"How far, in metres, leaning back can move the view.", nullptr}, 1, nullptr, "0.1", true},
-    {Concept::CollisionEnabled, "CollisionEnabled", "Position", "CollisionEnabled", ValueFamily::kBool, {"true: leaning stops at walls instead of moving the view through them.", nullptr}, 1, "true", "true", true},
+    {Concept::CollisionEnabled, "CollisionEnabled", "Position", "CollisionEnabled", ValueFamily::kBool, {"true: leaning stops at walls instead of moving the view through them.", "Only games whose mod sweeps the level for walls read this; the rest ignore it."}, 2, "true", "true", true},
     {Concept::CollisionMargin, "CollisionMargin", "Position", "CollisionMargin", ValueFamily::kFloating, {"How far the view is held off a wall when you lean into it, in the game's own units.", nullptr}, 1, nullptr, "0.1", false},
     {Concept::CollisionChannel, "CollisionChannel", "Position", "CollisionChannel", ValueFamily::kInteger, {"Which of the game's collision channels the wall check tests against.", nullptr}, 1, nullptr, "0", false},
     {Concept::CollisionReleaseSmoothing, "CollisionReleaseSmoothing", "Position", "CollisionReleaseSmoothing", ValueFamily::kFloating, {"How gently the view eases back out after a wall stopped a lean.", "0 is the quickest, 1 the slowest."}, 2, nullptr, "0.9", true},
@@ -384,7 +372,6 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::CycleTrackingModeKey, "CycleTrackingModeKey", "Hotkeys", "CycleTrackingModeKey", ValueFamily::kHotkey, {"Changes the tracking mode: rotation and position, rotation only, position only.", nullptr}, 1, "PageUp, Ctrl+Shift+G", "PageUp, Ctrl+Shift+G", true},
     {Concept::YawModeKey, "YawModeKey", "Hotkeys", "YawModeKey", ValueFamily::kHotkey, {"Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).", nullptr}, 1, "PageDown, Ctrl+Shift+H", "PageDown, Ctrl+Shift+H", true},
     {Concept::TrueFreeLookKey, "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ValueFamily::kHotkey, {"Switches between keeping your eye on the sights and true free look (TrueFreeLook).", nullptr}, 1, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U", true},
-    {Concept::LightFollowsHead, "LightFollowsHead", "Light", "LightFollowsHead", ValueFamily::kBool, {"true: a light you carry points where you look instead of where you aim.", nullptr}, 1, nullptr, "true", true},
     {Concept::LightMultiplier, "LightMultiplier", "Light", "LightMultiplier", ValueFamily::kFloating, {"How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."}, 2, nullptr, "1.5", true},
 };
 

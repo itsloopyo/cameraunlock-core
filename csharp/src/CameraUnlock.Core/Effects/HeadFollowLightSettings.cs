@@ -38,9 +38,6 @@ namespace CameraUnlock.Core.Effects
         /// </summary>
         public const float MaxMultiplier = 5.0f;
 
-        /// <summary>Point a carried light where the head is looking rather than where the body is aiming.</summary>
-        public bool FollowsHead { get; set; } = true;
-
         /// <summary>How far the light turns relative to the head.</summary>
         public float Multiplier { get; set; } = DefaultMultiplier;
 

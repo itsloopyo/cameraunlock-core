@@ -61,9 +61,9 @@ namespace CameraUnlock.Core.Config
             public const string YawModeKey = "yawmodekey";
             public const string TrueFreeLookKey = "truefreelookkey";
             public const string RecenterKey = "recenterkey";
-            public const string LightFollowsHead = "lightfollowshead";
             public const string LightMultiplier = "lightmultiplier";
 
+            public const string LightFollowsHead = "lightfollowshead";
             public const string Smoothing = "smoothing";
         }
 
@@ -274,9 +274,15 @@ namespace CameraUnlock.Core.Config
             { "zsensitivity", "positionsensitivityz" },
         };
 
-        private static readonly HashSet<string> Retired = new HashSet<string>
+        /// <summary>
+        /// Retired canonical names, each mapped to the sentence a player is shown when
+        /// the key is found in their config. Keyed rather than a set so a parser needs
+        /// no branch per retired concept.
+        /// </summary>
+        private static readonly Dictionary<string, string> Retired = new Dictionary<string, string>
         {
-            "smoothing",
+            { "lightfollowshead", "A carried light always follows the head now. To pin the beam to the aim, which is what this key did when it was off, set LightMultiplier=0 in the same section." },
+            { "smoothing", "Smoothing is now two keys: LocalSmoothing (a tracker on this machine) and RemoteSmoothing (a tracker on the network). The old value is not migrated because the semantics changed - it carried a hidden floor that no longer exists. Set the two new keys." },
         };
 
         /// <summary>
@@ -320,7 +326,18 @@ namespace CameraUnlock.Core.Config
         /// </summary>
         public static bool IsRetired(string canonicalKey)
         {
-            return canonicalKey != null && Retired.Contains(canonicalKey);
+            return RetiredAdvice(canonicalKey) != null;
+        }
+
+        /// <summary>
+        /// What to tell a player who still has this key, or null when the name names
+        /// no retired concept.
+        /// </summary>
+        public static string RetiredAdvice(string canonicalKey)
+        {
+            if (canonicalKey == null) return null;
+            string advice;
+            return Retired.TryGetValue(canonicalKey, out advice) ? advice : null;
         }
     }
 }

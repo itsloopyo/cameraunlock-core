@@ -17,7 +17,7 @@ namespace cameraunlock::reframework {
 ///   PositionLimitZBack;
 /// - [Hotkeys] ToggleKey, CycleTrackingModeKey and YawModeKey on the three *KeyBindings
 ///   fields, and with schema.diagnosticMarkerKey the local row DiagnosticMarkerKey;
-/// - with schema.flashlight, [Light] LightFollowsHead and LightMultiplier;
+/// - with schema.flashlight, [Light] LightMultiplier;
 /// - with schema.trueFreeLook, [Position] TrueFreeLook (Writable) and [Hotkeys] TrueFreeLookKey;
 /// - with schema.leanCollision, [Position] CollisionEnabled, CollisionMargin and
 ///   CollisionReleaseSmoothing.

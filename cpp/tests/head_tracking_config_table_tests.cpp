@@ -135,7 +135,6 @@ std::vector<FieldRead> Fields() {
         {"CycleTrackingModeKey", [k](const H& c) { return k(c.cycle_tracking_mode_key_name); }},
         {"YawModeKey", [k](const H& c) { return k(c.yaw_mode_key_name); }},
         {"TrueFreeLookKey", [k](const H& c) { return k(c.true_free_look_key_name); }},
-        {"LightFollowsHead", [b](const H& c) { return b(c.light.follows_head); }},
         {"LightMultiplier", [f](const H& c) { return f(c.light.multiplier); }},
         {"PositionLocalSmoothing", [f](const H& c) { return f(c.position.local_smoothing); }},
         {"PositionRemoteSmoothing", [f](const H& c) { return f(c.position.remote_smoothing); }},
@@ -328,11 +327,11 @@ void TestGlobalConcepts() {
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook",
         "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
-        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightFollowsHead", "LightMultiplier"};
+        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightMultiplier"};
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 22 listed, in schema order");
+    Check(global == expected, "the global concepts are the 21 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }

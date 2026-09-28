@@ -53,9 +53,9 @@ inline constexpr const char* kCycleTrackingModeKey = "cycletrackingmodekey";
 inline constexpr const char* kYawModeKey = "yawmodekey";
 inline constexpr const char* kTrueFreeLookKey = "truefreelookkey";
 inline constexpr const char* kRecenterKey = "recenterkey";
-inline constexpr const char* kLightFollowsHead = "lightfollowshead";
 inline constexpr const char* kLightMultiplier = "lightmultiplier";
 
+inline constexpr const char* kLightFollowsHead = "lightfollowshead";
 inline constexpr const char* kSmoothing = "smoothing";
 
 }  // namespace config_keys
@@ -87,7 +87,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "collisionskin", "collisionmargin", false },
     { "collisiontracechannel", "collisionchannel", false },
     { "compensatecrosshair", "showreticle", false },
-    { "compensateflashlight", "lightfollowshead", false },
+    { "compensateflashlight", "lightfollowshead", true },
     { "compensatereticle", "showreticle", false },
     { "crosshaircolor", "reticlecolor", false },
     { "crosshaircolour", "reticlecolor", false },
@@ -109,7 +109,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "enableonstartup", "enableonstartup", false },
     { "enableposition", "positionenabled", false },
     { "enablepositiontracking", "positionenabled", false },
-    { "flashlightfollowshead", "lightfollowshead", false },
+    { "flashlightfollowshead", "lightfollowshead", true },
     { "flashlightmultiplier", "lightmultiplier", false },
     { "flashlightscale", "lightmultiplier", false },
     { "horizonlock", "worldspaceyaw", false },
@@ -138,7 +138,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "leancollisionenabled", "collisionenabled", false },
     { "leancollisionmargin", "collisionmargin", false },
     { "leanreleasesmoothing", "collisionreleasesmoothing", false },
-    { "lightfollowshead", "lightfollowshead", false },
+    { "lightfollowshead", "lightfollowshead", true },
     { "lightmultiplier", "lightmultiplier", false },
     { "limitdown", "positionlimitydown", false },
     { "limitx", "positionlimitx", false },
@@ -337,7 +337,6 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "YawModeKey", config_keys::kYawModeKey, ConfigValueType::kString, 0, 0.0f, false, "PageDown", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "TrueFreeLookKey", config_keys::kTrueFreeLookKey, ConfigValueType::kString, 0, 0.0f, false, "Insert, Ctrl+Shift+U", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "RecenterKey", config_keys::kRecenterKey, ConfigValueType::kString, 0, 0.0f, false, "Home", {0.0f, 0.0f, 0.0f, 0.0f} },
-    { "LightFollowsHead", config_keys::kLightFollowsHead, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LightMultiplier", config_keys::kLightMultiplier, ConfigValueType::kFloat, 0, 1.5f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
 };
 
@@ -362,6 +361,34 @@ inline const char* ResolveConfigKey(const std::string& key) {
     const std::string normalized = NormalizeConfigKey(key);
     for (size_t i = 0; i < kConfigKeyAliasCount; ++i) {
         if (normalized == kConfigKeyAliases[i].normalized) return kConfigKeyAliases[i].canonical;
+    }
+    return nullptr;
+}
+
+/// A retired concept and the sentence a player is shown when the key is found in
+/// their config. Looked up by canonical name so a parser needs no branch per
+/// retired concept.
+struct RetiredConfigKeyAdviceEntry {
+    const char* canonical;
+    const char* advice;
+};
+
+inline constexpr RetiredConfigKeyAdviceEntry kRetiredConfigKeyAdvice[] = {
+    { "lightfollowshead", "A carried light always follows the head now. To pin the beam to the aim, which is what this key did when it was off, set LightMultiplier=0 in the same section." },
+    { "smoothing", "Smoothing is now two keys: LocalSmoothing (a tracker on this machine) and RemoteSmoothing (a tracker on the network). The old value is not migrated because the semantics changed - it carried a hidden floor that no longer exists. Set the two new keys." },
+};
+
+inline constexpr std::size_t kRetiredConfigKeyAdviceCount =
+    sizeof(kRetiredConfigKeyAdvice) / sizeof(kRetiredConfigKeyAdvice[0]);
+
+/// What to tell a player who still has this key, or nullptr when the name names no
+/// retired concept. The returned pointer is static storage.
+inline const char* RetiredConfigKeyAdvice(const char* canonical_key) {
+    if (canonical_key == nullptr) return nullptr;
+    for (std::size_t i = 0; i < kRetiredConfigKeyAdviceCount; ++i) {
+        if (std::string(canonical_key) == kRetiredConfigKeyAdvice[i].canonical) {
+            return kRetiredConfigKeyAdvice[i].advice;
+        }
     }
     return nullptr;
 }

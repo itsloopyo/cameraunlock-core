@@ -2174,7 +2174,7 @@ namespace CameraUnlock.Core.Tests.Config
                 config.PositionEnabled = position;
                 float multiplier = LegacyNormalisations.FiniteOrDefault(light, HeadFollowLightSettings.DefaultMultiplier, "Light",
                     "LightMultiplier", dropped);
-                config.Light = new HeadFollowLightSettings { FollowsHead = config.Light.FollowsHead, Multiplier = multiplier };
+                config.Light = new HeadFollowLightSettings { Multiplier = multiplier };
                 var follows = new LegacyFollowsDefaultsIni();
                 if (FollowsDefaultsIni)
                 {

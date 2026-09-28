@@ -195,13 +195,9 @@ namespace CameraUnlock.Core.Config
                 case nameof(ConfigConcepts.TrueFreeLookKey):
                     table.Concept(ConfigConcepts.TrueFreeLookKey, c => c.TrueFreeLookKeyName, (c, v) => c.TrueFreeLookKeyName = v);
                     return;
-                case nameof(ConfigConcepts.LightFollowsHead):
-                    table.Concept(ConfigConcepts.LightFollowsHead, c => c.Light.FollowsHead,
-                        (c, v) => c.Light = new HeadFollowLightSettings { FollowsHead = v, Multiplier = c.Light.Multiplier });
-                    return;
                 case nameof(ConfigConcepts.LightMultiplier):
                     table.Concept(ConfigConcepts.LightMultiplier, c => c.Light.Multiplier,
-                        (c, v) => c.Light = new HeadFollowLightSettings { FollowsHead = c.Light.FollowsHead, Multiplier = v });
+                        (c, v) => c.Light = new HeadFollowLightSettings { Multiplier = v });
                     return;
             }
             // Reached by a concept the schema gained after this switch was written.

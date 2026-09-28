@@ -9,6 +9,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - `LightFollowsHead` is retired, and retired keys no longer need a branch
+
+The concept is gone from the schema, from `HeadFollowLightSettings` (C++ `follows_head`, C#
+`FollowsHead`), from both config tables and from `PluginConfig` (`flashlightTracking`). A carried
+light always follows the head; `LightMultiplier=0` pins the beam to the aim, which is what the
+switch turned off ever meant, and it is the next key in the same section.
+
+What to change in a consuming repo:
+
+- A mod reading `config.Light.FollowsHead` / `config.light.follows_head` or
+  `PluginConfig::flashlightTracking` no longer compiles. Gate on `Light.Multiplier > 0` where the
+  distinction still matters, or drop the gate - the multiplier already carries it.
+- A committed canonical file holding `[Light] LightFollowsHead` drops the row. Nothing breaks if it
+  does not: the key still resolves, and a file that carries one is logged and ignored.
+- The legacy REFramework `[Flashlight] Enabled` key is still read, and `false` now folds into
+  `Multiplier=0`, so an existing user's setting survives the upgrade. It is no longer written.
+
+Each entry in the schema's `retired` list now carries an `advice` sentence, generated into
+`ConfigKeySchema.RetiredAdvice` (C#) and `RetiredConfigKeyAdvice` (C++). Both flat readers test
+`IsRetired` ahead of their switch and log that advice, so a retired concept needs no branch in
+either language - which is what let a second one be added at all.
+
+New `cameraunlock/config/retired_keys.h`: `WarnRetiredConfigKey(reader, section, key, log)`, the
+same warning for any retired key, for a reader that pulls keys out of an `IniReader` by name.
+`value_guards.h`'s narrower `WarnRetiredSmoothingKey` is unchanged and stays - every mod repo's
+frozen legacy import compiles that header, ~50 of them call that function, and eight pin the
+header and its .cpp by SHA-256 in `tests/config_differential/provenance.txt`. Neither file is
+touched by this change.
+
+### Changed - `CollisionEnabled`'s file comment says which games read it
+
+The row's comment now adds "Only games whose mod sweeps the level for walls read this; the rest
+ignore it." A committed canonical file that renders the comment picks it up on the next
+`render-config`.
+
 ### Changed - conformance's `ci-minutes` fails a push build that uploads an artifact
 
 A push or pull request build with an `actions/upload-artifact` step now draws a FAIL. Players get

@@ -129,12 +129,10 @@ struct PluginConfig {
     bool positionInvertZ = false;
     bool positionEnabled = true;
 
-    // The carried light follows the head rather than the aim: the beam is
-    // rotated by the head pose scaled by flashlightMultiplier, so it leads the
-    // view instead of matching it. See effects/head_follow_light.h for why it
-    // leads, and for what the number is bounded by. This is a light-to-view
-    // relationship, not tracker pose shaping.
-    bool flashlightTracking = true;
+    // How far the carried light leads the head: the beam is rotated by the head
+    // pose scaled by this, so 0 pins it to the aim and 1 matches the head. See
+    // effects/head_follow_light.h for why it leads, and for what the number is
+    // bounded by. This is a light-to-view relationship, not tracker pose shaping.
     float flashlightMultiplier = effects::kDefaultLightMultiplier;
 
     // General
