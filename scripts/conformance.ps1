@@ -59,7 +59,7 @@ $CHECK_IDS = @(
     'shim-marker', 'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
     'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme',
     'config-format', 'config-legacy-reader', 'config-preserve', 'config-descriptor', 'config-defaults',
-    'release-canonical-since'
+    'release-canonical-since', 'ci-minutes'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -1297,6 +1297,276 @@ function Test-ReleaseCanonicalSince {
     Add-Finding $Name 'release-canonical-since' 'FAIL' "launcher-manifest.json carries config.canonical_since and scripts/release.ps1 calls neither Assert-ReleaseNotBelowCanonicalSince nor New-ReleaseTag, so a version below it is tagged and pushed before CI refuses it. Call Assert-ReleaseNotBelowCanonicalSince -RepoRoot `$projectDir -Version `$Version as soon as the version is resolved"
 }
 
+# ---------------------------------------------------------------------------
+# ci-minutes: what a push build and a release run, held against the pixi task
+# graph. The files a repo copies are scripts/templates/build-workflow.yml,
+# pixi-test-tasks.toml and release-full-test.ps1.
+# ---------------------------------------------------------------------------
+
+# A native command whose stderr is an ordinary answer. Under Windows PowerShell
+# 5.1 a native command's stderr line becomes a NativeCommandError record, which
+# this script's $ErrorActionPreference = 'Stop' turns into a terminating error.
+function Invoke-NativeQuiet {
+    param([scriptblock]$Command)
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $all = @(& $Command 2>&1)
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+    return [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Out      = @($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+        Err      = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+    }
+}
+
+# pixi's own reading of the manifest, so every spelling pixi accepts (inline
+# tables, [tasks.name] tables, feature tasks, depends-on objects) reads the way
+# pixi runs it. A task defined in several environments is merged into one.
+function Get-PixiTaskGraph {
+    param([string]$Root)
+    $manifest = Join-Path $Root 'pixi.toml'
+    $result = Invoke-NativeQuiet { pixi task list --json --manifest-path $manifest }
+    if ($result.ExitCode -ne 0) { return [pscustomobject]@{ Error = "exit $($result.ExitCode): $(($result.Err -join ' ').Trim())"; Tasks = $null } }
+    $graph = @{}
+    foreach ($environment in @(($result.Out -join "`n") | ConvertFrom-Json)) {
+        foreach ($feature in @($environment.features)) {
+            foreach ($task in @($feature.tasks)) {
+                if (-not $graph.ContainsKey($task.name)) {
+                    $graph[$task.name] = [pscustomobject]@{ Cmd = $task.cmd; Deps = (New-Object System.Collections.Generic.HashSet[string]) }
+                }
+                foreach ($dep in @($task.depends_on)) {
+                    if ($dep) { [void]$graph[$task.name].Deps.Add($dep.task_name) }
+                }
+            }
+        }
+    }
+    return [pscustomobject]@{ Error = $null; Tasks = $graph }
+}
+
+# Every task that running $Tasks runs, the named ones included.
+function Get-TaskReach {
+    param([hashtable]$Graph, [string[]]$Tasks)
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    foreach ($t in $Tasks) { $stack.Push($t) }
+    while ($stack.Count -gt 0) {
+        $t = $stack.Pop()
+        if (-not $seen.Add($t)) { continue }
+        if ($Graph.ContainsKey($t)) {
+            foreach ($d in $Graph[$t].Deps) { $stack.Push($d) }
+        }
+    }
+    return ,$seen
+}
+
+# The tasks a workflow runs, in order. Only a `pixi run` that starts a command
+# counts, so the task named in an error message such as
+# "::error::pixi run test failed" is not taken for a step that runs it.
+function Get-WorkflowPixiTasks {
+    param([string[]]$Lines)
+    $tasks = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $Lines) {
+        if ($line -match '^\s*#') { continue }
+        foreach ($m in [regex]::Matches($line, '(?:^\s*(?:-\s+)?(?:run:\s*)?|[;&|{]\s*)pixi\s+run\s+(?:(?:-e|--environment)\s+\S+\s+)?([A-Za-z0-9_.-]+)')) {
+            $tasks.Add($m.Groups[1].Value)
+        }
+    }
+    return ,$tasks
+}
+
+# The top-level block that starts with "${Key}:", its key line included.
+function Get-TopLevelBlock {
+    param([string[]]$Lines, [string]$Key)
+    $block = New-Object System.Collections.Generic.List[string]
+    $inside = $false
+    foreach ($line in $Lines) {
+        if ($line -match '^\S') {
+            if ($inside) { break }
+            if ($line -match ('^["'']?' + [regex]::Escape($Key) + '["'']?\s*:')) { $inside = $true }
+        }
+        if ($inside) { $block.Add($line) }
+    }
+    return ,$block
+}
+
+# The triggers under `on:`, each with the lines beneath it, from the block form
+# or from the one-line `on: push` and `on: [push, pull_request]` forms.
+function Get-WorkflowTriggers {
+    param([string[]]$Lines)
+    $triggers = [ordered]@{}
+    $block = Get-TopLevelBlock $Lines 'on'
+    if ($block.Count -eq 0) { return $triggers }
+    if ($block[0] -match '^["'']?on["'']?\s*:\s*([^#\s].*)$') {
+        foreach ($name in ($Matches[1] -replace '[\[\]\s]', '' -split ',')) {
+            if ($name) { $triggers[$name] = @() }
+        }
+        return $triggers
+    }
+    $indent = -1
+    $current = $null
+    foreach ($line in ($block | Select-Object -Skip 1)) {
+        if ($line -match '^\s*(#|$)') { continue }
+        $lead = $line.Length - $line.TrimStart().Length
+        if ($indent -lt 0) { $indent = $lead }
+        if ($lead -eq $indent -and $line -match '^\s*([A-Za-z_]+)\s*:') {
+            $current = $Matches[1]
+            $triggers[$current] = @()
+        } elseif ($current) {
+            $triggers[$current] += $line
+        }
+    }
+    return $triggers
+}
+
+# The release-mod.yml a caller pins, read out of this core checkout. $null when
+# the commit is not here: a shallow clone, or a checkout older than the pin.
+function Get-PinnedReleaseWorkflow {
+    param([string]$Sha)
+    $result = Invoke-NativeQuiet { git -C $CoreRoot show "$($Sha):.github/workflows/release-mod.yml" }
+    if ($result.ExitCode -ne 0) { return $null }
+    return ($result.Out -join "`n")
+}
+
+function Test-CiMinutes {
+    param([string]$Name, [string]$Root)
+
+    if (-not (Test-Path -LiteralPath (Join-Path $Root 'pixi.toml'))) { return }
+    $read = Get-PixiTaskGraph $Root
+    if ($read.Error) {
+        Add-Finding $Name 'ci-minutes' 'FAIL' "pixi task list could not read pixi.toml ($($read.Error))"
+        return
+    }
+    $graph = $read.Tasks
+    $hasDifferential = Test-Path -LiteralPath (Join-Path $Root 'tests/config_differential') -PathType Container
+
+    $split = $graph.ContainsKey('test-differential')
+    if ($hasDifferential -and -not $split) {
+        Add-Finding $Name 'ci-minutes' 'FAIL' 'the repo has tests/config_differential and pixi.toml has no test-differential task, so the release paths cannot run the differential on its own and a push build that tests runs it. Split test into test-unit and test-differential, and make package depend on test-unit (scripts/templates/pixi-test-tasks.toml)'
+    }
+
+    # A release runs its package task and then, where there is one, the differential.
+    $releaseExtra = @(if ($hasDifferential) { 'test-differential' })
+
+    # What `pixi run test` runs and running $Tasks does not.
+    $skippedBy = {
+        param([string[]]$Tasks)
+        if (-not $graph.ContainsKey('test')) { return @() }
+        $release = Get-TaskReach $graph $Tasks
+        if ($release.Contains('test')) { return @() }
+        $test = Get-TaskReach $graph @('test')
+        $skipped = @($test | Where-Object { $_ -ne 'test' -and -not $release.Contains($_) } | Sort-Object)
+        if ($graph['test'].Cmd) { $skipped = @("test's own command") + $skipped }
+        return $skipped
+    }
+
+    if ($hasDifferential -and $split) {
+        if ($graph.ContainsKey('package') -and (Get-TaskReach $graph @('package')).Contains('test-differential')) {
+            Add-Finding $Name 'ci-minutes' 'FAIL' 'package runs test-differential, so every push build runs the slow differential. package depends on test-unit, and test on test-unit and test-differential'
+        }
+        if ($graph.ContainsKey('test') -and -not (Get-TaskReach $graph @('test')).Contains('test-differential')) {
+            Add-Finding $Name 'ci-minutes' 'FAIL' '`pixi run test` does not run test-differential, so a developer''s full run skips the differential'
+        }
+    }
+    if ($graph.ContainsKey('package') -and ($split -or -not $hasDifferential)) {
+        $skipped = @(& $skippedBy (@('package') + $releaseExtra))
+        if ($skipped.Count -gt 0) {
+            Add-Finding $Name 'ci-minutes' 'FAIL' "``pixi run test`` runs $($skipped -join ', '), which neither package nor $(if ($hasDifferential) { 'test-differential' } else { 'anything package depends on' }) runs, so push builds and releases skip it"
+        }
+    }
+
+    foreach ($wf in Get-WorkflowFiles $Root) {
+        $lines = [System.IO.File]::ReadAllLines($wf.FullName)
+        $text = $lines -join "`n"
+        if ($text -match '(?m)^\s*workflow_call\s*:') { continue }
+        $triggers = Get-WorkflowTriggers $lines
+        $pushTags = $triggers.Contains('push') -and @(@($triggers['push']) -match '^\s*tags\s*:').Count -gt 0
+        $callsRelease = $text -match '(?m)^\s*(-\s+)?uses:\s*\S+/\.github/workflows/release-(bepinex-)?mod\.yml@'
+        $ran = Get-WorkflowPixiTasks $lines
+
+        if ($callsRelease -or $pushTags) {
+            if ($text -match '(?m)^\s*cancel-in-progress\s*:\s*true') {
+                Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) sets cancel-in-progress: true, so a second run for the same ref cancels a release part-way through publishing it"
+            }
+            if ($text -match '(?m)^\s*(?:-\s+)?uses:\s*\S+/\.github/workflows/release-mod\.yml@([0-9a-f]{40})') {
+                $sha = $Matches[1]
+                if ($hasDifferential) {
+                    $pinned = Get-PinnedReleaseWorkflow $sha
+                    if ($null -eq $pinned) {
+                        Add-Finding $Name 'ci-minutes' 'WARN' "$($wf.Name) pins release-mod.yml at $($sha.Substring(0, 8)), which this core checkout does not have, so whether that release runs the config differential is unchecked. Fetch core and re-run"
+                    } elseif ($pinned -notmatch 'pixi run test-differential') {
+                        Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) pins release-mod.yml at $($sha.Substring(0, 8)), which has no config differential step, so a release never runs the differential. Pin a core commit that has one"
+                    }
+                }
+                $packageTask = if ($text -match '(?m)^\s*package-task\s*:\s*[''"]?([A-Za-z0-9_.-]+)') { $Matches[1] } else { 'package' }
+                if ($packageTask -ne 'package') {
+                    $skipped = @(& $skippedBy (@($packageTask) + $releaseExtra))
+                    if ($skipped.Count -gt 0) {
+                        Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) releases through $packageTask, which does not run $($skipped -join ', ') from ``pixi run test``"
+                    }
+                }
+            } elseif (-not $callsRelease) {
+                $skipped = @(& $skippedBy @($ran))
+                if ($skipped.Count -gt 0) {
+                    Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) is a release workflow that does not run $($skipped -join ', ') from ``pixi run test``, so a release can ship without the full suite"
+                }
+            }
+            continue
+        }
+
+        if (-not ($triggers.Contains('push') -or $triggers.Contains('pull_request'))) { continue }
+        if ($ran.Count -eq 0) { continue }
+
+        $concurrency = Get-TopLevelBlock $lines 'concurrency'
+        $group = @($concurrency | Where-Object { $_ -match '^\s*group\s*:' })
+        $cancels = @($concurrency | Where-Object { $_ -match '^\s*cancel-in-progress\s*:\s*true\s*$' }).Count -gt 0
+        if ($group.Count -eq 0 -or $group[0] -notmatch 'github\.ref' -or -not $cancels) {
+            Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) has no top-level concurrency block grouped on github.ref with cancel-in-progress: true, so a push that a newer one superseded keeps building"
+        }
+
+        foreach ($trigger in @('push', 'pull_request')) {
+            if (-not $triggers.Contains($trigger)) { continue }
+            $body = @($triggers[$trigger])
+            # A build that reads prose has to leave '**.md' out (the-witness runs
+            # conformance, whose readme check reads README.md), so 'docs/**' counts too.
+            $ignoresProse = @($body | Where-Object { $_ -match '^\s*paths-ignore\s*:' }).Count -gt 0 -and
+                @($body | Where-Object { $_ -match '^\s*-\s*[''"]?(\*\*/\*\.md|\*\*\.md|\*\.md|docs/\*\*)[''"]?\s*$' }).Count -gt 0
+            $allowList = @($body | Where-Object { $_ -match '^\s*paths\s*:' }).Count -gt 0
+            if (-not ($ignoresProse -or $allowList)) {
+                Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name)'s $trigger trigger has no paths-ignore for '**.md', 'docs/**' and 'LICENSE', so a docs-only push builds"
+            }
+        }
+
+        $distinct = @($ran | Select-Object -Unique)
+        foreach ($task in $distinct) {
+            if ($task -notmatch '^test') { continue }
+            foreach ($other in $distinct) {
+                if ($other -ne $task -and (Get-TaskReach $graph @($other)).Contains($task)) {
+                    Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) runs ``pixi run $task`` and ``pixi run $other``, and $other runs $task again, so the suite runs twice. Drop the $task step"
+                }
+            }
+        }
+
+        $reach = Get-TaskReach $graph $distinct
+        if ($hasDifferential -and $split -and $reach.Contains('test-differential')) {
+            Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) runs test-differential on every push. It belongs to the release paths only"
+        }
+        if ($graph.ContainsKey('test') -and @($reach | Where-Object { $_ -match '^test' }).Count -eq 0) {
+            Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) runs no test task, so a push is never tested. Make package depend on $(if ($hasDifferential) { 'test-unit' } else { 'test' })"
+        }
+    }
+
+    $release = Join-Path $Root 'scripts/release.ps1'
+    if (Test-Path -LiteralPath $release) {
+        $code = (Read-TextFile $release) -replace '(?s)<#.*?#>', '' -replace '(?m)^\s*#.*$', ''
+        if ($code -notmatch '(?m)(?:^|[;{&])\s*pixi\s+run\s+(?:(?:-e|--environment)\s+\S+\s+)?test(?![-\w])') {
+            Add-Finding $Name 'ci-minutes' 'FAIL' 'scripts/release.ps1 never runs `pixi run test`, so a tag is pushed without the full suite having passed first. Paste scripts/templates/release-full-test.ps1 before its first file edit'
+        }
+    }
+}
+
 $CHECK_TABLE = [ordered]@{
     'install-wrapper'   = ${function:Test-InstallWrapper}
     'delayed-expansion' = ${function:Test-DelayedExpansion}
@@ -1322,6 +1592,7 @@ $CHECK_TABLE = [ordered]@{
     'config-descriptor'    = ${function:Test-ConfigDescriptor}
     'config-defaults'      = ${function:Test-ConfigDefaults}
     'release-canonical-since' = ${function:Test-ReleaseCanonicalSince}
+    'ci-minutes'        = ${function:Test-CiMinutes}
 }
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - the config differential test runs on the release paths only, and push builds cancel when superseded
+
+A push build ran the whole suite twice in most of the fleet: a "Run unit tests" step ran
+`pixi run test`, then `pixi run package`, which depends on `test`, ran it again. In a repo with a
+legacy config differential test (`tests/config_differential`) that suite is ten to thirty minutes
+of a frozen import on every push, and nothing cancelled a run a newer push had superseded.
+
+Core now runs the differential where a release is made, once:
+
+- `release-mod.yml` runs `pixi run test-differential` after the package task when the repo has
+  `tests/config_differential`, and fails the release when that task is missing. Its job joins the
+  concurrency group `release-mod-<ref>` and is never cancelled. The default `timeout-minutes` is
+  now 60, since the differential alone can take 30.
+- `Publish-NightlyBuild` runs `pixi run test-differential` after its package command in the same
+  repos, so a dev build does too.
+- `release-bepinex-mod.yml` joins a non-cancelling group. It compiles nothing, so it runs no tests.
+- `check.yml` groups on `${{ github.workflow }}-${{ github.ref }}`.
+
+New templates: `scripts/templates/build-workflow.yml` (the push build: concurrency, paths-ignore
+and one `pixi run package` step), `pixi-test-tasks.toml` (the task split for ctest, run-tests.ps1,
+test executables, dotnet test and cargo) and `release-full-test.ps1` (the `pixi run test` gate for
+release.ps1).
+
+New conformance check `ci-minutes` (tested by `pixi run test-ci-minutes`, part of
+`test-powershell`). It reads the task graph through `pixi task list --json`, so running it needs
+pixi on `PATH`.
+
+What each mod repo changes, in one commit with the core pin bump:
+
+1. **pixi.toml**, where the repo has `tests/config_differential`: split `test` into `test-unit`
+   (everything but the differential) and `test-differential` (the differential, its provenance
+   check and the lint over what it migrated), make `test` depend on both and nothing else, and make
+   `package` depend on `test-unit` instead of `test`. A ctest repo labels the differential's tests
+   `differential`. A repo without the folder keeps its tasks, with `package` depending on `test`.
+2. **.github/workflows/build.yml**: the top-level `concurrency` block and the `paths-ignore`
+   lists from the template, and no step that runs a test task `package` already runs.
+3. **.github/workflows/release.yml**: pin `release-mod.yml` at this commit or later. A repo with
+   its own release workflow runs everything `pixi run test` runs in it (`pixi run test`, or
+   package and then test-differential) and does not set `cancel-in-progress: true`.
+4. **scripts/release.ps1**: run `pixi run test` before the first file edit
+   (`release-full-test.ps1`).
+
+Breaking because a repo with `tests/config_differential` and no `test-differential` task now
+fails at release, and at `pixi run release nightly`, once it pins this commit: split the tasks in
+the same commit as the pin bump.
+
 ### Fixed - `New-ChangelogFromCommits` files a breaking-change subject under its type
 
 A subject with the breaking-change mark (`feat(config)!: ...`, `fix!: ...`, `perf!: ...`) did not

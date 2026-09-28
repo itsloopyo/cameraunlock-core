@@ -1,0 +1,73 @@
+# The test tasks of a mod repo with a legacy config differential test, the
+# repos with a tests/config_differential folder. The blocks below are
+# alternatives, one per test runner, so this file is not one valid TOML
+# document. Paste the block for the repo's runner and keep its own paths,
+# configs, project names and depends-on. Any other task the old `test` ran
+# (pipeline vectors, notices, script tests) joins test-unit's depends-on.
+#
+#   test-unit          every suite except the differential. Fast.
+#   test-differential  the differential test, its provenance check, and the
+#                      lint over the files it migrated. Ten to thirty minutes.
+#   test               both, so `pixi run test` is still the whole suite.
+#   package            build-release and test-unit, never test.
+#
+# A push build runs `pixi run package` and nothing else. release-mod.yml and
+# Publish-NightlyBuild run package and then test-differential, and release.ps1
+# runs `pixi run test` before it changes a file, so a release runs the full
+# suite and a push runs the fast half. conformance.ps1's ci-minutes check fails
+# a repo whose package reaches test-differential, whose test reaches a task
+# that neither package nor test-differential reaches, or which has no
+# test-differential task.
+#
+# A repo without tests/config_differential keeps `test` as it is and package
+# keeps depending on it.
+
+# --- ctest, called from pixi.toml ------------------------------------------
+# Label every ctest test that is part of the differential, which is the
+# differential executable and any test that reads what it migrated (the
+# config_lint test), in the CMakeLists.txt that registers them:
+#
+#   set_tests_properties(config_differential_tests config_lint PROPERTIES LABELS differential)
+#
+# --no-tests=error on test-differential fails a repo that forgot the label
+# instead of passing with nothing run.
+test-unit = { cmd = "ctest --test-dir build -C Release --output-on-failure -LE differential", depends-on = ["build"] }
+test-differential = { cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-differential-provenance.ps1 && ctest --test-dir build -C Release --output-on-failure --no-tests=error -L differential", depends-on = ["build"] }
+test = { depends-on = ["test-unit", "test-differential"] }
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release", "test-unit"] }
+
+# --- ctest, called from scripts/run-tests.ps1 ------------------------------
+# Label the tests as above. run-tests.ps1 takes the suite:
+#
+#   param(..., [ValidateSet('all', 'unit', 'differential')][string]$Suite = 'all')
+#   $labels = @{ all = @(); unit = @('-LE', 'differential'); differential = @('--no-tests=error', '-L', 'differential') }[$Suite]
+#   ctest --test-dir $BuildDir -C $Config --output-on-failure @labels
+#
+# and runs the provenance check, when it has one, only when $Suite is not 'unit'.
+test-unit = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests.ps1 -Suite unit"
+test-differential = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests.ps1 -Suite differential"
+test = { depends-on = ["test-unit", "test-differential"] }
+
+# --- a test executable per suite, called from pixi.toml --------------------
+# The differential executable, its provenance check and its lint move out of
+# the test chain into test-differential; everything else stays in test-unit.
+# A repo that already has test-configdifferential (or test-config, running the
+# differential) renames it test-differential and takes it out of test's list.
+test-unit = { depends-on = ["test-cameramath", "test-config", "test-legacyreader"] }
+test-differential = { cmd = "build/Release/config_differential_tests.exe --migrated build/migrated && node tests/config_differential/lint-migrated.mjs build/migrated", depends-on = ["build", "test-configprovenance"] }
+test = { depends-on = ["test-unit", "test-differential"] }
+
+# --- dotnet test (xunit) ----------------------------------------------------
+# The differential's classes live in a namespace ending in Differential or
+# ConfigDifferential, compiled into a test project from tests/config_differential.
+# A project with no differential in it runs whole in test-unit.
+test-unit = { cmd = "dotnet test tests/ModHeadTracking.Tests/ModHeadTracking.Tests.csproj -c Release --filter FullyQualifiedName!~Differential", depends-on = ["build"] }
+test-differential = { cmd = "dotnet test tests/ModHeadTracking.Tests/ModHeadTracking.Tests.csproj -c Release --filter FullyQualifiedName~Differential && node tests/config_differential/lint-migrated.mjs tests/ModHeadTracking.Tests/bin/Release/net48/migrated", depends-on = ["build"] }
+test = { depends-on = ["test-unit", "test-differential"] }
+
+# --- cargo -----------------------------------------------------------------
+# The differential is its own [[test]] target in Cargo.toml. test-unit names
+# --lib and every other [[test]] target.
+test-unit = "cargo test --target i686-pc-windows-msvc --features test-support --lib --test config_owner"
+test-differential = { cmd = "cargo test --target i686-pc-windows-msvc --features test-support --test config_differential && node tests/config_differential/lint-migrated.mjs target/config-differential-migrated" }
+test = { depends-on = ["test-unit", "test-differential"] }
