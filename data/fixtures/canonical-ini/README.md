@@ -367,7 +367,9 @@ The rules the cases hold:
   section no concept has are not read, and draw nothing.
 - **A value** is refused when the concept's codec, with the schema's range, does not read it
   (`codecs/`), and the reason is the codec's. `default`, in any letter case, is refused the same
-  way.
+  way. A float concept's value must also read with the double codec over the same range, since a
+  game binds the row to a float or a double: `1.00000001` reads as a float as `1.0`, inside 0 to
+  1, and as a double above 1, so it is refused with the double codec's reason.
 - **A hotkey value** is first split at `,` into items. The key of an item is its text after the
   last `+`, trimmed of spaces and tabs. The first item whose key is not empty, not `Ctrl`, `Shift`
   or `Alt`, and not one of the 98 names the header lists (ASCII case-insensitively; an alias does
@@ -404,6 +406,7 @@ is three, since `80` cannot follow `F0`. The `value` row's value field stays the
 | `read-no-stamp`, `read-format-missing`, `read-format-zero`, `read-format-not-a-number` | read with no line |
 | `read-format-newer` | `ConfigFormat=2`: the format line, and the file read |
 | `read-refused-values` | codec and range refusals on int, bool and float rows and a value with `; note`, each with its line; a refused `CollisionEnabled` whose line names the built-in `true`, its `canonical_default`; one value beside them accepted; invalid `CollisionMargin` and `CollisionChannel` lines, not read at all since neither is global |
+| `read-float-edges` | `LocalSmoothing=1.00000001` and `PositionLimitZ=10.0000001`, each inside its range as a float and above it as a double, refused with the range; `RemoteSmoothing=1` and `PositionLimitX=10` at the top of their ranges, accepted |
 | `read-hotkey-mouse4`, `read-hotkey-code` | `ToggleKey=Mouse4` and `ToggleKey=0x23` on line 12, refused alike, with the line the design gives |
 | `read-hotkeys` | names in any letter case with modifiers, an empty list, a grammar error with the codec's reason, and `Clear`, a Unity key with no `vk` |
 | `read-hotkey-modifier-keys` | `LeftShift` alone, `rightcontrol` and `RIGHTALT` after modifiers, and `Ctrl+Shift+0x10`: each refused as not one of the key names the file takes, since no hotkey's key is a Ctrl, Shift or Alt key, each with its line |

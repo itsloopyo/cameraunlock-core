@@ -1102,6 +1102,10 @@ Defaults.ini has the grammar, codecs and stamp of every canonical file. What dif
   three take the same checked pair.
 - **Everything else** is the concept's codec and the schema's range. `default` is refused here,
   like any other value the codec does not read.
+- **A float concept reads as a float and as a double.** A native game binds the row to either, and
+  the two differ at the edge of the range: `LocalSmoothing=1.00000001` reads as a float as `1.0`,
+  inside 0 to 1, and as a double above 1. A value passes only when both read it, with the double
+  codec's reason when only the float does, so every game takes it or none does.
 - **A refused value** leaves the row at its built-in value. It draws a log line and counts toward
   the in-game message, but only for a row the game takes from Defaults.ini: one its table binds,
   that is not `PerGame()`, and that its own file does not set.

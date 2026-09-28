@@ -1632,6 +1632,50 @@ void ARefusedValueIsToldOnlyWhereTheGameTakesIt(const fs::path& dir) {
     Check(rig.sink.empty(), "nor a message");
 }
 
+struct DoubleRows {
+    double local_smoothing = 0.0;
+    double remote_smoothing = 0.15;
+    double position_limit_z = 0.4;
+};
+
+// 1.00000001 reads as a float as 1, inside 0 to 1, and as a double above 1. A game that binds the
+// row to a double once threw at Load for it; the value is refused like any other.
+void ADoubleRowTakesTheBuiltInForAValueOnlyAFloatReads(const fs::path& dir) {
+    ConfigTable<DoubleRows> table;
+    table.Concept<Concept::LocalSmoothing>(&DoubleRows::local_smoothing)
+        .Concept<Concept::RemoteSmoothing>(&DoubleRows::remote_smoothing)
+        .Concept<Concept::PositionLimitZ>(&DoubleRows::position_limit_z);
+    const fs::path defaults = ScratchDefaults(dir);
+    fs::create_directories(defaults.parent_path());
+    WriteBytes(defaults,
+               "[Smoothing]\r\nLocalSmoothing=1.00000001\r\nRemoteSmoothing=0.25\r\n[Position]\r\nPositionLimitZ=10.0000001\r\n");
+    std::vector<std::string> sink;
+    ConfigOwnerOptions<DoubleRows> options;
+    options.path = (dir / kFileName).wstring();
+    options.table = table;
+    options.header = RenderHeader{kDisplay};
+    options.status_sink = [&sink](const std::string& message) { sink.push_back(message); };
+    options.defaults = DefaultsFile::At(defaults.wstring());
+    const ConfigLoadResult<DoubleRows> load = ConfigOwner<DoubleRows>(std::move(options)).Load();
+
+    Check(load.status == ConfigLoadStatus::Created, std::string("Load is Created, got ") +
+                                                        ConfigLoadStatusName(load.status) + " (" + load.reason + ")");
+    Check(load.config.local_smoothing == 0.0 && load.config.position_limit_z == 0.4,
+          "each refused row takes the built-in");
+    Check(load.config.remote_smoothing == 0.25, "the value both codecs read is taken");
+    ExpectLogLine(load.log,
+                  "Defaults.ini: line 2: [Smoothing] LocalSmoothing=1.00000001 is not read (expected a number from 0.0 to "
+                  "1.0), so the built-in 0.0 is used.");
+    ExpectLogLine(load.log,
+                  "Defaults.ini: line 5: [Position] PositionLimitZ=10.0000001 is not read (expected a number from 0.0 to "
+                  "10.0), so the built-in 0.4 is used.");
+    Check(sink.size() == 1 && sink[0] ==
+                                  "Defaults.ini: 2 settings cannot be used (LocalSmoothing=1.00000001; "
+                                  "PositionLimitZ=10.0000001), so this game uses its built-in values for them. The log "
+                                  "has the details.",
+          "the player is told once" + Joined(sink));
+}
+
 void AnUnreadableDefaultsIniGivesTheBuiltInValues(const fs::path& dir) {
     const std::string text = "[Network]\r\nUdpPort=5000\r\n";
     const std::pair<std::string, std::string> cases[] = {
@@ -2287,7 +2331,9 @@ int RunConfigOwnerTests() {
     RunScenario("a-packaged-game-reads-defaults-ini-and-never-creates-it", APackagedGameReadsDefaultsIniAndNeverCreatesIt);
     RunScenario("defaults-ini-present-is-read", DefaultsIniPresentIsRead);
     RunScenario("a-refused-value-is-told-only-where-the-game-takes-it", ARefusedValueIsToldOnlyWhereTheGameTakesIt);
-    RunScenario("an-unreadable-defaults-ini-gives-the-built-in-values", AnUnreadableDefaultsIniGivesTheBuiltInValues);
+    RunScenario("a-double-row-takes-the-built-in-for-a-value-only-a-float-reads",
+                ADoubleRowTakesTheBuiltInForAValueOnlyAFloatReads);
+    RunScenario("an-unreadable-defaults-ini-gives-the-built-in-values",AnUnreadableDefaultsIniGivesTheBuiltInValues);
     RunScenario("defaults-ini-appearing-during-creation-is-read", DefaultsIniAppearingDuringCreationIsRead);
     RunScenario("a-migrated-game-writes-default-where-the-import-equals-it", AMigratedGameWritesDefaultWhereTheImportEqualsIt);
     RunScenario("a-migrated-game-writes-a-value-where-defaults-ini-differs", AMigratedGameWritesAValueWhereDefaultsIniDiffers);

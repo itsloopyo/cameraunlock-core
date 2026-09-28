@@ -196,6 +196,15 @@ namespace CameraUnlock.Core.Config
             string error = concept.Family == ConceptValueFamily.Hotkey ? KeyNameError(found.Value) : null;
 #endif
             if (error == null) error = concept.CodecError(found.Value);
+            if (error == null && concept.Family == ConceptValueFamily.Floating)
+            {
+                // A native game binds the row to a float or a double, and a float reads 1.00000001
+                // as 1, inside 0 to 1, where a double reads it as above 1. Every game reads this
+                // file alike, so a value passes only if both take it.
+                var codec = (FloatCodec)((ConceptDescriptor<float>)concept).Codec;
+                double read;
+                new DoubleCodec(codec.Min, codec.Max).TryParse(found.Value, out read, out error);
+            }
             return error == null
                 ? new DefaultsIniValue(DefaultsIniValueState.Accepted, found.Line, section.Name, found.Key, found.Value, string.Empty)
                 : new DefaultsIniValue(DefaultsIniValueState.Refused, found.Line, section.Name, found.Key, found.Value, error);

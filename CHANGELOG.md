@@ -9,6 +9,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - a Defaults.ini value only a float reads no longer throws in a game that binds a double
+
+Defaults.ini checked a float concept's value with the float codec, but a C++ row bound to a `double`
+field reads it with the double codec, whose bounds are exact. `LocalSmoothing=1.00000001` reads as
+a float as 1.0, inside 0 to 1, so the reader accepted it; the double row refused it, and
+`ConfigOwner::Load` threw `std::logic_error` at game start (fallout-new-vegas and
+bioshock-remastered bind `LocalSmoothing` and `RemoteSmoothing` to double).
+`PositionLimitZ=10.0000001` did the same. A float concept's Defaults.ini value now passes only when
+both codecs read it, in C++ and C#, so every game takes it or none does: the value is refused, the
+row keeps its built-in value, and the log line and in-game message give the double codec's reason.
+A C# row cannot bind a double, so no C# game threw, but a C# game now refuses the same values. A
+Defaults.ini holding such a value, written by hand, is now refused by games that took the float's
+rounding before. No signature changes. Fixture `global/read-float-edges` covers both values.
+
 ### Fixed - `FileChanged` and `Reload` no longer throw on a write time that cannot be read
 
 C++ `ConfigOwner::FileChanged` and `Reload` and C# `ConfigOwner.FileChanged` and `Reload` read the

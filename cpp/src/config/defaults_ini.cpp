@@ -125,7 +125,11 @@ std::string CodecError(std::string_view text) {
     } else if constexpr (Traits::kFamily == schema::ValueFamily::kInteger) {
         return IntCodec<int>(static_cast<int>(Traits::kMin), static_cast<int>(Traits::kMax)).Parse(text).error;
     } else if constexpr (Traits::kFamily == schema::ValueFamily::kFloating) {
-        return FloatCodec(Traits::kMin, Traits::kMax).Parse(text).error;
+        // A game binds the row to a float or a double, and the two codecs differ at the edges: a
+        // float reads 1.00000001 as 1, inside 0 to 1, and a double reads it as above 1. A value
+        // passes here only if both take it, so every game reads it.
+        std::string error = FloatCodec(Traits::kMin, Traits::kMax).Parse(text).error;
+        return error.empty() ? DoubleCodec(Traits::kMin, Traits::kMax).Parse(text).error : error;
     } else {
         std::string error = KeyNameError(text);
         return error.empty() ? HotkeyCodec().Parse(text).error : error;
