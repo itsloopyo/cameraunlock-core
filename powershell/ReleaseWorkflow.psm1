@@ -197,6 +197,7 @@ function Copy-SharedBundle {
         @{ Src = 'scripts\install-all-bepinex.ps1';   Dest = 'install-all-bepinex.ps1' }
         @{ Src = 'scripts\check-loader-arch.ps1';     Dest = 'check-loader-arch.ps1' }
         @{ Src = 'scripts\cecil-marker-check.ps1';    Dest = 'cecil-marker-check.ps1' }
+        @{ Src = 'scripts\restore-kept-configs.ps1';  Dest = 'restore-kept-configs.ps1' }
     )
     $bodyDir = Join-Path $CoreRoot 'scripts'
     $bodies = @(Get-ChildItem -Path $bodyDir -File -Filter 'install-body-*.cmd' | Select-Object -ExpandProperty Name)

@@ -30,7 +30,7 @@ foreach ($kind in @('shim', 'shim-forwarder')) {
     $shared = Join-Path $caseRoot 'shared'
     $plugins = Join-Path $caseRoot 'plugins'
     New-Item -ItemType Directory -Path $game, $shared, $plugins | Out-Null
-    foreach ($name in @("install-body-$kind.cmd", 'uninstall-body.cmd', 'cecil-marker-check.ps1')) {
+    foreach ($name in @("install-body-$kind.cmd", 'uninstall-body.cmd', 'cecil-marker-check.ps1', 'restore-kept-configs.ps1')) {
         Copy-Item -LiteralPath (Join-Path $BodiesRoot $name) -Destination $shared
     }
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'find-game.ps1') -Destination $shared

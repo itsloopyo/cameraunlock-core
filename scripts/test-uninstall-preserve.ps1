@@ -81,6 +81,7 @@ function New-Case {
     New-Item -ItemType Directory -Path $game, $shared | Out-Null
     Copy-Item -LiteralPath $Body -Destination (Join-Path $shared 'uninstall-body.cmd')
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'cecil-marker-check.ps1') -Destination $shared
+    Copy-Item -LiteralPath (Join-Path $BodiesRoot 'restore-kept-configs.ps1') -Destination $shared
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'find-game.ps1') -Destination $shared
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../powershell/GamePathDetection.psm1') -Destination $shared
     $gamesJson = @{ schema_version = 1; games = @{ fixture = @{ display_name = 'Fixture'; env_var = 'CUL_FIXTURE_PATH'; executable_relpath = $ExeRelPath } } }
@@ -381,12 +382,52 @@ $bepFiles = [ordered]@{}
 foreach ($rel in $trees[0].Files) { $bepFiles[$rel] = $rel }
 $bepListed = Copy-Map $trees[0].Config @{ PRESERVE_FILES = $trees[0].Preserve }
 
-$case = New-Case -Name 'leftover-holding' -Config $bepListed -Files (Copy-Map $bepFiles @{ "$holding\$bepConfig" = 'set aside earlier' }) -ExeRelPath 'fixture.exe'
+# An uninstall that stopped between setting the configs aside and putting them
+# back. The next uninstall puts them back first, then removes as usual.
+$interrupted = [ordered]@{ "$holding\$bepConfig" = 'tuned'; "$holding\$bepLegacy" = 'legacy tuned' }
+foreach ($stage in @(
+        @{ Name = 'kept-uninstall-tree-left'; Files = @($bepFiles.Keys | Where-Object { $trees[0].Kept -notcontains $_ }) },
+        @{ Name = 'kept-uninstall-tree-gone'; Files = @($bepFiles.Keys | Where-Object { -not $_.StartsWith('BepInEx\') }) })) {
+    $files = [ordered]@{}
+    foreach ($rel in $stage.Files) { $files[$rel] = $rel }
+    $case = New-Case -Name $stage.Name -Config $bepListed -Files (Copy-Map $files $interrupted) -ExeRelPath 'fixture.exe'
+    $output = Invoke-Uninstall $case 0
+    Assert-Output $case $output @("Restored: $bepConfig", "Restored: $bepLegacy", 'Removed: BepInEx folder', 'Removed: state file', '=== Uninstall Complete ===')
+    Assert-KeptLines $case $output $trees[0].Kept
+    Assert-Files $case (@('fixture.exe', 'user.txt') + $trees[0].Kept) @{ $bepConfig = 'tuned'; $bepLegacy = 'legacy tuned' }
+    Assert-NoHolding $case
+}
+Write-Host 'PASS interrupted uninstall, then uninstall: the set-aside configs go back to their own paths, with the loader folder whole or gone, and the uninstall completes keeping them'
+
+# Without PRESERVE_FILES in the wrapper the files still go back: they are the
+# player's whichever wrapper set them aside.
+$case = New-Case -Name 'kept-uninstall-unlisted' -Config $trees[0].Config -Files (Copy-Map $bepFiles @{ "$holding\BepInEx\config\Old.ini" = 'old' }) -ExeRelPath 'fixture.exe'
+$output = Invoke-Uninstall $case 0
+Assert-Output $case $output @('Restored: BepInEx\config\Old.ini', '=== Uninstall Complete ===')
+Assert-Files $case @('fixture.exe', 'user.txt')
+Assert-NoHolding $case
+Write-Host 'PASS interrupted uninstall, then an uninstall without PRESERVE_FILES: the file goes back before the loader folder removal'
+
+# A holding folder with nothing left in it but empty folders is removed quietly.
+$case = New-Case -Name 'kept-empty' -Config $bepListed -Files $bepFiles -ExeRelPath 'fixture.exe'
+New-Item -ItemType Directory -Path (Join-Path $case.Game "$holding\BepInEx\config") | Out-Null
+$output = Invoke-Uninstall $case 0
+if ($output -cmatch 'Restored|kept-configs') { throw "kept-empty: an empty holding folder was reported`n$output" }
+Assert-Files $case (@('fixture.exe', 'user.txt') + $trees[0].Kept)
+Assert-NoHolding $case
+Write-Host 'PASS empty holding folder: removed without a word, uninstall completes'
+
+# A file already at the path a set-aside one belongs at. Neither copy is
+# touched, the other set-aside file does not move either, and both paths of
+# the clash are named.
+$case = New-Case -Name 'kept-conflict' -Config $bepListed -ExeRelPath 'fixture.exe' `
+    -Files (Copy-Map $bepFiles @{ "$holding\$bepConfig" = 'set aside earlier'; "$holding\BepInEx\config\Old.ini" = 'old' })
 $before = Get-Snapshot $case.Game
 $output = Invoke-Uninstall $case 1
-if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'leftover-holding: the game folder changed' }
-if ($output -notmatch [regex]::Escape("$holding is left over")) { throw "leftover-holding: output does not name the folder`n$output" }
-Write-Host 'PASS leftover holding folder: refused with exit 1 before anything was touched'
+if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'kept-conflict: the game folder changed' }
+Assert-Output $case $output @("set aside: $($case.Game)\$holding\$bepConfig", "in place:  $($case.Game)\$bepConfig", 'Nothing was changed. Keep the copy you want at the in-place path, delete')
+if ($output -cmatch '(?m)^\s*(Restored|Removed|Kept): ') { throw "kept-conflict: something was moved or removed`n$output" }
+Write-Host 'PASS holding folder clash: uninstall exit 1, both copies left, nothing else moved, both paths named'
 
 $run = Start-Run $case ''
 Start-Sleep -Seconds 3
@@ -396,6 +437,13 @@ $output = Complete-Run $run $case 1
 if ($output -notmatch 'Press any key') { throw "pause: no pause prompt`n$output" }
 if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'pause: the game folder changed' }
 Write-Host 'PASS pause: a failed run without /y waits on the console, Enter releases it, exit code stays 1'
+
+Remove-Item -LiteralPath (Join-Path $case.Game "$holding\$bepConfig")
+$output = Invoke-Uninstall $case 0
+Assert-Output $case $output @('Restored: BepInEx\config\Old.ini', '=== Uninstall Complete ===')
+Assert-Files $case (@('fixture.exe', 'user.txt') + $trees[0].Kept)
+Assert-NoHolding $case
+Write-Host 'PASS holding folder clash resolved by deleting one copy: the next uninstall puts back the rest and completes'
 
 $case = New-Case -Name 'set-aside-fails' -Config $bepListed -Files $bepFiles -ExeRelPath 'fixture.exe'
 $before = Get-Snapshot $case.Game
@@ -432,12 +480,11 @@ try {
     $output = Invoke-Uninstall $case 1
     if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 'move-back-fails: the rerun touched the game folder' }
 } finally { Set-Deny $mods -Remove }
-New-Item -ItemType Directory -Path (Join-Path $mods 'HeadTracking') | Out-Null
-foreach ($rel in $ue.Kept) { Move-Item -LiteralPath (Join-Path $case.Game "$holding\$rel") -Destination (Join-Path $case.Game $rel) }
-Remove-Item -LiteralPath (Join-Path $case.Game $holding) -Recurse
-Invoke-Uninstall $case 0 | Out-Null
+$output = Invoke-Uninstall $case 0
+Assert-Output $case $output (@($ue.Kept | ForEach-Object { "Restored: $_" }) + '=== Uninstall Complete ===')
 Assert-Files $case (@($ue.Exe) + @($ue.Files | Where-Object { $ue.ModFiles -notcontains $_ }) + $ue.Kept) $ue.Contents
-Write-Host 'PASS move-back failure: files left in the named holding folder, state kept, rerun refused, retry after a manual restore completes'
+Assert-NoHolding $case
+Write-Host 'PASS move-back failure: files left in the named holding folder, state kept, a rerun that still cannot write fails with nothing changed, the rerun after the fix puts them back and completes'
 
 # ---------------------------------------------------------------- arguments
 foreach ($bad in @('*.ini', 'bin\?.ini', '..\up.ini', 'C:\abs.ini', 'D:rel.ini', '\lead.ini', 'bin\ok.ini \lead.ini', 'bin/fwd.ini',
@@ -568,6 +615,7 @@ function New-InstallCase {
     Copy-Item -LiteralPath $InstallBody -Destination (Join-Path $shared 'install-body-reframework.cmd')
     Copy-Item -LiteralPath (Join-Path $BodiesRoot 'uninstall-body.cmd') -Destination $shared
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'cecil-marker-check.ps1') -Destination $shared
+    Copy-Item -LiteralPath (Join-Path $BodiesRoot 'restore-kept-configs.ps1') -Destination $shared
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'find-game.ps1') -Destination $shared
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../powershell/GamePathDetection.psm1') -Destination $shared
     $gamesJson = @{ schema_version = 1; games = @{ fixture = @{ display_name = 'Fixture'; env_var = 'CUL_FIXTURE_PATH'; executable_relpath = 'fixture.exe' } } }
@@ -690,6 +738,33 @@ if ($output.Contains('OtherMod.ini')) { throw "re-template: the inherited MOD_SE
 Assert-Installed $case (Copy-Map (Copy-Map @{ 'fixture.exe' = 'fixture.exe' } $reLoader) @{ "$p\HeadTracking.dll" = 'dll 1' }) 'true'
 Write-Host 'PASS reframework wrapper template: a MOD_SEED_FILES left in the console by another wrapper is cleared'
 
+# An uninstall that stopped after setting the config aside and taking the loader
+# away. The next install puts the config back before it seeds, so the player's
+# file is kept rather than replaced by the default, and the prior state's
+# installed_by_us survives.
+$case = New-InstallCase -Name 're-kept-install' -Install $reInstall -Uninstall $reUninstall -Package $rePackage
+Invoke-Install $case 0 | Out-Null
+Set-GameFile $case "$p\HeadTracking.ini" 'tuned by the player'
+New-Item -ItemType Directory -Path (Join-Path $case.Game "$holding\$p") | Out-Null
+Move-Item -LiteralPath (Join-Path $case.Game "$p\HeadTracking.ini") -Destination (Join-Path $case.Game "$holding\$p\HeadTracking.ini")
+Remove-Item -LiteralPath (Join-Path $case.Game 'dinput8.dll')
+Remove-Item -LiteralPath (Join-Path $case.Game 'reframework') -Recurse
+$output = Invoke-Install $case 0
+Assert-Output $case $output @("Restored: $p\HeadTracking.ini", 'REFramework not found. Installing...', 'Kept your existing HeadTracking.ini', 'Deployed default Extra.ini')
+Assert-Installed $case (Copy-Map (Copy-Map @{ 'fixture.exe' = 'fixture.exe' } $reLoader) @{
+    "$p\HeadTracking.dll" = 'dll 1'; "$p\HeadTracking.ini" = 'tuned by the player'; "$p\Extra.ini" = 'extra default' }) 'true'
+Assert-NoHolding $case
+Write-Host 'PASS interrupted uninstall, then install: the config goes back before the seed, the loader is reinstalled, installed_by_us stays true'
+
+New-Item -ItemType Directory -Path (Join-Path $case.Game "$holding\$p") | Out-Null
+Set-GameFile $case "$holding\$p\HeadTracking.ini" 'set aside earlier'
+$before = Get-Snapshot $case.Game
+$output = Invoke-Install $case 1
+if (Compare-Object -CaseSensitive $before (Get-Snapshot $case.Game)) { throw 're-kept-install-conflict: the game folder changed' }
+Assert-Output $case $output @("set aside: $($case.Game)\$holding\$p\HeadTracking.ini", "in place:  $($case.Game)\$p\HeadTracking.ini")
+if ($output -cmatch '(?m)^\s*(Restored: |Deployed|REFramework not found)') { throw "re-kept-install-conflict: the install went on`n$output" }
+Write-Host 'PASS holding folder clash on install: exit 1, both copies left, nothing deployed, both paths named'
+
 $case = New-InstallCase -Name 're-seed-missing' -Install (Copy-Map $reInstall @{ MOD_SEED_FILES = 'HeadTracking.ini Missing.ini' }) -Uninstall $reUninstall -Package $rePackage -GameFiles $preexisting
 $output = Invoke-Install $case 1
 Assert-Output $case $output @('ERROR: Missing.ini not found in installer package', 'Deployment Failed!')
@@ -717,6 +792,7 @@ function New-AsiInstallCase([string]$Name, [string[]]$Drop = @()) {
     $shared = Join-Path $pkg 'shared'
     New-Item -ItemType Directory -Path (Join-Path $game 'bin\OtherMod'), $shared, (Join-Path $pkg 'vendor\ultimate-asi-loader'), (Join-Path $pkg 'plugins') | Out-Null
     Copy-Item -LiteralPath (Join-Path $BodiesRoot 'install-body-asi.cmd') -Destination $shared
+    Copy-Item -LiteralPath (Join-Path $BodiesRoot 'restore-kept-configs.ps1') -Destination $shared
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'find-game.ps1') -Destination $shared
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../powershell/GamePathDetection.psm1') -Destination $shared
     $gamesJson = @{ schema_version = 1; games = @{ fixture = @{ display_name = 'Fixture'; env_var = 'CUL_FIXTURE_PATH'; executable_relpath = 'bin\fixture.exe' } } }

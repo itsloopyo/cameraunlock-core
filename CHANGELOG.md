@@ -65,6 +65,34 @@ case-sensitively, a null, an empty string or a value that is not a string is an 
 an `install_cmd_reason` that is not a string counts as missing. No manifest in the fleet changes
 result: all 131 read the same under both rules.
 
+### Fixed - an interrupted uninstall no longer strands the player's config
+
+`uninstall-body.cmd` sets each `PRESERVE_FILES` entry inside a loader folder aside in
+`<game>\CameraUnlock-kept-configs\`, under its path relative to the game folder, while it removes
+that folder. A run that stopped before moving the files back left them there: the next uninstall
+refused with exit 1 until they were moved back by hand, and no install body looked at the folder,
+so a reinstall created a fresh `CameraUnlock.ini` and, in a `legacy` repo, never imported the
+legacy file that was also set aside.
+
+- New shared script `scripts/restore-kept-configs.ps1`, staged by `Copy-SharedBundle` as
+  `shared/restore-kept-configs.ps1`. It moves every file under `CameraUnlock-kept-configs\` back
+  to the same relative path under the game folder, creating parent folders, prints
+  `Restored: <path>` for each, and removes the emptied folder. When any of those paths already
+  holds a file it moves nothing, names both copies, and exits 1.
+- Every `install-body-*.cmd` runs it right after the game-running check, before the loader
+  install and before `MOD_SEED_FILES` are seeded, so a restored config is kept rather than
+  replaced by the default. `uninstall-body.cmd` runs it in place of the old refusal, whether or
+  not the wrapper sets `PRESERVE_FILES`, and then uninstalls as usual. A clash exits 1 under
+  `/y` as well; without `/y` the run pauses on the failure as any other does.
+- A move-back failure inside `:rmtree_keep` now tells the player to rerun the installer or
+  uninstaller once the folder can be written to, instead of moving the files by hand.
+- `validate-manifest` counts `shared\restore-kept-configs.ps1` among the files an install_cmd
+  package's scripts reach for, so a package that stages the new bodies without it fails.
+
+A mod picks this up at its next core pin bump. A package built with its own list of shared
+files rather than `Copy-SharedBundle` has to add the script, or every install and uninstall
+fails with "restore-kept-configs.ps1 not found".
+
 ### Changed - arx-fatalis, deep-rock-galactic and mudrunner keep their own hotkey rows
 
 `data/config-format.json` `per_game` lists hotkey rows for three repos, approved 2026-09-27, in

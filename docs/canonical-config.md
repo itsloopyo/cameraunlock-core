@@ -1622,7 +1622,13 @@ imports the legacy file again at the next start.
 - **`PRESERVE_FILES`** in an uninstall wrapper's CONFIG BLOCK lists config paths, relative to the
   game folder, that `uninstall-body.cmd` leaves in place, including inside a loader folder the
   uninstall removes. A converted repo lists every `installed` path, and a repo in `legacy` also
-  lists the legacy file in the folder of each one.
+  lists the legacy file in the folder of each one. While it removes a loader folder the uninstall
+  moves each listed file inside it to `CameraUnlock-kept-configs\<path relative to the game
+  folder>` and moves it back after. If that run is cut short, every install body and the next
+  uninstall first move each file in `CameraUnlock-kept-configs\` back to its own path and remove
+  the folder, so a reinstall finds the player's `CameraUnlock.ini`, or the legacy file to import,
+  where the mod reads it. When a file is already at one of those paths, the run names both copies,
+  changes nothing and exits 1.
 - **Manual (Nexus) ZIPs** carry neither `CameraUnlock.ini` nor the legacy file. Extracted over the
   game folder, the first would replace the player's settings with the defaults, and on an update
   from a legacy build would stop the import; the second would replace the file an older build

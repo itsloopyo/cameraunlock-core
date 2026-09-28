@@ -290,15 +290,11 @@ if errorlevel 1 exit /b 1
 
 :: Where :rmtree_one sets PRESERVE_FILES aside while it removes a loader folder.
 :: One left from an earlier run means that run stopped with the player's config
-:: in it, so nothing is touched until it has been put back by hand.
+:: in it. It is put back whether or not this wrapper sets PRESERVE_FILES: an
+:: earlier version of the wrapper may have been the one that set them aside.
 set "_KEEP_DIR=!GAME_PATH!\CameraUnlock-kept-configs"
-if defined PRESERVE_FILES if exist "!_KEEP_DIR!\" (
-    echo ERROR: !_KEEP_DIR! is left over from an uninstall that did not finish.
-    echo It holds config files that were set aside while a loader folder was
-    echo removed. Move each file in it back to the same place under the game
-    echo folder, delete the folder, and run this uninstaller again.
-    exit /b 1
-)
+call :restore_kept_configs
+if errorlevel 1 exit /b 1
 :: A listed folder would be deleted with the loader folder around it, since
 :: only files are set aside, so the run stops here with nothing touched.
 if defined PRESERVE_FILES for %%k in (%PRESERVE_FILES%) do (
@@ -449,6 +445,23 @@ echo   Removed: !_DEL_LABEL!
 exit /b 0
 
 :: ============================================
+:: Put back the files an uninstall that stopped part way left in
+:: CameraUnlock-kept-configs\, each at its own path under the game folder, or
+:: stop with nothing changed when a file is already at one of those paths. The
+:: work is in restore-kept-configs.ps1, which every install body runs too.
+:: ============================================
+:restore_kept_configs
+set "_RESTORE=!SCRIPT_DIR!shared\restore-kept-configs.ps1"
+if not exist "!_RESTORE!" set "_RESTORE=!SCRIPT_DIR!..\cameraunlock-core\scripts\restore-kept-configs.ps1"
+if not exist "!_RESTORE!" (
+    echo ERROR: restore-kept-configs.ps1 not found in shared\ or ..\cameraunlock-core\scripts\.
+    echo If this is a release ZIP, re-download it from GitHub ^(corrupt installer^).
+    exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_RESTORE!"
+exit /b %errorlevel%
+
+:: ============================================
 :: Same contract as :del_one for a whole directory tree. With PRESERVE_FILES
 :: set, :rmtree_keep does the removal instead, so a config inside the tree
 :: outlives it.
@@ -525,8 +538,8 @@ for %%k in (%PRESERVE_FILES%) do (
 )
 if defined _KEEP_STRANDED (
     for %%h in ("%_KEEP_DIR%") do echo   Those files are still in %%~h.
-    echo   Move each one back to the same place under the game folder, delete that
-    echo   folder, and run this uninstaller again.
+    echo   Run this uninstaller or the installer again once the folder they came
+    echo   from can be written to: it puts them back before anything else.
     exit /b 1
 )
 if exist "%_KEEP_DIR%\" rmdir /s /q "%_KEEP_DIR%"

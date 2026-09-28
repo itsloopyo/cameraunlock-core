@@ -222,6 +222,12 @@ if not errorlevel 1 (
     exit /b 1
 )
 
+:: An uninstall that stopped part way can have left the player's config in
+:: CameraUnlock-kept-configs\. Put it back before anything is deployed or
+:: seeded, or stop with nothing changed when a file is already in its place.
+call :restore_kept_configs
+if errorlevel 1 exit /b 1
+
 set "MANAGED_PATH=!GAME_PATH!\%MANAGED_SUBFOLDER%"
 set "ASSEMBLY_PATH=!MANAGED_PATH!\%ASSEMBLY_DLL%"
 set "BACKUP_PATH=!MANAGED_PATH!\%ASSEMBLY_DLL%.original"
@@ -460,3 +466,20 @@ if "%_MK_EC%"=="0" (
 )
 echo   ERROR: could not read assembly to verify patch state ^(code %_MK_EC%^).
 exit /b 1
+
+:: ============================================
+:: Put back the files an uninstall that stopped part way left in
+:: CameraUnlock-kept-configs\, each at its own path under the game folder, or
+:: stop with nothing changed when a file is already at one of those paths. The
+:: work is in restore-kept-configs.ps1, which uninstall-body.cmd runs too.
+:: ============================================
+:restore_kept_configs
+set "_RESTORE=!SCRIPT_DIR!shared\restore-kept-configs.ps1"
+if not exist "!_RESTORE!" set "_RESTORE=!SCRIPT_DIR!..\cameraunlock-core\scripts\restore-kept-configs.ps1"
+if not exist "!_RESTORE!" (
+    echo ERROR: restore-kept-configs.ps1 not found in shared\ or ..\cameraunlock-core\scripts\.
+    echo If this is a release ZIP, re-download it from GitHub ^(corrupt installer^).
+    exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_RESTORE!"
+exit /b %errorlevel%

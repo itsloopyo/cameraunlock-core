@@ -428,7 +428,7 @@ function scriptDependencies(text) {
     .split(/\r?\n/)
     .filter((line) => !/^\s*(::|@?rem\b)/i.test(line))
     .join("\n");
-  for (const m of text.matchAll(/shared[\\/]((?:un)?install-body[a-z-]*\.cmd|find-game\.ps1|install-all-bepinex\.ps1)/gi)) {
+  for (const m of text.matchAll(/shared[\\/]((?:un)?install-body[a-z-]*\.cmd|find-game\.ps1|install-all-bepinex\.ps1|restore-kept-configs\.ps1)/gi)) {
     deps.add(`shared/${m[1]}`);
   }
   for (const m of text.matchAll(/%(?:SCRIPT_DIR%|~dp0)([A-Za-z0-9_.-]+\.ps1)/g)) deps.add(m[1]);

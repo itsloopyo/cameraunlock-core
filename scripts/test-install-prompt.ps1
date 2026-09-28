@@ -22,7 +22,7 @@ $plugins = Join-Path $caseRoot 'plugins'
 $vendor = Join-Path $caseRoot 'vendor\ultimate-asi-loader'
 New-Item -ItemType Directory -Path $game, $decoy, $shared, $plugins, $vendor | Out-Null
 
-foreach ($name in @('install-body-asi.cmd', 'uninstall-body.cmd')) {
+foreach ($name in @('install-body-asi.cmd', 'uninstall-body.cmd', 'restore-kept-configs.ps1')) {
     Copy-Item -LiteralPath (Join-Path $BodiesRoot $name) -Destination $shared
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'find-game.ps1') -Destination $shared
