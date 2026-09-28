@@ -681,7 +681,10 @@ legacy file can hold but `DiagnosticMarkerKey` with `PluginConfig::SetDefaults` 
 legacy file does not hold, or holds at that value, migrates as `default`. No legacy file held
 `TrueFreeLook`, `TrueFreeLookKey`, `CollisionEnabled` or `CollisionReleaseSmoothing`, so the
 import leaves each to Defaults.ini; `CollisionMargin` is not global and keeps the table's own
-default. With the flag unset, a mod reads, migrates and writes
+default. The one exception is Insert, which `TrueFreeLookKey` takes: where the legacy file put the
+toggle, the tracking mode key, the yaw mode key or (with `diagnosticMarkerKey`) the diagnostic
+marker key on Insert, that action keeps Insert and `TrueFreeLookKey` is written as `Ctrl+Shift+U`
+alone, so one press does not fire both. With the flag unset, a mod reads, migrates and writes
 `configFileName` as it did before.
 
 ## The config owner

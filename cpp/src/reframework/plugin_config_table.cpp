@@ -27,6 +27,16 @@ std::string LegacyBindings(int vk, int chordLetter) {
     return input::FormatKeyBindings(bindings);
 }
 
+constexpr int kVkInsert = 0x2D;
+
+// No legacy build had true free look, whose key list takes Insert. Where the legacy file put an
+// action the import carries on Insert, that action keeps it and the list keeps only its chord, so
+// one press does not fire both.
+bool InsertTaken(const PluginConfig& legacy, const PluginConfigSchema& schema) {
+    return legacy.toggleKey == kVkInsert || legacy.positionToggleKey == kVkInsert || legacy.yawModeKey == kVkInsert ||
+           (schema.diagnosticMarkerKey && legacy.diagnosticMarkerKey == kVkInsert);
+}
+
 std::vector<LegacyKey> ReadKeys(const PluginConfigSchema& schema) {
     std::vector<LegacyKey> keys = {
         {"Network", "UDPPort"},
@@ -171,9 +181,15 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
             follows.Setting(Concept::LightMultiplier, legacy.flashlightMultiplier, shipped.flashlightMultiplier);
         }
         if (schema.trueFreeLook) {
-            // No legacy build had either setting, so both follow Defaults.ini.
+            // No legacy build had either setting, so both follow Defaults.ini, the key list unless
+            // an action is on Insert.
+            const bool insertTaken = InsertTaken(legacy, schema);
             follows.Setting(Concept::TrueFreeLook, true);
-            follows.Setting(Concept::TrueFreeLookKey, true);
+            follows.Setting(Concept::TrueFreeLookKey, !insertTaken);
+            if (insertTaken) {
+                out.trueFreeLookKeyBindings =
+                    input::FormatKeyBindings({{input::KeyModifiers::kCtrl | input::KeyModifiers::kShift, 'U'}});
+            }
         }
         if (schema.leanCollision) {
             // CollisionMargin is not global, so it is not listed: it holds the game's own value.

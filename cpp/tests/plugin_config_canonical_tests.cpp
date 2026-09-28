@@ -958,6 +958,47 @@ void TestTrueFreeLook(const fs::path& root) {
           "a file still carrying ads_mode=tracked loads with free look off, and is not rewritten");
 }
 
+// A legacy file that put an action the import carries on Insert: that action keeps Insert, and
+// TrueFreeLookKey is written as Ctrl+Shift+U alone rather than following Defaults.ini to Insert too.
+void TestTrueFreeLookLeavesInsertToALegacyAction(const fs::path& root) {
+    struct Case {
+        bool marker;
+        const char* from;
+        const char* to;
+        std::string PluginConfig::*action;
+        const char* bindings;
+    };
+    const Case cases[] = {
+        {false, "ToggleKey=0x23", "ToggleKey=0x2D", &PluginConfig::toggleKeyBindings, "Insert, Ctrl+Shift+Y"},
+        {false, "PositionToggleKey=0x21", "PositionToggleKey=0x2D", &PluginConfig::cycleTrackingModeKeyBindings,
+         "Insert, Ctrl+Shift+G"},
+        {false, "YawModeKey=0x22", "YawModeKey=0x2D", &PluginConfig::yawModeKeyBindings, "Insert, Ctrl+Shift+H"},
+        {true, "YawModeKey=0x22", "DiagnosticMarkerKey=0x2D\nYawModeKey=0x22",
+         &PluginConfig::diagnosticMarkerKeyBindings, "Insert"},
+    };
+    for (const Case& c : cases) {
+        Fixture shooter = kFixtures[1];
+        shooter.schema.trueFreeLook = true;
+        shooter.schema.diagnosticMarkerKey = c.marker;
+        std::string legacy = ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / shooter.file);
+        const std::size_t at = legacy.find(c.from);
+        if (at == std::string::npos) throw std::runtime_error(std::string(shooter.file) + " has no " + c.from);
+        legacy.replace(at, std::strlen(c.from), c.to);
+
+        const fs::path dir = Fresh(root, "insert-taken");
+        WriteBytes(dir / "HeadTracking.ini", legacy);
+        ConfigOwner<PluginConfig> owner(OwnerOptions(shooter, dir));
+        const ConfigLoadResult<PluginConfig> loaded = owner.Load();
+        const std::string converted = ReadBytes(dir / "CameraUnlock.ini");
+        const std::string name = std::string(shooter.file) + " with " + (c.marker ? "DiagnosticMarkerKey=0x2D" : c.to);
+        Check(loaded.status == ConfigLoadStatus::Migrated && loaded.config.*c.action == c.bindings &&
+                  loaded.config.trueFreeLookKeyBindings == "Ctrl+Shift+U" &&
+                  Contains(converted, "\r\nTrueFreeLookKey=Ctrl+Shift+U\r\n") &&
+                  Contains(converted, "\r\nTrueFreeLook=default\r\n"),
+              name + ": the action keeps Insert and TrueFreeLookKey is written as Ctrl+Shift+U alone");
+    }
+}
+
 // A schema with a lean collision query binds CollisionEnabled (default true) and
 // CollisionReleaseSmoothing, both written default, and CollisionMargin, which is not global and
 // holds the game's own value; the import of a legacy file, which held none of them, leaves the two
@@ -1010,6 +1051,7 @@ int RunPluginConfigCanonicalTests() {
     TestLoadIgnoresCanonicalConfig(root);
     TestConversionLog(root);
     TestTrueFreeLook(root);
+    TestTrueFreeLookLeavesInsertToALegacyAction(root);
     TestLeanCollision(root);
     for (const Fixture& f : kFixtures) TestOwnerConvertsShippedFile(root, f);
     for (const Fixture& f : kFixtures) {

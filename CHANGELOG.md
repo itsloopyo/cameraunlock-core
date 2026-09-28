@@ -23,6 +23,17 @@ A C# row cannot bind a double, so no C# game threw, but a C# game now refuses th
 Defaults.ini holding such a value, written by hand, is now refused by games that took the float's
 rounding before. No signature changes. Fixture `global/read-float-edges` covers both values.
 
+### Fixed - the REFramework legacy import leaves Insert to an action the legacy file put there
+
+`PluginConfigLegacyImport` left `TrueFreeLookKey` to Defaults.ini always, and its default is
+`Insert, Ctrl+Shift+U`. A player whose `HeadTracking.ini` put the toggle, the tracking mode key, the
+yaw mode key or the diagnostic marker key on Insert (0x2D) kept that action on Insert, so one press
+fired both. For a schema with `trueFreeLook` set, that action now keeps Insert and
+`TrueFreeLookKey` is written as `Ctrl+Shift+U` alone, as dying-light and far-cry-6 do.
+resident-evil-3 and resident-evil-requiem set `trueFreeLook` and take the fix at their next pin
+bump; a player whose legacy file has no action on Insert migrates as before. `PluginConfig::Read`
+is untouched.
+
 ### Fixed - `FileChanged` and `Reload` no longer throw on a write time that cannot be read
 
 C++ `ConfigOwner::FileChanged` and `Reload` and C# `ConfigOwner.FileChanged` and `Reload` read the
