@@ -22,7 +22,7 @@ namespace CameraUnlock.Core.Input
         /// order, then exactly one key. A key is a name from data/keys.json that has a Unity
         /// KeyCode value; a number is not read, because a KeyCode value is not a Windows
         /// virtual-key code and the same number would mean another key in a native mod. The key
-        /// is never a Ctrl, Shift or Alt key (LeftShift to RightAlt), however spelled: it goes
+        /// is never a Ctrl, Shift or Alt key (LeftShift, RightShift, LeftControl, RightControl, LeftAlt or RightAlt), however spelled: it goes
         /// down before the key a chord holds it with, so bound alone it would fire whenever a
         /// player starts a chord with it, and the chord's own binding would fire again. Names
         /// and modifiers read ASCII case-insensitively. A list naming the same binding twice is
@@ -219,7 +219,7 @@ namespace CameraUnlock.Core.Input
             return -1;
         }
 
-        // True for LeftShift to RightAlt, the keys data/keys.json names as a modifier's Unity left
+        // True for the six keys data/keys.json names as a modifier's Unity left
         // and right.
         internal static bool IsModifierKey(int unityKeyCode)
         {

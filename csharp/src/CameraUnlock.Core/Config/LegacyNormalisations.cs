@@ -123,7 +123,7 @@ namespace CameraUnlock.Core.Config
         /// for (<see cref="KeyBindings.HasName"/>) gives "" too, and the drop is added to
         /// <paramref name="dropped"/> as <see cref="DropRule.KeyCodeOutOfRange"/> with the code in
         /// decimal (N1, owner ruling of 2026-09-27): no hotkey value can spell it. A Ctrl, Shift or Alt key
-        /// (LeftShift to RightAlt) gives "" too, and the drop is added to
+        /// (LeftShift, RightShift, LeftControl, RightControl, LeftAlt or RightAlt) gives "" too, and the drop is added to
         /// <paramref name="dropped"/> under its key name: no hotkey value binds one, because it
         /// goes down before the key of any chord made with it, so a binding on it fires on the way
         /// into every such chord. Any other code gives its key name. A map folding the
