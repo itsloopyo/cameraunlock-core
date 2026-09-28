@@ -1771,6 +1771,19 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectThrows<ArgumentNullException>(() => new ConfigOwner<HeadTrackingConfigData>(null), "null options");
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(Options(dir, null)), "no path");
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(Options(dir, FileName)), "a relative path");
+            ExpectContains(ExpectThrows<ArgumentException>(
+                () => new ConfigOwner<HeadTrackingConfigData>(Options(dir, @"C:scratch\" + FileName)), "a drive-relative path").Message,
+                "is not a fully qualified path");
+            ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(Options(dir, @"\scratch\" + FileName)),
+                "a root-relative path");
+            foreach (string partly in new[] { @"C:scratch\" + LegacyName, @"\scratch\" + LegacyName })
+            {
+                ConfigOwnerOptions<HeadTrackingConfigData> partlySource = Options(dir, path);
+                partlySource.Import = new Legacy().Import;
+                partlySource.LegacySourcePath = partly;
+                ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(partlySource),
+                    "a legacy file at " + partly);
+            }
             ConfigOwnerOptions<HeadTrackingConfigData> noTable = Options(dir, path);
             noTable.Table = null;
             ExpectThrows<ArgumentException>(() => new ConfigOwner<HeadTrackingConfigData>(noTable), "no table");

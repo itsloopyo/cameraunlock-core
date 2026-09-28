@@ -102,7 +102,8 @@ namespace CameraUnlock.Core.Config
 
         /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
         /// <exception cref="ArgumentException">Path, Table, Header or Defaults is missing; a path is
-        /// not absolute; Import is set without a LegacySourcePath; LegacySourcePath is set without an
+        /// not fully qualified (on Windows a drive letter and a separator, or a UNC path; elsewhere a
+        /// leading /); Import is set without a LegacySourcePath; LegacySourcePath is set without an
         /// Import, or names Path; the table has both RotationEnabled and PositionEnabled and marks
         /// only one of them Writable; a legacy key's name holds an unpaired surrogate; or the table
         /// cannot render its fresh file under the header (<see cref="ConfigTable{TConfig}.RenderFresh"/>:
@@ -1385,9 +1386,9 @@ namespace CameraUnlock.Core.Config
             string option)
         {
             if (path == null || path.Length == 0) throw new ArgumentException("the options name no " + option, "options");
-            if (!System.IO.Path.IsPathRooted(path))
+            if (!DefaultsFile.IsFullyQualified(path))
             {
-                throw new ArgumentException(option + " '" + path + "' is not an absolute path", "options");
+                throw new ArgumentException(option + " '" + path + "' is not a fully qualified path", "options");
             }
             return System.IO.Path.GetFullPath(path);
         }

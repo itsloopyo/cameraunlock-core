@@ -10,7 +10,7 @@ namespace CameraUnlock.Core.Config
     public sealed class ConfigOwnerOptions<TConfig> where TConfig : class
     {
         /// <summary>
-        /// The config file, as an absolute path: <c>CameraUnlock.ini</c>, in the folder that holds
+        /// The config file, as a fully qualified path: <c>CameraUnlock.ini</c>, in the folder that holds
         /// the game's legacy file where it has one (<c>BepInEx\config\CameraUnlock.ini</c> for a
         /// BepInEx plugin). Required.
         /// </summary>
@@ -47,7 +47,7 @@ namespace CameraUnlock.Core.Config
 #endif
 
         /// <summary>
-        /// The game's legacy file, as an absolute path, normally in the same folder as
+        /// The game's legacy file, as a fully qualified path, normally in the same folder as
         /// <see cref="Path"/>: <c>HeadTracking.ini</c> beside <c>CameraUnlock.ini</c>, or a BepInEx
         /// plugin's <c>BepInEx\config\&lt;GUID&gt;.cfg</c> beside
         /// <c>BepInEx\config\CameraUnlock.ini</c>. Required with <see cref="Import"/>, refused

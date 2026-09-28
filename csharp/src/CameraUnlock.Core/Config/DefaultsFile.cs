@@ -60,7 +60,7 @@ namespace CameraUnlock.Core.Config
 
         // Path.IsPathRooted also accepts C:x and \x, which GetFullPath resolves against the
         // process's current drive and directory.
-        private static bool IsFullyQualified(string path)
+        internal static bool IsFullyQualified(string path)
         {
             if (System.IO.Path.DirectorySeparatorChar == '/') return path.Length > 0 && path[0] == '/';
             char drive = path.Length > 0 ? char.ToUpperInvariant(path[0]) : ' ';

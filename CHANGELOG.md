@@ -9,6 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - C# `ConfigOwner` refuses a partly qualified Path or LegacySourcePath
+
+`ConfigOwner<TConfig>` checked `ConfigOwnerOptions.Path` and `LegacySourcePath` with
+`Path.IsPathRooted`, which accepts `C:x\CameraUnlock.ini` and `\Games\Foo\CameraUnlock.ini`.
+`Path.GetFullPath` resolves those against the process's current drive and folder, so the owner could
+read and write a file on another drive than the one meant. Both now take the rule
+`DefaultsFile.At` and the C++ owner already apply: a drive letter and a separator, or a UNC path
+(elsewhere a leading /), and the constructor throws `ArgumentException` for anything else.
+
+This tightens a precondition. Every converted C# mod builds both paths from `Assembly.Location`,
+BepInEx's `Paths.ConfigPath` or `ConfigFile.ConfigFilePath`, and every test from
+`Path.GetTempPath()`, all fully qualified, so no caller changes.
+
 ### Fixed - `Assert-LauncherManifestDelivery` reads delivery_mode as Lopari and validate-manifest do
 
 `ReleaseWorkflow.psm1`'s `Assert-LauncherManifestDelivery` compared without case and read a JSON
