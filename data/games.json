@@ -162,7 +162,7 @@
       "steam_folder": "Amnesia Rebirth",
       "executable_relpath": "AmnesiaRebirth.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/amnesia-rebirth-headtracking",
       "engine": "HPL",
       "catalog_status": "prerelease"
@@ -174,7 +174,7 @@
       "steam_folder": "SOMA",
       "executable_relpath": "Soma.exe",
       "loader": "AsiLoader",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/soma-headtracking",
       "engine": "HPL",
       "catalog_status": "prerelease"
@@ -1597,7 +1597,7 @@
       "steam_folder": "A Plague Tale Innocence",
       "executable_relpath": "APlagueTaleInnocence_x64.exe",
       "loader": "Shim",
-      "delivery_mode": "install_cmd",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/a-plague-tale-innocence-headtracking",
       "catalog_status": "absent"
     },
