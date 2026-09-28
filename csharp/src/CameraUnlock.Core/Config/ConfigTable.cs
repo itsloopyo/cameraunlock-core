@@ -66,6 +66,7 @@ namespace CameraUnlock.Core.Config
         private readonly Func<TConfig> defaults;
         private readonly TConfig checkDefaults;
         private readonly List<Row> rows = new List<Row>();
+        private readonly List<KeyValuePair<Row, byte[]>> perGameDefaults = new List<KeyValuePair<Row, byte[]>>();
         private int last = -1;
 
         /// <param name="defaults">Makes a new config holding the defaults. It is called when the
@@ -223,6 +224,27 @@ namespace CameraUnlock.Core.Config
                     + "keeps its own value and Defaults.ini never reaches it; PerGame() is for a global concept");
             }
             row.PerGame = true;
+            return this;
+        }
+
+        /// <summary>
+        /// <see cref="PerGame()"/>, with the game's own default read from <paramref name="value"/> as
+        /// the row's codec reads it, for a table another function built with the schema's default on
+        /// the row (<see cref="HeadTrackingConfigTable"/>).
+        /// </summary>
+        /// <exception cref="InvalidOperationException">As <see cref="PerGame()"/>, or the codec
+        /// refuses <paramref name="value"/>.</exception>
+        public ConfigTable<TConfig> PerGame(string value)
+        {
+            PerGame();
+            Row row = rows[last];
+            byte[] text = Encoding.ASCII.GetBytes(value);
+            var error = row.Apply(text, checkDefaults);
+            if (error != null)
+            {
+                throw new InvalidOperationException(row.Name + " cannot default to " + value + ": " + error);
+            }
+            perGameDefaults.Add(new KeyValuePair<Row, byte[]>(row, text));
             return this;
         }
 
@@ -694,6 +716,7 @@ namespace CameraUnlock.Core.Config
         {
             TConfig made = defaults();
             if (made == null) throw new InvalidOperationException("the defaults factory returned null");
+            foreach (KeyValuePair<Row, byte[]> perGame in perGameDefaults) perGame.Key.Apply(perGame.Value, made);
             return made;
         }
 

@@ -451,6 +451,20 @@ public:
         return *this;
     }
 
+    /// PerGame(), with the game's own default read from `value` as the row's codec reads it, for a
+    /// table another function built with the schema's default on the row (HeadTrackingConfigTable).
+    /// Throws std::invalid_argument as PerGame() does, and when the codec refuses `value`.
+    ConfigTable& PerGame(std::string_view value) {
+        PerGame();
+        const std::size_t row = Last("PerGame");
+        const std::string error = ops_[row]->Apply(value, defaults_);
+        if (!error.empty()) {
+            throw std::invalid_argument(detail::RowName(rows_[row]) + " cannot default to " + std::string(value) +
+                                        ": " + error);
+        }
+        return *this;
+    }
+
     /// Marks the row as one the config owner's Save may change.
     ConfigTable& Writable() {
         rows_[Last("Writable")].writable = true;

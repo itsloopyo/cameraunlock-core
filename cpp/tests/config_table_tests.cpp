@@ -764,6 +764,14 @@ void TestGlobalChecks() {
               "(nothing thrown)",
           "PositionEnabled alone renders");
 
+    const std::string per_game_value =
+        RenderCanonicalFresh(ConfigTable<S>().Concept<Concept::UdpPort>(&S::value).PerGame("4300"), header);
+    Check(Contains(per_game_value, "\r\nUdpPort=4300\r\n"),
+          "PerGame with a value makes that value the row's default and renders it");
+    Check(Thrown([] { ConfigTable<S>().Concept<Concept::UdpPort>(&S::value).PerGame("port"); }).rfind(
+              "[Network] UdpPort cannot default to port: ", 0) == 0,
+          "PerGame with a value the codec refuses throws");
+
     Check(Thrown([] { ConfigTable<S>().Local("Camera", "Offset", &S::value, IntCodec<int>(), "One.").PerGame(); }) ==
               "[Camera] Offset is a local row, which never takes a value from Defaults.ini",
           "PerGame on a local row throws");

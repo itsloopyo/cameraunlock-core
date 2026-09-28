@@ -206,6 +206,24 @@ namespace CameraUnlock.Core.Tests.Config
                     + "with no other concept row has no Defaults.ini lines:\n" + perGame);
             }
 
+            string perGameValue = Encoding.ASCII.GetString(SmallTable()
+                .Concept(ConfigConcepts.UdpPort, s => s.Value, (s, v) => s.Value = v)
+                .PerGame("4300")
+                .RenderFresh(header));
+            if (!perGameValue.Contains("\r\nUdpPort=4300\r\n"))
+            {
+                throw new InvalidOperationException("PerGame with a value makes that value the row's default and renders "
+                    + "it:\n" + perGameValue);
+            }
+            try
+            {
+                SmallTable().Concept(ConfigConcepts.UdpPort, s => s.Value, (s, v) => s.Value = v).PerGame("port");
+                throw new InvalidOperationException("PerGame with a value the codec refuses did not throw");
+            }
+            catch (InvalidOperationException e) when (e.Message.StartsWith("[Network] UdpPort cannot default to port: "))
+            {
+            }
+
             ExpectMessage<ArgumentException>(() => SmallTable()
                 .Concept(ConfigConcepts.RotationEnabled, s => s.Rotation, (s, v) => s.Rotation = v)
                 .RenderFresh(header),
