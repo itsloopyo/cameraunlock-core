@@ -379,8 +379,9 @@ mode's position channel wherever it would have read such a switch.
 tracking. `false`, sights locked, keeps the eye on the sight line; `true`, true free look, leaves
 the lean in full while the weapon stays put in the world. It is in `[Position]` because the lean is
 all it changes and it exists only where positional tracking does, and a key belongs in the section
-of its subject, as `CollisionEnabled` does. A mod without positional tracking binds neither it nor
-`TrueFreeLookKey`. It has no alias: `true_free_look` is read only by a mod's legacy import, and in a
+of its subject, as `CollisionEnabled` does. Every mod has positional tracking, so every shooter
+with an aim state binds both it and `TrueFreeLookKey`, and a game with no aim state binds neither.
+It has no alias: `true_free_look` is read only by a mod's legacy import, and in a
 canonical file it draws `MisplacedKey` and is not read. The older flat readers read neither
 `TrueFreeLook` nor `TrueFreeLookKey`.
 
@@ -656,23 +657,31 @@ A mod passes `DefaultsFile.PerUser()` where the test passes a scratch file. A Un
 ### REFramework mods
 
 REFramework mods read their config through core's `PluginConfig`, so their table and their legacy
-import are core's too. A mod converts by setting `PluginConfigSchema::canonicalConfig` (appended
-last, since every mod initialises the schema positionally) and `PluginModDescriptor::gameName`,
-which `PluginMod::Initialize` then requires. `PluginConfigTable(schema)`
+import are core's too. A mod converts by setting `PluginConfigSchema::canonicalConfig` and
+`PluginModDescriptor::gameName`, which `PluginMod::Initialize` then requires. Fields are only ever
+appended to `PluginConfigSchema`, since every mod initialises it positionally; `trueFreeLook` and
+`leanCollision` come after `canonicalConfig`. `PluginConfigTable(schema)`
 (`reframework/plugin_config_table.h`) binds `UdpPort`, `EnableOnStartup`, `WorldSpaceYaw`
 (Writable), the smoothing pair, `PositionEnabled` (Writable), four position limits, the three
-hotkey lists, a local `DiagnosticMarkerKey` when the schema has a diagnostic marker key, and the
-light rows when the schema has a flashlight. The mode control has two states, so there is no
+hotkey lists, a local `DiagnosticMarkerKey` when the schema has a diagnostic marker key, the
+light rows when the schema has a flashlight, `TrueFreeLook` (Writable) and `TrueFreeLookKey` when
+the schema sets `trueFreeLook`, and `CollisionEnabled`, `CollisionMargin` and
+`CollisionReleaseSmoothing` when it sets `leanCollision`. With `trueFreeLook` the bootstrap
+registers the `TrueFreeLookKey` list on `PluginMod::ToggleTrueFreeLook`, which applies the new
+mode, logs it and saves `TrueFreeLook`. The mode control has two states, so there is no
 `RotationEnabled`. `PluginConfigLegacyImport(schema)` is the import, and `PluginConfig::Read`,
 which it calls, is frozen. Read replaces a hotkey code that `IsBindableVirtualKey` refuses, one
 outside 0x01-0xFE or a Ctrl, Shift or Alt key, with the row's default, so the import gives that
 default beside the chord and applies neither N1 nor N3. With the flag set, `PluginMod` keeps the settings in
 `reframework\plugins\CameraUnlock.ini`, beside the plugin DLL, and imports
 `PluginModDescriptor::configFileName` (`HeadTracking.ini` by default) from the same folder while
-`CameraUnlock.ini` is absent; that file is never written. The import compares every row but
-`DiagnosticMarkerKey` with `PluginConfig::SetDefaults` through `LegacyFollowsDefaultsIni` (the
-mode as `PositionEnabled`, a hotkey as its code), so a row the legacy file does not hold, or holds
-at that value, migrates as `default`. With the flag unset, a mod reads, migrates and writes
+`CameraUnlock.ini` is absent; that file is never written. The import compares every row the
+legacy file can hold but `DiagnosticMarkerKey` with `PluginConfig::SetDefaults` through
+`LegacyFollowsDefaultsIni` (the mode as `PositionEnabled`, a hotkey as its code), so a row the
+legacy file does not hold, or holds at that value, migrates as `default`. No legacy file held
+`TrueFreeLook`, `TrueFreeLookKey`, `CollisionEnabled` or `CollisionReleaseSmoothing`, so the
+import leaves each to Defaults.ini; `CollisionMargin` is not global and keeps the table's own
+default. With the flag unset, a mod reads, migrates and writes
 `configFileName` as it did before.
 
 ## The config owner
@@ -1336,8 +1345,8 @@ nothing. It stays for the life of the repo, since a player can update from any o
 | `PoseShaping` (2) | approved change `pose_shaping` | A sensitivity, unit scale, deadzone, response curve or axis inversion a player set away from the shipped default. A shipped unit scale, and a shipped default that is not identity, belong to the mod's axis conversion, so the conversion moves them into the mod's own code |
 | `Reticle` (3) | approved change `reticle` | Reticle settings and a reticle toggle key |
 | `FollowsDefault` (4) | approved change `follows_default` | The setting of a feature shipped switched off while untested, which now follows the mod's default |
-| `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code no hotkey value can spell, which imports as unbound: in a native import a virtual-key code outside 0x01-0xFE, 0xFF included (C++ `LegacyVirtualKeyToBindings`, recorded as the code in hex); in a Unity import a `KeyCode` value `data/keys.json` has no name for (C# `LegacyNormalisations.KeyCodeToBindings`, recorded in decimal, with `KeyBindings.HasName` to test a code). Code 0, a legacy file's unbound, stays unbound and is not recorded. The C# log line reads `it is not a key code Unity names, so the action is unbound` |
-| `ModifierKey` (6) | normalisation N3 | A hotkey bound to a Ctrl, Shift or Alt key on its own, which imports as unbound, since no hotkey value can hold one (C++ `LegacyVirtualKeyToBindings` for 0x10-0x12 and 0xA0-0xA5, recorded as the code in hex; C# `LegacyNormalisations.KeyCodeToBindings` for `LeftShift` to `RightAlt`, recorded as the key name). A map that folds the action's Ctrl+Shift chord into the list appends it to what these give, so the player keeps the chord. Core's REFramework import does not apply it (see REFramework mods) |
+| `KeyCodeOutOfRange` (5) | normalisation N1 | A hotkey code no hotkey value can spell, which imports as unbound: in a native import a virtual-key code outside 0x01-0xFE, 0xFF included (C++ `LegacyVirtualKeyToBindings`, recorded as the code in hex, or in decimal for a negative code); in a Unity import a `KeyCode` value `data/keys.json` has no name for (C# `LegacyNormalisations.KeyCodeToBindings`, recorded in decimal, with `KeyBindings.HasName` to test a code). Code 0, a legacy file's unbound, stays unbound and is not recorded. The C# log line reads `it is not a key code Unity names, so the action is unbound` |
+| `ModifierKey` (6) | normalisation N3 | A hotkey bound to a Ctrl, Shift or Alt key on its own, which imports as unbound, since no hotkey value can hold one (C++ `LegacyVirtualKeyToBindings` for 0x10-0x12 and 0xA0-0xA5, recorded as the code in hex; C# `LegacyNormalisations.KeyCodeToBindings` for `LeftShift`, `RightShift`, `LeftControl`, `RightControl`, `LeftAlt` and `RightAlt`, recorded as the key name). A map that folds the action's Ctrl+Shift chord into the list appends it to what these give, so the player keeps the chord. Core's REFramework import does not apply it (see REFramework mods) |
 | `CoupledAim` (7) | approved change `coupled_aim` | An aim decoupling switch (`AimDecoupling`, a BepInEx `EnableAimDecoupling`, or any other spelling of it) whose legacy value is false. Aim is always decoupled now, so that player gets decoupled aim, and the map records the value it read. A true value changes nothing and is not recorded. The conversion also deletes the mod's coupled-aim code path |
 | `PositionSwitchOff` (8) | approved change `position_switch_off` | A position switch whose legacy value is false, where it also kept the mode hotkey off the position modes (the setting `PositionAllowed` stood for: amnesia-rebirth, soma, bully-scholarship-edition, a-plague-tale-innocence, the-painscreek-killings). The map writes the rotation-only tracking mode, `RotationEnabled` true and `PositionEnabled` false, which keeps the view the player had, and records the switch (C++ `LegacyPositionSwitch`, C# `LegacyPositionSwitch.Record`, called after the map has written the tracking mode). Nothing else carries it, so the mode hotkey can now turn positional tracking back on. A true value changes nothing and is not recorded |
 | `TrackerPivot` (9) | approved change `tracker_pivot` | A neck pivot distance (`TrackerPivotForward`, `TrackerPivotUp`, or any other spelling of either) the player changed from the value the game shipped (C++ `LegacyTrackerPivot`, C# `LegacyTrackerPivot.Record`). Both are compared as the pipeline ran them, so a pivot behind the game's own switch set to off, or a key its code never read, counts as 0. The tracker is authoritative, so the setting has no row. The pivot the game shipped is no player's choice: the conversion keeps it in the mod's code, and a legacy value equal to it is not recorded |
