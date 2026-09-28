@@ -336,6 +336,9 @@
     "mirrors-edge-headtracking": [
       {"committed": "assets/MirrorsEdgeHeadTracking.ini", "installed": ["Binaries\\CameraUnlock.ini"], "legacy_source": "MirrorsEdgeHeadTracking.ini", "dialect": "native"}
     ],
+    "mixtape-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["NewMoon\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
     "mudrunner-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
