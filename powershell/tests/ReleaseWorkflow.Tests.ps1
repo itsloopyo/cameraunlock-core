@@ -252,6 +252,71 @@ try {
 Check 'a manifest-only commit counts as releasable' ($err -eq '') "threw $err"
 Check 'the manifest fix reaches the changelog' ((Get-Content -Raw (Join-Path $repo 'CHANGELOG.md')) -match 'ship a v2 manifest') 'entry missing'
 
+# --- New-ChangelogFromCommits and [Unreleased] -------------------------------
+
+# The fleet curates [Unreleased] as the release notes. Inserting the generated
+# entry under the header put the release above it, and the curated notes shipped
+# under no version (dying-light-2, resident-evil-requiem, rv-there-yet).
+$today = Get-Date -Format 'yyyy-MM-dd'
+function Invoke-ChangelogRelease {
+    param([string]$Name, [string]$Changelog, [string]$Subject = 'feat: generated feature')
+    $dir = New-GitRepo $Name
+    $path = Join-Path $dir 'CHANGELOG.md'
+    [System.IO.File]::WriteAllText($path, $Changelog, (New-Object System.Text.UTF8Encoding($false)))
+    & git -C $dir add -A
+    & git -C $dir -c user.email=t@t -c user.name=t commit -q -m 'chore: changelog'
+    & git -C $dir tag v1.0.0
+    New-Item -ItemType Directory -Path (Join-Path $dir 'src') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $dir 'src\a.txt') -Value 'a'
+    & git -C $dir add -A
+    & git -C $dir -c user.email=t@t -c user.name=t commit -q -m $Subject
+    Push-Location $dir
+    try {
+        $result = New-ChangelogFromCommits -ChangelogPath $path -Version '1.1.0' -ArtifactPaths @('src/')
+    } finally {
+        Pop-Location
+    }
+    return @{ Result = $result; Text = [System.IO.File]::ReadAllText($path); Path = $path }
+}
+
+$older = "## [1.0.0] - 2026-01-01`n`n### Fixed`n`n- an old fix`n"
+$curatedBody = "`n`n### Added`n`n- first curated`n- second curated`n  continued`n`n### Removed`n`n- a removed setting`n`n### Fixed`n`n- a curated fix`n`n"
+
+$run = Invoke-ChangelogRelease 'unreleased-curated' "# Changelog`n`nIntro.`n`n## [Unreleased]$curatedBody$older"
+$expected = "# Changelog`n`nIntro.`n`n## [1.1.0] - $today$curatedBody$older"
+Check 'a curated [Unreleased] is renamed to the release in place, content kept' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+Check 'a curated [Unreleased] is promoted without commit bullets' ($run.Text -notmatch 'generated feature') 'commit subject written'
+Check 'a promoted section reports Promoted' ($run.Result.Promoted -eq $true -and $run.Result.AlreadyExists -eq $false -and $run.Result.Generic -eq $false) "got Promoted=$($run.Result.Promoted)"
+Check 'a promoted section counts the bullets under Added, Fixed and Changed' ($run.Result.Features -eq 2 -and $run.Result.Fixes -eq 1 -and $run.Result.Changes -eq 0) "got $($run.Result.Features)/$($run.Result.Fixes)/$($run.Result.Changes)"
+$section = Get-ChangelogSection -ChangelogPath $run.Path -Version '1.1.0'
+Check 'the release body is the curated notes' ($section -match 'first curated' -and $section -match 'a curated fix' -and $section -notmatch 'an old fix') "got '$section'"
+
+$run = Invoke-ChangelogRelease 'unreleased-empty' "# Changelog`n`n## [Unreleased]`n`n`n$older" 'fix: use $_ literally'
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Fixed`n`n- use `$_ literally`n`n$older"
+Check 'an empty [Unreleased] is replaced by the generated entry' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+Check 'a generated entry reports not Promoted' ($run.Result.Promoted -eq $false -and $run.Result.Fixes -eq 1) "got Promoted=$($run.Result.Promoted) Fixes=$($run.Result.Fixes)"
+
+$run = Invoke-ChangelogRelease 'unreleased-then-version' "# Changelog`n`n## [Unreleased]`n$older"
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n`n$older"
+Check 'an [Unreleased] directly followed by a version is replaced by the generated entry' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogRelease 'no-unreleased' "# Changelog`n`n$older" 'fix: use $_ literally'
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Fixed`n`n- use `$_ literally`n`n$older"
+Check 'with no [Unreleased] the generated entry goes under the header' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogRelease 'crlf-curated' ("# Changelog`n`n## [Unreleased]$curatedBody$older" -replace "`n", "`r`n")
+$expected = "# Changelog`n`n## [1.1.0] - $today$curatedBody$older" -replace "`n", "`r`n"
+Check 'a curated [Unreleased] in a CRLF file is promoted with its line endings' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+Check 'a CRLF promotion counts the bullets' ($run.Result.Features -eq 2 -and $run.Result.Fixes -eq 1) "got $($run.Result.Features)/$($run.Result.Fixes)"
+
+$run = Invoke-ChangelogRelease 'crlf-empty' ("# Changelog`n`n## [Unreleased]`n`n$older" -replace "`n", "`r`n")
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n`n$older" -replace "`n", "`r`n"
+Check 'an empty [Unreleased] in a CRLF file is replaced with CRLF lines' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
+$run = Invoke-ChangelogRelease 'crlf-none' ("# Changelog`n`n$older" -replace "`n", "`r`n")
+$expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n`n$older" -replace "`n", "`r`n"
+Check 'a CRLF file with no [Unreleased] gets the generated entry under the header' ($run.Text -ceq $expected) "got:`n$($run.Text)"
+
 # --- cleanup ---------------------------------------------------------------
 
 Remove-Item $sandbox -Recurse -Force -ErrorAction SilentlyContinue

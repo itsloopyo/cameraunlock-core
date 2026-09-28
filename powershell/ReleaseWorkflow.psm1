@@ -481,15 +481,37 @@ function Update-ManifestVersion {
     }
 }
 
+function Write-ChangelogText {
+    param([string]$ChangelogPath, [string]$Text)
+    # BOM-less UTF-8: Set-Content's default is the ANSI codepage on 5.1, which
+    # writes the mojibake the UTF-8 read avoids. .NET resolves a relative path
+    # against the process directory, not the PowerShell location, so the path is
+    # made absolute first.
+    $changelogFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ChangelogPath)
+    [System.IO.File]::WriteAllText($changelogFullPath, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 <#
 .SYNOPSIS
-    Generates a changelog entry from git commit history.
+    Writes the changelog entry for a release.
+.DESCRIPTION
+    A `## [Unreleased]` section holding any non-blank line is the release's
+    notes: its heading becomes `## [Version] - date` where it stands, its content
+    is kept as written, and no commit is read. An empty `## [Unreleased]` is
+    replaced by an entry generated from the commit subjects since the last
+    version tag. With no `## [Unreleased]`, the generated entry goes directly
+    under the `# Changelog` header. No new `## [Unreleased]` is written.
 .PARAMETER ChangelogPath
     Path to the CHANGELOG.md file.
 .PARAMETER Version
     Version for the new changelog entry.
 .OUTPUTS
-    Hashtable with counts of features, fixes, and changes added.
+    Hashtable: AlreadyExists, Promoted (true when [Unreleased] was renamed),
+    Generic, and the counts Features, Fixes and Changes. For a generated entry
+    these count the bullets written under Added, Fixed and Changed. For a
+    promoted section they count the lines starting `- ` under its `### Added`,
+    `### Fixed` and `### Changed` headings; bullets under any other heading are
+    not counted.
 #>
 function New-ChangelogFromCommits {
     param(
@@ -524,6 +546,31 @@ function New-ChangelogFromCommits {
             Features = 0
             Fixes = 0
             Changes = 0
+        }
+    }
+
+    $nl = if ($changelog.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $date = Get-Date -Format 'yyyy-MM-dd'
+    $unreleased = [regex]::Match($changelog, '(?ms)^(?<heading>## \[Unreleased\][^\r\n]*?)\r?$(?<body>.*?)(?=^## |\z)')
+
+    if ($unreleased.Success -and $unreleased.Groups['body'].Value.Trim()) {
+        $body = $unreleased.Groups['body'].Value
+        $countUnder = {
+            param([string]$Heading)
+            $section = [regex]::Match($body, '(?ms)^### ' + $Heading + '[ \t]*\r?$(.*?)(?=^### |\z)')
+            if (-not $section.Success) { return 0 }
+            return [regex]::Matches($section.Groups[1].Value, '(?m)^- ').Count
+        }
+        $heading = $unreleased.Groups['heading']
+        $changelog = $changelog.Remove($heading.Index, $heading.Length).Insert($heading.Index, "## [$Version] - $date")
+        Write-ChangelogText -ChangelogPath $ChangelogPath -Text ($changelog.TrimEnd() + $nl)
+        return @{
+            AlreadyExists = $false
+            Promoted = $true
+            Features = & $countUnder 'Added'
+            Fixes = & $countUnder 'Fixed'
+            Changes = & $countUnder 'Changed'
+            Generic = $false
         }
     }
 
@@ -619,53 +666,50 @@ function New-ChangelogFromCommits {
     }
 
     # Build new entry
-    $date = Get-Date -Format 'yyyy-MM-dd'
-    $newEntry = "## [$Version] - $date`n`n"
+    $newEntry = "## [$Version] - $date$nl$nl"
 
     if ($features.Count -gt 0) {
-        $newEntry += "### Added`n`n"
-        $newEntry += ($features -join "`n") + "`n`n"
+        $newEntry += "### Added$nl$nl"
+        $newEntry += ($features -join $nl) + "$nl$nl"
     }
 
     if ($changes.Count -gt 0) {
-        $newEntry += "### Changed`n`n"
-        $newEntry += ($changes -join "`n") + "`n`n"
+        $newEntry += "### Changed$nl$nl"
+        $newEntry += ($changes -join $nl) + "$nl$nl"
     }
 
     if ($fixes.Count -gt 0) {
-        $newEntry += "### Fixed`n`n"
-        $newEntry += ($fixes -join "`n") + "`n`n"
+        $newEntry += "### Fixed$nl$nl"
+        $newEntry += ($fixes -join $nl) + "$nl$nl"
     }
 
     if ($other.Count -gt 0) {
-        $newEntry += "### Other`n`n"
-        $newEntry += ($other -join "`n") + "`n`n"
+        $newEntry += "### Other$nl$nl"
+        $newEntry += ($other -join $nl) + "$nl$nl"
     }
 
-    # $newEntry is built from raw commit subjects and is about to be used as a -replace
-    # REPLACEMENT string, where .NET expands $_, $&, $1, $` and $'. A commit subject like
-    # "fix: use $_ instead of $PSItem" would otherwise splice the entire existing
-    # changelog into the new entry, and that gets committed and shipped as the release
-    # body. Doubling every $ makes the regex engine emit it literally.
-    $safeEntry = $newEntry -replace '\$', '$$$$'
-
-    # Insert new entry after header
-    if ($changelog -match '(?s)(# Changelog.*?)(## \[)') {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$safeEntry"
+    if ($unreleased.Success) {
+        $changelog = $changelog.Remove($unreleased.Index, $unreleased.Length).Insert($unreleased.Index, $newEntry)
     } else {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$safeEntry"
+        # $newEntry is built from raw commit subjects and is about to be used as a -replace
+        # REPLACEMENT string, where .NET expands $_, $&, $1, $` and $'. A commit subject like
+        # "fix: use $_ instead of $PSItem" would otherwise splice the entire existing
+        # changelog into the new entry, and that gets committed and shipped as the release
+        # body. Doubling every $ makes the regex engine emit it literally.
+        $safeEntry = $newEntry -replace '\$', '$$$$'
+
+        if ($changelog -match '(?s)(# Changelog.*?)(## \[)') {
+            $changelog = $changelog -replace '(?s)(# Changelog.*?\r?\n\r?\n)', "`$1$safeEntry"
+        } else {
+            $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$safeEntry"
+        }
     }
 
-    $changelog = $changelog.TrimEnd() + "`n"
-    # BOM-less UTF-8: Set-Content's default is the ANSI codepage on 5.1, which
-    # writes the mojibake the read above now avoids. .NET resolves a relative
-    # path against the process directory, not the PowerShell location, so the
-    # path is made absolute first.
-    $changelogFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ChangelogPath)
-    [System.IO.File]::WriteAllText($changelogFullPath, $changelog, (New-Object System.Text.UTF8Encoding($false)))
+    Write-ChangelogText -ChangelogPath $ChangelogPath -Text ($changelog.TrimEnd() + $nl)
 
     return @{
         AlreadyExists = $false
+        Promoted = $false
         Features = $features.Count
         Fixes = $fixes.Count
         Changes = $changes.Count

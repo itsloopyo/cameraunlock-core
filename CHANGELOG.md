@@ -9,6 +9,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - `New-ChangelogFromCommits` releases a curated [Unreleased] instead of burying it
+
+`New-ChangelogFromCommits` put the generated `## [x.y.z] - date` entry directly under
+`# Changelog`, so in a CHANGELOG with a curated `## [Unreleased]` the release landed above it and
+the curated notes were left under no version (dying-light-2, resident-evil-requiem, rv-there-yet).
+Now a `## [Unreleased]` section holding any non-blank line becomes the release: its heading is
+renamed to `## [x.y.z] - date` where it stands, its content is kept as written, and no commit is
+read. An empty `## [Unreleased]` is replaced by the generated entry. A file with none gets the
+generated entry under the header as before. No new `## [Unreleased]` is written above the release,
+matching the fleet's CHANGELOGs, which start one when the next notes are written.
+
+The returned hashtable gains `Promoted`. For a promoted section `Features`, `Fixes` and `Changes`
+count the lines starting `- ` under its `### Added`, `### Fixed` and `### Changed` headings, and
+`Generic` is false. A CRLF CHANGELOG keeps CRLF, and a generated entry now reaches one: the
+insertion looked for `\n\n` after the header and silently wrote nothing when every line ended
+`\r\n`.
+
+A mod whose `release.ps1` moves [Unreleased] into the generated entry itself
+(`Move-UnreleasedIntoEntry` in assetto-corsa-evo, bioshock-remastered, black-and-white and
+snowrunner) finds no [Unreleased] after the call and leaves the file alone.
+
 ### Added - conformance check `release-canonical-since`
 
 `scripts/conformance.ps1` fails a repo whose `launcher-manifest.json` config block carries
