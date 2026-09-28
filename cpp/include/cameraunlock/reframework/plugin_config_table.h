@@ -18,7 +18,9 @@ namespace cameraunlock::reframework {
 /// - [Hotkeys] ToggleKey, CycleTrackingModeKey and YawModeKey on the three *KeyBindings
 ///   fields, and with schema.diagnosticMarkerKey the local row DiagnosticMarkerKey;
 /// - with schema.flashlight, [Light] LightFollowsHead and LightMultiplier;
-/// - with schema.trueFreeLook, [Position] TrueFreeLook (Writable) and [Hotkeys] TrueFreeLookKey.
+/// - with schema.trueFreeLook, [Position] TrueFreeLook (Writable) and [Hotkeys] TrueFreeLookKey;
+/// - with schema.leanCollision, [Position] CollisionEnabled, CollisionMargin and
+///   CollisionReleaseSmoothing.
 ///
 /// The mode cycle is two-state, so there is no RotationEnabled, and PluginMod sets the
 /// downward limit from PositionLimitY, so there is no PositionLimitYDown. Sensitivities and
@@ -46,7 +48,8 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
 /// tracking mode as PositionEnabled, a hotkey as its code), so a row the file does not hold or
 /// holds at the SetDefaults value is listed in follows_defaults_ini and migrates as `default`.
 /// With schema.trueFreeLook, TrueFreeLook and TrueFreeLookKey are listed there too: no legacy file
-/// held either.
+/// held either. So are CollisionEnabled and CollisionReleaseSmoothing with schema.leanCollision;
+/// CollisionMargin is not global and keeps the game's own value.
 /// Imported, or Absent when Read finds no file; it never refuses,
 /// and writes nothing. `keys` lists every key Read reads for this schema, [Position] Smoothing
 /// (read only to warn that it is retired) and [General] ConfigVersion included.

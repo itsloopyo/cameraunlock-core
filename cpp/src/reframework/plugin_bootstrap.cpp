@@ -41,6 +41,14 @@ static void OnPostBeginRendering() {
     CameraPipelinePostRender();
 }
 
+static void OnPreLateUpdateBehavior() {
+    CameraPipelinePreLateUpdate();
+}
+
+static void OnPostEndRendering() {
+    CameraPipelinePostEndRendering();
+}
+
 static bool OnPreGuiDrawElement(void* element, void* context) {
     return g_descriptor->preGuiDrawElement(element, context);
 }
@@ -64,6 +72,10 @@ bool InitializePlugin(const REFrameworkPluginInitializeParam* param,
 
     param->functions->on_pre_application_entry("BeginRendering", OnPreBeginRendering);
     param->functions->on_post_application_entry("BeginRendering", OnPostBeginRendering);
+    if (descriptor.camera.writeRig) {
+        param->functions->on_pre_application_entry("LateUpdateBehavior", OnPreLateUpdateBehavior);
+        param->functions->on_post_application_entry("EndRendering", OnPostEndRendering);
+    }
     if (descriptor.preGuiDrawElement) {
         param->functions->on_pre_gui_draw_element(OnPreGuiDrawElement);
     }

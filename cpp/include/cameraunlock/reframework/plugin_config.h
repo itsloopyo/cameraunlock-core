@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cameraunlock/camera/lean_clamp.h"
 #include "cameraunlock/config/config_concepts.g.h"
 #include "cameraunlock/data/position_settings.h"
 #include "cameraunlock/effects/head_follow_light.h"
@@ -83,11 +84,15 @@ struct PluginConfigSchema {
 
     // A shooter with an aim state: with canonicalConfig, the table binds
     // [Position] TrueFreeLook (Writable) and [Hotkeys] TrueFreeLookKey, and the
-    // bootstrap registers the key list on PluginMod::ToggleTrueFreeLook. Fields
-    // are only ever appended, and this one is last: every mod's schema is
-    // initialised positionally, so a field inserted above silently rebinds the
-    // rest.
+    // bootstrap registers the key list on PluginMod::ToggleTrueFreeLook.
     bool trueFreeLook = false;
+
+    // A mod with a lean collision query (CameraPipelineDescriptor::leanQuery):
+    // with canonicalConfig, the table binds [Position] CollisionEnabled,
+    // CollisionMargin and CollisionReleaseSmoothing. Fields are only ever
+    // appended, and this one is last: every mod's schema is initialised
+    // positionally, so a field inserted above silently rebinds the rest.
+    bool leanCollision = false;
 };
 
 struct PluginConfig {
@@ -158,6 +163,13 @@ struct PluginConfig {
     bool trueFreeLook = false;
     std::string trueFreeLookKeyBindings =
         config::schema::ConceptTraits<config::schema::Concept::TrueFreeLookKey>::kCanonicalDefault;
+
+    // [Position] CollisionEnabled, CollisionMargin and CollisionReleaseSmoothing,
+    // bound only with PluginConfigSchema::leanCollision. No legacy file ever held
+    // any of them. The margin is in metres, the engine's own unit.
+    bool collisionEnabled = true;
+    float collisionMargin = camera::LeanClampSettings{}.skin;
+    float collisionReleaseSmoothing = camera::LeanClampSettings{}.release_smoothing;
 
     // SetDefaults, then every key the schema names, then Validate: what Load reads,
     // without Load's log line or its ConfigVersion migration. False, on the defaults,

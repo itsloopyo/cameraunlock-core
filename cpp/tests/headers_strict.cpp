@@ -107,6 +107,7 @@
 #include "cameraunlock/reframework/plugin_config_table.h"
 #include "cameraunlock/reframework/plugin_mod.h"
 #include "cameraunlock/reframework/re_math.h"
+#include "cameraunlock/reframework/rig_lean.h"
 #include "cameraunlock/rendering/aim_ndc_projection.h"
 #include "cameraunlock/rendering/aim_quat_projection.h"
 #include "cameraunlock/rendering/crosshair_projection.h"

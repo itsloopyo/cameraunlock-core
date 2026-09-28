@@ -1,7 +1,8 @@
 #include <cameraunlock/reframework/camera_pipeline.h>
 
 #include <cameraunlock/math/smoothing_utils.h>
-#include <cameraunlock/ads/lean_handover.h>
+#include <cameraunlock/camera/zoom_compensation.h>
+#include <cameraunlock/reframework/rig_lean.h>
 #include <cameraunlock/memory/safe_memory.h>
 #include <cameraunlock/reframework/camera_controller_hook.h>
 #include <cameraunlock/reframework/log_callback.h>
@@ -11,6 +12,9 @@
 #include <cameraunlock/time/qpc_clock.h>
 
 #include <reframework/API.hpp>
+
+#include <cmath>
+#include <stdexcept>
 
 namespace cameraunlock::reframework {
 
@@ -45,10 +49,37 @@ static struct {
 
 static bool g_trackingAppliedThisFrame = false;
 
-// The pipeline has no rig to hand the lean to, so the handover runs with the
-// rig unavailable and eases the lean out on the camera alone.
-static cameraunlock::ads::LeanHandover g_leanHandover;
+// The lean: clamped against the world, and handed over to the rig while the
+// sights are up where the mod has one (reframework/rig_lean.h).
+static RigLean g_rigLean;
 static bool g_loggedAiming = false;
+
+// The rig's offset, world space. `request` is decided at BeginRendering and
+// written at the next LateUpdateBehavior; `applied` is what that write put on
+// the rig, which the game's eye carries until the next write.
+static struct {
+    cameraunlock::math::Vec3 request;
+    cameraunlock::math::Vec3 applied;
+    bool written = false;
+} g_rig;
+
+static struct {
+    bool contact = false;
+    bool failed = false;
+    uint64_t lastSampleUs = 0;
+    cameraunlock::math::Vec3 lastCleanEye;
+    bool hasLastCleanEye = false;
+} g_clampLog;
+
+// A clean eye that moves further than this in one frame is a camera cut
+// (teleport, load, cinematic hand-back), not walking.
+constexpr float kCameraCutMetres = 1.0f;
+constexpr uint64_t kClampSampleIntervalUs = 10ull * 1000000ull;
+
+static struct {
+    bool loggedFirst = false;
+    bool loggedZoomed = false;
+} g_zoomLog;
 
 // Per-frame transform + camera cache. Both are invalidated together at the
 // camera-controller update pre-hook and at the end of the post-render callback,
@@ -75,6 +106,58 @@ static Matrix4x4f* GetCameraWorldMatrix() {
 
 // --- Core head tracking application ---
 
+// Every path that applies no lean. Returns the offset that cancels a rig
+// already written this frame, so the eye drops back at once rather than a frame
+// later.
+static cameraunlock::math::Vec3 StopLean() {
+    g_rigLean.Stop();
+    g_rig.request = cameraunlock::math::Vec3();
+    g_clampLog.hasLastCleanEye = false;
+    return g_rig.written ? -g_rig.applied : cameraunlock::math::Vec3();
+}
+
+// The factor a head movement is scaled by so it moves the picture as far as it
+// would at the game's un-zoomed field of view. 1 without a baseline, or on a
+// frame either field of view cannot be read.
+static float ZoomFactor() {
+    if (!g_descriptor.unzoomedFovDegrees) return 1.0f;
+    const float live = g_cameraResolver.ResolveFovDegrees(g_cachedCamera);
+    float base = 0.0f;
+    const bool haveBase = g_descriptor.unzoomedFovDegrees(base);
+    const bool usable = haveBase && live > 1.0f && live < 179.0f && base > 1.0f && base < 179.0f;
+    const float factor = usable ? cameraunlock::camera::FovZoomFactor(std::tan(live * 0.5f * kDegToRad),
+                                                                     std::tan(base * 0.5f * kDegToRad))
+                                : 1.0f;
+    // Every term, once on the first frame the camera updates and once the first
+    // time the view is zoomed, so the units can be checked by eye: the factor
+    // reads 1.0000 at the hip or the two numbers are not the same quantity.
+    const bool zoomed = usable && (factor < 0.9999f || factor > 1.0001f);
+    if (!g_zoomLog.loggedFirst || (zoomed && !g_zoomLog.loggedZoomed)) {
+        g_zoomLog.loggedFirst = true;
+        if (zoomed) g_zoomLog.loggedZoomed = true;
+        LogInfo("Zoom compensation: fov=%.3f base=%.3f (degrees, via.Camera.get_FOV, same axis) factor=%.4f%s",
+                live, base, factor, usable ? "" : " - unreadable, no compensation this frame");
+    }
+    return factor;
+}
+
+// Every change of state, and a sample on a cadence while the head is off centre,
+// since transitions alone cannot tell a clear room from a query that never runs.
+static void LogLeanClampState(bool leaning) {
+    const cameraunlock::camera::LeanClamp& clamp = g_rigLean.Clamp();
+    const bool contact = clamp.InContact();
+    const bool failed = clamp.LastQueryFailed();
+    const uint64_t now = cameraunlock::time::QpcNowMicros();
+    const bool transition = contact != g_clampLog.contact || failed != g_clampLog.failed;
+    if (!transition && (!leaning || now - g_clampLog.lastSampleUs < kClampSampleIntervalUs)) return;
+    g_clampLog.contact = contact;
+    g_clampLog.failed = failed;
+    g_clampLog.lastSampleUs = now;
+    LogInfo("Lean clamp: %s%s",
+            failed ? "query failed, lean passed through unclamped" : contact ? "held off a surface" : "clear",
+            transition ? "" : " (sample)");
+}
+
 static void ApplyHeadTracking(Matrix4x4f* worldMat) {
     float yaw, pitch, roll;
     // Zero rotation builds an exact-identity matrix (bit-exact: sin(0)=0,
@@ -89,30 +172,54 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
     float px, py, pz;
     bool hasPosition = PluginMod::Instance().GetPositionOffset(px, py, pz);
 
-    if (g_descriptor.isAiming) {
-        if (hasPosition) {
-            const bool aiming = g_descriptor.isAiming();
-            if (aiming != g_loggedAiming) {
-                g_loggedAiming = aiming;
-                LogInfo("Aim state: %s", aiming ? "sights up" : "sights down");
-            }
-            const cameraunlock::ads::LeanShares shares = g_leanHandover.Update(
-                cameraunlock::math::Vec3(px, py, pz), aiming, PluginMod::Instance().IsTrueFreeLook(),
-                /*rigAvailable*/ false, cameraunlock::time::QpcNowMicros() / 1000ull);
-            px = shares.camera.x;
-            py = shares.camera.y;
-            pz = shares.camera.z;
-        } else {
-            g_leanHandover.Stop();
-        }
+    // Before anything else reads the pose, so the camera, the clamp, the rig and
+    // the reticle all work from the pose that is applied.
+    const float zoom = ZoomFactor();
+    if (zoom != 1.0f) {
+        yaw = cameraunlock::camera::ScaleAngleForZoom(yaw, zoom);
+        pitch = cameraunlock::camera::ScaleAngleForZoom(pitch, zoom);
+        px *= zoom;
+        py *= zoom;
+        pz *= zoom;
     }
 
-    if (!hasRotation && !hasPosition) return;
+    // Through the clean camera's own axes, before the head rotation below.
+    float lean[3] = {0.0f, 0.0f, 0.0f};
+    if (hasPosition) ViewSpaceOffsetToWorld(*worldMat, px, py, pz, lean);
+    cameraunlock::math::Vec3 cameraOffset(lean[0], lean[1], lean[2]);
 
-    // The pre-rotation axes are only read by the position offset below, so
-    // capture them only when that branch will run.
-    Matrix4x4f preRotationAxes;
-    if (hasPosition) preRotationAxes = *worldMat;
+    const bool shapedLean = g_descriptor.isAiming || g_descriptor.leanQuery;
+    if (shapedLean && hasPosition) {
+        const bool aiming = g_descriptor.isAiming && g_descriptor.isAiming();
+        if (aiming != g_loggedAiming) {
+            g_loggedAiming = aiming;
+            LogInfo("Aim state: %s", aiming ? "sights up" : "sights down");
+        }
+        const cameraunlock::camera::LeanQueryFn query =
+            PluginMod::Instance().GetConfig().collisionEnabled ? g_descriptor.leanQuery : nullptr;
+        const bool rigAvailable = g_descriptor.writeRig && g_descriptor.rigAvailable();
+
+        const cameraunlock::math::Vec3 gameEye(worldMat->m[3][0], worldMat->m[3][1], worldMat->m[3][2]);
+        const cameraunlock::math::Vec3 applied = g_rig.written ? g_rig.applied : cameraunlock::math::Vec3();
+        const cameraunlock::math::Vec3 cleanEye = gameEye - applied;
+        if (g_clampLog.hasLastCleanEye && (cleanEye - g_clampLog.lastCleanEye).Magnitude() > kCameraCutMetres) {
+            g_rigLean.Clamp().Reset();
+        }
+        g_clampLog.lastCleanEye = cleanEye;
+        g_clampLog.hasLastCleanEye = true;
+
+        const RigLeanFrame frame = g_rigLean.Update(
+            gameEye, cameraOffset, applied, aiming, PluginMod::Instance().IsTrueFreeLook(), rigAvailable,
+            PluginMod::Instance().GetLastDeltaTime(), cameraunlock::time::QpcNowMicros() / 1000ull, query, nullptr);
+        cameraOffset = frame.camera;
+        g_rig.request = frame.rigRequest;
+        if (query) LogLeanClampState(cameraOffset.SqrMagnitude() > 1e-8f || applied.SqrMagnitude() > 1e-8f);
+    } else if (shapedLean) {
+        cameraOffset = StopLean();
+    }
+
+    const bool hasOffset = cameraOffset.x != 0.0f || cameraOffset.y != 0.0f || cameraOffset.z != 0.0f;
+    if (!hasRotation && !hasOffset) return;
 
     if (hasRotation) {
         float yr = -yaw * kDegToRad;
@@ -126,9 +233,51 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
         }
     }
 
-    if (hasPosition) {
-        ApplyViewSpacePositionOffset(*worldMat, preRotationAxes, px, py, pz);
+    worldMat->m[3][0] += cameraOffset.x;
+    worldMat->m[3][1] += cameraOffset.y;
+    worldMat->m[3][2] += cameraOffset.z;
+}
+
+// --- The rig (LateUpdateBehavior and EndRendering) ---
+
+void CameraPipelinePreLateUpdate() {
+    // Unset when InitCameraPipeline refused the descriptor.
+    if (!g_descriptor.writeRig) return;
+    // A restore that never came (a frame with no EndRendering) is taken off here,
+    // so an offset is never written on top of one still in place.
+    if (g_rig.written) {
+        g_descriptor.restoreRig();
+        g_rig.written = false;
     }
+    g_rig.applied = cameraunlock::math::Vec3();
+    const cameraunlock::math::Vec3& r = g_rig.request;
+    const bool wanted = r.x != 0.0f || r.y != 0.0f || r.z != 0.0f;
+    if (wanted) {
+        const float offset[3] = {r.x, r.y, r.z};
+        if (g_descriptor.writeRig(offset)) {
+            g_rig.applied = r;
+            g_rig.written = true;
+        }
+    }
+    static bool s_carrying = false;
+    if (g_rig.written != s_carrying) {
+        s_carrying = g_rig.written;
+        LogInfo("Rig: %s", s_carrying ? "carrying the lean" : "released");
+    }
+    if (wanted && !g_rig.written) {
+        static uint64_t s_lastFailUs = 0;
+        const uint64_t now = cameraunlock::time::QpcNowMicros();
+        if (now - s_lastFailUs > kClampSampleIntervalUs) {
+            s_lastFailUs = now;
+            LogWarning("Rig: the mod could not write it, the lean stays on the camera");
+        }
+    }
+}
+
+void CameraPipelinePostEndRendering() {
+    if (!g_descriptor.writeRig || !g_rig.written) return;
+    g_descriptor.restoreRig();
+    g_rig.written = false;
 }
 
 // --- Camera controller hooks (save/restore) ---
@@ -228,7 +377,27 @@ void InitCameraPipeline(const CameraPipelineDescriptor& descriptor) {
                  "gameplay from a menu and stays inert");
         return;
     }
+    const int rigCallbacks = (descriptor.rigAvailable ? 1 : 0) + (descriptor.writeRig ? 1 : 0) +
+                             (descriptor.restoreRig ? 1 : 0);
+    if (rigCallbacks != 0 && rigCallbacks != 3) {
+        throw std::invalid_argument(
+            "CameraPipelineDescriptor: rigAvailable, writeRig and restoreRig are set together or not at all");
+    }
+    if (descriptor.writeRig && !descriptor.isAiming) {
+        throw std::invalid_argument("CameraPipelineDescriptor: a rig needs isAiming, which decides when it carries the lean");
+    }
     g_descriptor = descriptor;
+
+    const PluginConfig& config = PluginMod::Instance().GetConfig();
+    cameraunlock::camera::LeanClampSettings clamp;
+    clamp.skin = config.collisionMargin;
+    clamp.release_smoothing = config.collisionReleaseSmoothing;
+    g_rigLean.Clamp().SetSettings(clamp);
+    if (descriptor.leanQuery) {
+        LogInfo("Lean clamp: %s, margin %.3f m, release smoothing %.2f",
+                config.collisionEnabled ? "on" : "off (CollisionEnabled=false)", clamp.skin, clamp.release_smoothing);
+    }
+
     static CameraControllerHooker hooker{
         g_descriptor.controllerCandidateTypes,
         g_descriptor.controllerCandidateCount,
@@ -377,7 +546,7 @@ void CameraPipelinePreRender() {
         g_projection.markerValid = false;
         g_projection.aimValid = false;
         g_projection.cleanToHeadValid = false;
-        g_leanHandover.Stop();
+        StopLean();
         return;
     }
     EnsureCameraControllerHooked();

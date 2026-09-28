@@ -958,6 +958,39 @@ void TestTrueFreeLook(const fs::path& root) {
           "a file still carrying ads_mode=tracked loads with free look off, and is not rewritten");
 }
 
+// A schema with a lean collision query binds CollisionEnabled (default true) and
+// CollisionReleaseSmoothing, both written default, and CollisionMargin, which is not global and
+// holds the game's own value; the import of a legacy file, which held none of them, leaves the two
+// global rows to Defaults.ini.
+void TestLeanCollision(const fs::path& root) {
+    const Fixture& re3 = kFixtures[1];
+    Fixture clamped = re3;
+    clamped.schema.leanCollision = true;
+
+    const ConfigTable<PluginConfig> table = PluginConfigTable(clamped.schema);
+    Check(table.defaults().collisionEnabled && table.defaults().collisionMargin == 0.1f &&
+              table.defaults().collisionReleaseSmoothing == 0.9f,
+          "CollisionEnabled defaults to true, the margin to 0.1 m and the release to 0.9");
+    const std::string fresh = RenderCanonicalFresh(table, RenderHeader{clamped.game});
+    Check(Contains(fresh, "\r\nCollisionEnabled=default\r\n") && Contains(fresh, "\r\nCollisionMargin=0.1\r\n") &&
+              Contains(fresh, "\r\nCollisionReleaseSmoothing=default\r\n"),
+          "a fresh file holds CollisionEnabled and CollisionReleaseSmoothing at default and the game's margin");
+    const std::string plain = RenderCanonicalFresh(PluginConfigTable(re3.schema), RenderHeader{re3.game});
+    Check(!Contains(plain, "Collision"), "a schema without leanCollision binds none of the three");
+
+    const fs::path dir = Fresh(root, "lean-collision");
+    const fs::path file = dir / "CameraUnlock.ini";
+    WriteBytes(dir / "HeadTracking.ini", ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / re3.file));
+    ConfigOwner<PluginConfig> owner(OwnerOptions(clamped, dir));
+    const ConfigLoadResult<PluginConfig> loaded = owner.Load();
+    const std::string converted = ReadBytes(file);
+    Check(loaded.status == ConfigLoadStatus::Migrated && loaded.config.collisionEnabled &&
+              Contains(converted, "\r\nCollisionEnabled=default\r\n") &&
+              Contains(converted, "\r\nCollisionReleaseSmoothing=default\r\n") &&
+              Contains(converted, "\r\nCollisionMargin=0.1\r\n"),
+          "the legacy import leaves the clamp to Defaults.ini and writes the game's margin");
+}
+
 }  // namespace
 
 int RunPluginConfigCanonicalTests() {
@@ -977,6 +1010,7 @@ int RunPluginConfigCanonicalTests() {
     TestLoadIgnoresCanonicalConfig(root);
     TestConversionLog(root);
     TestTrueFreeLook(root);
+    TestLeanCollision(root);
     for (const Fixture& f : kFixtures) TestOwnerConvertsShippedFile(root, f);
     for (const Fixture& f : kFixtures) {
         const std::string file = f.file;

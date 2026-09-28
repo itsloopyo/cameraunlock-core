@@ -145,15 +145,25 @@ inline void ApplyCameraLocalHeadRotation(Matrix4x4f& worldMat, float yawRad, flo
 // with the invert_x / invert_z config flags instead is the documented mistake:
 // those land BEFORE the processor's clamp, so the lean comes out on the wrong
 // budget. See docs/porting-the-pipeline.md section 11.
-inline void ApplyViewSpacePositionOffset(Matrix4x4f& worldMat, const Matrix4x4f& preRotationAxes,
-                                         float offsetX, float offsetY, float offsetZ) {
+// The world-space vector ApplyViewSpacePositionOffset adds to the camera.
+inline void ViewSpaceOffsetToWorld(const Matrix4x4f& preRotationAxes, float offsetX, float offsetY,
+                                   float offsetZ, float out[3]) {
     float px = -offsetX;
     float py = offsetY;
     float pz = -offsetZ;
     const Matrix4x4f& gm = preRotationAxes;
-    worldMat.m[3][0] += px * gm.m[0][0] + py * gm.m[1][0] + pz * gm.m[2][0];
-    worldMat.m[3][1] += px * gm.m[0][1] + py * gm.m[1][1] + pz * gm.m[2][1];
-    worldMat.m[3][2] += px * gm.m[0][2] + py * gm.m[1][2] + pz * gm.m[2][2];
+    out[0] = px * gm.m[0][0] + py * gm.m[1][0] + pz * gm.m[2][0];
+    out[1] = px * gm.m[0][1] + py * gm.m[1][1] + pz * gm.m[2][1];
+    out[2] = px * gm.m[0][2] + py * gm.m[1][2] + pz * gm.m[2][2];
+}
+
+inline void ApplyViewSpacePositionOffset(Matrix4x4f& worldMat, const Matrix4x4f& preRotationAxes,
+                                         float offsetX, float offsetY, float offsetZ) {
+    float world[3];
+    ViewSpaceOffsetToWorld(preRotationAxes, offsetX, offsetY, offsetZ, world);
+    worldMat.m[3][0] += world[0];
+    worldMat.m[3][1] += world[1];
+    worldMat.m[3][2] += world[2];
 }
 
 // Express the head-tracked camera's translation relative to the clean camera

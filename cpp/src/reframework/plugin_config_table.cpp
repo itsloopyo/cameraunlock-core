@@ -95,6 +95,11 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
         table.Concept<Concept::TrueFreeLook>(&PluginConfig::trueFreeLook).Writable();
         table.Concept<Concept::TrueFreeLookKey>(&PluginConfig::trueFreeLookKeyBindings);
     }
+    if (schema.leanCollision) {
+        table.Concept<Concept::CollisionEnabled>(&PluginConfig::collisionEnabled);
+        table.Concept<Concept::CollisionMargin>(&PluginConfig::collisionMargin);
+        table.Concept<Concept::CollisionReleaseSmoothing>(&PluginConfig::collisionReleaseSmoothing);
+    }
     return table;
 }
 
@@ -169,6 +174,11 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
             // No legacy build had either setting, so both follow Defaults.ini.
             follows.Setting(Concept::TrueFreeLook, true);
             follows.Setting(Concept::TrueFreeLookKey, true);
+        }
+        if (schema.leanCollision) {
+            // CollisionMargin is not global, so it is not listed: it holds the game's own value.
+            follows.NotInLegacy(Concept::CollisionEnabled);
+            follows.NotInLegacy(Concept::CollisionReleaseSmoothing);
         }
 
         return found ? ImportResult::Imported(std::move(dropped), std::move(pose), follows.Concepts())

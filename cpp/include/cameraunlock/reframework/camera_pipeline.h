@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cameraunlock/camera/lean_clamp.h>
 #include <cameraunlock/reframework/camera_chain.h>
 #include <cameraunlock/reframework/gameplay_gate.h>
 #include <cameraunlock/reframework/re_math.h>
@@ -98,6 +99,34 @@ struct CameraPipelineDescriptor {
     // true free look. Rotation is never touched. A frame it cannot read reports
     // false, so the lean returns. Null leaves the lean alone.
     bool (*isAiming)() = nullptr;
+
+    // The rig: the transform the camera, the arms, the held weapon and the
+    // round's start point all hang off (the shooter-ads-handling skill, "Carry
+    // the lean on the rig"). With isAiming set, sights locked hands the lean
+    // over to it as the sights come up. writeRig is called from the
+    // LateUpdateBehavior pre-callback with the world-space offset to add, so the
+    // game places the camera, the weapon and the next shot from the moved rig,
+    // and returns false when it wrote nothing. restoreRig takes that exact
+    // offset back off, and is called from the EndRendering post-callback, or
+    // before the next write if that callback never came. rigAvailable is polled
+    // at BeginRendering: false wherever the rig must stay where the game put it,
+    // and the lean then eases out on the camera instead. All three or none.
+    bool (*rigAvailable)() = nullptr;
+    bool (*writeRig)(const float worldOffset[3]) = nullptr;
+    void (*restoreRig)() = nullptr;
+
+    // The engine's lean collision query (camera/lean_clamp.h), with metres and
+    // world space throughout. Set, and with [Position] CollisionEnabled true, the
+    // whole lean is clamped against the world from the un-leaned eye before it
+    // is split between the camera and the rig.
+    cameraunlock::camera::LeanQueryFn leanQuery = nullptr;
+
+    // The game's un-zoomed field of view, in the units via.Camera.get_FOV reports.
+    // Set, yaw, pitch and the lean are scaled so a head movement moves the picture
+    // as far as it would at that field of view (camera/zoom_compensation.h). Roll
+    // is not scaled. False on a frame it cannot answer, which applies no
+    // compensation that frame.
+    bool (*unzoomedFovDegrees)(float& out) = nullptr;
 };
 
 // Install the descriptor. Call once, from plugin initialization.
@@ -109,6 +138,11 @@ void InitCameraPipeline(const CameraPipelineDescriptor& descriptor);
 // head-tracked state.
 void CameraPipelinePreRender();
 void CameraPipelinePostRender();
+
+// The rig callbacks, registered on LateUpdateBehavior (pre) and EndRendering
+// (post) only when the descriptor sets writeRig.
+void CameraPipelinePreLateUpdate();
+void CameraPipelinePostEndRendering();
 
 const FrameProjection& GetFrameProjection();
 
