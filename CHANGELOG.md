@@ -22,6 +22,15 @@ This tightens a precondition. Every converted C# mod builds both paths from `Ass
 BepInEx's `Paths.ConfigPath` or `ConfigFile.ConfigFilePath`, and every test from
 `Path.GetTempPath()`, all fully qualified, so no caller changes.
 
+### Fixed - C# `CheckedFileWriter` looks for the target after any failed replacement
+
+The writer classed a failed `File.Replace` from `Marshal.GetHRForException`. A corlib that throws
+`IOException` without the Win32 code (a Unity Mono build may) got a certain failure, and the
+temporary was deleted even when the replacement had already removed the target, leaving no copy of
+the file at all. After any failed replacement the writer now looks for the target: when it is gone,
+the temporary is moved into place as it was for `ERROR_UNABLE_TO_MOVE_REPLACEMENT`, and a move that
+fails keeps the temporary with `OutcomeUncertain` set.
+
 ### Fixed - `Assert-LauncherManifestDelivery` reads delivery_mode as Lopari and validate-manifest do
 
 `ReleaseWorkflow.psm1`'s `Assert-LauncherManifestDelivery` compared without case and read a JSON

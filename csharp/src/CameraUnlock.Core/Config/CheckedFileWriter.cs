@@ -40,10 +40,12 @@ namespace CameraUnlock.Core.Config
         /// <para>
         /// <see cref="File.Replace(string, string, string)"/> failing with
         /// ERROR_UNABLE_TO_MOVE_REPLACEMENT or <c>_2</c> means Windows stopped partway and can
-        /// leave nothing at the target path. When nothing is found there, the writer finishes the
-        /// job with the same <see cref="File.Move"/>, which still refuses to overwrite, and a move
-        /// that succeeds is <see cref="CheckedWriteOutcome.Committed"/>. Otherwise it throws with
-        /// <see cref="CheckedWriteException.OutcomeUncertain"/> set.
+        /// leave nothing at the target path. After any failed replacement, whatever its error,
+        /// the writer looks for the target, and when nothing is found there it finishes the job
+        /// with the same <see cref="File.Move"/>, which still refuses to overwrite. A move that
+        /// succeeds is <see cref="CheckedWriteOutcome.Committed"/>, and one that fails throws with
+        /// <see cref="CheckedWriteException.OutcomeUncertain"/> set. A target still in place after
+        /// either of those two errors also throws with it set.
         /// </para>
         /// <para>
         /// The target is never opened for writing, truncated or deleted. A read-only target
@@ -259,11 +261,15 @@ namespace CameraUnlock.Core.Config
                     }
                     else
                     {
-                        bool uncertain = step == CheckedWriteStep.Commit && !creating
+                        bool replacing = step == CheckedWriteStep.Commit && !creating;
+                        bool uncertain = replacing
                             && (hresult == HResultUnableToMoveReplacement || hresult == HResultUnableToMoveReplacement2);
                         // File.Replace can stop with the target already deleted or renamed. Left like
                         // that, the next launch finds no file and writes defaults over the user's values.
-                        if (uncertain && GetFileAttributesW(_target) == InvalidFileAttributes)
+                        // The target is looked for after every failed replacement, whatever the HResult:
+                        // a corlib that throws IOException without the Win32 code would otherwise get
+                        // the temporary, then the only copy, deleted.
+                        if (replacing && GetFileAttributesW(_target) == InvalidFileAttributes)
                         {
                             try
                             {

@@ -64,6 +64,7 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("an-unfinished-replacement-keeps-the-temporary", AnUnfinishedReplacementKeepsTheTemporary),
             Scenario("an-unfinished-replacement-with-no-target-is-finished", AnUnfinishedReplacementWithNoTargetIsFinished),
             Scenario("a-failed-finishing-move-keeps-the-temporary", AFailedFinishingMoveKeepsTheTemporary),
+            Scenario("a-replacement-error-without-a-win32-code-is-checked-against-the-target", AReplacementErrorWithoutAWin32CodeIsCheckedAgainstTheTarget),
             Scenario("a-taken-temporary-name-is-not-deleted", ATakenTemporaryNameIsNotDeleted),
             Scenario("a-handle-without-share-delete-fails-the-commit", AHandleWithoutShareDeleteFailsTheCommit),
             Scenario("an-exclusive-handle-fails-the-read", AnExclusiveHandleFailsTheRead),
@@ -470,6 +471,33 @@ namespace CameraUnlock.Core.Tests.Config
                     File.Delete(renamed);
                 }
             }
+        }
+
+        // A corlib can throw IOException with its own COR_E_IO HResult in place of the Win32 code,
+        // which the writer cannot class. With the target gone the temporary is the only copy.
+        private static void AReplacementErrorWithoutAWin32CodeIsCheckedAgainstTheTarget(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            File.WriteAllBytes(target, Utf8("a=1"));
+            Expect(CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), (step, path) =>
+                {
+                    if (step != CheckedWriteStep.Commit) return;
+                    File.Delete(target);
+                    throw new IOException("injected without a Win32 code");
+                }) == CheckedWriteOutcome.Committed,
+                "a replacement that left no target is finished whatever its error");
+            ExpectBytes(target, "a=2");
+            ExpectListing(dir, FileName);
+
+            CheckedWriteException e = ExpectFailure(() => CheckedFileWriter.Write(target, Utf8("a=2"), Utf8("a=3"),
+                (step, path) =>
+                {
+                    if (step == CheckedWriteStep.Commit) throw new IOException("injected without a Win32 code");
+                }), CheckedWriteStep.Commit);
+            Expect(!e.OutcomeUncertain && e.TemporaryRemoved && e.CompletionError == null,
+                "with the target still in place the failure is certain and the temporary goes");
+            ExpectBytes(target, "a=2");
+            ExpectListing(dir, FileName);
         }
 
         private static void AFailedFinishingMoveKeepsTheTemporary(string dir)
