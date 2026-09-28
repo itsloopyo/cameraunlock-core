@@ -652,6 +652,13 @@
         "approved": "2026-09-27"
       }
     ],
+    "far-cry-6-headtracking": [
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "The fleet chord clashes with the game's own binding: Far Cry 6 opens the Arsenal on U, also with Ctrl and Shift held, so Ctrl+Shift+U would open it. The committed file holds TrueFreeLookKey=Insert, Ctrl+Shift+J.",
+        "approved": "2026-09-28"
+      }
+    ],
     "mudrunner-headtracking": [
       {
         "row": "ToggleKey",
