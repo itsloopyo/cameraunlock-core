@@ -296,6 +296,11 @@ $expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Fixed`n`n- use `$_ litera
 Check 'an empty [Unreleased] is replaced by the generated entry' ($run.Text -ceq $expected) "got:`n$($run.Text)"
 Check 'a generated entry reports not Promoted' ($run.Result.Promoted -eq $false -and $run.Result.Fixes -eq 1) "got Promoted=$($run.Result.Promoted) Fixes=$($run.Result.Fixes)"
 
+$run = Invoke-ChangelogRelease 'breaking-feat' "# Changelog`n`n$older" 'feat(config)!: a breaking feature'
+Check 'a breaking feat is listed under Added' ($run.Text -match '### Added\s+- a breaking feature' -and $run.Text -notmatch '### Other') "got:`n$($run.Text)"
+$run = Invoke-ChangelogRelease 'breaking-fix' "# Changelog`n`n$older" 'fix!: a breaking fix'
+Check 'a breaking fix is listed under Fixed' ($run.Text -match '### Fixed\s+- a breaking fix' -and $run.Text -notmatch '### Other') "got:`n$($run.Text)"
+
 $run = Invoke-ChangelogRelease 'unreleased-then-version' "# Changelog`n`n## [Unreleased]`n$older"
 $expected = "# Changelog`n`n## [1.1.0] - $today`n`n### Added`n`n- generated feature`n`n$older"
 Check 'an [Unreleased] directly followed by a version is replaced by the generated entry' ($run.Text -ceq $expected) "got:`n$($run.Text)"

@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - `New-ChangelogFromCommits` files a breaking-change subject under its type
+
+A subject with the breaking-change mark (`feat(config)!: ...`, `fix!: ...`, `perf!: ...`) did not
+match the type patterns and went under `### Other`. It now goes under Added, Fixed or Changed like
+the same subject without the mark.
+
 ### Fixed - `New-ChangelogFromCommits` puts the entry above the newest version, and does what release scripts did for themselves
 
 With no `## [Unreleased]`, the generated entry went after the first blank line below

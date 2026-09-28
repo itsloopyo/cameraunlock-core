@@ -682,11 +682,11 @@ function New-ChangelogFromCommits {
     }
 
     foreach ($commit in $commits) {
-        if ($commit -match '^feat(\(.*?\))?:\s*(.+)$') {
+        if ($commit -match '^feat(\(.*?\))?!?:\s*(.+)$') {
             $features += "- $($matches[2])"
-        } elseif ($commit -match '^fix(\(.*?\))?:\s*(.+)$') {
+        } elseif ($commit -match '^fix(\(.*?\))?!?:\s*(.+)$') {
             $fixes += "- $($matches[2])"
-        } elseif ($commit -match '^perf(\(.*?\))?:\s*(.+)$') {
+        } elseif ($commit -match '^perf(\(.*?\))?!?:\s*(.+)$') {
             $changes += "- $($matches[2])"
         } else {
             $other += "- $commit"
