@@ -19,10 +19,15 @@ namespace CameraUnlock.Core.Ads
     }
 
     /// <summary>
-    /// Hands a positional lean over from the camera to the rig as the sights come up, and
-    /// back as they come down, riding <see cref="AdsFade"/>. C# twin of
-    /// cameraunlock/ads/lean_handover.h (see the shooter-ads-handling skill, "Carry the lean
-    /// on the rig").
+    /// Hands the lateral part of a positional lean over from the camera to the rig as the
+    /// sights come up, and back as they come down, riding <see cref="AdsFade"/>. C# twin of
+    /// cameraunlock/ads/lean_handover.h (see the shooter-ads-handling skill, "Carry the
+    /// lateral lean on the rig").
+    /// <para>
+    /// The part of the lean along the aim moves the eye along the sight line, which keeps it
+    /// on the sights, so it stays on the camera in every mode: leaning in brings the sights
+    /// closer. Only the part perpendicular to the aim is handed over.
+    /// </para>
     /// <para>
     /// The lean goes in whole and already clamped against the world: the clamp runs once,
     /// before the split, because the rig carries the muzzle and the start point and an
@@ -42,19 +47,25 @@ namespace CameraUnlock.Core.Ads
         private bool _rigEngaged;
 
         /// <summary>
-        /// Once per rendered frame the lean is applied. <paramref name="aiming"/> is the ADS
-        /// state for this frame, polled rather than latched. In true free look the camera
-        /// keeps the lean through the aim. <paramref name="rigAvailable"/> is false wherever
-        /// the rig must stay where the game puts it (mounted in a vehicle seat, say): the
-        /// lean then eases out on the sights instead, and the rig carries nothing.
+        /// Once per rendered frame the lean is applied. <paramref name="aimForward"/> is the
+        /// unit aim direction in the same space as <paramref name="lean"/>.
+        /// <paramref name="aiming"/> is the ADS state for this frame, polled rather than
+        /// latched. In true free look the camera keeps the lean through the aim.
+        /// <paramref name="rigAvailable"/> is false wherever the rig must stay where the game
+        /// puts it (mounted in a vehicle seat, say): the lateral lean then eases out on the
+        /// sights instead, and the rig carries nothing.
         /// </summary>
-        public LeanShares Update(Vec3 lean, bool aiming, bool trueFreeLook, bool rigAvailable, ulong nowMs)
+        public LeanShares Update(Vec3 lean, Vec3 aimForward, bool aiming, bool trueFreeLook, bool rigAvailable,
+                                 ulong nowMs)
         {
             float cameraShare = _fade.Update(aiming && !trueFreeLook, nowMs);
+            float alongLength = Vec3.Dot(lean, aimForward);
+            Vec3 along = aimForward * alongLength;
+            Vec3 lateral = lean - along;
             var shares = new LeanShares
             {
-                Camera = lean * cameraShare,
-                Rig = rigAvailable ? lean * (1.0f - cameraShare) : Vec3.Zero,
+                Camera = along + lateral * cameraShare,
+                Rig = rigAvailable ? lateral * (1.0f - cameraShare) : Vec3.Zero,
             };
             _rigEngaged = shares.Rig.X != 0.0f || shares.Rig.Y != 0.0f || shares.Rig.Z != 0.0f;
             return shares;

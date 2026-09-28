@@ -14,9 +14,13 @@ struct LeanShares {
     math::Vec3 rig;
 };
 
-// Hands a positional lean over from the camera to the rig as the sights come up,
-// and back as they come down, riding AdsFade (see the shooter-ads-handling skill,
-// "Carry the lean on the rig").
+// Hands the lateral part of a positional lean over from the camera to the rig as the
+// sights come up, and back as they come down, riding AdsFade (see the
+// shooter-ads-handling skill, "Carry the lateral lean on the rig").
+//
+// The part of the lean along the aim moves the eye along the sight line, which keeps
+// it on the sights, so it stays on the camera in every mode: leaning in brings the
+// sights closer. Only the part perpendicular to the aim is handed over.
 //
 // The lean goes in whole and already clamped against the world: the clamp runs
 // once, before the split, because the rig carries the muzzle and the start point
@@ -31,17 +35,20 @@ struct LeanShares {
 // Pure: no clock, no logging, no game. nowMs comes from the caller.
 class LeanHandover {
 public:
-    // Once per rendered frame the lean is applied. `aiming` is the ADS state for
-    // this frame, polled rather than latched. In true free look the camera keeps
-    // the lean through the aim. `rigAvailable` is false wherever the rig must stay
-    // where the game puts it (mounted in a vehicle seat, say): the lean then eases
-    // out on the sights instead, and the rig carries nothing.
-    LeanShares Update(const math::Vec3& lean, bool aiming, bool trueFreeLook, bool rigAvailable,
-                      unsigned long long nowMs) {
+    // Once per rendered frame the lean is applied. `aimForward` is the unit aim
+    // direction in the same space as `lean`. `aiming` is the ADS state for this
+    // frame, polled rather than latched. In true free look the camera keeps the
+    // lean through the aim. `rigAvailable` is false wherever the rig must stay
+    // where the game puts it (mounted in a vehicle seat, say): the lateral lean
+    // then eases out on the sights instead, and the rig carries nothing.
+    LeanShares Update(const math::Vec3& lean, const math::Vec3& aimForward, bool aiming,
+                      bool trueFreeLook, bool rigAvailable, unsigned long long nowMs) {
         const float cameraShare = m_fade.Update(aiming && !trueFreeLook, nowMs);
+        const math::Vec3 along = aimForward * math::Vec3::Dot(lean, aimForward);
+        const math::Vec3 lateral = lean - along;
         LeanShares shares;
-        shares.camera = lean * cameraShare;
-        shares.rig = rigAvailable ? lean * (1.0f - cameraShare) : math::Vec3();
+        shares.camera = along + lateral * cameraShare;
+        shares.rig = rigAvailable ? lateral * (1.0f - cameraShare) : math::Vec3();
         m_rigEngaged = shares.rig.x != 0.0f || shares.rig.y != 0.0f || shares.rig.z != 0.0f;
         return shares;
     }

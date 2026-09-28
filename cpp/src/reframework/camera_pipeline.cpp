@@ -208,8 +208,11 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
         g_clampLog.lastCleanEye = cleanEye;
         g_clampLog.hasLastCleanEye = true;
 
+        // The clean camera's z axis, the aim line up to sign, which the split ignores.
+        const cameraunlock::math::Vec3 aimForward =
+            cameraunlock::math::Vec3(worldMat->m[2][0], worldMat->m[2][1], worldMat->m[2][2]).Normalized();
         const RigLeanFrame frame = g_rigLean.Update(
-            gameEye, cameraOffset, applied, aiming, PluginMod::Instance().IsTrueFreeLook(), rigAvailable,
+            gameEye, cameraOffset, aimForward, applied, aiming, PluginMod::Instance().IsTrueFreeLook(), rigAvailable,
             PluginMod::Instance().GetLastDeltaTime(), cameraunlock::time::QpcNowMicros() / 1000ull, query, nullptr);
         cameraOffset = frame.camera;
         g_rig.request = frame.rigRequest;

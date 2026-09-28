@@ -37,16 +37,19 @@ class RigLean {
 public:
     // gameEye: the eye the game computed this frame, rigApplied included.
     // lean: the whole lean in world space, before the clamp.
+    // aimForward: the clean camera's unit aim axis in world space; the lean along it
+    // stays on the camera (LeanHandover).
     // rigApplied: what the rig carried this frame (zero if it was not written).
     // rigAvailable: false wherever the rig must stay where the game put it; the
     // lean then eases out on the camera while aiming, as with no rig at all.
-    RigLeanFrame Update(const math::Vec3& gameEye, const math::Vec3& lean, const math::Vec3& rigApplied,
+    RigLeanFrame Update(const math::Vec3& gameEye, const math::Vec3& lean, const math::Vec3& aimForward,
+                        const math::Vec3& rigApplied,
                         bool aiming, bool trueFreeLook, bool rigAvailable, float deltaTime,
                         unsigned long long nowMs, camera::LeanQueryFn query, void* queryContext) {
         RigLeanFrame frame;
         frame.cleanEye = gameEye - rigApplied;
         const math::Vec3 clamped = m_clamp.Apply(frame.cleanEye, lean, deltaTime, query, queryContext);
-        const ads::LeanShares shares = m_handover.Update(clamped, aiming, trueFreeLook, rigAvailable, nowMs);
+        const ads::LeanShares shares = m_handover.Update(clamped, aimForward, aiming, trueFreeLook, rigAvailable, nowMs);
         frame.rigRequest = shares.rig;
         frame.camera = shares.camera + shares.rig - rigApplied;
         return frame;

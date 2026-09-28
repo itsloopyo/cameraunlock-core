@@ -40,6 +40,8 @@ struct Sim {
     int rigWrites = 0;
     cameraunlock::camera::LeanQueryFn query = nullptr;
     void* queryContext = nullptr;
+    // The aim axis of PitchedLean's camera, pitched 35 degrees down.
+    Vec3 aimForward{0.0f, -0.5735764f, 0.8191520f};
 
     // Returns the eye the player sees this frame.
     Vec3 Frame(const Vec3& worldLean, bool aiming, bool trueFreeLook, unsigned long long nowMs,
@@ -47,8 +49,8 @@ struct Sim {
         rigApplied = rigRequest;
         if (rigApplied.SqrMagnitude() > 0.0f) ++rigWrites;
         const Vec3 gameEye = body + rigApplied;
-        const RigLeanFrame f = lean.Update(gameEye, worldLean, rigApplied, aiming, trueFreeLook, rigAvailable,
-                                           1.0f / 60.0f, nowMs, query, queryContext);
+        const RigLeanFrame f = lean.Update(gameEye, worldLean, aimForward, rigApplied, aiming, trueFreeLook,
+                                           rigAvailable, 1.0f / 60.0f, nowMs, query, queryContext);
         rigRequest = f.rigRequest;
         if (out) *out = f;
         return gameEye + f.camera;
@@ -92,6 +94,17 @@ void TestSightsUpMovesItAllToTheRig() {
     sim.Frame(lean, true, false, AdsFade::kLowerMs + 200, true, &f);
     Check(NearVec(f.rigRequest, lean), "sights up: the rig carries the whole lean");
     Check(NearVec(f.camera, Vec3()), "and the camera, so the aim hook and the reticle, carry none of it");
+}
+
+void TestLeaningInStaysOnTheCamera() {
+    Sim sim;
+    const Vec3 lean = PitchedLean(0.2f, 0.0f, -0.15f);
+    RigLeanFrame f;
+    for (unsigned long long t = 0; t <= AdsFade::kLowerMs + 100; t += 16) sim.Frame(lean, true, false, t, true, &f);
+    const Vec3 eye = sim.Frame(lean, true, false, AdsFade::kLowerMs + 200, true, &f);
+    Check(NearVec(f.rigRequest, PitchedLean(0.2f, 0.0f, 0.0f)), "sights up: the rig carries only the lean across the aim");
+    Check(NearVec(f.camera, PitchedLean(0.0f, 0.0f, -0.15f)), "and the camera keeps the lean along the aim");
+    Check(NearVec(eye, sim.body + lean), "and the eye is where the whole lean puts it");
 }
 
 void TestEyeIsTheSameForEverySplit() {
@@ -186,6 +199,7 @@ int RunRigLeanTests() {
 
     TestHipNeverWritesTheRig();
     TestSightsUpMovesItAllToTheRig();
+    TestLeaningInStaysOnTheCamera();
     TestEyeIsTheSameForEverySplit();
     TestTrueFreeLookKeepsTheLeanOnTheCamera();
     TestEveryStopPutsTheRigBack();
