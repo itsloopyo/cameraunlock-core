@@ -618,6 +618,12 @@
         "approved": "2026-09-25"
       }
     ],
+    "skyrim-special-edition-headtracking": [
+      {
+        "text": "[Position] LimitZ, LimitZBack and InvertZ: v0.1.0 to v0.3.0 shipped and wrote InvertZ true, LimitZ 0.40 and LimitZBack 0.10. The legacy processor applied InvertZ before its clamp, so with InvertZ true LimitZBack bounded the forward lean and LimitZ the backward one, and the import carries each limit to the row of the lean it bounded: PositionLimitZ from LimitZBack and PositionLimitZBack from LimitZ. With InvertZ false, or no InvertZ line, which the frozen reader reads as false, the limits are carried by name. Each row is compared for Defaults.ini with the shipped value of the legacy key it came from, so an untouched limit is written default.",
+        "approved": "2026-09-28"
+      }
+    ],
     "subnautica-2-headtracking": [
       {
         "text": "[Position] LimitZ, LimitZBack and InvertZ: v0.1.0 to v0.6.0 shipped InvertZ true, LimitZ 0.10 and LimitZBack 0.40 (v0.1.0 to v0.3.0 did not read them); v0.6.1 and v0.6.2 shipped InvertZ false, LimitZ 0.40 and LimitZBack 0.10. The legacy processor applied InvertZ before its clamp, so the file's own InvertZ tells which key bounded which lean, and the import compares each canonical row with the limit of the lean it bounded, which every published build shipped at 0.40 forward and 0.10 backward. No list of shipped values is needed.",
