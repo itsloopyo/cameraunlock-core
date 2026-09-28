@@ -159,6 +159,9 @@ $cases['unit-step-twice'] = @{
 $noConcurrency = $BuildYml -replace '(?ms)^concurrency:.*?(?=^jobs:)', ''
 $cases['no-concurrency'] = @{ Root = (New-ModRepo 'no-concurrency' -Build $noConcurrency); Expect = @('FAIL build\.yml has no top-level concurrency') }
 
+$commentUnderOn = $noConcurrency -replace '(?m)^on:\r?\n', "on:`n# a comment at column 0 inside the block`n"
+$cases['no-concurrency-comment-under-on'] = @{ Root = (New-ModRepo 'no-concurrency-comment-under-on' -Build $commentUnderOn); Expect = @('FAIL build\.yml has no top-level concurrency') }
+
 $cases['concurrency-not-cancelling'] = @{
     Root = (New-ModRepo 'concurrency-not-cancelling' -Build ($BuildYml -replace 'cancel-in-progress: true', 'cancel-in-progress: false'))
     Expect = @('FAIL build\.yml has no top-level concurrency')

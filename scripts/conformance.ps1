@@ -1383,6 +1383,10 @@ function Get-TopLevelBlock {
     $block = New-Object System.Collections.Generic.List[string]
     $inside = $false
     foreach ($line in $Lines) {
+        if ($line -match '^#') {
+            if ($inside) { $block.Add($line) }
+            continue
+        }
         if ($line -match '^\S') {
             if ($inside) { break }
             if ($line -match ('^["'']?' + [regex]::Escape($Key) + '["'']?\s*:')) { $inside = $true }
