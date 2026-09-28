@@ -1530,6 +1530,10 @@ function Test-CiMinutes {
             Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) has no top-level concurrency block grouped on github.ref with cancel-in-progress: true, so a push that a newer one superseded keeps building"
         }
 
+        if (@($lines | Where-Object { $_ -match '^\s*(?:-\s+)?uses:\s*[''"]?actions/upload-artifact@' }).Count -gt 0) {
+            Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) uploads an artifact. Players get installers from GitHub Releases, so a push build's artifact only costs Actions storage. Delete the upload-artifact step and any step that only stages files for it"
+        }
+
         foreach ($trigger in @('push', 'pull_request')) {
             if (-not $triggers.Contains($trigger)) { continue }
             $body = @($triggers[$trigger])

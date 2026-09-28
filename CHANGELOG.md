@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - conformance's `ci-minutes` fails a push build that uploads an artifact
+
+A push or pull request build with an `actions/upload-artifact` step now draws a FAIL. Players get
+installers from GitHub Releases, so the artifact only cost Actions storage. Delete the step and any
+step that only stages files for it.
+
 ### BREAKING - the config differential test runs on the release paths only, and push builds cancel when superseded
 
 A push build ran the whole suite twice in most of the fleet: a "Run unit tests" step ran

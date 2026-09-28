@@ -185,6 +185,17 @@ $cases['one-line-trigger'] = @{
     Expect = @("FAIL build\.yml's push trigger has no paths-ignore", "FAIL build\.yml's pull_request trigger has no paths-ignore")
 }
 
+$uploads = $BuildYml + @'
+
+
+      - name: Upload installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: installer
+          path: release/*-installer.zip
+'@
+$cases['uploads-artifact'] = @{ Root = (New-ModRepo 'uploads-artifact' -Build $uploads); Expect = @('FAIL build\.yml uploads an artifact') }
+
 $cases['differential-not-split'] = @{
     Root = (New-ModRepo 'differential-not-split' -Differential -Tasks $PlainTasks)
     Expect = @('FAIL the repo has tests/config_differential and pixi\.toml has no test-differential task')
