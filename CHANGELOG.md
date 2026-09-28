@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - `Assert-LauncherManifestDelivery` reads delivery_mode as Lopari and validate-manifest do
+
+`ReleaseWorkflow.psm1`'s `Assert-LauncherManifestDelivery` compared without case and read a JSON
+null or an empty string as an absent field, so `"Manifest"` passed packaging while Lopari installs
+it through install.cmd and `validate-manifest.mjs` refuses it, and `"INSTALL_CMD"` with a reason
+passed too. It now matches `validate-manifest.mjs` exactly: the key and the value are compared
+case-sensitively, a null, an empty string or a value that is not a string is an unknown mode, and
+an `install_cmd_reason` that is not a string counts as missing. No manifest in the fleet changes
+result: all 131 read the same under both rules.
+
 ### Changed - arx-fatalis, deep-rock-galactic and mudrunner keep their own hotkey rows
 
 `data/config-format.json` `per_game` lists hotkey rows for three repos, approved 2026-09-27, in

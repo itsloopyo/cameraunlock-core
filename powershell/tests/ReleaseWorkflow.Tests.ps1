@@ -187,6 +187,26 @@ Check 'a blank install_cmd_reason is refused' ($err -match 'install_cmd_reason')
 $err = Test-Delivery 'install-cmd-reason' '{ "delivery_mode": "install_cmd", "install_cmd_reason": "writes a registry key" }'
 Check 'install_cmd with a reason passes' ($err -eq '') "threw $err"
 
+# Lopari's serde enum matches case-sensitively and cannot parse a null, and
+# validate-manifest.mjs refuses all of these; the two rules must agree.
+$reason = '"install_cmd_reason": "writes a registry key"'
+foreach ($case in @(
+    @('capitalised', '"Manifest"', '"Manifest"'),
+    @('upper-install-cmd', '"INSTALL_CMD"', '"INSTALL_CMD"'),
+    @('null', 'null', '"null"'),
+    @('empty', '""', '""'),
+    @('number', '2', '"2"')
+)) {
+    $err = Test-Delivery "mode-$($case[0])" "{ `"delivery_mode`": $($case[1]), $reason }"
+    Check "delivery_mode $($case[1]) is refused as unknown even with a reason" ($err -match [regex]::Escape("delivery_mode $($case[2]), which the launcher does not know")) "got '$err'"
+}
+$err = Test-Delivery 'miscased-name' "{ `"Delivery_Mode`": `"manifest`", $reason }"
+Check 'a Delivery_Mode key is not delivery_mode, so it reads as absent' ($err -eq '') "threw $err"
+$err = Test-Delivery 'miscased-name-no-reason' '{ "Delivery_Mode": "manifest" }'
+Check 'a Delivery_Mode key with no reason is refused as absent' ($err -match 'absent') "got '$err'"
+$err = Test-Delivery 'reason-not-string' '{ "delivery_mode": "install_cmd", "install_cmd_reason": 5 }'
+Check 'an install_cmd_reason that is not a string is refused' ($err -match 'install_cmd_reason') "got '$err'"
+
 # --- Assert-LauncherManifestConfig ------------------------------------------
 
 # A converted abzu-headtracking checkout (the folder name is its data/config-format.json entry)

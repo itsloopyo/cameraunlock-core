@@ -132,6 +132,14 @@ const patchCase = (label, man, files) => run(VALIDATOR, zip(path.join(scratch, "
   );
 }
 
+// delivery_mode is matched case-sensitively and a null is an unknown mode, as Lopari's serde enum
+// reads them. ReleaseWorkflow.psm1's Assert-LauncherManifestDelivery is held to the same cases.
+for (const [label, mode] of [["capitalised", "Manifest"], ["upper-install-cmd", "INSTALL_CMD"], ["null", null], ["empty", ""]]) {
+  const r = patchCase(`mode-${label}`, patched({ delivery_mode: mode, install_cmd_reason: "writes a registry key" }), payload());
+  check(r.status === 1 && r.out.includes(`delivery_mode is "${mode}"`), `delivery_mode: ${JSON.stringify(mode)} should fail as unknown, got ${r.status}
+${r.out}`);
+}
+
 // The Nexus ZIP. The mod is abzu-headtracking, converted: its committed HeadTracking.ini is the
 // rendered canonical file, and its config installs at AbzuGame/Binaries/Win64/CameraUnlock.ini.
 const ALL = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "canonical-ini", "head-tracking", "all-concepts-fresh.ini"));

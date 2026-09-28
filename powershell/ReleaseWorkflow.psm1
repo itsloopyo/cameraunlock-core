@@ -1305,18 +1305,22 @@ function Assert-ManifestSeedsMatchShipped {
     Fails packaging when launcher-manifest.json would not get native deployment
     and does not say why.
 .DESCRIPTION
-    Lopari reads every delivery_mode other than manifest / manifest_variants /
-    external as the install.cmd path, without a word: an absent field, a typo
-    and a value it has never heard of all install through the script. Black
-    Mesa shipped "installer" that way and twenty mods sat on "install_cmd"
-    with nobody deciding they should. So install_cmd is allowed only when the
+    Lopari deploys natively only for "manifest" and "manifest_variants",
+    matched case-sensitively. Every other string, "external" included,
+    installs through install.cmd without a word: an absent field, a typo, a
+    value in another case and a value it has never heard of. An external mod
+    is routed by the catalog's install_strategy, not by this field. Black Mesa
+    shipped "installer" that way and twenty mods sat on "install_cmd" with
+    nobody deciding they should. So install_cmd is allowed only when the
     manifest names what the deploy engine cannot express, in
     install_cmd_reason. The launcher ignores that field; it is for the next
-    person to read the manifest.
+    person to read the manifest. A JSON null is refused like an unknown mode,
+    since Lopari cannot parse it at all.
 
-    Same rule as validate-manifest.mjs, which checks the built ZIP. This runs
-    from Copy-SharedBundle so it holds in every package script, including the
-    ones that never call the validator.
+    Same rule as validate-manifest.mjs, which checks the built ZIP, and it
+    must stay identical: names and values are compared case-sensitively here
+    as there. This runs from Copy-SharedBundle so it holds in every package
+    script, including the ones that never call the validator.
 
     A repo with no launcher-manifest.json is skipped: the manifest is only
     warranted once the mod is in the launcher's catalog.
@@ -1331,16 +1335,20 @@ function Assert-LauncherManifestDelivery {
     if (-not (Test-Path -LiteralPath $path)) { return }
 
     $manifest = [System.IO.File]::ReadAllText($path).TrimStart([char]0xFEFF) | ConvertFrom-Json
-    $names = $manifest.PSObject.Properties.Name
-    $mode = if ($names -contains 'delivery_mode') { $manifest.delivery_mode } else { $null }
+    $modeProperty = @($manifest.PSObject.Properties | Where-Object { $_.Name -ceq 'delivery_mode' })
+    $reasonProperty = @($manifest.PSObject.Properties | Where-Object { $_.Name -ceq 'install_cmd_reason' })
 
-    if ($mode -in @('manifest', 'manifest_variants', 'external')) { return }
-
-    if ($mode -and $mode -ne 'install_cmd') {
-        throw "launcher-manifest.json has delivery_mode `"$mode`", which the launcher does not know and silently installs through install.cmd. Use `"manifest`" (or `"manifest_variants`" / `"external`") and declare the payload in files / loader."
+    if ($modeProperty.Count -gt 0) {
+        $mode = $modeProperty[0].Value
+        $isString = $mode -is [string]
+        if ($isString -and $mode -cin @('manifest', 'manifest_variants', 'external')) { return }
+        if (-not ($isString -and $mode -ceq 'install_cmd')) {
+            $text = if ($null -eq $mode) { 'null' } else { "$mode" }
+            throw "launcher-manifest.json has delivery_mode `"$text`", which the launcher does not know and silently installs through install.cmd. Use `"manifest`" (or `"manifest_variants`" / `"external`") and declare the payload in files / loader."
+        }
     }
-    $shown = if ($mode) { '"install_cmd"' } else { 'absent (the launcher reads that as "install_cmd")' }
-    $reason = if ($names -contains 'install_cmd_reason') { [string]$manifest.install_cmd_reason } else { '' }
+    $shown = if ($modeProperty.Count -gt 0) { '"install_cmd"' } else { 'absent (the launcher reads that as "install_cmd")' }
+    $reason = if ($reasonProperty.Count -gt 0 -and $reasonProperty[0].Value -is [string]) { $reasonProperty[0].Value } else { '' }
     if (-not $reason.Trim()) {
         throw "launcher-manifest.json delivery_mode is $shown with no install_cmd_reason. Move the package to `"manifest`" delivery, or, if the deploy engine really cannot express what install.cmd does, set install_cmd_reason to exactly what it cannot express."
     }
