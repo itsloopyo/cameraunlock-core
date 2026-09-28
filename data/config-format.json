@@ -364,7 +364,7 @@
       {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
     "pinball-fx-headtracking": [
-      {"committed": null, "installed": ["PinballFX\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+      {"committed": "CameraUnlock.ini", "installed": ["PinballFX\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
     "pixeljunk-monsters-2-headtracking": [
       {"committed": null, "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
