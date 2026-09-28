@@ -3,6 +3,8 @@
 #include "cameraunlock/ads/ads_fade.h"
 #include "cameraunlock/math/vec3.h"
 
+#include <limits>
+
 namespace cameraunlock::ads {
 
 // The lean split between its two carriers (see LeanHandover).
@@ -35,8 +37,15 @@ struct LeanShares {
 // Pure: no clock, no logging, no game. nowMs comes from the caller.
 class LeanHandover {
 public:
+    // The eye relief: how far forward of where the game puts the eye the lean may
+    // take it while the sights are up, so the eye never passes the rear sight or a
+    // scope's eyepiece. Measured once per game, in metres; a mod that never sets it
+    // has no stop. It holds in both modes, since the weapon stays put in true free
+    // look as well, and it eases in and out with the sights rather than stepping.
+    void SetForwardStop(float metres) { m_forwardStop = metres; }
+
     // Once per rendered frame the lean is applied. `aimForward` is the unit aim
-    // direction in the same space as `lean`. `aiming` is the ADS state for this
+    // direction in the same space as `lean`, pointing the way the camera looks. `aiming` is the ADS state for this
     // frame, polled rather than latched. In true free look the camera keeps the
     // lean through the aim. `rigAvailable` is false wherever the rig must stay
     // where the game puts it (mounted in a vehicle seat, say): the lateral lean
@@ -44,8 +53,12 @@ public:
     LeanShares Update(const math::Vec3& lean, const math::Vec3& aimForward, bool aiming,
                       bool trueFreeLook, bool rigAvailable, unsigned long long nowMs) {
         const float cameraShare = m_fade.Update(aiming && !trueFreeLook, nowMs);
-        const math::Vec3 along = aimForward * math::Vec3::Dot(lean, aimForward);
-        const math::Vec3 lateral = lean - along;
+        const float sightsUp = 1.0f - m_sightsFade.Update(aiming, nowMs);
+        const float alongLength = math::Vec3::Dot(lean, aimForward);
+        const math::Vec3 lateral = lean - aimForward * alongLength;
+        float kept = alongLength;
+        if (kept > m_forwardStop) kept += (m_forwardStop - kept) * sightsUp;
+        const math::Vec3 along = aimForward * kept;
         LeanShares shares;
         shares.camera = along + lateral * cameraShare;
         shares.rig = rigAvailable ? lateral * (1.0f - cameraShare) : math::Vec3();
@@ -62,11 +75,15 @@ public:
         const bool release = m_rigEngaged;
         m_rigEngaged = false;
         m_fade.Reset();
+        m_sightsFade.Reset();
         return release;
     }
 
 private:
     AdsFade m_fade;
+    // Follows the sights alone, true free look or not, for the forward stop.
+    AdsFade m_sightsFade;
+    float m_forwardStop = std::numeric_limits<float>::infinity();
     bool m_rigEngaged = false;
 };
 

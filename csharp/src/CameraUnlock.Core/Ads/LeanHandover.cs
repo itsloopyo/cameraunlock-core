@@ -44,11 +44,27 @@ namespace CameraUnlock.Core.Ads
     public sealed class LeanHandover
     {
         private readonly AdsFade _fade = new AdsFade();
+        // Follows the sights alone, true free look or not, for the forward stop.
+        private readonly AdsFade _sightsFade = new AdsFade();
+        private float _forwardStop = float.PositiveInfinity;
         private bool _rigEngaged;
 
         /// <summary>
+        /// The eye relief: how far forward of where the game puts the eye the lean may take
+        /// it while the sights are up, so the eye never passes the rear sight or a scope's
+        /// eyepiece. Measured once per game, in metres; a mod that never sets it has no
+        /// stop. It holds in both modes, since the weapon stays put in true free look as
+        /// well, and it eases in and out with the sights rather than stepping.
+        /// </summary>
+        public void SetForwardStop(float metres)
+        {
+            _forwardStop = metres;
+        }
+
+        /// <summary>
         /// Once per rendered frame the lean is applied. <paramref name="aimForward"/> is the
-        /// unit aim direction in the same space as <paramref name="lean"/>.
+        /// unit aim direction in the same space as <paramref name="lean"/>, pointing the way the
+        /// camera looks.
         /// <paramref name="aiming"/> is the ADS state for this frame, polled rather than
         /// latched. In true free look the camera keeps the lean through the aim.
         /// <paramref name="rigAvailable"/> is false wherever the rig must stay where the game
@@ -59,9 +75,12 @@ namespace CameraUnlock.Core.Ads
                                  ulong nowMs)
         {
             float cameraShare = _fade.Update(aiming && !trueFreeLook, nowMs);
+            float sightsUp = 1.0f - _sightsFade.Update(aiming, nowMs);
             float alongLength = Vec3.Dot(lean, aimForward);
-            Vec3 along = aimForward * alongLength;
-            Vec3 lateral = lean - along;
+            Vec3 lateral = lean - aimForward * alongLength;
+            float kept = alongLength;
+            if (kept > _forwardStop) kept += (_forwardStop - kept) * sightsUp;
+            Vec3 along = aimForward * kept;
             var shares = new LeanShares
             {
                 Camera = along + lateral * cameraShare,
@@ -82,6 +101,7 @@ namespace CameraUnlock.Core.Ads
             bool release = _rigEngaged;
             _rigEngaged = false;
             _fade.Reset();
+            _sightsFade.Reset();
             return release;
         }
     }

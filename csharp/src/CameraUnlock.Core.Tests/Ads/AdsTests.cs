@@ -220,6 +220,36 @@ namespace CameraUnlock.Core.Tests.Ads
             Assert.False(handover.Stop());
         }
 
+        private static LeanShares AimedWithStop(Vec3 lean, bool trueFreeLook)
+        {
+            var handover = new LeanHandover();
+            handover.SetForwardStop(0.12f);
+            handover.Update(lean, Forward, true, trueFreeLook, true, 0);
+            return handover.Update(lean, Forward, true, trueFreeLook, true, AdsFade.LowerMs + 1);
+        }
+
+        [Fact]
+        public void Handover_ForwardStopHoldsTheEyeBehindTheSights()
+        {
+            var lean = new Vec3(0.1f, 0f, 0.3f);
+            LeanShares locked = AimedWithStop(lean, false);
+            Assert.Equal(0.12f, locked.Camera.Z, 4);
+            Assert.Equal(0.1f, locked.Rig.X, 4);
+            Assert.Equal(0.12f, AimedWithStop(lean, true).Camera.Z, 4);
+
+            var hip = new LeanHandover();
+            hip.SetForwardStop(0.12f);
+            Assert.Equal(0.3f, hip.Update(lean, Forward, false, false, true, 0).Camera.Z, 4);
+
+            Assert.Equal(-0.1f, AimedWithStop(new Vec3(0f, 0f, -0.1f), false).Camera.Z, 4);
+
+            var easing = new LeanHandover();
+            easing.SetForwardStop(0.12f);
+            easing.Update(lean, Forward, true, false, true, 0);
+            float mid = easing.Update(lean, Forward, true, false, true, AdsFade.LowerMs / 2).Camera.Z;
+            Assert.True(mid < 0.3f && mid > 0.12f);
+        }
+
         [Fact]
         public void Handover_StopReleasesTheRig()
         {

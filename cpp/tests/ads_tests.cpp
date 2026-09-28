@@ -222,6 +222,33 @@ void TestHandoverWithoutARigEasesTheLeanOut() {
     Check(!handover.Stop(), "a rig that carried nothing has nothing to put back");
 }
 
+LeanShares AimedWithStop(const Vec3& lean, bool trueFreeLook) {
+    LeanHandover handover;
+    handover.SetForwardStop(0.12f);
+    handover.Update(lean, kForward, true, trueFreeLook, true, 0);
+    return handover.Update(lean, kForward, true, trueFreeLook, true, AdsFade::kLowerMs + 1);
+}
+
+void TestHandoverForwardStopHoldsTheEyeBehindTheSights() {
+    const Vec3 lean(0.1f, 0.0f, 0.3f);
+    const LeanShares locked = AimedWithStop(lean, false);
+    Check(Near(locked.camera.z, 0.12f), "sights up: leaning in stops at the eye relief");
+    Check(Near(locked.rig.x, 0.1f), "and the lean across the aim is untouched by the stop");
+    Check(Near(AimedWithStop(lean, true).camera.z, 0.12f), "the stop holds in true free look too");
+
+    LeanHandover hip;
+    hip.SetForwardStop(0.12f);
+    Check(Near(hip.Update(lean, kForward, false, false, true, 0).camera.z, 0.3f), "at the hip there is no stop");
+
+    Check(Near(AimedWithStop(Vec3(0.0f, 0.0f, -0.1f), false).camera.z, -0.1f), "leaning back is not stopped");
+
+    LeanHandover easing;
+    easing.SetForwardStop(0.12f);
+    easing.Update(lean, kForward, true, false, true, 0);
+    const float mid = easing.Update(lean, kForward, true, false, true, AdsFade::kLowerMs / 2).camera.z;
+    Check(mid < 0.3f && mid > 0.12f, "the stop eases in with the sights");
+}
+
 void TestHandoverStopReleasesTheRig() {
     LeanHandover handover;
     const Vec3 lean(0.25f, 0.0f, 0.0f);
@@ -251,6 +278,7 @@ int RunAdsTests() {
     TestHandoverSharesAlwaysSumToTheLean();
     TestHandoverTrueFreeLookKeepsTheLeanOnTheCamera();
     TestHandoverWithoutARigEasesTheLeanOut();
+    TestHandoverForwardStopHoldsTheEyeBehindTheSights();
     TestHandoverStopReleasesTheRig();
 
     if (g_failures == 0) {
