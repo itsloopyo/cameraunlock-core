@@ -91,6 +91,7 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings),
             Scenario("a-reload-that-keeps-failing-is-reported-once", AReloadThatKeepsFailingIsReportedOnce),
             Scenario("a-config-whose-write-time-cannot-be-read-defers", AConfigWhoseWriteTimeCannotBeReadDefers),
+            Scenario("a-reload-whose-write-time-cannot-be-read-is-unreadable", AReloadWhoseWriteTimeCannotBeReadIsUnreadable),
             Scenario("defaults-ini-absent-is-created-with-the-built-in-values", DefaultsIniAbsentIsCreatedWithTheBuiltInValues),
             Scenario("defaults-ini-under-a-missing-folder-is-not-created", DefaultsIniUnderAMissingFolderIsNotCreated),
             Scenario("defaults-ini-in-a-folder-that-denies-file-creation-is-not-created",
@@ -1181,6 +1182,58 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectSunkOnce(rig, load.Reason);
             ExpectBytes(rig.Path, Fresh());
             ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Canonical);
+        }
+
+        // After Load, a write time that cannot be read is a file that needs another look: FileChanged
+        // says so rather than throwing at every poll, and Reload reports it once as Unreadable.
+        private static void AReloadWhoseWriteTimeCannotBeReadIsUnreadable(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
+            ReplaceInFile(rig.Path, "UdpPort=default", "UdpPort=7000");
+            WindowsIdentity me = WindowsIdentity.GetCurrent();
+            var file = new FileInfo(rig.Path);
+            FileSecurity fileSecurity = file.GetAccessControl();
+            var denyAttributes = new FileSystemAccessRule(me.User, FileSystemRights.ReadAttributes, AccessControlType.Deny);
+            fileSecurity.AddAccessRule(denyAttributes);
+            file.SetAccessControl(fileSecurity);
+            var folder = new DirectoryInfo(dir);
+            DirectorySecurity folderSecurity = folder.GetAccessControl();
+            var denyListing = new FileSystemAccessRule(me.User, FileSystemRights.ListDirectory, AccessControlType.Deny);
+            folderSecurity.AddAccessRule(denyListing);
+            folder.SetAccessControl(folderSecurity);
+            try
+            {
+                ExpectThrows<UnauthorizedAccessException>(() => File.GetLastWriteTimeUtc(rig.Path), "reading the write time");
+                Expect(owner.FileChanged(), "a write time that cannot be read counts as changed");
+                ConfigReloadResult<HeadTrackingConfigData> first = owner.Reload();
+                Expect(first.Status == ConfigReloadStatus.Unreadable && first.Config == null,
+                    "the reload is Unreadable, got " + first.Status);
+                ExpectContains(first.Reason, FileName + " cannot be read: ");
+                ExpectContains(first.Reason, "The current settings stay.");
+                ExpectSunkOnce(rig, first.Reason);
+                for (int poll = 0; poll < 3; poll++)
+                {
+                    Expect(owner.FileChanged(), "the watcher keeps looking");
+                    ConfigReloadResult<HeadTrackingConfigData> again = owner.Reload();
+                    Expect(again.Status == ConfigReloadStatus.Unreadable && again.Reason == first.Reason,
+                        "every reload is still Unreadable with its reason, got " + again.Status + " (" + again.Reason + ")");
+                }
+                Expect(rig.Sink.Count == 1, "the same failure is not reported again, got " + rig.Sink.Count);
+            }
+            finally
+            {
+                folderSecurity.RemoveAccessRule(denyListing);
+                folder.SetAccessControl(folderSecurity);
+                fileSecurity.RemoveAccessRule(denyAttributes);
+                file.SetAccessControl(fileSecurity);
+            }
+            Expect(owner.FileChanged(), "the write time is still unrecorded once it can be read");
+            ConfigReloadResult<HeadTrackingConfigData> read = owner.Reload();
+            Expect(read.Status == ConfigReloadStatus.Applied && read.Config.UdpPort == 7000,
+                "the file is applied once its write time can be read, got " + read.Status);
+            Expect(!owner.FileChanged() && rig.Sink.Count == 1, "the read records the write time and reports nothing");
         }
 
         // Every row of the test table, in table order, as the created Defaults.ini gives it.

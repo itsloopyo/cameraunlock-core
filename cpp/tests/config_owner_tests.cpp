@@ -1461,6 +1461,42 @@ void AConfigWhoseWriteTimeCannotBeReadDefers(const fs::path& dir) {
     ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Canonical);
 }
 
+// After Load, a write time that cannot be read is a file that needs another look: FileChanged
+// says so rather than throwing at every poll, and Reload reports it once as Unreadable.
+void AReloadWhoseWriteTimeCannotBeReadIsUnreadable(const fs::path& dir) {
+    Rig rig(dir);
+    auto owner = rig.Make();
+    ExpectStatus(owner->Load(), ConfigLoadStatus::Created);
+    WriteBytes(rig.path, Replace(ReadBytes(rig.path), "UdpPort=default", "UdpPort=7000"));
+    std::optional<Reload> first;
+    {
+        DenyAccess file(rig.path, FILE_READ_ATTRIBUTES);
+        DenyAccess folder(dir, FILE_LIST_DIRECTORY);
+        std::uint64_t time = 0;
+        Check(detail::OwnerTryLastWriteTime(rig.path.wstring(), time) == ERROR_ACCESS_DENIED,
+              "neither lookup can read the write time");
+        Check(owner->FileChanged(), "a write time that cannot be read counts as changed");
+        first = owner->Reload();
+        Check(first->status == ConfigReloadStatus::Unreadable && !first->config, "the reload is Unreadable");
+        Check(Contains(first->reason, kFileNameText + " cannot be read: "s) &&
+                  Contains(first->reason, "The current settings stay."),
+              "the reason says why: " + first->reason);
+        ExpectSunkOnce(rig, first->reason);
+        for (int poll = 0; poll < 3; ++poll) {
+            Check(owner->FileChanged(), "the watcher keeps looking");
+            const Reload again = owner->Reload();
+            Check(again.status == ConfigReloadStatus::Unreadable && again.reason == first->reason,
+                  "every reload is still Unreadable with its reason: " + again.reason);
+        }
+        Check(rig.sink.size() == 1, "the same failure is not reported again");
+    }
+    Check(owner->FileChanged(), "the write time is still unrecorded once it can be read");
+    const Reload read = owner->Reload();
+    Check(read.status == ConfigReloadStatus::Applied && read.config && read.config->udp_port == 7000,
+          "the file is applied once its write time can be read");
+    Check(!owner->FileChanged() && rig.sink.size() == 1, "the read records the write time and reports nothing");
+}
+
 // Every row of the test table, in table order, as the created Defaults.ini gives it.
 constexpr char kAllFromDefaultsIni[] = "UdpPort=4242; EnableOnStartup=true; WorldSpaceYaw=true; RotationEnabled=true; "
                                        "PositionEnabled=true; ToggleKey=End, Ctrl+Shift+Y; LightMultiplier=1.5";
@@ -2243,6 +2279,7 @@ int RunConfigOwnerTests() {
     RunScenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings);
     RunScenario("a-reload-that-keeps-failing-is-reported-once", AReloadThatKeepsFailingIsReportedOnce);
     RunScenario("a-config-whose-write-time-cannot-be-read-defers", AConfigWhoseWriteTimeCannotBeReadDefers);
+    RunScenario("a-reload-whose-write-time-cannot-be-read-is-unreadable", AReloadWhoseWriteTimeCannotBeReadIsUnreadable);
     RunScenario("defaults-ini-absent-is-created-with-the-built-in-values", DefaultsIniAbsentIsCreatedWithTheBuiltInValues);
     RunScenario("defaults-ini-under-a-missing-folder-is-not-created", DefaultsIniUnderAMissingFolderIsNotCreated);
     RunScenario("defaults-ini-in-a-folder-that-denies-file-creation-is-not-created",

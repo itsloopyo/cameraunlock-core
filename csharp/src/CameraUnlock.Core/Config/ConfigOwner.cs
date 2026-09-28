@@ -326,9 +326,9 @@ namespace CameraUnlock.Core.Config
         /// reader cannot read, is Unreadable, which leaves the game's settings as they are. Its
         /// reason is handed to the status sink once: the next Unreadable reload with the same reason
         /// is not, until a reload reads the file (Applied or Unchanged) or the reason changes. A
-        /// file that cannot be opened keeps <see cref="FileChanged"/> true, so a watcher reloads it
-        /// at every poll until it can be read. Never writes, never imports and never opens the
-        /// legacy file.
+        /// file that cannot be opened, or whose write time cannot be read, is Unreadable and keeps
+        /// <see cref="FileChanged"/> true, so a watcher reloads it at every poll until it can be
+        /// read. Never writes, never imports and never opens the legacy file.
         /// </summary>
         /// <exception cref="InvalidOperationException">Load has not run.</exception>
         public ConfigReloadResult<TConfig> Reload()
@@ -353,7 +353,9 @@ namespace CameraUnlock.Core.Config
         /// <summary>
         /// True when the last write time of the file, or of Defaults.ini where Load found it, differs
         /// from the one the owner recorded at its last Load, Reload or committed Save. A missing file
-        /// has a write time too, so a file that appears or goes away counts.
+        /// has a write time too, so a file that appears or goes away counts. A config file whose
+        /// write time cannot be read counts as changed, so a watcher reloads it and Reload reports
+        /// it as Unreadable.
         /// </summary>
         /// <exception cref="InvalidOperationException">Load has not run.</exception>
         public bool FileChanged()
@@ -361,7 +363,20 @@ namespace CameraUnlock.Core.Config
             lock (_lock)
             {
                 RequireLoaded("FileChanged");
-                return File.GetLastWriteTimeUtc(_path) != _recordedWriteTime || DefaultsWriteTime() != _defaultsWriteTime;
+                DateTime writeTime;
+                try
+                {
+                    writeTime = File.GetLastWriteTimeUtc(_path);
+                }
+                catch (IOException)
+                {
+                    return true;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return true;
+                }
+                return writeTime != _recordedWriteTime || DefaultsWriteTime() != _defaultsWriteTime;
             }
         }
 
@@ -1086,18 +1101,44 @@ namespace CameraUnlock.Core.Config
         {
             var log = new List<string>();
             _sources = null;
-            DateTime writeTime = File.GetLastWriteTimeUtc(_path);
+            DateTime writeTime = default(DateTime);
+#if NULLABLE_ENABLED
+            Exception? timeError = null;
+#else
+            Exception timeError = null;
+#endif
+            try
+            {
+                writeTime = File.GetLastWriteTimeUtc(_path);
+            }
+            catch (IOException e)
+            {
+                timeError = e;
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                timeError = e;
+            }
             _defaultsWriteTime = DefaultsWriteTime();
             bool snapshotChanged;
             string unreadable = ReloadDefaults(log, out snapshotChanged);
             bool unapplied = snapshotChanged || _snapshotUnapplied;
-            ConfigReloadResult<TConfig> reloaded = ReloadConfigFile(log, writeTime, unapplied);
+            ConfigReloadResult<TConfig> reloaded = timeError != null
+                ? CannotReload(timeError, log)
+                : ReloadConfigFile(log, writeTime, unapplied);
             _snapshotUnapplied = unapplied && reloaded.Status != ConfigReloadStatus.Applied;
             var lines = new List<string>(reloaded.Log);
             string refused = DefaultsLines(lines);
             defaultsMessage = unreadable.Length > 0 ? unreadable : unapplied ? refused : string.Empty;
             return Reloaded(reloaded.Status, reloaded.Config, new List<CanonicalDiagnostic>(reloaded.Diagnostics), lines,
                 reloaded.Reason);
+        }
+
+        private ConfigReloadResult<TConfig> CannotReload(Exception e, List<string> log)
+        {
+            log.Add(_path + ": not reloaded: " + e.Message);
+            return Reloaded(ConfigReloadStatus.Unreadable, null, NoDiagnostics(), log,
+                _name + " cannot be read: " + Why(e) + ". The current settings stay.");
         }
 
         private ConfigReloadResult<TConfig> ReloadConfigFile(List<string> log, DateTime writeTime, bool snapshotUnapplied)
@@ -1121,15 +1162,11 @@ namespace CameraUnlock.Core.Config
             }
             catch (IOException e)
             {
-                log.Add(_path + ": not reloaded: " + e.Message);
-                return Reloaded(ConfigReloadStatus.Unreadable, null, NoDiagnostics(), log,
-                    _name + " cannot be read: " + Why(e) + ". The current settings stay.");
+                return CannotReload(e, log);
             }
             catch (UnauthorizedAccessException e)
             {
-                log.Add(_path + ": not reloaded: " + e.Message);
-                return Reloaded(ConfigReloadStatus.Unreadable, null, NoDiagnostics(), log,
-                    _name + " cannot be read: " + Why(e) + ". The current settings stay.");
+                return CannotReload(e, log);
             }
             _recordedWriteTime = writeTime;
 

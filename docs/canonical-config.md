@@ -807,7 +807,7 @@ never runs the import:
 |--------|---------|
 | `Unchanged` (0) | The file holds the bytes the owner last created or saved, and Defaults.ini gave no values an `Applied` reload has not yet read the file over |
 | `Applied` (1) | The file was read as canonical, stamped or not, over Defaults.ini's current values, and the result holds its settings |
-| `Unreadable` (3) | The file is missing or could not be read. The mod keeps the settings it has, whatever Defaults.ini did |
+| `Unreadable` (3) | The file is missing, or it or its write time could not be read. The mod keeps the settings it has, whatever Defaults.ini did |
 
 There is no status 2. `Reload` never reads the legacy file, so it has no status for one, and the
 number stays unused so the others keep theirs in both languages. What `Reload` does with a
@@ -1212,7 +1212,9 @@ only.
 `FileChanged` is true when the last write time of the game's file or of Defaults.ini differs from
 the one recorded, so a mod that already watches its file picks up an edit to Defaults.ini with no
 new code. A Defaults.ini whose write time cannot be read counts as one fixed time, so it never
-throws and never flaps. A mod that does not watch reads Defaults.ini again at the next start. An
+throws and never flaps. A game's file whose write time cannot be read, for a reason other than its
+absence, makes `FileChanged` true, and `Reload` then returns `Unreadable` with the reason, which
+goes to the status sink once until a reload reads the file or the reason changes. A mod that does not watch reads Defaults.ini again at the next start. An
 editor that truncates the file and writes it in place can be caught halfway: the rows it has not
 reached yet take the built-in value until its last write moves the write time again.
 

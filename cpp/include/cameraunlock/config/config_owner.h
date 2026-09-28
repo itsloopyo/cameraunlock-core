@@ -452,9 +452,10 @@ public:
     /// Defaults.ini's current values (Applied). A missing file, or one the canonical reader cannot
     /// read, is Unreadable, which leaves the game's settings as they are. Its reason is handed to the
     /// status sink once: the next Unreadable reload with the same reason is not, until a reload
-    /// reads the file (Applied or Unchanged) or the reason changes. A file that cannot be opened
-    /// keeps FileChanged true, so a watcher reloads it at every poll until it can be read. Never
-    /// writes, never imports and never opens the legacy file.
+    /// reads the file (Applied or Unchanged) or the reason changes. A file that cannot be opened, or
+    /// whose write time Windows cannot read, is Unreadable and keeps FileChanged true, so a watcher
+    /// reloads it at every poll until it can be read. Never writes, never imports and never opens
+    /// the legacy file.
     ///
     /// Throws std::logic_error when Load has not run.
     ConfigReloadResult<Config> Reload() {
@@ -478,14 +479,17 @@ public:
     /// from the one the owner recorded at its last Load, Reload or committed Save. The time is read
     /// with GetFileAttributesExW, or from the folder's listing with FindFirstFileW when that
     /// refuses a file that is there (one pending deletion), as .NET reads it. A missing file counts
-    /// as write time 0, so a file that appears or goes away counts.
+    /// as write time 0, so a file that appears or goes away counts. A config file whose time
+    /// Windows can read neither way, for a reason other than its absence, counts as changed, so a
+    /// watcher reloads it and Reload reports it as Unreadable.
     ///
-    /// Throws std::logic_error when Load has not run, and std::system_error when Windows can read
-    /// the config file's time neither way for a reason other than the file's absence.
+    /// Throws std::logic_error when Load has not run.
     bool FileChanged() {
         std::lock_guard<std::mutex> lock(mutex_);
         RequireLoaded("FileChanged");
-        return detail::OwnerLastWriteTime(path_) != recorded_write_time_ || DefaultsWriteTime() != defaults_write_time_;
+        std::uint64_t write_time = 0;
+        if (detail::OwnerTryLastWriteTime(path_, write_time) != 0) return true;
+        return write_time != recorded_write_time_ || DefaultsWriteTime() != defaults_write_time_;
     }
 
 private:
@@ -939,13 +943,16 @@ private:
 
     ConfigReloadResult<Config> ReloadLocked(std::string& defaults_message) {
         sources_.reset();
-        const std::uint64_t write_time = detail::OwnerLastWriteTime(path_);
+        std::uint64_t write_time = 0;
+        const std::uint32_t time_error = detail::OwnerTryLastWriteTime(path_, write_time);
         defaults_write_time_ = DefaultsWriteTime();
         std::vector<std::string> log;
         bool changed = false;
         const std::string unreadable = ReloadDefaults(log, changed);
         const bool unapplied = changed || snapshot_unapplied_;
-        ConfigReloadResult<Config> result = ReloadConfigFile(std::move(log), write_time, unapplied);
+        ConfigReloadResult<Config> result = time_error != 0
+                                                ? CannotReloadConfig(time_error, std::move(log))
+                                                : ReloadConfigFile(std::move(log), write_time, unapplied);
         snapshot_unapplied_ = unapplied && result.status != ConfigReloadStatus::Applied;
         const std::string refused = DefaultsLines(result.log);
         defaults_message = !unreadable.empty() ? unreadable : unapplied ? refused : std::string();
@@ -955,12 +962,7 @@ private:
     ConfigReloadResult<Config> ReloadConfigFile(std::vector<std::string> log, std::uint64_t write_time,
                                                 bool snapshot_unapplied) {
         const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
-        if (read.error != 0) {
-            log.push_back(path_text_ + ": not reloaded: " + detail::OwnerErrorText(read.error));
-            return Reloaded(ConfigReloadStatus::Unreadable, std::nullopt, {}, std::move(log),
-                            name_ + " cannot be read: " + detail::OwnerReadWhy(read.error) +
-                                ". The current settings stay.");
-        }
+        if (read.error != 0) return CannotReloadConfig(read.error, std::move(log));
         recorded_write_time_ = write_time;
         if (!read.present) {
             log.push_back(path_text_ + ": not reloaded: the file is missing");
@@ -985,6 +987,12 @@ private:
         if (committed_ && bytes != *committed_) committed_.reset();
         saves_allowed_ = true;
         return Reloaded(ConfigReloadStatus::Applied, std::move(config), std::move(diagnostics), std::move(log), "");
+    }
+
+    ConfigReloadResult<Config> CannotReloadConfig(std::uint32_t error, std::vector<std::string> log) {
+        log.push_back(path_text_ + ": not reloaded: " + detail::OwnerErrorText(error));
+        return Reloaded(ConfigReloadStatus::Unreadable, std::nullopt, {}, std::move(log),
+                        name_ + " cannot be read: " + detail::OwnerReadWhy(error) + ". The current settings stay.");
     }
 
     // Where Defaults.ini is, created where the choice allows it and read once. Adds its one

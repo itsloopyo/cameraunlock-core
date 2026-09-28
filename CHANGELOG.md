@@ -9,6 +9,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - `FileChanged` and `Reload` no longer throw on a write time that cannot be read
+
+C++ `ConfigOwner::FileChanged` and `Reload` and C# `ConfigOwner.FileChanged` and `Reload` read the
+config file's write time and threw when Windows could not read it for a reason other than absence
+(`std::system_error` in C++, `UnauthorizedAccessException` or `IOException` in C#), so a watcher
+polling `FileChanged` threw at every poll. `FileChanged` now returns true for such a file, since it
+needs another look, and `Reload` returns Unreadable with the reason ("... cannot be read: ... The
+current settings stay."), handed to the status sink once per episode like a read failure. The write
+time stays unrecorded, so the next reload that can read it applies the file. `Load` already deferred
+in this case. No signature changes.
+
 ### Fixed - `New-ChangelogFromCommits` releases a curated [Unreleased] instead of burying it
 
 `New-ChangelogFromCommits` put the generated `## [x.y.z] - date` entry directly under
