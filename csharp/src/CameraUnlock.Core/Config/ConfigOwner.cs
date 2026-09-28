@@ -79,6 +79,7 @@ namespace CameraUnlock.Core.Config
         private DefaultsCandidate? _defaultsAt;
         private byte[]? _defaultsSeen;
         private ConfigValueSource[]? _sources;
+        private string? _reportedUnreadable;
 #else
         private readonly LegacyImport<TConfig> _import;
         private readonly string _legacySourcePath;
@@ -88,6 +89,7 @@ namespace CameraUnlock.Core.Config
         private DefaultsCandidate _defaultsAt;
         private byte[] _defaultsSeen;
         private ConfigValueSource[] _sources;
+        private string _reportedUnreadable;
 #endif
         private bool _loaded;
         private bool _savesAllowed;
@@ -208,7 +210,9 @@ namespace CameraUnlock.Core.Config
         /// saved as UTF-16 or holding a NUL. An unstamped file gets a line in the log saying the
         /// next save adds the section; the first save that changes a row stamps it. The import
         /// never runs and the legacy file is never opened; when one exists, a line in the log says
-        /// the settings are read from Path and the legacy file is not read.</item>
+        /// the settings are read from Path and the legacy file is not read. A file at Path that
+        /// cannot be opened, or whose write time cannot be read, is Deferred on the table's
+        /// defaults, and nothing is imported.</item>
         /// <item>No file at Path and a file at LegacySourcePath: the legacy file is imported into a
         /// new file at Path (Migrated). A row that follows Defaults.ini is written <c>default</c>
         /// where the imported value equals what <c>default</c> gives it at this Load, and the
@@ -319,22 +323,28 @@ namespace CameraUnlock.Core.Config
         /// owner last wrote, the import's and creation's included, no Reload has applied other bytes
         /// since, and Defaults.ini gave nothing an Applied reload has not yet read over. Any other file is read as canonical, stamped or
         /// not, over Defaults.ini's current values (Applied). A missing file, or one the canonical
-        /// reader cannot read, is Unreadable, which leaves the game's settings as they are and is
-        /// handed to the status sink. Never writes, never imports and never opens the legacy file.
+        /// reader cannot read, is Unreadable, which leaves the game's settings as they are. Its
+        /// reason is handed to the status sink once: the next Unreadable reload with the same reason
+        /// is not, until a reload reads the file (Applied or Unchanged) or the reason changes. A
+        /// file that cannot be opened keeps <see cref="FileChanged"/> true, so a watcher reloads it
+        /// at every poll until it can be read. Never writes, never imports and never opens the
+        /// legacy file.
         /// </summary>
         /// <exception cref="InvalidOperationException">Load has not run.</exception>
         public ConfigReloadResult<TConfig> Reload()
         {
             ConfigReloadResult<TConfig> result;
             string defaultsMessage;
+            bool reportUnreadable;
             lock (_lock)
             {
                 RequireLoaded("Reload");
                 result = ReloadLocked(out defaultsMessage);
+                reportUnreadable = StartsUnreadableEpisode(result);
             }
             if (_statusSink != null)
             {
-                if (result.Status == ConfigReloadStatus.Unreadable) _statusSink(result.Reason);
+                if (reportUnreadable) _statusSink(result.Reason);
                 if (defaultsMessage.Length > 0) _statusSink(defaultsMessage);
             }
             return result;
@@ -361,6 +371,7 @@ namespace CameraUnlock.Core.Config
             _savesAllowed = false;
             _committed = null;
             _sources = null;
+            _reportedUnreadable = null;
             _snapshotUnapplied = false;
             var log = new List<string>();
             string twoFiles;
@@ -385,7 +396,18 @@ namespace CameraUnlock.Core.Config
 
         private ConfigLoadResult<TConfig> LoadConfigFile(List<string> log)
         {
-            _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
+            try
+            {
+                _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
+            }
+            catch (IOException e)
+            {
+                return CannotOpen(_path, e, log);
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                return CannotOpen(_path, e, log);
+            }
 
 #if NULLABLE_ENABLED
             byte[]? bytes;
@@ -1044,6 +1066,20 @@ namespace CameraUnlock.Core.Config
 #endif
         {
             return new ConfigSaveResult(ConfigSaveStatus.NotSaved, "Settings not saved: " + why + ".", error, null, log);
+        }
+
+        // A file that stays unreadable keeps its write time unrecorded, so a watcher reloads it at
+        // every poll; the player hears of it once, until a read succeeds or the reason changes.
+        private bool StartsUnreadableEpisode(ConfigReloadResult<TConfig> result)
+        {
+            if (result.Status != ConfigReloadStatus.Unreadable)
+            {
+                _reportedUnreadable = null;
+                return false;
+            }
+            if (result.Reason == _reportedUnreadable) return false;
+            _reportedUnreadable = result.Reason;
+            return true;
         }
 
         private ConfigReloadResult<TConfig> ReloadLocked(out string defaultsMessage)

@@ -1384,6 +1384,83 @@ void ReloadOfAnUnreadableFileKeepsTheSettings(const fs::path& dir) {
     Check(HoldsBytes(rig.path, utf16), "the file is not written");
 }
 
+HANDLE HoldExclusively(const fs::path& path) {
+    const HANDLE held = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL, nullptr);
+    Check(held != INVALID_HANDLE_VALUE, "another program holds the config with no sharing");
+    return held;
+}
+
+// A file that cannot be opened keeps FileChanged true, so a watcher reloads it at every poll.
+// The player is told once per stretch of failures: again after a read, or for another reason.
+void AReloadThatKeepsFailingIsReportedOnce(const fs::path& dir) {
+    Rig rig(dir);
+    auto owner = rig.Make();
+    ExpectStatus(owner->Load(), ConfigLoadStatus::Created);
+
+    WriteBytes(rig.path, Replace(ReadBytes(rig.path), "UdpPort=default", "UdpPort=7000"));
+    HANDLE held = HoldExclusively(rig.path);
+    const Reload first = owner->Reload();
+    Check(first.status == ConfigReloadStatus::Unreadable &&
+              Contains(first.reason, kFileNameText + " cannot be read: the file is in use by another program"s),
+          "a held file is Unreadable: " + first.reason);
+    ExpectSunkOnce(rig, first.reason);
+    for (int poll = 0; poll < 3; ++poll) {
+        Check(owner->FileChanged(), "the write time stays unrecorded, so the watcher keeps reloading");
+        const Reload again = owner->Reload();
+        Check(again.status == ConfigReloadStatus::Unreadable && again.reason == first.reason,
+              "every reload is still Unreadable with its reason: " + again.reason);
+    }
+    Check(rig.sink.size() == 1, "the same failure is not reported again");
+    CloseHandle(held);
+
+    const Reload read = owner->Reload();
+    Check(read.status == ConfigReloadStatus::Applied && read.config && read.config->udp_port == 7000,
+          "the file is applied once it can be read");
+    Check(!owner->FileChanged() && rig.sink.size() == 1, "the read records the write time and reports nothing");
+
+    WriteBytes(rig.path, Replace(ReadBytes(rig.path), "UdpPort=7000", "UdpPort=7001"));
+    held = HoldExclusively(rig.path);
+    const Reload after_read = owner->Reload();
+    CloseHandle(held);
+    Check(after_read.status == ConfigReloadStatus::Unreadable, "held again, Unreadable again");
+    Check(rig.sink.size() == 2 && rig.sink[1] == after_read.reason, "a failure after a read is reported again");
+
+    fs::remove(rig.path);
+    const Reload missing = owner->Reload();
+    Check(missing.status == ConfigReloadStatus::Unreadable && missing.reason != after_read.reason,
+          "a missing file is Unreadable for another reason: " + missing.reason);
+    Check(rig.sink.size() == 3 && rig.sink[2] == missing.reason, "a new reason is reported");
+    Check(owner->Reload().status == ConfigReloadStatus::Unreadable && rig.sink.size() == 3,
+          "the same missing file is not reported twice");
+}
+
+// Denying the file its attributes and the folder its listing leaves Windows no way to read the
+// write time, which Load treats as a file that cannot be opened.
+void AConfigWhoseWriteTimeCannotBeReadDefers(const fs::path& dir) {
+    Rig rig(dir);
+    ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Created);
+    rig.sink.clear();
+    std::optional<Load> load;
+    {
+        DenyAccess file(rig.path, FILE_READ_ATTRIBUTES);
+        DenyAccess folder(dir, FILE_LIST_DIRECTORY);
+        WIN32_FILE_ATTRIBUTE_DATA attributes{};
+        Check(!GetFileAttributesExW(rig.path.c_str(), GetFileExInfoStandard, &attributes) &&
+                  GetLastError() == ERROR_ACCESS_DENIED,
+              "GetFileAttributesExW refuses the file with access denied");
+        load = rig.Make()->Load();
+    }
+    ExpectStatus(*load, ConfigLoadStatus::Deferred);
+    Check(Contains(load->reason, kFileNameText + " cannot be read: "s) &&
+              Contains(load->reason, "The mod runs on its default settings this session."),
+          "the reason says why: " + load->reason);
+    Check(Same(load->config, Defaults()), "the session runs on the defaults");
+    ExpectSunkOnce(rig, load->reason);
+    Check(HoldsBytes(rig.path, Fresh()), "the config is not written");
+    ExpectStatus(rig.Make()->Load(), ConfigLoadStatus::Canonical);
+}
+
 // Every row of the test table, in table order, as the created Defaults.ini gives it.
 constexpr char kAllFromDefaultsIni[] = "UdpPort=4242; EnableOnStartup=true; WorldSpaceYaw=true; RotationEnabled=true; "
                                        "PositionEnabled=true; ToggleKey=End, Ctrl+Shift+Y; LightMultiplier=1.5";
@@ -2164,6 +2241,8 @@ int RunConfigOwnerTests() {
     RunScenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites);
     RunScenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports);
     RunScenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings);
+    RunScenario("a-reload-that-keeps-failing-is-reported-once", AReloadThatKeepsFailingIsReportedOnce);
+    RunScenario("a-config-whose-write-time-cannot-be-read-defers", AConfigWhoseWriteTimeCannotBeReadDefers);
     RunScenario("defaults-ini-absent-is-created-with-the-built-in-values", DefaultsIniAbsentIsCreatedWithTheBuiltInValues);
     RunScenario("defaults-ini-under-a-missing-folder-is-not-created", DefaultsIniUnderAMissingFolderIsNotCreated);
     RunScenario("defaults-ini-in-a-folder-that-denies-file-creation-is-not-created",

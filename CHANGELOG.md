@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - a config that stays unreadable is reported once, and Load no longer throws on its write time
+
+C++ `ConfigOwner::Reload` and C# `ConfigOwner.Reload`: a config file that cannot be opened (held by a
+program that denies read sharing, say) leaves its write time unrecorded, so `FileChanged()` stays
+true and a watcher reloads it at every poll, which is right, since the file may hold settings newer
+than those applied. Each of those reloads also handed the same "cannot be read" message to the status
+sink. The sink now gets an Unreadable reason once: again only after a reload that reads the file
+(Applied or Unchanged) or when the reason changes. The result still carries the status and reason
+every time, and `ConfigReloadStatus` is unchanged.
+
+`Load` read the config file's write time before opening it, and a failure there for any reason but
+absence threw out of `Load` (`std::system_error` in C++, `UnauthorizedAccessException` or
+`IOException` in C#). It is now Deferred on the table's defaults, as a file that cannot be opened
+already was. C++ adds `detail::OwnerTryLastWriteTime`, which returns the Win32 error in place of
+throwing; `OwnerLastWriteTime` is unchanged.
+
 ### Changed - C# `ConfigOwner` refuses a partly qualified Path or LegacySourcePath
 
 `ConfigOwner<TConfig>` checked `ConfigOwnerOptions.Path` and `LegacySourcePath` with

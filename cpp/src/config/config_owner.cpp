@@ -204,9 +204,13 @@ OwnerFileRead OwnerReadFile(const std::wstring& path) {
     return ReadWithSharing(path, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr);
 }
 
-std::uint64_t OwnerLastWriteTime(const std::wstring& path) {
+std::uint32_t OwnerTryLastWriteTime(const std::wstring& path, std::uint64_t& time) {
+    time = 0;
     WIN32_FILE_ATTRIBUTE_DATA data{};
-    if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return FileTimeCount(data.ftLastWriteTime);
+    if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) {
+        time = FileTimeCount(data.ftLastWriteTime);
+        return 0;
+    }
     DWORD error = GetLastError();
     if (IsAbsentForTime(error)) return 0;
     // As .NET does: a file pending deletion refuses GetFileAttributesExW with access denied while
@@ -216,12 +220,22 @@ std::uint64_t OwnerLastWriteTime(const std::wstring& path) {
         const HANDLE search = FindFirstFileW(path.c_str(), &found);
         if (search != INVALID_HANDLE_VALUE) {
             FindClose(search);
-            return FileTimeCount(found.ftLastWriteTime);
+            time = FileTimeCount(found.ftLastWriteTime);
+            return 0;
         }
         error = GetLastError();
         if (IsAbsentForTime(error)) return 0;
     }
-    throw std::system_error(static_cast<int>(error), std::system_category(), "GetFileAttributesExW " + OwnerUtf8(path));
+    return error;
+}
+
+std::uint64_t OwnerLastWriteTime(const std::wstring& path) {
+    std::uint64_t time = 0;
+    const std::uint32_t error = OwnerTryLastWriteTime(path, time);
+    if (error != 0) {
+        throw std::system_error(static_cast<int>(error), std::system_category(), "GetFileAttributesExW " + OwnerUtf8(path));
+    }
+    return time;
 }
 
 std::wstring OwnerFullPath(const std::wstring& path, const char* option) {

@@ -89,6 +89,8 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites),
             Scenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports),
             Scenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings),
+            Scenario("a-reload-that-keeps-failing-is-reported-once", AReloadThatKeepsFailingIsReportedOnce),
+            Scenario("a-config-whose-write-time-cannot-be-read-defers", AConfigWhoseWriteTimeCannotBeReadDefers),
             Scenario("defaults-ini-absent-is-created-with-the-built-in-values", DefaultsIniAbsentIsCreatedWithTheBuiltInValues),
             Scenario("defaults-ini-under-a-missing-folder-is-not-created", DefaultsIniUnderAMissingFolderIsNotCreated),
             Scenario("defaults-ini-in-a-folder-that-denies-file-creation-is-not-created",
@@ -1083,6 +1085,102 @@ namespace CameraUnlock.Core.Tests.Config
             ExpectSunkOnce(rig, reload.Reason);
             Expect(rig.Legacy.Runs == 0, "the config is never imported");
             ExpectBytes(rig.Path, utf16);
+        }
+
+        private static void ReplaceInFile(string path, string from, string to)
+        {
+            string text = Encoding.ASCII.GetString(File.ReadAllBytes(path));
+            ExpectContains(text, from);
+            File.WriteAllBytes(path, Ascii(text.Replace(from, to)));
+        }
+
+        // A file that cannot be opened keeps FileChanged true, so a watcher reloads it at every poll.
+        // The player is told once per stretch of failures: again after a read, or for another reason.
+        private static void AReloadThatKeepsFailingIsReportedOnce(string dir)
+        {
+            var rig = new Rig(dir);
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
+
+            ReplaceInFile(rig.Path, "UdpPort=default", "UdpPort=7000");
+            ConfigReloadResult<HeadTrackingConfigData> first;
+            using (new FileStream(rig.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                first = owner.Reload();
+                Expect(first.Status == ConfigReloadStatus.Unreadable, "a held file is Unreadable, got " + first.Status);
+                ExpectContains(first.Reason, FileName + " cannot be read: the file is in use by another program");
+                ExpectSunkOnce(rig, first.Reason);
+                for (int poll = 0; poll < 3; poll++)
+                {
+                    Expect(owner.FileChanged(), "the write time stays unrecorded, so the watcher keeps reloading");
+                    ConfigReloadResult<HeadTrackingConfigData> again = owner.Reload();
+                    Expect(again.Status == ConfigReloadStatus.Unreadable && again.Reason == first.Reason,
+                        "every reload is still Unreadable with its reason, got " + again.Status + " (" + again.Reason + ")");
+                }
+                Expect(rig.Sink.Count == 1, "the same failure is not reported again, got " + rig.Sink.Count);
+            }
+
+            ConfigReloadResult<HeadTrackingConfigData> read = owner.Reload();
+            Expect(read.Status == ConfigReloadStatus.Applied && read.Config.UdpPort == 7000,
+                "the file is applied once it can be read, got " + read.Status);
+            Expect(!owner.FileChanged() && rig.Sink.Count == 1, "the read records the write time and reports nothing");
+
+            ReplaceInFile(rig.Path, "UdpPort=7000", "UdpPort=7001");
+            ConfigReloadResult<HeadTrackingConfigData> afterRead;
+            using (new FileStream(rig.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                afterRead = owner.Reload();
+            }
+            Expect(afterRead.Status == ConfigReloadStatus.Unreadable, "held again, Unreadable again");
+            Expect(rig.Sink.Count == 2 && rig.Sink[1] == afterRead.Reason, "a failure after a read is reported again");
+
+            File.Delete(rig.Path);
+            ConfigReloadResult<HeadTrackingConfigData> missing = owner.Reload();
+            Expect(missing.Status == ConfigReloadStatus.Unreadable && missing.Reason != afterRead.Reason,
+                "a missing file is Unreadable for another reason: " + missing.Reason);
+            Expect(rig.Sink.Count == 3 && rig.Sink[2] == missing.Reason, "a new reason is reported");
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unreadable && rig.Sink.Count == 3,
+                "the same missing file is not reported twice");
+        }
+
+        // Denying the file its attributes and the folder its listing leaves Windows no way to read the
+        // write time, which Load treats as a file that cannot be opened.
+        private static void AConfigWhoseWriteTimeCannotBeReadDefers(string dir)
+        {
+            var rig = new Rig(dir);
+            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Created);
+            rig.Sink.Clear();
+            WindowsIdentity me = WindowsIdentity.GetCurrent();
+            var file = new FileInfo(rig.Path);
+            FileSecurity fileSecurity = file.GetAccessControl();
+            var denyAttributes = new FileSystemAccessRule(me.User, FileSystemRights.ReadAttributes, AccessControlType.Deny);
+            fileSecurity.AddAccessRule(denyAttributes);
+            file.SetAccessControl(fileSecurity);
+            var folder = new DirectoryInfo(dir);
+            DirectorySecurity folderSecurity = folder.GetAccessControl();
+            var denyListing = new FileSystemAccessRule(me.User, FileSystemRights.ListDirectory, AccessControlType.Deny);
+            folderSecurity.AddAccessRule(denyListing);
+            folder.SetAccessControl(folderSecurity);
+            ConfigLoadResult<HeadTrackingConfigData> load;
+            try
+            {
+                ExpectThrows<UnauthorizedAccessException>(() => File.GetLastWriteTimeUtc(rig.Path), "reading the write time");
+                load = rig.Owner().Load();
+            }
+            finally
+            {
+                folderSecurity.RemoveAccessRule(denyListing);
+                folder.SetAccessControl(folderSecurity);
+                fileSecurity.RemoveAccessRule(denyAttributes);
+                file.SetAccessControl(fileSecurity);
+            }
+            ExpectStatus(load, ConfigLoadStatus.Deferred);
+            ExpectContains(load.Reason, FileName + " cannot be read: ");
+            ExpectContains(load.Reason, "The mod runs on its default settings this session.");
+            ExpectSame(load.Config, Defaults(), "the session runs on the defaults");
+            ExpectSunkOnce(rig, load.Reason);
+            ExpectBytes(rig.Path, Fresh());
+            ExpectStatus(rig.Owner().Load(), ConfigLoadStatus.Canonical);
         }
 
         // Every row of the test table, in table order, as the created Defaults.ini gives it.

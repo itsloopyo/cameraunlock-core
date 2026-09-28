@@ -230,6 +230,10 @@ OwnerFileRead OwnerReadFile(const std::wstring& path);
 // std::system_error when both fail otherwise.
 std::uint64_t OwnerLastWriteTime(const std::wstring& path);
 
+// OwnerLastWriteTime without the throw: 0 with `time` set (0 for a missing file), or the Win32
+// error both lookups failed with, `time` then 0.
+std::uint32_t OwnerTryLastWriteTime(const std::wstring& path, std::uint64_t& time);
+
 // GetFullPathNameW of a fully qualified path. Throws std::invalid_argument naming the option
 // for an empty or relative path.
 std::wstring OwnerFullPath(const std::wstring& path, const char* option);
@@ -344,7 +348,8 @@ public:
     ///   the legacy file is never opened; when one exists (GetFileAttributesW), a line in the log
     ///   says the settings are read from `path` and the legacy file is not read. A file at `path`
     ///   that cannot be opened (held by a program denying read sharing, pending deletion, or
-    ///   denied by its permissions) is Deferred on the table's defaults, and nothing is imported.
+    ///   denied by its permissions), or whose write time Windows cannot read, is Deferred on the
+    ///   table's defaults, and nothing is imported.
     /// - No file at `path` and a file at legacy_path: the legacy file is imported into a new file
     ///   at `path` (Migrated). A row that follows Defaults.ini is written `default` where the
     ///   imported value equals what `default` gives it at this Load, and the tracking mode pair
@@ -445,20 +450,25 @@ public:
     /// the import's and creation's included, no Reload has applied other bytes since, and
     /// Defaults.ini gave nothing an Applied reload has not yet read over. Any other file is read as canonical, stamped or not, over
     /// Defaults.ini's current values (Applied). A missing file, or one the canonical reader cannot
-    /// read, is Unreadable, which leaves the game's settings as they are and is handed to the
-    /// status sink. Never writes, never imports and never opens the legacy file.
+    /// read, is Unreadable, which leaves the game's settings as they are. Its reason is handed to the
+    /// status sink once: the next Unreadable reload with the same reason is not, until a reload
+    /// reads the file (Applied or Unchanged) or the reason changes. A file that cannot be opened
+    /// keeps FileChanged true, so a watcher reloads it at every poll until it can be read. Never
+    /// writes, never imports and never opens the legacy file.
     ///
     /// Throws std::logic_error when Load has not run.
     ConfigReloadResult<Config> Reload() {
         ConfigReloadResult<Config> result;
         std::string defaults_message;
+        bool report_unreadable = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             RequireLoaded("Reload");
             result = ReloadLocked(defaults_message);
+            report_unreadable = StartsUnreadableEpisode(result);
         }
         if (status_sink_) {
-            if (result.status == ConfigReloadStatus::Unreadable) status_sink_(result.reason);
+            if (report_unreadable) status_sink_(result.reason);
             if (!defaults_message.empty()) status_sink_(defaults_message);
         }
         return result;
@@ -538,6 +548,7 @@ private:
         saves_allowed_ = false;
         committed_.reset();
         sources_.reset();
+        reported_unreadable_.reset();
         snapshot_unapplied_ = false;
         std::vector<std::string> log;
         std::string two_files;
@@ -549,16 +560,12 @@ private:
     }
 
     ConfigLoadResult<Config> LoadConfigFile(std::vector<std::string> log) {
-        recorded_write_time_ = detail::OwnerLastWriteTime(path_);
+        const std::uint32_t time_error = detail::OwnerTryLastWriteTime(path_, recorded_write_time_);
+        if (time_error != 0) return CannotOpenConfig(time_error, std::move(log));
 
         detail::OwnerStep(hook_, "Open", path_);
         const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
-        if (read.error != 0) {
-            log.push_back(path_text_ + ": could not be opened: " + detail::OwnerErrorText(read.error));
-            return LoadResult(ConfigLoadStatus::Deferred, OnDefaults(), {}, std::move(log),
-                              name_ + " cannot be read: " + detail::OwnerReadWhy(read.error) +
-                                  ". The mod runs on its default settings this session.");
-        }
+        if (read.error != 0) return CannotOpenConfig(read.error, std::move(log));
         if (read.present) {
             if (!legacy_path_.empty() && detail::OwnerFileExists(legacy_path_)) {
                 log.push_back(path_text_ + ": settings are read from this file. " + legacy_text_ +
@@ -577,6 +584,13 @@ private:
         }
         if (!opened.present) return Create(std::move(log));
         return Migrate(held, opened.bytes, std::move(log));
+    }
+
+    ConfigLoadResult<Config> CannotOpenConfig(std::uint32_t error, std::vector<std::string> log) {
+        log.push_back(path_text_ + ": could not be opened: " + detail::OwnerErrorText(error));
+        return LoadResult(ConfigLoadStatus::Deferred, OnDefaults(), {}, std::move(log),
+                          name_ + " cannot be read: " + detail::OwnerReadWhy(error) +
+                              ". The mod runs on its default settings this session.");
     }
 
     ConfigLoadResult<Config> ReadCanonical(const std::string& bytes, bool stamped, std::vector<std::string> log) {
@@ -909,6 +923,18 @@ private:
         result.error = error;
         result.log = std::move(log);
         return result;
+    }
+
+    // A file that stays unreadable keeps its write time unrecorded, so a watcher reloads it at
+    // every poll; the player hears of it once, until a read succeeds or the reason changes.
+    bool StartsUnreadableEpisode(const ConfigReloadResult<Config>& result) {
+        if (result.status != ConfigReloadStatus::Unreadable) {
+            reported_unreadable_.reset();
+            return false;
+        }
+        if (reported_unreadable_ == result.reason) return false;
+        reported_unreadable_ = result.reason;
+        return true;
     }
 
     ConfigReloadResult<Config> ReloadLocked(std::string& defaults_message) {
@@ -1308,6 +1334,7 @@ private:
     bool saves_allowed_ = false;
     std::optional<std::string> committed_;
     std::uint64_t recorded_write_time_ = 0;
+    std::optional<std::string> reported_unreadable_;
 };
 
 #endif  // _WIN32
