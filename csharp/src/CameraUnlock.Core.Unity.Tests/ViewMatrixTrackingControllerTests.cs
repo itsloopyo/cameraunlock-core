@@ -1,6 +1,7 @@
 using System;
 using Xunit;
 using UnityEngine;
+using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 using CameraUnlock.Core.Unity.Tracking;
@@ -651,6 +652,149 @@ namespace CameraUnlock.Core.Unity.Tests
             Frame();
 
             Assert.True(_controller.LastTrackingYaw < 1f);
+        }
+        // The lean clamp seam. The camera sits at (1, 2, 3) looking down world +z, so a
+        // tracker lean of +x is a world +x lean and the rendered eye is readable straight off
+        // the view matrix's translation column.
+        private Camera LeanCamera()
+        {
+            var cam = new Camera();
+            cam.transform.position = new Vector3(1f, 2f, 3f);
+            _positionProcessor.Settings = new PositionSettings(
+                1f, 1f, 1f, 0.3f, 0.2f, 0.2f, 0.4f, 0.1f, 0f, 0f);
+            _source.PositionX = 0.2f;
+            return cam;
+        }
+
+        private void RunLeanFrames(ViewMatrixTrackingController controller, Camera cam, int frames)
+        {
+            for (int i = 0; i < frames; i++)
+                ApplyFrameTo(controller, cam);
+        }
+
+        private static float RenderedEyeX(Camera cam)
+        {
+            return -cam.worldToCameraMatrix.m03;
+        }
+
+        [Fact]
+        public void LeanQuery_Null_LeavesTheLeanUnclamped()
+        {
+            Camera cam = LeanCamera();
+            var controller = NewController(() => cam);
+            controller.Enable();
+            try
+            {
+                RunLeanFrames(controller, cam, 120);
+                Assert.Equal(1.2f, RenderedEyeX(cam), 3);
+            }
+            finally
+            {
+                controller.Disable();
+            }
+        }
+
+        [Fact]
+        public void LeanQuery_Blocked_HoldsTheEyeTheSkinOffTheSurface()
+        {
+            Camera cam = LeanCamera();
+            Vec3 askedFrom = default(Vec3);
+            Vec3 askedAlong = default(Vec3);
+            var controller = NewController(() => cam);
+            controller.LeanQuery = (start, direction, maxDistance) =>
+            {
+                askedFrom = start;
+                askedAlong = direction;
+                return LeanObstruction.Hit(0.15f);
+            };
+            controller.Enable();
+            try
+            {
+                RunLeanFrames(controller, cam, 120);
+
+                // 0.15 to the wall less the 0.10 default skin leaves 0.05 of the 0.2 lean.
+                Assert.Equal(1.05f, RenderedEyeX(cam), 3);
+                Assert.True(controller.LeanClamp.InContact);
+                Assert.Equal(1f, askedFrom.X, 4);
+                Assert.Equal(2f, askedFrom.Y, 4);
+                Assert.Equal(3f, askedFrom.Z, 4);
+                Assert.Equal(1f, askedAlong.X, 4);
+
+                // The tracker's request is still what the controller reports.
+                Assert.Equal(0.2f, controller.LastTrackingPosition.X, 3);
+            }
+            finally
+            {
+                controller.Disable();
+            }
+        }
+
+        [Fact]
+        public void LeanQuery_Failed_PassesTheLeanThroughAndSaysSo()
+        {
+            Camera cam = LeanCamera();
+            var controller = NewController(() => cam);
+            controller.LeanQuery = (start, direction, maxDistance) => LeanObstruction.Failed;
+            controller.Enable();
+            try
+            {
+                RunLeanFrames(controller, cam, 120);
+                Assert.Equal(1.2f, RenderedEyeX(cam), 3);
+                Assert.True(controller.LeanClamp.LastQueryFailed);
+            }
+            finally
+            {
+                controller.Disable();
+            }
+        }
+
+        [Fact]
+        public void LeanQuery_ForwardLean_IsAskedAlongTheCameraForward()
+        {
+            // The processor's forward is -z and the transform's is +z; a query asked along
+            // the processor's axis would sweep behind the player.
+            Camera cam = LeanCamera();
+            _source.PositionX = 0f;
+            _source.PositionZ = -0.3f;
+            Vec3 askedAlong = default(Vec3);
+            var controller = NewController(() => cam);
+            controller.LeanQuery = (start, direction, maxDistance) =>
+            {
+                askedAlong = direction;
+                return LeanObstruction.Clear;
+            };
+            controller.Enable();
+            try
+            {
+                RunLeanFrames(controller, cam, 120);
+                Assert.Equal(1f, askedAlong.Z, 4);
+            }
+            finally
+            {
+                controller.Disable();
+            }
+        }
+
+        [Fact]
+        public void ResetState_DropsTheLeanAllowance()
+        {
+            Camera cam = LeanCamera();
+            var controller = NewController(() => cam);
+            controller.LeanQuery = (start, direction, maxDistance) => LeanObstruction.Hit(0.15f);
+            controller.Enable();
+            try
+            {
+                RunLeanFrames(controller, cam, 120);
+                Assert.True(controller.LeanClamp.InContact);
+
+                controller.ResetState();
+
+                Assert.False(controller.LeanClamp.InContact);
+            }
+            finally
+            {
+                controller.Disable();
+            }
         }
     }
 }

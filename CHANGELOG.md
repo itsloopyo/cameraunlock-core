@@ -9,6 +9,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - ViewMatrixTrackingController clamps the lean against the world
+
+`ViewMatrixTrackingController.LeanQuery` takes the mod's world query (a `Physics.Raycast` or
+`SphereCast` from the clean eye) and runs `LeanClamp` in the render hook, after the game has
+placed the camera, so the offset is cut before the eye can enter a wall. The query is asked along
+the world-space lean both ApplyHeadRotation paths apply (the camera's own axes, with the
+processor's -z forward flipped to the transform's +z), and the camera-space offset is scaled by
+the fraction the clamp allows. `LeanClamp` is exposed for its Settings (Skin must exceed the
+camera's near clip distance) and for InContact and LastQueryFailed. The allowance is reset on a
+camera switch, a new tracking session, `ResetState` and `Disable`. `LastTrackingPosition` stays
+the lean the tracker asked for.
+
+Consuming repos: nothing to change. With `LeanQuery` left null the controller behaves as before.
+easy-delivery-co-headtracking is the first to set it.
+
 ### Added - zoom compensation in C#
 
 `CameraUnlock.Core.Processing.ZoomCompensation` is the C# twin of `camera/zoom_compensation.h`:

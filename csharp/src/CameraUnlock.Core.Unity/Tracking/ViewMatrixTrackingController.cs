@@ -35,6 +35,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         private readonly PositionInterpolator _positionInterpolator;
         private readonly Func<Camera> _cameraResolver;
         private readonly PerFrameCache<Camera> _mainCameraCache;
+        private readonly LeanClamp _leanClamp = new LeanClamp();
 
         // Current processed values (set in ProcessFrame, applied in the render hook).
         private float _currentYaw;
@@ -91,6 +92,27 @@ namespace CameraUnlock.Core.Unity.Tracking
         public bool PositionEnabled { get; set; }
         public bool RotationEnabled { get; set; }
         public bool WorldSpaceYaw { get; set; }
+
+        /// <summary>
+        /// The mod's world query for keeping a lean out of the level: a Physics.Raycast or
+        /// SphereCast from the clean eye (the camera transform's position) along a world-space
+        /// direction, answered as a <see cref="LeanObstruction"/>. Null leaves the lean
+        /// unclamped. The query runs in the render hook, after the game has placed the camera
+        /// for the frame, so it sweeps from the eye the frame is actually drawn from.
+        /// <see cref="LastTrackingPosition"/> stays the lean the tracker asked for.
+        /// </summary>
+        public LeanQuery LeanQuery { get; set; }
+
+        /// <summary>
+        /// The policy that acts on <see cref="LeanQuery"/>'s answers. Its Settings carry the
+        /// standoff (Skin, which must exceed the camera's near clip distance) and the release
+        /// smoothing; InContact and LastQueryFailed describe the last frame drawn. Reset on
+        /// every camera switch and tracking session by the controller.
+        /// </summary>
+        public LeanClamp LeanClamp
+        {
+            get { return _leanClamp; }
+        }
 
         /// <summary>
         /// Whether starting a tracking session captures the incoming pose as the center.
@@ -213,6 +235,7 @@ namespace CameraUnlock.Core.Unity.Tracking
                 _appliedCamera.ResetWorldToCameraMatrix();
             _appliedCamera = null;
             _needsMatrixReset = false;
+            _leanClamp.Reset();
         }
 
         /// <summary>
@@ -427,6 +450,7 @@ namespace CameraUnlock.Core.Unity.Tracking
             _detected6DOF = false;
             _hasCentered = false;
             _recenterOnStabilize = false;
+            _leanClamp.Reset();
             ResetSmoothingState();
             ResetInterpolators();
         }
@@ -443,6 +467,7 @@ namespace CameraUnlock.Core.Unity.Tracking
             _transitionInProgress = _skipNextTransitionIn ? 1f : 0f;
             _skipNextTransitionIn = false;
             _detected6DOF = false;
+            _leanClamp.Reset();
             ResetInterpolators();
             ResetSmoothingState();
         }
@@ -607,14 +632,47 @@ namespace CameraUnlock.Core.Unity.Tracking
         private void ApplyToCamera(Camera cam, float yaw, float pitch, float roll, Vec3 position)
         {
             if (_appliedCamera != null && _appliedCamera != cam)
+            {
                 _appliedCamera.ResetWorldToCameraMatrix();
+                // A camera cut: the allowance describes the previous camera's surroundings.
+                _leanClamp.Reset();
+            }
             _appliedCamera = cam;
+
+            if (LeanQuery != null)
+                position = ClampLean(cam, position);
 
             var offset = new Vector3(position.X, position.Y, position.Z);
             if (WorldSpaceYaw)
                 ViewMatrixModifier.ApplyHeadRotationDecomposed(cam, yaw, pitch, roll, offset);
             else
                 ViewMatrixModifier.ApplyHeadRotation(cam, yaw, pitch, roll, offset);
+        }
+
+        /// <summary>
+        /// Both ApplyHeadRotation paths move the eye along the camera's own axes, with the
+        /// processor's -z forward being the transform's +z forward, so that is the world-space
+        /// lean the query is asked about. The clamp only shortens the offset along its own
+        /// direction, so the camera-space offset is scaled by the same fraction.
+        /// </summary>
+        private Vec3 ClampLean(Camera cam, Vec3 position)
+        {
+            Transform camTransform = cam.transform;
+            Vector3 world = camTransform.rotation * new Vector3(position.X, position.Y, -position.Z);
+            float desired = world.magnitude;
+            Vector3 eye = camTransform.position;
+
+            // Unscaled, like the transition out this also runs under: the release is a
+            // visual ease, and a fade at timeScale 0 must still be clamped and released.
+            Vec3 allowed = _leanClamp.Apply(
+                new Vec3(eye.x, eye.y, eye.z),
+                new Vec3(world.x, world.y, world.z),
+                Time.unscaledDeltaTime,
+                LeanQuery);
+
+            if (desired <= 0f)
+                return position;
+            return position * (allowed.Magnitude / desired);
         }
 
         private void AdvanceTransitionOut()
