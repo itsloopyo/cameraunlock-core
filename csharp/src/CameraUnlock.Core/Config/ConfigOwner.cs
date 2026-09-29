@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.IO.IsolatedStorage;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -1485,6 +1486,13 @@ namespace CameraUnlock.Core.Config
             {
                 return null;
             }
+            catch (IsolatedStorageException)
+            {
+                // Unity's Mono 2.x runtime (Unity 5 and older) reports a missing file as this,
+                // "Could not find file", and it is not an IOException there.
+                if (File.Exists(path)) throw;
+                return null;
+            }
             using (stream)
             {
                 return ReadAll(stream);
@@ -1566,6 +1574,12 @@ namespace CameraUnlock.Core.Config
                 }
                 catch (DirectoryNotFoundException)
                 {
+                    return null;
+                }
+                catch (IsolatedStorageException)
+                {
+                    // Unity's Mono 2.x runtime: a missing file, see ReadIfPresent.
+                    if (File.Exists(path)) throw;
                     return null;
                 }
                 try

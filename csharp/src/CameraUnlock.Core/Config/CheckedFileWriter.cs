@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.IO;
+using System.IO.IsolatedStorage;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
@@ -369,6 +370,13 @@ namespace CameraUnlock.Core.Config
                 }
                 catch (DirectoryNotFoundException)
                 {
+                    return Snapshot.Absent;
+                }
+                catch (IsolatedStorageException)
+                {
+                    // Unity's Mono 2.x runtime (Unity 5 and older) reports a missing file as this,
+                    // "Could not find file", and it is not an IOException there.
+                    if (File.Exists(_target)) throw;
                     return Snapshot.Absent;
                 }
 
