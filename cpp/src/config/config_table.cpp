@@ -24,8 +24,9 @@ constexpr const char* kDefaultsIniHeader[] = {
     "; that keeps its settings in CameraUnlock.ini reads: %AppData%\\CameraUnlock\\Defaults.ini on",
     "; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on",
     "; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini",
-    "; on macOS. The log names the file it read. Write a value instead of default to change that",
-    "; setting for this game only.",
+    "; on macOS. The log names the file it read. Change a setting in Defaults.ini to change it in",
+    "; every game that has it set to default, or write a value here instead of default to change it",
+    "; for this game only.",
 };
 
 bool IsPrintableAscii(std::string_view text) {

@@ -747,8 +747,8 @@ ApplyReport ApplyCanonical(const CanonicalIni& doc, const ConfigTable<Config>& t
 /// then the local sections in table order. Each row is its comment lines as `; text`, then
 /// `Key=value`, or `; Key=value` for an Engine row holding its default. A blank line separates
 /// sections. CRLF line endings with a final CRLF, no byte order mark. When the table has a global
-/// concept row that is not PerGame, six header lines say what `default` means and where
-/// Defaults.ini is.
+/// concept row that is not PerGame, seven header lines say what `default` means, where
+/// Defaults.ini is, and where to change a setting for every game or for this one.
 ///
 /// Throws std::invalid_argument, naming the row, for a value its codec cannot write, and for a
 /// display name that is empty, has a leading or trailing space, or holds a byte outside

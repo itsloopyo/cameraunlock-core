@@ -50,8 +50,9 @@ namespace CameraUnlock.Core.Config
             "; that keeps its settings in CameraUnlock.ini reads: %AppData%\\CameraUnlock\\Defaults.ini on",
             "; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on",
             "; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini",
-            "; on macOS. The log names the file it read. Write a value instead of default to change that",
-            "; setting for this game only.",
+            "; on macOS. The log names the file it read. Change a setting in Defaults.ini to change it in",
+            "; every game that has it set to default, or write a value here instead of default to change it",
+            "; for this game only.",
         };
 
         // How a render writes a row: as Render does (an Engine row at its default commented), as
@@ -440,8 +441,9 @@ namespace CameraUnlock.Core.Config
         /// order, then the local sections in table order. Each row is its comment lines as
         /// <c>; text</c>, then <c>Key=value</c>, or <c>; Key=value</c> for an Engine row holding its
         /// default. A blank line separates sections. CRLF line endings with a final CRLF, no byte
-        /// order mark. When the table has a global concept row that is not PerGame, six header lines
-        /// say what <c>default</c> means and where Defaults.ini is.
+        /// order mark. When the table has a global concept row that is not PerGame, seven header lines
+        /// say what <c>default</c> means, where Defaults.ini is, and where to change a setting for
+        /// every game or for this one.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
         /// <exception cref="ArgumentException">A value its codec cannot write, naming the row; or a

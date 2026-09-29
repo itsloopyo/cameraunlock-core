@@ -231,7 +231,7 @@ dialect, so the C++ suite's native `HotkeyCodec` and the C# suite's Unity one ag
 `CollisionChannel` is the table's one concept row that does not follow Defaults.ini: the schema
 marks it `"global": false`, so its default is the table's own, and the table marks it Engine. Every
 other concept row follows Defaults.ini, so the table passes the fresh render's gate, its renders
-carry the six header lines on `default`, and the cases pin that such a row keeps the commented
+carry the seven header lines on `default`, and the cases pin that such a row keeps the commented
 form at its default.
 
 A case directory holds `input.ini`, or one or more of the render files below:
@@ -324,7 +324,7 @@ the file on disk (docs/canonical-config.md, "The global defaults file").
 lists and `CollisionEnabled` at their `canonical_default`. Every row is written as its value. The
 rows, sections and comments are those of `head-tracking/all-concepts.ini` without
 `CollisionMargin` and `CollisionChannel`, which are not global and have no line here. The header
-is its own, and carries none of the six game-file lines on `default`: four lines saying what the
+is its own, and carries none of the seven game-file lines on `default`: four lines saying what the
 file is and who reads it, the comments line, the hotkeys line, and five lines listing the key names
 the file takes, the 98 names in `data/keys.json` that have a `vk` and are not a Ctrl, Shift or Alt
 key (`LeftShift` to `RightAlt`, the names `modifiers` gives as `unity`), with `A to Z`,
@@ -643,7 +643,7 @@ and all three invalid (`single-bools-invalid`); a single bool changed beside mod
 
 `CameraUnlock.ini`: the file the examples in docs/canonical-config.md create at first launch, which
 is the example table's fresh render (`RenderCanonicalFresh` / `RenderFresh`) with the display name
-`Example Game`: the six header lines on `default`, and `default` on every concept row. The table is
+`Example Game`: the seven header lines on `default`, and `default` on every concept row. The table is
 `HeadTrackingConfigTable` naming `UdpPort`, `EnableOnStartup`, `WorldSpaceYaw`, `RotationEnabled`,
 `PositionEnabled`, `ToggleKey`, `CycleTrackingModeKey` and `YawModeKey`, plus one local row,
 `[Logging] WriteLog`, a bool defaulting to false with the comment

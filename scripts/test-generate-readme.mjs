@@ -53,6 +53,7 @@ function check(ok, what) {
 const WHO = "A setting set to `default` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads.";
 const WHERE = "`Defaults.ini` is `%AppData%\\CameraUnlock\\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.";
 const NEVER = "The mod never changes `Defaults.ini` after that.";
+const EVERY_GAME = "Changing a setting in `Defaults.ini` changes it in every game that has it set to `default`.";
 const THIS_GAME = "Writing a value in place of `default` changes that setting for this game only.";
 const HOTKEY = "When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.";
 const NATIVE_SENTENCE = "On Linux and macOS without Wine or Proton, this version reads its settings and saves none: it creates no `CameraUnlock.ini` and a change made in game lasts until the game closes.";
@@ -72,6 +73,7 @@ for (const name of Object.keys(CASES)) {
     [HOTKEY, true, "that a saved hotkey change stops the row following Defaults.ini"],
     [WHERE, true, "where Defaults.ini is"],
     [NEVER, true, "that the mod never changes Defaults.ini"],
+    [EVERY_GAME, true, "where to change a setting for every game"],
     [THIS_GAME, true, "what a value in place of default does"],
     [NATIVE_SENTENCE, csharp, "the native Linux and macOS read-only sentence"],
     [NATIVE_CREATE, csharp, "the native exception to creating Defaults.ini"],

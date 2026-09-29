@@ -308,7 +308,7 @@ fails("a per_game value spelled another way", bepMan((c) => ({ ...c, per_game: {
   const noYaw = bepWith("per-game-absent", edit(ALL, "WorldSpaceYaw=default\r\n", ""));
   fails("per_game names a row the file lacks", bepMan(), noYaw, "per_game lists WorldSpaceYaw for subnautica-headtracking, and Config.ini has no WorldSpaceYaw line");
   const tokened = bepWith("per-game-token", ALL);
-  fails("a per_game row the file holds default on", bepMan(), tokened, "Config.ini line 23: [General] WorldSpaceYaw=default, and data/config-format.json per_game lists WorldSpaceYaw");
+  fails("a per_game row the file holds default on", bepMan(), tokened, "Config.ini line 24: [General] WorldSpaceYaw=default, and data/config-format.json per_game lists WorldSpaceYaw");
   const commented = bepWith("per-game-commented", edit(ALL, "WorldSpaceYaw=default", "; WorldSpaceYaw=false"));
   clean("a per_game row commented out at the game's own default", bepMan(), commented);
   const commentedElsewhere = bepWith("per-game-commented-elsewhere", edit(edit(ALL, "WorldSpaceYaw=default\r\n", ""), "[Network]\r\n", "[Network]\r\n; WorldSpaceYaw=false\r\n"));

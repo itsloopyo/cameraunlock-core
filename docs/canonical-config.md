@@ -53,8 +53,9 @@ keeps its settings in `CameraUnlock.ini` reads for those rows (see
 ; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
 ; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
 ; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
-; on macOS. The log names the file it read. Write a value instead of default to change that
-; setting for this game only.
+; on macOS. The log names the file it read. Change a setting in Defaults.ini to change it in
+; every game that has it set to default, or write a value here instead of default to change it
+; for this game only.
 
 [CameraUnlock]
 ; Written by the mod. Leave this section in place.
@@ -98,8 +99,9 @@ One renderer writes every file, so every file has the same shape:
 1. A header of comment lines: `; <display name> head tracking settings.`, where the display name
    is the game's name as `data/games.json` spells it; a line saying comments go on their own line;
    when the file holds a hotkey row, a line on how hotkeys are written; and, when it holds a
-   global concept row not marked `PerGame`, six lines on what a setting set to `default` means
-   and where Defaults.ini is, the lines of the example above. `Render`, `RenderFresh` and the migration
+   global concept row not marked `PerGame`, seven lines on what a setting set to `default` means,
+   where Defaults.ini is, and where to change a setting for every game or for this one, the lines
+   of the example above. `Render`, `RenderFresh` and the migration
    render all write them.
 2. `[CameraUnlock]`, a comment asking the player to leave it in place, and `ConfigFormat=1`.
 3. The schema sections the mod has rows in, in the order of the schema's `sections` array
@@ -274,8 +276,9 @@ same comment (`all-concepts-fresh.ini` beside it). The comments are the schema's
 ; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
 ; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
 ; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
-; on macOS. The log names the file it read. Write a value instead of default to change that
-; setting for this game only.
+; on macOS. The log names the file it read. Change a setting in Defaults.ini to change it in
+; every game that has it set to default, or write a value here instead of default to change it
+; for this game only.
 
 [CameraUnlock]
 ; Written by the mod. Leave this section in place.
@@ -1595,7 +1598,8 @@ changelog. What the block says between the file's location and the committed fil
 - **A committed file with `default` rows** adds, once, after the location: that a `default` row
   takes its value from Defaults.ini, which every head tracking mod that keeps its settings in
   `CameraUnlock.ini` reads, that head tracking mods keeping their settings in another file do not
-  read it, that a value changes that game only, and that a hotkey change the mod saves writes a
+  read it, that changing a setting in Defaults.ini changes it in every game that has it set to
+  `default`, that a value changes that game only, and that a hotkey change the mod saves writes a
   value over `default`, so the row stops following Defaults.ini in that game; the three locations
   of the file's header, and that the log names the file read; and that the mod creates
   Defaults.ini with the built-in values when it finds none, except in a packaged game, and never

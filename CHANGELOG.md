@@ -9,6 +9,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - the header of a rendered file says where to change a setting for every game
+
+The Defaults.ini lines above the settings named the file and its locations but never said to
+change a setting there for every game. They gain that sentence and are seven lines, not six. The
+last two lines become:
+
+```text
+; on macOS. The log names the file it read. Change a setting in Defaults.ini to change it in
+; every game that has it set to default, or write a value here instead of default to change it
+; for this game only.
+```
+
+`generate-readme.mjs`'s config block and `scripts/templates/canonical-config-changelog.md` gain
+the same sentence: "Changing a setting in `Defaults.ini` changes it in every game that has it set
+to `default`."
+
+Consuming repos: after bumping the pin, re-run `pixi run render-config` and commit the file,
+regenerate the README config block, and add the sentence to the conversion bullet of any changelog
+section not yet released. A file already on a player's disk keeps the header it was created with,
+since `Save` edits only the rows it changes.
+
 ### BREAKING - `LightFollowsHead` is retired, and retired keys no longer need a branch
 
 The concept is gone from the schema, from `HeadFollowLightSettings` (C++ `follows_head`, C#
