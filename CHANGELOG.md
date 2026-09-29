@@ -9,6 +9,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - LeanClamp in C#
+
+`CameraUnlock.Core.Processing.LeanClamp` is the C# twin of `camera/lean_clamp.h`, with
+`LeanObstruction`, `LeanClampSettings` and a `LeanQuery` delegate in place of the C++ function
+pointer and context. The policy is the same line for line (instant tightening, damped release,
+a failed query reported rather than absorbed, the allowance dropped on a neutral pose), and
+`LeanClampTests` ports `lean_clamp_tests.cpp` case for case. A Unity mod now writes only the
+query, a `Physics.SphereCast` or `Raycast` from the clean eye, and hands it to `Apply`.
+
+Consuming repos: nothing to change. A Unity mod carrying its own port of the policy can drop it
+for this one; blue-prince-headtracking is the first to.
+
 ### Fixed - HeadTrackingSession mode changes are safe from a hotkey thread
 
 `SetMode()` reset the position processor and interpolator inline, so a hotkey calling it (or
