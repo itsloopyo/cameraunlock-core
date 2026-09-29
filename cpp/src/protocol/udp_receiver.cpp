@@ -6,6 +6,10 @@
 #include <cmath>
 #include <string>
 
+#ifndef _WIN32
+#include <poll.h>
+#endif
+
 namespace cameraunlock {
 
 std::function<void(const std::string&)> DefaultLogSink() {
@@ -59,6 +63,20 @@ bool UdpReceiver::BindAndReceive() {
         m_retrying.store(true, std::memory_order_release);
         return false;
     }
+
+#ifdef _WIN32
+    m_stopEvent = WSACreateEvent();
+    if (m_stopEvent == WSA_INVALID_EVENT) {
+        if (m_log) {
+            m_log("WSACreateEvent failed with " + std::to_string(WSAGetLastError()) +
+                  " - receive thread not started");
+        }
+        m_socket.Close();
+        m_failed.store(true, std::memory_order_release);
+        m_retrying.store(true, std::memory_order_release);
+        return false;
+    }
+#endif
 
     m_failed.store(false, std::memory_order_release);
     m_retrying.store(false, std::memory_order_release);
@@ -130,11 +148,20 @@ void UdpReceiver::SupervisorThread() {
 void UdpReceiver::StopReceiverThread() {
     if (m_running.load(std::memory_order_acquire)) {
         m_stopFlag.store(true, std::memory_order_release);
+#ifdef _WIN32
+        WSASetEvent(m_stopEvent);
+#endif
         if (m_thread.joinable()) {
             m_thread.join();
         }
         m_running.store(false, std::memory_order_release);
     }
+#ifdef _WIN32
+    if (m_stopEvent != WSA_INVALID_EVENT) {
+        WSACloseEvent(m_stopEvent);
+        m_stopEvent = WSA_INVALID_EVENT;
+    }
+#endif
     m_socket.Close();
 }
 
@@ -354,32 +381,35 @@ void UdpReceiver::ReceiverThread() {
 
     SOCKET sock = m_socket.GetHandle();
 
-#ifdef _WIN32
-    WSAPOLLFD pollFd = {};
-    pollFd.fd = sock;
-    pollFd.events = POLLIN;
-#endif
-
     int64_t s_recvErrLogged = 0;
-    int64_t s_pollErrLogged = 0;
+    int64_t s_waitErrLogged = 0;
     int64_t s_firstPacketLogged = 0;
     int64_t s_shortPacketLogged = 0;
     int64_t s_parseFailLogged = 0;
 
+#ifdef _WIN32
+    // The thread sleeps until a datagram arrives or StopReceiverThread() sets
+    // m_stopEvent, so an idle receiver costs nothing. It used to poll with a
+    // 1ms timeout only to notice the stop flag, waking a thousand times a
+    // second for the whole session. Every timing rule in the loop (source
+    // handover, recenter re-arm, source cycling) runs off packet arrival
+    // times, so nothing here needs a timer wake-up.
+    WSAEVENT dataEvent = WSACreateEvent();
+    if (dataEvent == WSA_INVALID_EVENT || WSAEventSelect(sock, dataEvent, FD_READ) != 0) {
+        if (m_log) {
+            m_log("waiting on the UDP socket could not be set up (WSA error " +
+                  std::to_string(WSAGetLastError()) + ") - receiver thread exiting");
+        }
+        if (dataEvent != WSA_INVALID_EVENT) WSACloseEvent(dataEvent);
+        m_receiveFailed.store(true, std::memory_order_release);
+        return;
+    }
+    const WSAEVENT waitEvents[2] = {m_stopEvent, dataEvent};
+#endif
+
     while (!m_stopFlag.load(std::memory_order_relaxed)) {
 #ifdef _WIN32
         senderAddrSize = sizeof(senderAddr);
-        int pollResult = WSAPoll(&pollFd, 1, 1);
-        if (pollResult < 0) {
-            if (!s_pollErrLogged++ && m_log) {
-                m_log("WSAPoll failed with " + std::to_string(WSAGetLastError()) +
-                      " - receiver thread exiting");
-            }
-            m_receiveFailed.store(true, std::memory_order_release);
-            break;
-        }
-        if (pollResult == 0) continue;
-
         int bytesReceived = recvfrom(
             sock,
             buffer,
@@ -390,7 +420,23 @@ void UdpReceiver::ReceiverThread() {
         );
         if (bytesReceived == SOCKET_ERROR) {
             int err = WSAGetLastError();
-            if (err != WSAEWOULDBLOCK && !s_recvErrLogged++ && m_log) {
+            if (err == WSAEWOULDBLOCK) {
+                // Queue drained. The would-block re-arms FD_READ, so a datagram
+                // landing from here on signals dataEvent, including one that
+                // arrived before the wait starts.
+                const DWORD woke = WSAWaitForMultipleEvents(2, waitEvents, FALSE, WSA_INFINITE, FALSE);
+                if (woke == WSA_WAIT_FAILED) {
+                    if (!s_waitErrLogged++ && m_log) {
+                        m_log("WSAWaitForMultipleEvents failed with " +
+                              std::to_string(WSAGetLastError()) + " - receiver thread exiting");
+                    }
+                    m_receiveFailed.store(true, std::memory_order_release);
+                    break;
+                }
+                if (woke == WSA_WAIT_EVENT_0 + 1) WSAResetEvent(dataEvent);
+                continue;
+            }
+            if (!s_recvErrLogged++ && m_log) {
                 m_log("recvfrom failed with WSA error " + std::to_string(err) +
                       " (continuing)");
             }
@@ -409,6 +455,19 @@ void UdpReceiver::ReceiverThread() {
             }
         }
 #else
+        // Bounded so Stop() is noticed, and so the non-blocking socket is not
+        // spun on while nothing is sending.
+        pollfd readable = {sock, POLLIN, 0};
+        const int ready = poll(&readable, 1, kSupervisorTickMs);
+        if (ready < 0 && errno != EINTR) {
+            if (!s_waitErrLogged++ && m_log) {
+                m_log("poll failed with " + std::to_string(errno) + " - receiver thread exiting");
+            }
+            m_receiveFailed.store(true, std::memory_order_release);
+            break;
+        }
+        if (ready <= 0) continue;
+
         socklen_t addrLen = sizeof(senderAddr);
         int bytesReceived = recvfrom(
             sock,
@@ -621,6 +680,10 @@ void UdpReceiver::ReceiverThread() {
             }
         }
     }
+
+#ifdef _WIN32
+    WSACloseEvent(dataEvent);
+#endif
 }
 
 }  // namespace cameraunlock

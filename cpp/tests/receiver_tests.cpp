@@ -45,6 +45,8 @@ constexpr uint16_t kSupervisedSenderPort = 14264;
 constexpr uint16_t kReusePort = 14265;
 constexpr uint16_t kPressPort = 14266;
 constexpr uint16_t kPressSenderPort = 14267;
+constexpr uint16_t kWaitPort = 14268;
+constexpr uint16_t kWaitSenderPort = 14269;
 
 size_t BuildPacket(uint8_t out[54], double x, double y, double z,
                    double yaw, double pitch, double roll,
@@ -355,6 +357,50 @@ int RunReceiverTests() {
 
     pressRx.Stop();
     pressSender.Close();
+
+    // ---- UdpReceiver: the receive thread sleeps until a datagram arrives ----
+    //
+    // It waits on the socket with no timeout, so these hold the three things a
+    // wait can get wrong: a burst left half read, a tracker that goes quiet
+    // (the player's face out of frame) and comes back never being seen again,
+    // and Stop() hanging on a thread that is asleep.
+    std::cout << "UdpReceiver wait tests:\n";
+
+    UdpSocket waitSender;
+    if (!waitSender.Open(kWaitSenderPort)) {
+        Check(false, "wait sender binds loopback test port");
+        return g_failures;
+    }
+    UdpReceiver waitRx;
+    Check(waitRx.Start(kWaitPort), "wait receiver binds");
+
+    // Steps well under kConfirmJumpDegrees, so the pose gate passes each one.
+    bool burstSent = true;
+    for (int i = 1; i <= 200; i++) {
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, i * 0.05, 0.0, 0.0);
+        burstSent = SendToPort(waitSender, kWaitPort, pkt, len) && burstSent;
+    }
+    Check(burstSent, "a 200-packet burst is sent back to back");
+    Check(WaitForRotation(waitRx, 10.0f, 1000), "the last packet of the burst is published");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 10.5, 0.0, 0.0);
+    Check(SendToPort(waitSender, kWaitPort, pkt, len), "tracker resumes after 1.5s of silence");
+    Check(WaitForRotation(waitRx, 10.5f, 1000), "its first packet back is published");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const auto stopStart = std::chrono::steady_clock::now();
+    waitRx.Stop();
+    const auto stopMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - stopStart).count();
+    Check(stopMs < 1000, "Stop wakes an idle receive thread and returns promptly");
+
+    Check(waitRx.Start(kWaitPort), "the receiver starts again after Stop");
+    len = BuildPacket(pkt, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0);
+    Check(SendToPort(waitSender, kWaitPort, pkt, len), "packet sent to the restarted receiver");
+    Check(WaitForRotation(waitRx, 3.0f, 1000), "the restarted receive thread wakes on it");
+    waitRx.Stop();
+    waitSender.Close();
 
     if (g_failures == 0) {
         std::cout << "Receiver tests: all passed\n";

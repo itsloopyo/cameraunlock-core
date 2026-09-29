@@ -182,6 +182,11 @@ private:
     std::thread m_supervisorThread;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_stopFlag{false};
+#ifdef _WIN32
+    /// Wakes the receive thread out of its wait for a datagram. Created with
+    /// each receive thread and closed after it is joined.
+    WSAEVENT m_stopEvent{WSA_INVALID_EVENT};
+#endif
     std::atomic<bool> m_supervising{false};
     std::atomic<bool> m_retrying{false};
     std::atomic<bool> m_failed{false};
