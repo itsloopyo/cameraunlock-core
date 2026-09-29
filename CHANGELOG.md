@@ -9,6 +9,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - LineSweep in C#
+
+`CameraUnlock.Core.Processing.LineSweep` is the C# twin of `camera/lean_line_sweep.h`: a
+swept sphere for `LeanClamp` built from a `LineCast` delegate (a centre ray, and a ring of rays
+each behind a sideways probe), with `LineHit` and `LineSweepSettings`. `LineSweep.Query` is the
+`LeanQuery` to hand to `LeanClamp.Apply`, held once so passing it allocates nothing.
+`LineSweepTests` ports `lean_line_sweep_tests.cpp` case for case against the same box world.
+
+Consuming repos: nothing to change. A Unity mod's `Physics.SphereCast` misses every collider the
+sphere overlaps where it starts; wrapping `Physics.Raycast` in a `LineCast` and taking the
+nearer of the two answers covers a surface already inside the standoff.
+
 ### Added - ViewMatrixTrackingController clamps the lean against the world
 
 `ViewMatrixTrackingController.LeanQuery` takes the mod's world query (a `Physics.Raycast` or
