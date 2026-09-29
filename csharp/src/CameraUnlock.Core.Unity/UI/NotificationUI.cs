@@ -124,7 +124,9 @@ namespace CameraUnlock.Core.Unity.UI
         {
             if (_displayTimer > 0f)
             {
-                _displayTimer -= Time.deltaTime;
+                // Unscaled: a toast raised in a pause menu (timeScale 0) would otherwise
+                // stay on screen until the game resumes.
+                _displayTimer -= Time.unscaledDeltaTime;
             }
         }
 
