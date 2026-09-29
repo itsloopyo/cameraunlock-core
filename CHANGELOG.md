@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a swept sphere for LeanClamp, built out of line casts
+
+`camera/lean_line_sweep.h`. An engine that gives a mod only a line cast (HPL2, HPL3) could check
+the centre of the eye's path and nothing around it, so a lean past a door frame's edge or a table
+corner a few millimetres off the line put the eye close enough for the near plane to cull the
+corner. `LineSweepQuery` is a `LeanQueryFn` that sweeps a sphere of `LineSweepSettings::radius`
+along the lean: one ray down the centre, which is exact for a flat surface at any angle, and a
+ring of rays around it (8 by default), each started from a short sideways probe so it never starts
+inside a surface already beside the eye. The mod supplies only its line cast (`LineCastFn`), which
+has to skip the player's own body. The radius must equal the clamp's skin; the query hands back
+the sphere's travel plus the radius, which the clamp takes the skin off again. One lean costs
+1 + 2 x `ring_rays` casts. A cast that cannot run leaves the whole query unanswered.
+
+Consuming repos: nothing to change. A mod on a line cast can pass `&LineSweepQuery` and a
+`LineSweep` to `LeanClamp::Apply` in place of its own query.
+
 ### Added - LeanClamp in C#
 
 `CameraUnlock.Core.Processing.LeanClamp` is the C# twin of `camera/lean_clamp.h`, with

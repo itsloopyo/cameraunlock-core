@@ -24,6 +24,7 @@ add_executable(cameraunlock_tests
     config_schema_tests.cpp
     safe_memory_tests.cpp
     lean_clamp_tests.cpp
+    lean_line_sweep_tests.cpp
     rig_lean_tests.cpp
     zoom_compensation_tests.cpp
     tracking_mode_tests.cpp
