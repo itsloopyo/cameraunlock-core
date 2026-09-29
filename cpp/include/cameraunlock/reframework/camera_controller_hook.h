@@ -2,6 +2,8 @@
 
 #include <reframework/API.hpp>
 
+#include <vector>
+
 namespace cameraunlock::reframework {
 
 // True when an RE Engine component type name looks like a render/post-process
@@ -24,6 +26,12 @@ bool IsEffectControllerName(const char* typeName);
 //      component whose type looks like a camera controller and is not an
 //      effect controller, logging every component seen so an unrecognized
 //      game's real controller type can be promoted to the fast path later.
+//
+// The short-name scan visits every type in the TDB, which does not change
+// while the game runs, so it runs on the first attempt only and later attempts
+// retry the types it found. The walk's component log is written once per camera
+// transform: on a title where nothing matches, every retry would otherwise log
+// the same tree again (RE Village: 34 lines per attempt).
 //
 // At the main menu the primary camera GameObject typically carries only
 // render/effect controllers; the real player camera controller component
@@ -67,7 +75,7 @@ public:
 private:
     bool TryHookTypeDef(::reframework::API::TypeDefinition* type, const char* fullTypeName);
     bool TryHookType(const char* fullTypeName);
-    bool WalkParentChain(void* cameraTransform);
+    bool WalkParentChain(void* cameraTransform, bool logComponents);
 
     const char* const* m_candidateTypes;
     int m_candidateTypeCount;
@@ -77,6 +85,9 @@ private:
     unsigned int m_hookId = 0;
     bool m_hooked = false;
     int m_attempts = 0;
+    bool m_shortNameScanned = false;
+    std::vector<::reframework::API::TypeDefinition*> m_shortNameMatches;
+    void* m_lastWalkedTransform = nullptr;
 };
 
 } // namespace cameraunlock::reframework

@@ -77,7 +77,7 @@ bool CameraControllerHooker::TryHookType(const char* fullTypeName) {
     return TryHookTypeDef(type, fullTypeName);
 }
 
-bool CameraControllerHooker::WalkParentChain(void* cameraTransform) {
+bool CameraControllerHooker::WalkParentChain(void* cameraTransform, bool logComponents) {
     auto txMo = reinterpret_cast<::reframework::API::ManagedObject*>(cameraTransform);
 
     for (int depth = 0; depth < 8; depth++) {
@@ -86,19 +86,21 @@ bool CameraControllerHooker::WalkParentChain(void* cameraTransform) {
         auto goMo = reinterpret_cast<::reframework::API::ManagedObject*>(goRet.ptr);
 
         char goName[128] = "?";
-        auto nameRet = goMo->invoke("get_Name", EmptyArgs());
-        if (!nameRet.exception_thrown && nameRet.ptr) {
-            ReadManagedString(nameRet.ptr, goName, sizeof(goName));
+        if (logComponents) {
+            auto nameRet = goMo->invoke("get_Name", EmptyArgs());
+            if (!nameRet.exception_thrown && nameRet.ptr) {
+                ReadManagedString(nameRet.ptr, goName, sizeof(goName));
+            }
         }
 
         auto compsRet = goMo->invoke("get_Components", EmptyArgs());
         if (compsRet.exception_thrown || !compsRet.ptr) {
-            Log(LogLevel::Info, "  parent[%d] GO=\"%s\": no components", depth, goName);
+            if (logComponents) Log(LogLevel::Info, "  parent[%d] GO=\"%s\": no components", depth, goName);
         } else {
             auto compArr = reinterpret_cast<::reframework::API::ManagedObject*>(compsRet.ptr);
             auto lenRet = compArr->invoke("get_Length", EmptyArgs());
             uint32_t compCount = lenRet.exception_thrown ? 0 : lenRet.dword;
-            Log(LogLevel::Info, "  parent[%d] GO=\"%s\": %u components", depth, goName, compCount);
+            if (logComponents) Log(LogLevel::Info, "  parent[%d] GO=\"%s\": %u components", depth, goName, compCount);
 
             for (uint32_t i = 0; i < compCount && i < 32; i++) {
                 auto comp = ArrayGetValue(compArr, (int)i);
@@ -109,7 +111,7 @@ bool CameraControllerHooker::WalkParentChain(void* cameraTransform) {
                 const char* cnm = compTd->get_name();
                 if (!cns) cns = "";
                 if (!cnm) cnm = "?";
-                Log(LogLevel::Info, "    [%u] %s.%s", i, cns, cnm);
+                if (logComponents) Log(LogLevel::Info, "    [%u] %s.%s", i, cns, cnm);
 
                 // Accept a player camera controller (preferred) or a generic
                 // "Camera*Controller", but never a render/post-process effect
@@ -148,7 +150,11 @@ bool CameraControllerHooker::TryHook(void* cameraTransform) {
     // controller between namespaces across releases (app.ropeway.* vs
     // offline.* vs app.*) but keep the short type name. Exact short-name
     // matching cannot hit the Camera*Controller effect-controller shapes.
-    for (auto type : FindTypesByShortName("PlayerCameraController")) {
+    if (!m_shortNameScanned) {
+        m_shortNameScanned = true;
+        m_shortNameMatches = FindTypesByShortName("PlayerCameraController");
+    }
+    for (auto type : m_shortNameMatches) {
         const char* ns = type->get_namespace();
         char fullName[256];
         snprintf(fullName, sizeof(fullName), "%s.%s", ns ? ns : "", "PlayerCameraController");
@@ -157,8 +163,10 @@ bool CameraControllerHooker::TryHook(void* cameraTransform) {
 
     if (!cameraTransform) return false;
 
-    Log(LogLevel::Info, "Camera controller: hardcoded names failed, walking parent chain...");
-    return WalkParentChain(cameraTransform);
+    const bool logComponents = cameraTransform != m_lastWalkedTransform;
+    m_lastWalkedTransform = cameraTransform;
+    if (logComponents) Log(LogLevel::Info, "Camera controller: hardcoded names failed, walking parent chain...");
+    return WalkParentChain(cameraTransform, logComponents);
 }
 
 } // namespace cameraunlock::reframework
