@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <thread>
 
 namespace {
 
@@ -333,6 +334,54 @@ void TestModeCycling() {
     Check(ry == 0.f && rp == 0.f && rr == 0.f, "rotation zeroed in position-only mode");
 
     Check(session.CycleMode() == TrackingMode::RotationAndPosition, "third cycle wraps to 6DOF");
+}
+
+// SetMode only writes the atomic mode, so it is safe from a hotkey thread; the
+// position reset it used to do inline now happens in the next Update(). With
+// heavy smoothing, a lean that changed while position was off must restart from
+// the new pose when it comes back, not ease over from the old one.
+void TestPositionResetDeferredToUpdate() {
+    std::cout << "Position reset deferred to Update:\n";
+
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.hasPosition = true;
+    rx.posX = 0.1f;
+    rx.timestamp = 1;
+
+    Session session(rx);
+    session.SetLocalSmoothing(0.9f);
+    for (int i = 0; i < 600; i++) { rx.timestamp++; session.Update(0.016f); }
+    float x = 0.f, y = 0.f, z = 0.f;
+    session.GetPositionOffset(x, y, z);
+    Check(NearEqual(x, 0.1f, 0.01f), "lean settles at 0.1 before position is switched off");
+
+    session.SetMode(TrackingMode::RotationOnly);
+    rx.timestamp++;
+    session.Update(0.016f);
+    rx.posX = -0.1f;
+    session.SetMode(TrackingMode::RotationAndPosition);
+    rx.timestamp++;
+    session.Update(0.016f);
+    session.GetPositionOffset(x, y, z);
+    Check(x < -0.05f, "position restarts from the new lean after an Update saw it switched off");
+}
+
+void TestConcurrentCyclesAllLand() {
+    std::cout << "Concurrent CycleMode:\n";
+
+    FakeReceiver rx;
+    Session session(rx);
+    static constexpr int kPerThread = 10000;
+    auto cycle = [&session] {
+        for (int i = 0; i < kPerThread; i++) session.CycleMode();
+    };
+    std::thread a(cycle);
+    std::thread b(cycle);
+    a.join();
+    b.join();
+    Check(session.GetMode() == static_cast<TrackingMode>((2 * kPerThread) % 3),
+          "every cycle from two threads advances the mode exactly once");
 }
 
 void TestDuplicatePacketFiltering() {
@@ -744,6 +793,8 @@ int RunSessionTests() {
     TestAutoRecenterOnConnectIsOffByDefault();
     TestTrackerSideCenterLandsAtZero();
     TestModeCycling();
+    TestPositionResetDeferredToUpdate();
+    TestConcurrentCyclesAllLand();
     TestDuplicatePacketFiltering();
     TestRecenterZeroesPose();
     TestManualRecenterDisarmsTheAutomaticOne();

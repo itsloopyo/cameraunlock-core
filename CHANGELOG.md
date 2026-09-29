@@ -9,6 +9,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - HeadTrackingSession mode changes are safe from a hotkey thread
+
+`SetMode()` reset the position processor and interpolator inline, so a hotkey calling it (or
+`CycleMode()`) from the poller thread raced `Update()` on the render thread, which could be
+running on the same state. `SetMode()` now only stores the atomic mode, and `Update()` does the
+reset the first time it sees position switched off. `Update()` reads the mode once per frame, and
+`CycleMode()` advances with a compare-exchange, so two concurrent presses advance two steps.
+`Recenter()` is documented as render-thread only; nothing in core calls it from another thread.
+
+Consuming repos: nothing to change. A mod that defers its mode change to the render thread can
+call `CycleMode()` straight from the hotkey callback instead.
+
 ### Changed - the header of a rendered file says where to change a setting for every game
 
 The Defaults.ini lines above the settings named the file and its locations but never said to

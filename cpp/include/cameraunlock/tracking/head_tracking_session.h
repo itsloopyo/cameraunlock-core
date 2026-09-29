@@ -77,10 +77,11 @@ struct HasRemoteConnection<T, std::void_t<decltype(std::declval<T&>().IsRemoteCo
 /// the previous smoothed pose in a second time. A refactor to processor-level
 /// centering must preserve that (see TestRecenterSeedsCurrentFrameWithCenteredPose).
 ///
-/// Thread safety matches typical mod usage: Update() runs on the render
-/// thread; SetMode()/CycleMode()/Recenter() may be called from a hotkey
-/// thread. Mode changes are atomic; Recenter() races benignly with Update()
-/// on float state, identical to the per-mod wiring it replaces.
+/// Thread safety: Update() runs on the render thread. SetMode() and CycleMode()
+/// may be called from a hotkey thread: they only write the atomic mode, and the
+/// position state a mode change resets is reset inside Update(), on the thread
+/// that owns it. Recenter() writes pipeline state directly and belongs on the
+/// render thread.
 template <typename TReceiver>
 class HeadTrackingSession {
 public:
@@ -109,22 +110,17 @@ public:
 
     TrackingMode GetMode() const { return static_cast<TrackingMode>(m_mode.load()); }
 
-    /// Switching position off resets position smoothing so re-enabling it
-    /// does not blend from stale values.
-    void SetMode(TrackingMode mode) {
-        if (GetMode() == mode) return;
-        m_mode.store(static_cast<int>(mode));
-        if (!IsPositionActive()) {
-            m_positionProcessor.ResetSmoothing();
-            m_positionInterpolator.Reset();
-        }
-    }
+    /// The next Update() that sees position switched off resets position
+    /// smoothing, so re-enabling it does not blend from stale values.
+    void SetMode(TrackingMode mode) { m_mode.store(static_cast<int>(mode)); }
 
     /// Advances to the next mode (6DOF -> rotation only -> position only -> 6DOF)
-    /// and returns it.
+    /// and returns it. Two concurrent calls advance two steps.
     TrackingMode CycleMode() {
-        SetMode(static_cast<TrackingMode>((m_mode.load() + 1) % 3));
-        return GetMode();
+        int mode = m_mode.load();
+        while (!m_mode.compare_exchange_weak(mode, (mode + 1) % 3)) {
+        }
+        return static_cast<TrackingMode>((mode + 1) % 3);
     }
 
     bool IsRotationActive() const { return GetMode() != TrackingMode::PositionOnly; }
@@ -224,6 +220,17 @@ public:
     /// Runs the pipeline for this frame. Returns false when the receiver has
     /// no rotation data; cached outputs report invalid in that case.
     bool Update(float deltaTime) {
+        // One read per frame, so a hotkey landing mid-Update cannot give the
+        // rotation and position branches two different modes.
+        const TrackingMode mode = GetMode();
+        const bool rotationActive = mode != TrackingMode::PositionOnly;
+        const bool positionActive = mode != TrackingMode::RotationOnly;
+        if (!positionActive && m_positionWasActive) {
+            m_positionProcessor.ResetSmoothing();
+            m_positionInterpolator.Reset();
+        }
+        m_positionWasActive = positionActive;
+
         float rawYaw, rawPitch, rawRoll;
         if (!m_receiver.GetRotation(rawYaw, rawPitch, rawRoll)) {
             m_rotationValid = false;
@@ -318,7 +325,7 @@ public:
         m_lastProcessed = m_processor.Process(
             m_lastInterpolated.yaw, m_lastInterpolated.pitch, m_lastInterpolated.roll, deltaTime);
 
-        if (IsRotationActive()) {
+        if (rotationActive) {
             m_yaw = m_lastProcessed.yaw;
             m_pitch = m_lastProcessed.pitch;
             m_roll = m_lastProcessed.roll;
@@ -327,7 +334,7 @@ public:
         }
         m_rotationValid = true;
 
-        if (IsPositionActive()) {
+        if (positionActive) {
             float rawX, rawY, rawZ;
             if (m_receiver.GetPosition(rawX, rawY, rawZ)) {
                 PositionData rawPos(rawX, rawY, rawZ, receiveTs);
@@ -463,6 +470,8 @@ private:
     PositionProcessor m_positionProcessor;
 
     std::atomic<int> m_mode{static_cast<int>(TrackingMode::RotationAndPosition)};
+    // The mode's position channel as the last Update() saw it. Render thread only.
+    bool m_positionWasActive = true;
     // How far the pose may wander, per axis, and still count as held. Wide
     // enough to ride out tracker jitter, narrow enough that reaching for the
     // mouse or glancing at the keyboard restarts the window.
