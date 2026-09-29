@@ -22,8 +22,8 @@ const FORMAT_PATH = path.join(REPO_ROOT, "data", "config-format.json");
 const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "data", "config-schema.json"), "utf8"));
 
 const SCHEMA_VERSION = 1;
-const LEGACY_COUNT = 87;
-const LEGACY_PIN = "ba0932608d431edffb0f721d5d35b0309de0d28624dcabe864db593897d37c2b";
+const LEGACY_COUNT = 88;
+const LEGACY_PIN = "6f86014ddf31326072e09f1665360401398185449711f7df5d1c4a8695945691";
 
 const TOP_LEVEL_KEYS = [
   "schema_version",

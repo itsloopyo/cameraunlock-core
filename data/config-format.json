@@ -60,6 +60,7 @@
     "file holds there."
   ],
   "legacy": {
+    "cyberpunk-2077-headtracking": {},
     "abzu-headtracking": {},
     "alien-isolation-headtracking": {},
     "amnesia-the-dark-descent-headtracking": {},
@@ -150,7 +151,6 @@
   },
   "exempt": {
     "beamng-drive-headtracking": "Lua in BeamNG's LuaJIT, with file I/O bound to the game's virtual file system, and a JSON config.",
-    "cyberpunk-2077-headtracking": "The config is config.json, read and written by the Lua half under Cyber Engine Tweaks. Core has no JSON reader or editor, and CET's LuaJIT has no FFI, so the Lua half cannot call core.",
     "firewatch-headtracking": "MelonLoader owns the parse and rewrites the whole shared MelonPreferences.cfg at quit, so toggles stay session-only.",
     "fusion-360-headtracking": "Pure Python in Fusion's embedded interpreter, reading its config with configparser.",
     "green-hell-headtracking": "No config: the mod reads no file. A config added later is canonical from the start, with defaults equal to today's hardcoded values.",
@@ -160,6 +160,9 @@
     "the-pathless-headtracking": "Pure Lua under UE4SS with a JSON config, and nothing to persist: its only runtime control is F10, the master toggle."
   },
   "configs": {
+    "cyberpunk-2077-headtracking": [
+      {"committed": "CameraUnlock.ini", "installed": ["bin\\x64\\plugins\\cyber_engine_tweaks\\mods\\HeadTracking\\CameraUnlock.ini"], "legacy_source": "config.json", "dialect": "native"}
+    ],
     "a-plague-tale-innocence-headtracking": [
       {"committed": "dist_assets/headtrack.ini", "installed": ["CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
     ],
@@ -609,6 +612,7 @@
     }
   },
   "conversion_notes": {
+    "cyberpunk-2077-headtracking": [{"text": "The owner approved retiring the CET JSON exemption: the RED4ext script channel connects Lua to the native ConfigOwner. Preserve existing panel controls, including saving smoothing, travel limits and chase-camera tracking through Writable rows. Import config.json once without modifying it. The downward limit shipped as 0.05; untouched values follow Defaults.ini. JSON has no version marker, so imports compare against the newest pre-canonical defaults.", "approved": "2026-09-29"}],
     "gone-home-headtracking": [
       {
         "text": "WorldSpaceYaw: v1.0.0 to v1.2.0 wrote no WorldSpaceYaw key; v1.3.0 to v1.3.2 shipped false; v1.4.0 and later shipped true. Evidence: v1.3.x wrote the line '# false = camera-local yaw (default; matches dying-light-2/obra-dinn)' above the key at first run, no other build wrote it, and no build rewrites HeadTracking.cfg after its first start. The import compares WorldSpaceYaw with false in a file holding that line and with true in every other file, so a file without the line holding false carries false as the player's.",
