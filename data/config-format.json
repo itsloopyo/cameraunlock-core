@@ -153,7 +153,6 @@
     "beamng-drive-headtracking": "Lua in BeamNG's LuaJIT, with file I/O bound to the game's virtual file system, and a JSON config.",
     "firewatch-headtracking": "MelonLoader owns the parse and rewrites the whole shared MelonPreferences.cfg at quit, so toggles stay session-only.",
     "fusion-360-headtracking": "Pure Python in Fusion's embedded interpreter, reading its config with configparser.",
-    "green-hell-headtracking": "No config: the mod reads no file. A config added later is canonical from the start, with defaults equal to today's hardcoded values.",
     "minecraft-java-edition-headtracking": "Java under Fabric with a .properties config, and it carries its own Java port of core.",
     "ni-no-kuni-wrath-of-the-white-witch-headtracking": "No config: the mod reads nothing. A config added later is canonical from the start, with defaults equal to today's hardcoded values.",
     "outer-wilds-headtracking": "OWML owns the parse and rewrites config.json whole from its menus, and the OWML that runs is the user's, so toggles stay session-only.",
@@ -291,6 +290,9 @@
     ],
     "half-life-2-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
+    ],
+    "green-hell-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["Mods\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
     ],
     "high-on-life-headtracking": [
       {"committed": "config/HeadTracking.ini", "installed": ["Oregon\\Binaries\\Win64\\CameraUnlock.ini", "Oregon\\Binaries\\WinGDK\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
@@ -640,6 +642,11 @@
   },
   "allow_legacy_symbols": {},
   "per_game": {
+    "green-hell-headtracking": [
+      {"row": "WorldSpaceYaw", "reason": "Preserve Green Hell's existing camera-local yaw default when adding canonical configuration.", "approved": "2026-09-30"},
+      {"row": "PositionLimitY", "reason": "Preserve Green Hell's existing 0.15 metre upward lean limit when adding canonical configuration.", "approved": "2026-09-30"},
+      {"row": "PositionLimitYDown", "reason": "Preserve Green Hell's existing 0.05 metre downward lean limit when adding canonical configuration.", "approved": "2026-09-30"}
+    ],
     "arx-fatalis-headtracking": [
       {
         "row": "CycleTrackingModeKey",
