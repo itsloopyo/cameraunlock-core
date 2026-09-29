@@ -82,9 +82,13 @@ static struct {
 } g_zoomLog;
 
 // Per-frame transform + camera cache. Both are invalidated together at the
-// camera-controller update pre-hook and at the end of the post-render callback,
-// so within one render frame they hold the live primary camera and its
-// transform without re-walking the SceneManager chain.
+// camera-controller update pre-hook and at the end of every post-render
+// callback, so within one render frame they hold the live primary camera and its
+// transform without re-walking the SceneManager chain. The post-render clear has
+// to run on frames that applied nothing too: the controller's post-hook fills the
+// cache on a menu or loading frame, and with the controller then idle through a
+// scene load the next gameplay frame would write through the old camera's
+// transform, which the load may have freed.
 static void* g_cachedTransform = nullptr;
 static void* g_cachedCamera = nullptr;
 
@@ -518,6 +522,16 @@ bool IsCleanCameraMatrixValid() { return g_cleanCameraMatrix.valid; }
 CameraTransformResolver& GetCameraResolver() { return g_cameraResolver; }
 void* GetCachedCamera() { return g_cachedCamera; }
 
+// A frame that writes nothing to the camera. Nothing was projected, so nothing
+// derived from a projection is usable: leaving the flags true hands a GUI
+// consumer the last tracked frame's offsets over an untracked camera.
+static void SkipFrame() {
+    g_projection.markerValid = false;
+    g_projection.aimValid = false;
+    g_projection.cleanToHeadValid = false;
+    StopLean();
+}
+
 void CameraPipelinePreRender() {
     // Before every gate below: the first-packet latch has to survive
     // AutoEnable=false, a menu, and a failed function cache, because those are
@@ -543,13 +557,7 @@ void CameraPipelinePreRender() {
 
     if (!InitCachedFunctions()) return;
     if (!PluginMod::Instance().IsEnabled() || !g_descriptor.gate->IsInGameplay()) {
-        // Nothing was projected this frame, so nothing derived from a projection
-        // is usable. Leaving these true hands a GUI consumer in a menu the last
-        // gameplay frame's offsets.
-        g_projection.markerValid = false;
-        g_projection.aimValid = false;
-        g_projection.cleanToHeadValid = false;
-        StopLean();
+        SkipFrame();
         return;
     }
     EnsureCameraControllerHooked();
@@ -561,7 +569,10 @@ void CameraPipelinePreRender() {
     PluginMod::Instance().TickFrame();
 
     Matrix4x4f* worldMat = GetCameraWorldMatrix();
-    if (!worldMat) return;
+    if (!worldMat) {
+        SkipFrame();
+        return;
+    }
 
     g_cleanCameraMatrix.matrix = *worldMat;
     g_cleanCameraMatrix.valid = true;
@@ -579,34 +590,34 @@ void CameraPipelinePreRender() {
 void CameraPipelinePostRender() {
     if (g_descriptor.onPostRestore) g_descriptor.onPostRestore();
 
-    if (!g_trackingAppliedThisFrame) return;
-    g_trackingAppliedThisFrame = false;
+    if (g_trackingAppliedThisFrame) {
+        g_trackingAppliedThisFrame = false;
 
-    if (!g_cleanCameraMatrix.valid) return;
+        // The pre-render callback populated the per-frame transform cache this
+        // frame (g_trackingAppliedThisFrame is only set after that succeeded), so
+        // this reuses it rather than re-walking the SceneManager chain.
+        Matrix4x4f* worldMat = GetCameraWorldMatrix();
 
-    // The pre-render callback populated the per-frame transform cache this
-    // frame (g_trackingAppliedThisFrame is only set after that succeeded), so
-    // reuse it rather than re-walking the SceneManager chain.
-    Matrix4x4f* worldMat = GetCameraWorldMatrix();
-    if (!worldMat) return;
-
-    // Restore the clean camera in full - POSITION as well as rotation.
-    //
-    // Keeping the head-tracked translation row left the game aiming off a
-    // leaned eye: the shot converges on the leaned eye's axis while the round
-    // leaves the un-leaned body, so reticle and impact agree at exactly one
-    // range and splay apart either side of it, swapping sides as the player
-    // walks through it. Head tracking must not move where bullets go.
-    //
-    // The lean renders on the same terms as the rotation does. Both are written
-    // at the BeginRendering pre-callback and taken back at the post-callback,
-    // into the same transform world matrix, and rotation is demonstrably what
-    // the player sees - so whatever the renderer samples between the two hooks
-    // carries the translation row as well. This has not been observed in game;
-    // if the lean turns out not to render, the two hooks are the wrong pair for
-    // position and nothing here can tell us that.
-    cameraunlock::memory::SafeWrite(reinterpret_cast<std::uintptr_t>(worldMat),
-                                    g_cleanCameraMatrix.matrix);
+        // Restore the clean camera in full - POSITION as well as rotation.
+        //
+        // Keeping the head-tracked translation row left the game aiming off a
+        // leaned eye: the shot converges on the leaned eye's axis while the round
+        // leaves the un-leaned body, so reticle and impact agree at exactly one
+        // range and splay apart either side of it, swapping sides as the player
+        // walks through it. Head tracking must not move where bullets go.
+        //
+        // The lean renders on the same terms as the rotation does. Both are written
+        // at the BeginRendering pre-callback and taken back at the post-callback,
+        // into the same transform world matrix, and rotation is demonstrably what
+        // the player sees - so whatever the renderer samples between the two hooks
+        // carries the translation row as well. This has not been observed in game;
+        // if the lean turns out not to render, the two hooks are the wrong pair for
+        // position and nothing here can tell us that.
+        if (worldMat) {
+            cameraunlock::memory::SafeWrite(reinterpret_cast<std::uintptr_t>(worldMat),
+                                            g_cleanCameraMatrix.matrix);
+        }
+    }
 
     g_cachedTransform = nullptr;
     g_cachedCamera = nullptr;
