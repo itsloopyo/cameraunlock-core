@@ -31,9 +31,19 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
     {
         private sealed class TrackedCamera
         {
-            public TrackedCamera(Camera camera) { Camera = camera; }
+            public TrackedCamera(Camera camera)
+            {
+                Camera = camera;
+                Transform = camera.transform;
+            }
 
             public readonly Camera Camera;
+
+            // Held for the camera's lifetime. Each Component.transform read is a call
+            // through the interop proxy into the IL2CPP runtime that hands back a managed
+            // wrapper, and Apply and RestorePositions need the transform six times per
+            // camera per frame.
+            public readonly Transform Transform;
             public Vector3 AppliedLocalDelta;
             public bool HasWrite;
             public bool HasMatrixWrite;
@@ -245,21 +255,22 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 var t = _targets[i];
                 Camera cam = t.Camera;
                 if (cam == null) continue;
+                Transform transform = t.Transform;
 
                 // The game's fresh pose. Rotation is never written by us (always includes
                 // this frame's mouse look); position was returned to clean by RestorePositions.
-                Quaternion baseWorld = cam.transform.rotation;
-                Vector3 basePosition = cam.transform.position;
+                Quaternion baseWorld = transform.rotation;
+                Vector3 basePosition = transform.position;
 
                 Vector3 finalPosition = basePosition;
                 if (positionActive)
                 {
-                    Vector3 cleanLocalPosition = cam.transform.localPosition;
+                    Vector3 cleanLocalPosition = transform.localPosition;
                     Vector3 offsetInCameraSpace = new Vector3(
                         positionOffset.x, positionOffset.y, -positionOffset.z);
                     finalPosition = basePosition + baseWorld * offsetInCameraSpace;
-                    cam.transform.position = finalPosition;
-                    t.AppliedLocalDelta = cam.transform.localPosition - cleanLocalPosition;
+                    transform.position = finalPosition;
+                    t.AppliedLocalDelta = transform.localPosition - cleanLocalPosition;
                     t.HasWrite = true;
                 }
 
@@ -295,7 +306,7 @@ namespace CameraUnlock.Core.Unity.Il2Cpp
                 var t = _targets[i];
                 if (!t.HasWrite || t.Camera == null) continue;
 
-                t.Camera.transform.localPosition -= t.AppliedLocalDelta;
+                t.Transform.localPosition -= t.AppliedLocalDelta;
                 t.HasWrite = false;
             }
         }

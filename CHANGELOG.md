@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - SplitInjectionCameraTracker holds each camera's Transform
+
+`SplitInjectionCameraTracker` reads a tracked camera's `transform` once, when the camera joins
+the target set, instead of six times per camera per frame across `Apply` and `RestorePositions`.
+Under Il2CppInterop each of those reads was a call into the IL2CPP runtime that handed back a
+managed wrapper. The IL2CPP `UnityEngine.CoreModule` stub also gains `Time.unscaledDeltaTime`.
+
+Consuming repos: nothing to change.
+
 ### Added - Physics.SphereCast, SphereCastNonAlloc and RaycastNonAlloc in the Unity stubs
 
 The full seven-argument overloads (origin, [radius,] direction, hit or results, maxDistance,

@@ -193,6 +193,7 @@ namespace UnityEngine
         public Time(IntPtr pointer) : base(pointer) { }
 
         public static float deltaTime => default;
+        public static float unscaledDeltaTime => default;
         public static int frameCount => default;
         public static float timeScale { get; set; }
     }
