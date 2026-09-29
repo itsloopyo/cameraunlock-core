@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - zoom compensation in C#
+
+`CameraUnlock.Core.Processing.ZoomCompensation` is the C# twin of `camera/zoom_compensation.h`:
+`FovZoomFactor(tanHalfFov, tanHalfFovBase)` for the factor a lean scales by, and
+`ScaleAngleForZoom(angleDeg, factor)` for yaw and pitch. `ZoomCompensationTests` ports
+zoom_compensation_tests.cpp case for case.
+
+Consuming repos: nothing to change. A Unity mod whose game narrows its field of view calls these
+instead of writing its own.
+
 ### Added - a swept sphere for LeanClamp, built out of line casts
 
 `camera/lean_line_sweep.h`. An engine that gives a mod only a line cast (HPL2, HPL3) could check
