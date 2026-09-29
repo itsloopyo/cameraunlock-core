@@ -84,6 +84,7 @@
     "fallout-4-headtracking": {},
     "fallout-new-vegas-headtracking": {"predecessors": ["fallout-new-vegas-headtracking-delete"]},
     "far-cry-6-headtracking": {},
+    "firewatch-headtracking": {},
     "ghostrunner-headtracking": {},
     "gone-home-headtracking": {},
     "half-life-2-headtracking": {},
@@ -151,7 +152,6 @@
   },
   "exempt": {
     "beamng-drive-headtracking": "Lua in BeamNG's LuaJIT, with file I/O bound to the game's virtual file system, and a JSON config.",
-    "firewatch-headtracking": "MelonLoader owns the parse and rewrites the whole shared MelonPreferences.cfg at quit, so toggles stay session-only.",
     "fusion-360-headtracking": "Pure Python in Fusion's embedded interpreter, reading its config with configparser.",
     "minecraft-java-edition-headtracking": "Java under Fabric with a .properties config, and it carries its own Java port of core.",
     "ni-no-kuni-wrath-of-the-white-witch-headtracking": "No config: the mod reads nothing. A config added later is canonical from the start, with defaults equal to today's hardcoded values.",
@@ -278,6 +278,9 @@
     ],
     "far-cry-6-headtracking": [
       {"committed": "config/FarCry6HeadTracking.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": "FarCry6HeadTracking.ini", "dialect": "native"}
+    ],
+    "firewatch-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["UserData\\CameraUnlock.ini"], "legacy_source": "MelonPreferences.cfg", "dialect": "unity"}
     ],
     "ghostrunner-2-headtracking": [
       {"committed": "CameraUnlock.ini", "installed": ["Ghostrunner2\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
@@ -615,6 +618,12 @@
   },
   "conversion_notes": {
     "cyberpunk-2077-headtracking": [{"text": "The owner approved retiring the CET JSON exemption: the RED4ext script channel connects Lua to the native ConfigOwner. Preserve existing panel controls, including saving smoothing, travel limits and chase-camera tracking through Writable rows. Import config.json once without modifying it. The downward limit shipped as 0.05; untouched values follow Defaults.ini. JSON has no version marker, so imports compare against the newest pre-canonical defaults.", "approved": "2026-09-29"}],
+    "firewatch-headtracking": [
+      {
+        "text": "The owner approved completing the canonical migration, including preserving MelonPreferences settings, on 2026-09-30. Firewatch moves from exempt into legacy: its importer reads MelonPreferences.cfg with the vendored MelonLoader 0.5.7 Tomlet parser without registering a category or writing the shared file. The frozen reader is v0.4.0's. Retained defaults are unchanged across published builds. v0.1.2 replaced Smoothing/PositionSmoothing with LocalSmoothing/RemoteSmoothing, v0.2.0 replaced InvertPositionZ with InvertTrackerZ, and v0.2.0 removed RecenterKey; the import keeps those existing removals, reporting the old keys as not carried.",
+        "approved": "2026-09-30"
+      }
+    ],
     "gone-home-headtracking": [
       {
         "text": "WorldSpaceYaw: v1.0.0 to v1.2.0 wrote no WorldSpaceYaw key; v1.3.0 to v1.3.2 shipped false; v1.4.0 and later shipped true. Evidence: v1.3.x wrote the line '# false = camera-local yaw (default; matches dying-light-2/obra-dinn)' above the key at first run, no other build wrote it, and no build rewrites HeadTracking.cfg after its first start. The import compares WorldSpaceYaw with false in a file holding that line and with true in every other file, so a file without the line holding false carries false as the player's.",
