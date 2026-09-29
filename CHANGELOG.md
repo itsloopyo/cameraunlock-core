@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - Physics.SphereCast, SphereCastNonAlloc and RaycastNonAlloc in the Unity stubs
+
+The full seven-argument overloads (origin, [radius,] direction, hit or results, maxDistance,
+layerMask, queryTriggerInteraction), signatures read off Unity 2022.3.62's
+UnityEngine.PhysicsModule.dll. A Unity mod's lean trace needs them and could not build against the
+stubs without.
+
+Consuming repos: nothing to change.
+
 ### Added - LineSweep in C#
 
 `CameraUnlock.Core.Processing.LineSweep` is the C# twin of `camera/lean_line_sweep.h`: a

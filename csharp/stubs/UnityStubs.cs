@@ -628,6 +628,9 @@ namespace UnityEngine {
         public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction) { hitInfo = default; return false; }
         public static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance) => false;
         public static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance, int layerMask) => false;
+        public static int RaycastNonAlloc(Vector3 origin, Vector3 direction, RaycastHit[] results, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction) => 0;
+        public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction) { hitInfo = default; return false; }
+        public static int SphereCastNonAlloc(Vector3 origin, float radius, Vector3 direction, RaycastHit[] results, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction) => 0;
     }
     public class Canvas : Behaviour {
         public static event WillRenderCanvases willRenderCanvases;
