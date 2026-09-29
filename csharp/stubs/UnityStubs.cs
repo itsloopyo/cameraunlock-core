@@ -156,6 +156,7 @@ namespace UnityEngine {
         public Transform transform { get; }
         public bool activeSelf { get; }
         public bool activeInHierarchy { get; }
+        public int layer { get; set; }
         public T GetComponent<T>() => default;
         public Component GetComponent(System.Type type) => default;
         public T GetComponentInChildren<T>() => default;
