@@ -26,7 +26,7 @@ Now:
 
 `scripts/test-loader-switch.ps1` runs both bodies on synthetic game folders: an upgrade with and
 without the player's own BepInEx, the launcher's no-receipt route (the new `uninstall.cmd` alone),
-and a fresh install. Run it from a short path (`-WorkRoot C:	`): `findstr` cannot open a state file
+and a fresh install. Run it from a short path (`-WorkRoot C:\cul-t`): `findstr` cannot open a state file
 past `MAX_PATH`.
 
 Consuming repos: nothing to change unless moving off Cecil. A mod that does keeps
