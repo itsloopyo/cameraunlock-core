@@ -2,9 +2,9 @@
 
 namespace cameraunlock::reframework {
 
-// Center the game's main top-level window on its monitor's work area, once
-// per process; subsequent calls are no-ops. Windows that already fill the
-// work area (fullscreen / borderless) are left in place. Diagnostics go
+// Restore, raise, request foreground activation and center the game's window,
+// once per process; subsequent calls are no-ops. Borderless windows and windows
+// that already fill the work area keep their position. Diagnostics go
 // through the reframework log callback (log_callback.h).
 //
 // The routine itself now lives in cameraunlock/os/game_window.h, in the
