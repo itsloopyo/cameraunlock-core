@@ -9,6 +9,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the config differential runs only when something it depends on changed
+
+A mod's legacy config differential took ten to forty minutes on every release, locally in
+`release.ps1` and again on the tag build, re-proving an import whose frozen reader never changes.
+`DifferentialGate.psm1`'s `Invoke-ConfigDifferential` records a pass in
+`tests/config_differential/passed.json`: every file the differential compiled and read, with a
+git blob hash of each (the release version masked in `CMakeLists.txt`, `pixi.toml`, project files
+and `launcher-manifest.json`, and `data/config-format.json` hashed as the shared sections plus the
+repo's own entries). A later run re-hashes those files and skips the test when none changed, naming
+the ones that did when it runs it.
+
+The file list comes from the build that passed: MSBuild's tracking logs for the differential
+executable and the libraries it links, `dotnet msbuild -getItem` for a dotnet test project and the
+projects it references, and every tracked file plus the submodule commits for any other runner.
+All three add `tests/config_differential`, the committed config and the lint's JavaScript and JSON.
+
+- `Invoke-ReleaseTestSuite` (ReleaseWorkflow.psm1) runs `test-unit` and the gate where there is a
+  differential, and `pixi run test` elsewhere. `Invoke-VersionCommit` commits the record with the
+  version bump, and `Test-CleanGitStatus` does not count it as a change.
+- `Publish-NightlyBuild` runs the gate and records, and its clean-tree check ignores the record.
+- `release-mod.yml` runs the gate without recording where the mod's core has it, and
+  `pixi run test-differential` otherwise.
+- conformance's ci-minutes check accepts `Invoke-ReleaseTestSuite` in `release.ps1` and a
+  pinned `release-mod.yml` that calls `Invoke-ConfigDifferential`.
+
+Consuming repos with tests/config_differential: replace the full-suite block in
+`scripts/release.ps1` with `scripts/templates/release-full-test.ps1`, bump core, and re-pin
+`release-mod.yml`. The first release after that still runs the differential once and commits
+the record.
+
 ### Changed - SplitInjectionCameraTracker holds each camera's Transform
 
 `SplitInjectionCameraTracker` reads a tracked camera's `transform` once, when the camera joins

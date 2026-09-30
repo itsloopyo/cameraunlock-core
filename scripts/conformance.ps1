@@ -1500,7 +1500,7 @@ function Test-CiMinutes {
                     $pinned = Get-PinnedReleaseWorkflow $sha
                     if ($null -eq $pinned) {
                         Add-Finding $Name 'ci-minutes' 'WARN' "$($wf.Name) pins release-mod.yml at $($sha.Substring(0, 8)), which this core checkout does not have, so whether that release runs the config differential is unchecked. Fetch core and re-run"
-                    } elseif ($pinned -notmatch 'pixi run test-differential') {
+                    } elseif ($pinned -notmatch 'pixi run test-differential|Invoke-ConfigDifferential') {
                         Add-Finding $Name 'ci-minutes' 'FAIL' "$($wf.Name) pins release-mod.yml at $($sha.Substring(0, 8)), which has no config differential step, so a release never runs the differential. Pin a core commit that has one"
                     }
                 }
@@ -1569,8 +1569,9 @@ function Test-CiMinutes {
     $release = Join-Path $Root 'scripts/release.ps1'
     if (Test-Path -LiteralPath $release) {
         $code = (Read-TextFile $release) -replace '(?s)<#.*?#>', '' -replace '(?m)^\s*#.*$', ''
-        if ($code -notmatch '(?m)(?:^|[;{&])\s*pixi\s+run\s+(?:(?:-e|--environment)\s+\S+\s+)?test(?![-\w])') {
-            Add-Finding $Name 'ci-minutes' 'FAIL' 'scripts/release.ps1 never runs `pixi run test`, so a tag is pushed without the full suite having passed first. Paste scripts/templates/release-full-test.ps1 before its first file edit'
+        if ($code -notmatch '(?m)(?:^|[;{&])\s*pixi\s+run\s+(?:(?:-e|--environment)\s+\S+\s+)?test(?![-\w])' -and
+            $code -notmatch '(?m)(?:^|[;{&])\s*Invoke-ReleaseTestSuite(?![-\w])') {
+            Add-Finding $Name 'ci-minutes' 'FAIL' 'scripts/release.ps1 never runs `pixi run test` or Invoke-ReleaseTestSuite, so a tag is pushed without the full suite having passed first. Paste scripts/templates/release-full-test.ps1 before its first file edit'
         }
     }
 }

@@ -8,8 +8,9 @@
 # mod's own repo:
 #   1. Verify clean tree (caller can pass -AllowDirty through) and that
 #      HEAD is on the remote (the release tags this commit).
-#   2. Run the mod's build + package commands, then `pixi run
-#      test-differential` where the repo has tests/config_differential.
+#   2. Run the mod's build + package commands, then the config
+#      differential where the repo has tests/config_differential, unless its
+#      recorded pass still holds (DifferentialGate.psm1).
 #   3. Stamp a dev version: <version>-nightly.<utc-date>.<sha>.
 #   4. SHA-256 each ZIP (surfaced in the release notes).
 #   5. Replace the `dev` pre-release (delete + recreate at HEAD) with the
@@ -33,6 +34,8 @@
 # (needs `contents: write`); locally it's your `gh auth login`.
 # Also requires DISCORD_RELEASE_WEBHOOK in the environment - every dev
 # build is announced, so publishing without it is refused up front.
+
+Import-Module (Join-Path $PSScriptRoot 'DifferentialGate.psm1')
 
 # Not Get-FileHash: Windows PowerShell 5.1 autoloads it from a script module,
 # and a powershell.exe started from pwsh (GitHub Actions' shell: pwsh)
@@ -128,7 +131,10 @@ function Publish-NightlyBuild {
     Push-Location $ProjectRoot
     try {
         if (-not $AllowDirty) {
-            $dirty = & git status --porcelain
+            # The config differential's record does not count: the last dev build
+            # may have written it, and the next release commits it.
+            $stamp = Get-DifferentialStampRelativePath
+            $dirty = @(& git status --porcelain | Where-Object { $_ -and $_.Substring(3).Trim('"') -ne $stamp })
             if ($LASTEXITCODE -ne 0) { throw 'git status failed' }
             if ($dirty) {
                 throw "Working tree is dirty. Commit or stash, or pass -AllowDirty.`n$dirty"
@@ -176,11 +182,8 @@ function Publish-NightlyBuild {
 
         # package runs test-unit and leaves the slow legacy config differential to the
         # release paths, this one included, so a dev build runs the full suite once.
-        if (Test-Path -LiteralPath 'tests/config_differential') {
-            Write-Host 'Config differential test...' -ForegroundColor Cyan
-            & pixi run test-differential
-            if ($LASTEXITCODE -ne 0) { throw 'pixi run test-differential failed' }
-        }
+        # It is skipped when its recorded pass still holds.
+        Invoke-ConfigDifferential -Root $ProjectRoot
     } finally { Pop-Location }
 
     if (-not $InstallerZipPath) {

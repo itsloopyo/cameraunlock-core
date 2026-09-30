@@ -12,9 +12,12 @@
 #   package            build-release and test-unit, never test.
 #
 # A push build runs `pixi run package` and nothing else. release-mod.yml and
-# Publish-NightlyBuild run package and then test-differential, and release.ps1
-# runs `pixi run test` before it changes a file, so a release runs the full
-# suite and a push runs the fast half. conformance.ps1's ci-minutes check fails
+# Publish-NightlyBuild run package and then the differential, and release.ps1
+# runs test-unit and the differential (Invoke-ReleaseTestSuite) before it changes
+# a file, so a release runs the full suite and a push runs the fast half. Every
+# release path skips the differential while the pass recorded in
+# tests/config_differential/passed.json still holds (DifferentialGate.psm1), and
+# calls test-differential when it does not. conformance.ps1's ci-minutes check fails
 # a repo whose package reaches test-differential, whose test reaches a task
 # that neither package nor test-differential reaches, or which has no
 # test-differential task.

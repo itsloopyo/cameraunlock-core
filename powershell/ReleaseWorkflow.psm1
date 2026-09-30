@@ -4,6 +4,8 @@
 
 $ErrorActionPreference = "Stop"
 
+Import-Module (Join-Path $PSScriptRoot 'DifferentialGate.psm1')
+
 <#
 .SYNOPSIS
     Fast-forward the cameraunlock-core submodule to its origin/main tip.
@@ -362,6 +364,10 @@ function Resolve-ReleaseVersion {
 <#
 .SYNOPSIS
     Checks if the git working directory is clean.
+.DESCRIPTION
+    The config differential's record (tests/config_differential/passed.json)
+    does not count: a nightly build that ran the differential writes it, and
+    the next release commits it with the version bump (Invoke-VersionCommit).
 .OUTPUTS
     Boolean indicating if the working directory is clean.
 #>
@@ -376,7 +382,40 @@ function Test-CleanGitStatus {
     if ($LASTEXITCODE -ne 0) {
         throw "Not a git repository"
     }
-    return -not $gitStatus
+    $stamp = Get-DifferentialStampRelativePath
+    return -not @($gitStatus | Where-Object { $_ -and $_.Substring(3).Trim('"') -ne $stamp })
+}
+
+<#
+.SYNOPSIS
+    Runs a mod's full test suite before a release, with the config differential
+    only when something it depends on changed since it last passed.
+.DESCRIPTION
+    A repo with tests/config_differential runs `pixi run test-unit` and then
+    Invoke-ConfigDifferential (DifferentialGate.psm1), which records a pass in
+    tests/config_differential/passed.json for Invoke-VersionCommit to commit.
+    Any other repo runs `pixi run test`. Throws when a test fails.
+.PARAMETER ProjectRoot
+    The mod repo.
+.PARAMETER Force
+    Run the differential whatever its record says.
+#>
+function Invoke-ReleaseTestSuite {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Force
+    )
+    Push-Location $ProjectRoot
+    try {
+        $hasDifferential = Test-Path -LiteralPath 'tests/config_differential' -PathType Container
+        $task = if ($hasDifferential) { 'test-unit' } else { 'test' }
+        $global:LASTEXITCODE = 0
+        & pixi run $task
+        if ($LASTEXITCODE -ne 0) { throw "pixi run $task failed ($LASTEXITCODE)" }
+        if ($hasDifferential) { Invoke-ConfigDifferential -Root $ProjectRoot -Force:$Force }
+    } finally {
+        Pop-Location
+    }
 }
 
 <#
@@ -797,6 +836,10 @@ function Invoke-VersionCommit {
         [Parameter(Mandatory=$true)]
         [string[]]$Files
     )
+
+    # The config differential's record, when the release suite just wrote it.
+    $stamp = Get-DifferentialStampRelativePath
+    $Files = @($Files) + @(if (Test-Path -LiteralPath $stamp) { $stamp })
 
     foreach ($file in $Files) {
         if (Test-Path $file) {
@@ -1541,6 +1584,7 @@ Export-ModuleMember -Function @(
     'Step-SemanticVersion',
     'Resolve-ReleaseVersion',
     'Test-CleanGitStatus',
+    'Invoke-ReleaseTestSuite',
     'Test-GitTagExists',
     'Test-NoiseCommit',
     'Update-ManifestVersion',

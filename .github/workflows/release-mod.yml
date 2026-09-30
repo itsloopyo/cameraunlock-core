@@ -231,6 +231,12 @@ jobs:
       # differential so that a push build does not spend ten to thirty minutes on a
       # frozen import. `test` is test-unit plus test-differential, so running the
       # differential here makes a release run the full suite, each half once.
+      #
+      # The release script records a pass in tests/config_differential/passed.json
+      # and commits it with the version bump. Where the mod's core has
+      # DifferentialGate.psm1, this step re-hashes the files that record lists and
+      # skips the test when none changed, and runs it otherwise. It never writes
+      # the record: a tag build has nowhere to commit it.
       - name: Config differential test
         shell: pwsh
         env:
@@ -238,6 +244,17 @@ jobs:
         run: |
           if (-not (Test-Path -LiteralPath 'tests/config_differential')) {
             Write-Host 'No tests/config_differential, so package ran the whole suite.'
+            exit 0
+          }
+          $gate = 'cameraunlock-core/powershell/DifferentialGate.psm1'
+          if (Test-Path -LiteralPath $gate) {
+            Import-Module (Resolve-Path $gate)
+            try {
+              Invoke-ConfigDifferential -Root . -Environment $env:PIXI_ENVIRONMENT -NoRecord
+            } catch {
+              Write-Host "::error::Config differential: $($_.Exception.Message)"
+              exit 1
+            }
             exit 0
           }
           if ($env:PIXI_ENVIRONMENT) {
