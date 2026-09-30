@@ -200,6 +200,31 @@ const nexus = (files) => [null, files];
   check(none.status === 0 && !none.out.includes("nexus"), `nexus: a repo with no Nexus ZIP should say nothing about one, got ${none.status}\n${none.out}`);
 }
 
+{
+  const names = ["OuterWildsHeadTracking.dll", "CameraUnlock.Core.dll", "manifest.json", "default-config.json"];
+  const owml = {
+    schema_version: 2,
+    mod_info: { name: "Head Tracking", version: "1.3.0", game_id: "outer-wilds" },
+    strategy: "OWML",
+    delivery_mode: "external",
+    external: { manager_name: "Outer Wilds Mod Manager", manager_url: "https://outerwildsmods.com/", owml_mod_id: "itsloopyo.OuterWildsHeadTracking" },
+    files: names.map((name) => ({ source: name, target: name, anchor: "mod_home" })),
+  };
+  for (const scenario of ["valid", "legacy", "wrong-id", "config-overwrite", "wrong-anchor", "missing-dll", "loader"]) {
+    const man = structuredClone(owml);
+    const files = Object.fromEntries(names.map((name) => [name, "fixture"]));
+    if (scenario === "legacy") delete man.external.owml_mod_id;
+    if (scenario === "wrong-id") man.external.owml_mod_id = "../OtherMod";
+    if (scenario === "config-overwrite") man.files[0].target = "config.json";
+    if (scenario === "wrong-anchor") man.files[0].anchor = "game_root";
+    if (scenario === "missing-dll") delete files[names[0]];
+    if (scenario === "loader") man.loader = { archives: [] };
+    const result = run(VALIDATOR, zip(path.join(scratch, `owml-${scenario}.zip`), man, files));
+    const expected = ["valid", "legacy"].includes(scenario) ? 0 : 1;
+    check(result.status === expected, `OWML ${scenario}: expected ${expected}, got ${result.status}\n${result.out}`);
+  }
+}
+
 fs.rmSync(scratch, { recursive: true, force: true });
 
 if (failures.length > 0) {

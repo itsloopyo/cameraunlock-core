@@ -35,10 +35,9 @@
 //                leaves a ZIP that looks complete, and fails on the user's
 //                machine with "install-body-bepinex.cmd not found".
 //
-//   external     A third-party mod manager owns deployment (Outer Wilds via
-//                OWML). Nothing in the package provisions anything, so the
-//                check is that it says where to send the user and declares no
-//                loader it has no way to install.
+//   external     A third-party mod manager owns the loader. OWML packages
+//                can opt into Lopari payload deployment with owml_mod_id;
+//                their declared sources must exist, as in manifest mode.
 //
 // In manifest mode a declared source that is absent is fatal - the engine
 // deploys from that list. In the other two the lists are descriptive, ingested
@@ -321,9 +320,8 @@ function validateInstallCmd(label, zip, man, entries, entryByLower) {
   warnMiscased(label, miscased);
 }
 
-// external: a third-party manager deploys this, so there is nothing here to
-// provision and nothing to check against the engine. What the package still
-// owes the user is a route to that manager.
+// An OWML opt-in deploys the payload through Lopari; other external packages
+// only describe their manager route.
 function validateExternal(label, zip, man, entryByLower) {
   const ext = man.external;
   if (!ext) throw new Error('delivery_mode is "external" but there is no "external" block');
@@ -343,6 +341,19 @@ function validateExternal(label, zip, man, entryByLower) {
     throw new Error("manifest declares no files - nothing describes what ships");
   }
   const { missing, miscased } = resolveSources(sources, entryByLower);
+  if (ext.owml_mod_id != null) {
+    const targets = ["OuterWildsHeadTracking.dll", "CameraUnlock.Core.dll", "manifest.json", "default-config.json"];
+    if (ext.owml_mod_id !== "itsloopyo.OuterWildsHeadTracking" || man.strategy !== "OWML" || man.mod_info?.game_id !== "outer-wilds") {
+      throw new Error("external.owml_mod_id is only supported for Outer Wilds Head Tracking");
+    }
+    if (man.loader != null || ["variants", "patches", "runtime_requirements", "dependencies"].some((key) => (man[key] ?? []).length)) {
+      throw new Error("OWML packages deploy mod files only; Mod Manager owns the loader");
+    }
+    if (man.files.length !== targets.length || targets.some((target) => man.files.filter((file) => file.target === target && file.anchor === "mod_home").length !== 1)) {
+      throw new Error("OWML package must declare its two DLLs, manifest.json and default-config.json under mod_home; config.json belongs to the player");
+    }
+    if (missing.length || miscased.length) throw new Error("OWML package payload is missing files or has incorrectly cased sources");
+  }
   console.log(
     `OK   ${label}: ${path.basename(zip)} - external via ${ext.manager_name}, ${sources.length} file(s)`,
   );
