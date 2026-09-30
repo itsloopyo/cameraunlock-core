@@ -317,6 +317,29 @@ function Get-MsbuildDependencies {
     return @($files)
 }
 
+# One evaluation of a project: its compile items, project references and the
+# project files it imports.
+function Invoke-DotnetEvaluation {
+    param([Parameter(Mandatory)][string]$Project, [string]$TargetFramework)
+    $msbuildArgs = @($Project, '-nologo', '-getItem:Compile', '-getItem:ProjectReference',
+        '-getProperty:MSBuildAllProjects', '-getProperty:TargetFrameworks', '-p:Configuration=Release')
+    if ($TargetFramework) { $msbuildArgs += "-p:TargetFramework=$TargetFramework" }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $json = & dotnet msbuild @msbuildArgs 2>&1
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    if ($code -ne 0) { throw "dotnet msbuild -getItem on $Project failed ($code): $($json -join ' ')" }
+    $data = ($json -join "`n") | ConvertFrom-Json
+    return [pscustomobject]@{
+        Compile          = if ($data.Items.PSObject.Properties['Compile']) { @($data.Items.Compile) } else { @() }
+        References       = if ($data.Items.PSObject.Properties['ProjectReference']) { @($data.Items.ProjectReference) } else { @() }
+        Imports          = @($data.Properties.MSBuildAllProjects -split ';' | Where-Object { $_ })
+        TargetFrameworks = @("$($data.Properties.TargetFrameworks)" -split ';' | Where-Object { $_ })
+    }
+}
+
 function Get-DotnetDependencies {
     param([Parameter(Mandatory)]$Index, [Parameter(Mandatory)][string]$Project)
     $files = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -326,19 +349,17 @@ function Get-DotnetDependencies {
     while ($queue.Count -gt 0) {
         $proj = $queue.Dequeue()
         if (-not $seen.Add($proj)) { continue }
-        $prev = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            $json = & dotnet msbuild $proj -nologo '-getItem:Compile' '-getItem:ProjectReference' '-getProperty:MSBuildAllProjects' '-p:Configuration=Release' 2>&1
-            $code = $LASTEXITCODE
-        } finally { $ErrorActionPreference = $prev }
-        if ($code -ne 0) { throw "dotnet msbuild -getItem on $proj failed ($code): $($json -join ' ')" }
-        $data = ($json -join "`n") | ConvertFrom-Json
+        # A multi-targeted project lists its items only per target framework,
+        # so it is evaluated once for each and the answers are joined.
+        $evaluations = @(Invoke-DotnetEvaluation -Project $proj)
+        if ($evaluations[0].TargetFrameworks.Count -gt 0) {
+            $evaluations += @($evaluations[0].TargetFrameworks | ForEach-Object { Invoke-DotnetEvaluation -Project $proj -TargetFramework $_ })
+        }
         $paths = [System.Collections.Generic.List[string]]::new()
         $paths.Add($proj)
-        foreach ($p in ($data.Properties.MSBuildAllProjects -split ';')) { if ($p) { $paths.Add($p) } }
-        $compile = if ($data.Items.PSObject.Properties['Compile']) { @($data.Items.Compile) } else { @() }
-        $references = if ($data.Items.PSObject.Properties['ProjectReference']) { @($data.Items.ProjectReference) } else { @() }
+        $compile = @($evaluations | ForEach-Object { $_.Compile })
+        $references = @($evaluations | ForEach-Object { $_.References })
+        foreach ($e in $evaluations) { foreach ($p in $e.Imports) { $paths.Add($p) } }
         foreach ($item in $compile) {
             $paths.Add($item.FullPath)
             $rel = $Index.ByAbsolute[[System.IO.Path]::GetFullPath($item.FullPath).ToUpperInvariant()]
