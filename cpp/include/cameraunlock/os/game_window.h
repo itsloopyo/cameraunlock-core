@@ -27,9 +27,11 @@ using WindowLogFn = void (*)(WindowLogLevel level, const char* message);
 /// visible and unowned too.
 HWND FindGameWindow();
 
-/// Centres FindGameWindow()'s result on its monitor's work area, once per
-/// process; later calls are no-ops. Windows that already fill the work area
-/// (fullscreen or borderless) are left alone.
+/// Restores and raises FindGameWindow()'s result, requests foreground activation,
+/// and centres it on its monitor's work area, once per process. Later calls are
+/// no-ops. Borderless windows and windows filling the work area keep their position.
+/// If activation is refused, sends one Alt press/release when no modifier is held
+/// and requests activation again. Logs whether the game actually became foreground.
 ///
 /// The work area, not the monitor bounds: centring against the full monitor
 /// puts the title bar behind the taskbar on a top-docked one, and the window
