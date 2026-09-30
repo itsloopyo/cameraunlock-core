@@ -9,6 +9,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - install and uninstall across a move from the Cecil patcher to BepInEx
+
+A mod that moves off the Mono.Cecil patch onto BepInEx left upgraders with the patched
+`Assembly-CSharp.dll` and the old DLLs in `Managed`, so the old mod loaded beside the new plugin.
+Now:
+
+- `install-body-bepinex.cmd` runs the release's own `uninstall.cmd /y`, in a child `cmd`, when the
+  state file names another framework, before anything is deployed.
+- `uninstall-body.cmd` undoes a Cecil install when a non-Cecil wrapper still sets
+  `MANAGED_SUBFOLDER`, `ASSEMBLY_DLL` and `PATCH_MARKER`: the pristine assembly is restored first,
+  as for a Cecil mod, then `MANAGED_EXTRAS` come out of the Managed folder.
+- `uninstall-body.cmd` reads `installed_by_us` only when the state file's `framework.type` is the
+  wrapper's `FRAMEWORK_TYPE`. A Cecil release writes `true` for its own patch, and read as if it
+  were about BepInEx it deleted a BepInEx the player had installed.
+
+`scripts/test-loader-switch.ps1` runs both bodies on synthetic game folders: an upgrade with and
+without the player's own BepInEx, the launcher's no-receipt route (the new `uninstall.cmd` alone),
+and a fresh install. Run it from a short path (`-WorkRoot C:	`): `findstr` cannot open a state file
+past `MAX_PATH`.
+
+Consuming repos: nothing to change unless moving off Cecil. A mod that does keeps
+`MANAGED_SUBFOLDER`, `ASSEMBLY_DLL` and `PATCH_MARKER` in its uninstall wrapper, and lists the
+old Managed DLLs and logs in `MANAGED_EXTRAS`.
+
 ### Added - the config differential runs only when something it depends on changed
 
 A mod's legacy config differential took ten to forty minutes on every release, locally in

@@ -270,6 +270,19 @@ if not errorlevel 1 (
 call :restore_kept_configs
 if errorlevel 1 exit /b 1
 
+:: -------- An earlier release on another framework --------
+:: A mod that moved to BepInEx (off the Cecil patcher, say) finds the earlier
+:: release's install in the state file. This release's own uninstall.cmd,
+:: whose CONFIG BLOCK names what that release put down, takes it off before
+:: anything is deployed, or the old mod and the new plugin both load.
+if exist "!GAME_PATH!\%STATE_FILE%" (
+    findstr /c:"\"type\": \"%FRAMEWORK_TYPE%\"" "!GAME_PATH!\%STATE_FILE%" >nul 2>&1
+    if errorlevel 1 (
+        call :remove_other_framework
+        if errorlevel 1 exit /b 1
+    )
+)
+
 :: -------- Prior state: preserve installed_by_us=true across re-installs --------
 set "WE_INSTALLED=false"
 if exist "!GAME_PATH!\%STATE_FILE%" (
@@ -774,6 +787,27 @@ exit /b 0
     echo   }
     echo }
 )
+exit /b 0
+
+:: ============================================
+:: Run this release's uninstall.cmd on the game, for an install a release on
+:: another framework made. In a child cmd: the wrapper sets its CONFIG BLOCK
+:: before its setlocal, which here would land in this body's environment.
+:: ============================================
+:remove_other_framework
+set "_UNINSTALL=!SCRIPT_DIR!uninstall.cmd"
+if not exist "!_UNINSTALL!" (
+    echo ERROR: an earlier release installed this mod another way, and uninstall.cmd
+    echo is not beside install.cmd to remove it. Re-download the installer ZIP.
+    exit /b 1
+)
+echo An earlier release installed this mod another way. Removing it first...
+cmd /d /c ""!_UNINSTALL!" "!GAME_PATH!" /y"
+if errorlevel 1 (
+    echo ERROR: removing the earlier install failed; nothing new was deployed.
+    exit /b 1
+)
+echo.
 exit /b 0
 
 :: ============================================

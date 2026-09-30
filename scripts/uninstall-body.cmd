@@ -336,6 +336,16 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
 ) else (
     call :remove_mod_files_plain
 )
+:: A mod that moved off the Cecil patcher keeps MANAGED_SUBFOLDER, ASSEMBLY_DLL
+:: and PATCH_MARKER set, so an install an earlier release made is taken off
+:: too: the pristine assembly restored FIRST, as above, and only then the files
+:: it loaded out of the Managed folder. Left in place, the patched assembly
+:: loads the old mod beside the new one.
+if /i not "%FRAMEWORK_TYPE%"=="MonoCecil" if defined MANAGED_SUBFOLDER if defined ASSEMBLY_DLL if defined PATCH_MARKER (
+    call :remove_MonoCecil
+    if errorlevel 1 exit /b 1
+    call :remove_cecil_leftovers
+)
 call :remove_mod_seed_files
 if errorlevel 1 exit /b 1
 call :remove_mod_leftovers
@@ -346,10 +356,17 @@ if errorlevel 1 exit /b 1
 :: -------- Decide whether to remove loader --------
 set "REMOVE_LOADER=0"
 if "!FORCE_FLAG!"=="1" set "REMOVE_LOADER=1"
+:: installed_by_us speaks for the framework the state file names. After a mod
+:: moves framework, a state file an earlier release wrote says it installed
+:: THAT one (a Cecil release says true for its own patch), and read as if it
+:: were about this one it would take away a loader the player installed.
 if "!REMOVE_LOADER!"=="0" (
     if exist "!GAME_PATH!\%STATE_FILE%" (
-        findstr /c:"installed_by_us" "!GAME_PATH!\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
-        if not errorlevel 1 set "REMOVE_LOADER=1"
+        findstr /c:"\"type\": \"%FRAMEWORK_TYPE%\"" "!GAME_PATH!\%STATE_FILE%" >nul 2>&1
+        if not errorlevel 1 (
+            findstr /c:"installed_by_us" "!GAME_PATH!\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
+            if not errorlevel 1 set "REMOVE_LOADER=1"
+        )
     )
 )
 
@@ -903,6 +920,21 @@ if not defined MANAGED_EXTRAS exit /b 0
 for %%f in (%MANAGED_EXTRAS%) do (
     set "_DEL_PATH=!DEPLOY_DIR!\%%f"
     set "_DEL_LABEL=%%f"
+    call :del_one
+)
+exit /b 0
+
+:: ============================================
+:: What a Cecil release left in the Managed folder, for a mod that has since
+:: moved to another framework: MANAGED_EXTRAS, from MANAGED_PATH, which
+:: :remove_MonoCecil set. DEPLOY_DIR is the new framework's folder here, not
+:: the Managed one, so :remove_managed_extras cannot be reused.
+:: ============================================
+:remove_cecil_leftovers
+if not defined MANAGED_EXTRAS exit /b 0
+for %%f in (%MANAGED_EXTRAS%) do (
+    set "_DEL_PATH=!MANAGED_PATH!\%%f"
+    set "_DEL_LABEL=%MANAGED_SUBFOLDER%\%%f"
     call :del_one
 )
 exit /b 0
