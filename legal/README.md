@@ -40,6 +40,7 @@ which is easy to forget because it holds nothing but the payload subtree.
 | `cyber-engine-tweaks.txt` | Cyber Engine Tweaks | MIT |
 | `d3d8to9.txt` | d3d8to9 | BSD-2-Clause |
 | `dear-imgui.txt` | Dear ImGui | MIT |
+| `directx-shader-compiler.txt` | DirectX Shader Compiler DXBC hash | University of Illinois/NCSA |
 | `fabric-loader.txt` | Fabric Loader | Apache-2.0 |
 | `glm.txt` | OpenGL Mathematics | MIT / Happy Bunny |
 | `harmonyx.txt` | HarmonyX | MIT |

@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
+add_executable(cameraunlock_dxbc_tests dxbc_tests.cpp)
+target_link_libraries(cameraunlock_dxbc_tests PRIVATE cameraunlock)
+add_test(NAME cameraunlock_dxbc_tests COMMAND cameraunlock_dxbc_tests)
+
 # Simple test executable
 add_executable(cameraunlock_tests
     test_main.cpp

@@ -15,6 +15,8 @@ endif()
 
 # Library source files
 set(CAMERAUNLOCK_SOURCES
+    src/graphics/dxbc.cpp
+    src/graphics/dxbc_hash.cpp
     src/data/tracking_pose.cpp
     src/math/angle_utils.cpp
     src/math/deadzone_utils.cpp
