@@ -99,13 +99,13 @@ $CANONICAL_README_HEADINGS = @(
 # exemption only covers the repos that happened not to wrap. The bullet's `**`
 # emphasis is optional for the same reason - 13 repos ship it unbolded.
 $README_BANNED = @(
-    @{ Pattern = 'any\s+OpenTrack[- ]compatible'; Why = 'claims every OpenTrack-compatible tracker works; we have tested some'; Except = @(
+    @{ Pattern = '\bany\s+OpenTrack[- ]compatible'; Why = 'claims every OpenTrack-compatible tracker works; we have tested some'; Except = @(
         'An\s+unofficial\s+head\s+tracking\s+mod\s+for\s+[\s\S]{1,200}?driven\s+by\s+a\s+webcam,\s+phone,\s+or\s+any\s+OpenTrack\s+compatible\s+tracker,\s+with\s+no\s+VR\s+headset\s+required\.'
         '\**Works\s+with\s+any\s+OpenTrack\s+compatible\s+tracker\**\s+-\s+free\s+options\s+available\s+for\s+PC,\s+iOS\s+and\s+Android'
       ) }
-    @{ Pattern = 'any\s+phone\s+tracker';         Why = 'claims every phone tracker works; phone trackers do not share one protocol' }
-    @{ Pattern = 'all\s+\w+\s+(trackers|apps|headsets)\s+(speak|use|support|are|do|send)'; Why = 'an "all X do Y" generalisation about third-party kit' }
-    @{ Pattern = 'every\s+(phone|tracker|headset|app)\s+(speaks|uses|supports|sends)';     Why = 'an "all X do Y" generalisation about third-party kit' }
+    @{ Pattern = '\bany\s+phone\s+tracker';        Why = 'claims every phone tracker works; phone trackers do not share one protocol' }
+    @{ Pattern = '\ball\s+\w+\s+(trackers|apps|headsets)\s+(speak|use|support|are|do|send)'; Why = 'an "all X do Y" generalisation about third-party kit' }
+    @{ Pattern = '\bevery\s+(phone|tracker|headset|app)\s+(speaks|uses|supports|sends)';    Why = 'an "all X do Y" generalisation about third-party kit' }
     @{ Pattern = "(?i)it's not \w+,?\s+it's";     Why = 'the "not X, it''s Y" construction AGENTS.md bans' }
     @{ Pattern = [char]0x2014;                    Why = 'em-dash' }
 )
