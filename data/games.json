@@ -1834,6 +1834,14 @@
       "repo": "itsloopyo/voices-of-the-void-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
+    },
+    "robocop-rogue-city": {
+      "display_name": "RoboCop: Rogue City",
+      "env_var": "ROBOCOP_ROGUE_CITY_PATH",
+      "steam_app_id": 1681430,
+      "steam_folder": "Robocop Rogue City",
+      "executable_relpath": "Game\\Binaries\\Win64\\RoboCop-Win64-Shipping.exe",
+      "engine": "Unreal Engine"
     }
   }
 }
