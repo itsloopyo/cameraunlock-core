@@ -1844,6 +1844,15 @@
       "repo": "itsloopyo/robocop-rogue-city-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
+    },
+    "far-cry-5": {
+      "display_name": "Far Cry 5",
+      "env_var": "FAR_CRY_5_PATH",
+      "steam_app_id": 552520,
+      "steam_folder": "FarCry5",
+      "executable_relpath": "bin\\FarCry5.exe",
+      "repo": "itsloopyo/far-cry-5-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
