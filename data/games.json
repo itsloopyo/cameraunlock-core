@@ -1851,6 +1851,8 @@
       "steam_app_id": 552520,
       "steam_folder": "FarCry5",
       "executable_relpath": "bin\\FarCry5.exe",
+      "loader": "Shim",
+      "delivery_mode": "manifest",
       "repo": "itsloopyo/far-cry-5-headtracking",
       "catalog_status": "absent"
     }
