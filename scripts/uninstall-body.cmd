@@ -23,6 +23,9 @@
 ::                  mods\, and USER_FOLDER_EXTRAS from the user folder
 ::                  itself; nothing was written to the game folder and there
 ::                  is no loader, so there is nothing else to take away
+::   JavaAgent    - removes the agent jar from the exe's folder and the
+::                  <Exe>.site.json the install wrote there, when that file
+::                  still loads the jar; there is no loader
 ::
 :: Required env from the wrapper:
 ::   WRAPPER_DIR        - wrapper's %~dp0 (release-zip root or <mod>/scripts/)
@@ -248,6 +251,9 @@ if "%EXE_DIR:~-1%"=="\" set "EXE_DIR=%EXE_DIR:~0,-1%"
 :: EXE_DIR once covers both DEPLOY_DIR and the loader proxy, which install.cmd
 :: put in the same subdirectory.
 if defined ASI_SUBDIR set "EXE_DIR=%EXE_DIR%\%ASI_SUBDIR%"
+:: JavaAgent: the site JVM config the game's launcher reads, named after the
+:: exe. Derived here, with expansion still off, for the same reason as EXE_DIR.
+for %%i in ("%GAME_EXE%") do set "JVM_SITE_NAME=%%~ni.site.json"
 
 :: Delayed expansion is enabled HERE and not one line earlier. Everything the
 :: shim resolved is already in the environment, and `!VAR!` hands the value back
@@ -333,6 +339,12 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
     if errorlevel 1 exit /b 1
     call :remove_mod_files_plain
     call :remove_managed_extras
+) else if /i "%FRAMEWORK_TYPE%"=="JavaAgent" (
+    rem The site config first: it names the jar, and a site config left behind
+    rem a removed jar stops the JVM, and so the game, from starting.
+    call :remove_jvm_site_config
+    if errorlevel 1 exit /b 1
+    call :remove_mod_files_plain
 ) else (
     call :remove_mod_files_plain
 )
@@ -380,6 +392,8 @@ if /i "%FRAMEWORK_TYPE%"=="MonoCecil" goto :loader_done
 :: BeamNG reads its own mods folder; there was never a loader to install, so
 :: there is none to remove and /force has nothing extra to reach.
 if /i "%FRAMEWORK_TYPE%"=="BeamNGUserMods" goto :loader_done
+:: A Java agent is loaded by the game's own JVM, so there is no loader either.
+if /i "%FRAMEWORK_TYPE%"=="JavaAgent" goto :loader_done
 if /i "%FRAMEWORK_TYPE%"=="xNVSE" (
     rem xNVSE is a shared modding framework: every other New Vegas script mod
     rem binds to the same loader, so it is not ours to take away. /force does
@@ -776,6 +790,10 @@ if /i "%FRAMEWORK_TYPE%"=="None" (
     set "DEPLOY_DIR=!EXE_DIR!"
     exit /b 0
 )
+if /i "%FRAMEWORK_TYPE%"=="JavaAgent" (
+    set "DEPLOY_DIR=!EXE_DIR!"
+    exit /b 0
+)
 if /i "%FRAMEWORK_TYPE%"=="BeamNGUserMods" (
     rem Not derivable from GAME_PATH: BeamNG reads mods from the per-user
     rem folder, which is outside the game install entirely.
@@ -848,6 +866,41 @@ if /i "%FRAMEWORK_TYPE%"=="BepInEx" if defined PLUGIN_SUBFOLDER (
     rmdir "!DEPLOY_DIR!" >nul 2>&1
 )
 if "!REMOVED!"=="0" echo   No mod files found
+exit /b 0
+
+:: ============================================
+:: JavaAgent: remove the site JVM config the install generated. It is this
+:: mod's only while it still carries a -javaagent argument for one of the jars
+:: in MOD_DLLS or LEGACY_DLLS. One that does not was written by the player or
+:: by another mod after the install, and the launcher reads only that one file,
+:: so it is left in place and said so. The marker leaves the leading `-` off:
+:: PowerShell would read an argument that starts with one as a parameter name.
+:: ============================================
+:remove_jvm_site_config
+set "_SITE_PATH=!DEPLOY_DIR!\!JVM_SITE_NAME!"
+if not exist "!_SITE_PATH!" exit /b 0
+set "_SITE_OURS="
+set "_MARKER_PATH=!_SITE_PATH!"
+set "_MARKER_ALTERNATE="
+for %%f in (%MOD_DLLS% %LEGACY_DLLS%) do (
+    if /i "%%~xf"==".jar" (
+        set "_MARKER_VALUE=javaagent:%%f"
+        call :marker_state
+        if errorlevel 2 (
+            echo   ERROR: could not read !JVM_SITE_NAME! to tell whether it is this mod's.
+            set "_REMOVE_FAILED=1"
+            exit /b 1
+        )
+        if not errorlevel 1 set "_SITE_OURS=1"
+    )
+)
+if not defined _SITE_OURS (
+    echo   Left: !JVM_SITE_NAME! ^(it does not load this mod, so it is not ours to remove^)
+    exit /b 0
+)
+set "_DEL_PATH=!_SITE_PATH!"
+set "_DEL_LABEL=!JVM_SITE_NAME!"
+call :del_one
 exit /b 0
 
 :: ============================================

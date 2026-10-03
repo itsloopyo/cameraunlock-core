@@ -23,7 +23,7 @@ set "MOD_DLLS=<Mod>HeadTracking.dll"
 set "MOD_INTERNAL_NAME=<Mod>HeadTracking"
 set "STATE_FILE=.headtracking-state.json"
 :: BepInEx | MelonLoader | MonoCecil | ASILoader | REFramework | UE4SS | xNVSE
-:: | BeamNGUserMods | None
+:: | BeamNGUserMods | JavaAgent | None
 set "FRAMEWORK_TYPE=None"
 :: DLL names shipped by older versions of this mod, removed too so an upgrade
 :: does not leave a second copy for the loader to bind.

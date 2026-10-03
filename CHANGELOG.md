@@ -9,6 +9,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `install-body-javaagent.cmd`, for a mod that is a Java agent in a game with its own JVM launcher
+
+Project Zomboid is a Java program whose native launcher reads the JVM's arguments from
+`ProjectZomboid64.json` next to the exe, and from `ProjectZomboid64.site.json` instead when that
+is there. Its mod is a jar the JVM loads with `-javaagent`, which no existing body could install.
+
+- `scripts/install-body-javaagent.cmd` and `scripts/templates/install-wrapper-javaagent.cmd`:
+  copies `MOD_DLLS` from `plugins\` next to the exe and writes `<Exe>.site.json` as the stock
+  `<Exe>.json` with `-javaagent:<jar>` first in `vmArgs`, one for each `.jar` in `MOD_DLLS`. The
+  site config is generated on every install, so a reinstall picks up a game update's changes to
+  the stock file. A site config that is already there and does not load the mod stops the install
+  before anything is copied.
+- `scripts/jvm-site-config.ps1` does the JSON work, and `Copy-SharedBundle` stages it in `shared/`.
+- `uninstall-body.cmd`: `FRAMEWORK_TYPE=JavaAgent` removes the site config while it still loads
+  one of the jars in `MOD_DLLS` or `LEGACY_DLLS`, leaves one that does not, then removes the jars.
+  The uninstall wrapper template names the new value in its comment and gains no CONFIG BLOCK line.
+- `scripts/test-javaagent-installer.ps1` covers both scripts against a fixture game folder.
+- Not solved by the body, and stated in its header: Project Zomboid's launcher loads `jvm.dll` by
+  path, so `instrument.dll` cannot find `jli.dll` and `java.dll` unless `jre64\bin` is on PATH, and
+  the JVM stops at start-up. The mod has to arrange that load before the install is usable.
+- No consumer change for any other mod.
+
 ### Added - `IsolatedGameTest.psm1` and a coverage registry, so every mod's in-game tests run in the background
 
 In-game tests no longer use the real keyboard, mouse or foreground. A title isolated input cannot
