@@ -4,10 +4,12 @@
 // switches instead of easing, or steps when it is reversed.
 
 #include <cameraunlock/ads/ads_fade.h>
+#include <cameraunlock/ads/aim_mode.h>
 #include <cameraunlock/ads/lean_handover.h>
 
 #include <cmath>
 #include <iostream>
+#include <string>
 
 namespace {
 
@@ -260,6 +262,65 @@ void TestHandoverStopReleasesTheRig() {
     Check(NearVec(after.camera, lean) && NearVec(after.rig, Vec3()), "after a stop the next frame starts at the hip");
 }
 
+// ---- the aim mode ------------------------------------------------------------
+
+using cameraunlock::ads::AimMarkerOpacity;
+using cameraunlock::ads::AimMode;
+using cameraunlock::ads::AimModeLabel;
+using cameraunlock::ads::AimModePair;
+using cameraunlock::ads::DecodeAimMode;
+using cameraunlock::ads::EncodeAimMode;
+using cameraunlock::ads::NextAimMode;
+
+void TestAimModeDecodesThePair() {
+    std::cout << "Aim mode:\n";
+    Check(DecodeAimMode(false, false) == AimMode::SightsLocked, "both false, or both absent, is sights locked");
+    Check(DecodeAimMode(true, false) == AimMode::TrueFreeLook,
+          "TrueFreeLook alone is true free look, so a config from before the marker keeps its mode");
+    Check(DecodeAimMode(false, true) == AimMode::SightsLocked, "FreeLookMarker alone is sights locked");
+    Check(DecodeAimMode(true, true) == AimMode::FreeLookMarker, "both true is free look with a marker");
+}
+
+void TestAimModeCycleAndEncode() {
+    Check(NextAimMode(AimMode::SightsLocked) == AimMode::FreeLookMarker &&
+              NextAimMode(AimMode::FreeLookMarker) == AimMode::TrueFreeLook &&
+              NextAimMode(AimMode::TrueFreeLook) == AimMode::SightsLocked,
+          "the cycle is sights locked, free look with a marker, true free look and round again");
+
+    bool roundTrips = true;
+    bool markerWithoutFreeLook = false;
+    AimMode mode = AimMode::SightsLocked;
+    for (int step = 0; step < 6; ++step) {
+        const AimModePair pair = EncodeAimMode(mode);
+        roundTrips = roundTrips && DecodeAimMode(pair.trueFreeLook, pair.freeLookMarker) == mode;
+        markerWithoutFreeLook = markerWithoutFreeLook || (!pair.trueFreeLook && pair.freeLookMarker);
+        mode = NextAimMode(mode);
+    }
+    Check(roundTrips, "every mode of the cycle decodes from the pair it encodes to");
+    Check(!markerWithoutFreeLook, "the cycle never writes FreeLookMarker without TrueFreeLook");
+
+    const AimModePair marker = EncodeAimMode(AimMode::FreeLookMarker);
+    const AimModePair free = EncodeAimMode(AimMode::TrueFreeLook);
+    Check(marker.trueFreeLook && marker.freeLookMarker && free.trueFreeLook && !free.freeLookMarker,
+          "free look with a marker is true/true and true free look is true/false");
+}
+
+void TestAimModeLabels() {
+    Check(std::string(AimModeLabel(AimMode::SightsLocked)) == "Aim mode: sights locked" &&
+              std::string(AimModeLabel(AimMode::FreeLookMarker)) == "Aim mode: free look with marker" &&
+              std::string(AimModeLabel(AimMode::TrueFreeLook)) == "Aim mode: true free look",
+          "the three labels are the fixed ones");
+}
+
+void TestAimMarkerShowsOnlyInFreeLookWithAMarker() {
+    Check(Near(AimMarkerOpacity(AimMode::FreeLookMarker, 1.0f), 1.0f) &&
+              Near(AimMarkerOpacity(AimMode::FreeLookMarker, 0.4f), 0.4f),
+          "free look with a marker: the marker's opacity follows the sights");
+    Check(AimMarkerOpacity(AimMode::FreeLookMarker, 0.0f) == 0.0f, "and it is gone at the hip");
+    Check(AimMarkerOpacity(AimMode::SightsLocked, 1.0f) == 0.0f && AimMarkerOpacity(AimMode::TrueFreeLook, 1.0f) == 0.0f,
+          "sights locked and true free look draw no marker with the sights up");
+}
+
 }  // namespace
 
 int RunAdsTests() {
@@ -280,6 +341,10 @@ int RunAdsTests() {
     TestHandoverWithoutARigEasesTheLeanOut();
     TestHandoverForwardStopHoldsTheEyeBehindTheSights();
     TestHandoverStopReleasesTheRig();
+    TestAimModeDecodesThePair();
+    TestAimModeCycleAndEncode();
+    TestAimModeLabels();
+    TestAimMarkerShowsOnlyInFreeLookWithAMarker();
 
     if (g_failures == 0) {
         std::cout << "ADS tests: all passed\n";

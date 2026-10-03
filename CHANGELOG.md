@@ -9,6 +9,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the aim mode pair: `AimMode`, its cycle, its labels and the marker's opacity
+
+Aiming down sights has three modes, cycled on the `TrueFreeLookKey` list (owner ruling of
+2026-10-03): sights locked, free look with a marker, and true free look. The mode is stored as two
+bools, `TrueFreeLook` and `FreeLookMarker`. `cameraunlock/ads/aim_mode.h` and
+`CameraUnlock.Core.Ads` (`AimMode`, `AimModes`) hold what every mod would otherwise spell again:
+
+- `DecodeAimMode(trueFreeLook, freeLookMarker)` / `AimModes.Decode`: false/false is sights locked,
+  true/true free look with a marker, true/false true free look. `FreeLookMarker` alone is sights
+  locked, and `TrueFreeLook` alone is true free look, so a config from before the marker keeps
+  its mode.
+- `EncodeAimMode(mode)` returning `AimModePair` / `AimModes.Encode(mode, out trueFreeLook, out
+  freeLookMarker)`: the pair a mode is saved as, never false with true.
+- `NextAimMode(mode)` / `AimModes.Next`: the cycle, in that order.
+- `AimModeLabel(mode)` / `AimModes.Label`: `Aim mode: sights locked`, `Aim mode: free look with
+  marker`, `Aim mode: true free look`.
+- `AimMarkerOpacity(mode, sightsUp)` / `AimModes.MarkerOpacity`: `sightsUp` (0 at the hip, 1 with
+  the sights fully up) in free look with a marker, 0 in the other two modes.
+
+The C# methods throw `ArgumentOutOfRangeException` for a value outside the enum.
+`LeanHandover` is unchanged: its `trueFreeLook` argument is true in both free look modes.
+
+Consuming repos: nothing to change. A shooter that takes the three-mode cycle calls these instead
+of writing its own.
+
 ### Added - install and uninstall across a move from the Cecil patcher to BepInEx
 
 A mod that moves off the Mono.Cecil patch onto BepInEx left upgraders with the patched

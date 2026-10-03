@@ -263,5 +263,69 @@ namespace CameraUnlock.Core.Tests.Ads
             AssertVec(lean, after.Camera);
             AssertVec(Vec3.Zero, after.Rig);
         }
+
+        // ---- the aim mode ----------------------------------------------------------
+
+        [Fact]
+        public void AimMode_DecodesThePair()
+        {
+            Assert.Equal(AimMode.SightsLocked, AimModes.Decode(false, false));
+            // A config from before the marker holds TrueFreeLook alone and keeps its mode.
+            Assert.Equal(AimMode.TrueFreeLook, AimModes.Decode(true, false));
+            Assert.Equal(AimMode.SightsLocked, AimModes.Decode(false, true));
+            Assert.Equal(AimMode.FreeLookMarker, AimModes.Decode(true, true));
+        }
+
+        [Fact]
+        public void AimMode_CycleAndEncode()
+        {
+            Assert.Equal(AimMode.FreeLookMarker, AimModes.Next(AimMode.SightsLocked));
+            Assert.Equal(AimMode.TrueFreeLook, AimModes.Next(AimMode.FreeLookMarker));
+            Assert.Equal(AimMode.SightsLocked, AimModes.Next(AimMode.TrueFreeLook));
+
+            AimMode mode = AimMode.SightsLocked;
+            for (int step = 0; step < 6; step++)
+            {
+                bool trueFreeLook, freeLookMarker;
+                AimModes.Encode(mode, out trueFreeLook, out freeLookMarker);
+                Assert.Equal(mode, AimModes.Decode(trueFreeLook, freeLookMarker));
+                Assert.False(!trueFreeLook && freeLookMarker);
+                mode = AimModes.Next(mode);
+            }
+
+            bool free, marker;
+            AimModes.Encode(AimMode.FreeLookMarker, out free, out marker);
+            Assert.True(free && marker);
+            AimModes.Encode(AimMode.TrueFreeLook, out free, out marker);
+            Assert.True(free && !marker);
+        }
+
+        [Fact]
+        public void AimMode_Labels()
+        {
+            Assert.Equal("Aim mode: sights locked", AimModes.Label(AimMode.SightsLocked));
+            Assert.Equal("Aim mode: free look with marker", AimModes.Label(AimMode.FreeLookMarker));
+            Assert.Equal("Aim mode: true free look", AimModes.Label(AimMode.TrueFreeLook));
+        }
+
+        [Fact]
+        public void AimMode_MarkerShowsOnlyInFreeLookWithAMarker()
+        {
+            Assert.Equal(1.0f, AimModes.MarkerOpacity(AimMode.FreeLookMarker, 1.0f), 4);
+            Assert.Equal(0.4f, AimModes.MarkerOpacity(AimMode.FreeLookMarker, 0.4f), 4);
+            Assert.Equal(0.0f, AimModes.MarkerOpacity(AimMode.FreeLookMarker, 0.0f));
+            Assert.Equal(0.0f, AimModes.MarkerOpacity(AimMode.SightsLocked, 1.0f));
+            Assert.Equal(0.0f, AimModes.MarkerOpacity(AimMode.TrueFreeLook, 1.0f));
+        }
+
+        [Fact]
+        public void AimMode_AValueOutsideTheEnumThrows()
+        {
+            bool a, b;
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Next((AimMode)3));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Label((AimMode)3));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Encode((AimMode)(-1), out a, out b));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.MarkerOpacity((AimMode)3, 1.0f));
+        }
     }
 }
