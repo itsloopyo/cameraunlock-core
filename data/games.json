@@ -1855,6 +1855,19 @@
       "delivery_mode": "manifest",
       "repo": "itsloopyo/far-cry-5-headtracking",
       "catalog_status": "absent"
+    },
+    "far-cry-4": {
+      "display_name": "Far Cry 4",
+      "env_var": "FAR_CRY_4_PATH",
+      "steam_app_id": 298110,
+      "steam_folder": "Far Cry 4",
+      "ubisoft_app_ids": [
+        856
+      ],
+      "executable_relpath": "bin\\FarCry4.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/far-cry-4-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
