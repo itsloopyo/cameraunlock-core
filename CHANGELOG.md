@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - the DX12 overlay reads the swap chain's queue again whenever it rebuilds
+
+`DX12Overlay` resolved the swap chain's queue once and kept it for the session. A game that
+rebuilds its swap chain can come back presenting through another queue: Starfield does when frame
+generation is switched in its settings. The old queue stays alive, because the overlay holds a
+reference to every DIRECT queue it has seen, so the next draw was submitted on it against the new
+back buffers.
+
+- The queue is forgotten whenever the device resources are rebuilt (first `Present`, and the
+  `Present` after every `ResizeBuffers`) and resolved again from the swap chain being presented.
+- The overlay remembers which swap chain it was built from and draws only on that one's `Present`.
+  A `Present` for any other is dropped and logged once.
+- The log lines name the swap chain: "device resources initialized for swap chain X, 2 buffers at
+  WxH" and "swap chain X presents through DIRECT queue 1 of 2 seen".
+- No consumer change.
+
 ### Fixed - the DX12 overlay draws on the swap chain's own queue, and says why a frame was dropped
 
 `DX12Overlay` submitted its draw on the first DIRECT command queue it saw in its

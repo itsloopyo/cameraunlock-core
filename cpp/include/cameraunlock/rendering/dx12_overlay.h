@@ -161,8 +161,8 @@ struct QueuePath {
 
 // The ways RenderFrame can drop a frame it had something to draw in.
 enum DropReason {
-    kDropNoSwapChain3, kDropBufferIndex, kDropFenceWait, kDropAllocatorReset,
-    kDropListReset, kDropListClose, kDropNoExecute, kDropReasons
+    kDropOtherSwapChain, kDropNoSwapChain3, kDropBufferIndex, kDropFenceWait,
+    kDropAllocatorReset, kDropListReset, kDropListClose, kDropNoExecute, kDropReasons
 };
 
 struct OverlayState {
@@ -191,6 +191,8 @@ struct OverlayState {
 
     // Device resources
     bool                       initialized = false;
+    // The swap chain they were built from. Compared, never called through.
+    IDXGISwapChain*            swap        = nullptr;
     ID3D12Device*              device      = nullptr;
     ID3D12DescriptorHeap*      rtvHeap     = nullptr;
     ID3D12GraphicsCommandList* cmdList     = nullptr;
@@ -437,6 +439,14 @@ inline bool InitDeviceResources(IDXGISwapChain* swap) {
     auto& s = State();
     if (swap == s.notD3D12Swap) return false;
     ReleaseDeviceResources();
+    // The queue is read again with every rebuild. A game that rebuilds its swap
+    // chain can come back presenting through another queue (Starfield does when
+    // frame generation is switched in its settings), and the one resolved for
+    // the old swap chain is still alive, since seenQueues holds a reference, so
+    // a draw submitted on it is accepted and is not ordered against Present.
+    s.queue.store(nullptr, std::memory_order_release);
+    s.presentsUnresolved = 0;
+    s.queueUnresolvedLogged = false;
 
     IDXGISwapChain3* swap3 = nullptr;
     if (FAILED(swap->QueryInterface(IID_PPV_ARGS(&swap3))) || !swap3) {
@@ -533,8 +543,13 @@ inline bool InitDeviceResources(IDXGISwapChain* swap) {
     }
 
     s.notD3D12Swap = nullptr;
+    s.swap = swap;
     s.initialized = true;
-    Log("dx12_overlay: device resources initialized");
+    char line[160];
+    std::snprintf(line, sizeof(line),
+                  "dx12_overlay: device resources initialized for swap chain %p, %u buffers at %ux%u",
+                  static_cast<void*>(swap), bufferCount, s.width, s.height);
+    Log(line);
     return true;
 }
 
@@ -557,6 +572,7 @@ inline void ReleaseDeviceResources() {
     if (s.fence)      { s.fence->Release();      s.fence = nullptr; }
     s.fenceValue = 0;
     if (s.device)     { s.device->Release();     s.device = nullptr; }
+    s.swap = nullptr;
     s.initialized = false;
 }
 
@@ -648,8 +664,8 @@ inline ID3D12CommandQueue* ResolveSwapChainQueue(IDXGISwapChain* swap) {
         ID3D12CommandQueue* queue = s.seenQueues[i].load(std::memory_order_acquire);
         if (queue != held) continue;
         std::snprintf(line, sizeof(line),
-                      "dx12_overlay: the swap chain presents through DIRECT queue %d of %d seen",
-                      i + 1, seen);
+                      "dx12_overlay: swap chain %p presents through DIRECT queue %d of %d seen",
+                      static_cast<void*>(swap), i + 1, seen);
         Log(line);
         s.queue.store(queue, std::memory_order_release);
         return queue;
@@ -683,6 +699,12 @@ inline void RenderFrame(IDXGISwapChain* swap) {
     auto& s = State();
     if (!s.initialized) return;
     if (s.width == 0 || s.height == 0) return;
+    // The back buffers, their index and the queue are all this swap chain's.
+    if (swap != s.swap) {
+        LogDrop(kDropOtherSwapChain, "dx12_overlay: frame dropped, this Present is for a swap chain "
+                                     "other than the one the overlay was built from");
+        return;
+    }
 
     ID3D12CommandQueue* queue = s.queue.load(std::memory_order_acquire);
     if (!queue) queue = ResolveSwapChainQueue(swap);
