@@ -76,11 +76,16 @@ Key names are the ones hotkey lists use (`data/keys.json`).
 
 ## Measured
 
-Starfield 1.16.244.0 (Steam), 2026-10-03, one session. The detours installed, the
-game window was found, and scripts played. `Insert` and `Ctrl+Shift+U` stepped the
-mod's aim mode through the synthetic key state. Whether the GAME takes the
-synthetic raw input is not established: a dialog was dismissed, the sights came
-up and the view turned in that session, but a person brought the game to the
-foreground and pressed keys during it, and the real devices reach a foreground
-game. Repeat it with the foreground watched for the whole run before relying on
-it. `text` and the game's console were not tried.
+Starfield 1.16.244.0 (Steam), 2026-10-03, with the harness sampling the real
+foreground through every script and the game never holding it:
+
+- Keyboard: the title screen, the main menu and its confirm prompt were driven to
+  a loaded save, and letter keys opened the game's own screens.
+- Mouse: the right button raised and lowered the sights.
+- `text`: console commands typed and ran (`tgm`, `help grenade 4 weap`,
+  `player.additem ...`). The quote character did not type; leave quotes out.
+- The mod's hotkeys fired through the synthetic key state, nav keys and chords.
+- The backquote key has no name in `data/keys.json`: `tap 0xC0`.
+
+One Starfield session ran this way while a person used the machine, and it also
+drove the settings menu and fired shots.

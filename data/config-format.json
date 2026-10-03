@@ -678,6 +678,28 @@
         "approved": "2026-09-27"
       }
     ],
+    "starfield-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "The fleet chords do not work in Starfield: left Ctrl is the game's sneak toggle, so every Ctrl+Shift chord crouches the player, and the game acts on its own letter keys with any modifiers held. Measured in game on 2026-10-03 with Shift+Alt held: G throws a grenade, H opens the status screen, J opens the database, and Y, U and T do nothing. The committed file holds ToggleKey=End, Shift+Alt+Y.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chords do not work in Starfield: left Ctrl is the game's sneak toggle, so every Ctrl+Shift chord crouches the player, and the game acts on its own letter keys with any modifiers held. Measured in game on 2026-10-03 with Shift+Alt held: G throws a grenade, H opens the status screen, J opens the database, and Y, U and T do nothing. The committed file holds CycleTrackingModeKey=PageUp, Shift+Alt+T: G is taken, and T is the one free letter left in the cluster.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chords do not work in Starfield: left Ctrl is the game's sneak toggle, so every Ctrl+Shift chord crouches the player, and the game acts on its own letter keys with any modifiers held. Measured in game on 2026-10-03 with Shift+Alt held: G throws a grenade, H opens the status screen, J opens the database, and Y, U and T do nothing. The committed file holds YawModeKey=PageDown: H is taken and no letter of the cluster is left for a chord.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "The fleet chords do not work in Starfield: left Ctrl is the game's sneak toggle, so every Ctrl+Shift chord crouches the player, and the game acts on its own letter keys with any modifiers held. Measured in game on 2026-10-03 with Shift+Alt held: G throws a grenade, H opens the status screen, J opens the database, and Y, U and T do nothing. The committed file holds TrueFreeLookKey=Insert, Shift+Alt+U.",
+        "approved": "2026-10-03"
+      }
+    ],
     "far-cry-6-headtracking": [
       {
         "row": "TrueFreeLookKey",

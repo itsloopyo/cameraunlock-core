@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - Starfield's four hotkey rows are per_game, and isolated input is proven against a game
+
+- `data/config-format.json` `per_game` lists `ToggleKey`, `CycleTrackingModeKey`, `YawModeKey` and
+  `TrueFreeLookKey` for starfield-headtracking (owner approved 2026-10-03). Left Ctrl is the game's
+  sneak toggle and the game acts on G, H and J with any modifiers held, so its committed file holds
+  `End, Shift+Alt+Y`, `PageUp, Shift+Alt+T`, `PageDown` and `Insert, Shift+Alt+U`.
+- docs/isolated-input.md records what was measured in Starfield with the real foreground watched
+  through every script: keyboard, mouse, console text and the mod's hotkeys all work with the game
+  in the background. It replaces the earlier note that the result was not proven.
+
 ### Fixed - the DX12 overlay hooks the DXGI swap chain under Streamline's wrapper
 
 In a game that loads NVIDIA Streamline (`sl.interposer.dll`) every swap chain made in the process
