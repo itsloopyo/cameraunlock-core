@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a dev deploy for a Java agent mod
+
+- `Invoke-DevDeployJavaAgent` in `powershell/DevDeploy.psm1` deploys a Java agent mod to every
+  installed copy of the game: the agent jars go next to the exe and `scripts/jvm-site-config.ps1`
+  writes the site config, the same two writes `install-body-javaagent.cmd` makes. A site config
+  that does not load the mod stops the deploy before anything is copied.
+- Consumer change: none. project-zomboid-headtracking's `scripts/deploy.ps1` is the first caller.
+
 ### Changed - one rule for a hotkey a game takes, and Far Cry 6's rows follow it
 
 - docs/canonical-config.md, "A key the game takes": the clash is measured in the game, a modifier

@@ -951,6 +951,106 @@ function Invoke-DevDeployShim {
     return $result
 }
 
+<#
+.SYNOPSIS
+    Dev-deploy a Java agent mod to a game whose own launcher starts the JVM.
+.DESCRIPTION
+    The same two writes install-body-javaagent.cmd makes: the agent jars go
+    next to the game exe, and scripts/jvm-site-config.ps1 writes <Exe>.site.json
+    as the stock <Exe>.json with a -javaagent argument for each jar first in
+    vmArgs. The site config is checked before anything is copied, so a site
+    config that is somebody else's stops the deploy with the install untouched.
+.PARAMETER AgentJars
+    Jar filenames in BuildOutputPath, each loaded as a Java agent.
+.OUTPUTS
+    Hashtable: @{ GamePath; ExeDir; DeployedDllPath; SiteConfigPath }.
+    DeployedDllPath is the first jar, under the key the other orchestrators use.
+#>
+function Invoke-DevDeployJavaAgentToPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [Parameter(Mandatory)][string]$BuildOutputPath,
+        [Parameter(Mandatory)][string[]]$AgentJars,
+        [string]$GivenPath
+    )
+
+    foreach ($jar in $AgentJars) {
+        Assert-DevBuildArtifact -BuildOutputPath $BuildOutputPath -FileName $jar
+    }
+
+    $gamePath = Resolve-DevGamePath -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    Assert-DevGameNotRunning -GameId $GameId -GameDisplayName $GameDisplayName
+    $exeDir   = Resolve-DevExeDir -GamePath $gamePath -GameId $GameId
+
+    $exeRelpath = Get-GameExecutableRelPath -Config (Get-GameConfig -GameId $GameId) -Path $gamePath
+    $exeStem    = [IO.Path]::GetFileNameWithoutExtension($exeRelpath)
+    $jvmConfig  = Join-Path $exeDir "$exeStem.json"
+    $siteConfig = Join-Path $exeDir "$exeStem.site.json"
+
+    $siteHelper = Join-Path $PSScriptRoot '..\scripts\jvm-site-config.ps1'
+    $siteArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $siteHelper,
+        '-ConfigPath', $jvmConfig, '-SitePath', $siteConfig, '-AgentJars', ($AgentJars -join ' ')
+    )
+
+    & powershell @siteArgs -CheckOnly
+    if ($LASTEXITCODE -eq 3) {
+        throw "$exeStem.site.json in $exeDir does not load this mod. The game's launcher reads only one such file, so it is left as it is and nothing was deployed. Remove or rename it, then deploy again."
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not read the JVM arguments from $jvmConfig (jvm-site-config.ps1 exit $LASTEXITCODE). Nothing was deployed."
+    }
+
+    Write-Host ""
+    Write-Host "Deploying agent files to: $exeDir" -ForegroundColor Yellow
+    foreach ($jar in $AgentJars) {
+        Copy-Item -LiteralPath (Join-Path $BuildOutputPath $jar) -Destination (Join-Path $exeDir $jar) -Force
+        Write-Host "Deployed $jar" -ForegroundColor Green
+    }
+
+    & powershell @siteArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not write $siteConfig (jvm-site-config.ps1 exit $LASTEXITCODE)."
+    }
+    Write-Host "Wrote $exeStem.site.json" -ForegroundColor Green
+
+    return @{
+        GamePath        = $gamePath
+        ExeDir          = $exeDir
+        DeployedDllPath = (Join-Path $exeDir $AgentJars[0])
+        SiteConfigPath  = $siteConfig
+    }
+}
+
+# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
+# result for the last install written, which is what the single-install callers
+# have always been handed.
+function Invoke-DevDeployJavaAgent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameId,
+        [Parameter(Mandatory)][string]$GameDisplayName,
+        [Parameter(Mandatory)][string]$BuildOutputPath,
+        [Parameter(Mandatory)][string[]]$AgentJars,
+        [string]$GivenPath
+    )
+
+    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
+    $result = $null
+    foreach ($target in $targets) {
+        if ($targets.Count -gt 1) {
+            Write-Host ""
+            Write-Host "--- $target" -ForegroundColor Cyan
+        }
+        $forward = @{} + $PSBoundParameters
+        $forward['GivenPath'] = $target
+        $result = Invoke-DevDeployJavaAgentToPath @forward
+    }
+    return $result
+}
+
 Export-ModuleMember -Function @(
     'Invoke-DevDeployCecil',
     'Invoke-DevDeployBepInEx',
@@ -958,6 +1058,7 @@ Export-ModuleMember -Function @(
     'Invoke-DevDeployASILoader',
     'Invoke-DevDeployREFramework',
     'Invoke-DevDeployShim',
+    'Invoke-DevDeployJavaAgent',
     'Resolve-DevGamePath',
     'Resolve-DevExeDir'
 )
