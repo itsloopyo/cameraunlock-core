@@ -47,6 +47,12 @@
 //   - **Per-back-buffer state.** One command allocator per buffer, and a fence
 //     value per buffer, because an allocator cannot be reset while the GPU is
 //     still reading the commands it holds.
+//   - **Present1 as well as Present.** A game can present through either, and
+//     which one reaches the DXGI swap chain can change in the middle of a
+//     session: Dying Light 2 calls Present1, and with frame generation on
+//     Streamline turns that into Present calls from its own thread, so with it
+//     switched off in the settings the frames arrive through Present1 alone.
+//     Both are hooked and draw through the same path.
 //   - **Explicit transitions.** The back buffer arrives at Present in the
 //     PRESENT state and has to be handed back in it.
 //
@@ -136,6 +142,7 @@ namespace cameraunlock::rendering {
 namespace detail12 {
 
 using Present_t = HRESULT (__stdcall*)(IDXGISwapChain*, UINT, UINT);
+using Present1_t = HRESULT (__stdcall*)(IDXGISwapChain*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
 using ResizeBuffers_t = HRESULT (__stdcall*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 using ExecuteCommandLists_t = void (__stdcall*)(ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
 
@@ -180,9 +187,11 @@ struct OverlayState {
     // Hooks
     bool  hookInstalled = false;
     void* presentTarget = nullptr;
+    void* present1Target = nullptr;
     void* resizeTarget  = nullptr;
     void* executeTarget = nullptr;
     Present_t             origPresent = nullptr;
+    Present1_t            origPresent1 = nullptr;
     ResizeBuffers_t       origResize  = nullptr;
     ExecuteCommandLists_t origExecute = nullptr;
 
@@ -240,6 +249,7 @@ struct OverlayState {
 
     DX12LogFn logFn = nullptr;
     bool firstPresentLogged = false;
+    bool firstPresent1Logged = false;
     bool notD3D12Logged     = false;
     // One line per way a frame can go undrawn, and one for the first frame that
     // is drawn: an overlay that publishes and shows nothing is otherwise silent.
@@ -851,13 +861,15 @@ inline void __stdcall HookedExecuteCommandLists(ID3D12CommandQueue* queue, UINT 
     orig(queue, numLists, lists);
 }
 
-inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT flags) {
+// Set while this thread is inside one of the two present detours, so a DXGI
+// that implements one present through the other draws the overlay once.
+inline thread_local bool t_presenting = false;
+
+inline void DrawOnPresent(IDXGISwapChain* swap, const char* firstCallLine) {
     auto& s = State();
-    auto orig = s.origPresent;
-    if (!orig) return DXGI_ERROR_INVALID_CALL;
     if (!s.firstPresentLogged) {
         s.firstPresentLogged = true;
-        Log("dx12_overlay: Present hook fired (first invocation)");
+        Log(firstCallLine);
     }
     if (!s.initialized) {
         InitDeviceResources(swap);
@@ -865,7 +877,35 @@ inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT fla
     if (s.initialized) {
         RenderFrame(swap);
     }
-    return orig(swap, sync, flags);
+}
+
+inline HRESULT __stdcall HookedPresent(IDXGISwapChain* swap, UINT sync, UINT flags) {
+    auto& s = State();
+    auto orig = s.origPresent;
+    if (!orig) return DXGI_ERROR_INVALID_CALL;
+    if (t_presenting) return orig(swap, sync, flags);
+    DrawOnPresent(swap, "dx12_overlay: Present hook fired (first invocation)");
+    t_presenting = true;
+    const HRESULT result = orig(swap, sync, flags);
+    t_presenting = false;
+    return result;
+}
+
+inline HRESULT __stdcall HookedPresent1(IDXGISwapChain* swap, UINT sync, UINT flags,
+                                        const DXGI_PRESENT_PARAMETERS* parameters) {
+    auto& s = State();
+    auto orig = s.origPresent1;
+    if (!orig) return DXGI_ERROR_INVALID_CALL;
+    if (t_presenting) return orig(swap, sync, flags, parameters);
+    if (!s.firstPresent1Logged) {
+        s.firstPresent1Logged = true;
+        Log("dx12_overlay: Present1 hook fired (first invocation)");
+    }
+    DrawOnPresent(swap, "dx12_overlay: the first present to arrive came through Present1");
+    t_presenting = true;
+    const HRESULT result = orig(swap, sync, flags, parameters);
+    t_presenting = false;
+    return result;
 }
 
 inline HRESULT __stdcall HookedResizeBuffers(IDXGISwapChain* swap, UINT bufferCount, UINT width,
@@ -1009,9 +1049,11 @@ inline bool DX12Overlay::Install() {
     }
 
     // IDXGISwapChain (DXGI 1.0): Present @ 8, ResizeBuffers @ 13.
+    // IDXGISwapChain1 (DXGI 1.2): Present1 @ 22.
     // ID3D12CommandQueue: IUnknown 0-2, ID3D12Object 3-6, ID3D12DeviceChild 7,
     // then UpdateTileMappings 8, CopyTileMappings 9, ExecuteCommandLists 10.
     s.presentTarget = swapVTable[8];
+    s.present1Target = swapVTable[22];
     s.resizeTarget  = swapVTable[13];
     s.executeTarget = queueVTable[10];
 
@@ -1021,24 +1063,34 @@ inline bool DX12Overlay::Install() {
                       "this process may already own the shared DXGI vtable");
         return false;
     }
+    if (MH_CreateHook(s.present1Target, &detail12::HookedPresent1,
+                      reinterpret_cast<LPVOID*>(&s.origPresent1)) != MH_OK) {
+        detail12::Log("dx12_overlay: MH_CreateHook(Present1) failed");
+        MH_RemoveHook(s.presentTarget);
+        return false;
+    }
     if (MH_CreateHook(s.resizeTarget, &detail12::HookedResizeBuffers,
                       reinterpret_cast<LPVOID*>(&s.origResize)) != MH_OK) {
         detail12::Log("dx12_overlay: MH_CreateHook(ResizeBuffers) failed");
         MH_RemoveHook(s.presentTarget);
+        MH_RemoveHook(s.present1Target);
         return false;
     }
     if (MH_CreateHook(s.executeTarget, &detail12::HookedExecuteCommandLists,
                       reinterpret_cast<LPVOID*>(&s.origExecute)) != MH_OK) {
         detail12::Log("dx12_overlay: MH_CreateHook(ExecuteCommandLists) failed");
         MH_RemoveHook(s.presentTarget);
+        MH_RemoveHook(s.present1Target);
         MH_RemoveHook(s.resizeTarget);
         return false;
     }
     if (MH_EnableHook(s.presentTarget) != MH_OK ||
+        MH_EnableHook(s.present1Target) != MH_OK ||
         MH_EnableHook(s.resizeTarget)  != MH_OK ||
         MH_EnableHook(s.executeTarget) != MH_OK) {
         detail12::Log("dx12_overlay: MH_EnableHook failed");
         MH_RemoveHook(s.presentTarget);
+        MH_RemoveHook(s.present1Target);
         MH_RemoveHook(s.resizeTarget);
         MH_RemoveHook(s.executeTarget);
         return false;
@@ -1062,6 +1114,7 @@ inline void DX12Overlay::Remove() {
     // and remove every MinHook hook in the process, the mod's camera hook
     // included.
     if (s.presentTarget) { MH_DisableHook(s.presentTarget); MH_RemoveHook(s.presentTarget); }
+    if (s.present1Target) { MH_DisableHook(s.present1Target); MH_RemoveHook(s.present1Target); }
     if (s.resizeTarget)  { MH_DisableHook(s.resizeTarget);  MH_RemoveHook(s.resizeTarget); }
     if (s.executeTarget) { MH_DisableHook(s.executeTarget); MH_RemoveHook(s.executeTarget); }
 
@@ -1087,9 +1140,11 @@ inline void DX12Overlay::Remove() {
     // detour, and the null checks at the top of each detour are what stands
     // between that thread and a call through recycled memory.
     s.presentTarget = nullptr;
+    s.present1Target = nullptr;
     s.resizeTarget  = nullptr;
     s.executeTarget = nullptr;
     s.origPresent   = nullptr;
+    s.origPresent1  = nullptr;
     s.origResize    = nullptr;
     s.origExecute   = nullptr;
     s.hookInstalled = false;
