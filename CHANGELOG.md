@@ -9,6 +9,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - the DX12 overlay draws on the swap chain's own queue, and says why a frame was dropped
+
+`DX12Overlay` submitted its draw on the first DIRECT command queue it saw in its
+`ExecuteCommandLists` detour. A game can run more than one (Starfield runs two with frame
+generation on), and a mod that installs the overlay mid-game sees whichever submits next. A draw
+on any queue but the swap chain's is not ordered against `Present`, lands after the flip and never
+reaches the screen, with nothing in the log.
+
+- `Install` measures where a swap chain keeps its queue, on the throwaway swap chain and queue it
+  already creates (one pointer away on Windows 11: `+0x140` of the object at the swap chain's
+  `+0x10`), and logs it. The game's swap chain is read at the same place, and the answer is used
+  once that queue has been seen submitting. The log names it: "the swap chain presents through
+  DIRECT queue 2 of 2 seen".
+- Where the place cannot be measured, a lone DIRECT queue is still taken after 120 presents, as
+  before. With several and no measurement nothing is drawn, and the log says so once.
+- Every way `RenderFrame` can drop a frame it had something to draw in now logs once (no
+  `IDXGISwapChain3`, back buffer index, fence wait, allocator or list reset, list close, hook
+  gone), and the first frame drawn logs its vertex count, back buffer and size.
+- New `cameraunlock/rendering/held_pointer.h`, `FindHeldPointer`: which one of a set of candidate
+  pointers an object holds, `kHeldNone` or `kHeldAmbiguous` otherwise. Tested in
+  `held_pointer_tests.cpp`.
+- No consumer change. Not fixed here: in Starfield with frame generation on, the draw is submitted
+  on the swap chain's queue before every `Present` and still does not reach the screen. With frame
+  generation off it does.
+
 ### Added - `[Position] FreeLookMarker`, and `TrueFreeLookKey` cycles three aim modes
 
 `FreeLookMarker` is a canonical concept: bool, default `false`, no aliases, global, directly after

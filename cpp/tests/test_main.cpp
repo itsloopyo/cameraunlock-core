@@ -22,6 +22,7 @@ int RunWin32ProfileSemanticsTests();
 int RunConfigSchemaTests();
 int RunSafeMemoryTests();
 int RunLeanClampTests();
+int RunHeldPointerTests();
 int RunLeanLineSweepTests();
 int RunRigLeanTests();
 int RunZoomCompensationTests();
@@ -91,6 +92,7 @@ int main(int argc, char** argv) {
     failures += RunConfigSchemaTests();
     failures += RunSafeMemoryTests();
     failures += RunLeanClampTests();
+    failures += RunHeldPointerTests();
     failures += RunLeanLineSweepTests();
     failures += RunRigLeanTests();
     failures += RunZoomCompensationTests();
