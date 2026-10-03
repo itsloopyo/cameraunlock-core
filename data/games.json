@@ -1868,6 +1868,16 @@
       "loader": "AsiLoader",
       "repo": "itsloopyo/far-cry-4-headtracking",
       "catalog_status": "absent"
+    },
+    "fear": {
+      "display_name": "F.E.A.R.",
+      "env_var": "FEAR_PATH",
+      "steam_app_id": 21090,
+      "steam_folder": "FEAR Ultimate Shooter Edition",
+      "executable_relpath": "FEAR.exe",
+      "loader": "AsiLoader",
+      "repo": "itsloopyo/fear-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
