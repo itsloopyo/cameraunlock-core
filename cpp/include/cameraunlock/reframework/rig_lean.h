@@ -64,6 +64,9 @@ public:
         return m_handover.Stop();
     }
 
+    // The eye relief while the sights are up (LeanHandover::SetForwardStop).
+    void SetForwardStop(float metres) { m_handover.SetForwardStop(metres); }
+
     camera::LeanClamp& Clamp() { return m_clamp; }
     const camera::LeanClamp& Clamp() const { return m_clamp; }
 

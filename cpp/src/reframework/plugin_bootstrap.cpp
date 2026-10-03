@@ -99,7 +99,7 @@ bool InitializePlugin(const REFrameworkPluginInitializeParam* param,
         });
         if (descriptor.mod.config.trueFreeLook) {
             RegisterKeyBindings(g_hotkeyPoller, CanonicalBindings(config.trueFreeLookKeyBindings), []() {
-                PluginMod::Instance().ToggleTrueFreeLook();
+                PluginMod::Instance().CycleAimMode();
             });
         }
     } else {

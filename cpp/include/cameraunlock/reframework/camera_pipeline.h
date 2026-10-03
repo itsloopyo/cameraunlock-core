@@ -121,6 +121,13 @@ struct CameraPipelineDescriptor {
     // is split between the camera and the rig.
     cameraunlock::camera::LeanQueryFn leanQuery = nullptr;
 
+    // The eye relief: how far forward of where the game puts the eye, in metres,
+    // a lean in may take it while the sights are up, so the eye stops short of
+    // the rear sight or a scope's eyepiece (ads/lean_handover.h). Measured in the
+    // game, never guessed. 0 or less leaves the lean in bounded by
+    // PositionLimitZ and the level alone, as it always is at the hip.
+    float forwardStopMetres = 0.f;
+
     // The game's un-zoomed field of view, in the units via.Camera.get_FOV reports.
     // Set, yaw, pitch and the lean across the view are scaled so a head movement
     // moves the picture as far as it would at that field of view

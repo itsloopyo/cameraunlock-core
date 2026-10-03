@@ -133,6 +133,28 @@ void TestTrueFreeLookKeepsTheLeanOnTheCamera() {
     Check(NearVec(f.camera, lean) && sim.rigWrites == 0, "true free look: the camera keeps the lean and the rig is never written");
 }
 
+// Along Sim's aim axis, which is where a lean in goes.
+void TestTheForwardStopHoldsOnlyWithTheSightsUp() {
+    const float stop = 0.15f;
+    Sim hip;
+    hip.lean.SetForwardStop(stop);
+    const Vec3 in = hip.aimForward * 0.4f;
+    Vec3 eye;
+    for (unsigned long long t = 0; t < 1000; t += 16) eye = hip.Frame(in, false, false, t);
+    Check(NearVec(eye, hip.body + in), "at the hip a lean in is applied in full");
+
+    for (const bool freeLook : {false, true}) {
+        Sim aimed;
+        aimed.lean.SetForwardStop(stop);
+        RigLeanFrame f;
+        for (unsigned long long t = 0; t < 1000; t += 16) eye = aimed.Frame(in, true, freeLook, t, true, &f);
+        // Not rigWrites: with the sights locked the rig is handed the rounding
+        // left when the lean along the aim is taken off a lean that is all along it.
+        Check(NearVec(eye, aimed.body + aimed.aimForward * stop) && NearVec(f.rigRequest, Vec3()),
+              freeLook ? "and in free look" : "sights up: the eye stops at the forward stop, on the camera");
+    }
+}
+
 void TestEveryStopPutsTheRigBack() {
     const Vec3 lean(0.2f, 0.0f, 0.0f);
     RigLeanFrame f;
@@ -202,6 +224,7 @@ int RunRigLeanTests() {
     TestLeaningInStaysOnTheCamera();
     TestEyeIsTheSameForEverySplit();
     TestTrueFreeLookKeepsTheLeanOnTheCamera();
+    TestTheForwardStopHoldsOnlyWithTheSightsUp();
     TestEveryStopPutsTheRigBack();
     TestTheClampHoldsTheSameStandoffOnEitherCarrier();
 

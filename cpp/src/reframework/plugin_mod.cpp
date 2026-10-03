@@ -11,6 +11,7 @@
 namespace cameraunlock::reframework {
 
 using cameraunlock::TrackingMode;
+using cameraunlock::ads::AimMode;
 
 // The session re-reads the receiver's connection locality every Update() and
 // selects LocalSmoothing or RemoteSmoothing from it, but that wiring is
@@ -60,8 +61,9 @@ void PluginMod::Initialize(const PluginModDescriptor& descriptor) {
     m_appliedMode.store(startMode);
     m_worldSpaceYaw.store(m_config.worldSpaceYaw, std::memory_order_relaxed);
     if (m_descriptor.config.trueFreeLook) {
-        m_trueFreeLook.store(m_config.trueFreeLook, std::memory_order_relaxed);
-        LogInfo("Aim: %s", m_config.trueFreeLook ? "true free look" : "sights locked");
+        const AimMode mode = cameraunlock::ads::DecodeAimMode(m_config.trueFreeLook, m_config.freeLookMarker);
+        m_aimMode.store(mode, std::memory_order_relaxed);
+        LogInfo("%s", cameraunlock::ads::AimModeLabel(mode));
     }
 
     // Assigned by name rather than through the positional constructor.
@@ -330,11 +332,15 @@ void PluginMod::ToggleYawMode() {
     SaveConfig("[General] WorldSpaceYaw", [now](PluginConfig& config) { config.worldSpaceYaw = now; });
 }
 
-void PluginMod::ToggleTrueFreeLook() {
-    bool now = !m_trueFreeLook.load(std::memory_order_relaxed);
-    m_trueFreeLook.store(now, std::memory_order_relaxed);
-    LogInfo("%s", now ? "True free look: ON" : "True free look: OFF (sights locked)");
-    SaveConfig("[Position] TrueFreeLook", [now](PluginConfig& config) { config.trueFreeLook = now; });
+void PluginMod::CycleAimMode() {
+    const AimMode mode = cameraunlock::ads::NextAimMode(m_aimMode.load(std::memory_order_relaxed));
+    m_aimMode.store(mode, std::memory_order_relaxed);
+    LogInfo("%s", cameraunlock::ads::AimModeLabel(mode));
+    const cameraunlock::ads::AimModePair pair = cameraunlock::ads::EncodeAimMode(mode);
+    SaveConfig("[Position] TrueFreeLook and FreeLookMarker", [pair](PluginConfig& config) {
+        config.trueFreeLook = pair.trueFreeLook;
+        config.freeLookMarker = pair.freeLookMarker;
+    });
 }
 
 } // namespace cameraunlock::reframework

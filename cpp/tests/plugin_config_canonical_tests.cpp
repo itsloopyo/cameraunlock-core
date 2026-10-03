@@ -125,6 +125,15 @@ std::string OnlyChangedLine(const std::string& before, const std::string& after)
     return count == 1 ? changed : "";
 }
 
+int ChangedLineCount(const std::string& before, const std::string& after) {
+    const std::vector<std::string> a = SplitCrlf(before);
+    const std::vector<std::string> b = SplitCrlf(after);
+    if (a.size() != b.size()) return -1;
+    int count = 0;
+    for (std::size_t i = 0; i < a.size(); ++i) count += a[i] != b[i];
+    return count;
+}
+
 bool SameBits(float a, float b) { return std::memcmp(&a, &b, sizeof(float)) == 0; }
 
 std::string Bindings(int vk, int chord_letter) {
@@ -902,27 +911,31 @@ void TestLoadIgnoresCanonicalConfig(const fs::path& root) {
           "PluginConfig::Load reads and migrates the same with canonicalConfig set or not");
 }
 
-// A shooter's schema binds TrueFreeLook (default false, Writable) and TrueFreeLookKey, both
-// written default; the import of a legacy file, which never held either, leaves both to
-// Defaults.ini; the toggle's save edits one line; and a canonical file still carrying the retired
-// ads_mode loads with free look off.
+// A shooter's schema binds TrueFreeLook and FreeLookMarker (default false, Writable) and
+// TrueFreeLookKey, all written default; the import of a legacy file, which never held any of
+// them, leaves them to Defaults.ini; a step of the aim mode cycle saves the pair and edits only
+// those lines; and a canonical file still carrying the retired ads_mode loads in sights locked.
 void TestTrueFreeLook(const fs::path& root) {
     const Fixture& re3 = kFixtures[1];
     Fixture shooter = re3;
     shooter.schema.trueFreeLook = true;
 
     const ConfigTable<PluginConfig> table = PluginConfigTable(shooter.schema);
-    Check(!table.defaults().trueFreeLook && table.defaults().trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U",
-          "TrueFreeLook defaults to false, on Insert and Ctrl+Shift+U");
+    Check(!table.defaults().trueFreeLook && !table.defaults().freeLookMarker &&
+              table.defaults().trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U",
+          "TrueFreeLook and FreeLookMarker default to false, on Insert and Ctrl+Shift+U");
     const std::string fresh = RenderCanonicalFresh(table, RenderHeader{shooter.game});
     const std::size_t position = fresh.find("\r\n[Position]\r\n");
     const std::size_t hotkeys = fresh.find("\r\n[Hotkeys]\r\n");
     const std::size_t row = fresh.find("\r\nTrueFreeLook=default\r\n");
+    const std::size_t marker = fresh.find("\r\nFreeLookMarker=default\r\n");
     const std::size_t key = fresh.find("\r\nTrueFreeLookKey=default\r\n");
-    Check(position < row && row < hotkeys && hotkeys < key,
-          "a shooter's fresh file holds TrueFreeLook=default under [Position] and TrueFreeLookKey=default under [Hotkeys]");
+    Check(position < row && row < marker && marker < hotkeys && hotkeys < key,
+          "a shooter's fresh file holds TrueFreeLook=default and FreeLookMarker=default under [Position] and "
+          "TrueFreeLookKey=default under [Hotkeys]");
     const std::string plain = RenderCanonicalFresh(PluginConfigTable(re3.schema), RenderHeader{re3.game});
-    Check(!Contains(plain, "TrueFreeLook"), "a schema without trueFreeLook binds neither row");
+    Check(!Contains(plain, "TrueFreeLook") && !Contains(plain, "FreeLookMarker"),
+          "a schema without trueFreeLook binds none of the rows");
 
     const fs::path dir = Fresh(root, "true-free-look");
     const fs::path file = dir / "CameraUnlock.ini";
@@ -931,17 +944,39 @@ void TestTrueFreeLook(const fs::path& root) {
     const ConfigLoadResult<PluginConfig> loaded = owner.Load();
     const std::string converted = ReadBytes(file);
     Check(loaded.status == ConfigLoadStatus::Migrated && !loaded.config.trueFreeLook &&
-              loaded.config.trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U" &&
+              !loaded.config.freeLookMarker && loaded.config.trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U" &&
               Contains(converted, "\r\nTrueFreeLook=default\r\n") &&
+              Contains(converted, "\r\nFreeLookMarker=default\r\n") &&
               Contains(converted, "\r\nTrueFreeLookKey=default\r\n"),
-          "the legacy import leaves TrueFreeLook and its key to Defaults.ini, sights locked on Insert");
+          "the legacy import leaves the aim mode and its key to Defaults.ini, sights locked on Insert");
 
-    const ConfigSaveResult saved = owner.Save([](PluginConfig& c) { c.trueFreeLook = true; });
-    const std::string after = ReadBytes(file);
-    Check(saved.status == ConfigSaveStatus::Saved && OnlyChangedLine(converted, after) == "TrueFreeLook=true",
-          "the toggle's save edits the TrueFreeLook line and nothing else");
-    ConfigOwner<PluginConfig> restarted(OwnerOptions(shooter, dir));
-    Check(restarted.Load().config.trueFreeLook, "and a restart comes back in true free look");
+    // The cycle, as PluginMod::CycleAimMode saves it: the pair of the next mode, in one save.
+    using cameraunlock::ads::AimMode;
+    const auto step = [&](AimMode from) {
+        const AimMode next = cameraunlock::ads::NextAimMode(from);
+        const cameraunlock::ads::AimModePair pair = cameraunlock::ads::EncodeAimMode(next);
+        const ConfigSaveResult saved = owner.Save([pair](PluginConfig& c) {
+            c.trueFreeLook = pair.trueFreeLook;
+            c.freeLookMarker = pair.freeLookMarker;
+        });
+        ConfigOwner<PluginConfig> restarted(OwnerOptions(shooter, dir));
+        const PluginConfig back = restarted.Load().config;
+        return saved.status == ConfigSaveStatus::Saved &&
+               cameraunlock::ads::DecodeAimMode(back.trueFreeLook, back.freeLookMarker) == next;
+    };
+    const bool to_marker = step(AimMode::SightsLocked);
+    const std::string in_marker = ReadBytes(file);
+    Check(to_marker && Contains(in_marker, "\r\nTrueFreeLook=true\r\n") &&
+              Contains(in_marker, "\r\nFreeLookMarker=true\r\n") && ChangedLineCount(converted, in_marker) == 2,
+          "the first press saves free look with a marker, edits those two lines only, and a restart comes back in it");
+    const bool to_free = step(AimMode::FreeLookMarker);
+    const std::string in_free = ReadBytes(file);
+    Check(to_free && OnlyChangedLine(in_marker, in_free) == "FreeLookMarker=false",
+          "the second saves true free look, and a restart comes back in it");
+    const bool to_locked = step(AimMode::TrueFreeLook);
+    Check(to_locked && OnlyChangedLine(in_free, ReadBytes(file)) == "TrueFreeLook=false",
+          "the third saves sights locked, and a restart comes back in it");
+    WriteBytes(file, converted);
 
     const std::string with_ads_mode = [&] {
         std::string text = converted;

@@ -102,6 +102,7 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
     }
     if (schema.trueFreeLook) {
         table.Concept<Concept::TrueFreeLook>(&PluginConfig::trueFreeLook).Writable();
+        table.Concept<Concept::FreeLookMarker>(&PluginConfig::freeLookMarker).Writable();
         table.Concept<Concept::TrueFreeLookKey>(&PluginConfig::trueFreeLookKeyBindings);
     }
     if (schema.leanCollision) {
@@ -178,10 +179,11 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
             follows.Setting(Concept::LightMultiplier, legacy.flashlightMultiplier, shipped.flashlightMultiplier);
         }
         if (schema.trueFreeLook) {
-            // No legacy build had either setting, so both follow Defaults.ini, the key list unless
-            // an action is on Insert.
+            // No legacy build had any of these settings, so they follow Defaults.ini, the key
+            // list unless an action is on Insert.
             const bool insertTaken = InsertTaken(legacy, schema);
             follows.Setting(Concept::TrueFreeLook, true);
+            follows.Setting(Concept::FreeLookMarker, true);
             follows.Setting(Concept::TrueFreeLookKey, !insertTaken);
             if (insertTaken) {
                 out.trueFreeLookKeyBindings =

@@ -9,6 +9,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - REFramework mods cycle three aim modes, and a lean in can stop at the eye relief
+
+- With `PluginConfigSchema::trueFreeLook`, `PluginConfigTable` binds `[Position] FreeLookMarker`
+  (Writable) beside `TrueFreeLook`, and the legacy import leaves it to Defaults.ini. New field
+  `PluginConfig::freeLookMarker`, default false.
+- `PluginMod::CycleAimMode` replaces `ToggleTrueFreeLook` on the `TrueFreeLookKey` list: sights
+  locked, free look with a marker, true free look, saving `TrueFreeLook` and `FreeLookMarker` in
+  one save and logging `AimModeLabel`. `PluginMod::GetAimMode` returns the mode;
+  `IsTrueFreeLook` is true in both free look modes. `ToggleTrueFreeLook` stays as a deprecated
+  forwarder to `CycleAimMode`.
+- Core draws no marker for a REFramework mod. A mod that sets `trueFreeLook` draws it from
+  `GetAimMode` and `AimMarkerOpacity`, or its second mode looks the same as its third.
+- New `CameraPipelineDescriptor::forwardStopMetres` (default 0, no stop) and
+  `RigLean::SetForwardStop`: with the sights up, a lean in stops that far forward of the game's
+  eye (`LeanHandover::SetForwardStop`). The value is measured in the game.
+- The pipeline logs a `Lean:` line, requested against applied, along the aim and across it, every
+  two seconds while the head is off centre and at once when the sights change.
+- Consuming repos: a REFramework mod with `trueFreeLook` gains a `FreeLookMarker` row in its
+  committed `CameraUnlock.ini` on the next `render-config`, and its render test fails at its next
+  pin bump until that is run.
+
 ### Added - a dev deploy for a Java agent mod
 
 - `Invoke-DevDeployJavaAgent` in `powershell/DevDeploy.psm1` deploys a Java agent mod to every
@@ -236,9 +257,9 @@ reaches the screen, with nothing in the log.
 - 23 concepts are global, where 22 were.
 - The `head-tracking/` and `global/Defaults.ini` fixtures and docs/canonical-config.md carry it.
 
-Not done here: `PluginConfigTable` does not bind `FreeLookMarker`, and
-`PluginMod::ToggleTrueFreeLook` is still a two-state toggle. The `preferences/` fixtures and
-`preference_modes` in data/pipeline-conformance.json do not carry the aim mode.
+Not done here: the `preferences/` fixtures and `preference_modes` in
+data/pipeline-conformance.json do not carry the aim mode. The REFramework half is the entry
+"REFramework mods cycle three aim modes" above.
 
 Consuming repos: a committed canonical file that binds `TrueFreeLookKey` with core's comment
 changes on the next `render-config`, and the mod's render test fails at its next pin bump until

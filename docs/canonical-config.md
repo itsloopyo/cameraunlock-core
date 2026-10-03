@@ -708,12 +708,12 @@ appended to `PluginConfigSchema`, since every mod initialises it positionally; `
 (`reframework/plugin_config_table.h`) binds `UdpPort`, `EnableOnStartup`, `WorldSpaceYaw`
 (Writable), the smoothing pair, `PositionEnabled` (Writable), four position limits, the three
 hotkey lists, a local `DiagnosticMarkerKey` when the schema has a diagnostic marker key, the
-light rows when the schema has a flashlight, `TrueFreeLook` (Writable) and `TrueFreeLookKey` when
-the schema sets `trueFreeLook`, and `CollisionEnabled`, `CollisionMargin` and
-`CollisionReleaseSmoothing` when it sets `leanCollision`. With `trueFreeLook` the bootstrap
-registers the `TrueFreeLookKey` list on `PluginMod::ToggleTrueFreeLook`, which applies the new
-mode, logs it and saves `TrueFreeLook`. That control is still a two-state toggle: `PluginConfigTable`
-does not bind `FreeLookMarker`. The mode control has two states, so there is no
+light rows when the schema has a flashlight, `TrueFreeLook` and `FreeLookMarker` (both Writable)
+and `TrueFreeLookKey` when the schema sets `trueFreeLook`, and `CollisionEnabled`,
+`CollisionMargin` and `CollisionReleaseSmoothing` when it sets `leanCollision`. With
+`trueFreeLook` the bootstrap registers the `TrueFreeLookKey` list on `PluginMod::CycleAimMode`,
+which applies the next of the three aim modes, logs it and saves `TrueFreeLook` and
+`FreeLookMarker` in one save. The tracking mode control has two states, so there is no
 `RotationEnabled`. `PluginConfigLegacyImport(schema)` is the import, and `PluginConfig::Read`,
 which it calls, is frozen. Read replaces a hotkey code that `IsBindableVirtualKey` refuses, one
 outside 0x01-0xFE or a Ctrl, Shift or Alt key, with the row's default, so the import gives that

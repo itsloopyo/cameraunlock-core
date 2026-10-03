@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cameraunlock/ads/aim_mode.h>
 #include <cameraunlock/config/defaults_file.h>
 #include <cameraunlock/input/deferred_actions.h>
 #include <cameraunlock/protocol/udp_receiver.h>
@@ -63,13 +64,18 @@ public:
     void CycleTrackingMode();
     void ToggleYawMode();
 
-    // Sights locked <-> true free look (the shooter-ads-handling skill), for a
-    // schema with trueFreeLook. Applies the new mode, logs it and saves
-    // [Position] TrueFreeLook, on the calling thread. The camera pipeline reads
-    // it each frame, so a press mid-aim rides the lean fade rather than
-    // stepping.
-    void ToggleTrueFreeLook();
-    bool IsTrueFreeLook() const { return m_trueFreeLook.load(std::memory_order_relaxed); }
+    // Sights locked, free look with a marker, true free look and round again
+    // (the shooter-ads-handling skill), for a schema with trueFreeLook. Applies
+    // the next mode, logs it and saves [Position] TrueFreeLook and
+    // FreeLookMarker in one save, on the calling thread. The camera pipeline
+    // reads the mode each frame, so a press mid-aim rides the lean fade rather
+    // than stepping.
+    void CycleAimMode();
+    [[deprecated("the key cycles three aim modes: call CycleAimMode")]]
+    void ToggleTrueFreeLook() { CycleAimMode(); }
+    cameraunlock::ads::AimMode GetAimMode() const { return m_aimMode.load(std::memory_order_relaxed); }
+    // Both free look modes: the lean stays on the camera through the aim.
+    bool IsTrueFreeLook() const { return GetAimMode() != cameraunlock::ads::AimMode::SightsLocked; }
 
     // Hotkey callbacks fire on the HotkeyPoller's background thread, but
     // CycleTrackingMode mutates the session's non-atomic
@@ -131,7 +137,7 @@ private:
 
     // Read on the render thread, toggled on the hotkey thread.
     std::atomic<bool> m_worldSpaceYaw{false};
-    std::atomic<bool> m_trueFreeLook{false};
+    std::atomic<cameraunlock::ads::AimMode> m_aimMode{cameraunlock::ads::AimMode::SightsLocked};
 
     cameraunlock::input::DeferredAction m_cycleModeRequested;
     // Written on the render thread by ApplyTrackingMode. In canonical mode the

@@ -145,6 +145,32 @@ static float ZoomFactor() {
     return factor;
 }
 
+// What a lean asked for and what was applied, along the aim and across it, on a
+// cadence while the head is off centre and at once when the sights change. A
+// lean in that comes up short reads straight off this line: requested is the
+// lean after the position limits and the zoom factor, applied is what the clamp,
+// the forward stop and the hand-over left of it.
+constexpr uint64_t kLeanSampleIntervalUs = 2ull * 1000000ull;
+
+static void LogLean(const cameraunlock::math::Vec3& requested, const cameraunlock::math::Vec3& applied,
+                    const cameraunlock::math::Vec3& rig, const cameraunlock::math::Vec3& aimForward, bool aiming,
+                    float zoom) {
+    static uint64_t s_lastUs = 0;
+    static bool s_aiming = false;
+    const uint64_t now = cameraunlock::time::QpcNowMicros();
+    if (aiming == s_aiming && now - s_lastUs < kLeanSampleIntervalUs) return;
+    if (requested.SqrMagnitude() < 1e-6f && aiming == s_aiming) return;
+    s_lastUs = now;
+    s_aiming = aiming;
+    const float requestedAlong = cameraunlock::math::Vec3::Dot(requested, aimForward);
+    const float appliedAlong = cameraunlock::math::Vec3::Dot(applied, aimForward);
+    LogInfo("Lean: requested %.3f m along the aim, %.3f m across; applied %.3f m along, %.3f m across "
+            "(camera %.3f m, rig %.3f m); sights %s, zoom %.4f",
+            requestedAlong, (requested - aimForward * requestedAlong).Magnitude(), appliedAlong,
+            (applied - aimForward * appliedAlong).Magnitude(), (applied - rig).Magnitude(), rig.Magnitude(),
+            aiming ? "up" : "down", zoom);
+}
+
 // Every change of state, and a sample on a cadence while the head is off centre,
 // since transitions alone cannot tell a clear room from a query that never runs.
 static void LogLeanClampState(bool leaning) {
@@ -219,10 +245,12 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
         // The clean camera's z axis, the aim line up to sign, which the split ignores.
         const cameraunlock::math::Vec3 aimForward =
             cameraunlock::math::Vec3(worldMat->m[2][0], worldMat->m[2][1], worldMat->m[2][2]).Normalized();
+        const cameraunlock::math::Vec3 requested = cameraOffset;
         const RigLeanFrame frame = g_rigLean.Update(
             gameEye, cameraOffset, aimForward, applied, aiming, PluginMod::Instance().IsTrueFreeLook(), rigAvailable,
             PluginMod::Instance().GetLastDeltaTime(), cameraunlock::time::QpcNowMicros() / 1000ull, query, nullptr);
         cameraOffset = frame.camera;
+        LogLean(requested, frame.camera + applied, frame.rigRequest, aimForward, aiming, zoom);
         g_rig.request = frame.rigRequest;
         if (query) LogLeanClampState(cameraOffset.SqrMagnitude() > 1e-8f || applied.SqrMagnitude() > 1e-8f);
     } else if (shapedLean) {
@@ -404,6 +432,10 @@ void InitCameraPipeline(const CameraPipelineDescriptor& descriptor) {
     clamp.skin = config.collisionMargin;
     clamp.release_smoothing = config.collisionReleaseSmoothing;
     g_rigLean.Clamp().SetSettings(clamp);
+    if (descriptor.forwardStopMetres > 0.f) {
+        g_rigLean.SetForwardStop(descriptor.forwardStopMetres);
+        LogInfo("Lean in: stops %.3f m forward of the eye while the sights are up", descriptor.forwardStopMetres);
+    }
     if (descriptor.leanQuery) {
         LogInfo("Lean clamp: %s, margin %.3f m, release smoothing %.2f",
                 config.collisionEnabled ? "on" : "off (CollisionEnabled=false)", clamp.skin, clamp.release_smoothing);
