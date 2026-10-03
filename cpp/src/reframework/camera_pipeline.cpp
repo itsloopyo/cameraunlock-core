@@ -242,9 +242,12 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
         g_clampLog.lastCleanEye = cleanEye;
         g_clampLog.hasLastCleanEye = true;
 
-        // The clean camera's z axis, the aim line up to sign, which the split ignores.
+        // The way the clean camera looks. The sign matters: the forward stop
+        // holds a lean in, not a lean back.
+        float forward[3];
+        CameraForward(*worldMat, forward);
         const cameraunlock::math::Vec3 aimForward =
-            cameraunlock::math::Vec3(worldMat->m[2][0], worldMat->m[2][1], worldMat->m[2][2]).Normalized();
+            cameraunlock::math::Vec3(forward[0], forward[1], forward[2]).Normalized();
         const cameraunlock::math::Vec3 requested = cameraOffset;
         const RigLeanFrame frame = g_rigLean.Update(
             gameEye, cameraOffset, aimForward, applied, aiming, PluginMod::Instance().IsTrueFreeLook(), rigAvailable,

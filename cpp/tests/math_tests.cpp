@@ -159,13 +159,13 @@ int RunMathTests() {
         Check(RotationIsOrthonormal(m2), "world-space combined rotation stays orthonormal");
     }
 
-    // Position offset translates along the pre-rotation basis. X and Z are both
-    // negated at this boundary; see re_math_tests.cpp for why Z is.
+    // Position offset translates along the pre-rotation basis. X is negated at
+    // this boundary and Z is not; see re_math_tests.cpp for why.
     {
         Matrix4x4f m = Identity();
         ApplyViewSpacePositionOffset(m, Identity(), 0.5f, 0.2f, -0.3f);
-        Check(NearEqual(m.m[3][0], -0.5f) && NearEqual(m.m[3][1], 0.2f) && NearEqual(m.m[3][2], 0.3f),
-              "position offset applies inverted X and Z along identity basis");
+        Check(NearEqual(m.m[3][0], -0.5f) && NearEqual(m.m[3][1], 0.2f) && NearEqual(m.m[3][2], -0.3f),
+              "position offset applies inverted X, and Z as it is, along identity basis");
 
         Matrix4x4f none = Identity();
         ApplyViewSpacePositionOffset(none, Identity(), 0, 0, 0);

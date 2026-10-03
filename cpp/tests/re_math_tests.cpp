@@ -2,11 +2,12 @@
 //
 // The one these exist for is the direction of the head-translation offset.
 // Negative z is the forward lean everywhere inside the pipeline and the clamp
-// is asymmetric on that basis - 0.40m forward, 0.10m back. RE Engine's
-// camera-local +z is forward, so the boundary has to negate. It shipped without
-// the negation, which inverts the lean and swaps the two budgets over, and
-// nothing failed: the camera still moved, just the wrong way on the wrong
-// allowance. A test is the only thing that catches that.
+// is asymmetric on that basis - 0.40m forward, 0.10m back. An RE Engine camera
+// looks down the negative row 2 of its world matrix (CameraForward, measured in
+// Resident Evil 2 and Requiem), so z goes through the boundary as it is. A
+// negation there inverts the lean and swaps the two budgets over, and nothing
+// fails: the camera still moves, just the wrong way on the wrong allowance. It
+// shipped that way from 2026-08-30, on a test that assumed row 2 was forward.
 
 #include <cameraunlock/processing/position_processor.h>
 #include <cameraunlock/reframework/re_math.h>
@@ -34,7 +35,7 @@ bool Near(float a, float b) { return std::fabs(a - b) < 1e-4f; }
 // A twentieth of a pixel is well inside anything a player could see.
 bool NearPixels(float a, float b) { return std::fabs(a - b) < 0.05f; }
 
-// Identity camera: rows 0/1/2 are right/up/forward, row 3 is the position.
+// Identity camera: row 3 is the position, and it looks down world -z.
 cameraunlock::reframework::Matrix4x4f IdentityCamera() {
     cameraunlock::reframework::Matrix4x4f m{};
     m.m[0][0] = 1.0f;
@@ -60,26 +61,32 @@ float SteadyLean(float rawZ, bool invertZ) {
     return out.z;
 }
 
-// World-space z the camera ends at when the pipeline hands the boundary an
-// offset, with the camera looking down world +z.
-float AppliedWorldZ(float offsetZ) {
+// How far along the way it looks the camera ends up when the pipeline hands the
+// boundary an offset.
+float AppliedAlongTheView(float offsetZ) {
     using namespace cameraunlock::reframework;
     Matrix4x4f world = IdentityCamera();
     const Matrix4x4f axes = world;
+    float forward[3];
+    CameraForward(axes, forward);
     ApplyViewSpacePositionOffset(world, axes, 0.0f, 0.0f, offsetZ);
-    return world.m[3][2];
+    return world.m[3][0] * forward[0] + world.m[3][1] * forward[1] + world.m[3][2] * forward[2];
 }
 
 void TestForwardLeanMovesTheCameraForward() {
     std::cout << "ApplyViewSpacePositionOffset direction:\n";
 
-    // The camera's forward is +z in world space here, so a forward lean has to
-    // raise the world z. The pipeline expresses that lean as NEGATIVE z.
-    Check(AppliedWorldZ(-0.40f) > 0.0f,
-          "a negative pipeline z (forward lean) moves the camera along its forward axis");
-    Check(AppliedWorldZ(0.10f) < 0.0f,
-          "a positive pipeline z (backward lean) moves the camera against its forward axis");
-    Check(Near(AppliedWorldZ(-0.40f), 0.40f), "the magnitude carries through unchanged");
+    // The pipeline expresses a forward lean as NEGATIVE z.
+    Check(AppliedAlongTheView(-0.40f) > 0.0f,
+          "a negative pipeline z (forward lean) moves the camera the way it looks");
+    Check(AppliedAlongTheView(0.10f) < 0.0f,
+          "a positive pipeline z (backward lean) moves the camera away from what it looks at");
+    Check(Near(AppliedAlongTheView(-0.40f), 0.40f), "the magnitude carries through unchanged");
+
+    float forward[3];
+    cameraunlock::reframework::CameraForward(IdentityCamera(), forward);
+    Check(Near(forward[0], 0.0f) && Near(forward[1], 0.0f) && Near(forward[2], -1.0f),
+          "a camera looks down the negative row 2 of its world matrix");
 
     using namespace cameraunlock::reframework;
     Matrix4x4f world = IdentityCamera();
@@ -96,8 +103,8 @@ void TestTheAsymmetricBudgetLandsTheRightWayRound() {
     Check(Near(forward, -0.40f), "the processor gives a forward lean the 0.40m budget");
     Check(Near(backward, 0.10f), "the processor gives a backward lean the 0.10m budget");
 
-    const float forwardWorld = AppliedWorldZ(forward);
-    const float backwardWorld = AppliedWorldZ(backward);
+    const float forwardWorld = AppliedAlongTheView(forward);
+    const float backwardWorld = AppliedAlongTheView(backward);
     Check(forwardWorld > 0.0f && backwardWorld < 0.0f,
           "forward travel is forward in world space and backward is backward");
     Check(Near(forwardWorld, 0.40f) && Near(backwardWorld, -0.10f),

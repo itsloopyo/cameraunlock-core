@@ -9,6 +9,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - a lean in moved an RE Engine camera backwards
+
+- `reframework/re_math.h` `ViewSpaceOffsetToWorld` no longer negates z. An RE Engine camera
+  looks down the negative row 2 of its world matrix, so the pipeline's z, negative for a
+  forward lean, is already the engine's. The negation, added on 2026-08-30 on the belief that
+  row 2 was forward, drove a lean in backwards on the 0.40m budget and a lean back forwards on
+  0.10m in every REFramework mod.
+- Measured: in Resident Evil 2, with no mod loaded, the engine's own view and projection
+  matrices put eye - row2 * 5 m in front of the camera and eye + row2 * 5 m behind it. In
+  Requiem a lean in of 30 cm now brings the room closer, where it took the eye back.
+- New `CameraForward(camera, out)` in `re_math.h`: the direction a camera looks, the negative
+  row 2. The camera pipeline's `aimForward` is now that, so the forward stop
+  (`forwardStopMetres`) holds a lean in and the `Lean:` log line reads positive along the aim
+  for one.
+- `re_math_tests.cpp` and `math_tests.cpp` hold the direction to the measured one. The first
+  had locked the negation in on the same wrong assumption.
+- Consuming repos: every REFramework mod leans the right way at its next pin bump, with no
+  source change. A mod that casts or measures along the view from `m[2]` of the camera matrix
+  (Requiem's aim trace did) is casting behind the player and changes to `CameraForward`.
+
 ### Changed - **BREAKING** the Java agent install starts the mod through a boot class, not `-javaagent`
 
 A Project Zomboid install made by `install-body-javaagent.cmd` did not start: the game exited

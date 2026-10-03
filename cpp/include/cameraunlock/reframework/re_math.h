@@ -128,29 +128,41 @@ inline void ApplyCameraLocalHeadRotation(Matrix4x4f& worldMat, float yawRad, flo
     PreMultiplyRotation3x3(worldMat, headRot);
 }
 
+// The unit direction a camera looks in, in world space: the negative of row 2
+// of its world matrix. Measured, not assumed: in Resident Evil 2 and in Requiem
+// the engine's own view and projection matrices put the point at eye - row2 * d
+// in front of the camera and eye + row2 * d behind it. The projections below
+// walk out along +row2 on both the clean and the head-tracked matrix, so their
+// rotation terms come out the same either way; anything that casts or moves
+// along the view in the world needs this.
+inline void CameraForward(const Matrix4x4f& camera, float out[3]) {
+    out[0] = -camera.m[2][0];
+    out[1] = -camera.m[2][1];
+    out[2] = -camera.m[2][2];
+}
+
 // Translate the camera in the body-oriented basis captured before head
 // rotation, so the offset follows body orientation rather than the head-turned
 // view. Offsets are in meters, in the pipeline's own convention.
 //
-// This is the engine boundary, and the boundary is where the z flip belongs.
-// Negative z is the forward lean everywhere inside the pipeline and the
-// asymmetric clamp is built on it - [-limit_z, +limit_z_back] puts the generous
-// 0.40m budget on the negative side. RE Engine stores its basis axes in rows and
-// row 2 is camera FORWARD (ProjectAimToViewTangents walks the aim point out
-// along clean.m[2]), so pz multiplies a forward axis and the incoming z has to
-// be negated to reach it. Without that negation a forward lean drove the camera
-// backwards on the 0.40m budget and a backward lean forwards on 0.10m.
+// This is the engine boundary. Negative z is the forward lean everywhere inside
+// the pipeline and the asymmetric clamp is built on it - [-limit_z,
+// +limit_z_back] puts the generous 0.40m budget on the negative side. An RE
+// Engine camera looks down the NEGATIVE row 2 of its world matrix (CameraForward
+// above), so the pipeline's z and the engine's agree and z goes through as it
+// is. Negating it here, which this did from 2026-08-30 until it was measured,
+// drives a forward lean backwards on the 0.40m budget.
 //
-// X is negated here as well, to match RE Engine handedness. Doing either flip
-// with the invert_x / invert_z config flags instead is the documented mistake:
-// those land BEFORE the processor's clamp, so the lean comes out on the wrong
-// budget. See docs/porting-the-pipeline.md section 11.
+// X is negated, to match RE Engine handedness. Doing a flip with the invert_x /
+// invert_z config flags instead is the documented mistake: those land BEFORE
+// the processor's clamp, so the lean comes out on the wrong budget. See
+// docs/porting-the-pipeline.md section 11.
 // The world-space vector ApplyViewSpacePositionOffset adds to the camera.
 inline void ViewSpaceOffsetToWorld(const Matrix4x4f& preRotationAxes, float offsetX, float offsetY,
                                    float offsetZ, float out[3]) {
     float px = -offsetX;
     float py = offsetY;
-    float pz = -offsetZ;
+    float pz = offsetZ;
     const Matrix4x4f& gm = preRotationAxes;
     out[0] = px * gm.m[0][0] + py * gm.m[1][0] + pz * gm.m[2][0];
     out[1] = px * gm.m[0][1] + py * gm.m[1][1] + pz * gm.m[2][1];
