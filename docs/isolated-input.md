@@ -228,8 +228,9 @@ the real foreground sampled through every script and the game never holding it:
   walked the player 4.2 m and `Escape` opened and closed the pause menu.
 - Mouse: `mouse left click` fired nothing until a `cursor 640 360` had been
   played, and fired the equipped weapon after it.
-- The game's `GetKeyState` import was not followed up: nothing tested needed a
-  modifier held.
+- Modifiers held (2026-10-04): `down Ctrl`, `down Shift`, `tap G` threw a grenade and the same
+  with `H` ran the game's HUD toggle, and `down Ctrl` alone showed the laser pointer until
+  `up Ctrl`. The game's `GetKeyState` import was not followed up: these did not need it.
 
 Fallout: New Vegas 1.4.0.525 (Steam, 32-bit, DirectInput 8), 2026-10-03, with the
 real foreground sampled through every script and the game never holding it:

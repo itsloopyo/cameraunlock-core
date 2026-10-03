@@ -9,6 +9,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - Deep Rock Galactic's hotkey rows follow the rule for a key the game takes
+
+- `data/config-format.json` `per_game` for deep-rock-galactic-headtracking, from a measurement on
+  2026-10-04: `CycleTrackingModeKey=PageUp, Ctrl+Shift+J` as before, and
+  `YawModeKey=PageDown, Ctrl+Shift+T`, which had no chord. The game acts on G and H with Ctrl and
+  Shift held and on none of J, T, U, K and B.
+- docs/isolated-input.md, Measured: Deep Rock Galactic takes a letter key with Ctrl and Shift
+  held from a script.
+- Consumer change: deep-rock-galactic-headtracking only, which marks `YawModeKey` `PerGame` with
+  the new list.
+
 ### Fixed - a lean in moved an RE Engine camera backwards
 
 - `reframework/re_math.h` `ViewSpaceOffsetToWorld` no longer negates z. An RE Engine camera

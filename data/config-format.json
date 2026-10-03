@@ -673,13 +673,13 @@
     "deep-rock-galactic-headtracking": [
       {
         "row": "CycleTrackingModeKey",
-        "reason": "The fleet chord clashes with the game's own binding: in Deep Rock Galactic G throws a grenade, and the game fires it with Ctrl+Shift held. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
-        "approved": "2026-09-27"
+        "reason": "Measured in game on 2026-10-04, on foot with a weapon out, with Ctrl and Shift held: G throws a grenade and H runs the game's HUD toggle; J, T, U, K and B do nothing; Y and N run the game's answer to a join request, which did nothing with no request pending. Ctrl alone shows the laser pointer and Shift alone sprints, and both end when the key comes up, so the pair stays Ctrl+Shift. G is taken, so the tracking mode takes J, the first spare letter. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+J.",
+        "approved": "2026-10-04"
       },
       {
         "row": "YawModeKey",
-        "reason": "The fleet chord clashes with the game's own binding: in Deep Rock Galactic H toggles the HUD, and the game fires it with Ctrl+Shift held. The committed file holds YawModeKey=PageDown.",
-        "approved": "2026-09-27"
+        "reason": "Measured in game on 2026-10-04, on foot with a weapon out, with Ctrl and Shift held: G throws a grenade and H runs the game's HUD toggle; J, T, U, K and B do nothing; Y and N run the game's answer to a join request, which did nothing with no request pending. Ctrl alone shows the laser pointer and Shift alone sprints, and both end when the key comes up, so the pair stays Ctrl+Shift. H is taken and the tracking mode holds J, so yaw mode takes T, the next spare letter. The committed file holds YawModeKey=PageDown, Ctrl+Shift+T.",
+        "approved": "2026-10-04"
       }
     ],
     "starfield-headtracking": [
