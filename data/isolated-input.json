@@ -18,7 +18,7 @@
       "what": "keys polled with GetAsyncKeyState",
       "imports": ["GetAsyncKeyState"],
       "status": "supported",
-      "proven_in": ["starfield"]
+      "proven_in": ["starfield", "ready-or-not"]
     },
     "key-state": {
       "what": "keys polled with GetKeyState or GetKeyboardState, which read the thread's message-synchronised state",
@@ -36,7 +36,7 @@
       "what": "where the mouse cursor is, read with GetCursorPos or from WM_MOUSEMOVE, as a menu with a pointer does. The `cursor` command places it.",
       "imports": ["GetCursorPos"],
       "status": "supported",
-      "proven_in": ["far-cry-6"]
+      "proven_in": ["far-cry-6", "ready-or-not"]
     },
     "gameinput": {
       "what": "the GDK's GameInput API",

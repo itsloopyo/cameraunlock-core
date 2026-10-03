@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - isolated input is proven in Ready or Not, and the proof's blind spot is written down
+
+- `data/isolated-input.json`: `async-key-state` and `cursor-position` are also proven in
+  ready-or-not. Unreal takes mouse buttons from window messages, so its scripts place the cursor
+  first.
+- docs/isolated-input.md: what was measured there, and a limit of `Test-IsolatedInputProof`: it
+  passed on a weapon swaying at idle with no input taken, so such a title is proven from the
+  mod's log.
+- No consumer change.
+
 ### Added - isolated input places the cursor for a menu and keeps the game in the background by itself
 
 Far Cry 6's menus read where the cursor is, and its windows take the foreground more than once.

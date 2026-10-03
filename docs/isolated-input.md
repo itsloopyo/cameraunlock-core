@@ -193,6 +193,9 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
   for the game window again once the one it had is gone or hidden.
 - Games running at once share the GPU and the speakers. How many a machine
   carries has not been measured.
+- `Test-IsolatedInputProof` compares two captures, so a picture that moves by
+  itself (a weapon swaying at idle) passes it with no input taken. Prove such a
+  title with an input whose effect the mod also logs, and read the log.
 
 ## Measured
 
@@ -264,3 +267,22 @@ windowed and behind other windows for the whole session:
   process with exit code 0.
 - The intro before the main menu does not skip on Space and runs about three
   minutes.
+
+Ready or Not (Steam, Unreal Engine 5.3), 2026-10-03, game behind other windows:
+
+- Unreal takes mouse buttons from window messages, not from raw input: with no
+  cursor placed, the scripted right button left the sights down. After
+  `cursor 960 540` the right button raised and lowered them (the mod's log read
+  `aiming=1` and the field of view went from 90 to 67.5) and the left fired a
+  round.
+- The mod's hotkeys fired through the synthetic key state, `Insert` and the
+  `Ctrl+Shift+U` chord.
+- `Test-IsolatedInputProof` passed with the sights still down, on idle weapon
+  sway alone. The log is what proved the input.
+- The first window found was the launch splash.
+- The pose sender drove the mod through whole sessions, rotation and position,
+  on the mod's test port.
+- `Save-GameCapture` worked with the window at the bottom of the z-order. With
+  DLSS frame generation on, some captures showed a moving HUD element bent or
+  doubled and others showed it sharp; with it off every capture was sharp.
+- Not tried: `move`, `text`, and the game's own keyboard bindings.
