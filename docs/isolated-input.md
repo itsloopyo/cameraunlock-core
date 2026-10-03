@@ -76,8 +76,11 @@ Key names are the ones hotkey lists use (`data/keys.json`).
 
 ## Measured
 
-Starfield 1.16.244.0 (Steam), 2026-10-03: with the game in the background and
-the foreground never leaving another window, a scripted `E` dismissed a dialog,
-right mouse raised the sights, mouse movement turned the view, and `Insert` and
-`Ctrl+Shift+U` stepped the mod's aim mode. `text` and the game's console were
-not tried.
+Starfield 1.16.244.0 (Steam), 2026-10-03, one session. The detours installed, the
+game window was found, and scripts played. `Insert` and `Ctrl+Shift+U` stepped the
+mod's aim mode through the synthetic key state. Whether the GAME takes the
+synthetic raw input is not established: a dialog was dismissed, the sights came
+up and the view turned in that session, but a person brought the game to the
+foreground and pressed keys during it, and the real devices reach a foreground
+game. Repeat it with the foreground watched for the whole run before relying on
+it. `text` and the game's console were not tried.

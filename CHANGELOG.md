@@ -22,7 +22,8 @@ game and the mod behave as if the game had the foreground while it sits behind o
 - `cameraunlock/dev/input_script.h` is the command language (`down`, `up`, `tap` with chords,
   `mouse`, `move`, `text`, `wait`), pure and tested in `input_script_tests.cpp`.
 - For games that read raw input. Lab builds only: with it on the game does not answer to the real
-  keyboard. docs/isolated-input.md has the rest, and what was measured in Starfield.
+  keyboard. docs/isolated-input.md has the rest. Not yet proven against a game: the one Starfield
+  session was contaminated by real input, see that file.
 - No consumer change.
 
 ### Fixed - the DX12 overlay reads the swap chain's queue again whenever it rebuilds
