@@ -3,10 +3,10 @@
   "_comment": "What isolated input (docs/isolated-input.md) can drive today. IsolatedGameTest.psm1 reads a game's import table against input_paths and a mod's kind against mod_hosts. An entry that is not supported is work to do in core before that game is tested, never a reason to test with the real keyboard and mouse: its `build` says what to add, and the entry is changed to supported, with the game it was proven in, in the same core commit.",
   "input_paths": {
     "raw-input": {
-      "what": "RegisterRawInputDevices and WM_INPUT, read back through GetRawInputData",
+      "what": "RegisterRawInputDevices and WM_INPUT, read back through GetRawInputData. A key is also posted as WM_KEYDOWN and WM_KEYUP, which is where an engine that takes raw input for the mouse alone (Unreal Engine 4) reads its keys",
       "imports": ["GetRawInputData", "RegisterRawInputDevices"],
       "status": "supported",
-      "proven_in": ["starfield"]
+      "proven_in": ["starfield", "deep-rock-galactic"]
     },
     "raw-input-buffered": {
       "what": "raw input read in batches through GetRawInputBuffer instead of one WM_INPUT at a time",

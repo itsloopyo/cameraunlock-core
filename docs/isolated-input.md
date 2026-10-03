@@ -138,6 +138,14 @@ window as a `WM_INPUT` whose handle is one of ours, and the `GetRawInputData`
 detour answers for those handles. The real devices send a background game
 nothing, which is what keeps the two apart.
 
+A key is also posted as `WM_KEYDOWN` and `WM_KEYUP`, as Windows sends it beside
+raw input. Unreal Engine 4 registers raw input for the mouse and takes its keys
+from the window procedure, so without these it turns its view for `move` and
+answers to no key. They are not posted where the game registered its keyboard
+with `RIDEV_NOLEGACY`, because Windows sends none there. A mouse button reaches
+such a game as a window message too, which is posted once a `cursor` command has
+placed the cursor: start the script with `cursor <x> <y>`.
+
 | Function | Answer | Why |
 |---|---|---|
 | `GetForegroundWindow` | the game's own window | neither the game nor the mod stands down for being in the background |
@@ -209,6 +217,19 @@ through every script and the game never holding it:
   passed, sights, capture, stop, restore.
 - The pose sender was checked against a local listener, not yet in a game
   through this module.
+
+Deep Rock Galactic 1.40.154534.0 (Steam, Unreal Engine 4.27), 2026-10-03, with
+the real foreground sampled through every script and the game never holding it:
+
+- `move` turned the view (200 counts, about 16 degrees) before this change and
+  after it.
+- Keyboard: before keys were posted as window messages, `down W` did not walk
+  the player and `Escape` opened nothing. After, `down W`, `wait 1500`, `up W`
+  walked the player 4.2 m and `Escape` opened and closed the pause menu.
+- Mouse: `mouse left click` fired nothing until a `cursor 640 360` had been
+  played, and fired the equipped weapon after it.
+- The game's `GetKeyState` import was not followed up: nothing tested needed a
+  modifier held.
 
 Fallout: New Vegas 1.4.0.525 (Steam, 32-bit, DirectInput 8), 2026-10-03, with the
 real foreground sampled through every script and the game never holding it:

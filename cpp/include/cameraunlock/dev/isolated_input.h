@@ -11,6 +11,10 @@
 // game nothing while it is in the background, which is what keeps the two
 // apart.
 //
+// A key also arrives as WM_KEYDOWN and WM_KEYUP, as it does from Windows, for a
+// game that takes its keys from its window procedure. Not where the game
+// registered its keyboard with RIDEV_NOLEGACY: Windows sends none there.
+//
 // What else is detoured, and why, all in user32:
 //
 //   - GetForegroundWindow answers the game's own window, so neither the game
@@ -660,8 +664,37 @@ inline bool SendRawKey(int vk, bool down) {
     return Post(event);
 }
 
+// True when the game registered its keyboard for raw input with RIDEV_NOLEGACY:
+// Windows then sends it no WM_KEYDOWN or WM_KEYUP, so the script sends none
+// either.
+inline bool LegacyKeyMessagesOff() {
+    RAWINPUTDEVICE devices[16];
+    UINT count = 16;
+    const UINT got = GetRegisteredRawInputDevices(devices, &count, sizeof(RAWINPUTDEVICE));
+    if (got == static_cast<UINT>(-1)) return false;
+    for (UINT i = 0; i < got; ++i) {
+        if (devices[i].usUsagePage == 0x01 && devices[i].usUsage == 0x06 &&
+            (devices[i].dwFlags & RIDEV_NOLEGACY) == RIDEV_NOLEGACY)
+            return true;
+    }
+    return false;
+}
+
+// The key as the window message Windows sends beside raw input. A game that
+// takes its keys from its window procedure (Unreal Engine 4 does) reads nothing
+// else.
+inline void PostKeyMessage(int vk, bool down) {
+    if (LegacyKeyMessagesOff()) return;
+    const LPARAM scan = static_cast<LPARAM>(MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC) & 0xFF) << 16;
+    const LPARAM extended = IsExtendedKey(vk) ? (static_cast<LPARAM>(1) << 24) : 0;
+    const LPARAM released = down ? 0 : static_cast<LPARAM>(0xC0000000);
+    PostMessageW(S().window.load(std::memory_order_acquire), down ? WM_KEYDOWN : WM_KEYUP,
+                 static_cast<WPARAM>(vk), 1 | scan | extended | released);
+}
+
 inline bool SendKey(int vk, bool down) {
     const bool directInput = SendDirectInputKey(VkToDik(vk), down);
+    PostKeyMessage(vk, down);
     return SendRawKey(vk, down) && directInput;
 }
 

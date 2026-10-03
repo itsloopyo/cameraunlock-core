@@ -53,6 +53,16 @@ unless `jre64\bin` is on PATH. Measured with no Java on PATH and with another JD
   committed `CameraUnlock.ini` on the next `render-config`, and its render test fails at its next
   pin bump until that is run.
 
+### Added - isolated input posts a key as `WM_KEYDOWN` and `WM_KEYUP` too
+
+- `cameraunlock/dev/isolated_input.h`: every key the script presses is posted to the game window
+  as the window message Windows sends beside raw input, unless the game registered its keyboard
+  with `RIDEV_NOLEGACY`. Unreal Engine 4 takes raw input for the mouse alone and reads its keys
+  from the window procedure, so Deep Rock Galactic turned its view for `move` and answered to no
+  key. Measured there: `down W` walks the player and `Escape` opens the pause menu
+  (`data/isolated-input.json`, `docs/isolated-input.md`).
+- Consuming repos: nothing to change. A dev build picks it up at its next core bump.
+
 ### Fixed - isolated input installs where `SetCursorPos` is already written over
 
 - `cameraunlock/dev/isolated_input.h`: where `user32.dll`'s `SetCursorPos` cannot be detoured,
