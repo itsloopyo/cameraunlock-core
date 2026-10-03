@@ -52,7 +52,9 @@
 //     session: Dying Light 2 calls Present1, and with frame generation on
 //     Streamline turns that into Present calls from its own thread, so with it
 //     switched off in the settings the frames arrive through Present1 alone.
-//     Both are hooked and draw through the same path.
+//     Far Cry 6 has no frame generation and calls only Present1, and the overlay
+//     drew there through that hook. Both are hooked and draw through the same
+//     path.
 //   - **Explicit transitions.** The back buffer arrives at Present in the
 //     PRESENT state and has to be handed back in it.
 //

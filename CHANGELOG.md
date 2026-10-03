@@ -9,6 +9,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - isolated input places the cursor for a menu and keeps the game in the background by itself
+
+Far Cry 6's menus read where the cursor is, and its windows take the foreground more than once.
+Proven in that game in the background (docs/isolated-input.md, Measured).
+
+- A new command, `cursor <x> <y>`, puts the mouse cursor at a point of the client area: as a
+  `WM_MOUSEMOVE`, as what `GetCursorPos` answers, and a `mouse` button then also arrives as the
+  window message of a click there.
+- The game's window procedure no longer sees the messages that say it lost the foreground
+  (`WM_ACTIVATEAPP`, `WM_ACTIVATE`, `WM_KILLFOCUS`). A mod that dropped them in a window procedure
+  of its own can take that out.
+- The dev build gives the real foreground back from inside the game whenever one of its windows
+  takes it. A game that took the foreground after `Start-IsolatedGame`'s settle time used to keep
+  it, and Windows refused a hand-back from outside the game.
+- The game window is looked for again once the one first found is gone or hidden (a splash
+  screen).
+- `data/isolated-input.json`: `directinput` is also proven in far-cry-6, and `cursor-position` is
+  new and `supported`.
+- The DX12 overlay's `Present1` hook is confirmed in a game: Far Cry 6 presents through `Present1`
+  alone, and `AimMarkerDX12` drew there.
+- No consumer change. A dev build that already calls `StartIsolatedInput` gets all of it on its
+  next core bump.
+
 ### Added - isolated input answers DirectInput 8 keyboards and mice
 
 A game that reads its keyboard and mouse through `dinput8.dll` got nothing from a test script:

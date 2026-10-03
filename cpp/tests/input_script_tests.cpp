@@ -92,6 +92,11 @@ int RunInputScriptTests() {
     Check(Rejects("tap E soon"), "tap refuses a hold time that is not a number");
     Check(Rejects("mouse right press"), "mouse refuses anything but down, up or click, and adds nothing");
     Check(Rejects("mouse fourth down"), "mouse refuses an unknown button");
+    steps = Parse("cursor 150 238", ok);
+    Check(ok && steps.size() == 1 && steps[0].action == InputAction::kCursor && steps[0].dx == 150 && steps[0].dy == 238,
+          "cursor takes a point of the client area");
+    Check(Rejects("cursor 150"), "cursor refuses one number");
+    Check(Rejects("cursor -5 20"), "cursor refuses a point left of the client area");
     Check(Rejects("move 10"), "move refuses one number");
     Check(Rejects("move 1.5 2"), "move refuses a fraction");
     Check(Rejects("wait"), "wait refuses no time");

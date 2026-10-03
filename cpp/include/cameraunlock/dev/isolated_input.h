@@ -22,6 +22,19 @@
 //     otherwise trap and recentre the real cursor.
 //   - SetForegroundWindow does nothing, so the game cannot take the foreground
 //     back.
+//   - GetCursorPos answers the point the last `cursor` command gave, once one
+//     has: a menu that reads where the cursor is gets the script's cursor, as a
+//     WM_MOUSEMOVE at that point and as the position it reads back, and a button
+//     then also arrives as the window message a click there would be.
+//
+// And two things that keep the game in the background without it knowing:
+//
+//   - The real foreground is watched, and whenever a window of the game holds it
+//     the game gives it back to the window that had it before. Only the
+//     foreground process may do that, so it is done from in here.
+//   - The game's window procedure never sees the messages that say it lost the
+//     foreground (WM_ACTIVATEAPP, WM_ACTIVATE and WM_KILLFOCUS), so a game that
+//     stops following its mouse when it is deactivated carries on.
 //
 // For games that read DirectInput 8 (dinput8.dll loaded in the process): the
 // keyboard and mouse devices answer GetDeviceState and GetDeviceData from the
@@ -92,6 +105,7 @@ using ClipCursor_t = BOOL (WINAPI*)(const RECT*);
 using GetClipCursor_t = BOOL (WINAPI*)(LPRECT);
 using SetCursorPos_t = BOOL (WINAPI*)(int, int);
 using SetForegroundWindow_t = BOOL (WINAPI*)(HWND);
+using GetCursorPos_t = BOOL (WINAPI*)(LPPOINT);
 
 struct State {
     GetRawInputData_t origGetRawInputData = nullptr;
@@ -101,6 +115,14 @@ struct State {
     GetClipCursor_t origGetClipCursor = nullptr;
     SetCursorPos_t origSetCursorPos = nullptr;
     SetForegroundWindow_t origSetForegroundWindow = nullptr;
+    GetCursorPos_t origGetCursorPos = nullptr;
+
+    // The cursor the script placed, in the game window's client area.
+    std::atomic<bool> cursorPlaced{false};
+    std::atomic<int> cursorX{0};
+    std::atomic<int> cursorY{0};
+    std::atomic<unsigned> buttonsHeld{0};
+    std::atomic<bool> cursorPosRead{false};
 
     RAWINPUT events[kEventSlots] = {};
     std::atomic<unsigned> nextEvent{0};
@@ -110,6 +132,10 @@ struct State {
     std::atomic<bool> keyPressedSinceRead[256] = {};
 
     std::atomic<HWND> window{nullptr};
+    // The game window's own procedure, under ours.
+    std::atomic<WNDPROC> windowProc{nullptr};
+    // The last window of another process seen holding the real foreground.
+    HWND lastForeground = nullptr;
     HANDLE keyboard = nullptr;
     HANDLE mouse = nullptr;
 
@@ -182,6 +208,16 @@ inline BOOL WINAPI HookedGetClipCursor(LPRECT rect) {
 }
 
 inline BOOL WINAPI HookedSetCursorPos(int, int) { return TRUE; }
+
+inline BOOL WINAPI HookedGetCursorPos(LPPOINT point) {
+    if (!S().cursorPosRead.exchange(true, std::memory_order_acq_rel)) {
+        Log("isolated input: the game reads the cursor's position (GetCursorPos)");
+    }
+    const HWND window = S().window.load(std::memory_order_acquire);
+    if (!point || !window || !S().cursorPlaced.load(std::memory_order_acquire)) return S().origGetCursorPos(point);
+    *point = {S().cursorX.load(std::memory_order_relaxed), S().cursorY.load(std::memory_order_relaxed)};
+    return ClientToScreen(window, point);
+}
 inline BOOL WINAPI HookedSetForegroundWindow(HWND) { return TRUE; }
 
 struct WindowSearch {
@@ -641,6 +677,33 @@ inline bool SendMouse(USHORT buttonFlags, int dx, int dy) {
     return Post(event);
 }
 
+// The window messages of a cursor at the script's point: where it is, and a
+// button going down or up there.
+inline LPARAM CursorPoint() {
+    return MAKELPARAM(S().cursorX.load(std::memory_order_relaxed), S().cursorY.load(std::memory_order_relaxed));
+}
+
+inline bool PlaceCursor(int x, int y) {
+    const HWND window = S().window.load(std::memory_order_acquire);
+    if (!window) return false;
+    S().cursorX.store(x, std::memory_order_relaxed);
+    S().cursorY.store(y, std::memory_order_relaxed);
+    S().cursorPlaced.store(true, std::memory_order_release);
+    return PostMessageW(window, WM_MOUSEMOVE, S().buttonsHeld.load(std::memory_order_relaxed), CursorPoint()) != 0;
+}
+
+// Nothing until a `cursor` command has placed the cursor.
+inline void PostCursorButton(MouseButton button, bool down) {
+    if (!S().cursorPlaced.load(std::memory_order_acquire)) return;
+    const unsigned key = button == MouseButton::kLeft ? MK_LBUTTON : button == MouseButton::kRight ? MK_RBUTTON : MK_MBUTTON;
+    const UINT message = button == MouseButton::kLeft    ? (down ? WM_LBUTTONDOWN : WM_LBUTTONUP)
+                         : button == MouseButton::kRight ? (down ? WM_RBUTTONDOWN : WM_RBUTTONUP)
+                                                         : (down ? WM_MBUTTONDOWN : WM_MBUTTONUP);
+    const unsigned held = down ? S().buttonsHeld.fetch_or(key, std::memory_order_acq_rel) | key
+                               : S().buttonsHeld.fetch_and(~key, std::memory_order_acq_rel) & ~key;
+    PostMessageW(S().window.load(std::memory_order_acquire), message, held, CursorPoint());
+}
+
 inline USHORT ButtonFlag(MouseButton button, bool down) {
     switch (button) {
         case MouseButton::kLeft:  return down ? RI_MOUSE_LEFT_BUTTON_DOWN : RI_MOUSE_LEFT_BUTTON_UP;
@@ -680,13 +743,16 @@ inline bool Play(const InputStep& step) {
         case InputAction::kKeyUp:     return SendKey(step.vk, false);
         case InputAction::kMouseDown:
             SendDirectInputButton(step.button, true);
+            PostCursorButton(step.button, true);
             return SendMouse(ButtonFlag(step.button, true), 0, 0);
         case InputAction::kMouseUp:
             SendDirectInputButton(step.button, false);
+            PostCursorButton(step.button, false);
             return SendMouse(ButtonFlag(step.button, false), 0, 0);
         case InputAction::kMouseMove:
             SendDirectInputMove(step.dx, step.dy);
             return SendMouse(0, step.dx, step.dy);
+        case InputAction::kCursor:    return PlaceCursor(step.dx, step.dy);
         case InputAction::kWait:      Sleep(step.waitMs); return true;
         case InputAction::kText: {
             bool ok = true;
@@ -740,14 +806,6 @@ inline void RunCommandFile() {
     for (;;) {
         Sleep(kPollMs);
         InstallDirectInput();
-        // From the moment the game has a window it is told that window has the
-        // foreground, script or no script.
-        if (!S().window.load(std::memory_order_acquire)) {
-            if (const HWND window = FindGameWindow()) {
-                S().window.store(window, std::memory_order_release);
-                Log("isolated input: game window found");
-            }
-        }
         std::ifstream file(S().commandFile);
         std::string header;
         if (!file || !std::getline(file, header)) continue;
@@ -763,6 +821,63 @@ inline void RunCommandFile() {
         if (sequence == lastSequence) continue;
         lastSequence = sequence;
         PlayFile(sequence, file);
+    }
+}
+
+inline LRESULT CALLBACK GameWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    const bool leftForeground = (message == WM_ACTIVATEAPP && wParam == FALSE) ||
+                                (message == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE) || message == WM_KILLFOCUS;
+    if (leftForeground) return 0;
+    const WNDPROC original = S().windowProc.load(std::memory_order_acquire);
+    return IsWindowUnicode(window) ? CallWindowProcW(original, window, message, wParam, lParam)
+                                   : CallWindowProcA(original, window, message, wParam, lParam);
+}
+
+// From the moment the game has a window it is told that window has the
+// foreground, script or no script. Looked for again once that window is gone or
+// hidden: the first one a game shows can be its splash screen.
+inline void WatchGameWindow() {
+    const HWND known = S().window.load(std::memory_order_acquire);
+    if (known && IsWindowVisible(known)) return;
+    const HWND window = FindGameWindow();
+    if (!window || window == known) return;
+    const bool unicode = IsWindowUnicode(window) != 0;
+    // Stored before ours goes in: a message can arrive between the two calls.
+    S().windowProc.store(reinterpret_cast<WNDPROC>(unicode ? GetWindowLongPtrW(window, GWLP_WNDPROC)
+                                                           : GetWindowLongPtrA(window, GWLP_WNDPROC)),
+                         std::memory_order_release);
+    if (unicode) SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&GameWindowProc));
+    else SetWindowLongPtrA(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&GameWindowProc));
+    S().window.store(window, std::memory_order_release);
+    Log("isolated input: game window found");
+}
+
+// Keeps the real foreground away from the game: remembers which window of
+// another process last held it, and gives it back to that one (to the desktop
+// if it has gone) whenever one of this process's windows has taken it. The
+// window is taken over first, so the game is not told of the loss. A thread of
+// its own, because the command-file thread sleeps through a script's waits.
+inline void GuardForeground() {
+    bool refused = false;
+    for (;;) {
+        Sleep(kPollMs);
+        WatchGameWindow();
+        const HWND foreground = S().origGetForegroundWindow();
+        if (!foreground) continue;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(foreground, &pid);
+        if (pid != GetCurrentProcessId()) {
+            S().lastForeground = foreground;
+            continue;
+        }
+        const HWND previous = IsWindow(S().lastForeground) ? S().lastForeground : GetShellWindow();
+        if (S().origSetForegroundWindow(previous)) {
+            refused = false;
+            Log("isolated input: the game had the real foreground and gave it back");
+        } else if (!refused) {
+            refused = true;
+            Log("isolated input: the game has the real foreground and could not give it back");
+        }
     }
 }
 
@@ -798,7 +913,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     FindDevices();
 
     static const char* const kNames[] = {"GetRawInputData", "GetForegroundWindow", "GetAsyncKeyState", "ClipCursor",
-                                         "GetClipCursor", "SetCursorPos", "SetForegroundWindow"};
+                                         "GetClipCursor", "SetCursorPos", "SetForegroundWindow", "GetCursorPos"};
     const bool hooked[] = {
         Hook(kNames[0], &HookedGetRawInputData, s.origGetRawInputData),
         Hook(kNames[1], &HookedGetForegroundWindow, s.origGetForegroundWindow),
@@ -807,6 +922,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
         Hook(kNames[4], &HookedGetClipCursor, s.origGetClipCursor),
         Hook(kNames[5], &HookedSetCursorPos, s.origSetCursorPos),
         Hook(kNames[6], &HookedSetForegroundWindow, s.origSetForegroundWindow),
+        Hook(kNames[7], &HookedGetCursorPos, s.origGetCursorPos),
     };
     bool all = true;
     for (const bool one : hooked) all = all && one;
@@ -817,6 +933,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
         return false;
     }
     std::thread(&RunCommandFile).detach();
+    std::thread(&GuardForeground).detach();
     Log("isolated input: the game takes its keyboard and mouse from the command file, not from the real devices");
     return true;
 }

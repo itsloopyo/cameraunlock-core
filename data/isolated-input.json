@@ -30,7 +30,13 @@
       "what": "DirectInput 8 devices",
       "dlls": ["dinput8.dll", "dinput.dll"],
       "status": "supported",
-      "proven_in": ["fallout-new-vegas"]
+      "proven_in": ["fallout-new-vegas", "far-cry-6"]
+    },
+    "cursor-position": {
+      "what": "where the mouse cursor is, read with GetCursorPos or from WM_MOUSEMOVE, as a menu with a pointer does. The `cursor` command places it.",
+      "imports": ["GetCursorPos"],
+      "status": "supported",
+      "proven_in": ["far-cry-6"]
     },
     "gameinput": {
       "what": "the GDK's GameInput API",

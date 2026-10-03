@@ -113,12 +113,22 @@ up <key>              release it
 tap <binding> [ms]    press and release, held ms (default 60); a chord works: Ctrl+Shift+U
 mouse <left|right|middle> <down|up|click>
 move <dx> <dy>        relative mouse movement, in counts
+cursor <x> <y>        put the mouse cursor at a point of the game window's client area, in pixels
 text <characters>     typed one character at a time, to the end of the line
 wait <ms>
 ```
 
 Key names are the ones hotkey lists use (`data/keys.json`). A key with no name is
-its code: the backquote is `tap 0xC0`.
+its code: the backquote is `tap 0xC0`, the digit 2 is `tap 0x32`.
+
+`move` is for a game that turns the camera by how the mouse moved. `cursor` is
+for a menu that reads where the cursor is: after the first `cursor`, a `mouse`
+button also arrives as the click a pointer at that point would make. The point is
+in the client area, so take it from a capture and subtract the title bar and the
+border.
+
+Pass a script's commands through `powershell -Command "& script.ps1 -Commands 'tap E','wait 500'"`.
+With `powershell -File` the list arrives as one string and the mod refuses line 2.
 
 To a DirectInput keyboard, `text` presses the key that types each character on a
 US keyboard, with Shift held for upper case and the shifted symbols. It types
@@ -139,6 +149,13 @@ nothing, which is what keeps the two apart.
 | `ClipCursor`, `SetCursorPos` | nothing | the game would trap and recentre the real cursor |
 | `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |
 | `SetForegroundWindow` | nothing | the game cannot take the foreground back |
+| `GetCursorPos` | the point the last `cursor` command gave, once one has | a menu with a pointer follows the script's cursor, not the real one |
+| the game window's procedure | never sees `WM_ACTIVATEAPP`, `WM_ACTIVATE` or `WM_KILLFOCUS` saying it lost the foreground | a game that stops, or stops following its mouse, when deactivated carries on |
+
+The dev build also watches the real foreground itself. Whenever a window of the
+game holds it, the game gives it back to the window that had it before, or to the
+desktop if that one has gone. Only the foreground process may hand the foreground
+on, so this is done from inside the game and not from the harness.
 
 For a game that reads DirectInput 8 (`dinput8.dll` loaded in the process): the
 methods of the keyboard and mouse devices are detoured in the device vtable,
@@ -163,10 +180,17 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
 
 ## Limits
 
-- A new game window takes the real foreground once, when it appears.
-  `Start-IsolatedGame` hands it back to the window that had it.
-- Someone who clicks into the game window gives it the real devices. The run is
-  flagged and repeated.
+- A game window takes the real foreground when it appears, and some take it
+  again later. The dev build hands it back within its 50 ms poll each time, so
+  the window that had it loses it for that long.
+- Someone who clicks into the game window gets the same treatment: the game
+  gives the foreground straight back. A run in which `Invoke-GameInput` saw the
+  game hold it is still flagged and repeated.
+- A launcher can start a stub that hands over to the game's own process (Far Cry
+  6 does). `Start-IsolatedGame` returns the first process it sees, so take the
+  process id again once the game is up.
+- The first window a game shows can be its splash screen. The dev build looks
+  for the game window again once the one it had is gone or hidden.
 - Games running at once share the GPU and the speakers. How many a machine
   carries has not been measured.
 
@@ -212,3 +236,31 @@ real foreground sampled through every script and the game never holding it:
   deactivation messages in a window procedure of its own.
 - The game finds its data through the working directory: launch it from the game
   folder.
+
+Far Cry 6 (Ubisoft Connect, engine fingerprint 6824D119, DirectInput 8), 2026-10-03,
+windowed and behind other windows for the whole session:
+
+- The log named the paths: keyboard and mouse through `GetDeviceData`, and the
+  cursor's position through `GetCursorPos`.
+- Keyboard: Escape opened and closed the game's menus, the number keys chose a
+  weapon, and the mod's hotkeys (nav keys and a chord) fired.
+- Mouse: `move` turned the camera, the right button raised the sights and the
+  left fired a round (the ammunition count dropped).
+- Menus: `move` does not move the menu pointer. `cursor` does, and a click then
+  activates what is under it, but only with the deactivation messages kept from
+  the window procedure: a build without that left the pointer still.
+- `Test-IsolatedInputProof` passed on `move 700 0`.
+- The game's windows took the real foreground five times in one launch, as they
+  appeared and during the intro, and the game gave it back each time. A script
+  that spanned those moments was flagged, and the proof run was not. Before the
+  dev build did this, a game that took the foreground after
+  `Start-IsolatedGame`'s settle time kept it, and Windows refused a hand-back
+  from outside the game.
+- The pose sender drove the mod through this module, rotation and position, on
+  the mod's test port.
+- `Save-GameCapture` shows the frame as presented, a mod's Direct3D 12 overlay
+  included.
+- The game's own Quit to Desktop, reached by `cursor` and a click, ended the
+  process with exit code 0.
+- The intro before the main menu does not skip on Space and runs about three
+  minutes.

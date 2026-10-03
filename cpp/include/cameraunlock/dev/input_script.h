@@ -13,6 +13,9 @@
 //                         may be a chord, as in a hotkey list: Ctrl+Shift+U
 //   mouse <left|right|middle> <down|up|click>
 //   move <dx> <dy>        relative mouse movement, in counts
+//   cursor <x> <y>        put the mouse cursor at a point of the game window's
+//                         client area, in pixels, for a menu that reads where
+//                         the cursor is and not how the mouse moved
 //   text <characters>     typed one character at a time, to the end of the line
 //   wait <ms>
 //
@@ -28,13 +31,14 @@
 
 namespace cameraunlock::dev {
 
-enum class InputAction { kKeyDown, kKeyUp, kMouseDown, kMouseUp, kMouseMove, kText, kWait };
+enum class InputAction { kKeyDown, kKeyUp, kMouseDown, kMouseUp, kMouseMove, kCursor, kText, kWait };
 enum class MouseButton { kLeft, kRight, kMiddle };
 
 struct InputStep {
     InputAction action = InputAction::kWait;
     int vk = 0;
     MouseButton button = MouseButton::kLeft;
+    // The movement of kMouseMove, or the client-area point of kCursor.
     int dx = 0;
     int dy = 0;
     unsigned waitMs = 0;
@@ -188,6 +192,18 @@ inline bool ParseInputLine(std::string_view line, std::vector<InputStep>& out, s
         const std::string_view dy = NextWord(rest);
         if (!ParseNumber(dx, step.dx) || !ParseNumber(dy, step.dy) || !Trim(rest).empty()) {
             error = "expected two whole numbers";
+            return false;
+        }
+        out.push_back(step);
+        return true;
+    }
+    if (EqualsIgnoreCase(command, "cursor")) {
+        InputStep step;
+        step.action = InputAction::kCursor;
+        const std::string_view x = NextWord(rest);
+        const std::string_view y = NextWord(rest);
+        if (!ParseNumber(x, step.dx) || !ParseNumber(y, step.dy) || step.dx < 0 || step.dy < 0 || !Trim(rest).empty()) {
+            error = "expected two whole numbers, neither below zero";
             return false;
         }
         out.push_back(step);
