@@ -9,6 +9,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `IsolatedGameTest.psm1` and a coverage registry, so every mod's in-game tests run in the background
+
+In-game tests no longer use the real keyboard, mouse or foreground. A title isolated input cannot
+drive yet is refused with what to build in core, so coverage grows as mods meet new kinds of game.
+
+- `powershell/IsolatedGameTest.psm1`: `Assert-IsolatedInputCovers` and `Get-GameInputPaths` (a
+  game binary's import table against the registry), `Start-IsolatedGame` (launches and hands the
+  foreground back), `Invoke-GameInput` (plays a script and reports whether the game ever held the
+  real foreground), `Save-GameCapture`, `Test-CaptureDiffers`, `Test-IsolatedInputProof`,
+  `Stop-IsolatedGame`, `Save-GameTestState` / `Restore-GameTestState`, `Start-TestPoseSender` /
+  `Set-TestPose`, `Get-ModTestPort`. It has no function that sends real input.
+- `data/isolated-input.json`: each input path and mod kind as `supported`, `unsupported` or
+  `not-needed`. Supported today: raw input and `GetAsyncKeyState`, in a native mod. Unsupported,
+  each with what to build: buffered raw input, `GetKeyState` / `GetKeyboardState`, DirectInput,
+  GameInput, SDL, and C# and script-only mods.
+- `powershell/Send-TestPose.ps1`: the OpenTrack sender `Start-TestPoseSender` runs.
+- docs/isolated-input.md is now the procedure: testing a title, and a game it does not cover yet.
+- `pixi run test-powershell-isolated-game-test`, part of `test-powershell`.
+- No consumer change. A mod opts in by wiring `StartIsolatedInput` into its dev build.
+
 ### Changed - Starfield's four hotkey rows are per_game, and isolated input is proven against a game
 
 - `data/config-format.json` `per_game` lists `ToggleKey`, `CycleTrackingModeKey`, `YawModeKey` and

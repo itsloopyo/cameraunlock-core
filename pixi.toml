@@ -75,7 +75,8 @@ test-sync-core-notices = "powershell -NoProfile -ExecutionPolicy Bypass -File sc
 test-ci-minutes = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-ci-minutes.ps1"
 # DifferentialGate.psm1 over a throwaway mod repo. Needs git and node.
 test-powershell-differential-gate = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/DifferentialGate.Tests.ps1"
-test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-powershell-differential-gate"] }
+test-powershell-isolated-game-test = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedGameTest.Tests.ps1"
+test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-powershell-differential-gate", "test-powershell-isolated-game-test"] }
 
 # Building
 build = "dotnet build csharp -c Release"
