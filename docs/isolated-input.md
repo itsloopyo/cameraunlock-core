@@ -21,7 +21,7 @@ piece to core, and every later one gets it.
 
 1. **Ask whether it is covered.** Before the first in-game test:
 
-   ```powershell
+   ```text
    Import-Module cameraunlock-core/powershell/IsolatedGameTest.psm1
    Assert-IsolatedInputCovers -BinaryPath <the binary that reads input> -ModHost native
    ```
@@ -31,15 +31,11 @@ piece to core, and every later one gets it.
    `script` for a mod with no native code of its own. If it throws, go to
    [A game it does not cover yet](#a-game-it-does-not-cover-yet).
 
-2. **Wire the dev build.** In a source file compiled only into the dev build:
-
-   ```cpp
-   #define CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION
-   #include <cameraunlock/dev/isolated_input.h>
-
-   // after MH_Initialize, before the mod's own hotkey thread starts
-   if (the command file exists) cameraunlock::dev::StartIsolatedInput(commandFile, &Log);
-   ```
+2. **Wire the dev build.** In a source file compiled only into the dev build, define
+   `CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION`, include `<cameraunlock/dev/isolated_input.h>`,
+   and call `cameraunlock::dev::StartIsolatedInput(commandFile, &Log)` when the command file
+   exists: after `MH_Initialize`, before the mod's own hotkey thread starts.
+   far-cry-6-headtracking's `src/dev/isolated_input.cpp` is that file in a mod.
 
    The command file is `CameraUnlockInput.txt` beside the mod's DLL. Gating on it
    keeps the same dev build answering to the real keyboard when the file is not
@@ -48,7 +44,7 @@ piece to core, and every later one gets it.
 
 3. **Run the session.**
 
-   ```powershell
+   ```text
    Save-GameTestState -Files <deployed mod, its config, the game's settings> -Folder <scratch>\state
    # deploy the dev build; set the mod's port to Get-ModTestPort; make the game windowed
    # and keep it running unfocused (per game: Starfield needs bAlwaysActive=1)
@@ -107,7 +103,7 @@ commands after it. The mod plays it each time the number changes and writes
 is parsed before any is played, so a script with a mistake in it sends the game
 nothing. Whatever the file holds when the game starts is not played.
 
-```
+```text
 down <key>            press and hold: a key name, or Ctrl, Shift or Alt
 up <key>              release it
 tap <binding> [ms]    press and release, held ms (default 60); a chord works: Ctrl+Shift+U
