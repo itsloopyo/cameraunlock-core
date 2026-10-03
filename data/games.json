@@ -1888,6 +1888,15 @@
       "repo": "itsloopyo/blue-estate-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
+    },
+    "project-zomboid": {
+      "display_name": "Project Zomboid",
+      "env_var": "PROJECT_ZOMBOID_PATH",
+      "steam_app_id": 108600,
+      "steam_folder": "ProjectZomboid",
+      "executable_relpath": "ProjectZomboid64.exe",
+      "repo": "itsloopyo/project-zomboid-headtracking",
+      "catalog_status": "absent"
     }
   }
 }
