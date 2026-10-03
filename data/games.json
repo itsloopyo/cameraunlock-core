@@ -1878,6 +1878,16 @@
       "loader": "AsiLoader",
       "repo": "itsloopyo/fear-headtracking",
       "catalog_status": "absent"
+    },
+    "blue-estate": {
+      "display_name": "Blue Estate",
+      "env_var": "BLUE_ESTATE_PATH",
+      "steam_app_id": 305380,
+      "steam_folder": "Blue Estate",
+      "executable_relpath": "Binaries\\Win64\\BEGame.exe",
+      "repo": "itsloopyo/blue-estate-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     }
   }
 }
