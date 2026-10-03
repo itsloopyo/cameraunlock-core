@@ -23,6 +23,7 @@ int RunConfigSchemaTests();
 int RunSafeMemoryTests();
 int RunLeanClampTests();
 int RunHeldPointerTests();
+int RunInputScriptTests();
 int RunLeanLineSweepTests();
 int RunRigLeanTests();
 int RunZoomCompensationTests();
@@ -93,6 +94,7 @@ int main(int argc, char** argv) {
     failures += RunSafeMemoryTests();
     failures += RunLeanClampTests();
     failures += RunHeldPointerTests();
+    failures += RunInputScriptTests();
     failures += RunLeanLineSweepTests();
     failures += RunRigLeanTests();
     failures += RunZoomCompensationTests();

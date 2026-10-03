@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - isolated input: a lab build feeds its game keyboard and mouse from inside the process
+
+A test session used to need the real foreground and the real mouse and keyboard, so nobody could
+use the machine while one ran. `cameraunlock/dev/isolated_input.h` posts synthetic raw input to
+the game's own window and answers `GetRawInputData` for it, and detours `GetForegroundWindow`,
+`GetAsyncKeyState`, `ClipCursor`, `GetClipCursor`, `SetCursorPos` and `SetForegroundWindow` so the
+game and the mod behave as if the game had the foreground while it sits behind other windows.
+
+- `StartIsolatedInput(commandFile, log)` installs the detours and plays the command file each time
+  the number on its first line changes, then writes `<file>.done`.
+- `cameraunlock/dev/input_script.h` is the command language (`down`, `up`, `tap` with chords,
+  `mouse`, `move`, `text`, `wait`), pure and tested in `input_script_tests.cpp`.
+- For games that read raw input. Lab builds only: with it on the game does not answer to the real
+  keyboard. docs/isolated-input.md has the rest, and what was measured in Starfield.
+- No consumer change.
+
 ### Fixed - the DX12 overlay reads the swap chain's queue again whenever it rebuilds
 
 `DX12Overlay` resolved the swap chain's queue once and kept it for the session. A game that
