@@ -276,6 +276,9 @@
     "fallout-new-vegas-headtracking": [
       {"committed": "config/HeadTracking.ini", "installed": ["CameraUnlock.ini", "Fallout New Vegas English\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
+    "far-cry-5-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
     "far-cry-6-headtracking": [
       {"committed": "config/FarCry6HeadTracking.ini", "installed": ["bin\\CameraUnlock.ini"], "legacy_source": "FarCry6HeadTracking.ini", "dialect": "native"}
     ],
