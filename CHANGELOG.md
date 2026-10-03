@@ -9,6 +9,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - the DX12 overlay hooks the DXGI swap chain under Streamline's wrapper
+
+In a game that loads NVIDIA Streamline (`sl.interposer.dll`) every swap chain made in the process
+comes back wrapped, the overlay's throwaway one included, so `DX12Overlay` was hooking the
+wrapper's `Present`. Measured in Starfield (Steam, 1.16.244.0):
+
+- With frame generation on, the game presents the wrapper 60 times a second and Streamline
+  presents the DXGI swap chain underneath 120 times a second from its own thread, through its own
+  queue. The overlay drew into the wrapper's buffer and the draw never reached the screen.
+- With frame generation off, the wrapper's `Present` runs twice a frame, nested, for two wrapper
+  objects, and only the inner one holds a queue that submits. The swap chain check added in the
+  entry below built the overlay for the outer one, so it drew nothing at all. That regression is
+  fixed here.
+
+`Install` now asks the throwaway swap chain for the object it wraps (Streamline's
+`StreamlineRetrieveBaseInterface` id, repeated while it answers) and takes the `Present` and
+`ResizeBuffers` to hook from that one. Where nothing wraps the swap chain, nothing changes. Checked
+in Starfield with a build that draws a marker every frame: on screen with frame generation on, with
+it off, and after switching it either way in the settings mid-session, where the swap chain comes
+back on a different queue each time and the overlay rebuilds for it. The log says "swap chains here
+are wrapped by Streamline, so the hooks go on the DXGI swap chain under the wrapper".
+
+With frame generation on the detour, and so the render callback, runs on Streamline's presenting
+thread, once per frame shown, generated frames included. No consumer change.
+
 ### Added - isolated input: a lab build feeds its game keyboard and mouse from inside the process
 
 A test session used to need the real foreground and the real mouse and keyboard, so nobody could

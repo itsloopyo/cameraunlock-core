@@ -33,6 +33,17 @@
 //     installed mid-game see whichever queue submits next, which is why the
 //     first one seen is not the answer. Until the queue is known the overlay
 //     has nowhere to submit and draws nothing.
+//   - **The swap chain under Streamline's.** In a game that loads NVIDIA
+//     Streamline (sl.interposer.dll) every swap chain made in the process is
+//     handed back wrapped, the throwaway one included, so hooks taken from it
+//     land on the wrapper. The wrapper's back buffers are not the ones
+//     presented: with frame generation on, Streamline presents the DXGI swap
+//     chain underneath from a thread of its own, through a queue of its own,
+//     and a draw into the wrapper's buffer never reaches the screen. With it
+//     off the wrapper's Present runs twice a frame, nested, for two wrapper
+//     objects. So Install asks the wrapper for the DXGI swap chain under it
+//     and hooks that one: Present then arrives once per frame shown, generated
+//     frames included, with the swap chain whose buffers are on screen.
 //   - **Per-back-buffer state.** One command allocator per buffer, and a fence
 //     value per buffer, because an allocator cannot be reset while the GPU is
 //     still reading the commands it holds.
@@ -873,6 +884,25 @@ inline HRESULT __stdcall HookedResizeBuffers(IDXGISwapChain* swap, UINT bufferCo
     return orig(swap, bufferCount, width, height, format, swapChainFlags);
 }
 
+// Streamline's wrappers answer this interface id with the object they wrap
+// (StreamlineRetrieveBaseInterface in its SDK). Anything else refuses it.
+inline constexpr GUID kStreamlineBaseInterface =
+    {0xADEC44E2, 0x61F0, 0x45C3, {0xAD, 0x9F, 0x1B, 0x37, 0x37, 0x92, 0x84, 0xFF}};
+inline constexpr int kMaxWrapperLayers = 4;
+
+// The DXGI swap chain under `swap`, which is `swap` itself where nothing wraps
+// it. Not a reference of its own: the wrapper holds what it wraps.
+inline IDXGISwapChain* NativeSwapChain(IDXGISwapChain* swap) {
+    for (int layer = 0; layer < kMaxWrapperLayers; ++layer) {
+        void* base = nullptr;
+        if (FAILED(swap->QueryInterface(kStreamlineBaseInterface, &base)) || !base) return swap;
+        static_cast<IUnknown*>(base)->Release();
+        if (base == swap) return swap;
+        swap = static_cast<IDXGISwapChain*>(base);
+    }
+    return swap;
+}
+
 // The two vtables this overlay patches, from a throwaway device, queue and swap
 // chain of our own. Same probe technique as the D3D11 backend, with the extra
 // step D3D12 forces: the swap chain is created against a command queue rather
@@ -913,10 +943,15 @@ inline bool GetVTables(void**& outSwapChainVTable, void**& outQueueVTable) {
             scd.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_DISCARD;
             if (SUCCEEDED(factory->CreateSwapChainForHwnd(queue, hwnd, &scd, nullptr,
                                                           nullptr, &swap)) && swap) {
-                outSwapChainVTable = *reinterpret_cast<void***>(swap);
+                IDXGISwapChain* native = NativeSwapChain(swap);
+                if (native != swap) {
+                    Log("dx12_overlay: swap chains here are wrapped by Streamline, so the hooks go on "
+                        "the DXGI swap chain under the wrapper");
+                }
+                outSwapChainVTable = *reinterpret_cast<void***>(native);
                 outQueueVTable     = *reinterpret_cast<void***>(queue);
                 ok = true;
-                State().queuePath = FindQueuePath(swap, queue);
+                State().queuePath = FindQueuePath(native, queue);
             }
         }
     }
