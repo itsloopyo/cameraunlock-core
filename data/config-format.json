@@ -51,8 +51,12 @@
     "committed file holds its value there, where every other global concept row holds default;",
     "the canonical config lint holds the file to that. A concept data/config-schema.json marks",
     "`\"global\": false` (CollisionMargin, CollisionChannel) is never an entry: every game keeps",
-    "those already, as Engine rows. A chord a game binds itself is a per_game",
-    "hotkey row, whose reason names the chord it replaces and the one it uses. An entry added",
+    "those already, as Engine rows. A hotkey a game takes for itself is a per_game",
+    "hotkey row. Which keys it moves to is fixed by one rule (docs/canonical-config.md, A key",
+    "the game takes): measured in the game, the modifier pair settled for the whole mod, each",
+    "letter taken from the spare list J, T, U, H, K, B, N in slot order. Its reason holds the",
+    "measurement and the list the committed file has, `approved` is the date of the measurement,",
+    "and an entry that follows the rule needs no other approval. An entry added",
     "after the repo's first converted release changes what default means in files already on",
     "players' disks, since those rows stop following Defaults.ini, so it is a breaking change for",
     "that repo. scripts/check-config-descriptor.mjs requires a launcher-manifest.json config",
@@ -702,9 +706,24 @@
     ],
     "far-cry-6-headtracking": [
       {
+        "row": "ToggleKey",
+        "reason": "Measured in game on 2026-10-03, on foot with a rifle out, through isolated input: neither Ctrl nor Shift leaves anything changed when released, and with Ctrl and Shift held the game inspects the weapon on Y, opens the Arsenal on U, sends the Amigo on G, holsters on H, opens the Journal on J and takes out the phone on B, and does nothing on T, K or N. Y is taken and J, the first spare letter, is taken too, so the toggle has the next one. The committed file holds ToggleKey=End, Ctrl+Shift+T.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-03, on foot with a rifle out, through isolated input: neither Ctrl nor Shift leaves anything changed when released, and with Ctrl and Shift held the game inspects the weapon on Y, opens the Arsenal on U, sends the Amigo on G, holsters on H, opens the Journal on J and takes out the phone on B, and does nothing on T, K or N. G is taken, J, U and H are taken and the toggle holds T, so the tracking mode has K. The committed file holds CycleTrackingModeKey=PageUp, Ctrl+Shift+K.",
+        "approved": "2026-10-03"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "Measured in game on 2026-10-03, on foot with a rifle out, through isolated input: neither Ctrl nor Shift leaves anything changed when released, and with Ctrl and Shift held the game inspects the weapon on Y, opens the Arsenal on U, sends the Amigo on G, holsters on H, opens the Journal on J and takes out the phone on B, and does nothing on T, K or N. H is taken, the earlier actions hold T and K, and B is taken, so the yaw mode has N. The committed file holds YawModeKey=PageDown, Ctrl+Shift+N.",
+        "approved": "2026-10-03"
+      },
+      {
         "row": "TrueFreeLookKey",
-        "reason": "The fleet chord clashes with the game's own binding: Far Cry 6 opens the Arsenal on U, also with Ctrl and Shift held, so Ctrl+Shift+U would open it. The committed file holds TrueFreeLookKey=Insert, Ctrl+Shift+J.",
-        "approved": "2026-09-28"
+        "reason": "Measured in game on 2026-10-03, on foot with a rifle out, through isolated input: neither Ctrl nor Shift leaves anything changed when released, and with Ctrl and Shift held the game inspects the weapon on Y, opens the Arsenal on U, sends the Amigo on G, holsters on H, opens the Journal on J and takes out the phone on B, and does nothing on T, K or N. U is taken and no letter of the spare list is left, so the aim mode has no chord. The committed file holds TrueFreeLookKey=Insert.",
+        "approved": "2026-10-03"
       }
     ],
     "mudrunner-headtracking": [

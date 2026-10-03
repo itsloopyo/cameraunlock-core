@@ -230,6 +230,31 @@ C++ `input::RegisterKeyBindings` puts a list on a `HotkeyPoller`, one hotkey per
 one press runs the action once however many items it matches; C#
 `KeyBindingInput.IsTriggered` (`CameraUnlock.Core.Unity`) asks Unity's input the same question.
 
+### A key the game takes
+
+A default key list is the same in every game, so a player's Defaults.ini reaches all of them. A game
+can still take one of those keys: it can act on a letter whatever else is held (Far Cry 6 opens its
+Arsenal on `U` with Ctrl and Shift down), or give Ctrl or Shift a job of its own (Starfield's left
+Ctrl toggles sneak). That hotkey row then becomes a `per_game` row with the game's own list, and
+which keys it holds is not a choice:
+
+- **Measured in the game**, through isolated input (docs/isolated-input.md): each modifier held and
+  released on its own, then each chord tapped with the pair held, with a capture after each. A
+  modifier misbehaves when something is still changed after it is released. The game acts on a
+  letter when anything at all happens.
+- **The modifier pair is one for the whole mod.** `Ctrl+Shift`, or `Shift+Alt` where Ctrl
+  misbehaves, or `Ctrl+Alt` where Shift does, or no chords where the replacement misbehaves too. An
+  effect that ends when the key comes up is not misbehaviour.
+- **The letter**, one action at a time in slot order (toggle, tracking mode, yaw mode, aim mode,
+  fifth): the action keeps its own letter when the game does not act on it, and otherwise takes the
+  first letter of `J, T, U, H, K, B, N` that the game does not act on and no action of the mod holds.
+  With none left, the action's list is its nav-cluster key alone.
+- **A nav-cluster key the game uses** is dropped from the list and not replaced.
+
+The `per_game` entry's reason holds the measurement and the list the committed file has, and
+`approved` is the date of the measurement. An entry that follows this rule needs no other approval.
+Far Cry 6 is the worked example in `data/config-format.json`.
+
 ### The stamp and ConfigFormat
 
 `[CameraUnlock]` is the stamp. A file is stamped when it has a line that opens a section named
@@ -1935,8 +1960,8 @@ In a mod repo, and in conformance:
   other; no global concept row commented out under its own section (`; Key=value`, the
   form the renderer gives an Engine row marked `PerGame()` at its default) unless `per_game` lists
   it; the
-  file tracked by git and `-text`. It checks no other comment. A chord a game binds itself is a
-  `per_game` hotkey row, whose reason names the chord it replaces and the one it uses.
+  file tracked by git and `-text`. It checks no other comment. A hotkey a game takes for itself is a
+  `per_game` hotkey row (see [A key the game takes](#a-key-the-game-takes)).
 - **Conformance** (`pixi run conformance`) runs the lint as `config-format`, which also fails a
   converted `legacy` repo with no legacy folder (an REFramework repo needs none: its import is
   core's `PluginConfigLegacyImport`), a repo outside `legacy` with one, and a repo outside

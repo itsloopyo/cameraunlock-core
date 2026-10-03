@@ -9,6 +9,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - one rule for a hotkey a game takes, and Far Cry 6's rows follow it
+
+- docs/canonical-config.md, "A key the game takes": the clash is measured in the game, a modifier
+  that misbehaves moves every chord of the mod to `Shift+Alt` or `Ctrl+Alt`, and a letter the game
+  acts on moves that action to the first free letter of `J, T, U, H, K, B, N`, actions taken in slot
+  order, or to its nav-cluster key alone when none is left. A `per_game` hotkey entry that follows
+  the rule needs no other approval. `T` is no longer held back.
+- `data/config-format.json` `per_game` for far-cry-6-headtracking now lists all four hotkey rows,
+  from a measurement on 2026-10-03: `ToggleKey=End, Ctrl+Shift+T`,
+  `CycleTrackingModeKey=PageUp, Ctrl+Shift+K`, `YawModeKey=PageDown, Ctrl+Shift+N` and
+  `TrueFreeLookKey=Insert`. The game acts on Y, U, G, H, J and B with Ctrl and Shift held.
+- Consumer change: far-cry-6-headtracking only, which marks the four rows `PerGame` with those
+  lists. Entries made before the rule (MudRunner, Starfield, Arx Fatalis, Deep Rock Galactic,
+  Trepang2) stand until each mod is next worked on.
+
 ### Changed - isolated input is proven in Ready or Not, and the proof's blind spot is written down
 
 - `data/isolated-input.json`: `async-key-state` and `cursor-position` are also proven in
