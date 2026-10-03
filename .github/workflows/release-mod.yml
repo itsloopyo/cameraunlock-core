@@ -401,6 +401,7 @@ jobs:
           # name containing a double quote closes the assignment and the remainder runs
           # as code - in a job that holds the release webhook and contents:write.
           REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if (-not $env:DISCORD_RELEASE_WEBHOOK) {
             Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - the release was created but not announced. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run this job."
@@ -410,12 +411,29 @@ jobs:
           $repo = "${{ github.repository }}"
           $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
           $url  = "https://github.com/$repo/releases/tag/$tag"
+          $description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**`n**[Run in Lopari](https://lopari.app/run/?repo=$repo)**"
+          $notes = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }).body
+          if ($notes) {
+            $notes = ($notes -replace "`r`n", "`n").Trim()
+            # Discord refuses an embed whose description is over 4096 characters, and
+            # the refusal fails this step after the release is already public. The
+            # links come first so a cut never takes them.
+            $room = 4000 - $description.Length
+            if ($notes.Length -gt $room) {
+              $more = "`n[Full release notes]($url)"
+              $notes = $notes.Substring(0, $room - $more.Length)
+              $lastLine = $notes.LastIndexOf("`n")
+              if ($lastLine -gt 0) { $notes = $notes.Substring(0, $lastLine) }
+              $notes += $more
+            }
+            $description += "`n`n$notes"
+          }
           $payload = @{
             username = 'Mod Releases'
             embeds   = @(@{
               title       = "$name Head Tracking $tag"
               url         = $url
-              description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**`n**[Run in Lopari](https://lopari.app/run/?repo=$repo)**"
+              description = $description
               color       = 5814783
             })
           } | ConvertTo-Json -Depth 5

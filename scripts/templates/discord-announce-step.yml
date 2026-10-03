@@ -1,7 +1,10 @@
 # Canonical "announce release to Discord" step for every head-tracking mod's
 # release workflow. Self-contained on purpose: it must work in mods that do not
 # check out the cameraunlock-core submodule and across BepInEx/ASI/Rust
-# toolchains, so it depends on nothing but github context and the secret.
+# toolchains, so it depends on nothing but github context, the secret and the
+# job's own token. The changelog it posts is the body of the release the job
+# just created, read back from GitHub, so it is the same text whichever way
+# the workflow wrote its notes.
 #
 # Synced verbatim into each mod's release workflow by
 # scripts/sync-discord-announce.mjs (re-indented to match the target's steps).
@@ -21,6 +24,7 @@
           # name containing a double quote closes the assignment and the remainder runs
           # as code - in a job that holds the release webhook and contents:write.
           REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if (-not $env:DISCORD_RELEASE_WEBHOOK) {
             Write-Host "::error::DISCORD_RELEASE_WEBHOOK secret is not set - the release was created but not announced. Set it with 'gh secret set DISCORD_RELEASE_WEBHOOK --repo ${{ github.repository }}' and re-run this job."
@@ -30,12 +34,29 @@
           $repo = "${{ github.repository }}"
           $name = (Get-Culture).TextInfo.ToTitleCase(((($repo -split '/')[-1]) -replace '-head-?tracking$','' -replace '-',' '))
           $url  = "https://github.com/$repo/releases/tag/$tag"
+          $description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**`n**[Run in Lopari](https://lopari.app/run/?repo=$repo)**"
+          $notes = (Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }).body
+          if ($notes) {
+            $notes = ($notes -replace "`r`n", "`n").Trim()
+            # Discord refuses an embed whose description is over 4096 characters, and
+            # the refusal fails this step after the release is already public. The
+            # links come first so a cut never takes them.
+            $room = 4000 - $description.Length
+            if ($notes.Length -gt $room) {
+              $more = "`n[Full release notes]($url)"
+              $notes = $notes.Substring(0, $room - $more.Length)
+              $lastLine = $notes.LastIndexOf("`n")
+              if ($lastLine -gt 0) { $notes = $notes.Substring(0, $lastLine) }
+              $notes += $more
+            }
+            $description += "`n`n$notes"
+          }
           $payload = @{
             username = 'Mod Releases'
             embeds   = @(@{
               title       = "$name Head Tracking $tag"
               url         = $url
-              description = "A new release of **$name Head Tracking** is live.`n`n**[Download the $tag release]($url)**`n**[Run in Lopari](https://lopari.app/run/?repo=$repo)**"
+              description = $description
               color       = 5814783
             })
           } | ConvertTo-Json -Depth 5
