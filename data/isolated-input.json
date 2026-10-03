@@ -29,8 +29,8 @@
     "directinput": {
       "what": "DirectInput 8 devices",
       "dlls": ["dinput8.dll", "dinput.dll"],
-      "status": "unsupported",
-      "build": "Detour IDirectInputDevice8::GetDeviceState and GetDeviceData (vtable of a device made from a throwaway IDirectInput8) in isolated_input.h and answer keyboard and mouse state from the synthetic state; make the device calls succeed in the background (SetCooperativeLevel as DISCL_BACKGROUND, Acquire)."
+      "status": "supported",
+      "proven_in": ["fallout-new-vegas"]
     },
     "gameinput": {
       "what": "the GDK's GameInput API",

@@ -11,6 +11,8 @@ how coverage grows: the first mod to meet a new kind of game adds the missing
 piece to core, and every later one gets it.
 
 - `cameraunlock/dev/input_script.h`: the command language. Pure, tested.
+- `cameraunlock/dev/directinput_state.h`: what a DirectInput keyboard and mouse
+  report for the input a script plays. Pure, tested.
 - `cameraunlock/dev/isolated_input.h`: the Win32 half, compiled into a dev build.
 - `powershell/IsolatedGameTest.psm1`: launch, play, capture, proof, restore.
 - `data/isolated-input.json`: what is covered, and what to build for what is not.
@@ -118,6 +120,11 @@ wait <ms>
 Key names are the ones hotkey lists use (`data/keys.json`). A key with no name is
 its code: the backquote is `tap 0xC0`.
 
+To a DirectInput keyboard, `text` presses the key that types each character on a
+US keyboard, with Shift held for upper case and the shifted symbols. It types
+printable ASCII and nothing else: no Tab, no Enter (`tap Return`), no accented
+letters. Each key is held 40 ms.
+
 ## What the dev build detours
 
 For a game that reads raw input: each synthetic event is posted to the game's
@@ -132,6 +139,27 @@ nothing, which is what keeps the two apart.
 | `ClipCursor`, `SetCursorPos` | nothing | the game would trap and recentre the real cursor |
 | `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |
 | `SetForegroundWindow` | nothing | the game cannot take the foreground back |
+
+For a game that reads DirectInput 8 (`dinput8.dll` loaded in the process): the
+methods of the keyboard and mouse devices are detoured in the device vtable,
+found from throwaway devices, so a device the game makes later is covered too.
+The detours go in from the command-file thread once `dinput8.dll` is loaded, and
+`dinput8.dll` is never loaded into a game that has not loaded it. A DirectInput
+device that is neither a keyboard nor a mouse is left as it was.
+
+| Method | Answer | Why |
+|---|---|---|
+| `GetDeviceState` | keyboard: 256 bytes, `0x80` at the `DIK_` code of each key the script holds. Mouse: the buttons held and the movement since that device last asked, as `DIMOUSESTATE` or `DIMOUSESTATE2` | the real device is never read |
+| `GetDeviceData` | the events played since that device last asked: `dwOfs` a `DIK_` code or `DIMOFS_X`, `DIMOFS_Y`, `DIMOFS_BUTTON0` to `2`. Honours the caller's capacity, `DIGDD_PEEK` and a null buffer, and answers `DI_BUFFEROVERFLOW` after more than 256 unread events | a game that reads buffered input is covered as well |
+| `Acquire`, `Poll` | `DI_OK`, without reaching DirectInput | the real keyboard and mouse are never acquired, so a lost or refused acquire cannot reach the game |
+| `SetCooperativeLevel` | passed on as `DISCL_BACKGROUND \| DISCL_NONEXCLUSIVE` | the device stays usable behind other windows |
+| `Release` | passed on | forgets a device that is gone |
+
+Only the standard data formats are answered (`c_dfDIKeyboard`, `c_dfDIMouse`,
+`c_dfDIMouse2`): a `GetDeviceState` of any other size is refused and the log says
+so. There is no mouse wheel command, so `lZ` is always 0. A game that waits on
+`SetEventNotification` is not signalled. The log names, once for each device,
+which of `GetDeviceState` and `GetDeviceData` the game reads it through.
 
 ## Limits
 
@@ -157,3 +185,30 @@ through every script and the game never holding it:
   passed, sights, capture, stop, restore.
 - The pose sender was checked against a local listener, not yet in a game
   through this module.
+
+Fallout: New Vegas 1.4.0.525 (Steam, 32-bit, DirectInput 8), 2026-10-03, with the
+real foreground sampled through every script and the game never holding it:
+
+- The log named the paths: keyboard through `GetDeviceState` (256 bytes) and
+  `GetDeviceData`, mouse through `GetDeviceState` (20 bytes).
+- Keyboard: the console opened at the main menu and in play, and the game's own
+  screenshot key saved its files.
+- `text`: `load "Save 176   Courier  Primm  01 22 56"` typed with its quotes and
+  spaces and loaded the save; `tgm`, `player.additem` and `player.equipitem` ran.
+  No character came out twice.
+- Mouse: the right button raised and lowered the sights, the left fired (the
+  ammunition count dropped).
+- The mod's hotkeys fired through the synthetic key state.
+- A 60 ms `tap` was missed about one time in four by keys the game polls
+  (console, screenshot). `down`, `wait 400`, `up` was not missed.
+- `move` did not show a cursor on the main menu, and `down W` did not walk the
+  player. Neither was followed up.
+- `Save-GameCapture` returns a black frame for this renderer, so
+  `Test-IsolatedInputProof` cannot pass here. The proof was the game's own
+  screenshots before and after each script. Those are taken before a mod draws
+  on `Present`, so a mod's overlay needs the presented frame saved by the dev
+  build (`fallout-new-vegas-headtracking/src/isolated_input.cpp`).
+- The game stops when its window is deactivated. The dev build drops the
+  deactivation messages in a window procedure of its own.
+- The game finds its data through the working directory: launch it from the game
+  folder.

@@ -23,6 +23,15 @@
 //   - SetForegroundWindow does nothing, so the game cannot take the foreground
 //     back.
 //
+// For games that read DirectInput 8 (dinput8.dll loaded in the process): the
+// keyboard and mouse devices answer GetDeviceState and GetDeviceData from the
+// script alone (directinput_state.h), through detours on the device vtable, so
+// a device the game makes later is covered too. The real devices are never
+// acquired: Acquire and Poll succeed without reaching DirectInput, and
+// SetCooperativeLevel is passed on as background and non-exclusive. Any other
+// DirectInput device (a controller) is left as it was. dinput8.dll is never
+// loaded by this header: a game that has not loaded it gets no such detours.
+//
 // Never in a release build: with these detours in, the game does not answer to
 // the real keyboard. Requires MinHook, already initialised. Exactly one
 // translation unit defines CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION before
@@ -33,6 +42,7 @@
 // that number changes, and `<file>.done` then holds the number, or the number
 // and the line that did not parse.
 
+#include "cameraunlock/dev/directinput_state.h"
 #include "cameraunlock/dev/input_script.h"
 
 #include <string>
@@ -52,10 +62,17 @@ bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLogFn log)
 #include <MinHook.h>
 #include <Windows.h>
 
+#ifndef DIRECTINPUT_VERSION
+#define DIRECTINPUT_VERSION 0x0800
+#endif
+#include <dinput.h>
+
 #include <atomic>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -217,6 +234,370 @@ inline bool Post(const RAWINPUT& event) {
     return PostMessageW(window, WM_INPUT, RIM_INPUT, reinterpret_cast<LPARAM>(&S().events[slot])) != 0;
 }
 
+static_assert(offsetof(DIDEVICEOBJECTDATA, dwOfs) == offsetof(DirectInputEvent, offset)
+              && offsetof(DIDEVICEOBJECTDATA, dwData) == offsetof(DirectInputEvent, data)
+              && offsetof(DIDEVICEOBJECTDATA, dwTimeStamp) == offsetof(DirectInputEvent, timeMs)
+              && offsetof(DIDEVICEOBJECTDATA, dwSequence) == offsetof(DirectInputEvent, sequence),
+              "DirectInputEvent is the head of DIDEVICEOBJECTDATA");
+static_assert(sizeof(DIMOUSESTATE) == kMouseStateSize && sizeof(DIMOUSESTATE2) == kMouseState2Size
+              && offsetof(DIMOUSESTATE, lX) == kMouseOffsetX && offsetof(DIMOUSESTATE, lY) == kMouseOffsetY
+              && offsetof(DIMOUSESTATE, rgbButtons) == kMouseOffsetButton0,
+              "directinput_state.h writes the standard mouse data format");
+static_assert(DIK_LSHIFT == kDikLeftShift, "directinput_state.h holds this Shift for a shifted character");
+
+// IDirectInputDevice8 vtable slots, the same in the A and the W interface.
+enum DirectInputMethod {
+    kDiRelease,
+    kDiGetCapabilities,
+    kDiAcquire,
+    kDiGetDeviceState,
+    kDiGetDeviceData,
+    kDiSetCooperativeLevel,
+    kDiPoll,
+    kDiMethods
+};
+inline constexpr int kDiSlots[kDiMethods] = {2, 3, 7, 9, 10, 13, 25};
+// A and W interface, keyboard and mouse: at most this many addresses for one
+// method.
+inline constexpr int kDiVariants = 4;
+
+using DiRelease_t = ULONG (STDMETHODCALLTYPE*)(void*);
+using DiGetCapabilities_t = HRESULT (STDMETHODCALLTYPE*)(void*, LPDIDEVCAPS);
+using DiAcquire_t = HRESULT (STDMETHODCALLTYPE*)(void*);
+using DiGetDeviceState_t = HRESULT (STDMETHODCALLTYPE*)(void*, DWORD, LPVOID);
+using DiGetDeviceData_t = HRESULT (STDMETHODCALLTYPE*)(void*, DWORD, LPDIDEVICEOBJECTDATA, LPDWORD, DWORD);
+using DiSetCooperativeLevel_t = HRESULT (STDMETHODCALLTYPE*)(void*, HWND, DWORD);
+using DirectInput8Create_t = HRESULT (WINAPI*)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
+using DiCreateDevice_t = HRESULT (STDMETHODCALLTYPE*)(void*, REFGUID, void**, LPUNKNOWN);
+
+// Spelled out here so that a mod needs neither dxguid.lib nor dinput8.lib.
+inline constexpr GUID kIidDirectInput8A = {0xBF798030, 0x483A, 0x4DA2, {0xAA, 0x99, 0x5D, 0x64, 0xED, 0x36, 0x97, 0x00}};
+inline constexpr GUID kIidDirectInput8W = {0xBF798031, 0x483A, 0x4DA2, {0xAA, 0x99, 0x5D, 0x64, 0xED, 0x36, 0x97, 0x00}};
+inline constexpr GUID kGuidSysMouse = {0x6F1D2B60, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kGuidSysKeyboard = {0x6F1D2B61, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+
+struct DirectInputDevice {
+    void* object = nullptr;
+    // False for a device that is neither a keyboard nor a mouse, which is left
+    // to DirectInput.
+    bool synthetic = false;
+    bool stateLogged = false;
+    bool dataLogged = false;
+    DirectInputReader reader;
+};
+
+struct DirectInput {
+    std::mutex mutex;
+    DirectInputState state;
+    std::vector<DirectInputDevice> devices;
+    bool hooked = false;
+    bool attempted = false;
+    void* targets[kDiMethods][kDiVariants] = {};
+    void* originals[kDiMethods][kDiVariants] = {};
+};
+
+// Never destroyed: the game may release its devices after this module's
+// statics have been torn down, and the Release detour still runs then.
+inline DirectInput& D() {
+    static DirectInput* const d = new DirectInput;
+    return *d;
+}
+
+template <typename Function>
+inline Function DiOriginal(DirectInputMethod method, int variant) {
+    return reinterpret_cast<Function>(D().originals[method][variant]);
+}
+
+inline void** Vtable(void* object) { return *reinterpret_cast<void***>(object); }
+
+inline const char* DiKindName(const DirectInputDevice& device) {
+    return device.reader.kind == DirectInputKind::kKeyboard ? "keyboard" : "mouse";
+}
+
+// The entry for a device, made the first time the device is seen. Called with
+// `lock` held, and lets go of it while it asks DirectInput what the device is.
+inline DirectInputDevice& DiDevice(void* object, std::unique_lock<std::mutex>& lock) {
+    DirectInput& d = D();
+    for (DirectInputDevice& device : d.devices) {
+        if (device.object == object) return device;
+    }
+    lock.unlock();
+    DIDEVCAPS caps = {};
+    caps.dwSize = sizeof(caps);
+    reinterpret_cast<DiGetCapabilities_t>(Vtable(object)[kDiSlots[kDiGetCapabilities]])(object, &caps);
+    const BYTE type = GET_DIDEVICE_TYPE(caps.dwDevType);
+    lock.lock();
+    for (DirectInputDevice& device : d.devices) {
+        if (device.object == object) return device;
+    }
+    DirectInputDevice device;
+    device.object = object;
+    device.synthetic = type == DI8DEVTYPE_KEYBOARD || type == DI8DEVTYPE_MOUSE;
+    device.reader = d.state.Open(type == DI8DEVTYPE_MOUSE ? DirectInputKind::kMouse : DirectInputKind::kKeyboard);
+    d.devices.push_back(device);
+    return d.devices.back();
+}
+
+inline bool IsSyntheticDevice(void* object) {
+    std::unique_lock<std::mutex> lock(D().mutex);
+    return DiDevice(object, lock).synthetic;
+}
+
+inline void LogDeviceRead(const char* kind, const char* call, DWORD size) {
+    char line[160];
+    std::snprintf(line, sizeof(line), "isolated input: the game reads its DirectInput %s through %s (%lu bytes)", kind,
+                  call, size);
+    Log(line);
+}
+
+// True when the device is a keyboard or a mouse, and `result` is then the
+// answer. Only the standard data formats are answered.
+inline bool AnswerDeviceState(void* object, DWORD size, LPVOID data, HRESULT& result) {
+    DirectInput& d = D();
+    const char* logKind = nullptr;
+    {
+        std::unique_lock<std::mutex> lock(d.mutex);
+        DirectInputDevice& device = DiDevice(object, lock);
+        if (!device.synthetic) return false;
+        if (!device.stateLogged) {
+            device.stateLogged = true;
+            logKind = DiKindName(device);
+        }
+        auto* const out = static_cast<uint8_t*>(data);
+        if (out == nullptr) {
+            result = DIERR_INVALIDPARAM;
+        } else if (device.reader.kind == DirectInputKind::kMouse) {
+            result = d.state.MouseState(device.reader, out, size) ? DI_OK : DIERR_INVALIDPARAM;
+        } else if (size == kKeyboardStateSize) {
+            d.state.KeyboardState(out);
+            result = DI_OK;
+        } else {
+            result = DIERR_INVALIDPARAM;
+        }
+    }
+    if (logKind) {
+        LogDeviceRead(logKind, "GetDeviceState", size);
+        if (FAILED(result)) Log("isolated input: that is not the standard data format, the only one isolated input answers");
+    }
+    return true;
+}
+
+inline bool AnswerDeviceData(void* object, DWORD objectSize, LPDIDEVICEOBJECTDATA data, LPDWORD inOut, DWORD flags,
+                             HRESULT& result) {
+    DirectInput& d = D();
+    const char* logKind = nullptr;
+    {
+        std::unique_lock<std::mutex> lock(d.mutex);
+        DirectInputDevice& device = DiDevice(object, lock);
+        if (!device.synthetic) return false;
+        if (!device.dataLogged) {
+            device.dataLogged = true;
+            logKind = DiKindName(device);
+        }
+        if (inOut == nullptr || objectSize < sizeof(DirectInputEvent)) {
+            result = DIERR_INVALIDPARAM;
+        } else {
+            DirectInputEvent events[kDirectInputEventSlots];
+            bool overflowed = false;
+            const size_t count = d.state.ReadEvents(device.reader, data ? events : nullptr, *inOut,
+                                                    (flags & DIGDD_PEEK) != 0, overflowed);
+            for (size_t i = 0; data && i < count; ++i) {
+                BYTE* const at = reinterpret_cast<BYTE*>(data) + i * objectSize;
+                std::memset(at, 0, objectSize);
+                std::memcpy(at, &events[i], sizeof(DirectInputEvent));
+            }
+            *inOut = static_cast<DWORD>(count);
+            result = overflowed ? DI_BUFFEROVERFLOW : DI_OK;
+        }
+    }
+    if (logKind) LogDeviceRead(logKind, "GetDeviceData", objectSize);
+    return true;
+}
+
+template <int Variant>
+inline ULONG STDMETHODCALLTYPE HookedDiRelease(void* object) {
+    const ULONG left = DiOriginal<DiRelease_t>(kDiRelease, Variant)(object);
+    if (left != 0) return left;
+    DirectInput& d = D();
+    std::lock_guard<std::mutex> lock(d.mutex);
+    for (size_t i = 0; i < d.devices.size(); ++i) {
+        if (d.devices[i].object != object) continue;
+        d.devices.erase(d.devices.begin() + static_cast<std::ptrdiff_t>(i));
+        break;
+    }
+    return 0;
+}
+
+// The real keyboard and mouse are never acquired. The game is told it has the
+// foreground, and so is DirectInput (GetForegroundWindow is detoured for every
+// caller), so a real exclusive Acquire could succeed behind other windows and
+// take the mouse from the person using the machine.
+template <int Variant>
+inline HRESULT STDMETHODCALLTYPE HookedDiAcquire(void* object) {
+    if (IsSyntheticDevice(object)) return DI_OK;
+    return DiOriginal<DiAcquire_t>(kDiAcquire, Variant)(object);
+}
+
+template <int Variant>
+inline HRESULT STDMETHODCALLTYPE HookedDiPoll(void* object) {
+    if (IsSyntheticDevice(object)) return DI_OK;
+    return DiOriginal<DiAcquire_t>(kDiPoll, Variant)(object);
+}
+
+template <int Variant>
+inline HRESULT STDMETHODCALLTYPE HookedDiGetDeviceState(void* object, DWORD size, LPVOID data) {
+    HRESULT result = DI_OK;
+    if (AnswerDeviceState(object, size, data, result)) return result;
+    return DiOriginal<DiGetDeviceState_t>(kDiGetDeviceState, Variant)(object, size, data);
+}
+
+template <int Variant>
+inline HRESULT STDMETHODCALLTYPE HookedDiGetDeviceData(void* object, DWORD objectSize, LPDIDEVICEOBJECTDATA data,
+                                                       LPDWORD inOut, DWORD flags) {
+    HRESULT result = DI_OK;
+    if (AnswerDeviceData(object, objectSize, data, inOut, flags, result)) return result;
+    return DiOriginal<DiGetDeviceData_t>(kDiGetDeviceData, Variant)(object, objectSize, data, inOut, flags);
+}
+
+// DirectInput refuses background with exclusive for a keyboard, so both
+// devices are made non-exclusive.
+template <int Variant>
+inline HRESULT STDMETHODCALLTYPE HookedDiSetCooperativeLevel(void* object, HWND window, DWORD flags) {
+    const auto original = DiOriginal<DiSetCooperativeLevel_t>(kDiSetCooperativeLevel, Variant);
+    if (!IsSyntheticDevice(object)) return original(object, window, flags);
+    const HRESULT result = original(object, window, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+    char line[160];
+    std::snprintf(line, sizeof(line),
+                  "isolated input: DirectInput SetCooperativeLevel 0x%lX passed on as background, non-exclusive: 0x%08lX",
+                  flags, static_cast<unsigned long>(result));
+    Log(line);
+    return result;
+}
+
+template <int Variant>
+inline void* DiDetour(DirectInputMethod method) {
+    switch (method) {
+        case kDiRelease:             return reinterpret_cast<void*>(&HookedDiRelease<Variant>);
+        case kDiAcquire:             return reinterpret_cast<void*>(&HookedDiAcquire<Variant>);
+        case kDiGetDeviceState:      return reinterpret_cast<void*>(&HookedDiGetDeviceState<Variant>);
+        case kDiGetDeviceData:       return reinterpret_cast<void*>(&HookedDiGetDeviceData<Variant>);
+        case kDiSetCooperativeLevel: return reinterpret_cast<void*>(&HookedDiSetCooperativeLevel<Variant>);
+        case kDiPoll:                return reinterpret_cast<void*>(&HookedDiPoll<Variant>);
+        default:                     return nullptr;
+    }
+}
+
+inline void* DiDetour(DirectInputMethod method, int variant) {
+    switch (variant) {
+        case 0:  return DiDetour<0>(method);
+        case 1:  return DiDetour<1>(method);
+        case 2:  return DiDetour<2>(method);
+        default: return DiDetour<3>(method);
+    }
+}
+
+// Adds the vtables of a keyboard and a mouse device made from a throwaway
+// IDirectInput8 of one interface. CreateDevice has the same slot and the same
+// arguments in IDirectInput8A and IDirectInput8W.
+inline bool CollectDeviceVtables(DirectInput8Create_t create, const GUID& interfaceId, std::vector<void**>& vtables) {
+    void* directInput = nullptr;
+    if (FAILED(create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, interfaceId, &directInput, nullptr))) return false;
+    bool ok = true;
+    for (const GUID* guid : {&kGuidSysKeyboard, &kGuidSysMouse}) {
+        void* device = nullptr;
+        if (FAILED(reinterpret_cast<DiCreateDevice_t>(Vtable(directInput)[3])(directInput, *guid, &device, nullptr))) {
+            ok = false;
+            continue;
+        }
+        vtables.push_back(Vtable(device));
+        reinterpret_cast<DiRelease_t>(Vtable(device)[kDiSlots[kDiRelease]])(device);
+    }
+    reinterpret_cast<DiRelease_t>(Vtable(directInput)[2])(directInput);
+    return ok;
+}
+
+inline void RemoveDirectInputHooks() {
+    for (auto& method : D().targets) {
+        for (void*& target : method) {
+            if (!target) continue;
+            MH_DisableHook(target);
+            MH_RemoveHook(target);
+            target = nullptr;
+        }
+    }
+}
+
+// Detours the device methods once dinput8.dll is in the process. Run from the
+// command-file thread, never from StartIsolatedInput: making a DirectInput
+// device is not something to do under the loader lock, and a game may load
+// dinput8.dll after the mod.
+inline void InstallDirectInput() {
+    DirectInput& d = D();
+    if (d.attempted) return;
+    const HMODULE module = GetModuleHandleW(L"dinput8.dll");
+    if (!module) return;
+    d.attempted = true;
+
+    const auto create = reinterpret_cast<DirectInput8Create_t>(
+        reinterpret_cast<void*>(GetProcAddress(module, "DirectInput8Create")));
+    std::vector<void**> vtables;
+    if (!create || !CollectDeviceVtables(create, kIidDirectInput8A, vtables)
+        || !CollectDeviceVtables(create, kIidDirectInput8W, vtables)) {
+        Log("isolated input: could not make DirectInput devices to find their vtable, so DirectInput is not detoured");
+        return;
+    }
+
+    int detours = 0;
+    for (int method = 0; method < kDiMethods; ++method) {
+        if (method == kDiGetCapabilities) continue;
+        int variants = 0;
+        for (void** vtable : vtables) {
+            void* const target = vtable[kDiSlots[method]];
+            bool known = false;
+            for (int i = 0; i < variants; ++i) known = known || d.targets[method][i] == target;
+            if (known) continue;
+            const bool created = MH_CreateHook(target, DiDetour(static_cast<DirectInputMethod>(method), variants),
+                                               &d.originals[method][variants]) == MH_OK;
+            if (created) d.targets[method][variants++] = target;
+            if (!created || MH_EnableHook(target) != MH_OK) {
+                Log("isolated input: could not hook a DirectInput device method, so DirectInput is not detoured");
+                RemoveDirectInputHooks();
+                return;
+            }
+            ++detours;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(d.mutex);
+        d.hooked = true;
+    }
+    char line[200];
+    std::snprintf(line, sizeof(line),
+                  "isolated input: DirectInput keyboard and mouse devices answer from the command file (%d detours over %zu device vtables)",
+                  detours, vtables.size());
+    Log(line);
+}
+
+// False only when the game reads DirectInput and the key has no DirectInput
+// code.
+inline bool SendDirectInputKey(int dik, bool down) {
+    DirectInput& d = D();
+    std::lock_guard<std::mutex> lock(d.mutex);
+    return d.state.Key(dik, down, GetTickCount()) || !d.hooked;
+}
+
+inline void SendDirectInputButton(MouseButton button, bool down) {
+    DirectInput& d = D();
+    std::lock_guard<std::mutex> lock(d.mutex);
+    d.state.Button(button, down, GetTickCount());
+}
+
+inline void SendDirectInputMove(int dx, int dy) {
+    DirectInput& d = D();
+    std::lock_guard<std::mutex> lock(d.mutex);
+    d.state.Move(dx, dy, GetTickCount());
+}
+
 inline bool IsExtendedKey(int vk) {
     switch (vk) {
         case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END: case VK_PRIOR: case VK_NEXT:
@@ -228,7 +609,7 @@ inline bool IsExtendedKey(int vk) {
     }
 }
 
-inline bool SendKey(int vk, bool down) {
+inline bool SendRawKey(int vk, bool down) {
     S().keyDown[vk].store(down, std::memory_order_release);
     if (down) S().keyPressedSinceRead[vk].store(true, std::memory_order_release);
 
@@ -241,6 +622,11 @@ inline bool SendKey(int vk, bool down) {
     event.data.keyboard.VKey = static_cast<USHORT>(vk);
     event.data.keyboard.Message = down ? WM_KEYDOWN : WM_KEYUP;
     return Post(event);
+}
+
+inline bool SendKey(int vk, bool down) {
+    const bool directInput = SendDirectInputKey(VkToDik(vk), down);
+    return SendRawKey(vk, down) && directInput;
 }
 
 inline bool SendMouse(USHORT buttonFlags, int dx, int dy) {
@@ -264,19 +650,26 @@ inline USHORT ButtonFlag(MouseButton button, bool down) {
 }
 
 // One character as the key presses that type it on the current layout, and as
-// the WM_CHAR a text field reads.
+// the WM_CHAR a text field reads. A DirectInput keyboard gets the key that
+// types it on a US keyboard instead: a game that reads key codes turns them
+// into characters itself, whatever layout Windows has.
 inline bool SendCharacter(char character) {
     const SHORT scan = VkKeyScanA(character);
     if (scan == -1) return false;
     const int vk = scan & 0xFF;
     const bool shift = (scan & 0x100) != 0;
+    const DirectInputKeyStroke stroke = UsKeyStroke(character);
     bool ok = true;
-    if (shift) ok = SendKey(VK_SHIFT, true) && ok;
-    ok = SendKey(vk, true) && ok;
+    if (shift) ok = SendRawKey(VK_SHIFT, true) && ok;
+    if (stroke.shift) SendDirectInputKey(kDikLeftShift, true);
+    ok = SendRawKey(vk, true) && ok;
+    ok = SendDirectInputKey(stroke.dik, true) && ok;
     ok = PostMessageW(S().window.load(std::memory_order_acquire), WM_CHAR, static_cast<WPARAM>(character), 1) != 0 && ok;
     Sleep(kTextKeyMs);
-    ok = SendKey(vk, false) && ok;
-    if (shift) ok = SendKey(VK_SHIFT, false) && ok;
+    ok = SendRawKey(vk, false) && ok;
+    SendDirectInputKey(stroke.dik, false);
+    if (shift) ok = SendRawKey(VK_SHIFT, false) && ok;
+    if (stroke.shift) SendDirectInputKey(kDikLeftShift, false);
     Sleep(kTextKeyMs);
     return ok;
 }
@@ -285,9 +678,15 @@ inline bool Play(const InputStep& step) {
     switch (step.action) {
         case InputAction::kKeyDown:   return SendKey(step.vk, true);
         case InputAction::kKeyUp:     return SendKey(step.vk, false);
-        case InputAction::kMouseDown: return SendMouse(ButtonFlag(step.button, true), 0, 0);
-        case InputAction::kMouseUp:   return SendMouse(ButtonFlag(step.button, false), 0, 0);
-        case InputAction::kMouseMove: return SendMouse(0, step.dx, step.dy);
+        case InputAction::kMouseDown:
+            SendDirectInputButton(step.button, true);
+            return SendMouse(ButtonFlag(step.button, true), 0, 0);
+        case InputAction::kMouseUp:
+            SendDirectInputButton(step.button, false);
+            return SendMouse(ButtonFlag(step.button, false), 0, 0);
+        case InputAction::kMouseMove:
+            SendDirectInputMove(step.dx, step.dy);
+            return SendMouse(0, step.dx, step.dy);
         case InputAction::kWait:      Sleep(step.waitMs); return true;
         case InputAction::kText: {
             bool ok = true;
@@ -340,6 +739,7 @@ inline void RunCommandFile() {
     bool first = true;
     for (;;) {
         Sleep(kPollMs);
+        InstallDirectInput();
         // From the moment the game has a window it is told that window has the
         // foreground, script or no script.
         if (!S().window.load(std::memory_order_acquire)) {

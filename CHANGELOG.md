@@ -9,6 +9,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - isolated input answers DirectInput 8 keyboards and mice
+
+A game that reads its keyboard and mouse through `dinput8.dll` got nothing from a test script:
+isolated input only posted raw input and answered `GetAsyncKeyState`.
+
+- `cameraunlock/dev/isolated_input.h` detours `GetDeviceState`, `GetDeviceData`, `Acquire`, `Poll`,
+  `SetCooperativeLevel` and `Release` in the `IDirectInputDevice8` vtable (A and W, found from
+  throwaway devices), once `dinput8.dll` is loaded in the process. Keyboard and mouse devices answer
+  from the script alone, immediate and buffered, and the real devices are never acquired. Other
+  DirectInput devices are left as they were, and `dinput8.dll` is never loaded into a game that has
+  not loaded it.
+- `cameraunlock/dev/directinput_state.h` is the pure half (virtual key to `DIK_` code, the US key
+  for a character, keyboard and mouse state, buffered events), tested in
+  `directinput_state_tests.cpp`.
+- The command language is unchanged. `text` presses US-keyboard keys on a DirectInput keyboard.
+- Proven in Fallout: New Vegas (Steam), which reads its keyboard through both `GetDeviceState` and
+  `GetDeviceData` and its mouse through `GetDeviceState`: `directinput` is `supported` in
+  `data/isolated-input.json`. What was measured is in `docs/isolated-input.md`.
+- No consumer change: `StartIsolatedInput` is the only call, as before. The raw input path is
+  unchanged.
+
 ### Added - `install-body-javaagent.cmd`, for a mod that is a Java agent in a game with its own JVM launcher
 
 Project Zomboid is a Java program whose native launcher reads the JVM's arguments from
