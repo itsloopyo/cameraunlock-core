@@ -10,10 +10,19 @@
 :: launcher, which reads the JVM's arguments from <Exe>.json next to the exe
 :: and prefers <Exe>.site.json when one is there. The mod is a jar the JVM
 :: loads as a Java agent. There is no loader to install: the jar goes next to
-:: the exe, and a site config is written that is the stock config with
-:: -javaagent:<jar> first in vmArgs, one for each .jar in MOD_DLLS. The path
-:: in that argument is relative, because the launcher starts the JVM with the
-:: game folder as its working directory.
+:: the exe, and a site config is written that is the stock config with the
+:: mod's boot class (JVM_MAIN_CLASS) as mainClass, each .jar in MOD_DLLS added
+:: to the classpath, and two arguments first in vmArgs: the game's own main
+:: class for the boot class to start, and the switch that lets a running JVM
+:: load an agent. The jar paths are relative, because the launcher starts the
+:: JVM with the game folder as its working directory.
+::
+:: The agent is not named with -javaagent. A launcher of this kind loads
+:: jvm.dll by path, which leaves the runtime's bin folder off the DLL search
+:: path, and at start-up the JVM then cannot load instrument.dll: its imports,
+:: jli.dll and java.dll, are found only if that folder happens to be on PATH.
+:: Project Zomboid 42.21 exits within a second that way. The boot class runs
+:: once the runtime's DLLs are in the process and loads the agent from there.
 ::
 :: The site config REPLACES the stock one, so it is generated from the stock
 :: file on every install (jvm-site-config.ps1) rather than shipped: a shipped
@@ -25,15 +34,6 @@
 :: the player or to another mod. The install stops before copying anything
 :: rather than overwrite it.
 ::
-:: What this body does not do is make the JVM able to load an agent. For any
-:: -javaagent the JVM loads instrument.dll from its runtime's bin folder, and
-:: that DLL imports jli.dll and java.dll from the same folder. A launcher that
-:: loads jvm.dll by path leaves that folder off the DLL search path, the two
-:: imports resolve through PATH or not at all, and the JVM stops at start-up
-:: with "Could not find agent library instrument". Project Zomboid 42.21 does
-:: this: the game starts with this install only when jre64\bin is on PATH. A
-:: mod for such a launcher has to arrange that load itself.
-::
 :: FRAMEWORK_TYPE is "JavaAgent" on the state file and installed_by_us is
 :: always false, since nothing was installed on a framework's behalf.
 ::
@@ -41,6 +41,8 @@
 ::   WRAPPER_DIR              wrapper's %~dp0
 ::   GAME_ID, MOD_DISPLAY_NAME, MOD_DLLS, MOD_INTERNAL_NAME, MOD_VERSION
 ::   STATE_FILE, FRAMEWORK_TYPE (always "JavaAgent")
+::   JVM_MAIN_CLASS           the mod's boot class, as the stock config names
+::                            its own (com/example/Boot)
 ::   MOD_SEED_FILES           optional config files written only when absent
 ::   MOD_CONTROLS             optional post-install help text
 ::
@@ -156,7 +158,7 @@ goto :strip_given_slash
 :: Every name below is interpolated straight into a path that gets written,
 :: deleted or recursively removed. A blank one does not fail - it silently
 :: retargets the operation at the parent directory, which is the game folder.
-for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS) do (
+for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS JVM_MAIN_CLASS) do (
     if not defined %%v (
         echo ERROR: %%v is not set in this script's CONFIG BLOCK.
         exit /b 1
@@ -401,10 +403,10 @@ exit /b 0
 :: ============================================
 :site_config
 if defined _SITE_CHECK_ONLY goto :site_config_check
-powershell -NoProfile -ExecutionPolicy Bypass -File "!_SITE_HELPER!" -ConfigPath "!JVM_CONFIG!" -SitePath "!JVM_SITE!" -AgentJars "!AGENT_JARS!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_SITE_HELPER!" -ConfigPath "!JVM_CONFIG!" -SitePath "!JVM_SITE!" -AgentJars "!AGENT_JARS!" -MainClass "%JVM_MAIN_CLASS%"
 exit /b %errorlevel%
 :site_config_check
-powershell -NoProfile -ExecutionPolicy Bypass -File "!_SITE_HELPER!" -ConfigPath "!JVM_CONFIG!" -SitePath "!JVM_SITE!" -AgentJars "!AGENT_JARS!" -CheckOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_SITE_HELPER!" -ConfigPath "!JVM_CONFIG!" -SitePath "!JVM_SITE!" -AgentJars "!AGENT_JARS!" -MainClass "%JVM_MAIN_CLASS%" -CheckOnly
 exit /b %errorlevel%
 
 :: UTC ISO-8601, read through PowerShell: %DATE% is whatever the user's regional

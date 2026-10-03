@@ -25,7 +25,7 @@
 ::                  is no loader, so there is nothing else to take away
 ::   JavaAgent    - removes the agent jar from the exe's folder and the
 ::                  <Exe>.site.json the install wrote there, when that file
-::                  still loads the jar; there is no loader
+::                  still names the jar; there is no loader
 ::
 :: Required env from the wrapper:
 ::   WRAPPER_DIR        - wrapper's %~dp0 (release-zip root or <mod>/scripts/)
@@ -870,11 +870,10 @@ exit /b 0
 
 :: ============================================
 :: JavaAgent: remove the site JVM config the install generated. It is this
-:: mod's only while it still carries a -javaagent argument for one of the jars
-:: in MOD_DLLS or LEGACY_DLLS. One that does not was written by the player or
-:: by another mod after the install, and the launcher reads only that one file,
-:: so it is left in place and said so. The marker leaves the leading `-` off:
-:: PowerShell would read an argument that starts with one as a parameter name.
+:: mod's only while it still names one of the jars in MOD_DLLS or LEGACY_DLLS.
+:: One that does not was written by the player or by another mod after the
+:: install, and the launcher reads only that one file, so it is left in place
+:: and said so.
 :: ============================================
 :remove_jvm_site_config
 set "_SITE_PATH=!DEPLOY_DIR!\!JVM_SITE_NAME!"
@@ -884,7 +883,7 @@ set "_MARKER_PATH=!_SITE_PATH!"
 set "_MARKER_ALTERNATE="
 for %%f in (%MOD_DLLS% %LEGACY_DLLS%) do (
     if /i "%%~xf"==".jar" (
-        set "_MARKER_VALUE=javaagent:%%f"
+        set "_MARKER_VALUE=%%f"
         call :marker_state
         if errorlevel 2 (
             echo   ERROR: could not read !JVM_SITE_NAME! to tell whether it is this mod's.

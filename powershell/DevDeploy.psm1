@@ -957,11 +957,14 @@ function Invoke-DevDeployShim {
 .DESCRIPTION
     The same two writes install-body-javaagent.cmd makes: the agent jars go
     next to the game exe, and scripts/jvm-site-config.ps1 writes <Exe>.site.json
-    as the stock <Exe>.json with a -javaagent argument for each jar first in
-    vmArgs. The site config is checked before anything is copied, so a site
-    config that is somebody else's stops the deploy with the install untouched.
+    as the stock <Exe>.json with the mod's boot class as mainClass and each jar
+    on the classpath. The site config is checked before anything is copied, so
+    a site config that is somebody else's stops the deploy with the install
+    untouched.
 .PARAMETER AgentJars
-    Jar filenames in BuildOutputPath, each loaded as a Java agent.
+    Jar filenames in BuildOutputPath, each put on the classpath.
+.PARAMETER MainClass
+    The mod's boot class, as the stock config names its own (com/example/Boot).
 .OUTPUTS
     Hashtable: @{ GamePath; ExeDir; DeployedDllPath; SiteConfigPath }.
     DeployedDllPath is the first jar, under the key the other orchestrators use.
@@ -973,6 +976,7 @@ function Invoke-DevDeployJavaAgentToPath {
         [Parameter(Mandatory)][string]$GameDisplayName,
         [Parameter(Mandatory)][string]$BuildOutputPath,
         [Parameter(Mandatory)][string[]]$AgentJars,
+        [Parameter(Mandatory)][string]$MainClass,
         [string]$GivenPath
     )
 
@@ -992,7 +996,8 @@ function Invoke-DevDeployJavaAgentToPath {
     $siteHelper = Join-Path $PSScriptRoot '..\scripts\jvm-site-config.ps1'
     $siteArgs = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $siteHelper,
-        '-ConfigPath', $jvmConfig, '-SitePath', $siteConfig, '-AgentJars', ($AgentJars -join ' ')
+        '-ConfigPath', $jvmConfig, '-SitePath', $siteConfig, '-AgentJars', ($AgentJars -join ' '),
+        '-MainClass', $MainClass
     )
 
     & powershell @siteArgs -CheckOnly
@@ -1034,6 +1039,7 @@ function Invoke-DevDeployJavaAgent {
         [Parameter(Mandatory)][string]$GameDisplayName,
         [Parameter(Mandatory)][string]$BuildOutputPath,
         [Parameter(Mandatory)][string[]]$AgentJars,
+        [Parameter(Mandatory)][string]$MainClass,
         [string]$GivenPath
     )
 

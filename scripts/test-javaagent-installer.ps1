@@ -46,6 +46,7 @@ set "MOD_VERSION=1.0.0"
 set "STATE_FILE=.fixture-state.json"
 set "FRAMEWORK_TYPE=JavaAgent"
 set "MOD_DLLS=Fixture.jar"
+set "JVM_MAIN_CLASS=fixture/Boot"
 set "LEGACY_DLLS=OldFixture.jar"
 set "MOD_SEED_FILES="
 set "PRESERVE_FILES="
@@ -71,8 +72,9 @@ Invoke-Installer install 0
 Assert-File $jar 'jar v1'
 Assert-File $stock $stockJson
 $written = [IO.File]::ReadAllText($site) | ConvertFrom-Json
-if (($written.vmArgs -join '|') -ne '-javaagent:Fixture.jar|-Xmx1g') { throw "Unexpected vmArgs: $($written.vmArgs -join ' ')" }
-if ($written.mainClass -ne 'a/Main' -or ($written.classpath -join '|') -ne '.|game.jar') { throw 'The site config lost the stock mainClass or classpath' }
+if (($written.vmArgs -join '|') -ne '-Dcameraunlock.mainClass=a/Main|-XX:+EnableDynamicAgentLoading|-Xmx1g') { throw "Unexpected vmArgs: $($written.vmArgs -join ' ')" }
+if ($written.mainClass -ne 'fixture/Boot') { throw "Unexpected mainClass: $($written.mainClass)" }
+if (($written.classpath -join '|') -ne '.|game.jar|Fixture.jar') { throw "Unexpected classpath: $($written.classpath -join ' ')" }
 if (($written.windows.'10.0'.vmArgs -join '|') -ne '-XX:+UseZGC') { throw 'The site config lost the per-version vmArgs' }
 if (-not ([IO.File]::ReadAllText($state)).Contains('"type": "JavaAgent"')) { throw 'The state file does not name JavaAgent' }
 
@@ -82,16 +84,17 @@ if (-not ([IO.File]::ReadAllText($state)).Contains('"type": "JavaAgent"')) { thr
 Invoke-Installer install 0
 Assert-File $jar 'jar v2'
 $written = [IO.File]::ReadAllText($site) | ConvertFrom-Json
-if (($written.vmArgs -join '|') -ne '-javaagent:Fixture.jar|-Xmx2g') { throw "Unexpected vmArgs after reinstall: $($written.vmArgs -join ' ')" }
+if (($written.vmArgs -join '|') -ne '-Dcameraunlock.mainClass=a/Main|-XX:+EnableDynamicAgentLoading|-Xmx2g') { throw "Unexpected vmArgs after reinstall: $($written.vmArgs -join ' ')" }
+if (($written.classpath -join '|') -ne '.|game.jar|Fixture.jar') { throw "Unexpected classpath after reinstall: $($written.classpath -join ' ')" }
 
 Invoke-Installer uninstall 0
 if ((Test-Path -LiteralPath $jar) -or (Test-Path -LiteralPath $site) -or (Test-Path -LiteralPath $state)) { throw 'Uninstall left the jar, the site config or the state file' }
 if (-not (Test-Path -LiteralPath $stock)) { throw 'Uninstall removed the stock JVM config' }
 
-# A site config that loads only a jar from an older release is still this mod's.
+# A site config that names only a jar from an older release is still this mod's.
 [IO.File]::WriteAllText($site, '{"mainClass":"a/Main","classpath":[],"vmArgs":["-javaagent:OldFixture.jar"]}')
 Invoke-Installer uninstall 0
-if (Test-Path -LiteralPath $site) { throw 'Uninstall left a site config that loads a legacy jar' }
+if (Test-Path -LiteralPath $site) { throw 'Uninstall left a site config that names a legacy jar' }
 
 $foreign = '{"mainClass":"a/Main","classpath":[],"vmArgs":["-Xmx8g"]}'
 [IO.File]::WriteAllText($site, $foreign)

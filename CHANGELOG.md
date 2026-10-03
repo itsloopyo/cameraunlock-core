@@ -9,6 +9,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - **BREAKING** the Java agent install starts the mod through a boot class, not `-javaagent`
+
+A Project Zomboid install made by `install-body-javaagent.cmd` did not start: the game exited
+within a second with `Could not find agent library instrument on the library path`. Its launcher
+loads `jvm.dll` by path, so at start-up `instrument.dll` cannot find `jli.dll` and `java.dll`
+unless `jre64\bin` is on PATH. Measured with no Java on PATH and with another JDK on it.
+
+- `scripts/jvm-site-config.ps1` now writes the site config with the mod's boot class as
+  `mainClass`, each agent jar appended to `classpath`, and `-Dcameraunlock.mainClass=<the stock
+  mainClass>` and `-XX:+EnableDynamicAgentLoading` first in `vmArgs`. It takes a mandatory
+  `-MainClass`. A site config is the mod's when it names one of the jars anywhere, so one written
+  by the earlier `-javaagent` shape is still replaced on install and removed on uninstall.
+- `install-body-javaagent.cmd` requires `JVM_MAIN_CLASS`, and the wrapper template sets it.
+- `Invoke-DevDeployJavaAgent` and `Invoke-DevDeployJavaAgentToPath` take a mandatory `-MainClass`.
+- `uninstall-body.cmd` matches the site config on the jar name.
+- The mod's side of the contract: the jar holds the boot class, whose `main` loads the jar into
+  the running JVM as a Java agent and then calls the `main` of the class the
+  `cameraunlock.mainClass` system property names. `project-zomboid-headtracking`'s
+  `com.cameraunlock.zomboid.Boot` is the reference.
+- Consumer change (project-zomboid-headtracking, the only user): add
+  `set "JVM_MAIN_CLASS=..."` to `scripts/install.cmd`, pass `-MainClass` in `scripts/deploy.ps1`,
+  ship the boot class and an `Agent-Class` manifest entry.
+
 ### Changed - REFramework mods cycle three aim modes, and a lean in can stop at the eye relief
 
 - With `PluginConfigSchema::trueFreeLook`, `PluginConfigTable` binds `[Position] FreeLookMarker`
