@@ -1,4 +1,5 @@
 using System;
+using CameraUnlock.Core.Data;
 
 namespace CameraUnlock.Core.Processing
 {
@@ -14,9 +15,11 @@ namespace CameraUnlock.Core.Processing
     /// 1.0 when nothing is zoomed. Nothing here is user-configurable.
     /// </para>
     /// <para>
-    /// Yaw, pitch and a lean translate the image across the frame, so all three scale. Roll
-    /// rotates it about the view axis by the same angle at every field of view, so roll is left
-    /// alone.
+    /// Yaw, pitch and a lean across the view translate the image across the frame, so all three
+    /// scale. Roll rotates it about the view axis by the same angle at every field of view, so
+    /// roll is left alone. A lean along the view moves nothing across the frame, it brings the
+    /// scene closer, so it is left alone too: scaled, it would cut short how far the player can
+    /// lean in. <see cref="ScaleLeanForZoom"/> makes the split.
     /// </para>
     /// </summary>
     public static class ZoomCompensation
@@ -24,7 +27,8 @@ namespace CameraUnlock.Core.Processing
         private const double DegToRad = System.Math.PI / 180.0;
 
         /// <summary>
-        /// The factor a translation (a lean) scales by, given the field of view being rendered
+        /// The factor a translation across the view (a sideways or vertical lean) scales by,
+        /// given the field of view being rendered
         /// now and the game's un-zoomed one, both as tan(fov/2) in the same axis.
         /// <para>
         /// The same axis is the whole of the difficulty: pairing a vertical accessor with a
@@ -54,6 +58,20 @@ namespace CameraUnlock.Core.Processing
         public static float ScaleAngleForZoom(float angleDeg, float factor)
         {
             return (float)(System.Math.Atan(System.Math.Tan(angleDeg * DegToRad) * factor) / DegToRad);
+        }
+
+        /// <summary>
+        /// A lean with the part perpendicular to the view axis scaled by
+        /// <paramref name="factor"/> and the part along it left as it is.
+        /// <paramref name="viewAxis"/> is the direction the camera looks along, unit length, in
+        /// the frame <paramref name="lean"/> is in: (0, 0, 1) for a lean in the camera's own
+        /// axes where z is the view axis, the camera's forward vector for a lean in world space.
+        /// Its sign makes no difference.
+        /// </summary>
+        public static Vec3 ScaleLeanForZoom(Vec3 lean, Vec3 viewAxis, float factor)
+        {
+            Vec3 along = viewAxis * Vec3.Dot(lean, viewAxis);
+            return along + (lean - along) * factor;
         }
     }
 }

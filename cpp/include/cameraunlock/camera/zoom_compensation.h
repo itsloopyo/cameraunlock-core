@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cameraunlock/math/vec3.h>
+
 #include <cmath>
 
 // Keeps head tracking's effect on the picture the same size whatever the game
@@ -26,9 +28,13 @@
 // What scales and what does not:
 //
 //   - Yaw and pitch TRANSLATE the image across the frame, so both scale.
-//   - A lean translates it too - a head offset d seen at depth D lands at
-//     d / (2 * D * tan(fov/2)) of the frame - so position scales, linearly and
-//     exactly.
+//   - A lean ACROSS the view translates it too - a head offset d seen at depth
+//     D lands at d / (2 * D * tan(fov/2)) of the frame - so the part of the
+//     lean perpendicular to the view axis scales, linearly and exactly.
+//   - A lean ALONG the view moves nothing across the frame: it brings the scene
+//     closer. It is left alone, because scaled it would cut short how far the
+//     player can lean in, and a lean in through a 4x scope would keep a quarter
+//     of its travel. ScaleLeanForZoom makes the split.
 //   - Roll ROTATES the image about the view axis. Ten degrees of head roll
 //     rolls the picture ten degrees at every field of view there is, so roll is
 //     left alone. Scaling it would flatten a head tilt the player is holding
@@ -36,7 +42,8 @@
 namespace cameraunlock {
 namespace camera {
 
-/// The factor a translation - a lean - scales by, given the FOV being rendered
+/// The factor a translation across the view - a sideways or vertical lean -
+/// scales by, given the FOV being rendered
 /// now and the game's un-zoomed one, both as tan(fov/2) in the same axis.
 ///
 /// **The same axis is the whole of the difficulty.** An engine will hand you a
@@ -70,6 +77,18 @@ inline float FovZoomFactor(float tan_half_fov, float tan_half_fov_base) {
 inline float ScaleAngleForZoom(float angle_deg, float factor) {
     constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
     return std::atan(std::tan(angle_deg * kDegToRad) * factor) / kDegToRad;
+}
+
+/// A lean with the part perpendicular to the view axis scaled by `factor` and
+/// the part along it left as it is.
+///
+/// `view_axis` is the direction the camera looks along, unit length, in the
+/// frame `lean` is in: (0, 0, 1) for a lean in the camera's own axes where z is
+/// the view axis, the camera's forward vector for a lean in world space. Its
+/// sign makes no difference.
+inline math::Vec3 ScaleLeanForZoom(const math::Vec3& lean, const math::Vec3& view_axis, float factor) {
+    const math::Vec3 along = view_axis * math::Vec3::Dot(lean, view_axis);
+    return along + (lean - along) * factor;
 }
 
 }  // namespace camera

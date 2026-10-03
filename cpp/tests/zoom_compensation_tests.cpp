@@ -13,6 +13,8 @@ namespace {
 
 using cameraunlock::camera::FovZoomFactor;
 using cameraunlock::camera::ScaleAngleForZoom;
+using cameraunlock::camera::ScaleLeanForZoom;
+using cameraunlock::math::Vec3;
 
 int g_failures = 0;
 
@@ -27,6 +29,10 @@ void Check(bool cond, const char* name) {
 
 bool NearEqual(float a, float b, float eps = 1e-5f) {
     return std::fabs(a - b) <= eps;
+}
+
+bool NearVec(const Vec3& a, const Vec3& b, float eps = 1e-5f) {
+    return NearEqual(a.x, b.x, eps) && NearEqual(a.y, b.y, eps) && NearEqual(a.z, b.z, eps);
 }
 
 constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
@@ -80,6 +86,26 @@ int RunZoomCompensationTests() {
           "small angles are within a hundredth of a degree of a plain multiply");
     Check(ScaleAngleForZoom(45.0f, factor) > 45.0f * factor,
           "large angles are not, and the round trip keeps the displacement right");
+
+    // The lean: only the part across the view scales.
+    const Vec3 forward(0.0f, 0.0f, 1.0f);
+    Check(NearVec(ScaleLeanForZoom(Vec3(0.2f, -0.1f, 0.0f), forward, factor), Vec3(0.2f * factor, -0.1f * factor, 0.0f)),
+          "a lean across the view scales by the factor");
+    Check(NearVec(ScaleLeanForZoom(Vec3(0.0f, 0.0f, 0.4f), forward, 0.25f), Vec3(0.0f, 0.0f, 0.4f)) &&
+              NearVec(ScaleLeanForZoom(Vec3(0.0f, 0.0f, -0.1f), forward, 0.25f), Vec3(0.0f, 0.0f, -0.1f)),
+          "a lean along the view is untouched, in and back, through a 4x scope");
+    Check(NearVec(ScaleLeanForZoom(Vec3(0.2f, -0.1f, 0.4f), forward, 1.0f), Vec3(0.2f, -0.1f, 0.4f)),
+          "a factor of 1 returns the lean untouched");
+    Check(NearVec(ScaleLeanForZoom(Vec3(0.2f, -0.1f, 0.4f), forward, 0.5f), Vec3(0.1f, -0.05f, 0.4f)),
+          "a mixed lean keeps its part along the view and scales the rest");
+    Check(NearVec(ScaleLeanForZoom(Vec3(0.2f, -0.1f, 0.4f), -forward, 0.5f), Vec3(0.1f, -0.05f, 0.4f)),
+          "the view axis's sign makes no difference");
+
+    // A pitched view in world space: 0.3 along it and 0.2 across it.
+    const Vec3 pitched = Vec3(0.0f, 0.6f, 0.8f);
+    const Vec3 across = Vec3(1.0f, 0.0f, 0.0f);
+    Check(NearVec(ScaleLeanForZoom(pitched * 0.3f + across * 0.2f, pitched, 0.5f), pitched * 0.3f + across * 0.1f),
+          "the split follows a view axis that is not a coordinate axis");
 
     return g_failures;
 }

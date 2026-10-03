@@ -182,9 +182,13 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
     if (zoom != 1.0f) {
         yaw = cameraunlock::camera::ScaleAngleForZoom(yaw, zoom);
         pitch = cameraunlock::camera::ScaleAngleForZoom(pitch, zoom);
-        px *= zoom;
-        py *= zoom;
-        pz *= zoom;
+        // px, py and pz are in the camera's own axes, where z is the view axis
+        // (ViewSpaceOffsetToWorld), so the lean in keeps its full travel.
+        const cameraunlock::math::Vec3 scaled = cameraunlock::camera::ScaleLeanForZoom(
+            cameraunlock::math::Vec3(px, py, pz), cameraunlock::math::Vec3(0.0f, 0.0f, 1.0f), zoom);
+        px = scaled.x;
+        py = scaled.y;
+        pz = scaled.z;
     }
 
     // Through the clean camera's own axes, before the head rotation below.

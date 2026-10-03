@@ -9,6 +9,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - zoom compensation scales only the lean across the view
+
+A lean along the view moves nothing across the frame, it brings the scene closer, so the zoom
+factor no longer applies to it (owner ruling of 2026-10-03): scaled, a lean in through a 4x scope
+kept a quarter of its travel. Yaw, pitch and the part of the lean perpendicular to the view axis
+scale as before, and roll is still left alone.
+
+- `cameraunlock::camera::ScaleLeanForZoom(lean, view_axis, factor)` in
+  `camera/zoom_compensation.h` and `ZoomCompensation.ScaleLeanForZoom(lean, viewAxis, factor)`
+  return the lean with only its perpendicular part scaled. The view axis is unit length and in the
+  frame the lean is in, and its sign makes no difference.
+- The REFramework camera pipeline uses it, with the camera's own z as the view axis. A mod that
+  sets `unzoomedFovDegrees` now applies a forward or backward lean in full at any zoom, where it
+  was multiplied by the factor.
+
+Consuming repos: a mod that multiplies its whole lean by the zoom factor calls `ScaleLeanForZoom`
+instead. No vector in data/pipeline-conformance.json changed.
+
 ### Added - the aim mode pair: `AimMode`, its cycle, its labels and the marker's opacity
 
 Aiming down sights has three modes, cycled on the `TrueFreeLookKey` list (owner ruling of

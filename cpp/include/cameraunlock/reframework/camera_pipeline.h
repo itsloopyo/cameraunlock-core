@@ -122,9 +122,10 @@ struct CameraPipelineDescriptor {
     cameraunlock::camera::LeanQueryFn leanQuery = nullptr;
 
     // The game's un-zoomed field of view, in the units via.Camera.get_FOV reports.
-    // Set, yaw, pitch and the lean are scaled so a head movement moves the picture
-    // as far as it would at that field of view (camera/zoom_compensation.h). Roll
-    // is not scaled. False on a frame it cannot answer, which applies no
+    // Set, yaw, pitch and the lean across the view are scaled so a head movement
+    // moves the picture as far as it would at that field of view
+    // (camera/zoom_compensation.h). Roll and the lean along the view are not
+    // scaled. False on a frame it cannot answer, which applies no
     // compensation that frame.
     bool (*unzoomedFovDegrees)(float& out) = nullptr;
 };

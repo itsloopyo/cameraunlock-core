@@ -1,4 +1,5 @@
 using System;
+using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Processing;
 using Xunit;
 
@@ -87,6 +88,51 @@ namespace CameraUnlock.Core.Tests.Processing
             float factor = ZoomCompensation.FovZoomFactor(Scope, Base);
             Near(5.0f * factor, ZoomCompensation.ScaleAngleForZoom(5.0f, factor), 0.01f);
             Assert.True(ZoomCompensation.ScaleAngleForZoom(45.0f, factor) > 45.0f * factor);
+        }
+
+        private static void NearVec(Vec3 expected, Vec3 actual)
+        {
+            Near(expected.X, actual.X);
+            Near(expected.Y, actual.Y);
+            Near(expected.Z, actual.Z);
+        }
+
+        [Fact]
+        public void ALeanAcrossTheViewScalesByTheFactor()
+        {
+            float factor = ZoomCompensation.FovZoomFactor(Scope, Base);
+            NearVec(new Vec3(0.2f * factor, -0.1f * factor, 0f),
+                ZoomCompensation.ScaleLeanForZoom(new Vec3(0.2f, -0.1f, 0f), Vec3.Forward, factor));
+        }
+
+        [Fact]
+        public void ALeanAlongTheViewIsUntouched()
+        {
+            NearVec(new Vec3(0f, 0f, 0.4f), ZoomCompensation.ScaleLeanForZoom(new Vec3(0f, 0f, 0.4f), Vec3.Forward, 0.25f));
+            NearVec(new Vec3(0f, 0f, -0.1f), ZoomCompensation.ScaleLeanForZoom(new Vec3(0f, 0f, -0.1f), Vec3.Forward, 0.25f));
+        }
+
+        [Fact]
+        public void AFactorOfOneReturnsTheLeanUntouched()
+        {
+            NearVec(new Vec3(0.2f, -0.1f, 0.4f), ZoomCompensation.ScaleLeanForZoom(new Vec3(0.2f, -0.1f, 0.4f), Vec3.Forward, 1.0f));
+        }
+
+        [Fact]
+        public void AMixedLeanKeepsItsPartAlongTheViewAndScalesTheRest()
+        {
+            var lean = new Vec3(0.2f, -0.1f, 0.4f);
+            NearVec(new Vec3(0.1f, -0.05f, 0.4f), ZoomCompensation.ScaleLeanForZoom(lean, Vec3.Forward, 0.5f));
+            NearVec(new Vec3(0.1f, -0.05f, 0.4f), ZoomCompensation.ScaleLeanForZoom(lean, -Vec3.Forward, 0.5f));
+        }
+
+        [Fact]
+        public void TheSplitFollowsAViewAxisThatIsNotACoordinateAxis()
+        {
+            var pitched = new Vec3(0f, 0.6f, 0.8f);
+            var across = new Vec3(1f, 0f, 0f);
+            NearVec(pitched * 0.3f + across * 0.1f,
+                ZoomCompensation.ScaleLeanForZoom(pitched * 0.3f + across * 0.2f, pitched, 0.5f));
         }
     }
 }
