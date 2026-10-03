@@ -53,6 +53,17 @@ constexpr Rgba FadeRgba(Rgba color, float opacity) {
     return (color & 0x00FFFFFFu) | (alpha << 24);
 }
 
+// The mark itself, centred on a pixel of the draw list. AimMarker draws through
+// this. A mod whose overlay draws something else as well (Dying Light 2 keeps a
+// hip dot on the same overlay) calls it from its own render callback, so the
+// mark is the same one in every mod.
+inline void DrawAimMark(OverlayDrawList& dc, float px, float py, const AimMarkerStyle& style, float opacity) {
+    if (!(opacity > 0.0f)) return;
+    dc.DrawCross(px, py, style.arm_pixels + 1.0f, FadeRgba(style.outline, opacity),
+                 style.thickness_pixels + 2.0f, style.gap_pixels - 1.0f);
+    dc.DrawCross(px, py, style.arm_pixels, FadeRgba(style.ink, opacity), style.thickness_pixels, style.gap_pixels);
+}
+
 // `Traits` binds one graphics backend:
 //
 //   using Overlay     = <the backend's overlay class>;
@@ -148,13 +159,7 @@ inline void DrawMarker(typename Traits::DrawContext& dc) {
     const float px = (ndcX * 0.5f + 0.5f) * dc.Width();
     const float py = (0.5f - ndcY * 0.5f) * dc.Height();
 
-    const float opacity = s.opacity.load(std::memory_order_relaxed);
-    if (!(opacity > 0.0f)) return;
-
-    const AimMarkerStyle& st = s.style;
-    dc.DrawCross(px, py, st.arm_pixels + 1.0f, FadeRgba(st.outline, opacity),
-                 st.thickness_pixels + 2.0f, st.gap_pixels - 1.0f);
-    dc.DrawCross(px, py, st.arm_pixels, FadeRgba(st.ink, opacity), st.thickness_pixels, st.gap_pixels);
+    DrawAimMark(dc, px, py, s.style, s.opacity.load(std::memory_order_relaxed));
 }
 
 template <typename Traits>

@@ -333,6 +333,32 @@ void TestAimMarkerFadesBothCrossesByItsOpacity() {
           "an opacity outside 0..1 is held to it");
 }
 
+void TestAimMarkDrawsAnOutlineUnderTheInk() {
+    using namespace cameraunlock::rendering;
+    const AimMarkerStyle style;
+    OverlayDrawList hidden(1920.0f, 1080.0f);
+    DrawAimMark(hidden, 960.0f, 540.0f, style, 0.0f);
+    Check(hidden.TriVerts().empty(), "a mark with no opacity draws nothing");
+
+    OverlayDrawList drawn(1920.0f, 1080.0f);
+    DrawAimMark(drawn, 960.0f, 540.0f, style, 0.5f);
+    const auto& verts = drawn.TriVerts();
+    // Two crosses of four arms, each arm a quad of two triangles.
+    Check(verts.size() == 48, "the mark is an outline cross and an ink cross");
+    bool outlineFirst = verts.size() == 48;
+    for (std::size_t i = 0; outlineFirst && i < 24; ++i) outlineFirst = verts[i].color == FadeRgba(style.outline, 0.5f);
+    for (std::size_t i = 24; outlineFirst && i < 48; ++i) outlineFirst = verts[i].color == FadeRgba(style.ink, 0.5f);
+    Check(outlineFirst, "the outline is drawn first and the ink over it, both at the mark's opacity");
+    float left = 1e9f, right = -1e9f, top = 1e9f, bottom = -1e9f;
+    for (const OverlayVertex& v : verts) {
+        left = v.x < left ? v.x : left;
+        right = v.x > right ? v.x : right;
+        top = v.y < top ? v.y : top;
+        bottom = v.y > bottom ? v.y : bottom;
+    }
+    Check(Near(left + right, 2.0f * 960.0f, 1e-2f) && Near(top + bottom, 2.0f * 540.0f, 1e-2f), "the mark is centred on the pixel it was given");
+}
+
 }  // namespace
 
 int RunAdsTests() {
@@ -358,6 +384,7 @@ int RunAdsTests() {
     TestAimModeLabels();
     TestAimMarkerShowsOnlyInFreeLookWithAMarker();
     TestAimMarkerFadesBothCrossesByItsOpacity();
+    TestAimMarkDrawsAnOutlineUnderTheInk();
 
     if (g_failures == 0) {
         std::cout << "ADS tests: all passed\n";
