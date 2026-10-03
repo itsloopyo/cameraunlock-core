@@ -881,26 +881,45 @@ inline void GuardForeground() {
     }
 }
 
+// Every function detoured so far, so a start that fails part way takes each one back out.
+inline std::vector<void*>& Detoured() {
+    static std::vector<void*> targets;
+    return targets;
+}
+
 template <typename Detour, typename Original>
-inline bool Hook(const char* name, Detour detour, Original& original) {
-    void* target = reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), name));
-    if (target && MH_CreateHook(target, reinterpret_cast<void*>(detour), reinterpret_cast<void**>(&original)) == MH_OK
-        && MH_EnableHook(target) == MH_OK) {
+inline bool Hook(const wchar_t* module, const char* name, Detour detour, Original& original) {
+    void* target = reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(module), name));
+    MH_STATUS status = target
+        ? MH_CreateHook(target, reinterpret_cast<void*>(detour), reinterpret_cast<void**>(&original))
+        : MH_ERROR_FUNCTION_NOT_FOUND;
+    if (status == MH_OK) status = MH_EnableHook(target);
+    if (status == MH_OK) {
+        Detoured().push_back(target);
         return true;
     }
-    char line[120];
-    std::snprintf(line, sizeof(line), "isolated input: could not hook %s", name);
+    // The bytes say what is already sitting on the function: another hook's jump, or a stub
+    // MinHook cannot relocate.
+    char bytes[3 * 16 + 1] = "";
+    if (target) {
+        for (int i = 0; i < 16; ++i) {
+            std::snprintf(bytes + 3 * i, 4, " %02X", static_cast<const unsigned char*>(target)[i]);
+        }
+    }
+    char line[200];
+    std::snprintf(line, sizeof(line), "isolated input: could not hook %s: %s, starts%s", name,
+                  MH_StatusToString(status), bytes);
     Log(line);
     if (target) MH_RemoveHook(target);
     return false;
 }
 
-inline void Unhook(const char* name) {
-    void* target = reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), name));
-    if (target) {
+inline void UnhookAll() {
+    for (void* target : Detoured()) {
         MH_DisableHook(target);
         MH_RemoveHook(target);
     }
+    Detoured().clear();
 }
 
 }  // namespace isolated
@@ -912,24 +931,26 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     s.commandFile = commandFile;
     FindDevices();
 
-    static const char* const kNames[] = {"GetRawInputData", "GetForegroundWindow", "GetAsyncKeyState", "ClipCursor",
-                                         "GetClipCursor", "SetCursorPos", "SetForegroundWindow", "GetCursorPos"};
+    static const wchar_t* const kUser32 = L"user32.dll";
     const bool hooked[] = {
-        Hook(kNames[0], &HookedGetRawInputData, s.origGetRawInputData),
-        Hook(kNames[1], &HookedGetForegroundWindow, s.origGetForegroundWindow),
-        Hook(kNames[2], &HookedGetAsyncKeyState, s.origGetAsyncKeyState),
-        Hook(kNames[3], &HookedClipCursor, s.origClipCursor),
-        Hook(kNames[4], &HookedGetClipCursor, s.origGetClipCursor),
-        Hook(kNames[5], &HookedSetCursorPos, s.origSetCursorPos),
-        Hook(kNames[6], &HookedSetForegroundWindow, s.origSetForegroundWindow),
-        Hook(kNames[7], &HookedGetCursorPos, s.origGetCursorPos),
+        Hook(kUser32, "GetRawInputData", &HookedGetRawInputData, s.origGetRawInputData),
+        Hook(kUser32, "GetForegroundWindow", &HookedGetForegroundWindow, s.origGetForegroundWindow),
+        Hook(kUser32, "GetAsyncKeyState", &HookedGetAsyncKeyState, s.origGetAsyncKeyState),
+        Hook(kUser32, "ClipCursor", &HookedClipCursor, s.origClipCursor),
+        Hook(kUser32, "GetClipCursor", &HookedGetClipCursor, s.origGetClipCursor),
+        // user32's SetCursorPos can already be written over when the mod loads: in Resident Evil
+        // Requiem with REFramework loaded it starts with a `ret`, which MinHook cannot detour.
+        // It is a jump to the system call stub in win32u.dll, so that is detoured in its place
+        // and still answers once the bytes above it are put back.
+        Hook(kUser32, "SetCursorPos", &HookedSetCursorPos, s.origSetCursorPos)
+            || Hook(L"win32u.dll", "NtUserSetCursorPos", &HookedSetCursorPos, s.origSetCursorPos),
+        Hook(kUser32, "SetForegroundWindow", &HookedSetForegroundWindow, s.origSetForegroundWindow),
+        Hook(kUser32, "GetCursorPos", &HookedGetCursorPos, s.origGetCursorPos),
     };
     bool all = true;
     for (const bool one : hooked) all = all && one;
     if (!all) {
-        for (size_t i = 0; i < sizeof(hooked) / sizeof(hooked[0]); ++i) {
-            if (hooked[i]) Unhook(kNames[i]);
-        }
+        UnhookAll();
         return false;
     }
     std::thread(&RunCommandFile).detach();

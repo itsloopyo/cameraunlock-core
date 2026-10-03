@@ -143,6 +143,7 @@ nothing, which is what keeps the two apart.
 | `GetForegroundWindow` | the game's own window | neither the game nor the mod stands down for being in the background |
 | `GetAsyncKeyState` | the synthetic key state only | the mod's hotkeys fire for the script, not for what is typed elsewhere |
 | `ClipCursor`, `SetCursorPos` | nothing | the game would trap and recentre the real cursor |
+| `NtUserSetCursorPos` in `win32u.dll` | nothing | only where `SetCursorPos` could not be detoured because its first bytes were already written over: it is what `SetCursorPos` jumps to |
 | `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |
 | `SetForegroundWindow` | nothing | the game cannot take the foreground back |
 | `GetCursorPos` | the point the last `cursor` command gave, once one has | a menu with a pointer follows the script's cursor, not the real one |
@@ -263,6 +264,29 @@ windowed and behind other windows for the whole session:
   process with exit code 0.
 - The intro before the main menu does not skip on Space and runs about three
   minutes.
+
+Resident Evil Requiem 1.3.1.0 (Steam, REFramework 1.5.9.1), 2026-10-03, windowed and
+behind other windows for the whole session:
+
+- `SetCursorPos` could not be detoured when the plugin loaded: MinHook answered
+  `MH_ERROR_UNSUPPORTED_FUNCTION` and the function started `C3 46 D3 4F FD 00`
+  where this machine's `user32.dll` has `FF 25 3A 39 04 00`, a jump to
+  `NtUserSetCursorPos`. The dev build detours that in `win32u.dll` instead.
+- The log named the keyboard path: DirectInput through `GetDeviceState` (256
+  bytes). It named none for the mouse.
+- Keyboard: `F` held 200 ms chose Main Story and then Continue, and the save
+  loaded.
+- Mouse: `move 700 0` turned the camera, and the right button raised and lowered
+  the sights (the mod's log read `sights up`).
+- The mod's hotkeys fired through the synthetic key state, `Insert` and the
+  `Ctrl+Shift+U` chord.
+- `Test-IsolatedInputProof` passed on `move 700 0`, and the picture also moves by
+  itself here: two captures a second apart with no input differed. The turn was
+  read off the captures.
+- The pose sender drove the mod through this module, rotation and position.
+- The game took the real foreground once as it started and gave it back.
+- `Save-GameCapture` shows the frame with the game's own reticle and HUD.
+- Not tried: `cursor`, `text`.
 
 Ready or Not (Steam, Unreal Engine 5.3), 2026-10-03, game behind other windows:
 

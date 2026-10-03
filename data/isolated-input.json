@@ -18,7 +18,7 @@
       "what": "keys polled with GetAsyncKeyState",
       "imports": ["GetAsyncKeyState"],
       "status": "supported",
-      "proven_in": ["starfield", "ready-or-not"]
+      "proven_in": ["starfield", "ready-or-not", "resident-evil-requiem"]
     },
     "key-state": {
       "what": "keys polled with GetKeyState or GetKeyboardState, which read the thread's message-synchronised state",
@@ -30,7 +30,7 @@
       "what": "DirectInput 8 devices",
       "dlls": ["dinput8.dll", "dinput.dll"],
       "status": "supported",
-      "proven_in": ["fallout-new-vegas", "far-cry-6"]
+      "proven_in": ["fallout-new-vegas", "far-cry-6", "resident-evil-requiem"]
     },
     "cursor-position": {
       "what": "where the mouse cursor is, read with GetCursorPos or from WM_MOUSEMOVE, as a menu with a pointer does. The `cursor` command places it.",

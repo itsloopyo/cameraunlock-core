@@ -30,6 +30,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   committed `CameraUnlock.ini` on the next `render-config`, and its render test fails at its next
   pin bump until that is run.
 
+### Fixed - isolated input installs where `SetCursorPos` is already written over
+
+- `cameraunlock/dev/isolated_input.h`: where `user32.dll`'s `SetCursorPos` cannot be detoured,
+  the dev build detours `NtUserSetCursorPos` in `win32u.dll`, the system call stub it jumps to.
+  In Resident Evil Requiem with REFramework loaded the function starts with a `ret` by the time a
+  plugin loads, MinHook refused it, and isolated input took every detour back out. A detour that
+  fails now logs MinHook's status and the function's first 16 bytes.
+- Resident Evil Requiem is proven for the DirectInput and `GetAsyncKeyState` paths
+  (`data/isolated-input.json`, `docs/isolated-input.md`).
+- Consumer change: none. Dev builds only.
+
 ### Added - a dev deploy for a Java agent mod
 
 - `Invoke-DevDeployJavaAgent` in `powershell/DevDeploy.psm1` deploys a Java agent mod to every
