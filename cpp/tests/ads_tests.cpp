@@ -6,6 +6,7 @@
 #include <cameraunlock/ads/ads_fade.h>
 #include <cameraunlock/ads/aim_mode.h>
 #include <cameraunlock/ads/lean_handover.h>
+#include <cameraunlock/rendering/aim_marker.h>
 
 #include <cmath>
 #include <iostream>
@@ -321,6 +322,17 @@ void TestAimMarkerShowsOnlyInFreeLookWithAMarker() {
           "sights locked and true free look draw no marker with the sights up");
 }
 
+void TestAimMarkerFadesBothCrossesByItsOpacity() {
+    using cameraunlock::rendering::FadeRgba;
+    Check(FadeRgba(0xE6FFFFFF, 1.0f) == 0xE6FFFFFF && FadeRgba(0x99000000, 1.0f) == 0x99000000,
+          "full opacity draws the marker's fixed style");
+    Check(FadeRgba(0xE6FFFFFF, 0.0f) == 0x00FFFFFF, "no opacity leaves the colour and no alpha");
+    Check(FadeRgba(0xE6FFFFFF, 0.5f) == 0x73FFFFFF && FadeRgba(0x99000000, 0.5f) == 0x4D000000,
+          "half opacity halves the alpha of the ink and of the outline");
+    Check(FadeRgba(0xE6123456, 2.0f) == 0xE6123456 && FadeRgba(0xE6123456, -1.0f) == 0x00123456,
+          "an opacity outside 0..1 is held to it");
+}
+
 }  // namespace
 
 int RunAdsTests() {
@@ -345,6 +357,7 @@ int RunAdsTests() {
     TestAimModeCycleAndEncode();
     TestAimModeLabels();
     TestAimMarkerShowsOnlyInFreeLookWithAMarker();
+    TestAimMarkerFadesBothCrossesByItsOpacity();
 
     if (g_failures == 0) {
         std::cout << "ADS tests: all passed\n";

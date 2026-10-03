@@ -44,6 +44,15 @@ struct AimMarkerStyle {
     Rgba outline = 0x99000000;  // black, softer
 };
 
+// A colour with its alpha scaled by `opacity`, which is held to 0..1. The marker
+// fades in and out with the sights (ads/aim_mode.h, AimMarkerOpacity) through
+// this, so both crosses fade together and neither pops.
+constexpr Rgba FadeRgba(Rgba color, float opacity) {
+    const float held = opacity < 0.0f ? 0.0f : opacity > 1.0f ? 1.0f : opacity;
+    const Rgba alpha = static_cast<Rgba>(static_cast<float>(color >> 24) * held + 0.5f);
+    return (color & 0x00FFFFFFu) | (alpha << 24);
+}
+
 // `Traits` binds one graphics backend:
 //
 //   using Overlay     = <the backend's overlay class>;
@@ -66,7 +75,8 @@ public:
     // caller's per-frame decision and is never latched here: an invalid
     // projection must publish false rather than leave the last position
     // standing, which would put a mark where the rounds are not going.
-    void Publish(bool visible, float ndcX, float ndcY);
+    // `opacity` scales the whole mark, 0 drawing nothing and 1 the fixed style.
+    void Publish(bool visible, float ndcX, float ndcY, float opacity = 1.0f);
 
     // Singleton-by-design, like the overlay underneath it: there is one HUD per
     // process. Both of these write shared state without a lock, so set them from
@@ -103,6 +113,7 @@ struct AimMarkerState {
     std::atomic<bool> visible{false};
     std::atomic<float> ndcX{0.0f};
     std::atomic<float> ndcY{0.0f};
+    std::atomic<float> opacity{1.0f};
     std::atomic<unsigned long long> stampMs{0};
 
     std::atomic<bool> installStarted{false};
@@ -137,10 +148,13 @@ inline void DrawMarker(typename Traits::DrawContext& dc) {
     const float px = (ndcX * 0.5f + 0.5f) * dc.Width();
     const float py = (0.5f - ndcY * 0.5f) * dc.Height();
 
+    const float opacity = s.opacity.load(std::memory_order_relaxed);
+    if (!(opacity > 0.0f)) return;
+
     const AimMarkerStyle& st = s.style;
-    dc.DrawCross(px, py, st.arm_pixels + 1.0f, st.outline,
+    dc.DrawCross(px, py, st.arm_pixels + 1.0f, FadeRgba(st.outline, opacity),
                  st.thickness_pixels + 2.0f, st.gap_pixels - 1.0f);
-    dc.DrawCross(px, py, st.arm_pixels, st.ink, st.thickness_pixels, st.gap_pixels);
+    dc.DrawCross(px, py, st.arm_pixels, FadeRgba(st.ink, opacity), st.thickness_pixels, st.gap_pixels);
 }
 
 template <typename Traits>
@@ -170,10 +184,11 @@ inline bool AimMarker<Traits>::Ready() const {
 }
 
 template <typename Traits>
-inline void AimMarker<Traits>::Publish(bool visible, float ndcX, float ndcY) {
+inline void AimMarker<Traits>::Publish(bool visible, float ndcX, float ndcY, float opacity) {
     auto& s = detail::MarkerState<Traits>();
     s.ndcX.store(ndcX, std::memory_order_relaxed);
     s.ndcY.store(ndcY, std::memory_order_relaxed);
+    s.opacity.store(opacity, std::memory_order_relaxed);
     s.stampMs.store(GetTickCount64(), std::memory_order_release);
     s.visible.store(visible, std::memory_order_release);
 }
