@@ -100,6 +100,10 @@ struct HeadTrackingConfig {
     /// The key list that toggles true_free_look. Read only through
     /// config::HeadTrackingConfigTable; ApplyValues does not read it.
     std::string true_free_look_key_name = "Insert, Ctrl+Shift+U";
+    /// With true_free_look, the aim mode (ads/aim_mode.h): true draws the aim marker in free
+    /// look, and means nothing while true_free_look is false. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool free_look_marker = false;
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.

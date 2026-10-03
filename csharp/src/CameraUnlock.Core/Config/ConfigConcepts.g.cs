@@ -68,6 +68,12 @@ namespace CameraUnlock.Core.Config
             new BoolCodec(), new[] { "false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)." }, null, "false",
             true);
 
+        /// <summary>[Position] FreeLookMarker.</summary>
+        public static readonly ConceptDescriptor<bool> FreeLookMarker = new ConceptDescriptor<bool>(
+            "FreeLookMarker", "Position", "FreeLookMarker", ConceptValueFamily.Bool,
+            new BoolCodec(), new[] { "true, with TrueFreeLook=true: an aim marker shows where your shot will land while you aim down the sights.", "It does nothing while TrueFreeLook is false." }, null, "false",
+            true);
+
         /// <summary>[Position] PositionLimitX.</summary>
         public static readonly ConceptDescriptor<float> PositionLimitX = new ConceptDescriptor<float>(
             "PositionLimitX", "Position", "PositionLimitX", ConceptValueFamily.Floating,
@@ -143,7 +149,7 @@ namespace CameraUnlock.Core.Config
         /// <summary>[Hotkeys] TrueFreeLookKey.</summary>
         public static readonly ConceptDescriptor<string> TrueFreeLookKey = new ConceptDescriptor<string>(
             "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ConceptValueFamily.Hotkey,
-            new HotkeyCodec(), new[] { "Switches between keeping your eye on the sights and true free look (TrueFreeLook)." }, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U",
+            new HotkeyCodec(), new[] { "Cycles the aim mode: sights locked, free look with a marker, true free look (TrueFreeLook, FreeLookMarker)." }, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U",
             true);
 
         /// <summary>[Light] LightMultiplier.</summary>
@@ -164,6 +170,7 @@ namespace CameraUnlock.Core.Config
             DataFreshnessMs,
             PositionEnabled,
             TrueFreeLook,
+            FreeLookMarker,
             PositionLimitX,
             PositionLimitY,
             PositionLimitYDown,

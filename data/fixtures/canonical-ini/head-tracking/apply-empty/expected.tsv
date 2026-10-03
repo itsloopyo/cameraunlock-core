@@ -8,6 +8,7 @@ field	RotationEnabled	true
 field	DataFreshnessMs	500
 field	PositionEnabled	true
 field	TrueFreeLook	false
+field	FreeLookMarker	false
 field	PositionLimitX	0.3
 field	PositionLimitY	0.2
 field	PositionLimitYDown	0.2

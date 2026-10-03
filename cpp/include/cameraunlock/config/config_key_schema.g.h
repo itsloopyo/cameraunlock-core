@@ -29,6 +29,7 @@ inline constexpr const char* kDataFreshnessMs = "datafreshnessms";
 inline constexpr const char* kPositionEnabled = "positionenabled";
 inline constexpr const char* kPositionAllowed = "positionallowed";
 inline constexpr const char* kTrueFreeLook = "truefreelook";
+inline constexpr const char* kFreeLookMarker = "freelookmarker";
 inline constexpr const char* kPositionSensitivityX = "positionsensitivityx";
 inline constexpr const char* kPositionSensitivityY = "positionsensitivityy";
 inline constexpr const char* kPositionSensitivityZ = "positionsensitivityz";
@@ -112,6 +113,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "flashlightfollowshead", "lightfollowshead", true },
     { "flashlightmultiplier", "lightmultiplier", false },
     { "flashlightscale", "lightmultiplier", false },
+    { "freelookmarker", "freelookmarker", false },
     { "horizonlock", "worldspaceyaw", false },
     { "horizonlockedyaw", "worldspaceyaw", false },
     { "invertpitch", "invertpitch", false },
@@ -313,6 +315,7 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "PositionEnabled", config_keys::kPositionEnabled, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionAllowed", config_keys::kPositionAllowed, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "TrueFreeLook", config_keys::kTrueFreeLook, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "FreeLookMarker", config_keys::kFreeLookMarker, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityX", config_keys::kPositionSensitivityX, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityY", config_keys::kPositionSensitivityY, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "PositionSensitivityZ", config_keys::kPositionSensitivityZ, ConfigValueType::kFloat, 0, 1.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },

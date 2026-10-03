@@ -133,6 +133,9 @@ namespace CameraUnlock.Core.Config
                 case nameof(ConfigConcepts.TrueFreeLook):
                     table.Concept(ConfigConcepts.TrueFreeLook, c => c.TrueFreeLook, (c, v) => c.TrueFreeLook = v);
                     return;
+                case nameof(ConfigConcepts.FreeLookMarker):
+                    table.Concept(ConfigConcepts.FreeLookMarker, c => c.FreeLookMarker, (c, v) => c.FreeLookMarker = v);
+                    return;
                 case nameof(ConfigConcepts.PositionLimitX):
                     table.Concept(ConfigConcepts.PositionLimitX, c => c.Position.LimitX, (c, v) =>
                     {

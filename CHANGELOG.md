@@ -9,6 +9,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `[Position] FreeLookMarker`, and `TrueFreeLookKey` cycles three aim modes
+
+`FreeLookMarker` is a canonical concept: bool, default `false`, no aliases, global, directly after
+`TrueFreeLook`. With `TrueFreeLook` it is the aim mode (see the entry below for the pair).
+
+- Fields `HeadTrackingConfigData.FreeLookMarker` and `HeadTrackingConfig::free_look_marker` (the
+  C++ member after every existing one), bound by both `HeadTrackingConfigTable`s.
+- The deprecated flat readers do not read it, as they do not read `TrueFreeLook`.
+- `TrueFreeLookKey` keeps its name. Its schema doc and `TrueFreeLook`'s describe the cycle, and its
+  file comment is now "Cycles the aim mode: sights locked, free look with a marker, true free look
+  (TrueFreeLook, FreeLookMarker)."
+- Inserting the concept in the schema's order renumbers the later values of `schema::Concept`.
+- 23 concepts are global, where 22 were.
+- The `head-tracking/` and `global/Defaults.ini` fixtures and docs/canonical-config.md carry it.
+
+Not done here: `PluginConfigTable` does not bind `FreeLookMarker`, and
+`PluginMod::ToggleTrueFreeLook` is still a two-state toggle. The `preferences/` fixtures and
+`preference_modes` in data/pipeline-conformance.json do not carry the aim mode.
+
+Consuming repos: a committed canonical file that binds `TrueFreeLookKey` with core's comment
+changes on the next `render-config`, and the mod's render test fails at its next pin bump until
+it is run. A shooter on `HeadTrackingConfigTable` that takes the three-mode cycle binds
+`FreeLookMarker`, marks it Writable beside `TrueFreeLook`, and saves both in one `Save`.
+
 ### Changed - zoom compensation scales only the lean across the view
 
 A lean along the view moves nothing across the frame, it brings the scene closer, so the zoom

@@ -122,6 +122,7 @@ std::vector<FieldRead> Fields() {
         {"DataFreshnessMs", [i](const H& c) { return i(c.data_freshness_ms); }},
         {"PositionEnabled", [b](const H& c) { return b(c.position_enabled); }},
         {"TrueFreeLook", [b](const H& c) { return b(c.true_free_look); }},
+        {"FreeLookMarker", [b](const H& c) { return b(c.free_look_marker); }},
         {"PositionLimitX", [f](const H& c) { return f(c.position.limit_x); }},
         {"PositionLimitY", [f](const H& c) { return f(c.position.limit_y); }},
         {"PositionLimitYDown", [f](const H& c) { return f(c.position.limit_y_down); }},
@@ -319,19 +320,19 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe22TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe23TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 22 the schema names]\n";
+    std::cout << "\n[the global concepts are the 23 the schema names]\n";
     const std::vector<std::string> expected{
         "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
-        "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook",
+        "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
         "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
         "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightMultiplier"};
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 21 listed, in schema order");
+    Check(global == expected, "the global concepts are the 23 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }
@@ -379,10 +380,12 @@ void TestTrueFreeLookSpellings() {
 
     HeadTrackingConfig flat;
     std::vector<std::string> log;
-    flat.ApplyValues({{"TrueFreeLook", "true"}, {"true_free_look", "true"}, {"TrueFreeLookKey", "F8"}},
+    flat.ApplyValues({{"TrueFreeLook", "true"}, {"true_free_look", "true"}, {"TrueFreeLookKey", "F8"},
+                      {"FreeLookMarker", "true"}},
                      [&log](const std::string& line) { log.push_back(line); });
-    Check(!flat.true_free_look && flat.true_free_look_key_name == "Insert, Ctrl+Shift+U" && log.empty(),
-          "the flat reader reads neither TrueFreeLook concept");
+    Check(!flat.true_free_look && !flat.free_look_marker && flat.true_free_look_key_name == "Insert, Ctrl+Shift+U" &&
+              log.empty(),
+          "the flat reader reads none of the aim mode concepts");
 }
 
 void TestArguments() {

@@ -70,6 +70,9 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
         case C::TrueFreeLook:
             BindHeadTrackingMember<C::TrueFreeLook>(table, &H::true_free_look);
             return;
+        case C::FreeLookMarker:
+            BindHeadTrackingMember<C::FreeLookMarker>(table, &H::free_look_marker);
+            return;
         case C::PositionLimitX:
             table.template Concept<C::PositionLimitX>([](const Config& c) { return c.position.limit_x; },
                                                       [](Config& c, float v) { c.position.limit_x = v; });

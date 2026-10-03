@@ -136,6 +136,14 @@ namespace CameraUnlock.Core.Config
         public bool TrueFreeLook { get; set; } = false;
 
         /// <summary>
+        /// With <see cref="TrueFreeLook"/>, the aim mode (<see cref="CameraUnlock.Core.Ads.AimModes"/>):
+        /// true draws the aim marker in free look, and means nothing while TrueFreeLook is false.
+        /// Read only through <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does
+        /// not read it.
+        /// </summary>
+        public bool FreeLookMarker { get; set; } = false;
+
+        /// <summary>
         /// How long, in milliseconds, the newest packet counts as current. Core only parses
         /// it; the mod's per-frame gate stops following the tracker past it. At least 1.
         /// </summary>
@@ -288,7 +296,8 @@ namespace CameraUnlock.Core.Config
                 if (key == null) continue;
                 // Added to the schema after this reader was frozen: it skips them as it did when
                 // they resolved to nothing, duplicate-spelling warning included.
-                if (key == ConfigKeySchema.Keys.TrueFreeLook || key == ConfigKeySchema.Keys.TrueFreeLookKey) continue;
+                if (key == ConfigKeySchema.Keys.TrueFreeLook || key == ConfigKeySchema.Keys.TrueFreeLookKey
+                    || key == ConfigKeySchema.Keys.FreeLookMarker) continue;
 
                 string firstSpelling;
                 if (firstSpellingOf.TryGetValue(key, out firstSpelling))

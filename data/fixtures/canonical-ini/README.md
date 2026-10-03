@@ -298,7 +298,7 @@ and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Ga
   gate: every global concept defaults to the schema's `default` (its `canonical_default` where it
   has one), and the table binds `PositionEnabled` beside `RotationEnabled`.
 - `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose
-  rows are `field`, a name and the value as the concept's codec writes it. The names are the 24
+  rows are `field`, a name and the value as the concept's codec writes it. The names are the 25
   concepts in the schema's order, then `PositionLocalSmoothing` and `PositionRemoteSmoothing`,
   the copy of the smoothing pair the position settings carry (C++ `position.local_smoothing`,
   C# `Position.LocalSmoothing`). A runner reads each field straight off the config, not through

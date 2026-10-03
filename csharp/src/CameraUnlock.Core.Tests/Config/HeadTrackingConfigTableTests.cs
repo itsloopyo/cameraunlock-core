@@ -94,12 +94,12 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe22TheSchemaNames()
+        public void TheGlobalConceptsAreThe23TheSchemaNames()
         {
             string[] global =
             {
                 "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
-                "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook",
+                "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
                 "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
                 "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightMultiplier",
@@ -150,7 +150,7 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheFlatReaderReadsNeitherTrueFreeLookConcept()
+        public void TheFlatReaderReadsNoneOfTheAimModeConcepts()
         {
             var flat = new HeadTrackingConfigData();
             var log = new List<string>();
@@ -159,8 +159,10 @@ namespace CameraUnlock.Core.Tests.Config
                 { "TrueFreeLook", "true" },
                 { "true_free_look", "true" },
                 { "TrueFreeLookKey", "F8" },
+                { "FreeLookMarker", "true" },
             }, log.Add);
             Assert.False(flat.TrueFreeLook);
+            Assert.False(flat.FreeLookMarker);
             Assert.Equal("Insert, Ctrl+Shift+U", flat.TrueFreeLookKeyName);
             Assert.Empty(log);
         }

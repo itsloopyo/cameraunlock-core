@@ -37,6 +37,7 @@ namespace CameraUnlock.Core.Config
             public const string PositionEnabled = "positionenabled";
             public const string PositionAllowed = "positionallowed";
             public const string TrueFreeLook = "truefreelook";
+            public const string FreeLookMarker = "freelookmarker";
             public const string PositionSensitivityX = "positionsensitivityx";
             public const string PositionSensitivityY = "positionsensitivityy";
             public const string PositionSensitivityZ = "positionsensitivityz";
@@ -111,6 +112,7 @@ namespace CameraUnlock.Core.Config
             { "flashlightfollowshead", "lightfollowshead" },
             { "flashlightmultiplier", "lightmultiplier" },
             { "flashlightscale", "lightmultiplier" },
+            { "freelookmarker", "freelookmarker" },
             { "horizonlock", "worldspaceyaw" },
             { "horizonlockedyaw", "worldspaceyaw" },
             { "invertpitch", "invertpitch" },

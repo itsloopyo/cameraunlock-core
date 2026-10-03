@@ -254,7 +254,7 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way. 22 of them are global: a game's row
+The concepts are the settings every mod spells the same way. 23 of them are global: a game's row
 for one follows Defaults.ini unless the table marks it `PerGame()` (see
 [Which rows follow it](#which-rows-follow-it)). `CollisionMargin` and `CollisionChannel` are not:
 each holds a number in one engine's own units or channels, so the schema marks them
@@ -314,6 +314,9 @@ PositionEnabled=true
 ; false: while you aim down the sights, leaning keeps your eye on the sights.
 ; true: the weapon stays put and your head moves freely around it (true free look).
 TrueFreeLook=false
+; true, with TrueFreeLook=true: an aim marker shows where your shot will land while you aim down the sights.
+; It does nothing while TrueFreeLook is false.
+FreeLookMarker=false
 ; How far, in metres, leaning left or right can move the view.
 PositionLimitX=0.3
 ; How far, in metres, raising your head can move the view.
@@ -342,7 +345,7 @@ ToggleKey=End, Ctrl+Shift+Y
 CycleTrackingModeKey=PageUp, Ctrl+Shift+G
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
 YawModeKey=PageDown, Ctrl+Shift+H
-; Switches between keeping your eye on the sights and true free look (TrueFreeLook).
+; Cycles the aim mode: sights locked, free look with a marker, true free look (TrueFreeLook, FreeLookMarker).
 TrueFreeLookKey=Insert, Ctrl+Shift+U
 
 [Light]
@@ -378,16 +381,23 @@ game on rotation only whatever the pair says (owner ruling of 2026-09-26), and a
 mode's position channel wherever it would have read such a switch.
 
 `TrueFreeLook` is the lean while aiming down sights, in a shooter with an aim state and positional
-tracking. `false`, sights locked, keeps the eye on the sight line; `true`, true free look, leaves
-the lean in full while the weapon stays put in the world. It is in `[Position]` because the lean is
+tracking. `false`, sights locked, keeps the eye on the sight line; `true`, free look, leaves
+the lean in full while the weapon stays put in the world. With `FreeLookMarker` it is the aim mode,
+a pair as the tracking mode is: `false, false` is sights locked, `true, true` free look with a
+marker (the mod draws an aim marker where the round will land while the sights are up) and
+`true, false` true free look. `FreeLookMarker=true` with `TrueFreeLook=false` reads as sights
+locked with no marker, and the aim mode key never writes that pair. A file with `TrueFreeLook=true`
+and no `FreeLookMarker` is true free look. `ads/aim_mode.h` and `CameraUnlock.Core.Ads.AimModes`
+decode and encode the pair, step the cycle and hold the three labels.
+It is in `[Position]` because the lean is
 all it changes and it exists only where positional tracking does, and a key belongs in the section
-of its subject, as `CollisionEnabled` does. A shooter binds both it and `TrueFreeLookKey` where
+of its subject, as `CollisionEnabled` does. A shooter binds it, `FreeLookMarker` and `TrueFreeLookKey` where
 the mod can keep the sight line in sights locked, either from the game's aim state or by drawing the
-weapon from the leaned eye all the time, so it moves with the head (no-mans-sky), and binds neither
+weapon from the leaned eye all the time, so it moves with the head (no-mans-sky), and binds none
 where it can do neither.
-It has no alias: `true_free_look` is read only by a mod's legacy import, and in a
-canonical file it draws `MisplacedKey` and is not read. The older flat readers read neither
-`TrueFreeLook` nor `TrueFreeLookKey`.
+None has an alias: `true_free_look` is read only by a mod's legacy import, and in a
+canonical file it draws `MisplacedKey` and is not read. The older flat readers read none of
+`TrueFreeLook`, `FreeLookMarker` and `TrueFreeLookKey`.
 
 The schema's other concepts stay in the schema, so the older flat readers still parse them, and
 the canonical format never writes them. Each carries a `canonical_reason`, which the table's
@@ -543,7 +553,8 @@ throws, naming it. That is how a mod states which of its controls persist:
 
 - A tracking-mode control writes `RotationEnabled` and `PositionEnabled` together, so a table
   that has both must mark both Writable or neither; the owner refuses a table that marks one.
-- The yaw-mode control writes `WorldSpaceYaw`, and the true free look toggle writes `TrueFreeLook`.
+- The yaw-mode control writes `WorldSpaceYaw`, and the aim mode key (`TrueFreeLookKey`)
+  writes `TrueFreeLook` and `FreeLookMarker` together.
 - The on/off toggle (End) does not persist: it changes only the session. `EnableOnStartup` is
   Writable only in a mod with a separate control that saves it, and the toggle still never calls
   `Save` for it.
@@ -676,7 +687,8 @@ light rows when the schema has a flashlight, `TrueFreeLook` (Writable) and `True
 the schema sets `trueFreeLook`, and `CollisionEnabled`, `CollisionMargin` and
 `CollisionReleaseSmoothing` when it sets `leanCollision`. With `trueFreeLook` the bootstrap
 registers the `TrueFreeLookKey` list on `PluginMod::ToggleTrueFreeLook`, which applies the new
-mode, logs it and saves `TrueFreeLook`. The mode control has two states, so there is no
+mode, logs it and saves `TrueFreeLook`. That control is still a two-state toggle: `PluginConfigTable`
+does not bind `FreeLookMarker`. The mode control has two states, so there is no
 `RotationEnabled`. `PluginConfigLegacyImport(schema)` is the import, and `PluginConfig::Read`,
 which it calls, is frozen. Read replaces a hotkey code that `IsBindableVirtualKey` refuses, one
 outside 0x01-0xFE or a Ctrl, Shift or Alt key, with the row's default, so the import gives that
@@ -1036,6 +1048,9 @@ PositionEnabled=true
 ; false: while you aim down the sights, leaning keeps your eye on the sights.
 ; true: the weapon stays put and your head moves freely around it (true free look).
 TrueFreeLook=false
+; true, with TrueFreeLook=true: an aim marker shows where your shot will land while you aim down the sights.
+; It does nothing while TrueFreeLook is false.
+FreeLookMarker=false
 ; How far, in metres, leaning left or right can move the view.
 PositionLimitX=0.3
 ; How far, in metres, raising your head can move the view.
@@ -1060,7 +1075,7 @@ ToggleKey=End, Ctrl+Shift+Y
 CycleTrackingModeKey=PageUp, Ctrl+Shift+G
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
 YawModeKey=PageDown, Ctrl+Shift+H
-; Switches between keeping your eye on the sights and true free look (TrueFreeLook).
+; Cycles the aim mode: sights locked, free look with a marker, true free look (TrueFreeLook, FreeLookMarker).
 TrueFreeLookKey=Insert, Ctrl+Shift+U
 
 [Light]
