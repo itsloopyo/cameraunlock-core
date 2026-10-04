@@ -26,7 +26,9 @@
 //     is the toggle Windows keeps for every key: it flips on each press.
 //   - ClipCursor and SetCursorPos do nothing, and GetClipCursor answers what the
 //     game last asked for. A game that believes it has the foreground would
-//     otherwise trap and recentre the real cursor.
+//     otherwise trap and recentre the real cursor. A mod that places the cursor
+//     itself, and has to see it land, asks for SetCursorPos to move the script's
+//     cursor instead (LetGameMoveScriptedCursor).
 //   - SetForegroundWindow does nothing, so the game cannot take the foreground
 //     back.
 //   - GetCursorPos answers the point the last `cursor` command gave, once one
@@ -75,6 +77,14 @@ using IsolatedInputLogFn = void (*)(const char*);
 // Installs the detours and starts the thread that plays `commandFile`. False
 // when a detour could not be installed, in which case none is left in.
 bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLogFn log);
+
+// With this on, a SetCursorPos from the game or the mod moves the script's
+// cursor to that point, as it would move the real one: GetCursorPos answers it
+// and the window gets its WM_MOUSEMOVE. The real cursor still does not move.
+// Off by default, where SetCursorPos does nothing: most games only recentre the
+// cursor with it, which would pull the script's cursor off the menu item it was
+// put on. It takes effect once a `cursor` command has placed the cursor.
+void LetGameMoveScriptedCursor(bool allowed);
 
 }  // namespace cameraunlock::dev
 
@@ -143,6 +153,7 @@ struct State {
     std::atomic<int> cursorY{0};
     std::atomic<unsigned> buttonsHeld{0};
     std::atomic<bool> cursorPosRead{false};
+    std::atomic<bool> gameMovesCursor{false};
 
     RAWINPUT events[kEventSlots] = {};
     std::atomic<unsigned> nextEvent{0};
@@ -260,7 +271,19 @@ inline BOOL WINAPI HookedGetClipCursor(LPRECT rect) {
     return TRUE;
 }
 
-inline BOOL WINAPI HookedSetCursorPos(int, int) { return TRUE; }
+inline BOOL WINAPI HookedSetCursorPos(int x, int y) {
+    const HWND window = S().window.load(std::memory_order_acquire);
+    if (!window || !S().gameMovesCursor.load(std::memory_order_acquire) ||
+        !S().cursorPlaced.load(std::memory_order_acquire))
+        return TRUE;
+    POINT point{x, y};
+    if (!ScreenToClient(window, &point)) return TRUE;
+    S().cursorX.store(point.x, std::memory_order_relaxed);
+    S().cursorY.store(point.y, std::memory_order_relaxed);
+    PostMessageW(window, WM_MOUSEMOVE, S().buttonsHeld.load(std::memory_order_relaxed),
+                 MAKELPARAM(point.x, point.y));
+    return TRUE;
+}
 
 inline BOOL WINAPI HookedGetCursorPos(LPPOINT point) {
     if (!S().cursorPosRead.exchange(true, std::memory_order_acq_rel)) {
@@ -1106,6 +1129,10 @@ inline void UnhookAll() {
 }
 
 }  // namespace isolated
+
+inline void LetGameMoveScriptedCursor(bool allowed) {
+    isolated::S().gameMovesCursor.store(allowed, std::memory_order_release);
+}
 
 inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLogFn log) {
     using namespace isolated;

@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a game or mod can move the scripted cursor in isolated input
+
+`cameraunlock::dev::LetGameMoveScriptedCursor(true)` makes `SetCursorPos` move the script's
+cursor (what `GetCursorPos` answers, with its `WM_MOUSEMOVE`) once a `cursor` command has placed
+it. The real cursor still does not move. Off by default, where `SetCursorPos` does nothing as
+before. For a mod that places the cursor itself: The Ascent draws its crosshair as the mouse
+cursor, and the mod rests the cursor on the point the shot lands.
+
 ### Added - scripted XInput controllers in isolated input
 
 A test can now play a controller, and so a second local player. The command file takes

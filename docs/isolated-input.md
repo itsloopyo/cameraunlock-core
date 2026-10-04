@@ -235,6 +235,7 @@ placed the cursor: start the script with `cursor <x> <y>`.
 | `GetAsyncKeyState` | the synthetic key state only | the mod's hotkeys fire for the script, not for what is typed elsewhere |
 | `GetKeyState`, `GetKeyboardState` | the synthetic key state only: the high bit while the script holds the key, the low bit flipped by each press. A held `Ctrl`, `Shift` or `Alt` is also held as its left-hand key | an engine that polls keys or modifiers through them sees the script's keyboard. The log names each one the first time the game calls it |
 | `ClipCursor`, `SetCursorPos` | nothing | the game would trap and recentre the real cursor |
+| `SetCursorPos`, after the dev build called `LetGameMoveScriptedCursor(true)` | moves the script's cursor to that point, once a `cursor` command has placed it; the real cursor stays put | a mod that places the cursor itself (The Ascent rests it on the point the shot lands, because the game draws its crosshair as the cursor) can be seen to land it |
 | `NtUserSetCursorPos` in `win32u.dll` | nothing | only where `SetCursorPos` could not be detoured because its first bytes were already written over: it is what `SetCursorPos` jumps to |
 | `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |
 | `SetForegroundWindow` | nothing | the game cannot take the foreground back |

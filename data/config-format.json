@@ -477,6 +477,9 @@
     "starfield-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
+    "the-ascent-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["TheAscent\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": null, "dialect": "native"}
+    ],
     "still-wakes-the-deep-headtracking": [
       {"committed": "CameraUnlock.ini", "installed": ["Habitat\\Binaries\\Win64\\CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
@@ -661,6 +664,23 @@
   },
   "allow_legacy_symbols": {},
   "per_game": {
+    "the-ascent-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "The fleet chords do not work in The Ascent. Measured in game on 2026-10-04, on foot: every press of left Ctrl toggles crouch and leaves it toggled after release (eye height 421 to 365 and back on three presses running), so every Ctrl+Shift chord would crouch or stand the character. A Shift press and an Alt press leave it as it was, so the chords are on Shift+Alt. The game's action map binds G to Swap Grenade, T to CallTaxi and K to KillAll with no modifiers, and an Unreal action mapping with no modifiers fires with any held; Y, H, J, U, B and N are not bound. Y is free, so the toggle keeps its letter. The committed file holds ToggleKey=End, Shift+Alt+Y.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "The fleet chords do not work in The Ascent. Measured in game on 2026-10-04, on foot: every press of left Ctrl toggles crouch and leaves it toggled after release (eye height 421 to 365 and back on three presses running), so every Ctrl+Shift chord would crouch or stand the character. A Shift press and an Alt press leave it as it was, so the chords are on Shift+Alt. The game's action map binds G to Swap Grenade, T to CallTaxi and K to KillAll with no modifiers, and an Unreal action mapping with no modifiers fires with any held; Y, H, J, U, B and N are not bound. G is taken, so the tracking mode takes J, the first spare letter. The committed file holds CycleTrackingModeKey=PageUp, Shift+Alt+J.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "The fleet chords do not work in The Ascent. Measured in game on 2026-10-04, on foot: every press of left Ctrl toggles crouch and leaves it toggled after release (eye height 421 to 365 and back on three presses running), so every Ctrl+Shift chord would crouch or stand the character. A Shift press and an Alt press leave it as it was, so the chords are on Shift+Alt. The game's action map binds G to Swap Grenade, T to CallTaxi and K to KillAll with no modifiers, and an Unreal action mapping with no modifiers fires with any held; Y, H, J, U, B and N are not bound. H is free, so yaw mode keeps its letter. The committed file holds YawModeKey=PageDown, Shift+Alt+H.",
+        "approved": "2026-10-04"
+      }
+    ],
     "green-hell-headtracking": [
       {"row": "WorldSpaceYaw", "reason": "Preserve Green Hell's existing camera-local yaw default when adding canonical configuration.", "approved": "2026-09-30"},
       {"row": "PositionLimitY", "reason": "Preserve Green Hell's existing 0.15 metre upward lean limit when adding canonical configuration.", "approved": "2026-09-30"},
