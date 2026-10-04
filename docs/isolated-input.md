@@ -319,6 +319,10 @@ never holding the foreground:
 - Mouse: `move` turned the view (300 counts, about 50 degrees), the right button held the
   scope up (the mod's log read `Sights up`) and the left fired a round (the ammunition count
   dropped). No `cursor` was needed first.
+- In the launches where the log read `the game had the real foreground and gave it back` as the
+  window appeared, `move` and the mouse buttons did nothing until a `cursor 640 360` had been
+  played. After it the right button raised the scope and `move` turned the view, and the left
+  button fired only when held (`mouse left down`, `wait 200`, `mouse left up`): a `click` did not.
 - `Test-IsolatedInputProof` passed on `move 300 0`.
 - The pose sender drove the mod through whole sessions, rotation and position, on the mod's
   test port.
