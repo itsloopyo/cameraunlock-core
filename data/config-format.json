@@ -664,6 +664,13 @@
   },
   "allow_legacy_symbols": {},
   "per_game": {
+    "titanfall-2-headtracking": [
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-04, in the campaign on foot with a weapon out (sp_hub_timeshift). The game binds left Ctrl to +toggle_duck: a press and release left the player crouched (eye height -1332.0 to -1353.9, still there three seconds after release, and back on the next press), so Ctrl misbehaves and the chord is on Shift+Alt. A Shift press, an Alt press and the pair together left the eye and the aim where they were (Shift is sprint, only while held). With Shift and Alt held a tap of U moved nothing and opened nothing, and a tap of Insert stepped the aim mode and the game did nothing, so the aim mode keeps Insert and U. The committed file holds TrueFreeLookKey=Insert, Shift+Alt+U. The mod's other three actions still hold the fleet lists and have not been derived by this rule: their chords carry Ctrl.",
+        "approved": "2026-10-04"
+      }
+    ],
     "red-eclipse-headtracking": [
       {
         "row": "TrueFreeLookKey",

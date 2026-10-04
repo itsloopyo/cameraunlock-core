@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - Titanfall 2 aim mode key row (Insert, Shift+Alt+U)
+
+`data/config-format.json` `per_game` lists `TrueFreeLookKey` for titanfall-2-headtracking. Left Ctrl
+toggles crouch in the game and leaves the player crouched after release, so the aim mode chord is on
+Shift+Alt. Insert and U are free.
+
 ### Added - the C# aim marker and the camera's share of the lean, for a Unity shooter
 
 `IMGUIReticle` gains `ReticleStyle.Cross`, a plus-shaped crosshair with an outline, and `Opacity`,
