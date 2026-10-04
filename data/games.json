@@ -1905,6 +1905,7 @@
       "steam_folder": "Untitled Goose Game",
       "executable_relpath": "Untitled.exe",
       "data_folder": "Untitled_Data",
+      "loader": "BepInEx5",
       "repo": "itsloopyo/untitled-goose-game-headtracking",
       "engine": "Unity",
       "catalog_status": "absent"
