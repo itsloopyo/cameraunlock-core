@@ -710,8 +710,21 @@ inline bool IsExtendedKey(int vk) {
     }
 }
 
+// The left-hand key a script's Ctrl, Shift or Alt stands for, or 0.
+inline int LeftHandModifier(int vk) {
+    switch (vk) {
+        case VK_SHIFT: return VK_LSHIFT;
+        case VK_CONTROL: return VK_LCONTROL;
+        case VK_MENU: return VK_LMENU;
+        default: return 0;
+    }
+}
+
 inline bool SendRawKey(int vk, bool down) {
     const bool wasDown = S().keyDown[vk].exchange(down, std::memory_order_acq_rel);
+    // Windows reports a held Ctrl, Shift or Alt under the key's own side as well. Unity's
+    // Input.GetKey(KeyCode.LeftControl) stayed false for a scripted Ctrl until this did too.
+    if (const int left = LeftHandModifier(vk)) S().keyDown[left].store(down, std::memory_order_release);
     if (down) S().keyPressedSinceRead[vk].store(true, std::memory_order_release);
     // Only the command-file thread writes the toggle, so this read and write cannot interleave.
     if (down && !wasDown) {

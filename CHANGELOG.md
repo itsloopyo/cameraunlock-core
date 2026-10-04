@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - a scripted Ctrl, Shift or Alt is held as its left-hand key too
+
+`cameraunlock/dev/isolated_input.h` held only `VK_CONTROL`, `VK_SHIFT` or `VK_MENU` in the
+synthetic key state for a script's modifier, so a game or mod that asks for the left-hand key
+never saw it: in Untitled Goose Game a Unity plugin's `Ctrl+Shift` chords did not fire. The
+state now holds `VK_LCONTROL`, `VK_LSHIFT` or `VK_LMENU` beside it, as Windows does for the
+real key. Rebuild the host DLL (`pixi run build-isolated-input-host`) to pick it up.
+
 ### Added - isolated input for a C# mod, and for keys polled with `GetKeyState`
 
 Built for the first Unity title to be tested in the background, and not yet run in a game:

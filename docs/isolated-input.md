@@ -225,7 +225,7 @@ placed the cursor: start the script with `cursor <x> <y>`.
 |---|---|---|
 | `GetForegroundWindow` | the game's own window | neither the game nor the mod stands down for being in the background |
 | `GetAsyncKeyState` | the synthetic key state only | the mod's hotkeys fire for the script, not for what is typed elsewhere |
-| `GetKeyState`, `GetKeyboardState` | the synthetic key state only: the high bit while the script holds the key, the low bit flipped by each press | an engine that polls keys or modifiers through them sees the script's keyboard. The log names each one the first time the game calls it |
+| `GetKeyState`, `GetKeyboardState` | the synthetic key state only: the high bit while the script holds the key, the low bit flipped by each press. A held `Ctrl`, `Shift` or `Alt` is also held as its left-hand key | an engine that polls keys or modifiers through them sees the script's keyboard. The log names each one the first time the game calls it |
 | `ClipCursor`, `SetCursorPos` | nothing | the game would trap and recentre the real cursor |
 | `NtUserSetCursorPos` in `win32u.dll` | nothing | only where `SetCursorPos` could not be detoured because its first bytes were already written over: it is what `SetCursorPos` jumps to |
 | `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |
@@ -292,6 +292,13 @@ through the host DLL and `Start-IsolatedGame -ModHost managed`:
   `GetRegisteredRawInputDevices` names. Turning Rewired's native support off at
   run time is not a way round it: Rewired resets and the game's cached players
   go invalid.
+- A chord (`tap Ctrl+Shift+Y`) did not reach a plugin that checks
+  `Input.GetKey(KeyCode.LeftControl)` and `LeftShift`, though the letter did:
+  the script held `VK_CONTROL` and `VK_SHIFT` only, and the game reads key state
+  through `GetKeyState`. With the left-hand keys (`VK_LCONTROL`, `VK_LSHIFT`,
+  `VK_LMENU`) held in the synthetic state as well, the mod's `Ctrl+Shift+Y` and
+  `Ctrl+Shift+G` fired. `down Ctrl` and `down Shift` on their own left the goose
+  where it stood.
 - BepInEx's log console is a visible window of the game's process. It was taken
   for the game window by the host (every script went to it) and by
   `Save-GameCapture` (every capture was of the log) until both skipped
