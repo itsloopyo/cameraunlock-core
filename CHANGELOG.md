@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the C# aim marker and the camera's share of the lean, for a Unity shooter
+
+`IMGUIReticle` gains `ReticleStyle.Cross`, a plus-shaped crosshair with an outline, and `Opacity`,
+applied at draw time so a fade does not rebuild the texture: together they are the aim marker of
+free look with a marker for a C# mod, which has no `AimMarker` renderer. `ViewMatrixTrackingController`
+gains `CameraLeanShare`, called in the render hook with the clamped lean and answering the share
+the view carries, so a mod can hand the rest to its rig through `LeanHandover`. The Forest is the
+first mod on both.
+
 ### Fixed - isolated input never hands the game the real cursor or real raw input
 
 In The Forest (Unity 5.6, Rewired) the person's mouse, moved in another window, turned the

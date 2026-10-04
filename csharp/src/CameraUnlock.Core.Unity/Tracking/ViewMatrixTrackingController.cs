@@ -115,6 +115,16 @@ namespace CameraUnlock.Core.Unity.Tracking
         }
 
         /// <summary>
+        /// Called in the render hook with the lean about to be drawn, after
+        /// <see cref="LeanQuery"/> has clamped it, and answers with the share of it the view
+        /// carries. A shooter mod hands the rest to its rig, or drops it, while the sights are
+        /// up (<see cref="CameraUnlock.Core.Ads.LeanHandover"/>). The lean is in the
+        /// processor's axes: x right, y up, negative z forward. Null: the view carries it all.
+        /// <see cref="LastTrackingPosition"/> stays the whole lean.
+        /// </summary>
+        public Func<Vec3, Vec3> CameraLeanShare { get; set; }
+
+        /// <summary>
         /// Whether starting a tracking session captures the incoming pose as the center.
         /// Off by default; see
         /// <see cref="CameraUnlock.Core.Tracking.HeadTrackingSession.AutoRecenterOnConnect"/>
@@ -641,6 +651,8 @@ namespace CameraUnlock.Core.Unity.Tracking
 
             if (LeanQuery != null)
                 position = ClampLean(cam, position);
+            if (CameraLeanShare != null)
+                position = CameraLeanShare(position);
 
             var offset = new Vector3(position.X, position.Y, position.Z);
             if (WorldSpaceYaw)

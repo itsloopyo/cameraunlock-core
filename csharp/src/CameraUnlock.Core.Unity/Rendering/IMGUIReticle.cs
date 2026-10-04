@@ -19,7 +19,13 @@ namespace CameraUnlock.Core.Unity.Rendering
         /// <summary>Solid filled circle (dot).</summary>
         Dot,
         /// <summary>Circle outline (ring).</summary>
-        Circle
+        Circle,
+        /// <summary>
+        /// A plus-shaped crosshair with an outline: the aim marker of free look with a
+        /// marker (the shooter-ads-handling skill). <see cref="IMGUIReticle.BaseSizeAt1080p"/>
+        /// is its arm span and <see cref="IMGUIReticle.ThicknessAt1080p"/> its arm width.
+        /// </summary>
+        Cross
     }
 
     /// <summary>
@@ -45,6 +51,7 @@ namespace CameraUnlock.Core.Unity.Rendering
         private int _outlineWidthAt1080p = 0;
         private int _currentOutlineWidth;
         private bool _isVisible = true;
+        private float _opacity = 1f;
         private ReticleStyle _style = ReticleStyle.Dot;
 
         // Per-frame position, shared across this frame's multiple OnGUI passes.
@@ -96,7 +103,17 @@ namespace CameraUnlock.Core.Unity.Rendering
         }
 
         /// <summary>
-        /// Gets or sets the reticle style (Dot or Circle).
+        /// How opaque the reticle is drawn, 0 to 1, applied at draw time so a fade does not
+        /// rebuild the texture. 0 draws nothing.
+        /// </summary>
+        public float Opacity
+        {
+            get => _opacity;
+            set => _opacity = Mathf.Clamp01(value);
+        }
+
+        /// <summary>
+        /// Gets or sets the reticle style.
         /// </summary>
         public ReticleStyle Style
         {
@@ -279,9 +296,10 @@ namespace CameraUnlock.Core.Unity.Rendering
                     float dy = y - center;
                     float dist = Mathf.Sqrt(dx * dx + dy * dy);
 
-                    Color texel = _style == ReticleStyle.Dot
-                        ? DotTexel(dist, radius, innerRadius, outlineWidth)
-                        : CircleTexel(dist, radius, innerRadius, outlineWidth);
+                    Color texel;
+                    if (_style == ReticleStyle.Dot) texel = DotTexel(dist, radius, innerRadius, outlineWidth);
+                    else if (_style == ReticleStyle.Circle) texel = CircleTexel(dist, radius, innerRadius, outlineWidth);
+                    else texel = CrossTexel(Mathf.Abs(dx), Mathf.Abs(dy), innerRadius, outlineWidth);
 
                     _reticleTexture.SetPixel(x, y, texel);
                 }
@@ -356,9 +374,26 @@ namespace CameraUnlock.Core.Unity.Rendering
             return Transparent;
         }
 
+        /// <summary>
+        /// Two bars through the centre, each <see cref="_currentThickness"/> wide and reaching
+        /// the inner radius, with the outline band all round them.
+        /// </summary>
+        private Color CrossTexel(float ax, float ay, float innerRadius, float outlineWidth)
+        {
+            float halfWidth = _currentThickness * 0.5f;
+            // Distance outside the nearer bar, 0 inside it.
+            float outsideHorizontal = Mathf.Max(ax - innerRadius, ay - halfWidth);
+            float outsideVertical = Mathf.Max(ay - innerRadius, ax - halfWidth);
+            float outside = Mathf.Min(outsideHorizontal, outsideVertical);
+
+            if (outside <= 0f) return _reticleColor;
+            if (outlineWidth > 0 && outside <= outlineWidth) return _outlineColor;
+            return Transparent;
+        }
+
         private void OnGUI()
         {
-            if (!_isVisible || _positionProvider == null) return;
+            if (!_isVisible || _opacity <= 0f || _positionProvider == null) return;
 
             // OnGUI runs several times per frame (Layout, Repaint, once per input event). The
             // resolution check and the position provider - which for a
@@ -387,7 +422,15 @@ namespace CameraUnlock.Core.Unity.Rendering
                 size
             );
 
+            if (_opacity >= 1f)
+            {
+                GUI.DrawTexture(reticleRect, _reticleTexture);
+                return;
+            }
+            Color previous = GUI.color;
+            GUI.color = new Color(previous.r, previous.g, previous.b, previous.a * _opacity);
             GUI.DrawTexture(reticleRect, _reticleTexture);
+            GUI.color = previous;
         }
 
         private void OnDestroy()
