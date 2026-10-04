@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - isolated input: a game that goes by WM_NCACTIVATE took no scripted input
+
+Deus Ex: Mankind Divided reads a `WM_INPUT` only while its application object reports itself
+active, and that state follows `WM_NCACTIVATE`. Behind other windows it had been told it was
+inactive, so every scripted key and click reached its window procedure and was dropped. The
+game window's procedure no longer sees a `WM_NCACTIVATE` that deactivates it (the frame still
+gets it, through `DefWindowProc`), and is posted one that activates it when the window is
+found, beside the `WM_ACTIVATEAPP`, `WM_ACTIVATE` and `WM_SETFOCUS` it already got. Proven in
+the game: `docs/isolated-input.md`, Measured.
+
+### Added - Deus Ex: Mankind Divided's hotkey lists
+
+`data/config-format.json` `per_game` gains the four key lists of
+deus-ex-mankind-divided-headtracking, measured in game on 2026-10-04: left Ctrl toggles crouch,
+so the chords use Shift+Alt, and the game acts on Y and H, so the toggle has J and yaw mode T.
+
 ### Added - REFramework: the head rotation the camera got, for a light that follows the head
 
 `cameraunlock::reframework::GetAppliedHeadRotation(yaw, pitch, roll)` returns the rotation the

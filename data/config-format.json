@@ -727,6 +727,28 @@
         "approved": "2026-10-03"
       }
     ],
+    "deus-ex-mankind-divided-headtracking": [
+      {
+        "row": "ToggleKey",
+        "reason": "Measured in game on 2026-10-04, on foot with the machine pistol out, through isolated input. Left Ctrl toggles crouch and the crouch stays on after the key comes up, so every Ctrl+Shift chord crouches or stands the player and the chords use Shift+Alt, which leaves nothing changed: Alt alone and Shift+Alt together do nothing that lasts. With Shift and Alt held the game opens the weapon customisation screen on Y and holsters the weapon on H, and does nothing on G, U, J or T. End, PageUp, PageDown and Insert do nothing in the game. Y is taken, so the toggle has J, the first spare letter. The committed file holds ToggleKey=End, Shift+Alt+J.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-04, on foot with the machine pistol out, through isolated input. Left Ctrl toggles crouch and the crouch stays on after the key comes up, so every Ctrl+Shift chord crouches or stands the player and the chords use Shift+Alt, which leaves nothing changed: Alt alone and Shift+Alt together do nothing that lasts. With Shift and Alt held the game opens the weapon customisation screen on Y and holsters the weapon on H, and does nothing on G, U, J or T. End, PageUp, PageDown and Insert do nothing in the game. G is free and keeps its letter on the new pair. The committed file holds CycleTrackingModeKey=PageUp, Shift+Alt+G.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "Measured in game on 2026-10-04, on foot with the machine pistol out, through isolated input. Left Ctrl toggles crouch and the crouch stays on after the key comes up, so every Ctrl+Shift chord crouches or stands the player and the chords use Shift+Alt, which leaves nothing changed: Alt alone and Shift+Alt together do nothing that lasts. With Shift and Alt held the game opens the weapon customisation screen on Y and holsters the weapon on H, and does nothing on G, U, J or T. End, PageUp, PageDown and Insert do nothing in the game. H is taken and the toggle holds J, so yaw mode has T, the next spare letter. The committed file holds YawModeKey=PageDown, Shift+Alt+T.",
+        "approved": "2026-10-04"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-04, on foot with the machine pistol out, through isolated input. Left Ctrl toggles crouch and the crouch stays on after the key comes up, so every Ctrl+Shift chord crouches or stands the player and the chords use Shift+Alt, which leaves nothing changed: Alt alone and Shift+Alt together do nothing that lasts. With Shift and Alt held the game opens the weapon customisation screen on Y and holsters the weapon on H, and does nothing on G, U, J or T. End, PageUp, PageDown and Insert do nothing in the game. U is free and keeps its letter on the new pair. The committed file holds TrueFreeLookKey=Insert, Shift+Alt+U.",
+        "approved": "2026-10-04"
+      }
+    ],
     "far-cry-6-headtracking": [
       {
         "row": "ToggleKey",

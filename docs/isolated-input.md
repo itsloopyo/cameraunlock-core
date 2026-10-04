@@ -240,7 +240,7 @@ placed the cursor: start the script with `cursor <x> <y>`.
 | `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |
 | `SetForegroundWindow` | nothing | the game cannot take the foreground back |
 | `GetCursorPos` | the point the last `cursor` command gave, once one has | a menu with a pointer follows the script's cursor, not the real one |
-| the game window's procedure | never sees `WM_ACTIVATEAPP`, `WM_ACTIVATE` or `WM_KILLFOCUS` saying it lost the foreground | a game that stops, or stops following its mouse, when deactivated carries on |
+| the game window's procedure | never sees `WM_ACTIVATEAPP`, `WM_ACTIVATE`, `WM_KILLFOCUS` or `WM_NCACTIVATE` saying it lost the foreground, and is posted all four saying it has it when the window is found | a game that stops, or stops following its mouse, when deactivated carries on |
 
 The dev build also watches the real foreground itself. Whenever a window of the
 game holds it, the game gives it back to the window that had it before, or to the
@@ -300,6 +300,28 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
   title with an input whose effect the mod also logs, and read the log.
 
 ## Measured
+
+Deus Ex: Mankind Divided 1.19 build 801.0 (Steam), 2026-10-04, windowed and behind
+other windows for the whole session:
+
+- No scripted key or click did anything until the game was kept from seeing
+  `WM_NCACTIVATE` with a false `wParam`, and was posted one with a true `wParam` when its
+  window was found. The game's window procedure reads a `WM_INPUT` through `GetRawInputData`
+  only while the application object reports itself active, and that state follows
+  `WM_NCACTIVATE`, not `WM_ACTIVATE` or `WM_ACTIVATEAPP`. Before the change every `WM_INPUT`
+  and `WM_KEYDOWN` reached the window procedure and `GetRawInputData` was never called.
+- The launcher is a window of the same process and takes `Return` as a window message. The
+  script that presses it is reported as `1 of N steps could not be sent`, because the
+  launcher's window is gone before the key comes up.
+- Keyboard: `Return` went through the intro screens and the main menu into the save, and the
+  mod's hotkeys fired, nav keys and chords.
+- Mouse: `move` turned the view, and after a `cursor` the right button raised and lowered the
+  sights (the mod's log read `ADS: sights up`).
+- `Test-IsolatedInputProof` passed on `move 500 0`.
+- The pose sender drove the mod through this module, rotation and position.
+- `Save-GameCapture` shows live frames.
+- With five other games running on the machine the game drew three to four frames a second,
+  and about fifteen with its process at `AboveNormal`.
 
 The Ascent (Steam, Unreal Engine 4, build `++depot+release-CL-72946`), 2026-10-04,
 windowed and behind other windows for the whole session, the game never holding

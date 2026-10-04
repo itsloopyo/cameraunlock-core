@@ -42,8 +42,9 @@
 //     the game gives it back to the window that had it before. Only the
 //     foreground process may do that, so it is done from in here.
 //   - The game's window procedure never sees the messages that say it lost the
-//     foreground (WM_ACTIVATEAPP, WM_ACTIVATE and WM_KILLFOCUS), so a game that
-//     stops following its mouse when it is deactivated carries on.
+//     foreground (WM_ACTIVATEAPP, WM_ACTIVATE, WM_KILLFOCUS and a WM_NCACTIVATE
+//     that deactivates), so a game that stops following its mouse when it is
+//     deactivated carries on.
 //
 // For games that read DirectInput 8 (dinput8.dll loaded in the process): the
 // keyboard and mouse devices answer GetDeviceState and GetDeviceData from the
@@ -1028,6 +1029,13 @@ inline LRESULT CALLBACK GameWindowProc(HWND window, UINT message, WPARAM wParam,
     const bool leftForeground = (message == WM_ACTIVATEAPP && wParam == FALSE) ||
                                 (message == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE) || message == WM_KILLFOCUS;
     if (leftForeground) return 0;
+    // The frame is told it went inactive, so the title bar is drawn as Windows
+    // wants it, and the game is not: Deus Ex: Mankind Divided takes its active
+    // state from this message and reads no raw input while it is inactive.
+    if (message == WM_NCACTIVATE && wParam == FALSE) {
+        return IsWindowUnicode(window) ? DefWindowProcW(window, message, wParam, lParam)
+                                       : DefWindowProcA(window, message, wParam, lParam);
+    }
     const WNDPROC original = S().windowProc.load(std::memory_order_acquire);
     return IsWindowUnicode(window) ? CallWindowProcW(original, window, message, wParam, lParam)
                                    : CallWindowProcA(original, window, message, wParam, lParam);
@@ -1053,6 +1061,7 @@ inline void WatchGameWindow() {
     // is, or a launch that never had the foreground) has already been told so, and an engine
     // that ignores input while deactivated would ignore every script.
     PostMessageW(window, WM_ACTIVATEAPP, TRUE, 0);
+    PostMessageW(window, WM_NCACTIVATE, TRUE, 0);
     PostMessageW(window, WM_ACTIVATE, WA_ACTIVE, 0);
     PostMessageW(window, WM_SETFOCUS, 0, 0);
     Log("isolated input: game window found");
