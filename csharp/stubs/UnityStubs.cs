@@ -67,6 +67,7 @@ namespace UnityEngine {
     public class Object {
         public static void Destroy(Object obj) { }
         public static void DestroyImmediate(Object obj) { }
+        public static T Instantiate<T>(T original) where T : Object => default;
         public static void DontDestroyOnLoad(Object target) { }
         public string name { get; set; }
         public HideFlags hideFlags { get; set; }
@@ -157,6 +158,7 @@ namespace UnityEngine {
         public bool activeSelf { get; }
         public bool activeInHierarchy { get; }
         public int layer { get; set; }
+        public string tag { get; set; }
         public T GetComponent<T>() => default;
         public Component GetComponent(System.Type type) => default;
         public T GetComponentInChildren<T>() => default;
