@@ -664,6 +664,13 @@
   },
   "allow_legacy_symbols": {},
   "per_game": {
+    "red-eclipse-headtracking": [
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-04, in a match with the rifle out. The game binds Insert to addbot: one tap printed `set botoffset to 1 (was: 0)`, so Insert is dropped from the list. Left Ctrl is the game's `special` action, a dash: each press and release moved the player and left them there (eye 2096.59,1676.06 to 2100.15,1684.90 to 2104.59,1695.91 on two presses running, about 1.2 and 1.5 m), so Ctrl misbehaves and the chord is on Shift+Alt. A Shift press, an Alt press and the pair together left the eye where it was (Shift crouches only while held). With Shift and Alt held a tap of U stepped the aim mode once and the game did nothing: the eye did not move and no menu or prompt opened, so the aim mode keeps U. The committed file holds TrueFreeLookKey=Shift+Alt+U. The mod's other three actions still hold the fleet lists and have not been derived by this rule: End is bound to suicide, Home to spectate and Y to team chat in the game's own setup.cfg, and their chords carry Ctrl.",
+        "approved": "2026-10-04"
+      }
+    ],
     "the-ascent-headtracking": [
       {
         "row": "ToggleKey",

@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - isolated input drives an SDL2 game; Red Eclipse's aim mode key
+
+`data/isolated-input.json` records `sdl` as supported through raw input: Red Eclipse reads all
+its input through `SDL2.dll`, SDL2 reads raw input and window messages, and the existing path
+drove the game with nothing pushed into SDL's event queue (`docs/isolated-input.md`, Measured).
+`Assert-IsolatedInputCovers` no longer warns on a game that loads `sdl2.dll`.
+
+`data/config-format.json` `per_game` gains red-eclipse-headtracking's `TrueFreeLookKey`,
+measured in game on 2026-10-04: the game binds Insert to addbot and left Ctrl is a dash that
+moves the player, so the aim mode is on `Shift+Alt+U` alone.
 ### Fixed - isolated input: a held mouse button was not in the key state
 
 - A `mouse` command now also holds `VK_LBUTTON`, `VK_RBUTTON` or `VK_MBUTTON` in the

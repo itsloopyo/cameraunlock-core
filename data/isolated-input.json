@@ -45,10 +45,10 @@
       "build": "Wrap the IGameInput the game obtains (GameInputCreate) in isolated_input.h and answer GetCurrentReading for keyboard and mouse from the synthetic state."
     },
     "sdl": {
-      "what": "SDL's event queue",
+      "what": "SDL's event queue, through what SDL itself reads. SDL2 on Windows takes relative mouse movement and mouse buttons from raw input and keys and typed text from window messages, which the raw-input path sends, so nothing is pushed into SDL. Check SDL's own import table with Get-GameInputPaths on the SDL DLL the game loads. Proven with SDL2; a game on SDL3 is proven again before it counts",
       "dlls": ["sdl2.dll", "sdl3.dll"],
-      "status": "unsupported",
-      "build": "Push synthetic events through the game's own SDL (SDL_PushEvent resolved from the loaded SDL DLL) from isolated_input.h. SDL may itself sit on raw input: check SDL's import table with Get-GameInputPaths first, and if raw input is what it reads, prove that path and record SDL here as supported through it."
+      "status": "supported",
+      "proven_in": ["red-eclipse"]
     },
     "xinput": {
       "what": "XInput controllers, read with XInputGetState. The `pad` command plugs one in and holds its buttons, sticks and triggers.",

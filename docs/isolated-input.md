@@ -302,6 +302,30 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
 
 ## Measured
 
+Red Eclipse 2.0.9 (Steam, Cube 2 / Tesseract on SDL2, ASI under Ultimate ASI Loader as
+`winmm.dll`), 2026-10-04, windowed and behind other windows for the whole session, the game
+never holding the foreground:
+
+- The exe imports `SDL2.dll` and reads no input of its own beyond `GetKeyState` and
+  `GetCursorPos`. `Get-GameInputPaths` on `SDL2.dll` shows raw input, and that path drove the
+  game: nothing was pushed through SDL's event queue.
+- Keyboard: `E` joined the match from the spectator camera, `Return` opened the chat prompt,
+  `[` and `]` stepped the scope's zoom level, and the mod's hotkeys fired, `Insert` and the
+  `Ctrl+Shift` and `Shift+Alt` chords.
+- `text` typed into the chat prompt, slash, lower case, space and digits.
+- Mouse: `move` turned the view (300 counts, about 50 degrees), the right button held the
+  scope up (the mod's log read `Sights up`) and the left fired a round (the ammunition count
+  dropped). No `cursor` was needed first.
+- `Test-IsolatedInputProof` passed on `move 300 0`.
+- The pose sender drove the mod through whole sessions, rotation and position, on the mod's
+  test port.
+- `Save-GameCapture` showed live frames, the game's own HUD, crosshair and scope overlay
+  included, quickly enough to catch a 150 ms transition in a burst of captures.
+- The game runs on a home folder given with `-h<folder>`, so a test never reads or writes the
+  player's own settings, and `-x<commands>` runs console commands at start (a player name, the
+  map), which skips the first-run menu.
+- Not tried: `cursor`, `pad`.
+
 S.T.A.L.K.E.R.: Call of Prypiat - Enhanced Edition (Steam, X-Ray 1.10.3.653, ASI under Ultimate
 ASI Loader as `dinput8.dll`), 2026-10-04, windowed and behind other windows for the whole session:
 
