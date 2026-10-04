@@ -301,6 +301,32 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
 
 ## Measured
 
+S.T.A.L.K.E.R.: Call of Prypiat - Enhanced Edition (Steam, X-Ray 1.10.3.653, ASI under Ultimate
+ASI Loader as `dinput8.dll`), 2026-10-04, windowed and behind other windows for the whole session:
+
+- The log named the paths: keyboard and mouse through DirectInput `GetDeviceData`, key state
+  through `GetKeyState` and `GetKeyboardState`, and the cursor's position through `GetCursorPos`.
+  The exe also imports SDL2, and nothing needed pushing through it.
+- The loader being the `dinput8.dll` proxy in the game folder made no difference: the device
+  detours went in (10 detours over 4 device vtables).
+- Keyboard: the backquote opened the console at the main menu and in play, the arrow keys and
+  Return chose a main menu row and loaded the save, `W` walked, the number keys chose weapons,
+  and the mod's hotkeys fired, nav keys and the `Ctrl+Shift+U` chord.
+- Mouse: `move` turned the view (about 8 counts a degree), the right button held the sights up
+  (the mod's log read `sights=1` and the field of view went from 67.5 to 37.5) and the left
+  fired a round (the ammunition count dropped).
+- `text` typed console commands, lower case and digits. A shifted character came out unshifted:
+  `(` typed `9` and `_` typed `-`. Holding Shift as its own step typed it:
+  `down Shift`, `wait 80`, `tap 0xBD 80`, `wait 80`, `up Shift` gave `_`, and
+  `mtb_fsr_frame_generation on` ran that way. Whether `text` needs the wait or the synthetic key
+  state for Shift was not followed up.
+- The console closes the sights when it opens, so a script raises them again after it.
+- The game went on running unfocused, where it otherwise opens its menu and pauses.
+- `Save-GameCapture` showed live frames, the game's own HUD and crosshair included.
+- The pose sender drove the mod through whole sessions, rotation and position, on the mod's
+  test port.
+- Not tried: `cursor`, `pad`.
+
 Deus Ex: Mankind Divided 1.19 build 801.0 (Steam), 2026-10-04, windowed and behind
 other windows for the whole session:
 
