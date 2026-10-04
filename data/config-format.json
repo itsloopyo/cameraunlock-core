@@ -528,6 +528,9 @@
     "tt-isle-of-man-ride-on-the-edge-3-headtracking": [
       {"committed": "HeadTracking.ini", "installed": ["CameraUnlock.ini"], "legacy_source": "HeadTracking.ini", "dialect": "native"}
     ],
+    "untitled-goose-game-headtracking": [
+      {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": null, "dialect": "unity"}
+    ],
     "valheim-headtracking": [
       {"committed": "config/CameraUnlock.ini", "installed": ["BepInEx\\config\\CameraUnlock.ini"], "legacy_source": "com.cameraunlock.valheim.headtracking.cfg", "dialect": "unity"}
     ],
