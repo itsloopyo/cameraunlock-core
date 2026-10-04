@@ -234,6 +234,7 @@ placed the cursor: start the script with `cursor <x> <y>`.
 | `GetForegroundWindow` | the game's own window | neither the game nor the mod stands down for being in the background |
 | `GetAsyncKeyState` | the synthetic key state only | the mod's hotkeys fire for the script, not for what is typed elsewhere |
 | `GetKeyState`, `GetKeyboardState` | the synthetic key state only: the high bit while the script holds the key, the low bit flipped by each press. A held `Ctrl`, `Shift` or `Alt` is also held as its left-hand key | an engine that polls keys or modifiers through them sees the script's keyboard. The log names each one the first time the game calls it |
+| the same three, for `VK_LBUTTON`, `VK_RBUTTON` and `VK_MBUTTON` | held while a `mouse` command holds that button | Windows reports mouse buttons through the key state too, and a game can take its aim or fire button from there |
 | `ClipCursor`, `SetCursorPos` | nothing | the game would trap and recentre the real cursor |
 | `SetCursorPos`, after the dev build called `LetGameMoveScriptedCursor(true)` | moves the script's cursor to that point, once a `cursor` command has placed it; the real cursor stays put | a mod that places the cursor itself (The Ascent rests it on the point the shot lands, because the game draws its crosshair as the cursor) can be seen to land it |
 | `NtUserSetCursorPos` in `win32u.dll` | nothing | only where `SetCursorPos` could not be detoured because its first bytes were already written over: it is what `SetCursorPos` jumps to |
@@ -499,6 +500,18 @@ behind other windows for the whole session:
 - The game took the real foreground once as it started and gave it back.
 - `Save-GameCapture` shows the frame with the game's own reticle and HUD.
 - Not tried: `cursor`, `text`.
+
+A Plague Tale: Innocence (Steam, build 4336652), 2026-10-04, windowed and behind other
+windows for the whole session:
+
+- Keyboard: the title screen, the save slot and Continue were driven with `Return`, `W`
+  walked and `E` picked up.
+- Mouse: `move` turned the camera. The right button raised the sling only once the script
+  also held `VK_RBUTTON` in the key state, and the left button primed and threw only with
+  `VK_LBUTTON` held there. The `mouse` command now holds both.
+- `cursor` and a click chose a pause menu row.
+- The scripted pad's sticks and triggers moved nothing in the game. Not followed up.
+- `Save-GameCapture` showed live frames.
 
 Ready or Not (Steam, Unreal Engine 5.3), 2026-10-03, game behind other windows:
 

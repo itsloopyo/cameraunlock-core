@@ -364,7 +364,11 @@ function Invoke-GameInput {
     $temp = "$($Session.CommandFile).tmp"
     [IO.File]::WriteAllLines($temp, @($sequence) + $Commands)
     $heldForeground = [CameraUnlockIsolatedTest.Native]::ForegroundPid() -eq $Session.ProcessId
-    Move-Item $temp $Session.CommandFile -Force
+    # The mod reads the command file on a timer, and a move that lands on that read is refused.
+    foreach ($attempt in 1..20) {
+        try { Move-Item $temp $Session.CommandFile -Force -ErrorAction Stop; break }
+        catch [System.IO.IOException] { if ($attempt -eq 20) { throw }; Start-Sleep -Milliseconds 25 }
+    }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $done = $null
     while ((Get-Date) -lt $deadline) {

@@ -6,7 +6,7 @@
       "what": "RegisterRawInputDevices and WM_INPUT, read back through GetRawInputData. A key is also posted as WM_KEYDOWN and WM_KEYUP, which is where an engine that takes raw input for the mouse alone (Unreal Engine 4) reads its keys",
       "imports": ["GetRawInputData", "RegisterRawInputDevices"],
       "status": "supported",
-      "proven_in": ["starfield", "deep-rock-galactic", "untitled-goose-game", "deus-ex-mankind-divided"]
+      "proven_in": ["starfield", "deep-rock-galactic", "untitled-goose-game", "deus-ex-mankind-divided", "a-plague-tale-innocence"]
     },
     "raw-input-buffered": {
       "what": "raw input read in batches through GetRawInputBuffer instead of one WM_INPUT at a time",
@@ -18,7 +18,7 @@
       "what": "keys polled with GetAsyncKeyState",
       "imports": ["GetAsyncKeyState"],
       "status": "supported",
-      "proven_in": ["starfield", "ready-or-not", "resident-evil-requiem"]
+      "proven_in": ["starfield", "ready-or-not", "resident-evil-requiem", "a-plague-tale-innocence"]
     },
     "key-state": {
       "what": "keys polled with GetKeyState or GetKeyboardState, which read the thread's message-synchronised state",

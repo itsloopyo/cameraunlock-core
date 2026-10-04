@@ -793,16 +793,28 @@ inline int LeftHandModifier(int vk) {
     }
 }
 
-inline bool SendRawKey(int vk, bool down) {
+// The state GetAsyncKeyState, GetKeyState and GetKeyboardState answer from.
+inline void HoldKeyState(int vk, bool down) {
     const bool wasDown = S().keyDown[vk].exchange(down, std::memory_order_acq_rel);
-    // Windows reports a held Ctrl, Shift or Alt under the key's own side as well. Unity's
-    // Input.GetKey(KeyCode.LeftControl) stayed false for a scripted Ctrl until this did too.
-    if (const int left = LeftHandModifier(vk)) S().keyDown[left].store(down, std::memory_order_release);
     if (down) S().keyPressedSinceRead[vk].store(true, std::memory_order_release);
     // Only the command-file thread writes the toggle, so this read and write cannot interleave.
     if (down && !wasDown) {
         S().keyToggled[vk].store(!S().keyToggled[vk].load(std::memory_order_relaxed), std::memory_order_release);
     }
+}
+
+// Windows reports a held mouse button through the key state functions as well, under
+// VK_LBUTTON, VK_RBUTTON and VK_MBUTTON. A Plague Tale: Innocence raised its sling for a
+// scripted right button only once this did too.
+inline void HoldButtonKeyState(MouseButton button, bool down) {
+    HoldKeyState(button == MouseButton::kLeft ? VK_LBUTTON : button == MouseButton::kRight ? VK_RBUTTON : VK_MBUTTON, down);
+}
+
+inline bool SendRawKey(int vk, bool down) {
+    HoldKeyState(vk, down);
+    // Windows reports a held Ctrl, Shift or Alt under the key's own side as well. Unity's
+    // Input.GetKey(KeyCode.LeftControl) stayed false for a scripted Ctrl until this did too.
+    if (const int left = LeftHandModifier(vk)) S().keyDown[left].store(down, std::memory_order_release);
 
     RAWINPUT event = {};
     event.header.dwType = RIM_TYPEKEYBOARD;
@@ -944,10 +956,12 @@ inline bool Play(const InputStep& step) {
         case InputAction::kKeyUp:     return SendKey(step.vk, false);
         case InputAction::kMouseDown:
             SendDirectInputButton(step.button, true);
+            HoldButtonKeyState(step.button, true);
             PostCursorButton(step.button, true);
             return SendMouse(ButtonFlag(step.button, true), 0, 0);
         case InputAction::kMouseUp:
             SendDirectInputButton(step.button, false);
+            HoldButtonKeyState(step.button, false);
             PostCursorButton(step.button, false);
             return SendMouse(ButtonFlag(step.button, false), 0, 0);
         case InputAction::kMouseMove:

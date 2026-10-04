@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - isolated input: a held mouse button was not in the key state
+
+- A `mouse` command now also holds `VK_LBUTTON`, `VK_RBUTTON` or `VK_MBUTTON` in the
+  state `GetAsyncKeyState`, `GetKeyState` and `GetKeyboardState` answer from, as
+  Windows does for a real button. A Plague Tale: Innocence raised its sling for a
+  scripted right button only once it did.
+- `Invoke-GameInput` retries the move of the command file when it lands on the
+  mod's read of it, instead of failing the script.
+
 ### Fixed - isolated input: a game that goes by WM_NCACTIVATE took no scripted input
 
 Deus Ex: Mankind Divided reads a `WM_INPUT` only while its application object reports itself
