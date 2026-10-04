@@ -204,6 +204,8 @@ namespace UnityEngine {
         public int targetDisplay { get; set; }
         public bool stereoEnabled { get; }
         public Vector3 WorldToScreenPoint(Vector3 position) => default;
+        public Vector3 WorldToViewportPoint(Vector3 position) => default;
+        public float[] layerCullDistances { get; set; }
         public Vector3 ScreenToWorldPoint(Vector3 position) => default;
         public Ray ScreenPointToRay(Vector3 pos) => default;
         public void Render() { }
