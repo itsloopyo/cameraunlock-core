@@ -197,8 +197,8 @@ namespace CameraUnlock.Core.Protocol
                 // process that does not exist, so the hint is gated on the code the
                 // socket actually returned.
                 Log?.Invoke(string.Format(
-                    "UDP port {0} bind failed: {1} ({2}) - {3}{4} Retrying every {5}ms and will start listening as soon as the bind succeeds.",
-                    port, ex.SocketErrorCode, ex.ErrorCode, ex.Message,
+                    "UDP port {0} bind failed: {1} ({2}) - {3}.{4} Retrying every {5}ms and will start listening as soon as the bind succeeds.",
+                    port, ex.SocketErrorCode, ex.ErrorCode, ex.Message.TrimEnd('.'),
                     ex.SocketErrorCode == SocketError.AddressAlreadyInUse
                         ? " Another program holds the port - another game still running?"
                         : string.Empty,
