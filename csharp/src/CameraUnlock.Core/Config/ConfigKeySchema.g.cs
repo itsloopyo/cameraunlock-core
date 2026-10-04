@@ -38,6 +38,7 @@ namespace CameraUnlock.Core.Config
             public const string PositionAllowed = "positionallowed";
             public const string TrueFreeLook = "truefreelook";
             public const string FreeLookMarker = "freelookmarker";
+            public const string StockSights = "stocksights";
             public const string PositionSensitivityX = "positionsensitivityx";
             public const string PositionSensitivityY = "positionsensitivityy";
             public const string PositionSensitivityZ = "positionsensitivityz";
@@ -240,6 +241,7 @@ namespace CameraUnlock.Core.Config
             { "smoothinglocal", "localsmoothing" },
             { "smoothingremote", "remotesmoothing" },
             { "startenabled", "enableonstartup" },
+            { "stocksights", "stocksights" },
             { "toggle", "togglekey" },
             { "togglecrosshairkey", "reticletogglekey" },
             { "togglekey", "togglekey" },

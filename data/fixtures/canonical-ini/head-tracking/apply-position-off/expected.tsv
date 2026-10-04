@@ -10,6 +10,7 @@ field	DataFreshnessMs	500
 field	PositionEnabled	false
 field	TrueFreeLook	false
 field	FreeLookMarker	false
+field	StockSights	false
 field	PositionLimitX	0.3
 field	PositionLimitY	0.5
 field	PositionLimitYDown	0.2

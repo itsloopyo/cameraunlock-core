@@ -144,6 +144,14 @@ namespace CameraUnlock.Core.Config
         public bool FreeLookMarker { get; set; } = false;
 
         /// <summary>
+        /// The fourth aim mode (<see cref="CameraUnlock.Core.Ads.AimModes"/>): true eases yaw,
+        /// pitch and the lean out while the sights are up, whatever the two above hold. Read
+        /// only through <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not
+        /// read it.
+        /// </summary>
+        public bool StockSights { get; set; } = false;
+
+        /// <summary>
         /// How long, in milliseconds, the newest packet counts as current. Core only parses
         /// it; the mod's per-frame gate stops following the tracker past it. At least 1.
         /// </summary>
@@ -297,7 +305,7 @@ namespace CameraUnlock.Core.Config
                 // Added to the schema after this reader was frozen: it skips them as it did when
                 // they resolved to nothing, duplicate-spelling warning included.
                 if (key == ConfigKeySchema.Keys.TrueFreeLook || key == ConfigKeySchema.Keys.TrueFreeLookKey
-                    || key == ConfigKeySchema.Keys.FreeLookMarker) continue;
+                    || key == ConfigKeySchema.Keys.FreeLookMarker || key == ConfigKeySchema.Keys.StockSights) continue;
 
                 string firstSpelling;
                 if (firstSpellingOf.TryGetValue(key, out firstSpelling))

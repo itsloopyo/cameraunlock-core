@@ -104,6 +104,10 @@ struct HeadTrackingConfig {
     /// look, and means nothing while true_free_look is false. Read only through
     /// config::HeadTrackingConfigTable; ApplyValues does not read it.
     bool free_look_marker = false;
+    /// The fourth aim mode (ads/aim_mode.h): true eases yaw, pitch and the lean out while the
+    /// sights are up, whatever the two above hold. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool stock_sights = false;
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.

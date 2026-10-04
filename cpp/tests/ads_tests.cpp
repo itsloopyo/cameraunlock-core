@@ -268,49 +268,72 @@ void TestHandoverStopReleasesTheRig() {
 using cameraunlock::ads::AimMarkerOpacity;
 using cameraunlock::ads::AimMode;
 using cameraunlock::ads::AimModeLabel;
-using cameraunlock::ads::AimModePair;
+using cameraunlock::ads::AimModeSettings;
 using cameraunlock::ads::DecodeAimMode;
 using cameraunlock::ads::EncodeAimMode;
+using cameraunlock::ads::IsFreeLook;
 using cameraunlock::ads::NextAimMode;
+using cameraunlock::ads::StockSightsEngaged;
 
-void TestAimModeDecodesThePair() {
+void TestAimModeDecodesTheThreeValues() {
     std::cout << "Aim mode:\n";
-    Check(DecodeAimMode(false, false) == AimMode::SightsLocked, "both false, or both absent, is sights locked");
-    Check(DecodeAimMode(true, false) == AimMode::TrueFreeLook,
+    Check(DecodeAimMode(false, false, false) == AimMode::SightsLocked, "all false, or all absent, is sights locked");
+    Check(DecodeAimMode(true, false, false) == AimMode::TrueFreeLook,
           "TrueFreeLook alone is true free look, so a config from before the marker keeps its mode");
-    Check(DecodeAimMode(false, true) == AimMode::SightsLocked, "FreeLookMarker alone is sights locked");
-    Check(DecodeAimMode(true, true) == AimMode::FreeLookMarker, "both true is free look with a marker");
+    Check(DecodeAimMode(false, true, false) == AimMode::SightsLocked, "FreeLookMarker alone is sights locked");
+    Check(DecodeAimMode(true, true, false) == AimMode::FreeLookMarker,
+          "TrueFreeLook with FreeLookMarker is free look with a marker");
+    Check(DecodeAimMode(false, false, true) == AimMode::StockSights &&
+              DecodeAimMode(true, false, true) == AimMode::StockSights &&
+              DecodeAimMode(false, true, true) == AimMode::StockSights &&
+              DecodeAimMode(true, true, true) == AimMode::StockSights,
+          "StockSights is stock sights whatever the other two hold");
 }
 
 void TestAimModeCycleAndEncode() {
     Check(NextAimMode(AimMode::SightsLocked) == AimMode::FreeLookMarker &&
               NextAimMode(AimMode::FreeLookMarker) == AimMode::TrueFreeLook &&
-              NextAimMode(AimMode::TrueFreeLook) == AimMode::SightsLocked,
-          "the cycle is sights locked, free look with a marker, true free look and round again");
+              NextAimMode(AimMode::TrueFreeLook) == AimMode::StockSights &&
+              NextAimMode(AimMode::StockSights) == AimMode::SightsLocked,
+          "the cycle is sights locked, free look with a marker, true free look, stock sights and round again");
 
     bool roundTrips = true;
     bool markerWithoutFreeLook = false;
     AimMode mode = AimMode::SightsLocked;
-    for (int step = 0; step < 6; ++step) {
-        const AimModePair pair = EncodeAimMode(mode);
-        roundTrips = roundTrips && DecodeAimMode(pair.trueFreeLook, pair.freeLookMarker) == mode;
-        markerWithoutFreeLook = markerWithoutFreeLook || (!pair.trueFreeLook && pair.freeLookMarker);
+    for (int step = 0; step < 8; ++step) {
+        const AimModeSettings settings = EncodeAimMode(mode);
+        roundTrips = roundTrips &&
+                     DecodeAimMode(settings.trueFreeLook, settings.freeLookMarker, settings.stockSights) == mode;
+        markerWithoutFreeLook = markerWithoutFreeLook || (!settings.trueFreeLook && settings.freeLookMarker);
         mode = NextAimMode(mode);
     }
-    Check(roundTrips, "every mode of the cycle decodes from the pair it encodes to");
+    Check(roundTrips, "every mode of the cycle decodes from the values it encodes to");
     Check(!markerWithoutFreeLook, "the cycle never writes FreeLookMarker without TrueFreeLook");
 
-    const AimModePair marker = EncodeAimMode(AimMode::FreeLookMarker);
-    const AimModePair free = EncodeAimMode(AimMode::TrueFreeLook);
-    Check(marker.trueFreeLook && marker.freeLookMarker && free.trueFreeLook && !free.freeLookMarker,
-          "free look with a marker is true/true and true free look is true/false");
+    const AimModeSettings locked = EncodeAimMode(AimMode::SightsLocked);
+    const AimModeSettings marker = EncodeAimMode(AimMode::FreeLookMarker);
+    const AimModeSettings free = EncodeAimMode(AimMode::TrueFreeLook);
+    const AimModeSettings stock = EncodeAimMode(AimMode::StockSights);
+    Check(!locked.trueFreeLook && !locked.freeLookMarker && !locked.stockSights, "sights locked is false/false/false");
+    Check(marker.trueFreeLook && marker.freeLookMarker && !marker.stockSights,
+          "free look with a marker is true/true/false");
+    Check(free.trueFreeLook && !free.freeLookMarker && !free.stockSights, "true free look is true/false/false");
+    Check(!stock.trueFreeLook && !stock.freeLookMarker && stock.stockSights, "stock sights is false/false/true");
 }
 
 void TestAimModeLabels() {
     Check(std::string(AimModeLabel(AimMode::SightsLocked)) == "Aim mode: sights locked" &&
               std::string(AimModeLabel(AimMode::FreeLookMarker)) == "Aim mode: free look with marker" &&
-              std::string(AimModeLabel(AimMode::TrueFreeLook)) == "Aim mode: true free look",
-          "the three labels are the fixed ones");
+              std::string(AimModeLabel(AimMode::TrueFreeLook)) == "Aim mode: true free look" &&
+              std::string(AimModeLabel(AimMode::StockSights)) == "Aim mode: stock sights",
+          "the four labels are the fixed ones");
+}
+
+void TestOnlyTheTwoFreeLookModesAreFreeLook() {
+    Check(IsFreeLook(AimMode::FreeLookMarker) && IsFreeLook(AimMode::TrueFreeLook),
+          "both free look modes are free look");
+    Check(!IsFreeLook(AimMode::SightsLocked) && !IsFreeLook(AimMode::StockSights),
+          "sights locked and stock sights are not, so a lean on its way out is handed over as sights locked");
 }
 
 void TestAimMarkerShowsOnlyInFreeLookWithAMarker() {
@@ -318,8 +341,96 @@ void TestAimMarkerShowsOnlyInFreeLookWithAMarker() {
               Near(AimMarkerOpacity(AimMode::FreeLookMarker, 0.4f), 0.4f),
           "free look with a marker: the marker's opacity follows the sights");
     Check(AimMarkerOpacity(AimMode::FreeLookMarker, 0.0f) == 0.0f, "and it is gone at the hip");
-    Check(AimMarkerOpacity(AimMode::SightsLocked, 1.0f) == 0.0f && AimMarkerOpacity(AimMode::TrueFreeLook, 1.0f) == 0.0f,
-          "sights locked and true free look draw no marker with the sights up");
+    Check(AimMarkerOpacity(AimMode::SightsLocked, 1.0f) == 0.0f &&
+              AimMarkerOpacity(AimMode::TrueFreeLook, 1.0f) == 0.0f &&
+              AimMarkerOpacity(AimMode::StockSights, 1.0f) == 0.0f,
+          "sights locked, true free look and stock sights draw no marker with the sights up");
+}
+
+// ---- stock sights ------------------------------------------------------------
+
+void TestStockSightsEngagesOnlyInItsModeWithTheSightsUp() {
+    std::cout << "Stock sights:\n";
+    Check(StockSightsEngaged(AimMode::StockSights, true), "stock sights with the sights up eases the pose out");
+    Check(!StockSightsEngaged(AimMode::StockSights, false), "at the hip it does not");
+    Check(!StockSightsEngaged(AimMode::SightsLocked, true) && !StockSightsEngaged(AimMode::FreeLookMarker, true) &&
+              !StockSightsEngaged(AimMode::TrueFreeLook, true),
+          "and no other mode does with the sights up");
+}
+
+// The pose as a mod applies it: a second AdsFade fed StockSightsEngaged, whose
+// output scales yaw, pitch and the three lean axes and never roll.
+struct Pose {
+    float yaw, pitch, roll, x, y, z;
+};
+
+constexpr Pose kHead{20.0f, -8.0f, 6.0f, 0.25f, -0.05f, 0.1f};
+
+Pose StockSightsPose(AdsFade& fade, AimMode mode, bool aiming, unsigned long long nowMs) {
+    const float share = fade.Update(StockSightsEngaged(mode, aiming), nowMs);
+    return {kHead.yaw * share, kHead.pitch * share, kHead.roll, kHead.x * share, kHead.y * share, kHead.z * share};
+}
+
+bool NearPose(const Pose& p, float share) {
+    return Near(p.yaw, kHead.yaw * share) && Near(p.pitch, kHead.pitch * share) && p.roll == kHead.roll &&
+           Near(p.x, kHead.x * share) && Near(p.y, kHead.y * share) && Near(p.z, kHead.z * share);
+}
+
+void TestStockSightsEasesEverythingButRollOut() {
+    AdsFade fade;
+    Check(NearPose(StockSightsPose(fade, AimMode::StockSights, false, 1000), 1.0f),
+          "at the hip the pose passes through untouched");
+
+    StockSightsPose(fade, AimMode::StockSights, true, 2000);
+    const Pose mid = StockSightsPose(fade, AimMode::StockSights, true, 2000 + AdsFade::kLowerMs / 2);
+    Check(Near(mid.yaw, 10.0f, 1e-2f) && Near(mid.pitch, -4.0f, 1e-2f) && Near(mid.x, 0.125f, 1e-3f) &&
+              Near(mid.y, -0.025f, 1e-3f) && Near(mid.z, 0.05f, 1e-3f) && mid.roll == kHead.roll,
+          "mid-transition yaw, pitch and the lean are scaled by the fade and roll is untouched");
+
+    const Pose up = StockSightsPose(fade, AimMode::StockSights, true, 2000 + AdsFade::kLowerMs);
+    Check(up.yaw == 0.0f && up.pitch == 0.0f && up.x == 0.0f && up.y == 0.0f && up.z == 0.0f && up.roll == kHead.roll,
+          "sights up: yaw, pitch and all three lean axes are zero and roll is the tracker's roll");
+
+    StockSightsPose(fade, AimMode::StockSights, false, 5000);
+    Check(NearPose(StockSightsPose(fade, AimMode::StockSights, false, 5000 + AdsFade::kRaiseMs), 1.0f),
+          "and the pose comes back in full as the sights go down");
+}
+
+void TestStockSightsReversalsContinue() {
+    AdsFade button;
+    StockSightsPose(button, AimMode::StockSights, true, 0);
+    const Pose half = StockSightsPose(button, AimMode::StockSights, true, AdsFade::kLowerMs / 2);
+    const Pose released = StockSightsPose(button, AimMode::StockSights, false, AdsFade::kLowerMs / 2);
+    Check(Near(released.yaw, half.yaw) && Near(released.x, half.x),
+          "releasing the aim button mid-transition does not step");
+
+    // The mode key pressed with the sights up: into stock sights, then out of it.
+    AdsFade key;
+    Check(NearPose(StockSightsPose(key, AimMode::TrueFreeLook, true, 0), 1.0f),
+          "true free look with the sights up is the whole pose");
+    Check(NearPose(StockSightsPose(key, AimMode::StockSights, true, 100), 1.0f),
+          "the frame the key steps into stock sights does not step");
+    const Pose easing = StockSightsPose(key, AimMode::StockSights, true, 100 + AdsFade::kLowerMs / 2);
+    Check(easing.yaw < kHead.yaw && easing.yaw > 0.0f, "the pose then eases out");
+    const Pose steppedOut = StockSightsPose(key, AimMode::SightsLocked, true, 100 + AdsFade::kLowerMs / 2);
+    Check(Near(steppedOut.yaw, easing.yaw) && Near(steppedOut.z, easing.z),
+          "stepping out of stock sights mid-transition does not step");
+    Check(NearPose(StockSightsPose(key, AimMode::SightsLocked, true,
+                                   100 + AdsFade::kLowerMs / 2 + AdsFade::kRaiseMs),
+                   1.0f),
+          "and the pose eases back in full with the sights still up");
+}
+
+void TestTheOtherModesPassThePoseThrough() {
+    bool untouched = true;
+    for (AimMode mode : {AimMode::SightsLocked, AimMode::FreeLookMarker, AimMode::TrueFreeLook}) {
+        AdsFade fade;
+        untouched = untouched && NearPose(StockSightsPose(fade, mode, false, 0), 1.0f);
+        untouched = untouched && NearPose(StockSightsPose(fade, mode, true, 100), 1.0f);
+        untouched = untouched && NearPose(StockSightsPose(fade, mode, true, 100 + AdsFade::kLowerMs), 1.0f);
+        untouched = untouched && NearPose(StockSightsPose(fade, mode, false, 1000), 1.0f);
+    }
+    Check(untouched, "in the other three modes the pose passes through untouched, sights up or down");
 }
 
 void TestAimMarkerFadesBothCrossesByItsOpacity() {
@@ -379,10 +490,15 @@ int RunAdsTests() {
     TestHandoverWithoutARigEasesTheLeanOut();
     TestHandoverForwardStopHoldsTheEyeBehindTheSights();
     TestHandoverStopReleasesTheRig();
-    TestAimModeDecodesThePair();
+    TestAimModeDecodesTheThreeValues();
     TestAimModeCycleAndEncode();
     TestAimModeLabels();
+    TestOnlyTheTwoFreeLookModesAreFreeLook();
     TestAimMarkerShowsOnlyInFreeLookWithAMarker();
+    TestStockSightsEngagesOnlyInItsModeWithTheSightsUp();
+    TestStockSightsEasesEverythingButRollOut();
+    TestStockSightsReversalsContinue();
+    TestTheOtherModesPassThePoseThrough();
     TestAimMarkerFadesBothCrossesByItsOpacity();
     TestAimMarkDrawsAnOutlineUnderTheInk();
 

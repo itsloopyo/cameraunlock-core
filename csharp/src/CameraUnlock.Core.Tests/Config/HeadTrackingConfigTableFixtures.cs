@@ -236,6 +236,7 @@ namespace CameraUnlock.Core.Tests.Config
                 new FieldRead("PositionEnabled", c => b.Render(c.PositionEnabled)),
                 new FieldRead("TrueFreeLook", c => b.Render(c.TrueFreeLook)),
                 new FieldRead("FreeLookMarker", c => b.Render(c.FreeLookMarker)),
+                new FieldRead("StockSights", c => b.Render(c.StockSights)),
                 new FieldRead("PositionLimitX", c => f.Render(c.Position.LimitX)),
                 new FieldRead("PositionLimitY", c => f.Render(c.Position.LimitY)),
                 new FieldRead("PositionLimitYDown", c => f.Render(c.Position.LimitYDown)),

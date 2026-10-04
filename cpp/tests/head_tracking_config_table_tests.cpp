@@ -123,6 +123,7 @@ std::vector<FieldRead> Fields() {
         {"PositionEnabled", [b](const H& c) { return b(c.position_enabled); }},
         {"TrueFreeLook", [b](const H& c) { return b(c.true_free_look); }},
         {"FreeLookMarker", [b](const H& c) { return b(c.free_look_marker); }},
+        {"StockSights", [b](const H& c) { return b(c.stock_sights); }},
         {"PositionLimitX", [f](const H& c) { return f(c.position.limit_x); }},
         {"PositionLimitY", [f](const H& c) { return f(c.position.limit_y); }},
         {"PositionLimitYDown", [f](const H& c) { return f(c.position.limit_y_down); }},
@@ -326,7 +327,7 @@ void TestGlobalConcepts() {
     const std::vector<std::string> expected{
         "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
-        "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
+        "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
         "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightMultiplier"};
     std::vector<std::string> global;
@@ -381,9 +382,9 @@ void TestTrueFreeLookSpellings() {
     HeadTrackingConfig flat;
     std::vector<std::string> log;
     flat.ApplyValues({{"TrueFreeLook", "true"}, {"true_free_look", "true"}, {"TrueFreeLookKey", "F8"},
-                      {"FreeLookMarker", "true"}},
+                      {"FreeLookMarker", "true"}, {"StockSights", "true"}},
                      [&log](const std::string& line) { log.push_back(line); });
-    Check(!flat.true_free_look && !flat.free_look_marker && flat.true_free_look_key_name == "Insert, Ctrl+Shift+U" &&
+    Check(!flat.true_free_look && !flat.free_look_marker && !flat.stock_sights && flat.true_free_look_key_name == "Insert, Ctrl+Shift+U" &&
               log.empty(),
           "the flat reader reads none of the aim mode concepts");
 }

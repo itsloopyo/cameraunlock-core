@@ -96,8 +96,10 @@ struct CameraPipelineDescriptor {
     // The game's own aim state, polled once per gameplay frame, never latched.
     // Set, the lean eases out while this is true and PluginMod::IsTrueFreeLook
     // is false (sights locked), on ads/ads_fade.h's timing, and stays in full in
-    // true free look. Rotation is never touched. A frame it cannot read reports
-    // false, so the lean returns. Null leaves the lean alone.
+    // true free look. Rotation is never touched in those three modes. In stock
+    // sights yaw, pitch and the whole lean ease out while this is true, on the
+    // same timing, and roll stays. A frame it cannot read reports false, so the
+    // pose returns. Null leaves the pose alone, in every mode.
     bool (*isAiming)() = nullptr;
 
     // The rig: the transform the camera, the arms, the held weapon and the

@@ -61,7 +61,7 @@ void PluginMod::Initialize(const PluginModDescriptor& descriptor) {
     m_appliedMode.store(startMode);
     m_worldSpaceYaw.store(m_config.worldSpaceYaw, std::memory_order_relaxed);
     if (m_descriptor.config.trueFreeLook) {
-        const AimMode mode = cameraunlock::ads::DecodeAimMode(m_config.trueFreeLook, m_config.freeLookMarker);
+        const AimMode mode = cameraunlock::ads::DecodeAimMode(m_config.trueFreeLook, m_config.freeLookMarker, m_config.stockSights);
         m_aimMode.store(mode, std::memory_order_relaxed);
         LogInfo("%s", cameraunlock::ads::AimModeLabel(mode));
     }
@@ -336,10 +336,11 @@ void PluginMod::CycleAimMode() {
     const AimMode mode = cameraunlock::ads::NextAimMode(m_aimMode.load(std::memory_order_relaxed));
     m_aimMode.store(mode, std::memory_order_relaxed);
     LogInfo("%s", cameraunlock::ads::AimModeLabel(mode));
-    const cameraunlock::ads::AimModePair pair = cameraunlock::ads::EncodeAimMode(mode);
-    SaveConfig("[Position] TrueFreeLook and FreeLookMarker", [pair](PluginConfig& config) {
-        config.trueFreeLook = pair.trueFreeLook;
-        config.freeLookMarker = pair.freeLookMarker;
+    const cameraunlock::ads::AimModeSettings settings = cameraunlock::ads::EncodeAimMode(mode);
+    SaveConfig("[Position] TrueFreeLook, FreeLookMarker and StockSights", [settings](PluginConfig& config) {
+        config.trueFreeLook = settings.trueFreeLook;
+        config.freeLookMarker = settings.freeLookMarker;
+        config.stockSights = settings.stockSights;
     });
 }
 

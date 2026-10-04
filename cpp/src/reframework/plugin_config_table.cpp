@@ -103,6 +103,7 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
     if (schema.trueFreeLook) {
         table.Concept<Concept::TrueFreeLook>(&PluginConfig::trueFreeLook).Writable();
         table.Concept<Concept::FreeLookMarker>(&PluginConfig::freeLookMarker).Writable();
+        table.Concept<Concept::StockSights>(&PluginConfig::stockSights).Writable();
         table.Concept<Concept::TrueFreeLookKey>(&PluginConfig::trueFreeLookKeyBindings);
     }
     if (schema.leanCollision) {
@@ -184,6 +185,7 @@ config::LegacyImport<PluginConfig> PluginConfigLegacyImport(const PluginConfigSc
             const bool insertTaken = InsertTaken(legacy, schema);
             follows.Setting(Concept::TrueFreeLook, true);
             follows.Setting(Concept::FreeLookMarker, true);
+            follows.Setting(Concept::StockSights, true);
             follows.Setting(Concept::TrueFreeLookKey, !insertTaken);
             if (insertTaken) {
                 out.trueFreeLookKeyBindings =

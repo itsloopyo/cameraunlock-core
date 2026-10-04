@@ -911,30 +911,32 @@ void TestLoadIgnoresCanonicalConfig(const fs::path& root) {
           "PluginConfig::Load reads and migrates the same with canonicalConfig set or not");
 }
 
-// A shooter's schema binds TrueFreeLook and FreeLookMarker (default false, Writable) and
-// TrueFreeLookKey, all written default; the import of a legacy file, which never held any of
-// them, leaves them to Defaults.ini; a step of the aim mode cycle saves the pair and edits only
-// those lines; and a canonical file still carrying the retired ads_mode loads in sights locked.
+// A shooter's schema binds TrueFreeLook, FreeLookMarker and StockSights (default false, Writable)
+// and TrueFreeLookKey, all written default; the import of a legacy file, which never held any of
+// them, leaves them to Defaults.ini; a step of the aim mode cycle saves the three values and edits
+// only the lines that change; and a canonical file still carrying the retired ads_mode loads in
+// sights locked.
 void TestTrueFreeLook(const fs::path& root) {
     const Fixture& re3 = kFixtures[1];
     Fixture shooter = re3;
     shooter.schema.trueFreeLook = true;
 
     const ConfigTable<PluginConfig> table = PluginConfigTable(shooter.schema);
-    Check(!table.defaults().trueFreeLook && !table.defaults().freeLookMarker &&
+    Check(!table.defaults().trueFreeLook && !table.defaults().freeLookMarker && !table.defaults().stockSights &&
               table.defaults().trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U",
-          "TrueFreeLook and FreeLookMarker default to false, on Insert and Ctrl+Shift+U");
+          "TrueFreeLook, FreeLookMarker and StockSights default to false, on Insert and Ctrl+Shift+U");
     const std::string fresh = RenderCanonicalFresh(table, RenderHeader{shooter.game});
     const std::size_t position = fresh.find("\r\n[Position]\r\n");
     const std::size_t hotkeys = fresh.find("\r\n[Hotkeys]\r\n");
     const std::size_t row = fresh.find("\r\nTrueFreeLook=default\r\n");
     const std::size_t marker = fresh.find("\r\nFreeLookMarker=default\r\n");
+    const std::size_t stock = fresh.find("\r\nStockSights=default\r\n");
     const std::size_t key = fresh.find("\r\nTrueFreeLookKey=default\r\n");
-    Check(position < row && row < marker && marker < hotkeys && hotkeys < key,
-          "a shooter's fresh file holds TrueFreeLook=default and FreeLookMarker=default under [Position] and "
-          "TrueFreeLookKey=default under [Hotkeys]");
+    Check(position < row && row < marker && marker < stock && stock < hotkeys && hotkeys < key,
+          "a shooter's fresh file holds TrueFreeLook=default, FreeLookMarker=default and StockSights=default "
+          "under [Position] and TrueFreeLookKey=default under [Hotkeys]");
     const std::string plain = RenderCanonicalFresh(PluginConfigTable(re3.schema), RenderHeader{re3.game});
-    Check(!Contains(plain, "TrueFreeLook") && !Contains(plain, "FreeLookMarker"),
+    Check(!Contains(plain, "TrueFreeLook") && !Contains(plain, "FreeLookMarker") && !Contains(plain, "StockSights"),
           "a schema without trueFreeLook binds none of the rows");
 
     const fs::path dir = Fresh(root, "true-free-look");
@@ -944,25 +946,28 @@ void TestTrueFreeLook(const fs::path& root) {
     const ConfigLoadResult<PluginConfig> loaded = owner.Load();
     const std::string converted = ReadBytes(file);
     Check(loaded.status == ConfigLoadStatus::Migrated && !loaded.config.trueFreeLook &&
-              !loaded.config.freeLookMarker && loaded.config.trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U" &&
+              !loaded.config.freeLookMarker && !loaded.config.stockSights &&
+              loaded.config.trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U" &&
               Contains(converted, "\r\nTrueFreeLook=default\r\n") &&
               Contains(converted, "\r\nFreeLookMarker=default\r\n") &&
+              Contains(converted, "\r\nStockSights=default\r\n") &&
               Contains(converted, "\r\nTrueFreeLookKey=default\r\n"),
           "the legacy import leaves the aim mode and its key to Defaults.ini, sights locked on Insert");
 
-    // The cycle, as PluginMod::CycleAimMode saves it: the pair of the next mode, in one save.
+    // The cycle, as PluginMod::CycleAimMode saves it: the three values of the next mode, in one save.
     using cameraunlock::ads::AimMode;
     const auto step = [&](AimMode from) {
         const AimMode next = cameraunlock::ads::NextAimMode(from);
-        const cameraunlock::ads::AimModePair pair = cameraunlock::ads::EncodeAimMode(next);
-        const ConfigSaveResult saved = owner.Save([pair](PluginConfig& c) {
-            c.trueFreeLook = pair.trueFreeLook;
-            c.freeLookMarker = pair.freeLookMarker;
+        const cameraunlock::ads::AimModeSettings settings = cameraunlock::ads::EncodeAimMode(next);
+        const ConfigSaveResult saved = owner.Save([settings](PluginConfig& c) {
+            c.trueFreeLook = settings.trueFreeLook;
+            c.freeLookMarker = settings.freeLookMarker;
+            c.stockSights = settings.stockSights;
         });
         ConfigOwner<PluginConfig> restarted(OwnerOptions(shooter, dir));
         const PluginConfig back = restarted.Load().config;
         return saved.status == ConfigSaveStatus::Saved &&
-               cameraunlock::ads::DecodeAimMode(back.trueFreeLook, back.freeLookMarker) == next;
+               cameraunlock::ads::DecodeAimMode(back.trueFreeLook, back.freeLookMarker, back.stockSights) == next;
     };
     const bool to_marker = step(AimMode::SightsLocked);
     const std::string in_marker = ReadBytes(file);
@@ -973,9 +978,25 @@ void TestTrueFreeLook(const fs::path& root) {
     const std::string in_free = ReadBytes(file);
     Check(to_free && OnlyChangedLine(in_marker, in_free) == "FreeLookMarker=false",
           "the second saves true free look, and a restart comes back in it");
-    const bool to_locked = step(AimMode::TrueFreeLook);
-    Check(to_locked && OnlyChangedLine(in_free, ReadBytes(file)) == "TrueFreeLook=false",
-          "the third saves sights locked, and a restart comes back in it");
+    const bool to_stock = step(AimMode::TrueFreeLook);
+    const std::string in_stock = ReadBytes(file);
+    Check(to_stock && Contains(in_stock, "\r\nTrueFreeLook=false\r\n") &&
+              Contains(in_stock, "\r\nFreeLookMarker=false\r\n") && Contains(in_stock, "\r\nStockSights=true\r\n") &&
+              ChangedLineCount(in_free, in_stock) == 2,
+          "the third saves stock sights, edits TrueFreeLook and StockSights only, and a restart comes back in it");
+    const bool to_locked = step(AimMode::StockSights);
+    Check(to_locked && OnlyChangedLine(in_stock, ReadBytes(file)) == "StockSights=false",
+          "the fourth saves sights locked, and a restart comes back in it");
+
+    WriteBytes(file, in_marker);
+    const ConfigSaveResult stock_over_free_look =
+        owner.Save([](PluginConfig& c) { c.stockSights = true; });
+    ConfigOwner<PluginConfig> hand_edited(OwnerOptions(shooter, dir));
+    const PluginConfig held = hand_edited.Load().config;
+    Check(stock_over_free_look.status == ConfigSaveStatus::Saved && held.trueFreeLook && held.freeLookMarker &&
+              cameraunlock::ads::DecodeAimMode(held.trueFreeLook, held.freeLookMarker, held.stockSights) ==
+                  AimMode::StockSights,
+          "a file holding StockSights=true beside the free look values loads in stock sights");
     WriteBytes(file, converted);
 
     const std::string with_ads_mode = [&] {
@@ -988,8 +1009,8 @@ void TestTrueFreeLook(const fs::path& root) {
     ConfigOwner<PluginConfig> old(OwnerOptions(shooter, dir));
     const ConfigLoadResult<PluginConfig> old_loaded = old.Load();
     Check(old_loaded.status == ConfigLoadStatus::Canonical && !old_loaded.config.trueFreeLook &&
-              ReadBytes(file) == with_ads_mode,
-          "a file still carrying ads_mode=tracked loads with free look off, and is not rewritten");
+              !old_loaded.config.freeLookMarker && !old_loaded.config.stockSights && ReadBytes(file) == with_ads_mode,
+          "a file still carrying ads_mode=tracked loads in sights locked, and is not rewritten");
 }
 
 // A legacy file that put an action the import carries on Insert: that action keeps Insert, and

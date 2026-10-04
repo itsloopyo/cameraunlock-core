@@ -74,6 +74,12 @@ namespace CameraUnlock.Core.Config
             new BoolCodec(), new[] { "true, with TrueFreeLook=true: an aim marker shows where your shot will land while you aim down the sights.", "It does nothing while TrueFreeLook is false." }, null, "false",
             true);
 
+        /// <summary>[Position] StockSights.</summary>
+        public static readonly ConceptDescriptor<bool> StockSights = new ConceptDescriptor<bool>(
+            "StockSights", "Position", "StockSights", ConceptValueFamily.Bool,
+            new BoolCodec(), new[] { "true: while you aim down the sights your head stops moving the view, apart from tilting it,", "so the sights sit in the centre as they do without head tracking. At the hip nothing changes." }, null, "false",
+            true);
+
         /// <summary>[Position] PositionLimitX.</summary>
         public static readonly ConceptDescriptor<float> PositionLimitX = new ConceptDescriptor<float>(
             "PositionLimitX", "Position", "PositionLimitX", ConceptValueFamily.Floating,
@@ -149,7 +155,7 @@ namespace CameraUnlock.Core.Config
         /// <summary>[Hotkeys] TrueFreeLookKey.</summary>
         public static readonly ConceptDescriptor<string> TrueFreeLookKey = new ConceptDescriptor<string>(
             "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ConceptValueFamily.Hotkey,
-            new HotkeyCodec(), new[] { "Cycles the aim mode: sights locked, free look with a marker, true free look (TrueFreeLook, FreeLookMarker)." }, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U",
+            new HotkeyCodec(), new[] { "Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights", "(TrueFreeLook, FreeLookMarker, StockSights)." }, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U",
             true);
 
         /// <summary>[Light] LightMultiplier.</summary>
@@ -171,6 +177,7 @@ namespace CameraUnlock.Core.Config
             PositionEnabled,
             TrueFreeLook,
             FreeLookMarker,
+            StockSights,
             PositionLimitX,
             PositionLimitY,
             PositionLimitYDown,

@@ -18,7 +18,7 @@ namespace cameraunlock::reframework {
 /// - [Hotkeys] ToggleKey, CycleTrackingModeKey and YawModeKey on the three *KeyBindings
 ///   fields, and with schema.diagnosticMarkerKey the local row DiagnosticMarkerKey;
 /// - with schema.flashlight, [Light] LightMultiplier;
-/// - with schema.trueFreeLook, [Position] TrueFreeLook and FreeLookMarker (both Writable) and
+/// - with schema.trueFreeLook, [Position] TrueFreeLook, FreeLookMarker and StockSights (all Writable) and
 ///   [Hotkeys] TrueFreeLookKey;
 /// - with schema.leanCollision, [Position] CollisionEnabled, CollisionMargin and
 ///   CollisionReleaseSmoothing.
@@ -48,7 +48,7 @@ config::ConfigTable<PluginConfig> PluginConfigTable(const PluginConfigSchema& sc
 /// but DiagnosticMarkerKey goes through config::LegacyFollowsDefaultsIni against SetDefaults (the
 /// tracking mode as PositionEnabled, a hotkey as its code), so a row the file does not hold or
 /// holds at the SetDefaults value is listed in follows_defaults_ini and migrates as `default`.
-/// With schema.trueFreeLook, TrueFreeLook, FreeLookMarker and TrueFreeLookKey are listed there
+/// With schema.trueFreeLook, TrueFreeLook, FreeLookMarker, StockSights and TrueFreeLookKey are listed there
 /// too: no legacy file held any of them. So are CollisionEnabled and CollisionReleaseSmoothing with schema.leanCollision;
 /// CollisionMargin is not global and keeps the game's own value.
 /// Imported, or Absent when Read finds no file; it never refuses,

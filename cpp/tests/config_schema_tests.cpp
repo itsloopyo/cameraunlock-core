@@ -444,6 +444,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"PositionAllowed", ShippedBool(c.position_allowed)},
         {"TrueFreeLook", ShippedBool(c.true_free_look)},
         {"FreeLookMarker", ShippedBool(c.free_look_marker)},
+        {"StockSights", ShippedBool(c.stock_sights)},
         {"PositionSensitivityX", ShippedFloat(c.position.sensitivity_x)},
         {"PositionSensitivityY", ShippedFloat(c.position.sensitivity_y)},
         {"PositionSensitivityZ", ShippedFloat(c.position.sensitivity_z)},

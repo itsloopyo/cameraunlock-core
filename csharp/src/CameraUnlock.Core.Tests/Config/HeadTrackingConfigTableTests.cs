@@ -100,7 +100,7 @@ namespace CameraUnlock.Core.Tests.Config
             {
                 "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
                 "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
-                "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
+                "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
                 "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightMultiplier",
             };
@@ -160,9 +160,11 @@ namespace CameraUnlock.Core.Tests.Config
                 { "true_free_look", "true" },
                 { "TrueFreeLookKey", "F8" },
                 { "FreeLookMarker", "true" },
+                { "StockSights", "true" },
             }, log.Add);
             Assert.False(flat.TrueFreeLook);
             Assert.False(flat.FreeLookMarker);
+            Assert.False(flat.StockSights);
             Assert.Equal("Insert, Ctrl+Shift+U", flat.TrueFreeLookKeyName);
             Assert.Empty(log);
         }

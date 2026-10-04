@@ -342,6 +342,9 @@ TrueFreeLook=false
 ; true, with TrueFreeLook=true: an aim marker shows where your shot will land while you aim down the sights.
 ; It does nothing while TrueFreeLook is false.
 FreeLookMarker=false
+; true: while you aim down the sights your head stops moving the view, apart from tilting it,
+; so the sights sit in the centre as they do without head tracking. At the hip nothing changes.
+StockSights=false
 ; How far, in metres, leaning left or right can move the view.
 PositionLimitX=0.3
 ; How far, in metres, raising your head can move the view.
@@ -370,7 +373,8 @@ ToggleKey=End, Ctrl+Shift+Y
 CycleTrackingModeKey=PageUp, Ctrl+Shift+G
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
 YawModeKey=PageDown, Ctrl+Shift+H
-; Cycles the aim mode: sights locked, free look with a marker, true free look (TrueFreeLook, FreeLookMarker).
+; Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights
+; (TrueFreeLook, FreeLookMarker, StockSights).
 TrueFreeLookKey=Insert, Ctrl+Shift+U
 
 [Light]
@@ -407,22 +411,36 @@ mode's position channel wherever it would have read such a switch.
 
 `TrueFreeLook` is the lean while aiming down sights, in a shooter with an aim state and positional
 tracking. `false`, sights locked, keeps the eye on the sight line; `true`, free look, leaves
-the lean in full while the weapon stays put in the world. With `FreeLookMarker` it is the aim mode,
-a pair as the tracking mode is: `false, false` is sights locked, `true, true` free look with a
-marker (the mod draws an aim marker where the round will land while the sights are up) and
-`true, false` true free look. `FreeLookMarker=true` with `TrueFreeLook=false` reads as sights
-locked with no marker, and the aim mode key never writes that pair. A file with `TrueFreeLook=true`
-and no `FreeLookMarker` is true free look. `ads/aim_mode.h` and `CameraUnlock.Core.Ads.AimModes`
-decode and encode the pair, step the cycle and hold the three labels.
-It is in `[Position]` because the lean is
+the lean in full while the weapon stays put in the world. With `FreeLookMarker` and `StockSights`
+it is the aim mode, a set as the tracking mode is a pair. With `StockSights` false, `false, false`
+is sights locked, `true, true` free look with a marker (the mod draws an aim marker where the round
+will land while the sights are up) and `true, false` true free look. `FreeLookMarker=true` with
+`TrueFreeLook=false` reads as sights locked with no marker, and the aim mode key never writes that
+pair. A file with `TrueFreeLook=true` and no `FreeLookMarker` is true free look.
+
+`StockSights=true` is the fourth mode, stock sights, whatever the other two hold (owner ruling of
+2026-10-04): while the sights are up the head's yaw, pitch and whole lean ease out and only roll
+stays, so the sight picture is the game's own, and at the hip nothing changes. The aim mode key
+writes it as `false, false, true`. A file with no `StockSights` is in one of the other three
+modes. The mod eases the pose on a second `AdsFade` fed `StockSightsEngaged(mode, aiming)`, whose
+output multiplies yaw, pitch and the three lean axes before anything else reads the pose; roll is
+never scaled. For the lean hand-over stock sights is sights locked: `IsFreeLook` is true in the
+two free look modes only.
+
+`ads/aim_mode.h` and `CameraUnlock.Core.Ads.AimModes` decode and encode the three values, step
+the cycle (sights locked, free look with a marker, true free look, stock sights) and hold the four
+labels.
+`TrueFreeLook` is in `[Position]` because the lean is
 all it changes and it exists only where positional tracking does, and a key belongs in the section
-of its subject, as `CollisionEnabled` does. A shooter binds it, `FreeLookMarker` and `TrueFreeLookKey` where
+of its subject, as `CollisionEnabled` does. `StockSights` takes yaw and pitch out too, and sits
+beside the other two so the three lines of the aim mode are together in the file. A shooter binds
+the three and `TrueFreeLookKey` where
 the mod can keep the sight line in sights locked, either from the game's aim state or by drawing the
 weapon from the leaned eye all the time, so it moves with the head (no-mans-sky), and binds none
 where it can do neither.
 None has an alias: `true_free_look` is read only by a mod's legacy import, and in a
 canonical file it draws `MisplacedKey` and is not read. The older flat readers read none of
-`TrueFreeLook`, `FreeLookMarker` and `TrueFreeLookKey`.
+`TrueFreeLook`, `FreeLookMarker`, `StockSights` and `TrueFreeLookKey`.
 
 The schema's other concepts stay in the schema, so the older flat readers still parse them, and
 the canonical format never writes them. Each carries a `canonical_reason`, which the table's
@@ -579,7 +597,7 @@ throws, naming it. That is how a mod states which of its controls persist:
 - A tracking-mode control writes `RotationEnabled` and `PositionEnabled` together, so a table
   that has both must mark both Writable or neither; the owner refuses a table that marks one.
 - The yaw-mode control writes `WorldSpaceYaw`, and the aim mode key (`TrueFreeLookKey`)
-  writes `TrueFreeLook` and `FreeLookMarker` together.
+  writes `TrueFreeLook`, `FreeLookMarker` and `StockSights` together.
 - The on/off toggle (End) does not persist: it changes only the session. `EnableOnStartup` is
   Writable only in a mod with a separate control that saves it, and the toggle still never calls
   `Save` for it.
@@ -708,12 +726,13 @@ appended to `PluginConfigSchema`, since every mod initialises it positionally; `
 (`reframework/plugin_config_table.h`) binds `UdpPort`, `EnableOnStartup`, `WorldSpaceYaw`
 (Writable), the smoothing pair, `PositionEnabled` (Writable), four position limits, the three
 hotkey lists, a local `DiagnosticMarkerKey` when the schema has a diagnostic marker key, the
-light rows when the schema has a flashlight, `TrueFreeLook` and `FreeLookMarker` (both Writable)
-and `TrueFreeLookKey` when the schema sets `trueFreeLook`, and `CollisionEnabled`,
+light rows when the schema has a flashlight, `TrueFreeLook`, `FreeLookMarker` and `StockSights`
+(all Writable) and `TrueFreeLookKey` when the schema sets `trueFreeLook`, and `CollisionEnabled`,
 `CollisionMargin` and `CollisionReleaseSmoothing` when it sets `leanCollision`. With
 `trueFreeLook` the bootstrap registers the `TrueFreeLookKey` list on `PluginMod::CycleAimMode`,
-which applies the next of the three aim modes, logs it and saves `TrueFreeLook` and
-`FreeLookMarker` in one save. The tracking mode control has two states, so there is no
+which applies the next of the four aim modes, logs it and saves `TrueFreeLook`,
+`FreeLookMarker` and `StockSights` in one save. Where the pipeline has `isAiming`, it eases yaw,
+pitch and the lean out in stock sights while the sights are up. The tracking mode control has two states, so there is no
 `RotationEnabled`. `PluginConfigLegacyImport(schema)` is the import, and `PluginConfig::Read`,
 which it calls, is frozen. Read replaces a hotkey code that `IsBindableVirtualKey` refuses, one
 outside 0x01-0xFE or a Ctrl, Shift or Alt key, with the row's default, so the import gives that
@@ -724,7 +743,7 @@ default beside the chord and applies neither N1 nor N3. With the flag set, `Plug
 legacy file can hold but `DiagnosticMarkerKey` with `PluginConfig::SetDefaults` through
 `LegacyFollowsDefaultsIni` (the mode as `PositionEnabled`, a hotkey as its code), so a row the
 legacy file does not hold, or holds at that value, migrates as `default`. No legacy file held
-`TrueFreeLook`, `TrueFreeLookKey`, `CollisionEnabled` or `CollisionReleaseSmoothing`, so the
+`TrueFreeLook`, `FreeLookMarker`, `StockSights`, `TrueFreeLookKey`, `CollisionEnabled` or `CollisionReleaseSmoothing`, so the
 import leaves each to Defaults.ini; `CollisionMargin` is not global and keeps the table's own
 default. The one exception is Insert, which `TrueFreeLookKey` takes: where the legacy file put the
 toggle, the tracking mode key, the yaw mode key or (with `diagnosticMarkerKey`) the diagnostic
@@ -898,7 +917,7 @@ file, the README config block and the changelog template.
 
 ### Which rows follow it
 
-22 of the 24 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
+23 of the 25 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
 `CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of 2026-09-25,
 collision rows ruling of 2026-09-26). The schema says `global`, true or false, on
 every canonical concept, and `CollisionMargin` and `CollisionChannel` say false: a margin in the
@@ -1076,6 +1095,9 @@ TrueFreeLook=false
 ; true, with TrueFreeLook=true: an aim marker shows where your shot will land while you aim down the sights.
 ; It does nothing while TrueFreeLook is false.
 FreeLookMarker=false
+; true: while you aim down the sights your head stops moving the view, apart from tilting it,
+; so the sights sit in the centre as they do without head tracking. At the hip nothing changes.
+StockSights=false
 ; How far, in metres, leaning left or right can move the view.
 PositionLimitX=0.3
 ; How far, in metres, raising your head can move the view.
@@ -1100,7 +1122,8 @@ ToggleKey=End, Ctrl+Shift+Y
 CycleTrackingModeKey=PageUp, Ctrl+Shift+G
 ; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
 YawModeKey=PageDown, Ctrl+Shift+H
-; Cycles the aim mode: sights locked, free look with a marker, true free look (TrueFreeLook, FreeLookMarker).
+; Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights
+; (TrueFreeLook, FreeLookMarker, StockSights).
 TrueFreeLookKey=Insert, Ctrl+Shift+U
 
 [Light]

@@ -69,6 +69,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "PositionAllowed", config.PositionAllowed },
                 { "TrueFreeLook", config.TrueFreeLook },
                 { "FreeLookMarker", config.FreeLookMarker },
+                { "StockSights", config.StockSights },
                 { "PositionSensitivityX", config.Position.SensitivityX },
                 { "PositionSensitivityY", config.Position.SensitivityY },
                 { "PositionSensitivityZ", config.Position.SensitivityZ },

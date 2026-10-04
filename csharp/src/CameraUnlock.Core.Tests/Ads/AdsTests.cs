@@ -267,13 +267,17 @@ namespace CameraUnlock.Core.Tests.Ads
         // ---- the aim mode ----------------------------------------------------------
 
         [Fact]
-        public void AimMode_DecodesThePair()
+        public void AimMode_DecodesTheThreeValues()
         {
-            Assert.Equal(AimMode.SightsLocked, AimModes.Decode(false, false));
+            Assert.Equal(AimMode.SightsLocked, AimModes.Decode(false, false, false));
             // A config from before the marker holds TrueFreeLook alone and keeps its mode.
-            Assert.Equal(AimMode.TrueFreeLook, AimModes.Decode(true, false));
-            Assert.Equal(AimMode.SightsLocked, AimModes.Decode(false, true));
-            Assert.Equal(AimMode.FreeLookMarker, AimModes.Decode(true, true));
+            Assert.Equal(AimMode.TrueFreeLook, AimModes.Decode(true, false, false));
+            Assert.Equal(AimMode.SightsLocked, AimModes.Decode(false, true, false));
+            Assert.Equal(AimMode.FreeLookMarker, AimModes.Decode(true, true, false));
+            Assert.Equal(AimMode.StockSights, AimModes.Decode(false, false, true));
+            Assert.Equal(AimMode.StockSights, AimModes.Decode(true, false, true));
+            Assert.Equal(AimMode.StockSights, AimModes.Decode(false, true, true));
+            Assert.Equal(AimMode.StockSights, AimModes.Decode(true, true, true));
         }
 
         [Fact]
@@ -281,23 +285,28 @@ namespace CameraUnlock.Core.Tests.Ads
         {
             Assert.Equal(AimMode.FreeLookMarker, AimModes.Next(AimMode.SightsLocked));
             Assert.Equal(AimMode.TrueFreeLook, AimModes.Next(AimMode.FreeLookMarker));
-            Assert.Equal(AimMode.SightsLocked, AimModes.Next(AimMode.TrueFreeLook));
+            Assert.Equal(AimMode.StockSights, AimModes.Next(AimMode.TrueFreeLook));
+            Assert.Equal(AimMode.SightsLocked, AimModes.Next(AimMode.StockSights));
 
             AimMode mode = AimMode.SightsLocked;
-            for (int step = 0; step < 6; step++)
+            for (int step = 0; step < 8; step++)
             {
-                bool trueFreeLook, freeLookMarker;
-                AimModes.Encode(mode, out trueFreeLook, out freeLookMarker);
-                Assert.Equal(mode, AimModes.Decode(trueFreeLook, freeLookMarker));
+                bool trueFreeLook, freeLookMarker, stockSights;
+                AimModes.Encode(mode, out trueFreeLook, out freeLookMarker, out stockSights);
+                Assert.Equal(mode, AimModes.Decode(trueFreeLook, freeLookMarker, stockSights));
                 Assert.False(!trueFreeLook && freeLookMarker);
                 mode = AimModes.Next(mode);
             }
 
-            bool free, marker;
-            AimModes.Encode(AimMode.FreeLookMarker, out free, out marker);
-            Assert.True(free && marker);
-            AimModes.Encode(AimMode.TrueFreeLook, out free, out marker);
-            Assert.True(free && !marker);
+            bool free, marker, stock;
+            AimModes.Encode(AimMode.SightsLocked, out free, out marker, out stock);
+            Assert.True(!free && !marker && !stock);
+            AimModes.Encode(AimMode.FreeLookMarker, out free, out marker, out stock);
+            Assert.True(free && marker && !stock);
+            AimModes.Encode(AimMode.TrueFreeLook, out free, out marker, out stock);
+            Assert.True(free && !marker && !stock);
+            AimModes.Encode(AimMode.StockSights, out free, out marker, out stock);
+            Assert.True(!free && !marker && stock);
         }
 
         [Fact]
@@ -306,6 +315,17 @@ namespace CameraUnlock.Core.Tests.Ads
             Assert.Equal("Aim mode: sights locked", AimModes.Label(AimMode.SightsLocked));
             Assert.Equal("Aim mode: free look with marker", AimModes.Label(AimMode.FreeLookMarker));
             Assert.Equal("Aim mode: true free look", AimModes.Label(AimMode.TrueFreeLook));
+            Assert.Equal("Aim mode: stock sights", AimModes.Label(AimMode.StockSights));
+        }
+
+        [Fact]
+        public void AimMode_OnlyTheTwoFreeLookModesAreFreeLook()
+        {
+            Assert.True(AimModes.IsFreeLook(AimMode.FreeLookMarker));
+            Assert.True(AimModes.IsFreeLook(AimMode.TrueFreeLook));
+            Assert.False(AimModes.IsFreeLook(AimMode.SightsLocked));
+            // A lean on its way out in stock sights is handed over as sights locked.
+            Assert.False(AimModes.IsFreeLook(AimMode.StockSights));
         }
 
         [Fact]
@@ -316,16 +336,122 @@ namespace CameraUnlock.Core.Tests.Ads
             Assert.Equal(0.0f, AimModes.MarkerOpacity(AimMode.FreeLookMarker, 0.0f));
             Assert.Equal(0.0f, AimModes.MarkerOpacity(AimMode.SightsLocked, 1.0f));
             Assert.Equal(0.0f, AimModes.MarkerOpacity(AimMode.TrueFreeLook, 1.0f));
+            Assert.Equal(0.0f, AimModes.MarkerOpacity(AimMode.StockSights, 1.0f));
         }
 
         [Fact]
         public void AimMode_AValueOutsideTheEnumThrows()
         {
-            bool a, b;
-            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Next((AimMode)3));
-            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Label((AimMode)3));
-            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Encode((AimMode)(-1), out a, out b));
-            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.MarkerOpacity((AimMode)3, 1.0f));
+            bool a, b, c;
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Next((AimMode)4));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Label((AimMode)4));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.Encode((AimMode)(-1), out a, out b, out c));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.MarkerOpacity((AimMode)4, 1.0f));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.IsFreeLook((AimMode)4));
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => AimModes.StockSightsEngaged((AimMode)4, true));
+        }
+
+        // ---- stock sights ----------------------------------------------------------
+
+        [Fact]
+        public void StockSights_EngagesOnlyInItsModeWithTheSightsUp()
+        {
+            Assert.True(AimModes.StockSightsEngaged(AimMode.StockSights, true));
+            Assert.False(AimModes.StockSightsEngaged(AimMode.StockSights, false));
+            Assert.False(AimModes.StockSightsEngaged(AimMode.SightsLocked, true));
+            Assert.False(AimModes.StockSightsEngaged(AimMode.FreeLookMarker, true));
+            Assert.False(AimModes.StockSightsEngaged(AimMode.TrueFreeLook, true));
+        }
+
+        // The pose as a mod applies it: a second AdsFade fed StockSightsEngaged, whose
+        // output scales yaw, pitch and the three lean axes and never roll.
+        private const float HeadYaw = 20.0f;
+        private const float HeadPitch = -8.0f;
+        private const float HeadRoll = 6.0f;
+        private static readonly Vec3 HeadLean = new Vec3(0.25f, -0.05f, 0.1f);
+
+        private struct Pose
+        {
+            public float Yaw;
+            public float Pitch;
+            public float Roll;
+            public Vec3 Lean;
+        }
+
+        private static Pose StockSightsPose(AdsFade fade, AimMode mode, bool aiming, ulong nowMs)
+        {
+            float share = fade.Update(AimModes.StockSightsEngaged(mode, aiming), nowMs);
+            return new Pose { Yaw = HeadYaw * share, Pitch = HeadPitch * share, Roll = HeadRoll, Lean = HeadLean * share };
+        }
+
+        private static void AssertPose(float share, Pose pose)
+        {
+            Assert.Equal(HeadYaw * share, pose.Yaw, 4);
+            Assert.Equal(HeadPitch * share, pose.Pitch, 4);
+            Assert.Equal(HeadRoll, pose.Roll);
+            AssertVec(HeadLean * share, pose.Lean);
+        }
+
+        [Fact]
+        public void StockSights_EasesEverythingButRollOut()
+        {
+            var fade = new AdsFade();
+            AssertPose(1.0f, StockSightsPose(fade, AimMode.StockSights, false, 1000));
+
+            StockSightsPose(fade, AimMode.StockSights, true, 2000);
+            Pose mid = StockSightsPose(fade, AimMode.StockSights, true, 2000 + AdsFade.LowerMs / 2);
+            Assert.Equal(10.0f, mid.Yaw, 2);
+            Assert.Equal(-4.0f, mid.Pitch, 2);
+            Assert.Equal(0.125f, mid.Lean.X, 3);
+            Assert.Equal(-0.025f, mid.Lean.Y, 3);
+            Assert.Equal(0.05f, mid.Lean.Z, 3);
+            Assert.Equal(HeadRoll, mid.Roll);
+
+            Pose up = StockSightsPose(fade, AimMode.StockSights, true, 2000 + AdsFade.LowerMs);
+            Assert.Equal(0.0f, up.Yaw);
+            Assert.Equal(0.0f, up.Pitch);
+            Assert.Equal(0.0f, up.Lean.X);
+            Assert.Equal(0.0f, up.Lean.Y);
+            Assert.Equal(0.0f, up.Lean.Z);
+            Assert.Equal(HeadRoll, up.Roll);
+
+            StockSightsPose(fade, AimMode.StockSights, false, 5000);
+            AssertPose(1.0f, StockSightsPose(fade, AimMode.StockSights, false, 5000 + AdsFade.RaiseMs));
+        }
+
+        [Fact]
+        public void StockSights_ReversalsContinue()
+        {
+            var button = new AdsFade();
+            StockSightsPose(button, AimMode.StockSights, true, 0);
+            Pose half = StockSightsPose(button, AimMode.StockSights, true, AdsFade.LowerMs / 2);
+            Pose released = StockSightsPose(button, AimMode.StockSights, false, AdsFade.LowerMs / 2);
+            Assert.Equal(half.Yaw, released.Yaw, 4);
+            Assert.Equal(half.Lean.X, released.Lean.X, 4);
+
+            // The mode key pressed with the sights up: into stock sights, then out of it.
+            var key = new AdsFade();
+            AssertPose(1.0f, StockSightsPose(key, AimMode.TrueFreeLook, true, 0));
+            AssertPose(1.0f, StockSightsPose(key, AimMode.StockSights, true, 100));
+            Pose easing = StockSightsPose(key, AimMode.StockSights, true, 100 + AdsFade.LowerMs / 2);
+            Assert.True(easing.Yaw < HeadYaw && easing.Yaw > 0.0f);
+            Pose steppedOut = StockSightsPose(key, AimMode.SightsLocked, true, 100 + AdsFade.LowerMs / 2);
+            Assert.Equal(easing.Yaw, steppedOut.Yaw, 4);
+            Assert.Equal(easing.Lean.Z, steppedOut.Lean.Z, 4);
+            AssertPose(1.0f, StockSightsPose(key, AimMode.SightsLocked, true, 100 + AdsFade.LowerMs / 2 + AdsFade.RaiseMs));
+        }
+
+        [Fact]
+        public void StockSights_TheOtherModesPassThePoseThrough()
+        {
+            foreach (AimMode mode in new[] { AimMode.SightsLocked, AimMode.FreeLookMarker, AimMode.TrueFreeLook })
+            {
+                var fade = new AdsFade();
+                AssertPose(1.0f, StockSightsPose(fade, mode, false, 0));
+                AssertPose(1.0f, StockSightsPose(fade, mode, true, 100));
+                AssertPose(1.0f, StockSightsPose(fade, mode, true, 100 + AdsFade.LowerMs));
+                AssertPose(1.0f, StockSightsPose(fade, mode, false, 1000));
+            }
         }
     }
 }

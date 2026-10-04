@@ -64,18 +64,18 @@ public:
     void CycleTrackingMode();
     void ToggleYawMode();
 
-    // Sights locked, free look with a marker, true free look and round again
-    // (the shooter-ads-handling skill), for a schema with trueFreeLook. Applies
-    // the next mode, logs it and saves [Position] TrueFreeLook and
-    // FreeLookMarker in one save, on the calling thread. The camera pipeline
-    // reads the mode each frame, so a press mid-aim rides the lean fade rather
-    // than stepping.
+    // Sights locked, free look with a marker, true free look, stock sights and
+    // round again (the shooter-ads-handling skill), for a schema with
+    // trueFreeLook. Applies the next mode, logs it and saves [Position]
+    // TrueFreeLook, FreeLookMarker and StockSights in one save, on the calling
+    // thread. The camera pipeline reads the mode each frame, so a press mid-aim
+    // rides the fades rather than stepping.
     void CycleAimMode();
-    [[deprecated("the key cycles three aim modes: call CycleAimMode")]]
+    [[deprecated("the key cycles the aim modes: call CycleAimMode")]]
     void ToggleTrueFreeLook() { CycleAimMode(); }
     cameraunlock::ads::AimMode GetAimMode() const { return m_aimMode.load(std::memory_order_relaxed); }
     // Both free look modes: the lean stays on the camera through the aim.
-    bool IsTrueFreeLook() const { return GetAimMode() != cameraunlock::ads::AimMode::SightsLocked; }
+    bool IsTrueFreeLook() const { return cameraunlock::ads::IsFreeLook(GetAimMode()); }
 
     // Hotkey callbacks fire on the HotkeyPoller's background thread, but
     // CycleTrackingMode mutates the session's non-atomic

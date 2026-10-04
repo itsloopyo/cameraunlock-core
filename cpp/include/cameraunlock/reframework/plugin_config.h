@@ -83,7 +83,7 @@ struct PluginConfigSchema {
     bool canonicalConfig = false;
 
     // A shooter with an aim state: with canonicalConfig, the table binds
-    // [Position] TrueFreeLook and FreeLookMarker (both Writable) and [Hotkeys]
+    // [Position] TrueFreeLook, FreeLookMarker and StockSights (all Writable) and [Hotkeys]
     // TrueFreeLookKey, and the bootstrap registers the key list on
     // PluginMod::CycleAimMode.
     bool trueFreeLook = false;
@@ -157,11 +157,13 @@ struct PluginConfig {
         config::schema::ConceptTraits<config::schema::Concept::YawModeKey>::kCanonicalDefault;
     std::string diagnosticMarkerKeyBindings = "F9";
 
-    // [Position] TrueFreeLook and FreeLookMarker, which together are the aim
-    // mode (ads/aim_mode.h), and [Hotkeys] TrueFreeLookKey, bound only with
-    // PluginConfigSchema::trueFreeLook. No legacy file ever held any of them.
+    // [Position] TrueFreeLook, FreeLookMarker and StockSights, which together
+    // are the aim mode (ads/aim_mode.h), and [Hotkeys] TrueFreeLookKey, bound
+    // only with PluginConfigSchema::trueFreeLook. No legacy file ever held any
+    // of them.
     bool trueFreeLook = false;
     bool freeLookMarker = false;
+    bool stockSights = false;
     std::string trueFreeLookKeyBindings =
         config::schema::ConceptTraits<config::schema::Concept::TrueFreeLookKey>::kCanonicalDefault;
 

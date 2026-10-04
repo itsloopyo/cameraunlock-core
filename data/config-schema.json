@@ -303,7 +303,7 @@
       "type": "bool",
       "default": false,
       "aliases": [],
-      "doc": "The lean while aiming down sights, in a shooter with an aim state and positional tracking (the shooter-ads-handling skill). false is sights locked: the lean never takes the eye off the sight line, because the mod carries the lean on the rig (the weapon and the round come with the eye), draws the weapon from the clean eye, or eases the lean out through AdsFade while aiming. true is free look: the lean stays in full, the weapon stays put in the world and the head moves around it. With FreeLookMarker it is the aim mode, a pair as RotationEnabled and PositionEnabled are the tracking mode: false/false sights locked, true/true free look with a marker, true/false true free look (cameraunlock/ads/aim_mode.h, CameraUnlock.Core.Ads.AimModes). This concept alone decides the lean. A persisted preference: the TrueFreeLookKey cycle saves it with FreeLookMarker, so a mod marks both rows Writable. Every mod has positional tracking, so every shooter with an aim state binds TrueFreeLook, FreeLookMarker and TrueFreeLookKey. It sits under [Position] because the lean is all it changes and it exists only where positional tracking does, and a key goes in the schema section of its subject (docs/canonical-config.md), as CollisionEnabled does. No aliases: true_free_look is read only by a game's legacy import. Section-less matching resolves that spelling to this concept, so a canonical file that holds it draws MisplacedKey and is not read. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
+      "doc": "The lean while aiming down sights, in a shooter with an aim state and positional tracking (the shooter-ads-handling skill). false is sights locked: the lean never takes the eye off the sight line, because the mod carries the lean on the rig (the weapon and the round come with the eye), draws the weapon from the clean eye, or eases the lean out through AdsFade while aiming. true is free look: the lean stays in full, the weapon stays put in the world and the head moves around it. With FreeLookMarker and StockSights it is the aim mode, a set as RotationEnabled and PositionEnabled are the tracking mode: false/false sights locked, true/true free look with a marker, true/false true free look, and StockSights=true stock sights whatever these two hold (cameraunlock/ads/aim_mode.h, CameraUnlock.Core.Ads.AimModes). While StockSights is false this concept alone decides the lean. A persisted preference: the TrueFreeLookKey cycle saves it with FreeLookMarker and StockSights, so a mod marks all three rows Writable. Every mod has positional tracking, so every shooter with an aim state binds TrueFreeLook, FreeLookMarker, StockSights and TrueFreeLookKey. It sits under [Position] because the lean is all it changes and it exists only where positional tracking does, and a key goes in the schema section of its subject (docs/canonical-config.md), as CollisionEnabled does. No aliases: true_free_look is read only by a game's legacy import. Section-less matching resolves that spelling to this concept, so a canonical file that holds it draws MisplacedKey and is not read. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
       "canonical": true,
       "global": true,
       "file_comment": ["false: while you aim down the sights, leaning keeps your eye on the sights.", "true: the weapon stays put and your head moves freely around it (true free look)."]
@@ -315,10 +315,22 @@
       "type": "bool",
       "default": false,
       "aliases": [],
-      "doc": "The second half of the aim mode, with TrueFreeLook (the shooter-ads-handling skill): TrueFreeLook=false and FreeLookMarker=false is sights locked, true and true is free look with a marker, true and false is true free look. In free look with a marker the mod draws a small aim marker where the round will land while the sights are up; the lean, the weapon and the shot are the same as in true free look. FreeLookMarker=true with TrueFreeLook=false reads as sights locked with no marker, and the TrueFreeLookKey cycle never writes that pair. A file that holds TrueFreeLook=true and no FreeLookMarker is true free look. The pair is decoded and encoded by cameraunlock/ads/aim_mode.h and CameraUnlock.Core.Ads.AimModes. A persisted preference: the cycle saves it with TrueFreeLook, so a mod marks both rows Writable. It sits under [Position] beside TrueFreeLook. No aliases. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
+      "doc": "The second half of the aim mode, with TrueFreeLook (the shooter-ads-handling skill): TrueFreeLook=false and FreeLookMarker=false is sights locked, true and true is free look with a marker, true and false is true free look. In free look with a marker the mod draws a small aim marker where the round will land while the sights are up; the lean, the weapon and the shot are the same as in true free look. FreeLookMarker=true with TrueFreeLook=false reads as sights locked with no marker, and the TrueFreeLookKey cycle never writes that pair. A file that holds TrueFreeLook=true and no FreeLookMarker is true free look. StockSights=true is stock sights whatever this holds. The set is decoded and encoded by cameraunlock/ads/aim_mode.h and CameraUnlock.Core.Ads.AimModes. A persisted preference: the cycle saves it with TrueFreeLook and StockSights, so a mod marks all three rows Writable. It sits under [Position] beside TrueFreeLook. No aliases. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
       "canonical": true,
       "global": true,
       "file_comment": ["true, with TrueFreeLook=true: an aim marker shows where your shot will land while you aim down the sights.", "It does nothing while TrueFreeLook is false."]
+    },
+    {
+      "id": "StockSights",
+      "section": "Position",
+      "key": "StockSights",
+      "type": "bool",
+      "default": false,
+      "aliases": [],
+      "doc": "The fourth aim mode, stock sights (owner ruling of 2026-10-04; the shooter-ads-handling skill): while the sights are up the head's yaw, pitch and lean ease out and only roll stays, so the sight picture is the game's own, centred on the aim. At the hip tracking is whole. true is stock sights whatever TrueFreeLook and FreeLookMarker hold, and the TrueFreeLookKey cycle writes it true with both of those false, and false in the other three modes. A file with no StockSights is one of the other three modes. The easing is a second AdsFade fed StockSightsEngaged (cameraunlock/ads/aim_mode.h, CameraUnlock.Core.Ads.AimModes): its output scales yaw, pitch and the three lean axes, so nothing steps as the sights come up or go down. A persisted preference: a mod marks it Writable beside the other two. It sits under [Position] with them so the three lines of the aim mode are together in the file, although it also takes yaw and pitch out while aiming. No aliases. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
+      "canonical": true,
+      "global": true,
+      "file_comment": ["true: while you aim down the sights your head stops moving the view, apart from tilting it,", "so the sights sit in the centre as they do without head tracking. At the hip nothing changes."]
     },
     {
       "id": "PositionSensitivityX",
@@ -598,10 +610,10 @@
       "type": "string",
       "default": "Insert, Ctrl+Shift+U",
       "aliases": [],
-      "doc": "Key list that cycles the aim mode: sights locked, free look with a marker, true free look and round again. Each press saves TrueFreeLook and FreeLookMarker together. The name is from when it toggled TrueFreeLook between two states, and it stays. Only in a mod that binds TrueFreeLook. The deprecated flat readers do not read it, so nothing holds its default to a single key name: the default and the field initialisers are the canonical_default.",
+      "doc": "Key list that cycles the aim mode: sights locked, free look with a marker, true free look, stock sights and round again. Each press saves TrueFreeLook, FreeLookMarker and StockSights together. The name is from when it toggled TrueFreeLook between two states, and it stays. Only in a mod that binds TrueFreeLook. The deprecated flat readers do not read it, so nothing holds its default to a single key name: the default and the field initialisers are the canonical_default.",
       "canonical": true,
       "global": true,
-      "file_comment": ["Cycles the aim mode: sights locked, free look with a marker, true free look (TrueFreeLook, FreeLookMarker)."],
+      "file_comment": ["Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights", "(TrueFreeLook, FreeLookMarker, StockSights)."],
       "codec": "hotkey",
       "canonical_default": "Insert, Ctrl+Shift+U"
     },

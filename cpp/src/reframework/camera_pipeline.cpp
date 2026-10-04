@@ -1,5 +1,7 @@
 #include <cameraunlock/reframework/camera_pipeline.h>
 
+#include <cameraunlock/ads/ads_fade.h>
+#include <cameraunlock/ads/aim_mode.h>
 #include <cameraunlock/math/smoothing_utils.h>
 #include <cameraunlock/camera/zoom_compensation.h>
 #include <cameraunlock/reframework/rig_lean.h>
@@ -53,6 +55,10 @@ static bool g_trackingAppliedThisFrame = false;
 // sights are up where the mod has one (reframework/rig_lean.h).
 static RigLean g_rigLean;
 static bool g_loggedAiming = false;
+
+// The share of yaw, pitch and the lean that reaches the view in stock sights:
+// 1 at the hip, 0 with the sights up.
+static cameraunlock::ads::AdsFade g_stockSightsFade;
 
 // The rig's offset, world space. `request` is decided at BeginRendering and
 // written at the next LateUpdateBehavior; `applied` is what that write put on
@@ -202,8 +208,22 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
     float px, py, pz;
     bool hasPosition = PluginMod::Instance().GetPositionOffset(px, py, pz);
 
-    // Before anything else reads the pose, so the camera, the clamp, the rig and
-    // the reticle all work from the pose that is applied.
+    const bool aiming = g_descriptor.isAiming && g_descriptor.isAiming();
+    const unsigned long long nowMs = cameraunlock::time::QpcNowMicros() / 1000ull;
+
+    // Stock sights: yaw, pitch and the whole lean ease out with the sights up and
+    // roll stays. Before the zoom factor, the clamp, the rig and the reticle read
+    // the pose, so all of them work from the pose that is applied.
+    const float poseShare = g_stockSightsFade.Update(
+        cameraunlock::ads::StockSightsEngaged(PluginMod::Instance().GetAimMode(), aiming), nowMs);
+    if (poseShare != 1.0f) {
+        yaw *= poseShare;
+        pitch *= poseShare;
+        px *= poseShare;
+        py *= poseShare;
+        pz *= poseShare;
+    }
+
     const float zoom = ZoomFactor();
     if (zoom != 1.0f) {
         yaw = cameraunlock::camera::ScaleAngleForZoom(yaw, zoom);
@@ -224,7 +244,6 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
 
     const bool shapedLean = g_descriptor.isAiming || g_descriptor.leanQuery;
     if (shapedLean && hasPosition) {
-        const bool aiming = g_descriptor.isAiming && g_descriptor.isAiming();
         if (aiming != g_loggedAiming) {
             g_loggedAiming = aiming;
             LogInfo("Aim state: %s", aiming ? "sights up" : "sights down");
@@ -251,7 +270,7 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
         const cameraunlock::math::Vec3 requested = cameraOffset;
         const RigLeanFrame frame = g_rigLean.Update(
             gameEye, cameraOffset, aimForward, applied, aiming, PluginMod::Instance().IsTrueFreeLook(), rigAvailable,
-            PluginMod::Instance().GetLastDeltaTime(), cameraunlock::time::QpcNowMicros() / 1000ull, query, nullptr);
+            PluginMod::Instance().GetLastDeltaTime(), nowMs, query, nullptr);
         cameraOffset = frame.camera;
         LogLean(requested, frame.camera + applied, frame.rigRequest, aimForward, aiming, zoom);
         g_rig.request = frame.rigRequest;
@@ -569,6 +588,7 @@ static void SkipFrame() {
     g_projection.aimValid = false;
     g_projection.cleanToHeadValid = false;
     StopLean();
+    g_stockSightsFade.Reset();
 }
 
 void CameraPipelinePreRender() {

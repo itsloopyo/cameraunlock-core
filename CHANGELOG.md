@@ -9,6 +9,76 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - stock sights, the fourth aim mode
+
+Owner ruling of 2026-10-04. The aim mode key now steps sights locked, free look with a marker,
+true free look, stock sights and round again. In stock sights, while the sights are up, the
+head's yaw, pitch and whole lean (all three axes) ease out on a fade and only roll stays, so the
+sight picture is the game's own. At the hip nothing changes. It eases, it never snaps, and it is
+not a pause of tracking.
+
+- `data/config-schema.json`: the concept `StockSights`, `[Position]`, bool, default false,
+  global, canonical, no alias, after `FreeLookMarker`. `StockSights=true` is stock sights whatever
+  `TrueFreeLook` and `FreeLookMarker` hold. A file without it is in the mode it was in.
+- `ads/aim_mode.h` and `CameraUnlock.Core.Ads`: `AimMode::StockSights` (C# value 3) as the fourth
+  enumerator, `AimModeLabel` / `AimModes.Label` giving `Aim mode: stock sights`, and two new
+  functions. `IsFreeLook(mode)` is true in the two free look modes only, and is what a mod hands
+  `LeanHandover` as `trueFreeLook`. `StockSightsEngaged(mode, aiming)` is `aiming` in stock
+  sights and false otherwise.
+- There is no new pose function. A mod runs a second `AdsFade` fed `StockSightsEngaged`, and
+  multiplies yaw, pitch and the three lean axes by its output (1 at the hip, 0 with the sights
+  up) before the zoom compensation, the lean clamp, the hand-over and the reticle read the pose.
+  Roll is never scaled.
+- Both `HeadTrackingConfigTable`s bind the concept (`HeadTrackingConfig::stock_sights`,
+  `HeadTrackingConfigData.StockSights`). The deprecated flat readers do not read it.
+- REFramework layer: `PluginConfig::stockSights`, a Writable `StockSights` row with
+  `PluginConfigSchema::trueFreeLook`, listed in the legacy import's `follows_defaults_ini`.
+  `PluginMod::CycleAimMode` saves the three values in one save and the mode at startup is decoded
+  from the three. The camera pipeline eases the pose out itself wherever the descriptor has
+  `isAiming`, and resets that fade on every frame it applies nothing. `isAiming` is now polled on
+  every tracked frame, where it was polled only on frames with a lean.
+  `PluginMod::IsTrueFreeLook` is `IsFreeLook` of the mode, so it is false in stock sights.
+- The `TrueFreeLookKey` file comment names the fourth mode and the third setting, on two lines.
+- Tests in `ads_tests.cpp` and `AdsTests.cs` (the eight decodes, each encode, the cycle, the
+  labels, `IsFreeLook`, `StockSightsEngaged`, no marker in stock sights, and the pose through the
+  fade: the hip, sights up, mid-transition, a reversal from the aim button and from the mode key,
+  and the other three modes untouched), `plugin_config_canonical_tests.cpp` (the fresh row, the
+  import, the four saves of the cycle) and the canonical fixtures that list every concept.
+
+### Changed - **BREAKING** the aim mode is three config values, and the two-value forms are gone
+
+Every shooter mod that binds the aim mode stops compiling at its next pin bump, which is the
+prompt to add stock sights. Nothing is kept as an overload.
+
+- C++ `DecodeAimMode(bool trueFreeLook, bool freeLookMarker)` is now
+  `DecodeAimMode(bool trueFreeLook, bool freeLookMarker, bool stockSights)`.
+- C++ `struct AimModePair { trueFreeLook, freeLookMarker }` is now
+  `struct AimModeSettings { trueFreeLook, freeLookMarker, stockSights }`, and `EncodeAimMode`
+  returns it. Stock sights encodes as false, false, true. `trueFreeLook` is now false for stock
+  sights as well as for sights locked, where it used to be `mode != SightsLocked`.
+- C# `AimModes.Decode(bool, bool)` is now `AimModes.Decode(bool, bool, bool)`, and
+  `AimModes.Encode(mode, out trueFreeLook, out freeLookMarker)` is now
+  `AimModes.Encode(mode, out trueFreeLook, out freeLookMarker, out stockSights)`.
+- `NextAimMode(AimMode::TrueFreeLook)` and `AimModes.Next(AimMode.TrueFreeLook)` return stock
+  sights, where they returned sights locked.
+- The `TrueFreeLookKey` file comment changed and `StockSights` is a new global row, so the
+  rendered `CameraUnlock.ini` of every mod that binds the aim mode changes.
+- What each consuming shooter mod does:
+  1. Bind `StockSights` in its config table, marked Writable, beside `TrueFreeLook` and
+     `FreeLookMarker`, and run `pixi run render-config`.
+  2. Pass the three values to `DecodeAimMode` / `AimModes.Decode` at startup.
+  3. In the cycle handler, write the three values `EncodeAimMode` / `AimModes.Encode` gives and
+     save them in one `Save`.
+  4. Replace any `mode != SightsLocked` test that meant free look with `IsFreeLook(mode)`, the
+     `trueFreeLook` argument of `LeanHandover::Update` and the weapon pass's eye included.
+  5. Keep a second `AdsFade`, feed it `StockSightsEngaged(mode, aiming)` once per rendered frame
+     from the polled aim state, multiply yaw, pitch and the three lean axes by its output before
+     anything else reads the pose, and `Reset()` it wherever tracking is suppressed.
+  6. Add the fourth mode to the README's aim section and the toast.
+- REFramework mods with `PluginConfigSchema::trueFreeLook` need steps 1 (the render only) and 6:
+  the layer does the rest. A mod of that kind that reads `PluginMod::GetAimMode()` itself checks
+  each comparison against the fourth value.
+
 ### Changed - Deep Rock Galactic's hotkey rows follow the rule for a key the game takes
 
 - `data/config-format.json` `per_game` for deep-rock-galactic-headtracking, from a measurement on
