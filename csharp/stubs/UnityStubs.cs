@@ -542,6 +542,7 @@ namespace UnityEngine {
         public Material(Material source) { }
         public Color color { get; set; }
         public Shader shader { get; set; }
+        public int renderQueue { get; set; }
         public void SetFloat(string name, float value) { }
         public void SetColor(string name, Color value) { }
         public void SetTexture(string name, Texture value) { }
@@ -735,7 +736,13 @@ namespace UnityEngine {
     public class MeshRenderer : Renderer { }
     public class SkinnedMeshRenderer : Renderer { public bool updateWhenOffscreen { get; set; } }
     public class MeshFilter : Component { public Mesh mesh { get; set; } public Mesh sharedMesh { get; set; } }
-    public class Mesh : Object { public Bounds bounds { get; set; } }
+    public class Mesh : Object {
+        public Bounds bounds { get; set; }
+        public Vector3[] vertices { get; set; }
+        public Color[] colors { get; set; }
+        public int[] triangles { get; set; }
+        public void RecalculateBounds() { }
+    }
     public struct Bounds {
         private Vector3 _center, _size;
         public Bounds(Vector3 center, Vector3 size) { _center = center; _size = size; }
