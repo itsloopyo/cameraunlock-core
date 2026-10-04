@@ -18,10 +18,18 @@
 //                         the cursor is and not how the mouse moved
 //   text <characters>     typed one character at a time, to the end of the line
 //   wait <ms>
+//   pad <n> <button> <down|up|tap>          a controller button: a b x y lb rb ls rs
+//                                           start back up down left right
+//   pad <n> stick <left|right> <x> <y>      a stick held at -1 to 1 each way, up positive
+//   pad <n> trigger <left|right> <pull>     a trigger held at 0 to 1
+//                         n is the controller, 0 to 3. A controller is plugged
+//                         in from its first command on, and holds what it was
+//                         last told.
 //
 // Blank lines and lines starting with # are no steps. Key names are the ones
 // hotkey lists use (data/keys.json).
 
+#include "cameraunlock/dev/gamepad_state.h"
 #include "cameraunlock/input/key_bindings.h"
 
 #include <charconv>
@@ -31,7 +39,7 @@
 
 namespace cameraunlock::dev {
 
-enum class InputAction { kKeyDown, kKeyUp, kMouseDown, kMouseUp, kMouseMove, kCursor, kText, kWait };
+enum class InputAction { kKeyDown, kKeyUp, kMouseDown, kMouseUp, kMouseMove, kCursor, kText, kWait, kPad };
 enum class MouseButton { kLeft, kRight, kMiddle };
 
 struct InputStep {
@@ -43,9 +51,17 @@ struct InputStep {
     int dy = 0;
     unsigned waitMs = 0;
     std::string text;
+    // kPad: which controller, what on it, and what it is set to.
+    int pad = 0;
+    PadControl padControl = PadControl::kButton;
+    uint16_t padButton = 0;
+    bool padDown = false;
+    float padX = 0.0f;
+    float padY = 0.0f;
 };
 
 inline constexpr unsigned kDefaultTapHoldMs = 60;
+inline constexpr unsigned kPadTapHoldMs = 150;
 // The virtual-key codes of the three modifiers, either side.
 inline constexpr int kVkShift = 0x10;
 inline constexpr int kVkControl = 0x11;
@@ -83,6 +99,30 @@ inline bool ParseNumber(std::string_view word, T& out) {
     if (word.empty()) return false;
     const auto result = std::from_chars(word.data(), word.data() + word.size(), out);
     return result.ec == std::errc() && result.ptr == word.data() + word.size();
+}
+
+// A stick or trigger value. std::from_chars for a float is not in every
+// standard library the fleet builds with, so the digits are read by hand: an
+// optional sign, digits, and an optional fraction.
+inline bool ParseFraction(std::string_view word, float& out) {
+    if (word.empty()) return false;
+    size_t i = 0;
+    const bool negative = word[0] == '-';
+    if (negative || word[0] == '+') ++i;
+    if (i == word.size()) return false;
+    float value = 0.0f, scale = 1.0f;
+    bool digits = false, fraction = false;
+    for (; i < word.size(); ++i) {
+        const char c = word[i];
+        if (c == '.' && !fraction) { fraction = true; continue; }
+        if (c < '0' || c > '9') return false;
+        digits = true;
+        if (fraction) { scale /= 10.0f; value += static_cast<float>(c - '0') * scale; }
+        else value = value * 10.0f + static_cast<float>(c - '0');
+    }
+    if (!digits) return false;
+    out = negative ? -value : value;
+    return true;
 }
 
 // A key for `down` and `up`: a modifier by name, or one key with no modifiers.
@@ -222,6 +262,56 @@ inline bool ParseInputLine(std::string_view line, std::vector<InputStep>& out, s
         const std::string_view word = NextWord(rest);
         if (!ParseNumber(word, ms) || !Trim(rest).empty()) { error = "expected a time in milliseconds"; return false; }
         out.push_back(WaitStep(ms));
+        return true;
+    }
+    if (EqualsIgnoreCase(command, "pad")) {
+        InputStep step;
+        step.action = InputAction::kPad;
+        if (!ParseNumber(NextWord(rest), step.pad) || step.pad < 0 || step.pad >= kPadCount) {
+            error = "expected a controller, 0 to 3";
+            return false;
+        }
+        const std::string_view what = NextWord(rest);
+        if (EqualsIgnoreCase(what, "stick") || EqualsIgnoreCase(what, "trigger")) {
+            const bool stick = EqualsIgnoreCase(what, "stick");
+            const std::string_view side = NextWord(rest);
+            const bool left = EqualsIgnoreCase(side, "left");
+            if (!left && !EqualsIgnoreCase(side, "right")) { error = "expected left or right"; return false; }
+            if (stick) step.padControl = left ? PadControl::kLeftStick : PadControl::kRightStick;
+            else step.padControl = left ? PadControl::kLeftTrigger : PadControl::kRightTrigger;
+            const bool numbers = ParseFraction(NextWord(rest), step.padX)
+                && (!stick || ParseFraction(NextWord(rest), step.padY));
+            if (!numbers || !Trim(rest).empty()) {
+                error = stick ? "expected two numbers from -1 to 1" : "expected one number from 0 to 1";
+                return false;
+            }
+            if (step.padX < -1.0f || step.padX > 1.0f || step.padY < -1.0f || step.padY > 1.0f
+                || (!stick && step.padX < 0.0f)) {
+                error = stick ? "expected two numbers from -1 to 1" : "expected one number from 0 to 1";
+                return false;
+            }
+            out.push_back(step);
+            return true;
+        }
+        step.padButton = PadButtonBit(what);
+        if (step.padButton == 0) { error = "expected a button, stick or trigger"; return false; }
+        const std::string_view how = NextWord(rest);
+        if (!Trim(rest).empty()) { error = "expected down, up or tap"; return false; }
+        const bool tap = EqualsIgnoreCase(how, "tap");
+        if (!tap && !EqualsIgnoreCase(how, "down") && !EqualsIgnoreCase(how, "up")) {
+            error = "expected down, up or tap";
+            return false;
+        }
+        if (tap || EqualsIgnoreCase(how, "down")) {
+            step.padDown = true;
+            out.push_back(step);
+        }
+        // A pad is polled once a frame, so a tap is held longer than a key's.
+        if (tap) out.push_back(WaitStep(kPadTapHoldMs));
+        if (tap || EqualsIgnoreCase(how, "up")) {
+            step.padDown = false;
+            out.push_back(step);
+        }
         return true;
     }
     error = "unknown command '" + std::string(command) + "'";

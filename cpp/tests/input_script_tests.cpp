@@ -102,5 +102,41 @@ int RunInputScriptTests() {
     Check(Rejects("wait"), "wait refuses no time");
     Check(Rejects("text"), "text refuses nothing to type");
 
+    steps = Parse("pad 1 a tap", ok);
+    Check(ok && steps.size() == 3 && steps[0].action == InputAction::kPad && steps[0].pad == 1
+              && steps[0].padButton == 0x1000 && steps[0].padDown && steps[1].action == InputAction::kWait
+              && steps[2].action == InputAction::kPad && !steps[2].padDown,
+          "a pad tap is the button down, a wait and up");
+    steps = Parse("pad 0 start down", ok);
+    Check(ok && steps.size() == 1 && steps[0].pad == 0 && steps[0].padButton == 0x0010 && steps[0].padDown,
+          "pad holds a button");
+    steps = Parse("pad 2 stick right 0.5 -1", ok);
+    Check(ok && steps.size() == 1 && steps[0].padControl == cameraunlock::dev::PadControl::kRightStick
+              && steps[0].padX == 0.5f && steps[0].padY == -1.0f,
+          "pad stick takes a side and two deflections");
+    steps = Parse("pad 3 trigger left 0.25", ok);
+    Check(ok && steps.size() == 1 && steps[0].padControl == cameraunlock::dev::PadControl::kLeftTrigger
+              && steps[0].padX == 0.25f,
+          "pad trigger takes a side and a pull");
+    Check(Rejects("pad 4 a tap"), "pad refuses a fifth controller");
+    Check(Rejects("pad 0 q tap"), "pad refuses a button that has no name");
+    Check(Rejects("pad 0 a press"), "pad refuses anything but down, up or tap");
+    Check(Rejects("pad 0 stick left 2 0"), "pad refuses a stick past its end");
+    Check(Rejects("pad 0 stick up 0 0"), "pad refuses a stick that is not left or right");
+    Check(Rejects("pad 0 trigger right -0.5"), "pad refuses a trigger below zero");
+    Check(Rejects("pad 0 stick left 0.5"), "pad refuses a stick with one number");
+
+    cameraunlock::dev::PadState pad;
+    Check(!pad.connected, "a pad the script never named is not plugged in");
+    cameraunlock::dev::ApplyPadStep(pad, cameraunlock::dev::PadControl::kButton, 0x1000, true, 0, 0);
+    Check(pad.connected && pad.buttons == 0x1000 && pad.packet == 1, "a button press plugs the pad in and moves the packet on");
+    cameraunlock::dev::ApplyPadStep(pad, cameraunlock::dev::PadControl::kButton, 0x0100, true, 0, 0);
+    cameraunlock::dev::ApplyPadStep(pad, cameraunlock::dev::PadControl::kButton, 0x1000, false, 0, 0);
+    Check(pad.buttons == 0x0100 && pad.packet == 3, "a release leaves the other held buttons down");
+    cameraunlock::dev::ApplyPadStep(pad, cameraunlock::dev::PadControl::kRightStick, 0, false, 1.0f, -1.0f);
+    Check(pad.rightX == 32767 && pad.rightY == -32767 && pad.leftX == 0, "a stick at its ends is XInput's range");
+    cameraunlock::dev::ApplyPadStep(pad, cameraunlock::dev::PadControl::kLeftTrigger, 0, false, 1.0f, 0);
+    Check(pad.leftTrigger == 255 && pad.rightTrigger == 0, "a full trigger pull is 255");
+
     return g_failures;
 }

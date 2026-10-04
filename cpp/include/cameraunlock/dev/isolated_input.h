@@ -116,6 +116,14 @@ using GetClipCursor_t = BOOL (WINAPI*)(LPRECT);
 using SetCursorPos_t = BOOL (WINAPI*)(int, int);
 using SetForegroundWindow_t = BOOL (WINAPI*)(HWND);
 using GetCursorPos_t = BOOL (WINAPI*)(LPPOINT);
+using XInputGetState_t = DWORD (WINAPI*)(DWORD, void*);
+using XInputSetState_t = DWORD (WINAPI*)(DWORD, void*);
+
+// The XInput DLLs a game can be reading its controllers through. Only the ones
+// the game has already loaded are detoured.
+inline constexpr const wchar_t* kXInputDlls[] = {L"xinput1_4.dll", L"xinput1_3.dll", L"xinput9_1_0.dll",
+                                                 L"xinput1_2.dll", L"xinput1_1.dll"};
+inline constexpr int kXInputDllCount = sizeof(kXInputDlls) / sizeof(kXInputDlls[0]);
 
 struct State {
     GetRawInputData_t origGetRawInputData = nullptr;
@@ -157,6 +165,13 @@ struct State {
 
     std::atomic<bool> clipRequested{false};
     RECT clip = {};
+
+    // The script's controllers. The real ones are never read.
+    std::mutex padLock;
+    PadState pads[kPadCount];
+    XInputGetState_t origXInputGetState[kXInputDllCount] = {};
+    XInputSetState_t origXInputSetState[kXInputDllCount] = {};
+    std::atomic<bool> padRead{false};
 
     IsolatedInputLogFn log = nullptr;
     std::wstring commandFile;
@@ -257,6 +272,40 @@ inline BOOL WINAPI HookedGetCursorPos(LPPOINT point) {
     return ClientToScreen(window, point);
 }
 inline BOOL WINAPI HookedSetForegroundWindow(HWND) { return TRUE; }
+
+// XINPUT_STATE: the packet number, then XINPUT_GAMEPAD.
+#pragma pack(push, 1)
+struct XInputStateLayout {
+    DWORD packet;
+    WORD buttons;
+    BYTE leftTrigger;
+    BYTE rightTrigger;
+    SHORT leftX;
+    SHORT leftY;
+    SHORT rightX;
+    SHORT rightY;
+};
+#pragma pack(pop)
+static_assert(sizeof(XInputStateLayout) == 16, "XINPUT_STATE is a DWORD and a 12-byte XINPUT_GAMEPAD");
+
+inline DWORD WINAPI HookedXInputGetState(DWORD index, void* state) {
+    if (!S().padRead.exchange(true)) Log("isolated input: the game reads controllers through XInput");
+    if (index >= static_cast<DWORD>(kPadCount) || !state) return ERROR_DEVICE_NOT_CONNECTED;
+    std::lock_guard<std::mutex> lock(S().padLock);
+    const PadState& pad = S().pads[index];
+    if (!pad.connected) return ERROR_DEVICE_NOT_CONNECTED;
+    const XInputStateLayout out = {pad.packet, pad.buttons, pad.leftTrigger, pad.rightTrigger,
+                                   pad.leftX, pad.leftY, pad.rightX, pad.rightY};
+    std::memcpy(state, &out, sizeof(out));
+    return ERROR_SUCCESS;
+}
+
+// Rumble goes nowhere: the real controller is not this pad.
+inline DWORD WINAPI HookedXInputSetState(DWORD index, void*) {
+    if (index >= static_cast<DWORD>(kPadCount)) return ERROR_DEVICE_NOT_CONNECTED;
+    std::lock_guard<std::mutex> lock(S().padLock);
+    return S().pads[index].connected ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
+}
 
 struct WindowSearch {
     DWORD pid;
@@ -848,8 +897,25 @@ inline bool SendCharacter(char character) {
     return ok;
 }
 
+// A pad command, and the device-change message a game waits for before it
+// looks for a controller that was not there a moment ago.
+inline bool SendPad(const InputStep& step) {
+    bool plugged = false;
+    {
+        std::lock_guard<std::mutex> lock(S().padLock);
+        PadState& pad = S().pads[step.pad];
+        plugged = !pad.connected;
+        ApplyPadStep(pad, step.padControl, step.padButton, step.padDown, step.padX, step.padY);
+    }
+    if (!plugged) return true;
+    const HWND window = S().window.load();
+    // DBT_DEVNODES_CHANGED.
+    return window && PostMessageW(window, WM_DEVICECHANGE, 0x0007, 0);
+}
+
 inline bool Play(const InputStep& step) {
     switch (step.action) {
+        case InputAction::kPad:       return SendPad(step);
         case InputAction::kKeyDown:   return SendKey(step.vk, true);
         case InputAction::kKeyUp:     return SendKey(step.vk, false);
         case InputAction::kMouseDown:
@@ -1066,6 +1132,13 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
         Hook(kUser32, "SetForegroundWindow", &HookedSetForegroundWindow, s.origSetForegroundWindow),
         Hook(kUser32, "GetCursorPos", &HookedGetCursorPos, s.origGetCursorPos),
     };
+    // A controller DLL the game has not loaded is left alone, and one it has is
+    // optional: a game is driven by its keyboard and mouse without it.
+    for (int i = 0; i < kXInputDllCount; ++i) {
+        if (!GetModuleHandleW(kXInputDlls[i])) continue;
+        Hook(kXInputDlls[i], "XInputGetState", &HookedXInputGetState, s.origXInputGetState[i]);
+        Hook(kXInputDlls[i], "XInputSetState", &HookedXInputSetState, s.origXInputSetState[i]);
+    }
     bool all = true;
     for (const bool one : hooked) all = all && one;
     if (!all) {
