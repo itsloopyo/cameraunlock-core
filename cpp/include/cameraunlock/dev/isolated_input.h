@@ -21,6 +21,9 @@
 //     nor the mod stands down for being in the background.
 //   - GetAsyncKeyState answers from the synthetic key state alone, so the mod's
 //     hotkeys fire for the script and not for what is typed into another app.
+//   - GetKeyState and GetKeyboardState answer from the same synthetic state, for
+//     an engine that polls its keys or its modifiers through them. Their low bit
+//     is the toggle Windows keeps for every key: it flips on each press.
 //   - ClipCursor and SetCursorPos do nothing, and GetClipCursor answers what the
 //     game last asked for. A game that believes it has the foreground would
 //     otherwise trap and recentre the real cursor.
@@ -52,7 +55,8 @@
 // Never in a release build: with these detours in, the game does not answer to
 // the real keyboard. Requires MinHook, already initialised. Exactly one
 // translation unit defines CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION before
-// including this.
+// including this. A mod with no native code loads cpp/tools/isolated_input_host,
+// which is this header as a DLL.
 //
 // The harness writes a command file (input_script.h is the language): a whole
 // number on the first line, commands after it. The file is played each time
@@ -105,6 +109,8 @@ inline constexpr unsigned kTextKeyMs = 40;
 using GetRawInputData_t = UINT (WINAPI*)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
 using GetForegroundWindow_t = HWND (WINAPI*)();
 using GetAsyncKeyState_t = SHORT (WINAPI*)(int);
+using GetKeyState_t = SHORT (WINAPI*)(int);
+using GetKeyboardState_t = BOOL (WINAPI*)(PBYTE);
 using ClipCursor_t = BOOL (WINAPI*)(const RECT*);
 using GetClipCursor_t = BOOL (WINAPI*)(LPRECT);
 using SetCursorPos_t = BOOL (WINAPI*)(int, int);
@@ -115,6 +121,8 @@ struct State {
     GetRawInputData_t origGetRawInputData = nullptr;
     GetForegroundWindow_t origGetForegroundWindow = nullptr;
     GetAsyncKeyState_t origGetAsyncKeyState = nullptr;
+    GetKeyState_t origGetKeyState = nullptr;
+    GetKeyboardState_t origGetKeyboardState = nullptr;
     ClipCursor_t origClipCursor = nullptr;
     GetClipCursor_t origGetClipCursor = nullptr;
     SetCursorPos_t origSetCursorPos = nullptr;
@@ -134,6 +142,10 @@ struct State {
     // Set on a press and cleared by the read that reports it, as the low bit of
     // GetAsyncKeyState is.
     std::atomic<bool> keyPressedSinceRead[256] = {};
+    // Flipped by each press, as the low bit of GetKeyState is.
+    std::atomic<bool> keyToggled[256] = {};
+    std::atomic<bool> keyStateRead{false};
+    std::atomic<bool> keyboardStateRead{false};
 
     std::atomic<HWND> window{nullptr};
     // The game window's own procedure, under ours.
@@ -197,6 +209,28 @@ inline SHORT WINAPI HookedGetAsyncKeyState(int vk) {
     SHORT state = S().keyDown[vk].load(std::memory_order_acquire) ? static_cast<SHORT>(0x8000) : 0;
     if (S().keyPressedSinceRead[vk].exchange(false, std::memory_order_acq_rel)) state |= 1;
     return state;
+}
+
+inline SHORT WINAPI HookedGetKeyState(int vk) {
+    if (!S().keyStateRead.exchange(true, std::memory_order_acq_rel)) {
+        Log("isolated input: the game reads key state through GetKeyState");
+    }
+    if (vk < 0 || vk > 255) return 0;
+    SHORT state = S().keyDown[vk].load(std::memory_order_acquire) ? static_cast<SHORT>(0x8000) : 0;
+    if (S().keyToggled[vk].load(std::memory_order_acquire)) state |= 1;
+    return state;
+}
+
+inline BOOL WINAPI HookedGetKeyboardState(PBYTE state) {
+    if (!S().keyboardStateRead.exchange(true, std::memory_order_acq_rel)) {
+        Log("isolated input: the game reads key state through GetKeyboardState");
+    }
+    if (!state) return S().origGetKeyboardState(state);
+    for (int vk = 0; vk < 256; ++vk) {
+        state[vk] = static_cast<BYTE>((S().keyDown[vk].load(std::memory_order_acquire) ? 0x80 : 0)
+                                      | (S().keyToggled[vk].load(std::memory_order_acquire) ? 0x01 : 0));
+    }
+    return TRUE;
 }
 
 inline BOOL WINAPI HookedClipCursor(const RECT* rect) {
@@ -650,8 +684,12 @@ inline bool IsExtendedKey(int vk) {
 }
 
 inline bool SendRawKey(int vk, bool down) {
-    S().keyDown[vk].store(down, std::memory_order_release);
+    const bool wasDown = S().keyDown[vk].exchange(down, std::memory_order_acq_rel);
     if (down) S().keyPressedSinceRead[vk].store(true, std::memory_order_release);
+    // Only the command-file thread writes the toggle, so this read and write cannot interleave.
+    if (down && !wasDown) {
+        S().keyToggled[vk].store(!S().keyToggled[vk].load(std::memory_order_relaxed), std::memory_order_release);
+    }
 
     RAWINPUT event = {};
     event.header.dwType = RIM_TYPEKEYBOARD;
@@ -969,6 +1007,8 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
         Hook(kUser32, "GetRawInputData", &HookedGetRawInputData, s.origGetRawInputData),
         Hook(kUser32, "GetForegroundWindow", &HookedGetForegroundWindow, s.origGetForegroundWindow),
         Hook(kUser32, "GetAsyncKeyState", &HookedGetAsyncKeyState, s.origGetAsyncKeyState),
+        Hook(kUser32, "GetKeyState", &HookedGetKeyState, s.origGetKeyState),
+        Hook(kUser32, "GetKeyboardState", &HookedGetKeyboardState, s.origGetKeyboardState),
         Hook(kUser32, "ClipCursor", &HookedClipCursor, s.origClipCursor),
         Hook(kUser32, "GetClipCursor", &HookedGetClipCursor, s.origGetClipCursor),
         // user32's SetCursorPos can already be written over when the mod loads: in Resident Evil
