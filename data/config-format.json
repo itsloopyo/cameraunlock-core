@@ -679,6 +679,11 @@
         "row": "YawModeKey",
         "reason": "The fleet chords do not work in The Ascent. Measured in game on 2026-10-04, on foot: every press of left Ctrl toggles crouch and leaves it toggled after release (eye height 421 to 365 and back on three presses running), so every Ctrl+Shift chord would crouch or stand the character. A Shift press and an Alt press leave it as it was, so the chords are on Shift+Alt. The game's action map binds G to Swap Grenade, T to CallTaxi and K to KillAll with no modifiers, and an Unreal action mapping with no modifiers fires with any held; Y, H, J, U, B and N are not bound. H is free, so yaw mode keeps its letter. The committed file holds YawModeKey=PageDown, Shift+Alt+H.",
         "approved": "2026-10-04"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "The fleet chords do not work in The Ascent: every press of left Ctrl toggles crouch, so the chords are on Shift+Alt (the ToggleKey row has the measurement). The aim mode is the fourth action. J went to the tracking mode and the game binds T, so it keeps U. Measured in game on 2026-10-04, on foot with a weapon drawn: a tap of Insert and a tap of Shift+Alt+U each stepped the aim mode once and left the character where it stood with no menu, journal or panel opened. The committed file holds TrueFreeLookKey=Insert, Shift+Alt+U.",
+        "approved": "2026-10-04"
       }
     ],
     "green-hell-headtracking": [
