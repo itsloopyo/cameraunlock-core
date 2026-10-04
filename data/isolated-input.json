@@ -55,9 +55,9 @@
       "dlls": ["xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll", "xinput1_2.dll", "xinput1_1.dll"],
       "status": "supported",
       "proven_in": ["the-ascent"]
-}
-},
-"mod_hosts": {
+    }
+  },
+  "mod_hosts": {
     "native": {
       "what": "a C++ mod: ASI, proxy DLL, REFramework plugin, RED4ext plugin, a native half beside a script mod",
       "status": "supported",
