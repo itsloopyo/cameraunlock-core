@@ -187,7 +187,15 @@ move <dx> <dy>        relative mouse movement, in counts
 cursor <x> <y>        put the mouse cursor at a point of the game window's client area, in pixels
 text <characters>     typed one character at a time, to the end of the line
 wait <ms>
+pad <n> <button> <down|up|tap>        a controller button: a b x y lb rb ls rs start back up down left right
+pad <n> stick <left|right> <x> <y>    a stick held at -1 to 1 each way, up positive
+pad <n> trigger <left|right> <pull>   a trigger held at 0 to 1
 ```
+
+`pad` is an XInput controller, `n` from 0 to 3. A controller is plugged in from
+its first command on and holds what it was last told, so a stick is let go with
+`pad 1 stick left 0 0`. A `tap` holds the button 150 ms: a pad is polled once a
+frame. The real controllers are not read while isolated input is on.
 
 Key names are the ones hotkey lists use (`data/keys.json`). A key with no name is
 its code: the backquote is `tap 0xC0`, the digit 2 is `tap 0x32`.
@@ -253,6 +261,18 @@ device that is neither a keyboard nor a mouse is left as it was.
 | `SetCooperativeLevel` | passed on as `DISCL_BACKGROUND \| DISCL_NONEXCLUSIVE` | the device stays usable behind other windows |
 | `Release` | passed on | forgets a device that is gone |
 
+For a game that has an XInput DLL loaded (`xinput1_4.dll`, `xinput1_3.dll`,
+`xinput9_1_0.dll`, `xinput1_2.dll`, `xinput1_1.dll`; none is ever loaded for it):
+
+| Function | Answer | Why |
+|---|---|---|
+| `XInputGetState` | the script's controller at that index, or `ERROR_DEVICE_NOT_CONNECTED` for one the script has not named | the real controllers never reach the game, and a second player can be played from a script |
+| `XInputSetState` | `ERROR_SUCCESS` for a plugged-in script controller, without reaching XInput | rumble goes nowhere |
+
+A controller's first command also posts `WM_DEVICECHANGE` to the game window:
+Unreal Engine 4 looks for new controllers only when Windows says the devices
+changed. The log says once that the game reads XInput.
+
 Only the standard data formats are answered (`c_dfDIKeyboard`, `c_dfDIMouse`,
 `c_dfDIMouse2`): a `GetDeviceState` of any other size is refused and the log says
 so. There is no mouse wheel command, so `lZ` is always 0. A game that waits on
@@ -279,6 +299,23 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
   title with an input whose effect the mod also logs, and read the log.
 
 ## Measured
+
+The Ascent (Steam, Unreal Engine 4, build `++depot+release-CL-72946`), 2026-10-04,
+windowed and behind other windows for the whole session, the game never holding
+the foreground:
+
+- Keyboard and `cursor`: the title screen, the menus, a new game, the pause menu,
+  the journal and a dialogue's choices were driven, and `W`, `D`, `F`, `Ctrl`
+  and a held `Space` walked, interacted, crouched and closed tutorial cards.
+- Controller: in the couch co-op lobby `pad 1 a tap` joined a second player,
+  `pad 1 down tap` moved through its profile list and `pad 1 a tap` chose one.
+  In play `pad 1 stick left 0 1` for a second walked the second player 4.4 m,
+  and the right stick turned and pitched that player's view. The log read
+  `the game reads controllers through XInput`.
+- `SetCursorPos` is swallowed, so a mod that recentres the cursor every frame
+  has to measure mouse movement from where the cursor came to rest, read back
+  with `GetCursorPos`, and not from the point it asked for.
+- `Save-GameCapture` showed live frames, both halves of a split screen included.
 
 Untitled Goose Game 1.1.4 (Steam, Unity 2018.4.1f1, BepInEx 5 plugin), 2026-10-04,
 through the host DLL and `Start-IsolatedGame -ModHost managed`:

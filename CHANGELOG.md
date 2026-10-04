@@ -9,6 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - scripted XInput controllers in isolated input
+
+A test can now play a controller, and so a second local player. The command file takes
+`pad <n> <button> <down|up|tap>`, `pad <n> stick <left|right> <x> <y>` and
+`pad <n> trigger <left|right> <pull>`, and `cameraunlock/dev/isolated_input.h` answers
+`XInputGetState` from them in whichever XInput DLL the game has loaded. A controller is plugged
+in from its first command on; the real controllers are not read. The pure half is
+`cameraunlock/dev/gamepad_state.h`. Proven in The Ascent, where it joined and steered player
+two of a couch co-op game. `data/isolated-input.json` marks `xinput` supported.
+
+To change in consuming repos: nothing. Rebuild the host DLL
+(`pixi run build-isolated-input-host`) for a C# mod to pick it up.
+
 ### Fixed - a scripted Ctrl, Shift or Alt is held as its left-hand key too
 
 `cameraunlock/dev/isolated_input.h` held only `VK_CONTROL`, `VK_SHIFT` or `VK_MENU` in the

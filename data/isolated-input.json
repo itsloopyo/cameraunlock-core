@@ -51,13 +51,13 @@
       "build": "Push synthetic events through the game's own SDL (SDL_PushEvent resolved from the loaded SDL DLL) from isolated_input.h. SDL may itself sit on raw input: check SDL's import table with Get-GameInputPaths first, and if raw input is what it reads, prove that path and record SDL here as supported through it."
     },
     "xinput": {
-      "what": "XInput controllers",
+      "what": "XInput controllers, read with XInputGetState. The `pad` command plugs one in and holds its buttons, sticks and triggers.",
       "dlls": ["xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll", "xinput1_2.dll", "xinput1_1.dll"],
-      "status": "not-needed",
-      "note": "A controller is not what a test drives a game with. A game that reads XInput beside the keyboard and mouse is tested through the keyboard and mouse path."
-    }
-  },
-  "mod_hosts": {
+      "status": "supported",
+      "proven_in": ["the-ascent"]
+}
+},
+"mod_hosts": {
     "native": {
       "what": "a C++ mod: ASI, proxy DLL, REFramework plugin, RED4ext plugin, a native half beside a script mod",
       "status": "supported",
