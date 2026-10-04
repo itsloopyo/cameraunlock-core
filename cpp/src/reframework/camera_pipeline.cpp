@@ -60,6 +60,15 @@ static bool g_loggedAiming = false;
 // 1 at the hip, 0 with the sights up.
 static cameraunlock::ads::AdsFade g_stockSightsFade;
 
+// The head rotation the camera got this frame, in degrees: after the stock
+// sights share and the zoom factor.
+static struct {
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+    float roll = 0.0f;
+    bool valid = false;
+} g_appliedRotation;
+
 // The rig's offset, world space. `request` is decided at BeginRendering and
 // written at the next LateUpdateBehavior; `applied` is what that write put on
 // the rig, which the game's eye carries until the next write.
@@ -236,6 +245,11 @@ static void ApplyHeadTracking(Matrix4x4f* worldMat) {
         py = scaled.y;
         pz = scaled.z;
     }
+
+    g_appliedRotation.yaw = hasRotation ? yaw : 0.0f;
+    g_appliedRotation.pitch = hasRotation ? pitch : 0.0f;
+    g_appliedRotation.roll = hasRotation ? roll : 0.0f;
+    g_appliedRotation.valid = true;
 
     // Through the clean camera's own axes, before the head rotation below.
     float lean[3] = {0.0f, 0.0f, 0.0f};
@@ -573,6 +587,14 @@ static void UpdateFrameProjection(const Matrix4x4f& clean, const Matrix4x4f& hea
 
 // --- Public API ---
 
+bool GetAppliedHeadRotation(float& yaw, float& pitch, float& roll) {
+    if (!g_appliedRotation.valid) return false;
+    yaw = g_appliedRotation.yaw;
+    pitch = g_appliedRotation.pitch;
+    roll = g_appliedRotation.roll;
+    return true;
+}
+
 const FrameProjection& GetFrameProjection() { return g_projection; }
 uint64_t GetRenderFrame() { return g_renderFrame; }
 const Matrix4x4f& GetCleanCameraMatrix() { return g_cleanCameraMatrix.matrix; }
@@ -589,6 +611,7 @@ static void SkipFrame() {
     g_projection.cleanToHeadValid = false;
     StopLean();
     g_stockSightsFade.Reset();
+    g_appliedRotation.valid = false;
 }
 
 void CameraPipelinePreRender() {

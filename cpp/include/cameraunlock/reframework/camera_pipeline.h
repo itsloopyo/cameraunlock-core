@@ -156,6 +156,12 @@ void CameraPipelinePostEndRendering();
 
 const FrameProjection& GetFrameProjection();
 
+// The head rotation the camera got this frame, in degrees: the processed pose
+// after the stock sights share and the zoom factor. This is the pose an effect
+// that follows the head (a carried light) scales, so it eases with the view.
+// False on a frame that applied no tracking.
+bool GetAppliedHeadRotation(float& yaw, float& pitch, float& roll);
+
 // Bumped once per render callback, before the enable and gameplay gates. GUI
 // draw callbacks fire during that same frame - including in a menu, where no
 // tracking is applied - so this is the key per-frame memos invalidate on.

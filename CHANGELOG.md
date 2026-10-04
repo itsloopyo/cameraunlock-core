@@ -9,6 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - REFramework: the head rotation the camera got, for a light that follows the head
+
+`cameraunlock::reframework::GetAppliedHeadRotation(yaw, pitch, roll)` returns the rotation the
+camera pipeline applied this frame, in degrees: the processed pose after the stock sights share
+and the zoom factor. It returns false on a frame that applied no tracking. A carried light that
+follows the head scales this pose, so in stock sights the beam eases onto the aim with the view
+as the sights come up. `PluginMod::GetProcessedRotation` is the pose before both, and a light
+that scaled it stayed turned with the head while the view had gone back to the aim (measured in
+Resident Evil Requiem).
+
+To change in consuming repos: an REFramework mod whose light follows the head reads
+`GetAppliedHeadRotation` where it read `PluginMod::GetProcessedRotation`.
+
 ### Added - a game or mod can move the scripted cursor in isolated input
 
 `cameraunlock::dev::LetGameMoveScriptedCursor(true)` makes `SetCursorPos` move the script's
