@@ -1909,6 +1909,16 @@
       "repo": "itsloopyo/untitled-goose-game-headtracking",
       "engine": "Unity",
       "catalog_status": "absent"
+    },
+    "the-ascent": {
+      "display_name": "The Ascent",
+      "env_var": "THE_ASCENT_PATH",
+      "steam_app_id": 979690,
+      "steam_folder": "The Ascent",
+      "executable_relpath": "TheAscent\\Binaries\\Win64\\TheAscent-Win64-Shipping.exe",
+      "repo": "itsloopyo/the-ascent-headtracking",
+      "engine": "Unreal Engine",
+      "catalog_status": "absent"
     }
   }
 }
