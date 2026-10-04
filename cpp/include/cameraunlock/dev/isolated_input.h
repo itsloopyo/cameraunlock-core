@@ -7,9 +7,10 @@
 // For games that read raw input (RegisterRawInputDevices and WM_INPUT, read
 // back through GetRawInputData). Each synthetic event is posted to the game's
 // window as a WM_INPUT message whose handle is one of ours, and the
-// GetRawInputData detour answers for those handles. The real devices send the
-// game nothing while it is in the background, which is what keeps the two
-// apart.
+// GetRawInputData detour answers for those handles. Windows sends a background
+// window no raw input unless it registered with RIDEV_INPUTSINK, and a real
+// keyboard or mouse event that does arrive is emptied by the same detour and by
+// GetRawInputBuffer's, so it moves and presses nothing.
 //
 // A key also arrives as WM_KEYDOWN and WM_KEYUP, as it does from Windows, for a
 // game that takes its keys from its window procedure. Not where the game
@@ -31,8 +32,9 @@
 //     cursor instead (LetGameMoveScriptedCursor).
 //   - SetForegroundWindow does nothing, so the game cannot take the foreground
 //     back.
-//   - GetCursorPos answers the point the last `cursor` command gave, once one
-//     has: a menu that reads where the cursor is gets the script's cursor, as a
+//   - GetCursorPos never answers the real cursor once the game window is found.
+//     It answers the middle of the window until a `cursor` command gives a
+//     point: a menu that reads where the cursor is gets the script's cursor, as a
 //     WM_MOUSEMOVE at that point and as the position it reads back, and a button
 //     then also arrives as the window message a click there would be.
 //
@@ -118,6 +120,7 @@ inline constexpr unsigned kPollMs = 50;
 inline constexpr unsigned kTextKeyMs = 40;
 
 using GetRawInputData_t = UINT (WINAPI*)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
+using GetRawInputBuffer_t = UINT (WINAPI*)(PRAWINPUT, PUINT, UINT);
 using GetForegroundWindow_t = HWND (WINAPI*)();
 using GetAsyncKeyState_t = SHORT (WINAPI*)(int);
 using GetKeyState_t = SHORT (WINAPI*)(int);
@@ -138,6 +141,8 @@ inline constexpr int kXInputDllCount = sizeof(kXInputDlls) / sizeof(kXInputDlls[
 
 struct State {
     GetRawInputData_t origGetRawInputData = nullptr;
+    GetRawInputBuffer_t origGetRawInputBuffer = nullptr;
+    std::atomic<bool> realRawInputSeen{false};
     GetForegroundWindow_t origGetForegroundWindow = nullptr;
     GetAsyncKeyState_t origGetAsyncKeyState = nullptr;
     GetKeyState_t origGetKeyState = nullptr;
@@ -204,9 +209,55 @@ inline bool IsOurs(HRAWINPUT handle) {
     return at >= first && at < first + sizeof(S().events) && (at - first) % sizeof(RAWINPUT) == 0;
 }
 
+// A real keyboard or mouse event, emptied in place. A window registered with
+// RIDEV_INPUTSINK is sent raw input while it is in the background (Rewired
+// registers its own window that way), so the real devices do reach a
+// background game, and the person's mouse turned The Forest's camera from
+// another window until this withheld it. The event keeps its header, so the
+// game's reader sees a well-formed event that moves and presses nothing. Other
+// HID devices are left as they are.
+inline void WithholdRealDevice(RAWINPUT& event) {
+    if (event.header.dwType == RIM_TYPEMOUSE) {
+        event.data.mouse.ulButtons = 0;
+        event.data.mouse.ulRawButtons = 0;
+        event.data.mouse.lLastX = 0;
+        event.data.mouse.lLastY = 0;
+    } else if (event.header.dwType == RIM_TYPEKEYBOARD) {
+        event.data.keyboard.MakeCode = 0;
+        event.data.keyboard.VKey = 0xFF;
+        event.data.keyboard.Message = WM_NULL;
+    } else {
+        return;
+    }
+    if (!S().realRawInputSeen.exchange(true, std::memory_order_acq_rel)) {
+        Log("isolated input: the game is sent raw input from the real keyboard or mouse while in the "
+            "background (RIDEV_INPUTSINK); it is withheld");
+    }
+}
+
+inline UINT WINAPI HookedGetRawInputBuffer(PRAWINPUT data, PUINT size, UINT headerSize) {
+    const UINT count = S().origGetRawInputBuffer(data, size, headerSize);
+    if (count == static_cast<UINT>(-1) || data == nullptr || headerSize != sizeof(RAWINPUTHEADER)) return count;
+    PRAWINPUT event = data;
+    for (UINT i = 0; i < count; ++i) {
+        WithholdRealDevice(*event);
+        // NEXTRAWINPUTBLOCK, which names QWORD and so needs a typedef the SDK leaves to the caller.
+        const auto next = reinterpret_cast<uintptr_t>(event) + event->header.dwSize;
+        event = reinterpret_cast<PRAWINPUT>((next + sizeof(uintptr_t) - 1) & ~(sizeof(uintptr_t) - 1));
+    }
+    return count;
+}
+
 inline UINT WINAPI HookedGetRawInputData(HRAWINPUT handle, UINT command, LPVOID data, PUINT size,
                                          UINT headerSize) {
-    if (!IsOurs(handle)) return S().origGetRawInputData(handle, command, data, size, headerSize);
+    if (!IsOurs(handle)) {
+        const UINT copied = S().origGetRawInputData(handle, command, data, size, headerSize);
+        if (copied != static_cast<UINT>(-1) && copied >= sizeof(RAWINPUTHEADER) && command == RID_INPUT &&
+            data != nullptr && headerSize == sizeof(RAWINPUTHEADER)) {
+            WithholdRealDevice(*static_cast<RAWINPUT*>(data));
+        }
+        return copied;
+    }
     const RAWINPUT& event = *reinterpret_cast<const RAWINPUT*>(handle);
     if (size == nullptr || headerSize != sizeof(RAWINPUTHEADER)) {
         SetLastError(ERROR_INVALID_PARAMETER);
@@ -291,7 +342,15 @@ inline BOOL WINAPI HookedGetCursorPos(LPPOINT point) {
         Log("isolated input: the game reads the cursor's position (GetCursorPos)");
     }
     const HWND window = S().window.load(std::memory_order_acquire);
-    if (!point || !window || !S().cursorPlaced.load(std::memory_order_acquire)) return S().origGetCursorPos(point);
+    if (!point || !window) return S().origGetCursorPos(point);
+    if (!S().cursorPlaced.load(std::memory_order_acquire)) {
+        // Never the real cursor: a game that turns its view or moves a pointer by
+        // where the cursor is would follow the person's mouse in another window.
+        RECT client;
+        if (!GetClientRect(window, &client)) return S().origGetCursorPos(point);
+        *point = {(client.right - client.left) / 2, (client.bottom - client.top) / 2};
+        return ClientToScreen(window, point);
+    }
     *point = {S().cursorX.load(std::memory_order_relaxed), S().cursorY.load(std::memory_order_relaxed)};
     return ClientToScreen(window, point);
 }
@@ -1167,6 +1226,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     static const wchar_t* const kUser32 = L"user32.dll";
     const bool hooked[] = {
         Hook(kUser32, "GetRawInputData", &HookedGetRawInputData, s.origGetRawInputData),
+        Hook(kUser32, "GetRawInputBuffer", &HookedGetRawInputBuffer, s.origGetRawInputBuffer),
         Hook(kUser32, "GetForegroundWindow", &HookedGetForegroundWindow, s.origGetForegroundWindow),
         Hook(kUser32, "GetAsyncKeyState", &HookedGetAsyncKeyState, s.origGetAsyncKeyState),
         Hook(kUser32, "GetKeyState", &HookedGetKeyState, s.origGetKeyState),

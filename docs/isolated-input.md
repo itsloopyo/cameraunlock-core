@@ -218,8 +218,10 @@ letters. Each key is held 40 ms.
 
 For a game that reads raw input: each synthetic event is posted to the game's
 window as a `WM_INPUT` whose handle is one of ours, and the `GetRawInputData`
-detour answers for those handles. The real devices send a background game
-nothing, which is what keeps the two apart.
+detour answers for those handles. Windows sends a background window no raw input
+unless it registered with `RIDEV_INPUTSINK`. Where one did, a real keyboard or
+mouse event is emptied on its way through `GetRawInputData` and
+`GetRawInputBuffer`: it keeps its header and moves and presses nothing.
 
 A key is also posted as `WM_KEYDOWN` and `WM_KEYUP`, as Windows sends it beside
 raw input. Unreal Engine 4 registers raw input for the mouse and takes its keys
@@ -240,7 +242,8 @@ placed the cursor: start the script with `cursor <x> <y>`.
 | `NtUserSetCursorPos` in `win32u.dll` | nothing | only where `SetCursorPos` could not be detoured because its first bytes were already written over: it is what `SetCursorPos` jumps to |
 | `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |
 | `SetForegroundWindow` | nothing | the game cannot take the foreground back |
-| `GetCursorPos` | the point the last `cursor` command gave, once one has | a menu with a pointer follows the script's cursor, not the real one |
+| `GetRawInputData`, `GetRawInputBuffer`, for an event of the real keyboard or mouse | the event with no movement, no buttons and no key | a window registered with `RIDEV_INPUTSINK` is sent the real devices in the background. The log says so the first time one arrives |
+| `GetCursorPos` | the point the last `cursor` command gave, and the middle of the game window until one has | a menu with a pointer follows the script's cursor, and a game that reads the cursor never follows the real one |
 | the game window's procedure | never sees `WM_ACTIVATEAPP`, `WM_ACTIVATE`, `WM_KILLFOCUS` or `WM_NCACTIVATE` saying it lost the foreground, and is posted all four saying it has it when the window is found | a game that stops, or stops following its mouse, when deactivated carries on |
 
 The dev build also watches the real foreground itself. Whenever a window of the

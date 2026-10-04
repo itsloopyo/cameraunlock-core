@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - isolated input never hands the game the real cursor or real raw input
+
+In The Forest (Unity 5.6, Rewired) the person's mouse, moved in another window, turned the
+game's view during a background test. `GetCursorPos` answered the real cursor until a `cursor`
+command had placed one; it now answers the middle of the game window until then. A real keyboard
+or mouse event read through `GetRawInputData` or `GetRawInputBuffer`, which a window registered
+with `RIDEV_INPUTSINK` is sent in the background, is emptied, and the log says so the first time.
+Measured after the change: the view held still for 45 s with no scripted input while the machine
+was in use, where the run before it had pitched 19 degrees unasked.
+
 ### Added - isolated input drives an SDL2 game; Red Eclipse's aim mode key
 
 `data/isolated-input.json` records `sdl` as supported through raw input: Red Eclipse reads all
