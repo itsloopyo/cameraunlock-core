@@ -14,6 +14,8 @@ piece to core, and every later one gets it.
 - `cameraunlock/dev/directinput_state.h`: what a DirectInput keyboard and mouse
   report for the input a script plays. Pure, tested.
 - `cameraunlock/dev/isolated_input.h`: the Win32 half, compiled into a dev build.
+- `cpp/tools/isolated_input_host`: that header as a DLL, for a mod with no native
+  code. `CameraUnlock.Core.Dev.IsolatedInput` is what a C# mod loads it with.
 - `powershell/IsolatedGameTest.psm1`: launch, play, capture, proof, restore.
 - `data/isolated-input.json`: what is covered, and what to build for what is not.
 
@@ -36,6 +38,7 @@ piece to core, and every later one gets it.
    and call `cameraunlock::dev::StartIsolatedInput(commandFile, &Log)` when the command file
    exists: after `MH_Initialize`, before the mod's own hotkey thread starts.
    far-cry-6-headtracking's `src/dev/isolated_input.cpp` is that file in a mod.
+   A C# mod has no such file: see [A C# mod](#a-c-mod).
 
    The command file is `CameraUnlockInput.txt` beside the mod's DLL. Gating on it
    keeps the same dev build answering to the real keyboard when the file is not
@@ -50,6 +53,7 @@ piece to core, and every later one gets it.
    # and keep it running unfocused (per game: Starfield needs bAlwaysActive=1)
    $sender  = Start-TestPoseSender -Port $port -PoseFile $pose
    $session = Start-IsolatedGame -ProcessName <name> -Launch <uri or exe> -ModFolder <mod folder>
+   # a C# mod: add -ModHost managed, which also copies the host DLL into the mod folder
    Invoke-GameInput -Session $session -Commands 'tap Space', 'wait 5000'      # title, menus, load
    Test-IsolatedInputProof -Session $session -Commands <something visible> -Folder <scratch>
    Set-TestPose -PoseFile $pose -Yaw 15; Invoke-GameInput ...; Save-GameCapture ...
@@ -75,6 +79,77 @@ Rules a run has to meet:
 - **Restore everything**, whether the run passed or not.
 - **A capture that never changes is a broken instrument.** Check
   `Test-CaptureDiffers` on two captures a second apart, once per title.
+
+## A C# mod
+
+A C# mod cannot compile `isolated_input.h`, so the detours come in a DLL of
+core's, `CameraUnlockIsolatedInput.dll`, and the mod's dev build loads it.
+
+1. **Build the host DLL once per core checkout**, and again when
+   `isolated_input.h` changes:
+
+   ```text
+   pixi run build-isolated-input-host
+   ```
+
+   or, where pixi is not set up (a mod's submodule checkout), the two commands
+   that task runs, from the core folder:
+
+   ```text
+   cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build
+   cmake --build cpp/tools/isolated_input_host/build --config Release
+   ```
+
+   It lands at `cpp/tools/isolated_input_host/build/Release/CameraUnlockIsolatedInput.dll`:
+   x64, MinHook and the C++ runtime linked in, one export. It is never committed
+   and never goes into a mod's package.
+
+2. **Call the entry point from the dev build**, in code a release build does not
+   compile, as the plugin starts (`Awake` in a BepInEx plugin):
+   `CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked(modFolder, log)`, where
+   `modFolder` is the folder the plugin's DLL is in and `log` takes one line of
+   text. In a BepInEx 5 plugin that is
+   `IsolatedInput.StartIfAsked(Path.GetDirectoryName(Info.Location), line => Logger.LogInfo(line))`.
+
+   With no `CameraUnlockInput.txt` in that folder it does nothing and returns
+   false, so the same dev build answers to the real keyboard. With the file
+   there it loads `CameraUnlockIsolatedInput.dll` from the same folder, starts
+   it and returns true. It throws when the file is there and the DLL is missing,
+   does not load, or does not start, and the message says which. Let it throw:
+   a test session that believes the detours are in when they are not sends the
+   game nothing.
+
+3. **Start the session with `-ModHost managed`.** `Start-IsolatedGame` then
+   copies the host DLL into `-ModFolder` beside the command file
+   (`Copy-IsolatedInputHost` is that step alone), and `Stop-IsolatedGame`
+   removes the copy. `-HostDll <path>` names a build that is not this checkout's
+   x64 one, such as a 32-bit build (`-A Win32` and a build folder of its own) for
+   a 32-bit game.
+
+The host logs to `CameraUnlockIsolatedInput.log` in the mod folder, keeping the
+run before it as `CameraUnlockIsolatedInput.prev.log`. What the native route
+writes to the mod's own log is in there: which paths the game reads, each script
+played, each time the foreground was handed back. `Stop-IsolatedGame` leaves both
+logs to be read, so name them in `Save-GameTestState -Files` to have the restore
+remove them.
+
+The DLL's one export is `int CameraUnlockStartIsolatedInput(const wchar_t* commandFile)`:
+0 when it started, 1 when MinHook did not initialise, 2 when a detour could not
+be installed (none is left in), 3 when it was already started in this process.
+Loading the DLL starts nothing.
+
+For a Unity game the binary that reads input is `UnityPlayer.dll`, and a native
+plugin of the game can read input too: Untitled Goose Game ships Rewired's
+`Rewired_DirectInput.dll`, which imports `dinput8.dll`. Run `Get-GameInputPaths`
+on each.
+
+Checked outside a game, 2026-10-04 (`pixi run test-isolated-input-host`): Windows
+PowerShell loaded the net472 `CameraUnlock.Core`, `StartIfAsked` started the host,
+every detour went in, and with a script holding `A` down `GetKeyState`,
+`GetKeyboardState` and `GetAsyncKeyState` each reported `A` and no other key.
+That process has no window, so it says nothing about what a game's window
+receives. No game has been driven this way yet: until one is, `managed` stays
+`unsupported` in `data/isolated-input.json`.
 
 ## A game it does not cover yet
 
@@ -150,6 +225,7 @@ placed the cursor: start the script with `cursor <x> <y>`.
 |---|---|---|
 | `GetForegroundWindow` | the game's own window | neither the game nor the mod stands down for being in the background |
 | `GetAsyncKeyState` | the synthetic key state only | the mod's hotkeys fire for the script, not for what is typed elsewhere |
+| `GetKeyState`, `GetKeyboardState` | the synthetic key state only: the high bit while the script holds the key, the low bit flipped by each press | an engine that polls keys or modifiers through them sees the script's keyboard. The log names each one the first time the game calls it |
 | `ClipCursor`, `SetCursorPos` | nothing | the game would trap and recentre the real cursor |
 | `NtUserSetCursorPos` in `win32u.dll` | nothing | only where `SetCursorPos` could not be detoured because its first bytes were already written over: it is what `SetCursorPos` jumps to |
 | `GetClipCursor` | what the game last asked for | a mod that reads the clip to tell gameplay from a menu still can |

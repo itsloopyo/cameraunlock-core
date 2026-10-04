@@ -19,6 +19,8 @@ $ErrorActionPreference = 'Stop'
 
 $script:CoverageFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'data\isolated-input.json'
 $script:CommandFileName = 'CameraUnlockInput.txt'
+$script:HostDllName = 'CameraUnlockIsolatedInput.dll'
+$script:HostDllBuild = Join-Path (Split-Path -Parent $PSScriptRoot) "cpp\tools\isolated_input_host\build\Release\$script:HostDllName"
 
 if (-not ('CameraUnlockIsolatedTest.Native' -as [type])) {
     Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
@@ -242,6 +244,26 @@ function Get-ModTestPort {
 # Running the game
 # ---------------------------------------------------------------------------
 
+function Copy-IsolatedInputHost {
+    <#
+    .SYNOPSIS
+    Copies the isolated-input host DLL (cpp/tools/isolated_input_host) into a mod folder, for a mod
+    with no native code of its own: a C# mod's dev build loads it from there through
+    CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked. Returns the path of the copy.
+    .DESCRIPTION
+    The default source is the x64 build `pixi run build-isolated-input-host` leaves in this core
+    checkout. Pass -HostDll for a build made elsewhere, such as a 32-bit one for a 32-bit game.
+    #>
+    param([Parameter(Mandatory)][string]$ModFolder, [string]$HostDll = $script:HostDllBuild)
+    if (-not (Test-Path $HostDll -PathType Leaf)) {
+        throw "The isolated-input host DLL is not built: $HostDll. Build it in cameraunlock-core with: cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build; cmake --build cpp/tools/isolated_input_host/build --config Release (pixi run build-isolated-input-host)."
+    }
+    if (-not (Test-Path $ModFolder -PathType Container)) { throw "The mod folder does not exist: $ModFolder" }
+    $target = Join-Path $ModFolder $script:HostDllName
+    Copy-Item $HostDll $target -Force
+    $target
+}
+
 function Start-IsolatedGame {
     <#
     .SYNOPSIS
@@ -251,6 +273,8 @@ function Start-IsolatedGame {
     input on), launches, waits for the process, and for -SettleSeconds returns the foreground to the
     window that held it each time the new game window takes it. Returns the session the other
     functions take. Refuses to start while the game is already running: that one is someone else's.
+    With -ModHost managed it also copies the host DLL beside the mod (Copy-IsolatedInputHost), and
+    Stop-IsolatedGame removes that copy.
     #>
     param(
         [Parameter(Mandatory)][string]$ProcessName,
@@ -259,11 +283,16 @@ function Start-IsolatedGame {
         # The folder the mod's DLL is deployed to.
         [Parameter(Mandatory)][string]$ModFolder,
         [int]$StartTimeoutSeconds = 120,
-        [int]$SettleSeconds = 60
+        [int]$SettleSeconds = 60,
+        # native: the mod's own dev build holds the detours. managed: a C# mod, which loads the host DLL.
+        [ValidateSet('native', 'managed')][string]$ModHost = 'native',
+        # The host DLL to copy for a managed mod, when it is not this checkout's x64 build.
+        [string]$HostDll = $script:HostDllBuild
     )
     if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue) {
         throw "$ProcessName is already running and this session did not start it. Not launching over it."
     }
+    $deployedHost = $(if ($ModHost -eq 'managed') { Copy-IsolatedInputHost -ModFolder $ModFolder -HostDll $HostDll } else { $null })
     $commandFile = Join-Path $ModFolder $script:CommandFileName
     Set-Content -Path $commandFile -Value '0' -Encoding ASCII
     Remove-Item "$commandFile.done" -ErrorAction SilentlyContinue
@@ -286,7 +315,7 @@ function Start-IsolatedGame {
             [void][CameraUnlockIsolatedTest.Native]::SetForegroundWindow($foreground)
         }
     }
-    [pscustomobject]@{ ProcessId = $process.Id; ProcessName = $ProcessName; CommandFile = $commandFile; Sequence = 0 }
+    [pscustomobject]@{ ProcessId = $process.Id; ProcessName = $ProcessName; CommandFile = $commandFile; Sequence = 0; HostDll = $deployedHost }
 }
 
 function Invoke-GameInput {
@@ -407,7 +436,8 @@ function Stop-IsolatedGame {
     <#
     .SYNOPSIS
     Stops the game this session started, by process id, and removes the command file so the next
-    start of the same build answers to the real keyboard.
+    start of the same build answers to the real keyboard. Removes the host DLL too when the session
+    copied one. The host's log (CameraUnlockIsolatedInput.log beside it) is left to be read.
     #>
     param([Parameter(Mandatory)]$Session)
     $process = Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
@@ -416,6 +446,7 @@ function Stop-IsolatedGame {
         Wait-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
     }
     Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
+    if ($Session.HostDll) { Remove-Item $Session.HostDll -Force }
 }
 
 # ---------------------------------------------------------------------------
@@ -495,5 +526,5 @@ function Set-TestPose {
 }
 
 Export-ModuleMember -Function Get-PeImports, Get-IsolatedInputCoverage, Get-GameInputPaths, Assert-IsolatedInputCovers,
-    Get-ModTestPort, Start-IsolatedGame, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
+    Get-ModTestPort, Copy-IsolatedInputHost, Start-IsolatedGame, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
     Stop-IsolatedGame, Save-GameTestState, Restore-GameTestState, Start-TestPoseSender, Set-TestPose

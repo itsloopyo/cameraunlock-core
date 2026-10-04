@@ -24,7 +24,7 @@
       "what": "keys polled with GetKeyState or GetKeyboardState, which read the thread's message-synchronised state",
       "imports": ["GetKeyState", "GetKeyboardState"],
       "status": "unsupported",
-      "build": "Detour GetKeyState and GetKeyboardState in isolated_input.h and answer from the synthetic key state, as the GetAsyncKeyState detour does."
+      "build": "The GetKeyState and GetKeyboardState detours are in isolated_input.h and answer from the synthetic key state. No game has been driven through them yet: run a proof (Test-IsolatedInputProof) in a game whose log names one of them (`the game reads key state through GetKeyState`), then change this entry to supported and name the game under proven_in."
     },
     "directinput": {
       "what": "DirectInput 8 devices",
@@ -66,12 +66,12 @@
     "managed": {
       "what": "a C# mod: BepInEx, MelonLoader, a Cecil-patched assembly, OWML",
       "status": "unsupported",
-      "build": "Build cameraunlock/dev/isolated_input.h into a small native DLL in core (cpp/tools/isolated_input_host: MinHook, DllMain starts StartIsolatedInput on the command file beside the game exe, logs to a file beside it), and add a C# entry point (CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked) that LoadLibrary-s it from a DEBUG-only code path of the plugin. Then check what the engine reads: run Get-GameInputPaths on UnityPlayer.dll, not on the game exe."
+      "build": "The host DLL (cpp/tools/isolated_input_host, built by `pixi run build-isolated-input-host`) and the C# entry point that loads it (CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked) are in core, and no game has been driven through them yet. Wire the plugin's dev build as docs/isolated-input.md says (A C# mod), start the session with Start-IsolatedGame -ModHost managed, and prove it with Test-IsolatedInputProof. Then change this entry to supported. Check what the engine reads with Get-GameInputPaths on UnityPlayer.dll, not on the game exe."
     },
     "script": {
       "what": "a mod with no native code of its own, such as a Lua mod under a script extender",
       "status": "unsupported",
-      "build": "Use the native DLL the managed entry describes and load it through the game's ASI or plugin loader for the test session."
+      "build": "Use the host DLL of the managed entry (cpp/tools/isolated_input_host). It starts from an export, CameraUnlockStartIsolatedInput, and does nothing when it is loaded, so a loader that only loads a DLL does not start it: add a start for a mod with nothing to call the export (a DllMain that starts a thread when the command file is beside the DLL), and load it through the game's ASI or plugin loader for the test session."
     }
   }
 }

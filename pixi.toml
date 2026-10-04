@@ -76,6 +76,14 @@ test-ci-minutes = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/t
 # DifferentialGate.psm1 over a throwaway mod repo. Needs git and node.
 test-powershell-differential-gate = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/DifferentialGate.Tests.ps1"
 test-powershell-isolated-game-test = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedGameTest.Tests.ps1"
+# The isolated-input host a C# mod loads for a background in-game test (docs/isolated-input.md):
+# cameraunlock/dev/isolated_input.h as a DLL. The build task is the only thing here that compiles
+# that header's Win32 half, and it leaves the DLL where IsolatedGameTest.psm1 copies it from:
+# cpp/tools/isolated_input_host/build/Release/CameraUnlockIsolatedInput.dll. The test starts it
+# from the net472 CameraUnlock.Core in a child Windows PowerShell and reads the key state functions
+# back. It detours user32 in that child alone, and sends no input to any window.
+build-isolated-input-host = "cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build && cmake --build cpp/tools/isolated_input_host/build --config Release"
+test-isolated-input-host = { cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedInputHost.Tests.ps1", depends-on = ["build-isolated-input-host", "build-debug"] }
 test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-powershell-differential-gate", "test-powershell-isolated-game-test"] }
 
 # Building

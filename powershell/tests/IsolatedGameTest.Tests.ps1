@@ -63,8 +63,9 @@ $paths = @(Get-GameInputPaths -BinaryPath $user32)
 Check 'a binary that imports no input API yields no paths' ($paths.Count -eq 0) (($paths | ForEach-Object Path) -join ', ')
 Check 'a binary with no usable path is refused, and told not to use the real devices' `
     (Throws { Assert-IsolatedInputCovers -BinaryPath $user32 -ModHost native } 'Do not test it with the real keyboard and mouse')
-Check 'a managed mod is refused with what to build' `
-    (Throws { Assert-IsolatedInputCovers -BinaryPath $user32 -ModHost managed } 'cannot host isolated input yet\. Build:')
+# The script host, which nothing has been built for.
+Check 'a mod host that is not supported is refused with what to build' `
+    (Throws { Assert-IsolatedInputCovers -BinaryPath $user32 -ModHost script } 'cannot host isolated input yet\. Build:')
 
 # --- the test port ----------------------------------------------------------
 # The two worked examples the fleet's prompts give.
@@ -91,6 +92,19 @@ try {
     Check 'a file that existed is put back as it was' ((Get-Content $existing -Raw).Trim() -eq 'UdpPort=default')
     Check 'a file the test created is removed' (-not (Test-Path $absent))
     Check 'the saved state is gone once restored' (-not (Test-Path $state))
+
+    # --- the host DLL of a managed mod ---------------------------------------
+    $modFolder = Join-Path $root 'plugins'
+    New-Item -ItemType Directory -Force $modFolder | Out-Null
+    $builtHost = Join-Path $root 'built.dll'
+    Check 'a host DLL that is not built is refused with how to build it' `
+        (Throws { Copy-IsolatedInputHost -ModFolder $modFolder -HostDll $builtHost } 'not built: .*built\.dll.*build-isolated-input-host')
+    Set-Content $builtHost 'host' -Encoding ASCII
+    Check 'a mod folder that does not exist is refused' `
+        (Throws { Copy-IsolatedInputHost -ModFolder (Join-Path $root 'absent') -HostDll $builtHost } 'mod folder does not exist')
+    $copied = Copy-IsolatedInputHost -ModFolder $modFolder -HostDll $builtHost
+    Check 'the host DLL is copied beside the mod under the name the C# entry point loads' `
+        ($copied -eq (Join-Path $modFolder 'CameraUnlockIsolatedInput.dll') -and (Test-Path $copied)) "$copied"
 
     $pose = Join-Path $root 'pose.txt'
     Set-TestPose -PoseFile $pose -X 15 -Yaw -12.5

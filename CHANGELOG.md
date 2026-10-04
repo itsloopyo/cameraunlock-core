@@ -9,6 +9,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - isolated input for a C# mod, and for keys polled with `GetKeyState`
+
+Built for the first Unity title to be tested in the background, and not yet run in a game:
+`managed` and `key-state` stay `unsupported` in `data/isolated-input.json` until one is proven
+(docs/isolated-input.md, A C# mod).
+
+- `cameraunlock/dev/isolated_input.h` detours `GetKeyState` and `GetKeyboardState` and answers
+  both from the synthetic key state: the high bit while the script holds the key, the low bit
+  flipped by each press. The log names each the first time the game calls it. A native dev build
+  that already calls `StartIsolatedInput` gets them on its next core bump, and a start now fails
+  where either cannot be detoured.
+- `cpp/tools/isolated_input_host`: the header as an x64 DLL, `CameraUnlockIsolatedInput.dll`,
+  with MinHook and the C++ runtime linked in. One export,
+  `int CameraUnlockStartIsolatedInput(const wchar_t* commandFile)`, and nothing done on load. It
+  logs to `CameraUnlockIsolatedInput.log` beside the command file. `pixi run
+  build-isolated-input-host` builds it to `cpp/tools/isolated_input_host/build/Release/`.
+- `CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked(string modFolder, Action<string> log)`, in
+  every target of `CameraUnlock.Core`: with `CameraUnlockInput.txt` in the folder it loads the
+  host DLL from the same folder and starts it, and without the file it does nothing. It throws
+  when the file is there and the DLL is missing, does not load or does not start.
+- `IsolatedGameTest.psm1`: `Start-IsolatedGame -ModHost managed [-HostDll <path>]` copies the host
+  DLL beside the mod and `Stop-IsolatedGame` removes it. `Copy-IsolatedInputHost` is that copy
+  alone. The session object gains `HostDll`. `-ModHost` defaults to `native`, so no caller changes.
+- `pixi run test-isolated-input-host` runs the C# entry point and the DLL in a child process and
+  reads the three key state functions back. It is not part of `check`.
+
 ### Added - stock sights, the fourth aim mode
 
 Owner ruling of 2026-10-04. The aim mode key now steps sights locked, free look with a marker,
