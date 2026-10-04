@@ -1897,6 +1897,17 @@
       "executable_relpath": "ProjectZomboid64.exe",
       "repo": "itsloopyo/project-zomboid-headtracking",
       "catalog_status": "absent"
+    },
+    "untitled-goose-game": {
+      "display_name": "Untitled Goose Game",
+      "env_var": "UNTITLED_GOOSE_GAME_PATH",
+      "steam_app_id": 837470,
+      "steam_folder": "Untitled Goose Game",
+      "executable_relpath": "Untitled.exe",
+      "data_folder": "Untitled_Data",
+      "repo": "itsloopyo/untitled-goose-game-headtracking",
+      "engine": "Unity",
+      "catalog_status": "absent"
     }
   }
 }
