@@ -270,6 +270,11 @@ inline BOOL CALLBACK PickLargestWindow(HWND hwnd, LPARAM param) {
     GetWindowThreadProcessId(hwnd, &pid);
     RECT rect = {};
     if (pid != search.pid || !IsWindowVisible(hwnd) || !GetWindowRect(hwnd, &rect)) return TRUE;
+    // A console the process owns (a mod loader's log console) is not the game, and once it had
+    // been taken for the game every script went to it.
+    char className[32] = {};
+    GetClassNameA(hwnd, className, sizeof(className));
+    if (std::strcmp(className, "ConsoleWindowClass") == 0) return TRUE;
     const long area = (rect.right - rect.left) * (rect.bottom - rect.top);
     if (area > search.bestArea) {
         search.best = hwnd;
@@ -278,7 +283,7 @@ inline BOOL CALLBACK PickLargestWindow(HWND hwnd, LPARAM param) {
     return TRUE;
 }
 
-// The game's main window: the largest visible top-level window of this process.
+// The game's main window: the largest visible top-level window of this process that is not a console.
 // Null until the game has made one.
 inline HWND FindGameWindow() {
     WindowSearch search = {GetCurrentProcessId(), nullptr, 0};
@@ -300,12 +305,34 @@ inline void FindDevices() {
     }
 }
 
+// The window this process registered to receive raw input of the event's kind, when it is
+// not the game's main window. An input library can register a window of its own (Rewired
+// does, in a Unity game), and Windows delivers a kind of raw input to one window per process.
+inline HWND RawInputTarget(DWORD type) {
+    const USHORT usage = type == RIM_TYPEKEYBOARD ? 0x06 : 0x02;
+    RAWINPUTDEVICE devices[16];
+    UINT count = 16;
+    const UINT got = GetRegisteredRawInputDevices(devices, &count, sizeof(RAWINPUTDEVICE));
+    if (got == static_cast<UINT>(-1)) return nullptr;
+    for (UINT i = 0; i < got; ++i) {
+        if (devices[i].usUsagePage == 0x01 && devices[i].usUsage == usage) return devices[i].hwndTarget;
+    }
+    return nullptr;
+}
+
 inline bool Post(const RAWINPUT& event) {
     const HWND window = S().window.load(std::memory_order_acquire);
     if (!window) return false;
     const unsigned slot = S().nextEvent.fetch_add(1, std::memory_order_acq_rel) % kEventSlots;
     S().events[slot] = event;
-    return PostMessageW(window, WM_INPUT, RIM_INPUT, reinterpret_cast<LPARAM>(&S().events[slot])) != 0;
+    const LPARAM handle = reinterpret_cast<LPARAM>(&S().events[slot]);
+    const HWND target = RawInputTarget(event.header.dwType);
+    if (target && target != window) {
+        static std::atomic<bool> said{false};
+        if (!said.exchange(true)) Log("isolated input: raw input is registered to a window other than the game's, and goes to both");
+        PostMessageW(target, WM_INPUT, RIM_INPUT, handle);
+    }
+    return PostMessageW(window, WM_INPUT, RIM_INPUT, handle) != 0;
 }
 
 static_assert(offsetof(DIDEVICEOBJECTDATA, dwOfs) == offsetof(DirectInputEvent, offset)
@@ -920,6 +947,12 @@ inline void WatchGameWindow() {
     if (unicode) SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&GameWindowProc));
     else SetWindowLongPtrA(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&GameWindowProc));
     S().window.store(window, std::memory_order_release);
+    // A window that lost the foreground before it was found (a mod loaded late, as a C# one
+    // is, or a launch that never had the foreground) has already been told so, and an engine
+    // that ignores input while deactivated would ignore every script.
+    PostMessageW(window, WM_ACTIVATEAPP, TRUE, 0);
+    PostMessageW(window, WM_ACTIVATE, WA_ACTIVE, 0);
+    PostMessageW(window, WM_SETFOCUS, 0, 0);
     Log("isolated input: game window found");
 }
 

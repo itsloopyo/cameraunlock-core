@@ -148,8 +148,8 @@ PowerShell loaded the net472 `CameraUnlock.Core`, `StartIfAsked` started the hos
 every detour went in, and with a script holding `A` down `GetKeyState`,
 `GetKeyboardState` and `GetAsyncKeyState` each reported `A` and no other key.
 That process has no window, so it says nothing about what a game's window
-receives. No game has been driven this way yet: until one is, `managed` stays
-`unsupported` in `data/isolated-input.json`.
+receives. Untitled Goose Game is the first game driven this way: see
+[Measured](#measured).
 
 ## A game it does not cover yet
 
@@ -279,6 +279,27 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
   title with an input whose effect the mod also logs, and read the log.
 
 ## Measured
+
+Untitled Goose Game 1.1.4 (Steam, Unity 2018.4.1f1, BepInEx 5 plugin), 2026-10-04,
+through the host DLL and `Start-IsolatedGame -ModHost managed`:
+
+- Keyboard: the title menu, the player count and the save slot were driven into
+  the world, and the arrow keys walked and turned the goose. The proof passed in
+  the world, and the game never held the foreground.
+- The game reads its keyboard through Rewired, whose native keyboard support
+  registers raw input to a window of its own. Unity saw every scripted key and
+  Rewired saw none until the script's raw input was also posted to the window
+  `GetRegisteredRawInputDevices` names. Turning Rewired's native support off at
+  run time is not a way round it: Rewired resets and the game's cached players
+  go invalid.
+- BepInEx's log console is a visible window of the game's process. It was taken
+  for the game window by the host (every script went to it) and by
+  `Save-GameCapture` (every capture was of the log) until both skipped
+  `ConsoleWindowClass`.
+- BepInEx 5 logs the host DLL in `plugins` as not a .NET assembly and skips it.
+- The host DLL could not be deleted for a moment after the game was stopped;
+  `Stop-IsolatedGame` waits for it.
+- Not driven: the mouse.
 
 Starfield 1.16.244.0 (Steam), 2026-10-03, with the real foreground sampled
 through every script and the game never holding it:

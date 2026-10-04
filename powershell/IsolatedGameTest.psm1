@@ -37,6 +37,30 @@ namespace CameraUnlockIsolatedTest {
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
         [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 
+        [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder name, int max);
+        delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+
+        // A process can own a console as well (BepInEx's log console), and that is what
+        // Process.MainWindowHandle returns for some games. The game is the largest visible
+        // window of the process that is not a console.
+        public static IntPtr GameWindow(uint pid) {
+            IntPtr best = IntPtr.Zero; long bestArea = 0;
+            EnumWindows(delegate(IntPtr hWnd, IntPtr l) {
+                uint owner; GetWindowThreadProcessId(hWnd, out owner);
+                RECT r;
+                if (owner != pid || !IsWindowVisible(hWnd) || !GetWindowRect(hWnd, out r)) return true;
+                System.Text.StringBuilder name = new System.Text.StringBuilder(256);
+                GetClassName(hWnd, name, name.Capacity);
+                if (name.ToString() == "ConsoleWindowClass") return true;
+                long area = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
+                if (area > bestArea) { bestArea = area; best = hWnd; }
+                return true;
+            }, IntPtr.Zero);
+            return best;
+        }
+
         public static uint ForegroundPid() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
 
         // PW_RENDERFULLCONTENT: the window's own content, whatever covers it.
@@ -363,7 +387,9 @@ function Save-GameCapture {
     #>
     param([Parameter(Mandatory)]$Session, [Parameter(Mandatory)][string]$Path, [int]$Scale = 1)
     $process = Get-Process -Id $Session.ProcessId -ErrorAction Stop
-    $bitmap = [CameraUnlockIsolatedTest.Native]::Capture($process.MainWindowHandle)
+    $window = [CameraUnlockIsolatedTest.Native]::GameWindow([uint32]$process.Id)
+    if ($window -eq [IntPtr]::Zero) { throw "the game (pid $($process.Id)) has no visible window to capture" }
+    $bitmap = [CameraUnlockIsolatedTest.Native]::Capture($window)
     if (-not $bitmap) { throw "the game window could not be captured" }
     try {
         if ($Scale -gt 1) {
@@ -446,7 +472,17 @@ function Stop-IsolatedGame {
         Wait-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
     }
     Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
-    if ($Session.HostDll) { Remove-Item $Session.HostDll -Force }
+    if ($Session.HostDll) {
+        # Windows can hold a DLL the game had loaded for a moment after the process is gone.
+        $deadline = (Get-Date).AddSeconds(10)
+        while ($true) {
+            try { Remove-Item $Session.HostDll -Force -ErrorAction Stop; break }
+            catch [UnauthorizedAccessException], [System.IO.IOException] {
+                if ((Get-Date) -gt $deadline) { throw }
+                Start-Sleep -Milliseconds 200
+            }
+        }
+    }
 }
 
 # ---------------------------------------------------------------------------
