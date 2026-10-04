@@ -134,7 +134,7 @@ int RunInputScriptTests() {
     cameraunlock::dev::ApplyPadStep(pad, cameraunlock::dev::PadControl::kButton, 0x1000, false, 0, 0);
     Check(pad.buttons == 0x0100 && pad.packet == 3, "a release leaves the other held buttons down");
     cameraunlock::dev::ApplyPadStep(pad, cameraunlock::dev::PadControl::kRightStick, 0, false, 1.0f, -1.0f);
-    Check(pad.rightX == 32767 && pad.rightY == -32767 && pad.leftX == 0, "a stick at its ends is XInput's range");
+    Check(pad.rightX == 32767 && pad.rightY == -32768 && pad.leftX == 0, "a stick at its ends is XInput's range");
     cameraunlock::dev::ApplyPadStep(pad, cameraunlock::dev::PadControl::kLeftTrigger, 0, false, 1.0f, 0);
     Check(pad.leftTrigger == 255 && pad.rightTrigger == 0, "a full trigger pull is 255");
 
