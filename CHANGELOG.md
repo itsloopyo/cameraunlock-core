@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - BioShock Remastered keeps its 5 cm downward lean as a per_game row
+
+`data/config-format.json` `per_game` gains bioshock-remastered-headtracking's `PositionLimitYDown`.
+Every build of that mod through v0.7.0 held the downward lean at 5 cm in code, and the owner ruled
+on 2026-10-07 that it keeps that limit when its position limits become rows of `CameraUnlock.ini`.
+The mod's table marks the row `PerGame()` with 0.05, its committed file holds
+`PositionLimitYDown=0.05`, and no released file holds the row, so nothing on a player's disk
+changes meaning.
+
 ### Fixed - a row edited just before a hotkey's save was not read until the next start
 
 An editor saves `CameraUnlock.ini`, and a hotkey's save runs before the mod's watch has looked at
