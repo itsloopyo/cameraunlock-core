@@ -43,6 +43,8 @@ bool UdpReceiver::Start(uint16_t port) {
     m_supervising.store(true, std::memory_order_release);
 
     const bool bound = BindAndReceive();
+    m_startFailure = bound ? std::string() : m_socket.LastError();
+    m_startFoundPortInUse = !bound && m_socket.LastErrorWasPortInUse();
     if (!bound && m_log) {
         // The OS's own reason, not a guess at one. A bind fails for reasons
         // other than a port conflict, and a log line that names the wrong one
@@ -199,6 +201,9 @@ void UdpReceiver::Stop() {
     m_frozenPackets.store(0, std::memory_order_relaxed);
     m_seenSourceCount = 0;
     m_rejectedPackets.store(0, std::memory_order_relaxed);
+    m_datagrams.store(0, std::memory_order_relaxed);
+    m_publishedPoses.store(0, std::memory_order_relaxed);
+    m_announcedCenters.store(0, std::memory_order_relaxed);
 }
 
 bool UdpReceiver::IsReceiving() const {
@@ -438,6 +443,9 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
         m_lastRecenterCounter = recenterCounter;
         m_hasRecenterCounter = true;
     }
+    if (pressed) {
+        m_announcedCenters.fetch_add(1, std::memory_order_relaxed);
+    }
 
     {
         // A press is the one discontinuity the tracker announces, so the
@@ -470,12 +478,14 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
 
         m_isRemoteConnection.store(IsRemoteAddress(senderAddr), std::memory_order_relaxed);
 
+        m_publishedPoses.fetch_add(1, std::memory_order_relaxed);
         m_lastReceiveTimestamp.store(nowUs, std::memory_order_release);
     }
 }
 
 void detail::UdpReceiverTestAccess::Deliver(UdpReceiver& receiver, const void* datagram, int length,
                                            const sockaddr_in& sender, int64_t arrivedUs) {
+    receiver.m_datagrams.fetch_add(1, std::memory_order_relaxed);
     if (length >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
         receiver.HandleDatagram(static_cast<const char*>(datagram), length, sender, arrivedUs);
     }
@@ -552,8 +562,12 @@ void UdpReceiver::ReceiverThread() {
                 m_log("recvfrom failed with WSA error " + std::to_string(err) +
                       " (continuing)");
             }
+            if (err == WSAEMSGSIZE) {
+                m_datagrams.fetch_add(1, std::memory_order_relaxed);
+            }
             continue;
         }
+        m_datagrams.fetch_add(1, std::memory_order_relaxed);
         if (!s_firstPacketLogged++ && m_log) {
             char ip[INET_ADDRSTRLEN] = {};
             inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
@@ -589,6 +603,9 @@ void UdpReceiver::ReceiverThread() {
             reinterpret_cast<sockaddr*>(&senderAddr),
             &addrLen
         );
+        if (bytesReceived >= 0) {
+            m_datagrams.fetch_add(1, std::memory_order_relaxed);
+        }
 #endif
 
         if (bytesReceived >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {

@@ -36,7 +36,8 @@ is yours to re-test forever.
 Conformance holds a repo to both halves of this with its `pipeline-port` check
 (`pixi run conformance -Check pipeline-port`). It looks at the tracked `.java`,
 `.kt`, `.lua`, `.py` and `.rs` sources outside `cameraunlock-core/`, vendored
-folders and test folders, and finds a port by two of the stages below: the
+folders, test folders and a Rust file's `#[cfg(test)]` modules, and finds a port
+by two of the stages below: the
 packet layer (a file that names OpenTrack, opens a UDP socket and reads from
 it) and the interpolator (a file that names a sample interval and
 extrapolates). A repo with either fails, quoting the paragraph above, when a
@@ -105,7 +106,7 @@ that calls `run-vectors.mjs`.
 | `project-zomboid-headtracking` | Java over a native DLL | Seven hand-written classes (receiver, filter, lean clamp, aim fade, aim mode, lean handover, zoom) beside a DLL that links core for the config and the hotkeys. No task that runs the vectors. The C interface below replaces all seven |
 | `fusion-360-headtracking` | Python | Runs the vectors |
 | `euro-truck-simulator-2-headtracking` | Python | `bridge/opentrack_to_freetrack.py` reads OpenTrack datagrams and hands them to FreeTrack. No core submodule, no interpolator |
-| `lopari` | Rust | `src-tauri/src/opentrack.rs`, the launcher's own reader of the packet. No interpolator |
+| `lopari` | Rust over C++ | Was a port: `src-tauri/src/opentrack.rs` read the packet and `src-tauri/src/bridge/interp.rs` interpolated. Its `tracker` crate now compiles core's receiver, parser and interpolators in, and no Rust reads a datagram |
 
 `bioshock-infinite-headtracking` was listed here as Rust. It is C++ now and links the core.
 

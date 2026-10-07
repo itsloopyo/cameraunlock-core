@@ -116,6 +116,16 @@ public:
     /// True if the most recent bind attempt failed. Cleared once retry succeeds.
     bool IsFailed() const { return m_failed.load(std::memory_order_acquire); }
 
+    /// What the OS said when Start() could not bind, and empty when it bound. For a host
+    /// that gives the port up where a mod waits for it: a launcher that leaves head tracking
+    /// to the program already listening calls Stop() and says why. Start() writes it before
+    /// the supervisor exists and the retries leave it alone, so it is read on the thread
+    /// that called Start().
+    const std::string& GetStartFailure() const { return m_startFailure; }
+
+    /// True when that Start() failed because another socket holds the port.
+    bool StartFoundPortInUse() const { return m_startFoundPortInUse; }
+
     /// Timestamp of the last received packet (microseconds since epoch).
     /// Compare across frames to detect new samples for interpolation.
     int64_t GetLastReceiveTimestamp() const { return m_lastReceiveTimestamp.load(std::memory_order_relaxed); }
@@ -166,6 +176,20 @@ public:
     uint64_t GetRejectedPacketCount() const {
         return m_rejectedPackets.load(std::memory_order_relaxed);
     }
+
+    /// Datagrams taken off the socket since Start(), whatever their length or content,
+    /// one that was too long for the buffer included. With GetPublishedPoseCount() it
+    /// tells a sender in the wrong format from no sender at all.
+    uint64_t GetDatagramCount() const { return m_datagrams.load(std::memory_order_relaxed); }
+
+    /// Of those, the ones published as the pose: parsed, from the source followed, and
+    /// let through by the gate. GetLastReceiveTimestamp() moves with each.
+    uint64_t GetPublishedPoseCount() const { return m_publishedPoses.load(std::memory_order_relaxed); }
+
+    /// CENTER presses the followed tracker announced in the trailer. Nothing in core acts
+    /// on one. A host whose output is relative (head movement turned into mouse movement)
+    /// compares this across frames to drop the step the press makes in the pose.
+    uint64_t GetAnnouncedCenterCount() const { return m_announcedCenters.load(std::memory_order_relaxed); }
 
 private:
     friend struct detail::UdpReceiverTestAccess;
@@ -239,6 +263,11 @@ private:
     std::atomic<int64_t> m_cycleRequestedAtUs{0};
     int64_t m_primaryLastSeenUs{0};
     std::atomic<uint64_t> m_rejectedPackets{0};
+    std::atomic<uint64_t> m_datagrams{0};
+    std::atomic<uint64_t> m_publishedPoses{0};
+    std::atomic<uint64_t> m_announcedCenters{0};
+    std::string m_startFailure;
+    bool m_startFoundPortInUse{false};
 
     /// The first datagram that does not parse is logged, once per receive thread.
     bool m_parseFailLogged{false};

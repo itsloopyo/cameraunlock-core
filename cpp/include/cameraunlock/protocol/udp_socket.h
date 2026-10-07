@@ -45,10 +45,14 @@ public:
     /// then goes hunting an app that is not running).
     const std::string& LastError() const { return m_lastError; }
 
+    /// True when the most recent Open() failed because another socket holds the port.
+    bool LastErrorWasPortInUse() const { return m_lastErrorWasPortInUse; }
+
 private:
     SOCKET m_socket = INVALID_SOCKET;
     bool m_wsaInitialized = false;
     std::string m_lastError;
+    bool m_lastErrorWasPortInUse = false;
 };
 
 }  // namespace cameraunlock

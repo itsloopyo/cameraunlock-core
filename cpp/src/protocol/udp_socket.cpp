@@ -47,6 +47,7 @@ bool UdpSocket::Open(uint16_t port) {
     if (m_socket != INVALID_SOCKET) {
         return true;
     }
+    m_lastErrorWasPortInUse = false;
 
 #ifdef _WIN32
     WSADATA wsaData;
@@ -122,7 +123,13 @@ bool UdpSocket::Open(uint16_t port) {
     addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-        m_lastError = DescribeFailure("bind", LastSocketError());
+        const int code = LastSocketError();
+        m_lastError = DescribeFailure("bind", code);
+#ifdef _WIN32
+        m_lastErrorWasPortInUse = code == WSAEADDRINUSE;
+#else
+        m_lastErrorWasPortInUse = code == EADDRINUSE;
+#endif
 #ifdef _WIN32
         closesocket(m_socket);
         WSACleanup();

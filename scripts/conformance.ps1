@@ -1612,6 +1612,28 @@ $PORT_CARGO_BUILDS_CORE = 'cameraunlock-core/cpp/'
 # the two to the same words.
 $PORT_LINK_IT = 'If the mod already loads a native DLL of its own, link `cameraunlock` and do not port - not the packet layer, not the interpolators, not the processors.'
 
+# A Rust file keeps its unit tests in a `#[cfg(test)] mod` of its own. A socket opened
+# there is a test sending itself a datagram, not the repo's packet layer: lopari's
+# firewall.rs, which reads the Windows firewall's rules, was named as a port of the packet
+# layer for one. The module's text is cut before the stages are looked for.
+$PORT_RUST_TEST_MOD = '#\[cfg\((?:test|all\([^\]]*\btest\b[^\]]*\))\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{'
+
+function Remove-RustTestModules {
+    param([string]$Text)
+    while ($true) {
+        $m = [regex]::Match($Text, $PORT_RUST_TEST_MOD)
+        if (-not $m.Success) { return $Text }
+        $depth = 1
+        $i = $m.Index + $m.Length
+        while ($i -lt $Text.Length -and $depth -gt 0) {
+            $c = $Text[$i]
+            if ($c -eq '{') { $depth++ } elseif ($c -eq '}') { $depth-- }
+            $i++
+        }
+        $Text = $Text.Remove($m.Index, $i - $m.Index)
+    }
+}
+
 function Test-PipelinePort {
     param([string]$Name, [string]$Root)
 
@@ -1621,6 +1643,7 @@ function Test-PipelinePort {
     foreach ($rel in $tracked) {
         if ($rel -notmatch $PORT_SOURCE -or (Test-IsTestSource $rel)) { continue }
         $text = Read-TextFile (Join-Path $Root $rel)
+        if ($rel -match '\.rs$') { $text = Remove-RustTestModules $text }
         if ($text -match $PORT_OPENTRACK -and $text -cmatch $PORT_UDP_OPEN -and $text -cmatch $PORT_UDP_READ) { $packet.Add($rel) }
         if ($text -match $PORT_SAMPLE_INTERVAL -and $text -match $PORT_EXTRAPOLATES) { $interpolator.Add($rel) }
     }

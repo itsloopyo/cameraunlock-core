@@ -114,6 +114,37 @@ udp:setsockname('127.0.0.1', 4444)
 local data = udp:receivefrom()
 '@
 
+# A Rust file that names OpenTrack and whose only socket is in its unit tests.
+$RustTestOnlySocket = @'
+//! Reads the firewall rules that decide whether OpenTrack datagrams reach UDP 4242.
+pub fn port_list_contains(list: &str, port: u16) -> bool { list.split(',').any(|p| p.trim().parse() == Ok(port)) }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_datagram_gets_through() {
+        let listener = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        let mut buf = [0u8; 8];
+        if true { assert!(listener.recv(&mut buf).is_ok()); }
+    }
+}
+'@
+
+# The same file with a receive loop of its own after the tests.
+$RustSocketBesideTests = $RustTestOnlySocket + @'
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    fn nothing() {}
+}
+
+pub fn listen() {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:4242").unwrap();
+    let mut buf = [0u8; 64];
+    socket.recv(&mut buf).unwrap();
+}
+'@
+
 $CMakeLinksCore = @'
 add_subdirectory(../cameraunlock-core/cpp core)
 add_library(Mod SHARED src/plugin.cpp)
@@ -194,6 +225,16 @@ $cases['port-beside-cargo-core'] = @{
 $cases['port-beside-other-native'] = @{
     Root = (New-Repo 'port-beside-other-native' @{ 'pixi.toml' = $PixiVectors; 'modules/poseinterpolator.lua' = $LuaInterpolator; 'native/CMakeLists.txt' = $CMakeNoCore })
     Expect = @()
+}
+# A socket opened only in a Rust file's unit tests is not a packet layer, and one opened
+# outside them still is, whatever test modules the file also has.
+$cases['rust-socket-in-unit-tests'] = @{
+    Root = (New-Repo 'rust-socket-in-unit-tests' @{ 'pixi.toml' = $PixiNoVectors; 'src/firewall.rs' = $RustTestOnlySocket; 'build.rs' = $BuildRs })
+    Expect = @()
+}
+$cases['rust-socket-beside-unit-tests'] = @{
+    Root = (New-Repo 'rust-socket-beside-unit-tests' @{ 'pixi.toml' = $PixiNoVectors; 'src/firewall.rs' = $RustSocketBesideTests })
+    Expect = @('FAIL ports the packet layer \(src/firewall\.rs\) of core''s tracking pipeline.*no pixi task runs .*run-vectors\.mjs')
 }
 # The harness, the vendored core and a build tree are not the mod's port.
 $cases['port-shaped-files-elsewhere'] = @{

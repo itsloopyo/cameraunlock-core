@@ -9,6 +9,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - what a host that hands the tracker's pose on needs from the receiver and the session
+
+lopari, the launcher, carried a Rust copy of the packet reader and of both interpolators for its
+FreeTrack bridge, its mouse bridge and its tracker preview. Run against the pipeline vectors, the
+copy failed three: `wire-rejects-finite-double-infinite-float`, `wire-rejects-a-pose-no-tracker-sends`
+and `duplicate-packets-track-the-source-rate`. It now compiles the receiver and the session in, and
+these are the pieces it had no way to reach.
+
+- `HeadTrackingSession::GetLastInterpolatedPosition()`: the position after interpolation and before
+  the position processor, beside `GetLastInterpolated()` for the rotation. A bridge to another head
+  tracking protocol publishes that pair and leaves limits and smoothing to whatever reads it.
+- `UdpReceiver::GetStartFailure()` and `StartFoundPortInUse()`: why `Start()` did not bind, for a
+  host that gives the port up where a mod waits for it. `UdpSocket::LastErrorWasPortInUse()` is
+  what they read.
+- `UdpReceiver::GetDatagramCount()` and `GetPublishedPoseCount()`: every datagram taken off the
+  socket, and the ones published as the pose. The gap between them is a sender in the wrong format.
+- `UdpReceiver::GetAnnouncedCenterCount()`: CENTER presses announced in the HCAM trailer. Nothing in
+  core acts on one. A host whose output is relative uses it to drop the step a press makes.
+
+### Fixed - pipeline-port no longer counts a socket opened in a Rust file's unit tests
+
+The check named lopari's `firewall.rs` as a port of the packet layer because a `#[cfg(test)]` module
+in it opens a UDP socket to test a route. A Rust file's `#[cfg(test)]` modules are now cut before
+the two stages are looked for. `scripts/test-conformance-checks.ps1` has both cases: a socket only
+in the tests, and one beside them.
+
 ### Added - java/: the binding to the C interface and the boot class of a Java agent mod
 
 project-zomboid-headtracking, a Java agent, carried seven hand-written Java copies of the pipeline

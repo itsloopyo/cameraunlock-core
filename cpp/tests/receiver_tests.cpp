@@ -47,6 +47,7 @@ constexpr uint16_t kPressPort = 14266;
 constexpr uint16_t kPressSenderPort = 14267;
 constexpr uint16_t kWaitPort = 14268;
 constexpr uint16_t kWaitSenderPort = 14269;
+constexpr uint16_t kStartFailurePort = 14270;
 
 size_t BuildPacket(uint8_t out[54], double x, double y, double z,
                    double yaw, double pitch, double roll,
@@ -438,6 +439,39 @@ int RunReceiverTests() {
         UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1022000);
         Check(refusing.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 12.5f) && refusing.GetFrozenPacketCount() == 0,
               "a refused datagram between two poses leaves the gate where it was");
+        Check(refusing.GetDatagramCount() == 23 && refusing.GetPublishedPoseCount() == 2,
+              "every datagram is counted, and only the two poses as published");
+        Check(refusing.GetAnnouncedCenterCount() == 0, "a trailer on a refused datagram announces nothing");
+
+        const uint8_t press = 1;
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &press);
+        UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1023000);
+        UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1024000);
+        Check(refusing.GetAnnouncedCenterCount() == 1, "a burst carrying one counter is one announced press");
+        const uint8_t short_datagram[12] = {};
+        UdpReceiverTestAccess::Deliver(refusing, short_datagram, sizeof(short_datagram), tracker, 1025000);
+        Check(refusing.GetDatagramCount() == 26 && refusing.GetPublishedPoseCount() == 4,
+              "a datagram too short to be a pose is counted and not published");
+    }
+
+    // ---- UdpReceiver: a host that gives the port up is told why Start() did not bind ----
+    std::cout << "UdpReceiver start failure tests:\n";
+    {
+        cameraunlock::UdpSocket holder;
+        Check(holder.Open(kStartFailurePort), "another socket holds the port");
+        UdpReceiver blocked;
+        blocked.SetLog([](const std::string&) {});
+        Check(!blocked.Start(kStartFailurePort), "Start does not bind a held port");
+        Check(blocked.StartFoundPortInUse(), "and says the port is in use");
+        Check(blocked.GetStartFailure().find("bind failed with error " + std::to_string(kExpectedInUseError)) == 0,
+              "with the OS's own reason");
+        blocked.Stop();
+        holder.Close();
+
+        Check(blocked.Start(kStartFailurePort), "the same receiver binds once the port is free");
+        Check(!blocked.StartFoundPortInUse() && blocked.GetStartFailure().empty(),
+              "and a Start that binds reports no failure");
+        blocked.Stop();
     }
 
     if (g_failures == 0) {

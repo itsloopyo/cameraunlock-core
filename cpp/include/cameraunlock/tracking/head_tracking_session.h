@@ -362,6 +362,7 @@ public:
 
                 PositionData interpolatedPos =
                     m_positionInterpolator.Update(rawPos, isNewPosSample, deltaTime);
+                m_lastInterpolatedPosition = interpolatedPos;
 
                 // The PHYSICAL head rotation, taken from the processor's smoothed state
                 // rather than from m_yaw/m_pitch/m_roll. Those carry per-axis sensitivity
@@ -379,10 +380,12 @@ public:
                 m_positionValid = true;
             } else {
                 m_positionValid = false;
+                m_lastInterpolatedPosition = PositionData();
             }
         } else {
             m_posX = m_posY = m_posZ = 0.0f;
             m_positionValid = false;
+            m_lastInterpolatedPosition = PositionData();
         }
 
         return true;
@@ -429,6 +432,7 @@ public:
         m_positionInterpolator.Reset();
         m_rotationValid = false;
         m_positionValid = false;
+        m_lastInterpolatedPosition = PositionData();
     }
 
     /// Processed rotation in degrees from the latest Update().
@@ -460,6 +464,13 @@ public:
     // Per-frame pipeline taps for diagnostics (raw -> interpolated -> processed).
     const TrackingPose& GetLastRaw() const { return m_lastRaw; }
     const InterpolatedPose& GetLastInterpolated() const { return m_lastInterpolated; }
+
+    /// The position after interpolation and before the position processor: metres in the
+    /// tracker's axes, no limits, no smoothing, no pivot. With GetLastInterpolated() it is
+    /// the pose for a host that hands the tracker's pose on to something that shapes it
+    /// itself, as a bridge to another head tracking protocol does. Not valid (IsValid())
+    /// until an Update() has run the position path.
+    const PositionData& GetLastInterpolatedPosition() const { return m_lastInterpolatedPosition; }
     const TrackingPose& GetLastProcessed() const { return m_lastProcessed; }
     bool WasNewSample() const { return m_lastWasNewSample; }
 
@@ -518,6 +529,7 @@ private:
 
     TrackingPose m_lastRaw;
     InterpolatedPose m_lastInterpolated;
+    PositionData m_lastInterpolatedPosition;
     TrackingPose m_lastProcessed;
     bool m_lastWasNewSample = false;
 };
