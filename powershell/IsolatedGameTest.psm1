@@ -360,6 +360,7 @@ function Start-IsolatedGame {
     input on), launches, waits for the process, and for -SettleSeconds returns the foreground to the
     window that held it each time the new game window takes it. Returns the session the other
     functions take. Refuses to start while the game is already running: that one is someone else's.
+    -Started is handed the process the moment it appears, before the settling.
     With -ModHost managed it also copies the host DLL beside the mod (Copy-IsolatedInputHost), and
     Stop-IsolatedGame removes that copy.
     #>
@@ -374,7 +375,8 @@ function Start-IsolatedGame {
         # native: the mod's own dev build holds the detours. managed: a C# mod, which loads the host DLL.
         [ValidateSet('native', 'managed')][string]$ModHost = 'native',
         # The host DLL to copy for a managed mod, when it is not this checkout's x64 build.
-        [string]$HostDll = $script:HostDllBuild
+        [string]$HostDll = $script:HostDllBuild,
+        [scriptblock]$Started
     )
     if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue) {
         throw "$ProcessName is already running and this session did not start it. Not launching over it."
@@ -393,6 +395,7 @@ function Start-IsolatedGame {
         if (-not $process) { Start-Sleep -Milliseconds 500 }
     }
     if (-not $process) { throw "$ProcessName did not start within $StartTimeoutSeconds seconds of launching $Launch" }
+    if ($Started) { & $Started $process | Out-Null }
 
     $settled = (Get-Date).AddSeconds($SettleSeconds)
     while ((Get-Date) -lt $settled) {
@@ -559,7 +562,7 @@ function Stop-IsolatedGame {
 # One session at a time
 # ---------------------------------------------------------------------------
 # <root>\<key>\lock\owner.json     the lock, with who holds it
-# <root>\queue\<ticks>-<pid>.json  one ticket for each session waiting, oldest first
+# <root>\_queue\<ticks>-<pid>.json one ticket for each session waiting, oldest first
 # Every look at them and every change to them happens inside one named mutex, so no two sessions
 # ever decide on the same state. The lock itself is a folder, because it has to outlive the
 # process that took it: a session that starts the game in one process and stops it in another
@@ -693,6 +696,12 @@ function Enter-GameRig {
     rig that process got. This is how a session that starts the game in one process stops it in
     another.
 
+    While it waits it says what for, each time that changes: who holds the rig and how many asked
+    before this session. -Waiting is a block handed the same line, for a caller that acts on it. A
+    holder whose own process has gone while its game runs on is named as that: the session is
+    between two of its processes, or its runner was killed. -SessionFile is recorded with the
+    lock for that case, so whoever waits can see what Stop-IsolatedGameSession would need.
+
     A session that never asks is not seen. Every session on the machine has to take the rig for
     the lock to mean anything.
     #>
@@ -710,7 +719,11 @@ function Enter-GameRig {
         [switch]$WholeGpu,
         # 0 takes the rig now or throws. The default waits an hour.
         [int]$WaitSeconds = 3600,
-        [string]$Token = ''
+        [string]$Token = '',
+        # The file the session is kept in (Start-IsolatedGameSession -SessionFile), shown by Get-GameRig.
+        [string]$SessionFile = '',
+        # Handed each new line this session waits on. It runs outside the lock's mutex.
+        [scriptblock]$Waiting
     )
     if (-not $Game -and -not $WholeGpu -and -not $Token) { throw 'Enter-GameRig needs -Game, or -WholeGpu for work that has no game' }
     $key = $(if ($Game) { Get-GameRigKey $Game } else { 'gpu' })
@@ -756,6 +769,12 @@ function Enter-GameRig {
             # One turn: the rig, or what this session is waiting for.
             $turn = Invoke-GameRigExclusive {
                 $stale = $null
+                # Whoever asked before this session, for the same rig or for the whole card, goes first.
+                $ahead = @(foreach ($other in Get-GameRigTickets) {
+                    if ($other.File -eq $ticket) { break }
+                    if ($other.Key -eq $key -or $other.WholeGpu -or $WholeGpu) { $other }
+                })
+                $behind = $(if ($ahead.Count -gt 0) { ", and $($ahead.Count) asked before this session" } else { '' })
                 foreach ($folder in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne '_queue' }) {
                     $held = Read-GameRigOwner $folder.Name
                     if (-not $held) { continue }
@@ -764,7 +783,10 @@ function Enter-GameRig {
                         if ($held.ProcessId -eq $PID -and $held.ProcessStart -eq $start) {
                             throw "this process already holds the rig for $key ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
                         }
-                        if ($live) { return "the rig is in use: $(Format-GameRigOwner $held)" }
+                        if ($live) {
+                            $orphaned = $(if (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart) { '' } else { ', whose own process has gone while the game runs on' })
+                            return "the rig is in use: $(Format-GameRigOwner $held)$orphaned$behind"
+                        }
                         if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
                             throw "the last session on $key, $(Format-GameRigOwner $held), ended without putting the game's files back. What it saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)', then ask again."
                         }
@@ -773,12 +795,8 @@ function Enter-GameRig {
                         return "the graphics card is in use: $($folder.Name) is held by $(Format-GameRigOwner $held)"
                     }
                 }
-                # Whoever asked before this session, for the same rig or for the whole card, goes first.
-                foreach ($other in Get-GameRigTickets) {
-                    if ($other.File -eq $ticket) { break }
-                    if ($other.Key -eq $key -or $other.WholeGpu -or $WholeGpu) {
-                        return "waiting behind $($other.Owner) (pid $($other.ProcessId)), who asked first"
-                    }
+                if ($ahead.Count -gt 0) {
+                    return "waiting behind $($ahead[0].Owner) (pid $($ahead[0].ProcessId)), who asked first$(if ($ahead.Count -gt 1) { ", with $($ahead.Count - 1) more ahead of this session" })"
                 }
                 $running = @($names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
                 if ($running.Count -gt 0) {
@@ -793,6 +811,7 @@ function Enter-GameRig {
                 $record = [pscustomobject]@{
                     Key = $key; Owner = $Owner; ProcessId = $PID; ProcessStart = $start; Since = (Get-Date).ToString('s')
                     What = $What; Processes = $names; WholeGpu = [bool]$WholeGpu; StateFolder = $StateFolder
+                    SessionFile = $SessionFile
                     Token = [Guid]::NewGuid().ToString('N')
                 }
                 ConvertTo-Json $record | Set-Content (Join-Path $fresh 'owner.json') -Encoding UTF8
@@ -808,12 +827,18 @@ function Enter-GameRig {
             }
             if ($WaitSeconds -le 0) { throw $turn }
             if ((Get-Date) -ge $deadline) { throw "$turn. Waited $WaitSeconds seconds for the rig for $key." }
-            if ($turn -ne $said) { Write-Host "Enter-GameRig ($key, $Owner): $turn"; $said = $turn }
+            if ($turn -ne $said) {
+                Write-Host "Enter-GameRig ($key, $Owner): $turn"
+                $said = $turn
+                if ($Waiting) { & $Waiting $turn | Out-Host }
+            }
             Start-Sleep -Milliseconds 500
         }
     } finally {
         # Gone already when the rig was taken. Left by a wait that ran out or a turn that threw.
-        Remove-Item $ticket -Force -ErrorAction SilentlyContinue
+        # Inside the mutex, as every look at the queue is: a ticket that went while another
+        # session was reading the queue made that session's turn throw.
+        Invoke-GameRigExclusive { Remove-Item $ticket -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -1101,13 +1126,22 @@ function Start-IsolatedGameSession {
     processes: start, look at a capture, decide what to play next, stop. The rig stays held in
     between, by the running game.
 
+    -Enter runs with the rig held and nothing saved yet, and is handed the session: take a
+    second lock the game's other users still go by, wait for one of them to finish putting the
+    game's files back. -Leave is its other half, run once the files are back and before the rig is
+    released. It runs when the start fails too, -Enter having thrown included, so it must do
+    nothing where -Enter did nothing. Pass the same block to Stop-IsolatedGameSession.
+
     -Prepare runs with the rig held and the state saved, before the launch: build and deploy the
     dev build, change the game's settings. A build made there cannot land under another session's
     running game. -IniPath is the mod's config, where -Port is written; it is saved and put back
     with -Files. -PoseFile starts the pose sender on -Port.
 
     The session carries Port, PoseFile, Sender (the pose sender's process id), ModFolder,
-    StateFolder, Owner, RigToken and SessionFile beside what Start-IsolatedGame returns.
+    StateFolder, Owner, RigToken and SessionFile beside what Start-IsolatedGame returns. With
+    -SessionFile it is written there as soon as the game's process appears, and the rig's record
+    names the file, so a session whose own process is killed can still be stopped by another:
+    Stop-IsolatedGameSession -SessionFile.
     #>
     param(
         [Parameter(Mandatory)][string]$ProcessName,
@@ -1121,6 +1155,8 @@ function Start-IsolatedGameSession {
         [string[]]$Folders = @(),
         # Where they are kept until the session stops. Needed with -Files, -Folders or -IniPath.
         [string]$StateFolder = '',
+        [scriptblock]$Enter,
+        [scriptblock]$Leave,
         [scriptblock]$Prepare,
         [string]$IniPath = '',
         [int]$Port = 0,
@@ -1137,6 +1173,8 @@ function Start-IsolatedGameSession {
         [string[]]$Processes = @(),
         [switch]$WholeGpu,
         [int]$WaitSeconds = 3600,
+        # Handed each new line the wait for the rig says (Enter-GameRig -Waiting).
+        [scriptblock]$Waiting,
         [string]$SessionFile = ''
     )
     if (($IniPath -or $PoseFile) -and $Port -eq 0) { throw '-IniPath and -PoseFile need -Port: pass Get-ModTestPort -RepoName <the repo folder>' }
@@ -1146,7 +1184,7 @@ function Start-IsolatedGameSession {
     if ($SessionFile -and (Test-Path $SessionFile)) { throw "$SessionFile holds a session that was never stopped. Stop it first (Stop-IsolatedGameSession -SessionFile)." }
 
     $rig = Enter-GameRig -Game $ProcessName -Owner $Owner -What $What -Processes $Processes -WholeGpu:$WholeGpu -WaitSeconds $WaitSeconds `
-        -StateFolder $(if ($saves) { $StateFolder } else { '' })
+        -StateFolder $(if ($saves) { $StateFolder } else { '' }) -SessionFile $SessionFile -Waiting $Waiting
     $session = [pscustomobject]@{
         ProcessId = 0; ProcessName = $ProcessName; CommandFile = (Join-Path $ModFolder $script:CommandFileName); Sequence = 0
         HostDll = $(if ($ModHost -eq 'managed') { Join-Path $ModFolder $script:HostDllName } else { $null })
@@ -1154,6 +1192,7 @@ function Start-IsolatedGameSession {
         StateFolder = $(if ($saves) { $StateFolder } else { '' }); Owner = $Owner; RigToken = $rig.Token; SessionFile = $SessionFile
     }
     try {
+        if ($Enter) { & $Enter $session | Out-Host }
         if ($saves) { Save-GameTestState -Files $kept -Folders $Folders -Folder $StateFolder }
         if ($Prepare) { & $Prepare | Out-Host }
         if ($IniPath) { [void](Set-ModTestPort -IniPath $IniPath -Port $Port) }
@@ -1168,19 +1207,22 @@ function Start-IsolatedGameSession {
         }
         if ($WorkingDirectory) { Push-Location $WorkingDirectory }
         try {
-            $started = Start-IsolatedGame -ProcessName $ProcessName -Launch $Launch -ModFolder $ModFolder -StartTimeoutSeconds $StartTimeoutSeconds `
-                -SettleSeconds $SettleSeconds -ModHost $ModHost -HostDll $HostDll
+            # Written before the settling: a session killed in it has left a game someone has to stop.
+            [void](Start-IsolatedGame -ProcessName $ProcessName -Launch $Launch -ModFolder $ModFolder -StartTimeoutSeconds $StartTimeoutSeconds `
+                -SettleSeconds $SettleSeconds -ModHost $ModHost -HostDll $HostDll -Started {
+                    param($process)
+                    $session.ProcessId = $process.Id
+                    if ($SessionFile) { Save-IsolatedGameSession -Session $session }
+                })
         } finally {
             if ($WorkingDirectory) { Pop-Location }
             foreach ($name in $before.Keys) { [Environment]::SetEnvironmentVariable($name, $before[$name], 'Process') }
         }
-        $session.ProcessId = $started.ProcessId
-        if ($SessionFile) { Save-IsolatedGameSession -Session $session }
         $session
     } catch {
         # The first error is the one to report. One from putting things back is said beside it.
         $failure = $_
-        try { Complete-IsolatedGameSession -Session $session -Rig $rig -RestoreRetrySeconds 30 }
+        try { Complete-IsolatedGameSession -Session $session -Rig $rig -Leave $Leave -RestoreRetrySeconds 30 }
         catch { Write-Warning "and the session could not be put back: $_" }
         throw $failure
     }
@@ -1190,7 +1232,7 @@ function Complete-IsolatedGameSession {
     # Stops what the session started and puts back what it changed, each step whatever the one
     # before it did. The rig is released only once the game's files are back: a restore that
     # fails leaves it held, and Enter-GameRig then tells the next session what to restore.
-    param($Session, $Rig, [scriptblock]$Collect, [int]$RestoreRetrySeconds)
+    param($Session, $Rig, [scriptblock]$Collect, [scriptblock]$Leave, [int]$RestoreRetrySeconds)
     $failures = New-Object System.Collections.Generic.List[object]
     if ($Session.ProcessId) {
         try { Stop-IsolatedGame -Session $Session } catch { $failures.Add($_) }
@@ -1211,6 +1253,7 @@ function Complete-IsolatedGameSession {
     if ($Session.StateFolder -and (Test-Path (Join-Path $Session.StateFolder 'state.json'))) {
         Restore-GameTestState -Folder $Session.StateFolder -RetrySeconds $RestoreRetrySeconds
     }
+    if ($Leave) { try { & $Leave $Session | Out-Host } catch { $failures.Add($_) } }
     Exit-GameRig -Rig $Rig
     if ($Session.SessionFile) { Remove-Item $Session.SessionFile -Force -ErrorAction SilentlyContinue }
     if ($failures.Count -gt 0) { throw $failures[0] }
@@ -1224,7 +1267,11 @@ function Stop-IsolatedGameSession {
     .DESCRIPTION
     Every step runs whatever the one before it did, and the first failure is thrown at the end.
     -Collect runs after the game has stopped and before its files are put back, and is handed the
-    session: copy out the logs and the config as the run left them.
+    session: copy out the logs and the config as the run left them. -Leave runs once the files
+    are back and before the rig is released: the other half of Start-IsolatedGameSession -Enter.
+
+    With -SessionFile this also ends a session whose own process was killed: Get-GameRig names
+    the file of the session that holds a rig. It refuses while that process is still running.
 
     A session whose lock is gone (someone removed it, or it was taken over after the game went
     with nothing saved) is not put back: its pose sender is stopped, its session file removed,
@@ -1243,6 +1290,7 @@ function Stop-IsolatedGameSession {
         # In place of -Session, in a later process than the one that started it.
         [string]$SessionFile = '',
         [scriptblock]$Collect,
+        [scriptblock]$Leave,
         [int]$RestoreRetrySeconds = 30
     )
     if (-not $Session) {
@@ -1260,7 +1308,7 @@ function Stop-IsolatedGameSession {
         if ($Session.SessionFile) { Remove-Item $Session.SessionFile -Force -ErrorAction SilentlyContinue }
         throw "this session no longer holds the rig, so the game and its files were left alone: $_"
     }
-    Complete-IsolatedGameSession -Session $Session -Rig $rig -Collect $Collect -RestoreRetrySeconds $RestoreRetrySeconds
+    Complete-IsolatedGameSession -Session $Session -Rig $rig -Collect $Collect -Leave $Leave -RestoreRetrySeconds $RestoreRetrySeconds
 }
 
 function Invoke-IsolatedGameSession {
@@ -1271,8 +1319,8 @@ function Invoke-IsolatedGameSession {
     and releases the rig, on every way out: the block throwing, the game not starting, the rig
     not coming free in time.
     .DESCRIPTION
-    Takes what Start-IsolatedGameSession takes, and -Collect as Stop-IsolatedGameSession does.
-    Returns what -Run returns. What the block does is the mod's own: the way into a save, the
+    Takes what Start-IsolatedGameSession takes, -SessionFile included, and -Collect as
+    Stop-IsolatedGameSession does. Returns what -Run returns. What the block does is the mod's own: the way into a save, the
     inputs, the poses, the captures.
 
     When the block throws and the teardown fails as well, the block's error is the one thrown and
@@ -1290,6 +1338,8 @@ function Invoke-IsolatedGameSession {
         [string[]]$Files = @(),
         [string[]]$Folders = @(),
         [string]$StateFolder = '',
+        [scriptblock]$Enter,
+        [scriptblock]$Leave,
         [scriptblock]$Prepare,
         [string]$IniPath = '',
         [int]$Port = 0,
@@ -1303,6 +1353,8 @@ function Invoke-IsolatedGameSession {
         [string[]]$Processes = @(),
         [switch]$WholeGpu,
         [int]$WaitSeconds = 3600,
+        [scriptblock]$Waiting,
+        [string]$SessionFile = '',
         [int]$RestoreRetrySeconds = 30
     )
     $start = @{} + $PSBoundParameters
@@ -1315,7 +1367,7 @@ function Invoke-IsolatedGameSession {
         $thrown = $true
         throw
     } finally {
-        try { Stop-IsolatedGameSession -Session $session -Collect $Collect -RestoreRetrySeconds $RestoreRetrySeconds }
+        try { Stop-IsolatedGameSession -Session $session -Collect $Collect -Leave $Leave -RestoreRetrySeconds $RestoreRetrySeconds }
         catch {
             if (-not $thrown) { throw }
             Write-Warning "and the session could not be put back: $_"

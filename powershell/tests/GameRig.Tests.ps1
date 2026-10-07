@@ -130,6 +130,8 @@ try {
     $state = Get-GameRig -Game 'queue'
     Check 'the rig says who holds it and who waits, in the order they asked' `
         ($state.Holder.Owner -eq 'first' -and $state.Holder.ProcessId -eq $PID -and $state.Live -and ($state.Waiting -join ',') -eq 'w1,w2,w3') ($state.Waiting -join ',')
+    Wait-All @(Start-Taker @{ Game = 'queue'; Owner = 'counted'; Log = $log; WaitSeconds = 0 })
+    Check 'a session that asks is told how many asked before it' ((Get-Content "$log.counted" -Raw) -match 'the rig is in use: first \(.*\), and 3 asked before this session') (Get-Content "$log.counted" -Raw)
     Exit-GameRig -Rig $mine
     Wait-All $takers
     Check 'waiters are served oldest first' ((@(Get-Content $log | Where-Object { $_ -like 'in *' }) -join ',') -eq 'in w1,in w2,in w3') ((Get-Content $log) -join ', ')
@@ -141,6 +143,16 @@ try {
     Check 'and its ticket is gone' (@((Get-GameRig -Game 'queue').Waiting).Count -eq 0)
     Check 'a process that asks again for a rig it holds is told so, and does not wait on itself' (Throws { Enter-GameRig -Game 'queue' -Owner 'first' } 'already holds the rig')
     Exit-GameRig -Rig $mine
+
+    # The block a waiter passes is handed what it waits on.
+    $tokenFile = Join-Path $root 'told.token'
+    $holder = Start-Taker @{ Game = 'told'; Owner = 'holder'; Log = $log; HoldMs = 3000; TokenFile = $tokenFile }
+    Wait-Until { Test-Path $tokenFile }
+    $told = New-Object System.Collections.Generic.List[string]
+    $mine = Enter-GameRig -Game 'told' -Owner 'waiter' -Waiting { param($line) $told.Add($line) } 6>$null
+    Check 'the waiting block is handed each line the wait says, and the rig then comes' ($told.Count -ge 1 -and $told[0] -match '^the rig is in use: holder \(pid \d+' -and (Get-GameRig -Game 'told').Holder.Owner -eq 'waiter') ($told -join ' | ')
+    Exit-GameRig -Rig $mine
+    Wait-All @($holder)
 
     # --- a dead owner's lock ------------------------------------------------
     $log = Join-Path $root 'dead.log'
@@ -238,6 +250,8 @@ try {
     $thrown = ''
     try {
         Invoke-IsolatedGameSession @session -Prepare { $seen.PreparedWithRig = (Get-GameRig -Game $gameName).Holder.Owner } `
+            -Enter { param($s) $seen.EnteredWith = "$((Get-GameRig -Game $gameName).Holder.Token -eq $s.RigToken) $(Test-Path (Join-Path $root 'state'))" } `
+            -Leave { param($s) $seen.LeftWith = "$((Get-GameRig -Game $gameName).Holder.Token -eq $s.RigToken) $(Test-Path (Join-Path $root 'state')) $([IO.File]::ReadAllText($ini) -eq $iniText)" } `
             -Collect { param($s) $seen.CollectedIni = [IO.File]::ReadAllText($ini); $seen.CollectedAfterStop = -not (Get-Process -Id $s.ProcessId -ErrorAction SilentlyContinue) } `
             -Run {
                 param($s)
@@ -268,6 +282,8 @@ try {
     Check 'the folder is as it was: the deleted file back, the changed one as before, the added one gone' ($tree -eq 'player.bin=the player;world\chunk-1.bin=a chunk') $tree
     Check 'the saved state and the command file are gone' (-not (Test-Path $session.StateFolder) -and -not (Test-Path (Join-Path $mod 'CameraUnlockInput.txt')))
     Check 'the rig is free' ($null -eq (Get-GameRig -Game $gameName))
+    Check 'the enter block ran with the rig held and nothing saved yet' ($seen.EnteredWith -eq 'True False') $seen.EnteredWith
+    Check 'the leave block ran with the files back and the rig still held' ($seen.LeftWith -eq 'True False True') $seen.LeftWith
 
     # The sampler was left running by the block: it ends with the process it watched.
     $samplerProcess = Get-Process -Id $seen.Sampler.SamplerId -ErrorAction SilentlyContinue
@@ -314,6 +330,12 @@ try {
         (Throws { Invoke-IsolatedGameSession @session -Prepare { Set-Content $made 'x'; throw 'the build failed' } -Run { throw 'never run' } } 'the build failed')
     Check 'with what it had changed put back and the rig free' (-not (Test-Path $made) -and -not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and $null -eq (Get-GameRig -Game $gameName))
 
+    # An enter step that throws: nothing has been saved, and its other half still runs.
+    $seen.Left = 0
+    Check 'an enter step that throws stops the session before anything is saved' `
+        (Throws { Invoke-IsolatedGameSession @session -Enter { throw 'the other lock never came' } -Leave { $seen.Left++ } -Prepare { Set-Content $made 'x' } -Run { throw 'never run' } } 'the other lock never came')
+    Check 'with the leave step run once, nothing changed and the rig free' ($seen.Left -eq 1 -and -not (Test-Path $made) -and -not (Test-Path (Join-Path $root 'state')) -and $null -eq (Get-GameRig -Game $gameName))
+
     Check 'files to keep with nowhere to keep them are refused before anything is taken' `
         (Throws { Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'x' -Files $made } 'need -StateFolder')
     Check 'a port to write with no port is refused' `
@@ -324,10 +346,10 @@ try {
     $sessionFile = Join-Path $root 'session.json'
     $starter = Join-Path $root 'starter.ps1'
     Set-Content $starter -Encoding ASCII -Value @'
-param([string]$Module, [string]$Game, [string]$Exe, [string]$Mod, [string]$Saves, [string]$State, [string]$SessionFile)
+param([string]$Module, [string]$Game, [string]$Exe, [string]$Mod, [string]$Saves, [string]$State, [string]$SessionFile, [int]$Settle = 0)
 $ErrorActionPreference = 'Stop'
 Import-Module $Module
-Start-IsolatedGameSession -ProcessName $Game -Launch $Exe -ModFolder $Mod -Owner 'split test' -SettleSeconds 0 -Folders $Saves -StateFolder $State -SessionFile $SessionFile | Out-Null
+Start-IsolatedGameSession -ProcessName $Game -Launch $Exe -ModFolder $Mod -Owner 'split test' -SettleSeconds $Settle -Folders $Saves -StateFolder $State -SessionFile $SessionFile | Out-Null
 '@
     $process = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$starter`"",
         '-Module', "`"$modulePath`"", '-Game', $gameName, '-Exe', "`"$gameExe`"", '-Mod', "`"$mod`"", '-Saves', "`"$saves`"", '-State', "`"$(Join-Path $root 'state')`"", '-SessionFile', "`"$sessionFile`"")
@@ -336,12 +358,31 @@ Start-IsolatedGameSession -ProcessName $Game -Launch $Exe -ModFolder $Mod -Owner
     $state = Get-GameRig -Game $gameName
     Check 'a session started in a process that has ended is read back, its game running' ([bool](Get-Process -Id $split.ProcessId -ErrorAction SilentlyContinue) -and $split.Owner -eq 'split test')
     Check 'and still holds the rig, through the game' ($state.Live -and $state.Holder.Owner -eq 'split test' -and $state.Holder.ProcessId -eq $process.Id)
+    Check 'the rig names the file the session is kept in' ($state.Holder.SessionFile -eq $sessionFile) "$($state.Holder.SessionFile)"
+    Check 'a session that waits behind it is told its own process has gone' (Throws { Enter-GameRig -Game $gameName -Owner 'next' -WaitSeconds 0 } 'the rig is in use: split test \(.*\), whose own process has gone while the game runs on')
     Check 'a second start over it is refused' (Throws { Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'x' -SessionFile $sessionFile } 'never stopped')
     Set-Content (Join-Path $saves 'world\chunk-9.bin') 'added while it ran' -Encoding ASCII
-    Stop-IsolatedGameSession -SessionFile $sessionFile
+    $seen.SplitLeft = ''
+    Stop-IsolatedGameSession -SessionFile $sessionFile -Leave { param($s) $seen.SplitLeft = "$($s.RigToken -eq (Get-GameRig -Game $gameName).Holder.Token) $(Test-Path (Join-Path $saves 'world\chunk-9.bin'))" }
+    Check 'its leave block runs in the process that stops it, files back and rig held' ($seen.SplitLeft -eq 'True False') $seen.SplitLeft
     Check 'stopping it from another process stops the game, restores and releases' `
         (-not (Get-Process -Id $split.ProcessId -ErrorAction SilentlyContinue) -and -not (Test-Path (Join-Path $saves 'world\chunk-9.bin')) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $sessionFile))
     Check 'a session that is not there says so' (Throws { Stop-IsolatedGameSession -SessionFile $sessionFile } 'no session at')
+
+    # The starting process is killed while the game settles: the session is in its file already, and another process ends it.
+    $killed = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$starter`"",
+        '-Module', "`"$modulePath`"", '-Game', $gameName, '-Exe', "`"$gameExe`"", '-Mod', "`"$mod`"", '-Saves', "`"$saves`"", '-State', "`"$(Join-Path $root 'state')`"", '-SessionFile', "`"$sessionFile`"", '-Settle', '60')
+    $started.Add($killed)
+    Wait-Until { Test-Path $sessionFile }
+    Check 'the starter is still settling when the session is in its file' (-not $killed.HasExited)
+    $killed.Kill(); $killed.WaitForExit()
+    $orphan = Get-IsolatedGameSession -SessionFile $sessionFile
+    $game = Get-Process -Name $gameName
+    Check 'a session killed while the game settled left the game''s process id in its file' ($orphan.ProcessId -eq $game.Id) "$($orphan.ProcessId)"
+    Set-Content (Join-Path $saves 'world\chunk-9.bin') 'added while it ran' -Encoding ASCII
+    Stop-IsolatedGameSession -SessionFile (Get-GameRig -Game $gameName).Holder.SessionFile
+    Check 'and another process stops that game, restores and releases' `
+        (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and -not (Test-Path (Join-Path $saves 'world\chunk-9.bin')) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $sessionFile))
 
     # A session whose lock has gone: with nothing saved, a game that went leaves the lock to be taken over.
     $lost = Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'lost' -SettleSeconds 0 -SessionFile $sessionFile

@@ -112,7 +112,9 @@ whose output a running game would load.
   live and who is waiting.
 - **It waits, oldest first.** A session that finds the rig taken queues and is
   served in the order it asked, for an hour by default (`-WaitSeconds`; 0 takes
-  the rig now or throws). There is nothing to poll and no race to win.
+  the rig now or throws). There is nothing to poll and no race to win. While it
+  waits it prints who holds the rig and how many asked before it, each time
+  that changes, and hands the same line to a `-Waiting` block.
 - **Only the session that took a lock releases it.** `Exit-GameRig` throws, and
   removes nothing, for a lock that is someone else's.
 - **A lock is taken over only when its taker's process has gone and the game is
@@ -124,6 +126,14 @@ whose output a running game would load.
 - **A game running with no lock on it was started by hand**, by the person at
   the machine or by a script that does not take the rig. `Enter-GameRig` waits
   for it to end.
+- **A session whose own process was killed with its game up still holds the
+  rig**, and nothing will ever stop that game for it. Whoever waits is told the
+  holder's process has gone, and `Get-GameRig` names the file the session is
+  kept in when it was started with `-SessionFile`.
+  `Stop-IsolatedGameSession -SessionFile <that file>` then stops the game, puts
+  its files back and releases the rig, from any process. It cannot tell a
+  killed runner from a session that is between two of its own processes, so
+  only do it for a runner known to do the whole run in one.
 
 Work that needs the whole graphics card takes the rig too, with `-WholeGpu`: an
 image generation run, a benchmark. It waits until no rig is held, and no game's
@@ -154,7 +164,10 @@ is not a lock: PowerShell looks and then makes, and in Project Zomboid on
 `Invoke-IsolatedGameSession` is the run a mod's `.lab/isolated.ps1` otherwise
 writes out by hand. In order:
 
-1. Takes the game's rig, waiting its turn.
+1. Takes the game's rig, waiting its turn, then runs `-Enter` with the session.
+   Nothing has been saved yet, so this is where to take a second lock that
+   other users of the game still go by, and to wait out one of them that is
+   still putting the game's files back.
 2. Saves `-Files` and `-Folders` into `-StateFolder` (`Save-GameTestState`).
 3. Runs `-Prepare`: build and deploy the dev build, change the game's settings.
    A build made here cannot land under another session's running game.
@@ -164,7 +177,9 @@ writes out by hand. In order:
    `-Environment` set for the launch alone when those are given.
 6. Runs `-Run` with the session.
 7. Stops the game and the pose sender, runs `-Collect`, puts every file and
-   folder back, releases the rig.
+   folder back, runs `-Leave`, releases the rig. `-Leave` is `-Enter`'s other
+   half, and runs even when `-Enter` threw: it must do nothing where `-Enter`
+   did nothing.
 
 Step 7 runs however the call ends: the block throwing, the game not starting,
 the prepare step failing. Each part of it runs whatever the part before it did.
@@ -267,6 +282,13 @@ a property of the mod's own.
 The rig stays held between the processes, by the running game. If the game goes
 before the stop, the session's saved state is what keeps the rig from being
 taken over, and `Stop-IsolatedGameSession` still restores and releases.
+
+`Invoke-IsolatedGameSession` takes `-SessionFile` too. The session is written
+there as soon as the game's process appears, before the settling, so a run
+whose PowerShell is killed at any point after that can be ended by another
+process with `Stop-IsolatedGameSession -SessionFile`. Give each run a file of
+its own (one named for `$PID`): a start refuses a file that already holds a
+session, before it has asked for the rig.
 
 ## A C# mod
 
