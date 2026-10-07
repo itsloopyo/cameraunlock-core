@@ -90,6 +90,55 @@ namespace CameraUnlock.Core.Tests.Processing
             Assert.True(ZoomCompensation.ScaleAngleForZoom(45.0f, factor) > 45.0f * factor);
         }
 
+        // The formula every caller had before an angle past 90 degrees was handled.
+        private static float TangentRoundTrip(float angleDeg, float factor)
+        {
+            const double degToRad = System.Math.PI / 180.0;
+            return (float)(System.Math.Atan(System.Math.Tan(angleDeg * degToRad) * factor) / degToRad);
+        }
+
+        [Fact]
+        public void Below90TheAnswerIsBitForBitTheTangentRoundTrips()
+        {
+            foreach (float factor in new[] { 1.0f, 0.9f, 0.7673f, 0.5f, 0.41422223f, 0.25f, 0.1f, 2.0f })
+            {
+                for (int tenths = -899; tenths <= 899; tenths++)
+                {
+                    float angle = tenths / 10.0f;
+                    Assert.Equal(
+                        BitConverter.SingleToInt32Bits(TangentRoundTrip(angle, factor)),
+                        BitConverter.SingleToInt32Bits(ZoomCompensation.ScaleAngleForZoom(angle, factor)));
+                }
+            }
+        }
+
+        // A tracker's response curve reaches angles no neck does.
+        [Theory]
+        [InlineData(90.0f)]
+        [InlineData(120.0f)]
+        [InlineData(-150.0f)]
+        [InlineData(179.0f)]
+        public void FactorOfOneReturnsAnAnglePast90OnItsOwnSide(float angle)
+        {
+            Near(angle, ZoomCompensation.ScaleAngleForZoom(angle, 1.0f), 1e-3f);
+        }
+
+        [Fact]
+        public void From90OnTheScalingIsContinuousOddAndRising()
+        {
+            float factor = ZoomCompensation.FovZoomFactor(Scope, Base);
+            Near(90.0f, ZoomCompensation.ScaleAngleForZoom(90.0f, factor), 1e-3f);
+            Near(180.0f, System.Math.Abs(ZoomCompensation.ScaleAngleForZoom(180.0f, factor)), 1e-3f);
+            Assert.True(System.Math.Abs(ZoomCompensation.ScaleAngleForZoom(90.5f, factor)
+                - ZoomCompensation.ScaleAngleForZoom(89.5f, factor)) < 3.0f);
+            Near(-ZoomCompensation.ScaleAngleForZoom(120.0f, factor), ZoomCompensation.ScaleAngleForZoom(-120.0f, factor));
+            for (float angle = -179.0f; angle < 179.0f; angle += 1.0f)
+            {
+                Assert.True(ZoomCompensation.ScaleAngleForZoom(angle + 1.0f, factor) > ZoomCompensation.ScaleAngleForZoom(angle, factor),
+                    "the scaled angle fell between " + angle + " and " + (angle + 1.0f));
+            }
+        }
+
         private static void NearVec(Vec3 expected, Vec3 actual)
         {
             Near(expected.X, actual.X);

@@ -72,27 +72,20 @@ inline float FovZoomFactor(float tan_half_fov, float tan_half_fov_base) {
 /// head reaches it is indistinguishable from multiplying, and it stays honest
 /// at the large ones.
 ///
-/// `factor` must be positive; `angle_deg` must be within +/-90, which every
-/// pose a neck produces is.
-inline float ScaleAngleForZoom(float angle_deg, float factor) {
-    constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
-    return std::atan(std::tan(angle_deg * kDegToRad) * factor) / kDegToRad;
-}
-
-/// ScaleAngleForZoom for an angle anywhere within +/-180.
-///
 /// A neck does not turn past 90 degrees, but a tracker's response curve hands a
 /// mod yaw well past it, and atan(tan(120)) is -60: the view swung to the other
-/// side, at a factor of 1 as much as through a scope. Here the tangent is scaled
-/// through the sine and the cosine, so the angle stays on its side. Within 90
-/// degrees the answer is ScaleAngleForZoom's. Past it nothing is on screen for
-/// the ratio to hold, and the angle is only kept continuous: 90 maps to itself
-/// at every factor, and 180 to straight behind (as 180 or -180).
+/// side, at a factor of 1 as much as through a scope. From 90 degrees on, the
+/// tangent is scaled through the sine and the cosine, which keeps the angle on
+/// its side. Nothing that far round is on screen for the ratio to hold, so there
+/// the answer is only continuous with the rest: 90 maps to itself at every
+/// factor, and 180 to straight behind (as 180 or -180). A caller needs no guard
+/// of its own.
 ///
-/// `factor` must be positive.
-inline float ScaleWideAngleForZoom(float angle_deg, float factor) {
+/// `factor` must be positive; `angle_deg` is any angle within +/-180.
+inline float ScaleAngleForZoom(float angle_deg, float factor) {
     constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
     const float angle = angle_deg * kDegToRad;
+    if (std::fabs(angle_deg) < 90.0f) return std::atan(std::tan(angle) * factor) / kDegToRad;
     return std::atan2(std::sin(angle) * factor, std::cos(angle)) / kDegToRad;
 }
 

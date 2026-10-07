@@ -52,12 +52,24 @@ namespace CameraUnlock.Core.Processing
         /// angle did at the base field of view. The image displacement of an angle goes as
         /// tan(angle) / tan(fov/2), so tan(out) = tan(in) * factor holds it exactly; for the
         /// small angles a head reaches it is indistinguishable from multiplying.
-        /// <paramref name="factor"/> must be positive and <paramref name="angleDeg"/> within
-        /// +/-90, which every pose a neck produces is.
+        /// <para>
+        /// A tracker's response curve hands a mod yaw well past 90 degrees, and Atan(Tan(120))
+        /// is -60: the view swung to the other side, at a factor of 1 as much as through a
+        /// scope. From 90 degrees on, the tangent is scaled through the sine and the cosine,
+        /// which keeps the angle on its side: 90 maps to itself at every factor, and 180 to
+        /// straight behind. A caller needs no guard of its own.
+        /// </para>
+        /// <paramref name="factor"/> must be positive; <paramref name="angleDeg"/> is any angle
+        /// within +/-180.
         /// </summary>
         public static float ScaleAngleForZoom(float angleDeg, float factor)
         {
-            return (float)(System.Math.Atan(System.Math.Tan(angleDeg * DegToRad) * factor) / DegToRad);
+            double angle = angleDeg * DegToRad;
+            if (System.Math.Abs(angleDeg) < 90.0f)
+            {
+                return (float)(System.Math.Atan(System.Math.Tan(angle) * factor) / DegToRad);
+            }
+            return (float)(System.Math.Atan2(System.Math.Sin(angle) * factor, System.Math.Cos(angle)) / DegToRad);
         }
 
         /// <summary>

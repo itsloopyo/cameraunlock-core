@@ -7,6 +7,7 @@
 #include <cameraunlock/camera/zoom_compensation.h>
 
 #include <cmath>
+#include <cstring>
 #include <iostream>
 
 namespace {
@@ -14,7 +15,6 @@ namespace {
 using cameraunlock::camera::FovZoomFactor;
 using cameraunlock::camera::ScaleAngleForZoom;
 using cameraunlock::camera::ScaleLeanForZoom;
-using cameraunlock::camera::ScaleWideAngleForZoom;
 using cameraunlock::math::Vec3;
 
 int g_failures = 0;
@@ -90,26 +90,31 @@ int RunZoomCompensationTests() {
 
     // A tracker's response curve reaches angles no neck does.
     for (float angle : {90.0f, 120.0f, -150.0f, 179.0f}) {
-        Check(NearEqual(ScaleWideAngleForZoom(angle, 1.0f), angle, 1e-3f),
+        Check(NearEqual(ScaleAngleForZoom(angle, 1.0f), angle, 1e-3f),
               "a factor of 1 returns an angle past 90 degrees untouched, on its own side");
     }
-    Check(NearEqual(ScaleWideAngleForZoom(90.0f, factor), 90.0f, 1e-3f) &&
-              NearEqual(std::fabs(ScaleWideAngleForZoom(180.0f, factor)), 180.0f, 1e-3f),
+    Check(NearEqual(ScaleAngleForZoom(90.0f, factor), 90.0f, 1e-3f) &&
+              NearEqual(std::fabs(ScaleAngleForZoom(180.0f, factor)), 180.0f, 1e-3f),
           "90 degrees maps to itself at every factor, and 180 to straight behind");
-    Check(std::fabs(ScaleWideAngleForZoom(90.5f, factor) - ScaleWideAngleForZoom(89.5f, factor)) < 3.0f,
+    Check(std::fabs(ScaleAngleForZoom(90.5f, factor) - ScaleAngleForZoom(89.5f, factor)) < 3.0f,
           "the scaling is continuous across 90 degrees");
-    Check(NearEqual(ScaleWideAngleForZoom(-120.0f, factor), -ScaleWideAngleForZoom(120.0f, factor)),
+    Check(NearEqual(ScaleAngleForZoom(-120.0f, factor), -ScaleAngleForZoom(120.0f, factor)),
           "and odd past it");
     bool rising = true;
     for (float angle = -179.0f; angle < 179.0f; angle += 1.0f) {
-        rising = rising && ScaleWideAngleForZoom(angle + 1.0f, factor) > ScaleWideAngleForZoom(angle, factor);
+        rising = rising && ScaleAngleForZoom(angle + 1.0f, factor) > ScaleAngleForZoom(angle, factor);
     }
+    // Below 90 degrees no caller's result moves by a bit: the formula every caller had.
     bool same = true;
-    for (float angle = -89.0f; angle <= 89.0f; angle += 1.0f) {
-        same = same && NearEqual(ScaleWideAngleForZoom(angle, factor), ScaleAngleForZoom(angle, factor), 1e-4f);
+    for (float sweep : {1.0f, 0.9f, 0.7673f, 0.5f, 0.41422223f, 0.25f, 0.1f, 2.0f}) {
+        for (int tenths = -899; tenths <= 899; ++tenths) {
+            const float angle = static_cast<float>(tenths) / 10.0f;
+            const float before = std::atan(std::tan(angle * kDegToRad) * sweep) / kDegToRad;
+            const float now = ScaleAngleForZoom(angle, sweep);
+            same = same && std::memcmp(&before, &now, sizeof(float)) == 0;
+        }
     }
-    Check(same, "within 90 degrees it is ScaleAngleForZoom's answer");
-    Check(rising, "a larger angle never scales to a smaller one, the whole way round");
+    Check(same, "below 90 degrees the answer is bit for bit the tangent round trip's, over 1799 angles and 8 factors");
 
     // The lean: only the part across the view scales.
     const Vec3 forward(0.0f, 0.0f, 1.0f);
