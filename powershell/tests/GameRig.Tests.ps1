@@ -198,6 +198,26 @@ Start-Sleep 600
     $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
     [void](Start-StandIn)
     Exit-GameRig -Rig $back -KeptIn $keptFile
+    Check 'work that wants the whole card is refused at once while a game left running holds a rig' (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' } 'in use by a game left running')
+    Check 'and leaves no ticket for others to wait behind' ($null -eq (Get-GameRig))
+    # A process takes the kept lock back and dies with the game up.
+    $died = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+        "Import-Module '$modulePath'; Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn '$keptFile' -WaitSeconds 0 | Out-Null; Start-Sleep 600")
+    $started.Add($died)
+    Wait-Until { (Get-GameRig -Game $gameName).Holder.ProcessId -eq $died.Id }
+    $died.Kill(); $died.WaitForExit()
+    $kept = @(Get-Process -Name $gameName)
+    # One of the same name is started by hand while the lock is nobody's live process.
+    $hand = Start-StandIn
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -StopKept -WaitSeconds 0
+    Check 'a kept lock whose taker died with the game up is taken back by the next run' ((Get-GameRig -Game $gameName).Holder.ProcessId -eq $PID)
+    Check '-StopKept stops the game the lock was left with, and not one started by hand' (@($kept | Where-Object { -not $_.HasExited }).Count -eq 0 -and -not $hand.HasExited)
+    Exit-GameRig -Rig $back -KeptIn $keptFile
+    Check 'and a lock is not left with a game its holder did not start' ($null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $keptFile) -and -not $hand.HasExited)
+    Stop-StandIn
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
+    [void](Start-StandIn)
+    Exit-GameRig -Rig $back -KeptIn $keptFile
     Stop-KeptGame -Game $gameName -KeptIn $keptFile
     Check 'Stop-KeptGame stops that game, releases the lock and removes the file' (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $keptFile))
     $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0

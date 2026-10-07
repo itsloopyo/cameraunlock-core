@@ -140,8 +140,8 @@ it, leaves its lock with the game instead of releasing it:
 
 ```powershell
 $kept = Join-Path $PSScriptRoot 'rig-token.json'
-$rig = Enter-GameRig -Game <process name> -Owner <who you are> -KeptIn $kept
-try { <stop the game the last run left up, deploy, launch> } finally { Exit-GameRig -Rig $rig -KeptIn $kept }
+$rig = Enter-GameRig -Game <process name> -Owner <who you are> -KeptIn $kept -StopKept
+try { <deploy, launch, wait for the game's process> } finally { Exit-GameRig -Rig $rig -KeptIn $kept }
 ```
 
 While the game runs, `Exit-GameRig -KeptIn` writes the lock's token to that file
@@ -153,12 +153,25 @@ the start (a session, above all) calls `Stop-KeptGame -Game <name> -KeptIn $kept
 first: it stops the game left up and releases its lock, and does nothing when
 none is kept.
 
-The lock is left with the processes that were running, by process id, and with
-no others. Once they have ended the lock is not live and the file is stale: a
-game of the same name that someone starts afterwards is theirs, `Stop-KeptGame`
-does not touch it, and `Enter-GameRig` waits for it. A script that leaves only
-a launcher running, with the game's own process still to come, therefore keeps
-nothing: wait for the game's process before the script ends.
+The lock is left with processes, by process id, and with no others: the ones it
+was left with before that still run, and whatever of the game's names (the game,
+and anything in `-Processes`) started after the script took the rig. A game that
+was already up when the script came is never the script's, so `-StopKept` and
+`Stop-KeptGame` do not touch one someone started by hand, and a script stops the
+game it left through `-StopKept`, never by process name. Once the processes a
+lock was left with have ended the lock is not live and the file is stale:
+`Enter-GameRig` then waits for whatever of that name is running. A script that
+ends before the game's own process has appeared has left the lock with nothing,
+so wait for that process before the script ends.
+
+A process that takes a kept lock back and dies with the game still up (a tool
+timeout on a long wait) does not strand it: the next `Enter-GameRig -KeptIn`
+takes it back again, for as long as the processes it was left with still run.
+
+Work that wants the whole card (`-WholeGpu`, below) is refused at once while a
+game left running holds a rig. Nothing says when that game will end, and every
+session that asked after the waiter would wait behind it. The refusal names the
+file `Stop-KeptGame` needs.
 
 Work that needs the whole graphics card takes the rig too, with `-WholeGpu`: an
 image generation run, a benchmark. It waits until no rig is held, and no game's
