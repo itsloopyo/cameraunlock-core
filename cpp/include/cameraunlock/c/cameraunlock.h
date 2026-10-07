@@ -323,6 +323,14 @@ CAMERAUNLOCK_C int32_t cameraunlock_hotkeys_take(void);
 /* Forgets them without answering: for presses made where the host does not act on them. */
 CAMERAUNLOCK_C void cameraunlock_hotkeys_drop(void);
 
+/* ---- The game's window ---------------------------------------------------------------------- */
+
+/* Centres a windowed, bordered game window in the work area of the monitor it is on
+ * (os::CenterWindowInWorkArea). `window` is the HWND. Answers 1 when the window is at the centred
+ * origin on return and 0 when it was left alone, with the reason in the log. It keeps no latch and
+ * never activates the window, so a host calls it after every placement the game makes. */
+CAMERAUNLOCK_C int32_t cameraunlock_window_center(uint64_t window);
+
 #ifdef __cplusplus
 }
 #endif

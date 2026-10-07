@@ -185,6 +185,14 @@ play.
 and drains core's lines with `cameraunlock_log_take` when a frame's flags carry
 `CAMERAUNLOCK_STATE_LOG`.
 
+## The game's window
+
+`cameraunlock_window_center(window)` is `os::CenterWindowInWorkArea` for a host: it centres a
+windowed, bordered game window in the work area of the monitor it is on, keeps no latch and never
+activates the window, so a host calls it after every placement the game makes. It answers 1 when
+the window is at the centred origin on return and 0 when it was left alone, and the reason for
+either a move or a refusal goes to the log.
+
 ## Testing without a socket
 
 `CameraUnlockCoreTesting.dll` (CMake target `cameraunlock_c_testing`, never shipped) is the same
@@ -232,4 +240,5 @@ name. The table is here to check that declaration against, not to copy numbers o
   canonical format keeps its C++ table and import.
 - No string, list or color local row, no `Engine()` row, and no concept row read again by
   `cameraunlock_config_reload`.
+- `os::CenterGameWindowOnce`, the one-shot that also raises the window, is not exported.
 - No camera cut signal for the lean clamp. An inactive frame resets it.

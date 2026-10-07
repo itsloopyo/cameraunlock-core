@@ -85,6 +85,10 @@ rows a host describes at run time, the hotkey poller as bits a host takes, and t
 `docs/c-interface.md` is the contract. Nothing calls back into the host and nothing joins a thread
 at process exit. project-zomboid-headtracking, a Java agent, is the first host it was written for.
 
+`cameraunlock_window_center` is `os::CenterWindowInWorkArea` through the same boundary.
+`docs/porting-the-pipeline.md` now sends a host that can load a DLL to it, and its table of ports
+is checked against the repos again.
+
 `pixi run vectors` gains a third harness, `scripts/pipeline-vectors/harness/c/`, which runs the
 datagram-in, pose-out vectors through the interface and skips the rest by name.
 

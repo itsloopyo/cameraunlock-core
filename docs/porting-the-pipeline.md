@@ -92,14 +92,33 @@ should pin its own mapping to that block, as it pins the constants.
 
 ## Ports found
 
+Checked against each repo on 2026-10-07. "Runs the vectors" means its `pixi.toml` has a task
+that calls `run-vectors.mjs`.
+
 | Repo | Language | Notes |
 |---|---|---|
-| `cyberpunk-2077-headtracking` | Lua over a native DLL | Links the core for the packet layer; only the Lua half is a port |
-| `the-pathless-headtracking` | Lua (UE4SS) | 3DOF only - no position processor and no interpolator |
-| `bioshock-infinite-headtracking` | Rust | |
-| `bioshock-remastered-headtracking` | Rust | |
-| `minecraft-java-edition-headtracking` | Java | 15 hand-written classes under `core/src/main/java/com/cameraunlock/core/`; the submodule is present but the Gradle build compiles nothing from it |
-| `fusion-360-headtracking` | Python | |
+| `cyberpunk-2077-headtracking` | Lua over a native DLL | Links the core for the packet layer; only the Lua half is a port. Runs the vectors |
+| `the-pathless-headtracking` | Lua (UE4SS) | 3DOF only - no position processor and no interpolator. Runs the vectors |
+| `beamng-drive-headtracking` | Lua | `mod/lua/ge/extensions/headTracking/pipeline.lua`. No task that runs the vectors |
+| `bioshock-remastered-headtracking` | Rust | `build.rs` compiles C++ with core's headers on the include path. Runs the vectors |
+| `minecraft-java-edition-headtracking` | Java | 15 hand-written classes under `core/src/main/java/com/cameraunlock/core/`; the submodule is present but the Gradle build compiles nothing from it. Runs the vectors with declared skips |
+| `project-zomboid-headtracking` | Java over a native DLL | Seven hand-written classes (receiver, filter, lean clamp, aim fade, aim mode, lean handover, zoom) beside a DLL that links core for the config and the hotkeys. No task that runs the vectors. The C interface below replaces all seven |
+| `fusion-360-headtracking` | Python | Runs the vectors |
+| `euro-truck-simulator-2-headtracking` | Python | `bridge/opentrack_to_freetrack.py` reads OpenTrack datagrams and hands them to FreeTrack. No core submodule, no interpolator |
+| `lopari` | Rust | `src-tauri/src/opentrack.rs`, the launcher's own reader of the packet. No interpolator |
+
+`bioshock-infinite-headtracking` was listed here as Rust. It is C++ now and links the core.
+
+## Do not port: load the DLL
+
+A host that can load a DLL and call C functions needs none of the above. `CameraUnlockCore.dll`
+([c-interface.md](c-interface.md)) is the receiver, the interpolators, the processors, the lean
+clamp, the zoom compensation, the aim modes, the config owner and the hotkey poller as built from
+this repo, behind one call a frame. A Java agent (`java.lang.foreign`, Java 22 on), LuaJIT's
+`ffi`, Python's `ctypes` and Rust all reach it. What is left for the host to write is the axis
+conversion at its engine's boundary and its world query for the lean, and neither is in the
+checks below. A port is for a host that cannot load a native library at all: stock Lua in a
+sandbox, for one.
 
 ## 1. Yaw and roll traverse the shortest arc
 

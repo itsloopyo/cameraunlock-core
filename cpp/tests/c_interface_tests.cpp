@@ -649,6 +649,31 @@ void TestConfig(const fs::path& scratch) {
     Check(cameraunlock_hotkeys_take() == 0, "with no key pressed nothing is taken");
 }
 
+void TestWindow() {
+    std::cout << "\n[c interface: the game's window]\n";
+    const HWND window = CreateWindowExW(0, L"STATIC", L"cameraunlock c interface test", WS_OVERLAPPEDWINDOW, 13, 17, 640,
+                                        480, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    Check(window != nullptr, "a bordered window that is never shown");
+    TakeLog();
+    const std::uint64_t handle = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(window));
+    Check(cameraunlock_window_center(handle) == 1, "the window is centred: " + LastError());
+    RECT placed = {};
+    GetWindowRect(window, &placed);
+    MONITORINFO monitor = {};
+    monitor.cbSize = sizeof(monitor);
+    GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+    const int left_gap = placed.left - monitor.rcWork.left;
+    const int right_gap = monitor.rcWork.right - placed.right;
+    Check(left_gap - right_gap >= -1 && left_gap - right_gap <= 1 && !(placed.left == 13 && placed.top == 17),
+          "in the work area of its monitor, where it was not before");
+    Check(!TakeLog().empty(), "and the move is in the log");
+    Check(cameraunlock_window_center(handle) == 1 && TakeLog().empty(),
+          "a second call finds it centred and logs nothing");
+    DestroyWindow(window);
+    Check(cameraunlock_window_center(handle) == 0 && !TakeLog().empty(),
+          "a window that is gone is left alone, with the reason in the log");
+}
+
 void TestLog(const fs::path& scratch) {
     std::cout << "\n[c interface: the log]\n";
     Check(cameraunlock_log_write("too early") == CAMERAUNLOCK_ERROR, "a line for the file log before it is open is refused");
@@ -684,6 +709,7 @@ int main() {
     TestAbsurdPose();
     TestSmoothingByConnection();
     TestConfig(scratch);
+    TestWindow();
     TestLog(scratch);
 
     std::cout << (g_failures == 0 ? "\nAll tests passed!\n" : "\n" + std::to_string(g_failures) + " test(s) FAILED\n");

@@ -21,6 +21,9 @@ LAYOUT(lean_rig, offsetof(CameraUnlockLean, rig) == 20);
 LAYOUT(config_size, sizeof(CameraUnlockConfig) == 76);
 LAYOUT(config_settings, offsetof(CameraUnlockConfig, settings) == 16);
 
+/* A handle travels as 64 bits whatever the host's pointer type is. */
+LAYOUT(window_handle, sizeof(uint64_t) >= sizeof(void*));
+
 int CameraUnlockHeaderIsC(void) {
     return cameraunlock_abi() == CAMERAUNLOCK_ABI;
 }

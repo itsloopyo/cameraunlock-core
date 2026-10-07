@@ -16,6 +16,7 @@
 #include "cameraunlock/input/key_binding_registration.h"
 #include "cameraunlock/input/key_bindings.h"
 #include "cameraunlock/logging/file_log.h"
+#include "cameraunlock/os/game_window.h"
 #include "cameraunlock/protocol/udp_receiver.h"
 #include "cameraunlock/time/frame_clock.h"
 #include "cameraunlock/tracking/head_tracking_session.h"
@@ -1061,6 +1062,15 @@ std::int32_t cameraunlock_hotkeys_start(void) {
         }
         if (!c.poller->Start()) throw std::runtime_error("the hotkey poller did not start");
         return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_window_center(std::uint64_t window) {
+    return Guarded("cameraunlock_window_center", [&] {
+        const bool centred = os::CenterWindowInWorkArea(
+            reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window)),
+            [](os::WindowLogLevel, const char* message) { LogLine(message); });
+        return centred ? 1 : 0;
     });
 }
 
