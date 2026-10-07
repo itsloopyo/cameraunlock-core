@@ -1239,8 +1239,9 @@ function Complete-IsolatedGameSession {
     $failures = New-Object System.Collections.Generic.List[object]
     if ($Session.ProcessId) {
         try { Stop-IsolatedGame -Session $Session } catch { $failures.Add($_) }
+        # A process that has just been ended is still listed for a moment, so it is given time to go.
         $still = Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
-        if ($still -and $still.ProcessName -eq $Session.ProcessName) {
+        if ($still -and $still.ProcessName -eq $Session.ProcessName -and -not $still.WaitForExit(15000)) {
             throw "the game (pid $($Session.ProcessId)) could not be stopped, so nothing was put back under it and the rig is still held. $($failures -join ' ')"
         }
     } else {
