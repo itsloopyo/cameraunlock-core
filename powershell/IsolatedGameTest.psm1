@@ -620,6 +620,14 @@ function Test-GameRigOwnerLive {
     # A lock is live while the process that took it runs, or while any process it named does: the
     # game a session started goes on holding the rig after the process that launched it has ended.
     param($Owner)
+    # A lock left with its game (Exit-GameRig -KeptIn) is held by those processes and no others:
+    # a game of the same name started later, by hand, is not the one that was left.
+    if (-not $Owner.ProcessId -and $Owner.PSObject.Properties['Kept']) {
+        foreach ($left in @($Owner.Kept)) {
+            if (Test-GameRigProcessAlive -Id $left.Id -Start $left.Start) { return $true }
+        }
+        return $false
+    }
     if (Test-GameRigProcessAlive -Id $Owner.ProcessId -Start $Owner.ProcessStart) { return $true }
     foreach ($name in @($Owner.Processes)) {
         if (Get-Process -Name $name -ErrorAction SilentlyContinue) { return $true }
@@ -629,7 +637,7 @@ function Test-GameRigOwnerLive {
 
 function Format-GameRigOwner {
     param($Owner)
-    $text = "$($Owner.Owner) ($(if ($Owner.ProcessId) { "pid $($Owner.ProcessId)" } else { 'left with its running game' }), since $($Owner.Since)"
+    $text = "$($Owner.Owner) ($(if ($Owner.ProcessId) { "pid $($Owner.ProcessId)" } else { "left with its running game, which Stop-KeptGame -KeptIn '$($Owner.KeptIn)' ends" }), since $($Owner.Since)"
     if ($Owner.What) { $text += ", $($Owner.What)" }
     if ($Owner.WholeGpu) { $text += ', the whole graphics card' }
     "$text)"
@@ -702,10 +710,12 @@ function Enter-GameRig {
     another.
 
     -KeptIn is for a script that leaves the game running when it ends and is run again to restart
-    it: the file Exit-GameRig -KeptIn wrote. While the rig is still held under the token in that
-    file it is taken back, from whichever process asks, and the game left up is this caller's to
-    stop. A file whose lock has gone is removed and the rig is asked for in the ordinary way,
-    which waits for a game someone else has up.
+    it: the file Exit-GameRig -KeptIn wrote. While the processes that run left up are still
+    running under the token in that file, the rig is taken back, from whichever process asks,
+    and the game left up is this caller's to stop. A file whose lock has gone, or whose game has
+    ended, is removed and the rig is asked for in the ordinary way, which waits for a game
+    someone else has up, one of the same name started by hand included. While another process
+    has the kept lock taken back, this waits for it like any other.
 
     While it waits it says what for, each time that changes: who holds the rig and how many asked
     before this session. -Waiting is a block handed that line in place of its being printed, for a
@@ -742,11 +752,6 @@ function Enter-GameRig {
     if (-not $Game -and -not $WholeGpu -and -not $Token) { throw 'Enter-GameRig needs -Game, or -WholeGpu for work that has no game' }
     if ($KeptIn -and -not $Game) { throw "-KeptIn needs -Game: the lock kept there is a game's" }
     $key = $(if ($Game) { Get-GameRigKey $Game } else { 'gpu' })
-    if ($KeptIn -and (Test-Path $KeptIn)) {
-        $kept = Get-Content $KeptIn -Raw | ConvertFrom-Json
-        $now = Invoke-GameRigExclusive { Read-GameRigOwner $key }
-        if ($now -and $now.Token -eq $kept.Token) { $Token = $kept.Token } else { Remove-Item $KeptIn -Force }
-    }
     $names = [string[]]@(@($Game -replace '\.exe$', '') + $Processes | Where-Object { $_ } | Select-Object -Unique)
     $root = Get-GameRigRoot
     $rigFolder = Join-Path $root $key
@@ -795,6 +800,20 @@ function Enter-GameRig {
                     if ($other.Key -eq $key -or $other.WholeGpu -or $WholeGpu) { $other }
                 })
                 $behind = $(if ($ahead.Count -gt 0) { ", and $($ahead.Count) asked before this session" } else { '' })
+                if ($KeptIn -and (Test-Path $KeptIn)) {
+                    $kept = Get-Content $KeptIn -Raw | ConvertFrom-Json
+                    $left = Read-GameRigOwner $key
+                    if (-not $left -or $left.Token -ne $kept.Token -or -not (Test-GameRigOwnerLive $left)) {
+                        Remove-Item $KeptIn -Force
+                    } elseif (-not $left.ProcessId) {
+                        # The lock this file keeps is this caller's already: it is not queued for.
+                        $left.ProcessId = $PID
+                        $left.ProcessStart = $start
+                        ConvertTo-Json $left | Set-Content (Join-Path $lock 'owner.json') -Encoding UTF8
+                        Remove-Item $ticket -Force
+                        return [pscustomobject]@{ Key = $key; Owner = $left.Owner; Token = $left.Token; Path = $lock; TakenOverFrom = $null }
+                    }
+                }
                 foreach ($folder in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne '_queue' }) {
                     $held = Read-GameRigOwner $folder.Name
                     if (-not $held) { continue }
@@ -879,8 +898,17 @@ function Exit-GameRig {
         if ($held.Token -ne $Rig.Token) { throw "the rig for $($Rig.Key) is held by $(Format-GameRigOwner $held), not by the session releasing it. Left as it is." }
         if ($held.ProcessId -ne $PID) { throw "the rig for $($Rig.Key) was taken by pid $($held.ProcessId), not by this process. Take it back with Enter-GameRig -Token first." }
         if ($KeptIn) {
-            if (@($held.Processes | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }).Count -gt 0) {
+            $running = @($held.Processes | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
+            if ($running.Count -gt 0) {
                 ConvertTo-Json ([pscustomobject]@{ Key = $held.Key; Token = $held.Token; Owner = $held.Owner }) | Set-Content $KeptIn -Encoding UTF8
+                # The processes the lock is left with, by id and start time: they alone keep it live.
+                $left = @(foreach ($process in $running) {
+                    $began = ''
+                    try { $began = $process.StartTime.ToFileTimeUtc().ToString() } catch [System.ComponentModel.Win32Exception] { }
+                    [pscustomobject]@{ Id = $process.Id; Start = $began }
+                })
+                $held | Add-Member -NotePropertyName Kept -NotePropertyValue $left -Force
+                $held | Add-Member -NotePropertyName KeptIn -NotePropertyValue $KeptIn -Force
                 $held.ProcessId = 0
                 $held.ProcessStart = ''
                 ConvertTo-Json $held | Set-Content (Join-Path $Rig.Path 'owner.json') -Encoding UTF8
@@ -901,20 +929,39 @@ function Stop-KeptGame {
     Stops the game an earlier run left up with its lock kept in -KeptIn (Exit-GameRig -KeptIn),
     and releases that lock. For a script that wants the rig from the start, a session through
     Start-IsolatedGameSession above all, in a repo whose other scripts leave the game running.
-    Does nothing when no lock is kept there, and removes a file whose lock has gone.
+    Does nothing when no lock is kept there, and removes a file whose lock or whose game has gone.
+    .DESCRIPTION
+    Only the processes the lock was left with are stopped, by process id: a game of the same
+    name that someone started since is not touched. While another process has the kept lock
+    taken back this waits for it. Throws, stopping nothing, when the kept lock names saved
+    state that was never put back, and when this process itself holds the lock.
     #>
     param([Parameter(Mandatory)][string]$Game, [Parameter(Mandatory)][string]$KeptIn)
     if (-not (Test-Path $KeptIn)) { return }
-    $kept = Get-Content $KeptIn -Raw | ConvertFrom-Json
     $key = Get-GameRigKey $Game
-    $held = Invoke-GameRigExclusive { Read-GameRigOwner $key }
-    if (-not $held -or $held.Token -ne $kept.Token) { Remove-Item $KeptIn -Force; return }
-    $rig = Enter-GameRig -Game $Game -Owner $kept.Owner -KeptIn $KeptIn
-    foreach ($process in @($held.Processes | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })) {
-        Stop-Process -Id $process.Id -Force
-        $process.WaitForExit()
+    $held = Invoke-GameRigExclusive {
+        $kept = Get-Content $KeptIn -Raw | ConvertFrom-Json
+        $now = Read-GameRigOwner $key
+        if (-not $now -or $now.Token -ne $kept.Token -or -not (Test-GameRigOwnerLive $now)) { Remove-Item $KeptIn -Force; return }
+        $now
     }
-    Exit-GameRig -Rig $rig -KeptIn $KeptIn
+    if (-not $held) { return }
+    if ($held.ProcessId -eq $PID) { throw "this process holds the rig for $key itself: stop the game it took back and release with Exit-GameRig -KeptIn" }
+    if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
+        throw "the game left up on $key, $(Format-GameRigOwner $held), has files that were never put back. What was saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)' once the game is stopped."
+    }
+    $rig = Enter-GameRig -Game $Game -Owner $held.Owner -KeptIn $KeptIn
+    $mine = Invoke-GameRigExclusive { Read-GameRigOwner $key }
+    if ($mine.PSObject.Properties['Kept']) {
+        foreach ($left in @($mine.Kept)) {
+            if (-not (Test-GameRigProcessAlive -Id $left.Id -Start $left.Start)) { continue }
+            $process = Get-Process -Id $left.Id
+            Stop-Process -Id $left.Id -Force -ErrorAction Stop
+            if (-not $process.WaitForExit(15000)) { throw "the game left up on $key (pid $($left.Id)) could not be stopped, and the rig is still held" }
+        }
+    }
+    Exit-GameRig -Rig $rig
+    Remove-Item $KeptIn -Force -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------------------

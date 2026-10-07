@@ -153,6 +153,13 @@ the start (a session, above all) calls `Stop-KeptGame -Game <name> -KeptIn $kept
 first: it stops the game left up and releases its lock, and does nothing when
 none is kept.
 
+The lock is left with the processes that were running, by process id, and with
+no others. Once they have ended the lock is not live and the file is stale: a
+game of the same name that someone starts afterwards is theirs, `Stop-KeptGame`
+does not touch it, and `Enter-GameRig` waits for it. A script that leaves only
+a launcher running, with the game's own process still to come, therefore keeps
+nothing: wait for the game's process before the script ends.
+
 Work that needs the whole graphics card takes the rig too, with `-WholeGpu`: an
 image generation run, a benchmark. It waits until no rig is held, and no game's
 rig is given out while it holds. It needs no game:

@@ -180,8 +180,24 @@ Start-Sleep 600
     Check 'another session waits for it, and is told it was left with the game' (Throws { Enter-GameRig -Game $gameName -Owner 'other' -WaitSeconds 0 } 'the rig is in use: keeper \(left with its running game')
     $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
     Check 'the next run takes it back while the run that left it is still alive' ($back.Token -eq $state.Holder.Token -and (Get-GameRig -Game $gameName).Holder.ProcessId -eq $PID -and -not $keeperProcess.HasExited)
+    Check 'Stop-KeptGame from the process that took it back is refused' (Throws { Stop-KeptGame -Game $gameName -KeptIn $keptFile } 'holds the rig for .* itself')
+    $second = (& powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module '$modulePath'; try { Enter-GameRig -Game $gameName -Owner 'second' -KeptIn '$keptFile' -WaitSeconds 0 | Out-Null; 'taken' } catch { `"`$_`" }" | Out-String)
+    Check 'a second take-back while one holds it waits like any other' ($second -match 'the rig is in use: keeper') $second
+    Check 'and the kept file is still there for it' (Test-Path $keptFile)
     Exit-GameRig -Rig $back -KeptIn $keptFile
     Check 'and leaves it with the game again' ((Get-GameRig -Game $gameName).Holder.ProcessId -eq 0 -and (Test-Path $keptFile))
+    # The game that was left ends, and someone starts one of the same name by hand.
+    Stop-StandIn
+    $hand = Start-StandIn
+    Check 'a kept lock whose game has ended is not live, whatever of that name runs now' (-not (Get-GameRig -Game $gameName).Live)
+    Check 'the next run does not take a game of the same name started by hand' (Throws { Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0 } 'someone started it by hand')
+    Set-Content $keptFile ('{"Key":"x","Token":"' + $state.Holder.Token + '","Owner":"keeper"}') -Encoding ASCII
+    Stop-KeptGame -Game $gameName -KeptIn $keptFile
+    Check 'and Stop-KeptGame leaves that game running' (-not $hand.HasExited -and -not (Test-Path $keptFile))
+    Stop-StandIn
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
+    [void](Start-StandIn)
+    Exit-GameRig -Rig $back -KeptIn $keptFile
     Stop-KeptGame -Game $gameName -KeptIn $keptFile
     Check 'Stop-KeptGame stops that game, releases the lock and removes the file' (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $keptFile))
     $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
