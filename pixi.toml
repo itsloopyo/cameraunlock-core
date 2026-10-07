@@ -78,6 +78,9 @@ test-conformance-checks = "powershell -NoProfile -ExecutionPolicy Bypass -File s
 # DifferentialGate.psm1 over a throwaway mod repo. Needs git and node.
 test-powershell-differential-gate = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/DifferentialGate.Tests.ps1"
 test-powershell-isolated-game-test = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedGameTest.Tests.ps1"
+# The rig lock and the session wrapper of IsolatedGameTest.psm1, with the takers as separate
+# processes and a windowless stand-in for the game. It starts no game and sends no input.
+test-powershell-game-rig = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/GameRig.Tests.ps1"
 # The isolated-input host a C# mod loads for a background in-game test (docs/isolated-input.md):
 # cameraunlock/dev/isolated_input.h as a DLL. The build task is the only thing here that compiles
 # that header's Win32 half, and it leaves the DLL where IsolatedGameTest.psm1 copies it from:
@@ -86,7 +89,7 @@ test-powershell-isolated-game-test = "powershell -NoProfile -ExecutionPolicy Byp
 # back. It detours user32 in that child alone, and sends no input to any window.
 build-isolated-input-host = "cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build && cmake --build cpp/tools/isolated_input_host/build --config Release"
 test-isolated-input-host = { cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedInputHost.Tests.ps1", depends-on = ["build-isolated-input-host", "build-debug"] }
-test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-conformance-checks", "test-powershell-differential-gate", "test-powershell-isolated-game-test"] }
+test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-conformance-checks", "test-powershell-differential-gate", "test-powershell-isolated-game-test", "test-powershell-game-rig"] }
 
 # Building
 build = "dotnet build csharp -c Release"

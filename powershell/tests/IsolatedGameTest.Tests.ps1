@@ -7,8 +7,9 @@
 #
 # The parts that need no game: reading an import table, classifying it against
 # data/isolated-input.json, the refusal that names what to build, the test port
-# and the saved state a test restores. No Pester dependency, matching the other
-# tests.
+# and writing it into a config, the saved files and folders a test restores, and
+# the wait for a log line. The rig lock and the session wrapper are in
+# GameRig.Tests.ps1. No Pester dependency, matching the other tests.
 # ============================================================================
 
 Set-StrictMode -Version Latest
@@ -92,6 +93,103 @@ try {
     Check 'a file that existed is put back as it was' ((Get-Content $existing -Raw).Trim() -eq 'UdpPort=default')
     Check 'a file the test created is removed' (-not (Test-Path $absent))
     Check 'the saved state is gone once restored' (-not (Test-Path $state))
+
+    # --- saved folders ------------------------------------------------------
+    # A save folder as a game leaves it: a file deleted, one rewritten, one added, a folder added.
+    $saves = Join-Path $root 'Saves'
+    $newFolder = Join-Path $root 'Made By The Run'
+    New-Item -ItemType Directory -Force (Join-Path $saves 'world one') | Out-Null
+    Set-Content (Join-Path $saves 'latest.ini') 'world one' -Encoding ASCII
+    Set-Content (Join-Path $saves 'world one\player.bin') 'the player' -Encoding ASCII
+    Set-Content (Join-Path $saves 'world one\chunk-1.bin') 'a chunk' -Encoding ASCII
+    $listing = { (Get-ChildItem $saves -Recurse -File | Sort-Object FullName | ForEach-Object { "$($_.FullName.Substring($saves.Length + 1))=$((Get-Content $_.FullName -Raw).Trim())" }) -join ';' }
+    $asSaved = & $listing
+    Save-GameTestState -Files $existing -Folders "$saves\", $newFolder -Folder $state
+    Remove-Item (Join-Path $saves 'world one\player.bin')
+    Set-Content (Join-Path $saves 'world one\chunk-1.bin') 'rewritten' -Encoding ASCII
+    Set-Content (Join-Path $saves 'world one\chunk-2.bin') 'added' -Encoding ASCII
+    New-Item -ItemType Directory -Force (Join-Path $saves 'world two'), $newFolder | Out-Null
+    Set-Content (Join-Path $saves 'world two\player.bin') 'another' -Encoding ASCII
+    Set-Content (Join-Path $newFolder 'log.txt') 'x' -Encoding ASCII
+    Set-Content $existing 'UdpPort=5198' -Encoding ASCII
+
+    # The stopped game still holds one file: the restore fails, and fails whole.
+    $held = [IO.File]::Open((Join-Path $saves 'world one\chunk-1.bin'), 'Open', 'ReadWrite', 'None')
+    try {
+        Check 'a folder restore that cannot write a file throws' (Throws { Restore-GameTestState -Folder $state } 'robocopy could not make')
+    } finally { $held.Dispose() }
+    Check 'and leaves the folder there, with the saved state still to restore from' `
+        ((Test-Path (Join-Path $saves 'world one\chunk-1.bin')) -and (Test-Path (Join-Path $saves 'latest.ini')) -and (Test-Path (Join-Path $state 'state.json')))
+    Restore-GameTestState -Folder $state
+    Check 'a folder is put back as it was: deleted files back, rewritten ones as before, added ones gone' ((& $listing) -eq $asSaved) (& $listing)
+    Check 'a folder the game added inside it is gone' (-not (Test-Path (Join-Path $saves 'world two')))
+    Check 'a folder that did not exist before is removed' (-not (Test-Path $newFolder))
+    Check 'a file saved beside the folders is put back too' ((Get-Content $existing -Raw).Trim() -eq 'UdpPort=default')
+    Check 'the saved state is gone once the folders are restored' (-not (Test-Path $state))
+    Check 'a save of nothing is refused' (Throws { Save-GameTestState -Folder $state } 'nothing to save')
+    Check 'a file named as a folder is refused' (Throws { Save-GameTestState -Folders $existing -Folder $state } 'is a file')
+    Check 'a robocopy success code does not become the exit code' ($LASTEXITCODE -eq 0) "$LASTEXITCODE"
+
+    # A file the game still holds is waited for when the caller asks.
+    Save-GameTestState -Files $existing -Folder $state
+    Set-Content $existing 'UdpPort=5198' -Encoding ASCII
+    $held = [IO.File]::Open($existing, 'Open', 'ReadWrite', 'None')
+    try {
+        Check 'a file that is held throws at once without -RetrySeconds' (Throws { Restore-GameTestState -Folder $state } 'being used by another process')
+        $release = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList '-NoProfile', '-Command', 'Start-Sleep 2'
+        $waited = [Diagnostics.Stopwatch]::StartNew()
+        $job = [PowerShell]::Create().AddScript({ param($h, $p) $p.WaitForExit(); $h.Dispose() }).AddArgument($held).AddArgument($release)
+        $pending = $job.BeginInvoke()
+        Restore-GameTestState -Folder $state -RetrySeconds 20
+        $job.EndInvoke($pending); $job.Dispose()
+        Check 'with -RetrySeconds it is put back once the file is let go' ((Get-Content $existing -Raw).Trim() -eq 'UdpPort=default' -and $waited.Elapsed.TotalSeconds -ge 1.5) "$($waited.Elapsed.TotalSeconds)"
+    } finally { $held.Dispose() }
+
+    # --- the test port in a config file -------------------------------------
+    $ini = Join-Path $root 'CameraUnlock.ini'
+    $bytesOf = { param([string]$Text) [Text.Encoding]::GetEncoding(28591).GetBytes($Text) }
+    $textOf = { [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($ini)) }
+    # A byte order mark, a byte that is not UTF-8 (0xE9), odd spacing, a key given twice, CRLF.
+    [IO.File]::WriteAllBytes($ini, [byte[]](0xEF, 0xBB, 0xBF) + (& $bytesOf "; caf$([char]0xE9)`r`n[Network]`r`nUdpPort=1`r`n  udpport = 4242   `r`n`r`n[General]`r`nEnableOnStartup=true`r`n"))
+    Check 'the port written is returned' ((Set-ModTestPort -IniPath $ini -Port 5198) -eq 5198)
+    Check 'the last UdpPort line is replaced, its spelling and spacing kept, every other byte as it was' `
+        ((& $textOf) -eq ("$([char]0xEF)$([char]0xBB)$([char]0xBF)" + "; caf$([char]0xE9)`r`n[Network]`r`nUdpPort=1`r`n  udpport = 5198`r`n`r`n[General]`r`nEnableOnStartup=true`r`n")) (& $textOf)
+    [IO.File]::WriteAllBytes($ini, (& $bytesOf "[Network]`nDataFreshnessMs=500`n`n[General]`nEnableOnStartup=true`n"))
+    Set-ModTestPort -IniPath $ini -Port 5198 | Out-Null
+    Check 'a missing key goes at the end of [Network], with the file''s line ending' ((& $textOf) -eq "[Network]`nDataFreshnessMs=500`nUdpPort=5198`n`n[General]`nEnableOnStartup=true`n") (& $textOf)
+    [IO.File]::WriteAllBytes($ini, (& $bytesOf "[General]`r`nEnableOnStartup=true"))
+    Set-ModTestPort -IniPath $ini -Port 5198 | Out-Null
+    Check 'a missing section goes at the end' ((& $textOf) -eq "[General]`r`nEnableOnStartup=true`r`n[Network]`r`nUdpPort=5198`r`n") (& $textOf)
+    Remove-Item $ini
+    Check 'a config that does not exist is refused' (Throws { Set-ModTestPort -IniPath $ini -Port 5198 } 'does not exist')
+    Set-ModTestPort -IniPath $ini -Port 5198 -Create | Out-Null
+    Check 'unless the test asks for one holding the port alone' ((& $textOf) -eq "[Network]`r`nUdpPort=5198`r`n") (& $textOf)
+    Check 'port 4242 is never written' (Throws { Set-ModTestPort -IniPath $ini -Port 4242 } '4242')
+    [IO.File]::WriteAllBytes($ini, [Text.Encoding]::Unicode.GetBytes("[Network]`r`nUdpPort=1`r`n"))
+    Check 'a UTF-16 file is refused' (Throws { Set-ModTestPort -IniPath $ini -Port 5198 } 'NUL byte')
+
+    # --- waiting for a log line ---------------------------------------------
+    $gameLog = Join-Path $root 'game.log'
+    Check 'a log that never shows the line throws, and one that does not exist says so' (Throws { Wait-GameLogLine -Path $gameLog -Match 'loaded' -TimeoutSeconds 1 } 'did not show ''loaded'' within 1 seconds\. It does not exist')
+    # Read while its writer holds it open for writing, as a game holds its log.
+    $writer = New-Object IO.StreamWriter((New-Object IO.FileStream($gameLog, 'Create', 'Write', 'Read')))
+    try {
+        $writer.WriteLine('boot'); $writer.WriteLine('save loaded (1.5 s)'); $writer.Flush()
+        $found = Wait-GameLogLine -Path $gameLog -Match 'loaded \((\d|\.)+ s\)' -TimeoutSeconds 5
+        Check 'a line is found in a log its writer holds open' ($found.Line -eq 'save loaded (1.5 s)' -and $found.LineNumber -eq 2) "$($found.Line)"
+        Check 'the text itself is matched with -SimpleMatch' ((Wait-GameLogLine -Path $gameLog -Match '(1.5 s)' -SimpleMatch -TimeoutSeconds 5).LineNumber -eq 2)
+        Check 'a line above -After is not found again, and the error gives the log''s last line' `
+            (Throws { Wait-GameLogLine -Path $gameLog -Match 'loaded' -After $found.LineNumber -TimeoutSeconds 1 } 'Its last line: save loaded')
+        # A line written while the wait is on.
+        $late = [PowerShell]::Create().AddScript({ param($w) Start-Sleep -Milliseconds 1500; $w.WriteLine('save loaded again'); $w.Flush() }).AddArgument($writer)
+        $pending = $late.BeginInvoke()
+        $found = Wait-GameLogLine -Path $gameLog -Match 'loaded' -After $found.LineNumber -TimeoutSeconds 10
+        $late.EndInvoke($pending); $late.Dispose()
+        Check 'a line written during the wait is found' ($found.Line -eq 'save loaded again' -and $found.LineNumber -eq 3) "$($found.Line)"
+    } finally { $writer.Dispose() }
+    $goneSession = [pscustomobject]@{ ProcessId = (Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList '-NoProfile', '-Command', 'exit').Id }
+    Wait-Process -Id $goneSession.ProcessId -ErrorAction SilentlyContinue
+    Check 'with a session, the wait ends when the game has gone' (Throws { Wait-GameLogLine -Path $gameLog -Match 'never' -Session $goneSession -TimeoutSeconds 60 } 'went before')
 
     # --- the host DLL of a managed mod ---------------------------------------
     $modFolder = Join-Path $root 'plugins'
