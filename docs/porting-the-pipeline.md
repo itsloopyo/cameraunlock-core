@@ -106,7 +106,7 @@ that calls `run-vectors.mjs`.
 | `project-zomboid-headtracking` | Java over a native DLL | Seven hand-written classes (receiver, filter, lean clamp, aim fade, aim mode, lean handover, zoom) beside a DLL that links core for the config and the hotkeys. No task that runs the vectors. The C interface below replaces all seven |
 | `fusion-360-headtracking` | Python | Runs the vectors |
 | `euro-truck-simulator-2-headtracking` | Python | `bridge/opentrack_to_freetrack.py` reads OpenTrack datagrams and hands them to FreeTrack. No core submodule, no interpolator |
-| `lopari` | Rust over C++ | Was a port: `src-tauri/src/opentrack.rs` read the packet and `src-tauri/src/bridge/interp.rs` interpolated. Its `tracker` crate now compiles core's receiver, parser and interpolators in, and no Rust reads a datagram |
+| `lopari` | Rust over C++ | Was a port: `src-tauri/src/opentrack.rs` read the packet and `src-tauri/src/bridge/interp.rs` interpolated. `src-tauri/build.rs` now compiles core's receiver, parser and session in behind `src-tauri/src/pose_feed.rs`, and no Rust there reads a datagram |
 
 `bioshock-infinite-headtracking` was listed here as Rust. It is C++ now and links the core.
 
