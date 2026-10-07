@@ -478,17 +478,17 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
 
         m_isRemoteConnection.store(IsRemoteAddress(senderAddr), std::memory_order_relaxed);
 
-        m_publishedPoses.fetch_add(1, std::memory_order_relaxed);
         m_lastReceiveTimestamp.store(nowUs, std::memory_order_release);
+        m_publishedPoses.fetch_add(1, std::memory_order_release);
     }
 }
 
 void detail::UdpReceiverTestAccess::Deliver(UdpReceiver& receiver, const void* datagram, int length,
                                            const sockaddr_in& sender, int64_t arrivedUs) {
-    receiver.m_datagrams.fetch_add(1, std::memory_order_relaxed);
     if (length >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
         receiver.HandleDatagram(static_cast<const char*>(datagram), length, sender, arrivedUs);
     }
+    receiver.m_datagrams.fetch_add(1, std::memory_order_release);
 }
 
 void UdpReceiver::ReceiverThread() {
@@ -563,11 +563,10 @@ void UdpReceiver::ReceiverThread() {
                       " (continuing)");
             }
             if (err == WSAEMSGSIZE) {
-                m_datagrams.fetch_add(1, std::memory_order_relaxed);
+                m_datagrams.fetch_add(1, std::memory_order_release);
             }
             continue;
         }
-        m_datagrams.fetch_add(1, std::memory_order_relaxed);
         if (!s_firstPacketLogged++ && m_log) {
             char ip[INET_ADDRSTRLEN] = {};
             inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
@@ -603,14 +602,15 @@ void UdpReceiver::ReceiverThread() {
             reinterpret_cast<sockaddr*>(&senderAddr),
             &addrLen
         );
-        if (bytesReceived >= 0) {
-            m_datagrams.fetch_add(1, std::memory_order_relaxed);
-        }
+        if (bytesReceived < 0) continue;
 #endif
 
         if (bytesReceived >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
             HandleDatagram(buffer, bytesReceived, senderAddr, NowUs());
         }
+        // Counted once the datagram has been dealt with, so a reader that sees the count
+        // sees everything the datagram changed.
+        m_datagrams.fetch_add(1, std::memory_order_release);
     }
 
 #ifdef _WIN32

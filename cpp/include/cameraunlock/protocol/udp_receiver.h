@@ -179,12 +179,14 @@ public:
 
     /// Datagrams taken off the socket since Start(), whatever their length or content,
     /// one that was too long for the buffer included. With GetPublishedPoseCount() it
-    /// tells a sender in the wrong format from no sender at all.
-    uint64_t GetDatagramCount() const { return m_datagrams.load(std::memory_order_relaxed); }
+    /// tells a sender in the wrong format from no sender at all. A datagram is counted
+    /// after it has been dealt with: whatever it changed is in place when the count moves.
+    uint64_t GetDatagramCount() const { return m_datagrams.load(std::memory_order_acquire); }
 
     /// Of those, the ones published as the pose: parsed, from the source followed, and
-    /// let through by the gate. GetLastReceiveTimestamp() moves with each.
-    uint64_t GetPublishedPoseCount() const { return m_publishedPoses.load(std::memory_order_relaxed); }
+    /// let through by the gate. GetLastReceiveTimestamp() moves with each, and the pose
+    /// is in place when the count moves.
+    uint64_t GetPublishedPoseCount() const { return m_publishedPoses.load(std::memory_order_acquire); }
 
     /// CENTER presses the followed tracker announced in the trailer. Nothing in core acts
     /// on one. A host whose output is relative (head movement turned into mouse movement)
