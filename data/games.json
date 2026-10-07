@@ -1927,6 +1927,14 @@
       "steam_app_id": 6880,
       "steam_folder": "Just Cause",
       "executable_relpath": "JustCause.exe"
+    },
+    "roadside-research": {
+      "display_name": "Roadside Research",
+      "env_var": "ROADSIDE_RESEARCH_PATH",
+      "executable_relpath": "Roadside Research.exe",
+      "data_folder": "Roadside Research_Data",
+      "xbox_identity_name": "OroInteractive.RoadsideResearch",
+      "engine": "Unity"
     }
   }
 }
