@@ -114,7 +114,7 @@ whose output a running game would load.
   served in the order it asked, for an hour by default (`-WaitSeconds`; 0 takes
   the rig now or throws). There is nothing to poll and no race to win. While it
   waits it prints who holds the rig and how many asked before it, each time
-  that changes, and hands the same line to a `-Waiting` block.
+  that changes. A `-Waiting` block is handed that line in place of the print.
 - **Only the session that took a lock releases it.** `Exit-GameRig` throws, and
   removes nothing, for a lock that is someone else's.
 - **A lock is taken over only when its taker's process has gone and the game is

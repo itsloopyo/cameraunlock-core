@@ -697,7 +697,8 @@ function Enter-GameRig {
     another.
 
     While it waits it says what for, each time that changes: who holds the rig and how many asked
-    before this session. -Waiting is a block handed the same line, for a caller that acts on it. A
+    before this session. -Waiting is a block handed that line in place of its being printed, for a
+    caller that acts on it or words it its own way. A
     holder whose own process has gone while its game runs on is named as that: the session is
     between two of its processes, or its runner was killed. -SessionFile is recorded with the
     lock for that case, so whoever waits can see what Stop-IsolatedGameSession would need.
@@ -722,7 +723,7 @@ function Enter-GameRig {
         [string]$Token = '',
         # The file the session is kept in (Start-IsolatedGameSession -SessionFile), shown by Get-GameRig.
         [string]$SessionFile = '',
-        # Handed each new line this session waits on. It runs outside the lock's mutex.
+        # Handed each new line this session waits on, which is then not printed. It runs outside the lock's mutex.
         [scriptblock]$Waiting
     )
     if (-not $Game -and -not $WholeGpu -and -not $Token) { throw 'Enter-GameRig needs -Game, or -WholeGpu for work that has no game' }
@@ -828,9 +829,8 @@ function Enter-GameRig {
             if ($WaitSeconds -le 0) { throw $turn }
             if ((Get-Date) -ge $deadline) { throw "$turn. Waited $WaitSeconds seconds for the rig for $key." }
             if ($turn -ne $said) {
-                Write-Host "Enter-GameRig ($key, $Owner): $turn"
                 $said = $turn
-                if ($Waiting) { & $Waiting $turn | Out-Host }
+                if ($Waiting) { & $Waiting $turn | Out-Host } else { Write-Host "Enter-GameRig ($key, $Owner): $turn" }
             }
             Start-Sleep -Milliseconds 500
         }
