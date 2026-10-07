@@ -1920,6 +1920,13 @@
       "repo": "itsloopyo/the-ascent-headtracking",
       "engine": "Unreal Engine",
       "catalog_status": "absent"
+    },
+    "just-cause": {
+      "display_name": "Just Cause",
+      "env_var": "JUST_CAUSE_PATH",
+      "steam_app_id": 6880,
+      "steam_folder": "Just Cause",
+      "executable_relpath": "JustCause.exe"
     }
   }
 }
