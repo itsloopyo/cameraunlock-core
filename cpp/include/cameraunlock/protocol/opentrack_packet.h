@@ -17,6 +17,20 @@ struct OpenTrackPacket {
     /// Minimum packet size (6 doubles = 48 bytes).
     static constexpr size_t kMinPacketSize = 48;
 
+    /// The largest angle, either way, a datagram may carry on any axis, in degrees. An angle
+    /// has no reading outside one full turn, so a sender that reports 0 to 360 passes and
+    /// nothing past it is a pose. A datagram over it is refused whole.
+    ///
+    /// The bound is not tidiness. Any finite float used to pass, and two packets with pitch
+    /// at opposite ends of a float's range made the interpolator's step between them
+    /// infinite: the view went to NaN and stayed there, since smoothing a NaN gives a NaN.
+    /// The port is open to the network, so two datagrams from any host did it.
+    static constexpr float kMaxRotationDegrees = 360.0f;
+
+    /// The largest position, either way, a datagram may carry on any axis, in the wire's
+    /// centimetres: 100 m, ten times the largest position limit a config can hold.
+    static constexpr float kMaxPositionCm = 10000.0f;
+
     /// Byte offsets for position (doubles at offsets 0, 8, 16).
     static constexpr size_t kPosXOffset = 0;
     static constexpr size_t kPosYOffset = 8;

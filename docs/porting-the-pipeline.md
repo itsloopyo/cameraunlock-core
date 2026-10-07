@@ -295,6 +295,15 @@ breaking callers.
 reaches the output, and no recenter happened. Then set a centre with the hotkey,
 send a trailered packet, and assert the hotkey centre survives.
 
+A datagram is also refused whole, like one holding a NaN, when an angle on any axis is past 360
+degrees or a position past 10000 cm, compared after the narrowing to float (constants
+`max_rotation_degrees` and `max_position_cm`). Any finite float used to pass, and two datagrams
+with pitch at opposite ends of a float's range made the interpolator's step between them
+infinite: the pose went to NaN and smoothing kept it. A refused datagram changes nothing, the
+source the receiver follows and the locality flag included.
+
+**Check.** `wire-rejects-a-pose-no-tracker-sends`.
+
 ## 10. The mod-side center starts at identity
 
 The pipeline consumes the tracker's pose as absolute, the way TrackIR does: the

@@ -402,6 +402,44 @@ int RunReceiverTests() {
     waitRx.Stop();
     waitSender.Close();
 
+    // ---- UdpReceiver: a datagram that does not parse changes nothing ----
+    //
+    // Through the test seam, so the two senders and the times between them are exact.
+    std::cout << "UdpReceiver refused datagram tests:\n";
+    {
+        using cameraunlock::detail::UdpReceiverTestAccess;
+        UdpReceiver refusing;
+        refusing.SetLog([](const std::string&) {});
+        sockaddr_in stranger = {};
+        stranger.sin_family = AF_INET;
+        stranger.sin_port = htons(5000);
+        inet_pton(AF_INET, "192.0.2.7", &stranger.sin_addr);
+        sockaddr_in tracker = stranger;
+        inet_pton(AF_INET, "127.0.0.1", &tracker.sin_addr);
+
+        uint8_t garbage[54];
+        const uint8_t stale_counter = 9;
+        size_t garbage_len = BuildPacket(garbage, 0.0, 0.0, 0.0, 361.0, 0.0, 0.0, &stale_counter);
+        for (int i = 0; i < 20; i++) {
+            UdpReceiverTestAccess::Deliver(refusing, garbage, static_cast<int>(garbage_len), stranger, 1000000 + i * 1000);
+        }
+        Check(!refusing.GetRotation(yaw, pitch, roll) && refusing.GetLastReceiveTimestamp() == 0,
+              "a pose past 360 degrees is not published and is no arrival");
+
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0);
+        UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1020000);
+        Check(refusing.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 12.0f),
+              "the tracker's first pose is taken although a stranger's refused datagrams came first");
+        Check(!refusing.IsRemoteConnection(), "and the stranger's address did not set the locality");
+        Check(refusing.GetRejectedPacketCount() == 0, "the tracker is the source followed, not a second one");
+
+        UdpReceiverTestAccess::Deliver(refusing, garbage, static_cast<int>(garbage_len), tracker, 1021000);
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 12.5, 0.0, 0.0);
+        UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1022000);
+        Check(refusing.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 12.5f) && refusing.GetFrozenPacketCount() == 0,
+              "a refused datagram between two poses leaves the gate where it was");
+    }
+
     if (g_failures == 0) {
         std::cout << "Receiver tests: all passed\n";
     } else {

@@ -32,6 +32,22 @@ namespace CameraUnlock.Core.Protocol
         /// <summary>Byte offset of roll in the packet.</summary>
         public const int RollOffset = 40;
 
+        /// <summary>
+        /// The largest angle, either way, a datagram may carry on any axis, in degrees: one
+        /// full turn. A datagram over it is refused whole. Any finite float used to pass, and
+        /// two packets with pitch at opposite ends of a float's range made the interpolator's
+        /// step between them infinite, which left the view on NaN. Matches
+        /// OpenTrackPacket::kMaxRotationDegrees.
+        /// </summary>
+        public const float MaxRotationDegrees = 360.0f;
+
+        /// <summary>
+        /// The largest position, either way, a datagram may carry on any axis, in the wire's
+        /// centimetres: 100 m, ten times the largest position limit a config can hold. Matches
+        /// OpenTrackPacket::kMaxPositionCm.
+        /// </summary>
+        public const float MaxPositionCm = 10000.0f;
+
         /// <summary>Conversion factor from centimeters (OpenTrack default) to meters.</summary>
         public const float CmToMeters = 0.01f;
 
@@ -72,7 +88,7 @@ namespace CameraUnlock.Core.Protocol
             double pitch = BitConverter.ToDouble(data, PitchOffset);
             double roll = BitConverter.ToDouble(data, RollOffset);
 
-            if (!IsFiniteAsFloat(yaw) || !IsFiniteAsFloat(pitch) || !IsFiniteAsFloat(roll))
+            if (!IsWithin(yaw, MaxRotationDegrees) || !IsWithin(pitch, MaxRotationDegrees) || !IsWithin(roll, MaxRotationDegrees))
             {
                 return false;
             }
@@ -101,7 +117,7 @@ namespace CameraUnlock.Core.Protocol
             double y = BitConverter.ToDouble(data, YOffset);
             double z = BitConverter.ToDouble(data, ZOffset);
 
-            if (!IsFiniteAsFloat(x) || !IsFiniteAsFloat(y) || !IsFiniteAsFloat(z))
+            if (!IsWithin(x, MaxPositionCm) || !IsWithin(y, MaxPositionCm) || !IsWithin(z, MaxPositionCm))
             {
                 return false;
             }
@@ -122,10 +138,11 @@ namespace CameraUnlock.Core.Protocol
         /// off and on. The socket accepts packets from any host on the network, so this
         /// is the boundary that has to reject them.
         /// </summary>
-        private static bool IsFiniteAsFloat(double value)
+        private static bool IsWithin(double value, float bound)
         {
+            // False for a NaN and for either infinity, so one test covers finiteness and the bound.
             float narrowed = (float)value;
-            return !float.IsNaN(narrowed) && !float.IsInfinity(narrowed);
+            return System.Math.Abs(narrowed) <= bound;
         }
 
         /// <summary>
@@ -181,7 +198,7 @@ namespace CameraUnlock.Core.Protocol
             double pitch = BitConverter.ToDouble(data.Slice(PitchOffset, 8));
             double roll = BitConverter.ToDouble(data.Slice(RollOffset, 8));
 
-            if (!IsFiniteAsFloat(yaw) || !IsFiniteAsFloat(pitch) || !IsFiniteAsFloat(roll))
+            if (!IsWithin(yaw, MaxRotationDegrees) || !IsWithin(pitch, MaxRotationDegrees) || !IsWithin(roll, MaxRotationDegrees))
             {
                 return false;
             }
@@ -207,7 +224,7 @@ namespace CameraUnlock.Core.Protocol
             double y = BitConverter.ToDouble(data.Slice(YOffset, 8));
             double z = BitConverter.ToDouble(data.Slice(ZOffset, 8));
 
-            if (!IsFiniteAsFloat(x) || !IsFiniteAsFloat(y) || !IsFiniteAsFloat(z))
+            if (!IsWithin(x, MaxPositionCm) || !IsWithin(y, MaxPositionCm) || !IsWithin(z, MaxPositionCm))
             {
                 return false;
             }

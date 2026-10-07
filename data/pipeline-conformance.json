@@ -131,6 +131,20 @@
     "trailer_magic": { "value": "HCAM", "offset": 48 },
     "trailer_version_offset": { "value": 52, "note": "byte >= 1 is valid; compare with >=, not ==, so a later version still parses" },
     "trailer_counter_offset": { "value": 53, "note": "u8, wraps" },
+    "max_rotation_degrees": {
+      "value": 360.0,
+      "cpp": "OpenTrackPacket::kMaxRotationDegrees",
+      "csharp": "OpenTrackPacket.MaxRotationDegrees",
+      "unit": "deg",
+      "note": "A datagram carrying a larger angle on any axis, either way, is refused whole. Compared with <= on the value narrowed to float, which also refuses NaN and infinity."
+    },
+    "max_position_cm": {
+      "value": 10000.0,
+      "cpp": "OpenTrackPacket::kMaxPositionCm",
+      "csharp": "OpenTrackPacket.MaxPositionCm",
+      "unit": "cm",
+      "note": "The wire's centimetres, before the conversion to metres. A datagram carrying a larger position on any axis, either way, is refused whole."
+    },
     "confirm_jump_degrees": {
       "value": 8.0,
       "cpp": "PoseJumpGate::kConfirmJumpDegrees",
@@ -750,6 +764,33 @@
         { "kind": "equals", "at": "big_pos", "field": "ok", "value": 0, "tolerance": 0 },
         { "kind": "equals", "at": "big_yaw", "field": "ok", "value": 0, "tolerance": 0 },
         { "kind": "equals", "at": "nan_yaw", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "sane", "field": "ok", "value": 1, "tolerance": 0 },
+        { "kind": "equals", "at": "sane", "field": "yaw", "value": 40.0, "tolerance": 1e-5 }
+      ]
+    },
+    {
+      "id": "wire-rejects-a-pose-no-tracker-sends",
+      "section": 9,
+      "title": "A datagram is refused whole past 360 degrees or 100 m on any axis",
+      "catches": "Accepting any finite float. Two datagrams with pitch at opposite ends of a float's range make the step between them infinite inside the interpolator, the view goes to NaN, and smoothing keeps it there until a restart. The port is bound on every interface, so any host on the network can send them. The bounds are constants.max_rotation_degrees and constants.max_position_cm, compared with <= on the value narrowed to float.",
+      "unit": "packet",
+      "config": {},
+      "steps": [
+        { "op": "step", "label": "over_yaw", "bytes": "000000000000000000000000000000000000000000000000000000000088764000000000000000000000000000000000" },
+        { "op": "step", "label": "over_pitch", "bytes": "00000000000000000000000000000000000000000000000000000000000000008af221bf3c36ecc70000000000000000" },
+        { "op": "step", "label": "over_roll", "bytes": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006af840" },
+        { "op": "step", "label": "over_x", "bytes": "000000008088c34000000000000000000000000000000000000000000000000000000000000000000000000000000000" },
+        { "op": "step", "label": "over_z", "bytes": "000000000000000000000000000000008af221bf3c36ecc7000000000000000000000000000000000000000000000000" },
+        { "op": "step", "label": "edge", "bytes": "000000000088c3c000000000000000000000000000000000000000000080764000000000008076c00000000000000000" },
+        { "op": "step", "label": "sane", "bytes": "000000000000000000000000000000000000000000000000000000000000444000000000000000000000000000000000" }
+      ],
+      "assert": [
+        { "kind": "equals", "at": "over_yaw", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "over_pitch", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "over_roll", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "over_x", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "over_z", "field": "ok", "value": 0, "tolerance": 0 },
+        { "kind": "equals", "at": "edge", "field": "ok", "value": 1, "tolerance": 0 },
         { "kind": "equals", "at": "sane", "field": "ok", "value": 1, "tolerance": 0 },
         { "kind": "equals", "at": "sane", "field": "yaw", "value": 40.0, "tolerance": 1e-5 }
       ]

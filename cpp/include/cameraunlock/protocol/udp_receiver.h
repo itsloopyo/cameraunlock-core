@@ -18,6 +18,20 @@ std::function<void(const std::string&)> DefaultLogSink();
 
 namespace cameraunlock {
 
+class UdpReceiver;
+
+namespace detail {
+
+/// Not API: the test seam. Hands a receiver that is not started one datagram as if it had
+/// arrived from `sender` at `arrivedUs`, on the caller's thread, so a test can run the
+/// receive path without a socket or a clock.
+struct UdpReceiverTestAccess {
+    static void Deliver(UdpReceiver& receiver, const void* datagram, int length, const sockaddr_in& sender,
+                        int64_t arrivedUs);
+};
+
+}  // namespace detail
+
 /// UDP receiver for OpenTrack protocol.
 /// Thread-safe with lock-free reads on the game thread.
 class UdpReceiver {
@@ -154,6 +168,9 @@ public:
     }
 
 private:
+    friend struct detail::UdpReceiverTestAccess;
+
+    void HandleDatagram(const char* buffer, int bytesReceived, const sockaddr_in& senderAddr, int64_t arrivedUs);
     void ReceiverThread();
     void SupervisorThread();
     bool BindAndReceive();
@@ -222,6 +239,9 @@ private:
     std::atomic<int64_t> m_cycleRequestedAtUs{0};
     int64_t m_primaryLastSeenUs{0};
     std::atomic<uint64_t> m_rejectedPackets{0};
+
+    /// The first datagram that does not parse is logged, once per receive thread.
+    bool m_parseFailLogged{false};
 
     /// Dropout rejection. Receive-thread only; Stop() resets it after the join.
     PoseJumpGate m_poseGate;

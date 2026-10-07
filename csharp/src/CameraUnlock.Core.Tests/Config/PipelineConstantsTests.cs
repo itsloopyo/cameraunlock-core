@@ -53,6 +53,8 @@ namespace CameraUnlock.Core.Tests.Config
                 { "SmoothingUtils.DefaultLocalSmoothing", SmoothingUtils.DefaultLocalSmoothing },
                 { "SmoothingUtils.DefaultRemoteSmoothing", SmoothingUtils.DefaultRemoteSmoothing },
                 { "PoseJumpGate.ConfirmJumpDegrees", PoseJumpGate.ConfirmJumpDegrees },
+                { "OpenTrackPacket.MaxRotationDegrees", OpenTrackPacket.MaxRotationDegrees },
+                { "OpenTrackPacket.MaxPositionCm", OpenTrackPacket.MaxPositionCm },
                 { "AdsFade.LowerMs", AdsFade.LowerMs },
                 { "AdsFade.RaiseMs", AdsFade.RaiseMs },
                 { "HeadFollowLightSettings.DefaultMultiplier", HeadFollowLightSettings.DefaultMultiplier },

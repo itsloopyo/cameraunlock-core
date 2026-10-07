@@ -14,9 +14,11 @@ namespace {
 // Matches OpenTrackPacket.CmToMeters on the C# side.
 constexpr float kCmToMeters = 0.01f;
 
-inline bool FiniteFloat(double v, float& out) {
+// The comparison is false for a NaN and for either infinity, so one test covers
+// finiteness and the bound.
+inline bool Within(double v, float bound, float& out) {
     out = static_cast<float>(v);
-    return std::isfinite(out);
+    return std::fabs(out) <= bound;
 }
 }  // namespace
 
@@ -33,7 +35,8 @@ bool OpenTrackPacket::TryParse(const void* data, size_t length, TrackingPose& po
     std::memcpy(&roll, bytes + kRollOffset, sizeof(double));
 
     float fyaw, fpitch, froll;
-    if (!FiniteFloat(yaw, fyaw) || !FiniteFloat(pitch, fpitch) || !FiniteFloat(roll, froll)) {
+    if (!Within(yaw, kMaxRotationDegrees, fyaw) || !Within(pitch, kMaxRotationDegrees, fpitch) ||
+        !Within(roll, kMaxRotationDegrees, froll)) {
         return false;
     }
 
@@ -60,7 +63,7 @@ bool OpenTrackPacket::TryParsePosition(const void* data, size_t length, Position
     // 3.4e38..3.4e40 cm through here while C# rejected it, so the same hostile datagram
     // produced a 1e37 m position in native mods and no position at all in Unity mods.
     float fx, fy, fz;
-    if (!FiniteFloat(px, fx) || !FiniteFloat(py, fy) || !FiniteFloat(pz, fz)) {
+    if (!Within(px, kMaxPositionCm, fx) || !Within(py, kMaxPositionCm, fy) || !Within(pz, kMaxPositionCm, fz)) {
         return false;
     }
 
@@ -85,8 +88,9 @@ bool OpenTrackPacket::TryParseAll(const void* data, size_t length, TrackingPose&
 
     float fyaw, fpitch, froll, fx, fy, fz;
     // See TryParsePosition: validate the raw double's narrowing, scale in float.
-    if (!FiniteFloat(yaw, fyaw) || !FiniteFloat(pitch, fpitch) || !FiniteFloat(roll, froll) ||
-        !FiniteFloat(px, fx) || !FiniteFloat(py, fy) || !FiniteFloat(pz, fz)) {
+    if (!Within(yaw, kMaxRotationDegrees, fyaw) || !Within(pitch, kMaxRotationDegrees, fpitch) ||
+        !Within(roll, kMaxRotationDegrees, froll) || !Within(px, kMaxPositionCm, fx) ||
+        !Within(py, kMaxPositionCm, fy) || !Within(pz, kMaxPositionCm, fz)) {
         return false;
     }
 

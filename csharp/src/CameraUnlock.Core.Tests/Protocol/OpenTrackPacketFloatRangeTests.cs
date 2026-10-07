@@ -67,18 +67,31 @@ namespace CameraUnlock.Core.Tests.Protocol
             Assert.False(OpenTrackPacket.TryParsePosition(MakePacket(z: AboveFloatMax), out _));
         }
 
-        [Fact]
-        public void TryParse_AtFloatMax_StillParses()
+        // The bounds, inclusive: one full turn and 100 m. A finite value past either used to
+        // parse, and two such poses made the interpolator's step between them infinite.
+        [Theory]
+        [InlineData(360.0, true)]
+        [InlineData(-360.0, true)]
+        [InlineData(360.5, false)]
+        [InlineData(-100000.0, false)]
+        [InlineData((double)float.MaxValue, false)]
+        public void TryParse_AngleAgainstTheBound(double angle, bool parses)
         {
-            Assert.True(OpenTrackPacket.TryParse(MakePacket(yaw: float.MaxValue), out TrackingPose pose));
-            Assert.Equal(float.MaxValue, pose.Yaw);
+            Assert.Equal(parses, OpenTrackPacket.TryParse(MakePacket(yaw: angle), out _));
+            Assert.Equal(parses, OpenTrackPacket.TryParse(MakePacket(pitch: angle), out _));
+            Assert.Equal(parses, OpenTrackPacket.TryParse(MakePacket(roll: angle), out _));
         }
 
-        [Fact]
-        public void TryParsePosition_AtFloatMax_StillParses()
+        [Theory]
+        [InlineData(10000.0, true)]
+        [InlineData(-10000.0, true)]
+        [InlineData(10001.0, false)]
+        [InlineData((double)float.MaxValue, false)]
+        public void TryParsePosition_CentimetresAgainstTheBound(double centimetres, bool parses)
         {
-            Assert.True(OpenTrackPacket.TryParsePosition(MakePacket(x: float.MaxValue), out PositionData pos));
-            Assert.False(float.IsInfinity(pos.X));
+            Assert.Equal(parses, OpenTrackPacket.TryParsePosition(MakePacket(x: centimetres), out _));
+            Assert.Equal(parses, OpenTrackPacket.TryParsePosition(MakePacket(y: centimetres), out _));
+            Assert.Equal(parses, OpenTrackPacket.TryParsePosition(MakePacket(z: centimetres), out _));
         }
 
         [Fact]
