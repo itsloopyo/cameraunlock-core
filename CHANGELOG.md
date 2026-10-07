@@ -9,6 +9,60 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - java/: the binding to the C interface and the boot class of a Java agent mod
+
+project-zomboid-headtracking, a Java agent, carried seven hand-written Java copies of the pipeline
+and a C++ bridge DLL of its own because core had no Java. `java/` is the half of a Java mod whose
+other half was already here, and no more. A mod compiles it into its own jar from the submodule.
+`docs/java-agent-mod.md` ties the pieces together.
+
+- `java/src/com/cameraunlock/core/CameraUnlock.java`: every function of
+  `cameraunlock/c/cameraunlock.h` through `java.lang.foreign`, for Java 22 or later. It loads
+  `CameraUnlockCore.dll` from beside its jar and nowhere else, checks the ABI number and every
+  struct's size at load and says which side is the older, and turns a refused call into an
+  exception carrying the library's reason.
+- `java/src/com/cameraunlock/core/agent/Boot.java`: the main class `scripts/jvm-site-config.ps1`
+  names in a game's site JVM config. It was project-zomboid's own, calling that mod's agent class.
+  The agent now calls `Boot.agentStarted()` instead, which is the mod's half of the contract.
+- `pixi run test-java` and `pixi run vectors-java`, both part of `pixi run check`. The vectors
+  harness runs the five vectors the C harness runs and skips the same 29. `openjdk` 25 joins the
+  pixi environment.
+
+### BREAKING - the Java agent installer names core's boot class, and the C interface's ABI is 2
+
+One consumer, project-zomboid-headtracking, which moves in the same change.
+
+- `scripts/templates/install-wrapper-javaagent.cmd` no longer sets `JVM_MAIN_CLASS`, and
+  `install-body-javaagent.cmd` no longer reads it: the site config names
+  `com/cameraunlock/core/agent/Boot`. **What to change:** delete the `JVM_MAIN_CLASS` lines from
+  the mod's `scripts/install.cmd`, add `set "LEGACY_DLLS="`, compile `cameraunlock-core/java/src`
+  into the jar and have the agent call `Boot.agentStarted()` first.
+- `jvm-site-config.ps1` and `Invoke-DevDeployJavaAgent` keep `-MainClass` as an optional
+  parameter that defaults to core's boot class.
+- The site config's `vmArgs` gain `--enable-native-access=ALL-UNNAMED`, third, for the jar's
+  calls into the DLL: without it Java 25 warns at the first one that a later release will refuse
+  them.
+- `CAMERAUNLOCK_ABI` is 2, and now also rises when a function is added, so a host that checks it
+  first never looks up a function an older library lacks. A host built against 1 refuses this
+  library at load, as it is meant to.
+
+### Added - to the C interface and the Java agent installer
+
+- `cameraunlock_struct_size(which)`: the size the library has for each struct, for a binding that
+  declares them in its own language to check at load.
+- `cameraunlock_session_set_aim_mode(mode)`: for a game whose cycle is not core's four. In Project
+  Zomboid the game's own reticle is the aim marker, so free look without a marker is left out.
+- `cameraunlock_session_start` logs `Listening for OpenTrack datagrams on UDP port <n>` when the
+  port is bound at once. The receiver already logged a failed bind and a later one that held, so
+  a log now always says which happened.
+- `LEGACY_DLLS` in the Java agent install wrapper: files an older version of the mod left beside
+  the exe under names it no longer uses are removed by an install, once the new files and site
+  config are in place. `Invoke-DevDeployJavaAgent` gains `-LegacyFiles` for the same, and
+  `-NativeFiles` for the DLL that goes beside the jar and not on the classpath.
+- `CameraUnlockCoreOtherAbi.dll` (CMake target `cameraunlock_c_other_abi`, never built by default,
+  never shipped): a library that answers the ABI number before the header's, for a binding's test
+  of its check at load.
+
 ### Added - a lock on the game and a whole-session wrapper for background tests
 
 `IsolatedGameTest.psm1` had launch, input, capture, proof and stop, and every mod wrote the rest

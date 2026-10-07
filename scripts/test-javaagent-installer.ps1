@@ -45,9 +45,8 @@ set "MOD_INTERNAL_NAME=Fixture"
 set "MOD_VERSION=1.0.0"
 set "STATE_FILE=.fixture-state.json"
 set "FRAMEWORK_TYPE=JavaAgent"
-set "MOD_DLLS=Fixture.jar"
-set "JVM_MAIN_CLASS=fixture/Boot"
-set "LEGACY_DLLS=OldFixture.jar"
+set "MOD_DLLS=Fixture.jar Fixture.dll"
+set "LEGACY_DLLS=OldFixture.jar OldFixture.dll"
 set "MOD_SEED_FILES="
 set "PRESERVE_FILES="
 set "USER_FOLDER_EXTRAS="
@@ -61,7 +60,9 @@ $jar = Join-Path $game 'Fixture.jar'
 $stock = Join-Path $game 'Fixture64.json'
 $site = Join-Path $game 'Fixture64.site.json'
 $state = Join-Path $game '.fixture-state.json'
+$dll = Join-Path $game 'Fixture.dll'
 [IO.File]::WriteAllText((Join-Path $plugins 'Fixture.jar'), 'jar v1')
+[IO.File]::WriteAllText((Join-Path $plugins 'Fixture.dll'), 'dll v1')
 
 Invoke-Installer install 1
 if (@(Get-ChildItem -LiteralPath $game -Force).Count -ne 1) { throw 'An install with no stock JVM config changed the game folder' }
@@ -70,10 +71,11 @@ $stockJson = '{"mainClass":"a/Main","classpath":[".","game.jar"],"vmArgs":["-Xmx
 [IO.File]::WriteAllText($stock, $stockJson)
 Invoke-Installer install 0
 Assert-File $jar 'jar v1'
+Assert-File $dll 'dll v1'
 Assert-File $stock $stockJson
 $written = [IO.File]::ReadAllText($site) | ConvertFrom-Json
-if (($written.vmArgs -join '|') -ne '-Dcameraunlock.mainClass=a/Main|-XX:+EnableDynamicAgentLoading|-Xmx1g') { throw "Unexpected vmArgs: $($written.vmArgs -join ' ')" }
-if ($written.mainClass -ne 'fixture/Boot') { throw "Unexpected mainClass: $($written.mainClass)" }
+if (($written.vmArgs -join '|') -ne '-Dcameraunlock.mainClass=a/Main|-XX:+EnableDynamicAgentLoading|--enable-native-access=ALL-UNNAMED|-Xmx1g') { throw "Unexpected vmArgs: $($written.vmArgs -join ' ')" }
+if ($written.mainClass -ne 'com/cameraunlock/core/agent/Boot') { throw "The site config does not name core's boot class: $($written.mainClass)" }
 if (($written.classpath -join '|') -ne '.|game.jar|Fixture.jar') { throw "Unexpected classpath: $($written.classpath -join ' ')" }
 if (($written.windows.'10.0'.vmArgs -join '|') -ne '-XX:+UseZGC') { throw 'The site config lost the per-version vmArgs' }
 if (-not ([IO.File]::ReadAllText($state)).Contains('"type": "JavaAgent"')) { throw 'The state file does not name JavaAgent' }
@@ -84,12 +86,30 @@ if (-not ([IO.File]::ReadAllText($state)).Contains('"type": "JavaAgent"')) { thr
 Invoke-Installer install 0
 Assert-File $jar 'jar v2'
 $written = [IO.File]::ReadAllText($site) | ConvertFrom-Json
-if (($written.vmArgs -join '|') -ne '-Dcameraunlock.mainClass=a/Main|-XX:+EnableDynamicAgentLoading|-Xmx2g') { throw "Unexpected vmArgs after reinstall: $($written.vmArgs -join ' ')" }
+if (($written.vmArgs -join '|') -ne '-Dcameraunlock.mainClass=a/Main|-XX:+EnableDynamicAgentLoading|--enable-native-access=ALL-UNNAMED|-Xmx2g') { throw "Unexpected vmArgs after reinstall: $($written.vmArgs -join ' ')" }
 if (($written.classpath -join '|') -ne '.|game.jar|Fixture.jar') { throw "Unexpected classpath after reinstall: $($written.classpath -join ' ')" }
 
 Invoke-Installer uninstall 0
-if ((Test-Path -LiteralPath $jar) -or (Test-Path -LiteralPath $site) -or (Test-Path -LiteralPath $state)) { throw 'Uninstall left the jar, the site config or the state file' }
+if ((Test-Path -LiteralPath $jar) -or (Test-Path -LiteralPath $dll) -or (Test-Path -LiteralPath $site) -or (Test-Path -LiteralPath $state)) { throw 'Uninstall left the jar, the DLL, the site config or the state file' }
 if (-not (Test-Path -LiteralPath $stock)) { throw 'Uninstall removed the stock JVM config' }
+
+# An older version's layout: the jar, a DLL under a name this version does not use, and a site
+# config naming a boot class of the mod's own. The new version installed over it leaves neither.
+$oldDll = Join-Path $game 'OldFixture.dll'
+[IO.File]::WriteAllText($jar, 'old jar')
+[IO.File]::WriteAllText($oldDll, 'old dll')
+[IO.File]::WriteAllText($site, '{"mainClass":"fixture/Boot","classpath":[".","game.jar","Fixture.jar"],"vmArgs":["-Dcameraunlock.mainClass=a/Main","-XX:+EnableDynamicAgentLoading","-Xmx2g"]}')
+Invoke-Installer install 0
+if (Test-Path -LiteralPath $oldDll) { throw 'An install over an older layout left its DLL beside the new one' }
+Assert-File $jar 'jar v2'
+Assert-File $dll 'dll v1'
+$written = [IO.File]::ReadAllText($site) | ConvertFrom-Json
+if ($written.mainClass -ne 'com/cameraunlock/core/agent/Boot') { throw "An install over an older layout kept its boot class: $($written.mainClass)" }
+if (($written.classpath -join '|') -ne '.|game.jar|Fixture.jar') { throw "An install over an older layout kept its jar on the classpath: $($written.classpath -join ' ')" }
+if (($written.vmArgs -join '|') -ne '-Dcameraunlock.mainClass=a/Main|-XX:+EnableDynamicAgentLoading|--enable-native-access=ALL-UNNAMED|-Xmx2g') { throw "Unexpected vmArgs over an older layout: $($written.vmArgs -join ' ')" }
+Invoke-Installer uninstall 0
+$left = @(Get-ChildItem -LiteralPath $game -Force | ForEach-Object Name | Sort-Object)
+if (($left -join '|') -ne 'Fixture64.exe|Fixture64.json') { throw "Old layout, new install, uninstall left: $($left -join ', ')" }
 
 # A site config that names only a jar from an older release is still this mod's.
 [IO.File]::WriteAllText($site, '{"mainClass":"a/Main","classpath":[],"vmArgs":["-javaagent:OldFixture.jar"]}')
@@ -113,5 +133,5 @@ try { Invoke-Installer uninstall 1 } finally { $handle.Dispose() }
 if (-not (Test-Path -LiteralPath $jar) -or -not (Test-Path -LiteralPath $state)) { throw 'An uninstall that could not read the site config removed the jar or the state file' }
 Invoke-Installer uninstall 0
 Invoke-Installer install 2 '--unknown /y'
-Write-Host 'PASS javaagent: stock config required, site config written and refreshed, legacy and foreign site configs, locked site config, exit codes'
+Write-Host 'PASS javaagent: stock config required, site config written with the boot class of core and refreshed, native file beside the jar, older layout replaced, legacy and foreign site configs, locked site config, exit codes'
 Write-Host "Fixtures retained at $root"

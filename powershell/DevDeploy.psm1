@@ -955,16 +955,24 @@ function Invoke-DevDeployShim {
 .SYNOPSIS
     Dev-deploy a Java agent mod to a game whose own launcher starts the JVM.
 .DESCRIPTION
-    The same two writes install-body-javaagent.cmd makes: the agent jars go
-    next to the game exe, and scripts/jvm-site-config.ps1 writes <Exe>.site.json
-    as the stock <Exe>.json with the mod's boot class as mainClass and each jar
-    on the classpath. The site config is checked before anything is copied, so
-    a site config that is somebody else's stops the deploy with the install
-    untouched.
+    The same writes install-body-javaagent.cmd makes: the agent jars and the
+    native files they load go next to the game exe, scripts/jvm-site-config.ps1
+    writes <Exe>.site.json as the stock <Exe>.json with the boot class as
+    mainClass and each jar on the classpath, and what an older layout left is
+    removed. The site config is checked before anything is copied, so a site
+    config that is somebody else's stops the deploy with the install untouched.
 .PARAMETER AgentJars
     Jar filenames in BuildOutputPath, each put on the classpath.
+.PARAMETER NativeFiles
+    Filenames in BuildOutputPath copied next to the jars and not put on the
+    classpath: the CameraUnlockCore.dll the jar loads from beside itself.
+.PARAMETER LegacyFiles
+    Filenames an older build of the mod put next to the exe under names this
+    one no longer uses. Each is removed once the new files are in place.
 .PARAMETER MainClass
-    The mod's boot class, as the stock config names its own (com/example/Boot).
+    The boot class, as the stock config names its own. Leave it out for core's
+    (java/src/com/cameraunlock/core/agent/Boot.java), which a Java agent mod
+    compiles into its jar.
 .OUTPUTS
     Hashtable: @{ GamePath; ExeDir; DeployedDllPath; SiteConfigPath }.
     DeployedDllPath is the first jar, under the key the other orchestrators use.
@@ -976,12 +984,14 @@ function Invoke-DevDeployJavaAgentToPath {
         [Parameter(Mandatory)][string]$GameDisplayName,
         [Parameter(Mandatory)][string]$BuildOutputPath,
         [Parameter(Mandatory)][string[]]$AgentJars,
-        [Parameter(Mandatory)][string]$MainClass,
+        [string[]]$NativeFiles = @(),
+        [string[]]$LegacyFiles = @(),
+        [string]$MainClass,
         [string]$GivenPath
     )
 
-    foreach ($jar in $AgentJars) {
-        Assert-DevBuildArtifact -BuildOutputPath $BuildOutputPath -FileName $jar
+    foreach ($file in @($AgentJars) + @($NativeFiles)) {
+        Assert-DevBuildArtifact -BuildOutputPath $BuildOutputPath -FileName $file
     }
 
     $gamePath = Resolve-DevGamePath -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
@@ -996,9 +1006,9 @@ function Invoke-DevDeployJavaAgentToPath {
     $siteHelper = Join-Path $PSScriptRoot '..\scripts\jvm-site-config.ps1'
     $siteArgs = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $siteHelper,
-        '-ConfigPath', $jvmConfig, '-SitePath', $siteConfig, '-AgentJars', ($AgentJars -join ' '),
-        '-MainClass', $MainClass
+        '-ConfigPath', $jvmConfig, '-SitePath', $siteConfig, '-AgentJars', ($AgentJars -join ' ')
     )
+    if ($MainClass) { $siteArgs += @('-MainClass', $MainClass) }
 
     & powershell @siteArgs -CheckOnly
     if ($LASTEXITCODE -eq 3) {
@@ -1010,9 +1020,9 @@ function Invoke-DevDeployJavaAgentToPath {
 
     Write-Host ""
     Write-Host "Deploying agent files to: $exeDir" -ForegroundColor Yellow
-    foreach ($jar in $AgentJars) {
-        Copy-Item -LiteralPath (Join-Path $BuildOutputPath $jar) -Destination (Join-Path $exeDir $jar) -Force
-        Write-Host "Deployed $jar" -ForegroundColor Green
+    foreach ($file in @($AgentJars) + @($NativeFiles)) {
+        Copy-Item -LiteralPath (Join-Path $BuildOutputPath $file) -Destination (Join-Path $exeDir $file) -Force
+        Write-Host "Deployed $file" -ForegroundColor Green
     }
 
     & powershell @siteArgs
@@ -1020,6 +1030,14 @@ function Invoke-DevDeployJavaAgentToPath {
         throw "Could not write $siteConfig (jvm-site-config.ps1 exit $LASTEXITCODE)."
     }
     Write-Host "Wrote $exeStem.site.json" -ForegroundColor Green
+
+    foreach ($file in $LegacyFiles) {
+        $left = Join-Path $exeDir $file
+        if (Test-Path -LiteralPath $left -PathType Leaf) {
+            Remove-Item -LiteralPath $left -Force
+            Write-Host "Removed $file (from an older build of the mod)" -ForegroundColor Green
+        }
+    }
 
     return @{
         GamePath        = $gamePath
@@ -1039,7 +1057,9 @@ function Invoke-DevDeployJavaAgent {
         [Parameter(Mandatory)][string]$GameDisplayName,
         [Parameter(Mandatory)][string]$BuildOutputPath,
         [Parameter(Mandatory)][string[]]$AgentJars,
-        [Parameter(Mandatory)][string]$MainClass,
+        [string[]]$NativeFiles = @(),
+        [string[]]$LegacyFiles = @(),
+        [string]$MainClass,
         [string]$GivenPath
     )
 

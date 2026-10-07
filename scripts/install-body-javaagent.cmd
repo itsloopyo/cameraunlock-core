@@ -10,12 +10,15 @@
 :: launcher, which reads the JVM's arguments from <Exe>.json next to the exe
 :: and prefers <Exe>.site.json when one is there. The mod is a jar the JVM
 :: loads as a Java agent. There is no loader to install: the jar goes next to
-:: the exe, and a site config is written that is the stock config with the
-:: mod's boot class (JVM_MAIN_CLASS) as mainClass, each .jar in MOD_DLLS added
-:: to the classpath, and two arguments first in vmArgs: the game's own main
-:: class for the boot class to start, and the switch that lets a running JVM
-:: load an agent. The jar paths are relative, because the launcher starts the
-:: JVM with the game folder as its working directory.
+:: the exe, and a site config is written that is the stock config with core's
+:: boot class (java/src/com/cameraunlock/core/agent/Boot.java, which the mod
+:: compiles into its jar) as mainClass, each .jar in MOD_DLLS added to the
+:: classpath, and three arguments first in vmArgs: the game's own main class
+:: for the boot class to start, the switch that lets a running JVM load an
+:: agent, and the one that lets the jar call into the DLL. The jar paths are
+:: relative, because the launcher starts the JVM with the game folder as its
+:: working directory. What else MOD_DLLS names, such as
+:: the CameraUnlockCore.dll the jar loads from beside itself, is copied with it.
 ::
 :: The agent is not named with -javaagent. A launcher of this kind loads
 :: jvm.dll by path, which leaves the runtime's bin folder off the DLL search
@@ -41,8 +44,9 @@
 ::   WRAPPER_DIR              wrapper's %~dp0
 ::   GAME_ID, MOD_DISPLAY_NAME, MOD_DLLS, MOD_INTERNAL_NAME, MOD_VERSION
 ::   STATE_FILE, FRAMEWORK_TYPE (always "JavaAgent")
-::   JVM_MAIN_CLASS           the mod's boot class, as the stock config names
-::                            its own (com/example/Boot)
+::   LEGACY_DLLS              optional files an older version of the mod put
+::                            next to the exe under names this one no longer
+::                            uses, removed once the new files are in place
 ::   MOD_SEED_FILES           optional config files written only when absent
 ::   MOD_CONTROLS             optional post-install help text
 ::
@@ -158,7 +162,7 @@ goto :strip_given_slash
 :: Every name below is interpolated straight into a path that gets written,
 :: deleted or recursively removed. A blank one does not fail - it silently
 :: retargets the operation at the parent directory, which is the game folder.
-for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS JVM_MAIN_CLASS) do (
+for %%v in (GAME_ID MOD_DISPLAY_NAME MOD_INTERNAL_NAME STATE_FILE FRAMEWORK_TYPE MOD_DLLS) do (
     if not defined %%v (
         echo ERROR: %%v is not set in this script's CONFIG BLOCK.
         exit /b 1
@@ -361,6 +365,24 @@ if "!DEPLOY_FAILED!"=="0" (
     )
 )
 
+:: What an older version left under a name this one does not use goes last,
+:: once the new site config no longer needs it: a jar the old site config
+:: named has to be there until that file is rewritten, or a failed update
+:: would leave a game that does not start.
+if "!DEPLOY_FAILED!"=="0" if defined LEGACY_DLLS (
+    for %%f in (%LEGACY_DLLS%) do (
+        if exist "!EXE_DIR!\%%f" (
+            del /f /q "!EXE_DIR!\%%f" >nul 2>&1
+            if exist "!EXE_DIR!\%%f" (
+                echo   ERROR: Failed to remove %%f, which an older version of the mod left - is the game folder writable?
+                set "DEPLOY_FAILED=1"
+            ) else (
+                echo   Removed %%f ^(from an older version of the mod^)
+            )
+        )
+    )
+)
+
 if "!DEPLOY_FAILED!"=="1" (
     echo.
     echo ========================================
@@ -403,10 +425,10 @@ exit /b 0
 :: ============================================
 :site_config
 if defined _SITE_CHECK_ONLY goto :site_config_check
-powershell -NoProfile -ExecutionPolicy Bypass -File "!_SITE_HELPER!" -ConfigPath "!JVM_CONFIG!" -SitePath "!JVM_SITE!" -AgentJars "!AGENT_JARS!" -MainClass "%JVM_MAIN_CLASS%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_SITE_HELPER!" -ConfigPath "!JVM_CONFIG!" -SitePath "!JVM_SITE!" -AgentJars "!AGENT_JARS!"
 exit /b %errorlevel%
 :site_config_check
-powershell -NoProfile -ExecutionPolicy Bypass -File "!_SITE_HELPER!" -ConfigPath "!JVM_CONFIG!" -SitePath "!JVM_SITE!" -AgentJars "!AGENT_JARS!" -MainClass "%JVM_MAIN_CLASS%" -CheckOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_SITE_HELPER!" -ConfigPath "!JVM_CONFIG!" -SitePath "!JVM_SITE!" -AgentJars "!AGENT_JARS!" -CheckOnly
 exit /b %errorlevel%
 
 :: UTC ISO-8601, read through PowerShell: %DATE% is whatever the user's regional

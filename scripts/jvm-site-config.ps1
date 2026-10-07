@@ -13,11 +13,18 @@
     to carry everything the stock file does. This writes one that is the stock
     file with three changes:
 
-      mainClass  the mod's boot class, which loads the agent into the running
-                 JVM and then starts the game's own main class
+      mainClass  core's boot class (java/src/com/cameraunlock/core/agent/Boot.java,
+                 compiled into the mod's jar), which loads the jar it is in
+                 into the running JVM as a Java agent and then starts the
+                 game's own main class
       classpath  the stock entries, then each agent jar
-      vmArgs     -Dcameraunlock.mainClass=<the stock mainClass> and
-                 -XX:+EnableDynamicAgentLoading, then the stock entries
+      vmArgs     -Dcameraunlock.mainClass=<the stock mainClass>,
+                 -XX:+EnableDynamicAgentLoading and
+                 --enable-native-access=ALL-UNNAMED, then the stock entries.
+                 The last is for the jar's calls into CameraUnlockCore.dll
+                 through java.lang.foreign: without it Java 25 prints a
+                 warning at the first one and says a later release will
+                 refuse them.
 
     It does not use -javaagent. Such a launcher loads jvm.dll by path, which
     leaves the runtime's bin folder off the DLL search path, and the JVM then
@@ -43,8 +50,8 @@
 .PARAMETER AgentJars
     Space-separated jar filenames, each relative to the launcher's folder.
 .PARAMETER MainClass
-    The mod's boot class, in the form the stock config names its own
-    (com/example/Boot).
+    The boot class, in the form the stock config names its own. Core's, which
+    every Java agent mod compiles into its jar, unless a mod names another.
 .PARAMETER CheckOnly
     Run every check and write nothing.
 #>
@@ -52,7 +59,7 @@ param(
     [Parameter(Mandatory=$true)][string]$ConfigPath,
     [Parameter(Mandatory=$true)][string]$SitePath,
     [Parameter(Mandatory=$true)][string]$AgentJars,
-    [Parameter(Mandatory=$true)][string]$MainClass,
+    [string]$MainClass = 'com/cameraunlock/core/agent/Boot',
     [switch]$CheckOnly
 )
 
@@ -91,7 +98,7 @@ if (Test-Path -LiteralPath $SitePath -PathType Leaf) {
 
 if ($CheckOnly) { exit 0 }
 
-$ownArgs = @("-Dcameraunlock.mainClass=$($stock.mainClass)", '-XX:+EnableDynamicAgentLoading')
+$ownArgs = @("-Dcameraunlock.mainClass=$($stock.mainClass)", '-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED')
 $stock.vmArgs = $ownArgs + @($stock.vmArgs | Where-Object { $ownArgs -notcontains $_ })
 $stock.classpath = @($stock.classpath | Where-Object { $jars -notcontains $_ }) + $jars
 $stock.mainClass = $MainClass
