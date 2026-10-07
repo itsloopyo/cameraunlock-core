@@ -1616,22 +1616,65 @@ $PORT_LINK_IT = 'If the mod already loads a native DLL of its own, link `camerau
 # there is a test sending itself a datagram, not the repo's packet layer: lopari's
 # firewall.rs, which reads the Windows firewall's rules, was named as a port of the packet
 # layer for one. The module's text is cut before the stages are looked for.
-$PORT_RUST_TEST_MOD = '#\[cfg\((?:test|all\([^\]]*\btest\b[^\]]*\))\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{'
+#
+# Only a module that is compiled for tests and nothing else is cut: `cfg(test)`, or an
+# `all(...)` with such a term at its top level. `not(test)` and `any(test, ...)` are code
+# the shipped build has. The attribute and the module's braces are found in a copy of the
+# text whose comments, strings and character literals are blanked, so a brace or an
+# attribute written inside one counts for nothing. A module whose closing brace is not
+# found is left in the text: hiding the rest of a file would hide a port in it.
+$PORT_RUST_MOD = '#\[cfg\((?<cfg>[^\]]*)\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{'
+$PORT_RUST_NOT_CODE = [regex]('//[^\n]*' +
+    '|/\*(?>[^/*]+|/(?!\*)|\*(?!/)|(?<open>/\*)|(?<-open>\*/))*(?(open)(?!))\*/' +
+    '|b?r(?<hashes>#*)"[\s\S]*?"\k<hashes>' +
+    '|b?"(?:[^"\\]|\\[\s\S])*"' +
+    '|b?''(?:[^''\\\n]|\\[^\n]+?)''')
+
+function Test-RustCfgIsTestOnly {
+    param([string]$Cfg)
+    $Cfg = $Cfg.Trim()
+    if ($Cfg -eq 'test') { return $true }
+    if ($Cfg -notmatch '^all\s*\(([\s\S]*)\)$') { return $false }
+    $inner = $Matches[1]
+    $depth = 0
+    $start = 0
+    for ($i = 0; $i -le $inner.Length; $i++) {
+        $c = if ($i -lt $inner.Length) { $inner[$i] } else { ',' }
+        if ($c -eq '(') { $depth++ } elseif ($c -eq ')') { $depth-- }
+        elseif ($c -eq ',' -and $depth -eq 0) {
+            if (Test-RustCfgIsTestOnly $inner.Substring($start, $i - $start)) { return $true }
+            $start = $i + 1
+        }
+    }
+    return $false
+}
 
 function Remove-RustTestModules {
     param([string]$Text)
+    $code = $PORT_RUST_NOT_CODE.Replace($Text, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) ($m.Value -replace '[^\r\n]', ' ') })
+    $cuts = New-Object System.Collections.Generic.List[object]
+    $from = 0
     while ($true) {
-        $m = [regex]::Match($Text, $PORT_RUST_TEST_MOD)
-        if (-not $m.Success) { return $Text }
+        $m = [regex]::Match($code.Substring($from), $PORT_RUST_MOD)
+        if (-not $m.Success) { break }
+        $open = $from + $m.Index
+        $i = $open + $m.Length
+        $from = $i
+        if (-not (Test-RustCfgIsTestOnly $m.Groups['cfg'].Value)) { continue }
         $depth = 1
-        $i = $m.Index + $m.Length
-        while ($i -lt $Text.Length -and $depth -gt 0) {
-            $c = $Text[$i]
+        while ($i -lt $code.Length -and $depth -gt 0) {
+            $c = $code[$i]
             if ($c -eq '{') { $depth++ } elseif ($c -eq '}') { $depth-- }
             $i++
         }
-        $Text = $Text.Remove($m.Index, $i - $m.Index)
+        if ($depth -ne 0) { continue }
+        $cuts.Add(@($open, $i))
+        $from = $i
     }
+    for ($k = $cuts.Count - 1; $k -ge 0; $k--) {
+        $Text = $Text.Remove($cuts[$k][0], $cuts[$k][1] - $cuts[$k][0])
+    }
+    return $Text
 }
 
 function Test-PipelinePort {
