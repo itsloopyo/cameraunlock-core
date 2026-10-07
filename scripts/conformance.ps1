@@ -59,7 +59,7 @@ $CHECK_IDS = @(
     'shim-marker', 'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
     'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme',
     'config-format', 'config-legacy-reader', 'config-preserve', 'config-descriptor', 'config-defaults',
-    'release-canonical-since', 'ci-minutes'
+    'release-canonical-since', 'ci-minutes', 'pipeline-port', 'changelog-unreleased'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -1576,6 +1576,129 @@ function Test-CiMinutes {
     }
 }
 
+# ---------------------------------------------------------------------------
+# pipeline-port: a hand-written port of core's tracking pipeline. A mod that can
+# load native code links core and does not port it; a port is for a host that
+# forbids native code, and it runs core's pipeline vectors in `pixi run test`
+# (docs/porting-the-pipeline.md).
+# ---------------------------------------------------------------------------
+
+# The languages core does not ship that the fleet's mods are written in.
+$PORT_SOURCE = '\.(java|kt|lua|py|rs)$'
+
+# A port is found by what it does, in two stages the vectors cover. Neither is
+# "opens a UDP socket": dying-light-2, subnautica and the-long-dark each track a
+# Python script that sends test poses, and cyberpunk-2077's Lua opens no socket
+# at all, since its native DLL receives, and still carries an interpolator.
+#
+# The packet layer: a file that names OpenTrack, opens a UDP socket and reads
+# from it.
+$PORT_OPENTRACK = '(?i)opentrack'
+$PORT_UDP_OPEN = '\b(DatagramSocket|DatagramChannel|UdpSocket|SOCK_DGRAM)\b|\budp[46]?\s*\('
+$PORT_UDP_READ = '\b(recv\w*|receive(from)?)\s*\('
+# The interpolator: a file that estimates the tracker's sample interval and
+# extrapolates past the newest sample. Every port of PoseInterpolator names both.
+$PORT_SAMPLE_INTERVAL = '(?i)sample[_ ]?interval'
+$PORT_EXTRAPOLATES = '(?i)extrapolat'
+
+# The repo's own native build takes core: a CMake target that links
+# `cameraunlock`, or a Cargo build script that compiles sources out of
+# cameraunlock-core/cpp into the crate's DLL (bioshock-remastered's build.rs).
+$PORT_CMAKE_LINKS_CORE = '(?s)\btarget_link_libraries\s*\([^)]*\bcameraunlock\w*'
+$PORT_CARGO_BUILDS_CORE = 'cameraunlock-core/cpp/'
+
+# The sentence the check quotes from docs/porting-the-pipeline.md, "Before
+# porting: if you can link the core, link it". test-conformance-checks.ps1 holds
+# the two to the same words.
+$PORT_LINK_IT = 'If the mod already loads a native DLL of its own, link `cameraunlock` and do not port - not the packet layer, not the interpolators, not the processors.'
+
+function Test-PipelinePort {
+    param([string]$Name, [string]$Root)
+
+    $tracked = @(Get-TrackedFiles $Root | Where-Object { $_ -notmatch $LEGACY_SCAN_SKIP })
+    $packet = New-Object System.Collections.Generic.List[string]
+    $interpolator = New-Object System.Collections.Generic.List[string]
+    foreach ($rel in $tracked) {
+        if ($rel -notmatch $PORT_SOURCE -or (Test-IsTestSource $rel)) { continue }
+        $text = Read-TextFile (Join-Path $Root $rel)
+        if ($text -match $PORT_OPENTRACK -and $text -cmatch $PORT_UDP_OPEN -and $text -cmatch $PORT_UDP_READ) { $packet.Add($rel) }
+        if ($text -match $PORT_SAMPLE_INTERVAL -and $text -match $PORT_EXTRAPOLATES) { $interpolator.Add($rel) }
+    }
+    if ($packet.Count -eq 0 -and $interpolator.Count -eq 0) { return }
+
+    $stages = @()
+    if ($packet.Count -gt 0) { $stages += "the packet layer ($($packet -join ', '))" }
+    if ($interpolator.Count -gt 0) { $stages += "the interpolator ($($interpolator -join ', '))" }
+    $ported = "ports $($stages -join ' and ') of core's tracking pipeline to a language core does not ship"
+
+    $links = @($tracked | Where-Object {
+        $leaf = ($_ -split '/')[-1]
+        ($leaf -eq 'CMakeLists.txt' -and (Read-TextFile (Join-Path $Root $_)) -match $PORT_CMAKE_LINKS_CORE) -or
+        ($leaf -eq 'build.rs' -and (Read-TextFile (Join-Path $Root $_)).Contains($PORT_CARGO_BUILDS_CORE))
+    })
+    if ($links.Count -gt 0) {
+        Add-Finding $Name 'pipeline-port' 'FAIL' "$ported, and $($links -join ', ') already builds core into this mod's own native code. docs/porting-the-pipeline.md: `"$PORT_LINK_IT`" Have the native code run that stage and hand the result up, and delete the port"
+        return
+    }
+
+    $fix = 'A port is for a host that forbids native code, and it runs core''s pipeline vectors in its tests: write the harness (docs/porting-the-pipeline.md, Conformance vectors) and a test-vectors task that test depends on, as minecraft-java-edition-headtracking has'
+    if (-not (Test-Path -LiteralPath (Join-Path $Root 'pixi.toml'))) {
+        Add-Finding $Name 'pipeline-port' 'FAIL' "$ported, and the repo has no pixi.toml, so nothing runs cameraunlock-core/scripts/pipeline-vectors/run-vectors.mjs against it. $fix"
+        return
+    }
+    $read = Get-PixiTaskGraph $Root
+    if ($read.Error) {
+        Add-Finding $Name 'pipeline-port' 'FAIL' "pixi task list could not read pixi.toml ($($read.Error))"
+        return
+    }
+    $graph = $read.Tasks
+    $vectorTasks = @($graph.Keys | Where-Object { "$($graph[$_].Cmd)" -match 'run-vectors\.mjs' } | Sort-Object)
+    if ($vectorTasks.Count -eq 0) {
+        Add-Finding $Name 'pipeline-port' 'FAIL' "$ported, and no pixi task runs cameraunlock-core/scripts/pipeline-vectors/run-vectors.mjs against it. $fix"
+        return
+    }
+    $reach = Get-TaskReach $graph @('test')
+    if (@($vectorTasks | Where-Object { $reach.Contains($_) }).Count -eq 0) {
+        Add-Finding $Name 'pipeline-port' 'FAIL' "$ported, and ``pixi run test`` does not run $($vectorTasks -join ' or '), so the vectors run only when someone remembers them. Make test depend on $($vectorTasks[0])"
+    }
+}
+
+# ---------------------------------------------------------------------------
+# changelog-unreleased: a hand-kept [Unreleased] section long enough to be the
+# history of the work. New-ChangelogFromCommits renames a non-empty [Unreleased]
+# to the release's heading and keeps it as written, so every bullet in it is
+# published as one version's entry.
+# ---------------------------------------------------------------------------
+
+# Measured across the fleet on 2026-10-07: 147 repos have a CHANGELOG.md, 35 of
+# them with an empty or absent [Unreleased]. The other 112 hold 1 to 66
+# top-level bullets, and then project-zomboid-headtracking holds 197. Five
+# repos are above 50: 197, 66, 61, 60 and 51. A lower number warns on work in
+# progress across the fleet, and the conversion to the canonical config alone
+# adds about a dozen bullets (scripts/templates/canonical-config-changelog.md).
+$MAX_UNRELEASED_BULLETS = 50
+
+function Test-ChangelogUnreleased {
+    param([string]$Name, [string]$Root)
+
+    $path = Join-Path $Root 'CHANGELOG.md'
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    # The same section and the same bullet New-ChangelogFromCommits reads, with `* ` counted too.
+    $section = [regex]::Match((Read-TextFile $path), '(?ms)^## \[Unreleased\][^\r\n]*?\r?$(?<body>.*?)(?=^## |\z)')
+    if (-not $section.Success) { return }
+    $bullets = [regex]::Matches($section.Groups['body'].Value, '(?m)^[-*] ').Count
+    if ($bullets -le $MAX_UNRELEASED_BULLETS) { return }
+
+    $tags = Invoke-NativeQuiet { git -C $Root tag --list 'v[0-9]*' }
+    $released = $tags.ExitCode -eq 0 -and @($tags.Out | Where-Object { $_ }).Count -gt 0
+    $fix = if ($released) {
+        'Cut it down to what this release changes for a player, checked against the build. Or empty the section, and the release writes the entry from the feat:, fix: and perf: commit subjects since the last v* tag'
+    } else {
+        'The repo has no v* tag, and an emptied section would be filled from every commit subject in its history, so rewrite it as the short list of what the first release does, checked against the build'
+    }
+    Add-Finding $Name 'changelog-unreleased' 'WARN' "CHANGELOG.md's [Unreleased] holds $bullets bullets (more than $MAX_UNRELEASED_BULLETS). scripts/release.ps1 renames a non-empty [Unreleased] to the version's heading and keeps it as written, reading no commit (New-ChangelogFromCommits), so all $bullets are published as one version's entry, and a bullet written the day a behaviour landed stays after the behaviour is replaced. $fix"
+}
+
 $CHECK_TABLE = [ordered]@{
     'install-wrapper'   = ${function:Test-InstallWrapper}
     'delayed-expansion' = ${function:Test-DelayedExpansion}
@@ -1602,6 +1725,8 @@ $CHECK_TABLE = [ordered]@{
     'config-defaults'      = ${function:Test-ConfigDefaults}
     'release-canonical-since' = ${function:Test-ReleaseCanonicalSince}
     'ci-minutes'        = ${function:Test-CiMinutes}
+    'pipeline-port'     = ${function:Test-PipelinePort}
+    'changelog-unreleased' = ${function:Test-ChangelogUnreleased}
 }
 
 # ---------------------------------------------------------------------------

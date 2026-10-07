@@ -9,6 +9,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - conformance checks for a pipeline port and a long [Unreleased]
+
+`scripts/conformance.ps1` gains two checks, tested by `pixi run test-conformance-checks`.
+
+- `pipeline-port` fails a repo that carries a port of the tracking pipeline in Java, Kotlin, Lua,
+  Python or Rust (a file that names OpenTrack, opens a UDP socket and reads from it, or a file
+  that names a sample interval and extrapolates) unless `pixi run test` runs
+  `scripts/pipeline-vectors/run-vectors.mjs`. Where a `CMakeLists.txt` of the repo links
+  `cameraunlock`, or a `build.rs` compiles from `cameraunlock-core/cpp/`, it fails whether the
+  vectors run or not, quoting `docs/porting-the-pipeline.md`: link core and delete the port.
+  On 2026-10-07 it fails six repos checked out beside this core: beamng-drive-headtracking and
+  lopari (no vectors), euro-truck-simulator-2-headtracking (no pixi.toml), and
+  bioshock-remastered-headtracking, cyberpunk-2077-headtracking and
+  project-zomboid-headtracking (a port beside native code that builds core).
+- `changelog-unreleased` warns when `CHANGELOG.md`'s `[Unreleased]` holds more than 50
+  top-level bullets. A release keeps a non-empty `[Unreleased]` as written and reads no commit,
+  so every bullet becomes one version's entry. Five repos draw it today, at 197, 66, 61, 60
+  and 51 bullets.
+
 ### Added - Application.runInBackground in the IL2CPP stubs
 
 `csharp/stubs/il2cpp/UnityEngineCoreModuleStubs.cs` gains `UnityEngine.Application` with the static

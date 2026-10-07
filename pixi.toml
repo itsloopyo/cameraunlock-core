@@ -73,6 +73,8 @@ test-powershell-release = "powershell -NoProfile -ExecutionPolicy Bypass -File p
 test-sync-core-notices = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-sync-core-notices.ps1"
 # conformance.ps1's ci-minutes check over throwaway repos. Needs core's full history and pixi.
 test-ci-minutes = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-ci-minutes.ps1"
+# conformance.ps1's pipeline-port and changelog-unreleased checks over throwaway git repos. Needs git and pixi.
+test-conformance-checks = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-conformance-checks.ps1"
 # DifferentialGate.psm1 over a throwaway mod repo. Needs git and node.
 test-powershell-differential-gate = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/DifferentialGate.Tests.ps1"
 test-powershell-isolated-game-test = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedGameTest.Tests.ps1"
@@ -84,7 +86,7 @@ test-powershell-isolated-game-test = "powershell -NoProfile -ExecutionPolicy Byp
 # back. It detours user32 in that child alone, and sends no input to any window.
 build-isolated-input-host = "cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build && cmake --build cpp/tools/isolated_input_host/build --config Release"
 test-isolated-input-host = { cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedInputHost.Tests.ps1", depends-on = ["build-isolated-input-host", "build-debug"] }
-test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-powershell-differential-gate", "test-powershell-isolated-game-test"] }
+test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-conformance-checks", "test-powershell-differential-gate", "test-powershell-isolated-game-test"] }
 
 # Building
 build = "dotnet build csharp -c Release"
@@ -137,7 +139,10 @@ validate-notices = "node scripts/validate-notices.mjs"
 # README claims AGENTS.md forbids, and the canonical config format
 # (config-format, config-legacy-reader, config-preserve; see
 # scripts/check-canonical-config.mjs), and the launcher-manifest.json config descriptor
-# (config-descriptor; see scripts/check-config-descriptor.mjs). Reports; sync-templates.ps1 fixes.
+# (config-descriptor; see scripts/check-config-descriptor.mjs), a port of the tracking pipeline
+# that runs no pipeline vectors or sits beside native code that links core (pipeline-port), and
+# an [Unreleased] changelog section of more than 50 bullets (changelog-unreleased, a warning).
+# Reports; sync-templates.ps1 fixes.
 #   pixi run conformance
 #   pixi run conformance -All
 #   pixi run conformance -All -Json

@@ -33,6 +33,19 @@ The same reasoning applies inside a port. Draw the native/scripted boundary as
 low as you can: everything below it is shared and maintained, everything above it
 is yours to re-test forever.
 
+Conformance holds a repo to both halves of this with its `pipeline-port` check
+(`pixi run conformance -Check pipeline-port`). It looks at the tracked `.java`,
+`.kt`, `.lua`, `.py` and `.rs` sources outside `cameraunlock-core/`, vendored
+folders and test folders, and finds a port by two of the stages below: the
+packet layer (a file that names OpenTrack, opens a UDP socket and reads from
+it) and the interpolator (a file that names a sample interval and
+extrapolates). A repo with either fails, quoting the paragraph above, when a
+`CMakeLists.txt` of its own links `cameraunlock` or a `build.rs` of its own
+compiles sources from `cameraunlock-core/cpp/`. Otherwise it fails unless
+`pixi run test` runs a task that calls `run-vectors.mjs`. A port of the
+processors or the lean clamp alone matches neither stage, so the check does
+not see it.
+
 ## Conformance vectors
 
 `data/pipeline-conformance.json` is the executable form of the checks below -
