@@ -16,7 +16,9 @@ piece to core, and every later one gets it.
 - `cameraunlock/dev/isolated_input.h`: the Win32 half, compiled into a dev build.
 - `cpp/tools/isolated_input_host`: that header as a DLL, for a mod with no native
   code. `CameraUnlock.Core.Dev.IsolatedInput` is what a C# mod loads it with.
-- `powershell/IsolatedGameTest.psm1`: launch, play, capture, proof, restore.
+- `powershell/IsolatedGameTest.psm1`: the lock on the game, the whole session
+  round a script block, launch, play, capture, proof, restore, a log wait and a
+  process sampler.
 - `data/isolated-input.json`: what is covered, and what to build for what is not.
 
 ## Testing a title
@@ -45,24 +47,23 @@ piece to core, and every later one gets it.
    there. It never goes into a release build: with it on, the game does not answer
    to the real keyboard.
 
-3. **Run the session.**
+3. **Run the session** with `Invoke-IsolatedGameSession`, which takes the game's
+   rig, saves what the test changes, launches, runs your block, and puts
+   everything back on every way out. [A whole session](#a-whole-session) is the
+   call and a worked script.
+
+   Inside the block:
 
    ```text
-   Save-GameTestState -Files <deployed mod, its config, the game's settings> -Folder <scratch>\state
-   # deploy the dev build; set the mod's port to Get-ModTestPort; make the game windowed
-   # and keep it running unfocused (per game: Starfield needs bAlwaysActive=1)
-   $sender  = Start-TestPoseSender -Port $port -PoseFile $pose
-   $session = Start-IsolatedGame -ProcessName <name> -Launch <uri or exe> -ModFolder <mod folder>
-   # a C# mod: add -ModHost managed, which also copies the host DLL into the mod folder
    Invoke-GameInput -Session $session -Commands 'tap Space', 'wait 5000'      # title, menus, load
    Test-IsolatedInputProof -Session $session -Commands <something visible> -Folder <scratch>
-   Set-TestPose -PoseFile $pose -Yaw 15; Invoke-GameInput ...; Save-GameCapture ...
-   Stop-IsolatedGame -Session $session; Stop-Process -Id $sender; Restore-GameTestState -Folder <scratch>\state
+   Set-TestPose -PoseFile $session.PoseFile -Yaw 15; Invoke-GameInput ...; Save-GameCapture ...
    ```
 
-   What is the game's own stays in the mod's `.lab`: the way from the title screen
-   into a save, its cheats, and what to look for in a capture.
-   `starfield-headtracking/.lab/isolated.ps1` is a worked session.
+   Per game, the prepare step makes the game windowed and keeps it running
+   unfocused (Starfield needs `bAlwaysActive=1`). What is the game's own stays in
+   the mod's `.lab`: the way from the title screen into a save, its cheats, and
+   what to look for in a capture.
 
 4. **Prove it once per title, then trust it.** `Test-IsolatedInputProof` sends
    something the game visibly reacts to and passes only if the picture changed
@@ -74,11 +75,198 @@ Rules a run has to meet:
 - **A run in which the game held the foreground does not count.**
   `Invoke-GameInput` samples the real foreground for the whole script and says
   so. The real devices reach a foreground game, so that run is repeated.
+- **One session has a game at a time.** Take its rig before touching the game's
+  files, through `Invoke-IsolatedGameSession` or `Enter-GameRig`. Never delete a
+  lock, and never start the game round one. See
+  [One session at a time](#one-session-at-a-time).
 - **Only stop what the session started**, by process id. `Start-IsolatedGame`
   refuses to launch while the game is already running: that one is someone's.
 - **Restore everything**, whether the run passed or not.
 - **A capture that never changes is a broken instrument.** Check
   `Test-CaptureDiffers` on two captures a second apart, once per title.
+
+## One session at a time
+
+An installed game is one thing on the machine: one process, one set of saves,
+one settings file, and a share of one graphics card. Two sessions that both save
+the game's files, launch and restore do not fail loudly. Each puts back a save
+the other has played in. `Enter-GameRig` is the lock that stops that, and every
+session that touches a game takes it first, whichever repo or worktree it is
+working in.
+
+```text
+$rig = Enter-GameRig -Game <process name> -Owner <who you are> -What 'the lean check, run 3'
+try { ... } finally { Exit-GameRig -Rig $rig }
+```
+
+`Invoke-IsolatedGameSession` does this itself. Call `Enter-GameRig` directly for
+work on a game that is not a session: a deploy into the game folder, a build
+whose output a running game would load.
+
+- **The lock is keyed by the game and lives outside every repo**, in
+  `%LOCALAPPDATA%\CameraUnlock\rig\<process name>\lock`. Two worktrees of one
+  mod, and two mods for one game, meet the same lock.
+- **It says who has it.** `owner.json` in the lock holds the owner's name, the
+  process id, when it was taken, `-What`, and where the session saved the
+  game's files. `Get-GameRig -Game <name>` shows it, with whether the lock is
+  live and who is waiting.
+- **It waits, oldest first.** A session that finds the rig taken queues and is
+  served in the order it asked, for an hour by default (`-WaitSeconds`; 0 takes
+  the rig now or throws). There is nothing to poll and no race to win.
+- **Only the session that took a lock releases it.** `Exit-GameRig` throws, and
+  removes nothing, for a lock that is someone else's.
+- **A lock is taken over only when its taker's process has gone and the game is
+  not running.** The game alone keeps a lock live, so a session that starts the
+  game in one process and stops it in another holds the rig in between.
+- **A lock left by a session that never put the game's files back is not taken
+  over.** `Enter-GameRig` throws and names the folder that session saved into.
+  Run `Restore-GameTestState -Folder` on it, then ask again.
+- **A game running with no lock on it was started by hand**, by the person at
+  the machine or by a script that does not take the rig. `Enter-GameRig` waits
+  for it to end.
+
+Work that needs the whole graphics card takes the rig too, with `-WholeGpu`: an
+image generation run, a benchmark. It waits until no rig is held, and no game's
+rig is given out while it holds. It needs no game:
+
+```text
+$rig = Enter-GameRig -WholeGpu -Owner <who you are> -What 'eight pictures'
+try { & python generate.py --count 8 } finally { Exit-GameRig -Rig $rig }
+```
+
+Run the work from the PowerShell that took the lock: with no game to keep it
+live, the lock of a process that has ended is anyone's to take over. Hold it for
+a batch, not for an evening, because every game session on the machine waits
+behind it.
+
+The lock is a convention, not a fence. A session that never asks is not seen,
+and a script that still calls `Start-IsolatedGame` without the rig runs beside
+whoever holds it.
+
+Taking and releasing happen inside one named mutex, so no two sessions ever
+decide on the same state, and the lock folder is renamed into place with its
+owner record already in it. A folder made with `New-Item -ItemType Directory`
+is not a lock: PowerShell looks and then makes, and in Project Zomboid on
+2026-10-05 three runs started in the same second got through one.
+
+## A whole session
+
+`Invoke-IsolatedGameSession` is the run a mod's `.lab/isolated.ps1` otherwise
+writes out by hand. In order:
+
+1. Takes the game's rig, waiting its turn.
+2. Saves `-Files` and `-Folders` into `-StateFolder` (`Save-GameTestState`).
+3. Runs `-Prepare`: build and deploy the dev build, change the game's settings.
+   A build made here cannot land under another session's running game.
+4. Writes `-Port` into `-IniPath` (`Set-ModTestPort`), and starts the pose
+   sender on it when `-PoseFile` is given.
+5. Launches (`Start-IsolatedGame`), from `-WorkingDirectory` and with
+   `-Environment` set for the launch alone when those are given.
+6. Runs `-Run` with the session.
+7. Stops the game and the pose sender, runs `-Collect`, puts every file and
+   folder back, releases the rig.
+
+Step 7 runs however the call ends: the block throwing, the game not starting,
+the prepare step failing. Each part of it runs whatever the part before it did.
+The rig is released only once the files are back, so a restore that fails
+leaves the game refused to everyone, with the folder to restore named, until
+someone has run `Restore-GameTestState` on it.
+
+A mod's `.lab/isolated.ps1` on it:
+
+```text
+param([Parameter(Mandatory)][string]$Name, [string]$Owner = $env:RIG_OWNER)
+$ErrorActionPreference = 'Stop'
+$repo = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $repo 'cameraunlock-core\powershell\IsolatedGameTest.psm1')
+
+$game  = '<the game folder>'
+$saves = '<the folder the game keeps its saves in>'
+$prefs = '<the settings file of the game>'
+$asi   = Join-Path $game '<Mod>.asi'
+$ini   = Join-Path $game 'CameraUnlock.ini'
+$log   = Join-Path $game '<Mod>.log'
+$out   = Join-Path $PSScriptRoot "runs\$Name"
+New-Item -ItemType Directory -Force $out | Out-Null
+
+Invoke-IsolatedGameSession -ProcessName '<Game>' -Launch 'steam://rungameid/<id>' -ModFolder $game `
+    -Owner $Owner -What "isolated.ps1 $Name" `
+    -Files $asi, $prefs, $log -Folders $saves -StateFolder (Join-Path $PSScriptRoot 'state') `
+    -IniPath $ini -Port (Get-ModTestPort -RepoName (Split-Path -Leaf $repo)) -PoseFile (Join-Path $out 'pose.txt') `
+    -Prepare {
+        # build the dev build and copy it to $asi; make the game windowed and running unfocused in $prefs
+    } `
+    -Run {
+        param($session)
+        Wait-GameLogLine -Path $log -Match '<the line the mod logs once it is in>' -Session $session | Out-Null
+        Invoke-GameInput -Session $session -Commands 'tap Space', 'wait 5000' | Out-Null    # the way into the save
+        $sampler = Start-GameProcessSampler -ProcessId $session.ProcessId -Path (Join-Path $out 'process.csv')
+        Set-TestPose -PoseFile $session.PoseFile -Yaw 15
+        $played = Invoke-GameInput -Session $session -Commands 'tap Insert', 'wait 500'
+        if ($played.GameHeldForeground) { throw 'the game held the foreground: this run does not count' }
+        Save-GameCapture -Session $session -Path (Join-Path $out 'yaw15.png') | Out-Null
+        Stop-GameProcessSampler -Sampler $sampler | Out-Null
+    } `
+    -Collect { Copy-Item $log, $ini $out -Force }
+```
+
+What is left in the script is the game's: its paths, the build, the way into a
+save, the inputs and what to capture. A C# mod adds `-ModHost managed`.
+
+The parts, for a script that needs one alone:
+
+- **`Save-GameTestState -Files ... -Folders ...`** takes whole folders as well as
+  files. Name a folder for anything the game writes while it runs: a save folder
+  gains files as the game plays, and only putting the folder back removes them.
+  `Restore-GameTestState` mirrors a folder back with robocopy. It never empties
+  the folder first, it tries a file the stopped game still holds for 20 seconds,
+  and when it gives up the folder has everything else in place, the saved copy is
+  still there and it can be run again. Remove-then-copy left Project Zomboid's
+  save folder half deleted once, on one locked file. `-RetrySeconds` gives a
+  single file the same patience, for a DLL the game holds after it has gone.
+- **`Set-ModTestPort -IniPath <config> -Port <port>`** replaces the last
+  `UdpPort` line and keeps every other byte. A config that does not exist
+  throws: a mod on the canonical config imports its older settings only while
+  `CameraUnlock.ini` is absent, so a test that made the file would not test what
+  a player gets. `-Create` is for the test that means to.
+- **`Wait-GameLogLine -Path <log> -Match <regex> -TimeoutSeconds 120`** returns
+  the line and its number, or throws with the log's last line. With `-Session`
+  it stops waiting when the game has gone. A log left by an earlier run can hold
+  the line already: delete it in `-Prepare`, or pass `-After` a line number.
+- **`Start-GameProcessSampler -ProcessId <pid> -Path <csv>`** writes a row every
+  two seconds (`-IntervalSeconds`): `time`, `elapsedSeconds`, `privateMB`,
+  `workingSetMB`, `dedicatedVideoMB`, `cpuSeconds`. `dedicatedVideoMB` is the sum
+  of Windows' `GPU Process Memory` counters for the process, and is empty in a
+  row where Windows had none. `cpuSeconds` counts from the start of the process,
+  so the load between two rows is the difference over the time between them. It
+  ends by itself when the process goes, and `Stop-GameProcessSampler` ends it
+  between two rows.
+
+### A session over several processes
+
+A session driven a step at a time (start, look at a capture, decide what to
+play, stop) runs over several PowerShell processes. `Start-IsolatedGameSession`
+and `Stop-IsolatedGameSession` are the two halves of `Invoke-IsolatedGameSession`,
+with the session kept in a file between them:
+
+```text
+# start
+Start-IsolatedGameSession ... -SessionFile $sessionFile | Out-Null
+# play, any number of times
+$session = Get-IsolatedGameSession -SessionFile $sessionFile
+Invoke-GameInput -Session $session -Commands $Commands
+# stop
+Stop-IsolatedGameSession -SessionFile $sessionFile -Collect { ... }
+```
+
+`Invoke-GameInput` writes the session back to its file after each script, so the
+next process has the sequence it reached. Call `Save-IsolatedGameSession` after
+changing the session by hand: a new `ProcessId` once a launcher has handed over,
+a property of the mod's own.
+
+The rig stays held between the processes, by the running game. If the game goes
+before the stop, the session's saved state is what keeps the rig from being
+taken over, and `Stop-IsolatedGameSession` still restores and releases.
 
 ## A C# mod
 
@@ -150,6 +338,31 @@ every detour went in, and with a script holding `A` down `GetKeyState`,
 That process has no window, so it says nothing about what a game's window
 receives. Untitled Goose Game is the first game driven this way: see
 [Measured](#measured).
+
+## A Java agent mod
+
+A mod that is a Java agent in a game on a JVM has no native code that could
+compile `isolated_input.h`, and loads the same host DLL a C# mod does.
+
+1. Build the host DLL as for [a C# mod](#a-c-mod).
+2. In the dev agent, when `CameraUnlockIsolatedInput.dll` and
+   `CameraUnlockInput.txt` are both in the folder it is given, load the DLL
+   through `java.lang.foreign` (`SymbolLookup.libraryLookup`) and call
+   `CameraUnlockStartIsolatedInput` with the command file's path as a
+   NUL-terminated UTF-16 string. Throw unless it answers 0.
+3. Start the session with `-ModHost managed`, which copies the DLL into
+   `-ModFolder`. `Assert-IsolatedInputCovers` takes `-ModHost jvm`.
+
+Where the JVM is told what to load through the launch's environment
+(`JAVA_TOOL_OPTIONS`), `Invoke-IsolatedGameSession -Environment` sets it for the
+launch alone.
+
+An LWJGL game reads its keyboard and mouse through GLFW, and no import table of
+the game shows it: Project Zomboid's exe imports no input API, `lwjgl.dll`
+imports only `KERNEL32.dll`, and `glfw.dll` is packed inside the game's jar. A
+copy with the same bytes is unpacked in an `lwjgl_<user>` folder under the temp
+folder. `Get-GameInputPaths` on that file shows what GLFW itself reads. See
+[Measured](#measured) for where that stands.
 
 ## A game it does not cover yet
 
@@ -298,12 +511,31 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
 - The first window a game shows can be its splash screen. The dev build looks
   for the game window again once the one it had is gone or hidden.
 - Games running at once share the GPU and the speakers. How many a machine
-  carries has not been measured.
+  carries has not been measured. The rig keeps two sessions off one game, and
+  off the card while `-WholeGpu` work holds it. It does not stop two different
+  games running side by side.
+- The rig sees only sessions that take it.
 - `Test-IsolatedInputProof` compares two captures, so a picture that moves by
   itself (a weapon swaying at idle) passes it with no input taken. Prove such a
   title with an input whose effect the mod also logs, and read the log.
 
 ## Measured
+
+Project Zomboid (Steam, a Java agent on the game's own Java 25 runtime), from the mod's notes of
+2026-10-05 and the host's log of one run, not measured again for this entry:
+
+- The host DLL, loaded from the dev agent through `java.lang.foreign`, started and its detours
+  went in. The log read `DirectInput keyboard and mouse devices answer from the command file (10
+  detours over 4 device vtables)`, `the game reads key state through GetKeyState`, the same for
+  `GetKeyboardState`, and `the game reads the cursor's position (GetCursorPos)`.
+- The mod's hotkeys, which core's poller reads with `GetAsyncKeyState`, fired once each for
+  `tap PageUp`, `tap Ctrl+Shift+H`, `tap Insert` and `tap End`, and the game never held the
+  foreground.
+- The game's own keyboard and mouse were not driven through isolated input. The mod's dev probe
+  answers the game's `org.lwjglx` key and button polls from Java. Whether the raw-input path
+  drives the game's GLFW window has not been tried, which is why `glfw` is `unsupported` in
+  `data/isolated-input.json`. The game's `glfw.dll` imports `GetRawInputData`,
+  `RegisterRawInputDevices`, `GetKeyState` and `GetCursorPos`.
 
 Red Eclipse 2.0.9 (Steam, Cube 2 / Tesseract on SDL2, ASI under Ultimate ASI Loader as
 `winmm.dll`), 2026-10-04, windowed and behind other windows for the whole session, the game

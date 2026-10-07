@@ -9,6 +9,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a lock on the game and a whole-session wrapper for background tests
+
+`IsolatedGameTest.psm1` had launch, input, capture, proof and stop, and every mod wrote the rest
+round it by hand: 37 mods carry a `.lab/isolated.ps1`, and nothing stopped two sessions taking one
+game. In Project Zomboid three runs started in the same second on a hand-made lock folder, and
+each put back a save another had played in. All of this is new functions and new named
+parameters. No existing call changes.
+
+- `Enter-GameRig` / `Exit-GameRig` / `Get-GameRig`: one lock per game, in
+  `%LOCALAPPDATA%\CameraUnlock\rig\<process name>`, outside every repo. Taken and released inside
+  a named mutex, with an owner record (name, process id, when, what for), a queue served oldest
+  first, release only by the taker, and a take-over only when the taker's process has gone, the
+  game is not running and the taker left nothing to restore. `-WholeGpu` holds the graphics card
+  against every rig, for work with no game such as an image generation run. `-Token` takes the
+  lock back in a later process of the same session.
+- `Invoke-IsolatedGameSession`, and its halves `Start-IsolatedGameSession` /
+  `Stop-IsolatedGameSession` for a session over several processes (`Get-IsolatedGameSession`,
+  `Save-IsolatedGameSession`): lock, save, prepare, test port, pose sender, launch, the caller's
+  block, stop, collect, restore, release, on every way out, the game not starting included.
+- `Save-GameTestState -Folders`, restored as a robocopy mirror that never empties the folder
+  first, and `Restore-GameTestState -RetrySeconds` for a file the stopped game still holds.
+  `-Files` is no longer mandatory, so a save can be folders alone.
+- `Set-ModTestPort -IniPath -Port`: the `UdpPort` rewrite, every other byte kept.
+- `Wait-GameLogLine -Path -Match -TimeoutSeconds`.
+- `Start-GameProcessSampler` / `Stop-GameProcessSampler`: private bytes, working set, dedicated
+  video memory and processor time to a CSV (`powershell/Sample-GameProcess.ps1`).
+- `Invoke-GameInput` writes a session back to its `SessionFile` after each script, for a session
+  that has one. A session object built by hand has none and plays as before.
+- `data/isolated-input.json`: `mod_hosts.jvm`, supported and proven in project-zomboid, and
+  `input_paths.glfw`, unsupported. `Assert-IsolatedInputCovers` takes `-ModHost jvm`.
+- `pixi run test-powershell-game-rig`, part of `test-powershell`.
+
+`docs/isolated-input.md` has the lock, the wrapper and the script a mod's `.lab/isolated.ps1`
+comes down to.
+
 ### Added - CenterWindowInWorkArea, a window centre that can be called after every placement
 
 `cameraunlock/os/game_window.h` gains `constexpr int CenteredOrigin(int workStart, int workLength,
