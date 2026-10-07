@@ -667,6 +667,13 @@
   },
   "allow_legacy_symbols": {},
   "per_game": {
+    "bioshock-remastered-headtracking": [
+      {
+        "row": "PositionLimitYDown",
+        "reason": "Every build through v0.7.0 held the downward lean at 5 cm in code and had no setting for it. The owner ruled on 2026-10-07 that the game keeps that shipped limit when its position limits become config rows, so PositionLimitYDown=0.05 is the game's own default and never follows Defaults.ini. No released file holds the row: it first ships in the version that adds it.",
+        "approved": "2026-10-07"
+      }
+    ],
     "titanfall-2-headtracking": [
       {
         "row": "TrueFreeLookKey",

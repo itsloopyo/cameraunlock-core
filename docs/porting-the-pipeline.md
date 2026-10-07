@@ -100,7 +100,6 @@ that calls `run-vectors.mjs`.
 | `cyberpunk-2077-headtracking` | Lua over a native DLL | Links the core for the packet layer; only the Lua half is a port. Runs the vectors |
 | `the-pathless-headtracking` | Lua (UE4SS) | 3DOF only - no position processor and no interpolator. Runs the vectors |
 | `beamng-drive-headtracking` | Lua | `mod/lua/ge/extensions/headTracking/pipeline.lua`. No task that runs the vectors |
-| `bioshock-remastered-headtracking` | Rust | `build.rs` compiles C++ with core's headers on the include path. Runs the vectors |
 | `minecraft-java-edition-headtracking` | Java | 15 hand-written classes under `core/src/main/java/com/cameraunlock/core/`; the submodule is present but the Gradle build compiles nothing from it. Runs the vectors with declared skips |
 | `project-zomboid-headtracking` | Java over a native DLL | Seven hand-written classes (receiver, filter, lean clamp, aim fade, aim mode, lean handover, zoom) beside a DLL that links core for the config and the hotkeys. No task that runs the vectors. The C interface below replaces all seven |
 | `fusion-360-headtracking` | Python | Runs the vectors |
@@ -108,6 +107,12 @@ that calls `run-vectors.mjs`.
 | `lopari` | Rust | `src-tauri/src/opentrack.rs`, the launcher's own reader of the packet. No interpolator |
 
 `bioshock-infinite-headtracking` was listed here as Rust. It is C++ now and links the core.
+
+`bioshock-remastered-headtracking` was listed here as a Rust port that ran the vectors. Its
+`build.rs` now compiles `cpp/src/c/cameraunlock_c.cpp` and what it needs into the mod's own DLL,
+and its Rust calls `cameraunlock_session_frame` and `cameraunlock_session_lean` once a frame and
+keeps the engine boundary. A Rust mod that is a DLL already can do the same in place of loading
+`CameraUnlockCore.dll`.
 
 ## Do not port: load the DLL
 
