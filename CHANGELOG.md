@@ -59,6 +59,16 @@ One consumer, project-zomboid-headtracking, which moves in the same change.
   the exe under names it no longer uses are removed by an install, once the new files and site
   config are in place. `Invoke-DevDeployJavaAgent` gains `-LegacyFiles` for the same, and
   `-NativeFiles` for the DLL that goes beside the jar and not on the classpath.
+- `logging::Text(text)` writes one timestamped entry of any length, and `logging::IsOpen()` says
+  whether `Open` has a file. The C interface's log goes through `Text`: `Line` cuts a formatted
+  line at 2047 bytes, which lost the end of a stack trace a host logged.
+- `cameraunlock_log_open` answers an error when the file cannot be created. It answered OK and
+  wrote nothing.
+- A C interface call that goes on failing for one reason on one thread is in the log once a
+  second, not once a call: a frame that failed every time wrote a line a frame.
+- The Java agent install body and `Invoke-DevDeployJavaAgent` copy the jars last and only when
+  every other file copied. A new jar under an older version's site config, with the DLL's copy
+  failed, was a game that did not start.
 - `CameraUnlockCoreOtherAbi.dll` (CMake target `cameraunlock_c_other_abi`, never built by default,
   never shipped): a library that answers the ABI number before the header's, for a binding's test
   of its check at load.

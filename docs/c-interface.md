@@ -29,7 +29,9 @@ beside its own code and loads it by full path.
 - Plain C, fixed-width types. Text in and out is UTF-8 and NUL terminated. Paths are full paths.
 - Nothing thrown inside the library leaves it. A function that fails answers `CAMERAUNLOCK_ERROR`
   (-1), or `NULL` for `cameraunlock_aim_mode_label`. The reason is text: `cameraunlock_last_error`
-  gives the calling thread's last one, and the same line goes to the log.
+  gives the calling thread's last one, and the same line goes to the log, once a second at most
+  while one thread's call goes on failing for one reason, so a frame that fails every time does
+  not write a line a frame.
 - The library never calls the host, and keeps no pointer the host passed.
 - Every struct starts with `struct_size`, which the host sets to the size it was compiled with,
   in structs it fills and in structs the library fills. A size that is not the library's is
@@ -190,8 +192,9 @@ play.
 ## The log
 
 `cameraunlock_log_open(path)` opens core's file log, which keeps the previous run's file as
-`<name>.prev.log` and flushes each line. From then on core's lines and the host's
-(`cameraunlock_log_write`) go to that one file. A host that keeps a log of its own never opens it
+`<name>.prev.log` and flushes each line. A file that cannot be created is an error. From then on
+core's lines and the host's (`cameraunlock_log_write`) go to that one file. An entry may be of any
+length and hold line breaks, as a stack trace does. A host that keeps a log of its own never opens it
 and drains core's lines with `cameraunlock_log_take` when a frame's flags carry
 `CAMERAUNLOCK_STATE_LOG`.
 

@@ -17,8 +17,18 @@ std::wstring PreviousGenerationPath(const std::wstring& filename);
 void Open(const std::wstring& filename);
 void Close();
 
-// printf-style. Timestamped, mutex-serialized, flushed per line.
+// Whether Open has a file to write to. Open answers nothing, and a file that
+// could not be created (a folder that is not writable, a second process
+// holding it) leaves every Line a no-op.
+bool IsOpen();
+
+// printf-style. Timestamped, mutex-serialized, flushed per line. The formatted
+// line is cut at 2047 bytes.
 void Line(const char* fmt, ...);
+
+// One timestamped entry of any length, written as given: a stack trace, or a
+// line that lists every row of a config.
+void Text(const std::string& text);
 
 // Lock-free, exception-handler-safe write. Use ONLY from inside a
 // vectored / unhandled exception handler. Bypasses the normal mutex so

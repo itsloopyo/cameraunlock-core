@@ -338,20 +338,14 @@ if defined MOD_SEED_FILES (
     )
 )
 
-for %%f in (%MOD_DLLS%) do (
-    if not exist "!SRC_DIR!\%%f" (
-        echo   ERROR: %%f not found in plugins folder
-        set "DEPLOY_FAILED=1"
-    ) else (
-        copy /y "!SRC_DIR!\%%f" "!EXE_DIR!\" >nul
-        if errorlevel 1 (
-            echo   ERROR: Failed to copy %%f - is the game folder writable?
-            set "DEPLOY_FAILED=1"
-        ) else (
-            echo   Deployed %%f
-        )
-    )
-)
+:: The jars go last, and only once everything else is in place. A site config
+:: from an older version may name a boot class the new jar does not have, and
+:: it is rewritten only after every copy has worked: a new jar beside it, with
+:: another file's copy failed, would be a game that does not start.
+set "_JAR_PASS="
+call :deploy_mod_files
+set "_JAR_PASS=1"
+if "!DEPLOY_FAILED!"=="0" call :deploy_mod_files
 
 :: The site config goes last, and only once every jar it names is in place.
 if "!DEPLOY_FAILED!"=="0" (
@@ -414,6 +408,34 @@ if not defined MOD_CONTROLS goto :controls_done
 echo %MOD_CONTROLS%
 echo.
 :controls_done
+exit /b 0
+
+:: ============================================
+:: Copy the files of MOD_DLLS from plugins\ to the exe's folder: those that are
+:: not jars, or with _JAR_PASS set the jars.
+:: ============================================
+:deploy_mod_files
+for %%f in (%MOD_DLLS%) do (
+    set "_IS_JAR="
+    if /i "%%~xf"==".jar" set "_IS_JAR=1"
+    set "_THIS_PASS="
+    if defined _JAR_PASS if defined _IS_JAR set "_THIS_PASS=1"
+    if not defined _JAR_PASS if not defined _IS_JAR set "_THIS_PASS=1"
+    if defined _THIS_PASS (
+        if not exist "!SRC_DIR!\%%f" (
+            echo   ERROR: %%f not found in plugins folder
+            set "DEPLOY_FAILED=1"
+        ) else (
+            copy /y "!SRC_DIR!\%%f" "!EXE_DIR!\" >nul
+            if errorlevel 1 (
+                echo   ERROR: Failed to copy %%f - is the game folder writable?
+                set "DEPLOY_FAILED=1"
+            ) else (
+                echo   Deployed %%f
+            )
+        )
+    )
+)
 exit /b 0
 
 :: ============================================

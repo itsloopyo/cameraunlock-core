@@ -697,9 +697,26 @@ void TestLog(const fs::path& scratch) {
     Check(!TakeLog().empty(), "until it is open the lines wait to be taken");
     Check(cameraunlock_log_take(nullptr, 0) == 0, "and are forgotten once taken");
     cameraunlock_session_configure(nullptr);
+    const std::string nowhere = (scratch / "no such folder" / "Mod.log").u8string();
+    Check(cameraunlock_log_open(nowhere.c_str()) == CAMERAUNLOCK_ERROR &&
+              LastError().find("could not be created") != std::string::npos,
+          "a log file that cannot be created is an error: " + LastError());
     const std::string file = (scratch / "Mod.log").u8string();
     Check(cameraunlock_log_open(file.c_str()) == CAMERAUNLOCK_OK, "the file log opens at a full path: " + LastError());
     Check(cameraunlock_log_write("the host's own line") == CAMERAUNLOCK_OK, "the host writes a line");
+    const std::string trace = std::string(3000, 'a') + "\r\n\tat the end of a long stack trace";
+    Check(cameraunlock_log_write(trace.c_str()) == CAMERAUNLOCK_OK &&
+              ReadFile(scratch / "Mod.log").find(trace) != std::string::npos,
+          "an entry longer than a line, with line breaks in it, is written whole");
+    for (int i = 0; i < 50; ++i) cameraunlock_session_configure(nullptr);
+    const std::string repeated = ReadFile(scratch / "Mod.log");
+    std::size_t refusals = 0;
+    for (std::size_t at = repeated.find("CameraUnlockSettings is NULL"); at != std::string::npos;
+         at = repeated.find("CameraUnlockSettings is NULL", at + 1)) {
+        ++refusals;
+    }
+    Check(refusals >= 2 && refusals <= 3, "a call that fails the same way over and over is in the log once a second, not every time: " +
+                                              std::to_string(refusals));
     cameraunlock_session_start(-1);
     const std::string text = ReadFile(scratch / "Mod.log");
     Check(text.find("cameraunlock_session_configure: CameraUnlockSettings is NULL") != std::string::npos,

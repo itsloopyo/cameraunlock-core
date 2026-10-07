@@ -50,9 +50,11 @@ CAMERAUNLOCK_C int32_t cameraunlock_last_error(char* buffer, int32_t capacity);
 
 /* Opens core's file log at `path`, a full path. The file a previous run left is kept beside it as
  * <name>.prev.log. From here every line core has for the log, and every cameraunlock_log_write,
- * goes to this file, each flushed as it is written. */
+ * goes to this file, each flushed as it is written. An error when the file cannot be created: a
+ * folder that cannot be written to, or another process of the game holding the file. */
 CAMERAUNLOCK_C int32_t cameraunlock_log_open(const char* path);
-/* One line for the file log. An error while no file is open. */
+/* One entry for the file log, of any length: it may hold line breaks, as a stack trace does. An
+ * error while no file is open. */
 CAMERAUNLOCK_C int32_t cameraunlock_log_write(const char* line);
 /* For a host with a log of its own, which never calls cameraunlock_log_open: the lines core has
  * for it, each ending in '\n'. Answers their length in bytes. They are copied to `buffer` and

@@ -76,7 +76,7 @@ void LogLine(const std::string& line) {
     LogState& log = TheLog();
     const std::lock_guard<std::mutex> lock(log.mutex);
     if (log.file) {
-        logging::Line("%s", line.c_str());
+        logging::Text(line);
     } else {
         log.pending.append(line).push_back('\n');
     }
@@ -97,8 +97,16 @@ std::int32_t Guarded(const char* what, Body&& body) noexcept {
         reason = "something that is not a std::exception was thrown";
     }
     try {
-        t_last_error = std::string(what) + ": " + reason;
-        LogLine(t_last_error);
+        // A call made every frame that fails every frame would write a line a frame. The reason
+        // is always there to be asked for, and the log has it once a second.
+        thread_local std::chrono::steady_clock::time_point logged_at;
+        const std::string failure = std::string(what) + ": " + reason;
+        const auto now = std::chrono::steady_clock::now();
+        if (failure != t_last_error || now - logged_at >= std::chrono::seconds(1)) {
+            logged_at = now;
+            LogLine(failure);
+        }
+        t_last_error = failure;
     } catch (...) {
         // Out of memory while recording the reason. Nothing may leave this function but the status.
     }
@@ -447,11 +455,14 @@ std::int32_t cameraunlock_log_open(const char* path) {
         const std::lock_guard<std::mutex> lock(log.mutex);
         if (log.file) throw std::logic_error("the log is already open");
         logging::Open(file);
+        if (!logging::IsOpen()) {
+            throw std::runtime_error(std::string(path) + " could not be created or written to");
+        }
         log.file = true;
         std::size_t start = 0;
         while (start < log.pending.size()) {
             const std::size_t end = log.pending.find('\n', start);
-            logging::Line("%s", log.pending.substr(start, end - start).c_str());
+            logging::Text(log.pending.substr(start, end - start));
             start = end + 1;
         }
         log.pending.clear();
@@ -465,7 +476,7 @@ std::int32_t cameraunlock_log_write(const char* line) {
         LogState& log = TheLog();
         const std::lock_guard<std::mutex> lock(log.mutex);
         if (!log.file) throw std::logic_error("cameraunlock_log_open has not run");
-        logging::Line("%s", line);
+        logging::Text(line);
         return CAMERAUNLOCK_OK;
     });
 }

@@ -107,6 +107,20 @@ $written = [IO.File]::ReadAllText($site) | ConvertFrom-Json
 if ($written.mainClass -ne 'com/cameraunlock/core/agent/Boot') { throw "An install over an older layout kept its boot class: $($written.mainClass)" }
 if (($written.classpath -join '|') -ne '.|game.jar|Fixture.jar') { throw "An install over an older layout kept its jar on the classpath: $($written.classpath -join ' ')" }
 if (($written.vmArgs -join '|') -ne '-Dcameraunlock.mainClass=a/Main|-XX:+EnableDynamicAgentLoading|--enable-native-access=ALL-UNNAMED|-Xmx2g') { throw "Unexpected vmArgs over an older layout: $($written.vmArgs -join ' ')" }
+# An update whose DLL cannot be copied leaves the older jar and its site config as they were:
+# a new jar under a site config that names the older one's boot class would not start.
+Invoke-Installer uninstall 0
+[IO.File]::WriteAllText($jar, 'old jar')
+$olderSite = '{"mainClass":"fixture/Boot","classpath":[".","game.jar","Fixture.jar"],"vmArgs":["-Xmx2g"]}'
+[IO.File]::WriteAllText($site, $olderSite)
+[IO.File]::WriteAllText($dll, 'held')
+$held = [IO.File]::Open($dll, 'Open', 'Read', 'None')
+try { Invoke-Installer install 1 } finally { $held.Dispose() }
+Assert-File $jar 'old jar'
+Assert-File $site $olderSite
+Invoke-Installer install 0
+Assert-File $jar 'jar v2'
+
 Invoke-Installer uninstall 0
 $left = @(Get-ChildItem -LiteralPath $game -Force | ForEach-Object Name | Sort-Object)
 if (($left -join '|') -ne 'Fixture64.exe|Fixture64.json') { throw "Old layout, new install, uninstall left: $($left -join ', ')" }

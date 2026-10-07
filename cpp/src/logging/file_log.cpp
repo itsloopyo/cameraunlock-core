@@ -143,6 +143,16 @@ void Close() {
     }
 }
 
+bool IsOpen() {
+    return CurrentHandle() != INVALID_HANDLE_VALUE;
+}
+
+void Text(const std::string& text) {
+    if (CurrentHandle() == INVALID_HANDLE_VALUE) return;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    WriteTimestampedLocked(text.data(), text.size());
+}
+
 void Line(const char* fmt, ...) {
     if (CurrentHandle() == INVALID_HANDLE_VALUE) return;
     char buf[2048];

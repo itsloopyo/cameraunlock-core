@@ -1020,7 +1020,9 @@ function Invoke-DevDeployJavaAgentToPath {
 
     Write-Host ""
     Write-Host "Deploying agent files to: $exeDir" -ForegroundColor Yellow
-    foreach ($file in @($AgentJars) + @($NativeFiles)) {
+    # The jars last: an older build's site config may name a boot class the new jar does not
+    # have, and it is rewritten only after every copy has worked.
+    foreach ($file in @($NativeFiles) + @($AgentJars)) {
         Copy-Item -LiteralPath (Join-Path $BuildOutputPath $file) -Destination (Join-Path $exeDir $file) -Force
         Write-Host "Deployed $file" -ForegroundColor Green
     }
