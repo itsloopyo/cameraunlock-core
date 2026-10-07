@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - Application.runInBackground in the IL2CPP stubs
+
+`csharp/stubs/il2cpp/UnityEngineCoreModuleStubs.cs` gains `UnityEngine.Application` with the static
+`runInBackground`, read off Sons of the Forest's `BepInEx/interop/UnityEngine.CoreModule.dll`, so an
+IL2CPP mod's Debug build can keep the game running behind other windows for a background test.
+
 ### Changed - Titanfall 2 aim mode key row (Insert, Shift+Alt+U)
 
 `data/config-format.json` `per_game` lists `TrueFreeLookKey` for titanfall-2-headtracking. Left Ctrl

@@ -198,6 +198,13 @@ namespace UnityEngine
         public static float timeScale { get; set; }
     }
 
+    public class Application : Il2CppSystem.Object
+    {
+        public Application(IntPtr pointer) : base(pointer) { }
+
+        public static bool runInBackground { get; set; }
+    }
+
     public sealed class Resources : Il2CppSystem.Object
     {
         public Resources(IntPtr pointer) : base(pointer) { }
