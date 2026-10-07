@@ -71,7 +71,21 @@ vectors-csharp = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harnes
 build-vectors-c = "cmake -S scripts/pipeline-vectors/harness/c -B scripts/pipeline-vectors/harness/c/build && cmake --build scripts/pipeline-vectors/harness/c/build --config Release --target conformance_harness_c"
 vectors-c = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/c/build/Release/conformance_harness_c.exe --expect-skips yaw-seam-forward,yaw-seam-reverse,roll-seam-forward,extrapolation-expires-on-stall,extrapolation-survives-short-dropout,sample-interval-estimate-resists-packet-jitter,cold-start-32hz-no-jolt,default-sample-interval-is-one-thirtieth,position-interpolator-fills-frames-between-samples,position-interpolator-extrapolation-expires-on-stall,position-interpolator-resists-packet-jitter,position-interpolator-default-sample-interval-is-one-thirtieth,position-clamp-before-smoothing,position-clamp-is-asymmetric,vertical-limits-are-independent,gimbal-lock-at-exactly-90,euler-roundtrip-sweep,euler-decomposition-returns-canonical-angles,pivot-compensation-cancels-a-pure-head-turn,pivot-compensation-defaults-off,pivot-compensation-covers-pitch-and-the-up-arm,deadzone-is-continuous-at-its-edge,diagonal-motion-keeps-roll-at-zero,wire-position-is-centimetres,hcam-trailer-parses,packet-accepts-a-longer-datagram-without-inventing-a-trailer,hcam-trailer-version-is-forward-compatible,hcam-trailer-does-not-recenter,no-center-captured-on-connect-rotation", depends-on = ["build-vectors-c"] }
 
-vectors = { depends-on = ["vectors-cpp", "vectors-csharp", "vectors-c"] }
+# java/ (docs/java-agent-mod.md): the binding to the C interface a Java mod compiles into its own
+# jar, and the boot class of a Java agent mod. build-java compiles it for Java 22, the first
+# release where java.lang.foreign is final, and puts the three libraries its tests load beside the
+# class folders. They come out of the C harness's build tree, which build-vectors-c configures.
+# Windows only, as the DLL is, so none of it runs in a container.
+build-java = { cmd = "cmake --build scripts/pipeline-vectors/harness/c/build --config Release --target cameraunlock_c cameraunlock_c_testing cameraunlock_c_other_abi && node scripts/build-java.mjs", depends-on = ["build-vectors-c"] }
+# The binding against docs/c-interface.md's layout table and through CameraUnlockCoreTesting.dll,
+# a library of another ABI refused at load, and the boot class run as a game's launcher runs it.
+test-java = { cmd = "java --enable-native-access=ALL-UNNAMED -cp \"java/build/classes;java/build/test-classes\" com.cameraunlock.core.Tests", depends-on = ["build-java"] }
+# The vectors the C harness runs, through the Java binding: what they hold is Java's declaration
+# of the three structs a frame crosses in, its units and its order of calls. The skips are the C
+# harness's, for its reasons.
+vectors-java = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness \"java --enable-native-access=ALL-UNNAMED -cp java/build/classes;java/build/test-classes com.cameraunlock.core.ConformanceHarness\" --expect-skips yaw-seam-forward,yaw-seam-reverse,roll-seam-forward,extrapolation-expires-on-stall,extrapolation-survives-short-dropout,sample-interval-estimate-resists-packet-jitter,cold-start-32hz-no-jolt,default-sample-interval-is-one-thirtieth,position-interpolator-fills-frames-between-samples,position-interpolator-extrapolation-expires-on-stall,position-interpolator-resists-packet-jitter,position-interpolator-default-sample-interval-is-one-thirtieth,position-clamp-before-smoothing,position-clamp-is-asymmetric,vertical-limits-are-independent,gimbal-lock-at-exactly-90,euler-roundtrip-sweep,euler-decomposition-returns-canonical-angles,pivot-compensation-cancels-a-pure-head-turn,pivot-compensation-defaults-off,pivot-compensation-covers-pitch-and-the-up-arm,deadzone-is-continuous-at-its-edge,diagonal-motion-keeps-roll-at-zero,wire-position-is-centimetres,hcam-trailer-parses,packet-accepts-a-longer-datagram-without-inventing-a-trailer,hcam-trailer-version-is-forward-compatible,hcam-trailer-does-not-recenter,no-center-captured-on-connect-rotation", depends-on = ["build-java"] }
+
+vectors = { depends-on = ["vectors-cpp", "vectors-csharp", "vectors-c", "vectors-java"] }
 
 # Windows-only: the powershell/ modules are a Windows surface, so this is not
 # part of `check`. Covers the vendoring soak that keeps update-deps off
@@ -257,10 +271,13 @@ config-report = "node scripts/check-canonical-config.mjs --report"
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-validate-manifest", "test-generate-readme", "validate-games", "vectors", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-validate-manifest", "test-generate-readme", "validate-games", "vectors", "test-java", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"
 
 [dependencies]
 nodejs = ">=20"
+# For java/. 25 is the runtime the one Java agent mod's game ships (Project Zomboid 42), and
+# build-java compiles for 22 with it.
+openjdk = ">=25,<26"

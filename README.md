@@ -31,6 +31,10 @@ cameraunlock-core/
 │   ├── src/                                      # Implementation
 │   ├── tests/                                    # C++ tests
 │   └── CMakeLists.txt
+├── java/
+│   ├── src/                                      # The binding to CameraUnlockCore.dll and the boot class of a Java agent mod
+│   ├── harness/                                  # The pipeline vectors' harness for the binding
+│   └── tests/                                    # Its tests
 ├── powershell/                                   # 7 reusable .psm1 modules for mod release pipelines
 ├── scripts/
 │   ├── templates/                                # install.cmd / uninstall.cmd templates copied into mod repos
@@ -140,6 +144,10 @@ mistake, which is why that document exists.
 A host that can load a DLL does not need a port. `CameraUnlockCore.dll` is this library's
 pipeline, config owner, hotkey poller and file log behind plain C functions, for a Java,
 Lua, Python or Rust host: [docs/c-interface.md](docs/c-interface.md).
+
+For a Java host the binding to it is here too, `java/src/com/cameraunlock/core/CameraUnlock.java`,
+with the boot class a Java agent mod is started through. A mod compiles both into its own jar
+from the submodule: [docs/java-agent-mod.md](docs/java-agent-mod.md).
 
 A port that reads or writes a mod's config file follows the canonical config format in
 [docs/canonical-config.md](docs/canonical-config.md), and runs the byte fixtures in
@@ -302,6 +310,7 @@ pixi run test           # dotnet test csharp
 pixi run check          # debug build + quick tests
 pixi run pack           # dotnet pack to dist/
 pixi run test-powershell # vendoring soak tests (Windows only)
+pixi run test-java      # java/: the binding and the boot class (Windows only)
 ```
 
 ### C# (.NET)
@@ -382,7 +391,7 @@ Located in `powershell/`, imported by every mod repo's `release.ps1` / `update-d
 
 `scripts/templates/` is the source of truth for every mod repo's `install.cmd` /
 `uninstall.cmd` (plus per-loader variants: ASI, Cecil, MelonLoader, REFramework,
-shim, UE4SS). Templates are copied verbatim into mod repos; only the CONFIG BLOCK
+shim, UE4SS, and the Java agent, which has no loader). Templates are copied verbatim into mod repos; only the CONFIG BLOCK
 differs per mod. Supporting scripts:
 
 - `find-game.ps1` - bridges `install.cmd` to `GamePathDetection.psm1`, and asks
@@ -422,6 +431,9 @@ the installer ZIP, generates release notes, and publishes the GitHub release.
 - Winsock2 (Windows UDP)
 - MinHook (optional, for hooks/discovery modules)
 - REFramework headers (optional, for reframework module)
+
+### Java
+- OpenJDK 25 from the pixi environment, to compile and test `java/` for Java 22. Nothing else.
 
 ### Runtime
 - Unity assemblies provided by consuming projects (weak references)

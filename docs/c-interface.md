@@ -35,7 +35,11 @@ beside its own code and loads it by full path.
   in structs it fills and in structs the library fills. A size that is not the library's is
   refused, and the reason names both sizes.
 - `cameraunlock_abi()` answers `CAMERAUNLOCK_ABI`. A host compares it with the number it was
-  written against when it loads the DLL, and stops if they differ.
+  written against when it loads the DLL, before it looks up any other function, and stops if they
+  differ. The number is raised when a function is added, when a function's meaning changes and
+  when a struct's layout changes, so the lower of the two numbers is the older side.
+- `cameraunlock_struct_size(which)` answers the size the library has for a struct. A binding that
+  declares the structs in its own language compares each with its declaration at load.
 - Nothing joins a thread when the process ends. The receiver's and the poller's threads belong to
   objects that are never destroyed, so a host's process just ends. `cameraunlock_session_stop`
   joins the receiver's threads, for a host that stops tracking while it keeps running.
@@ -46,7 +50,7 @@ beside its own code and loads it by full path.
 |---|---|
 | `cameraunlock_session_frame`, then `cameraunlock_session_lean` | One thread, the one that draws. The pair is one frame's work. |
 | `cameraunlock_session_configure`, `_start`, `_stop` | Any. They wait for a frame in progress. |
-| `cameraunlock_session_cycle_tracking_mode`, `_cycle_aim_mode`, `cameraunlock_hotkeys_take`, `_drop`, `cameraunlock_log_*`, `cameraunlock_last_error`, `cameraunlock_abi`, `cameraunlock_aim_mode_label` | Any, at any time. |
+| `cameraunlock_session_cycle_tracking_mode`, `_cycle_aim_mode`, `_set_aim_mode`, `cameraunlock_hotkeys_take`, `_drop`, `cameraunlock_log_*`, `cameraunlock_last_error`, `cameraunlock_abi`, `cameraunlock_struct_size`, `cameraunlock_aim_mode_label` | Any, at any time. |
 | `cameraunlock_config_*` | Any, one at a time between them. `_load`, `_reload`, `_save_*` and `_render` read or write a file: never from the thread that draws. |
 
 A mode cycled on another thread is seen by the next frame.
@@ -120,12 +124,18 @@ member of the `CameraUnlockConfig` the load filled, as it is.
 
 `cameraunlock_session_cycle_tracking_mode` and `cameraunlock_session_cycle_aim_mode` go to the
 next mode and answer it. `cameraunlock_aim_mode_label` is the line every mod shows for an aim mode.
+`cameraunlock_session_set_aim_mode` puts the session in one mode, for a game whose cycle is not
+core's four: where the game draws a reticle of its own whenever the sights are up, free look
+without a marker is free look with one, and the host steps over it.
 
 ## The receiver
 
 `cameraunlock_session_start(port)` listens for OpenTrack datagrams. A port that cannot be bound is
 not an error: the system's own reason goes to the log, the bind is tried again every 500 ms, and
-`CAMERAUNLOCK_STATE_LISTENING` says when it holds. Starting a started session is an error.
+`CAMERAUNLOCK_STATE_LISTENING` says when it holds. Starting a started session is an error. The log
+has one of two lines for every start, `Listening for OpenTrack datagrams on UDP port <n>` or
+`Failed to bind UDP port <n>: <the system's reason>`, and `Bound UDP port <n> after <s>s of
+waiting` when a later try holds. A host's troubleshooting text can name them.
 
 What a host tells its users about the tracker:
 
@@ -217,6 +227,31 @@ holds these to the header, compiled as C.
 
 A binding declares each struct once as a named layout in its own language and reads members by
 name. The table is here to check that declaration against, not to copy numbers out of.
+
+## The Java binding
+
+`java/src/com/cameraunlock/core/CameraUnlock.java` is this interface for a Java host, through
+`java.lang.foreign`: one method for each function and one class with public fields for each
+struct. A mod compiles it into its own jar from the submodule's source.
+[java-agent-mod.md](java-agent-mod.md) is the page for a mod that uses it.
+
+- Java 22 or later. `pixi run build-java` compiles it for 22.
+- `CameraUnlock.load()` loads `CameraUnlockCore.dll` from the folder its jar or class folder is in,
+  and from nowhere else.
+- At load it compares `cameraunlock_abi()` with the version it was written for, then each
+  `cameraunlock_struct_size` with its own declaration. A difference throws, and the message names
+  the file, both versions and the older side.
+- Each struct is declared once, as a layout with the header's member names, and every member is
+  read and written through its name. `pixi run test-java` holds those layouts to the table above.
+- A call that answers `CAMERAUNLOCK_ERROR` throws an `IllegalStateException` whose message is
+  `cameraunlock_last_error`.
+- `frame`, `lean`, `hotkeysTake` and `hotkeysDrop` allocate nothing.
+- It needs no upcall, as the interface has no callback.
+- The JVM is started with `--enable-native-access=ALL-UNNAMED`. Without it Java 25 prints a warning
+  at the first call and says a later release will refuse such calls.
+
+`pixi run vectors-java` runs the pipeline vectors through it
+(`java/harness/com/cameraunlock/core/ConformanceHarness.java`), the same five the C harness runs.
 
 ## What a new host writes
 
