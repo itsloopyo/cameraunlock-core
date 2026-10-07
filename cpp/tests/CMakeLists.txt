@@ -74,6 +74,18 @@ endif()
 
 add_test(NAME cameraunlock_tests COMMAND cameraunlock_tests)
 
+# The C interface, driven as a host drives it: through CameraUnlockCore.dll and the C header
+# alone. c_header.c compiles that header as C.
+if(CAMERAUNLOCK_BUILD_C)
+    enable_language(C)
+    add_executable(cameraunlock_c_tests c_interface_tests.cpp c_header.c)
+    target_link_libraries(cameraunlock_c_tests PRIVATE cameraunlock_c ws2_32)
+    target_compile_options(cameraunlock_c_tests PRIVATE /W4 /WX)
+    add_custom_command(TARGET cameraunlock_c_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:cameraunlock_c> $<TARGET_FILE_DIR:cameraunlock_c_tests>)
+    add_test(NAME cameraunlock_c_tests COMMAND cameraunlock_c_tests)
+endif()
+
 # Compile-only, and STRICT. Every public header in one TU at the warning level the
 # fleet's own mods use, because a problem that only appears when two headers meet is
 # invisible to any build that includes them separately - which is every build here.

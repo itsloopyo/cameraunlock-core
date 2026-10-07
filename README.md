@@ -137,6 +137,10 @@ implementation, are in [docs/porting-the-pipeline.md](docs/porting-the-pipeline.
 An audit of four independent ports found three had made the same angle-handling
 mistake, which is why that document exists.
 
+A host that can load a DLL does not need a port. `CameraUnlockCore.dll` is this library's
+pipeline, config owner, hotkey poller and file log behind plain C functions, for a Java,
+Lua, Python or Rust host: [docs/c-interface.md](docs/c-interface.md).
+
 A port that reads or writes a mod's config file follows the canonical config format in
 [docs/canonical-config.md](docs/canonical-config.md), and runs the byte fixtures in
 `data/fixtures/canonical-ini/` that core's C++ and C# suites run.

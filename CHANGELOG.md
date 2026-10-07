@@ -76,6 +76,31 @@ a window that fills the work area on either axis where it is.
   top-level bullets. A release keeps a non-empty `[Unreleased]` as written and reads no commit,
   so every bullet becomes one version's entry. Five repos draw it today, at 197, 66, 61, 60
   and 51 bullets.
+### Added - CameraUnlockCore.dll, the C interface for a host that is not C++ or C#
+
+`cpp/include/cameraunlock/c/cameraunlock.h` and the CMake option `CAMERAUNLOCK_BUILD_C` (off by
+default, on in `pixi run build-cpp`): the receiver, the session, the lean clamp, the zoom
+compensation, the aim modes and the lean handover behind one call a frame, the config owner over
+rows a host describes at run time, the hotkey poller as bits a host takes, and the file log.
+`docs/c-interface.md` is the contract. Nothing calls back into the host and nothing joins a thread
+at process exit. project-zomboid-headtracking, a Java agent, is the first host it was written for.
+
+For it, added and changing no caller: `HeadTrackingSession::ResetTransientState`,
+`camera::ScaleWideAngleForZoom` (an angle past 90 degrees keeps its side),
+`config::HeadTrackingConfigTableFrom` (the concepts as any container, over a given defaults
+instance), `ConfigTable::Default` (a non-global concept's own default as text), an `EnumCodec`
+constructor from a vector, and `LeanClamp::kMinimumLean` made public.
+
+### Changed - the C# receiver holds a jump back as the C++ one does
+
+`OpenTrackReceiver` now runs every pose through `PoseJumpGate`: a step of more than 8 degrees is
+held one packet and dropped when the next packet repeats it bit for bit, which is what a tracker
+that has lost the head sends. A turn that continues is delayed by one packet at its start and no
+more. A CENTER press in the HCAM trailer passes at once. `FrozenPacketCount` counts what was
+refused. The C++ gate moved out of `UdpReceiver` into `cameraunlock::PoseJumpGate` with no change
+to what it publishes; `data/fixtures/pose-jump-gate/cases.tsv` holds the two to the same answers
+and `confirm_jump_degrees` joins the conformance constants. A C# test that sends one large jump
+and expects it published needs a second packet after it.
 
 ### Added - Application.runInBackground in the IL2CPP stubs
 

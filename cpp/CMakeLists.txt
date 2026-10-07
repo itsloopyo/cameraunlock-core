@@ -244,6 +244,30 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
     )
 endif()
 
+# Optional C interface: CameraUnlockCore.dll, the pipeline, the config owner, the hotkeys and the
+# log for a host that is neither C++ nor C# (docs/c-interface.md). One DLL serves every such host.
+option(CAMERAUNLOCK_BUILD_C "Build CameraUnlockCore.dll, the C interface" OFF)
+if(CAMERAUNLOCK_BUILD_C)
+    if(NOT WIN32)
+        message(FATAL_ERROR "CAMERAUNLOCK_BUILD_C: the config owner and the hotkey poller it exports are Windows only.")
+    endif()
+    add_library(cameraunlock_c SHARED src/c/cameraunlock_c.cpp)
+    set_target_properties(cameraunlock_c PROPERTIES OUTPUT_NAME CameraUnlockCore)
+    target_compile_definitions(cameraunlock_c PRIVATE CAMERAUNLOCK_C_EXPORTS)
+    target_include_directories(cameraunlock_c
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(cameraunlock_c PRIVATE cameraunlock)
+    target_compile_options(cameraunlock_c PRIVATE /W4 /WX /permissive-)
+
+    install(TARGETS cameraunlock_c
+        RUNTIME DESTINATION bin
+        ARCHIVE DESTINATION lib
+    )
+endif()
+
 # Tests
 if(CAMERAUNLOCK_BUILD_TESTS)
     enable_testing()
