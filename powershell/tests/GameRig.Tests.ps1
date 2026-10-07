@@ -250,6 +250,7 @@ try {
     $thrown = ''
     try {
         Invoke-IsolatedGameSession @session -Prepare { $seen.PreparedWithRig = (Get-GameRig -Game $gameName).Holder.Owner } `
+            -Launched { param($s) $seen.LaunchedWith = "$($s.ProcessId) $([bool](Get-Process -Id $s.ProcessId -ErrorAction SilentlyContinue))" } `
             -Enter { param($s) $seen.EnteredWith = "$((Get-GameRig -Game $gameName).Holder.Token -eq $s.RigToken) $(Test-Path (Join-Path $root 'state'))" } `
             -Leave { param($s) $seen.LeftWith = "$((Get-GameRig -Game $gameName).Holder.Token -eq $s.RigToken) $(Test-Path (Join-Path $root 'state')) $([IO.File]::ReadAllText($ini) -eq $iniText)" } `
             -Collect { param($s) $seen.CollectedIni = [IO.File]::ReadAllText($ini); $seen.CollectedAfterStop = -not (Get-Process -Id $s.ProcessId -ErrorAction SilentlyContinue) } `
@@ -282,6 +283,7 @@ try {
     Check 'the folder is as it was: the deleted file back, the changed one as before, the added one gone' ($tree -eq 'player.bin=the player;world\chunk-1.bin=a chunk') $tree
     Check 'the saved state and the command file are gone' (-not (Test-Path $session.StateFolder) -and -not (Test-Path (Join-Path $mod 'CameraUnlockInput.txt')))
     Check 'the rig is free' ($null -eq (Get-GameRig -Game $gameName))
+    Check 'the launched block was handed the session with the game''s process in it' ($seen.LaunchedWith -eq "$($seen.Pid) True") $seen.LaunchedWith
     Check 'the enter block ran with the rig held and nothing saved yet' ($seen.EnteredWith -eq 'True False') $seen.EnteredWith
     Check 'the leave block ran with the files back and the rig still held' ($seen.LeftWith -eq 'True False True') $seen.LeftWith
 

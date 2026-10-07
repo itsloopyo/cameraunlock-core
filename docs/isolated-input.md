@@ -174,7 +174,9 @@ writes out by hand. In order:
 4. Writes `-Port` into `-IniPath` (`Set-ModTestPort`), and starts the pose
    sender on it when `-PoseFile` is given.
 5. Launches (`Start-IsolatedGame`), from `-WorkingDirectory` and with
-   `-Environment` set for the launch alone when those are given.
+   `-Environment` set for the launch alone when those are given. `-Launched`
+   runs as the game's process appears, before the settling: a sampler started
+   there has the process from its first seconds.
 6. Runs `-Run` with the session.
 7. Stops the game and the pose sender, runs `-Collect`, puts every file and
    folder back, runs `-Leave`, releases the rig. `-Leave` is `-Enter`'s other

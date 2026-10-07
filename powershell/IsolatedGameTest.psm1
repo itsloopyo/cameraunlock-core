@@ -1134,7 +1134,8 @@ function Start-IsolatedGameSession {
 
     -Prepare runs with the rig held and the state saved, before the launch: build and deploy the
     dev build, change the game's settings. A build made there cannot land under another session's
-    running game. -IniPath is the mod's config, where -Port is written; it is saved and put back
+    running game. -Launched runs as the game's process appears, before the settling, and is handed
+    the session: start a sampler there to have the process from its first seconds. -IniPath is the mod's config, where -Port is written; it is saved and put back
     with -Files. -PoseFile starts the pose sender on -Port.
 
     The session carries Port, PoseFile, Sender (the pose sender's process id), ModFolder,
@@ -1158,6 +1159,7 @@ function Start-IsolatedGameSession {
         [scriptblock]$Enter,
         [scriptblock]$Leave,
         [scriptblock]$Prepare,
+        [scriptblock]$Launched,
         [string]$IniPath = '',
         [int]$Port = 0,
         [string]$PoseFile = '',
@@ -1213,6 +1215,7 @@ function Start-IsolatedGameSession {
                     param($process)
                     $session.ProcessId = $process.Id
                     if ($SessionFile) { Save-IsolatedGameSession -Session $session }
+                    if ($Launched) { & $Launched $session | Out-Host }
                 })
         } finally {
             if ($WorkingDirectory) { Pop-Location }
@@ -1341,6 +1344,7 @@ function Invoke-IsolatedGameSession {
         [scriptblock]$Enter,
         [scriptblock]$Leave,
         [scriptblock]$Prepare,
+        [scriptblock]$Launched,
         [string]$IniPath = '',
         [int]$Port = 0,
         [string]$PoseFile = '',
