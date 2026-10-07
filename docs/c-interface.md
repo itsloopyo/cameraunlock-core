@@ -127,6 +127,18 @@ next mode and answer it. `cameraunlock_aim_mode_label` is the line every mod sho
 not an error: the system's own reason goes to the log, the bind is tried again every 500 ms, and
 `CAMERAUNLOCK_STATE_LISTENING` says when it holds. Starting a started session is an error.
 
+What a host tells its users about the tracker:
+
+- It sends the OpenTrack UDP protocol to the port in `[Network] UdpPort`, over IPv4. Core listens
+  on IPv4 only, so a tracker pointed at `::1` or another IPv6 address reaches nothing.
+- A tracker sending to `127.0.0.1` (any `127.x.x.x`) is local and gets `LocalSmoothing`. One
+  sending to any other address is remote and gets `RemoteSmoothing`, this machine's own network
+  address included.
+- One tracker at a time. The receiver follows the first sender it hears and ignores a second
+  until the first has been silent for two seconds, and the log names both.
+- A datagram is refused whole when a value is not a number, an angle is past 360 degrees or a
+  position past 100 m.
+
 ## The config
 
 A host describes its `CameraUnlock.ini` at run time, then loads it:
@@ -173,6 +185,14 @@ play.
 and drains core's lines with `cameraunlock_log_take` when a frame's flags carry
 `CAMERAUNLOCK_STATE_LOG`.
 
+## Testing without a socket
+
+`CameraUnlockCoreTesting.dll` (CMake target `cameraunlock_c_testing`, never shipped) is the same
+library with two more functions, declared in `cameraunlock/c/testing/cameraunlock_testing.h`:
+`cameraunlock_testing_deliver` hands a session that is not started one datagram as if it had just
+arrived, and `cameraunlock_testing_reset` gives a fresh session. They are for core's vectors
+harness and a binding's own. A mod has no use for them: a tracker's poses reach it as datagrams.
+
 ## Layouts
 
 Every member is four bytes except `now_ms`, and no struct has padding. `cpp/tests/c_header.c`
@@ -202,9 +222,12 @@ name. The table is here to check that declaration against, not to copy numbers o
 
 ## What it does not do
 
-- The pipeline conformance vectors (`pixi run vectors`) do not run through it. They feed the
-  interpolators and processors sample by sample, and the interface takes poses only as datagrams
-  on a socket, on the receiver's own clock.
+- It has one entry to the pipeline, the frame. So of the pipeline conformance vectors
+  (`pixi run vectors-c`, harness in `scripts/pipeline-vectors/harness/c/`) it runs the ones that
+  go datagram in, pose out, and the harness skips the rest by name with a reason: those that
+  drive one interpolator or processor on its own, those that assert whether a datagram carried
+  a trailer, and two whose stream drops to zero and then repeats, which the receiver's
+  lost-tracker gate holds.
 - No legacy import: a described config has no legacy file. A mod that published builds before the
   canonical format keeps its C++ table and import.
 - No string, list or color local row, no `Engine()` row, and no concept row read again by

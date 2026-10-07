@@ -456,6 +456,42 @@ void TestLean() {
     Check(cameraunlock_session_frame(&turned, &unused) == CAMERAUNLOCK_ERROR, "an aim that is not unit length is refused");
 }
 
+void TestAbsurdPose() {
+    std::cout << "\n[c interface: a pose no tracker sends]\n";
+    const Sender& sender = Tracker();
+    sender.Pose(1.0, 2.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitFor([] { return Near(Settle().head_pitch, 2.0f); }), "a pose to start from");
+
+    // Finite as floats, so the check for NaN and infinity passes them, and far enough apart that
+    // the step between them is not finite.
+    const double absurd[5][6] = {{1.0, 3e38, 0.0, 20.0, 0.0, 0.0},
+                                 {1.0, -3e38, 0.0, 20.0, 0.0, 0.0},
+                                 {1.0, 3e38, 0.0, 20.0, 0.0, 0.0},
+                                 {1.0, 0.0, 0.0, 3e38, -3e38, 3e38},
+                                 {100000.0, 0.0, 0.0, 20.0, 0.0, 0.0}};
+    CameraUnlockFrame frame = {};
+    for (const double* pose : absurd) {
+        sender.Pose(pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        frame = Settle();
+    }
+    Check(std::isfinite(frame.head_pitch) && std::isfinite(frame.pitch) && std::isfinite(frame.head_yaw),
+          "datagrams with angles at the ends of a float's range do not leave the view on a NaN");
+    Check(Near(frame.head_pitch, 2.0f) && Near(frame.head_yaw, 1.0f) && Near(frame.head_x, 0.20f),
+          "they are refused whole: the pose is the last real one");
+    sender.Pose(1.5, 2.5, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitFor([] { return Near(Settle().head_pitch, 2.5f); }), "and the tracker's next pose is followed");
+
+    sender.Pose(1.5, 2.5, 0.0, 20.0, 0.0, 0.0);
+    sender.Pose(170.5, 80.5, -170.5, -500.0, 500.0, 500.0);
+    sender.Pose(170.0, 80.0, -170.0, -500.0, 500.0, 500.0);
+    Check(WaitFor([] { return Near(Settle().head_pitch, 80.0f, 0.05f) && Near(Settle().head_yaw, 170.0f, 0.05f); }),
+          "a pose at the far end of what a tracker sends is taken");
+    sender.Pose(1.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    sender.Pose(1.5, 0.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitYaw(1.5f), "back to the middle");
+}
+
 void TestSmoothingByConnection() {
     std::cout << "\n[c interface: the smoothing the connection selects]\n";
     CameraUnlockSettings settings = Defaults();
@@ -645,6 +681,7 @@ int main() {
     TestReceiving();
     TestModes();
     TestLean();
+    TestAbsurdPose();
     TestSmoothingByConnection();
     TestConfig(scratch);
     TestLog(scratch);

@@ -85,11 +85,34 @@ rows a host describes at run time, the hotkey poller as bits a host takes, and t
 `docs/c-interface.md` is the contract. Nothing calls back into the host and nothing joins a thread
 at process exit. project-zomboid-headtracking, a Java agent, is the first host it was written for.
 
+`pixi run vectors` gains a third harness, `scripts/pipeline-vectors/harness/c/`, which runs the
+datagram-in, pose-out vectors through the interface and skips the rest by name.
+
 For it, added and changing no caller: `HeadTrackingSession::ResetTransientState`,
-`camera::ScaleWideAngleForZoom` (an angle past 90 degrees keeps its side),
 `config::HeadTrackingConfigTableFrom` (the concepts as any container, over a given defaults
 instance), `ConfigTable::Default` (a non-global concept's own default as text), an `EnumCodec`
 constructor from a vector, and `LeanClamp::kMinimumLean` made public.
+
+### Fixed - a datagram with an absurd pose could leave the view on NaN until a restart
+
+**BREAKING for a port:** `OpenTrackPacket` (C++ and C#) now refuses a datagram whose angle on any
+axis is past 360 degrees or whose position is past 10000 cm, as it refuses a NaN. Any finite float
+used to pass, and two datagrams with pitch at opposite ends of a float's range made
+`PoseInterpolator`'s step infinite: the pose went to NaN and smoothing kept it there. The bounds
+are `max_rotation_degrees` and `max_position_cm` in the conformance constants, and the vector
+`wire-rejects-a-pose-no-tracker-sends` holds every implementation to them, so a Lua, Rust or
+Java port fails that vector until it bounds its own parser.
+
+The C++ `UdpReceiver` also parses a datagram before anything else reads it. A datagram that does
+not parse no longer takes or keeps the source lock, or latches a trailer counter.
+
+### Fixed - ScaleAngleForZoom keeps an angle past 90 degrees on its side
+
+`camera::ScaleAngleForZoom` and `ZoomCompensation.ScaleAngleForZoom` returned -60 for 120, at a
+factor of 1 too, since the tangent wraps at 90. From 90 degrees on they now scale through the
+sine and the cosine. Below 90 the result is bit for bit what it was: both suites sweep 1799 angles
+and 8 factors against the old formula. A mod's own guard in front of the call (a clamp to under
+90, a saturate-and-add) is no longer needed and can go.
 
 ### Changed - the C# receiver holds a jump back as the C++ one does
 

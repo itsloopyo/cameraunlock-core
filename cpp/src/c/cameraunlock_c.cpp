@@ -1,4 +1,7 @@
 #include "cameraunlock/c/cameraunlock.h"
+#ifdef CAMERAUNLOCK_C_TESTING
+#include "cameraunlock/c/testing/cameraunlock_testing.h"
+#endif
 
 #include "cameraunlock/ads/ads_fade.h"
 #include "cameraunlock/ads/aim_mode.h"
@@ -197,9 +200,13 @@ struct Session {
     Session() { receiver.SetLog(&LogLine); }
 };
 
-Session& TheSession() {
+Session*& SessionSlot() {
     static Session* session = new Session();
-    return *session;
+    return session;
+}
+
+Session& TheSession() {
+    return *SessionSlot();
 }
 
 void RequireSettings(const CameraUnlockSettings& s) {
@@ -618,8 +625,8 @@ std::int32_t cameraunlock_session_frame(const CameraUnlockFrameInput* input, Cam
             out->head_yaw = yaw;
             out->head_pitch = pitch;
             out->head_roll = roll;
-            out->yaw = camera::ScaleWideAngleForZoom(yaw * share, zoom);
-            out->pitch = camera::ScaleWideAngleForZoom(pitch * share, zoom);
+            out->yaw = camera::ScaleAngleForZoom(yaw * share, zoom);
+            out->pitch = camera::ScaleAngleForZoom(pitch * share, zoom);
             out->roll = roll;
             const effects::HeadEuler light =
                 effects::ScaleHeadEuler({out->yaw, out->pitch, out->roll}, s.settings.light_multiplier);
@@ -1056,6 +1063,37 @@ std::int32_t cameraunlock_hotkeys_start(void) {
         return CAMERAUNLOCK_OK;
     });
 }
+
+#ifdef CAMERAUNLOCK_C_TESTING
+
+std::int32_t cameraunlock_testing_reset(void) {
+    return Guarded("cameraunlock_testing_reset", [&] {
+        delete SessionSlot();
+        SessionSlot() = new Session();
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_testing_deliver(const void* datagram, std::int32_t length, std::int32_t remote) {
+    return Guarded("cameraunlock_testing_deliver", [&] {
+        Require(datagram != nullptr && length >= 0, "datagram is NULL or its length negative");
+        Session& s = TheSession();
+        const std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.started) throw std::logic_error("the session is listening: a datagram is delivered to one that is not");
+        sockaddr_in sender = {};
+        sender.sin_family = AF_INET;
+        sender.sin_port = htons(4242);
+        inet_pton(AF_INET, remote != 0 ? "192.0.2.1" : "127.0.0.1", &sender.sin_addr);
+        // Each delivery is a later arrival than the last, as the session tells packets apart by it.
+        static std::int64_t last_arrival = 0;
+        const std::int64_t now = SteadyMicros();
+        last_arrival = now > last_arrival ? now : last_arrival + 1;
+        detail::UdpReceiverTestAccess::Deliver(s.receiver, datagram, length, sender, last_arrival);
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+#endif
 
 std::int32_t cameraunlock_hotkeys_take(void) {
     return TheConfig().pressed.exchange(0);

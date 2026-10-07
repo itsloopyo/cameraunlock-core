@@ -61,7 +61,17 @@ vectors-cpp = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness s
 build-vectors-csharp = "dotnet build scripts/pipeline-vectors/harness/csharp/ConformanceHarness.csproj -c Release --nologo -v quiet"
 vectors-csharp = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/csharp/bin/Release/net8.0/ConformanceHarness.exe", depends-on = ["build-vectors-csharp"] }
 
-vectors = { depends-on = ["vectors-cpp", "vectors-csharp"] }
+# The C interface (docs/c-interface.md), through CameraUnlockCoreTesting.dll and the C headers
+# alone. It has one entry to the pipeline, the frame, so it runs the vectors that go datagram in,
+# pose out, and holds the boundary a foreign host relies on: units, struct layout, call order.
+# Every other vector is named here and skipped by the harness with its reason: the ones that
+# drive an interpolator, a processor or the Euler round trip on its own, the four that assert
+# whether a datagram carried a trailer, which the interface does not say, and the two whose
+# stream drops to zero and repeats, which the receiver's lost-tracker gate holds.
+build-vectors-c = "cmake -S scripts/pipeline-vectors/harness/c -B scripts/pipeline-vectors/harness/c/build && cmake --build scripts/pipeline-vectors/harness/c/build --config Release --target conformance_harness_c"
+vectors-c = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness scripts/pipeline-vectors/harness/c/build/Release/conformance_harness_c.exe --expect-skips yaw-seam-forward,yaw-seam-reverse,roll-seam-forward,extrapolation-expires-on-stall,extrapolation-survives-short-dropout,sample-interval-estimate-resists-packet-jitter,cold-start-32hz-no-jolt,default-sample-interval-is-one-thirtieth,position-interpolator-fills-frames-between-samples,position-interpolator-extrapolation-expires-on-stall,position-interpolator-resists-packet-jitter,position-interpolator-default-sample-interval-is-one-thirtieth,position-clamp-before-smoothing,position-clamp-is-asymmetric,vertical-limits-are-independent,gimbal-lock-at-exactly-90,euler-roundtrip-sweep,euler-decomposition-returns-canonical-angles,pivot-compensation-cancels-a-pure-head-turn,pivot-compensation-defaults-off,pivot-compensation-covers-pitch-and-the-up-arm,deadzone-is-continuous-at-its-edge,diagonal-motion-keeps-roll-at-zero,wire-position-is-centimetres,hcam-trailer-parses,packet-accepts-a-longer-datagram-without-inventing-a-trailer,hcam-trailer-version-is-forward-compatible,hcam-trailer-does-not-recenter,no-center-captured-on-connect-rotation", depends-on = ["build-vectors-c"] }
+
+vectors = { depends-on = ["vectors-cpp", "vectors-csharp", "vectors-c"] }
 
 # Windows-only: the powershell/ modules are a Windows surface, so this is not
 # part of `check`. Covers the vendoring soak that keeps update-deps off

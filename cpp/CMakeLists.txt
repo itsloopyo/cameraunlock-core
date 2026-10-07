@@ -266,6 +266,15 @@ if(CAMERAUNLOCK_BUILD_C)
         RUNTIME DESTINATION bin
         ARCHIVE DESTINATION lib
     )
+
+    # The same library with the entry points of cameraunlock/c/testing/cameraunlock_testing.h,
+    # for the pipeline vectors' harness. Never shipped, never installed.
+    add_library(cameraunlock_c_testing SHARED EXCLUDE_FROM_ALL src/c/cameraunlock_c.cpp)
+    set_target_properties(cameraunlock_c_testing PROPERTIES OUTPUT_NAME CameraUnlockCoreTesting)
+    target_compile_definitions(cameraunlock_c_testing PRIVATE CAMERAUNLOCK_C_EXPORTS CAMERAUNLOCK_C_TESTING)
+    target_include_directories(cameraunlock_c_testing PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_link_libraries(cameraunlock_c_testing PRIVATE cameraunlock)
+    target_compile_options(cameraunlock_c_testing PRIVATE /W4 /WX /permissive-)
 endif()
 
 # Tests
