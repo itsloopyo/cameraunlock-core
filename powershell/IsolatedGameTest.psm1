@@ -424,8 +424,14 @@ function Invoke-GameInput {
         [Parameter(Mandatory)][string[]]$Commands,
         [int]$TimeoutSeconds = 60
     )
+    # Process id 0 is what a session holds between stopping its game and starting it again, and it is also the system's idle process.
+    if (-not $Session.ProcessId) { throw 'the session has no game running: it was stopped and not started again' }
     if (-not (Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue)) { throw "the game (pid $($Session.ProcessId)) is no longer running" }
     $Session.Sequence++
+    # A session with a file of its own (Start-IsolatedGameSession -SessionFile) is one a later
+    # process picks up. The number is written before the script is handed over: one that is never
+    # answered has still used it, and the next process must not ask with it again.
+    if ($Session.PSObject.Properties['SessionFile'] -and $Session.SessionFile) { Save-IsolatedGameSession -Session $Session }
     $sequence = "$($Session.Sequence)"
     $temp = "$($Session.CommandFile).tmp"
     [IO.File]::WriteAllLines($temp, @($sequence) + $Commands)
@@ -446,9 +452,6 @@ function Invoke-GameInput {
     if (-not ($done -and $done.StartsWith($sequence))) {
         throw "script $sequence was not played within $TimeoutSeconds seconds. Is the dev build deployed, and was the command file there when the game started?"
     }
-    # A session with a file of its own (Start-IsolatedGameSession -SessionFile) is one a later
-    # process picks up, so the sequence it has reached is written there before anything throws.
-    if ($Session.PSObject.Properties['SessionFile'] -and $Session.SessionFile) { Save-IsolatedGameSession -Session $Session }
     if ($done -ne $sequence) { throw "script $done" }
     [pscustomobject]@{ Sequence = $Session.Sequence; GameHeldForeground = $heldForeground }
 }
@@ -1275,7 +1278,8 @@ function Stop-IsolatedGameSession {
     are back and before the rig is released: the other half of Start-IsolatedGameSession -Enter.
 
     With -SessionFile this also ends a session whose own process was killed: Get-GameRig names
-    the file of the session that holds a rig. It refuses while that process is still running.
+    the file of the session that holds a rig. It refuses while that process is still running, and
+    leaves the session as it is, its file included, to be stopped once that process has ended.
 
     A session whose lock is gone (someone removed it, or it was taken over after the game went
     with nothing saved) is not put back: its pose sender is stopped, its session file removed,
@@ -1300,6 +1304,12 @@ function Stop-IsolatedGameSession {
     if (-not $Session) {
         if (-not $SessionFile) { throw 'Stop-IsolatedGameSession needs -Session or -SessionFile' }
         $Session = Get-IsolatedGameSession -SessionFile $SessionFile
+    }
+    # The process that started or restarted the session is still at it: the session is that one's
+    # until it ends, and nothing of it is touched, so it can be stopped afterwards.
+    $held = Invoke-GameRigExclusive { Read-GameRigOwner (Get-GameRigKey $Session.ProcessName) }
+    if ($held -and $held.Token -eq $Session.RigToken -and $held.ProcessId -ne $PID -and (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) {
+        throw "the session is still in the hands of pid $($held.ProcessId), which is starting or restarting its game. Nothing was stopped or put back: stop it once that process has ended."
     }
     try { $rig = Enter-GameRig -Game $Session.ProcessName -Owner $Session.Owner -Token $Session.RigToken }
     catch {

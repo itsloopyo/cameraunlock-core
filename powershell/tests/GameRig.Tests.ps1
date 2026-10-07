@@ -377,6 +377,8 @@ Start-IsolatedGameSession -ProcessName $Game -Launch $Exe -ModFolder $Mod -Owner
     $started.Add($killed)
     Wait-Until { Test-Path $sessionFile }
     Check 'the starter is still settling when the session is in its file' (-not $killed.HasExited)
+    Check 'stopping a session its starter still has is refused' (Throws { Stop-IsolatedGameSession -SessionFile $sessionFile } 'still in the hands of pid')
+    Check 'and leaves its file, its game and its rig' ((Test-Path $sessionFile) -and [bool](Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and (Get-GameRig -Game $gameName).Holder.ProcessId -eq $killed.Id)
     $killed.Kill(); $killed.WaitForExit()
     $orphan = Get-IsolatedGameSession -SessionFile $sessionFile
     $game = Get-Process -Name $gameName
@@ -402,7 +404,13 @@ Start-IsolatedGameSession -ProcessName $Game -Launch $Exe -ModFolder $Mod -Owner
     $kept = [pscustomobject]@{ ProcessId = $PID; ProcessName = 'powershell'; CommandFile = $commandFile; Sequence = 0; SessionFile = $sessionFile }
     Invoke-GameInput -Session $kept -Commands 'wait 1' | Out-Null
     Check 'a session with a file of its own is written there after each script' ((Get-IsolatedGameSession -SessionFile $sessionFile).Sequence -eq 1)
+    Remove-Item "$commandFile.done"
+    Check 'a script the mod never answers throws' (Throws { Invoke-GameInput -Session $kept -Commands 'wait 1' -TimeoutSeconds 1 } 'was not played')
+    Check 'and the number it used is in the file, so the next process does not ask with it again' ((Get-IsolatedGameSession -SessionFile $sessionFile).Sequence -eq 2)
+    Set-Content "$commandFile.done" '1' -Encoding ASCII
     Remove-Item $sessionFile
+    $stopped = [pscustomobject]@{ ProcessId = 0; ProcessName = 'powershell'; CommandFile = $commandFile; Sequence = 0 }
+    Check 'a session whose game was stopped says so at once' (Throws { Invoke-GameInput -Session $stopped -Commands 'wait 1' } 'no game running')
     # The session object every mod's script builds by hand today has no SessionFile.
     $plain = [pscustomobject]@{ ProcessId = $PID; ProcessName = 'powershell'; CommandFile = $commandFile; Sequence = 0; Sender = 0 }
     $played = Invoke-GameInput -Session $plain -Commands 'wait 1'

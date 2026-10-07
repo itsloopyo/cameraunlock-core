@@ -276,7 +276,7 @@ Invoke-GameInput -Session $session -Commands $Commands
 Stop-IsolatedGameSession -SessionFile $sessionFile -Collect { ... }
 ```
 
-`Invoke-GameInput` writes the session back to its file after each script, so the
+`Invoke-GameInput` writes the session back to its file with each script, so the
 next process has the sequence it reached. Call `Save-IsolatedGameSession` after
 changing the session by hand: a new `ProcessId` once a launcher has handed over,
 a property of the mod's own.
