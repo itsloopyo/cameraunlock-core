@@ -6,6 +6,7 @@ using System.Text.Json;
 using CameraUnlock.Core.Ads;
 using CameraUnlock.Core.Effects;
 using CameraUnlock.Core.Math;
+using CameraUnlock.Core.Protocol;
 using Xunit;
 
 namespace CameraUnlock.Core.Tests.Config
@@ -51,6 +52,7 @@ namespace CameraUnlock.Core.Tests.Config
             {
                 { "SmoothingUtils.DefaultLocalSmoothing", SmoothingUtils.DefaultLocalSmoothing },
                 { "SmoothingUtils.DefaultRemoteSmoothing", SmoothingUtils.DefaultRemoteSmoothing },
+                { "PoseJumpGate.ConfirmJumpDegrees", PoseJumpGate.ConfirmJumpDegrees },
                 { "AdsFade.LowerMs", AdsFade.LowerMs },
                 { "AdsFade.RaiseMs", AdsFade.RaiseMs },
                 { "HeadFollowLightSettings.DefaultMultiplier", HeadFollowLightSettings.DefaultMultiplier },

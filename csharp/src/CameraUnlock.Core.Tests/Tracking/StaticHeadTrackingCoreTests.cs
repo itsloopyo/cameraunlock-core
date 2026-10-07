@@ -56,6 +56,8 @@ namespace CameraUnlock.Core.Tests.Tracking
                 $"Expected the first-connection pose to become the center, got {centered}");
 
             // Pin the captured centre itself: 20 degrees further must read as 20.
+            // Two samples: the receiver holds the first of a jump this size (PoseJumpGate).
+            SendPacket(14277, yaw: 59.95);
             SendPacket(14277, yaw: 60.0);
             WaitUntilReceiving();
             float residual = SettleYaw();

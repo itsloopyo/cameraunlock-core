@@ -11,6 +11,7 @@ add_executable(cameraunlock_tests
     math_tests.cpp
     protocol_tests.cpp
     receiver_tests.cpp
+    pose_jump_gate_tests.cpp
     util_tests.cpp
     session_tests.cpp
     smoothing_tests.cpp
@@ -59,7 +60,8 @@ if(WIN32)
 endif()
 target_compile_definitions(cameraunlock_tests PRIVATE
     CAMERAUNLOCK_INI_EDITOR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/canonical-ini/editor"
-    CAMERAUNLOCK_CANONICAL_INI_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/canonical-ini")
+    CAMERAUNLOCK_CANONICAL_INI_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/canonical-ini"
+    CAMERAUNLOCK_POSE_JUMP_GATE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/pose-jump-gate/cases.tsv")
 
 # plugin_config.cpp lives in the optional REFramework target, so its tests can
 # only build when that target is configured.

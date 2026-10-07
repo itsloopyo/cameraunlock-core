@@ -72,7 +72,11 @@ namespace CameraUnlock.Core.Protocol
         private volatile float _positionZ;
 
         // Trailer counters are latched without centring; the tracker owns centring.
+        // Receive thread only, as the gate is; Start() resets all three before the thread exists.
         private byte _lastRecenterCounter;
+        private bool _hasRecenterCounter;
+        private readonly PoseJumpGate _poseGate = new PoseJumpGate();
+        private long _frozenPackets;
         private int _recenterRequested;
 
         // Recenter offset
@@ -125,6 +129,13 @@ namespace CameraUnlock.Core.Protocol
         public bool IsRemoteConnection => _isRemoteConnection;
 
         /// <summary>
+        /// Packets ignored because the tracker had stopped tracking and was repeating one
+        /// pose, or held back for the packet after them to confirm (see
+        /// <see cref="PoseJumpGate"/>). Counted since the last Start().
+        /// </summary>
+        public long FrozenPacketCount => Interlocked.Read(ref _frozenPackets);
+
+        /// <summary>
         /// Classifies a packet source as remote or same-machine. Loopback is the whole
         /// 127.0.0.0/8 block, not just 127.0.0.1: pointing OpenTrack at 127.0.0.2 to keep
         /// several local streams apart is a real pattern.
@@ -173,6 +184,9 @@ namespace CameraUnlock.Core.Protocol
             _port = port;
             _isRemoteConnection = false;
             _firstPacketLogged = false;
+            _hasRecenterCounter = false;
+            _poseGate.Reset();
+            Interlocked.Exchange(ref _frozenPackets, 0L);
             Interlocked.Exchange(ref _recenterRequested, 0);
             Interlocked.Exchange(ref _timestampTicks, 0L);
 
@@ -587,8 +601,36 @@ namespace CameraUnlock.Core.Protocol
                         bool positionValid = OpenTrackPacket.TryParsePosition(data, out PositionData positionParsed);
                         bool poseValid = anglesValid && positionValid;
 
+                        // The trailer is read BEFORE the gate below. It no longer raises a
+                        // recenter request: Headcam owns centring, zeroing its own output
+                        // on CENTER, and the pipeline's centre is identity. But a press is
+                        // exactly the shape the gate exists to reject, a long jump to the
+                        // app's new neutral that then sits still, and the trailer is the
+                        // tracker saying the jump is deliberate. A new counter, or the
+                        // first one of a stream, is a press.
+                        bool pressed = false;
+                        if (poseValid && OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
+                        {
+                            pressed = !_hasRecenterCounter || recenterCounter != _lastRecenterCounter;
+                            _lastRecenterCounter = recenterCounter;
+                            _hasRecenterCounter = true;
+                        }
+
                         if (poseValid)
                         {
+                            if (pressed)
+                            {
+                                _poseGate.Announce(parsed.Yaw, parsed.Pitch, parsed.Roll);
+                            }
+                            else if (!_poseGate.Accept(parsed.Yaw, parsed.Pitch, parsed.Roll))
+                            {
+                                // Nothing of a refused packet is published, its arrival time
+                                // included, so IsDataFresh goes false on a tracker that has
+                                // lost the head as it does on one that has gone silent.
+                                Interlocked.Increment(ref _frozenPackets);
+                                continue;
+                            }
+
                             // Odd for the duration of the write; readers spin past it.
                             Interlocked.Increment(ref _publishSeq);
 
@@ -640,16 +682,6 @@ namespace CameraUnlock.Core.Protocol
                             _isConnected = true;
                             _consecutiveTimeouts = 0;
                         }
-
-                        // The trailer is parsed but no longer raises a recenter request.
-                        // Headcam owns centring: it zeroes its own output on CENTER, and
-                        // the pipeline's centre is identity by default, so the zeroed
-                        // stream is already correct without the mod doing anything. An
-                        // older app that still sends the trailer is simply ignored.
-                        if (poseValid && OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
-                        {
-                            _lastRecenterCounter = recenterCounter;
-                        }
                     }
                 }
                 catch (SocketException ex)
@@ -660,6 +692,10 @@ namespace CameraUnlock.Core.Protocol
                         if (_consecutiveTimeouts >= DisconnectThreshold)
                         {
                             _isConnected = false;
+                            // A tracker app that restarts counts its presses from zero
+                            // again, so a counter latched from the old session would hide
+                            // the first press of the new one from the gate.
+                            _hasRecenterCounter = false;
                         }
                     }
                     else if (ex.SocketErrorCode == SocketError.Interrupted)

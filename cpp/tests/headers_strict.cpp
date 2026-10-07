@@ -99,6 +99,7 @@
 #include "cameraunlock/processing/tracking_processor.h"
 #include "cameraunlock/protocol/opentrack_packet.h"
 #include "cameraunlock/protocol/polling_udp_receiver.h"
+#include "cameraunlock/protocol/pose_jump_gate.h"
 #include "cameraunlock/protocol/port_utils.h"
 #include "cameraunlock/protocol/socket_types.h"
 #include "cameraunlock/protocol/udp_receiver.h"

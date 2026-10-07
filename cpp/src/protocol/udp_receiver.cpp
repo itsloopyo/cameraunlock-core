@@ -3,7 +3,6 @@
 #include "cameraunlock/protocol/opentrack_packet.h"
 #include "cameraunlock/data/position_data.h"
 #include <chrono>
-#include <cmath>
 #include <string>
 
 #ifndef _WIN32
@@ -196,14 +195,9 @@ void UdpReceiver::Stop() {
     m_avoidSource = 0;
     m_cycleRequested.store(false, std::memory_order_relaxed);
     m_primaryLastSeenUs = 0;
-    m_hasAcceptedPose = false;
-    m_pendingValid = false;
-    m_lastStepWasLarge = false;
+    m_poseGate.Reset();
     m_frozenPackets.store(0, std::memory_order_relaxed);
     m_seenSourceCount = 0;
-    m_lastSourceYaw = 0.0f;
-    m_lastSourcePitch = 0.0f;
-    m_lastSourceRoll = 0.0f;
     m_rejectedPackets.store(0, std::memory_order_relaxed);
 }
 
@@ -276,102 +270,7 @@ std::string DescribeSource(uint64_t source) {
     return std::string(ip) + ":" + std::to_string(static_cast<uint16_t>(source & 0xFFFF));
 }
 
-float LargestAxisChange(const TrackingPose& a, const TrackingPose& b) {
-    const float dy = std::fabs(a.yaw - b.yaw);
-    const float dp = std::fabs(a.pitch - b.pitch);
-    const float dr = std::fabs(a.roll - b.roll);
-    float worst = dy > dp ? dy : dp;
-    return worst > dr ? worst : dr;
-}
-
 }  // namespace
-
-// Takes `pose` as the truth the gate measures the next one against, discarding
-// any jump it was still holding for confirmation.
-void UdpReceiver::SeedPoseGate(const TrackingPose& pose) {
-    m_hasAcceptedPose = true;
-    m_pendingValid = false;
-    m_lastStepWasLarge = false;
-    m_acceptedPose = pose;
-}
-
-// Decides whether a freshly arrived pose is head tracking or the tracker having
-// stopped tracking.
-//
-// A head tracker that loses the head does not say so - it just starts repeating
-// one pose, usually centred. Followed faithfully, that swings the view from
-// wherever the head was to centre and back every time tracking blinks, which is
-// the single most visible failure this mod can have and is indistinguishable
-// from a camera bug. Measured against a simulated eye-tracker dropout, each
-// 200 ms blink moved the view 17 to 25 degrees.
-//
-// The tell is that the repeat is BIT-IDENTICAL. Real sensor output always
-// jitters, so a value that arrives twice unchanged is not a measurement. That
-// cannot be known until the repeat arrives, so a large jump is held back for one
-// packet and only accepted once the following packet DIFFERS from it. Small
-// changes - ordinary head movement - are never delayed.
-bool UdpReceiver::AcceptPose(const TrackingPose& pose, bool repeatsPrevious) {
-    if (!m_hasAcceptedPose) {
-        SeedPoseGate(pose);
-        return true;
-    }
-
-    if (repeatsPrevious) {
-        // A resent duplicate is harmless - it is the value already published, so
-        // publishing it again changes nothing. Refusing them would fight every
-        // tracker app that resends faster than its sensor updates, which is most
-        // of them, and that fight would itself look like jitter.
-        //
-        // The one case that matters is a repeat of a jump still awaiting
-        // confirmation: a source that has stopped tracking repeats its "lost"
-        // pose exactly, so the jump toward it was never a head movement. Keep
-        // holding the last pose the head was actually in.
-        if (m_pendingValid) {
-            // The source has stopped moving, so whatever movement preceded this
-            // is over: the next real step starts a new movement and gets the
-            // confirmation hold again.
-            m_lastStepWasLarge = false;
-            m_frozenPackets.fetch_add(1, std::memory_order_relaxed);
-            return false;
-        }
-        return true;
-    }
-
-    const float jump = LargestAxisChange(pose, m_acceptedPose);
-
-    // Hold back the FIRST large step of a movement, never a continuing one.
-    //
-    // The `m_lastStepWasLarge` half is not a refinement, it is the whole
-    // correctness of this gate. Without it, sustained fast movement is rejected
-    // on every OTHER packet: one is held, the next is accepted, the one after
-    // that is a large step again from the newly accepted pose, and so on. The
-    // published pose then alternates between current and one packet stale for as
-    // long as the head keeps moving, at half the tracker's rate - which is
-    // exactly "the view flickers between two poses", and it appears only while
-    // the head is moving, so a held test pose never shows it.
-    //
-    // Rejecting a packet also leaves `m_acceptedPose` behind, so the next step
-    // measures even larger and the gate is more certain to trip again. It
-    // self-sustains.
-    //
-    // The threshold reasons in degrees per PACKET, so what counts as "large"
-    // depends on the tracker's sample rate: 300 deg/s is 5 degrees a packet at
-    // 60 Hz but 9 at 33 Hz, and plenty of trackers (eye trackers especially) run
-    // at the low end. A dropout is still caught, because the thing that
-    // identifies one is not the size of the jump but that the pose STOPS moving
-    // afterwards - which the repeat branch above tests directly.
-    const bool sustainedMovement = m_lastStepWasLarge;
-    if (jump > kConfirmJumpDegrees && !m_pendingValid && !sustainedMovement) {
-        m_pendingValid = true;
-        m_frozenPackets.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
-
-    m_pendingValid = false;
-    m_lastStepWasLarge = jump > kConfirmJumpDegrees;
-    m_acceptedPose = pose;
-    return true;
-}
 
 void UdpReceiver::ReceiverThread() {
     constexpr size_t kReceiveBufferSize = 64;
@@ -638,15 +537,6 @@ void UdpReceiver::ReceiverThread() {
                 m_log("OpenTrack parse failed on " + std::to_string(bytesReceived) + "-byte packet");
             }
             if (parsed) {
-                const bool repeatsPrevious = pose.yaw == m_lastSourceYaw &&
-                                             pose.pitch == m_lastSourcePitch &&
-                                             pose.roll == m_lastSourceRoll;
-                if (!repeatsPrevious) {
-                    m_lastSourceYaw = pose.yaw;
-                    m_lastSourcePitch = pose.pitch;
-                    m_lastSourceRoll = pose.roll;
-                }
-
                 // A press is the one discontinuity the tracker announces, so the
                 // gate has nothing left to decide - take the pose it carries.
                 // The trailer no longer drives a recenter, but it still marks the
@@ -662,8 +552,9 @@ void UdpReceiver::ReceiverThread() {
                 // persists until the pose changes again. Telling the two apart
                 // needs the announcement, which is what the trailer is for.
                 if (pressed) {
-                    SeedPoseGate(pose);
-                } else if (!AcceptPose(pose, repeatsPrevious)) {
+                    m_poseGate.Announce(pose.yaw, pose.pitch, pose.roll);
+                } else if (!m_poseGate.Accept(pose.yaw, pose.pitch, pose.roll)) {
+                    m_frozenPackets.fetch_add(1, std::memory_order_relaxed);
                     continue;
                 }
                 m_trackingData.Set(pose.yaw, pose.pitch, pose.roll);

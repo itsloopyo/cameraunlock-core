@@ -195,8 +195,11 @@ namespace CameraUnlock.Core.Tests.Tracking
                 _session.Update(FrameTime);
             }
 
+            // The receiver holds a jump this size until the packet after it differs
+            // (PoseJumpGate), which a tracker's next sample does.
             SendTestPacket(TestPort, 0.0, 0.0, 0.0);
-            WaitForRotation(0f, 0f, 0f);
+            SendTestPacket(TestPort, 0.05, 0.0, 0.0);
+            WaitForRotation(0.05f, 0f, 0f);
             for (int i = 0; i < 60; i++)
             {
                 _session.Update(FrameTime);
@@ -270,8 +273,10 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             // Pin the captured centre itself, not just "output happens to be zero":
             // a further 20 degrees of yaw must read as 20, not 60.
+            // Two samples: the receiver holds the first of a jump this size (PoseJumpGate).
+            SendTestPacket(TestPort, 59.95, 0.0, 0.0, 10.0, 5.0, -8.0);
             SendTestPacket(TestPort, 60.0, 0.0, 0.0, 10.0, 5.0, -8.0);
-            WaitForData();
+            WaitForRotation(60f, 0f, 0f);
             for (int i = 0; i < 60; i++)
             {
                 _session.Update(FrameTime);
@@ -298,6 +303,8 @@ namespace CameraUnlock.Core.Tests.Tracking
 
             _session.Recenter();
 
+            // Two samples: the receiver holds the first of a jump this size (PoseJumpGate).
+            SendTestPacket(TestPort, 39.95, 0.0, 0.0);
             SendTestPacket(TestPort, 40.0, 0.0, 0.0);
             WaitForRotation(40f, 0f, 0f);
             for (int i = 0; i < 60; i++)

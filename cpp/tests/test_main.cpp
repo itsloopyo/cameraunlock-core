@@ -4,6 +4,7 @@
 int RunAdsTests();
 int RunProtocolTests();
 int RunReceiverTests();
+int RunPoseJumpGateTests();
 int RunMathTests();
 int RunUtilTests();
 int RunSessionTests();
@@ -76,6 +77,7 @@ int main(int argc, char** argv) {
     failures += RunAdsTests();
     failures += RunProtocolTests();
     failures += RunReceiverTests();
+    failures += RunPoseJumpGateTests();
     failures += RunMathTests();
     failures += RunUtilTests();
     failures += RunSessionTests();

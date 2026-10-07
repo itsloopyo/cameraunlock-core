@@ -1,0 +1,83 @@
+# Poses fed to a PoseJumpGate in order, and whether each is published. Tab separated.
+# case <name> starts a fresh gate. pose rows go to Accept, announce rows to Announce,
+# which always publishes. Columns: op, yaw, pitch, roll, published (1 or 0).
+case	the first pose is published wherever it is
+pose	50	-20	10	1
+case	a first pose of zero and its repeat are both published
+pose	0	0	0	1
+pose	0	0	0	1
+case	small steps are never delayed
+pose	0	0	0	1
+pose	1	0	0	1
+pose	2.5	0.5	0	1
+pose	6	-3	2	1
+case	a step of exactly the threshold is not large
+pose	0	0	0	1
+pose	8	0	0	1
+pose	16	0	0	1
+case	a repeat of the published pose is published again
+pose	5	5	5	1
+pose	5	5	5	1
+pose	5	5	5	1
+case	a tracker that loses the head and repeats centre is never followed
+pose	20	0	0	1
+pose	20.5	0	0	1
+pose	0	0	0	0
+pose	0	0	0	0
+pose	0	0	0	0
+pose	0	0	0	0
+pose	21	0	0	1
+case	a large jump is published once the next packet differs from it
+pose	0	0	0	1
+pose	30	0	0	0
+pose	30.01	0	0	1
+case	only the first large step of a movement is held
+pose	0	0	0	1
+pose	10	0	0	0
+pose	20	0	0	1
+pose	30	0	0	1
+pose	40	0	0	1
+pose	40	0	0	1
+pose	50	0	0	1
+case	a movement that slowed gets the hold again on its next large step
+pose	0	0	0	1
+pose	10	0	0	0
+pose	20	0	0	1
+pose	21	0	0	1
+pose	35	0	0	0
+pose	35	0	0	0
+pose	36	0	0	1
+case	a tracker lost twice is held both times
+pose	0	0	0	1
+pose	10	0	0	0
+pose	20	0	0	1
+pose	40	0	0	1
+pose	40	0	0	1
+pose	41	0	0	1
+pose	0	0	0	0
+pose	0	0	0	0
+pose	41.5	0	0	1
+pose	0	0	0	0
+case	pitch counts as yaw does
+pose	0	0	0	1
+pose	0	9	0	0
+pose	0	9	0	0
+pose	0	0.5	0	1
+case	roll counts as yaw does
+pose	0	0	0	1
+pose	0	0	-9	0
+pose	0	0	-18	1
+case	the largest axis decides, not the sum
+pose	0	0	0	1
+pose	5	5	5	1
+case	an announced pose is published in one packet
+pose	20	0	0	1
+announce	0	0	0	1
+pose	0	0	0	1
+pose	0.5	0	0	1
+case	an announced pose replaces a jump that was held
+pose	20	0	0	1
+pose	0	0	0	0
+announce	0	0	0	1
+pose	0	0	0	1
+pose	12	0	0	0

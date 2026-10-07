@@ -131,6 +131,13 @@
     "trailer_magic": { "value": "HCAM", "offset": 48 },
     "trailer_version_offset": { "value": 52, "note": "byte >= 1 is valid; compare with >=, not ==, so a later version still parses" },
     "trailer_counter_offset": { "value": 53, "note": "u8, wraps" },
+    "confirm_jump_degrees": {
+      "value": 8.0,
+      "cpp": "PoseJumpGate::kConfirmJumpDegrees",
+      "csharp": "PoseJumpGate.ConfirmJumpDegrees",
+      "unit": "deg",
+      "note": "Per packet, the largest of the three axes, compared with >. The first step larger than this is held one packet and published only if the next packet differs from it bit for bit; a continuing movement is never held. data/fixtures/pose-jump-gate/cases.tsv is the behaviour, case by case."
+    },
     "ads_fade_lower_ms": {
       "value": 150,
       "cpp": "AdsFade::kLowerMs",
