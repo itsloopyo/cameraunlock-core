@@ -222,7 +222,7 @@ function Assert-IsolatedInputCovers {
     #>
     param(
         [Parameter(Mandatory)][string]$BinaryPath,
-        [Parameter(Mandatory)][ValidateSet('native', 'managed', 'script')][string]$ModHost
+        [Parameter(Mandatory)][ValidateSet('native', 'managed', 'jvm', 'script')][string]$ModHost
     )
     $coverage = Get-IsolatedInputCoverage
     $modHostEntry = $coverage.mod_hosts.$ModHost

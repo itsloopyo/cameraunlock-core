@@ -55,6 +55,13 @@
       "dlls": ["xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll", "xinput1_2.dll", "xinput1_1.dll"],
       "status": "supported",
       "proven_in": ["the-ascent"]
+    },
+    "glfw": {
+      "what": "GLFW key, button and cursor state, as a game on GLFW polls it. An import table shows it only for a binary that links GLFW. Project Zomboid, an LWJGL game, keeps glfw.dll inside projectzomboid.jar, the same bytes are found unpacked in an lwjgl_<user> folder under the temp folder, and neither the game's exe nor lwjgl.dll imports it: run Get-GameInputPaths on the unpacked glfw.dll to see what GLFW itself reads",
+      "imports": ["glfwGetKey", "glfwGetMouseButton", "glfwGetCursorPos"],
+      "dlls": ["glfw.dll"],
+      "status": "unsupported",
+      "build": "Try what is there first. The glfw.dll Project Zomboid ships (LWJGL 3.4.1-snapshot) imports GetRawInputData, RegisterRawInputDevices, GetKeyState and GetCursorPos, all paths isolated input already answers, and whether its posted messages drive a GLFW window has not been tried in any game: run Test-IsolatedInputProof. Where they do not, detour glfwGetKey, glfwGetMouseButton and glfwGetCursorPos in cameraunlock/dev/isolated_input.h, found in the loaded glfw.dll by export name, answer them from the synthetic state, and call the key, button and cursor callbacks the game registered. Project Zomboid's dev probe answers the game's own org.lwjglx key and button polls from Java instead, which is that game's and covers no other."
     }
   },
   "mod_hosts": {
@@ -68,6 +75,12 @@
       "status": "supported",
       "how": "Call CameraUnlock.Core.Dev.IsolatedInput.StartIfAsked from the plugin's dev build and start the session with Start-IsolatedGame -ModHost managed (docs/isolated-input.md, A C# mod).",
       "proven_in": ["untitled-goose-game"]
+    },
+    "jvm": {
+      "what": "a Java agent mod in a game that runs on a JVM",
+      "status": "supported",
+      "how": "The dev agent loads the host DLL of the managed entry through java.lang.foreign (SymbolLookup.libraryLookup) and calls CameraUnlockStartIsolatedInput with the command file's path as UTF-16, when both are in the folder it is given. Start the session with Start-IsolatedGame -ModHost managed, which copies the DLL there. Project Zomboid's own runtime is Java 25.",
+      "proven_in": ["project-zomboid"]
     },
     "script": {
       "what": "a mod with no native code of its own, such as a Lua mod under a script extender",

@@ -67,6 +67,9 @@ Check 'a binary with no usable path is refused, and told not to use the real dev
 # The script host, which nothing has been built for.
 Check 'a mod host that is not supported is refused with what to build' `
     (Throws { Assert-IsolatedInputCovers -BinaryPath $user32 -ModHost script } 'cannot host isolated input yet\. Build:')
+# A Java agent mod is a host of its own, and a supported one: only the binary is refused here.
+$jvm = $(try { Assert-IsolatedInputCovers -BinaryPath $user32 -ModHost jvm | Out-Null; '' } catch { $_.Exception.Message })
+Check 'a Java agent mod can host isolated input' ($jvm -match 'imports no input API' -and $jvm -notmatch 'cannot host isolated input yet') $jvm
 
 # --- the test port ----------------------------------------------------------
 # The two worked examples the fleet's prompts give.
