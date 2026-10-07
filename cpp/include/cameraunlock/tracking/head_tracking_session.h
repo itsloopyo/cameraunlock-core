@@ -418,6 +418,19 @@ public:
         m_positionInterpolator.Reset();
     }
 
+    /// Drops the interpolation and smoothing state and keeps the centre, so the next
+    /// Update() starts at the pose the tracker reports then, where it would otherwise
+    /// ease to it from the pose a break began on. For a frame tracking is not applied
+    /// on: a menu, a loading screen, the master toggle off. Render thread.
+    void ResetTransientState() {
+        m_processor.ResetSmoothing();
+        m_poseInterpolator.Reset();
+        m_positionProcessor.ResetSmoothing();
+        m_positionInterpolator.Reset();
+        m_rotationValid = false;
+        m_positionValid = false;
+    }
+
     /// Processed rotation in degrees from the latest Update().
     /// Returns false (with zeros) when no rotation data is available.
     bool GetRotation(float& yaw, float& pitch, float& roll) const {

@@ -157,8 +157,11 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
 ///
 /// Throws std::invalid_argument for an empty list, a concept named twice, or a value that is not a
 /// canonical concept.
-template <class Config = HeadTrackingConfig>
-ConfigTable<Config> HeadTrackingConfigTable(std::initializer_list<schema::Concept> implemented) {
+///
+/// `defaults` is what the table's rows start from: a Config whose own members, the ones no concept
+/// binds, already hold their defaults. The four key lists and CollisionEnabled are set on it here.
+template <class Config, class Concepts>
+ConfigTable<Config> HeadTrackingConfigTableFrom(const Concepts& implemented, Config defaults) {
     static_assert(std::is_base_of_v<HeadTrackingConfig, Config>,
                   "HeadTrackingConfigTable binds HeadTrackingConfig fields, so Config must derive from it");
     if (implemented.size() == 0) {
@@ -173,7 +176,6 @@ ConfigTable<Config> HeadTrackingConfigTable(std::initializer_list<schema::Concep
         }
     }
 
-    Config defaults{};
     defaults.toggle_key_name = schema::ConceptTraits<schema::Concept::ToggleKey>::kCanonicalDefault;
     defaults.cycle_tracking_mode_key_name =
         schema::ConceptTraits<schema::Concept::CycleTrackingModeKey>::kCanonicalDefault;
@@ -185,6 +187,12 @@ ConfigTable<Config> HeadTrackingConfigTable(std::initializer_list<schema::Concep
     ConfigTable<Config> table(std::move(defaults));
     for (schema::Concept id : implemented) detail::BindHeadTrackingConcept(table, id);
     return table;
+}
+
+/// HeadTrackingConfigTableFrom over a default-constructed Config.
+template <class Config = HeadTrackingConfig>
+ConfigTable<Config> HeadTrackingConfigTable(std::initializer_list<schema::Concept> implemented) {
+    return HeadTrackingConfigTableFrom<Config>(implemented, Config{});
 }
 
 }  // namespace cameraunlock::config

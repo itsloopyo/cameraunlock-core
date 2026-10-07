@@ -262,7 +262,10 @@ public:
     /// Throws std::invalid_argument for an empty list, a token that is not PascalCase (a
     /// capital ASCII letter, then ASCII letters and digits), two tokens equal ASCII
     /// case-insensitively, or two tokens for one enumerator.
-    EnumCodec(std::initializer_list<EnumToken<E>> tokens) : tokens_(tokens) {
+    EnumCodec(std::initializer_list<EnumToken<E>> tokens) : EnumCodec(std::vector<EnumToken<E>>(tokens)) {}
+
+    /// For tokens that are not known until the program runs.
+    explicit EnumCodec(std::vector<EnumToken<E>> tokens) : tokens_(std::move(tokens)) {
         if (tokens_.empty()) throw std::invalid_argument("EnumCodec needs at least one token");
         for (std::size_t i = 0; i < tokens_.size(); ++i) {
             if (!detail::IsPascalCase(tokens_[i].token)) {

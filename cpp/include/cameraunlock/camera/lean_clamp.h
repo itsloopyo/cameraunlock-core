@@ -175,11 +175,11 @@ public:
         m_query_failed = false;
     }
 
-private:
     /// Below this the offset has no reliable direction to query along, and the
-    /// lean is too small to reach anything regardless.
+    /// lean is too small to reach anything regardless, so Apply runs no query.
     static constexpr float kMinimumLean = 1e-4f;
 
+private:
     /// How close the release has to get, as a fraction of the lean, before the
     /// allowance is called full. Relative so it means the same thing whatever
     /// units the caller works in.

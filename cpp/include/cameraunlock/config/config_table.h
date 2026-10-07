@@ -465,6 +465,25 @@ public:
         return *this;
     }
 
+    /// The game's own default for a concept row that is not global, read from `value` as the
+    /// row's codec reads it, for a table another function built with the schema's default on
+    /// the row (HeadTrackingConfigTable). A global concept takes PerGame(value). Throws
+    /// std::invalid_argument on a local row, on a global concept, and when the codec refuses
+    /// `value`.
+    ConfigTable& Default(std::string_view value) {
+        const std::size_t row = Last("Default");
+        if (!rows_[row].concept_id || schema::kConcepts[static_cast<std::size_t>(*rows_[row].concept_id)].global) {
+            throw std::invalid_argument(detail::RowName(rows_[row]) +
+                                        " is not a concept every game keeps its own value of; Default() is for one");
+        }
+        const std::string error = ops_[row]->Apply(value, defaults_);
+        if (!error.empty()) {
+            throw std::invalid_argument(detail::RowName(rows_[row]) + " cannot default to " + std::string(value) +
+                                        ": " + error);
+        }
+        return *this;
+    }
+
     /// Marks the row as one the config owner's Save may change.
     ConfigTable& Writable() {
         rows_[Last("Writable")].writable = true;

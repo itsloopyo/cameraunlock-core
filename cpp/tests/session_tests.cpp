@@ -483,6 +483,54 @@ void TestRecenterZeroesPose() {
     Check(NearEqual(y, 20.f, 0.1f), "rotation is measured from the captured centre");
 }
 
+void TestResetTransientStateStartsFromTheTrackersPose() {
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.hasPosition = true;
+    cameraunlock::HeadTrackingSession<FakeReceiver> session(rx);
+    cameraunlock::HeadTrackingSession<FakeReceiver> unreset(rx);
+    session.SetLocalSmoothing(0.9f);
+    unreset.SetLocalSmoothing(0.9f);
+
+    rx.yaw = 30.f;
+    rx.posX = 0.2f;
+    rx.timestamp = 1;
+    for (int i = 0; i < 5; i++) {
+        session.Update(1.f / 60.f);
+        unreset.Update(1.f / 60.f);
+    }
+
+    // The head has moved a long way by the time tracking applies again.
+    rx.yaw = -20.f;
+    rx.posX = -0.1f;
+    rx.timestamp = 2;
+
+    float yaw, pitch, roll, x, y, z;
+    unreset.Update(1.f / 60.f);
+    Check(unreset.GetRotation(yaw, pitch, roll) && yaw > 25.f,
+          "without a reset the next Update is still near the pose the break began on");
+
+    session.ResetTransientState();
+    Check(!session.GetRotation(yaw, pitch, roll) && !session.GetPositionOffset(x, y, z),
+          "after a reset there is no pose until the next Update");
+    session.Update(1.f / 60.f);
+    Check(session.GetRotation(yaw, pitch, roll) && NearEqual(yaw, -20.f),
+          "the first Update after a reset is at the tracker's rotation, not easing to it");
+    Check(session.GetPositionOffset(x, y, z) && NearEqual(x, -0.1f),
+          "and at the tracker's position");
+
+    // The tracker holds still, so no packet after the reset carries a new pose.
+    rx.timestamp = 3;
+    session.Update(1.f / 60.f);
+    Check(session.GetRotation(yaw, pitch, roll) && NearEqual(yaw, -20.f),
+          "a tracker holding still after a reset stays at its pose");
+
+    rx.recenterCalls = 0;
+    session.ResetTransientState();
+    Check(rx.recenterCalls == 0, "a reset does not recentre the receiver");
+    Check(!session.HasCentered(), "and captures no centre");
+}
+
 void TestRemoteRecenterRequest() {
     std::cout << "Remote recenter request (packet trailer):\n";
 
@@ -798,6 +846,7 @@ int RunSessionTests() {
     TestDuplicatePacketFiltering();
     TestRecenterZeroesPose();
     TestManualRecenterDisarmsTheAutomaticOne();
+    TestResetTransientStateStartsFromTheTrackersPose();
     TestRemoteRecenterRequest();
     TestRecenterSeedsCurrentFrameWithCenteredPose();
     TestConnectionFlagReachesBothProcessors();

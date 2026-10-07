@@ -14,6 +14,7 @@ namespace {
 using cameraunlock::camera::FovZoomFactor;
 using cameraunlock::camera::ScaleAngleForZoom;
 using cameraunlock::camera::ScaleLeanForZoom;
+using cameraunlock::camera::ScaleWideAngleForZoom;
 using cameraunlock::math::Vec3;
 
 int g_failures = 0;
@@ -86,6 +87,29 @@ int RunZoomCompensationTests() {
           "small angles are within a hundredth of a degree of a plain multiply");
     Check(ScaleAngleForZoom(45.0f, factor) > 45.0f * factor,
           "large angles are not, and the round trip keeps the displacement right");
+
+    // A tracker's response curve reaches angles no neck does.
+    for (float angle : {90.0f, 120.0f, -150.0f, 179.0f}) {
+        Check(NearEqual(ScaleWideAngleForZoom(angle, 1.0f), angle, 1e-3f),
+              "a factor of 1 returns an angle past 90 degrees untouched, on its own side");
+    }
+    Check(NearEqual(ScaleWideAngleForZoom(90.0f, factor), 90.0f, 1e-3f) &&
+              NearEqual(std::fabs(ScaleWideAngleForZoom(180.0f, factor)), 180.0f, 1e-3f),
+          "90 degrees maps to itself at every factor, and 180 to straight behind");
+    Check(std::fabs(ScaleWideAngleForZoom(90.5f, factor) - ScaleWideAngleForZoom(89.5f, factor)) < 3.0f,
+          "the scaling is continuous across 90 degrees");
+    Check(NearEqual(ScaleWideAngleForZoom(-120.0f, factor), -ScaleWideAngleForZoom(120.0f, factor)),
+          "and odd past it");
+    bool rising = true;
+    for (float angle = -179.0f; angle < 179.0f; angle += 1.0f) {
+        rising = rising && ScaleWideAngleForZoom(angle + 1.0f, factor) > ScaleWideAngleForZoom(angle, factor);
+    }
+    bool same = true;
+    for (float angle = -89.0f; angle <= 89.0f; angle += 1.0f) {
+        same = same && NearEqual(ScaleWideAngleForZoom(angle, factor), ScaleAngleForZoom(angle, factor), 1e-4f);
+    }
+    Check(same, "within 90 degrees it is ScaleAngleForZoom's answer");
+    Check(rising, "a larger angle never scales to a smaller one, the whole way round");
 
     // The lean: only the part across the view scales.
     const Vec3 forward(0.0f, 0.0f, 1.0f);

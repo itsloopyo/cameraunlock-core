@@ -79,6 +79,23 @@ inline float ScaleAngleForZoom(float angle_deg, float factor) {
     return std::atan(std::tan(angle_deg * kDegToRad) * factor) / kDegToRad;
 }
 
+/// ScaleAngleForZoom for an angle anywhere within +/-180.
+///
+/// A neck does not turn past 90 degrees, but a tracker's response curve hands a
+/// mod yaw well past it, and atan(tan(120)) is -60: the view swung to the other
+/// side, at a factor of 1 as much as through a scope. Here the tangent is scaled
+/// through the sine and the cosine, so the angle stays on its side. Within 90
+/// degrees the answer is ScaleAngleForZoom's. Past it nothing is on screen for
+/// the ratio to hold, and the angle is only kept continuous: 90 maps to itself
+/// at every factor, and 180 to straight behind (as 180 or -180).
+///
+/// `factor` must be positive.
+inline float ScaleWideAngleForZoom(float angle_deg, float factor) {
+    constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
+    const float angle = angle_deg * kDegToRad;
+    return std::atan2(std::sin(angle) * factor, std::cos(angle)) / kDegToRad;
+}
+
 /// A lean with the part perpendicular to the view axis scaled by `factor` and
 /// the part along it left as it is.
 ///
