@@ -135,6 +135,24 @@ whose output a running game would load.
   killed runner from a session that is between two of its own processes, so
   only do it for a runner known to do the whole run in one.
 
+A script that leaves the game running when it ends, to be run again to restart
+it, leaves its lock with the game instead of releasing it:
+
+```powershell
+$kept = Join-Path $PSScriptRoot 'rig-token.json'
+$rig = Enter-GameRig -Game <process name> -Owner <who you are> -KeptIn $kept
+try { <stop the game the last run left up, deploy, launch> } finally { Exit-GameRig -Rig $rig -KeptIn $kept }
+```
+
+While the game runs, `Exit-GameRig -KeptIn` writes the lock's token to that file
+and leaves the lock held by the game alone. The next `Enter-GameRig -KeptIn`
+takes it back, from any process, and the game left up is that run's to stop.
+With the game gone the rig is released and the file removed. One file serves
+every such script of a repo. A script of the same repo that wants the rig from
+the start (a session, above all) calls `Stop-KeptGame -Game <name> -KeptIn $kept`
+first: it stops the game left up and releases its lock, and does nothing when
+none is kept.
+
 Work that needs the whole graphics card takes the rig too, with `-WholeGpu`: an
 image generation run, a benchmark. It waits until no rig is held, and no game's
 rig is given out while it holds. It needs no game:

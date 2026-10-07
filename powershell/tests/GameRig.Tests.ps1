@@ -154,6 +154,49 @@ try {
     Exit-GameRig -Rig $mine
     Wait-All @($holder)
 
+    # --- a lock left with its game ------------------------------------------
+    # The run that leaves the game up is a process of its own, and stays alive: the next run
+    # still takes the lock back, because it was left with the game and not with that process.
+    $keptFile = Join-Path $root 'kept.json'
+    $keeper = Join-Path $root 'keeper.ps1'
+    Set-Content $keeper -Encoding ASCII -Value @'
+param([string]$Module, [string]$Game, [string]$Exe, [string]$KeptIn, [string]$Done)
+$ErrorActionPreference = 'Stop'
+Import-Module $Module
+$rig = Enter-GameRig -Game $Game -Owner 'keeper' -KeptIn $KeptIn -WaitSeconds 0
+Start-Process $Exe
+while (-not (Get-Process -Name $Game -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 50 }
+Exit-GameRig -Rig $rig -KeptIn $KeptIn
+Set-Content $Done ''
+Start-Sleep 600
+'@
+    $keeperDone = Join-Path $root 'keeper.done'
+    $keeperProcess = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$keeper`"",
+        '-Module', "`"$modulePath`"", '-Game', $gameName, '-Exe', "`"$gameExe`"", '-KeptIn', "`"$keptFile`"", '-Done', "`"$keeperDone`"")
+    $started.Add($keeperProcess)
+    Wait-Until { Test-Path $keeperDone }
+    $state = Get-GameRig -Game $gameName
+    Check 'a lock left with its running game is still held and live, with no process of its own' ($state.Live -and $state.Holder.Owner -eq 'keeper' -and $state.Holder.ProcessId -eq 0 -and (Test-Path $keptFile))
+    Check 'another session waits for it, and is told it was left with the game' (Throws { Enter-GameRig -Game $gameName -Owner 'other' -WaitSeconds 0 } 'the rig is in use: keeper \(left with its running game')
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
+    Check 'the next run takes it back while the run that left it is still alive' ($back.Token -eq $state.Holder.Token -and (Get-GameRig -Game $gameName).Holder.ProcessId -eq $PID -and -not $keeperProcess.HasExited)
+    Exit-GameRig -Rig $back -KeptIn $keptFile
+    Check 'and leaves it with the game again' ((Get-GameRig -Game $gameName).Holder.ProcessId -eq 0 -and (Test-Path $keptFile))
+    Stop-KeptGame -Game $gameName -KeptIn $keptFile
+    Check 'Stop-KeptGame stops that game, releases the lock and removes the file' (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $keptFile))
+    $back = Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0
+    Exit-GameRig -Rig $back -KeptIn $keptFile
+    Check 'a rig given up with no game running is released, and nothing is kept' ($null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $keptFile))
+    Set-Content $keptFile '{"Key":"x","Token":"not the one","Owner":"keeper"}' -Encoding ASCII
+    [void](Start-StandIn)
+    Check 'a kept file whose lock has gone does not take a game someone else has up' (Throws { Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn $keptFile -WaitSeconds 0 } 'someone started it by hand')
+    Check 'and the file is removed' (-not (Test-Path $keptFile))
+    Set-Content $keptFile '{"Key":"x","Token":"not the one","Owner":"keeper"}' -Encoding ASCII
+    Stop-KeptGame -Game $gameName -KeptIn $keptFile
+    Check 'Stop-KeptGame leaves a game it has no lock on alone' ([bool](Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and -not (Test-Path $keptFile))
+    Stop-StandIn
+    $keeperProcess.Kill()
+
     # --- a dead owner's lock ------------------------------------------------
     $log = Join-Path $root 'dead.log'
     Wait-All @(Start-Taker @{ Game = $absent; Owner = 'gone'; Log = $log; Abandon = $true })

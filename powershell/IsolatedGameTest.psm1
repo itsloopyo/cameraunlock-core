@@ -599,6 +599,8 @@ function Invoke-GameRigExclusive {
 function Test-GameRigProcessAlive {
     # The start time is what tells the process that took a lock from a later one handed the same id.
     param([int]$Id, [string]$Start)
+    # No process: the lock was left with its running game (Exit-GameRig -KeptIn). Id 0 is also the system's idle process.
+    if (-not $Id) { return $false }
     $process = Get-Process -Id $Id -ErrorAction SilentlyContinue
     if (-not $process) { return $false }
     try { $process.StartTime.ToFileTimeUtc().ToString() -eq $Start }
@@ -627,7 +629,7 @@ function Test-GameRigOwnerLive {
 
 function Format-GameRigOwner {
     param($Owner)
-    $text = "$($Owner.Owner) (pid $($Owner.ProcessId), since $($Owner.Since)"
+    $text = "$($Owner.Owner) ($(if ($Owner.ProcessId) { "pid $($Owner.ProcessId)" } else { 'left with its running game' }), since $($Owner.Since)"
     if ($Owner.What) { $text += ", $($Owner.What)" }
     if ($Owner.WholeGpu) { $text += ', the whole graphics card' }
     "$text)"
@@ -699,6 +701,12 @@ function Enter-GameRig {
     rig that process got. This is how a session that starts the game in one process stops it in
     another.
 
+    -KeptIn is for a script that leaves the game running when it ends and is run again to restart
+    it: the file Exit-GameRig -KeptIn wrote. While the rig is still held under the token in that
+    file it is taken back, from whichever process asks, and the game left up is this caller's to
+    stop. A file whose lock has gone is removed and the rig is asked for in the ordinary way,
+    which waits for a game someone else has up.
+
     While it waits it says what for, each time that changes: who holds the rig and how many asked
     before this session. -Waiting is a block handed that line in place of its being printed, for a
     caller that acts on it or words it its own way. A
@@ -727,10 +735,18 @@ function Enter-GameRig {
         # The file the session is kept in (Start-IsolatedGameSession -SessionFile), shown by Get-GameRig.
         [string]$SessionFile = '',
         # Handed each new line this session waits on, which is then not printed. It runs outside the lock's mutex.
-        [scriptblock]$Waiting
+        [scriptblock]$Waiting,
+        # The file a run that left the game up kept its lock in (Exit-GameRig -KeptIn).
+        [string]$KeptIn = ''
     )
     if (-not $Game -and -not $WholeGpu -and -not $Token) { throw 'Enter-GameRig needs -Game, or -WholeGpu for work that has no game' }
+    if ($KeptIn -and -not $Game) { throw "-KeptIn needs -Game: the lock kept there is a game's" }
     $key = $(if ($Game) { Get-GameRigKey $Game } else { 'gpu' })
+    if ($KeptIn -and (Test-Path $KeptIn)) {
+        $kept = Get-Content $KeptIn -Raw | ConvertFrom-Json
+        $now = Invoke-GameRigExclusive { Read-GameRigOwner $key }
+        if ($now -and $now.Token -eq $kept.Token) { $Token = $kept.Token } else { Remove-Item $KeptIn -Force }
+    }
     $names = [string[]]@(@($Game -replace '\.exe$', '') + $Processes | Where-Object { $_ } | Select-Object -Unique)
     $root = Get-GameRigRoot
     $rigFolder = Join-Path $root $key
@@ -788,7 +804,7 @@ function Enter-GameRig {
                             throw "this process already holds the rig for $key ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
                         }
                         if ($live) {
-                            $orphaned = $(if (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart) { '' } else { ', whose own process has gone while the game runs on' })
+                            $orphaned = $(if (-not $held.ProcessId -or (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) { '' } else { ', whose own process has gone while the game runs on' })
                             return "the rig is in use: $(Format-GameRigOwner $held)$orphaned$behind"
                         }
                         if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
@@ -850,18 +866,55 @@ function Exit-GameRig {
     .SYNOPSIS
     Releases the rig Enter-GameRig returned. Throws, and removes nothing, when the lock is no
     longer this session's: one another session holds is theirs to release.
+    .DESCRIPTION
+    -KeptIn is for a script that may leave the game running when it ends. While the game runs
+    the lock is not released: it is left with the game, its token is written to that file, and
+    the next run takes it back with Enter-GameRig -KeptIn, from any process. With the game gone
+    the rig is released and the file removed.
     #>
-    param([Parameter(Mandatory)]$Rig)
+    param([Parameter(Mandatory)]$Rig, [string]$KeptIn = '')
     Invoke-GameRigExclusive {
         $held = Read-GameRigOwner $Rig.Key
         if (-not $held) { throw "the rig for $($Rig.Key) is not held: the lock $($Rig.Owner) took is gone" }
         if ($held.Token -ne $Rig.Token) { throw "the rig for $($Rig.Key) is held by $(Format-GameRigOwner $held), not by the session releasing it. Left as it is." }
         if ($held.ProcessId -ne $PID) { throw "the rig for $($Rig.Key) was taken by pid $($held.ProcessId), not by this process. Take it back with Enter-GameRig -Token first." }
+        if ($KeptIn) {
+            if (@($held.Processes | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }).Count -gt 0) {
+                ConvertTo-Json ([pscustomobject]@{ Key = $held.Key; Token = $held.Token; Owner = $held.Owner }) | Set-Content $KeptIn -Encoding UTF8
+                $held.ProcessId = 0
+                $held.ProcessStart = ''
+                ConvertTo-Json $held | Set-Content (Join-Path $Rig.Path 'owner.json') -Encoding UTF8
+                return
+            }
+            Remove-Item $KeptIn -Force -ErrorAction SilentlyContinue
+        }
         # Renamed away first, so the lock goes in one step even when a file in it is slow to delete.
         $gone = Join-Path (Split-Path -Parent $Rig.Path) ('released-' + [Guid]::NewGuid().ToString('N'))
         [IO.Directory]::Move($Rig.Path, $gone)
         Remove-Item $gone -Recurse -Force
     }
+}
+
+function Stop-KeptGame {
+    <#
+    .SYNOPSIS
+    Stops the game an earlier run left up with its lock kept in -KeptIn (Exit-GameRig -KeptIn),
+    and releases that lock. For a script that wants the rig from the start, a session through
+    Start-IsolatedGameSession above all, in a repo whose other scripts leave the game running.
+    Does nothing when no lock is kept there, and removes a file whose lock has gone.
+    #>
+    param([Parameter(Mandatory)][string]$Game, [Parameter(Mandatory)][string]$KeptIn)
+    if (-not (Test-Path $KeptIn)) { return }
+    $kept = Get-Content $KeptIn -Raw | ConvertFrom-Json
+    $key = Get-GameRigKey $Game
+    $held = Invoke-GameRigExclusive { Read-GameRigOwner $key }
+    if (-not $held -or $held.Token -ne $kept.Token) { Remove-Item $KeptIn -Force; return }
+    $rig = Enter-GameRig -Game $Game -Owner $kept.Owner -KeptIn $KeptIn
+    foreach ($process in @($held.Processes | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })) {
+        Stop-Process -Id $process.Id -Force
+        $process.WaitForExit()
+    }
+    Exit-GameRig -Rig $rig -KeptIn $KeptIn
 }
 
 # ---------------------------------------------------------------------------
@@ -1166,6 +1219,8 @@ function Start-IsolatedGameSession {
         [string]$IniPath = '',
         [int]$Port = 0,
         [string]$PoseFile = '',
+        # How long the pose sender runs if nothing stops it. The session's end stops it.
+        [int]$PoseSenderMinutes = 120,
         # The folder to launch from, for a game that finds its data through the working directory.
         [string]$WorkingDirectory = '',
         # Environment variables for the launch alone, put back once the game has started.
@@ -1203,7 +1258,7 @@ function Start-IsolatedGameSession {
         if ($IniPath) { [void](Set-ModTestPort -IniPath $IniPath -Port $Port) }
         if ($PoseFile) {
             Set-TestPose -PoseFile $PoseFile
-            $session.Sender = Start-TestPoseSender -Port $Port -PoseFile $PoseFile
+            $session.Sender = Start-TestPoseSender -Port $Port -PoseFile $PoseFile -Minutes $PoseSenderMinutes
         }
         $before = @{}
         foreach ($name in $Environment.Keys) {
@@ -1359,6 +1414,7 @@ function Invoke-IsolatedGameSession {
         [string]$IniPath = '',
         [int]$Port = 0,
         [string]$PoseFile = '',
+        [int]$PoseSenderMinutes = 120,
         [string]$WorkingDirectory = '',
         [hashtable]$Environment = @{},
         [int]$StartTimeoutSeconds = 120,
@@ -1393,5 +1449,5 @@ function Invoke-IsolatedGameSession {
 Export-ModuleMember -Function Get-PeImports, Get-IsolatedInputCoverage, Get-GameInputPaths, Assert-IsolatedInputCovers,
     Get-ModTestPort, Copy-IsolatedInputHost, Start-IsolatedGame, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
     Stop-IsolatedGame, Save-GameTestState, Restore-GameTestState, Start-TestPoseSender, Set-TestPose,
-    Set-ModTestPort, Get-GameRig, Enter-GameRig, Exit-GameRig, Wait-GameLogLine, Start-GameProcessSampler, Stop-GameProcessSampler,
+    Set-ModTestPort, Get-GameRig, Enter-GameRig, Exit-GameRig, Stop-KeptGame, Wait-GameLogLine, Start-GameProcessSampler, Stop-GameProcessSampler,
     Start-IsolatedGameSession, Stop-IsolatedGameSession, Invoke-IsolatedGameSession, Get-IsolatedGameSession, Save-IsolatedGameSession
