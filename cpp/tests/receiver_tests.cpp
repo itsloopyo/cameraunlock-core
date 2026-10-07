@@ -7,6 +7,7 @@
 #include "cameraunlock/protocol/udp_receiver.h"
 #include "cameraunlock/protocol/udp_socket.h"
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -14,6 +15,10 @@
 #include <iostream>
 #include <string>
 #include <thread>
+
+#ifndef _WIN32
+#include <netdb.h>
+#endif
 
 namespace {
 
@@ -48,6 +53,8 @@ constexpr uint16_t kPressSenderPort = 14267;
 constexpr uint16_t kWaitPort = 14268;
 constexpr uint16_t kWaitSenderPort = 14269;
 constexpr uint16_t kStartFailurePort = 14270;
+constexpr uint16_t kLoopbackPort = 14271;
+constexpr uint16_t kLoopbackSenderPort = 14272;
 
 size_t BuildPacket(uint8_t out[54], double x, double y, double z,
                    double yaw, double pitch, double roll,
@@ -441,13 +448,18 @@ int RunReceiverTests() {
               "a refused datagram between two poses leaves the gate where it was");
         Check(refusing.GetDatagramCount() == 23 && refusing.GetPublishedPoseCount() == 2,
               "every datagram is counted, and only the two poses as published");
-        Check(refusing.GetAnnouncedCenterCount() == 0, "a trailer on a refused datagram announces nothing");
+        cameraunlock::PoseSnapshot snapshot = refusing.GetSnapshot();
+        Check(snapshot.centers == 0, "a trailer on a refused datagram announces nothing");
+        Check(snapshot.sequence == 2 && NearEqual(snapshot.yaw, 12.5f) && snapshot.received_us == 1022000,
+              "the snapshot is the second published pose");
 
         const uint8_t press = 1;
         len = BuildPacket(pkt, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &press);
         UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1023000);
         UdpReceiverTestAccess::Deliver(refusing, pkt, static_cast<int>(len), tracker, 1024000);
-        Check(refusing.GetAnnouncedCenterCount() == 1, "a burst carrying one counter is one announced press");
+        snapshot = refusing.GetSnapshot();
+        Check(snapshot.centers == 1 && snapshot.sequence == 4 && NearEqual(snapshot.yaw, 0.0f),
+              "a burst carrying one counter is one announced press, in the snapshot of its poses");
         const uint8_t short_datagram[12] = {};
         UdpReceiverTestAccess::Deliver(refusing, short_datagram, sizeof(short_datagram), tracker, 1025000);
         Check(refusing.GetDatagramCount() == 26 && refusing.GetPublishedPoseCount() == 4,
@@ -465,13 +477,127 @@ int RunReceiverTests() {
         Check(blocked.StartFoundPortInUse(), "and says the port is in use");
         Check(blocked.GetStartFailure().find("bind failed with error " + std::to_string(kExpectedInUseError)) == 0,
               "with the OS's own reason");
+        const auto failedStopStart = std::chrono::steady_clock::now();
         blocked.Stop();
+        const auto failedStopMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - failedStopStart).count();
+        Check(failedStopMs < 50, "Stop after a failed Start does not wait out the supervisor's tick");
         holder.Close();
 
         Check(blocked.Start(kStartFailurePort), "the same receiver binds once the port is free");
         Check(!blocked.StartFoundPortInUse() && blocked.GetStartFailure().empty(),
               "and a Start that binds reports no failure");
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        const auto boundStopStart = std::chrono::steady_clock::now();
         blocked.Stop();
+        const auto boundStopMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - boundStopStart).count();
+        Check(boundStopMs < 50, "Stop of a bound receiver does not wait out the supervisor's tick");
+    }
+
+    // ---- UdpReceiver: a snapshot is one datagram's, with a writer running ----
+    //
+    // Each pose carries its own number in x and the presses so far in y, so a snapshot
+    // that mixed two datagrams, or marked a pose with a press it did not come with, shows.
+    std::cout << "UdpReceiver snapshot tests:\n";
+    {
+        using cameraunlock::detail::UdpReceiverTestAccess;
+        UdpReceiver published;
+        published.SetLog([](const std::string&) {});
+        sockaddr_in tracker = {};
+        tracker.sin_family = AF_INET;
+        tracker.sin_port = htons(5000);
+        inet_pton(AF_INET, "127.0.0.1", &tracker.sin_addr);
+
+        constexpr int kPoses = 200000;
+        std::atomic<bool> done{false};
+        std::thread writer([&] {
+            uint8_t datagram[54];
+            uint8_t counter = 0;
+            uint64_t presses = 0;
+            for (int i = 1; i <= kPoses; i++) {
+                const bool press = i % 7 == 0;
+                if (press) {
+                    counter++;
+                    presses++;
+                }
+                const size_t length = BuildPacket(datagram, static_cast<double>(i % 1000), static_cast<double>(presses % 1000),
+                                                  0.0, 1.0 + (i % 2) * 0.5, 0.0, 0.0, press ? &counter : nullptr);
+                UdpReceiverTestAccess::Deliver(published, datagram, static_cast<int>(length), tracker,
+                                               1000000 + static_cast<int64_t>(i) * 1000);
+            }
+            done.store(true, std::memory_order_release);
+        });
+
+        uint64_t torn = 0;
+        uint64_t backwards = 0;
+        uint64_t distinct = 0;
+        uint64_t lastSequence = 0;
+        while (!done.load(std::memory_order_acquire)) {
+            const cameraunlock::PoseSnapshot s = published.GetSnapshot();
+            if (s.sequence == 0) continue;
+            if (s.sequence < lastSequence) backwards++;
+            if (s.sequence != lastSequence) distinct++;
+            lastSequence = s.sequence;
+            const bool whole =
+                std::lround(s.x * 100.0f) == static_cast<long>(s.sequence % 1000) &&
+                std::lround(s.y * 100.0f) == static_cast<long>(s.centers % 1000) &&
+                s.centers == s.sequence / 7 &&
+                NearEqual(s.yaw, 1.0f + (s.sequence % 2) * 0.5f) &&
+                s.received_us == 1000000 + static_cast<int64_t>(s.sequence) * 1000;
+            if (!whole) torn++;
+        }
+        writer.join();
+        const cameraunlock::PoseSnapshot last = published.GetSnapshot();
+        Check(last.sequence == kPoses && last.centers == kPoses / 7, "every pose and every press is counted");
+        Check(distinct > 1000, "the reader saw the writer at work");
+        Check(torn == 0 && backwards == 0, "no snapshot mixed two datagrams or went back");
+        std::cout << "    (" << distinct << " distinct snapshots read during " << kPoses << " publishes)\n";
+        published.Stop();
+        Check(published.GetSnapshot().sequence == 0, "Stop forgets the snapshot");
+    }
+
+    // ---- UdpReceiver: loopback only ----
+    std::cout << "UdpReceiver loopback tests:\n";
+    {
+        UdpReceiver local;
+        local.SetLog([](const std::string&) {});
+        local.SetLoopbackOnly(true);
+        Check(local.Start(kLoopbackPort), "a loopback-only receiver starts");
+        cameraunlock::UdpSocket sender;
+        Check(sender.Open(kLoopbackSenderPort), "sender socket opens");
+
+        // An address of this machine that is not loopback, when it has one.
+        sockaddr_in outside = {};
+        char host[256] = {};
+        addrinfo hints = {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        addrinfo* found = nullptr;
+        if (gethostname(host, sizeof(host)) == 0 && getaddrinfo(host, nullptr, &hints, &found) == 0) {
+            for (addrinfo* a = found; a != nullptr; a = a->ai_next) {
+                const sockaddr_in* candidate = reinterpret_cast<const sockaddr_in*>(a->ai_addr);
+                if (cameraunlock::IsRemoteAddress(*candidate)) {
+                    outside = *candidate;
+                    break;
+                }
+            }
+            freeaddrinfo(found);
+        }
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0);
+        if (outside.sin_family == AF_INET) {
+            outside.sin_port = htons(kLoopbackPort);
+            sendto(sender.GetHandle(), reinterpret_cast<const char*>(pkt), static_cast<int>(len), 0,
+                   reinterpret_cast<const sockaddr*>(&outside), sizeof(outside));
+        } else {
+            std::cout << "  [SKIP] this machine has no address but loopback to send to\n";
+        }
+        len = BuildPacket(pkt, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0);
+        Check(SendToPort(sender, kLoopbackPort, pkt, len), "a datagram is sent to 127.0.0.1");
+        Check(WaitForRotation(local, 5.0f, 1000), "and is received");
+        Check(local.GetDatagramCount() == 1, "and it is the only one: the one to the other address never arrived");
+        local.Stop();
+        sender.Close();
     }
 
     if (g_failures == 0) {

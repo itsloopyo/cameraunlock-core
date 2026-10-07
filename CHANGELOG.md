@@ -19,21 +19,38 @@ these are the pieces it had no way to reach.
 
 - `HeadTrackingSession::GetLastInterpolatedPosition()`: the position after interpolation and before
   the position processor, beside `GetLastInterpolated()` for the rotation. A bridge to another head
-  tracking protocol publishes that pair and leaves limits and smoothing to whatever reads it.
-- `UdpReceiver::GetStartFailure()` and `StartFoundPortInUse()`: why `Start()` did not bind, for a
-  host that gives the port up where a mod waits for it. `UdpSocket::LastErrorWasPortInUse()` is
-  what they read.
+  tracking protocol publishes that pair and leaves limits and smoothing to whatever reads it. It is
+  valid exactly when the latest `Update()` ran the position path: an `Update()` that answers false
+  clears it, as it clears the position offset.
+- `UdpReceiver::GetStartFailure()` and `StartFoundPortInUse()`: why `Start()` answered false, for a
+  host that gives the port up where a mod waits for it. Never empty after a false: a socket that
+  opened and an event that could not be created says so. `UdpSocket::LastErrorWasPortInUse()` is
+  what the second one reads.
 - `UdpReceiver::GetDatagramCount()` and `GetPublishedPoseCount()`: every datagram taken off the
   socket, and the ones published as the pose. The gap between them is a sender in the wrong format.
-- `UdpReceiver::GetAnnouncedCenterCount()`: CENTER presses announced in the HCAM trailer. Nothing in
-  core acts on one. A host whose output is relative uses it to drop the step a press makes.
+- `UdpReceiver::GetSnapshot()` and `PoseSnapshot`: the newest published pose, its sequence number,
+  its arrival time and the CENTER presses announced so far, copied under one lock the receive thread
+  holds for each publish. `GetRotation()` and `GetPosition()` are separate reads and can straddle two
+  datagrams, and a press counted apart from its pose can be read against the wrong one. Nothing in
+  core acts on a press. A host whose output is relative compares `centers` across snapshots to drop
+  the step a press makes.
+- `UdpReceiver::SetLoopbackOnly()` and the second parameter of `UdpSocket::Open()`: listen on
+  127.0.0.1 alone. For a test, which has no reason to be reachable from the network.
+
+### Changed - UdpReceiver::Stop() no longer waits out the supervisor's tick
+
+The supervisor slept 100 ms between looks at its flag, so `Stop()`, and the destructor, took up to
+that long. It now waits on a condition `Stop()` signals. Measured in `receiver_tests.cpp`: under
+50 ms for a bound receiver and for one whose `Start()` failed.
 
 ### Fixed - pipeline-port no longer counts a socket opened in a Rust file's unit tests
 
 The check named lopari's `firewall.rs` as a port of the packet layer because a `#[cfg(test)]` module
 in it opens a UDP socket to test a route. A Rust file's `#[cfg(test)]` modules are now cut before
-the two stages are looked for. `scripts/test-conformance-checks.ps1` has both cases: a socket only
-in the tests, and one beside them.
+the two stages are looked for. Only a module compiled for tests alone is cut (`cfg(test)`, or an
+`all(...)` with `test` at its top level, never `not(test)` or `any(test, ...)`), its braces are
+found outside strings, character literals and comments, and a module whose end is not found is
+left in. `scripts/test-conformance-checks.ps1` has a case for each.
 
 ### Added - java/: the binding to the C interface and the boot class of a Java agent mod
 

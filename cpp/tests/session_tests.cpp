@@ -447,6 +447,14 @@ void TestInterpolatedPositionIsBeforeTheProcessor() {
     session.SetMode(cameraunlock::TrackingMode::RotationOnly);
     session.Update(1.f / 120.f);
     Check(!session.GetLastInterpolatedPosition().IsValid(), "and is not valid in a mode without position");
+
+    session.SetMode(cameraunlock::TrackingMode::RotationAndPosition);
+    session.Update(1.f / 120.f);
+    Check(session.GetLastInterpolatedPosition().IsValid(), "it is valid again with position back");
+    rx.hasRotation = false;
+    Check(!session.Update(1.f / 120.f), "an Update with no rotation answers false");
+    Check(!session.GetLastInterpolatedPosition().IsValid() && !session.GetPositionOffset(x, y, z),
+          "and leaves no position from the frame before, in the tap or in the offset");
 }
 
 void TestManualRecenterDisarmsTheAutomaticOne() {

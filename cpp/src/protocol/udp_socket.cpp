@@ -43,7 +43,7 @@ UdpSocket::~UdpSocket() {
     Close();
 }
 
-bool UdpSocket::Open(uint16_t port) {
+bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
     if (m_socket != INVALID_SOCKET) {
         return true;
     }
@@ -115,12 +115,11 @@ bool UdpSocket::Open(uint16_t port) {
     }
 #endif
 
-    // Bind to all interfaces
     sockaddr_in addr;
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = loopbackOnly ? htonl(INADDR_LOOPBACK) : htonl(INADDR_ANY);
 
     if (bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
         const int code = LastSocketError();

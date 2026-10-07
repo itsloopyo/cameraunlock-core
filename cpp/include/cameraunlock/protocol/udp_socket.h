@@ -19,9 +19,10 @@ public:
     UdpSocket(UdpSocket&&) = delete;
     UdpSocket& operator=(UdpSocket&&) = delete;
 
-    /// Creates and binds a non-blocking UDP socket on the given port.
+    /// Creates and binds a non-blocking UDP socket on the given port, on every interface,
+    /// or with `loopbackOnly` on 127.0.0.1 alone, where only this machine can send to it.
     /// @return True if successful.
-    bool Open(uint16_t port);
+    bool Open(uint16_t port, bool loopbackOnly = false);
 
     /// Closes the socket and cleans up WSA if needed.
     void Close();
