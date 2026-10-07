@@ -21,14 +21,26 @@
 extern "C" {
 #endif
 
-/* Raised when a function's meaning or a struct's layout changes. */
-#define CAMERAUNLOCK_ABI 1
+/* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
+ * a host that asks first never looks for a function this library does not have. */
+#define CAMERAUNLOCK_ABI 2
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
 
-/* The CAMERAUNLOCK_ABI this library was built as. A host compares it with its own at load. */
+/* The CAMERAUNLOCK_ABI this library was built as. A host compares it with its own at load, before
+ * it calls or looks up anything else: this function is in every version of the library. */
 CAMERAUNLOCK_C int32_t cameraunlock_abi(void);
+
+#define CAMERAUNLOCK_STRUCT_SETTINGS 0
+#define CAMERAUNLOCK_STRUCT_FRAME_INPUT 1
+#define CAMERAUNLOCK_STRUCT_FRAME 2
+#define CAMERAUNLOCK_STRUCT_OBSTRUCTION 3
+#define CAMERAUNLOCK_STRUCT_LEAN 4
+#define CAMERAUNLOCK_STRUCT_CONFIG 5
+/* The size in bytes this library has for a struct, by its CAMERAUNLOCK_STRUCT_*. A binding that
+ * declares the structs in its own language compares each with its declaration at load. */
+CAMERAUNLOCK_C int32_t cameraunlock_struct_size(int32_t which);
 
 /* The reason for the last CAMERAUNLOCK_ERROR on the calling thread. Answers its length in bytes
  * and copies it, with its NUL, when `capacity` holds length + 1. */
@@ -98,6 +110,9 @@ CAMERAUNLOCK_C int32_t cameraunlock_session_stop(void);
 /* The mode after the current one. Each answers the new mode. */
 CAMERAUNLOCK_C int32_t cameraunlock_session_cycle_tracking_mode(void);
 CAMERAUNLOCK_C int32_t cameraunlock_session_cycle_aim_mode(void);
+/* Puts the session in one aim mode, for a game whose cycle is not all four: one where the game
+ * draws a reticle of its own whenever the sights are up has no free look without a marker. */
+CAMERAUNLOCK_C int32_t cameraunlock_session_set_aim_mode(int32_t aim_mode);
 /* The line a mod shows and logs for an aim mode, the same in every mod. A static string. */
 CAMERAUNLOCK_C const char* cameraunlock_aim_mode_label(int32_t aim_mode);
 

@@ -166,6 +166,14 @@ void TestBoundary() {
     std::cout << "\n[c interface: the boundary]\n";
     Check(cameraunlock_abi() == CAMERAUNLOCK_ABI, "the library is the ABI this test was compiled against");
     Check(CameraUnlockHeaderIsC() == 1, "the header compiles as C and calls through");
+    Check(cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_SETTINGS) == sizeof(CameraUnlockSettings) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_FRAME_INPUT) == sizeof(CameraUnlockFrameInput) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_FRAME) == sizeof(CameraUnlockFrame) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_OBSTRUCTION) == sizeof(CameraUnlockObstruction) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_LEAN) == sizeof(CameraUnlockLean) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_CONFIG) == sizeof(CameraUnlockConfig),
+          "the library says how large each of its structs is");
+    Check(cameraunlock_struct_size(6) == CAMERAUNLOCK_ERROR, "and refuses a number that names none");
 
     CameraUnlockSettings settings = {};
     settings.struct_size = 4;
@@ -211,6 +219,7 @@ void TestPortInUse() {
     const std::string log = TakeLog();
     Check(log.find("bind failed with error " + std::to_string(WSAEADDRINUSE)) != std::string::npos,
           "the log carries the system's own reason for the bind");
+    Check(log.find("Listening for OpenTrack datagrams") == std::string::npos, "and does not say it is listening");
     Check(cameraunlock_session_start(kHeldPort) == CAMERAUNLOCK_ERROR &&
               LastError().find("already started") != std::string::npos,
           "starting twice is refused: " + LastError());
@@ -232,7 +241,10 @@ void TestReceiving() {
     settings.limit_y = 0.25f;
     settings.limit_y_down = 0.05f;
     Check(cameraunlock_session_configure(&settings) == CAMERAUNLOCK_OK, "the settings are taken");
+    TakeLog();
     Check(cameraunlock_session_start(kPort) == CAMERAUNLOCK_OK, "the session starts again after a stop");
+    Check(TakeLog().find("Listening for OpenTrack datagrams on UDP port " + std::to_string(kPort)) != std::string::npos,
+          "and a port bound at once is said so in the log");
     const Sender& sender = Tracker();
 
     CameraUnlockFrame frame = Settle();
@@ -346,6 +358,11 @@ void TestModes() {
               Near(frame.head_yaw, 50.0f),
           "stock sights with the sights up leaves the view the head's roll alone");
     Check(cameraunlock_session_cycle_aim_mode() == CAMERAUNLOCK_AIM_SIGHTS_LOCKED, "and the cycle comes round");
+    Check(cameraunlock_session_set_aim_mode(CAMERAUNLOCK_AIM_TRUE_FREE_LOOK) == CAMERAUNLOCK_OK &&
+              Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).aim_mode == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK,
+          "a host with a cycle of its own puts the session in one mode");
+    Check(cameraunlock_session_set_aim_mode(4) == CAMERAUNLOCK_ERROR, "which has to be a mode");
+    Check(cameraunlock_session_set_aim_mode(CAMERAUNLOCK_AIM_SIGHTS_LOCKED) == CAMERAUNLOCK_OK, "and back");
     g_now_ms += 1000;
 
     // The zoom: a narrower field of view scales yaw and pitch, never roll.

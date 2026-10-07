@@ -275,6 +275,15 @@ if(CAMERAUNLOCK_BUILD_C)
     target_include_directories(cameraunlock_c_testing PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(cameraunlock_c_testing PRIVATE cameraunlock)
     target_compile_options(cameraunlock_c_testing PRIVATE /W4 /WX /permissive-)
+
+    # A library that answers cameraunlock_abi with another number and has nothing else, for the
+    # test of a binding's check at load. Never shipped, never installed.
+    enable_language(C)
+    add_library(cameraunlock_c_other_abi SHARED EXCLUDE_FROM_ALL tests/c_other_abi.c)
+    set_target_properties(cameraunlock_c_other_abi PROPERTIES OUTPUT_NAME CameraUnlockCoreOtherAbi)
+    target_compile_definitions(cameraunlock_c_other_abi PRIVATE CAMERAUNLOCK_C_EXPORTS)
+    target_include_directories(cameraunlock_c_other_abi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(cameraunlock_c_other_abi PRIVATE /W4 /WX)
 endif()
 
 # Tests

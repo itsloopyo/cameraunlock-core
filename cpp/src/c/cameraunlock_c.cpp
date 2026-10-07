@@ -426,6 +426,16 @@ std::int32_t cameraunlock_abi(void) {
     return CAMERAUNLOCK_ABI;
 }
 
+std::int32_t cameraunlock_struct_size(std::int32_t which) {
+    return Guarded("cameraunlock_struct_size", [&] {
+        constexpr std::size_t sizes[] = {sizeof(CameraUnlockSettings), sizeof(CameraUnlockFrameInput),
+                                         sizeof(CameraUnlockFrame),    sizeof(CameraUnlockObstruction),
+                                         sizeof(CameraUnlockLean),     sizeof(CameraUnlockConfig)};
+        Require(which >= 0 && which < static_cast<std::int32_t>(std::size(sizes)), "which is not a CAMERAUNLOCK_STRUCT_*");
+        return static_cast<std::int32_t>(sizes[which]);
+    });
+}
+
 std::int32_t cameraunlock_last_error(char* buffer, std::int32_t capacity) {
     return CopyOut(t_last_error, buffer, capacity, true);
 }
@@ -509,7 +519,11 @@ std::int32_t cameraunlock_session_start(std::int32_t udp_port) {
         const std::lock_guard<std::mutex> lock(s.mutex);
         if (s.started) throw std::logic_error("the session is already started: cameraunlock_session_stop first");
         s.started = true;
-        s.receiver.Start(static_cast<std::uint16_t>(udp_port));
+        // The receiver says why a bind failed and when a later one held. This is the line for
+        // the bind that held at once, so a log always says which of the two happened.
+        if (s.receiver.Start(static_cast<std::uint16_t>(udp_port))) {
+            LogLine("Listening for OpenTrack datagrams on UDP port " + std::to_string(udp_port));
+        }
         return CAMERAUNLOCK_OK;
     });
 }
@@ -542,6 +556,14 @@ std::int32_t cameraunlock_session_cycle_aim_mode(void) {
             next = static_cast<std::int32_t>(ads::NextAimMode(static_cast<ads::AimMode>(now)));
         } while (!mode.compare_exchange_weak(now, next));
         return next;
+    });
+}
+
+std::int32_t cameraunlock_session_set_aim_mode(std::int32_t aim_mode) {
+    return Guarded("cameraunlock_session_set_aim_mode", [&] {
+        Require(aim_mode >= 0 && aim_mode <= 3, "aim_mode is not a CAMERAUNLOCK_AIM_*");
+        TheSession().aim_mode.store(aim_mode);
+        return CAMERAUNLOCK_OK;
     });
 }
 
