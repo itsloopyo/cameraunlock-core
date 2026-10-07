@@ -297,6 +297,11 @@ namespace CameraUnlock.Core.Config
         /// once. An editor writing the file between the last check and the replacement is
         /// overwritten: the replacement is not compare-and-swap.
         /// </para>
+        /// <para>
+        /// A save that finds the file written since the owner last read it keeps what the other
+        /// program wrote, as any save does, and leaves <see cref="FileChanged"/> true, so the next
+        /// Reload reads those rows and is Applied.
+        /// </para>
         /// </summary>
         /// <exception cref="ArgumentNullException"><paramref name="change"/> is null.</exception>
         /// <exception cref="InvalidOperationException">Load has not run, or a row that is not
@@ -353,7 +358,8 @@ namespace CameraUnlock.Core.Config
 
         /// <summary>
         /// True when the last write time of the file, or of Defaults.ini where Load found it, differs
-        /// from the one the owner recorded at its last Load, Reload or committed Save. A missing file
+        /// from the one the owner recorded at its last Load, Reload or committed Save. A Save records
+        /// its write only when the file had not been written since the owner last read it. A missing file
         /// has a write time too, so a file that appears or goes away counts. A config file whose
         /// write time cannot be read counts as changed, so a watcher reloads it and Reload reports
         /// it as Unreadable.
@@ -920,6 +926,21 @@ namespace CameraUnlock.Core.Config
                 return NotSaved("the settings file could not be used this session", null, log);
             }
 
+            // Asked before the file is read, as Reload asks: an edit that lands later moves the time again.
+            bool unread;
+            try
+            {
+                unread = File.GetLastWriteTimeUtc(_path) != _recordedWriteTime;
+            }
+            catch (IOException)
+            {
+                unread = true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                unread = true;
+            }
+
             byte[] snapshot;
             try
             {
@@ -1028,8 +1049,17 @@ namespace CameraUnlock.Core.Config
                 }
                 return NotSaved(Why(e), e, log);
             }
-            _committed = candidate;
-            _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
+            if (unread)
+            {
+                // Another program wrote the file after the owner last read it, and the game has not
+                // been given those rows. Recording this write would hide them from FileChanged and Reload.
+                _committed = null;
+            }
+            else
+            {
+                _committed = candidate;
+                _recordedWriteTime = File.GetLastWriteTimeUtc(_path);
+            }
             for (int i = 0; i < count; i++)
             {
                 if (!edited[i] || !_table.RowFollowsDefaultsIni(i) || baselineSources[i] == ConfigValueSource.File) continue;

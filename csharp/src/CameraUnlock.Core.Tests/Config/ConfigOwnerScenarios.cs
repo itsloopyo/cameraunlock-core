@@ -87,6 +87,7 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-save-to-a-read-only-file-is-not-saved", ASaveToAReadOnlyFileIsNotSaved),
             Scenario("an-unfinished-save-is-uncertain", AnUnfinishedSaveIsUncertain),
             Scenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites),
+            Scenario("a-save-leaves-an-unread-edit-for-the-reload", ASaveLeavesAnUnreadEditForTheReload),
             Scenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports),
             Scenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings),
             Scenario("a-reload-that-keeps-failing-is-reported-once", AReloadThatKeepsFailingIsReportedOnce),
@@ -1045,6 +1046,33 @@ namespace CameraUnlock.Core.Tests.Config
             Expect(rig.Legacy.Runs == 1 && rig.Sink.Count == 0, "no import and nothing reported");
             rig.ExpectLegacyKept();
             ExpectListing(dir, FileName, LegacyName);
+        }
+
+        // An editor saves the file and a hotkey's save runs before the mod's watch has looked.
+        private static void ASaveLeavesAnUnreadEditForTheReload(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.PutLegacy(Ascii(LegacyText));
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Migrated);
+
+            string imported = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+            File.WriteAllBytes(rig.Path, Ascii(imported.Replace("UdpPort=5555", "UdpPort=6000")));
+            File.SetLastWriteTimeUtc(rig.Path, File.GetLastWriteTimeUtc(rig.Path).AddSeconds(5));
+            ExpectSaved(owner.Save(c => c.WorldSpaceYaw = true));
+            string saved = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+            Expect(saved.Contains("UdpPort=6000") && saved.Contains("WorldSpaceYaw=true"),
+                "the file holds the edit and the saved row");
+            Expect(owner.FileChanged(), "the edit the owner has not read is still a change");
+            ConfigReloadResult<HeadTrackingConfigData> reload = owner.Reload();
+            Expect(reload.Status == ConfigReloadStatus.Applied && reload.Config.UdpPort == 6000 && reload.Config.WorldSpaceYaw,
+                "the reload applies the edit and the saved row, got " + reload.Status);
+            Expect(!owner.FileChanged(), "the reload records the write time");
+
+            ExpectSaved(owner.Save(c => c.WorldSpaceYaw = false));
+            Expect(!owner.FileChanged(), "a save of a file the owner has read records its write");
+            Expect(owner.Reload().Status == ConfigReloadStatus.Unchanged, "and its bytes reload as Unchanged");
+            Expect(rig.Sink.Count == 0, "nothing is reported");
         }
 
         private static void ReloadReadsAnUnstampedConfigAndNeverImports(string dir)

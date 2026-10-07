@@ -9,6 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - a row edited just before a hotkey's save was not read until the next start
+
+An editor saves `CameraUnlock.ini`, and a hotkey's save runs before the mod's watch has looked at
+the file. The save kept the editor's rows in the file, then recorded its own write as the last one
+the owner had seen, so `FileChanged` stayed false and the rows the player had edited were not read
+while the game ran. Reproduced in project-zomboid-headtracking: `FieldOfView=90` saved from an
+editor 0.2 s before a picture style key was still 65 in the game three watch ticks later.
+
+- `ConfigOwner::Save` (C++) and `ConfigOwner.Save` (C#) record their write only when the file had
+  not been written since the owner last read it. Otherwise `FileChanged` stays true and the next
+  `Reload` is `Applied` with the editor's rows and the saved one.
+- A mod that watches its file gets it with its next core bump. Nothing to change in a mod.
+
 ### Fixed - a save was dropped when Windows would not replace the file at that instant
 
 A hotkey's save could come back `NotSaved` with `Windows error 1175: Unable to remove the file to

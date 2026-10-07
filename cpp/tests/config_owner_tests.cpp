@@ -1349,6 +1349,32 @@ void ReloadIgnoresTheOwnersOwnWrites(const fs::path& dir) {
     Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
 }
 
+// An editor saves the file and a hotkey's save runs before the mod's watch has looked.
+void ASaveLeavesAnUnreadEditForTheReload(const fs::path& dir) {
+    Rig rig(dir);
+    rig.PutLegacy(kLegacyText);
+    auto owner = rig.Make();
+    ExpectStatus(owner->Load(), ConfigLoadStatus::Migrated);
+
+    WriteBytes(rig.path, Replace(ReadBytes(rig.path), "UdpPort=5555", "UdpPort=6000"));
+    fs::last_write_time(rig.path, fs::last_write_time(rig.path) + std::chrono::seconds(5));
+    ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }));
+    const std::string saved = ReadBytes(rig.path);
+    Check(Contains(saved, "UdpPort=6000") && Contains(saved, "WorldSpaceYaw=true"),
+          "the file holds the edit and the saved row");
+    Check(owner->FileChanged(), "the edit the owner has not read is still a change");
+    const Reload reload = owner->Reload();
+    Check(reload.status == ConfigReloadStatus::Applied && reload.config && reload.config->udp_port == 6000 &&
+              reload.config->world_space_yaw,
+          std::string("the reload applies the edit and the saved row, got ") + ConfigReloadStatusName(reload.status));
+    Check(!owner->FileChanged(), "the reload records the write time");
+
+    ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = false; }));
+    Check(!owner->FileChanged(), "a save of a file the owner has read records its write");
+    Check(owner->Reload().status == ConfigReloadStatus::Unchanged, "and its bytes reload as Unchanged");
+    Check(rig.sink.empty(), "nothing is reported");
+}
+
 void ReloadReadsAnUnstampedConfigAndNeverImports(const fs::path& dir) {
     Rig rig(dir);
     rig.PutLegacy(kLegacyText);
@@ -2319,6 +2345,7 @@ int RunConfigOwnerTests() {
     RunScenario("a-save-to-a-read-only-file-is-not-saved", ASaveToAReadOnlyFileIsNotSaved);
     RunScenario("an-unfinished-save-is-uncertain", AnUnfinishedSaveIsUncertain);
     RunScenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites);
+    RunScenario("a-save-leaves-an-unread-edit-for-the-reload", ASaveLeavesAnUnreadEditForTheReload);
     RunScenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports);
     RunScenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings);
     RunScenario("a-reload-that-keeps-failing-is-reported-once", AReloadThatKeepsFailingIsReportedOnce);

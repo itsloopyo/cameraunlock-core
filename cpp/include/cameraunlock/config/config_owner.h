@@ -427,6 +427,10 @@ public:
     /// once. An editor writing the file between the last check and the replacement is
     /// overwritten: the replacement is not compare-and-swap.
     ///
+    /// A save that finds the file written since the owner last read it keeps what the other
+    /// program wrote, as any save does, and leaves FileChanged true, so the next Reload reads
+    /// those rows and is Applied.
+    ///
     /// Throws std::invalid_argument for an empty `change`, or a Writable row holding a value its
     /// codec cannot write or text outside printable ASCII, which the editor refuses; and
     /// std::logic_error when Load has not run, or when a row that is not Writable changed, naming
@@ -476,8 +480,9 @@ public:
     }
 
     /// True when the last write time of the file, or of Defaults.ini where Load found it, differs
-    /// from the one the owner recorded at its last Load, Reload or committed Save. The time is read
-    /// with GetFileAttributesExW, or from the folder's listing with FindFirstFileW when that
+    /// from the one the owner recorded at its last Load, Reload or committed Save. A Save records
+    /// its write only when the file had not been written since the owner last read it. The time is
+    /// read with GetFileAttributesExW, or from the folder's listing with FindFirstFileW when that
     /// refuses a file that is there (one pending deletion), as .NET reads it. A missing file counts
     /// as write time 0, so a file that appears or goes away counts. A config file whose time
     /// Windows can read neither way, for a reason other than its absence, counts as changed, so a
@@ -782,6 +787,12 @@ private:
             return NotSaved("the settings file could not be used this session", 0, std::move(log));
         }
 
+        // Asked before the file is read, as Reload asks: an edit that lands later moves the time
+        // again.
+        std::uint64_t write_time = 0;
+        const bool unread = detail::OwnerTryLastWriteTime(path_, write_time) != 0 ||
+                            write_time != recorded_write_time_;
+
         const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
         if (read.error != 0) {
             log.push_back(path_text_ + ": not saved: could not be read: " + detail::OwnerErrorText(read.error));
@@ -897,8 +908,15 @@ private:
             log.push_back(path_text_ + ": not saved: " + CheckedWriteStatusName(written.status));
             return NotSaved(detail::OwnerConflict(written.status), 0, std::move(log));
         }
-        committed_ = candidate;
-        recorded_write_time_ = detail::OwnerLastWriteTime(path_);
+        if (unread) {
+            // Another program wrote the file after the owner last read it, and the game has not
+            // been given those rows. Recording this write would hide them from FileChanged and
+            // Reload.
+            committed_.reset();
+        } else {
+            committed_ = candidate;
+            recorded_write_time_ = detail::OwnerLastWriteTime(path_);
+        }
         ConfigSaveResult saved;
         for (std::size_t i = 0; i < count; ++i) {
             if (!edited[i] || !detail::FollowsDefaultsIni(table_.rows_[i]) ||

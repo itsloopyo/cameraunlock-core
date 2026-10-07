@@ -862,6 +862,10 @@ writer waits 20 ms, reads the file again, and replaces it only if it still holds
 read, ten attempts in all, before the save is `NotSaved` with that error. A file an editor changed
 in the meantime is `NotSaved` as at any other time.
 
+A save that finds the file written since the owner last read it (an editor saved it, and the mod's
+watch has not looked yet) edits the file as it is, so the editor's rows stay, and leaves
+`FileChanged` true: the next `Reload` reads those rows and is `Applied`.
+
 The file is read over the session's Defaults.ini values, for the starting point the change is
 given and for the read-back, where every row the save did not edit must also read from where it
 did before, so a row holding `default` stays `default`. A row that held `default`, or had no line,
@@ -875,7 +879,8 @@ Writable throws there as it does on Windows. See [Saves and toggles](#saves-and-
 ### Reload and FileChanged
 
 `FileChanged()` compares the last write times of the file and of Defaults.ini with the ones the
-owner recorded at its last load, reload or save, for a mod that watches its file. `Reload()` reads
+owner recorded at its last load, reload or save, for a mod that watches its file. A save records
+its write only when the file had not been written since the owner last read it. `Reload()` reads
 Defaults.ini again where `Load` found it, then the config file over its values. It never writes, and
 never runs the import:
 
