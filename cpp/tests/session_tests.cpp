@@ -413,6 +413,50 @@ void TestDuplicatePacketFiltering() {
     Check(session.WasNewSample(), "new packet with changed data is a new sample");
 }
 
+// The pose a bridge to another protocol hands on: interpolated, and nothing after that.
+void TestInterpolatedPositionIsBeforeTheProcessor() {
+    std::cout << "Interpolated position tap:\n";
+
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.timestamp = 1;
+
+    Session session(rx);
+    session.Update(1.f / 120.f);
+    Check(!session.GetLastInterpolatedPosition().IsValid(),
+          "no interpolated position while the receiver has none");
+
+    // 5 m to the side, far past limit_x, and held until the smoothing has settled.
+    rx.hasPosition = true;
+    rx.posX = 5.f;
+    rx.timestamp = 2;
+    for (int i = 0; i < 240; i++) session.Update(1.f / 120.f);
+    float x, y, z;
+    session.GetPositionOffset(x, y, z);
+    const cameraunlock::PositionData& tapped = session.GetLastInterpolatedPosition();
+    Check(tapped.IsValid() && NearEqual(tapped.x, 5.f), "the tap carries the tracker's position, not the limited one");
+    Check(NearEqual(x, session.GetPositionSettings().limit_x), "while the processed offset stops at the limit");
+
+    // A new sample is reached over the sample interval, not in one frame.
+    rx.posX = 5.3f;
+    rx.timestamp = 3;
+    session.Update(1.f / 120.f);
+    const float first = session.GetLastInterpolatedPosition().x;
+    Check(first > 5.f && first < 5.3f, "the tap is interpolated between samples");
+
+    session.SetMode(cameraunlock::TrackingMode::RotationOnly);
+    session.Update(1.f / 120.f);
+    Check(!session.GetLastInterpolatedPosition().IsValid(), "and is not valid in a mode without position");
+
+    session.SetMode(cameraunlock::TrackingMode::RotationAndPosition);
+    session.Update(1.f / 120.f);
+    Check(session.GetLastInterpolatedPosition().IsValid(), "it is valid again with position back");
+    rx.hasRotation = false;
+    Check(!session.Update(1.f / 120.f), "an Update with no rotation answers false");
+    Check(!session.GetLastInterpolatedPosition().IsValid() && !session.GetPositionOffset(x, y, z),
+          "and leaves no position from the frame before, in the tap or in the offset");
+}
+
 void TestManualRecenterDisarmsTheAutomaticOne() {
     std::cout << "Manual recenter disarms the automatic one:" << std::endl;
 
@@ -844,6 +888,7 @@ int RunSessionTests() {
     TestPositionResetDeferredToUpdate();
     TestConcurrentCyclesAllLand();
     TestDuplicatePacketFiltering();
+    TestInterpolatedPositionIsBeforeTheProcessor();
     TestRecenterZeroesPose();
     TestManualRecenterDisarmsTheAutomaticOne();
     TestResetTransientStateStartsFromTheTrackersPose();

@@ -114,6 +114,116 @@ udp:setsockname('127.0.0.1', 4444)
 local data = udp:receivefrom()
 '@
 
+# A Rust file that names OpenTrack and whose only socket is in its unit tests.
+$RustTestOnlySocket = @'
+//! Reads the firewall rules that decide whether OpenTrack datagrams reach UDP 4242.
+pub fn port_list_contains(list: &str, port: u16) -> bool { list.split(',').any(|p| p.trim().parse() == Ok(port)) }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_datagram_gets_through() {
+        let listener = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        let mut buf = [0u8; 8];
+        if true { assert!(listener.recv(&mut buf).is_ok()); }
+    }
+}
+'@
+
+# The same file with a receive loop of its own after the tests.
+$RustSocketBesideTests = $RustTestOnlySocket + @'
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    fn nothing() {}
+}
+
+pub fn listen() {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:4242").unwrap();
+    let mut buf = [0u8; 64];
+    socket.recv(&mut buf).unwrap();
+}
+'@
+
+# A module the shipped build has, whatever the word test in its cfg.
+$RustNotTestModule = @'
+//! The OpenTrack listener.
+#[cfg(all(not(test), windows))]
+mod real {
+    pub fn listen() {
+        let socket = std::net::UdpSocket::bind("0.0.0.0:4242").unwrap();
+        let mut buf = [0u8; 64];
+        socket.recv(&mut buf).unwrap();
+    }
+}
+
+#[cfg(any(test, feature = "probe"))]
+mod probe {
+    pub fn listen() {
+        let socket = std::net::UdpSocket::bind("0.0.0.0:4243").unwrap();
+        let mut buf = [0u8; 64];
+        socket.recv(&mut buf).unwrap();
+    }
+}
+'@
+
+# Braces, and a whole test module attribute, written where they are not code. None of
+# them may hide the listener after the tests.
+$RustBracesInLiterals = @'
+//! OpenTrack.
+// #[cfg(test)] mod commented { the rest of this file is not a test module
+const HINT: &str = "#[cfg(test)] mod quoted {";
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn braces_in_literals() {
+        let open = "{";
+        let raw = r#"{ " {"#;
+        let ch = '{';
+        let escaped = '\'';
+        /* { /* { */ */
+        assert_eq!(open.len() + raw.len(), 7, "{ {{ {ch}{escaped}");
+    }
+}
+
+pub fn listen<'a>(buf: &'a mut [u8]) {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:4242").unwrap();
+    socket.recv(buf).unwrap();
+}
+'@
+
+# Closing braces in literals inside the tests: the module still ends where it ends, so
+# the socket after them, still inside the tests, is not a packet layer.
+$RustClosingBracesInTests = @'
+//! Reads the firewall rules that decide whether OpenTrack datagrams reach UDP 4242.
+pub fn nothing() {}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn closing_braces_in_literals() {
+        let close = "}";
+        let ch = '}';
+        // }
+        let listener = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        let mut buf = [0u8; 8];
+        assert!(listener.recv(&mut buf).is_ok(), "{close}{ch}");
+    }
+}
+'@
+
+# A test module that never closes. Its text is kept, so the socket in it is seen.
+$RustUnclosedTestModule = @'
+//! OpenTrack.
+#[cfg(test)]
+mod tests {
+    fn listen() {
+        let socket = std::net::UdpSocket::bind("0.0.0.0:4242").unwrap();
+        let mut buf = [0u8; 64];
+        socket.recv(&mut buf).unwrap();
+'@
+
 $CMakeLinksCore = @'
 add_subdirectory(../cameraunlock-core/cpp core)
 add_library(Mod SHARED src/plugin.cpp)
@@ -194,6 +304,33 @@ $cases['port-beside-cargo-core'] = @{
 $cases['port-beside-other-native'] = @{
     Root = (New-Repo 'port-beside-other-native' @{ 'pixi.toml' = $PixiVectors; 'modules/poseinterpolator.lua' = $LuaInterpolator; 'native/CMakeLists.txt' = $CMakeNoCore })
     Expect = @()
+}
+# A socket opened only in a Rust file's unit tests is not a packet layer, and one opened
+# outside them still is, whatever test modules the file also has.
+$cases['rust-socket-in-unit-tests'] = @{
+    Root = (New-Repo 'rust-socket-in-unit-tests' @{ 'pixi.toml' = $PixiNoVectors; 'src/firewall.rs' = $RustTestOnlySocket; 'build.rs' = $BuildRs })
+    Expect = @()
+}
+$cases['rust-socket-beside-unit-tests'] = @{
+    Root = (New-Repo 'rust-socket-beside-unit-tests' @{ 'pixi.toml' = $PixiNoVectors; 'src/firewall.rs' = $RustSocketBesideTests })
+    Expect = @('FAIL ports the packet layer \(src/firewall\.rs\) of core''s tracking pipeline.*no pixi task runs .*run-vectors\.mjs')
+}
+$rustPort = 'FAIL ports the packet layer \(src/listener\.rs\) of core''s tracking pipeline.*no pixi task runs .*run-vectors\.mjs'
+$cases['rust-socket-in-not-test-module'] = @{
+    Root = (New-Repo 'rust-socket-in-not-test-module' @{ 'pixi.toml' = $PixiNoVectors; 'src/listener.rs' = $RustNotTestModule })
+    Expect = @($rustPort)
+}
+$cases['rust-braces-in-literals'] = @{
+    Root = (New-Repo 'rust-braces-in-literals' @{ 'pixi.toml' = $PixiNoVectors; 'src/listener.rs' = $RustBracesInLiterals })
+    Expect = @($rustPort)
+}
+$cases['rust-closing-braces-in-tests'] = @{
+    Root = (New-Repo 'rust-closing-braces-in-tests' @{ 'pixi.toml' = $PixiNoVectors; 'src/listener.rs' = $RustClosingBracesInTests })
+    Expect = @()
+}
+$cases['rust-unclosed-test-module'] = @{
+    Root = (New-Repo 'rust-unclosed-test-module' @{ 'pixi.toml' = $PixiNoVectors; 'src/listener.rs' = $RustUnclosedTestModule })
+    Expect = @($rustPort)
 }
 # The harness, the vendored core and a build tree are not the mod's port.
 $cases['port-shaped-files-elsewhere'] = @{

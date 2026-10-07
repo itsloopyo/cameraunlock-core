@@ -2,7 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <cstdint>
@@ -31,6 +33,31 @@ struct UdpReceiverTestAccess {
 };
 
 }  // namespace detail
+
+/// One published pose with everything that was published with it, read as a whole by
+/// UdpReceiver::GetSnapshot(). The members belong to one datagram: no reader sees the
+/// rotation of one pose beside the position, the sequence number or the centre count of
+/// another.
+struct PoseSnapshot {
+    /// 1 for the first pose published since Start(), one more for each after it. 0 while
+    /// no pose has been published, and then nothing else here means anything.
+    uint64_t sequence = 0;
+    /// CENTER presses the followed tracker has announced in the trailer, in the poses up
+    /// to and including this one. A reader that keeps the count from the snapshot it took
+    /// before knows whether a press came with this pose or with one it did not see in
+    /// between. Nothing in core acts on a press.
+    uint64_t centers = 0;
+    /// When the datagram arrived, on the steady clock, in microseconds.
+    int64_t received_us = 0;
+    /// Degrees, as the tracker sent them: Recenter()'s offset is not taken off.
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+    float roll = 0.0f;
+    /// Metres, as the tracker sent them.
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
 
 /// UDP receiver for OpenTrack protocol.
 /// Thread-safe with lock-free reads on the game thread.
@@ -87,6 +114,11 @@ public:
     /// @return True if bound and the receive thread started immediately.
     bool Start(uint16_t port = kDefaultPort);
 
+    /// Listen on 127.0.0.1 alone from the next Start(), where only this machine can send
+    /// to the port, or on every interface again. For a test, which has no business being
+    /// reachable from the network or raising a firewall prompt.
+    void SetLoopbackOnly(bool loopbackOnly) { m_loopbackOnly = loopbackOnly; }
+
     /// Stops the UDP receiver. Joins the supervisor and receive threads,
     /// closes the socket, and clears tracking state.
     void Stop();
@@ -115,6 +147,17 @@ public:
 
     /// True if the most recent bind attempt failed. Cleared once retry succeeds.
     bool IsFailed() const { return m_failed.load(std::memory_order_acquire); }
+
+    /// Why Start() answered false, and empty when it answered true: what the OS said about
+    /// the socket, or about the event the receive thread waits on. Never empty after a
+    /// false. For a host that gives the port up where a mod waits for it: a launcher that
+    /// leaves head tracking to the program already listening calls Stop() and says why.
+    /// Start() writes it before the supervisor exists and the retries leave it alone, so
+    /// it is read on the thread that called Start().
+    const std::string& GetStartFailure() const { return m_startFailure; }
+
+    /// True when that Start() failed because another socket holds the port.
+    bool StartFoundPortInUse() const { return m_startFoundPortInUse; }
 
     /// Timestamp of the last received packet (microseconds since epoch).
     /// Compare across frames to detect new samples for interpolation.
@@ -167,13 +210,37 @@ public:
         return m_rejectedPackets.load(std::memory_order_relaxed);
     }
 
+    /// Datagrams taken off the socket since Start(), whatever their length or content,
+    /// one that was too long for the buffer included. With GetPublishedPoseCount() it
+    /// tells a sender in the wrong format from no sender at all. A datagram is counted
+    /// after it has been dealt with: whatever it changed is in place when the count moves.
+    uint64_t GetDatagramCount() const { return m_datagrams.load(std::memory_order_acquire); }
+
+    /// Of those, the ones published as the pose: parsed, from the source followed, and
+    /// let through by the gate. GetLastReceiveTimestamp() moves with each, and the pose
+    /// is in place when the count moves.
+    uint64_t GetPublishedPoseCount() const { return m_publishedPoses.load(std::memory_order_acquire); }
+
+    /// The newest published pose, its sequence number and the centre presses announced so
+    /// far, copied under one lock the receive thread also takes for the whole of each
+    /// publish. So the copy is one datagram's: see PoseSnapshot. GetRotation() and
+    /// GetPosition() are separate lock-free reads and can straddle two datagrams; a host
+    /// that needs the six values, or a pose and its centre mark, to belong together reads
+    /// this. A host whose output is relative (head movement turned into mouse movement)
+    /// compares `centers` across snapshots to drop the step a press makes in the pose.
+    PoseSnapshot GetSnapshot() const {
+        std::lock_guard<std::mutex> lock(m_snapshotMutex);
+        return m_snapshot;
+    }
+
 private:
     friend struct detail::UdpReceiverTestAccess;
 
     void HandleDatagram(const char* buffer, int bytesReceived, const sockaddr_in& senderAddr, int64_t arrivedUs);
     void ReceiverThread();
     void SupervisorThread();
-    bool BindAndReceive();
+    /// False with the reason in `failure`, which is then never empty.
+    bool BindAndReceive(std::string& failure);
     void StopReceiverThread();
 
     // Thread-safe tracking data
@@ -239,6 +306,19 @@ private:
     std::atomic<int64_t> m_cycleRequestedAtUs{0};
     int64_t m_primaryLastSeenUs{0};
     std::atomic<uint64_t> m_rejectedPackets{0};
+    std::atomic<uint64_t> m_datagrams{0};
+    std::atomic<uint64_t> m_publishedPoses{0};
+    std::string m_startFailure;
+    bool m_startFoundPortInUse{false};
+    bool m_loopbackOnly{false};
+
+    /// Written by the receive thread, whole, under the mutex.
+    mutable std::mutex m_snapshotMutex;
+    PoseSnapshot m_snapshot;
+
+    /// Stop() wakes the supervisor out of its wait between ticks.
+    std::mutex m_supervisorMutex;
+    std::condition_variable m_supervisorWake;
 
     /// The first datagram that does not parse is logged, once per receive thread.
     bool m_parseFailLogged{false};

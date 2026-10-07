@@ -43,10 +43,11 @@ UdpSocket::~UdpSocket() {
     Close();
 }
 
-bool UdpSocket::Open(uint16_t port) {
+bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
     if (m_socket != INVALID_SOCKET) {
         return true;
     }
+    m_lastErrorWasPortInUse = false;
 
 #ifdef _WIN32
     WSADATA wsaData;
@@ -114,15 +115,20 @@ bool UdpSocket::Open(uint16_t port) {
     }
 #endif
 
-    // Bind to all interfaces
     sockaddr_in addr;
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = loopbackOnly ? htonl(INADDR_LOOPBACK) : htonl(INADDR_ANY);
 
     if (bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-        m_lastError = DescribeFailure("bind", LastSocketError());
+        const int code = LastSocketError();
+        m_lastError = DescribeFailure("bind", code);
+#ifdef _WIN32
+        m_lastErrorWasPortInUse = code == WSAEADDRINUSE;
+#else
+        m_lastErrorWasPortInUse = code == EADDRINUSE;
+#endif
 #ifdef _WIN32
         closesocket(m_socket);
         WSACleanup();

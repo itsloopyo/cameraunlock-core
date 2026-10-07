@@ -42,13 +42,15 @@ bool UdpReceiver::Start(uint16_t port) {
     m_port = port;
     m_supervising.store(true, std::memory_order_release);
 
-    const bool bound = BindAndReceive();
+    m_startFailure.clear();
+    const bool bound = BindAndReceive(m_startFailure);
+    m_startFoundPortInUse = !bound && m_socket.LastErrorWasPortInUse();
     if (!bound && m_log) {
         // The OS's own reason, not a guess at one. A bind fails for reasons
         // other than a port conflict, and a log line that names the wrong one
         // sends the user looking for an app that is not running.
         m_log("Failed to bind UDP port " + std::to_string(port) + ": " +
-              m_socket.LastError() + " -- retrying every " +
+              m_startFailure + " -- retrying every " +
               std::to_string(kRetryIntervalMs) + "ms until it succeeds");
     }
 
@@ -56,8 +58,10 @@ bool UdpReceiver::Start(uint16_t port) {
     return bound;
 }
 
-bool UdpReceiver::BindAndReceive() {
-    if (!m_socket.Open(m_port)) {
+bool UdpReceiver::BindAndReceive(std::string& failure) {
+    if (!m_socket.Open(m_port, m_loopbackOnly)) {
+        // Every failing path of UdpSocket::Open describes itself.
+        failure = m_socket.LastError();
         m_failed.store(true, std::memory_order_release);
         m_retrying.store(true, std::memory_order_release);
         return false;
@@ -66,9 +70,10 @@ bool UdpReceiver::BindAndReceive() {
 #ifdef _WIN32
     m_stopEvent = WSACreateEvent();
     if (m_stopEvent == WSA_INVALID_EVENT) {
+        // The socket opened, so it has no error to give: the reason is this one.
+        failure = "WSACreateEvent failed with error " + std::to_string(WSAGetLastError());
         if (m_log) {
-            m_log("WSACreateEvent failed with " + std::to_string(WSAGetLastError()) +
-                  " - receive thread not started");
+            m_log(failure + " - receive thread not started");
         }
         m_socket.Close();
         m_failed.store(true, std::memory_order_release);
@@ -92,8 +97,13 @@ void UdpReceiver::SupervisorThread() {
     int64_t lastAttemptUs = retryingSinceUs;
     int64_t lastWaitLogUs = retryingSinceUs;
 
+    std::string failure;
     while (m_supervising.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(kSupervisorTickMs));
+        {
+            std::unique_lock<std::mutex> lock(m_supervisorMutex);
+            m_supervisorWake.wait_for(lock, std::chrono::milliseconds(kSupervisorTickMs),
+                                      [this] { return !m_supervising.load(std::memory_order_acquire); });
+        }
         if (!m_supervising.load(std::memory_order_acquire)) return;
 
         const int64_t now = NowUs();
@@ -102,7 +112,7 @@ void UdpReceiver::SupervisorThread() {
             if (now - lastAttemptUs < static_cast<int64_t>(kRetryIntervalMs) * 1000) continue;
             lastAttemptUs = now;
 
-            if (BindAndReceive()) {
+            if (BindAndReceive(failure)) {
                 if (m_log) {
                     m_log("Bound UDP port " + std::to_string(m_port) + " after " +
                           std::to_string((now - retryingSinceUs) / 1000000) +
@@ -113,7 +123,7 @@ void UdpReceiver::SupervisorThread() {
                 lastWaitLogUs = now;
                 m_log("Still waiting for UDP port " + std::to_string(m_port) +
                       " (" + std::to_string((now - retryingSinceUs) / 1000000) +
-                      "s elapsed): " + m_socket.LastError());
+                      "s elapsed): " + failure);
             }
             continue;
         }
@@ -125,7 +135,7 @@ void UdpReceiver::SupervisorThread() {
         if (!m_receiveFailed.load(std::memory_order_acquire)) continue;
 
         StopReceiverThread();
-        if (BindAndReceive()) {
+        if (BindAndReceive(failure)) {
             if (m_log) {
                 m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
                       " - socket re-established");
@@ -136,7 +146,7 @@ void UdpReceiver::SupervisorThread() {
             lastWaitLogUs = retryingSinceUs;
             if (m_log) {
                 m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
-                      " and it could not be reopened: " + m_socket.LastError() +
+                      " and it could not be reopened: " + failure +
                       " -- retrying every " + std::to_string(kRetryIntervalMs) +
                       "ms until it succeeds");
             }
@@ -165,7 +175,11 @@ void UdpReceiver::StopReceiverThread() {
 }
 
 void UdpReceiver::Stop() {
-    m_supervising.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(m_supervisorMutex);
+        m_supervising.store(false, std::memory_order_release);
+    }
+    m_supervisorWake.notify_all();
     if (m_supervisorThread.joinable()) {
         m_supervisorThread.join();
     }
@@ -199,6 +213,12 @@ void UdpReceiver::Stop() {
     m_frozenPackets.store(0, std::memory_order_relaxed);
     m_seenSourceCount = 0;
     m_rejectedPackets.store(0, std::memory_order_relaxed);
+    m_datagrams.store(0, std::memory_order_relaxed);
+    m_publishedPoses.store(0, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(m_snapshotMutex);
+        m_snapshot = PoseSnapshot();
+    }
 }
 
 bool UdpReceiver::IsReceiving() const {
@@ -460,6 +480,19 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
             m_frozenPackets.fetch_add(1, std::memory_order_relaxed);
             return;
         }
+        {
+            // The pose, its number and the press it announced go out together.
+            std::lock_guard<std::mutex> lock(m_snapshotMutex);
+            m_snapshot.sequence += 1;
+            if (pressed) m_snapshot.centers += 1;
+            m_snapshot.received_us = nowUs;
+            m_snapshot.yaw = pose.yaw;
+            m_snapshot.pitch = pose.pitch;
+            m_snapshot.roll = pose.roll;
+            m_snapshot.x = position.x;
+            m_snapshot.y = position.y;
+            m_snapshot.z = position.z;
+        }
         m_trackingData.Set(pose.yaw, pose.pitch, pose.roll);
 
         // Store position data
@@ -471,6 +504,7 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
         m_isRemoteConnection.store(IsRemoteAddress(senderAddr), std::memory_order_relaxed);
 
         m_lastReceiveTimestamp.store(nowUs, std::memory_order_release);
+        m_publishedPoses.fetch_add(1, std::memory_order_release);
     }
 }
 
@@ -479,6 +513,7 @@ void detail::UdpReceiverTestAccess::Deliver(UdpReceiver& receiver, const void* d
     if (length >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
         receiver.HandleDatagram(static_cast<const char*>(datagram), length, sender, arrivedUs);
     }
+    receiver.m_datagrams.fetch_add(1, std::memory_order_release);
 }
 
 void UdpReceiver::ReceiverThread() {
@@ -552,6 +587,9 @@ void UdpReceiver::ReceiverThread() {
                 m_log("recvfrom failed with WSA error " + std::to_string(err) +
                       " (continuing)");
             }
+            if (err == WSAEMSGSIZE) {
+                m_datagrams.fetch_add(1, std::memory_order_release);
+            }
             continue;
         }
         if (!s_firstPacketLogged++ && m_log) {
@@ -589,11 +627,15 @@ void UdpReceiver::ReceiverThread() {
             reinterpret_cast<sockaddr*>(&senderAddr),
             &addrLen
         );
+        if (bytesReceived < 0) continue;
 #endif
 
         if (bytesReceived >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
             HandleDatagram(buffer, bytesReceived, senderAddr, NowUs());
         }
+        // Counted once the datagram has been dealt with, so a reader that sees the count
+        // sees everything the datagram changed.
+        m_datagrams.fetch_add(1, std::memory_order_release);
     }
 
 #ifdef _WIN32
