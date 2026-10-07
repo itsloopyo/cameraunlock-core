@@ -477,22 +477,41 @@ int RunReceiverTests() {
         Check(blocked.StartFoundPortInUse(), "and says the port is in use");
         Check(blocked.GetStartFailure().find("bind failed with error " + std::to_string(kExpectedInUseError)) == 0,
               "with the OS's own reason");
-        const auto failedStopStart = std::chrono::steady_clock::now();
         blocked.Stop();
-        const auto failedStopMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - failedStopStart).count();
-        Check(failedStopMs < 50, "Stop after a failed Start does not wait out the supervisor's tick");
+
+        // The supervisor used to sleep 100 ms between looks at its flag, so a Stop this
+        // soon after Start took what was left of that every time. The fastest of five is
+        // taken, so a machine busy with something else does not fail the check.
+        int64_t fastestFailedStopMs = 1000;
+        for (int i = 0; i < 5; i++) {
+            blocked.Start(kStartFailurePort);
+            const auto stopStart = std::chrono::steady_clock::now();
+            blocked.Stop();
+            const int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - stopStart).count();
+            if (ms < fastestFailedStopMs) fastestFailedStopMs = ms;
+        }
+        Check(fastestFailedStopMs < 30, "Stop after a failed Start does not wait out the supervisor's tick");
         holder.Close();
 
         Check(blocked.Start(kStartFailurePort), "the same receiver binds once the port is free");
         Check(!blocked.StartFoundPortInUse() && blocked.GetStartFailure().empty(),
               "and a Start that binds reports no failure");
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-        const auto boundStopStart = std::chrono::steady_clock::now();
         blocked.Stop();
-        const auto boundStopMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - boundStopStart).count();
-        Check(boundStopMs < 50, "Stop of a bound receiver does not wait out the supervisor's tick");
+
+        int64_t fastestBoundStopMs = 1000;
+        for (int i = 0; i < 5; i++) {
+            blocked.Start(kStartFailurePort);
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            const auto stopStart = std::chrono::steady_clock::now();
+            blocked.Stop();
+            const int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - stopStart).count();
+            if (ms < fastestBoundStopMs) fastestBoundStopMs = ms;
+        }
+        Check(fastestBoundStopMs < 30, "Stop of a bound receiver does not wait out the supervisor's tick");
+        std::cout << "    (fastest Stop of five: " << fastestFailedStopMs << " ms after a failed Start, "
+                  << fastestBoundStopMs << " ms bound)\n";
     }
 
     // ---- UdpReceiver: a snapshot is one datagram's, with a writer running ----
