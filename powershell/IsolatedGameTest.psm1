@@ -761,6 +761,9 @@ function Enter-GameRig {
                     if (-not $held) { continue }
                     $live = Test-GameRigOwnerLive $held
                     if ($folder.Name -eq $key) {
+                        if ($held.ProcessId -eq $PID -and $held.ProcessStart -eq $start) {
+                            throw "this process already holds the rig for $key ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
+                        }
                         if ($live) { return "the rig is in use: $(Format-GameRigOwner $held)" }
                         if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
                             throw "the last session on $key, $(Format-GameRigOwner $held), ended without putting the game's files back. What it saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)', then ask again."
@@ -1010,7 +1013,8 @@ function Start-GameProcessSampler {
     .SYNOPSIS
     Starts a hidden process that writes one CSV row every -IntervalSeconds for a running process:
     private bytes, working set, dedicated video memory and processor time. Returns the sampler
-    Stop-GameProcessSampler takes. It ends by itself when the process it watches has gone.
+    Stop-GameProcessSampler takes. It ends by itself when the process it watches has gone. A file
+    already at -Path is replaced.
     .DESCRIPTION
     Columns: time, elapsedSeconds, privateMB, workingSetMB, dedicatedVideoMB, cpuSeconds.
     dedicatedVideoMB is the sum of Windows' "GPU Process Memory" counters for the process and is
@@ -1190,6 +1194,10 @@ function Complete-IsolatedGameSession {
     $failures = New-Object System.Collections.Generic.List[object]
     if ($Session.ProcessId) {
         try { Stop-IsolatedGame -Session $Session } catch { $failures.Add($_) }
+        $still = Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
+        if ($still -and $still.ProcessName -eq $Session.ProcessName) {
+            throw "the game (pid $($Session.ProcessId)) could not be stopped, so nothing was put back under it and the rig is still held. $($failures -join ' ')"
+        }
     } else {
         # The game never started, and Start-IsolatedGame had already put these beside the mod.
         Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
@@ -1218,6 +1226,10 @@ function Stop-IsolatedGameSession {
     -Collect runs after the game has stopped and before its files are put back, and is handed the
     session: copy out the logs and the config as the run left them.
 
+    A session whose lock is gone (someone removed it, or it was taken over after the game went
+    with nothing saved) is not put back: its pose sender is stopped, its session file removed,
+    and this throws. The game and its files may be another session's by then.
+
     The rig is released only once the files are back. If the restore fails this throws with the
     rig still held and the saved state still in the session's StateFolder: run
     Restore-GameTestState on it. Until then Enter-GameRig refuses the game to everyone, naming
@@ -1237,7 +1249,17 @@ function Stop-IsolatedGameSession {
         if (-not $SessionFile) { throw 'Stop-IsolatedGameSession needs -Session or -SessionFile' }
         $Session = Get-IsolatedGameSession -SessionFile $SessionFile
     }
-    $rig = Enter-GameRig -Game $Session.ProcessName -Owner $Session.Owner -Token $Session.RigToken
+    try { $rig = Enter-GameRig -Game $Session.ProcessName -Owner $Session.Owner -Token $Session.RigToken }
+    catch {
+        # Without the rig the game and its files may be another session's by now. What is only
+        # this session's is cleared, so it is not stopped twice.
+        if ($Session.Sender) {
+            $sender = Get-Process -Id $Session.Sender -ErrorAction SilentlyContinue
+            if ($sender -and $sender.ProcessName -eq 'powershell') { Stop-Process -Id $Session.Sender -Force }
+        }
+        if ($Session.SessionFile) { Remove-Item $Session.SessionFile -Force -ErrorAction SilentlyContinue }
+        throw "this session no longer holds the rig, so the game and its files were left alone: $_"
+    }
     Complete-IsolatedGameSession -Session $Session -Rig $rig -Collect $Collect -RestoreRetrySeconds $RestoreRetrySeconds
 }
 

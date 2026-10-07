@@ -60,11 +60,11 @@ function Stop-StandIn {
 $taker = Join-Path $root 'taker.ps1'
 Set-Content $taker -Encoding ASCII -Value @'
 param([string]$Module, [string]$Game, [string]$Owner, [string]$Log, [int]$HoldMs = 0, [string]$Gate = '', [int]$WaitSeconds = 3600,
-      [switch]$Abandon, [string]$StateFolder = '', [string]$SaveFile = '', [string]$TokenFile = '')
+      [switch]$Abandon, [string]$StateFolder = '', [string]$SaveFile = '', [string]$TokenFile = '', [switch]$WholeGpu)
 $ErrorActionPreference = 'Stop'
 Import-Module $Module
 if ($Gate) { Set-Content "$Gate.$Owner" ''; while (-not (Test-Path $Gate)) { Start-Sleep -Milliseconds 10 } }
-try { $rig = Enter-GameRig -Game $Game -Owner $Owner -WaitSeconds $WaitSeconds -StateFolder $StateFolder 6>$null }
+try { $rig = Enter-GameRig -Game $Game -Owner $Owner -WaitSeconds $WaitSeconds -StateFolder $StateFolder -WholeGpu:$WholeGpu 6>$null }
 catch { Set-Content "$Log.$Owner" "$_"; exit 3 }
 Add-Content $Log "in $Owner"
 if ($TokenFile) { Set-Content $TokenFile $rig.Token }
@@ -136,8 +136,10 @@ try {
 
     # A waiter that gives up leaves the queue.
     $mine = Enter-GameRig -Game 'queue' -Owner 'first' -WaitSeconds 0
-    Check 'a wait that runs out throws, naming the holder' (Throws { Enter-GameRig -Game 'queue' -Owner 'late' -WaitSeconds 1 6>$null } 'the rig is in use: first .*Waited 1 seconds')
+    Wait-All @(Start-Taker @{ Game = 'queue'; Owner = 'late'; Log = $log; WaitSeconds = 1 })
+    Check 'a wait that runs out throws, naming the holder' ((Get-Content "$log.late" -Raw) -match 'the rig is in use: first .*Waited 1 seconds')
     Check 'and its ticket is gone' (@((Get-GameRig -Game 'queue').Waiting).Count -eq 0)
+    Check 'a process that asks again for a rig it holds is told so, and does not wait on itself' (Throws { Enter-GameRig -Game 'queue' -Owner 'first' } 'already holds the rig')
     Exit-GameRig -Rig $mine
 
     # --- a dead owner's lock ------------------------------------------------
@@ -210,7 +212,9 @@ try {
     $card = Enter-GameRig -WholeGpu -Owner 'pictures' -What 'a batch of eight' -WaitSeconds 0
     Check 'with every rig free it takes the card, with no game named' ((Get-GameRig).Holder.WholeGpu -and (Get-GameRig).Holder.What -eq 'a batch of eight')
     Check 'and no game''s rig is given out while it holds' (Throws { Enter-GameRig -Game 'cardgame' -Owner 'player' -WaitSeconds 0 } 'the graphics card is in use: gpu is held by pictures \(.*a batch of eight, the whole graphics card\)')
-    Check 'nor a second run that needs the card' (Throws { Enter-GameRig -WholeGpu -Owner 'more pictures' -WaitSeconds 0 } 'the rig is in use: pictures')
+    $log = Join-Path $root 'card.log'
+    Wait-All @(Start-Taker @{ Owner = 'more'; Log = $log; WaitSeconds = 0; WholeGpu = $true })
+    Check 'nor a second run that needs the card' ((Get-Content "$log.more" -Raw) -match 'the rig is in use: pictures')
     Exit-GameRig -Rig $card
     Check 'a name that is not a process name is refused' (Throws { Enter-GameRig -Game '..\elsewhere' -Owner 'x' -WaitSeconds 0 } 'cannot name a rig')
 
@@ -338,6 +342,15 @@ Start-IsolatedGameSession -ProcessName $Game -Launch $Exe -ModFolder $Mod -Owner
     Check 'stopping it from another process stops the game, restores and releases' `
         (-not (Get-Process -Id $split.ProcessId -ErrorAction SilentlyContinue) -and -not (Test-Path (Join-Path $saves 'world\chunk-9.bin')) -and $null -eq (Get-GameRig -Game $gameName) -and -not (Test-Path $sessionFile))
     Check 'a session that is not there says so' (Throws { Stop-IsolatedGameSession -SessionFile $sessionFile } 'no session at')
+
+    # A session whose lock has gone: with nothing saved, a game that went leaves the lock to be taken over.
+    $lost = Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'lost' -SettleSeconds 0 -SessionFile $sessionFile
+    Stop-StandIn
+    Exit-GameRig -Rig (Enter-GameRig -Game $gameName -Owner 'lost' -Token $lost.RigToken)
+    $taken = Enter-GameRig -Game $gameName -Owner 'another session' -WaitSeconds 0
+    Check 'stopping a session that has lost the rig throws and touches nothing of the game''s' (Throws { Stop-IsolatedGameSession -SessionFile $sessionFile } 'no longer holds the rig')
+    Check 'the rig is still the other session''s, and the lost session''s file is gone' ((Get-GameRig -Game $gameName).Holder.Owner -eq 'another session' -and -not (Test-Path $sessionFile))
+    Exit-GameRig -Rig $taken
 
     # The sequence a session has reached is what its next process needs. A stand-in for the mod's
     # answer: the done file already says script 1 was played.
