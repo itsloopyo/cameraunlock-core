@@ -9,6 +9,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - CenterWindowInWorkArea, a window centre that can be called after every placement
+
+`cameraunlock/os/game_window.h` gains `constexpr int CenteredOrigin(int workStart, int workLength,
+int windowLength)`, the origin that centres a window on one axis of a work area, and
+`bool CenterWindowInWorkArea(HWND hwnd, WindowLogFn log)`, which centres the window it is given in
+the work area of the monitor it is on. It keeps no once-per-process latch and does not raise or
+activate the window, so a mod calls it from wherever the game places its window: at creation, on a
+change of windowed resolution, on the way back from fullscreen. It leaves a minimised, maximised
+or captionless window alone, and one wider or taller than the work area, and says nothing when the
+window is already centred. C# has the same pair as `CameraUnlock.Core.Os.GameWindow`.
+
+`CenterGameWindowOnce` is unchanged: it still runs once per process, raises the window, and leaves
+a window that fills the work area on either axis where it is.
+
 ### Added - conformance checks for a pipeline port and a long [Unreleased]
 
 `scripts/conformance.ps1` gains two checks, tested by `pixi run test-conformance-checks`.

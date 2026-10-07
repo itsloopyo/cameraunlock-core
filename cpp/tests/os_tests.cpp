@@ -34,6 +34,30 @@ void Check(bool cond, const char* name) {
     }
 }
 
+void TestCenteredOrigin() {
+    using cameraunlock::os::CenteredOrigin;
+    std::cout << "CenteredOrigin:\n";
+
+    Check(CenteredOrigin(0, 1920, 1280) == 320, "a window in a work area at the origin");
+    Check(CenteredOrigin(0, 1040, 720) == 160, "the work area's length is used, not the monitor's");
+    Check(CenteredOrigin(1920, 2560, 1936) == 2232, "a monitor right of the primary starts past zero");
+    Check(CenteredOrigin(-1920, 1920, 1280) == -1600, "a monitor left of the primary has a negative start");
+    Check(CenteredOrigin(-1080, 1040, 720) == -920, "a monitor above the primary has a negative start");
+    Check(CenteredOrigin(-1000, 3000, 500) == 250, "a work area that spans zero");
+    Check(CenteredOrigin(0, 1921, 1280) == 320, "an odd gap leaves the spare pixel after the window");
+    Check(CenteredOrigin(-1921, 1921, 1280) == -1601, "an odd gap rounds the same way at a negative start");
+    Check(CenteredOrigin(100, 1280, 1280) == 100, "a window as long as the work area starts where it starts");
+    Check(CenteredOrigin(0, 1920, 0) == 960, "a zero-length window starts at the middle");
+    Check(CenteredOrigin(0, 1080, 1100) == -10, "a longer window starts before the work area");
+    Check(CenteredOrigin(0, 1080, 1083) == -1, "an odd overhang is halved toward zero, not toward the smaller number");
+    Check(CenteredOrigin(-1080, 1080, 1100) == -1090, "a longer window on a monitor with a negative start");
+
+    // Usable where a constant is wanted, and through a plain function pointer.
+    static_assert(CenteredOrigin(0, 1920, 1280) == 320, "CenteredOrigin is constexpr");
+    int (*const fn)(int, int, int) noexcept = &CenteredOrigin;
+    Check(fn(0, 100, 50) == 25, "it is an ordinary function of three ints");
+}
+
 #ifdef _WIN32
 
 void TestDirectoryOf() {
@@ -155,17 +179,108 @@ void TestGameWindow() {
     Check(true, "a null log sink is accepted");
 }
 
+std::string g_lastLog;
+
+void RecordingLog(cameraunlock::os::WindowLogLevel, const char* message) {
+    ++g_logCalls;
+    g_lastLog = message;
+}
+
+// The windows here are never shown, so nothing appears on the desktop and no
+// window is activated. Placement, the monitor lookup and the style read all work
+// on a hidden window.
+void TestCenterWindowInWorkArea() {
+    using cameraunlock::os::CenteredOrigin;
+    using cameraunlock::os::CenterWindowInWorkArea;
+    std::cout << "CenterWindowInWorkArea:\n";
+
+    g_logCalls = 0;
+    Check(!CenterWindowInWorkArea(nullptr, &RecordingLog) && g_logCalls == 1,
+          "a null window is refused and reported");
+    Check(!CenterWindowInWorkArea(nullptr, nullptr), "a null log sink is accepted");
+
+    HWND hwnd = CreateWindowExW(0, L"STATIC", L"cameraunlock os test", WS_OVERLAPPEDWINDOW,
+                                37, 53, 400, 300, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    Check(hwnd != nullptr, "a hidden captioned window is created");
+    if (hwnd == nullptr) return;
+
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &info);
+    const RECT work = info.rcWork;
+    const int workW = work.right - work.left;
+    const int workH = work.bottom - work.top;
+    const HWND foregroundBefore = GetForegroundWindow();
+
+    g_logCalls = 0;
+    const bool moved = CenterWindowInWorkArea(hwnd, &RecordingLog);
+    RECT rect{};
+    GetWindowRect(hwnd, &rect);
+    Check(moved && g_logCalls == 1, "the first call centres and logs once");
+    Check(rect.left == CenteredOrigin(work.left, workW, 400) &&
+              rect.top == CenteredOrigin(work.top, workH, 300),
+          "the window is at the centred origin of its monitor's work area");
+    Check(rect.right - rect.left == 400 && rect.bottom - rect.top == 300, "its size is unchanged");
+    Check(g_lastLog.find("400x300") != std::string::npos && g_lastLog.find("was at (37, 53)") != std::string::npos,
+          "the log line carries the size and the origin it was at");
+    Check(!IsWindowVisible(hwnd) && GetForegroundWindow() == foregroundBefore,
+          "the window is neither shown nor activated");
+
+    g_logCalls = 0;
+    Check(CenterWindowInWorkArea(hwnd, &RecordingLog) && g_logCalls == 0,
+          "a second call finds it centred and says nothing");
+
+    // The game picks another windowed size: the same call centres the new size.
+    SetWindowPos(hwnd, nullptr, 11, 17, 640, 360, SWP_NOZORDER | SWP_NOACTIVATE);
+    g_logCalls = 0;
+    Check(CenterWindowInWorkArea(hwnd, &RecordingLog) && g_logCalls == 1, "a resized window is centred again");
+    GetWindowRect(hwnd, &rect);
+    Check(rect.left == CenteredOrigin(work.left, workW, 640) &&
+              rect.top == CenteredOrigin(work.top, workH, 360),
+          "at the origin for its new size");
+
+    SetWindowPos(hwnd, nullptr, 5, 7, workW + 40, 360, SWP_NOZORDER | SWP_NOACTIVATE);
+    GetWindowRect(hwnd, &rect);
+    if (rect.right - rect.left > workW) {
+        g_logCalls = 0;
+        Check(!CenterWindowInWorkArea(hwnd, &RecordingLog) && g_logCalls == 1,
+              "a window wider than the work area is left alone and reported");
+        RECT after{};
+        GetWindowRect(hwnd, &after);
+        Check(EqualRect(&rect, &after) != FALSE, "and it has not moved");
+    } else {
+        std::cout << "  (skipped: Windows clamped the oversized window to the work area)\n";
+    }
+
+    SetWindowPos(hwnd, nullptr, 11, 17, 400, 300, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowLongW(hwnd, GWL_STYLE, WS_POPUP);
+    GetWindowRect(hwnd, &rect);
+    g_logCalls = 0;
+    Check(!CenterWindowInWorkArea(hwnd, &RecordingLog) && g_logCalls == 1,
+          "a window with no caption is left alone and reported");
+    RECT after{};
+    GetWindowRect(hwnd, &after);
+    Check(EqualRect(&rect, &after) != FALSE, "and it has not moved");
+
+    DestroyWindow(hwnd);
+    g_logCalls = 0;
+    Check(!CenterWindowInWorkArea(hwnd, &RecordingLog) && g_logCalls == 1,
+          "a destroyed window is refused and reported");
+}
+
 #endif  // _WIN32
 
 }  // namespace
 
 int RunOsTests() {
     std::cout << "\n=== OS Tests ===\n";
+    TestCenteredOrigin();
 #ifdef _WIN32
     TestDirectoryOf();
     TestNarrowToAnsi();
     TestSelfAndHostDirectories();
     TestGameWindow();
+    TestCenterWindowInWorkArea();
 #else
     std::cout << "  (skipped: cameraunlock::os is Windows-only)\n";
 #endif

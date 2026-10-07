@@ -153,8 +153,8 @@ void CenterGameWindowOnce(WindowLogFn log) {
         return;
     }
 
-    int newX = work.left + (workW - winW) / 2;
-    int newY = work.top + (workH - winH) / 2;
+    int newX = CenteredOrigin(work.left, workW, winW);
+    int newY = CenteredOrigin(work.top, workH, winH);
     if (!SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0,
                       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)) {
         Emit(log, WindowLogLevel::Warning, "window: SetWindowPos failed: %lu", GetLastError());
@@ -163,6 +163,69 @@ void CenterGameWindowOnce(WindowLogFn log) {
     Emit(log, WindowLogLevel::Info,
          "window: centered %dx%d window at (%d, %d) on work area %dx%d",
          winW, winH, newX, newY, workW, workH);
+}
+
+bool CenterWindowInWorkArea(HWND hwnd, WindowLogFn log) {
+    if (!IsWindow(hwnd)) {
+        Emit(log, WindowLogLevel::Warning, "window: %p is not a window", static_cast<void*>(hwnd));
+        return false;
+    }
+    // A minimised window reports a small rect far off screen in place of its own.
+    if (IsIconic(hwnd)) {
+        Emit(log, WindowLogLevel::Info, "window: minimised, leaving position unchanged");
+        return false;
+    }
+    if (IsZoomed(hwnd)) {
+        Emit(log, WindowLogLevel::Info, "window: maximised, leaving position unchanged");
+        return false;
+    }
+    if ((GetWindowLongW(hwnd, GWL_STYLE) & WS_CAPTION) == 0) {
+        Emit(log, WindowLogLevel::Info, "window: borderless/fullscreen window, leaving position unchanged");
+        return false;
+    }
+
+    RECT win{};
+    if (!GetWindowRect(hwnd, &win)) {
+        Emit(log, WindowLogLevel::Warning, "window: GetWindowRect failed: %lu", GetLastError());
+        return false;
+    }
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &info)) {
+        Emit(log, WindowLogLevel::Warning, "window: GetMonitorInfoW failed");
+        return false;
+    }
+    const RECT& work = info.rcWork;
+    const int winW = win.right - win.left;
+    const int winH = win.bottom - win.top;
+    const int workW = work.right - work.left;
+    const int workH = work.bottom - work.top;
+
+    // Nowhere on the work area shows all of it, and centring a window taller
+    // than the work area puts its title bar above the top, out of reach.
+    if (winW > workW || winH > workH) {
+        Emit(log, WindowLogLevel::Info,
+             "window: %dx%d at (%d, %d) does not fit work area %dx%d at (%d, %d), leaving position unchanged",
+             winW, winH, static_cast<int>(win.left), static_cast<int>(win.top),
+             workW, workH, static_cast<int>(work.left), static_cast<int>(work.top));
+        return false;
+    }
+
+    const int newX = CenteredOrigin(work.left, workW, winW);
+    const int newY = CenteredOrigin(work.top, workH, winH);
+    if (newX == win.left && newY == win.top) return true;
+
+    if (!SetWindowPos(hwnd, nullptr, newX, newY, 0, 0,
+                      SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)) {
+        Emit(log, WindowLogLevel::Warning, "window: SetWindowPos failed: %lu", GetLastError());
+        return false;
+    }
+    Emit(log, WindowLogLevel::Info,
+         "window: centered %dx%d at (%d, %d) on work area %dx%d at (%d, %d), was at (%d, %d)",
+         winW, winH, newX, newY, workW, workH,
+         static_cast<int>(work.left), static_cast<int>(work.top),
+         static_cast<int>(win.left), static_cast<int>(win.top));
+    return true;
 }
 
 }  // namespace cameraunlock::os
