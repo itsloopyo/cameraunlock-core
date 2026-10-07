@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.IO;
 using System.IO.IsolatedStorage;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
 namespace CameraUnlock.Core.Config
@@ -15,6 +16,8 @@ namespace CameraUnlock.Core.Config
     {
         private const int HResultFileExists = unchecked((int)0x80070050);
         private const int HResultAlreadyExists = unchecked((int)0x800700B7);
+        private const int HResultSharingViolation = unchecked((int)0x80070020);
+        private const int HResultUnableToRemoveReplaced = unchecked((int)0x80070497);
         private const int HResultUnableToMoveReplacement = unchecked((int)0x80070498);
         private const int HResultUnableToMoveReplacement2 = unchecked((int)0x80070499);
         private const uint GenericWrite = 0x40000000;
@@ -22,6 +25,8 @@ namespace CameraUnlock.Core.Config
         private const uint FileAttributeNormal = 0x80;
         private const uint InvalidFileAttributes = 0xFFFFFFFF;
         private const int ErrorWriteFault = 29;
+        private const int CommitAttempts = 10;
+        private const int CommitRetryMilliseconds = 20;
 
         /// <summary>
         /// Writes <paramref name="candidate"/> to <paramref name="path"/> if the file there
@@ -37,6 +42,14 @@ namespace CameraUnlock.Core.Config
         /// string, string)"/>, which keeps the target's attributes, and no backup is made. An
         /// absent one is created by renaming the temporary with <see cref="File.Move"/>, which
         /// fails rather than overwrite a file that appeared after the check.
+        /// </para>
+        /// <para>
+        /// <see cref="File.Replace(string, string, string)"/> failing with
+        /// ERROR_SHARING_VIOLATION or ERROR_UNABLE_TO_REMOVE_REPLACED means the target could not
+        /// be replaced at that instant, and leaves the target and the temporary as they were. The
+        /// writer then waits 20 ms, reads the target again and replaces it only if it still
+        /// passes the same check, up to ten attempts in all. A target that cannot be replaced at
+        /// the tenth throws with that error. Creating an absent target is tried once.
         /// </para>
         /// <para>
         /// <see cref="File.Replace(string, string, string)"/> failing with
@@ -233,23 +246,37 @@ namespace CameraUnlock.Core.Config
                     _handle = null;
                     Close(handle);
 
-                    step = CheckedWriteStep.RecheckTarget;
-                    Snapshot second = Read(step);
-                    outcome = Compare(expected, first, second);
-                    if (outcome == CheckedWriteOutcome.Committed)
+                    for (int attempt = 1; ; attempt++)
                     {
+                        step = CheckedWriteStep.RecheckTarget;
+                        Snapshot second = Read(step);
+                        outcome = Compare(expected, first, second);
+                        if (outcome != CheckedWriteOutcome.Committed) break;
+
                         step = CheckedWriteStep.Commit;
                         creating = !second.Exists;
-                        Before(step, _target);
-                        if (creating)
+                        try
                         {
-                            File.Move(_temporary, _target);
+                            Before(step, _target);
+                            if (creating)
+                            {
+                                File.Move(_temporary, _target);
+                            }
+                            else
+                            {
+                                File.Replace(_temporary, _target, null);
+                            }
+                            return CheckedWriteOutcome.Committed;
                         }
-                        else
+                        catch (Exception e)
                         {
-                            File.Replace(_temporary, _target, null);
+                            if (creating || attempt == CommitAttempts
+                                || !TargetInUse(Marshal.GetHRForException(e)))
+                            {
+                                throw;
+                            }
                         }
-                        return CheckedWriteOutcome.Committed;
+                        Thread.Sleep(CommitRetryMilliseconds);
                     }
                 }
                 catch (Exception e)
@@ -299,6 +326,17 @@ namespace CameraUnlock.Core.Config
                         CheckedWriteStep.RemoveTemporary, _target, _temporary, false, false, e, null, null);
                 }
                 return outcome;
+            }
+
+            // The two errors File.Replace gives for a target it cannot replace at this instant,
+            // both leaving the target and the temporary as they were. ERROR_SHARING_VIOLATION is
+            // another program's handle opened without FILE_SHARE_DELETE.
+            // ERROR_UNABLE_TO_REMOVE_REPLACED comes with no handle of this process on either file:
+            // on a loaded Windows 11 machine 35 of 24000 calls to ReplaceFileW failed with it, 34
+            // were made by the next call and one by the call after.
+            private static bool TargetInUse(int hresult)
+            {
+                return hresult == HResultSharingViolation || hresult == HResultUnableToRemoveReplaced;
             }
 
             private void Before(CheckedWriteStep step, string path)

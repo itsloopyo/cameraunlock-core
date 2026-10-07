@@ -24,6 +24,7 @@ namespace CameraUnlock.Core.Tests.Config
         private const string FileName = "HeadTracking.ini";
         private const int HResultGenFailure = unchecked((int)0x8007001F);
         private const int HResultSharingViolation = unchecked((int)0x80070020);
+        private const int HResultUnableToRemoveReplaced = unchecked((int)0x80070497);
         private const int HResultUnableToMoveReplacement = unchecked((int)0x80070498);
         private const int HResultUnableToMoveReplacement2 = unchecked((int)0x80070499);
         private const int ErrorInvalidHandle = 6;
@@ -67,6 +68,10 @@ namespace CameraUnlock.Core.Tests.Config
             Scenario("a-replacement-error-without-a-win32-code-is-checked-against-the-target", AReplacementErrorWithoutAWin32CodeIsCheckedAgainstTheTarget),
             Scenario("a-taken-temporary-name-is-not-deleted", ATakenTemporaryNameIsNotDeleted),
             Scenario("a-handle-without-share-delete-fails-the-commit", AHandleWithoutShareDeleteFailsTheCommit),
+            Scenario("a-target-in-use-for-a-moment-is-replaced-on-a-later-attempt", ATargetInUseForAMomentIsReplacedOnALaterAttempt),
+            Scenario("a-handle-without-share-delete-that-closes-lets-the-commit-through", AHandleWithoutShareDeleteThatClosesLetsTheCommitThrough),
+            Scenario("a-target-edited-while-in-use-is-not-overwritten", ATargetEditedWhileInUseIsNotOverwritten),
+            Scenario("a-target-in-use-throughout-fails-after-ten-attempts", ATargetInUseThroughoutFailsAfterTenAttempts),
             Scenario("an-exclusive-handle-fails-the-read", AnExclusiveHandleFailsTheRead),
             Scenario("a-read-only-target-fails-and-stays-read-only", AReadOnlyTargetFailsAndStaysReadOnly),
             Scenario("hidden-and-system-attributes-are-kept", HiddenAndSystemAttributesAreKept),
@@ -567,6 +572,120 @@ namespace CameraUnlock.Core.Tests.Config
             }
             ExpectBytes(target, "a=1");
             ExpectListing(dir, FileName);
+        }
+
+        private static void ATargetInUseForAMomentIsReplacedOnALaterAttempt(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            foreach (int hresult in new[] { HResultUnableToRemoveReplaced, HResultSharingViolation })
+            {
+                string name = "0x" + hresult.ToString("X8");
+                File.WriteAllBytes(target, Utf8("a=1"));
+                var steps = new List<CheckedWriteStep>();
+                int commits = 0;
+                CheckedWriteOutcome outcome = CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), (step, path) =>
+                {
+                    steps.Add(step);
+                    if (step == CheckedWriteStep.Commit && ++commits <= 2) throw new IOException("injected", hresult);
+                });
+                Expect(outcome == CheckedWriteOutcome.Committed, name + ": the third attempt commits, got " + outcome);
+                var again = new[]
+                {
+                    CheckedWriteStep.RecheckTarget, CheckedWriteStep.Commit,
+                    CheckedWriteStep.RecheckTarget, CheckedWriteStep.Commit,
+                    CheckedWriteStep.RecheckTarget, CheckedWriteStep.Commit,
+                };
+                Expect(steps.Skip(System.Math.Max(0, steps.Count - 6)).SequenceEqual(again),
+                    name + ": the target is read again before each attempt");
+                ExpectBytes(target, "a=2");
+                ExpectListing(dir, FileName);
+            }
+        }
+
+        private static void AHandleWithoutShareDeleteThatClosesLetsTheCommitThrough(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            File.WriteAllBytes(target, Utf8("a=1"));
+            FileStream other = null;
+            int commits = 0;
+            CheckedWriteOutcome outcome;
+            try
+            {
+                outcome = CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), (step, path) =>
+                {
+                    if (step != CheckedWriteStep.Commit) return;
+                    if (++commits == 1)
+                    {
+                        other = new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    }
+                    else if (commits == 3)
+                    {
+                        other.Dispose();
+                    }
+                });
+            }
+            finally
+            {
+                if (other != null) other.Dispose();
+            }
+            Expect(commits == 3, "another handle was open for two attempts, got " + commits);
+            Expect(outcome == CheckedWriteOutcome.Committed, "the attempt after it closed commits, got " + outcome);
+            ExpectBytes(target, "a=2");
+            ExpectListing(dir, FileName);
+        }
+
+        private static void ATargetEditedWhileInUseIsNotOverwritten(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            File.WriteAllBytes(target, Utf8("a=1"));
+            int commits = 0;
+            CheckedWriteOutcome outcome = CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), (step, path) =>
+            {
+                if (step != CheckedWriteStep.Commit) return;
+                commits++;
+                File.WriteAllBytes(target, Utf8("theirs"));
+                throw new IOException("injected", HResultUnableToRemoveReplaced);
+            });
+            Expect(commits == 1 && outcome == CheckedWriteOutcome.TargetChanged,
+                "the next read finds the edit and stops, got " + outcome + " after " + commits);
+            ExpectBytes(target, "theirs");
+            ExpectListing(dir, FileName);
+        }
+
+        private static void ATargetInUseThroughoutFailsAfterTenAttempts(string dir)
+        {
+            string target = Path.Combine(dir, FileName);
+            File.WriteAllBytes(target, Utf8("a=1"));
+            int commits = 0;
+            Action<CheckedWriteStep, string> inUse = (step, path) =>
+            {
+                if (step != CheckedWriteStep.Commit) return;
+                commits++;
+                throw new IOException("injected", HResultUnableToRemoveReplaced);
+            };
+            CheckedWriteException e = ExpectFailure(
+                () => CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), inUse), CheckedWriteStep.Commit);
+            Expect(commits == 10, "ten attempts are made, got " + commits);
+            Expect(Marshal.GetHRForException(e.InnerException) == HResultUnableToRemoveReplaced && !e.OutcomeUncertain,
+                "the commit fails with the last error, got " + e.InnerException);
+            Expect(e.TemporaryRemoved, "the temporary is removed");
+            ExpectBytes(target, "a=1");
+            ExpectListing(dir, FileName);
+
+            commits = 0;
+            ExpectFailure(() => CheckedFileWriter.Write(target, Utf8("a=1"), Utf8("a=2"), (step, path) =>
+            {
+                if (step != CheckedWriteStep.Commit) return;
+                commits++;
+                throw new IOException("injected", HResultGenFailure);
+            }), CheckedWriteStep.Commit);
+            Expect(commits == 1, "another error is not tried again, got " + commits);
+
+            File.Delete(target);
+            commits = 0;
+            ExpectFailure(() => CheckedFileWriter.Write(target, null, Utf8("a=2"), inUse), CheckedWriteStep.Commit);
+            Expect(commits == 1, "creating an absent target is tried once, got " + commits);
+            ExpectListing(dir);
         }
 
         private static void AnExclusiveHandleFailsTheRead(string dir)

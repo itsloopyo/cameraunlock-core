@@ -36,7 +36,7 @@ enum class CheckedWriteStep {
     /// FlushFileBuffers on the temporary.
     FlushTemporary = 4,
     CloseTemporary = 5,
-    /// Reading the target's bytes and identity again, just before the commit.
+    /// Reading the target's bytes and identity again, just before each attempt at the commit.
     RecheckTarget = 6,
     /// ReplaceFileW over an existing target, MoveFileExW into place for an absent one.
     Commit = 7,
@@ -88,6 +88,12 @@ struct CheckedWriteResult {
 /// target's attributes, and no backup is made. An absent one is created by
 /// MoveFileExW(MOVEFILE_WRITE_THROUGH) without MOVEFILE_REPLACE_EXISTING, which fails
 /// rather than overwrite a file that appeared after the check.
+///
+/// ReplaceFileW's ERROR_SHARING_VIOLATION and ERROR_UNABLE_TO_REMOVE_REPLACED mean the target
+/// could not be replaced at that instant, and leave the target and the temporary as they were.
+/// The writer then waits 20 ms, reads the target again and replaces it only if it still passes
+/// the same check, up to ten attempts in all. A target that cannot be replaced at the tenth is
+/// Failed at Commit with that error. Creating an absent target is tried once.
 ///
 /// ReplaceFileW's ERROR_UNABLE_TO_MOVE_REPLACEMENT and _2 mean it stopped partway and can
 /// leave nothing at the target path. When nothing is found there, the writer finishes the

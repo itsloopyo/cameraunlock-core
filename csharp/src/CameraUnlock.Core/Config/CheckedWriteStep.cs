@@ -19,7 +19,7 @@ namespace CameraUnlock.Core.Config
 
         CloseTemporary = 5,
 
-        /// <summary>Reading the target's bytes and identity again, just before the commit.</summary>
+        /// <summary>Reading the target's bytes and identity again, just before each attempt at the commit.</summary>
         RecheckTarget = 6,
 
         /// <summary>Replacing the target with the temporary, or renaming it into place.</summary>

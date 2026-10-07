@@ -853,6 +853,15 @@ file is not created by `Save`: the next `Load` creates it. After a `Deferred`, `
 rolls back and never retries: the mod applies the new value first, and a save that fails leaves
 the session running on it.
 
+One step inside a save is repeated. Windows can refuse to replace the file for a moment and leave
+it and the save's temporary as they were: with `ERROR_SHARING_VIOLATION` while another program
+holds the file open without delete sharing, and with `ERROR_UNABLE_TO_REMOVE_REPLACED` with no
+holder the save can see. On a loaded Windows 11 machine 35 of 24000 replacements failed with the
+second, 34 were made by the next call and one by the call after. So after either error the checked
+writer waits 20 ms, reads the file again, and replaces it only if it still holds the bytes the save
+read, ten attempts in all, before the save is `NotSaved` with that error. A file an editor changed
+in the meantime is `NotSaved` as at any other time.
+
 The file is read over the session's Defaults.ini values, for the starting point the change is
 given and for the read-back, where every row the save did not edit must also read from where it
 did before, so a row holding `default` stays `default`. A row that held `default`, or had no line,

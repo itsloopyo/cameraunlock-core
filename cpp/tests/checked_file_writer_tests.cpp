@@ -113,6 +113,14 @@ CheckedWriteFault FailAt(CheckedWriteStep failing, DWORD error = ERROR_GEN_FAILU
     };
 }
 
+CheckedWriteFault FailAtCounting(CheckedWriteStep failing, int& count) {
+    return [failing, &count](CheckedWriteStep step, const std::wstring&) -> std::uint32_t {
+        if (step != failing) return 0;
+        ++count;
+        return ERROR_GEN_FAILURE;
+    };
+}
+
 CheckedWriteFault OnStep(CheckedWriteStep at, std::function<void()> action) {
     return [at, action](CheckedWriteStep step, const std::wstring&) -> std::uint32_t {
         if (step == at) action();
@@ -458,6 +466,97 @@ void AHandleWithoutShareDeleteFailsTheCommit(const fs::path& dir) {
     Check(ListingIs(dir, {kFileName}), "nothing else is left");
 }
 
+void ATargetInUseForAMomentIsReplacedOnALaterAttempt(const fs::path& dir) {
+    const fs::path target = dir / kFileName;
+    for (DWORD error : {ERROR_UNABLE_TO_REMOVE_REPLACED, ERROR_SHARING_VIOLATION}) {
+        const std::string name = "error " + std::to_string(error);
+        WriteBytes(target, "a=1");
+        std::vector<CheckedWriteStep> steps;
+        int commits = 0;
+        const CheckedWriteResult r = WriteFileCheckedWithFault(
+            target.wstring(), "a=1", "a=2", [&](CheckedWriteStep step, const std::wstring&) -> std::uint32_t {
+                steps.push_back(step);
+                return step == CheckedWriteStep::Commit && ++commits <= 2 ? error : 0;
+            });
+        Check(r.Committed() && r.error == 0, name + ": the third attempt commits");
+        const std::vector<CheckedWriteStep> tail(steps.end() - (std::min)(steps.size(), std::size_t{6}), steps.end());
+        Check(tail == std::vector<CheckedWriteStep>{CheckedWriteStep::RecheckTarget, CheckedWriteStep::Commit,
+                                                    CheckedWriteStep::RecheckTarget, CheckedWriteStep::Commit,
+                                                    CheckedWriteStep::RecheckTarget, CheckedWriteStep::Commit},
+              name + ": the target is read again before each attempt");
+        Check(HoldsBytes(target, "a=2"), name + ": the target holds the candidate");
+        Check(ListingIs(dir, {kFileName}), name + ": nothing else is left");
+    }
+}
+
+void AHandleWithoutShareDeleteThatClosesLetsTheCommitThrough(const fs::path& dir) {
+    const fs::path target = dir / kFileName;
+    WriteBytes(target, "a=1");
+    HANDLE other = INVALID_HANDLE_VALUE;
+    int commits = 0;
+    const CheckedWriteResult r = WriteFileCheckedWithFault(
+        target.wstring(), "a=1", "a=2", [&](CheckedWriteStep step, const std::wstring&) -> std::uint32_t {
+            if (step != CheckedWriteStep::Commit) return 0;
+            if (++commits == 1) {
+                other = OpenShared(target, GENERIC_READ, FILE_SHARE_READ);
+            } else if (commits == 3) {
+                CloseHandle(other);
+            }
+            return 0;
+        });
+    Check(other != INVALID_HANDLE_VALUE, "another handle was open for two attempts");
+    if (commits < 3) CloseHandle(other);
+    Check(commits == 3 && r.Committed(), "the attempt after it closed commits");
+    Check(HoldsBytes(target, "a=2"), "the target holds the candidate");
+    Check(ListingIs(dir, {kFileName}), "nothing else is left");
+}
+
+void ATargetEditedWhileInUseIsNotOverwritten(const fs::path& dir) {
+    const fs::path target = dir / kFileName;
+    WriteBytes(target, "a=1");
+    int commits = 0;
+    const CheckedWriteResult r = WriteFileCheckedWithFault(
+        target.wstring(), "a=1", "a=2", [&](CheckedWriteStep step, const std::wstring&) -> std::uint32_t {
+            if (step != CheckedWriteStep::Commit) return 0;
+            ++commits;
+            WriteBytes(target, "theirs");
+            return ERROR_UNABLE_TO_REMOVE_REPLACED;
+        });
+    Check(commits == 1 && r.status == CheckedWriteStatus::TargetChanged, "the next read finds the edit and stops");
+    Check(r.temporary_removed, "the temporary is removed");
+    Check(HoldsBytes(target, "theirs"), "the edit is kept");
+    Check(ListingIs(dir, {kFileName}), "nothing else is left");
+}
+
+void ATargetInUseThroughoutFailsAfterTenAttempts(const fs::path& dir) {
+    const fs::path target = dir / kFileName;
+    WriteBytes(target, "a=1");
+    int commits = 0;
+    const CheckedWriteFault in_use = [&](CheckedWriteStep step, const std::wstring&) -> std::uint32_t {
+        if (step != CheckedWriteStep::Commit) return 0;
+        ++commits;
+        return ERROR_UNABLE_TO_REMOVE_REPLACED;
+    };
+    CheckedWriteResult r = WriteFileCheckedWithFault(target.wstring(), "a=1", "a=2", in_use);
+    Check(commits == 10, "ten attempts are made");
+    Check(r.failed_step == CheckedWriteStep::Commit && r.error == ERROR_UNABLE_TO_REMOVE_REPLACED &&
+              !r.outcome_uncertain,
+          "the commit fails with the last error");
+    Check(r.temporary_removed, "the temporary is removed");
+    Check(HoldsBytes(target, "a=1"), "the target is unchanged");
+    Check(ListingIs(dir, {kFileName}), "nothing else is left");
+
+    commits = 0;
+    r = WriteFileCheckedWithFault(target.wstring(), "a=1", "a=2", FailAtCounting(CheckedWriteStep::Commit, commits));
+    Check(commits == 1 && r.error == ERROR_GEN_FAILURE, "another error is not tried again");
+
+    fs::remove(target);
+    commits = 0;
+    r = WriteFileCheckedWithFault(target.wstring(), std::nullopt, "a=2", in_use);
+    Check(commits == 1 && r.failed_step == CheckedWriteStep::Commit, "creating an absent target is tried once");
+    Check(ListingIs(dir, {}), "nothing is left");
+}
+
 void AnExclusiveHandleFailsTheRead(const fs::path& dir) {
     const fs::path target = dir / kFileName;
     WriteBytes(target, "a=1");
@@ -662,6 +761,12 @@ int RunCheckedFileWriterTests() {
     RunScenario("a-failed-finishing-move-keeps-the-temporary", AFailedFinishingMoveKeepsTheTemporary);
     RunScenario("a-taken-temporary-name-is-not-deleted", ATakenTemporaryNameIsNotDeleted);
     RunScenario("a-handle-without-share-delete-fails-the-commit", AHandleWithoutShareDeleteFailsTheCommit);
+    RunScenario("a-target-in-use-for-a-moment-is-replaced-on-a-later-attempt",
+                ATargetInUseForAMomentIsReplacedOnALaterAttempt);
+    RunScenario("a-handle-without-share-delete-that-closes-lets-the-commit-through",
+                AHandleWithoutShareDeleteThatClosesLetsTheCommitThrough);
+    RunScenario("a-target-edited-while-in-use-is-not-overwritten", ATargetEditedWhileInUseIsNotOverwritten);
+    RunScenario("a-target-in-use-throughout-fails-after-ten-attempts", ATargetInUseThroughoutFailsAfterTenAttempts);
     RunScenario("an-exclusive-handle-fails-the-read", AnExclusiveHandleFailsTheRead);
     RunScenario("a-read-only-target-fails-and-stays-read-only", AReadOnlyTargetFailsAndStaysReadOnly);
     RunScenario("hidden-and-system-attributes-are-kept", HiddenAndSystemAttributesAreKept);

@@ -9,6 +9,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - a save was dropped when Windows would not replace the file at that instant
+
+A hotkey's save could come back `NotSaved` with `Windows error 1175: Unable to remove the file to
+be replaced` while nothing the mod could see had `CameraUnlock.ini` open. The session kept the new
+value, the file kept the old one, and the next start of the game ran on the old one. Measured on a
+loaded Windows 11 machine: 35 of 24000 calls to `ReplaceFileW` failed that way, each with the file
+and the temporary left as they were, 34 were made by the next call and one by the call after.
+project-zomboid-headtracking's tests, which save over a dozen times a run, failed about one run in
+five on it.
+
+- `WriteFileChecked` (C++) and `CheckedFileWriter.Write` (C#) repeat the commit over an existing
+  file after `ERROR_UNABLE_TO_REMOVE_REPLACED` or `ERROR_SHARING_VIOLATION`: 20 ms apart, ten
+  attempts in all, reading the file again before each one and replacing it only if it still
+  passes the check, so a file another program changed meanwhile is still `TargetChanged` and is
+  not overwritten. A file in use at the tenth attempt fails at `Commit` with that error, as
+  before. Creating a file that is absent is tried once, as before.
+- No signature, enum or status changed. A save that meets a file held open for good by a program
+  that does not share delete now takes about 0.2 s to report `NotSaved`, where it reported at once.
+- Every mod gets it with its next core bump. Nothing to change in a mod.
+
 ### Added - java/: the binding to the C interface and the boot class of a Java agent mod
 
 project-zomboid-headtracking, a Java agent, carried seven hand-written Java copies of the pipeline
