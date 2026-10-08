@@ -776,10 +776,39 @@ void TestConfig(const fs::path& scratch) {
               cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x400, 0x800) == CAMERAUNLOCK_ERROR,
           "and the bit it answers held is taken, as the one it answers tapped is");
 
+    const char* turn = "Tapped, tapped twice or held.";
+    const auto taps = [turn](const char* keys, std::int32_t tap, std::int32_t twice, std::int32_t held) {
+        return cameraunlock_config_local_hotkey_taps("TurnKey", turn, 0, keys, tap, twice, held);
+    };
+    Check(taps("Home", 0x100, 0x1000, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("hotkey_bit is another row's") != std::string::npos &&
+              taps("Home", 0x800, 0x400, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("double_bit is another row's") != std::string::npos &&
+              taps("Home", 0x800, 0x1000, 0x200) == CAMERAUNLOCK_ERROR &&
+              LastError().find("held_bit is another row's") != std::string::npos,
+          "a key row that tells a tap, a double tap and a hold apart takes none of its three bits from another row, tapped or held: " +
+              LastError());
+    Check(taps("Home", 0x800, 0x800, 0x2000) == CAMERAUNLOCK_ERROR && taps("Home", 0x800, 0x1000, 0x800) == CAMERAUNLOCK_ERROR &&
+              taps("Home", 0x800, 0x1000, 0x1000) == CAMERAUNLOCK_ERROR,
+          "nor answers one bit for two of them");
+    Check(taps("Home", 0x800, 0x8, 0x2000) == CAMERAUNLOCK_ERROR &&
+              LastError().find("double_bit is not one bit") != std::string::npos &&
+              taps("Home", 0x800, 0x3000, 0x4000) == CAMERAUNLOCK_ERROR && taps("Home", 0x4, 0x1000, 0x2000) == CAMERAUNLOCK_ERROR &&
+              taps("Home", 0x800, 0x1000, 0) == CAMERAUNLOCK_ERROR,
+          "and each of the three is one bit, not one of the fleet's");
+    Check(taps(nullptr, 0x8, 0x8, 0x8) == CAMERAUNLOCK_ERROR && LastError().find("default_keys is NULL") != std::string::npos,
+          "with no keys at all it is told that first");
+    Check(taps("home", 0x800, 0x1000, 0x2000) == 6, "it is a row like any other key row, numbered after them: " + LastError());
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x1000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x4000, 0x1000) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x2000, 0x4000) == CAMERAUNLOCK_ERROR &&
+              taps("F10", 0x4000, 0x8000, 0x1000) == CAMERAUNLOCK_ERROR,
+          "and each of its three is taken, for a row of any kind");
+
     Check(cameraunlock_config_render(rendered.c_str()) == CAMERAUNLOCK_OK, "the description renders: " + LastError());
     const std::string fresh = ReadFile(scratch / "rendered.ini");
     Check(fresh.find("[CameraUnlock]") != std::string::npos && fresh.find("FieldOfView=65") != std::string::npos &&
-              fresh.find("Quality=Low") != std::string::npos && fresh.find("GraphicsKey=F9") != std::string::npos && fresh.find("SeatKey=Delete") != std::string::npos &&
+              fresh.find("Quality=Low") != std::string::npos && fresh.find("GraphicsKey=F9") != std::string::npos && fresh.find("SeatKey=Delete") != std::string::npos && fresh.find("TurnKey=Home") != std::string::npos &&
               fresh.find("CollisionMargin=0.12") != std::string::npos && fresh.find("LocalSmoothing=default") != std::string::npos,
           "the render holds the stamp, the local rows at their defaults and the global concepts as default");
 

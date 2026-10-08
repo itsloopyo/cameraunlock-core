@@ -533,6 +533,20 @@ A hotkey that does one thing tapped and another held (`RegisterHoldKeyBindings`,
 C interface's `cameraunlock_config_local_hotkey_held`, which holds for 400 ms) is driven by the
 hold time of a `tap`: `tap Delete 80` is its tap and `tap Delete 800` its hold.
 
+One that also tells a double tap (`RegisterTapKeyBindings`, or a row of
+`cameraunlock_config_local_hotkey_taps`, where the second press has 300 ms from the first being
+let go) is double tapped with a `wait` between two taps, which is played as that many
+milliseconds with the key up:
+
+```text
+tap Delete 80
+wait 120
+tap Delete 80
+```
+
+Its single tap is answered 300 ms after the key is let go, so a script that reads the result
+follows `tap Delete 80` with `wait 400` or more.
+
 `move` is for a game that turns the camera by how the mouse moved. `cursor` is
 for a menu that reads where the cursor is: after the first `cursor`, a `mouse`
 button also arrives as the click a pointer at that point would make. The point is

@@ -314,11 +314,18 @@ public final class Tests {
         check(core.configLocalHotkeyHeld("SeatKey", "Tapped for the first player, held for the second.", 0, "Delete",
                         CameraUnlock.HOTKEY_LOCAL << 1, CameraUnlock.HOTKEY_LOCAL << 2) == 5 && CameraUnlock.HOLD_MS == 400,
                 "and with two bits of its own is a row numbered like the others");
+        String twice = refusal(() -> core.configLocalHotkeyTaps("TurnKey", "Tapped, tapped twice or held.", 0, "Home",
+                CameraUnlock.HOTKEY_LOCAL << 3, CameraUnlock.HOTKEY_LOCAL << 2, CameraUnlock.HOTKEY_LOCAL << 5));
+        check(twice.contains("cameraunlock_config_local_hotkey_taps") && twice.contains("double_bit is another row's"),
+                "a key row that tells a double tap as well cannot answer another row's bit for it: " + twice);
+        check(core.configLocalHotkeyTaps("TurnKey", "Tapped, tapped twice or held.", 0, "Home", CameraUnlock.HOTKEY_LOCAL << 3,
+                        CameraUnlock.HOTKEY_LOCAL << 4, CameraUnlock.HOTKEY_LOCAL << 5) == 6 && CameraUnlock.DOUBLE_TAP_MS == 300,
+                "and with three bits of its own is a row numbered like the others");
 
         core.configRender(rendered);
         String fresh = Files.readString(rendered, StandardCharsets.US_ASCII);
         check(fresh.contains("[CameraUnlock]") && fresh.contains("\r\nFieldOfView=65.0\r\n") && fresh.contains("\r\nQuality=Low\r\n")
-                        && fresh.contains("\r\nGraphicsKey=F9\r\n") && fresh.contains("\r\nSeatKey=Delete\r\n") && fresh.contains("\r\nCollisionMargin=0.12\r\n")
+                        && fresh.contains("\r\nGraphicsKey=F9\r\n") && fresh.contains("\r\nSeatKey=Delete\r\n") && fresh.contains("\r\nTurnKey=Home\r\n") && fresh.contains("\r\nCollisionMargin=0.12\r\n")
                         && fresh.contains("; How far the view is held off a wall, in map tiles.\r\n") && fresh.contains("\r\nLocalSmoothing=default\r\n"),
                 "the render holds the stamp, the local rows, the game's own default and comment, and the global concepts as default");
 

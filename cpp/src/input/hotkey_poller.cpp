@@ -33,6 +33,7 @@ HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) {
         std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
         m_hotkeys = std::move(other.m_hotkeys);
         m_holdHotkeys = std::move(other.m_holdHotkeys);
+        m_tapHotkeys = std::move(other.m_tapHotkeys);
         m_nextHotkeyId = other.m_nextHotkeyId;
     }
 
@@ -56,6 +57,7 @@ HotkeyPoller& HotkeyPoller::operator=(HotkeyPoller&& other) {
             std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
             m_hotkeys = std::move(other.m_hotkeys);
             m_holdHotkeys = std::move(other.m_holdHotkeys);
+            m_tapHotkeys = std::move(other.m_tapHotkeys);
             m_nextHotkeyId = other.m_nextHotkeyId;
         }
 
@@ -98,6 +100,23 @@ int HotkeyPoller::AddHoldHotkey(int vkCode, int holdMs, HotkeyCallback onTap, Ho
     return id;
 }
 
+int HotkeyPoller::AddTapHotkey(int vkCode, int holdMs, int doubleTapMs, HotkeyCallback onTap, HotkeyCallback onDouble,
+                               HotkeyCallback onHold, std::function<bool()> accepts) {
+    std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    int id = m_nextHotkeyId++;
+    TapHotkeyEntry entry;
+    entry.id = id;
+    entry.vkCode = vkCode;
+    entry.hold = std::chrono::milliseconds(holdMs);
+    entry.doubleTap = std::chrono::milliseconds(doubleTapMs);
+    entry.onTap = std::move(onTap);
+    entry.onDouble = std::move(onDouble);
+    entry.onHold = std::move(onHold);
+    entry.accepts = std::move(accepts);
+    m_tapHotkeys.push_back(std::move(entry));
+    return id;
+}
+
 void HotkeyPoller::RemoveHotkey(int id) {
     std::lock_guard<std::mutex> lock(m_hotkeyMutex);
     auto it = std::find_if(m_hotkeys.begin(), m_hotkeys.end(),
@@ -109,6 +128,11 @@ void HotkeyPoller::RemoveHotkey(int id) {
         [id](const HoldHotkeyEntry& entry) { return entry.id == id; });
     if (hold != m_holdHotkeys.end()) {
         m_holdHotkeys.erase(hold);
+    }
+    auto tap = std::find_if(m_tapHotkeys.begin(), m_tapHotkeys.end(),
+        [id](const TapHotkeyEntry& entry) { return entry.id == id; });
+    if (tap != m_tapHotkeys.end()) {
+        m_tapHotkeys.erase(tap);
     }
 }
 
@@ -130,6 +154,11 @@ bool HotkeyPoller::Start(int pollIntervalMs) {
         }
         for (auto& entry : m_holdHotkeys) {
             entry.keyDown = false;
+        }
+        for (auto& entry : m_tapHotkeys) {
+            entry.keyDown = false;
+            entry.press = TapHotkeyEntry::Press::kIgnored;
+            entry.waiting = false;
         }
         m_polled = false;
     }
@@ -239,6 +268,14 @@ void HotkeyPoller::DisarmHoldPressesWith(KeyState isDown) {
             entry.armed = false;
         }
     }
+    for (auto& entry : m_tapHotkeys) {
+        if (entry.vkCode == 0) continue;
+        entry.waiting = false;
+        if (entry.keyDown || isDown(entry.vkCode)) {
+            entry.keyDown = true;
+            entry.press = TapHotkeyEntry::Press::kIgnored;
+        }
+    }
 }
 
 void HotkeyPoller::PollAt(std::chrono::steady_clock::time_point now, bool allowFire, KeyState isDown) {
@@ -305,6 +342,54 @@ void HotkeyPoller::PollAt(std::chrono::steady_clock::time_point now, bool allowF
                 if (entry.armed && !entry.held && allowFire && now - entry.downAt < entry.hold && entry.onTap) {
                     toFire.push_back(entry.onTap);
                 }
+            }
+        }
+
+        for (auto& entry : m_tapHotkeys) {
+            if (entry.vkCode == 0) continue;
+            using Press = TapHotkeyEntry::Press;
+
+            bool pressed = isDown(entry.vkCode);
+            if (gap) {
+                // What the key did unseen is not known: a tap may not have been the last
+                // press, and a key still down may be a press begun since, in the
+                // foreground or not.
+                entry.waiting = false;
+                if (pressed && entry.keyDown && entry.press != Press::kIgnored && !entry.held) {
+                    entry.press = allowFire ? Press::kFirst : Press::kIgnored;
+                    entry.downAt = now;
+                }
+            }
+            // Before the key is looked at, so a press that goes down as the time runs out
+            // is a first press and not a second.
+            if (entry.waiting && now - entry.releasedAt >= entry.doubleTap) {
+                entry.waiting = false;
+                if (allowFire && entry.onTap) toFire.push_back(entry.onTap);
+            }
+            if (pressed && !entry.keyDown) {
+                entry.keyDown = true;
+                entry.held = false;
+                entry.downAt = now;
+                if (!allowFire || (entry.accepts && !entry.accepts())) {
+                    entry.press = Press::kIgnored;
+                } else if (entry.waiting) {
+                    entry.waiting = false;
+                    entry.press = Press::kSecond;
+                    if (entry.onDouble) toFire.push_back(entry.onDouble);
+                } else {
+                    entry.press = Press::kFirst;
+                }
+            }
+            if (pressed && entry.press == Press::kFirst && !entry.held && now - entry.downAt >= entry.hold) {
+                entry.held = true;
+                if (allowFire && entry.onHold) toFire.push_back(entry.onHold);
+            } else if (!pressed && entry.keyDown) {
+                entry.keyDown = false;
+                if (entry.press == Press::kFirst && !entry.held && allowFire && now - entry.downAt < entry.hold) {
+                    entry.waiting = true;
+                    entry.releasedAt = now;
+                }
+                entry.press = Press::kIgnored;
             }
         }
     }

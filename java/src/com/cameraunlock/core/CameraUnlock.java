@@ -25,7 +25,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 3;
+    public static final int ABI = 4;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -52,6 +52,8 @@ public final class CameraUnlock {
             HOTKEY_AIM_MODE = 0x8, HOTKEY_LOCAL = 0x100;
     /** How long a key of configLocalHotkeyHeld is down, in milliseconds, before it counts as held. */
     public static final int HOLD_MS = 400;
+    /** How long after a key of configLocalHotkeyTaps is let go, in milliseconds, a second press still makes a double tap. */
+    public static final int DOUBLE_TAP_MS = 300;
 
     private static final int ERROR = -1;
     private static final ValueLayout.OfInt INT = ValueLayout.JAVA_INT;
@@ -290,7 +292,7 @@ public final class CameraUnlock {
             sessionStop, cycleTrackingMode, cycleAimMode, setAimMode, aimModeLabel, sessionFrame, sessionLean, viewStart,
             viewStop, viewFrame, viewLean, configDescribe,
             configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalHotkey, configLocalHotkeyHeld,
-            configRender,
+            configLocalHotkeyTaps, configRender,
             configLoad, configReload, configGetInt, configGetFloat, configSaveInt, configSaveFloat, configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
 
@@ -371,6 +373,8 @@ public final class CameraUnlock {
         configLocalHotkey = bind("cameraunlock_config_local_hotkey", FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT));
         configLocalHotkeyHeld = bind("cameraunlock_config_local_hotkey_held",
                 FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT, INT));
+        configLocalHotkeyTaps = bind("cameraunlock_config_local_hotkey_taps",
+                FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT, INT, INT));
         configRender = bind("cameraunlock_config_render", FunctionDescriptor.of(INT, POINTER));
         configLoad = bind("cameraunlock_config_load", FunctionDescriptor.of(INT, POINTER, POINTER, POINTER));
         configReload = bind("cameraunlock_config_reload", FunctionDescriptor.of(INT));
@@ -636,6 +640,23 @@ public final class CameraUnlock {
         }
     }
 
+    /**
+     * A key list whose keys do one thing tapped, another tapped twice and a third held.
+     *
+     * @param hotkeyBit the bit hotkeysTake answers with once DOUBLE_TAP_MS have passed since a tap was let go
+     *                  with no second press
+     * @param doubleBit the bit it answers with as a second press goes down within that time
+     * @param heldBit   the bit it answers with once a first press has been down HOLD_MS. Each is one bit,
+     *                  HOTKEY_LOCAL or above, and no other row's
+     */
+    public int configLocalHotkeyTaps(String key, String comment, int flags, String defaultKeys, int hotkeyBit, int doubleBit,
+            int heldBit) {
+        try (Arena arena = Arena.ofConfined()) {
+            return check(status(configLocalHotkeyTaps, text(arena, key), text(arena, comment), flags,
+                    text(arena, defaultKeys), hotkeyBit, doubleBit, heldBit));
+        }
+    }
+
     /** Writes the file the description renders for a first start. */
     public void configRender(Path file) {
         try (Arena arena = Arena.ofConfined()) {
@@ -714,7 +735,8 @@ public final class CameraUnlock {
 
     /**
      * The actions whose keys went down since the last take or drop, as HOTKEY_* bits. A row of
-     * configLocalHotkeyHeld answers when its key is let go or has been held, not as it goes down.
+     * configLocalHotkeyHeld answers when its key is let go or has been held, not as it goes down, and one of
+     * configLocalHotkeyTaps as that method says.
      */
     public int hotkeysTake() {
         try {

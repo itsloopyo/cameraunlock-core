@@ -549,6 +549,8 @@ struct LocalRow {
     std::int32_t hotkey_bit = 0;
     // What a key of the row answers once held, or 0 for a row whose keys answer as they go down.
     std::int32_t held_bit = 0;
+    // What a key of the row answers tapped twice, or 0 for a row that tells no double tap.
+    std::int32_t double_bit = 0;
 };
 
 struct ConceptRow {
@@ -689,39 +691,56 @@ std::int32_t Save(ConfigState& c, const std::function<void(HostConfig&)>& change
     return static_cast<std::int32_t>(saved.status);
 }
 
-// Under the config's mutex. `held_bit` is 0 for a row of cameraunlock_config_local_hotkey.
+void RequireHotkeyBit(std::int32_t bit, const char* otherwise) {
+    Require(bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (bit & (bit - 1)) == 0, otherwise);
+}
+
+// Under the config's mutex. `held_bit` and `double_bit` are 0 for a row that has none.
 std::int32_t AddHotkeyRow(ConfigState& c, const char* key, const char* comment, std::uint32_t flags,
-                          const char* default_keys, std::int32_t hotkey_bit, std::int32_t held_bit) {
-    for (const LocalRow& other : c.locals) {
-        if (other.hotkey_bit == hotkey_bit || other.held_bit == hotkey_bit) {
-            throw std::invalid_argument("hotkey_bit is another row's");
+                          const char* default_keys, std::int32_t hotkey_bit, std::int32_t held_bit,
+                          std::int32_t double_bit) {
+    const auto taken = [&c](std::int32_t bit) {
+        for (const LocalRow& other : c.locals) {
+            if (other.hotkey_bit == bit || other.held_bit == bit || other.double_bit == bit) return true;
         }
-        if (held_bit != 0 && (other.hotkey_bit == held_bit || other.held_bit == held_bit)) {
-            throw std::invalid_argument("held_bit is another row's");
-        }
-    }
+        return false;
+    };
+    if (taken(hotkey_bit)) throw std::invalid_argument("hotkey_bit is another row's");
+    if (double_bit != 0 && taken(double_bit)) throw std::invalid_argument("double_bit is another row's");
+    if (held_bit != 0 && taken(held_bit)) throw std::invalid_argument("held_bit is another row's");
     const cfg::CodecParseResult<std::string> parsed = cfg::HotkeyCodec().Parse(default_keys);
     if (!parsed.ok()) throw std::invalid_argument(std::string(default_keys) + ": " + parsed.error);
     LocalRow row{LocalKind::Hotkey};
     row.start = parsed.value;
     row.hotkey_bit = hotkey_bit;
     row.held_bit = held_bit;
+    row.double_bit = double_bit;
     return AddLocal(c, "Hotkeys", key, comment, flags, std::move(row));
 }
 
-// `held_bit` is 0 for a list whose keys answer `bit` as they go down.
-void Register(ConfigState& c, const std::string& row, const std::string& keys, std::int32_t bit,
-              std::int32_t held_bit = 0) {
+// One of the fleet's four key rows, which answer their bit as a key goes down.
+LocalRow FleetKey(const char* name, std::int32_t bit) {
+    LocalRow row{LocalKind::Hotkey};
+    row.key = name;
+    row.hotkey_bit = bit;
+    return row;
+}
+
+// A row's key list on the poller, as the kind of row its bits make it.
+void Register(ConfigState& c, const LocalRow& row, const std::string& keys) {
     const input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
-    if (!parsed.ok()) throw std::runtime_error(row + "=" + keys + ": " + parsed.error);
+    if (!parsed.ok()) throw std::runtime_error(row.key + "=" + keys + ": " + parsed.error);
     std::atomic<std::int32_t>* pressed = &c.pressed;
     input::HotkeyPoller& poller = *c.poller.load();
-    if (held_bit == 0) {
-        input::RegisterKeyBindings(poller, parsed.bindings, [pressed, bit] { pressed->fetch_or(bit); });
+    const auto answer = [pressed](std::int32_t bit) { return [pressed, bit] { pressed->fetch_or(bit); }; };
+    if (row.double_bit != 0) {
+        input::RegisterTapKeyBindings(poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, CAMERAUNLOCK_DOUBLE_TAP_MS,
+                                      answer(row.hotkey_bit), answer(row.double_bit), answer(row.held_bit));
+    } else if (row.held_bit != 0) {
+        input::RegisterHoldKeyBindings(poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, answer(row.hotkey_bit),
+                                       answer(row.held_bit));
     } else {
-        input::RegisterHoldKeyBindings(
-            poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, [pressed, bit] { pressed->fetch_or(bit); },
-            [pressed, held_bit] { pressed->fetch_or(held_bit); });
+        input::RegisterKeyBindings(poller, parsed.bindings, answer(row.hotkey_bit));
     }
 }
 
@@ -1005,7 +1024,7 @@ std::int32_t cameraunlock_config_local_hotkey(const char* key, const char* comme
                 "hotkey_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
-        return AddHotkeyRow(c, key, comment, flags, default_keys, hotkey_bit, 0);
+        return AddHotkeyRow(c, key, comment, flags, default_keys, hotkey_bit, 0, 0);
     });
 }
 
@@ -1021,7 +1040,23 @@ std::int32_t cameraunlock_config_local_hotkey_held(const char* key, const char* 
         Require(held_bit != hotkey_bit, "hotkey_bit and held_bit are one bit, and a tap has to be told from a hold");
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
-        return AddHotkeyRow(c, key, comment, flags, default_keys, hotkey_bit, held_bit);
+        return AddHotkeyRow(c, key, comment, flags, default_keys, hotkey_bit, held_bit, 0);
+    });
+}
+
+std::int32_t cameraunlock_config_local_hotkey_taps(const char* key, const char* comment, std::uint32_t flags,
+                                                   const char* default_keys, std::int32_t hotkey_bit,
+                                                   std::int32_t double_bit, std::int32_t held_bit) {
+    return Guarded("cameraunlock_config_local_hotkey_taps", [&] {
+        Require(default_keys != nullptr, "default_keys is NULL");
+        RequireHotkeyBit(hotkey_bit, "hotkey_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+        RequireHotkeyBit(double_bit, "double_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+        RequireHotkeyBit(held_bit, "held_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
+        Require(hotkey_bit != double_bit && hotkey_bit != held_bit && double_bit != held_bit,
+                "two of hotkey_bit, double_bit and held_bit are one bit, and a tap, a double tap and a hold have to be told apart");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddHotkeyRow(c, key, comment, flags, default_keys, hotkey_bit, held_bit, double_bit);
     });
 }
 
@@ -1214,20 +1249,19 @@ std::int32_t cameraunlock_hotkeys_start(void) {
         using Concept = cfg::schema::Concept;
         for (const ConceptRow& row : c.concepts) {
             if (row.id == Concept::ToggleKey) {
-                Register(c, "ToggleKey", c.loaded.toggle_key_name, CAMERAUNLOCK_HOTKEY_TOGGLE);
+                Register(c, FleetKey("ToggleKey", CAMERAUNLOCK_HOTKEY_TOGGLE), c.loaded.toggle_key_name);
             } else if (row.id == Concept::CycleTrackingModeKey) {
-                Register(c, "CycleTrackingModeKey", c.loaded.cycle_tracking_mode_key_name,
-                         CAMERAUNLOCK_HOTKEY_CYCLE_TRACKING_MODE);
+                Register(c, FleetKey("CycleTrackingModeKey", CAMERAUNLOCK_HOTKEY_CYCLE_TRACKING_MODE),
+                         c.loaded.cycle_tracking_mode_key_name);
             } else if (row.id == Concept::YawModeKey) {
-                Register(c, "YawModeKey", c.loaded.yaw_mode_key_name, CAMERAUNLOCK_HOTKEY_YAW_MODE);
+                Register(c, FleetKey("YawModeKey", CAMERAUNLOCK_HOTKEY_YAW_MODE), c.loaded.yaw_mode_key_name);
             } else if (row.id == Concept::TrueFreeLookKey) {
-                Register(c, "TrueFreeLookKey", c.loaded.true_free_look_key_name, CAMERAUNLOCK_HOTKEY_AIM_MODE);
+                Register(c, FleetKey("TrueFreeLookKey", CAMERAUNLOCK_HOTKEY_AIM_MODE), c.loaded.true_free_look_key_name);
             }
         }
         for (std::size_t i = 0; i < c.locals.size(); ++i) {
             if (c.locals[i].kind == LocalKind::Hotkey) {
-                Register(c, c.locals[i].key, std::get<std::string>(c.loaded.locals[i]), c.locals[i].hotkey_bit,
-                         c.locals[i].held_bit);
+                Register(c, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
             }
         }
         if (!c.poller.load()->Start()) throw std::runtime_error("the hotkey poller did not start");

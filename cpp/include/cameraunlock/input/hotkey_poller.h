@@ -67,13 +67,37 @@ public:
     int AddHoldHotkey(int vkCode, int holdMs, HotkeyCallback onTap, HotkeyCallback onHold,
                       HotkeyCallback onDown = nullptr);
 
+    // Add a hotkey that tells a tap, a double tap and a hold apart.
+    //
+    // A press let go before holdMs is a tap, and onTap runs for it only once
+    // doubleTapMs have passed since it was let go with no second press: a tap is late
+    // by that much. A second press that goes down inside that time runs onDouble as it
+    // goes down, and that press runs nothing else, however long it is held and when it
+    // is let go. A first press still down after holdMs runs onHold once, and nothing
+    // when it is let go. The press after a double tap or a hold is a first press again.
+    //
+    // `accepts`, when given, is asked as each press goes down, and a press it refuses
+    // takes no part: it is no tap, no hold and no second press, and a tap waiting for
+    // its time goes on waiting as if the press had not been made. It is called with
+    // the poller's lock held, so it must not call the poller.
+    //
+    // The foreground rule: a press that began while this process was not in the
+    // foreground takes no part either, a tap let go there is no tap, and a tap whose
+    // time runs out there is dropped, not run late. After a poll gap of more than
+    // kMaxHoldPollGapMs a waiting tap is dropped and a key still down is a first
+    // press begun at that poll.
+    // Returns an ID that can be used to remove the hotkey
+    int AddTapHotkey(int vkCode, int holdMs, int doubleTapMs, HotkeyCallback onTap, HotkeyCallback onDouble,
+                     HotkeyCallback onHold, std::function<bool()> accepts = nullptr);
+
     // The longest time between two polls across which a key seen down at both is
     // taken to have stayed down. Six of the default 16 ms polls: a thread held up
     // for less is late, and held up for longer it can miss a quick second press.
     static constexpr int kMaxHoldPollGapMs = 100;
 
-    // Every AddHoldHotkey key that is down now runs nothing for this press, however
-    // it ends. The next press is a press like any other. For a caller that throws
+    // Every AddHoldHotkey and AddTapHotkey key that is down now runs nothing for this
+    // press, however it ends, and a tap waiting for its double tap time is forgotten.
+    // The next press is a press like any other. For a caller that throws
     // away what was pressed while it was not acting on keys: a key that went down
     // then would otherwise run its tap or its hold when it ends, later.
     void DisarmHoldPresses();
@@ -156,10 +180,32 @@ private:
         std::chrono::steady_clock::time_point downAt;
     };
     std::vector<HoldHotkeyEntry> m_holdHotkeys;
+
+    struct TapHotkeyEntry {
+        int id;
+        int vkCode;
+        std::chrono::milliseconds hold;
+        std::chrono::milliseconds doubleTap;
+        HotkeyCallback onTap;
+        HotkeyCallback onDouble;
+        HotkeyCallback onHold;
+        std::function<bool()> accepts;
+        bool keyDown = false;
+        // What the press now down is. One that takes no part is kIgnored, as is no press.
+        enum class Press { kIgnored, kFirst, kSecond };
+        Press press = Press::kIgnored;
+        // Set once a first press has been down for `hold`, so its release is not a tap.
+        bool held = false;
+        std::chrono::steady_clock::time_point downAt;
+        // A tap let go at releasedAt that runs once `doubleTap` has passed with no second press.
+        bool waiting = false;
+        std::chrono::steady_clock::time_point releasedAt;
+    };
+    std::vector<TapHotkeyEntry> m_tapHotkeys;
     // When PollAt last ran, once it has.
     bool m_polled = false;
     std::chrono::steady_clock::time_point m_polledAt;
-    // Guards both lists and the ID counter.
+    // Guards the three lists and the ID counter.
     std::mutex m_hotkeyMutex;
     int m_nextHotkeyId = 1;
 };

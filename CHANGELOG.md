@@ -9,6 +9,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a hotkey that does one thing tapped, another tapped twice and a third held (ABI 4)
+
+- `HotkeyPoller::AddTapHotkey(vkCode, holdMs, doubleTapMs, onTap, onDouble, onHold, accepts =
+  nullptr)`. A tap runs `onTap` once `doubleTapMs` have passed since it was let go with no second
+  press, so a tap is late by that much. A second press inside that time runs `onDouble` as it
+  goes down and nothing else. A first press down `holdMs` runs `onHold` once. The press after a
+  double tap or a hold starts afresh. `accepts` is asked as each press goes down, and a press it
+  refuses takes no part.
+- `input::RegisterTapKeyBindings(poller, bindings, holdMs, doubleTapMs, onTap, onDouble, onHold)`,
+  beside `RegisterHoldKeyBindings`, with the modifier guard as `accepts`: a chord's key pressed a
+  second time without its modifiers is no double tap, and the tap before it still runs.
+- C interface: `cameraunlock_config_local_hotkey_taps(key, comment, flags, default_keys,
+  hotkey_bit, double_bit, held_bit)` and `CAMERAUNLOCK_DOUBLE_TAP_MS` (300). Java:
+  `configLocalHotkeyTaps` and `DOUBLE_TAP_MS`. `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 4.
+- The foreground rule, `DisarmHoldPresses` (and so `cameraunlock_hotkeys_drop`) and the
+  `kMaxHoldPollGapMs` rule cover it: a press begun in the background takes no part, a tap whose
+  time runs out in the background is dropped, a drop forgets a waiting tap, and a poll gap drops
+  a waiting tap and times a key still down from that poll.
+- Every key row of the C interface is refused a bit another row answers for a double tap.
+
+`AddHoldHotkey`, `RegisterHoldKeyBindings` and `cameraunlock_config_local_hotkey_held` are
+unchanged: with them a tap still answers as the key is let go. A background test double taps
+with `tap Delete 80`, `wait 120`, `tap Delete 80`. `docs/c-interface.md`: Hotkeys.
+
 ### Added - a hotkey that does one thing tapped and another held
 
 The poller reported a key going down and nothing else, so a mod that wanted one key to switch

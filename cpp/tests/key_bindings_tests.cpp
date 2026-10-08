@@ -452,6 +452,96 @@ void TestHoldRegistration() {
           "a refused list registered nothing");
     g_held = none;
 }
+
+void TestTapRegistration() {
+    using cameraunlock::input::HotkeyPoller;
+    using cameraunlock::input::RegisterTapKeyBindings;
+    std::cout << "RegisterTapKeyBindings:\n";
+
+    const KeyModifiers ctrl = KeyModifiers::kCtrl;
+    const KeyModifiers shift = KeyModifiers::kShift;
+    const KeyModifiers none = KeyModifiers::kNone;
+    constexpr int kDelete = 0x2E;
+    constexpr int kJ = 0x4A;
+    g_keyDown[kDelete] = false;
+    g_keyDown[kJ] = false;
+
+    HotkeyPoller poller;
+    int taps = 0;
+    int doubles = 0;
+    int holds = 0;
+    const auto parsed = ParseKeyBindings("Delete, Ctrl+Shift+J, Alt+Delete");
+    const std::vector<int> ids = cameraunlock::input::detail::RegisterTapKeyBindings(
+        poller, parsed.bindings, 400, 300, [&taps] { ++taps; }, [&doubles] { ++doubles; }, [&holds] { ++holds; }, &FakeHeld);
+    Check(ids.size() == 2 && ids[0] != ids[1], "one tap hotkey per key, for bindings that share one too");
+
+    int ms = 0;
+    const auto poll = [&](int when) {
+        poller.PollAt(std::chrono::steady_clock::time_point() + std::chrono::milliseconds(when), true, &FakeKeyDown);
+    };
+    const auto at = [&](int advance, int vk, bool down, KeyModifiers held) {
+        for (int t = 16; t < advance; t += 16) poll(ms + t);
+        ms += advance;
+        g_keyDown[vk] = down;
+        g_held = held;
+        poll(ms);
+    };
+    const auto ran = [&](int t, int d, int h) { return taps == t && doubles == d && holds == h; };
+
+    at(0, kDelete, true, none);
+    at(80, kDelete, false, none);
+    at(299, kDelete, false, none);
+    Check(ran(0, 0, 0), "a plain key tapped waits out the double tap time");
+    at(1, kDelete, false, none);
+    Check(ran(1, 0, 0), "and then runs the tap");
+    at(100, kDelete, true, none);
+    at(80, kDelete, false, none);
+    at(100, kDelete, true, none);
+    Check(ran(1, 1, 0), "tapped twice it runs the double tap");
+    at(80, kDelete, false, none);
+    at(400, kDelete, true, none);
+    at(400, kDelete, true, none);
+    Check(ran(1, 1, 1), "and held, the hold");
+    at(100, kDelete, false, none);
+
+    at(400, kJ, true, ctrl | shift);
+    at(40, kJ, true, none);
+    at(40, kJ, false, none);
+    at(100, kJ, true, ctrl | shift);
+    Check(ran(1, 2, 1), "a chord pressed twice is its double tap, whatever its modifiers did between the presses");
+    at(80, kJ, false, ctrl | shift);
+
+    at(400, kJ, true, ctrl | shift);
+    at(80, kJ, false, ctrl | shift);
+    at(100, kJ, true, none);
+    at(80, kJ, false, none);
+    Check(ran(1, 2, 1), "its key pressed a second time without them is no double tap");
+    at(120, kJ, false, none);
+    Check(ran(2, 2, 1), "and the chord's tap before it runs in its time");
+
+    at(400, kDelete, true, ctrl | shift);
+    at(80, kDelete, false, none);
+    at(100, kDelete, true, none);
+    Check(ran(2, 2, 1), "a plain key pressed with Ctrl and Shift held is no first tap for the bare press after it");
+    at(80, kDelete, false, none);
+    at(300, kDelete, false, none);
+    Check(ran(3, 2, 1), "which is a tap of its own");
+
+    HotkeyPoller fresh;
+    const std::function<void()> nothing;
+    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, nothing, [] {}, [] {}); }) &&
+              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, [] {}, nothing, [] {}); }) &&
+              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, [] {}, [] {}, nothing); }),
+          "an empty action throws");
+    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, -1, 300, [] {}, [] {}, [] {}); }) &&
+              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, -1, [] {}, [] {}, [] {}); }),
+          "a negative hold or double tap time throws");
+    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}, {none, 0x100}}, 400, 300, [] {}, [] {}, [] {}); }),
+          "a code outside 0x01-0xFE throws");
+    Check(RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, [] {}, [] {}, [] {}) == std::vector<int>{1},
+          "a refused list registered nothing");
+    g_held = none;
+}
 #endif
 
 }  // namespace
@@ -467,6 +557,7 @@ int RunKeyBindingsTests() {
 #ifdef _WIN32
     TestRegistration();
     TestHoldRegistration();
+    TestTapRegistration();
 #endif
     return g_failures;
 }

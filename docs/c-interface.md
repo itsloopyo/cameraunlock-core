@@ -200,8 +200,8 @@ A host describes its `CameraUnlock.ini` at run time, then loads it:
    save may change. `default_text` gives a concept that is not global (`CollisionMargin`,
    `CollisionChannel`) the game's own default, and with `CAMERAUNLOCK_ROW_PER_GAME` a global one,
    which needs the owner-approved `per_game` entry `docs/canonical-config.md` describes.
-3. `cameraunlock_config_local_bool`, `_int`, `_float`, `_enum`, `_hotkey` and `_hotkey_held` for
-   the game's own rows. Each answers the row's number. `CAMERAUNLOCK_ROW_LIVE` marks a row
+3. `cameraunlock_config_local_bool`, `_int`, `_float`, `_enum`, `_hotkey`, `_hotkey_held` and
+   `_hotkey_taps` for the game's own rows. Each answers the row's number. `CAMERAUNLOCK_ROW_LIVE` marks a row
    `cameraunlock_config_reload` reads again while the game runs.
 4. `cameraunlock_config_load(path, defaults_path, out)`. `defaults_path` is `NULL` in a mod, for
    the player's own Defaults.ini, and a scratch file in every test.
@@ -251,8 +251,34 @@ and in every rule, with two bits where that has one:
   down at both may have been let go and pressed again unseen, so it is timed as a press begun at
   the second look.
 
-A background test taps and holds such a key through isolated input's `tap <key> <ms>`
-([isolated-input.md](isolated-input.md), The command file).
+A key that does one thing tapped, another tapped twice and a third held is a row of
+`cameraunlock_config_local_hotkey_taps(key, comment, flags, default_keys, hotkey_bit, double_bit,
+held_bit)`, with three bits:
+
+- `hotkey_bit` is answered for a tap, a press let go before `CAMERAUNLOCK_HOLD_MS`, once
+  `CAMERAUNLOCK_DOUBLE_TAP_MS` (300 ms) have passed since it was let go with no second press. A
+  tap is late by that much, which is what telling it from a double tap costs.
+- `double_bit` is answered as a second press goes down within that time. That press answers
+  nothing else, however long it is held and when it is let go, and the first tap's bit is never
+  answered. The press after it starts afresh.
+- `held_bit` is answered once, when a first press has been down `CAMERAUNLOCK_HOLD_MS` and is
+  still down. Nothing is answered when it is let go, and a press right after it starts afresh: a
+  hold and a tap make no double tap.
+- Each is one bit at `CAMERAUNLOCK_HOTKEY_LOCAL` or above, the three differ, and none is a bit of
+  another row of any kind.
+- A chord is judged as each press goes down. A press that is not the chord takes no part: it is
+  no tap, no hold and no second press, and a tap waiting for its time is left waiting and is
+  answered when the time is up, as if that press had not been made.
+- The foreground rule is the same: a press begun while the game is not in the foreground takes no
+  part either, a tap let go there is no tap, and a tap whose time runs out there is dropped, not
+  answered late.
+- `cameraunlock_hotkeys_drop` forgets a tap that is waiting, as well as ending every press that
+  is down.
+- After more than 100 ms between two looks at the keys, a waiting tap is dropped and a key still
+  down is a first press begun at the second look.
+
+A background test taps, double taps and holds such a key through isolated input's `tap <key> <ms>`
+and `wait <ms>` ([isolated-input.md](isolated-input.md), The command file).
 
 ## The log
 

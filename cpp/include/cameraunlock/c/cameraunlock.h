@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 3
+#define CAMERAUNLOCK_ABI 4
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -298,6 +298,18 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey(const char* key, const c
 CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey_held(const char* key, const char* comment, uint32_t flags,
                                                              const char* default_keys, int32_t hotkey_bit,
                                                              int32_t held_bit);
+/* How long after a key of cameraunlock_config_local_hotkey_taps is let go a second press of it
+ * still makes a double tap. */
+#define CAMERAUNLOCK_DOUBLE_TAP_MS 300
+/* A key list of the game's own under [Hotkeys] whose keys do one thing tapped, another tapped
+ * twice and a third held. cameraunlock_hotkeys_take answers `hotkey_bit` once
+ * CAMERAUNLOCK_DOUBLE_TAP_MS have passed since a tap was let go with no second press,
+ * `double_bit` as a second press goes down within that time, and `held_bit` once a first press
+ * has been down CAMERAUNLOCK_HOLD_MS. Each is one bit, CAMERAUNLOCK_HOTKEY_LOCAL or above, and no
+ * other row's. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey_taps(const char* key, const char* comment, uint32_t flags,
+                                                             const char* default_keys, int32_t hotkey_bit,
+                                                             int32_t double_bit, int32_t held_bit);
 
 /* The file the description renders for a first start, written to `path`: the committed
  * config/CameraUnlock.ini a mod's build keeps in step with its rows. */
@@ -364,7 +376,8 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_save_world_space_yaw(int32_t world_sp
 CAMERAUNLOCK_C int32_t cameraunlock_hotkeys_start(void);
 /* The actions whose keys went down since the last take or drop, as bits, forgotten as they are
  * answered. A row of cameraunlock_config_local_hotkey_held answers when its key is let go or has
- * been held, not as it goes down. */
+ * been held, not as it goes down, and one of cameraunlock_config_local_hotkey_taps as its comment
+ * says. */
 CAMERAUNLOCK_C int32_t cameraunlock_hotkeys_take(void);
 /* Forgets them without answering: for presses made where the host does not act on them. */
 CAMERAUNLOCK_C void cameraunlock_hotkeys_drop(void);
