@@ -31,6 +31,12 @@ itself.
   answer and the key states handed in, which `Poll()` now calls with the system's. The tests
   drive presses through it.
 - A plain key row of the C interface is now also refused a bit another row answers held.
+- `HotkeyPoller::DisarmHoldPresses()` makes every such key that is down now run nothing for that
+  press. `cameraunlock_hotkeys_drop` calls it, so a key that went down where the host drops, in
+  a menu, answers neither bit when it is let go or has been held in play.
+- A poll more than `HotkeyPoller::kMaxHoldPollGapMs` (100 ms) after the one before it times a
+  key it finds still down as a press begun at that poll: a polling thread that was held up
+  cannot turn two presses into one hold.
 
 No existing signature or behaviour changed. A background test drives such a key with isolated
 input's `tap <key> <ms>`: `tap Delete 80`, `tap Delete 800`. `docs/c-interface.md`: Hotkeys.
@@ -45,6 +51,8 @@ of their own, and had nowhere to put the second.
   `cameraunlock_view_frame` and `cameraunlock_view_lean` are the four `cameraunlock_session_*`
   functions for the view named, and those four are view 0. Each view has its own receiver, port,
   interpolation, smoothing state, lean clamp, aim transitions, frame clock and waiting lean.
+- `cameraunlock_session_configure` reaches every view as one change: a frame or a lean of any
+  view runs wholly before it or wholly after it, the tracking mode included.
 - The settings and the two modes are every view's: `cameraunlock_session_configure`, the two
   cycles and `cameraunlock_session_set_aim_mode` reach all of them, one started later included.
 - Starting a view on a port another started view listens on is an error that names both views

@@ -750,6 +750,9 @@ void TestConfig(const fs::path& scratch) {
           "two key rows cannot share a bit");
     Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x8) == CAMERAUNLOCK_ERROR,
           "and a local key row cannot take one of the fleet's bits");
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, nullptr, 0x8) == CAMERAUNLOCK_ERROR &&
+              LastError().find("default_keys is NULL") != std::string::npos,
+          "a key row with no keys at all is told that before anything about its bit: " + LastError());
     Check(cameraunlock_config_local_float("General", "FieldOfView", "Again.", 0, 65.0f, 40.0f, 110.0f) == CAMERAUNLOCK_ERROR,
           "a key used twice is refused");
 

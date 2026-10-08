@@ -120,7 +120,8 @@ A frame that asked for a lean and never got the call is an error at the next fra
 ## Settings
 
 `cameraunlock_settings_defaults` fills a `CameraUnlockSettings` with core's defaults, and
-`cameraunlock_session_configure` puts one on the session: the tracking mode, the aim mode, the two
+`cameraunlock_session_configure` puts one on the session, whole, between one frame and the next:
+the tracking mode, the aim mode, the two
 smoothing values, the five position limits, the lean clamp's margin and release, whether the clamp
 runs, `data_freshness_ms` and `light_multiplier`. A host with a config file passes the `settings`
 member of the `CameraUnlockConfig` the load filled, as it is.
@@ -242,6 +243,13 @@ and in every rule, with two bits where that has one:
   chord's tap or hold, and a bare key pressed with Ctrl and Shift both held is neither.
 - As with every hotkey, nothing is answered while the game is not in the foreground, and a press
   that began there answers neither bit, however it ends.
+- `cameraunlock_hotkeys_drop` also ends every such press that is down as it is called: that press
+  answers neither bit, when it is let go or when it has been held, and the next press is a press
+  like any other. So a key that went down in a menu, where the host drops, does not answer in
+  play.
+- The poller looks at the keys every 16 ms. When more than 100 ms pass between two looks, a key
+  down at both may have been let go and pressed again unseen, so it is timed as a press begun at
+  the second look.
 
 A background test taps and holds such a key through isolated input's `tap <key> <ms>`
 ([isolated-input.md](isolated-input.md), The command file).

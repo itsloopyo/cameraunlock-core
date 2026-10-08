@@ -273,6 +273,11 @@ public final class Tests {
                 "a view past the last is refused by its number: " + none);
         check(refusal(() -> core.viewStart(1, -1)).contains("udp_port is outside 1 to 65535"), "and a port that is none");
         core.viewStop(1);
+        core.logTake();
+        refusal(() -> testing.deliver(CameraUnlock.VIEWS, datagram(0, 0, 0, 0, 0, 0), false));
+        String undelivered = core.logTake();
+        check(undelivered.contains("cameraunlock_testing_deliver_view: there is no view " + CameraUnlock.VIEWS),
+                "a datagram for a view that is none is refused under the name of the function called: " + undelivered);
         check(refusal(() -> core.viewStop(-1)).contains("there is no view -1"), "stopping a stopped view is not an error, and a view that is none is");
     }
 

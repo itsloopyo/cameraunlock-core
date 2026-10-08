@@ -131,6 +131,7 @@ bool HotkeyPoller::Start(int pollIntervalMs) {
         for (auto& entry : m_holdHotkeys) {
             entry.keyDown = false;
         }
+        m_polled = false;
     }
 
     // m_running is set AFTER the thread exists, and rolled back if it does not.
@@ -223,6 +224,23 @@ void HotkeyPoller::Poll() {
     PollAt(std::chrono::steady_clock::now(), IsOwnProcessForeground(), &IsKeyDown);
 }
 
+void HotkeyPoller::DisarmHoldPresses() {
+    DisarmHoldPressesWith(&IsKeyDown);
+}
+
+void HotkeyPoller::DisarmHoldPressesWith(KeyState isDown) {
+    std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    for (auto& entry : m_holdHotkeys) {
+        if (entry.vkCode == 0) continue;
+        // The key is read here as well: one that went down since the last poll is a
+        // press this call is for, and the next poll must not find it a new one.
+        if (entry.keyDown || isDown(entry.vkCode)) {
+            entry.keyDown = true;
+            entry.armed = false;
+        }
+    }
+}
+
 void HotkeyPoller::PollAt(std::chrono::steady_clock::time_point now, bool allowFire, KeyState isDown) {
     // Edge detection happens under the lock; the callbacks themselves are collected and
     // invoked after it is released. Firing in place deadlocked the polling thread against
@@ -253,10 +271,21 @@ void HotkeyPoller::PollAt(std::chrono::steady_clock::time_point now, bool allowF
             }
         }
 
+        const bool gap = m_polled && now - m_polledAt > std::chrono::milliseconds(kMaxHoldPollGapMs);
+        m_polled = true;
+        m_polledAt = now;
+
         for (auto& entry : m_holdHotkeys) {
             if (entry.vkCode == 0) continue;
 
             bool pressed = isDown(entry.vkCode);
+            if (pressed && entry.keyDown && !entry.held && gap) {
+                // The key may have come up and gone down again unseen, so its time down
+                // counts from here, and a press that may have begun in the background
+                // is not one begun in the foreground.
+                entry.downAt = now;
+                entry.armed = entry.armed && allowFire;
+            }
             if (pressed && !entry.keyDown) {
                 entry.keyDown = true;
                 entry.armed = allowFire;

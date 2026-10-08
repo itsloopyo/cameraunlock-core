@@ -218,6 +218,10 @@ struct View {
 struct Session {
     // Held through a start and a stop, taken before the view's own.
     std::mutex starts;
+    // Held through a configure, a frame and a lean, taken before the view's own and never with
+    // `starts`: a frame runs on the settings and the tracking mode of one configure, whole, in
+    // every view.
+    std::mutex settings;
     View views[CAMERAUNLOCK_VIEWS];
     std::atomic<std::int32_t> aim_mode{CAMERAUNLOCK_AIM_SIGHTS_LOCKED};
 
@@ -307,13 +311,19 @@ std::int32_t StartView(std::int32_t view, std::int32_t udp_port) {
                                         " listens on: a port carries one tracker");
         }
     }
+    bool bound = false;
+    try {
+        bound = s.receiver.Start(static_cast<std::uint16_t>(udp_port));
+    } catch (...) {
+        // A start that threw part way leaves the view not started and its port free to another.
+        s.receiver.Stop();
+        throw;
+    }
     s.started = true;
     s.port = udp_port;
     // The receiver says why a bind failed and when a later one held. This is the line for
     // the bind that held at once, so a log always says which of the two happened.
-    if (s.receiver.Start(static_cast<std::uint16_t>(udp_port))) {
-        LogLine("Listening for OpenTrack datagrams on UDP port " + std::to_string(udp_port) + Named(view));
-    }
+    if (bound) LogLine("Listening for OpenTrack datagrams on UDP port " + std::to_string(udp_port) + Named(view));
     return CAMERAUNLOCK_OK;
 }
 
@@ -336,6 +346,7 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
     View& s = ViewAt(session, view);
     RequireStruct(input, "CameraUnlockFrameInput");
     RequireStruct(out, "CameraUnlockFrame");
+    const std::lock_guard<std::mutex> settings(session.settings);
     const std::lock_guard<std::mutex> lock(s.mutex);
 
     *out = {};
@@ -465,8 +476,10 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
 }
 
 std::int32_t LeanOf(std::int32_t view, const CameraUnlockObstruction* obstruction, CameraUnlockLean* out) {
-    View& s = ViewAt(TheSession(), view);
+    Session& session = TheSession();
+    View& s = ViewAt(session, view);
     RequireStruct(out, "CameraUnlockLean");
+    const std::lock_guard<std::mutex> settings(session.settings);
     const std::lock_guard<std::mutex> lock(s.mutex);
     if (!s.pending) {
         throw std::logic_error("no lean is waiting" + (view == 0 ? std::string() : " for view " + std::to_string(view)) +
@@ -552,7 +565,8 @@ struct ConfigState {
     std::vector<LocalRow> locals;
     std::unique_ptr<cfg::ConfigOwner<HostConfig>> owner;
     HostConfig loaded;
-    input::HotkeyPoller* poller = nullptr;
+    // Written under the mutex, and read without it by cameraunlock_hotkeys_drop.
+    std::atomic<input::HotkeyPoller*> poller{nullptr};
     std::atomic<std::int32_t> pressed{0};
 };
 
@@ -678,7 +692,6 @@ std::int32_t Save(ConfigState& c, const std::function<void(HostConfig&)>& change
 // Under the config's mutex. `held_bit` is 0 for a row of cameraunlock_config_local_hotkey.
 std::int32_t AddHotkeyRow(ConfigState& c, const char* key, const char* comment, std::uint32_t flags,
                           const char* default_keys, std::int32_t hotkey_bit, std::int32_t held_bit) {
-    Require(default_keys != nullptr, "default_keys is NULL");
     for (const LocalRow& other : c.locals) {
         if (other.hotkey_bit == hotkey_bit || other.held_bit == hotkey_bit) {
             throw std::invalid_argument("hotkey_bit is another row's");
@@ -702,11 +715,12 @@ void Register(ConfigState& c, const std::string& row, const std::string& keys, s
     const input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
     if (!parsed.ok()) throw std::runtime_error(row + "=" + keys + ": " + parsed.error);
     std::atomic<std::int32_t>* pressed = &c.pressed;
+    input::HotkeyPoller& poller = *c.poller.load();
     if (held_bit == 0) {
-        input::RegisterKeyBindings(*c.poller, parsed.bindings, [pressed, bit] { pressed->fetch_or(bit); });
+        input::RegisterKeyBindings(poller, parsed.bindings, [pressed, bit] { pressed->fetch_or(bit); });
     } else {
         input::RegisterHoldKeyBindings(
-            *c.poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, [pressed, bit] { pressed->fetch_or(bit); },
+            poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, [pressed, bit] { pressed->fetch_or(bit); },
             [pressed, held_bit] { pressed->fetch_or(held_bit); });
     }
 }
@@ -796,6 +810,7 @@ std::int32_t cameraunlock_session_configure(const CameraUnlockSettings* settings
         clamp.skin = settings->collision_margin;
         clamp.release_smoothing = settings->collision_release_smoothing;
         Session& session = TheSession();
+        const std::lock_guard<std::mutex> configuring(session.settings);
         for (View& s : session.views) {
             const std::lock_guard<std::mutex> lock(s.mutex);
             s.settings = *settings;
@@ -985,6 +1000,7 @@ std::int32_t cameraunlock_config_local_enum(const char* section, const char* key
 std::int32_t cameraunlock_config_local_hotkey(const char* key, const char* comment, std::uint32_t flags,
                                               const char* default_keys, std::int32_t hotkey_bit) {
     return Guarded("cameraunlock_config_local_hotkey", [&] {
+        Require(default_keys != nullptr, "default_keys is NULL");
         Require(hotkey_bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (hotkey_bit & (hotkey_bit - 1)) == 0,
                 "hotkey_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
         ConfigState& c = TheConfig();
@@ -997,6 +1013,7 @@ std::int32_t cameraunlock_config_local_hotkey_held(const char* key, const char* 
                                                    const char* default_keys, std::int32_t hotkey_bit,
                                                    std::int32_t held_bit) {
     return Guarded("cameraunlock_config_local_hotkey_held", [&] {
+        Require(default_keys != nullptr, "default_keys is NULL");
         Require(hotkey_bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (hotkey_bit & (hotkey_bit - 1)) == 0,
                 "hotkey_bit is not one bit at CAMERAUNLOCK_HOTKEY_LOCAL or above");
         Require(held_bit >= CAMERAUNLOCK_HOTKEY_LOCAL && (held_bit & (held_bit - 1)) == 0,
@@ -1192,8 +1209,8 @@ std::int32_t cameraunlock_hotkeys_start(void) {
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
         RequireLoaded(c);
-        if (c.poller != nullptr) throw std::logic_error("the hotkeys are already started");
-        c.poller = new input::HotkeyPoller();
+        if (c.poller.load() != nullptr) throw std::logic_error("the hotkeys are already started");
+        c.poller.store(new input::HotkeyPoller());
         using Concept = cfg::schema::Concept;
         for (const ConceptRow& row : c.concepts) {
             if (row.id == Concept::ToggleKey) {
@@ -1213,7 +1230,7 @@ std::int32_t cameraunlock_hotkeys_start(void) {
                          c.locals[i].held_bit);
             }
         }
-        if (!c.poller->Start()) throw std::runtime_error("the hotkey poller did not start");
+        if (!c.poller.load()->Start()) throw std::runtime_error("the hotkey poller did not start");
         return CAMERAUNLOCK_OK;
     });
 }
@@ -1237,28 +1254,37 @@ std::int32_t cameraunlock_testing_reset(void) {
     });
 }
 
+namespace {
+
+std::int32_t DeliverTo(std::int32_t view, const void* datagram, std::int32_t length, std::int32_t remote) {
+    View& s = ViewAt(TheSession(), view);
+    Require(datagram != nullptr && length >= 0, "datagram is NULL or its length negative");
+    const std::lock_guard<std::mutex> lock(s.mutex);
+    if (s.started) {
+        throw std::logic_error((view == 0 ? std::string("the session") : "view " + std::to_string(view)) +
+                               " is listening: a datagram is delivered to one that is not");
+    }
+    sockaddr_in sender = {};
+    sender.sin_family = AF_INET;
+    sender.sin_port = htons(4242);
+    inet_pton(AF_INET, remote != 0 ? "192.0.2.1" : "127.0.0.1", &sender.sin_addr);
+    // Each delivery is a later arrival than the last, as the session tells packets apart by it.
+    static std::int64_t last_arrival = 0;
+    const std::int64_t now = SteadyMicros();
+    last_arrival = now > last_arrival ? now : last_arrival + 1;
+    detail::UdpReceiverTestAccess::Deliver(s.receiver, datagram, length, sender, last_arrival);
+    return CAMERAUNLOCK_OK;
+}
+
+}  // namespace
+
 std::int32_t cameraunlock_testing_deliver(const void* datagram, std::int32_t length, std::int32_t remote) {
-    return cameraunlock_testing_deliver_view(0, datagram, length, remote);
+    return Guarded("cameraunlock_testing_deliver", [&] { return DeliverTo(0, datagram, length, remote); });
 }
 
 std::int32_t cameraunlock_testing_deliver_view(std::int32_t view, const void* datagram, std::int32_t length,
                                                std::int32_t remote) {
-    return Guarded("cameraunlock_testing_deliver", [&] {
-        View& s = ViewAt(TheSession(), view);
-        Require(datagram != nullptr && length >= 0, "datagram is NULL or its length negative");
-        const std::lock_guard<std::mutex> lock(s.mutex);
-        if (s.started) throw std::logic_error("the session is listening: a datagram is delivered to one that is not");
-        sockaddr_in sender = {};
-        sender.sin_family = AF_INET;
-        sender.sin_port = htons(4242);
-        inet_pton(AF_INET, remote != 0 ? "192.0.2.1" : "127.0.0.1", &sender.sin_addr);
-        // Each delivery is a later arrival than the last, as the session tells packets apart by it.
-        static std::int64_t last_arrival = 0;
-        const std::int64_t now = SteadyMicros();
-        last_arrival = now > last_arrival ? now : last_arrival + 1;
-        detail::UdpReceiverTestAccess::Deliver(s.receiver, datagram, length, sender, last_arrival);
-        return CAMERAUNLOCK_OK;
-    });
+    return Guarded("cameraunlock_testing_deliver_view", [&] { return DeliverTo(view, datagram, length, remote); });
 }
 
 #endif
@@ -1268,5 +1294,9 @@ std::int32_t cameraunlock_hotkeys_take(void) {
 }
 
 void cameraunlock_hotkeys_drop(void) {
-    TheConfig().pressed.store(0);
+    ConfigState& c = TheConfig();
+    // First, so a key down now ends as nothing: its tap or its hold would otherwise be answered
+    // after this, when the host is acting on keys again.
+    if (input::HotkeyPoller* poller = c.poller.load()) poller->DisarmHoldPresses();
+    c.pressed.store(0);
 }

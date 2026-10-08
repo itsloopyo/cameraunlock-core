@@ -59,8 +59,27 @@ public:
     // process is in the foreground at that moment, and a press that began while it
     // was not runs none of the three.
     // Returns an ID that can be used to remove the hotkey
+    //
+    // A poll that comes more than kMaxHoldPollGapMs after the one before it cannot
+    // tell a key held through the gap from one let go and pressed again inside it,
+    // so a key it finds still down is timed as a press begun at that poll. A caller
+    // that polls from its own loop less often than that never sees a hold.
     int AddHoldHotkey(int vkCode, int holdMs, HotkeyCallback onTap, HotkeyCallback onHold,
                       HotkeyCallback onDown = nullptr);
+
+    // The longest time between two polls across which a key seen down at both is
+    // taken to have stayed down. Six of the default 16 ms polls: a thread held up
+    // for less is late, and held up for longer it can miss a quick second press.
+    static constexpr int kMaxHoldPollGapMs = 100;
+
+    // Every AddHoldHotkey key that is down now runs nothing for this press, however
+    // it ends. The next press is a press like any other. For a caller that throws
+    // away what was pressed while it was not acting on keys: a key that went down
+    // then would otherwise run its tap or its hold when it ends, later.
+    void DisarmHoldPresses();
+    // The same with the key states handed in, as PollAt has them.
+    using KeyState = bool (*)(int vkCode);
+    void DisarmHoldPressesWith(KeyState isDown);
 
     // Remove a hotkey by ID
     void RemoveHotkey(int id);
@@ -90,7 +109,6 @@ public:
     // One poll with the clock, the foreground answer and the key states handed in.
     // Poll() is this with the system's. A test drives a press down and up at the
     // times it chooses through it, with no keyboard and no waiting.
-    using KeyState = bool (*)(int vkCode);
     void PollAt(std::chrono::steady_clock::time_point now, bool foreground, KeyState isDown);
 
 private:
@@ -138,6 +156,9 @@ private:
         std::chrono::steady_clock::time_point downAt;
     };
     std::vector<HoldHotkeyEntry> m_holdHotkeys;
+    // When PollAt last ran, once it has.
+    bool m_polled = false;
+    std::chrono::steady_clock::time_point m_polledAt;
     // Guards both lists and the ID counter.
     std::mutex m_hotkeyMutex;
     int m_nextHotkeyId = 1;

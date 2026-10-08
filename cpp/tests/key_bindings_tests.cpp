@@ -392,11 +392,16 @@ void TestHoldRegistration() {
     Check(ids.size() == 2 && ids[0] != ids[1], "one hold hotkey per key, for bindings that share one too");
 
     int ms = 0;
+    const auto poll = [&](int when) {
+        poller.PollAt(std::chrono::steady_clock::time_point() + std::chrono::milliseconds(when), true, &FakeKeyDown);
+    };
+    // The key and the modifiers as given from `advance` ms on, polled every 16 ms up to then as they were.
     const auto at = [&](int advance, int vk, bool down, KeyModifiers held) {
+        for (int t = 16; t < advance; t += 16) poll(ms + t);
         ms += advance;
         g_keyDown[vk] = down;
         g_held = held;
-        poller.PollAt(std::chrono::steady_clock::time_point() + std::chrono::milliseconds(ms), true, &FakeKeyDown);
+        poll(ms);
     };
 
     at(0, kDelete, true, none);

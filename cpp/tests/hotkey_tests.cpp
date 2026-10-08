@@ -80,8 +80,28 @@ struct HoldRig {
             cameraunlock::input::VK::Delete, 400, [this] { ++taps; }, [this] { ++holds; }, [this] { ++downs; });
     }
 
+    int last = 0;
+    bool wasForeground = true;
+
+    // The key and the foreground as given from `ms` on, polled every 16 ms up to then as
+    // they were, the way the poller's thread does.
     void At(int ms, bool down, bool foreground = true) {
+        for (int t = last + 16; t < ms; t += 16) Poll(t, wasForeground);
+        Jump(ms, down, foreground);
+    }
+
+    // The same with no poll since the last one: a polling thread that was held up.
+    void Jump(int ms, bool down, bool foreground = true) {
         g_down[cameraunlock::input::VK::Delete] = down;
+        Poll(ms, foreground);
+        last = ms;
+        wasForeground = foreground;
+    }
+
+    void Disarm() { poller.DisarmHoldPressesWith(&FakeDown); }
+
+private:
+    void Poll(int ms, bool foreground) {
         poller.PollAt(std::chrono::steady_clock::time_point() + std::chrono::milliseconds(ms), foreground, &FakeDown);
     }
 };
@@ -125,9 +145,68 @@ void TestTapAndHold() {
     {
         HoldRig rig;
         rig.At(0, true);
-        rig.At(500, false);
+        rig.Jump(500, false);
         Check(rig.taps == 0 && rig.holds == 0,
               "a release first seen past the hold time, with no poll that saw the key held, runs nothing");
+    }
+    {
+        HoldRig rig;
+        rig.At(0, true);
+        rig.Jump(2000, true);
+        Check(rig.holds == 0,
+              "a key seen down again after two seconds with no poll may be a second press, and is not a hold yet");
+        rig.At(2399, true);
+        Check(rig.holds == 0, "its time down counts from the poll that found it");
+        rig.At(2400, true);
+        Check(rig.holds == 1 && rig.taps == 0, "and it is a hold once that is the hold time");
+    }
+    {
+        HoldRig rig;
+        rig.At(0, true);
+        rig.Jump(2000, true);
+        rig.At(2080, false);
+        Check(rig.taps == 1 && rig.holds == 0, "let go soon after such a gap it is a tap");
+    }
+    {
+        HoldRig rig;
+        rig.At(0, true);
+        rig.At(300, true);
+        rig.Jump(300 + cameraunlock::input::HotkeyPoller::kMaxHoldPollGapMs, true);
+        Check(rig.holds == 1, "a poll late by no more than kMaxHoldPollGapMs is only late: the key was down all along");
+    }
+    {
+        HoldRig rig;
+        rig.At(0, true);
+        rig.Jump(2000, true, false);
+        rig.At(2080, false, true);
+        Check(rig.taps == 0, "a press that may have begun again in the background, behind a gap, runs nothing");
+    }
+    {
+        HoldRig rig;
+        rig.At(0, true);
+        rig.Disarm();
+        rig.At(80, false);
+        Check(rig.taps == 0, "a press down when the presses are disarmed is not a tap when it is let go");
+        rig.At(100, true);
+        rig.At(180, false);
+        Check(rig.taps == 1, "and the press after it is");
+        rig.At(200, true);
+        rig.Disarm();
+        rig.At(700, true);
+        rig.At(800, false);
+        Check(rig.holds == 0 && rig.taps == 1, "nor is a disarmed press a hold, at the hold time or at its release");
+        rig.At(816, true);
+        rig.At(1300, true);
+        Check(rig.holds == 1, "and the press after that holds");
+    }
+    {
+        HoldRig rig;
+        rig.At(0, false);
+        g_down[cameraunlock::input::VK::Delete] = true;
+        rig.Disarm();
+        rig.At(16, true);
+        rig.At(80, false);
+        Check(rig.downs == 0 && rig.taps == 0, "a key that went down since the last poll is disarmed with the rest");
     }
     {
         HoldRig rig;
