@@ -9,6 +9,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - a background test's stop waits for the game to go, and a host DLL that will not delete no longer fails the stop or the next start
+
+`Stop-IsolatedGame` ended the game and waited with `Wait-Process`, which returns when the exit
+code is set: at once after a forced stop, while the process is still listed and every DLL it
+loaded is still mapped. Measured with a stand-in that had touched 4 GB: `Wait-Process` returned
+after 17 ms, and the process and its hold on the host DLL went 240 ms later. The stop then tried
+to delete `CameraUnlockIsolatedInput.dll` for 10 seconds and threw. On 2026-10-07 a Project
+Zomboid on a machine short of commit outlasted that and the 15 seconds a session then gave it, so
+the session threw `the game could not be stopped` with the game's files and the player's saves
+not put back and the rig held. Where the process did go in time, the files were put back and the
+rig released, and the run still ended on `Cannot remove item ...CameraUnlockIsolatedInput.dll:
+Access to the path is denied`, which also ended a waiting session that was clearing a killed
+one. A copy left in a folder, still loaded, stopped the next start there at `Copy-Item`.
+
+- `Stop-IsolatedGame`, `Stop-IsolatedGameSession`, `Invoke-IsolatedGameSession` and
+  `Enter-GameRig -StopKept` wait on the process itself, 120 seconds at most. A caller's stop
+  returns a little later than it did, with the game's files free.
+- A session stops the game, puts the game's files back, and only then removes the host DLL. A
+  copy that will not delete for 10 seconds is moved aside as
+  `CameraUnlockIsolatedInput.dll.left-<id>` (Windows renames a loaded DLL it will not delete) and
+  reported as a warning that names the file, the error and the process that has it, read from
+  the Restart Manager. It is never an error, in a session or in `Stop-IsolatedGame` alone.
+- `Copy-IsolatedInputHost`, and so every `-ModHost managed` start, moves aside a copy an earlier
+  run left that is still loaded, with the same warning, and puts the fresh copy under the name
+  the mod loads. Each start and stop deletes the `.left-` files in its folder that have come
+  free. Only a copy that can be neither deleted nor moved for 10 seconds throws, at the start,
+  naming the process.
+- A game that has not gone is the one thing that still stops a session before the restore, and
+  it says what happened: `the game (pid N) has not stopped, so nothing was put back under it and
+  the rig is still held`, then that the stop was refused or that the process was ended and had
+  not gone 120 seconds later. It throws at once on a refused stop, where it waited 15 seconds.
+- `Stop-IsolatedGameSession` said `this session no longer holds the rig` for every way
+  `Enter-GameRig -Token` could fail, and removed the session file with it. It says that, and
+  clears the file, only when the lock is gone or is another session's. Any other refusal is
+  thrown as itself and leaves the session to be stopped again.
+
+No signature changes. `pixi run test-powershell-game-rig` has the cases, with a stand-in that
+holds the DLL loaded, one that holds it open, and one that refuses to be ended.
+`docs/isolated-input.md`: A whole session, A host DLL that will not delete.
+
 ### Changed - BioShock Remastered keeps its 5 cm downward lean as a per_game row
 
 `data/config-format.json` `per_game` gains bioshock-remastered-headtracking's `PositionLimitYDown`.

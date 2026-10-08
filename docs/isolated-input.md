@@ -222,10 +222,36 @@ writes out by hand. In order:
    did nothing.
 
 Step 7 runs however the call ends: the block throwing, the game not starting,
-the prepare step failing. Each part of it runs whatever the part before it did.
-The rig is released only once the files are back, so a restore that fails
-leaves the game refused to everyone, with the folder to restore named, until
-someone has run `Restore-GameTestState` on it.
+the prepare step failing. Its order is the order of what each part protects:
+
+- **The game first.** The stop returns once the game's process has gone, which
+  is when the files it had loaded come free. A game that has not stopped throws
+  at once, as `the game (pid N) has not stopped, so nothing was put back under
+  it and the rig is still held`, with the reason after it: the stop was
+  refused, or the process was ended and had still not gone 120 seconds later.
+  Nothing is put back under a game that is still there, the rig stays held, and
+  the session can be stopped again once the game has gone
+  (`Stop-IsolatedGameSession -SessionFile`).
+- **Then the game's files.** `-Collect` runs, then the restore. The rig is
+  released only once the files are back, so a restore that fails leaves the
+  game refused to everyone, with the folder to restore named, until someone has
+  run `Restore-GameTestState` on it.
+- **The host DLL of a `-ModHost managed` session last**, once the files are
+  back. It is a copy of core's own in the mod folder and nothing of the game's,
+  so one that will not delete never fails the session: see
+  [A host DLL that will not delete](#a-host-dll-that-will-not-delete).
+- `-Leave`, and the rig is released. A `-Collect` or `-Leave` that threw is
+  thrown once everything else is done.
+
+`Stop-IsolatedGame` waits on the process itself, not with `Wait-Process`.
+Measured 2026-10-08 with a stand-in that had touched 4 GB of memory and loaded
+the host DLL: `Wait-Process` returned 17 ms after `Stop-Process -Force`, with
+the process still listed and the DLL still refusing to be deleted, and both
+went together 240 ms later. A stand-in of 2 GB took 140 ms and one of 9 MB was
+gone before `Wait-Process` returned. On 2026-10-07, an evening the machine was
+short of commit, a Project Zomboid had not gone 25 seconds after its stop: the
+run's log shows the DLL tried for 10 seconds and the process then waited on
+for 15. That is what the 120 seconds are for.
 
 A mod's `.lab/isolated.ps1` on it:
 
@@ -375,6 +401,34 @@ core's, `CameraUnlockIsolatedInput.dll`, and the mod's dev build loads it.
    removes the copy. `-HostDll <path>` names a build that is not this checkout's
    x64 one, such as a 32-bit build (`-A Win32` and a build folder of its own) for
    a 32-bit game.
+
+   It is copied, and under that one name, because that is where every dev build
+   looks for it: `StartIfAsked` loads `CameraUnlockIsolatedInput.dll` from the
+   mod folder it is handed, and that code is compiled into each mod at the core
+   commit the mod pins.
+
+### A host DLL that will not delete
+
+Windows deletes no DLL that a process still has loaded and writes over none,
+and it renames one freely. The copy in the mod folder is loaded by the game, so
+it comes free when the game's process has gone, which the stop waits for.
+Anything else that still has it is not the session's to wait on, and neither
+the stop nor the next start depends on it:
+
+- **At the stop**, a copy that will not delete for 10 seconds is moved aside as
+  `CameraUnlockIsolatedInput.dll.left-<id>` in the same folder, and a warning
+  says so, with the path, the error and the process Windows names as having it
+  open or loaded. The session ends as it should: the game stopped, its files
+  back, the rig released. `Stop-IsolatedGame` by itself warns the same way and
+  does not throw.
+- **At the start**, a copy an earlier run left is deleted, or moved aside the
+  same way when it is still loaded, with the same warning, and the fresh copy
+  goes in under the name the mod loads.
+- **Every start and stop** in a folder deletes the `.left-` files there that
+  have come free, and says nothing about one that has not.
+- A copy that can be neither deleted nor moved (open in a process that shares
+  nothing) is left where it is with a warning at the stop. Only at the start
+  is it an error, after 10 seconds, naming the process, with nothing launched.
 
 The host logs to `CameraUnlockIsolatedInput.log` in the mod folder, keeping the
 run before it as `CameraUnlockIsolatedInput.prev.log`. What the native route
@@ -716,8 +770,9 @@ through the host DLL and `Start-IsolatedGame -ModHost managed`:
   `Save-GameCapture` (every capture was of the log) until both skipped
   `ConsoleWindowClass`.
 - BepInEx 5 logs the host DLL in `plugins` as not a .NET assembly and skips it.
-- The host DLL could not be deleted for a moment after the game was stopped;
-  `Stop-IsolatedGame` waits for it.
+- The host DLL could not be deleted for a moment after the game was stopped:
+  the game's process had not gone yet. `Stop-IsolatedGame` waits for the
+  process to go.
 - Not driven: the mouse.
 
 Starfield 1.16.244.0 (Steam), 2026-10-03, with the real foreground sampled
