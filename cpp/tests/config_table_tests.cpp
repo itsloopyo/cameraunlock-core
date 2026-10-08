@@ -980,6 +980,19 @@ void TestOptions() {
     Check(Contains(Thrown([&] { table.OptionValue(values, 8); }), "no option 8"), "and an option the table has not");
     Check(values.trees == 40 && values.fov == 90.5f, "a refused value changes nothing");
 
+    struct Wide {
+        long long count = 0;
+    };
+    ConfigTable<Wide> wide;
+    wide.Local("Content", "Count", &Wide::count, IntCodec<long long>(), "A whole number of any size.").Writable();
+    Wide held;
+    Check(Contains(Thrown([&] { wide.SetOption(held, 0, 9223372036854775808.0); }), "not a whole number") &&
+              Contains(Thrown([&] { wide.SetOption(held, 0, std::numeric_limits<double>::quiet_NaN()); }), "not a whole number") &&
+              held.count == 0,
+          "a number past what a double holds exactly, and one that is no number, are refused for an int of any width");
+    wide.SetOption(held, 0, -9007199254740992.0);
+    Check(held.count == -9007199254740992LL, "and the largest it does hold is taken");
+
     using P = Paged;
     ConfigTable<P> partial;
     partial.Concept<Concept::RotationEnabled>(&P::rotation).Writable();

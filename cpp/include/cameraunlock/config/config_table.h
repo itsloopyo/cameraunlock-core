@@ -398,7 +398,9 @@ public:
             if (number != 0.0 && number != 1.0) RefuseOptionValue(number, "a bool is 0 or 1");
             set_(config, number != 0.0);
         } else if constexpr (IsIntCodec<Codec>::value) {
-            if (!(number >= static_cast<double>(codec_.min()) && number <= static_cast<double>(codec_.max())) ||
+            // Past 2^53 a double no longer holds every whole number, and the cast below is only defined inside long long.
+            if (!(number >= -kLargestExactWhole && number <= kLargestExactWhole) ||
+                !(number >= static_cast<double>(codec_.min()) && number <= static_cast<double>(codec_.max())) ||
                 number != static_cast<double>(static_cast<long long>(number))) {
                 RefuseOptionValue(number, "it is not a whole number in the row's range");
             }

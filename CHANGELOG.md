@@ -16,7 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from the key, the file's comment, its kind, range, a slider step and an enum's words.
   `RotationEnabled` with `PositionEnabled` is the one option `TrackingMode`, and `TrueFreeLook`,
   `FreeLookMarker` and `StockSights` the one option `AimMode`. `OptionValue(config, option)` and
-  `SetOption(config, option, value)` read and set an option as one `double`.
+  `SetOption(config, option, value)` read and set an option as one `double`. `SetOption` refuses a
+  whole number past 2^53 in size, which a `double` does not hold exactly, for an int row of any width.
 - C interface: `cameraunlock_config_option_count`, `_option`, `_option_text`, `_option_get` and
   `_option_save`, the struct `CameraUnlockOption` (40 bytes, `CAMERAUNLOCK_STRUCT_OPTION`) and the
   `CAMERAUNLOCK_OPTION_*` numbers. A get of a mode answers the session's, and a save of one puts
