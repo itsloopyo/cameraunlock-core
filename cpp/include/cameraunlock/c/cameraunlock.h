@@ -289,6 +289,15 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_local_enum(const char* section, const
  * answers with when one of its keys goes down: one bit, CAMERAUNLOCK_HOTKEY_LOCAL or above. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey(const char* key, const char* comment, uint32_t flags,
                                                         const char* default_keys, int32_t hotkey_bit);
+/* How long a key of cameraunlock_config_local_hotkey_held is down before it counts as held. */
+#define CAMERAUNLOCK_HOLD_MS 400
+/* A key list of the game's own under [Hotkeys] whose keys do one thing tapped and another held:
+ * cameraunlock_hotkeys_take answers `hotkey_bit` when a key is let go within CAMERAUNLOCK_HOLD_MS
+ * of going down, and `held_bit` once it has been down that long. Each is one bit,
+ * CAMERAUNLOCK_HOTKEY_LOCAL or above, and no other row's. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey_held(const char* key, const char* comment, uint32_t flags,
+                                                             const char* default_keys, int32_t hotkey_bit,
+                                                             int32_t held_bit);
 
 /* The file the description renders for a first start, written to `path`: the committed
  * config/CameraUnlock.ini a mod's build keeps in step with its rows. */
@@ -354,7 +363,8 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_save_world_space_yaw(int32_t world_sp
  * their rows and each local one, and starts its thread. Once per process. */
 CAMERAUNLOCK_C int32_t cameraunlock_hotkeys_start(void);
 /* The actions whose keys went down since the last take or drop, as bits, forgotten as they are
- * answered. */
+ * answered. A row of cameraunlock_config_local_hotkey_held answers when its key is let go or has
+ * been held, not as it goes down. */
 CAMERAUNLOCK_C int32_t cameraunlock_hotkeys_take(void);
 /* Forgets them without answering: for presses made where the host does not act on them. */
 CAMERAUNLOCK_C void cameraunlock_hotkeys_drop(void);

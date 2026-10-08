@@ -9,6 +9,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a hotkey that does one thing tapped and another held
+
+The poller reported a key going down and nothing else, so a mod that wanted one key to switch
+something for the first player when tapped and for the second when held had to read the keyboard
+itself.
+
+- `HotkeyPoller::AddHoldHotkey(vkCode, holdMs, onTap, onHold, onDown = nullptr)`. `onTap` runs
+  when the key is let go less than `holdMs` after it went down. `onHold` runs once, when the key
+  has been down that long and is still down, and nothing then runs at its release. The foreground
+  rule is the existing one, and a press that began in the background runs neither.
+- `input::RegisterHoldKeyBindings(poller, bindings, holdMs, onTap, onHold)`, beside
+  `RegisterKeyBindings`: one hold hotkey per distinct key, with the modifier guard asked as the
+  key goes down and kept for that press.
+- C interface: `cameraunlock_config_local_hotkey_held(key, comment, flags, default_keys,
+  hotkey_bit, held_bit)` and `CAMERAUNLOCK_HOLD_MS` (400). A row like
+  `cameraunlock_config_local_hotkey`, whose keys answer `hotkey_bit` from
+  `cameraunlock_hotkeys_take` when tapped and `held_bit` when held. Java:
+  `configLocalHotkeyHeld` and `HOLD_MS`. It is part of ABI 3, with the views below.
+- `HotkeyPoller::PollAt(now, foreground, isDown)` is one poll with the clock, the foreground
+  answer and the key states handed in, which `Poll()` now calls with the system's. The tests
+  drive presses through it.
+- A plain key row of the C interface is now also refused a bit another row answers held.
+
+No existing signature or behaviour changed. A background test drives such a key with isolated
+input's `tap <key> <ms>`: `tap Delete 80`, `tap Delete 800`. `docs/c-interface.md`: Hotkeys.
+
 ### Added - the C interface runs more than one view, each with a tracker on a port of its own (ABI 3)
 
 `CameraUnlockCore.dll` had one session: one receiver and one pipeline. A game with two local

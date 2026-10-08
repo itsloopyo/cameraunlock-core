@@ -529,6 +529,10 @@ frame. The real controllers are not read while isolated input is on.
 Key names are the ones hotkey lists use (`data/keys.json`). A key with no name is
 its code: the backquote is `tap 0xC0`, the digit 2 is `tap 0x32`.
 
+A hotkey that does one thing tapped and another held (`RegisterHoldKeyBindings`, or a row of the
+C interface's `cameraunlock_config_local_hotkey_held`, which holds for 400 ms) is driven by the
+hold time of a `tap`: `tap Delete 80` is its tap and `tap Delete 800` its hold.
+
 `move` is for a game that turns the camera by how the mouse moved. `cursor` is
 for a menu that reads where the cursor is: after the first `cursor`, a `mouse`
 button also arrives as the click a pointer at that point would make. The point is

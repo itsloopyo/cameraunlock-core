@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -54,6 +55,66 @@ inline std::function<void()> GuardKey(std::vector<KeyModifiers> bindings, std::f
     };
 }
 
+// A list's bindings by key: each distinct key once, in the order it first appears, with the
+// modifiers of every binding on it. Throws std::invalid_argument for a code outside 0x01-0xFE
+// or a modifier value outside KeyModifiers.
+struct KeyGroup {
+    int vk;
+    std::vector<KeyModifiers> modifiers;
+};
+
+inline std::vector<KeyGroup> GroupByKey(const std::vector<KeyBinding>& bindings) {
+    for (const KeyBinding& binding : bindings) {
+        if (binding.vk < 0x01 || binding.vk > 0xFE) {
+            throw std::invalid_argument("virtual-key code " + std::to_string(binding.vk) + " is outside 0x01-0xFE");
+        }
+        const auto modifiers = static_cast<unsigned>(binding.modifiers);
+        if ((modifiers & ~static_cast<unsigned>(KeyModifiers::kCtrl | KeyModifiers::kShift | KeyModifiers::kAlt)) != 0) {
+            throw std::invalid_argument("modifier value " + std::to_string(modifiers) + " is not a set of KeyModifiers");
+        }
+    }
+
+    std::vector<KeyGroup> groups;
+    for (const KeyBinding& binding : bindings) {
+        std::size_t i = 0;
+        while (i < groups.size() && groups[i].vk != binding.vk) ++i;
+        if (i == groups.size()) groups.push_back({binding.vk, {}});
+        groups[i].modifiers.push_back(binding.modifiers);
+    }
+    return groups;
+}
+
+// RegisterHoldKeyBindings with the modifier read handed in, for a test.
+inline std::vector<int> RegisterHoldKeyBindings(HotkeyPoller& poller, const std::vector<KeyBinding>& bindings,
+                                                int holdMs, std::function<void()> onTap, std::function<void()> onHold,
+                                                KeyModifiers (*held)()) {
+    if (!onTap || !onHold) throw std::invalid_argument("RegisterHoldKeyBindings needs an action for a tap and one for a hold");
+    if (holdMs < 0) throw std::invalid_argument("hold time " + std::to_string(holdMs) + " ms is negative");
+
+    std::vector<int> ids;
+    for (KeyGroup& group : GroupByKey(bindings)) {
+        // Whether the press now down is one a binding on this key fires for. All three callbacks
+        // run on the poller's thread, the first before either of the others.
+        const auto fires = std::make_shared<bool>(false);
+        ids.push_back(poller.AddHoldHotkey(
+            group.vk, holdMs,
+            [fires, onTap] {
+                if (*fires) onTap();
+            },
+            [fires, onHold] {
+                if (*fires) onHold();
+            },
+            [fires, modifiers = std::move(group.modifiers), held] {
+                const KeyModifiers now = held();
+                *fires = false;
+                for (const KeyModifiers binding : modifiers) {
+                    if (BindingFires(binding, now)) *fires = true;
+                }
+            }));
+    }
+    return ids;
+}
+
 }  // namespace detail
 
 /// Puts a hotkey list on the poller: one AddHotkey per distinct key, running `action` once
@@ -66,35 +127,28 @@ inline std::function<void()> GuardKey(std::vector<KeyModifiers> bindings, std::f
 inline std::vector<int> RegisterKeyBindings(HotkeyPoller& poller, const std::vector<KeyBinding>& bindings,
                                             std::function<void()> action) {
     if (!action) throw std::invalid_argument("RegisterKeyBindings needs an action");
-    for (const KeyBinding& binding : bindings) {
-        if (binding.vk < 0x01 || binding.vk > 0xFE) {
-            throw std::invalid_argument("virtual-key code " + std::to_string(binding.vk) + " is outside 0x01-0xFE");
-        }
-        const auto modifiers = static_cast<unsigned>(binding.modifiers);
-        if ((modifiers & ~static_cast<unsigned>(KeyModifiers::kCtrl | KeyModifiers::kShift | KeyModifiers::kAlt)) != 0) {
-            throw std::invalid_argument("modifier value " + std::to_string(modifiers) + " is not a set of KeyModifiers");
-        }
-    }
-
-    std::vector<int> keys;
-    std::vector<std::vector<KeyModifiers>> modifiers;
-    for (const KeyBinding& binding : bindings) {
-        std::size_t i = 0;
-        while (i < keys.size() && keys[i] != binding.vk) ++i;
-        if (i == keys.size()) {
-            keys.push_back(binding.vk);
-            modifiers.emplace_back();
-        }
-        modifiers[i].push_back(binding.modifiers);
-    }
 
     std::vector<int> ids;
-    ids.reserve(keys.size());
-    for (std::size_t i = 0; i < keys.size(); ++i) {
-        ids.push_back(poller.AddHotkey(keys[i], detail::GuardKey(std::move(modifiers[i]), action,
-                                                                 &detail::HeldModifiers)));
+    for (detail::KeyGroup& group : detail::GroupByKey(bindings)) {
+        ids.push_back(poller.AddHotkey(group.vk, detail::GuardKey(std::move(group.modifiers), action,
+                                                                  &detail::HeldModifiers)));
     }
     return ids;
+}
+
+/// Puts a hotkey list on the poller whose keys do one thing tapped and another held: one
+/// AddHoldHotkey per distinct key. `onTap` runs once when the key is let go less than `holdMs`
+/// after it went down, and `onHold` once when it has been down that long. detail::BindingFires is
+/// asked as the key goes down and its answer holds for that press, so letting go of Ctrl before
+/// the key does not turn a chord's tap into nothing, or into a bare key's. Returns one id per
+/// distinct key, as RegisterKeyBindings does.
+///
+/// Throws std::invalid_argument for an empty action, a negative hold time, a code outside
+/// 0x01-0xFE or a modifier value outside KeyModifiers, before registering anything.
+inline std::vector<int> RegisterHoldKeyBindings(HotkeyPoller& poller, const std::vector<KeyBinding>& bindings,
+                                                int holdMs, std::function<void()> onTap, std::function<void()> onHold) {
+    return detail::RegisterHoldKeyBindings(poller, bindings, holdMs, std::move(onTap), std::move(onHold),
+                                           &detail::HeldModifiers);
 }
 
 }  // namespace cameraunlock::input

@@ -50,6 +50,8 @@ public final class CameraUnlock {
     public static final int RELOAD_UNCHANGED = 0, RELOAD_APPLIED = 1, RELOAD_UNREADABLE = 3;
     public static final int HOTKEY_TOGGLE = 0x1, HOTKEY_CYCLE_TRACKING_MODE = 0x2, HOTKEY_YAW_MODE = 0x4,
             HOTKEY_AIM_MODE = 0x8, HOTKEY_LOCAL = 0x100;
+    /** How long a key of configLocalHotkeyHeld is down, in milliseconds, before it counts as held. */
+    public static final int HOLD_MS = 400;
 
     private static final int ERROR = -1;
     private static final ValueLayout.OfInt INT = ValueLayout.JAVA_INT;
@@ -287,7 +289,8 @@ public final class CameraUnlock {
     private final MethodHandle lastError, logOpen, logWrite, logTake, settingsDefaults, sessionConfigure, sessionStart,
             sessionStop, cycleTrackingMode, cycleAimMode, setAimMode, aimModeLabel, sessionFrame, sessionLean, viewStart,
             viewStop, viewFrame, viewLean, configDescribe,
-            configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalHotkey, configRender,
+            configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalHotkey, configLocalHotkeyHeld,
+            configRender,
             configLoad, configReload, configGetInt, configGetFloat, configSaveInt, configSaveFloat, configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
 
@@ -366,6 +369,8 @@ public final class CameraUnlock {
         configLocalEnum = bind("cameraunlock_config_local_enum",
                 FunctionDescriptor.of(INT, POINTER, POINTER, POINTER, INT, POINTER, INT));
         configLocalHotkey = bind("cameraunlock_config_local_hotkey", FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT));
+        configLocalHotkeyHeld = bind("cameraunlock_config_local_hotkey_held",
+                FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT, INT));
         configRender = bind("cameraunlock_config_render", FunctionDescriptor.of(INT, POINTER));
         configLoad = bind("cameraunlock_config_load", FunctionDescriptor.of(INT, POINTER, POINTER, POINTER));
         configReload = bind("cameraunlock_config_reload", FunctionDescriptor.of(INT));
@@ -617,6 +622,20 @@ public final class CameraUnlock {
         }
     }
 
+    /**
+     * A key list whose keys do one thing tapped and another held.
+     *
+     * @param hotkeyBit the bit hotkeysTake answers with when a key is let go within HOLD_MS of going down
+     * @param heldBit   the bit it answers with once a key has been down that long. Each is one bit,
+     *                  HOTKEY_LOCAL or above, and no other row's
+     */
+    public int configLocalHotkeyHeld(String key, String comment, int flags, String defaultKeys, int hotkeyBit, int heldBit) {
+        try (Arena arena = Arena.ofConfined()) {
+            return check(status(configLocalHotkeyHeld, text(arena, key), text(arena, comment), flags,
+                    text(arena, defaultKeys), hotkeyBit, heldBit));
+        }
+    }
+
     /** Writes the file the description renders for a first start. */
     public void configRender(Path file) {
         try (Arena arena = Arena.ofConfined()) {
@@ -693,7 +712,10 @@ public final class CameraUnlock {
         check(status(hotkeysStart));
     }
 
-    /** The actions whose keys went down since the last take or drop, as HOTKEY_* bits. */
+    /**
+     * The actions whose keys went down since the last take or drop, as HOTKEY_* bits. A row of
+     * configLocalHotkeyHeld answers when its key is let go or has been held, not as it goes down.
+     */
     public int hotkeysTake() {
         try {
             return (int) hotkeysTake.invokeExact();

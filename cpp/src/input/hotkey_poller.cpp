@@ -32,6 +32,7 @@ HotkeyPoller::HotkeyPoller(HotkeyPoller&& other) {
     {
         std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
         m_hotkeys = std::move(other.m_hotkeys);
+        m_holdHotkeys = std::move(other.m_holdHotkeys);
         m_nextHotkeyId = other.m_nextHotkeyId;
     }
 
@@ -54,6 +55,7 @@ HotkeyPoller& HotkeyPoller::operator=(HotkeyPoller&& other) {
         {
             std::lock_guard<std::mutex> lock(other.m_hotkeyMutex);
             m_hotkeys = std::move(other.m_hotkeys);
+            m_holdHotkeys = std::move(other.m_holdHotkeys);
             m_nextHotkeyId = other.m_nextHotkeyId;
         }
 
@@ -81,12 +83,32 @@ int HotkeyPoller::AddHotkey(int vkCode, HotkeyCallback callback) {
     return id;
 }
 
+int HotkeyPoller::AddHoldHotkey(int vkCode, int holdMs, HotkeyCallback onTap, HotkeyCallback onHold,
+                                HotkeyCallback onDown) {
+    std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    int id = m_nextHotkeyId++;
+    HoldHotkeyEntry entry;
+    entry.id = id;
+    entry.vkCode = vkCode;
+    entry.hold = std::chrono::milliseconds(holdMs);
+    entry.onTap = std::move(onTap);
+    entry.onHold = std::move(onHold);
+    entry.onDown = std::move(onDown);
+    m_holdHotkeys.push_back(std::move(entry));
+    return id;
+}
+
 void HotkeyPoller::RemoveHotkey(int id) {
     std::lock_guard<std::mutex> lock(m_hotkeyMutex);
     auto it = std::find_if(m_hotkeys.begin(), m_hotkeys.end(),
         [id](const HotkeyEntry& entry) { return entry.id == id; });
     if (it != m_hotkeys.end()) {
         m_hotkeys.erase(it);
+    }
+    auto hold = std::find_if(m_holdHotkeys.begin(), m_holdHotkeys.end(),
+        [id](const HoldHotkeyEntry& entry) { return entry.id == id; });
+    if (hold != m_holdHotkeys.end()) {
+        m_holdHotkeys.erase(hold);
     }
 }
 
@@ -104,6 +126,9 @@ bool HotkeyPoller::Start(int pollIntervalMs) {
     {
         std::lock_guard<std::mutex> lock(m_hotkeyMutex);
         for (auto& entry : m_hotkeys) {
+            entry.keyDown = false;
+        }
+        for (auto& entry : m_holdHotkeys) {
             entry.keyDown = false;
         }
     }
@@ -147,20 +172,16 @@ void HotkeyPoller::SetRecenterKeyCode(int vkCode) {
 }
 
 void HotkeyPoller::CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
-                              bool allowFire, std::vector<HotkeyCallback>& toFire) {
+                              bool allowFire, KeyState isDown, std::vector<HotkeyCallback>& toFire) {
     if (vkCode == 0 || !callback) return;
 
-#ifdef _WIN32
-    bool pressed = (GetAsyncKeyState(vkCode) & kKeyPressedMask) != 0;
+    bool pressed = isDown(vkCode);
     if (pressed && !keyDown.load()) {
         keyDown.store(true);
         if (allowFire) toFire.push_back(callback);
     } else if (!pressed && keyDown.load()) {
         keyDown.store(false);
     }
-#else
-    (void)keyDown; (void)allowFire; (void)toFire;
-#endif
 }
 
 void HotkeyPoller::PollLoop() {
@@ -176,23 +197,33 @@ void HotkeyPoller::PollLoop() {
 // a user typing End/Home/PageUp in another window silently toggles the mod.
 // Key edges are still tracked while unfocused (allowFire=false) so a press
 // that starts in another window doesn't fire a stale callback on refocus.
-#ifdef _WIN32
 namespace {
+#ifdef _WIN32
 bool IsOwnProcessForeground() {
     DWORD foregroundPid = 0;
     GetWindowThreadProcessId(GetForegroundWindow(), &foregroundPid);
     return foregroundPid == GetCurrentProcessId();
 }
-}  // namespace
+
+bool IsKeyDown(int vkCode) {
+    return (GetAsyncKeyState(vkCode) & kKeyPressedMask) != 0;
+}
+#else
+bool IsOwnProcessForeground() {
+    return true;
+}
+
+bool IsKeyDown(int) {
+    return false;
+}
 #endif
+}  // namespace
 
 void HotkeyPoller::Poll() {
-#ifdef _WIN32
-    const bool allowFire = IsOwnProcessForeground();
-#else
-    const bool allowFire = true;
-#endif
+    PollAt(std::chrono::steady_clock::now(), IsOwnProcessForeground(), &IsKeyDown);
+}
 
+void HotkeyPoller::PollAt(std::chrono::steady_clock::time_point now, bool allowFire, KeyState isDown) {
     // Edge detection happens under the lock; the callbacks themselves are collected and
     // invoked after it is released. Firing in place deadlocked the polling thread against
     // itself for any callback that rebinds a key, since AddHotkey / RemoveHotkey /
@@ -203,8 +234,8 @@ void HotkeyPoller::Poll() {
 
     {
         std::lock_guard<std::mutex> lock(m_callbackMutex);
-        CollectKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback, allowFire, toFire);
-        CollectKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback, allowFire, toFire);
+        CollectKey(m_toggleKey.load(), m_toggleKeyDown, m_toggleCallback, allowFire, isDown, toFire);
+        CollectKey(m_recenterKey.load(), m_recenterKeyDown, m_recenterCallback, allowFire, isDown, toFire);
     }
 
     // Check generic hotkeys
@@ -213,15 +244,39 @@ void HotkeyPoller::Poll() {
         for (auto& entry : m_hotkeys) {
             if (entry.vkCode == 0 || !entry.callback) continue;
 
-#ifdef _WIN32
-            bool pressed = (GetAsyncKeyState(entry.vkCode) & kKeyPressedMask) != 0;
+            bool pressed = isDown(entry.vkCode);
             if (pressed && !entry.keyDown) {
                 entry.keyDown = true;
                 if (allowFire) toFire.push_back(entry.callback);
             } else if (!pressed && entry.keyDown) {
                 entry.keyDown = false;
             }
-#endif
+        }
+
+        for (auto& entry : m_holdHotkeys) {
+            if (entry.vkCode == 0) continue;
+
+            bool pressed = isDown(entry.vkCode);
+            if (pressed && !entry.keyDown) {
+                entry.keyDown = true;
+                entry.armed = allowFire;
+                entry.held = false;
+                entry.downAt = now;
+                if (entry.armed && entry.onDown) toFire.push_back(entry.onDown);
+            }
+            if (pressed && entry.armed && !entry.held && now - entry.downAt >= entry.hold) {
+                // The press is a hold from here whether or not it may run: one that came
+                // of age while the process was in the background is not a tap at its release.
+                entry.held = true;
+                if (allowFire && entry.onHold) toFire.push_back(entry.onHold);
+            } else if (!pressed && entry.keyDown) {
+                entry.keyDown = false;
+                // A release first seen past the hold time was never seen held, and when
+                // the key came up between the two polls is not known: it runs nothing.
+                if (entry.armed && !entry.held && allowFire && now - entry.downAt < entry.hold && entry.onTap) {
+                    toFire.push_back(entry.onTap);
+                }
+            }
         }
     }
 

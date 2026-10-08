@@ -49,6 +49,19 @@ public:
     // Returns an ID that can be used to remove the hotkey
     int AddHotkey(int vkCode, HotkeyCallback callback);
 
+    // Add a hotkey that tells a tap from a hold. onTap runs when the key is let go
+    // less than holdMs after it went down. onHold runs once, at the poll that finds
+    // the key still down holdMs after it went down, and nothing then runs when it is
+    // let go. onDown, when given, runs as the key goes down, before either: for a
+    // caller that has to read something at that moment, as a chord's modifiers.
+    //
+    // The foreground rule is the one every hotkey has: nothing runs unless this
+    // process is in the foreground at that moment, and a press that began while it
+    // was not runs none of the three.
+    // Returns an ID that can be used to remove the hotkey
+    int AddHoldHotkey(int vkCode, int holdMs, HotkeyCallback onTap, HotkeyCallback onHold,
+                      HotkeyCallback onDown = nullptr);
+
     // Remove a hotkey by ID
     void RemoveHotkey(int id);
 
@@ -74,12 +87,18 @@ public:
     // Call this once per frame instead of using Start()
     void Poll();
 
+    // One poll with the clock, the foreground answer and the key states handed in.
+    // Poll() is this with the system's. A test drives a press down and up at the
+    // times it chooses through it, with no keyboard and no waiting.
+    using KeyState = bool (*)(int vkCode);
+    void PollAt(std::chrono::steady_clock::time_point now, bool foreground, KeyState isDown);
+
 private:
     void PollLoop();
     // Edge-detects and appends the callback to fire rather than invoking it, so Poll()
     // can release its locks before running user code. See the note in Poll().
     void CollectKey(int vkCode, std::atomic<bool>& keyDown, const HotkeyCallback& callback,
-                    bool allowFire, std::vector<HotkeyCallback>& toFire);
+                    bool allowFire, KeyState isDown, std::vector<HotkeyCallback>& toFire);
 
     std::thread m_thread;
     std::atomic<bool> m_stopFlag{false};
@@ -103,6 +122,23 @@ private:
         HotkeyCallback callback;
     };
     std::vector<HotkeyEntry> m_hotkeys;
+
+    struct HoldHotkeyEntry {
+        int id;
+        int vkCode;
+        std::chrono::milliseconds hold;
+        HotkeyCallback onTap;
+        HotkeyCallback onHold;
+        HotkeyCallback onDown;
+        bool keyDown = false;
+        // Whether this press began in the foreground, and so may run anything at all.
+        bool armed = false;
+        // Set once the press has been down for `hold`, so its release is not a tap.
+        bool held = false;
+        std::chrono::steady_clock::time_point downAt;
+    };
+    std::vector<HoldHotkeyEntry> m_holdHotkeys;
+    // Guards both lists and the ID counter.
     std::mutex m_hotkeyMutex;
     int m_nextHotkeyId = 1;
 };

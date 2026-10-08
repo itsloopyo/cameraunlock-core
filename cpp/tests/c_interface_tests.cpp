@@ -753,10 +753,30 @@ void TestConfig(const fs::path& scratch) {
     Check(cameraunlock_config_local_float("General", "FieldOfView", "Again.", 0, 65.0f, 40.0f, 110.0f) == CAMERAUNLOCK_ERROR,
           "a key used twice is refused");
 
+    const char* seat = "Tapped for the first player, held for the second.";
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x100, 0x400) == CAMERAUNLOCK_ERROR &&
+              LastError().find("hotkey_bit is another row's") != std::string::npos,
+          "a key row that tells a tap from a hold cannot tap another row's bit: " + LastError());
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x200, 0x100) == CAMERAUNLOCK_ERROR &&
+              LastError().find("held_bit is another row's") != std::string::npos,
+          "nor hold it: " + LastError());
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x200, 0x200) == CAMERAUNLOCK_ERROR,
+          "nor answer one bit for both");
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x200, 0x8) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x200, 0x600) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "Delete", 0x300, 0x400) == CAMERAUNLOCK_ERROR,
+          "and each of its two is one bit, not one of the fleet's");
+    Check(cameraunlock_config_local_hotkey_held("SeatKey", seat, 0, "delete", 0x200, 0x400) == 5,
+          "it is a row like any other key row, numbered after them: " + LastError());
+    Check(cameraunlock_config_local_hotkey("StyleKey", "The style.", 0, "F10", 0x400) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x800, 0x200) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_hotkey_held("StyleKey", "The style.", 0, "F10", 0x400, 0x800) == CAMERAUNLOCK_ERROR,
+          "and the bit it answers held is taken, as the one it answers tapped is");
+
     Check(cameraunlock_config_render(rendered.c_str()) == CAMERAUNLOCK_OK, "the description renders: " + LastError());
     const std::string fresh = ReadFile(scratch / "rendered.ini");
     Check(fresh.find("[CameraUnlock]") != std::string::npos && fresh.find("FieldOfView=65") != std::string::npos &&
-              fresh.find("Quality=Low") != std::string::npos && fresh.find("GraphicsKey=F9") != std::string::npos &&
+              fresh.find("Quality=Low") != std::string::npos && fresh.find("GraphicsKey=F9") != std::string::npos && fresh.find("SeatKey=Delete") != std::string::npos &&
               fresh.find("CollisionMargin=0.12") != std::string::npos && fresh.find("LocalSmoothing=default") != std::string::npos,
           "the render holds the stamp, the local rows at their defaults and the global concepts as default");
 

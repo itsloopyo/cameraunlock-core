@@ -199,8 +199,8 @@ A host describes its `CameraUnlock.ini` at run time, then loads it:
    save may change. `default_text` gives a concept that is not global (`CollisionMargin`,
    `CollisionChannel`) the game's own default, and with `CAMERAUNLOCK_ROW_PER_GAME` a global one,
    which needs the owner-approved `per_game` entry `docs/canonical-config.md` describes.
-3. `cameraunlock_config_local_bool`, `_int`, `_float`, `_enum` and `_hotkey` for the game's own
-   rows. Each answers the row's number. `CAMERAUNLOCK_ROW_LIVE` marks a row
+3. `cameraunlock_config_local_bool`, `_int`, `_float`, `_enum`, `_hotkey` and `_hotkey_held` for
+   the game's own rows. Each answers the row's number. `CAMERAUNLOCK_ROW_LIVE` marks a row
    `cameraunlock_config_reload` reads again while the game runs.
 4. `cameraunlock_config_load(path, defaults_path, out)`. `defaults_path` is `NULL` in a mod, for
    the player's own Defaults.ini, and a scratch file in every test.
@@ -226,6 +226,25 @@ with. `cameraunlock_hotkeys_take` answers the actions whose keys went down since
 bits, and forgets them. `cameraunlock_hotkeys_drop` forgets them unanswered: a host calls it when
 it starts acting on keys again, so a key pressed in a menu does not fire on the first frame of
 play.
+
+A key that does one thing tapped and another held is a row of
+`cameraunlock_config_local_hotkey_held(key, comment, flags, default_keys, hotkey_bit, held_bit)`.
+It is a key list under `[Hotkeys]` like a row of `cameraunlock_config_local_hotkey`, in the file
+and in every rule, with two bits where that has one:
+
+- `hotkey_bit` is answered when a key of the list is let go less than `CAMERAUNLOCK_HOLD_MS`
+  (400 ms) after it went down. A tap answers at the release, not as the key goes down.
+- `held_bit` is answered once, when the key has been down that long and is still down. Nothing is
+  answered when it is then let go.
+- Each is one bit at `CAMERAUNLOCK_HOTKEY_LOCAL` or above, the two differ, and neither is another
+  row's bit, tapped or held.
+- A chord is judged as its key goes down: `Ctrl+Shift+J` with Ctrl let go before J is still that
+  chord's tap or hold, and a bare key pressed with Ctrl and Shift both held is neither.
+- As with every hotkey, nothing is answered while the game is not in the foreground, and a press
+  that began there answers neither bit, however it ends.
+
+A background test taps and holds such a key through isolated input's `tap <key> <ms>`
+([isolated-input.md](isolated-input.md), The command file).
 
 ## The log
 

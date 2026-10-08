@@ -11,9 +11,11 @@
 #include <cameraunlock/input/key_binding_registration.h>
 #endif
 
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
@@ -366,6 +368,85 @@ void TestRegistration() {
     Check(RegisterKeyBindings(fresh, {{none, 0x23}}, [] {}) == std::vector<int>{1},
           "a refused list registered nothing");
 }
+
+bool g_keyDown[256] = {};
+bool FakeKeyDown(int vk) { return g_keyDown[vk]; }
+
+void TestHoldRegistration() {
+    using cameraunlock::input::HotkeyPoller;
+    using cameraunlock::input::RegisterHoldKeyBindings;
+    std::cout << "RegisterHoldKeyBindings:\n";
+
+    const KeyModifiers ctrl = KeyModifiers::kCtrl;
+    const KeyModifiers shift = KeyModifiers::kShift;
+    const KeyModifiers none = KeyModifiers::kNone;
+    constexpr int kDelete = 0x2E;
+    constexpr int kJ = 0x4A;
+
+    HotkeyPoller poller;
+    int taps = 0;
+    int holds = 0;
+    const auto parsed = ParseKeyBindings("Delete, Ctrl+Shift+J, Alt+Delete");
+    const std::vector<int> ids = cameraunlock::input::detail::RegisterHoldKeyBindings(
+        poller, parsed.bindings, 400, [&taps] { ++taps; }, [&holds] { ++holds; }, &FakeHeld);
+    Check(ids.size() == 2 && ids[0] != ids[1], "one hold hotkey per key, for bindings that share one too");
+
+    int ms = 0;
+    const auto at = [&](int advance, int vk, bool down, KeyModifiers held) {
+        ms += advance;
+        g_keyDown[vk] = down;
+        g_held = held;
+        poller.PollAt(std::chrono::steady_clock::time_point() + std::chrono::milliseconds(ms), true, &FakeKeyDown);
+    };
+
+    at(0, kDelete, true, none);
+    at(80, kDelete, false, none);
+    Check(taps == 1 && holds == 0, "a plain key tapped runs the tap");
+    at(100, kDelete, true, none);
+    at(400, kDelete, true, none);
+    at(100, kDelete, false, none);
+    Check(taps == 1 && holds == 1, "and held runs the hold alone");
+
+    at(100, kJ, true, ctrl | shift);
+    at(40, kJ, true, none);
+    at(40, kJ, false, none);
+    Check(taps == 2, "a chord whose Ctrl is let go before its key is still that chord's tap");
+    at(100, kJ, true, ctrl | shift);
+    at(40, kJ, true, none);
+    at(400, kJ, true, none);
+    at(40, kJ, false, none);
+    Check(taps == 2 && holds == 2, "and still its hold");
+
+    at(100, kJ, true, ctrl);
+    at(40, kJ, true, ctrl | shift);
+    at(40, kJ, false, ctrl | shift);
+    at(100, kJ, true, none);
+    at(40, kJ, true, ctrl | shift);
+    at(400, kJ, true, ctrl | shift);
+    at(40, kJ, false, ctrl | shift);
+    Check(taps == 2 && holds == 2, "a chord's key pressed without its modifiers is neither, whatever is held after");
+
+    at(100, kDelete, true, ctrl | shift);
+    at(40, kDelete, true, none);
+    at(40, kDelete, false, none);
+    at(100, kDelete, true, ctrl | shift);
+    at(40, kDelete, true, none);
+    at(400, kDelete, true, none);
+    at(40, kDelete, false, none);
+    Check(taps == 2 && holds == 2,
+          "a plain key pressed with Ctrl and Shift held is not a bare key's tap or hold once they are let go");
+
+    HotkeyPoller fresh;
+    Check(Throws([&] { RegisterHoldKeyBindings(fresh, {{none, kDelete}}, 400, std::function<void()>(), [] {}); }) &&
+              Throws([&] { RegisterHoldKeyBindings(fresh, {{none, kDelete}}, 400, [] {}, std::function<void()>()); }),
+          "an empty action throws");
+    Check(Throws([&] { RegisterHoldKeyBindings(fresh, {{none, kDelete}}, -1, [] {}, [] {}); }), "a negative hold time throws");
+    Check(Throws([&] { RegisterHoldKeyBindings(fresh, {{none, kDelete}, {none, 0x100}}, 400, [] {}, [] {}); }),
+          "a code outside 0x01-0xFE throws");
+    Check(RegisterHoldKeyBindings(fresh, {{none, kDelete}}, 400, [] {}, [] {}) == std::vector<int>{1},
+          "a refused list registered nothing");
+    g_held = none;
+}
 #endif
 
 }  // namespace
@@ -380,6 +461,7 @@ int RunKeyBindingsTests() {
     TestTable();
 #ifdef _WIN32
     TestRegistration();
+    TestHoldRegistration();
 #endif
     return g_failures;
 }

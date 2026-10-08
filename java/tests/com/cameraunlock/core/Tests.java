@@ -302,11 +302,18 @@ public final class Tests {
         int trees = core.configLocalInt("Content", "Trees", "How many trees.", 0, 12, 0, 100);
         int key = core.configLocalHotkey("GraphicsKey", "Goes to the next graphics mode.", 0, "F9", CameraUnlock.HOTKEY_LOCAL);
         check(fov == 0 && quality == 1 && arms == 2 && trees == 3 && key == 4, "local rows are numbered as they are added");
+        String taken = refusal(() -> core.configLocalHotkeyHeld("SeatKey", "Tapped for the first player, held for the second.", 0,
+                "Delete", CameraUnlock.HOTKEY_LOCAL << 1, CameraUnlock.HOTKEY_LOCAL));
+        check(taken.contains("cameraunlock_config_local_hotkey_held") && taken.contains("held_bit is another row's"),
+                "a key row that tells a tap from a hold cannot answer another row's bit held: " + taken);
+        check(core.configLocalHotkeyHeld("SeatKey", "Tapped for the first player, held for the second.", 0, "Delete",
+                        CameraUnlock.HOTKEY_LOCAL << 1, CameraUnlock.HOTKEY_LOCAL << 2) == 5 && CameraUnlock.HOLD_MS == 400,
+                "and with two bits of its own is a row numbered like the others");
 
         core.configRender(rendered);
         String fresh = Files.readString(rendered, StandardCharsets.US_ASCII);
         check(fresh.contains("[CameraUnlock]") && fresh.contains("\r\nFieldOfView=65.0\r\n") && fresh.contains("\r\nQuality=Low\r\n")
-                        && fresh.contains("\r\nGraphicsKey=F9\r\n") && fresh.contains("\r\nCollisionMargin=0.12\r\n")
+                        && fresh.contains("\r\nGraphicsKey=F9\r\n") && fresh.contains("\r\nSeatKey=Delete\r\n") && fresh.contains("\r\nCollisionMargin=0.12\r\n")
                         && fresh.contains("; How far the view is held off a wall, in map tiles.\r\n") && fresh.contains("\r\nLocalSmoothing=default\r\n"),
                 "the render holds the stamp, the local rows, the game's own default and comment, and the global concepts as default");
 
