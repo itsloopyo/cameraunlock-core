@@ -206,6 +206,10 @@ try {
     $copied = Copy-IsolatedInputHost -ModFolder $modFolder -HostDll $builtHost
     Check 'the host DLL is copied beside the mod under the name the C# entry point loads' `
         ($copied -eq (Join-Path $modFolder 'CameraUnlockIsolatedInput.dll') -and (Test-Path $copied)) "$copied"
+    Set-Content $copied 'an earlier run left this' -Encoding ASCII
+    Set-ItemProperty $copied IsReadOnly $true
+    [void](Copy-IsolatedInputHost -ModFolder $modFolder -HostDll $builtHost)
+    Check 'a copy an earlier run left there is replaced, a read-only one too' ((Get-Content $copied -Raw).Trim() -eq 'host') (Get-Content $copied -Raw)
 
     $pose = Join-Path $root 'pose.txt'
     Set-TestPose -PoseFile $pose -X 15 -Yaw -12.5

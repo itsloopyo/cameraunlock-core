@@ -494,10 +494,170 @@ Start-IsolatedGameSession -ProcessName $Game -Launch $Exe -ModFolder $Mod -Owner
     $plain = [pscustomobject]@{ ProcessId = $PID; ProcessName = 'powershell'; CommandFile = $commandFile; Sequence = 0; Sender = 0 }
     $played = Invoke-GameInput -Session $plain -Commands 'wait 1'
     Check 'a session without one plays as before and writes nothing' ($played.Sequence -eq 1 -and $plain.Sequence -eq 1 -and -not (Test-Path $sessionFile))
+
+    # --- a host DLL that will not delete ------------------------------------
+    # A real DLL, and a process that is not the game and has the mod folder's copy loaded, or open
+    # with nothing shared but reading: what a game still being torn down, or anything else on
+    # the machine, does to that copy.
+    $hostBuilt = Join-Path $root 'host-built.dll'
+    $hostOld = Join-Path $root 'host-old.dll'
+    Add-Type -TypeDefinition 'public static class StandInHost { }' -OutputAssembly $hostBuilt -OutputType Library
+    Add-Type -TypeDefinition 'public static class StandInOldHost { public static int Older; }' -OutputAssembly $hostOld -OutputType Library
+    $holderName = 'CuRigHolder' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    $holderExe = Join-Path $root "$holderName.exe"
+    Add-Type -OutputAssembly $holderExe -OutputType WindowsApplication -TypeDefinition @'
+using System; using System.IO; using System.Runtime.InteropServices;
+public static class StandInHolder {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+    public static void Main(string[] a) {
+        FileStream open = null;
+        // DONT_RESOLVE_DLL_REFERENCES: mapped as a loaded DLL is, with none of its code run.
+        if (a[1] == "load") { if (LoadLibraryExW(a[0], IntPtr.Zero, 1) == IntPtr.Zero) Environment.Exit(7); }
+        else open = new FileStream(a[0], FileMode.Open, FileAccess.Read, FileShare.Read);
+        File.WriteAllText(a[2], "held");
+        System.Threading.Thread.Sleep(600000);
+        GC.KeepAlive(open);
+    }
+}
+'@
+    function Start-Holder {
+        param([string]$Path, [string]$How)
+        $ready = Join-Path $root ('held-' + [Guid]::NewGuid().ToString('N'))
+        $process = Start-Process $holderExe -PassThru -ArgumentList "`"$Path`"", $How, "`"$ready`""
+        $started.Add($process)
+        Wait-Until { (Test-Path $ready) -or $process.HasExited }
+        if ($process.HasExited) { throw "the holder could not $How $Path" }
+        $process
+    }
+    function Stop-Holder { param($Process) $Process.Kill(); $Process.WaitForExit() }
+    # What a call wrote to the warning stream, and what it returned or threw.
+    function Invoke-Warned {
+        param([scriptblock]$Block)
+        $thrown = ''
+        $all = @(try { & $Block 3>&1 } catch { $thrown = "$_" })
+        [pscustomobject]@{
+            Thrown   = $thrown
+            Warnings = (@($all | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }) -join ' | ')
+            Result   = @($all | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
+        }
+    }
+    function Get-Asides { Get-ChildItem $mod -Filter 'CameraUnlockIsolatedInput.dll.left-*' }
+    function Test-PutBack { (Get-Content (Join-Path $saves 'player.bin') -Raw).Trim() -eq 'the player' -and [IO.File]::ReadAllText($ini) -eq $iniText -and -not (Test-Path $session.StateFolder) }
+    $hostCopy = Join-Path $mod 'CameraUnlockIsolatedInput.dll'
+    $managed = @{} + $session
+    $managed.ModHost = 'managed'
+    $managed.HostDll = $hostBuilt
+    [IO.File]::WriteAllText($ini, $iniText)
+
+    # Still loaded in a process when the session ends: the game is stopped, so the session ends as it should.
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run {
+        param($s)
+        $seen.Pid = $s.ProcessId
+        $seen.Loaded = Start-Holder -Path $hostCopy -How load
+        Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
+        "pid $($s.ProcessId)"
+    } }
+    Check 'a host DLL still loaded in a process when the session ends does not fail the session' ($ran.Thrown -eq '' -and "$($ran.Result)" -eq "pid $($seen.Pid)") "$($ran.Thrown) $($ran.Result)"
+    Check 'the game is stopped, the game''s files are back and the rig is free' `
+        (-not (Get-Process -Id $seen.Pid -ErrorAction SilentlyContinue) -and (Test-PutBack) -and $null -eq (Get-GameRig -Game $gameName))
+    Check 'the warning says the session ended, that the DLL was moved aside and where, and which process has it' `
+        ($ran.Warnings -match 'session ended as it should' -and $ran.Warnings -match 'moved aside to \S+CameraUnlockIsolatedInput\.dll\.left-\w+' -and $ran.Warnings -match "$holderName \(pid $($seen.Loaded.Id)\)") $ran.Warnings
+    Check 'the name the mod loads is free and the copy is aside' (-not (Test-Path $hostCopy) -and @(Get-Asides).Count -eq 1)
+    Stop-Holder $seen.Loaded
+
+    # An earlier run's copy, still loaded in a process, is in the folder when the next run starts.
+    Copy-Item $hostOld $hostCopy -Force
+    $old = Start-Holder -Path $hostCopy -How load
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run {
+        $seen.Fresh = (Get-FileHash $hostCopy).Hash -eq (Get-FileHash $hostBuilt).Hash
+        Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
+    } }
+    Check 'a start with an earlier run''s host DLL still loaded in the folder works, on a fresh copy' ($ran.Thrown -eq '' -and $seen.Fresh) $ran.Thrown
+    Check 'and says the earlier one was moved aside, and which process has it' `
+        ($ran.Warnings -match 'from an earlier run was still in use' -and $ran.Warnings -match 'moved aside to \S+\.left-\w+' -and $ran.Warnings -match "$holderName \(pid $($old.Id)\)") $ran.Warnings
+    Check 'that session''s own copy is deleted when it ends, with the files back and the rig free' `
+        (-not (Test-Path $hostCopy) -and @(Get-Asides).Count -eq 1 -and (Test-PutBack) -and $null -eq (Get-GameRig -Game $gameName))
+    Stop-Holder $old
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run { } }
+    Check 'the copies moved aside are deleted by the next session once they are free, with nothing said' ($ran.Thrown -eq '' -and $ran.Warnings -eq '' -and @(Get-Asides).Count -eq 0) "$($ran.Thrown) $($ran.Warnings)"
+
+    # Open in a process that shares nothing but reading: it can be neither deleted nor moved.
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run {
+        $seen.Opened = Start-Holder -Path $hostCopy -How open
+        Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
+    } }
+    Check 'a host DLL that can be neither deleted nor moved does not fail the session either' ($ran.Thrown -eq '' -and (Test-PutBack) -and $null -eq (Get-GameRig -Game $gameName)) $ran.Thrown
+    Check 'and the warning says where it still is and which process has it' `
+        ($ran.Warnings -match 'could not be moved aside either and is still at \S+CameraUnlockIsolatedInput\.dll:' -and $ran.Warnings -match "$holderName \(pid $($seen.Opened.Id)\)") $ran.Warnings
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run { throw 'never run' } }
+    Check 'a start it is still in the way of throws, saying what it is and which process has it' `
+        ($ran.Thrown -match 'from an earlier run is at \S+CameraUnlockIsolatedInput\.dll and for 10 seconds could be neither deleted .* nor moved aside' -and $ran.Thrown -match "$holderName \(pid $($seen.Opened.Id)\)") $ran.Thrown
+    Check 'with no game started, nothing changed and the rig free' (-not (Get-Process -Name $gameName -ErrorAction SilentlyContinue) -and (Test-PutBack) -and $null -eq (Get-GameRig -Game $gameName))
+    Stop-Holder $seen.Opened
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run { $seen.Fresh = Test-Path $hostCopy } }
+    Check 'once it is let go the next session replaces it and removes its own' ($ran.Thrown -eq '' -and $ran.Warnings -eq '' -and $seen.Fresh -and -not (Test-Path $hostCopy)) "$($ran.Thrown) $($ran.Warnings)"
+
+    # Stop-IsolatedGame by itself, as a mod's own script calls it, with no rig and nothing saved.
+    $direct = Start-IsolatedGame -ProcessName $gameName -Launch $gameExe -ModFolder $mod -SettleSeconds 0 -ModHost managed -HostDll $hostBuilt
+    $loaded = Start-Holder -Path $direct.HostDll -How load
+    $ran = Invoke-Warned { Stop-IsolatedGame -Session $direct }
+    Check 'Stop-IsolatedGame warns of a host DLL it had to leave and does not throw' `
+        ($ran.Thrown -eq '' -and $ran.Warnings -match '^The game is stopped, and the isolated-input host DLL' -and $ran.Warnings -match "$holderName \(pid $($loaded.Id)\)") "$($ran.Thrown) $($ran.Warnings)"
+    Check 'with the game gone, the command file removed and the name the mod loads free' `
+        (-not (Get-Process -Id $direct.ProcessId -ErrorAction SilentlyContinue) -and -not (Test-Path $direct.CommandFile) -and -not (Test-Path $hostCopy))
+    Stop-Holder $loaded
+    $direct = Start-IsolatedGame -ProcessName $gameName -Launch $gameExe -ModFolder $mod -SettleSeconds 0 -ModHost managed -HostDll $hostBuilt
+    $ran = Invoke-Warned { Stop-IsolatedGame -Session $direct }
+    Check 'a stop with nothing in its way says nothing and leaves no DLL' ($ran.Thrown -eq '' -and $ran.Warnings -eq '' -and @($ran.Result).Count -eq 0 -and -not (Test-Path $hostCopy) -and @(Get-Asides).Count -eq 0) "$($ran.Thrown) $($ran.Warnings)"
+
+    # --- a game that will not stop ------------------------------------------
+    # A stand-in that refuses everyone the right to end it, and goes when its release file appears.
+    # An elevated PowerShell with the debug privilege switched on would end it all the same.
+    $stubbornName = 'CuRigStubborn' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    $stubbornExe = Join-Path $root "$stubbornName.exe"
+    Add-Type -OutputAssembly $stubbornExe -OutputType WindowsApplication -TypeDefinition @'
+using System; using System.IO; using System.Runtime.InteropServices;
+public static class StandInStubborn {
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl, uint revision, out IntPtr descriptor, IntPtr size);
+    [DllImport("advapi32.dll")] static extern bool SetKernelObjectSecurity(IntPtr handle, uint information, IntPtr descriptor);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    public static void Main() {
+        string exe = System.Reflection.Assembly.GetExecutingAssembly().Location;
+        IntPtr descriptor;
+        // Everyone is refused PROCESS_TERMINATE and allowed the rest. 4 is DACL_SECURITY_INFORMATION.
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW("D:(D;;0x0001;;;WD)(A;;0x1fffff;;;WD)", 1, out descriptor, IntPtr.Zero)
+            || !SetKernelObjectSecurity(GetCurrentProcess(), 4, descriptor)) Environment.Exit(7);
+        File.WriteAllText(exe + ".ready", "");
+        for (int i = 0; i < 1200 && !File.Exists(exe + ".release"); i++) System.Threading.Thread.Sleep(100);
+    }
+}
+'@
+    $stubborn = @{} + $session
+    $stubborn.ProcessName = $stubbornName
+    $stubborn.Launch = $stubbornExe
+    $stubborn.SessionFile = Join-Path $root 'stubborn.json'
+    $ran = Invoke-Warned { Invoke-IsolatedGameSession @stubborn -Run {
+        param($s)
+        $seen.Stubborn = $s.ProcessId
+        Wait-Until { Test-Path "$stubbornExe.ready" }
+        Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
+    } }
+    Check 'a game that will not stop throws, saying that and why' `
+        ($ran.Thrown -match "^the game \(pid $($seen.Stubborn)\) has not stopped, so nothing was put back under it and the rig is still held: .*Access is denied") $ran.Thrown
+    Check 'it is still running, and nothing was put back under it' `
+        ([bool](Get-Process -Id $seen.Stubborn -ErrorAction SilentlyContinue) -and (Get-Content (Join-Path $saves 'player.bin') -Raw).Trim() -eq 'changed' -and [IO.File]::ReadAllText($ini) -ne $iniText)
+    $state = Get-GameRig -Game $stubbornName
+    Check 'the rig is still held, and names what was saved and the session to stop' `
+        ($state.Live -and $state.Holder.Owner -eq 'session test' -and $state.Unrestored -eq $session.StateFolder -and $state.Holder.SessionFile -eq $stubborn.SessionFile -and (Test-Path $stubborn.SessionFile))
+    Set-Content "$stubbornExe.release" ''
+    Wait-Until { -not (Get-Process -Id $seen.Stubborn -ErrorAction SilentlyContinue) }
+    Stop-IsolatedGameSession -SessionFile $stubborn.SessionFile
+    Check 'once it has gone, stopping the session puts the files back and frees the rig' ((Test-PutBack) -and $null -eq (Get-GameRig -Game $stubbornName) -and -not (Test-Path $stubborn.SessionFile))
 } finally {
     # By the process objects, which stay tied to what was started: an id can be handed on once its process ends.
     foreach ($process in $started) { if (-not $process.HasExited) { $process.Kill() } }
     Stop-StandIn
+    if (Get-Variable stubbornExe -ErrorAction SilentlyContinue) { Set-Content "$stubbornExe.release" '' }
     $env:CAMERAUNLOCK_RIG_ROOT = $null
     Start-Sleep -Milliseconds 500
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue

@@ -26,6 +26,8 @@ $script:CoverageFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'data\isolat
 $script:CommandFileName = 'CameraUnlockInput.txt'
 $script:HostDllName = 'CameraUnlockIsolatedInput.dll'
 $script:HostDllBuild = Join-Path (Split-Path -Parent $PSScriptRoot) "cpp\tools\isolated_input_host\build\Release\$script:HostDllName"
+# How long a game that has been ended is given to go (Stop-GameProcess).
+$script:GameExitSeconds = 120
 
 if (-not ('CameraUnlockIsolatedTest.Native' -as [type])) {
     Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
@@ -82,6 +84,57 @@ namespace CameraUnlockIsolatedTest {
                 if (!ok) { bmp.Dispose(); return null; }
             }
             return bmp;
+        }
+    }
+}
+'@
+}
+
+# A type of its own, so a PowerShell that loaded this module before the type existed gains it on the next import.
+if (-not ('CameraUnlockIsolatedTest.FileUse' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace CameraUnlockIsolatedTest {
+    public static class FileUse {
+        [StructLayout(LayoutKind.Sequential)]
+        struct UniqueProcess { public int ProcessId; public System.Runtime.InteropServices.ComTypes.FILETIME StartTime; }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct ProcessInfo {
+            public UniqueProcess Process;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string AppName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string ServiceShortName;
+            public int ApplicationType; public uint AppStatus; public uint SessionId;
+            [MarshalAs(UnmanagedType.Bool)] public bool Restartable;
+        }
+        [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmStartSession(out uint session, int flags, System.Text.StringBuilder key);
+        [DllImport("rstrtmgr.dll")] static extern int RmEndSession(uint session);
+        [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmRegisterResources(uint session, uint files, string[] names, uint apps, IntPtr app, uint services, string[] serviceNames);
+        [DllImport("rstrtmgr.dll")] static extern int RmGetList(uint session, out uint needed, ref uint count, [In, Out] ProcessInfo[] info, ref uint reasons);
+
+        // The ids of the processes the Restart Manager names as using a file: one that has it
+        // open, and one that has it loaded as a DLL.
+        public static int[] ProcessIds(string path) {
+            uint session;
+            int result = RmStartSession(out session, 0, new System.Text.StringBuilder(64));
+            if (result != 0) throw new Win32Exception(result);
+            try {
+                result = RmRegisterResources(session, 1, new[] { path }, 0, IntPtr.Zero, 0, null);
+                if (result != 0) throw new Win32Exception(result);
+                uint needed, count = 0, reasons = 0;
+                result = RmGetList(session, out needed, ref count, null, ref reasons);
+                if (result == 0) return new int[0];
+                // ERROR_MORE_DATA: needed is how many there are.
+                if (result != 234) throw new Win32Exception(result);
+                ProcessInfo[] info = new ProcessInfo[needed];
+                count = needed;
+                result = RmGetList(session, out needed, ref count, info, ref reasons);
+                if (result != 0) throw new Win32Exception(result);
+                int[] ids = new int[count];
+                for (int i = 0; i < count; i++) ids[i] = info[i].Process.ProcessId;
+                return ids;
+            } finally { RmEndSession(session); }
         }
     }
 }
@@ -331,6 +384,81 @@ function Set-ModTestPort {
 # Running the game
 # ---------------------------------------------------------------------------
 
+function Get-FileUse {
+    # One clause for a message: which processes have a file open or loaded, as far as Windows will say.
+    param([Parameter(Mandatory)][string]$Path)
+    try { $ids = @([CameraUnlockIsolatedTest.FileUse]::ProcessIds($Path)) }
+    catch [System.ComponentModel.Win32Exception] { return "what has it could not be asked ($($_.Exception.Message))" }
+    if ($ids.Count -eq 0) { return 'no process is named as having it open or loaded' }
+    $named = foreach ($id in $ids) {
+        $process = Get-Process -Id $id -ErrorAction SilentlyContinue
+        $(if ($process) { "$($process.ProcessName) (pid $id)" } else { "pid $id, which has gone since" })
+    }
+    "it is open or loaded in $($named -join ', ')"
+}
+
+function Stop-GameProcess {
+    # Ends a process and returns once it has gone. Wait-Process is not that wait: it goes by the
+    # exit code, which a forced stop sets at once, and returned 17 ms after the stop of a process
+    # with 4 GB of memory that stayed listed, with a DLL it had loaded still undeletable, for
+    # another 240 ms (measured 2026-10-08). The process handle is signalled when it has gone. A
+    # Project Zomboid had not gone 25 s after its stop on a machine short of commit (2026-10-07).
+    param([Parameter(Mandatory)][System.Diagnostics.Process]$Process)
+    $id = $Process.Id
+    $name = $Process.ProcessName
+    try { Stop-Process -Id $id -Force -ErrorAction Stop }
+    catch {
+        # A process that is already on its way out (it quit or crashed in the same moment, and
+        # its exit code is set) is waited for whatever the stop answered. One whose state cannot
+        # even be asked for is taken as still running, and the refusal is what is thrown.
+        $refusal = $_
+        $ending = $false
+        try { $ending = $Process.HasExited } catch [System.ComponentModel.Win32Exception] { }
+        if (-not $ending) { throw $refusal }
+    }
+    if (-not $Process.WaitForExit($script:GameExitSeconds * 1000)) {
+        throw "$name (pid $id) was ended and had still not gone $script:GameExitSeconds seconds later"
+    }
+}
+
+function Remove-IsolatedInputHostCopy {
+    # Removes a host DLL copied beside a mod, and the ones earlier runs had to leave. Returns
+    # nothing when the name is free, or what is left: Path, where it is now, Moved, whether it
+    # was moved aside, Reason, why it could not be deleted, and Use, what has it.
+    # Windows deletes no DLL a process still has loaded and writes over none, and renames one
+    # freely: a copy that will not delete is moved aside under a name of its own, so the next
+    # start can put its copy under the name the mod loads.
+    param([Parameter(Mandatory)][string]$Path, [int]$PatienceSeconds = 0)
+    # Left by earlier runs. One that is still held stays for the next run to try.
+    Get-ChildItem (Split-Path -Parent $Path) -Filter "$(Split-Path -Leaf $Path).left-*" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    $deadline = (Get-Date).AddSeconds($PatienceSeconds)
+    while ($true) {
+        if (-not (Test-Path $Path)) { return }
+        try { Remove-Item $Path -Force -ErrorAction Stop; return }
+        catch [UnauthorizedAccessException], [System.IO.IOException] {
+            $reason = $_.Exception.Message
+            if ((Get-Date) -ge $deadline) { break }
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    $use = Get-FileUse -Path $Path
+    $aside = "$Path.left-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+    try {
+        [IO.File]::Move($Path, $aside)
+        [pscustomobject]@{ Path = $aside; Moved = $true; Reason = $reason; Use = $use }
+    } catch [UnauthorizedAccessException], [System.IO.IOException] {
+        [pscustomobject]@{ Path = $Path; Moved = $false; Reason = $reason; Use = $use }
+    }
+}
+
+function Format-HostDllLeft {
+    param([Parameter(Mandatory)]$Left)
+    $where = $(if ($Left.Moved) { "It was moved aside to $($Left.Path), and the next start or stop of a session in that folder deletes it once it is free." }
+               else { "It could not be moved aside either and is still at $($Left.Path): the next Start-IsolatedGame -ModHost managed in that folder replaces it, or says what has it." })
+    "the isolated-input host DLL copied beside the mod could not be deleted ($($Left.Reason)): $($Left.Use). $where Nothing of the game's is affected."
+}
+
 function Copy-IsolatedInputHost {
     <#
     .SYNOPSIS
@@ -340,6 +468,12 @@ function Copy-IsolatedInputHost {
     .DESCRIPTION
     The default source is the x64 build `pixi run build-isolated-input-host` leaves in this core
     checkout. Pass -HostDll for a build made elsewhere, such as a 32-bit one for a 32-bit game.
+
+    A copy an earlier run left in the folder is replaced. One that a process still has loaded
+    can be neither deleted nor written over, so it is moved aside (CameraUnlockIsolatedInput.dll.left-<id>),
+    with a warning that names the process, and deleted by a later start or stop once it is free.
+    Only a copy that can be neither deleted nor moved for 10 seconds stops the start, and the
+    error says what has it.
     #>
     param([Parameter(Mandatory)][string]$ModFolder, [string]$HostDll = $script:HostDllBuild)
     if (-not (Test-Path $HostDll -PathType Leaf)) {
@@ -347,7 +481,20 @@ function Copy-IsolatedInputHost {
     }
     if (-not (Test-Path $ModFolder -PathType Container)) { throw "The mod folder does not exist: $ModFolder" }
     $target = Join-Path $ModFolder $script:HostDllName
-    Copy-Item $HostDll $target -Force
+    $deadline = (Get-Date).AddSeconds(10)
+    while ($true) {
+        $left = Remove-IsolatedInputHostCopy -Path $target
+        if (-not $left) { break }
+        if ($left.Moved) {
+            Write-Warning "an isolated-input host DLL from an earlier run was still in use at $target ($($left.Reason)): $($left.Use). It was moved aside to $($left.Path) and a fresh copy put in its place."
+            break
+        }
+        if ((Get-Date) -ge $deadline) {
+            throw "An isolated-input host DLL from an earlier run is at $target and for 10 seconds could be neither deleted ($($left.Reason)) nor moved aside: $($left.Use). Nothing was started."
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    Copy-Item $HostDll $target
     $target
 }
 
@@ -362,7 +509,8 @@ function Start-IsolatedGame {
     functions take. Refuses to start while the game is already running: that one is someone else's.
     -Started is handed the process the moment it appears, before the settling.
     With -ModHost managed it also copies the host DLL beside the mod (Copy-IsolatedInputHost), and
-    Stop-IsolatedGame removes that copy.
+    Stop-IsolatedGame removes that copy. A copy an earlier run left there, still loaded in some
+    process, does not stop the start: it is moved aside.
     #>
     param(
         [Parameter(Mandatory)][string]$ProcessName,
@@ -540,24 +688,21 @@ function Stop-IsolatedGame {
     Stops the game this session started, by process id, and removes the command file so the next
     start of the same build answers to the real keyboard. Removes the host DLL too when the session
     copied one. The host's log (CameraUnlockIsolatedInput.log beside it) is left to be read.
+    .DESCRIPTION
+    Returns once the game's process has gone, which is when the files it had loaded come free. It
+    throws when the stop is refused, and when the process has still not gone 120 seconds after it.
+
+    A host DLL that will not delete for 10 seconds with the game gone is something else's to
+    let go: this warns, naming the file and the process that has it, moves it aside so the next
+    start is not in its way, and does not throw. The game is stopped either way.
     #>
     param([Parameter(Mandatory)]$Session)
     $process = Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
-    if ($process -and $process.ProcessName -eq $Session.ProcessName) {
-        Stop-Process -Id $Session.ProcessId -Force
-        Wait-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
-    }
+    if ($process -and $process.ProcessName -eq $Session.ProcessName) { Stop-GameProcess -Process $process }
     Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
     if ($Session.HostDll) {
-        # Windows can hold a DLL the game had loaded for a moment after the process is gone.
-        $deadline = (Get-Date).AddSeconds(10)
-        while ($true) {
-            try { Remove-Item $Session.HostDll -Force -ErrorAction Stop; break }
-            catch [UnauthorizedAccessException], [System.IO.IOException] {
-                if ((Get-Date) -gt $deadline) { throw }
-                Start-Sleep -Milliseconds 200
-            }
-        }
+        $left = Remove-IsolatedInputHostCopy -Path $Session.HostDll -PatienceSeconds 10
+        if ($left) { Write-Warning "The game is stopped, and $(Format-HostDllLeft $left)" }
     }
 }
 
@@ -908,9 +1053,10 @@ function Enter-GameRig {
                 if ($StopKept -and $turn.PSObject.Properties['Kept']) {
                     foreach ($left in @($turn.Kept)) {
                         if (-not (Test-GameRigProcessAlive -Id $left.Id -Start $left.Start)) { continue }
-                        $process = Get-Process -Id $left.Id
-                        Stop-Process -Id $left.Id -Force -ErrorAction Stop
-                        if (-not $process.WaitForExit(15000)) { throw "the game left up on $key (pid $($left.Id)) could not be stopped, and the rig is held by this process" }
+                        $process = Get-Process -Id $left.Id -ErrorAction SilentlyContinue
+                        if (-not $process) { continue }
+                        try { Stop-GameProcess -Process $process }
+                        catch { throw "the game left up on $key (pid $($left.Id)) has not stopped, and the rig is held by this process: $_" }
                     }
                 }
                 if ($turn.TakenOverFrom) {
@@ -1377,23 +1523,22 @@ function Start-IsolatedGameSession {
 }
 
 function Complete-IsolatedGameSession {
-    # Stops what the session started and puts back what it changed, each step whatever the one
-    # before it did. The rig is released only once the game's files are back: a restore that
-    # fails leaves it held, and Enter-GameRig then tells the next session what to restore.
+    # Stops what the session started and puts back what it changed, in the order of what each
+    # step protects. The game first: nothing is put back under a game that has not gone, so that
+    # alone throws at once and leaves the rig held. Then the game's files, and the rig is
+    # released only once they are back: a restore that fails leaves it held, and Enter-GameRig
+    # then tells the next session what to restore. -Collect and -Leave run whatever the other
+    # did. The host DLL is the least of it, a copy of core's own in the mod folder: one that
+    # will not delete is a warning and never keeps the files from going back or the rig held.
     param($Session, $Rig, [scriptblock]$Collect, [scriptblock]$Leave, [int]$RestoreRetrySeconds)
     $failures = New-Object System.Collections.Generic.List[object]
-    if ($Session.ProcessId) {
-        try { Stop-IsolatedGame -Session $Session } catch { $failures.Add($_) }
-        # A process that has just been ended is still listed for a moment, so it is given time to go.
-        $still = Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue
-        if ($still -and $still.ProcessName -eq $Session.ProcessName -and -not $still.WaitForExit(15000)) {
-            throw "the game (pid $($Session.ProcessId)) could not be stopped, so nothing was put back under it and the rig is still held. $($failures -join ' ')"
-        }
-    } else {
-        # The game never started, and Start-IsolatedGame had already put these beside the mod.
-        Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
-        if ($Session.HostDll) { Remove-Item $Session.HostDll -Force -ErrorAction SilentlyContinue }
+    $process = $(if ($Session.ProcessId) { Get-Process -Id $Session.ProcessId -ErrorAction SilentlyContinue })
+    if ($process -and $process.ProcessName -eq $Session.ProcessName) {
+        try { Stop-GameProcess -Process $process }
+        catch { throw "the game (pid $($Session.ProcessId)) has not stopped, so nothing was put back under it and the rig is still held: $_" }
     }
+    # With no game started as well: Start-IsolatedGame puts it beside the mod before the launch.
+    Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
     if ($Session.Sender) {
         $sender = Get-Process -Id $Session.Sender -ErrorAction SilentlyContinue
         if ($sender -and $sender.ProcessName -eq 'powershell') { Stop-Process -Id $Session.Sender -Force }
@@ -1401,6 +1546,10 @@ function Complete-IsolatedGameSession {
     if ($Collect) { try { & $Collect $Session | Out-Host } catch { $failures.Add($_) } }
     if ($Session.StateFolder -and (Test-Path (Join-Path $Session.StateFolder 'state.json'))) {
         Restore-GameTestState -Folder $Session.StateFolder -RetrySeconds $RestoreRetrySeconds
+    }
+    if ($Session.HostDll) {
+        $left = Remove-IsolatedInputHostCopy -Path $Session.HostDll -PatienceSeconds 10
+        if ($left) { Write-Warning "The session ended as it should, with the game stopped and its files back, and $(Format-HostDllLeft $left)" }
     }
     if ($Leave) { try { & $Leave $Session | Out-Host } catch { $failures.Add($_) } }
     Exit-GameRig -Rig $Rig
@@ -1414,10 +1563,18 @@ function Stop-IsolatedGameSession {
     Ends a session Start-IsolatedGameSession began: stops the game and the pose sender, runs
     -Collect, puts back every file and folder the session saved, and releases the rig.
     .DESCRIPTION
-    Every step runs whatever the one before it did, and the first failure is thrown at the end.
+    The game is stopped first, and the stop returns once its process has gone. A game that has
+    not stopped (the stop refused, or the process still there 120 seconds after it) throws at
+    once: nothing is put back under it, and the rig stays held.
+
     -Collect runs after the game has stopped and before its files are put back, and is handed the
     session: copy out the logs and the config as the run left them. -Leave runs once the files
     are back and before the rig is released: the other half of Start-IsolatedGameSession -Enter.
+    Each of the two runs whatever the other did, and the first failure is thrown at the end.
+
+    The host DLL of a -ModHost managed session is removed once the files are back. One that will
+    not delete is a warning that names it and the process that has it, never an error: the
+    session ends as it should, and the next start in that folder is not stopped by it.
 
     With -SessionFile this also ends a session whose own process was killed: Get-GameRig names
     the file of the session that holds a rig. It refuses while that process is still running, and
@@ -1453,8 +1610,7 @@ function Stop-IsolatedGameSession {
     if ($held -and $held.Token -eq $Session.RigToken -and $held.ProcessId -ne $PID -and (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) {
         throw "the session is still in the hands of pid $($held.ProcessId), which is starting or restarting its game. Nothing was stopped or put back: stop it once that process has ended."
     }
-    try { $rig = Enter-GameRig -Game $Session.ProcessName -Owner $Session.Owner -Token $Session.RigToken }
-    catch {
+    if (-not $held -or $held.Token -ne $Session.RigToken) {
         # Without the rig the game and its files may be another session's by now. What is only
         # this session's is cleared, so it is not stopped twice.
         if ($Session.Sender) {
@@ -1462,8 +1618,10 @@ function Stop-IsolatedGameSession {
             if ($sender -and $sender.ProcessName -eq 'powershell') { Stop-Process -Id $Session.Sender -Force }
         }
         if ($Session.SessionFile) { Remove-Item $Session.SessionFile -Force -ErrorAction SilentlyContinue }
-        throw "this session no longer holds the rig, so the game and its files were left alone: $_"
+        throw "this session no longer holds the rig, so the game and its files were left alone: $(if ($held) { "the rig is held by $(Format-GameRigOwner $held)" } else { 'the lock it took is gone' })"
     }
+    # Any other refusal is said as itself and leaves the session whole, its file included, to be stopped again.
+    $rig = Enter-GameRig -Game $Session.ProcessName -Owner $Session.Owner -Token $Session.RigToken
     Complete-IsolatedGameSession -Session $Session -Rig $rig -Collect $Collect -Leave $Leave -RestoreRetrySeconds $RestoreRetrySeconds
 }
 
