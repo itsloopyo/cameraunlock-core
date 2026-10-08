@@ -193,20 +193,44 @@ struct PendingLean {
     std::uint64_t now_ms = 0;
 };
 
-struct Session {
+// How a line names a view. View 0 is the session and goes unnamed, so a host with one view reads
+// the lines it always has.
+std::string Named(std::int32_t view) {
+    return view == 0 ? std::string() : " (view " + std::to_string(view) + ")";
+}
+
+// What is one tracker's and one camera's.
+struct View {
     std::mutex mutex;
     UdpReceiver receiver;
     HeadTrackingSession<UdpReceiver> tracking{receiver};
+    // Written under Session::starts and the view's own mutex, so either one reads them.
     bool started = false;
+    std::int32_t port = 0;
     CameraUnlockSettings settings = SettingsOf(HeadTrackingConfig{});
-    std::atomic<std::int32_t> aim_mode{CAMERAUNLOCK_AIM_SIGHTS_LOCKED};
     camera::LeanClamp clamp;
     ads::LeanHandover handover;
     ads::AdsFade stock_fade;
     time::FrameClock clock{std::numeric_limits<float>::max()};
     std::optional<PendingLean> pending;
+};
 
-    Session() { receiver.SetLog(&LogLine); }
+struct Session {
+    // Held through a start and a stop, taken before the view's own.
+    std::mutex starts;
+    View views[CAMERAUNLOCK_VIEWS];
+    std::atomic<std::int32_t> aim_mode{CAMERAUNLOCK_AIM_SIGHTS_LOCKED};
+
+    Session() {
+        views[0].receiver.SetLog(&LogLine);
+        for (std::int32_t view = 1; view < CAMERAUNLOCK_VIEWS; ++view) {
+            views[view].receiver.SetLog([view](const std::string& line) { LogLine(line + Named(view)); });
+        }
+    }
+
+    // The tracking mode is every view's. View 0's pipeline keeps it, where core's cycle is, and a
+    // frame of another view takes it from there.
+    HeadTrackingSession<UdpReceiver>& mode() { return views[0].tracking; }
 };
 
 Session*& SessionSlot() {
@@ -216,6 +240,14 @@ Session*& SessionSlot() {
 
 Session& TheSession() {
     return *SessionSlot();
+}
+
+View& ViewAt(Session& session, std::int32_t view) {
+    if (view < 0 || view >= CAMERAUNLOCK_VIEWS) {
+        throw std::invalid_argument("there is no view " + std::to_string(view) + ": the views are 0 to " +
+                                    std::to_string(CAMERAUNLOCK_VIEWS - 1));
+    }
+    return session.views[view];
 }
 
 void RequireSettings(const CameraUnlockSettings& s) {
@@ -235,12 +267,12 @@ void RequireSettings(const CameraUnlockSettings& s) {
             "light_multiplier is outside 0 to 5");
 }
 
-bool StopLean(Session& s) {
+bool StopLean(View& s) {
     s.clamp.Reset();
     return s.handover.Stop();
 }
 
-void Rest(Session& s, CameraUnlockFrame& out) {
+void Rest(View& s, CameraUnlockFrame& out) {
     s.tracking.ResetTransientState();
     s.stock_fade.Reset();
     if (StopLean(s)) out.flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
@@ -254,6 +286,228 @@ std::int64_t SteadyMicros() {
 
 camera::LeanObstruction HandBack(void* context, const math::Vec3&, const math::Vec3&, float) {
     return *static_cast<const camera::LeanObstruction*>(context);
+}
+
+// ---- A view's start, stop, frame and lean -----------------------------------------------------
+
+std::int32_t StartView(std::int32_t view, std::int32_t udp_port) {
+    Session& session = TheSession();
+    View& s = ViewAt(session, view);
+    Require(udp_port >= 1 && udp_port <= 65535, "udp_port is outside 1 to 65535");
+    const std::lock_guard<std::mutex> starts(session.starts);
+    const std::lock_guard<std::mutex> lock(s.mutex);
+    if (s.started) {
+        throw std::logic_error(view == 0 ? "the session is already started: cameraunlock_session_stop first"
+                                         : "view " + std::to_string(view) + " is already started: cameraunlock_view_stop first");
+    }
+    for (std::int32_t other = 0; other < CAMERAUNLOCK_VIEWS; ++other) {
+        if (other != view && session.views[other].started && session.views[other].port == udp_port) {
+            throw std::invalid_argument("view " + std::to_string(view) + " cannot listen on UDP port " +
+                                        std::to_string(udp_port) + ", which view " + std::to_string(other) +
+                                        " listens on: a port carries one tracker");
+        }
+    }
+    s.started = true;
+    s.port = udp_port;
+    // The receiver says why a bind failed and when a later one held. This is the line for
+    // the bind that held at once, so a log always says which of the two happened.
+    if (s.receiver.Start(static_cast<std::uint16_t>(udp_port))) {
+        LogLine("Listening for OpenTrack datagrams on UDP port " + std::to_string(udp_port) + Named(view));
+    }
+    return CAMERAUNLOCK_OK;
+}
+
+std::int32_t StopView(std::int32_t view) {
+    Session& session = TheSession();
+    View& s = ViewAt(session, view);
+    const std::lock_guard<std::mutex> starts(session.starts);
+    const std::lock_guard<std::mutex> lock(s.mutex);
+    s.receiver.Stop();
+    s.started = false;
+    s.pending.reset();
+    s.tracking.ResetTransientState();
+    s.stock_fade.Reset();
+    StopLean(s);
+    return CAMERAUNLOCK_OK;
+}
+
+std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, CameraUnlockFrame* out) {
+    Session& session = TheSession();
+    View& s = ViewAt(session, view);
+    RequireStruct(input, "CameraUnlockFrameInput");
+    RequireStruct(out, "CameraUnlockFrame");
+    const std::lock_guard<std::mutex> lock(s.mutex);
+
+    *out = {};
+    out->struct_size = sizeof(*out);
+    out->pose_share = 1.0f;
+    out->zoom_factor = 1.0f;
+
+    if (s.pending) {
+        s.pending.reset();
+        StopLean(s);
+        throw std::logic_error(
+            view == 0 ? "the frame before this one asked for cameraunlock_session_lean, which was not called"
+                      : "the frame of view " + std::to_string(view) +
+                            " before this one asked for cameraunlock_view_lean, which was not called");
+    }
+
+    float delta = input->delta_seconds;
+    Require(std::isfinite(delta) && delta >= 0.0f, "delta_seconds is negative or not a number");
+    std::uint64_t now_ms = input->now_ms;
+    if ((input->flags & CAMERAUNLOCK_FRAME_CLOCK) != 0) {
+        const float measured = s.clock.Tick();
+        delta = measured < delta ? measured : delta;
+        now_ms = static_cast<std::uint64_t>(SteadyMicros() / 1000);
+    }
+    out->delta_seconds = delta;
+
+    const TrackingMode mode = session.mode().GetMode();
+    // Not on view 0, which keeps the mode: a cycle on another thread between the two would be undone.
+    if (view != 0) s.tracking.SetMode(mode);
+    const ads::AimMode aim_mode = static_cast<ads::AimMode>(session.aim_mode.load());
+    out->tracking_mode = static_cast<std::int32_t>(mode);
+    out->aim_mode = static_cast<std::int32_t>(aim_mode);
+
+    const std::int64_t received = s.receiver.GetLastReceiveTimestamp();
+    if (s.receiver.IsRunning()) out->flags |= CAMERAUNLOCK_STATE_LISTENING;
+    if (s.receiver.IsRemoteConnection()) out->flags |= CAMERAUNLOCK_STATE_REMOTE;
+    if (received != 0 && (SteadyMicros() - received) / 1000 < s.settings.data_freshness_ms) {
+        out->flags |= CAMERAUNLOCK_STATE_FRESH;
+    }
+    {
+        LogState& log = TheLog();
+        const std::lock_guard<std::mutex> log_lock(log.mutex);
+        if (!log.pending.empty()) out->flags |= CAMERAUNLOCK_STATE_LOG;
+    }
+
+    if ((input->flags & CAMERAUNLOCK_FRAME_ACTIVE) == 0) {
+        Rest(s, *out);
+        return CAMERAUNLOCK_OK;
+    }
+    Require(std::isfinite(input->tan_half_fov) && input->tan_half_fov > 0.0f &&
+                std::isfinite(input->tan_half_fov_base) && input->tan_half_fov_base > 0.0f,
+            "tan_half_fov and tan_half_fov_base are not both positive numbers");
+
+    if (!s.tracking.Update(delta)) {
+        Rest(s, *out);
+        return CAMERAUNLOCK_OK;
+    }
+    out->flags |= CAMERAUNLOCK_STATE_POSE;
+
+    const bool aiming = (input->flags & CAMERAUNLOCK_FRAME_AIMING) != 0;
+    const float share = s.stock_fade.Update(ads::StockSightsEngaged(aim_mode, aiming), now_ms);
+    const float zoom = camera::FovZoomFactor(input->tan_half_fov, input->tan_half_fov_base);
+    out->pose_share = share;
+    out->zoom_factor = zoom;
+
+    float yaw, pitch, roll;
+    if (mode != TrackingMode::PositionOnly && s.tracking.GetRotation(yaw, pitch, roll)) {
+        out->flags |= CAMERAUNLOCK_STATE_ROTATION;
+        out->head_yaw = yaw;
+        out->head_pitch = pitch;
+        out->head_roll = roll;
+        out->yaw = camera::ScaleAngleForZoom(yaw * share, zoom);
+        out->pitch = camera::ScaleAngleForZoom(pitch * share, zoom);
+        out->roll = roll;
+        const effects::HeadEuler light =
+            effects::ScaleHeadEuler({out->yaw, out->pitch, out->roll}, s.settings.light_multiplier);
+        out->light_yaw = light.yaw;
+        out->light_pitch = light.pitch;
+        out->light_roll = light.roll;
+    }
+
+    float x, y, z;
+    const bool has_position = s.tracking.GetPositionOffset(x, y, z);
+    if (has_position) {
+        out->head_x = x;
+        out->head_y = y;
+        out->head_z = z;
+    }
+    if (!has_position || (input->flags & CAMERAUNLOCK_FRAME_LEAN) == 0) {
+        if (StopLean(s)) out->flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
+        return CAMERAUNLOCK_OK;
+    }
+
+    const float* m = input->tracker_to_world;
+    const math::Vec3 aim(input->aim_forward[0], input->aim_forward[1], input->aim_forward[2]);
+    Require(Finite(m, 9) && Finite(input->aim_forward, 3), "tracker_to_world or aim_forward holds something that is not a number");
+    Require(std::fabs(aim.Magnitude() - 1.0f) < 1e-3f, "aim_forward is not unit length");
+    Require(!std::isnan(input->forward_stop), "forward_stop is not a number");
+
+    const math::Vec3 head(x * share, y * share, z * share);
+    const math::Vec3 lean = camera::ScaleLeanForZoom(
+        math::Vec3(m[0] * head.x + m[1] * head.y + m[2] * head.z, m[3] * head.x + m[4] * head.y + m[5] * head.z,
+                   m[6] * head.x + m[7] * head.y + m[8] * head.z),
+        aim, zoom);
+    const float desired = lean.Magnitude();
+
+    PendingLean pending;
+    pending.lean = lean;
+    pending.aim = aim;
+    pending.query = s.settings.collision_enabled != 0 && desired > camera::LeanClamp::kMinimumLean;
+    pending.aiming = aiming;
+    pending.rig_available = (input->flags & CAMERAUNLOCK_FRAME_RIG_AVAILABLE) != 0;
+    pending.free_look = ads::IsFreeLook(aim_mode);
+    pending.delta_seconds = delta;
+    pending.forward_stop = input->forward_stop;
+    pending.now_ms = now_ms;
+    if (pending.query) {
+        out->flags |= CAMERAUNLOCK_STATE_LEAN_QUERY;
+        out->query_direction[0] = lean.x / desired;
+        out->query_direction[1] = lean.y / desired;
+        out->query_direction[2] = lean.z / desired;
+        out->query_reach = desired + s.clamp.Settings().skin;
+    }
+    s.pending = pending;
+    out->flags |= CAMERAUNLOCK_STATE_LEAN;
+    return CAMERAUNLOCK_OK;
+}
+
+std::int32_t LeanOf(std::int32_t view, const CameraUnlockObstruction* obstruction, CameraUnlockLean* out) {
+    View& s = ViewAt(TheSession(), view);
+    RequireStruct(out, "CameraUnlockLean");
+    const std::lock_guard<std::mutex> lock(s.mutex);
+    if (!s.pending) {
+        throw std::logic_error("no lean is waiting" + (view == 0 ? std::string() : " for view " + std::to_string(view)) +
+                               ": it follows a frame whose flags carry CAMERAUNLOCK_STATE_LEAN, once");
+    }
+    const PendingLean pending = *s.pending;
+    s.pending.reset();
+
+    math::Vec3 lean = pending.lean;
+    if (s.settings.collision_enabled == 0) {
+        s.clamp.Reset();
+    } else {
+        camera::LeanObstruction hit;
+        if (pending.query) {
+            RequireStruct(obstruction, "CameraUnlockObstruction");
+            hit.queried = obstruction->queried != 0;
+            hit.blocked = obstruction->blocked != 0;
+            hit.distance = obstruction->distance;
+            Require(!hit.queried || !hit.blocked || (std::isfinite(hit.distance) && hit.distance >= 0.0f),
+                    "the obstruction's distance is negative or not a number");
+        }
+        lean = s.clamp.Apply(math::Vec3(), pending.lean, pending.delta_seconds, &HandBack, &hit);
+    }
+
+    s.handover.SetForwardStop(pending.forward_stop);
+    const ads::LeanShares shares = s.handover.Update(lean, pending.aim, pending.aiming, pending.free_look,
+                                                     pending.rig_available, pending.now_ms);
+
+    *out = {};
+    out->struct_size = sizeof(*out);
+    if (s.clamp.InContact()) out->flags |= CAMERAUNLOCK_LEAN_CONTACT;
+    if (s.clamp.LastQueryFailed()) out->flags |= CAMERAUNLOCK_LEAN_QUERY_FAILED;
+    out->camera[0] = shares.camera.x;
+    out->camera[1] = shares.camera.y;
+    out->camera[2] = shares.camera.z;
+    out->rig[0] = shares.rig.x;
+    out->rig[1] = shares.rig.y;
+    out->rig[2] = shares.rig.z;
+    out->asked = pending.lean.Magnitude();
+    out->given = lean.Magnitude();
+    return CAMERAUNLOCK_OK;
 }
 
 // ---- The config -------------------------------------------------------------------------------
@@ -501,61 +755,49 @@ std::int32_t cameraunlock_session_configure(const CameraUnlockSettings* settings
     return Guarded("cameraunlock_session_configure", [&] {
         RequireStruct(settings, "CameraUnlockSettings");
         RequireSettings(*settings);
-        Session& s = TheSession();
-        const std::lock_guard<std::mutex> lock(s.mutex);
-        s.settings = *settings;
-        s.tracking.SetLocalSmoothing(settings->local_smoothing);
-        s.tracking.SetRemoteSmoothing(settings->remote_smoothing);
         PositionSettings position;
         position.limit_x = settings->limit_x;
         position.limit_y = settings->limit_y;
         position.limit_y_down = settings->limit_y_down;
         position.limit_z = settings->limit_z;
         position.limit_z_back = settings->limit_z_back;
-        s.tracking.SetPositionSettings(position);
-        s.tracking.SetMode(static_cast<TrackingMode>(settings->tracking_mode));
-        s.aim_mode.store(settings->aim_mode);
         camera::LeanClampSettings clamp;
         clamp.skin = settings->collision_margin;
         clamp.release_smoothing = settings->collision_release_smoothing;
-        s.clamp.SetSettings(clamp);
+        Session& session = TheSession();
+        for (View& s : session.views) {
+            const std::lock_guard<std::mutex> lock(s.mutex);
+            s.settings = *settings;
+            s.tracking.SetLocalSmoothing(settings->local_smoothing);
+            s.tracking.SetRemoteSmoothing(settings->remote_smoothing);
+            s.tracking.SetPositionSettings(position);
+            s.clamp.SetSettings(clamp);
+        }
+        session.mode().SetMode(static_cast<TrackingMode>(settings->tracking_mode));
+        session.aim_mode.store(settings->aim_mode);
         return CAMERAUNLOCK_OK;
     });
 }
 
 std::int32_t cameraunlock_session_start(std::int32_t udp_port) {
-    return Guarded("cameraunlock_session_start", [&] {
-        Require(udp_port >= 1 && udp_port <= 65535, "udp_port is outside 1 to 65535");
-        Session& s = TheSession();
-        const std::lock_guard<std::mutex> lock(s.mutex);
-        if (s.started) throw std::logic_error("the session is already started: cameraunlock_session_stop first");
-        s.started = true;
-        // The receiver says why a bind failed and when a later one held. This is the line for
-        // the bind that held at once, so a log always says which of the two happened.
-        if (s.receiver.Start(static_cast<std::uint16_t>(udp_port))) {
-            LogLine("Listening for OpenTrack datagrams on UDP port " + std::to_string(udp_port));
-        }
-        return CAMERAUNLOCK_OK;
-    });
+    return Guarded("cameraunlock_session_start", [&] { return StartView(0, udp_port); });
 }
 
 std::int32_t cameraunlock_session_stop(void) {
-    return Guarded("cameraunlock_session_stop", [&] {
-        Session& s = TheSession();
-        const std::lock_guard<std::mutex> lock(s.mutex);
-        s.receiver.Stop();
-        s.started = false;
-        s.pending.reset();
-        s.tracking.ResetTransientState();
-        s.stock_fade.Reset();
-        StopLean(s);
-        return CAMERAUNLOCK_OK;
-    });
+    return Guarded("cameraunlock_session_stop", [&] { return StopView(0); });
+}
+
+std::int32_t cameraunlock_view_start(std::int32_t view, std::int32_t udp_port) {
+    return Guarded("cameraunlock_view_start", [&] { return StartView(view, udp_port); });
+}
+
+std::int32_t cameraunlock_view_stop(std::int32_t view) {
+    return Guarded("cameraunlock_view_stop", [&] { return StopView(view); });
 }
 
 std::int32_t cameraunlock_session_cycle_tracking_mode(void) {
     return Guarded("cameraunlock_session_cycle_tracking_mode",
-                   [&] { return static_cast<std::int32_t>(TheSession().tracking.CycleMode()); });
+                   [&] { return static_cast<std::int32_t>(TheSession().mode().CycleMode()); });
 }
 
 std::int32_t cameraunlock_session_cycle_aim_mode(void) {
@@ -589,179 +831,19 @@ const char* cameraunlock_aim_mode_label(std::int32_t aim_mode) {
 }
 
 std::int32_t cameraunlock_session_frame(const CameraUnlockFrameInput* input, CameraUnlockFrame* out) {
-    return Guarded("cameraunlock_session_frame", [&] {
-        RequireStruct(input, "CameraUnlockFrameInput");
-        RequireStruct(out, "CameraUnlockFrame");
-        Session& s = TheSession();
-        const std::lock_guard<std::mutex> lock(s.mutex);
-
-        *out = {};
-        out->struct_size = sizeof(*out);
-        out->pose_share = 1.0f;
-        out->zoom_factor = 1.0f;
-
-        if (s.pending) {
-            s.pending.reset();
-            StopLean(s);
-            throw std::logic_error("the frame before this one asked for cameraunlock_session_lean, which was not called");
-        }
-
-        float delta = input->delta_seconds;
-        Require(std::isfinite(delta) && delta >= 0.0f, "delta_seconds is negative or not a number");
-        std::uint64_t now_ms = input->now_ms;
-        if ((input->flags & CAMERAUNLOCK_FRAME_CLOCK) != 0) {
-            const float measured = s.clock.Tick();
-            delta = measured < delta ? measured : delta;
-            now_ms = static_cast<std::uint64_t>(SteadyMicros() / 1000);
-        }
-        out->delta_seconds = delta;
-
-        const TrackingMode mode = s.tracking.GetMode();
-        const ads::AimMode aim_mode = static_cast<ads::AimMode>(s.aim_mode.load());
-        out->tracking_mode = static_cast<std::int32_t>(mode);
-        out->aim_mode = static_cast<std::int32_t>(aim_mode);
-
-        const std::int64_t received = s.receiver.GetLastReceiveTimestamp();
-        if (s.receiver.IsRunning()) out->flags |= CAMERAUNLOCK_STATE_LISTENING;
-        if (s.receiver.IsRemoteConnection()) out->flags |= CAMERAUNLOCK_STATE_REMOTE;
-        if (received != 0 && (SteadyMicros() - received) / 1000 < s.settings.data_freshness_ms) {
-            out->flags |= CAMERAUNLOCK_STATE_FRESH;
-        }
-        {
-            LogState& log = TheLog();
-            const std::lock_guard<std::mutex> log_lock(log.mutex);
-            if (!log.pending.empty()) out->flags |= CAMERAUNLOCK_STATE_LOG;
-        }
-
-        if ((input->flags & CAMERAUNLOCK_FRAME_ACTIVE) == 0) {
-            Rest(s, *out);
-            return CAMERAUNLOCK_OK;
-        }
-        Require(std::isfinite(input->tan_half_fov) && input->tan_half_fov > 0.0f &&
-                    std::isfinite(input->tan_half_fov_base) && input->tan_half_fov_base > 0.0f,
-                "tan_half_fov and tan_half_fov_base are not both positive numbers");
-
-        if (!s.tracking.Update(delta)) {
-            Rest(s, *out);
-            return CAMERAUNLOCK_OK;
-        }
-        out->flags |= CAMERAUNLOCK_STATE_POSE;
-
-        const bool aiming = (input->flags & CAMERAUNLOCK_FRAME_AIMING) != 0;
-        const float share = s.stock_fade.Update(ads::StockSightsEngaged(aim_mode, aiming), now_ms);
-        const float zoom = camera::FovZoomFactor(input->tan_half_fov, input->tan_half_fov_base);
-        out->pose_share = share;
-        out->zoom_factor = zoom;
-
-        float yaw, pitch, roll;
-        if (mode != TrackingMode::PositionOnly && s.tracking.GetRotation(yaw, pitch, roll)) {
-            out->flags |= CAMERAUNLOCK_STATE_ROTATION;
-            out->head_yaw = yaw;
-            out->head_pitch = pitch;
-            out->head_roll = roll;
-            out->yaw = camera::ScaleAngleForZoom(yaw * share, zoom);
-            out->pitch = camera::ScaleAngleForZoom(pitch * share, zoom);
-            out->roll = roll;
-            const effects::HeadEuler light =
-                effects::ScaleHeadEuler({out->yaw, out->pitch, out->roll}, s.settings.light_multiplier);
-            out->light_yaw = light.yaw;
-            out->light_pitch = light.pitch;
-            out->light_roll = light.roll;
-        }
-
-        float x, y, z;
-        const bool has_position = s.tracking.GetPositionOffset(x, y, z);
-        if (has_position) {
-            out->head_x = x;
-            out->head_y = y;
-            out->head_z = z;
-        }
-        if (!has_position || (input->flags & CAMERAUNLOCK_FRAME_LEAN) == 0) {
-            if (StopLean(s)) out->flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
-            return CAMERAUNLOCK_OK;
-        }
-
-        const float* m = input->tracker_to_world;
-        const math::Vec3 aim(input->aim_forward[0], input->aim_forward[1], input->aim_forward[2]);
-        Require(Finite(m, 9) && Finite(input->aim_forward, 3), "tracker_to_world or aim_forward holds something that is not a number");
-        Require(std::fabs(aim.Magnitude() - 1.0f) < 1e-3f, "aim_forward is not unit length");
-        Require(!std::isnan(input->forward_stop), "forward_stop is not a number");
-
-        const math::Vec3 head(x * share, y * share, z * share);
-        const math::Vec3 lean = camera::ScaleLeanForZoom(
-            math::Vec3(m[0] * head.x + m[1] * head.y + m[2] * head.z, m[3] * head.x + m[4] * head.y + m[5] * head.z,
-                       m[6] * head.x + m[7] * head.y + m[8] * head.z),
-            aim, zoom);
-        const float desired = lean.Magnitude();
-
-        PendingLean pending;
-        pending.lean = lean;
-        pending.aim = aim;
-        pending.query = s.settings.collision_enabled != 0 && desired > camera::LeanClamp::kMinimumLean;
-        pending.aiming = aiming;
-        pending.rig_available = (input->flags & CAMERAUNLOCK_FRAME_RIG_AVAILABLE) != 0;
-        pending.free_look = ads::IsFreeLook(aim_mode);
-        pending.delta_seconds = delta;
-        pending.forward_stop = input->forward_stop;
-        pending.now_ms = now_ms;
-        if (pending.query) {
-            out->flags |= CAMERAUNLOCK_STATE_LEAN_QUERY;
-            out->query_direction[0] = lean.x / desired;
-            out->query_direction[1] = lean.y / desired;
-            out->query_direction[2] = lean.z / desired;
-            out->query_reach = desired + s.clamp.Settings().skin;
-        }
-        s.pending = pending;
-        out->flags |= CAMERAUNLOCK_STATE_LEAN;
-        return CAMERAUNLOCK_OK;
-    });
+    return Guarded("cameraunlock_session_frame", [&] { return FrameOf(0, input, out); });
 }
 
 std::int32_t cameraunlock_session_lean(const CameraUnlockObstruction* obstruction, CameraUnlockLean* out) {
-    return Guarded("cameraunlock_session_lean", [&] {
-        RequireStruct(out, "CameraUnlockLean");
-        Session& s = TheSession();
-        const std::lock_guard<std::mutex> lock(s.mutex);
-        if (!s.pending) {
-            throw std::logic_error("no lean is waiting: it follows a frame whose flags carry CAMERAUNLOCK_STATE_LEAN, once");
-        }
-        const PendingLean pending = *s.pending;
-        s.pending.reset();
+    return Guarded("cameraunlock_session_lean", [&] { return LeanOf(0, obstruction, out); });
+}
 
-        math::Vec3 lean = pending.lean;
-        if (s.settings.collision_enabled == 0) {
-            s.clamp.Reset();
-        } else {
-            camera::LeanObstruction hit;
-            if (pending.query) {
-                RequireStruct(obstruction, "CameraUnlockObstruction");
-                hit.queried = obstruction->queried != 0;
-                hit.blocked = obstruction->blocked != 0;
-                hit.distance = obstruction->distance;
-                Require(!hit.queried || !hit.blocked || (std::isfinite(hit.distance) && hit.distance >= 0.0f),
-                        "the obstruction's distance is negative or not a number");
-            }
-            lean = s.clamp.Apply(math::Vec3(), pending.lean, pending.delta_seconds, &HandBack, &hit);
-        }
+std::int32_t cameraunlock_view_frame(std::int32_t view, const CameraUnlockFrameInput* input, CameraUnlockFrame* out) {
+    return Guarded("cameraunlock_view_frame", [&] { return FrameOf(view, input, out); });
+}
 
-        s.handover.SetForwardStop(pending.forward_stop);
-        const ads::LeanShares shares = s.handover.Update(lean, pending.aim, pending.aiming, pending.free_look,
-                                                         pending.rig_available, pending.now_ms);
-
-        *out = {};
-        out->struct_size = sizeof(*out);
-        if (s.clamp.InContact()) out->flags |= CAMERAUNLOCK_LEAN_CONTACT;
-        if (s.clamp.LastQueryFailed()) out->flags |= CAMERAUNLOCK_LEAN_QUERY_FAILED;
-        out->camera[0] = shares.camera.x;
-        out->camera[1] = shares.camera.y;
-        out->camera[2] = shares.camera.z;
-        out->rig[0] = shares.rig.x;
-        out->rig[1] = shares.rig.y;
-        out->rig[2] = shares.rig.z;
-        out->asked = pending.lean.Magnitude();
-        out->given = lean.Magnitude();
-        return CAMERAUNLOCK_OK;
-    });
+std::int32_t cameraunlock_view_lean(std::int32_t view, const CameraUnlockObstruction* obstruction, CameraUnlockLean* out) {
+    return Guarded("cameraunlock_view_lean", [&] { return LeanOf(view, obstruction, out); });
 }
 
 std::int32_t cameraunlock_config_describe(const char* display_name) {
@@ -1037,7 +1119,7 @@ std::int32_t cameraunlock_config_save_float(std::int32_t row, float value) {
 
 std::int32_t cameraunlock_config_save_tracking_mode(void) {
     return Guarded("cameraunlock_config_save_tracking_mode", [&] {
-        const TrackingModeChannels channels = EncodeTrackingMode(TheSession().tracking.GetMode());
+        const TrackingModeChannels channels = EncodeTrackingMode(TheSession().mode().GetMode());
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
         return Save(c, [&](HostConfig& config) {
@@ -1118,9 +1200,14 @@ std::int32_t cameraunlock_testing_reset(void) {
 }
 
 std::int32_t cameraunlock_testing_deliver(const void* datagram, std::int32_t length, std::int32_t remote) {
+    return cameraunlock_testing_deliver_view(0, datagram, length, remote);
+}
+
+std::int32_t cameraunlock_testing_deliver_view(std::int32_t view, const void* datagram, std::int32_t length,
+                                               std::int32_t remote) {
     return Guarded("cameraunlock_testing_deliver", [&] {
+        View& s = ViewAt(TheSession(), view);
         Require(datagram != nullptr && length >= 0, "datagram is NULL or its length negative");
-        Session& s = TheSession();
         const std::lock_guard<std::mutex> lock(s.mutex);
         if (s.started) throw std::logic_error("the session is listening: a datagram is delivered to one that is not");
         sockaddr_in sender = {};

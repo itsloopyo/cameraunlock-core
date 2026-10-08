@@ -21,16 +21,18 @@ import java.nio.file.Path;
  * cpp/include/cameraunlock/c/cameraunlock.h, and one class for each struct.
  *
  * A call the library refuses throws an IllegalStateException whose message is the library's own
- * reason. frame, lean and hotkeysTake allocate nothing.
+ * reason. frame, lean, viewFrame, viewLean and hotkeysTake allocate nothing.
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 2;
+    public static final int ABI = 3;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
     public static final int TRACKING_ROTATION_AND_POSITION = 0, TRACKING_ROTATION_ONLY = 1, TRACKING_POSITION_ONLY = 2;
     public static final int AIM_SIGHTS_LOCKED = 0, AIM_FREE_LOOK_MARKER = 1, AIM_TRUE_FREE_LOOK = 2, AIM_STOCK_SIGHTS = 3;
+    /** The views a host may run at once. View 0 is the session of start, stop, frame and lean. */
+    public static final int VIEWS = 4;
 
     /** FrameInput.flags */
     public static final int FRAME_ACTIVE = 0x1, FRAME_LEAN = 0x2, FRAME_AIMING = 0x4, FRAME_RIG_AVAILABLE = 0x8,
@@ -249,6 +251,12 @@ public final class CameraUnlock {
 
         private static final VarHandle QUERIED = member(OBSTRUCTION, "queried"), BLOCKED = member(OBSTRUCTION, "blocked"),
                 DISTANCE = member(OBSTRUCTION, "distance");
+
+        private void write(MemorySegment to) {
+            QUERIED.set(to, 0L, queried ? 1 : 0);
+            BLOCKED.set(to, 0L, blocked ? 1 : 0);
+            DISTANCE.set(to, 0L, distance);
+        }
     }
 
     /** The lean, split between the view and the rig: CameraUnlockLean. */
@@ -260,6 +268,16 @@ public final class CameraUnlock {
 
         private static final VarHandle FLAGS = member(LEAN, "flags"), CAMERA = element(LEAN, "camera"), RIG = element(LEAN, "rig"),
                 ASKED = member(LEAN, "asked"), GIVEN = member(LEAN, "given");
+
+        private void read(MemorySegment from) {
+            flags = (int) FLAGS.get(from, 0L);
+            for (int i = 0; i < 3; i++) {
+                camera[i] = (float) CAMERA.get(from, 0L, (long) i);
+                rig[i] = (float) RIG.get(from, 0L, (long) i);
+            }
+            asked = (float) ASKED.get(from, 0L);
+            given = (float) GIVEN.get(from, 0L);
+        }
     }
 
     private final Path library;
@@ -267,7 +285,8 @@ public final class CameraUnlock {
     private final Linker linker = Linker.nativeLinker();
 
     private final MethodHandle lastError, logOpen, logWrite, logTake, settingsDefaults, sessionConfigure, sessionStart,
-            sessionStop, cycleTrackingMode, cycleAimMode, setAimMode, aimModeLabel, sessionFrame, sessionLean, configDescribe,
+            sessionStop, cycleTrackingMode, cycleAimMode, setAimMode, aimModeLabel, sessionFrame, sessionLean, viewStart,
+            viewStop, viewFrame, viewLean, configDescribe,
             configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalHotkey, configRender,
             configLoad, configReload, configGetInt, configGetFloat, configSaveInt, configSaveFloat, configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
@@ -333,6 +352,10 @@ public final class CameraUnlock {
         aimModeLabel = bind("cameraunlock_aim_mode_label", FunctionDescriptor.of(POINTER, INT));
         sessionFrame = bind("cameraunlock_session_frame", FunctionDescriptor.of(INT, POINTER, POINTER));
         sessionLean = bind("cameraunlock_session_lean", FunctionDescriptor.of(INT, POINTER, POINTER));
+        viewStart = bind("cameraunlock_view_start", FunctionDescriptor.of(INT, INT, INT));
+        viewStop = bind("cameraunlock_view_stop", FunctionDescriptor.of(INT, INT));
+        viewFrame = bind("cameraunlock_view_frame", FunctionDescriptor.of(INT, INT, POINTER, POINTER));
+        viewLean = bind("cameraunlock_view_lean", FunctionDescriptor.of(INT, INT, POINTER, POINTER));
         configDescribe = bind("cameraunlock_config_describe", FunctionDescriptor.of(INT, POINTER));
         configConcept = bind("cameraunlock_config_concept", FunctionDescriptor.of(INT, POINTER, INT, POINTER, POINTER));
         configLocalBool = bind("cameraunlock_config_local_bool", FunctionDescriptor.of(INT, POINTER, POINTER, POINTER, INT, INT));
@@ -476,9 +499,7 @@ public final class CameraUnlock {
      * read when they also carry STATE_LEAN_QUERY.
      */
     public void lean(Obstruction found, Lean out) {
-        Obstruction.QUERIED.set(obstruction, 0L, found.queried ? 1 : 0);
-        Obstruction.BLOCKED.set(obstruction, 0L, found.blocked ? 1 : 0);
-        Obstruction.DISTANCE.set(obstruction, 0L, found.distance);
+        found.write(obstruction);
         int status;
         try {
             status = (int) sessionLean.invokeExact(obstruction, leanOut);
@@ -488,13 +509,52 @@ public final class CameraUnlock {
             throw new IllegalStateException(failure);
         }
         check(status);
-        out.flags = (int) Lean.FLAGS.get(leanOut, 0L);
-        for (int i = 0; i < 3; i++) {
-            out.camera[i] = (float) Lean.CAMERA.get(leanOut, 0L, (long) i);
-            out.rig[i] = (float) Lean.RIG.get(leanOut, 0L, (long) i);
+        out.read(leanOut);
+    }
+
+    // ---- Views -------------------------------------------------------------------------------
+
+    /**
+     * Starts one view, 0 to VIEWS - 1, listening on a port of its own: a camera with its own
+     * tracker, for a game that draws more than one first person view in a frame. The settings and
+     * the two modes are every view's. A port another started view listens on is refused.
+     */
+    public void viewStart(int view, int udpPort) {
+        check(status(viewStart, view, udpPort));
+    }
+
+    public void viewStop(int view) {
+        check(status(viewStop, view));
+    }
+
+    /** frame for one view, on the thread that draws. It allocates nothing. */
+    public void viewFrame(int view, FrameInput input, Frame out) {
+        input.write(frameInput);
+        int status;
+        try {
+            status = (int) viewFrame.invokeExact(view, frameInput, frameOut);
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Throwable failure) {
+            throw new IllegalStateException(failure);
         }
-        out.asked = (float) Lean.ASKED.get(leanOut, 0L);
-        out.given = (float) Lean.GIVEN.get(leanOut, 0L);
+        check(status);
+        out.read(frameOut);
+    }
+
+    /** lean for one view: once after each of its frames whose flags carry STATE_LEAN, on the same thread. */
+    public void viewLean(int view, Obstruction found, Lean out) {
+        found.write(obstruction);
+        int status;
+        try {
+            status = (int) viewLean.invokeExact(view, obstruction, leanOut);
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Throwable failure) {
+            throw new IllegalStateException(failure);
+        }
+        check(status);
+        out.read(leanOut);
     }
 
     // ---- Config ------------------------------------------------------------------------------

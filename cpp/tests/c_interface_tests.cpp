@@ -38,6 +38,7 @@ bool Near(float a, float b, float eps = 1e-3f) {
 
 constexpr int kPort = 14311;
 constexpr int kHeldPort = 14312;
+constexpr int kViewPort = 14313;
 constexpr float kFrame = 1.0f / 60.0f;
 
 std::string LastError() {
@@ -549,6 +550,158 @@ void TestSmoothingByConnection() {
     cameraunlock_session_stop();
 }
 
+CameraUnlockFrame ViewFrame(std::int32_t view, const CameraUnlockFrameInput& input) {
+    CameraUnlockFrame frame = {};
+    frame.struct_size = sizeof(frame);
+    if (cameraunlock_view_frame(view, &input, &frame) != CAMERAUNLOCK_OK) {
+        Check(false, "cameraunlock_view_frame: " + LastError());
+    }
+    return frame;
+}
+
+void TestViews() {
+    std::cout << "\n[c interface: more than one view]\n";
+    CameraUnlockSettings settings = Defaults();
+    settings.collision_enabled = 1;
+    settings.collision_margin = 0.10f;
+    cameraunlock_session_configure(&settings);
+    TakeLog();
+
+    Check(cameraunlock_view_start(0, kPort) == CAMERAUNLOCK_OK, "view 0 starts: " + LastError());
+    Check(cameraunlock_session_start(kPort) == CAMERAUNLOCK_ERROR && LastError().find("already started") != std::string::npos,
+          "and is the session, which is then started");
+    const std::string port = std::to_string(kPort);
+    Check(cameraunlock_view_start(1, kPort) == CAMERAUNLOCK_ERROR && LastError().find("view 1") != std::string::npos &&
+              LastError().find("view 0") != std::string::npos && LastError().find("UDP port " + port) != std::string::npos,
+          "a port another view listens on is refused, and the reason names both views and the port: " + LastError());
+    TakeLog();
+    Check(cameraunlock_view_start(1, kViewPort) == CAMERAUNLOCK_OK, "view 1 starts on a port of its own: " + LastError());
+    Check(TakeLog() == "Listening for OpenTrack datagrams on UDP port " + std::to_string(kViewPort) + " (view 1)\n",
+          "and its line in the log says which view it is");
+    Check(cameraunlock_view_start(1, kViewPort + 1) == CAMERAUNLOCK_ERROR &&
+              LastError().find("view 1 is already started") != std::string::npos,
+          "starting a started view is refused: " + LastError());
+
+    CameraUnlockFrame unused = {};
+    unused.struct_size = sizeof(unused);
+    CameraUnlockLean lean = {};
+    lean.struct_size = sizeof(lean);
+    const CameraUnlockFrameInput any = Input(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check(cameraunlock_view_start(CAMERAUNLOCK_VIEWS, kViewPort + 1) == CAMERAUNLOCK_ERROR &&
+              LastError().find("there is no view " + std::to_string(CAMERAUNLOCK_VIEWS)) != std::string::npos,
+          "a view past the last is refused by its number: " + LastError());
+    Check(cameraunlock_view_start(-1, kViewPort + 1) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_view_stop(CAMERAUNLOCK_VIEWS) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_view_frame(CAMERAUNLOCK_VIEWS, &any, &unused) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_view_lean(-1, nullptr, &lean) == CAMERAUNLOCK_ERROR &&
+              LastError().find("there is no view -1") != std::string::npos,
+          "and one below 0, by every function that takes a view");
+
+    const Sender& first = Tracker();
+    const Sender second("127.0.0.1", kViewPort);
+    first.Pose(10.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    second.Pose(-25.0, 0.0, 0.0, -10.0, 0.0, 0.0);
+    CameraUnlockFrame one = {};
+    CameraUnlockFrame two = {};
+    const auto both = [&](std::uint32_t flags) {
+        for (int i = 0; i < 60; ++i) {
+            const CameraUnlockFrameInput input = Input(flags);
+            one = ViewFrame(0, input);
+            two = ViewFrame(1, input);
+        }
+    };
+    Check(WaitFor([&] {
+              both(CAMERAUNLOCK_FRAME_ACTIVE);
+              return Near(one.head_yaw, 10.0f) && Near(two.head_yaw, -25.0f);
+          }),
+          "two views drawn in one frame each have the pose of their own tracker");
+    Check(Near(one.head_x, 0.20f) && Near(two.head_x, -0.10f), "position included");
+    const CameraUnlockFrame third = ViewFrame(2, Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check((third.flags & (CAMERAUNLOCK_STATE_LISTENING | CAMERAUNLOCK_STATE_POSE)) == 0 &&
+              (one.flags & two.flags & CAMERAUNLOCK_STATE_LISTENING) != 0,
+          "a view that was never started has no port and no pose, as a session that was never started has none");
+
+    Check(cameraunlock_session_cycle_tracking_mode() == CAMERAUNLOCK_TRACKING_ROTATION_ONLY, "the tracking mode is cycled once");
+    both(CAMERAUNLOCK_FRAME_ACTIVE | CAMERAUNLOCK_FRAME_LEAN);
+    Check(one.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_ONLY && two.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_ONLY &&
+              ((one.flags | two.flags) & CAMERAUNLOCK_STATE_LEAN) == 0 && one.head_x == 0.0f && two.head_x == 0.0f,
+          "and both views are in the new one");
+    cameraunlock_session_cycle_tracking_mode();
+    cameraunlock_session_cycle_tracking_mode();
+    Check(cameraunlock_session_set_aim_mode(CAMERAUNLOCK_AIM_TRUE_FREE_LOOK) == CAMERAUNLOCK_OK, "the aim mode is set once");
+    both(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check(one.aim_mode == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK && two.aim_mode == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK &&
+              ViewFrame(2, Input(CAMERAUNLOCK_FRAME_ACTIVE)).aim_mode == CAMERAUNLOCK_AIM_TRUE_FREE_LOOK &&
+              one.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_AND_POSITION &&
+              two.tracking_mode == CAMERAUNLOCK_TRACKING_ROTATION_AND_POSITION,
+          "and is every view's, one not started included");
+    cameraunlock_session_set_aim_mode(CAMERAUNLOCK_AIM_SIGHTS_LOCKED);
+    settings.light_multiplier = 2.0f;
+    cameraunlock_session_configure(&settings);
+    both(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check(Near(one.light_yaw, 20.0f) && Near(two.light_yaw, -50.0f), "the settings are every view's");
+
+    // The frame and its lean are a pair in each view, and a wall beside one view is not beside the other.
+    const std::uint32_t leaning = CAMERAUNLOCK_FRAME_ACTIVE | CAMERAUNLOCK_FRAME_LEAN;
+    one = ViewFrame(0, Input(leaning));
+    two = ViewFrame(1, Input(leaning));
+    Check((one.flags & two.flags & CAMERAUNLOCK_STATE_LEAN_QUERY) != 0 && Near(one.query_direction[0], 1.0f) &&
+              Near(two.query_direction[0], -1.0f) && Near(one.query_reach, 0.30f) && Near(two.query_reach, 0.20f),
+          "each view asks for a lean of its own, along its own head");
+    CameraUnlockObstruction clear = {};
+    clear.struct_size = sizeof(clear);
+    clear.queried = 1;
+    CameraUnlockObstruction wall = clear;
+    wall.blocked = 1;
+    wall.distance = 0.15f;
+    CameraUnlockLean held = {};
+    held.struct_size = sizeof(held);
+    Check(cameraunlock_view_lean(1, &wall, &held) == CAMERAUNLOCK_OK && cameraunlock_view_lean(0, &clear, &lean) == CAMERAUNLOCK_OK,
+          "and each is answered: " + LastError());
+    Check((held.flags & CAMERAUNLOCK_LEAN_CONTACT) != 0 && Near(held.given, 0.05f) && Near(held.camera[0], -0.05f) &&
+              lean.flags == 0 && Near(lean.given, 0.20f),
+          "a wall beside one player holds that view and leaves the other its whole lean");
+
+    ViewFrame(0, Input(leaning));
+    ViewFrame(1, Input(leaning));
+    cameraunlock_view_lean(0, &clear, &lean);
+    const CameraUnlockFrameInput next = Input(leaning);
+    Check(cameraunlock_view_frame(0, &next, &unused) == CAMERAUNLOCK_OK, "a view whose lean was finished goes on to its next frame");
+    Check(cameraunlock_view_frame(1, &next, &unused) == CAMERAUNLOCK_ERROR &&
+              LastError().find("view 1") != std::string::npos && LastError().find("cameraunlock_view_lean") != std::string::npos,
+          "and the one whose lean was not is said so by name: " + LastError());
+    Check(cameraunlock_view_lean(1, &clear, &held) == CAMERAUNLOCK_ERROR &&
+              LastError().find("no lean is waiting for view 1") != std::string::npos,
+          "with no lean waiting in it after that: " + LastError());
+    Check(cameraunlock_session_lean(&clear, &lean) == CAMERAUNLOCK_OK, "while the lean of view 0 still waits, for the session's call");
+
+    const SOCKET holder = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    sockaddr_in address = {};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(kHeldPort);
+    address.sin_addr.s_addr = INADDR_ANY;
+    bind(holder, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+    TakeLog();
+    Check(cameraunlock_view_start(2, kHeldPort) == CAMERAUNLOCK_OK, "a view starts on a port another program holds");
+    const std::string failed = TakeLog();
+    Check(failed.find("Failed to bind UDP port " + std::to_string(kHeldPort)) != std::string::npos &&
+              failed.find(" (view 2)\n") != std::string::npos,
+          "and the receiver's own line says which view could not bind: " + failed);
+    Check(cameraunlock_view_stop(2) == CAMERAUNLOCK_OK, "it stops while it waits for the port");
+    closesocket(holder);
+
+    Check(cameraunlock_view_stop(1) == CAMERAUNLOCK_OK, "one view stops");
+    both(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check((two.flags & (CAMERAUNLOCK_STATE_LISTENING | CAMERAUNLOCK_STATE_POSE)) == 0 &&
+              (one.flags & CAMERAUNLOCK_STATE_POSE) != 0 && Near(one.head_yaw, 10.0f),
+          "and the other keeps its tracker");
+    Check(cameraunlock_session_stop() == CAMERAUNLOCK_OK && cameraunlock_view_start(1, kPort) == CAMERAUNLOCK_OK &&
+              cameraunlock_view_stop(1) == CAMERAUNLOCK_OK,
+          "a port a stopped view listened on is another view's to take: " + LastError());
+    settings.light_multiplier = Defaults().light_multiplier;
+    cameraunlock_session_configure(&settings);
+}
+
 void TestConfig(const fs::path& scratch) {
     std::cout << "\n[c interface: the config]\n";
     const std::string file = (scratch / "CameraUnlock.ini").u8string();
@@ -742,6 +895,7 @@ int main() {
     TestLean();
     TestAbsurdPose();
     TestSmoothingByConnection();
+    TestViews();
     TestConfig(scratch);
     TestWindow();
     TestLog(scratch);

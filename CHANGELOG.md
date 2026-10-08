@@ -9,6 +9,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the C interface runs more than one view, each with a tracker on a port of its own (ABI 3)
+
+`CameraUnlockCore.dll` had one session: one receiver and one pipeline. A game with two local
+players in split screen draws two first person views in a frame, each player with a head tracker
+of their own, and had nowhere to put the second.
+
+- `CAMERAUNLOCK_VIEWS` (4) views. `cameraunlock_view_start(view, port)`, `cameraunlock_view_stop`,
+  `cameraunlock_view_frame` and `cameraunlock_view_lean` are the four `cameraunlock_session_*`
+  functions for the view named, and those four are view 0. Each view has its own receiver, port,
+  interpolation, smoothing state, lean clamp, aim transitions, frame clock and waiting lean.
+- The settings and the two modes are every view's: `cameraunlock_session_configure`, the two
+  cycles and `cameraunlock_session_set_aim_mode` reach all of them, one started later included.
+- Starting a view on a port another started view listens on is an error that names both views
+  and the port. A view number outside 0 to 3 is an error that names it.
+- A log line about a view past 0 ends in ` (view <n>)`, the receiver's bind lines included. View
+  0's lines are unchanged.
+- `CameraUnlockCoreTesting.dll` gains `cameraunlock_testing_deliver_view`, and
+  `cameraunlock_testing_reset` resets every view.
+- The Java binding gains `VIEWS`, `viewStart`, `viewStop`, `viewFrame` and `viewLean`.
+
+`CAMERAUNLOCK_ABI` is 3, and `CameraUnlock.ABI` with it: a mod on the Java binding ships the DLL
+and the binding from one core commit, as it already must. No existing function changed its
+signature or its meaning for a host with one view. `docs/c-interface.md`: Views.
+
 ### Fixed - a background test's stop waits for the game to go, and a host DLL that will not delete no longer fails the stop or the next start
 
 `Stop-IsolatedGame` ended the game and waited with `Wait-Process`, which returns when the exit

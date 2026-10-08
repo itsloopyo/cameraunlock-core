@@ -51,11 +51,12 @@ beside its own code and loads it by full path.
 | Calls | Thread |
 |---|---|
 | `cameraunlock_session_frame`, then `cameraunlock_session_lean` | One thread, the one that draws. The pair is one frame's work. |
-| `cameraunlock_session_configure`, `_start`, `_stop` | Any. They wait for a frame in progress. |
+| `cameraunlock_view_frame`, then `cameraunlock_view_lean`, for each view | The same thread, one view after another. The pair is one view's work for the frame. |
+| `cameraunlock_session_configure`, `_start`, `_stop`, `cameraunlock_view_start`, `_stop` | Any. They wait for a frame in progress. |
 | `cameraunlock_session_cycle_tracking_mode`, `_cycle_aim_mode`, `_set_aim_mode`, `cameraunlock_hotkeys_take`, `_drop`, `cameraunlock_log_*`, `cameraunlock_last_error`, `cameraunlock_abi`, `cameraunlock_struct_size`, `cameraunlock_aim_mode_label` | Any, at any time. |
 | `cameraunlock_config_*` | Any, one at a time between them. `_load`, `_reload`, `_save_*` and `_render` read or write a file: never from the thread that draws. |
 
-A mode cycled on another thread is seen by the next frame.
+A mode cycled on another thread is seen by the next frame, of every view.
 
 ## The frame
 
@@ -151,6 +152,43 @@ What a host tells its users about the tracker:
 - A datagram is refused whole when a value is not a number, an angle is past 360 degrees or a
   position past 100 m.
 
+## Views
+
+A game that draws more than one first person view in a frame, as split screen does, gives each
+its own view: `CAMERAUNLOCK_VIEWS` of them, numbered from 0. A view is one camera and one tracker.
+It has a receiver on a port of its own, and its own interpolation, smoothing state, lean clamp,
+aim transitions, frame clock and waiting lean, so one player's head, wall and sights are never
+another's.
+
+| Function | Is, for the view named |
+|---|---|
+| `cameraunlock_view_start(view, port)` | `cameraunlock_session_start` |
+| `cameraunlock_view_stop(view)` | `cameraunlock_session_stop` |
+| `cameraunlock_view_frame(view, input, out)` | `cameraunlock_session_frame` |
+| `cameraunlock_view_lean(view, obstruction, out)` | `cameraunlock_session_lean` |
+
+- View 0 is the session. Each `cameraunlock_session_*` function of the four is its
+  `cameraunlock_view_*` one with 0, so a host with one view calls what it always did, and one that
+  adds a second player starts view 1 beside it.
+- The settings and the two modes are not a view's. `cameraunlock_session_configure`,
+  `_cycle_tracking_mode`, `_cycle_aim_mode` and `_set_aim_mode` reach every view, one started
+  later included, and every view's frame answers the same `tracking_mode` and `aim_mode`.
+  `cameraunlock_config_save_tracking_mode` and `_save_aim_mode` save that one pair.
+- A view outside 0 to `CAMERAUNLOCK_VIEWS` - 1 is an error, and the reason names the number.
+- Two started views cannot listen on one port: two receivers there would split one tracker's
+  datagrams between two players. The second start is an error that names both views and the port.
+  A stopped view's port is free again.
+- A view that was never started draws as a session that was never started does: its frame
+  succeeds, with no `_LISTENING` and no `_POSE`.
+- A frame and its lean are a pair in each view. A view whose frame asked for a lean and never got
+  the call has the error at its own next frame, and the other views go on.
+- A line in the log about a view past 0 ends in ` (view <n>)`, the receiver's own lines included:
+  `Listening for OpenTrack datagrams on UDP port 4243 (view 1)`. View 0's lines are the
+  session's, unmarked.
+
+Which tracker belongs to which player is the host's to say: it starts each view on a port, and
+tells its users which port is whose.
+
 ## The config
 
 A host describes its `CameraUnlock.ini` at run time, then loads it:
@@ -209,9 +247,10 @@ either a move or a refusal goes to the log.
 ## Testing without a socket
 
 `CameraUnlockCoreTesting.dll` (CMake target `cameraunlock_c_testing`, never shipped) is the same
-library with two more functions, declared in `cameraunlock/c/testing/cameraunlock_testing.h`:
+library with three more functions, declared in `cameraunlock/c/testing/cameraunlock_testing.h`:
 `cameraunlock_testing_deliver` hands a session that is not started one datagram as if it had just
-arrived, and `cameraunlock_testing_reset` gives a fresh session. They are for core's vectors
+arrived, `cameraunlock_testing_deliver_view` does the same for one view, and
+`cameraunlock_testing_reset` gives a fresh session, in every view. They are for core's vectors
 harness and a binding's own. A mod has no use for them: a tracker's poses reach it as datagrams.
 
 ## Layouts
@@ -248,7 +287,7 @@ struct. A mod compiles it into its own jar from the submodule's source.
   read and written through its name. `pixi run test-java` holds those layouts to the table above.
 - A call that answers `CAMERAUNLOCK_ERROR` throws an `IllegalStateException` whose message is
   `cameraunlock_last_error`.
-- `frame`, `lean`, `hotkeysTake` and `hotkeysDrop` allocate nothing.
+- `frame`, `lean`, `viewFrame`, `viewLean`, `hotkeysTake` and `hotkeysDrop` allocate nothing.
 - It needs no upcall, as the interface has no callback.
 - The JVM is started with `--enable-native-access=ALL-UNNAMED`. Without it Java 25 prints a warning
   at the first call and says a later release will refuse such calls.
@@ -262,7 +301,8 @@ struct. A mod compiles it into its own jar from the submodule's source.
 2. Describe the config, load it, hand `settings` to `cameraunlock_session_configure`, start the
    session on `udp_port`, start the hotkeys.
 3. Each frame: one `cameraunlock_session_frame`, the engine boundary conversion of the pose, and
-   where it leans, its world query and `cameraunlock_session_lean`.
+   where it leans, its world query and `cameraunlock_session_lean`. With more than one first
+   person view, the same per view through `cameraunlock_view_frame` and `_lean`.
 4. On a thread of its own: `cameraunlock_config_reload` about once a second, and the saves.
 5. A build step that runs the same description and `cameraunlock_config_render`.
 

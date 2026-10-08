@@ -11,14 +11,17 @@
 extern "C" {
 #endif
 
-/* A session as a new process has it: nothing received, nothing configured. The session must
- * not be started. */
+/* A session as a new process has it, in every view: nothing received, nothing configured. No view
+ * may be started. */
 CAMERAUNLOCK_C int32_t cameraunlock_testing_reset(void);
 
 /* Hands the session one datagram as if it had just arrived, from loopback or, with `remote`,
  * from another machine, through everything a datagram off the socket goes through. On the
  * caller's thread, to a session that is not started, so a run needs no socket and no waiting. */
 CAMERAUNLOCK_C int32_t cameraunlock_testing_deliver(const void* datagram, int32_t length, int32_t remote);
+/* The same for one view. cameraunlock_testing_deliver is view 0. */
+CAMERAUNLOCK_C int32_t cameraunlock_testing_deliver_view(int32_t view, const void* datagram, int32_t length,
+                                                         int32_t remote);
 
 #ifdef __cplusplus
 }

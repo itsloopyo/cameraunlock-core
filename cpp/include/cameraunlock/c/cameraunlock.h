@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 2
+#define CAMERAUNLOCK_ABI 3
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -234,6 +234,25 @@ typedef struct CameraUnlockLean {
 /* Once after each frame whose flags carry CAMERAUNLOCK_STATE_LEAN. `obstruction` is read when
  * they also carry CAMERAUNLOCK_STATE_LEAN_QUERY, and may be NULL otherwise. */
 CAMERAUNLOCK_C int32_t cameraunlock_session_lean(const CameraUnlockObstruction* obstruction, CameraUnlockLean* out);
+
+/* ---- Views ---------------------------------------------------------------------------------- */
+
+/* The views a host may run at once. View 0 is the session of every cameraunlock_session_* function. */
+#define CAMERAUNLOCK_VIEWS 4
+
+/* A view is one camera with a tracker of its own: a receiver on a port of its own, and its own
+ * pipeline, lean clamp, aim transitions and frame clock. For a game that draws more than one
+ * first person view in a frame, as split screen does. The settings and the two modes are not a
+ * view's: cameraunlock_session_configure, the cycles and cameraunlock_session_set_aim_mode reach
+ * every view, one started later included.
+ *
+ * Each is its cameraunlock_session_* function for the view named. An error for a view outside 0
+ * to CAMERAUNLOCK_VIEWS - 1, and from cameraunlock_view_start for a port another started view
+ * listens on: two receivers on one port would split one tracker's datagrams between them. */
+CAMERAUNLOCK_C int32_t cameraunlock_view_start(int32_t view, int32_t udp_port);
+CAMERAUNLOCK_C int32_t cameraunlock_view_stop(int32_t view);
+CAMERAUNLOCK_C int32_t cameraunlock_view_frame(int32_t view, const CameraUnlockFrameInput* input, CameraUnlockFrame* out);
+CAMERAUNLOCK_C int32_t cameraunlock_view_lean(int32_t view, const CameraUnlockObstruction* obstruction, CameraUnlockLean* out);
 
 /* ---- Config --------------------------------------------------------------------------------- */
 

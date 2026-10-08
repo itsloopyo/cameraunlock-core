@@ -37,6 +37,7 @@ public final class Tests {
         refusalCarriesTheLibrarysReason(testing.core);
         poseArrivesAndTheLeanIsHeldOffAWall(testing);
         modesAreSetCycledAndNamed(testing.core);
+        viewsEachHaveATrackerAndShareTheModes(testing);
         configIsDescribedRenderedLoadedSavedAndReadAgain(testing.core, scratch);
         hotkeysAndTheWindow(testing.core);
         logGoesToItsFile(testing.core, scratch);
@@ -221,6 +222,58 @@ public final class Tests {
         check(core.aimModeLabel(CameraUnlock.AIM_STOCK_SIGHTS).equals("Aim mode: stock sights"), "an aim mode's label is core's");
         check(refusal(() -> core.aimModeLabel(9)).contains("aim_mode"), "and a mode that is none has no label");
         core.setAimMode(CameraUnlock.AIM_SIGHTS_LOCKED);
+    }
+
+    private static void viewsEachHaveATrackerAndShareTheModes(Testing testing) {
+        CameraUnlock core = testing.core;
+        testing.reset();
+        CameraUnlock.Settings settings = core.settingsDefaults();
+        settings.collisionEnabled = false;
+        core.configure(settings);
+
+        testing.deliver(0, datagram(20, 0, 0, 30, 0, 0), false);
+        testing.deliver(1, datagram(-10, 0, 0, -15, 0, 0), false);
+        CameraUnlock.FrameInput input = leaning();
+        CameraUnlock.Frame one = new CameraUnlock.Frame();
+        CameraUnlock.Frame two = new CameraUnlock.Frame();
+        CameraUnlock.Frame three = new CameraUnlock.Frame();
+        core.viewFrame(0, input, one);
+        core.viewFrame(1, input, two);
+        core.viewFrame(2, input, three);
+        check(near(one.headYaw, 30f) && near(one.headX, 0.20f) && near(two.headYaw, -15f) && near(two.headX, -0.10f),
+                "two views in one frame each have the pose of their own tracker");
+        check((three.flags & CameraUnlock.STATE_POSE) == 0, "and a view no datagram reached has none");
+
+        CameraUnlock.Obstruction found = new CameraUnlock.Obstruction();
+        CameraUnlock.Lean first = new CameraUnlock.Lean();
+        CameraUnlock.Lean second = new CameraUnlock.Lean();
+        core.viewLean(1, found, second);
+        core.lean(found, first);
+        check(near(first.camera[1], -0.20f) && near(second.camera[1], 0.10f) && near(first.given, 0.20f) && near(second.given, 0.10f),
+                "each view has a lean of its own, and the session's is view 0's");
+
+        core.viewFrame(1, input, two);
+        String forgotten = refusal(() -> core.viewFrame(1, input, two));
+        check(forgotten.contains("view 1") && forgotten.contains("cameraunlock_view_lean"),
+                "a view whose lean was never finished is said so by name at its next frame: " + forgotten);
+
+        check(core.cycleTrackingMode() == CameraUnlock.TRACKING_ROTATION_ONLY, "the tracking mode is cycled once");
+        core.setAimMode(CameraUnlock.AIM_TRUE_FREE_LOOK);
+        core.viewFrame(0, input, one);
+        core.viewFrame(1, input, two);
+        check(one.trackingMode == CameraUnlock.TRACKING_ROTATION_ONLY && two.trackingMode == CameraUnlock.TRACKING_ROTATION_ONLY
+                        && one.aimMode == CameraUnlock.AIM_TRUE_FREE_LOOK && two.aimMode == CameraUnlock.AIM_TRUE_FREE_LOOK,
+                "and both views run in it, and in the aim mode set once");
+        core.cycleTrackingMode();
+        core.cycleTrackingMode();
+        core.setAimMode(CameraUnlock.AIM_SIGHTS_LOCKED);
+
+        String none = refusal(() -> core.viewStart(CameraUnlock.VIEWS, 4243));
+        check(none.contains("cameraunlock_view_start") && none.contains("there is no view " + CameraUnlock.VIEWS),
+                "a view past the last is refused by its number: " + none);
+        check(refusal(() -> core.viewStart(1, -1)).contains("udp_port is outside 1 to 65535"), "and a port that is none");
+        core.viewStop(1);
+        check(refusal(() -> core.viewStop(-1)).contains("there is no view -1"), "stopping a stopped view is not an error, and a view that is none is");
     }
 
     private static void configIsDescribedRenderedLoadedSavedAndReadAgain(CameraUnlock core, Path scratch) throws IOException {
