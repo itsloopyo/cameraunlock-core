@@ -38,6 +38,37 @@ struct ApplyReport {
     std::vector<CanonicalDiagnostic> diagnostics;
 };
 
+/// What a ConfigOption holds, and so which control shows it.
+enum class OptionKind { kBool, kInt, kFloat, kEnum };
+
+/// What a ConfigOption is in the file: one row, or the rows of the tracking mode or the aim mode.
+enum class OptionSource { kRow, kTrackingMode, kAimMode };
+
+/// One setting a game's own options screen can show, from ConfigTable::Options. Its value is one
+/// number whatever it holds: a bool as 0 or 1, a whole number, a float, and a word from a list as
+/// its place in `choices`, counted from 0.
+struct ConfigOption {
+    /// The row's key. "TrackingMode" and "AimMode" for the two modes, each of which is several
+    /// rows of the file and one setting to the player.
+    std::string id;
+    /// The row's section, and for a mode the section of its first row.
+    std::string section;
+    /// The id as words, "Field of view" for FieldOfView: what the control is called.
+    std::string label;
+    /// The lines the file has above the row, for a tooltip.
+    std::vector<std::string> comment;
+    OptionSource source = OptionSource::kRow;
+    OptionKind kind = OptionKind::kBool;
+    /// The lowest and highest value, both allowed.
+    double min = 0.0;
+    double max = 0.0;
+    /// How far one notch of a slider moves the value: 1 for a whole number, and for a float the
+    /// power of ten nearest a fiftieth of its range, or 0 where an end of its range is its type's limit.
+    double step = 0.0;
+    /// For kEnum, each word as the screen shows it, "Rotation only" for RotationOnly.
+    std::vector<std::string> choices;
+};
+
 namespace detail {
 
 template <class Int>
@@ -134,6 +165,40 @@ protected:
 // "[Section] Key", for messages.
 std::string RowName(const TableRow& row);
 
+// What a row's codec holds as an option's number, where it holds one of the four kinds.
+struct OptionShape {
+    OptionKind kind = OptionKind::kBool;
+    double min = 0.0;
+    double max = 0.0;
+    // False for a float row with an end at its type's own limit, which is no range to cut into notches.
+    bool ranged = true;
+    // An enum's words as the file holds them.
+    std::vector<std::string> tokens;
+};
+
+// Where an option's value is: one row, or the rows of a mode in the order its encoder names them.
+struct OptionSlot {
+    using Kind = OptionSource;
+    Kind kind = Kind::kRow;
+    std::size_t rows[3] = {0, 0, 0};
+};
+
+// The options of a table, in the order of its rows: each Writable row with a shape that is not an
+// Engine row, and each mode whose rows are all there and all Writable, where its first row is.
+// A mode's rows are never options of their own.
+std::vector<OptionSlot> PlanOptions(const std::vector<TableRow>& rows, const std::vector<bool>& shaped);
+// How many rows a mode is.
+std::size_t ModeRowCount(OptionSlot::Kind mode);
+ConfigOption DescribeOption(const TableRow& row, const OptionShape& shape);
+ConfigOption DescribeMode(OptionSlot::Kind mode, const TableRow& first);
+// A mode's number from its rows' values, and the values its rows take for a number. `on` holds
+// ModeRowCount values. ModeRows throws std::invalid_argument for a number that is no mode, and
+// ModeNumber std::logic_error for rows that name none.
+double ModeNumber(OptionSlot::Kind mode, const bool* on);
+void ModeRows(OptionSlot::Kind mode, double number, bool* on);
+// Throws std::invalid_argument, naming the value and why it is none of the option's.
+[[noreturn]] void RefuseOptionValue(double value, const char* why);
+
 // Splits a comment at '\n' into lines of printable ASCII with no leading or trailing space.
 // An empty text is no lines. Throws std::invalid_argument naming the row.
 std::vector<std::string> CommentLines(const char* text, const std::string& row);
@@ -172,6 +237,11 @@ template <class T>
 struct IsFloatingCodec : std::false_type {};
 template <class F>
 struct IsFloatingCodec<FloatingCodec<F>> : std::true_type {};
+
+template <class T>
+struct IsEnumCodec : std::false_type {};
+template <class E>
+struct IsEnumCodec<EnumCodec<E>> : std::true_type {};
 
 // A value as a message shows it when its codec cannot write it: numbers in their shortest
 // round-trip form, an enum as its number, a list or color as its items joined by ", ".
@@ -217,6 +287,13 @@ public:
     virtual void Assign(Config& to, const Config& from) const = 0;
     virtual bool IsFalse(const Config& config) const = 0;
     virtual std::shared_ptr<const RowOps> WithRange(double lo, double hi) const = 0;
+    // The row as an option, or nullopt for a row no single control shows: a key list, text, a
+    // colour, a list, a hex number.
+    virtual std::optional<OptionShape> Shape() const = 0;
+    // For a row with a shape. SetNumber throws std::invalid_argument for a number the row does
+    // not hold.
+    virtual double Number(const Config& config) const = 0;
+    virtual void SetNumber(Config& config, double number) const = 0;
 };
 
 template <class Config, class Codec, class Get, class Set>
@@ -271,6 +348,75 @@ public:
             return std::make_shared<CodecRow>(Codec(static_cast<Value>(lo), static_cast<Value>(hi)), get_, set_);
         } else {
             throw std::invalid_argument("Range applies to an int, float or double row");
+        }
+    }
+
+    std::optional<OptionShape> Shape() const override {
+        OptionShape shape;
+        if constexpr (std::is_same_v<Codec, BoolCodec>) {
+            shape.kind = OptionKind::kBool;
+            shape.max = 1.0;
+        } else if constexpr (IsIntCodec<Codec>::value) {
+            shape.kind = OptionKind::kInt;
+            shape.min = static_cast<double>(codec_.min());
+            shape.max = static_cast<double>(codec_.max());
+        } else if constexpr (IsFloatingCodec<Codec>::value) {
+            shape.kind = OptionKind::kFloat;
+            shape.min = static_cast<double>(codec_.min());
+            shape.max = static_cast<double>(codec_.max());
+            shape.ranged = codec_.min() != std::numeric_limits<Value>::lowest() &&
+                           codec_.max() != std::numeric_limits<Value>::max();
+        } else if constexpr (IsEnumCodec<Codec>::value) {
+            shape.kind = OptionKind::kEnum;
+            for (const auto& entry : codec_.tokens()) shape.tokens.push_back(entry.token);
+            shape.max = static_cast<double>(shape.tokens.size() - 1);
+        } else {
+            return std::nullopt;
+        }
+        return shape;
+    }
+
+    double Number(const Config& config) const override {
+        if constexpr (std::is_same_v<Codec, BoolCodec>) {
+            return get_(config) ? 1.0 : 0.0;
+        } else if constexpr (IsIntCodec<Codec>::value || IsFloatingCodec<Codec>::value) {
+            return static_cast<double>(get_(config));
+        } else if constexpr (IsEnumCodec<Codec>::value) {
+            const Value held = get_(config);
+            const auto& tokens = codec_.tokens();
+            for (std::size_t i = 0; i < tokens.size(); ++i) {
+                if (tokens[i].value == held) return static_cast<double>(i);
+            }
+            throw std::logic_error("the row holds a value its codec has no word for");
+        } else {
+            throw std::logic_error("Number on a row with no option shape");
+        }
+    }
+
+    void SetNumber(Config& config, double number) const override {
+        if constexpr (std::is_same_v<Codec, BoolCodec>) {
+            if (number != 0.0 && number != 1.0) RefuseOptionValue(number, "a bool is 0 or 1");
+            set_(config, number != 0.0);
+        } else if constexpr (IsIntCodec<Codec>::value) {
+            if (!(number >= static_cast<double>(codec_.min()) && number <= static_cast<double>(codec_.max())) ||
+                number != static_cast<double>(static_cast<long long>(number))) {
+                RefuseOptionValue(number, "it is not a whole number in the row's range");
+            }
+            set_(config, static_cast<Value>(static_cast<long long>(number)));
+        } else if constexpr (IsFloatingCodec<Codec>::value) {
+            if (!(number >= static_cast<double>(codec_.min()) && number <= static_cast<double>(codec_.max()))) {
+                RefuseOptionValue(number, "it is outside the row's range");
+            }
+            set_(config, static_cast<Value>(number));
+        } else if constexpr (IsEnumCodec<Codec>::value) {
+            const auto& tokens = codec_.tokens();
+            if (!(number >= 0.0 && number < static_cast<double>(tokens.size())) ||
+                number != static_cast<double>(static_cast<std::size_t>(number))) {
+                RefuseOptionValue(number, "it is the place of none of the row's words");
+            }
+            set_(config, Value(tokens[static_cast<std::size_t>(number)].value));
+        } else {
+            throw std::logic_error("SetNumber on a row with no option shape");
         }
     }
 
@@ -505,6 +651,48 @@ public:
 
     const Config& defaults() const { return defaults_; }
 
+    /// The settings of this table a game's own options screen can show, in the order of its rows.
+    /// A row is one when it is Writable, is not an Engine row, and holds a bool, a whole number, a
+    /// float or a word from a list. RotationEnabled with PositionEnabled is the one option
+    /// "TrackingMode", and TrueFreeLook, FreeLookMarker and StockSights the one option "AimMode",
+    /// where the table has every row of the mode and all are Writable; a mode's rows are never
+    /// options of their own. A key list is no option: one control does not hold it.
+    std::vector<ConfigOption> Options() const {
+        std::vector<ConfigOption> options;
+        for (const detail::OptionSlot& slot : OptionSlots()) {
+            options.push_back(slot.kind == detail::OptionSlot::Kind::kRow
+                                  ? detail::DescribeOption(rows_[slot.rows[0]], *ops_[slot.rows[0]]->Shape())
+                                  : detail::DescribeMode(slot.kind, rows_[slot.rows[0]]));
+        }
+        return options;
+    }
+
+    /// The value `config` holds for the option at `option`, a place in Options().
+    double OptionValue(const Config& config, std::size_t option) const {
+        const detail::OptionSlot slot = OptionSlotAt(option);
+        if (slot.kind == detail::OptionSlot::Kind::kRow) return ops_[slot.rows[0]]->Number(config);
+        bool on[3] = {false, false, false};
+        for (std::size_t i = 0; i < detail::ModeRowCount(slot.kind); ++i) {
+            on[i] = ops_[slot.rows[i]]->Number(config) != 0.0;
+        }
+        return detail::ModeNumber(slot.kind, on);
+    }
+
+    /// Puts `value` in `config` as the option at `option`: what the change handed to the owner's
+    /// Save calls. Throws std::invalid_argument for a value the option does not hold.
+    void SetOption(Config& config, std::size_t option, double value) const {
+        const detail::OptionSlot slot = OptionSlotAt(option);
+        if (slot.kind == detail::OptionSlot::Kind::kRow) {
+            ops_[slot.rows[0]]->SetNumber(config, value);
+            return;
+        }
+        bool on[3] = {false, false, false};
+        detail::ModeRows(slot.kind, value, on);
+        for (std::size_t i = 0; i < detail::ModeRowCount(slot.kind); ++i) {
+            ops_[slot.rows[i]]->SetNumber(config, on[i] ? 1.0 : 0.0);
+        }
+    }
+
 private:
     friend class ConfigOwner<Config>;
     friend ApplyReport ApplyCanonical<Config>(const CanonicalIni&, const ConfigTable&, Config&);
@@ -597,6 +785,21 @@ private:
     std::size_t Last(const char* modifier) const {
         if (!last_) throw std::invalid_argument(std::string(modifier) + " needs a row: add or Select one first");
         return *last_;
+    }
+
+    std::vector<detail::OptionSlot> OptionSlots() const {
+        std::vector<bool> shaped;
+        for (const auto& ops : ops_) shaped.push_back(ops->Shape().has_value());
+        return detail::PlanOptions(rows_, shaped);
+    }
+
+    detail::OptionSlot OptionSlotAt(std::size_t option) const {
+        const std::vector<detail::OptionSlot> slots = OptionSlots();
+        if (option >= slots.size()) {
+            throw std::invalid_argument("the table has no option " + std::to_string(option) + ": it has " +
+                                        std::to_string(slots.size()));
+        }
+        return slots[option];
     }
 
     Config defaults_;

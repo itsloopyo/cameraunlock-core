@@ -172,9 +172,10 @@ void TestBoundary() {
               cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_FRAME) == sizeof(CameraUnlockFrame) &&
               cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_OBSTRUCTION) == sizeof(CameraUnlockObstruction) &&
               cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_LEAN) == sizeof(CameraUnlockLean) &&
-              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_CONFIG) == sizeof(CameraUnlockConfig),
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_CONFIG) == sizeof(CameraUnlockConfig) &&
+              cameraunlock_struct_size(CAMERAUNLOCK_STRUCT_OPTION) == sizeof(CameraUnlockOption),
           "the library says how large each of its structs is");
-    Check(cameraunlock_struct_size(6) == CAMERAUNLOCK_ERROR, "and refuses a number that names none");
+    Check(cameraunlock_struct_size(7) == CAMERAUNLOCK_ERROR, "and refuses a number that names none");
 
     CameraUnlockSettings settings = {};
     settings.struct_size = 4;
@@ -702,6 +703,76 @@ void TestViews() {
     cameraunlock_session_configure(&settings);
 }
 
+// After the modes and the yaw mode were saved: rotation only, free look with a marker, yaw false, Quality High.
+void TestOptions(const fs::path& scratch, std::int32_t quality) {
+    const auto text = [](std::int32_t option, std::int32_t which) {
+        char held[512] = {};
+        return cameraunlock_config_option_text(option, which, held, sizeof(held)) == CAMERAUNLOCK_ERROR ? std::string("(error)")
+                                                                                                         : std::string(held);
+    };
+    const auto value = [](std::int32_t option) {
+        double held = -1.0;
+        return cameraunlock_config_option_get(option, &held) == CAMERAUNLOCK_ERROR ? -1.0 : held;
+    };
+
+    Check(cameraunlock_config_option_count() == 4 && text(0, CAMERAUNLOCK_OPTION_TEXT_ID) == "WorldSpaceYaw" &&
+              text(1, CAMERAUNLOCK_OPTION_TEXT_ID) == "TrackingMode" && text(2, CAMERAUNLOCK_OPTION_TEXT_ID) == "AimMode" &&
+              text(3, CAMERAUNLOCK_OPTION_TEXT_ID) == "Quality",
+          "the options are the writable rows a control holds, each mode as one: " + LastError());
+    CameraUnlockOption option = {};
+    option.struct_size = sizeof(option);
+    Check(cameraunlock_config_option(3, &option) == CAMERAUNLOCK_OK && option.kind == CAMERAUNLOCK_OPTION_ENUM &&
+              option.source == CAMERAUNLOCK_OPTION_ROW && option.choices == 4 && option.min == 0.0 && option.max == 3.0 &&
+              option.step == 1.0 && text(3, CAMERAUNLOCK_OPTION_TEXT_LABEL) == "Quality" &&
+              text(3, CAMERAUNLOCK_OPTION_TEXT_SECTION) == "General" &&
+              text(3, CAMERAUNLOCK_OPTION_TEXT_COMMENT) == "The graphics mode." &&
+              text(3, CAMERAUNLOCK_OPTION_TEXT_CHOICE + 2) == "Medium",
+          "an enum row is described, with its words: " + LastError());
+    Check(cameraunlock_config_option(1, &option) == CAMERAUNLOCK_OK && option.kind == CAMERAUNLOCK_OPTION_ENUM &&
+              option.source == CAMERAUNLOCK_OPTION_TRACKING_MODE && option.choices == 3 &&
+              text(1, CAMERAUNLOCK_OPTION_TEXT_LABEL) == "Tracking mode" &&
+              text(1, CAMERAUNLOCK_OPTION_TEXT_CHOICE + 1) == "Rotation only" &&
+              cameraunlock_config_option(2, &option) == CAMERAUNLOCK_OK && option.source == CAMERAUNLOCK_OPTION_AIM_MODE &&
+              option.choices == 4 && cameraunlock_config_option(0, &option) == CAMERAUNLOCK_OK &&
+              option.kind == CAMERAUNLOCK_OPTION_BOOL && option.choices == 0 && option.max == 1.0,
+          "and the modes and a bool row");
+    char small[4] = {'x', 'x', 'x', 'x'};
+    Check(cameraunlock_config_option_text(3, CAMERAUNLOCK_OPTION_TEXT_ID, small, sizeof(small)) == 7 && small[0] == 'x',
+          "a text that does not fit answers its length and copies nothing");
+    Check(text(3, CAMERAUNLOCK_OPTION_TEXT_CHOICE + 4) == "(error)" && text(0, CAMERAUNLOCK_OPTION_TEXT_CHOICE) == "(error)" &&
+              text(4, CAMERAUNLOCK_OPTION_TEXT_ID) == "(error)" && cameraunlock_config_option(-1, &option) == CAMERAUNLOCK_ERROR,
+          "a word or an option that is not there is refused");
+
+    Check(value(0) == 0.0 && value(1) == CAMERAUNLOCK_TRACKING_ROTATION_ONLY && value(2) == CAMERAUNLOCK_AIM_FREE_LOOK_MARKER &&
+              value(3) == 3.0,
+          "each reads as it was last saved");
+    Check(cameraunlock_config_option_save(0, 1.0) == CAMERAUNLOCK_SAVE_SAVED &&
+              cameraunlock_config_option_save(1, CAMERAUNLOCK_TRACKING_POSITION_ONLY) == CAMERAUNLOCK_SAVE_SAVED &&
+              cameraunlock_config_option_save(2, CAMERAUNLOCK_AIM_STOCK_SIGHTS) == CAMERAUNLOCK_SAVE_SAVED &&
+              cameraunlock_config_option_save(3, 2.0) == CAMERAUNLOCK_SAVE_SAVED,
+          "each saves: " + LastError());
+    const std::string saved = ReadFile(scratch / "CameraUnlock.ini");
+    Check(saved.find("WorldSpaceYaw=true") != std::string::npos && saved.find("RotationEnabled=false") != std::string::npos &&
+              saved.find("PositionEnabled=true") != std::string::npos && saved.find("TrueFreeLook=false") != std::string::npos &&
+              saved.find("FreeLookMarker=false") != std::string::npos && saved.find("StockSights=true") != std::string::npos &&
+              saved.find("Quality=Medium") != std::string::npos,
+          "as its row, or every row of its mode");
+    std::int32_t number = -1;
+    Check(value(0) == 1.0 && value(1) == 2.0 && value(2) == 3.0 && value(3) == 2.0 &&
+              cameraunlock_config_get_int(quality, &number) == CAMERAUNLOCK_OK && number == 2,
+          "and reads back as saved, as a local row's number does");
+    Check(cameraunlock_session_cycle_tracking_mode() == CAMERAUNLOCK_TRACKING_ROTATION_AND_POSITION &&
+              cameraunlock_session_cycle_aim_mode() == CAMERAUNLOCK_AIM_SIGHTS_LOCKED,
+          "a saved mode is the session's: the cycle goes on from it");
+    Check(value(1) == 0.0 && value(2) == 0.0, "and a mode a hotkey cycled reads as the session has it");
+    Check(cameraunlock_config_option_save(3, 7.0) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_option_save(1, 3.0) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_option_save(2, 0.5) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_option_save(9, 0.0) == CAMERAUNLOCK_ERROR && value(1) == 0.0 && value(2) == 0.0 &&
+              value(3) == 2.0 && ReadFile(scratch / "CameraUnlock.ini") == saved,
+          "a value an option does not hold is refused, and nothing takes it");
+}
+
 void TestConfig(const fs::path& scratch) {
     std::cout << "\n[c interface: the config]\n";
     const std::string file = (scratch / "CameraUnlock.ini").u8string();
@@ -854,6 +925,8 @@ void TestConfig(const fs::path& scratch) {
               saved.find("TrueFreeLook=true") != std::string::npos && saved.find("FreeLookMarker=true") != std::string::npos &&
               saved.find("WorldSpaceYaw=false") != std::string::npos,
           "as the rows core's encoders give");
+
+    TestOptions(scratch, quality);
 
     Check(cameraunlock_config_reload() == CAMERAUNLOCK_RELOAD_UNCHANGED, "a file nobody touched is not read again");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));

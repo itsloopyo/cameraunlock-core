@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 4
+#define CAMERAUNLOCK_ABI 5
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -38,6 +38,7 @@ CAMERAUNLOCK_C int32_t cameraunlock_abi(void);
 #define CAMERAUNLOCK_STRUCT_OBSTRUCTION 3
 #define CAMERAUNLOCK_STRUCT_LEAN 4
 #define CAMERAUNLOCK_STRUCT_CONFIG 5
+#define CAMERAUNLOCK_STRUCT_OPTION 6
 /* The size in bytes this library has for a struct, by its CAMERAUNLOCK_STRUCT_*. A binding that
  * declares the structs in its own language compares each with its declaration at load. */
 CAMERAUNLOCK_C int32_t cameraunlock_struct_size(int32_t which);
@@ -361,6 +362,62 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_save_float(int32_t row, float value);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_tracking_mode(void);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_aim_mode(void);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_world_space_yaw(int32_t world_space_yaw);
+
+/* ---- Options -------------------------------------------------------------------------------- */
+
+/* The settings of the loaded file a game's own options screen can show, for a host that fills
+ * that screen from them: each row marked CAMERAUNLOCK_ROW_WRITABLE that holds a bool, an int, a
+ * float or an enum, in the order of the file, with RotationEnabled and PositionEnabled as the one
+ * option "TrackingMode" and TrueFreeLook, FreeLookMarker and StockSights as the one option
+ * "AimMode". A key list is not one. Options are numbered from 0, and an option's value is one
+ * double whatever it holds: a bool as 0 or 1, an int, a float, an enum as its word's place. */
+
+#define CAMERAUNLOCK_OPTION_BOOL 0  /* a tick box */
+#define CAMERAUNLOCK_OPTION_INT 1   /* a slider of whole numbers */
+#define CAMERAUNLOCK_OPTION_FLOAT 2 /* a slider */
+#define CAMERAUNLOCK_OPTION_ENUM 3  /* a list of `choices` words */
+
+#define CAMERAUNLOCK_OPTION_ROW 0           /* one row of the file */
+#define CAMERAUNLOCK_OPTION_TRACKING_MODE 1 /* the session's tracking mode, a CAMERAUNLOCK_TRACKING_* */
+#define CAMERAUNLOCK_OPTION_AIM_MODE 2      /* the session's aim mode, a CAMERAUNLOCK_AIM_* */
+
+/* The members before `min` are four bytes each and the rest eight. */
+typedef struct CameraUnlockOption {
+    uint32_t struct_size;
+    int32_t kind;
+    int32_t source;
+    /* How many words an enum has. 0 for every other kind. */
+    int32_t choices;
+    /* The lowest and highest value, both allowed. */
+    double min;
+    double max;
+    /* How far one notch of a slider moves the value: 1 for an int, and for a float the power of
+     * ten nearest a fiftieth of its range. */
+    double step;
+} CameraUnlockOption;
+
+/* How many options the loaded file has. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_option_count(void);
+CAMERAUNLOCK_C int32_t cameraunlock_config_option(int32_t option, CameraUnlockOption* out);
+
+#define CAMERAUNLOCK_OPTION_TEXT_ID 0      /* the row's key, or "TrackingMode" or "AimMode" */
+#define CAMERAUNLOCK_OPTION_TEXT_SECTION 1 /* the row's section */
+#define CAMERAUNLOCK_OPTION_TEXT_LABEL 2   /* the id as words: "Field of view" */
+#define CAMERAUNLOCK_OPTION_TEXT_COMMENT 3 /* the file's comment above the row, its lines parted by '\n' */
+/* Add an enum's word's place: the word as a screen shows it, "Rotation only" for RotationOnly. */
+#define CAMERAUNLOCK_OPTION_TEXT_CHOICE 16
+/* One text of an option, by its CAMERAUNLOCK_OPTION_TEXT_*. Answers its length in bytes and
+ * copies it, with its NUL, when `capacity` holds length + 1. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_option_text(int32_t option, int32_t which, char* buffer, int32_t capacity);
+
+/* An option's value now: what the file gave, or the last save. The two modes are the session's,
+ * so a mode a hotkey cycled reads as it is. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_option_get(int32_t option, double* out);
+/* Writes an option's rows and answers a CAMERAUNLOCK_SAVE_*. An error for a value the option
+ * does not hold, with nothing written. A mode is put on the session first, as
+ * cameraunlock_session_set_aim_mode does; every other option the host applies to its own running
+ * state. Synchronous, as every save is: from a thread that is not drawing a frame. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_option_save(int32_t option, double value);
 
 /* ---- Hotkeys -------------------------------------------------------------------------------- */
 

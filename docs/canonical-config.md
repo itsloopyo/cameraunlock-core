@@ -602,6 +602,38 @@ throws, naming it. That is how a mod states which of its controls persist:
   Writable only in a mod with a separate control that saves it, and the toggle still never calls
   `Save` for it.
 
+### Options for a game's own options screen
+
+Where a game has an options screen a mod can add a page to, the page is filled from the table,
+so it cannot list a setting the file does not have or leave out one a later row adds. C++ only so
+far (`config/config_table.h`), and through the C interface for any other host
+([c-interface.md](c-interface.md#options)).
+
+- `table.Options()` lists a `ConfigOption` for each row that is Writable, is not an Engine row
+  and holds a bool, a whole number, a float or a word from a list (`BoolCodec`, `IntCodec`,
+  `FloatingCodec`, `EnumCodec`), in the order of the table. Marking a row Writable is what puts it
+  on the page, since a page saves what it shows. A key list is never one: a list of keys and
+  chords is not something one control holds.
+- `RotationEnabled` with `PositionEnabled` is the one option `TrackingMode`, and `TrueFreeLook`,
+  `FreeLookMarker` and `StockSights` the one option `AimMode`, each a list of its modes, where
+  the table has every row of the mode and all are Writable. A mode's rows are never options of
+  their own, so a page cannot be made to write a pair that names no mode.
+- A `ConfigOption` has the row's key as `id`, its `section`, a `label` made from the key
+  ("Field of view" for `FieldOfView`), the file's `comment` for a tooltip, a `kind`, `min` and
+  `max`, a slider `step` (1 for a whole number, and for a float the power of ten nearest a
+  fiftieth of its range) and an enum's `choices` as words.
+- `table.OptionValue(config, option)` reads an option as one `double`: a bool as 0 or 1, a
+  number, an enum as its word's place, a mode as its enumerator.
+  `table.SetOption(config, option, value)` puts one in a config and throws
+  `std::invalid_argument` for a value the option does not hold. A page saves with
+  `owner.Save([&](Config& c) { table.SetOption(c, option, value); })`, after the mod has applied
+  the value to the running game, as for any other control.
+
+A save from the page is a save like a hotkey's: a row that held `default` is written as its
+value and stops following Defaults.ini ([Saves and toggles](#saves-and-toggles)). The game's own
+screen may keep a copy of what it shows in a file of its own; the mod never reads that copy, and
+fills the screen from the owner's values each time it opens.
+
 ### The committed file
 
 A converted repo commits its table's fresh render (`RenderCanonicalFresh(table, header)` /

@@ -52,6 +52,8 @@ static_assert(sizeof(CameraUnlockFrame) == 92, "docs/c-interface.md states this 
 static_assert(sizeof(CameraUnlockObstruction) == 16, "docs/c-interface.md states this layout");
 static_assert(sizeof(CameraUnlockLean) == 40, "docs/c-interface.md states this layout");
 static_assert(sizeof(CameraUnlockConfig) == 76, "docs/c-interface.md states this layout");
+static_assert(sizeof(CameraUnlockOption) == 40 && offsetof(CameraUnlockOption, min) == 16,
+              "docs/c-interface.md states this layout");
 
 // Everything below lives in objects that are never destroyed. A host's process can end with the
 // receiver's and the poller's threads running, and a destructor that joined them would run
@@ -566,6 +568,8 @@ struct ConfigState {
     std::vector<ConceptRow> concepts;
     std::vector<LocalRow> locals;
     std::unique_ptr<cfg::ConfigOwner<HostConfig>> owner;
+    // The table the owner was given, for the options, which are places in it.
+    std::optional<cfg::ConfigTable<HostConfig>> table;
     HostConfig loaded;
     // Written under the mutex, and read without it by cameraunlock_hotkeys_drop.
     std::atomic<input::HotkeyPoller*> poller{nullptr};
@@ -688,7 +692,19 @@ std::int32_t Save(ConfigState& c, const std::function<void(HostConfig&)>& change
     const cfg::ConfigSaveResult saved = c.owner->Save(change);
     LogLines(saved.log);
     if (saved.status != cfg::ConfigSaveStatus::Saved) LogLine(saved.reason);
+    // The session runs on the new value whether or not the file took it, so it is what an option reads.
+    change(c.loaded);
     return static_cast<std::int32_t>(saved.status);
+}
+
+// Under the config's mutex.
+cfg::ConfigOption OptionAt(const ConfigState& c, std::int32_t option) {
+    RequireLoaded(c);
+    const std::vector<cfg::ConfigOption> options = c.table->Options();
+    if (option < 0 || static_cast<std::size_t>(option) >= options.size()) {
+        throw std::invalid_argument("there is no option " + std::to_string(option));
+    }
+    return options[static_cast<std::size_t>(option)];
 }
 
 void RequireHotkeyBit(std::int32_t bit, const char* otherwise) {
@@ -756,7 +772,8 @@ std::int32_t cameraunlock_struct_size(std::int32_t which) {
     return Guarded("cameraunlock_struct_size", [&] {
         constexpr std::size_t sizes[] = {sizeof(CameraUnlockSettings), sizeof(CameraUnlockFrameInput),
                                          sizeof(CameraUnlockFrame),    sizeof(CameraUnlockObstruction),
-                                         sizeof(CameraUnlockLean),     sizeof(CameraUnlockConfig)};
+                                         sizeof(CameraUnlockLean),     sizeof(CameraUnlockConfig),
+                                         sizeof(CameraUnlockOption)};
         Require(which >= 0 && which < static_cast<std::int32_t>(std::size(sizes)), "which is not a CAMERAUNLOCK_STRUCT_*");
         return static_cast<std::int32_t>(sizes[which]);
     });
@@ -1086,7 +1103,8 @@ std::int32_t cameraunlock_config_load(const char* path, const char* defaults_pat
 
         cfg::ConfigOwnerOptions<HostConfig> options;
         options.path = Wide(path, "path");
-        options.table = BuildTable(c);
+        cfg::ConfigTable<HostConfig> table = BuildTable(c);
+        options.table = table;
         options.header.display_name = *c.display_name;
         options.defaults = defaults_path == nullptr ? cfg::DefaultsFile::PerUser()
                                                     : cfg::DefaultsFile::At(Wide(defaults_path, "defaults_path"));
@@ -1104,6 +1122,7 @@ std::int32_t cameraunlock_config_load(const char* path, const char* defaults_pat
 
         c.loaded = std::move(loaded.config);
         c.owner = std::move(owner);
+        c.table = std::move(table);
         *out = filled;
         return static_cast<std::int32_t>(loaded.status);
     });
@@ -1186,9 +1205,7 @@ std::int32_t cameraunlock_config_save_int(std::int32_t row, std::int32_t value) 
                 throw std::invalid_argument(described.key + " is not a bool, an int or an enum row");
         }
         const std::size_t index = static_cast<std::size_t>(row);
-        const std::int32_t status = Save(c, [&](HostConfig& config) { config.locals[index] = next; });
-        c.loaded.locals[index] = next;
-        return status;
+        return Save(c, [&](HostConfig& config) { config.locals[index] = next; });
     });
 }
 
@@ -1200,9 +1217,7 @@ std::int32_t cameraunlock_config_save_float(std::int32_t row, float value) {
         const LocalRow& described = LocalAt(c, row);
         if (described.kind != LocalKind::Float) throw std::invalid_argument(described.key + " is not a float row");
         const std::size_t index = static_cast<std::size_t>(row);
-        const std::int32_t status = Save(c, [&](HostConfig& config) { config.locals[index] = value; });
-        c.loaded.locals[index] = value;
-        return status;
+        return Save(c, [&](HostConfig& config) { config.locals[index] = value; });
     });
 }
 
@@ -1236,6 +1251,94 @@ std::int32_t cameraunlock_config_save_world_space_yaw(std::int32_t world_space_y
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
         return Save(c, [&](HostConfig& config) { config.world_space_yaw = world_space_yaw != 0; });
+    });
+}
+
+std::int32_t cameraunlock_config_option_count(void) {
+    return Guarded("cameraunlock_config_option_count", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        return static_cast<std::int32_t>(c.table->Options().size());
+    });
+}
+
+std::int32_t cameraunlock_config_option(std::int32_t option, CameraUnlockOption* out) {
+    return Guarded("cameraunlock_config_option", [&] {
+        RequireStruct(out, "CameraUnlockOption");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        const cfg::ConfigOption described = OptionAt(c, option);
+        CameraUnlockOption filled = {};
+        filled.struct_size = sizeof(filled);
+        filled.kind = static_cast<std::int32_t>(described.kind);
+        filled.source = static_cast<std::int32_t>(described.source);
+        filled.choices = static_cast<std::int32_t>(described.choices.size());
+        filled.min = described.min;
+        filled.max = described.max;
+        filled.step = described.step;
+        *out = filled;
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_option_text(std::int32_t option, std::int32_t which, char* buffer,
+                                             std::int32_t capacity) {
+    return Guarded("cameraunlock_config_option_text", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        const cfg::ConfigOption described = OptionAt(c, option);
+        std::string text;
+        if (which == CAMERAUNLOCK_OPTION_TEXT_ID) {
+            text = described.id;
+        } else if (which == CAMERAUNLOCK_OPTION_TEXT_SECTION) {
+            text = described.section;
+        } else if (which == CAMERAUNLOCK_OPTION_TEXT_LABEL) {
+            text = described.label;
+        } else if (which == CAMERAUNLOCK_OPTION_TEXT_COMMENT) {
+            for (const std::string& line : described.comment) text += (text.empty() ? "" : "\n") + line;
+        } else {
+            Require(which >= CAMERAUNLOCK_OPTION_TEXT_CHOICE &&
+                        static_cast<std::size_t>(which - CAMERAUNLOCK_OPTION_TEXT_CHOICE) < described.choices.size(),
+                    "which is not a CAMERAUNLOCK_OPTION_TEXT_* of this option");
+            text = described.choices[static_cast<std::size_t>(which - CAMERAUNLOCK_OPTION_TEXT_CHOICE)];
+        }
+        return CopyOut(text, buffer, capacity, true);
+    });
+}
+
+std::int32_t cameraunlock_config_option_get(std::int32_t option, double* out) {
+    return Guarded("cameraunlock_config_option_get", [&] {
+        Require(out != nullptr, "out is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        const cfg::ConfigOption described = OptionAt(c, option);
+        if (described.source == cfg::OptionSource::kTrackingMode) {
+            *out = static_cast<double>(static_cast<std::int32_t>(TheSession().mode().GetMode()));
+        } else if (described.source == cfg::OptionSource::kAimMode) {
+            *out = static_cast<double>(TheSession().aim_mode.load());
+        } else {
+            *out = c.table->OptionValue(c.loaded, static_cast<std::size_t>(option));
+        }
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_config_option_save(std::int32_t option, double value) {
+    return Guarded("cameraunlock_config_option_save", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        const cfg::ConfigOption described = OptionAt(c, option);
+        const std::size_t index = static_cast<std::size_t>(option);
+        // On a copy first: a value the option does not hold throws here, before anything runs on it.
+        HostConfig checked = c.loaded;
+        c.table->SetOption(checked, index, value);
+        if (described.source == cfg::OptionSource::kTrackingMode) {
+            TheSession().mode().SetMode(static_cast<TrackingMode>(static_cast<std::int32_t>(value)));
+        } else if (described.source == cfg::OptionSource::kAimMode) {
+            TheSession().aim_mode.store(static_cast<std::int32_t>(value));
+        }
+        return Save(c, [&](HostConfig& config) { c.table->SetOption(config, index, value); });
     });
 }
 

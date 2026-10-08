@@ -25,7 +25,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 4;
+    public static final int ABI = 5;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -48,6 +48,10 @@ public final class CameraUnlock {
             LOAD_LEGACY_REFUSED = 4, LOAD_UNREADABLE = 5;
     public static final int SAVE_SAVED = 0, SAVE_NOT_SAVED = 1, SAVE_UNCERTAIN = 2;
     public static final int RELOAD_UNCHANGED = 0, RELOAD_APPLIED = 1, RELOAD_UNREADABLE = 3;
+    /** Option.kind: a tick box, a slider of whole numbers, a slider, a list of words. */
+    public static final int OPTION_BOOL = 0, OPTION_INT = 1, OPTION_FLOAT = 2, OPTION_ENUM = 3;
+    /** Option.source: one row of the file, or the session's tracking mode or aim mode. */
+    public static final int OPTION_ROW = 0, OPTION_TRACKING_MODE = 1, OPTION_AIM_MODE = 2;
     public static final int HOTKEY_TOGGLE = 0x1, HOTKEY_CYCLE_TRACKING_MODE = 0x2, HOTKEY_YAW_MODE = 0x4,
             HOTKEY_AIM_MODE = 0x8, HOTKEY_LOCAL = 0x100;
     /** How long a key of configLocalHotkeyHeld is down, in milliseconds, before it counts as held. */
@@ -59,6 +63,9 @@ public final class CameraUnlock {
     private static final ValueLayout.OfInt INT = ValueLayout.JAVA_INT;
     private static final ValueLayout.OfLong LONG = ValueLayout.JAVA_LONG;
     private static final ValueLayout.OfFloat FLOAT = ValueLayout.JAVA_FLOAT;
+    private static final ValueLayout.OfDouble DOUBLE = ValueLayout.JAVA_DOUBLE;
+    private static final int OPTION_TEXT_ID = 0, OPTION_TEXT_SECTION = 1, OPTION_TEXT_LABEL = 2, OPTION_TEXT_COMMENT = 3,
+            OPTION_TEXT_CHOICE = 16;
     private static final ValueLayout POINTER = ValueLayout.ADDRESS;
 
     // Each struct of the header, once, with the header's member names. Nothing below reads or
@@ -93,9 +100,12 @@ public final class CameraUnlock {
     static final StructLayout CONFIG = MemoryLayout.structLayout(
             INT.withName("struct_size"), INT.withName("udp_port"), INT.withName("enable_on_startup"),
             INT.withName("world_space_yaw"), SETTINGS.withName("settings")).withName("CameraUnlockConfig");
+    static final StructLayout OPTION = MemoryLayout.structLayout(
+            INT.withName("struct_size"), INT.withName("kind"), INT.withName("source"), INT.withName("choices"),
+            DOUBLE.withName("min"), DOUBLE.withName("max"), DOUBLE.withName("step")).withName("CameraUnlockOption");
 
     /** The header's CAMERAUNLOCK_STRUCT_* numbers, in order. */
-    private static final StructLayout[] STRUCTS = {SETTINGS, FRAME_INPUT, FRAME, OBSTRUCTION, LEAN, CONFIG};
+    private static final StructLayout[] STRUCTS = {SETTINGS, FRAME_INPUT, FRAME, OBSTRUCTION, LEAN, CONFIG, OPTION};
 
     private static VarHandle member(StructLayout struct, String name) {
         return struct.varHandle(PathElement.groupElement(name));
@@ -173,6 +183,33 @@ public final class CameraUnlock {
         private static final VarHandle UDP_PORT = member(CONFIG, "udp_port"),
                 ENABLE_ON_STARTUP = member(CONFIG, "enable_on_startup"), WORLD_SPACE_YAW = member(CONFIG, "world_space_yaw");
         private static final long SETTINGS_AT = CONFIG.byteOffset(PathElement.groupElement("settings"));
+    }
+
+    /**
+     * One setting a game's own options screen can show: CameraUnlockOption and its texts. Its
+     * value is one double whatever it holds: a bool as 0 or 1, an int, a float, an enum as its
+     * word's place in choices.
+     */
+    public static final class Option {
+        /** An OPTION_BOOL, OPTION_INT, OPTION_FLOAT or OPTION_ENUM. */
+        public int kind;
+        /** An OPTION_ROW, OPTION_TRACKING_MODE or OPTION_AIM_MODE. */
+        public int source;
+        /** The row's key, or "TrackingMode" or "AimMode". */
+        public String id;
+        public String section;
+        /** The id as words: "Field of view". */
+        public String label;
+        /** The file's comment above the row, its lines parted by a line feed. */
+        public String comment;
+        /** An enum's words as a screen shows them. Empty for every other kind. */
+        public String[] choices;
+        /** The lowest and highest value, both allowed, and how far one notch of a slider moves it. */
+        public double min, max, step;
+
+        private static final VarHandle KIND = member(OPTION, "kind"), SOURCE = member(OPTION, "source"),
+                CHOICES = member(OPTION, "choices"), MIN = member(OPTION, "min"), MAX = member(OPTION, "max"),
+                STEP = member(OPTION, "step");
     }
 
     /** What a frame is given: CameraUnlockFrameInput. */
@@ -294,7 +331,8 @@ public final class CameraUnlock {
             configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalHotkey, configLocalHotkeyHeld,
             configLocalHotkeyTaps, configRender,
             configLoad, configReload, configGetInt, configGetFloat, configSaveInt, configSaveFloat, configSaveTrackingMode,
-            configSaveAimMode, configSaveWorldSpaceYaw, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
+            configSaveAimMode, configSaveWorldSpaceYaw, configOptionCount, configOption, configOptionText, configOptionGet,
+            configOptionSave, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
 
     private final MemorySegment frameInput = sized(FRAME_INPUT), frameOut = sized(FRAME), obstruction = sized(OBSTRUCTION),
             leanOut = sized(LEAN);
@@ -385,6 +423,11 @@ public final class CameraUnlock {
         configSaveTrackingMode = bind("cameraunlock_config_save_tracking_mode", FunctionDescriptor.of(INT));
         configSaveAimMode = bind("cameraunlock_config_save_aim_mode", FunctionDescriptor.of(INT));
         configSaveWorldSpaceYaw = bind("cameraunlock_config_save_world_space_yaw", FunctionDescriptor.of(INT, INT));
+        configOptionCount = bind("cameraunlock_config_option_count", FunctionDescriptor.of(INT));
+        configOption = bind("cameraunlock_config_option", FunctionDescriptor.of(INT, INT, POINTER));
+        configOptionText = bind("cameraunlock_config_option_text", FunctionDescriptor.of(INT, INT, INT, POINTER, INT));
+        configOptionGet = bind("cameraunlock_config_option_get", FunctionDescriptor.of(INT, INT, POINTER));
+        configOptionSave = bind("cameraunlock_config_option_save", FunctionDescriptor.of(INT, INT, DOUBLE));
         hotkeysStart = bind("cameraunlock_hotkeys_start", FunctionDescriptor.of(INT));
         hotkeysTake = bind("cameraunlock_hotkeys_take", FunctionDescriptor.of(INT));
         hotkeysDrop = bind("cameraunlock_hotkeys_drop", FunctionDescriptor.ofVoid());
@@ -725,6 +768,63 @@ public final class CameraUnlock {
 
     public int configSaveWorldSpaceYaw(boolean worldSpaceYaw) {
         return check(status(configSaveWorldSpaceYaw, worldSpaceYaw ? 1 : 0));
+    }
+
+    // ---- Options -----------------------------------------------------------------------------
+
+    /**
+     * How many settings of the loaded file a game's own options screen can show: its writable
+     * bool, int, float and enum rows, with the tracking mode and the aim mode as one each.
+     */
+    public int configOptionCount() {
+        return check(status(configOptionCount));
+    }
+
+    /** The option at a place from 0 to configOptionCount() - 1. */
+    public Option configOption(int option) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = stamped(arena, OPTION);
+            check(status(configOption, option, out));
+            Option described = new Option();
+            described.kind = (int) Option.KIND.get(out, 0L);
+            described.source = (int) Option.SOURCE.get(out, 0L);
+            described.min = (double) Option.MIN.get(out, 0L);
+            described.max = (double) Option.MAX.get(out, 0L);
+            described.step = (double) Option.STEP.get(out, 0L);
+            described.id = optionText(arena, option, OPTION_TEXT_ID);
+            described.section = optionText(arena, option, OPTION_TEXT_SECTION);
+            described.label = optionText(arena, option, OPTION_TEXT_LABEL);
+            described.comment = optionText(arena, option, OPTION_TEXT_COMMENT);
+            described.choices = new String[(int) Option.CHOICES.get(out, 0L)];
+            for (int choice = 0; choice < described.choices.length; choice++) {
+                described.choices[choice] = optionText(arena, option, OPTION_TEXT_CHOICE + choice);
+            }
+            return described;
+        }
+    }
+
+    private String optionText(Arena arena, int option, int which) {
+        int length = check(status(configOptionText, option, which, MemorySegment.NULL, 0));
+        MemorySegment buffer = arena.allocate(length + 1L);
+        check(status(configOptionText, option, which, buffer, length + 1));
+        return buffer.getString(0);
+    }
+
+    /** An option's value now. The two modes are the session's, so a mode a hotkey cycled reads as it is. */
+    public double configOptionGet(int option) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate(DOUBLE);
+            check(status(configOptionGet, option, out));
+            return out.get(DOUBLE, 0);
+        }
+    }
+
+    /**
+     * Writes an option's rows and answers a SAVE_*. A mode is put on the session first. Every
+     * other option the host applies to its own running state. Not from the thread that draws.
+     */
+    public int configOptionSave(int option, double value) {
+        return check(status(configOptionSave, option, value));
     }
 
     // ---- Hotkeys -----------------------------------------------------------------------------

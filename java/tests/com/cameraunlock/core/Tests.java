@@ -70,7 +70,7 @@ public final class Tests {
     /** docs/c-interface.md's Layouts table, which cpp/tests/c_header.c holds to the header. */
     private static void layoutsAreTheDocumentedOnes() throws IOException {
         StructLayout[] structs = {CameraUnlock.SETTINGS, CameraUnlock.FRAME_INPUT, CameraUnlock.FRAME,
-                CameraUnlock.OBSTRUCTION, CameraUnlock.LEAN, CameraUnlock.CONFIG};
+                CameraUnlock.OBSTRUCTION, CameraUnlock.LEAN, CameraUnlock.CONFIG, CameraUnlock.OPTION};
         String document = Files.readString(Path.of("docs", "c-interface.md"));
         for (StructLayout struct : structs) {
             String name = struct.name().orElseThrow();
@@ -357,6 +357,42 @@ public final class Tests {
                         && saved.contains("\r\nTrueFreeLook=true\r\n") && saved.contains("\r\nFreeLookMarker=true\r\n")
                         && saved.contains("\r\nWorldSpaceYaw=false\r\n"),
                 "as the rows core's encoders give");
+
+        CameraUnlock.Option yaw = core.configOption(0), tracking = core.configOption(1), aim = core.configOption(2),
+                graphics = core.configOption(3);
+        check(core.configOptionCount() == 4 && yaw.id.equals("WorldSpaceYaw") && yaw.kind == CameraUnlock.OPTION_BOOL
+                        && yaw.source == CameraUnlock.OPTION_ROW && yaw.choices.length == 0 && yaw.max == 1 && !yaw.comment.isEmpty(),
+                "the options are the writable rows a control holds: a bool row");
+        check(tracking.id.equals("TrackingMode") && tracking.source == CameraUnlock.OPTION_TRACKING_MODE
+                        && tracking.label.equals("Tracking mode") && tracking.section.equals("General")
+                        && Arrays.equals(tracking.choices, new String[] {"Rotation and position", "Rotation only", "Position only"})
+                        && aim.id.equals("AimMode") && aim.source == CameraUnlock.OPTION_AIM_MODE && aim.choices.length == 4,
+                "each mode as one option, with its modes as words");
+        check(graphics.id.equals("Quality") && graphics.kind == CameraUnlock.OPTION_ENUM && graphics.label.equals("Quality")
+                        && graphics.section.equals("General") && graphics.comment.equals("The graphics mode.")
+                        && Arrays.equals(graphics.choices, new String[] {"Automatic", "Low", "Medium", "High"})
+                        && graphics.min == 0 && graphics.max == 3 && graphics.step == 1,
+                "and an enum row with its words, range and comment");
+        check(core.configOptionGet(0) == 0 && core.configOptionGet(1) == CameraUnlock.TRACKING_ROTATION_ONLY
+                        && core.configOptionGet(2) == CameraUnlock.AIM_FREE_LOOK_MARKER && core.configOptionGet(3) == 3,
+                "each reads as one number, as it was last saved");
+        check(core.configOptionSave(3, 2) == CameraUnlock.SAVE_SAVED && core.configOptionSave(0, 1) == CameraUnlock.SAVE_SAVED
+                        && core.configOptionSave(1, CameraUnlock.TRACKING_POSITION_ONLY) == CameraUnlock.SAVE_SAVED
+                        && core.configOptionSave(2, CameraUnlock.AIM_STOCK_SIGHTS) == CameraUnlock.SAVE_SAVED,
+                "and saves");
+        String paged = Files.readString(file, StandardCharsets.US_ASCII);
+        check(paged.contains("\r\nQuality=Medium\r\n") && paged.contains("\r\nWorldSpaceYaw=true\r\n")
+                        && paged.contains("\r\nRotationEnabled=false\r\n") && paged.contains("\r\nPositionEnabled=true\r\n")
+                        && paged.contains("\r\nTrueFreeLook=false\r\n") && paged.contains("\r\nStockSights=true\r\n"),
+                "as its row, or every row of its mode");
+        check(core.configGetInt(quality) == 2 && core.configOptionGet(1) == CameraUnlock.TRACKING_POSITION_ONLY
+                        && core.cycleAimMode() == CameraUnlock.AIM_SIGHTS_LOCKED && core.configOptionGet(2) == CameraUnlock.AIM_SIGHTS_LOCKED,
+                "a saved mode is the session's, and a mode the session cycled is what its option reads");
+        check(refusal(() -> core.configOptionSave(3, 7)).contains("none of the row's words")
+                        && refusal(() -> core.configOptionSave(1, 3)).contains("not a tracking mode")
+                        && refusal(() -> core.configOption(4)).contains("no option 4") && core.configOptionGet(3) == 2,
+                "a value an option does not hold, and an option that is not there, are refused in the library's words");
+        core.configOptionSave(1, CameraUnlock.TRACKING_ROTATION_ONLY);
 
         check(core.configReload() == CameraUnlock.RELOAD_UNCHANGED, "a file nobody touched is not read again");
         Files.writeString(file, saved.replace("FieldOfView=65.0", "FieldOfView=90").replace("Trees=12", "Trees=40"), StandardCharsets.US_ASCII);

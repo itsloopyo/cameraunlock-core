@@ -20,6 +20,9 @@ LAYOUT(lean_size, sizeof(CameraUnlockLean) == 40);
 LAYOUT(lean_rig, offsetof(CameraUnlockLean, rig) == 20);
 LAYOUT(config_size, sizeof(CameraUnlockConfig) == 76);
 LAYOUT(config_settings, offsetof(CameraUnlockConfig, settings) == 16);
+LAYOUT(option_size, sizeof(CameraUnlockOption) == 40);
+LAYOUT(option_min, offsetof(CameraUnlockOption, min) == 16);
+LAYOUT(option_step, offsetof(CameraUnlockOption, step) == 32);
 
 /* A handle travels as 64 bits whatever the host's pointer type is. */
 LAYOUT(window_handle, sizeof(uint64_t) >= sizeof(void*));

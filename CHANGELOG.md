@@ -9,6 +9,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a config table lists its settings for a game's own options screen (ABI 5)
+
+- `ConfigTable::Options()` lists a `ConfigOption` for each Writable row that holds a bool, a whole
+  number, a float or a word from a list and is not an Engine row: its key, section, a label made
+  from the key, the file's comment, its kind, range, a slider step and an enum's words.
+  `RotationEnabled` with `PositionEnabled` is the one option `TrackingMode`, and `TrueFreeLook`,
+  `FreeLookMarker` and `StockSights` the one option `AimMode`. `OptionValue(config, option)` and
+  `SetOption(config, option, value)` read and set an option as one `double`.
+- C interface: `cameraunlock_config_option_count`, `_option`, `_option_text`, `_option_get` and
+  `_option_save`, the struct `CameraUnlockOption` (40 bytes, `CAMERAUNLOCK_STRUCT_OPTION`) and the
+  `CAMERAUNLOCK_OPTION_*` numbers. A get of a mode answers the session's, and a save of one puts
+  it on the session before it writes the rows. Java: `configOptionCount`, `configOption`,
+  `configOptionGet`, `configOptionSave` and the class `Option`. `CAMERAUNLOCK_ABI` and
+  `CameraUnlock.ABI` are 5: a mod on the Java binding ships the DLL and the binding from one
+  commit, as before.
+- `cameraunlock_config_save_tracking_mode`, `_save_aim_mode` and `_save_world_space_yaw` now also
+  change what the library holds as the file's values, as `_save_int` and `_save_float` always did,
+  so an option reads what was last saved by any of them.
+- `docs/c-interface.md` "Options" and `docs/canonical-config.md` "Options for a game's own
+  options screen".
+
 ### Added - a hotkey that does one thing tapped, another tapped twice and a third held (ABI 4)
 
 - `HotkeyPoller::AddTapHotkey(vkCode, holdMs, doubleTapMs, onTap, onDouble, onHold, accepts =

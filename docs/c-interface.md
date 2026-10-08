@@ -54,7 +54,7 @@ beside its own code and loads it by full path.
 | `cameraunlock_view_frame`, then `cameraunlock_view_lean`, for each view | The same thread, one view after another. The pair is one view's work for the frame. |
 | `cameraunlock_session_configure`, `_start`, `_stop`, `cameraunlock_view_start`, `_stop` | Any. They wait for a frame in progress. |
 | `cameraunlock_session_cycle_tracking_mode`, `_cycle_aim_mode`, `_set_aim_mode`, `cameraunlock_hotkeys_take`, `_drop`, `cameraunlock_log_*`, `cameraunlock_last_error`, `cameraunlock_abi`, `cameraunlock_struct_size`, `cameraunlock_aim_mode_label` | Any, at any time. |
-| `cameraunlock_config_*` | Any, one at a time between them. `_load`, `_reload`, `_save_*` and `_render` read or write a file: never from the thread that draws. |
+| `cameraunlock_config_*` | Any, one at a time between them. `_load`, `_reload`, `_save_*`, `_option_save` and `_render` read or write a file: never from the thread that draws. |
 
 A mode cycled on another thread is seen by the next frame, of every view.
 
@@ -219,6 +219,39 @@ by both the mod and its build.
 and `_save_float` write one. `cameraunlock_config_save_tracking_mode` and `_save_aim_mode` write
 the session's modes, and `_save_world_space_yaw` the yaw mode, which the host holds.
 
+## Options
+
+A host whose game has an options screen a mod can add to fills it from the loaded file, with no
+list of its own to keep in step with the rows:
+
+1. `cameraunlock_config_option_count()`, then for each option `cameraunlock_config_option(option,
+   out)` and `cameraunlock_config_option_text(option, which, buffer, capacity)` for its id, its
+   section, its label, the file's comment and each word of an enum.
+2. One control per option by its `kind`: a tick box for `CAMERAUNLOCK_OPTION_BOOL`, a slider from
+   `min` to `max` in notches of `step` for `_INT` and `_FLOAT`, a list of its `choices` words for
+   `_ENUM`. The label names it and the comment is its tooltip.
+3. `cameraunlock_config_option_get(option, out)` for what the control shows, read again each
+   time the screen opens: a hotkey or a hand edit of the file may have changed it since.
+4. `cameraunlock_config_option_save(option, value)` when the player applies a change, then the
+   host applies the value to its own running state, as after any save.
+
+The options are `ConfigTable::Options()` of the described table
+([canonical-config.md](canonical-config.md#options-for-a-games-own-options-screen)): each row
+marked `CAMERAUNLOCK_ROW_WRITABLE` that holds a bool, an int, a float or an enum, in the order of
+the file. `RotationEnabled` and `PositionEnabled` are the one option `TrackingMode`, and
+`TrueFreeLook`, `FreeLookMarker` and `StockSights` the one option `AimMode`: their `source` says
+so, their value is a `CAMERAUNLOCK_TRACKING_*` or a `CAMERAUNLOCK_AIM_*`, a get answers the
+session's mode, and a save puts the mode on the session before it writes the rows. A key list is
+no option, and nor is a row that is not writable: marking a row writable is how a host puts it on
+the screen.
+
+A value is one `double` whatever the option holds: a bool as 0 or 1, an int, a float, an enum as
+its word's place. A value the option does not hold is an error, with nothing written and nothing
+put on the session.
+
+A game without the whole aim cycle leaves a word out of its list and maps places itself:
+`CAMERAUNLOCK_OPTION_AIM_MODE` tells it which option that is.
+
 ## Hotkeys
 
 `cameraunlock_hotkeys_start` puts the loaded file's key lists on core's poller: the fleet's four
@@ -308,7 +341,8 @@ harness and a binding's own. A mod has no use for them: a tracker's poses reach 
 
 ## Layouts
 
-Every member is four bytes except `now_ms`, and no struct has padding. `cpp/tests/c_header.c`
+Every member is four bytes except `now_ms` and the three doubles of `CameraUnlockOption`, and no
+struct has padding. `cpp/tests/c_header.c`
 holds these to the header, compiled as C.
 
 | Struct | Bytes | Offsets |
@@ -319,6 +353,7 @@ holds these to the header, compiled as C.
 | `CameraUnlockObstruction` | 16 | `struct_size` 0, `queried` 4, `blocked` 8, `distance` 12 |
 | `CameraUnlockLean` | 40 | `struct_size` 0, `flags` 4, `camera` 8, `rig` 20, `asked` 32, `given` 36 |
 | `CameraUnlockConfig` | 76 | `struct_size` 0, `udp_port` 4, `enable_on_startup` 8, `world_space_yaw` 12, `settings` 16 |
+| `CameraUnlockOption` | 40 | `struct_size` 0, `kind` 4, `source` 8, `choices` 12, `min` 16 (eight bytes), `max` 24 (eight bytes), `step` 32 (eight bytes) |
 
 A binding declares each struct once as a named layout in its own language and reads members by
 name. The table is here to check that declaration against, not to copy numbers out of.

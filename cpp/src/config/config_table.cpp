@@ -1,8 +1,11 @@
 #include "cameraunlock/config/config_table.h"
 
+#include "cameraunlock/ads/aim_mode.h"
 #include "cameraunlock/config/config_key_schema.g.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <iterator>
 #include <stdexcept>
@@ -385,6 +388,164 @@ std::string RenderRows(const std::vector<TableRow>& rows, const std::vector<std:
         }
     }
     return out;
+}
+
+namespace {
+
+constexpr schema::Concept kTrackingModeRows[] = {schema::Concept::RotationEnabled, schema::Concept::PositionEnabled};
+constexpr schema::Concept kAimModeRows[] = {schema::Concept::TrueFreeLook, schema::Concept::FreeLookMarker,
+                                            schema::Concept::StockSights};
+
+constexpr const char* kTrackingModeChoices[] = {"Rotation and position", "Rotation only", "Position only"};
+constexpr const char* kAimModeChoices[] = {"Sights locked", "Free look with marker", "True free look", "Stock sights"};
+
+constexpr const char* kTrackingModeComment[] = {
+    "What of your head moves the view: its turning and its leaning, its turning alone, or its",
+    "leaning alone.",
+};
+constexpr const char* kAimModeComment[] = {
+    "What head tracking does while you aim down the sights. Sights locked: leaning keeps your",
+    "eye on the sights. Free look with marker: the weapon stays put, your head moves freely",
+    "around it, and a marker shows where the shot will land. True free look: the same with no",
+    "marker. Stock sights: your head's turning and leaning ease out, so the sight picture is",
+    "the game's own.",
+};
+
+bool IsLower(char c) { return c >= 'a' && c <= 'z'; }
+bool IsUpper(char c) { return c >= 'A' && c <= 'Z'; }
+bool IsDigit(char c) { return c >= '0' && c <= '9'; }
+
+// A PascalCase name as words: a new word starts at a capital after a small letter or a digit, and
+// at the last capital of a run of them that a small letter follows. Every word but the first
+// starts small, and a run of capitals is kept as it is: "Field of view", "Position limit Z back".
+std::string AsWords(std::string_view name) {
+    std::string words;
+    for (std::size_t i = 0; i < name.size(); ++i) {
+        const char c = name[i];
+        const bool word_follows = i + 1 < name.size() && IsLower(name[i + 1]);
+        const bool starts = i > 0 && IsUpper(c) &&
+                            (IsLower(name[i - 1]) || IsDigit(name[i - 1]) || (IsUpper(name[i - 1]) && word_follows));
+        if (starts) words += ' ';
+        words += starts && word_follows ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+    return words;
+}
+
+// The rows of a mode, in the order of `ids`, when the table has every one and all are Writable.
+bool ModeRowsOf(const std::vector<TableRow>& rows, const schema::Concept* ids, std::size_t count, std::size_t* found) {
+    for (std::size_t i = 0; i < count; ++i) {
+        found[i] = rows.size();
+        for (std::size_t r = 0; r < rows.size(); ++r) {
+            if (rows[r].concept_id == ids[i] && rows[r].writable) found[i] = r;
+        }
+        if (found[i] == rows.size()) return false;
+    }
+    return true;
+}
+
+bool IsModeRow(const TableRow& row) {
+    if (!row.concept_id) return false;
+    return std::find(std::begin(kTrackingModeRows), std::end(kTrackingModeRows), *row.concept_id) !=
+               std::end(kTrackingModeRows) ||
+           std::find(std::begin(kAimModeRows), std::end(kAimModeRows), *row.concept_id) != std::end(kAimModeRows);
+}
+
+}  // namespace
+
+std::size_t ModeRowCount(OptionSlot::Kind mode) {
+    return mode == OptionSlot::Kind::kTrackingMode ? std::size(kTrackingModeRows) : std::size(kAimModeRows);
+}
+
+std::vector<OptionSlot> PlanOptions(const std::vector<TableRow>& rows, const std::vector<bool>& shaped) {
+    OptionSlot tracking{OptionSlot::Kind::kTrackingMode};
+    OptionSlot aim{OptionSlot::Kind::kAimMode};
+    const bool has_tracking = ModeRowsOf(rows, kTrackingModeRows, std::size(kTrackingModeRows), tracking.rows);
+    const bool has_aim = ModeRowsOf(rows, kAimModeRows, std::size(kAimModeRows), aim.rows);
+    const std::size_t tracking_at = *std::min_element(tracking.rows, tracking.rows + std::size(kTrackingModeRows));
+    const std::size_t aim_at = *std::min_element(aim.rows, aim.rows + std::size(kAimModeRows));
+
+    std::vector<OptionSlot> slots;
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+        if (has_tracking && r == tracking_at) {
+            slots.push_back(tracking);
+        } else if (has_aim && r == aim_at) {
+            slots.push_back(aim);
+        } else if (rows[r].writable && !rows[r].engine && shaped[r] && !IsModeRow(rows[r])) {
+            OptionSlot slot;
+            slot.rows[0] = r;
+            slots.push_back(slot);
+        }
+    }
+    return slots;
+}
+
+ConfigOption DescribeOption(const TableRow& row, const OptionShape& shape) {
+    ConfigOption option;
+    option.id = row.key;
+    option.section = row.section;
+    option.label = AsWords(row.key);
+    option.comment = row.comment;
+    option.kind = shape.kind;
+    option.min = shape.min;
+    option.max = shape.max;
+    option.step = 1.0;
+    if (shape.kind == OptionKind::kFloat) {
+        const double range = shape.max - shape.min;
+        option.step = shape.ranged && range > 0.0 ? std::pow(10.0, std::round(std::log10(range / 50.0))) : 0.0;
+    }
+    for (const std::string& token : shape.tokens) option.choices.push_back(AsWords(token));
+    return option;
+}
+
+ConfigOption DescribeMode(OptionSlot::Kind mode, const TableRow& first) {
+    const bool tracking = mode == OptionSlot::Kind::kTrackingMode;
+    ConfigOption option;
+    option.source = mode;
+    option.id = tracking ? "TrackingMode" : "AimMode";
+    option.section = first.section;
+    option.label = AsWords(option.id);
+    if (tracking) {
+        option.comment.assign(std::begin(kTrackingModeComment), std::end(kTrackingModeComment));
+        option.choices.assign(std::begin(kTrackingModeChoices), std::end(kTrackingModeChoices));
+    } else {
+        option.comment.assign(std::begin(kAimModeComment), std::end(kAimModeComment));
+        option.choices.assign(std::begin(kAimModeChoices), std::end(kAimModeChoices));
+    }
+    option.kind = OptionKind::kEnum;
+    option.max = static_cast<double>(option.choices.size() - 1);
+    option.step = 1.0;
+    return option;
+}
+
+double ModeNumber(OptionSlot::Kind mode, const bool* on) {
+    if (mode == OptionSlot::Kind::kTrackingMode) {
+        const std::optional<TrackingMode> decoded = DecodeTrackingMode(on[0], on[1]);
+        if (!decoded) throw std::logic_error("RotationEnabled and PositionEnabled are both false, which is not a tracking mode");
+        return static_cast<double>(static_cast<int>(*decoded));
+    }
+    return static_cast<double>(static_cast<int>(ads::DecodeAimMode(on[0], on[1], on[2])));
+}
+
+void ModeRows(OptionSlot::Kind mode, double number, bool* on) {
+    const bool tracking = mode == OptionSlot::Kind::kTrackingMode;
+    const double count = static_cast<double>(tracking ? std::size(kTrackingModeChoices) : std::size(kAimModeChoices));
+    if (!(number >= 0.0 && number < count) || number != std::floor(number)) {
+        RefuseOptionValue(number, tracking ? "it is not a tracking mode" : "it is not an aim mode");
+    }
+    if (tracking) {
+        const TrackingModeChannels channels = EncodeTrackingMode(static_cast<TrackingMode>(static_cast<int>(number)));
+        on[0] = channels.rotation_enabled;
+        on[1] = channels.position_enabled;
+    } else {
+        const ads::AimModeSettings settings = ads::EncodeAimMode(static_cast<ads::AimMode>(static_cast<int>(number)));
+        on[0] = settings.trueFreeLook;
+        on[1] = settings.freeLookMarker;
+        on[2] = settings.stockSights;
+    }
+}
+
+void RefuseOptionValue(double value, const char* why) {
+    throw std::invalid_argument(std::to_string(value) + " is not a value of the option: " + why);
 }
 
 }  // namespace cameraunlock::config::detail

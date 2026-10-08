@@ -877,6 +877,117 @@ void TestGlobalChecks() {
           "a PerGame row starts from the table's default, whatever the effective defaults hold");
 }
 
+enum class Detail { kLow, kHigh, kUltraHigh };
+
+struct Paged {
+    bool rotation = true;
+    bool position = true;
+    bool free_look = false;
+    bool marker = false;
+    bool stock = false;
+    bool yaw = true;
+    bool arms = true;
+    int trees = 12;
+    float fov = 65.0f;
+    float gain = 1.0f;
+    Detail detail = Detail::kHigh;
+    std::string key = "F9";
+    int channel = 3;
+    int unsaved = 1;
+};
+
+ConfigTable<Paged> PagedTable() {
+    using P = Paged;
+    ConfigTable<P> table;
+    table.Concept<Concept::WorldSpaceYaw>(&P::yaw).Writable();
+    table.Concept<Concept::RotationEnabled>(&P::rotation).Writable();
+    table.Concept<Concept::PositionEnabled>(&P::position).Writable();
+    table.Concept<Concept::TrueFreeLook>(&P::free_look).Writable();
+    table.Concept<Concept::FreeLookMarker>(&P::marker).Writable();
+    table.Concept<Concept::StockSights>(&P::stock).Writable();
+    table.Local("General", "FieldOfView", &P::fov, FloatCodec(40.0f, 110.0f), "Degrees, top to bottom.").Writable();
+    table.Local("General", "Gain", &P::gain, FloatCodec(), "No range.").Writable();
+    table.Local("General", "DetailLevel", &P::detail,
+                EnumCodec<Detail>({{"Low", Detail::kLow}, {"High", Detail::kHigh}, {"UltraHigh", Detail::kUltraHigh}}),
+                "How much is drawn.")
+        .Writable();
+    table.Local("Content", "OwnArms", &P::arms, BoolCodec(), "The mod's own arms.").Writable();
+    table.Local("Content", "Trees", &P::trees, IntCodec<int>(0, 100), "How many trees.").Writable();
+    table.Local("Content", "NextKey", &P::key, HotkeyCodec(), "A key list.").Writable();
+    table.Local("Content", "MeshBudget", &P::channel, IntCodec<int>(0, 31), "Engine data.").Engine().Writable();
+    table.Local("Content", "Unsaved", &P::unsaved, IntCodec<int>(0, 9), "Not writable.");
+    return table;
+}
+
+void TestOptions() {
+    std::cout << "\nConfig table options:\n";
+    const ConfigTable<Paged> table = PagedTable();
+    const std::vector<ConfigOption> options = table.Options();
+
+    std::string ids;
+    for (const ConfigOption& option : options) ids += option.id + " ";
+    Check(ids == "WorldSpaceYaw TrackingMode AimMode FieldOfView Gain DetailLevel OwnArms Trees ",
+          "the writable rows a control holds, each mode as one option where its first row is, and no key list, "
+          "Engine row or unwritable row: " + ids);
+    if (options.size() != 8) return;
+
+    Check(options[0].kind == OptionKind::kBool && options[0].label == "World space yaw" &&
+              options[0].section == "General" && !options[0].comment.empty() && options[0].max == 1.0,
+          "a bool row, labelled as words, with the file's comment");
+    Check(options[1].kind == OptionKind::kEnum && options[1].label == "Tracking mode" && options[1].section == "General" &&
+              options[1].choices ==
+                  std::vector<std::string>{"Rotation and position", "Rotation only", "Position only"} &&
+              options[1].max == 2.0 && !options[1].comment.empty() && options[1].source == OptionSource::kTrackingMode &&
+              options[0].source == OptionSource::kRow && options[2].source == OptionSource::kAimMode,
+          "the tracking mode is a list of its three modes");
+    Check(options[2].kind == OptionKind::kEnum && options[2].label == "Aim mode" && options[2].section == "Position" &&
+              options[2].choices.size() == 4 && options[2].choices[1] == "Free look with marker" && options[2].max == 3.0,
+          "the aim mode a list of its four");
+    Check(options[3].kind == OptionKind::kFloat && options[3].label == "Field of view" && options[3].min == 40.0 &&
+              options[3].max == 110.0 && options[3].step == 1.0,
+          "a float row has its range, and a step from it");
+    Check(options[4].kind == OptionKind::kFloat && options[4].step == 0.0, "a float row with no range has no step");
+    Check(options[5].kind == OptionKind::kEnum &&
+              options[5].choices == std::vector<std::string>{"Low", "High", "Ultra high"} && options[5].max == 2.0,
+          "an enum row has its words as words");
+    Check(options[7].kind == OptionKind::kInt && options[7].min == 0.0 && options[7].max == 100.0 && options[7].step == 1.0,
+          "an int row has its range and a step of 1");
+
+    Paged values;
+    Check(table.OptionValue(values, 0) == 1.0 && table.OptionValue(values, 1) == 0.0 && table.OptionValue(values, 2) == 0.0 &&
+              table.OptionValue(values, 3) == 65.0 && table.OptionValue(values, 5) == 1.0 &&
+              table.OptionValue(values, 6) == 1.0 && table.OptionValue(values, 7) == 12.0,
+          "each option's value is one number");
+
+    table.SetOption(values, 0, 0.0);
+    table.SetOption(values, 1, 2.0);
+    table.SetOption(values, 2, 1.0);
+    table.SetOption(values, 3, 90.5);
+    table.SetOption(values, 5, 2.0);
+    table.SetOption(values, 7, 40.0);
+    Check(!values.yaw && !values.rotation && values.position && values.free_look && values.marker && !values.stock &&
+              values.fov == 90.5f && values.detail == Detail::kUltraHigh && values.trees == 40,
+          "a number set goes to the row, and a mode to every row of it");
+    table.SetOption(values, 2, 3.0);
+    Check(!values.free_look && !values.marker && values.stock && table.OptionValue(values, 2) == 3.0,
+          "stock sights is its row alone");
+
+    Check(Contains(Thrown([&] { table.SetOption(values, 0, 2.0); }), "a bool is 0 or 1"), "a bool takes 0 or 1");
+    Check(Contains(Thrown([&] { table.SetOption(values, 1, 3.0); }), "not a tracking mode"), "a number that is no mode is refused");
+    Check(Contains(Thrown([&] { table.SetOption(values, 3, 111.0); }), "outside the row's range"), "and one outside a range");
+    Check(Contains(Thrown([&] { table.SetOption(values, 5, 3.0); }), "none of the row's words"), "and one past the words");
+    Check(Contains(Thrown([&] { table.SetOption(values, 7, 4.5); }), "not a whole number"), "and a fraction for an int");
+    Check(Contains(Thrown([&] { table.OptionValue(values, 8); }), "no option 8"), "and an option the table has not");
+    Check(values.trees == 40 && values.fov == 90.5f, "a refused value changes nothing");
+
+    using P = Paged;
+    ConfigTable<P> partial;
+    partial.Concept<Concept::RotationEnabled>(&P::rotation).Writable();
+    partial.Concept<Concept::PositionEnabled>(&P::position);
+    partial.Concept<Concept::TrueFreeLook>(&P::free_look).Writable();
+    Check(partial.Options().empty(), "a mode with a row missing or not writable is no option, and nor are its rows");
+}
+
 }  // namespace
 
 int RunConfigTableTests() {
@@ -888,6 +999,7 @@ int RunConfigTableTests() {
         TestModifiers();
         TestRenderAndApply();
         TestGlobalChecks();
+        TestOptions();
     } catch (const std::exception& e) {
         std::cout << "  [FAIL] unexpected exception: " << e.what() << "\n";
         ++g_failures;
