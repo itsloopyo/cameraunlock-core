@@ -681,6 +681,23 @@
         "approved": "2026-10-04"
       }
     ],
+    "project-zomboid-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-07 on foot and seated: End is the game's search mode key, and with Ctrl and Shift held the game acts on Y (walk to the cursor), G, H (the health panel) and U (vehicle mechanics); every letter of the spare list is one the game uses in some state, so the rule leaves no action a chord and Toggle tracking no key. PageUp, PageDown and Insert measured free. The owner ruled on 2026-10-09: no Toggle tracking action at all (the mod declares no ToggleKey row), and the other three on the nav key alone, with the modes also on the game's own options screen. The committed file holds CycleTrackingModeKey=PageUp.",
+        "approved": "2026-10-09"
+      },
+      {
+        "row": "YawModeKey",
+        "reason": "Measured in game on 2026-10-07 on foot and seated: End is the game's search mode key, and with Ctrl and Shift held the game acts on Y (walk to the cursor), G, H (the health panel) and U (vehicle mechanics); every letter of the spare list is one the game uses in some state, so the rule leaves no action a chord and Toggle tracking no key. PageUp, PageDown and Insert measured free. The owner ruled on 2026-10-09: no Toggle tracking action at all (the mod declares no ToggleKey row), and the other three on the nav key alone, with the modes also on the game's own options screen. The committed file holds YawModeKey=PageDown.",
+        "approved": "2026-10-09"
+      },
+      {
+        "row": "TrueFreeLookKey",
+        "reason": "Measured in game on 2026-10-07 on foot and seated: End is the game's search mode key, and with Ctrl and Shift held the game acts on Y (walk to the cursor), G, H (the health panel) and U (vehicle mechanics); every letter of the spare list is one the game uses in some state, so the rule leaves no action a chord and Toggle tracking no key. PageUp, PageDown and Insert measured free. The owner ruled on 2026-10-09: no Toggle tracking action at all (the mod declares no ToggleKey row), and the other three on the nav key alone, with the modes also on the game's own options screen. The committed file holds TrueFreeLookKey=Insert.",
+        "approved": "2026-10-09"
+      }
+    ],
     "red-eclipse-headtracking": [
       {
         "row": "TrueFreeLookKey",
