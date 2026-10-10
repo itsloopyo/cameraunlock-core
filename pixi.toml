@@ -253,6 +253,9 @@ test-config-descriptor = "node scripts/test-config-descriptor.mjs"
 # files beside it in its folder are declared payload; with no arguments, only the Nexus ZIP of the
 # installer ZIP just validated is checked, and any other one is skipped as stale with a warning.
 test-validate-manifest = "node scripts/test-validate-manifest.mjs"
+# scripts/jvm-site-config.ps1 against data/fixtures/jvm-site-config/vectors.json, the cases
+# Lopari's jvm_site_config deploy step runs too, under Windows PowerShell 5.1 as install.cmd runs it.
+test-jvm-site-config = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-jvm-site-config.ps1"
 
 # The fleet report over every canonical repo checked out beside this core: game-local
 # (section, key) pairs shared by three or more repos (candidates for a concept), the
@@ -271,7 +274,7 @@ config-report = "node scripts/check-canonical-config.mjs --report"
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-validate-manifest", "test-generate-readme", "validate-games", "vectors", "test-java", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-validate-manifest", "test-jvm-site-config", "test-generate-readme", "validate-games", "vectors", "test-java", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
 
 # Documentation
 # doc = "docfx docfx.json"

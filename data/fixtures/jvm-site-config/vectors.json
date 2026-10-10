@@ -1,0 +1,130 @@
+{
+  "about": "Inputs and expected results for the site JVM config a Java agent mod writes beside a game's launcher (scripts/jvm-site-config.ps1, and the launcher's jvm_site_config deploy step). Each case names the agent jars and, where it is not core's, the boot class. stock and site are the files' text as found in the game folder, null when absent. expect.site is the text of the site config written, compared as parsed JSON with key order kept; expect.refused is why nothing was written: stock (the stock config is missing or not the expected shape, script exit 1) or foreign (a site config that names none of the agent jars is there, script exit 3).",
+  "cases": [
+    {
+      "name": "project-zomboid-42.21-stock",
+      "agent_jars": ["ProjectZomboidHeadTracking.jar"],
+      "stock": "{\n\t\"mainClass\": \"zombie/gameStates/MainScreenState\",\n\t\"classpath\": [\n\t\t\".\",\n\t\t\"projectzomboid.jar\"\n\t],\n\t\"vmArgs\": [\n\t\t\"-Djava.awt.headless=true\",\n\t\t\"--enable-native-access=ALL-UNNAMED\",\n\t\t\"--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED\",\n\t\t\"-Xmx3072m\",\n\t\t\"-Dzomboid.steam=1\",\n\t\t\"-Dzomboid.znetlog=1\",\n\t\t\"-Djava.library.path=win64/;.\",\n\t\t\"-XX:-CreateCoredumpOnCrash\",\n\t\t\"-XX:-OmitStackTraceInFastThrow\"\n\t],\n\t\"windows\": {\n\t\t\"6.1\": {\n\t\t\t\"vmArgs\": [\n\t\t\t\t\"-XX:+UseG1GC\"\n\t\t\t]\n\t\t},\n\t\t\"10.0.17134\": {\n\t\t\t\"vmArgs\": [\n\t\t\t\t\"-XX:+UseZGC\"\n\t\t\t]\n\t\t}\n\t}\n}\n",
+      "site": null,
+      "expect": {
+        "site": "{\"mainClass\":\"com/cameraunlock/core/agent/Boot\",\"classpath\":[\".\",\"projectzomboid.jar\",\"ProjectZomboidHeadTracking.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=zombie/gameStates/MainScreenState\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\",\"-Djava.awt.headless=true\",\"--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED\",\"-Xmx3072m\",\"-Dzomboid.steam=1\",\"-Dzomboid.znetlog=1\",\"-Djava.library.path=win64/;.\",\"-XX:-CreateCoredumpOnCrash\",\"-XX:-OmitStackTraceInFastThrow\"],\"windows\":{\"6.1\":{\"vmArgs\":[\"-XX:+UseG1GC\"]},\"10.0.17134\":{\"vmArgs\":[\"-XX:+UseZGC\"]}}}"
+      }
+    },
+    {
+      "name": "keys-keep-their-order-and-values",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"zeta\":1,\"vmArgs\":[],\"alpha\":{\"b\":true,\"a\":null,\"9\":\"nine\",\"10\":[1,2]},\"classpath\":[],\"mainClass\":\"a/Main\",\"middle\":\"<&>'\\\\\"}",
+      "site": null,
+      "expect": {
+        "site": "{\"zeta\":1,\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\"],\"alpha\":{\"b\":true,\"a\":null,\"9\":\"nine\",\"10\":[1,2]},\"classpath\":[\"Fixture.jar\"],\"mainClass\":\"com/cameraunlock/core/agent/Boot\",\"middle\":\"<&>'\\\\\"}"
+      }
+    },
+    {
+      "name": "our-arguments-and-jars-already-in-the-stock-config-move-not-repeat",
+      "agent_jars": ["Fixture.jar", "Second.jar"],
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\"Second.jar\",\".\",\"Fixture.jar\",\"game.jar\"],\"vmArgs\":[\"-Xmx1g\",\"-XX:+EnableDynamicAgentLoading\",\"-Dcameraunlock.mainClass=a/Main\",\"-Xss4m\"]}",
+      "site": null,
+      "expect": {
+        "site": "{\"mainClass\":\"com/cameraunlock/core/agent/Boot\",\"classpath\":[\".\",\"game.jar\",\"Fixture.jar\",\"Second.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\",\"-Xmx1g\",\"-Xss4m\"]}"
+      }
+    },
+    {
+      "name": "a-mod-names-its-own-boot-class",
+      "agent_jars": ["Fixture.jar"],
+      "main_class": "fixture/Boot",
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\"],\"vmArgs\":[\"-Xmx1g\"]}",
+      "site": null,
+      "expect": {
+        "site": "{\"mainClass\":\"fixture/Boot\",\"classpath\":[\".\",\"Fixture.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\",\"-Xmx1g\"]}"
+      }
+    },
+    {
+      "name": "our-own-site-config-is-rebuilt-from-the-stock-config",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\",\"game.jar\"],\"vmArgs\":[\"-Xmx2g\"]}",
+      "site": "{\"mainClass\":\"fixture/Boot\",\"classpath\":[\".\",\"game.jar\",\"Fixture.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"-Xmx1g\"]}",
+      "expect": {
+        "site": "{\"mainClass\":\"com/cameraunlock/core/agent/Boot\",\"classpath\":[\".\",\"game.jar\",\"Fixture.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\",\"-Xmx2g\"]}"
+      }
+    },
+    {
+      "name": "a-site-config-that-is-not-json-but-names-our-jar-is-ours",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\"],\"vmArgs\":[]}",
+      "site": "{\"classpath\":[\"Fixture.jar\"",
+      "expect": {
+        "site": "{\"mainClass\":\"com/cameraunlock/core/agent/Boot\",\"classpath\":[\".\",\"Fixture.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\"]}"
+      }
+    },
+    {
+      "name": "a-site-config-naming-none-of-our-jars-is-left-alone",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\"],\"vmArgs\":[]}",
+      "site": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\",\"Other.jar\"],\"vmArgs\":[\"-Xmx8g\"]}",
+      "expect": { "refused": "foreign" }
+    },
+    {
+      "name": "the-jar-name-is-matched-with-its-case",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\"],\"vmArgs\":[]}",
+      "site": "{\"mainClass\":\"a/Main\",\"classpath\":[\"fixture.jar\"],\"vmArgs\":[]}",
+      "expect": { "refused": "foreign" }
+    },
+    {
+      "name": "no-stock-config",
+      "agent_jars": ["Fixture.jar"],
+      "stock": null,
+      "site": null,
+      "expect": { "refused": "stock" }
+    },
+    {
+      "name": "stock-config-is-not-json",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":",
+      "site": null,
+      "expect": { "refused": "stock" }
+    },
+    {
+      "name": "stock-config-is-not-an-object",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "[\"a/Main\"]",
+      "site": null,
+      "expect": { "refused": "stock" }
+    },
+    {
+      "name": "stock-config-has-no-main-class",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"classpath\":[\".\"],\"vmArgs\":[]}",
+      "site": null,
+      "expect": { "refused": "stock" }
+    },
+    {
+      "name": "stock-main-class-is-not-a-string",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":7,\"classpath\":[\".\"],\"vmArgs\":[]}",
+      "site": null,
+      "expect": { "refused": "stock" }
+    },
+    {
+      "name": "stock-classpath-is-not-an-array",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":\".;game.jar\",\"vmArgs\":[]}",
+      "site": null,
+      "expect": { "refused": "stock" }
+    },
+    {
+      "name": "stock-vm-args-is-missing",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\"]}",
+      "site": null,
+      "expect": { "refused": "stock" }
+    },
+    {
+      "name": "a-bad-stock-config-is-refused-before-the-site-config-is-read",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":\"a/Main\"}",
+      "site": "{\"mainClass\":\"a/Main\",\"classpath\":[],\"vmArgs\":[]}",
+      "expect": { "refused": "stock" }
+    }
+  ]
+}
