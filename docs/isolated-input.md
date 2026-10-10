@@ -138,7 +138,7 @@ whose output a running game would load.
 A script that leaves the game running when it ends, to be run again to restart
 it, leaves its lock with the game instead of releasing it:
 
-```powershell
+```text
 $kept = Join-Path $PSScriptRoot 'rig-token.json'
 $rig = Enter-GameRig -Game <process name> -Owner <who you are> -KeptIn $kept -StopKept
 try { <deploy, launch, wait for the game's process> } finally { Exit-GameRig -Rig $rig -KeptIn $kept }
