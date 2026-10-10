@@ -1896,7 +1896,8 @@
       "steam_folder": "ProjectZomboid",
       "executable_relpath": "ProjectZomboid64.exe",
       "repo": "itsloopyo/project-zomboid-headtracking",
-      "catalog_status": "absent"
+      "delivery_mode": "manifest_versioned",
+      "catalog_status": "prerelease"
     },
     "untitled-goose-game": {
       "display_name": "Untitled Goose Game",
