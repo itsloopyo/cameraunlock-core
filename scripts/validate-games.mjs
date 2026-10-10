@@ -59,7 +59,7 @@ const OPTIONAL = {
 const KNOWN = new Map([...REQUIRED.map((k) => [k, "string"]), ...Object.entries(OPTIONAL)]);
 
 const CATALOG_STATUS = new Set(["absent", "prerelease", "private", "released"]);
-const DELIVERY_MODE = new Set(["external", "install_cmd", "manifest", "manifest_variants"]);
+const DELIVERY_MODE = new Set(["external", "install_cmd", "manifest", "manifest_variants", "manifest_versioned"]);
 
 const problems = [];
 const fail = (msg) => problems.push(msg);

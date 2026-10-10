@@ -63,7 +63,7 @@ const COMMENTED_ROW = /^;[ \t]*([A-Za-z0-9]+)[ \t]*=(.*)$/;
 // name, so a launcher that manages it leaves alone the file an older version reads after a rollback.
 const CONFIG_NAME = "CameraUnlock.ini";
 const ANCHORS = ["game_root", "exe_dir", "mod_home"];
-const MANIFEST_MODES = ["manifest", "manifest_variants"];
+const MANIFEST_MODES = ["manifest", "manifest_variants", "manifest_versioned"];
 const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
 const VERSION = /^\d+\.\d+\.\d+(-.+)?$/;
 const TAG_VERSION = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
@@ -132,7 +132,7 @@ export function shapeProblems(man, { checkVersion }) {
 
   if (!MANIFEST_MODES.includes(man.delivery_mode)) {
     problems.push(
-      `config is read from a package the launcher deploys itself, delivery_mode "manifest" or "manifest_variants", and this one is ${JSON.stringify(man.delivery_mode)}`,
+      `config is read from a package the launcher deploys itself, delivery_mode "manifest", "manifest_variants" or "manifest_versioned", and this one is ${JSON.stringify(man.delivery_mode)}`,
     );
   }
   for (const key of Object.keys(config)) {

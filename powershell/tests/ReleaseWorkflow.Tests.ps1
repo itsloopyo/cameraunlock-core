@@ -168,7 +168,7 @@ function Test-Delivery {
     return Get-ThrownId { Assert-LauncherManifestDelivery -RepoRoot $dir }
 }
 
-foreach ($mode in @('manifest', 'manifest_variants', 'external')) {
+foreach ($mode in @('manifest', 'manifest_variants', 'manifest_versioned', 'external')) {
     $err = Test-Delivery $mode "{ `"delivery_mode`": `"$mode`" }"
     Check "delivery_mode $mode passes" ($err -eq '') "threw $err"
 }

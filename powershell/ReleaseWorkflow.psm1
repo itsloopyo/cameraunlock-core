@@ -1424,7 +1424,9 @@ function Assert-ManifestSeedsMatchShipped {
     Fails packaging when launcher-manifest.json would not get native deployment
     and does not say why.
 .DESCRIPTION
-    Lopari deploys natively only for "manifest" and "manifest_variants",
+    Lopari deploys natively only for "manifest", "manifest_variants" and
+    "manifest_versioned" (the last only from a Lopari that knows the
+    manifest's schema_version; every older one reads it as install.cmd),
     matched case-sensitively. Every other string, "external" included,
     installs through install.cmd without a word: an absent field, a typo, a
     value in another case and a value it has never heard of. An external mod
@@ -1460,7 +1462,7 @@ function Assert-LauncherManifestDelivery {
     if ($modeProperty.Count -gt 0) {
         $mode = $modeProperty[0].Value
         $isString = $mode -is [string]
-        if ($isString -and $mode -cin @('manifest', 'manifest_variants', 'external')) { return }
+        if ($isString -and $mode -cin @('manifest', 'manifest_variants', 'manifest_versioned', 'external')) { return }
         if (-not ($isString -and $mode -ceq 'install_cmd')) {
             $text = if ($null -eq $mode) { 'null' } else { "$mode" }
             throw "launcher-manifest.json has delivery_mode `"$text`", which the launcher does not know and silently installs through install.cmd. Use `"manifest`" (or `"manifest_variants`" / `"external`") and declare the payload in files / loader."

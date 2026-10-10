@@ -140,6 +140,65 @@ for (const [label, mode] of [["capitalised", "Manifest"], ["upper-install-cmd", 
 ${r.out}`);
 }
 
+// manifest_versioned and jvm_site_config: the block only under the mode an older launcher sends to
+// install.cmd, the scripts that launcher runs in the ZIP, and every jar it names deployed beside
+// the site config.
+{
+  const jvm = (extra = {}) => ({
+    schema_version: 3,
+    mod_info: { name: "Mod", version: "1.2.0", game_id: "mod" },
+    strategy: "JavaAgent",
+    delivery_mode: "manifest_versioned",
+    files: [
+      { source: "plugins/Mod.jar", target: "Mod.jar" },
+      { source: "plugins/Mod.dll", target: "Mod.dll" },
+    ],
+    jvm_site_config: { config: "Game64.json", site: "Game64.site.json", agent_jars: ["Mod.jar"], legacy_jars: ["Old.jar"] },
+    ...extra,
+  });
+  const scripts = { "install.cmd": "@echo off", "uninstall.cmd": "@echo off" };
+  const jvmFiles = (extra = {}) => ({ "plugins/Mod.jar": "jar", "plugins/Mod.dll": "dll", ...scripts, ...extra });
+  const jvmCase = (label, man, files = jvmFiles()) => run(VALIDATOR, zip(path.join(scratch, "jvm", `${label}-v1.2.0-installer.zip`), man, files));
+
+  const good = jvmCase("good", jvm());
+  check(good.status === 0 && good.out.includes("install_cmd, 2 script(s)") && good.out.includes("- manifest, 2 file(s)"), `jvm: a versioned manifest with its scripts should pass, got ${good.status}\n${good.out}`);
+  const noScripts = jvmCase("no-scripts", jvm(), { "plugins/Mod.jar": "jar", "plugins/Mod.dll": "dll" });
+  check(noScripts.status === 1 && noScripts.out.includes("install.cmd is not in the zip"), `jvm: the scripts an older launcher runs must be in the ZIP, got ${noScripts.status}\n${noScripts.out}`);
+
+  const sub = jvm({
+    files: [{ source: "plugins/Mod.jar", target: "bin/Mod.jar" }, { source: "plugins/Mod.dll", target: "bin/Mod.dll" }],
+    jvm_site_config: { config: "bin/Game64.json", site: "bin\\Game64.site.json", agent_jars: ["Mod.jar"], main_class: "mod/Boot" },
+  });
+  const inSub = jvmCase("subfolder", sub);
+  check(inSub.status === 0, `jvm: a site config in a subfolder beside its jar should pass, got ${inSub.status}\n${inSub.out}`);
+
+  for (const [label, man, expected] of [
+    ["plain-manifest", jvm({ delivery_mode: "manifest" }), 'jvm_site_config needs delivery_mode "manifest_versioned"'],
+    ["install-cmd", jvm({ delivery_mode: "install_cmd", install_cmd_reason: "x" }), 'jvm_site_config needs delivery_mode "manifest_versioned"'],
+    ["old-schema", jvm({ schema_version: 2 }), 'needs schema_version 3 or above, and this one is 2'],
+    ["string-schema", jvm({ schema_version: "3" }), 'needs schema_version 3 or above, and this one is "3"'],
+    ["unknown-key", jvm({ jvm_site_config: { ...jvm().jvm_site_config, vm_args: [] } }), 'jvm_site_config has an unknown key "vm_args"'],
+    ["not-json", jvm({ jvm_site_config: { ...jvm().jvm_site_config, site: "Game64.site.cfg" } }), "jvm_site_config.site must name a .json file"],
+    ["traversal", jvm({ jvm_site_config: { ...jvm().jvm_site_config, config: "../Game64.json" } }), "jvm_site_config.config must stay inside the game folder"],
+    ["absolute", jvm({ jvm_site_config: { ...jvm().jvm_site_config, site: "C:\\Game\\Game64.site.json" } }), "jvm_site_config.site must stay inside the game folder"],
+    ["same-file", jvm({ jvm_site_config: { ...jvm().jvm_site_config, site: "game64.JSON" } }), "jvm_site_config.site is the stock config itself"],
+    ["no-jars", jvm({ jvm_site_config: { ...jvm().jvm_site_config, agent_jars: [] } }), "jvm_site_config.agent_jars must be a nonempty array of jar file names"],
+    ["jar-path", jvm({ jvm_site_config: { ...jvm().jvm_site_config, agent_jars: ["bin/Mod.jar"] } }), "jvm_site_config.agent_jars must be a nonempty array"],
+    ["legacy-dll", jvm({ jvm_site_config: { ...jvm().jvm_site_config, legacy_jars: ["Old.dll"] } }), "jvm_site_config.legacy_jars must be an array of jar file names"],
+    ["dotted-class", jvm({ jvm_site_config: { ...jvm().jvm_site_config, main_class: "com.cameraunlock.core.agent.Boot" } }), "must be a class name in slash form"],
+    ["undeployed-jar", jvm({ jvm_site_config: { ...jvm().jvm_site_config, agent_jars: ["Other.jar"] } }), "jvm_site_config names Other.jar, which no files[] row deploys beside Game64.site.json"],
+    ["jar-elsewhere", jvm({ files: [{ source: "plugins/Mod.jar", target: "lib/Mod.jar" }, { source: "plugins/Mod.dll", target: "Mod.dll" }] }), "jvm_site_config names Mod.jar, which no files[] row deploys"],
+    ["shipped-site", jvm({ files: [...jvm().files, { source: "plugins/Game64.site.json", target: "Game64.site.json" }] }), "a files[] row ships Game64.site.json"],
+  ]) {
+    const files = label === "shipped-site" ? jvmFiles({ "plugins/Game64.site.json": "{}" }) : jvmFiles();
+    const r = jvmCase(label, man, files);
+    check(r.status === 1 && r.out.includes(expected), `jvm: ${label} should fail with "${expected}", got ${r.status}\n${r.out}`);
+  }
+
+  const versionedNoJvm = jvmCase("versioned-without-jvm", jvm({ jvm_site_config: undefined }));
+  check(versionedNoJvm.status === 0, `jvm: manifest_versioned without a jvm_site_config should pass, got ${versionedNoJvm.status}\n${versionedNoJvm.out}`);
+}
+
 // The Nexus ZIP. The mod is abzu-headtracking, converted: its committed HeadTracking.ini is the
 // rendered canonical file, and its config installs at AbzuGame/Binaries/Win64/CameraUnlock.ini.
 const ALL = fs.readFileSync(path.join(CORE_ROOT, "data", "fixtures", "canonical-ini", "head-tracking", "all-concepts-fresh.ini"));

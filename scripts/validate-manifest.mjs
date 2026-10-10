@@ -98,6 +98,10 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // when core is a standalone sibling checkout (-> sibling repo tokens resolve).
 const ROOT = path.resolve(SCRIPT_DIR, "..", "..");
 
+// The schema_version manifest_versioned starts at, and the keys of its jvm_site_config block.
+const VERSIONED_SCHEMA = 3;
+const JVM_SITE_KEYS = new Set(["config", "site", "agent_jars", "legacy_jars", "main_class"]);
+
 // Sentinel for the no-args case: validate this repo's own built zip.
 const SELF = Symbol("self");
 
@@ -156,6 +160,7 @@ function validate(label, zip, repo) {
   checkConfigWrites(man, repo);
 
   const mode = man.delivery_mode;
+  assertVersionedWellFormed(man);
   // Lopari installs an absent mode through install.cmd, so it needs the same
   // stated reason as an explicit one. Same rule as ReleaseWorkflow.psm1's
   // Assert-LauncherManifestDelivery, which checks the committed manifest.
@@ -169,18 +174,21 @@ function validate(label, zip, repo) {
     return validateInstallCmd(label, zip, man, entries, entryByLower);
   }
   if (mode === "external") return validateExternal(label, zip, man, entryByLower);
-  if (mode !== "manifest" && mode !== "manifest_variants") {
+  if (mode !== "manifest" && mode !== "manifest_variants" && mode !== "manifest_versioned") {
     throw new Error(
-      `delivery_mode is "${mode}", expected one of "manifest", "manifest_variants", "install_cmd", "external"`,
+      `delivery_mode is "${mode}", expected one of "manifest", "manifest_variants", "manifest_versioned", "install_cmd", "external"`,
     );
   }
 
   assertVariantsWellFormed(man);
-  if ((man.variants ?? []).length > 0 && mode !== "manifest_variants") {
+  if ((man.variants ?? []).length > 0 && mode === "manifest") {
     throw new Error('variants require delivery_mode "manifest_variants" so older launchers use install.cmd');
   }
-  if (mode === "manifest_variants") {
-    if (!(man.variants ?? []).length) throw new Error('manifest_variants requires at least one variant');
+  if (mode === "manifest_variants" && !(man.variants ?? []).length) {
+    throw new Error('manifest_variants requires at least one variant');
+  }
+  // A launcher too old for these deploys the package through its scripts, so they must work.
+  if (mode === "manifest_variants" || mode === "manifest_versioned") {
     validateInstallCmd(label, zip, man, entries, entryByLower);
   }
 
@@ -540,6 +548,62 @@ function payloads(man) {
   const variants = man.variants ?? [];
   if (variants.length === 0) return [{ loader: man.loader, files: man.files ?? [] }];
   return variants;
+}
+
+// manifest_versioned is the mode a launcher reads as native deployment only when it knows the
+// manifest's schema_version, and as install.cmd otherwise; every launcher released before it was
+// added reads any unknown mode as install.cmd and ignores schema_version. So a block such a
+// launcher would skip, leaving the mod installed but unable to start, is allowed only there.
+function assertVersionedWellFormed(man) {
+  const versioned = man.delivery_mode === "manifest_versioned";
+  if (versioned && !(Number.isInteger(man.schema_version) && man.schema_version >= VERSIONED_SCHEMA)) {
+    throw new Error(`delivery_mode "manifest_versioned" needs schema_version ${VERSIONED_SCHEMA} or above, and this one is ${JSON.stringify(man.schema_version)}`);
+  }
+  if (!("jvm_site_config" in man)) return;
+  if (!versioned) {
+    throw new Error('jvm_site_config needs delivery_mode "manifest_versioned": a launcher that does not know the block would deploy the jar without the site config that starts it');
+  }
+  const jvm = man.jvm_site_config;
+  if (!jvm || typeof jvm !== "object" || Array.isArray(jvm)) throw new Error("jvm_site_config must be an object");
+  for (const key of Object.keys(jvm)) {
+    if (!JVM_SITE_KEYS.has(key)) throw new Error(`jvm_site_config has an unknown key "${key}"`);
+  }
+  for (const key of ["config", "site"]) {
+    const p = jvm[key];
+    if (typeof p !== "string" || !p.toLowerCase().endsWith(".json")) {
+      throw new Error(`jvm_site_config.${key} must name a .json file, and is ${JSON.stringify(p)}`);
+    }
+    if (path.win32.isAbsolute(p) || p.includes(":") || p.split(/[\\/]/).includes("..")) {
+      throw new Error(`jvm_site_config.${key} must stay inside the game folder: ${p}`);
+    }
+  }
+  if (jvm.config.toLowerCase() === jvm.site.toLowerCase()) {
+    throw new Error("jvm_site_config.site is the stock config itself");
+  }
+  const jarList = (key, required) => {
+    const list = jvm[key];
+    if (list === undefined && !required) return [];
+    if (!Array.isArray(list) || (required && list.length === 0) || !list.every((j) => typeof j === "string" && /^[^\\/:]+\.jar$/i.test(j))) {
+      throw new Error(`jvm_site_config.${key} must be ${required ? "a nonempty" : "an"} array of jar file names, and is ${JSON.stringify(list)}`);
+    }
+    return list;
+  };
+  const agents = jarList("agent_jars", true);
+  jarList("legacy_jars", false);
+  // The launcher's JVM is handed the class in the form its stock config names its own.
+  if (jvm.main_class !== undefined && (typeof jvm.main_class !== "string" || !/^[A-Za-z_$][\w$]*(\/[A-Za-z_$][\w$]*)*$/.test(jvm.main_class))) {
+    throw new Error(`jvm_site_config.main_class must be a class name in slash form (com/example/Boot), and is ${JSON.stringify(jvm.main_class)}`);
+  }
+  const norm = (p) => String(p ?? "").replace(/\\/g, "/").toLowerCase();
+  const targets = new Set((man.files ?? []).map((f) => norm(f.target)));
+  const siteDir = path.posix.dirname(norm(jvm.site));
+  for (const jar of agents) {
+    const at = siteDir === "." ? jar.toLowerCase() : `${siteDir}/${jar.toLowerCase()}`;
+    if (!targets.has(at)) throw new Error(`jvm_site_config names ${jar}, which no files[] row deploys beside ${jvm.site}`);
+  }
+  if (targets.has(norm(jvm.site))) {
+    throw new Error(`a files[] row ships ${jvm.site}, which jvm_site_config writes from the stock config`);
+  }
 }
 
 // Structural rules the launcher's resolver depends on. Each is something a

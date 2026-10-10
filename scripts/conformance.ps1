@@ -697,12 +697,15 @@ function Test-Manifest {
         return
     }
     $mode = if ($man.PSObject.Properties.Name -contains 'delivery_mode') { $man.delivery_mode } else { $null }
-    if ($mode -notin @('manifest', 'manifest_variants', 'install_cmd', 'external')) {
-        Add-Finding $Name 'manifest' 'FAIL' "delivery_mode is '$mode'; expected manifest, manifest_variants, install_cmd or external"
+    if ($mode -notin @('manifest', 'manifest_variants', 'manifest_versioned', 'install_cmd', 'external')) {
+        Add-Finding $Name 'manifest' 'FAIL' "delivery_mode is '$mode'; expected manifest, manifest_variants, manifest_versioned, install_cmd or external"
     }
+    # manifest_versioned is native deployment only on a launcher that knows its schema_version,
+    # so it is the one mode that is past 2.
     $schema = if ($man.PSObject.Properties.Name -contains 'schema_version') { $man.schema_version } else { $null }
-    if ($schema -ne 2) {
-        Add-Finding $Name 'manifest' 'FAIL' "schema_version is '$schema', the fleet is on 2"
+    $wantSchema = if ($mode -eq 'manifest_versioned') { 3 } else { 2 }
+    if ($schema -ne $wantSchema) {
+        Add-Finding $Name 'manifest' 'FAIL' "schema_version is '$schema', and delivery_mode '$mode' is on $wantSchema"
     }
 }
 

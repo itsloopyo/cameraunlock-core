@@ -1923,7 +1923,7 @@ on the built ZIP against the repo it was built from:
   it with. A package whose version is below `canonical_since` is a pre-release of it, and passes
   with a warning; a pre-release version sorts below its release, so a `1.1.0-rc1` build under
   `canonical_since` `1.1.0` warns too. Only a release below `canonical_since` fails (below).
-- `delivery_mode` is `manifest` or `manifest_variants`.
+- `delivery_mode` is `manifest`, `manifest_variants` or `manifest_versioned`.
 - The repo is converted and `data/config-format.json` records one config file for it. `game_root`
   needs exactly one `installed` path, and `path` is it; `exe_dir` needs `path` to be the tail of
   every `installed` path, and `path` beside each executable `data/games.json` records for the game
