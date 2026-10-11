@@ -472,7 +472,7 @@ void TestTapRegistration() {
     int holds = 0;
     const auto parsed = ParseKeyBindings("Delete, Ctrl+Shift+J, Alt+Delete");
     const std::vector<int> ids = cameraunlock::input::detail::RegisterTapKeyBindings(
-        poller, parsed.bindings, 400, 300, [&taps] { ++taps; }, [&doubles] { ++doubles; }, [&holds] { ++holds; }, &FakeHeld);
+        poller, parsed.bindings, 400, 300, {[&taps] { ++taps; }, [&doubles] { ++doubles; }}, [&holds] { ++holds; }, &FakeHeld);
     Check(ids.size() == 2 && ids[0] != ids[1], "one tap hotkey per key, for bindings that share one too");
 
     int ms = 0;
@@ -491,7 +491,7 @@ void TestTapRegistration() {
     at(0, kDelete, true, none);
     at(80, kDelete, false, none);
     at(299, kDelete, false, none);
-    Check(ran(0, 0, 0), "a plain key tapped waits out the double tap time");
+    Check(ran(0, 0, 0), "a plain key tapped waits out the tap gap");
     at(1, kDelete, false, none);
     Check(ran(1, 0, 0), "and then runs the tap");
     at(100, kDelete, true, none);
@@ -529,16 +529,19 @@ void TestTapRegistration() {
 
     HotkeyPoller fresh;
     const std::function<void()> nothing;
-    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, nothing, [] {}, [] {}); }) &&
-              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, [] {}, nothing, [] {}); }) &&
-              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, [] {}, [] {}, nothing); }),
+    const auto both = [] { return std::vector<std::function<void()>>{[] {}, [] {}}; };
+    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, {nothing, [] {}}, [] {}); }) &&
+              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, {[] {}, nothing}, [] {}); }) &&
+              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, both(), nothing); }),
           "an empty action throws");
-    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, -1, 300, [] {}, [] {}, [] {}); }) &&
-              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, -1, [] {}, [] {}, [] {}); }),
-          "a negative hold or double tap time throws");
-    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}, {none, 0x100}}, 400, 300, [] {}, [] {}, [] {}); }),
+    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, {[] {}}, [] {}); }),
+          "one tap alone throws");
+    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, -1, 300, both(), [] {}); }) &&
+              Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, -1, both(), [] {}); }),
+          "a negative hold time or tap gap throws");
+    Check(Throws([&] { RegisterTapKeyBindings(fresh, {{none, kDelete}, {none, 0x100}}, 400, 300, both(), [] {}); }),
           "a code outside 0x01-0xFE throws");
-    Check(RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, [] {}, [] {}, [] {}) == std::vector<int>{1},
+    Check(RegisterTapKeyBindings(fresh, {{none, kDelete}}, 400, 300, both(), [] {}) == std::vector<int>{1},
           "a refused list registered nothing");
     g_held = none;
 }

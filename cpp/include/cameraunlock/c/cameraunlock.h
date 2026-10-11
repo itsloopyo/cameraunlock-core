@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 5
+#define CAMERAUNLOCK_ABI 6
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -299,18 +299,22 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey(const char* key, const c
 CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey_held(const char* key, const char* comment, uint32_t flags,
                                                              const char* default_keys, int32_t hotkey_bit,
                                                              int32_t held_bit);
-/* How long after a key of cameraunlock_config_local_hotkey_taps is let go a second press of it
- * still makes a double tap. */
-#define CAMERAUNLOCK_DOUBLE_TAP_MS 300
-/* A key list of the game's own under [Hotkeys] whose keys do one thing tapped, another tapped
- * twice and a third held. cameraunlock_hotkeys_take answers `hotkey_bit` once
- * CAMERAUNLOCK_DOUBLE_TAP_MS have passed since a tap was let go with no second press,
- * `double_bit` as a second press goes down within that time, and `held_bit` once a first press
- * has been down CAMERAUNLOCK_HOLD_MS. Each is one bit, CAMERAUNLOCK_HOTKEY_LOCAL or above, and no
- * other row's. */
+/* How long after a press of a key of cameraunlock_config_local_hotkey_taps is let go the next
+ * press of it still counts as another tap. */
+#define CAMERAUNLOCK_TAP_GAP_MS 300
+/* The most taps a row of cameraunlock_config_local_hotkey_taps tells apart. */
+#define CAMERAUNLOCK_MOST_TAPS 8
+/* A key list of the game's own under [Hotkeys] whose keys do one thing tapped once, another
+ * tapped twice and so on to `taps` taps, and another held. A run of presses each within
+ * CAMERAUNLOCK_TAP_GAP_MS of the one before it being let go is that many taps.
+ * cameraunlock_hotkeys_take answers `tap_bits[n - 1]` for a run of n taps fewer than `taps` once
+ * CAMERAUNLOCK_TAP_GAP_MS have passed since its last press was let go, `tap_bits[taps - 1]` as the
+ * press that makes the run `taps` long goes down, and `held_bit` once a first press has been down
+ * CAMERAUNLOCK_HOLD_MS. `taps` is 2 to CAMERAUNLOCK_MOST_TAPS, and each bit is one bit,
+ * CAMERAUNLOCK_HOTKEY_LOCAL or above, and no other's. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey_taps(const char* key, const char* comment, uint32_t flags,
-                                                             const char* default_keys, int32_t hotkey_bit,
-                                                             int32_t double_bit, int32_t held_bit);
+                                                             const char* default_keys, const int32_t* tap_bits,
+                                                             int32_t taps, int32_t held_bit);
 
 /* The file the description renders for a first start, written to `path`: the committed
  * config/CameraUnlock.ini a mod's build keeps in step with its rows. */

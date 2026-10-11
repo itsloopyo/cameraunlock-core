@@ -533,10 +533,10 @@ A hotkey that does one thing tapped and another held (`RegisterHoldKeyBindings`,
 C interface's `cameraunlock_config_local_hotkey_held`, which holds for 400 ms) is driven by the
 hold time of a `tap`: `tap Delete 80` is its tap and `tap Delete 800` its hold.
 
-One that also tells a double tap (`RegisterTapKeyBindings`, or a row of
-`cameraunlock_config_local_hotkey_taps`, where the second press has 300 ms from the first being
-let go) is double tapped with a `wait` between two taps, which is played as that many
-milliseconds with the key up:
+One that also counts taps (`RegisterTapKeyBindings`, or a row of
+`cameraunlock_config_local_hotkey_taps`, where each press has 300 ms from the one before it being
+let go) is tapped more than once with a `wait` between the taps, which is played as that many
+milliseconds with the key up. Twice:
 
 ```text
 tap Delete 80

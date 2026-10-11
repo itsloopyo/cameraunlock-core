@@ -284,33 +284,38 @@ and in every rule, with two bits where that has one:
   down at both may have been let go and pressed again unseen, so it is timed as a press begun at
   the second look.
 
-A key that does one thing tapped, another tapped twice and a third held is a row of
-`cameraunlock_config_local_hotkey_taps(key, comment, flags, default_keys, hotkey_bit, double_bit,
-held_bit)`, with three bits:
+A key that does one thing tapped once, another tapped twice and so on, and another held, is a row
+of `cameraunlock_config_local_hotkey_taps(key, comment, flags, default_keys, tap_bits, taps,
+held_bit)`. `tap_bits` holds `taps` bits, the first for one tap, the second for two and so on, and
+`taps` is 2 to `CAMERAUNLOCK_MOST_TAPS` (8). A run of presses, each going down within
+`CAMERAUNLOCK_TAP_GAP_MS` (300 ms) of the one before it being let go, is that many taps:
 
-- `hotkey_bit` is answered for a tap, a press let go before `CAMERAUNLOCK_HOLD_MS`, once
-  `CAMERAUNLOCK_DOUBLE_TAP_MS` (300 ms) have passed since it was let go with no second press. A
-  tap is late by that much, which is what telling it from a double tap costs.
-- `double_bit` is answered as a second press goes down within that time. That press answers
-  nothing else, however long it is held and when it is let go, and the first tap's bit is never
-  answered. The press after it starts afresh.
+- A run shorter than `taps` answers its bit once `CAMERAUNLOCK_TAP_GAP_MS` have passed since its
+  last press was let go with no next press. It is late by that much, which is what telling it from
+  a longer run costs.
+- The press that makes the run `taps` long answers the last bit as it goes down. That press
+  answers nothing else, however long it is held and when it is let go. The press after it starts
+  afresh.
+- The first press of a run is a tap only when it is let go before `CAMERAUNLOCK_HOLD_MS`. A later
+  press counts as it goes down, however long it is held, and the time to the next press runs from
+  when it is let go.
 - `held_bit` is answered once, when a first press has been down `CAMERAUNLOCK_HOLD_MS` and is
   still down. Nothing is answered when it is let go, and a press right after it starts afresh: a
-  hold and a tap make no double tap.
-- Each is one bit at `CAMERAUNLOCK_HOTKEY_LOCAL` or above, the three differ, and none is a bit of
-  another row of any kind.
+  hold and a tap make no run.
+- Each bit is one bit at `CAMERAUNLOCK_HOTKEY_LOCAL` or above, they all differ, and none is a bit
+  of another row of any kind.
 - A chord is judged as each press goes down. A press that is not the chord takes no part: it is
-  no tap, no hold and no second press, and a tap waiting for its time is left waiting and is
+  no tap, no hold and no next press, and a run waiting for its time is left waiting and is
   answered when the time is up, as if that press had not been made.
 - The foreground rule is the same: a press begun while the game is not in the foreground takes no
-  part either, a tap let go there is no tap, and a tap whose time runs out there is dropped, not
-  answered late.
-- `cameraunlock_hotkeys_drop` forgets a tap that is waiting, as well as ending every press that
+  part either, a first press let go there is no tap, a run whose later press is let go there is
+  dropped, and a run whose time runs out there is dropped, not answered late.
+- `cameraunlock_hotkeys_drop` forgets a run that is waiting, as well as ending every press that
   is down.
-- After more than 100 ms between two looks at the keys, a waiting tap is dropped and a key still
+- After more than 100 ms between two looks at the keys, a waiting run is dropped and a key still
   down is a first press begun at the second look.
 
-A background test taps, double taps and holds such a key through isolated input's `tap <key> <ms>`
+A background test taps such a key any number of times, and holds it, through isolated input's `tap <key> <ms>`
 and `wait <ms>` ([isolated-input.md](isolated-input.md), The command file).
 
 ## The log

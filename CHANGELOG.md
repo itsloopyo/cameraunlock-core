@@ -9,6 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### BREAKING - a tap hotkey counts any number of taps (ABI 6)
+
+- `cameraunlock_config_local_hotkey_taps` takes `tap_bits` and `taps` in place of `hotkey_bit`
+  and `double_bit`: a bit for each number of taps from one, 2 to `CAMERAUNLOCK_MOST_TAPS` (8) of
+  them. A row of two taps does what the double tap row did. `CAMERAUNLOCK_DOUBLE_TAP_MS` is
+  `CAMERAUNLOCK_TAP_GAP_MS`, still 300. Java: `configLocalHotkeyTaps(key, comment, flags,
+  defaultKeys, int[] tapBits, heldBit)` and `TAP_GAP_MS`. `CAMERAUNLOCK_ABI` and
+  `CameraUnlock.ABI` are 6.
+- `HotkeyPoller::AddTapHotkey` and `RegisterTapKeyBindings` take a vector of tap actions in
+  place of a tap and a double tap action, and throw for fewer than two or an empty one.
+- To change: project-zomboid-headtracking, the one caller, passes its FirstPersonKey bits as an
+  array.
+
 ### Added - a config table lists its settings for a game's own options screen (ABI 5)
 
 - `ConfigTable::Options()` lists a `ConfigOption` for each Writable row that holds a bool, a whole

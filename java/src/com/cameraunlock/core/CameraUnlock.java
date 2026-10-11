@@ -25,7 +25,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 5;
+    public static final int ABI = 6;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -56,8 +56,10 @@ public final class CameraUnlock {
             HOTKEY_AIM_MODE = 0x8, HOTKEY_LOCAL = 0x100;
     /** How long a key of configLocalHotkeyHeld is down, in milliseconds, before it counts as held. */
     public static final int HOLD_MS = 400;
-    /** How long after a key of configLocalHotkeyTaps is let go, in milliseconds, a second press still makes a double tap. */
-    public static final int DOUBLE_TAP_MS = 300;
+    /** How long after a press of a key of configLocalHotkeyTaps is let go, in milliseconds, the next press still counts as another tap. */
+    public static final int TAP_GAP_MS = 300;
+    /** The most taps a row of configLocalHotkeyTaps tells apart. */
+    public static final int MOST_TAPS = 8;
 
     private static final int ERROR = -1;
     private static final ValueLayout.OfInt INT = ValueLayout.JAVA_INT;
@@ -412,7 +414,7 @@ public final class CameraUnlock {
         configLocalHotkeyHeld = bind("cameraunlock_config_local_hotkey_held",
                 FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT, INT));
         configLocalHotkeyTaps = bind("cameraunlock_config_local_hotkey_taps",
-                FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT, INT, INT));
+                FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, POINTER, INT, INT));
         configRender = bind("cameraunlock_config_render", FunctionDescriptor.of(INT, POINTER));
         configLoad = bind("cameraunlock_config_load", FunctionDescriptor.of(INT, POINTER, POINTER, POINTER));
         configReload = bind("cameraunlock_config_reload", FunctionDescriptor.of(INT));
@@ -684,19 +686,20 @@ public final class CameraUnlock {
     }
 
     /**
-     * A key list whose keys do one thing tapped, another tapped twice and a third held.
+     * A key list whose keys do one thing tapped once, another tapped twice and so on, and another
+     * held. A run of presses, each within TAP_GAP_MS of the one before it being let go, is that
+     * many taps.
      *
-     * @param hotkeyBit the bit hotkeysTake answers with once DOUBLE_TAP_MS have passed since a tap was let go
-     *                  with no second press
-     * @param doubleBit the bit it answers with as a second press goes down within that time
-     * @param heldBit   the bit it answers with once a first press has been down HOLD_MS. Each is one bit,
-     *                  HOTKEY_LOCAL or above, and no other row's
+     * @param tapBits the bit hotkeysTake answers with for each number of taps, from one: for a run
+     *                shorter than tapBits.length once TAP_GAP_MS have passed since its last press
+     *                was let go, and for one that long as its last press goes down. 2 to MOST_TAPS of them
+     * @param heldBit the bit it answers with once a first press has been down HOLD_MS. Each bit is
+     *                one bit, HOTKEY_LOCAL or above, and no other's
      */
-    public int configLocalHotkeyTaps(String key, String comment, int flags, String defaultKeys, int hotkeyBit, int doubleBit,
-            int heldBit) {
+    public int configLocalHotkeyTaps(String key, String comment, int flags, String defaultKeys, int[] tapBits, int heldBit) {
         try (Arena arena = Arena.ofConfined()) {
             return check(status(configLocalHotkeyTaps, text(arena, key), text(arena, comment), flags,
-                    text(arena, defaultKeys), hotkeyBit, doubleBit, heldBit));
+                    text(arena, defaultKeys), arena.allocateFrom(INT, tapBits), tapBits.length, heldBit));
         }
     }
 

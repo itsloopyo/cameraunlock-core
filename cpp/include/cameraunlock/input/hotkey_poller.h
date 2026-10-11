@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <atomic>
+#include <cstddef>
 #include <thread>
 #include <chrono>
 #include <mutex>
@@ -67,28 +68,34 @@ public:
     int AddHoldHotkey(int vkCode, int holdMs, HotkeyCallback onTap, HotkeyCallback onHold,
                       HotkeyCallback onDown = nullptr);
 
-    // Add a hotkey that tells a tap, a double tap and a hold apart.
+    // Add a hotkey that tells one to onTaps.size() taps and a hold apart.
     //
-    // A press let go before holdMs is a tap, and onTap runs for it only once
-    // doubleTapMs have passed since it was let go with no second press: a tap is late
-    // by that much. A second press that goes down inside that time runs onDouble as it
-    // goes down, and that press runs nothing else, however long it is held and when it
-    // is let go. A first press still down after holdMs runs onHold once, and nothing
-    // when it is let go. The press after a double tap or a hold is a first press again.
+    // A run of presses, each going down within tapGapMs of the one before it being let
+    // go, is that many taps. A run of fewer than onTaps.size() runs onTaps[n - 1] once
+    // tapGapMs have passed since its last press was let go with no next press: it is late
+    // by that much. A press that makes the run onTaps.size() long runs the last of them
+    // as it goes down, and that press runs nothing else, however long it is held and when
+    // it is let go. A first press still down after holdMs runs onHold once, and nothing
+    // when it is let go. A later press counts as it goes down, whatever it is held for,
+    // and the time to the next one runs from when it is let go. The press after a run
+    // or a hold is a first press again.
     //
     // `accepts`, when given, is asked as each press goes down, and a press it refuses
-    // takes no part: it is no tap, no hold and no second press, and a tap waiting for
-    // its time goes on waiting as if the press had not been made. It is called with
-    // the poller's lock held, so it must not call the poller.
+    // takes no part: it is no tap, no hold and no next press, and a run waiting for its
+    // time goes on waiting as if the press had not been made. It is called with the
+    // poller's lock held, so it must not call the poller.
     //
     // The foreground rule: a press that began while this process was not in the
-    // foreground takes no part either, a tap let go there is no tap, and a tap whose
-    // time runs out there is dropped, not run late. After a poll gap of more than
-    // kMaxHoldPollGapMs a waiting tap is dropped and a key still down is a first
-    // press begun at that poll.
+    // foreground takes no part either, a first press let go there is no tap, and a run
+    // whose time runs out there is dropped, not run late. After a poll gap of more than
+    // kMaxHoldPollGapMs a waiting run is dropped and a key still down is a first press
+    // begun at that poll.
     // Returns an ID that can be used to remove the hotkey
-    int AddTapHotkey(int vkCode, int holdMs, int doubleTapMs, HotkeyCallback onTap, HotkeyCallback onDouble,
-                     HotkeyCallback onHold, std::function<bool()> accepts = nullptr);
+    //
+    // Throws std::invalid_argument for fewer than two taps or an empty action: one tap
+    // and a hold is AddHoldHotkey.
+    int AddTapHotkey(int vkCode, int holdMs, int tapGapMs, std::vector<HotkeyCallback> onTaps, HotkeyCallback onHold,
+                     std::function<bool()> accepts = nullptr);
 
     // The longest time between two polls across which a key seen down at both is
     // taken to have stayed down. Six of the default 16 ms polls: a thread held up
@@ -185,19 +192,21 @@ private:
         int id;
         int vkCode;
         std::chrono::milliseconds hold;
-        std::chrono::milliseconds doubleTap;
-        HotkeyCallback onTap;
-        HotkeyCallback onDouble;
+        std::chrono::milliseconds tapGap;
+        std::vector<HotkeyCallback> onTaps;
         HotkeyCallback onHold;
         std::function<bool()> accepts;
         bool keyDown = false;
-        // What the press now down is. One that takes no part is kIgnored, as is no press.
-        enum class Press { kIgnored, kFirst, kSecond };
+        // What the press now down is. One that takes no part is kIgnored, as is no press. kLast
+        // made the run as long as it goes and has run its action.
+        enum class Press { kIgnored, kFirst, kLater, kLast };
         Press press = Press::kIgnored;
         // Set once a first press has been down for `hold`, so its release is not a tap.
         bool held = false;
         std::chrono::steady_clock::time_point downAt;
-        // A tap let go at releasedAt that runs once `doubleTap` has passed with no second press.
+        // The presses counted in the run so far.
+        std::size_t taps = 0;
+        // A run whose last press was let go at releasedAt, which runs once `tapGap` has passed with no next press.
         bool waiting = false;
         std::chrono::steady_clock::time_point releasedAt;
     };

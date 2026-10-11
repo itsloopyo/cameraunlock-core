@@ -117,18 +117,19 @@ inline std::vector<int> RegisterHoldKeyBindings(HotkeyPoller& poller, const std:
 
 // RegisterTapKeyBindings with the modifier read handed in, for a test.
 inline std::vector<int> RegisterTapKeyBindings(HotkeyPoller& poller, const std::vector<KeyBinding>& bindings, int holdMs,
-                                               int doubleTapMs, std::function<void()> onTap,
-                                               std::function<void()> onDouble, std::function<void()> onHold,
-                                               KeyModifiers (*held)()) {
-    if (!onTap || !onDouble || !onHold) {
-        throw std::invalid_argument("RegisterTapKeyBindings needs an action for a tap, one for a double tap and one for a hold");
+                                               int tapGapMs, const std::vector<std::function<void()>>& onTaps,
+                                               std::function<void()> onHold, KeyModifiers (*held)()) {
+    if (onTaps.size() < 2) throw std::invalid_argument("RegisterTapKeyBindings needs an action for each of two taps or more");
+    for (const std::function<void()>& onTap : onTaps) {
+        if (!onTap) throw std::invalid_argument("RegisterTapKeyBindings needs an action for every number of taps");
     }
+    if (!onHold) throw std::invalid_argument("RegisterTapKeyBindings needs an action for a hold");
     if (holdMs < 0) throw std::invalid_argument("hold time " + std::to_string(holdMs) + " ms is negative");
-    if (doubleTapMs < 0) throw std::invalid_argument("double tap time " + std::to_string(doubleTapMs) + " ms is negative");
+    if (tapGapMs < 0) throw std::invalid_argument("tap gap " + std::to_string(tapGapMs) + " ms is negative");
 
     std::vector<int> ids;
     for (KeyGroup& group : GroupByKey(bindings)) {
-        ids.push_back(poller.AddTapHotkey(group.vk, holdMs, doubleTapMs, onTap, onDouble, onHold,
+        ids.push_back(poller.AddTapHotkey(group.vk, holdMs, tapGapMs, onTaps, onHold,
                                           [modifiers = std::move(group.modifiers), held] {
                                               const KeyModifiers now = held();
                                               for (const KeyModifiers binding : modifiers) {
@@ -176,20 +177,21 @@ inline std::vector<int> RegisterHoldKeyBindings(HotkeyPoller& poller, const std:
                                            &detail::HeldModifiers);
 }
 
-/// Puts a hotkey list on the poller whose keys do one thing tapped, another tapped twice and a
-/// third held: one AddTapHotkey per distinct key, with `onTap`, `onDouble` and `onHold` as that
-/// function runs them. detail::BindingFires is asked as each press goes down, and a press it
-/// refuses takes no part: a key pressed a second time without the chord's modifiers is no double
-/// tap, and the tap before it still runs when its time is up. Returns one id per distinct key, as
-/// RegisterKeyBindings does.
+/// Puts a hotkey list on the poller whose keys do one thing tapped once, another tapped twice and
+/// so on to onTaps.size() taps, and another held: one AddTapHotkey per distinct key, with `onTaps`
+/// and `onHold` as that function runs them. detail::BindingFires is asked as each press goes down,
+/// and a press it refuses takes no part: a key pressed again without the chord's modifiers is no
+/// next tap, and the run before it still runs when its time is up. Returns one id per distinct
+/// key, as RegisterKeyBindings does.
 ///
-/// Throws std::invalid_argument for an empty action, a negative hold or double tap time, a code
-/// outside 0x01-0xFE or a modifier value outside KeyModifiers, before registering anything.
+/// Throws std::invalid_argument for fewer than two taps, an empty action, a negative hold time or
+/// tap gap, a code outside 0x01-0xFE or a modifier value outside KeyModifiers, before registering
+/// anything.
 inline std::vector<int> RegisterTapKeyBindings(HotkeyPoller& poller, const std::vector<KeyBinding>& bindings, int holdMs,
-                                               int doubleTapMs, std::function<void()> onTap,
-                                               std::function<void()> onDouble, std::function<void()> onHold) {
-    return detail::RegisterTapKeyBindings(poller, bindings, holdMs, doubleTapMs, std::move(onTap), std::move(onDouble),
-                                          std::move(onHold), &detail::HeldModifiers);
+                                               int tapGapMs, const std::vector<std::function<void()>>& onTaps,
+                                               std::function<void()> onHold) {
+    return detail::RegisterTapKeyBindings(poller, bindings, holdMs, tapGapMs, onTaps, std::move(onHold),
+                                          &detail::HeldModifiers);
 }
 
 }  // namespace cameraunlock::input

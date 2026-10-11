@@ -266,7 +266,7 @@ struct TapRig {
     TapRig() {
         g_down[cameraunlock::input::VK::Delete] = false;
         id = poller.AddTapHotkey(
-            cameraunlock::input::VK::Delete, 400, 300, [this] { ++taps; }, [this] { ++doubles; }, [this] { ++holds; },
+            cameraunlock::input::VK::Delete, 400, 300, {[this] { ++taps; }, [this] { ++doubles; }}, [this] { ++holds; },
             [this] { return accept; });
     }
 
@@ -471,6 +471,134 @@ void TestTapDoubleTapAndHold() {
     g_down[cameraunlock::input::VK::Delete] = false;
 }
 
+// A poller with one tap hotkey on Delete that counts four taps, held at 400 ms with 300 between
+// taps, and a count of what it ran for each number of taps.
+struct FourTapRig {
+    cameraunlock::input::HotkeyPoller poller;
+    int ran[4] = {};
+    int holds = 0;
+    int last = 0;
+    bool wasForeground = true;
+
+    FourTapRig() {
+        g_down[cameraunlock::input::VK::Delete] = false;
+        poller.AddTapHotkey(cameraunlock::input::VK::Delete, 400, 300,
+                            {[this] { ++ran[0]; }, [this] { ++ran[1]; }, [this] { ++ran[2]; }, [this] { ++ran[3]; }},
+                            [this] { ++holds; });
+    }
+
+    void At(int ms, bool down, bool foreground = true) {
+        for (int t = last + 16; t < ms; t += 16) Poll(t, wasForeground);
+        Jump(ms, down, foreground);
+    }
+
+    void Jump(int ms, bool down, bool foreground = true) {
+        g_down[cameraunlock::input::VK::Delete] = down;
+        Poll(ms, foreground);
+        last = ms;
+        wasForeground = foreground;
+    }
+
+    // Presses the key `times` times from `from`, each down 80 ms and up 100 ms, and answers when the last was let go.
+    int Taps(int from, int times) {
+        for (int i = 0; i < times; ++i) {
+            At(from + i * 180, true);
+            At(from + i * 180 + 80, false);
+        }
+        return from + (times - 1) * 180 + 80;
+    }
+
+    bool Ran(int one, int two, int three, int four, int h) const {
+        return ran[0] == one && ran[1] == two && ran[2] == three && ran[3] == four && holds == h;
+    }
+
+private:
+    void Poll(int ms, bool foreground) {
+        poller.PollAt(std::chrono::steady_clock::time_point() + std::chrono::milliseconds(ms), foreground, &FakeDown);
+    }
+};
+
+void TestFourTaps() {
+    std::cout << "HotkeyPoller::AddTapHotkey, four taps:\n";
+    {
+        FourTapRig rig;
+        int up = rig.Taps(0, 3);
+        rig.At(up + 299, false);
+        Check(rig.Ran(0, 0, 0, 0, 0), "three taps run nothing while a fourth could still come");
+        rig.At(up + 300, false);
+        Check(rig.Ran(0, 0, 1, 0, 0), "and run the third action once the gap has passed");
+        up = rig.Taps(up + 400, 2);
+        rig.At(up + 300, false);
+        Check(rig.Ran(0, 1, 1, 0, 0), "two taps run the second");
+        up = rig.Taps(up + 400, 1);
+        rig.At(up + 300, false);
+        Check(rig.Ran(1, 1, 1, 0, 0), "and one the first");
+    }
+    {
+        FourTapRig rig;
+        rig.Taps(0, 3);
+        rig.At(540, true);
+        Check(rig.Ran(0, 0, 0, 1, 0), "the fourth press runs the fourth action as it goes down");
+        rig.At(1500, true);
+        rig.At(1600, false);
+        rig.At(2000, false);
+        Check(rig.Ran(0, 0, 0, 1, 0), "and nothing else, held or let go");
+        int up = rig.Taps(2016, 1);
+        rig.At(up + 300, false);
+        Check(rig.Ran(1, 0, 0, 1, 0), "the press after it starts a run afresh");
+    }
+    {
+        FourTapRig rig;
+        rig.At(0, true);
+        rig.At(80, false);
+        rig.At(180, true);
+        rig.At(1000, true);
+        Check(rig.Ran(0, 0, 0, 0, 0), "a second press held past the hold time is no hold");
+        rig.At(1100, false);
+        rig.At(1399, false);
+        Check(rig.Ran(0, 0, 0, 0, 0), "it is the second tap, and the gap runs from its release");
+        rig.At(1400, false);
+        Check(rig.Ran(0, 1, 0, 0, 0), "after which the second action runs");
+    }
+    {
+        FourTapRig rig;
+        rig.At(0, true);
+        rig.At(400, true);
+        Check(rig.Ran(0, 0, 0, 0, 1), "a first press held is the hold");
+        rig.At(500, false);
+        rig.At(560, true);
+        rig.At(640, false);
+        rig.At(940, false);
+        Check(rig.Ran(1, 0, 0, 0, 1), "and the press right after it a first tap, not a second");
+    }
+    {
+        FourTapRig rig;
+        rig.Taps(0, 2);
+        rig.At(360, true);
+        rig.At(440, false, false);
+        rig.At(456, false, true);
+        rig.At(1000, false, true);
+        Check(rig.Ran(0, 0, 0, 0, 0), "a run whose later press is let go in the background runs nothing");
+    }
+    {
+        FourTapRig rig;
+        rig.Taps(0, 2);
+        rig.poller.DisarmHoldPressesWith(&FakeDown);
+        int up = rig.Taps(400, 1);
+        rig.At(up + 300, false);
+        Check(rig.Ran(1, 0, 0, 0, 0), "a run is forgotten when the presses are disarmed, and the press after is a first tap");
+    }
+    {
+        FourTapRig rig;
+        int up = rig.Taps(0, 2);
+        rig.Jump(up + 2000, false);
+        up = rig.Taps(up + 2016, 1);
+        rig.At(up + 300, false);
+        Check(rig.Ran(1, 0, 0, 0, 0), "a run waiting across a gap with no poll is dropped, and the press after is a first tap");
+    }
+    g_down[cameraunlock::input::VK::Delete] = false;
+}
+
 }  // namespace
 
 int RunHotkeyTests() {
@@ -480,5 +608,6 @@ int RunHotkeyTests() {
     TestNavClusterAccepted();
     TestTapAndHold();
     TestTapDoubleTapAndHold();
+    TestFourTaps();
     return g_failures;
 }

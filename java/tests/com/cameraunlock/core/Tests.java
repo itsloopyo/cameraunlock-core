@@ -314,13 +314,18 @@ public final class Tests {
         check(core.configLocalHotkeyHeld("SeatKey", "Tapped for the first player, held for the second.", 0, "Delete",
                         CameraUnlock.HOTKEY_LOCAL << 1, CameraUnlock.HOTKEY_LOCAL << 2) == 5 && CameraUnlock.HOLD_MS == 400,
                 "and with two bits of its own is a row numbered like the others");
-        String twice = refusal(() -> core.configLocalHotkeyTaps("TurnKey", "Tapped, tapped twice or held.", 0, "Home",
-                CameraUnlock.HOTKEY_LOCAL << 3, CameraUnlock.HOTKEY_LOCAL << 2, CameraUnlock.HOTKEY_LOCAL << 5));
-        check(twice.contains("cameraunlock_config_local_hotkey_taps") && twice.contains("double_bit is another row's"),
-                "a key row that tells a double tap as well cannot answer another row's bit for it: " + twice);
-        check(core.configLocalHotkeyTaps("TurnKey", "Tapped, tapped twice or held.", 0, "Home", CameraUnlock.HOTKEY_LOCAL << 3,
-                        CameraUnlock.HOTKEY_LOCAL << 4, CameraUnlock.HOTKEY_LOCAL << 5) == 6 && CameraUnlock.DOUBLE_TAP_MS == 300,
-                "and with three bits of its own is a row numbered like the others");
+        String twice = refusal(() -> core.configLocalHotkeyTaps("TurnKey", "Tapped once to three times or held.", 0, "Home",
+                new int[] {CameraUnlock.HOTKEY_LOCAL << 3, CameraUnlock.HOTKEY_LOCAL << 2, CameraUnlock.HOTKEY_LOCAL << 6},
+                CameraUnlock.HOTKEY_LOCAL << 5));
+        check(twice.contains("cameraunlock_config_local_hotkey_taps") && twice.contains("a bit of tap_bits is another row's"),
+                "a key row that counts taps cannot answer another row's bit for one of them: " + twice);
+        String once = refusal(() -> core.configLocalHotkeyTaps("TurnKey", "Tapped or held.", 0, "Home",
+                new int[] {CameraUnlock.HOTKEY_LOCAL << 3}, CameraUnlock.HOTKEY_LOCAL << 5));
+        check(once.contains("taps is not 2 to CAMERAUNLOCK_MOST_TAPS"), "nor count one tap alone: " + once);
+        check(core.configLocalHotkeyTaps("TurnKey", "Tapped once to three times or held.", 0, "Home",
+                        new int[] {CameraUnlock.HOTKEY_LOCAL << 3, CameraUnlock.HOTKEY_LOCAL << 4, CameraUnlock.HOTKEY_LOCAL << 6},
+                        CameraUnlock.HOTKEY_LOCAL << 5) == 6 && CameraUnlock.TAP_GAP_MS == 300,
+                "and with bits of its own is a row numbered like the others");
 
         core.configRender(rendered);
         String fresh = Files.readString(rendered, StandardCharsets.US_ASCII);
