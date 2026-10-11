@@ -187,7 +187,9 @@ ${r.out}`);
     ["legacy-dll", jvm({ jvm_site_config: { ...jvm().jvm_site_config, legacy_jars: ["Old.dll"] } }), "jvm_site_config.legacy_jars must be an array of jar file names"],
     ["dotted-class", jvm({ jvm_site_config: { ...jvm().jvm_site_config, main_class: "com.cameraunlock.core.agent.Boot" } }), "must be a class name in slash form"],
     ["undeployed-jar", jvm({ jvm_site_config: { ...jvm().jvm_site_config, agent_jars: ["Other.jar"] } }), "jvm_site_config names Other.jar, which no files[] row deploys beside Game64.site.json"],
-    ["jar-elsewhere", jvm({ files: [{ source: "plugins/Mod.jar", target: "lib/Mod.jar" }, { source: "plugins/Mod.dll", target: "Mod.dll" }] }), "jvm_site_config names Mod.jar, which no files[] row deploys"],
+    ["quoted-jar", jvm({ jvm_site_config: { ...jvm().jvm_site_config, agent_jars: ['Mod".jar'] } }), "jvm_site_config.agent_jars must be a nonempty array"],
+    ["exe-dir-jar", jvm({ files: [{ source: "plugins/Mod.jar", target: "Mod.jar", anchor: "exe_dir" }, { source: "plugins/Mod.dll", target: "Mod.dll" }] }), "jvm_site_config names Mod.jar, which no files[] row deploys"],
+    ["jar-elsewhere",jvm({ files: [{ source: "plugins/Mod.jar", target: "lib/Mod.jar" }, { source: "plugins/Mod.dll", target: "Mod.dll" }] }), "jvm_site_config names Mod.jar, which no files[] row deploys"],
     ["shipped-site", jvm({ files: [...jvm().files, { source: "plugins/Game64.site.json", target: "Game64.site.json" }] }), "a files[] row ships Game64.site.json"],
   ]) {
     const files = label === "shipped-site" ? jvmFiles({ "plugins/Game64.site.json": "{}" }) : jvmFiles();

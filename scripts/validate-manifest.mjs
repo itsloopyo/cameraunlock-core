@@ -583,8 +583,8 @@ function assertVersionedWellFormed(man) {
   const jarList = (key, required) => {
     const list = jvm[key];
     if (list === undefined && !required) return [];
-    if (!Array.isArray(list) || (required && list.length === 0) || !list.every((j) => typeof j === "string" && /^[^\\/:]+\.jar$/i.test(j))) {
-      throw new Error(`jvm_site_config.${key} must be ${required ? "a nonempty" : "an"} array of jar file names, and is ${JSON.stringify(list)}`);
+    if (!Array.isArray(list) || (required && list.length === 0) || !list.every((j) => typeof j === "string" && /^[A-Za-z0-9._ -]+\.jar$/i.test(j))) {
+      throw new Error(`jvm_site_config.${key} must be ${required ? "a nonempty" : "an"} array of jar file names (letters, digits, space, dot, dash, underscore), and is ${JSON.stringify(list)}`);
     }
     return list;
   };
@@ -595,7 +595,8 @@ function assertVersionedWellFormed(man) {
     throw new Error(`jvm_site_config.main_class must be a class name in slash form (com/example/Boot), and is ${JSON.stringify(jvm.main_class)}`);
   }
   const norm = (p) => String(p ?? "").replace(/\\/g, "/").toLowerCase();
-  const targets = new Set((man.files ?? []).map((f) => norm(f.target)));
+  // The launcher writes the site config into the game folder, so the jars it names are found there.
+  const targets = new Set((man.files ?? []).filter((f) => (f.anchor ?? "game_root") === "game_root").map((f) => norm(f.target)));
   const siteDir = path.posix.dirname(norm(jvm.site));
   for (const jar of agents) {
     const at = siteDir === "." ? jar.toLowerCase() : `${siteDir}/${jar.toLowerCase()}`;
