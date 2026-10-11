@@ -1,5 +1,5 @@
 {
-  "about": "Inputs and expected results for the site JVM config a Java agent mod writes beside a game's launcher (scripts/jvm-site-config.ps1, and the launcher's jvm_site_config deploy step). Each case names the agent jars and, where it is not core's, the boot class. stock and site are the files' text as found in the game folder, null when absent. expect.site is the text of the site config written, compared as parsed JSON with key order kept; expect.refused is why nothing was written: stock (the stock config is missing or not the expected shape, script exit 1) or foreign (a site config that names none of the agent jars is there, script exit 3).",
+  "about": "Inputs and expected results for the site JVM config a Java agent mod writes beside a game's launcher (scripts/jvm-site-config.ps1, and the launcher's jvm_site_config deploy step). Each case names the agent jars and, where it is not core's, the boot class. stock and site are the files' text as found in the game folder, null when absent; stock is UTF-8 without a byte order mark unless stock_encoding is utf-16le, which is that encoding with its mark. expect.site is the text of the site config written, compared as parsed JSON with key order kept; expect.refused is why nothing was written: stock (the stock config is missing or not the expected shape, script exit 1) or foreign (a site config that names none of the agent jars is there, script exit 3).",
   "cases": [
     {
       "name": "project-zomboid-42.21-stock",
@@ -26,6 +26,25 @@
       "site": null,
       "expect": {
         "site": "{\"mainClass\":\"com/cameraunlock/core/agent/Boot\",\"classpath\":[\".\",\"game.jar\",\"Fixture.jar\",\"Second.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\",\"-Xmx1g\",\"-Xss4m\"]}"
+      }
+    },
+    {
+      "name": "our-arguments-and-jars-are-matched-without-case",
+      "agent_jars": ["Fixture.jar"],
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\",\"fixture.jar\"],\"vmArgs\":[\"-xx:+enabledynamicagentloading\",\"-Xmx1g\"]}",
+      "site": null,
+      "expect": {
+        "site": "{\"mainClass\":\"com/cameraunlock/core/agent/Boot\",\"classpath\":[\".\",\"Fixture.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\",\"-Xmx1g\"]}"
+      }
+    },
+    {
+      "name": "a-utf-16-stock-config-is-read-by-its-byte-order-mark",
+      "agent_jars": ["Fixture.jar"],
+      "stock_encoding": "utf-16le",
+      "stock": "{\"mainClass\":\"a/Main\",\"classpath\":[\".\"],\"vmArgs\":[\"-Xmx1g\"]}",
+      "site": null,
+      "expect": {
+        "site": "{\"mainClass\":\"com/cameraunlock/core/agent/Boot\",\"classpath\":[\".\",\"Fixture.jar\"],\"vmArgs\":[\"-Dcameraunlock.mainClass=a/Main\",\"-XX:+EnableDynamicAgentLoading\",\"--enable-native-access=ALL-UNNAMED\",\"-Xmx1g\"]}"
       }
     },
     {

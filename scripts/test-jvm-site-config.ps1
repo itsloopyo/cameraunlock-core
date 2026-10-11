@@ -27,7 +27,8 @@ foreach ($case in $vectors.cases) {
     New-Item -ItemType Directory -Path $dir | Out-Null
     $stock = Join-Path $dir 'Game64.json'
     $site = Join-Path $dir 'Game64.site.json'
-    if ($null -ne $case.stock) { [IO.File]::WriteAllText($stock, $case.stock, $utf8) }
+    $stockEncoding = if ($case.PSObject.Properties.Name -contains 'stock_encoding') { New-Object System.Text.UnicodeEncoding($false, $true) } else { $utf8 }
+    if ($null -ne $case.stock) { [IO.File]::WriteAllText($stock, $case.stock, $stockEncoding) }
     if ($null -ne $case.site) { [IO.File]::WriteAllText($site, $case.site, $utf8) }
 
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $helper,
