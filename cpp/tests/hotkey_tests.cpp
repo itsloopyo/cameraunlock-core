@@ -596,6 +596,17 @@ void TestFourTaps() {
         rig.At(up + 300, false);
         Check(rig.Ran(1, 0, 0, 0, 0), "a run waiting across a gap with no poll is dropped, and the press after is a first tap");
     }
+    {
+        FourTapRig rig;
+        rig.Taps(0, 1);
+        rig.At(180, true);
+        rig.Jump(380, false);
+        rig.At(1000, false);
+        Check(rig.Ran(0, 0, 0, 0, 0), "a later press first seen let go after a gap ends the run with nothing run");
+        int up = rig.Taps(1016, 1);
+        rig.At(up + 300, false);
+        Check(rig.Ran(1, 0, 0, 0, 0), "and the press after it is a first tap");
+    }
     g_down[cameraunlock::input::VK::Delete] = false;
 }
 

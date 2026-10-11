@@ -365,6 +365,9 @@ void HotkeyPoller::PollAt(std::chrono::steady_clock::time_point now, bool allowF
                 if (pressed && entry.keyDown && entry.press != Press::kIgnored && !entry.held) {
                     entry.press = allowFire ? Press::kFirst : Press::kIgnored;
                     entry.downAt = now;
+                } else if (!pressed && entry.press == Press::kLater) {
+                    // The run it was the next of is dropped above, so its release starts none.
+                    entry.press = Press::kIgnored;
                 }
             }
             // Before the key is looked at, so a press that goes down as the time runs out
