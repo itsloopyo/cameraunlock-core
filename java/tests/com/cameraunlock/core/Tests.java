@@ -326,12 +326,17 @@ public final class Tests {
                         new int[] {CameraUnlock.HOTKEY_LOCAL << 3, CameraUnlock.HOTKEY_LOCAL << 4, CameraUnlock.HOTKEY_LOCAL << 6},
                         CameraUnlock.HOTKEY_LOCAL << 5) == 6 && CameraUnlock.TAP_GAP_MS == 300,
                 "and with bits of its own is a row numbered like the others");
+        int microphone = core.configLocalText("Voice", "Microphone", "Which microphone.", CameraUnlock.ROW_WRITABLE, "Default");
+        check(microphone == 7, "a text row is numbered like the others");
+        check(refusal(() -> core.configLocalText("Voice", "Speaker", "Which speaker.", 0, "Default ")).contains("cameraunlock_config_local_text"),
+                "and one with a default the file cannot hold as it is is refused");
 
         core.configRender(rendered);
         String fresh = Files.readString(rendered, StandardCharsets.US_ASCII);
         check(fresh.contains("[CameraUnlock]") && fresh.contains("\r\nFieldOfView=65.0\r\n") && fresh.contains("\r\nQuality=Low\r\n")
                         && fresh.contains("\r\nGraphicsKey=F9\r\n") && fresh.contains("\r\nSeatKey=Delete\r\n") && fresh.contains("\r\nTurnKey=Home\r\n") && fresh.contains("\r\nCollisionMargin=0.12\r\n")
-                        && fresh.contains("; How far the view is held off a wall, in map tiles.\r\n") && fresh.contains("\r\nLocalSmoothing=default\r\n"),
+                        && fresh.contains("; How far the view is held off a wall, in map tiles.\r\n") && fresh.contains("\r\nLocalSmoothing=default\r\n")
+                        && fresh.contains("\r\nMicrophone=Default\r\n"),
                 "the render holds the stamp, the local rows, the game's own default and comment, and the global concepts as default");
 
         CameraUnlock.Config config = core.configLoad(file, defaults);
@@ -351,6 +356,17 @@ public final class Tests {
                 "a writable row saves as its word");
         check(refusal(() -> core.configSaveInt(arms, 0)).contains("Writable"), "a row not marked writable does not");
         check(refusal(() -> core.configSaveFloat(quality, 1f)).contains("not a float row"), "nor a float into an enum row");
+        check(core.configGetText(microphone).equals("Default"), "a text row reads back");
+        String named = "Microphone (USB Audio Device) é";
+        check(core.configSaveText(microphone, named) == CameraUnlock.SAVE_SAVED
+                        && Files.readString(file, StandardCharsets.UTF_8).contains("\r\nMicrophone=" + named + "\r\n")
+                        && core.configGetText(microphone).equals(named),
+                "and saves as UTF-8, reading back as saved");
+        check(refusal(() -> core.configSaveText(microphone, "two\nlines")).contains("cameraunlock_config_save_text")
+                        && refusal(() -> core.configGetText(fov)).contains("not a text row"),
+                "text the file cannot hold is refused, and a float row is not read as text");
+        // The checks after this one read the file as ASCII.
+        core.configSaveText(microphone, "Default");
 
         core.cycleTrackingMode();
         core.setAimMode(CameraUnlock.AIM_FREE_LOOK_MARKER);

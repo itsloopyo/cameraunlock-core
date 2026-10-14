@@ -534,7 +534,7 @@ struct HostConfig : HeadTrackingConfig {
     std::vector<LocalValue> locals;
 };
 
-enum class LocalKind { Bool, Int, Float, Enum, Hotkey };
+enum class LocalKind { Bool, Int, Float, Enum, Text, Hotkey };
 
 struct LocalRow {
     LocalKind kind;
@@ -651,6 +651,9 @@ cfg::ConfigTable<HostConfig> BuildTable(const ConfigState& c) {
                             cfg::EnumCodec<HostEnum>(std::move(tokens)), comment);
                 break;
             }
+            case LocalKind::Text:
+                table.Local(section, key, Getter<std::string>(i), Setter<std::string>(i), cfg::StringCodec(), comment);
+                break;
             case LocalKind::Hotkey:
                 table.Local(section, key, Getter<std::string>(i), Setter<std::string>(i), cfg::HotkeyCodec(), comment);
                 break;
@@ -1044,6 +1047,20 @@ std::int32_t cameraunlock_config_local_enum(const char* section, const char* key
     });
 }
 
+std::int32_t cameraunlock_config_local_text(const char* section, const char* key, const char* comment,
+                                            std::uint32_t flags, const char* default_text) {
+    return Guarded("cameraunlock_config_local_text", [&] {
+        Require(default_text != nullptr, "default_text is NULL");
+        LocalRow row{LocalKind::Text};
+        // Throws for text the file cannot hold, before the row is added.
+        cfg::StringCodec().Render(default_text);
+        row.start = std::string(default_text);
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        return AddLocal(c, section, key, comment, flags, std::move(row));
+    });
+}
+
 std::int32_t cameraunlock_config_local_hotkey(const char* key, const char* comment, std::uint32_t flags,
                                               const char* default_keys, std::int32_t hotkey_bit) {
     return Guarded("cameraunlock_config_local_hotkey", [&] {
@@ -1201,6 +1218,17 @@ std::int32_t cameraunlock_config_get_float(std::int32_t row, float* out) {
     });
 }
 
+std::int32_t cameraunlock_config_get_text(std::int32_t row, char* buffer, std::int32_t capacity) {
+    return Guarded("cameraunlock_config_get_text", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const LocalRow& described = LocalAt(c, row);
+        if (described.kind != LocalKind::Text) throw std::invalid_argument(described.key + " is not a text row");
+        return CopyOut(std::get<std::string>(c.loaded.locals[static_cast<std::size_t>(row)]), buffer, capacity, true);
+    });
+}
+
 std::int32_t cameraunlock_config_save_int(std::int32_t row, std::int32_t value) {
     return Guarded("cameraunlock_config_save_int", [&] {
         ConfigState& c = TheConfig();
@@ -1236,6 +1264,21 @@ std::int32_t cameraunlock_config_save_float(std::int32_t row, float value) {
         if (described.kind != LocalKind::Float) throw std::invalid_argument(described.key + " is not a float row");
         const std::size_t index = static_cast<std::size_t>(row);
         return Save(c, [&](HostConfig& config) { config.locals[index] = value; });
+    });
+}
+
+std::int32_t cameraunlock_config_save_text(std::int32_t row, const char* value) {
+    return Guarded("cameraunlock_config_save_text", [&] {
+        Require(value != nullptr, "value is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const LocalRow& described = LocalAt(c, row);
+        if (described.kind != LocalKind::Text) throw std::invalid_argument(described.key + " is not a text row");
+        cfg::StringCodec().Render(value);
+        const std::size_t index = static_cast<std::size_t>(row);
+        const std::string text = value;
+        return Save(c, [&](HostConfig& config) { config.locals[index] = text; });
     });
 }
 

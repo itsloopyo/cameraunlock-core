@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - text rows (ABI 7)
+
+- C interface: `cameraunlock_config_local_text(section, key, comment, flags, default_text)`,
+  `cameraunlock_config_get_text(row, buffer, capacity)` and `cameraunlock_config_save_text(row,
+  value)`, a local row that holds text as the file holds it, such as a device's name. A text row
+  is no option. Java: `configLocalText`, `configGetText` and `configSaveText`.
+  `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 7.
+
 ### Added - values saved as UTF-8
 
 - The editor (`EditIni`, `IniEditor.Edit`) writes a value as printable ASCII or well-formed UTF-8

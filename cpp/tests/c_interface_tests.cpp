@@ -889,11 +889,23 @@ void TestConfig(const fs::path& scratch) {
               taps("F10", {0x4000, 0x8000}, 0x1000) == CAMERAUNLOCK_ERROR,
           "and each of its bits is taken, for a row of any kind");
 
+    const std::int32_t microphone =
+        cameraunlock_config_local_text("Voice", "Microphone", "Which microphone.",
+                                       CAMERAUNLOCK_ROW_WRITABLE | CAMERAUNLOCK_ROW_LIVE, "Default");
+    Check(microphone == 7, "a text row is numbered like any other: " + LastError());
+    Check(cameraunlock_config_local_text("Voice", "Speaker", "Which speaker.", 0, " Default") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_local_text("Voice", "Speaker", "Which speaker.", 0, "Default\n") == CAMERAUNLOCK_ERROR,
+          "a default the file cannot hold as it is is refused: " + LastError());
+    Check(cameraunlock_config_local_text("Voice", "Speaker", "Which speaker.", 0, nullptr) == CAMERAUNLOCK_ERROR &&
+              LastError().find("default_text is NULL") != std::string::npos,
+          "and so is none at all");
+
     Check(cameraunlock_config_render(rendered.c_str()) == CAMERAUNLOCK_OK, "the description renders: " + LastError());
     const std::string fresh = ReadFile(scratch / "rendered.ini");
     Check(fresh.find("[CameraUnlock]") != std::string::npos && fresh.find("FieldOfView=65") != std::string::npos &&
               fresh.find("Quality=Low") != std::string::npos && fresh.find("GraphicsKey=F9") != std::string::npos && fresh.find("SeatKey=Delete") != std::string::npos && fresh.find("TurnKey=Home") != std::string::npos &&
-              fresh.find("CollisionMargin=0.12") != std::string::npos && fresh.find("LocalSmoothing=default") != std::string::npos,
+              fresh.find("CollisionMargin=0.12") != std::string::npos && fresh.find("LocalSmoothing=default") != std::string::npos &&
+              fresh.find("[Voice]") != std::string::npos && fresh.find("Microphone=Default") != std::string::npos,
           "the render holds the stamp, the local rows at their defaults and the global concepts as default");
 
     fs::create_directories(scratch / "defaults");
@@ -927,6 +939,28 @@ void TestConfig(const fs::path& scratch) {
           "a row not marked writable does not: " + LastError());
     Check(cameraunlock_config_save_int(quality, 9) == CAMERAUNLOCK_ERROR, "nor a value that names no word");
 
+    char text[64] = {};
+    Check(cameraunlock_config_get_text(microphone, text, sizeof(text)) == 7 && std::string(text) == "Default",
+          "a text row reads back as its bytes, its length answered: " + LastError());
+    char small[4] = {'x', 'x', 'x', 'x'};
+    Check(cameraunlock_config_get_text(microphone, small, sizeof(small)) == 7 && small[0] == 'x',
+          "a buffer too small for it is told the length and left alone");
+    Check(cameraunlock_config_get_text(fov, text, sizeof(text)) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_get_int(microphone, &number) == CAMERAUNLOCK_ERROR,
+          "a float row is not read as text, nor a text row as a number");
+    const char* named = "Microphone (USB Audio Device) \xc3\xa9";
+    Check(cameraunlock_config_save_text(microphone, named) == CAMERAUNLOCK_SAVE_SAVED, "a writable text row saves: " + LastError());
+    Check(ReadFile(scratch / "CameraUnlock.ini").find(std::string("Microphone=") + named) != std::string::npos,
+          "as its bytes, a character past ASCII included");
+    Check(cameraunlock_config_get_text(microphone, text, sizeof(text)) == static_cast<std::int32_t>(std::strlen(named)) &&
+              std::string(text) == named,
+          "and reads back as saved");
+    Check(cameraunlock_config_save_text(microphone, "two\nlines") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_text(microphone, "spaced ") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_text(microphone, nullptr) == CAMERAUNLOCK_ERROR,
+          "text the file cannot hold as it is is refused");
+    Check(cameraunlock_config_save_text(fov, "65") == CAMERAUNLOCK_ERROR, "and a row that is not text takes none");
+
     cameraunlock_session_cycle_tracking_mode();
     cameraunlock_session_cycle_aim_mode();
     Check(cameraunlock_config_save_tracking_mode() == CAMERAUNLOCK_SAVE_SAVED &&
@@ -945,9 +979,13 @@ void TestConfig(const fs::path& scratch) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     saved.replace(saved.find("FieldOfView=65"), 14, "FieldOfView=90");
     saved.replace(saved.find("Trees=12"), 8, "Trees=40");
+    const std::string held = std::string("Microphone=") + named;
+    saved.replace(saved.find(held), held.size(), "Microphone=None");
     std::ofstream(scratch / "CameraUnlock.ini", std::ios::binary | std::ios::trunc) << saved;
     Check(cameraunlock_config_reload() == CAMERAUNLOCK_RELOAD_APPLIED, "a file the player saved is: " + LastError());
     Check(cameraunlock_config_get_float(fov, &degrees) == CAMERAUNLOCK_OK && degrees == 90.0f, "a live row holds the new value");
+    Check(cameraunlock_config_get_text(microphone, text, sizeof(text)) == 4 && std::string(text) == "None",
+          "a live text row too");
     Check(cameraunlock_config_get_int(count, &number) == CAMERAUNLOCK_OK && number == 12,
           "a row not marked live keeps what the load gave it");
 

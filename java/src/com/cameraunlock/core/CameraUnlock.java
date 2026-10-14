@@ -25,7 +25,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 6;
+    public static final int ABI = 7;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -330,9 +330,10 @@ public final class CameraUnlock {
     private final MethodHandle lastError, logOpen, logWrite, logTake, settingsDefaults, sessionConfigure, sessionStart,
             sessionStop, cycleTrackingMode, cycleAimMode, setAimMode, aimModeLabel, sessionFrame, sessionLean, viewStart,
             viewStop, viewFrame, viewLean, configDescribe,
-            configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalHotkey, configLocalHotkeyHeld,
-            configLocalHotkeyTaps, configRender,
-            configLoad, configReload, configGetInt, configGetFloat, configSaveInt, configSaveFloat, configSaveTrackingMode,
+            configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalText, configLocalHotkey,
+            configLocalHotkeyHeld, configLocalHotkeyTaps, configRender,
+            configLoad, configReload, configGetInt, configGetFloat, configGetText, configSaveInt, configSaveFloat, configSaveText,
+            configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, configOptionCount, configOption, configOptionText, configOptionGet,
             configOptionSave, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
 
@@ -410,6 +411,7 @@ public final class CameraUnlock {
                 FunctionDescriptor.of(INT, POINTER, POINTER, POINTER, INT, FLOAT, FLOAT, FLOAT));
         configLocalEnum = bind("cameraunlock_config_local_enum",
                 FunctionDescriptor.of(INT, POINTER, POINTER, POINTER, INT, POINTER, INT));
+        configLocalText = bind("cameraunlock_config_local_text", FunctionDescriptor.of(INT, POINTER, POINTER, POINTER, INT, POINTER));
         configLocalHotkey = bind("cameraunlock_config_local_hotkey", FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT));
         configLocalHotkeyHeld = bind("cameraunlock_config_local_hotkey_held",
                 FunctionDescriptor.of(INT, POINTER, POINTER, INT, POINTER, INT, INT));
@@ -420,8 +422,10 @@ public final class CameraUnlock {
         configReload = bind("cameraunlock_config_reload", FunctionDescriptor.of(INT));
         configGetInt = bind("cameraunlock_config_get_int", FunctionDescriptor.of(INT, INT, POINTER));
         configGetFloat = bind("cameraunlock_config_get_float", FunctionDescriptor.of(INT, INT, POINTER));
+        configGetText = bind("cameraunlock_config_get_text", FunctionDescriptor.of(INT, INT, POINTER, INT));
         configSaveInt = bind("cameraunlock_config_save_int", FunctionDescriptor.of(INT, INT, INT));
         configSaveFloat = bind("cameraunlock_config_save_float", FunctionDescriptor.of(INT, INT, FLOAT));
+        configSaveText = bind("cameraunlock_config_save_text", FunctionDescriptor.of(INT, INT, POINTER));
         configSaveTrackingMode = bind("cameraunlock_config_save_tracking_mode", FunctionDescriptor.of(INT));
         configSaveAimMode = bind("cameraunlock_config_save_aim_mode", FunctionDescriptor.of(INT));
         configSaveWorldSpaceYaw = bind("cameraunlock_config_save_world_space_yaw", FunctionDescriptor.of(INT, INT));
@@ -663,6 +667,14 @@ public final class CameraUnlock {
         }
     }
 
+    /** Text the file holds as it is. Not an option: a game's options screen shows it with a control of the game's own. */
+    public int configLocalText(String section, String key, String comment, int flags, String defaultText) {
+        try (Arena arena = Arena.ofConfined()) {
+            return check(status(configLocalText, text(arena, section), text(arena, key), text(arena, comment), flags,
+                    text(arena, defaultText)));
+        }
+    }
+
     /** @param hotkeyBit the bit hotkeysTake answers with: one bit, HOTKEY_LOCAL or above */
     public int configLocalHotkey(String key, String comment, int flags, String defaultKeys, int hotkeyBit) {
         try (Arena arena = Arena.ofConfined()) {
@@ -752,6 +764,15 @@ public final class CameraUnlock {
         }
     }
 
+    public String configGetText(int row) {
+        try (Arena arena = Arena.ofConfined()) {
+            int length = check(status(configGetText, row, MemorySegment.NULL, 0));
+            MemorySegment buffer = arena.allocate(length + 1L);
+            check(status(configGetText, row, buffer, length + 1));
+            return buffer.getString(0);
+        }
+    }
+
     /** Each configSave answers a SAVE_*. Not from the thread that draws. */
     public int configSaveInt(int row, int value) {
         return check(status(configSaveInt, row, value));
@@ -759,6 +780,12 @@ public final class CameraUnlock {
 
     public int configSaveFloat(int row, float value) {
         return check(status(configSaveFloat, row, value));
+    }
+
+    public int configSaveText(int row, String value) {
+        try (Arena arena = Arena.ofConfined()) {
+            return check(status(configSaveText, row, text(arena, value)));
+        }
     }
 
     public int configSaveTrackingMode() {

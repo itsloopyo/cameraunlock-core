@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 6
+#define CAMERAUNLOCK_ABI 7
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -286,6 +286,10 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_local_float(const char* section, cons
  * place in that list, counted from 0. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_local_enum(const char* section, const char* key, const char* comment,
                                                       uint32_t flags, const char* tokens, int32_t default_index);
+/* Text the file holds as it is, such as the name of a device. Not an option: a game's options
+ * screen shows it with a control of the game's own. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_local_text(const char* section, const char* key, const char* comment,
+                                                      uint32_t flags, const char* default_text);
 /* A key list of the game's own under [Hotkeys]. `hotkey_bit` is the bit cameraunlock_hotkeys_take
  * answers with when one of its keys goes down: one bit, CAMERAUNLOCK_HOTKEY_LOCAL or above. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_local_hotkey(const char* key, const char* comment, uint32_t flags,
@@ -356,11 +360,15 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_reload(void);
 /* A local row's value: a bool as 0 or 1, an int, an enum as its word's place. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_int(int32_t row, int32_t* out);
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_float(int32_t row, float* out);
+/* A text row's value. Answers its length in bytes and copies it, with its NUL, when `capacity`
+ * holds length + 1. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_get_text(int32_t row, char* buffer, int32_t capacity);
 
 /* Each writes rows of the file and answers a CAMERAUNLOCK_SAVE_*. Synchronous: from a thread
  * that is not drawing a frame. The host has already applied the value to its running state. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_int(int32_t row, int32_t value);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_float(int32_t row, float value);
+CAMERAUNLOCK_C int32_t cameraunlock_config_save_text(int32_t row, const char* value);
 /* The session's tracking mode as RotationEnabled and PositionEnabled, and its aim mode as
  * TrueFreeLook, FreeLookMarker and StockSights. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_tracking_mode(void);

@@ -200,8 +200,8 @@ A host describes its `CameraUnlock.ini` at run time, then loads it:
    save may change. `default_text` gives a concept that is not global (`CollisionMargin`,
    `CollisionChannel`) the game's own default, and with `CAMERAUNLOCK_ROW_PER_GAME` a global one,
    which needs the owner-approved `per_game` entry `docs/canonical-config.md` describes.
-3. `cameraunlock_config_local_bool`, `_int`, `_float`, `_enum`, `_hotkey`, `_hotkey_held` and
-   `_hotkey_taps` for the game's own rows. Each answers the row's number. `CAMERAUNLOCK_ROW_LIVE` marks a row
+3. `cameraunlock_config_local_bool`, `_int`, `_float`, `_enum`, `_text`, `_hotkey`, `_hotkey_held`
+   and `_hotkey_taps` for the game's own rows. Each answers the row's number. `CAMERAUNLOCK_ROW_LIVE` marks a row
    `cameraunlock_config_reload` reads again while the game runs.
 4. `cameraunlock_config_load(path, defaults_path, out)`. `defaults_path` is `NULL` in a mod, for
    the player's own Defaults.ini, and a scratch file in every test.
@@ -215,8 +215,10 @@ after the same description to produce its committed `config/CameraUnlock.ini`, w
 config block is generated from. The description therefore lives in one place in the host, called
 by both the mod and its build.
 
-`cameraunlock_config_get_int` and `_get_float` read a local row. `cameraunlock_config_save_int`
-and `_save_float` write one. `cameraunlock_config_save_tracking_mode` and `_save_aim_mode` write
+`cameraunlock_config_get_int`, `_get_float` and `_get_text` read a local row.
+`cameraunlock_config_save_int`, `_save_float` and `_save_text` write one. A text row holds what
+the file holds as it is, such as a device's name, and a save writes it as UTF-8. It is no option
+(below): a host that shows it on an options screen does so with a control of its own. `cameraunlock_config_save_tracking_mode` and `_save_aim_mode` write
 the session's modes, and `_save_world_space_yaw` the yaw mode, which the host holds.
 
 ## Options
