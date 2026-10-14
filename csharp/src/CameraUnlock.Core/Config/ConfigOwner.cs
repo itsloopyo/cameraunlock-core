@@ -307,7 +307,7 @@ namespace CameraUnlock.Core.Config
         /// <exception cref="InvalidOperationException">Load has not run, or a row that is not
         /// Writable changed; the message names the row.</exception>
         /// <exception cref="ArgumentException">A Writable row holds a value its codec cannot write,
-        /// or text outside printable ASCII, which the editor refuses.</exception>
+        /// or text with a control character in it, which the editor refuses.</exception>
         public ConfigSaveResult Save(Action<TConfig> change)
         {
             if (change == null) throw new ArgumentNullException("change");

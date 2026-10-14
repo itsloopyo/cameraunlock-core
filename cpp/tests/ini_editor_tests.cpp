@@ -389,8 +389,26 @@ void TestPrintableAsciiBoundary() {
         if (Throws({{"General", "K" + byte + "K", "1"}}) != (!printable || b == '=')) ++wrong;
         if (Throws({{"S" + byte + "S", "A", "1"}}) != (!printable || b == ']')) ++wrong;
     }
-    Check(wrong == 0, "inside a value every byte from 0x20 to 0x7E is writable and no other is; "
+    Check(wrong == 0, "inside a value every byte from 0x20 to 0x7E is writable and no other is alone; "
                       "a key refuses '=' as well, and a section ']'");
+}
+
+void TestValueUtf8() {
+    std::cout << "EditIni writes a value as UTF-8:\n";
+    Check(!Throws({{"Voice", "Microphone", "Micr\xC3\xB3" "fono"}}) && !Throws({{"Voice", "Microphone", "\xE9\xBA\xA6\xE5\x85\x8B\xE9\xA3\x8E"}}) &&
+              !Throws({{"Voice", "Microphone", "x\xF0\x9F\x8E\xA4"}}) && !Throws({{"Voice", "Microphone", "\xEF\xBF\xBF\xF4\x8F\xBF\xBF"}}),
+          "two, three and four byte characters are writable, up to U+10FFFF");
+    Check(Throws({{"Voice", "Microphone", "x\xC3"}}) && Throws({{"Voice", "Microphone", "x\xE9\xBA"}}) &&
+              Throws({{"Voice", "Microphone", "x\x80y"}}) && Throws({{"Voice", "Microphone", "\xC3x"}}),
+          "a character cut short, or a continuation byte alone, is not");
+    Check(Throws({{"Voice", "Microphone", "\xC0\xAF"}}) && Throws({{"Voice", "Microphone", "\xE0\x80\xAF"}}) &&
+              Throws({{"Voice", "Microphone", "\xF0\x80\x80\xAF"}}),
+          "nor an overlong form");
+    Check(Throws({{"Voice", "Microphone", "\xED\xA0\x80"}}) && Throws({{"Voice", "Microphone", "\xF4\x90\x80\x80"}}) &&
+              Throws({{"Voice", "Microphone", "\xF5\x80\x80\x80"}}) && Throws({{"Voice", "Microphone", "\xFF"}}),
+          "nor a surrogate, nor anything past U+10FFFF");
+    Check(Throws({{"V\xC3\xB3ice", "Microphone", "1"}}) && Throws({{"Voice", "Micr\xC3\xB3" "fono", "1"}}),
+          "a section and a key stay printable ASCII");
 }
 
 void TestUnwritableEditsThrow() {
@@ -431,6 +449,7 @@ int RunIniEditorTests() {
     std::cout << "\n=== IniEditor Tests ===\n";
     TestFixtures();
     TestPrintableAsciiBoundary();
+    TestValueUtf8();
     TestUnwritableEditsThrow();
     TestNoEditsKeepsBytes();
     TestRefusalNames();

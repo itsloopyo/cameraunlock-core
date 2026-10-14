@@ -39,18 +39,21 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void ExactlyPrintableAsciiIsWritable()
+        public void NamesArePrintableAsciiAndValuesAnyTextButControlCharacters()
         {
             for (int c = 0; c <= 0xFFFF; c++)
             {
                 if (char.IsSurrogate((char)c)) continue;
                 string ch = ((char)c).ToString();
                 bool printable = c >= 0x20 && c <= 0x7E;
-                Assert.True(Throws(new IniEdit("General", "A", "x" + ch + "x", true)) == !printable, "value U+" + c.ToString("X4"));
+                bool control = c < 0x20 || c == 0x7F;
+                Assert.True(Throws(new IniEdit("General", "A", "x" + ch + "x", true)) == control, "value U+" + c.ToString("X4"));
                 Assert.True(Throws(new IniEdit("General", "K" + ch + "K", "1", true)) == (!printable || c == '='), "key U+" + c.ToString("X4"));
                 Assert.True(Throws(new IniEdit("S" + ch + "S", "A", "1", true)) == (!printable || c == ']'), "section U+" + c.ToString("X4"));
             }
             Assert.True(Throws(new IniEdit("General", "A", "\ud800", true)));
+            Assert.True(Throws(new IniEdit("General", "A", "x\udc00", true)));
+            Assert.False(Throws(new IniEdit("General", "A", "\ud83c\udfa4", true)), "a pair of surrogates is one character");
             Assert.True(Throws(new IniEdit("General", "A\udc00", "1", true)));
         }
 

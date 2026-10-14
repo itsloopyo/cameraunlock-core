@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text;
 
 namespace CameraUnlock.Core.Config
 {
@@ -100,9 +101,10 @@ namespace CameraUnlock.Core.Config
         /// </para>
         /// </summary>
         /// <exception cref="ArgumentException">
-        /// An edit cannot be written so that it reads back as given: a section, key or value
-        /// holding a character outside printable ASCII (U+0020 to U+007E), an empty section or
-        /// key, a section, key or value with a leading or trailing space, a section holding
+        /// An edit cannot be written so that it reads back as given: a section or key holding a
+        /// character outside printable ASCII (U+0020 to U+007E), a value holding a control
+        /// character (below U+0020, or U+007F) or a surrogate that is not one of a pair, an
+        /// empty section or key, a section, key or value with a leading or trailing space, a section holding
         /// ']', a key holding '=' or starting '[', ';' or '#', or two edits of the same key. A
         /// value may be empty.
         /// </exception>
@@ -294,7 +296,7 @@ namespace CameraUnlock.Core.Config
 
                 byte[] section = RequireName(edit.Section, "section");
                 byte[] key = RequireName(edit.Key, "key");
-                byte[] value = RequirePrintableAscii(edit.Value, "value");
+                byte[] value = RequireValueText(edit.Value);
                 RequireNoSurroundingSpace(value, edit.Value, "value");
                 if (Array.IndexOf(section, (byte)']') >= 0)
                 {
@@ -334,6 +336,31 @@ namespace CameraUnlock.Core.Config
                 bytes[i] = (byte)c;
             }
             return bytes;
+        }
+
+        private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
+
+        // A value is text for a person to read, a device's name in their own language for one: it
+        // is written as UTF-8, which the reader keeps as its bytes. A control character would end
+        // or corrupt the line.
+        private static byte[] RequireValueText(string text)
+        {
+            foreach (char c in text)
+            {
+                if (c < 0x20 || c == 0x7F)
+                {
+                    throw new ArgumentException("IniEdit value holds U+" +
+                        ((int)c).ToString("X4", CultureInfo.InvariantCulture) + ", a control character, which cannot be written");
+                }
+            }
+            try
+            {
+                return StrictUtf8.GetBytes(text);
+            }
+            catch (EncoderFallbackException failure)
+            {
+                throw new ArgumentException("IniEdit value holds a surrogate that is not one of a pair", failure);
+            }
         }
 
         private static byte[] RequireName(string text, string what)

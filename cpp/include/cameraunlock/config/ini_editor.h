@@ -10,7 +10,8 @@ namespace cameraunlock {
 /// Section and key match ASCII case-insensitively, and a replaced line keeps the file's
 /// own spelling. When the key is absent and `insert_if_absent` is set, the line is added
 /// as `key=value`, and a missing section as `[section]`, spelled exactly as given here.
-/// Section, key and value are printable ASCII (see EditIni).
+/// Section and key are printable ASCII, and value is printable ASCII or well-formed UTF-8
+/// (see EditIni).
 ///
 /// By default an edit follows the canonical reader, which keeps the last occurrence of a
 /// repeated key: that occurrence is replaced, and an absent key goes into the last block
@@ -88,8 +89,9 @@ struct IniEditResult {
 /// without one: the new text is joined on with a line ending in front instead of behind.
 ///
 /// Throws std::invalid_argument for an edit that cannot be written so that it reads back
-/// as given: a section, key or value holding a byte outside printable ASCII (0x20 to
-/// 0x7E), an empty section or key, a section, key or value with a leading or trailing
+/// as given: a section or key holding a byte outside printable ASCII (0x20 to 0x7E), a
+/// value holding a byte below 0x20 or 0x7F, or bytes above 0x7F that are not well-formed
+/// UTF-8 (an overlong form, a surrogate, past U+10FFFF or cut short), an empty section or key, a section, key or value with a leading or trailing
 /// space, a section holding ']', a key holding '=' or starting '[', ';' or '#', and two
 /// edits of the same key. A value may be empty.
 IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& edits);

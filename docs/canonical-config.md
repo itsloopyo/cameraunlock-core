@@ -111,7 +111,7 @@ One renderer writes every file, so every file has the same shape:
 
 Each row is its comment lines (`; text`) and then `Key=value`. A blank line separates sections.
 Lines end in CRLF, including the last, and everything the renderer writes is ASCII with no byte
-order mark.
+order mark. A save may later write a string row's value as UTF-8 (see the editor's rules below).
 
 A file holds only the rows the mod binds: a mod with no carried light has no `[Light]`, and one
 whose mode control has two states has no `RotationEnabled`. Every bound row is written. A new
@@ -1833,8 +1833,10 @@ owner's rules:
 - Change values with the editor's rules and nothing else: every other byte is kept, a replaced
   line keeps its key's spelling and the white space around `=`, a repeated key has its last
   occurrence replaced, a missing key goes after the last key line of its section, a missing
-  section at the end, and new lines take the file's most common line ending. The editor refuses a
-  UTF-16 file and one holding a NUL byte. `editor/` pins all of it.
+  section at the end, and new lines take the file's most common line ending. A section and a key
+  are written as printable ASCII, and a value as printable ASCII or well-formed UTF-8 with no
+  control byte, which is how a string row holds a device's name in the player's own language.
+  The editor refuses a UTF-16 file and one holding a NUL byte. `editor/` pins all of it.
 - Read with the reader's rules (`reader/`) and read the edited bytes back before writing them.
 - Expect no protection from the running mod. The owner's lock covers one process, and its check
   that the file still holds the bytes it read is a separate operation from its replacement, so a

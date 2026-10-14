@@ -1,0 +1,5 @@
+# A value is written as the UTF-8 it is given, which the reader keeps as its bytes: a
+# device's name in the player's own language. A space that is not ASCII's, at either end,
+# is not trimmed by the reader and is written as it is.
+set	Voice	Microphone	Micr\xC3\xB3fono (Realtek(R) Audio)
+set_or_insert	Voice	SecondPlayerMicrophone	\xC2\xA0\xE3\x83\x9E\xE3\x82\xA4\xE3\x82\xAF\xE3\x80\x80

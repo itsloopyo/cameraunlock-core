@@ -38,6 +38,57 @@ void RequirePrintableAscii(const std::string& text, const char* what) {
     }
 }
 
+// A value is text for a person to read, a device's name in their own language for one: it may
+// hold UTF-8, which the reader keeps as its bytes. A control byte would end or corrupt the line.
+void RequireValueText(const std::string& text) {
+    static const char kHex[] = "0123456789ABCDEF";
+    size_t i = 0;
+    while (i < text.size()) {
+        const unsigned char b = static_cast<unsigned char>(text[i]);
+        if (b < 0x80) {
+            if (b < 0x20 || b == 0x7F) {
+                throw std::invalid_argument(std::string("IniEdit value holds the byte 0x") + kHex[b >> 4] + kHex[b & 0xF] +
+                                            ", a control byte, which cannot be written");
+            }
+            ++i;
+            continue;
+        }
+        // The lead byte says how many continuation bytes follow and the least the sequence may
+        // stand for, so an overlong form is refused, as are surrogates and anything past U+10FFFF.
+        size_t more = 0;
+        unsigned long code = 0, least = 0;
+        if (b >= 0xC2 && b <= 0xDF) {
+            more = 1;
+            code = b & 0x1F;
+            least = 0x80;
+        } else if (b >= 0xE0 && b <= 0xEF) {
+            more = 2;
+            code = b & 0x0F;
+            least = 0x800;
+        } else if (b >= 0xF0 && b <= 0xF4) {
+            more = 3;
+            code = b & 0x07;
+            least = 0x10000;
+        } else {
+            throw std::invalid_argument("IniEdit value is not well-formed UTF-8 at byte " + std::to_string(i));
+        }
+        if (i + more >= text.size()) {
+            throw std::invalid_argument("IniEdit value is not well-formed UTF-8 at byte " + std::to_string(i));
+        }
+        for (size_t k = 1; k <= more; ++k) {
+            const unsigned char c = static_cast<unsigned char>(text[i + k]);
+            if ((c & 0xC0) != 0x80) {
+                throw std::invalid_argument("IniEdit value is not well-formed UTF-8 at byte " + std::to_string(i));
+            }
+            code = (code << 6) | (c & 0x3F);
+        }
+        if (code < least || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) {
+            throw std::invalid_argument("IniEdit value is not well-formed UTF-8 at byte " + std::to_string(i));
+        }
+        i += more + 1;
+    }
+}
+
 void RequireNoSurroundingSpace(const std::string& text, const char* what) {
     if (!text.empty() && (text.front() == ' ' || text.back() == ' ')) {
         throw std::invalid_argument(std::string("IniEdit ") + what + " '" + text +
@@ -56,7 +107,7 @@ void ValidateEdits(const std::vector<IniEdit>& edits) {
         const IniEdit& edit = edits[i];
         RequireName(edit.section, "section");
         RequireName(edit.key, "key");
-        RequirePrintableAscii(edit.value, "value");
+        RequireValueText(edit.value);
         RequireNoSurroundingSpace(edit.value, "value");
         if (edit.section.find(']') != kNpos) {
             throw std::invalid_argument("IniEdit section '" + edit.section +

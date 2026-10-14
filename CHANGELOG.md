@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - values saved as UTF-8
+
+- The editor (`EditIni`, `IniEditor.Edit`) writes a value as printable ASCII or well-formed UTF-8
+  with no control byte, where it wrote printable ASCII alone; a section and a key stay printable
+  ASCII. The reader always kept such bytes as they are. Fixture `editor/utf8-value-written`, and
+  the four UTF-8 values `editor/edits-rejected` refused are written now.
+
 ### BREAKING - a tap hotkey counts any number of taps (ABI 6)
 
 - `cameraunlock_config_local_hotkey_taps` takes `tap_bits` and `taps` in place of `hotkey_bit`

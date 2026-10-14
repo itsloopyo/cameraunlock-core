@@ -1,5 +1,5 @@
-# Each rejects row throws on its own: a byte outside printable ASCII anywhere, a leading
-# or trailing space, an empty section or key, ']' in a section, '=' in a key or a key
+# Each rejects row throws on its own: a byte outside printable ASCII in a section or key, a
+# control byte in a value, a leading or trailing space, an empty section or key, ']' in a section, '=' in a key or a key
 # starting '[', ';' or '#'. Quotes, ';', '#' and inner spaces are written as they are.
 set	General	Name	say "a;b" now
 rejects	General	Name	 x
@@ -14,10 +14,6 @@ rejects	General	Name	a\x0Bb
 rejects	General	Name	a\x0Cb
 rejects	General	Name	\x1Fx
 rejects	General	Name	a\x7Fb
-rejects	General	Name	caf\xC3\xA9
-rejects	General	Name	\xC2\xA0x
-rejects	General	Name	x\xE3\x80\x80
-rejects	General	Name	\xEF\xBB\xBFx
 rejects	General	 Name	1
 rejects	General	Name 	1
 rejects	General	Na\x09me	1
