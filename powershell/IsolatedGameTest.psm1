@@ -761,6 +761,26 @@ function Read-GameRigOwner {
     Get-Content $file -Raw | ConvertFrom-Json
 }
 
+function Move-GameRigFolder {
+    # Windows refuses to rename a folder while any file in it is open, whatever the handle shares,
+    # and a scanner opens the owner.json just written. With 15 sessions queued on Project Zomboid a
+    # take failed on it once (2026-10-16). That handle goes in moments; one that stays is named.
+    param([Parameter(Mandatory)][string]$From, [Parameter(Mandatory)][string]$To, [int]$PatienceSeconds = 5)
+    $deadline = (Get-Date).AddSeconds($PatienceSeconds)
+    while ($true) {
+        try { [IO.Directory]::Move($From, $To); return }
+        # .NET Framework reports the refusal as an IOException carrying E_ACCESSDENIED.
+        catch [System.IO.IOException] {
+            if ($_.Exception.HResult -ne 0x80070005) { throw }
+            if ((Get-Date) -ge $deadline) {
+                $use = @(Get-ChildItem $From -File -Recurse | ForEach-Object { "$($_.Name): $(Get-FileUse -Path $_.FullName)" })
+                throw "the rig folder $From could not be renamed to $To for $PatienceSeconds s ($($_.Exception.Message)). $($use -join '; ')"
+            }
+            Start-Sleep -Milliseconds 50
+        }
+    }
+}
+
 function Test-GameRigOwnerLive {
     # A lock is live while the process that took it runs, or while any process it named does: the
     # game a session started goes on holding the rig after the process that launched it has ended.
@@ -1045,7 +1065,7 @@ function Enter-GameRig {
                     Token = [Guid]::NewGuid().ToString('N')
                 }
                 ConvertTo-Json $record | Set-Content (Join-Path $fresh 'owner.json') -Encoding UTF8
-                [IO.Directory]::Move($fresh, $lock)
+                Move-GameRigFolder -From $fresh -To $lock
                 Remove-Item $ticket -Force
                 [pscustomobject]@{ Key = $key; Owner = $Owner; Token = $record.Token; Path = $lock; TakenOverFrom = $stale }
             }
@@ -1113,7 +1133,7 @@ function Exit-GameRig {
         }
         # Renamed away first, so the lock goes in one step even when a file in it is slow to delete.
         $gone = Join-Path (Split-Path -Parent $Rig.Path) ('released-' + [Guid]::NewGuid().ToString('N'))
-        [IO.Directory]::Move($Rig.Path, $gone)
+        Move-GameRigFolder -From $Rig.Path -To $gone
         Remove-Item $gone -Recurse -Force
     }
 }

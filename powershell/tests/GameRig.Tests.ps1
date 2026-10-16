@@ -653,6 +653,32 @@ public static class StandInStubborn {
     Wait-Until { -not (Get-Process -Id $seen.Stubborn -ErrorAction SilentlyContinue) }
     Stop-IsolatedGameSession -SessionFile $stubborn.SessionFile
     Check 'once it has gone, stopping the session puts the files back and frees the rig' ((Test-PutBack) -and $null -eq (Get-GameRig -Game $stubbornName) -and -not (Test-Path $stubborn.SessionFile))
+
+    # A lock folder whose owner.json another process has open, as a scanner opens a file just written.
+    $moveFrom = Join-Path $root 'move-from'
+    $moveTo = Join-Path $root 'move-to'
+    New-Item -ItemType Directory $moveFrom | Out-Null
+    Set-Content (Join-Path $moveFrom 'owner.json') '{}' -Encoding ASCII
+    $holdFor = { param([int]$Ms)
+        $held = Join-Path $root "held-$Ms"
+        $command = "`$f = [IO.File]::Open('$moveFrom\owner.json', 'Open', 'Read', 'ReadWrite,Delete'); Set-Content '$held' ''; Start-Sleep -Milliseconds $Ms; `$f.Dispose()"
+        $process = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList '-NoProfile', '-Command', $command
+        $started.Add($process)
+        Wait-Until { Test-Path $held }
+        $process
+    }
+    $holder = & $holdFor 800
+    & (Get-Module IsolatedGameTest) { param($From, $To) Move-GameRigFolder -From $From -To $To } $moveFrom $moveTo
+    Check 'a lock folder with a file held open for a moment is renamed once it is let go' ((Test-Path (Join-Path $moveTo 'owner.json')) -and -not (Test-Path $moveFrom))
+    Wait-All @($holder)
+    [IO.Directory]::Move($moveTo, $moveFrom)
+    $holder = & $holdFor 30000
+    Check 'one held for longer than the patience throws, naming the file and what has it' `
+        (Throws { & (Get-Module IsolatedGameTest) { param($From, $To) Move-GameRigFolder -From $From -To $To -PatienceSeconds 1 } $moveFrom $moveTo } `
+            "^the rig folder .*move-from could not be renamed .* for 1 s \(.*denied.*\)\. owner\.json: it is open or loaded in powershell \(pid $($holder.Id)\)") `
+        'see the message above'
+    Check 'and leaves the folder where it was' ((Test-Path (Join-Path $moveFrom 'owner.json')) -and -not (Test-Path $moveTo))
+    $holder.Kill()
 } finally {
     # By the process objects, which stay tied to what was started: an id can be handed on once its process ends.
     foreach ($process in $started) { if (-not $process.HasExited) { $process.Kill() } }
