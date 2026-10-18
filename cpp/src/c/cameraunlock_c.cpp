@@ -1,4 +1,7 @@
 #include "cameraunlock/c/cameraunlock.h"
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+#include "cameraunlock/c/host/cameraunlock_host.h"
+#endif
 #ifdef CAMERAUNLOCK_C_TESTING
 #include "cameraunlock/c/testing/cameraunlock_testing.h"
 #endif
@@ -27,8 +30,6 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -574,6 +575,10 @@ struct ConfigState {
     HostConfig loaded;
     // Written under the mutex, and read without it by cameraunlock_hotkeys_drop.
     std::atomic<input::HotkeyPoller*> poller{nullptr};
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+    // Where the DLL starts the poller's thread: a start that threw first leaves it unpolled.
+    bool polled = false;
+#endif
     std::atomic<std::int32_t> pressed{0};
 };
 
@@ -1114,17 +1119,28 @@ std::int32_t cameraunlock_config_local_hotkey_taps(const char* key, const char* 
 
 std::int32_t cameraunlock_config_render(const char* path) {
     return Guarded("cameraunlock_config_render", [&] {
-        const std::filesystem::path file(Wide(path, "path"));
+        const std::wstring file = Wide(path, "path");
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
         cfg::RenderHeader header;
         const cfg::ConfigTable<HostConfig> table = BuildTable(c);
         header.display_name = *c.display_name;
         const std::string bytes = cfg::RenderCanonicalFresh(table, header);
-        std::ofstream stream(file, std::ios::binary | std::ios::trunc);
-        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        stream.close();
-        if (!stream) throw std::runtime_error("the rendered file could not be written to " + std::string(path));
+        // Win32 rather than a stream, so the WebAssembly build writes it as the DLL does.
+        const HANDLE handle =
+            CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            throw std::runtime_error("the rendered file could not be written to " + std::string(path) + ": " +
+                                     cfg::detail::OwnerErrorText(GetLastError()));
+        }
+        DWORD written = 0;
+        const BOOL wrote = WriteFile(handle, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+        const DWORD error = GetLastError();
+        CloseHandle(handle);
+        if (!wrote || written != bytes.size()) {
+            throw std::runtime_error("the rendered file could not be written to " + std::string(path) + ": " +
+                                     cfg::detail::OwnerErrorText(wrote ? ERROR_WRITE_FAULT : error));
+        }
         return CAMERAUNLOCK_OK;
     });
 }
@@ -1428,7 +1444,12 @@ std::int32_t cameraunlock_hotkeys_start(void) {
                 Register(c, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
             }
         }
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
+        // The WebAssembly build's host polls through cameraunlock_host_tick instead.
         if (!c.poller.load()->Start()) throw std::runtime_error("the hotkey poller did not start");
+#else
+        c.polled = true;
+#endif
         return CAMERAUNLOCK_OK;
     });
 }
@@ -1483,6 +1504,40 @@ std::int32_t cameraunlock_testing_deliver(const void* datagram, std::int32_t len
 std::int32_t cameraunlock_testing_deliver_view(std::int32_t view, const void* datagram, std::int32_t length,
                                                std::int32_t remote) {
     return Guarded("cameraunlock_testing_deliver_view", [&] { return DeliverTo(view, datagram, length, remote); });
+}
+
+#endif
+
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+
+std::int32_t cameraunlock_host_tick(void) {
+    return Guarded("cameraunlock_host_tick", [&] {
+        ConfigState& c = TheConfig();
+        if (c.polled) c.poller.load()->Poll();
+        Session& session = TheSession();
+        for (View& view : session.views) {
+            if (view.receiver.IsSupervising()) view.receiver.SupervisorStep(SteadyMicros());
+        }
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_host_received(void* receiver, const char* buffer, std::int32_t bytes, std::int32_t error,
+                                        const void* sender) {
+    return Guarded("cameraunlock_host_received", [&] {
+        Require(receiver != nullptr && sender != nullptr && (bytes < 0 || buffer != nullptr),
+                "the receiver, the sender or the datagram is NULL");
+        static_cast<UdpReceiver*>(receiver)->Received(buffer, bytes, error, *static_cast<const sockaddr_in*>(sender));
+        return CAMERAUNLOCK_OK;
+    });
+}
+
+std::int32_t cameraunlock_host_receive_failed(void* receiver, const char* what) {
+    return Guarded("cameraunlock_host_receive_failed", [&] {
+        Require(receiver != nullptr && what != nullptr, "the receiver or the reason is NULL");
+        static_cast<UdpReceiver*>(receiver)->ReceiveLoopFailed(what);
+        return CAMERAUNLOCK_OK;
+    });
 }
 
 #endif
