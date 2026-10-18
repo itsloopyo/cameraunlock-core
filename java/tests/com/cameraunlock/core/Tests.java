@@ -1,6 +1,9 @@
 package com.cameraunlock.core;
 
 import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.lang.foreign.MemoryLayout.PathElement;
 import java.lang.foreign.StructLayout;
 import java.nio.ByteBuffer;
@@ -40,6 +43,7 @@ public final class Tests {
         viewsEachHaveATrackerAndShareTheModes(testing);
         configIsDescribedRenderedLoadedSavedAndReadAgain(testing.core, scratch);
         hotkeysAndTheWindow(testing.core);
+        aTrackerOnThePortReachesTheFrame(testing);
         logGoesToItsFile(testing.core, scratch);
         bootLoadsTheAgentAndStartsTheGame(scratch);
         System.out.println(failures == 0 ? "all " + checks + " checks passed" : failures + " of " + checks + " checks FAILED");
@@ -98,6 +102,14 @@ public final class Tests {
     }
 
     private static void libraryIsFoundBesideTheClasses() {
+        if (Testing.BUNDLED) {
+            CameraUnlock core = CameraUnlock.loadBundled();
+            Path from = CameraUnlock.beside(com.cameraunlock.core.wasm.CoreModule.class)
+                    .resolve(CameraUnlock.beside(com.cameraunlock.core.wasm.CoreModule.class).relativize(core.library()));
+            check(core.library().equals(from), "the module a mod ships is named by where its classes are: " + core.library());
+            check(core.settingsDefaults().dataFreshnessMs == 500, "and answers");
+            return;
+        }
         CameraUnlock core = CameraUnlock.load();
         check(core.library().equals(CameraUnlock.beside(CameraUnlock.class).resolve("CameraUnlockCore.dll")),
                 "the library a mod ships is loaded from beside the class folder: " + core.library());
@@ -105,6 +117,15 @@ public final class Tests {
     }
 
     private static void libraryOfAnotherAbiIsRefusedInWords() {
+        if (Testing.BUNDLED) {
+            String reason = refusal(() -> CameraUnlock.bundled(com.cameraunlock.core.wasm.CoreOtherAbiModule::load,
+                    com.cameraunlock.core.wasm.CoreOtherAbiModule::create, com.cameraunlock.core.wasm.CoreOtherAbiModule.class));
+            check(reason.contains("version " + (CameraUnlock.ABI - 1)) && reason.contains("written for version " + CameraUnlock.ABI)
+                            && reason.contains("the module is the older"),
+                    "a module of the ABI before this one is refused at load, and the reason names both versions and the older side: "
+                            + reason);
+            return;
+        }
         Path older = CameraUnlock.beside(Tests.class).resolve("CameraUnlockCoreOtherAbi.dll");
         String reason = refusal(() -> CameraUnlock.load(older));
         check(reason.contains(older.toString()) && reason.contains("version " + (CameraUnlock.ABI - 1))
@@ -430,6 +451,76 @@ public final class Tests {
         core.hotkeysDrop();
         check(core.hotkeysTake() == 0, "with no key pressed nothing is taken");
         check(!core.windowCenter(0L), "a window that is none is left alone");
+    }
+
+    /** A port no socket of this machine holds now. */
+    private static int freePort() throws IOException {
+        try (DatagramSocket probe = new DatagramSocket(0)) {
+            return probe.getLocalPort();
+        }
+    }
+
+    /** Frames until `until` holds or two seconds pass: what the receiver does runs on threads of its own. */
+    private static CameraUnlock.Frame frameUntil(CameraUnlock core, CameraUnlock.FrameInput input, Runnable each,
+            java.util.function.Predicate<CameraUnlock.Frame> until) throws InterruptedException {
+        CameraUnlock.Frame frame = new CameraUnlock.Frame();
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        do {
+            each.run();
+            Thread.sleep(16);
+            input.nowMs += 16;
+            core.frame(input, frame);
+        } while (!until.test(frame) && System.nanoTime() < end);
+        return frame;
+    }
+
+    /** The receiver on a real socket: what a tracker sends reaches the frame, and a port held by another is waited for. */
+    private static void aTrackerOnThePortReachesTheFrame(Testing testing) throws IOException, InterruptedException {
+        CameraUnlock core = testing.core;
+        testing.reset();
+        core.configure(core.settingsDefaults());
+        core.logTake();
+        CameraUnlock.FrameInput input = leaning();
+        input.flags = CameraUnlock.FRAME_ACTIVE;
+        int port = freePort();
+        core.start(port);
+        check(core.logTake().contains("Listening for OpenTrack datagrams on UDP port " + port), "a start says it listens");
+        try (DatagramSocket tracker = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
+            byte[] pose = datagram(0, 0, 0, 25, -5, 3);
+            Runnable send = () -> {
+                try {
+                    tracker.send(new DatagramPacket(pose, pose.length, InetAddress.getLoopbackAddress(), port));
+                } catch (IOException failure) {
+                    throw new IllegalStateException(failure);
+                }
+            };
+            CameraUnlock.Frame frame = frameUntil(core, input, send, f -> (f.flags & CameraUnlock.STATE_POSE) != 0 && near(f.headYaw, 25f));
+            check((frame.flags & (CameraUnlock.STATE_LISTENING | CameraUnlock.STATE_POSE | CameraUnlock.STATE_FRESH))
+                            == (CameraUnlock.STATE_LISTENING | CameraUnlock.STATE_POSE | CameraUnlock.STATE_FRESH)
+                            && near(frame.headYaw, 25f) && near(frame.headPitch, -5f) && near(frame.headRoll, 3f),
+                    "a tracker sending to the port reaches the frame: " + Integer.toHexString(frame.flags) + " yaw " + frame.headYaw);
+            check((frame.flags & CameraUnlock.STATE_REMOTE) == 0, "from loopback, which is local");
+            check(core.logTake().contains("First UDP packet received: 48 bytes from 127.0.0.1"), "and the first datagram is in the log");
+        }
+        core.stop();
+
+        int held = freePort();
+        try (DatagramSocket other = new DatagramSocket(held)) {
+            check(other.getLocalPort() == held, "another socket holds the port");
+            core.start(held);
+            CameraUnlock.Frame frame = new CameraUnlock.Frame();
+            input.nowMs += 16;
+            core.frame(input, frame);
+            check((frame.flags & CameraUnlock.STATE_LISTENING) == 0 && core.logTake().contains("Failed to bind UDP port " + held),
+                    "a port another socket holds is not listened on, and the log says why");
+        }
+        CameraUnlock.Frame bound = frameUntil(core, input, () -> {}, f -> (f.flags & CameraUnlock.STATE_LISTENING) != 0);
+        check((bound.flags & CameraUnlock.STATE_LISTENING) != 0 && core.logTake().contains("Bound UDP port " + held + " after"),
+                "once the port is let go the receiver binds it, and says so");
+        core.stop();
+        try (DatagramSocket after = new DatagramSocket(held)) {
+            check(after.getLocalPort() == held, "a stop lets the port go");
+        }
     }
 
     private static void logGoesToItsFile(CameraUnlock core, Path scratch) throws IOException {

@@ -16,12 +16,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
- * cameraunlock-core for a Java host: CameraUnlockCore.dll (docs/c-interface.md) through
- * java.lang.foreign, which is final from Java 22. One method for each function of
- * cpp/include/cameraunlock/c/cameraunlock.h, and one class for each struct.
+ * cameraunlock-core for a Java host: the C interface (docs/c-interface.md), either as
+ * CameraUnlockCore.dll through java.lang.foreign, which is final from Java 22 (load), or compiled
+ * to WebAssembly and carried in the jar as JVM classes, with no native file (loadBundled,
+ * docs/core-jar.md). One method for each function of cpp/include/cameraunlock/c/cameraunlock.h,
+ * and one class for each struct.
  *
  * A call the library refuses throws an IllegalStateException whose message is the library's own
- * reason. frame, lean, viewFrame, viewLean and hotkeysTake allocate nothing.
+ * reason. With the DLL, frame, lean, viewFrame, viewLean and hotkeysTake allocate nothing; on the module
+ * every call allocates the copies of its arguments.
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
@@ -61,7 +64,7 @@ public final class CameraUnlock {
     /** The most taps a row of configLocalHotkeyTaps tells apart. */
     public static final int MOST_TAPS = 8;
 
-    private static final int ERROR = -1;
+    static final int ERROR = -1;
     private static final ValueLayout.OfInt INT = ValueLayout.JAVA_INT;
     private static final ValueLayout.OfLong LONG = ValueLayout.JAVA_LONG;
     private static final ValueLayout.OfFloat FLOAT = ValueLayout.JAVA_FLOAT;
@@ -323,9 +326,20 @@ public final class CameraUnlock {
         }
     }
 
+    /** Where a function of the C interface comes from: the DLL, or the module in the jar. */
+    interface Backend {
+        /** The function, as a handle of the descriptor's type. Throws when there is none. */
+        MethodHandle bind(String name, FunctionDescriptor descriptor);
+
+        /** What the library is called in a message: "DLL" or "module". */
+        String kind();
+
+        /** Called once the library's ABI and structs have been checked. */
+        default void started() {}
+    }
+
     private final Path library;
-    private final SymbolLookup lookup;
-    private final Linker linker = Linker.nativeLinker();
+    private final Backend backend;
 
     private final MethodHandle lastError, logOpen, logWrite, logTake, settingsDefaults, sessionConfigure, sessionStart,
             sessionStop, cycleTrackingMode, cycleAimMode, setAimMode, aimModeLabel, sessionFrame, sessionLean, viewStart,
@@ -360,17 +374,57 @@ public final class CameraUnlock {
     /** For this tree's own tests, which load the testing build of the library by its own name. */
     @SuppressWarnings("restricted")
     static CameraUnlock load(Path library) {
-        return new CameraUnlock(library, SymbolLookup.libraryLookup(library, Arena.global()));
+        SymbolLookup lookup = SymbolLookup.libraryLookup(library, Arena.global());
+        Linker linker = Linker.nativeLinker();
+        return new CameraUnlock(library, new Backend() {
+            @Override
+            public MethodHandle bind(String name, FunctionDescriptor descriptor) {
+                return linker.downcallHandle(lookup.find(name).orElseThrow(() ->
+                        new IllegalStateException(library + " has no function " + name)), descriptor);
+            }
+
+            @Override
+            public String kind() {
+                return "DLL";
+            }
+        });
     }
 
-    private CameraUnlock(Path library, SymbolLookup lookup) {
+    /**
+     * cameraunlock-core compiled to WebAssembly and carried in this jar as JVM classes
+     * (com.cameraunlock.core.wasm.CoreModule), for a host where no native file can ship. It reaches
+     * Windows through the same calls the DLL makes (Win32Host). library() is the jar.
+     */
+    public static synchronized CameraUnlock loadBundled() {
+        // One per process, as the DLL is: a second would poll the same keys and listen on the same port.
+        if (bundledCore == null) {
+            bundledCore = bundled(com.cameraunlock.core.wasm.CoreModule::load, com.cameraunlock.core.wasm.CoreModule::create,
+                    com.cameraunlock.core.wasm.CoreModule.class);
+        }
+        return bundledCore;
+    }
+
+    private static CameraUnlock bundledCore;
+
+    /** A module from the generated classes of one build of the C interface: the shipped one, or one of the tests'. */
+    static CameraUnlock bundled(java.util.function.Supplier<run.endive.wasm.WasmModule> module,
+            java.util.function.Function<run.endive.runtime.Instance, run.endive.runtime.Machine> machine, Class<?> from) {
+        try {
+            return new CameraUnlock(Path.of(from.getProtectionDomain().getCodeSource().getLocation().toURI()),
+                    new WasmCore(module.get(), machine));
+        } catch (URISyntaxException failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    private CameraUnlock(Path library, Backend backend) {
         this.library = library;
-        this.lookup = lookup;
+        this.backend = backend;
         // Before anything else is looked up: a library of another ABI may not have it.
         int abi = status(bind("cameraunlock_abi", FunctionDescriptor.of(INT)));
         if (abi != ABI) {
             throw new IllegalStateException(library + " is version " + abi + " of cameraunlock-core's C interface and the"
-                    + " Java code beside it was written for version " + ABI + ": the " + (abi < ABI ? "DLL" : "Java code")
+                    + " Java code beside it was written for version " + ABI + ": the " + (abi < ABI ? backend.kind() : "Java code")
                     + " is the older of the two. Both come from one build of the mod, so one of them was replaced"
                     + " without the other");
         }
@@ -438,15 +492,14 @@ public final class CameraUnlock {
         hotkeysTake = bind("cameraunlock_hotkeys_take", FunctionDescriptor.of(INT));
         hotkeysDrop = bind("cameraunlock_hotkeys_drop", FunctionDescriptor.ofVoid());
         windowCenter = bind("cameraunlock_window_center", FunctionDescriptor.of(INT, LONG));
+        backend.started();
     }
 
-    @SuppressWarnings("restricted")
     MethodHandle bind(String name, FunctionDescriptor descriptor) {
-        return linker.downcallHandle(lookup.find(name).orElseThrow(() ->
-                new IllegalStateException(library + " has no function " + name)), descriptor);
+        return backend.bind(name, descriptor);
     }
 
-    /** The file this instance is bound to. */
+    /** The file this instance is bound to: the DLL, or for loadBundled the jar. */
     public Path library() {
         return library;
     }

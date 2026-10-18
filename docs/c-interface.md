@@ -382,7 +382,8 @@ struct. A mod compiles it into its own jar from the submodule's source.
   read and written through its name. `pixi run test-java` holds those layouts to the table above.
 - A call that answers `CAMERAUNLOCK_ERROR` throws an `IllegalStateException` whose message is
   `cameraunlock_last_error`.
-- `frame`, `lean`, `viewFrame`, `viewLean`, `hotkeysTake` and `hotkeysDrop` allocate nothing.
+- With the DLL, `frame`, `lean`, `viewFrame`, `viewLean`, `hotkeysTake` and `hotkeysDrop` allocate
+  nothing. On the module ([core-jar.md](core-jar.md)) every call allocates its arguments' copies.
 - It needs no upcall, as the interface has no callback.
 - The JVM is started with `--enable-native-access=ALL-UNNAMED`. Without it Java 25 prints a warning
   at the first call and says a later release will refuse such calls.

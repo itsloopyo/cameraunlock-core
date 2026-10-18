@@ -14,7 +14,13 @@ import java.lang.invoke.MethodHandle;
 final class Testing {
     static final String LIBRARY = "CameraUnlockCoreTesting.dll";
 
-    final CameraUnlock core = CameraUnlock.load(CameraUnlock.beside(Testing.class).resolve(LIBRARY));
+    /** -Dcameraunlock.bundled=true runs the tests and the vectors on the testing build compiled to WebAssembly. */
+    static final boolean BUNDLED = Boolean.getBoolean("cameraunlock.bundled");
+
+    final CameraUnlock core = BUNDLED
+            ? CameraUnlock.bundled(com.cameraunlock.core.wasm.CoreTestingModule::load, com.cameraunlock.core.wasm.CoreTestingModule::create,
+                    com.cameraunlock.core.wasm.CoreTestingModule.class)
+            : CameraUnlock.load(CameraUnlock.beside(Testing.class).resolve(LIBRARY));
     private final MethodHandle reset = core.bind("cameraunlock_testing_reset", FunctionDescriptor.of(ValueLayout.JAVA_INT));
     private final MethodHandle deliver = core.bind("cameraunlock_testing_deliver",
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));

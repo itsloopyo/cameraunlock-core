@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Compiles java/ and stages what its tests and its vectors harness load, under java/build/:
 //
-//   classes/        java/src, the binding and the boot class a mod compiles into its own jar
-//   test-classes/   java/harness and java/tests
+//   classes/        java/src, the binding and the boot class a mod compiles into its own jar,
+//                   with the C interface as JVM classes (cpp/build-wasm/core)
+//   test-classes/   java/harness and java/tests, with the testing and other-ABI modules
+//   lib/            the Endive jars the module classes run on (docs/core-jar.md)
 //   *.dll           CameraUnlockCore.dll, CameraUnlockCoreTesting.dll and
 //                   CameraUnlockCoreOtherAbi.dll, beside the class folders, which is where the
 //                   binding looks for its library
@@ -11,19 +13,21 @@
 // java/src is compiled for Java 22, the first release where java.lang.foreign is final, so a
 // construct from a later release fails here and not in a mod on an older runtime.
 //
-// The DLLs are built by the task that calls this (pixi.toml, build-java). javac, jar and node come
-// from the pixi environment.
+// The DLLs and the modules are built by the tasks this depends on (pixi.toml, build-java). javac,
+// jar and node come from the pixi environment.
 
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { toolchain } from './wasm-toolchain.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const javaRoot = join(repoRoot, 'java');
 const out = join(javaRoot, 'build');
 const dllRoot = join(repoRoot, 'scripts', 'pipeline-vectors', 'harness', 'c', 'build', 'cameraunlock', 'Release');
 const dlls = ['CameraUnlockCore.dll', 'CameraUnlockCoreTesting.dll', 'CameraUnlockCoreOtherAbi.dll'];
+const modules = join(repoRoot, 'cpp', 'build-wasm');
 
 function sources(directory) {
     return readdirSync(directory, { recursive: true, withFileTypes: true })
@@ -35,13 +39,31 @@ function run(tool, args) {
     execFileSync(tool, args, { stdio: 'inherit' });
 }
 
+/** A module's generated source and classes, which build-wasm.mjs writes. */
+function module(variant) {
+    const folder = join(modules, variant);
+    if (!existsSync(join(folder, 'classes'))) throw new Error(`${folder} is not built: run this through \`pixi run build-java\``);
+    return { src: join(folder, 'src'), classes: join(folder, 'classes') };
+}
+
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
+const lib = join(out, 'lib');
+mkdirSync(lib);
+for (const jar of (await toolchain()).runtime) copyFileSync(jar, join(lib, basename(jar)));
+const runtime = readdirSync(lib).map((jar) => join(lib, jar)).join(';');
+
+const core = module('core'), testing = module('testing'), otherAbi = module('other-abi');
 const javac = ['--release', '22', '-Xlint:all', '-Werror'];
-run('javac', [...javac, '-d', join(out, 'classes'), ...sources(join(javaRoot, 'src'))]);
-run('javac', [...javac, '-cp', join(out, 'classes'), '-d', join(out, 'test-classes'),
-    ...sources(join(javaRoot, 'harness')), ...sources(join(javaRoot, 'tests'))]);
+run('javac', [...javac, '-cp', `${runtime};${core.classes}`, '-d', join(out, 'classes'),
+    ...sources(join(javaRoot, 'src')), ...sources(core.src)]);
+cpSync(core.classes, join(out, 'classes'), { recursive: true });
+run('javac', [...javac, '-cp', `${runtime};${join(out, 'classes')};${testing.classes};${otherAbi.classes}`,
+    '-d', join(out, 'test-classes'), ...sources(join(javaRoot, 'harness')), ...sources(join(javaRoot, 'tests')),
+    ...sources(testing.src), ...sources(otherAbi.src)]);
+cpSync(testing.classes, join(out, 'test-classes'), { recursive: true });
+cpSync(otherAbi.classes, join(out, 'test-classes'), { recursive: true });
 
 for (const dll of dlls) {
     const built = join(dllRoot, dll);
