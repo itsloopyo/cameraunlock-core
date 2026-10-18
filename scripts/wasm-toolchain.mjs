@@ -1,7 +1,15 @@
 // The toolchain that builds the C interface as WebAssembly and turns it into JVM classes
 // (docs/core-jar.md): wasi-sdk's clang and sysroot, and Endive's build-time compiler and the
 // runtime its classes need. Each file is pinned by version and SHA-256, fetched once into a cache
-// every checkout and worktree of the user shares, and checked before it is used.
+// every checkout and worktree of the user shares, and checked before it is used. Windows only:
+// the cache is under %LOCALAPPDATA%, the wasi-sdk build is the Windows one, and Windows' tar
+// unpacks it.
+//
+// What is checked: each download against its pin before it is kept, every Endive jar on every
+// run, and the wasi-sdk archive before it is unpacked. The unpacked wasi-sdk
+// folder is trusted once it carries the marker naming the archive it came from, which is written
+// only after a complete unpacking; its files are not hashed again. Anyone who can write to the
+// user's %LOCALAPPDATA% can change what the build runs.
 //
 //   import { toolchain } from './wasm-toolchain.mjs';
 //   const t = await toolchain();   // { clang, sysroot, compiler, runtime: [jars] }
