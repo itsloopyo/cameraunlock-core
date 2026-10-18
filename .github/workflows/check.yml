@@ -54,6 +54,15 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'nuget.config') }}
           restore-keys: nuget-${{ runner.os }}-
 
+      # The WebAssembly toolchain (scripts/wasm-toolchain.mjs): about 620 MB to fetch and 1.5 GB
+      # unpacked. Keyed on the file that pins it, and the archive is left out once unpacked.
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/AppData/Local/cameraunlock-core/toolchain
+            !~/AppData/Local/cameraunlock-core/toolchain/*.tar.gz
+          key: wasm-toolchain-${{ runner.os }}-${{ hashFiles('scripts/wasm-toolchain.mjs') }}
+
       - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           cache: true
