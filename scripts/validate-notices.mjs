@@ -297,6 +297,15 @@ function collect(repo) {
     }
   }
 
+  // A mod that builds core's jar (scripts/build-core-jar.mjs, docs/core-jar.md) ships what the jar
+  // carries besides core: the Endive classes its module runs on, and the C and C++ runtimes
+  // compiled into the module.
+  const scripts = path.join(repo, "scripts");
+  if (fs.existsSync(scripts) && fs.readdirSync(scripts).some((name) =>
+      /\.(ps1|mjs|cmd)$/i.test(name) && read(path.join(scripts, name)).includes("build-core-jar.mjs"))) {
+    for (const component of ["endive", "wasi-libc", "llvm-runtimes"]) add(component, null, "cameraunlock-core.jar");
+  }
+
   const vendorBase = path.join(repo, VENDORED_BINARY_DIR);
   if (fs.existsSync(vendorBase)) {
     for (const entry of fs.readdirSync(vendorBase, { withFileTypes: true })) {
