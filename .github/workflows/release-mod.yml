@@ -300,9 +300,10 @@ jobs:
         shell: pwsh
         run: |
           # Every mod's package task writes release/<Name>-v<version>-installer.zip;
-          # the NexusMods variant is optional and only some mods produce it.
+          # the NexusMods and Steam Workshop variants are optional and only some mods produce them.
           $installerZip = Get-ChildItem release/*-installer.zip -ErrorAction SilentlyContinue | Select-Object -First 1
           $nexusZip = Get-ChildItem release/*-nexus.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          $workshopZip = Get-ChildItem release/*-workshop.zip -ErrorAction SilentlyContinue | Select-Object -First 1
 
           if (-not $installerZip) {
             Write-Host "::error::No release/*-installer.zip after 'pixi run ${{ inputs.package-task }}'. The package task must write the installer ZIP into release/."
@@ -315,6 +316,10 @@ jobs:
             echo "nexus_zip=$($nexusZip.FullName)" >> $env:GITHUB_OUTPUT
             Write-Host "NexusMods: $($nexusZip.Name)"
           }
+          if ($workshopZip) {
+            echo "workshop_zip=$($workshopZip.FullName)" >> $env:GITHUB_OUTPUT
+            Write-Host "Steam Workshop: $($workshopZip.Name)"
+          }
 
       - name: Create GitHub Release
         env:
@@ -325,8 +330,10 @@ jobs:
         run: |
           $installerZip = "${{ steps.find_zips.outputs.installer_zip }}"
           $nexusZip = "${{ steps.find_zips.outputs.nexus_zip }}"
+          $workshopZip = "${{ steps.find_zips.outputs.workshop_zip }}"
           $assets = @($installerZip)
           if ($nexusZip) { $assets += $nexusZip }
+          if ($workshopZip) { $assets += $workshopZip }
 
           gh release create $env:RELEASE_TAG `
             --title "$($env:PROJECT_NAME) $($env:RELEASE_TAG)" `

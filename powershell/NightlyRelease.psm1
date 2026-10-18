@@ -108,6 +108,12 @@ function Publish-NightlyBuild {
         # place.
         [switch]$NoNexusZip,
 
+        # For a mod whose package step also writes a Steam Workshop item,
+        # release/<ModName>-v<Version>-workshop.zip (or -WorkshopZipPath).
+        # Asked for, its absence is fatal, as the Nexus ZIP's is.
+        [switch]$WorkshopZip,
+        [string]$WorkshopZipPath = $null,
+
         # Git tag for the rolling dev pre-release. One release per repo,
         # replaced on every publish.
         [string]$DevTag = 'dev',
@@ -204,12 +210,25 @@ function Publish-NightlyBuild {
         Assert-FreshArtifact -Path $NexusZipPath -Label 'Nexus' -BuildStartedAt $buildStartedAt -PackageCommand $PackageCommand
     }
 
+    if ($WorkshopZip) {
+        if (-not $WorkshopZipPath) {
+            $WorkshopZipPath = Join-Path $ProjectRoot "release\$ModName-v$Version-workshop.zip"
+        }
+        if (-not (Test-Path -LiteralPath $WorkshopZipPath)) {
+            throw "Expected Steam Workshop ZIP missing: $WorkshopZipPath. '$PackageCommand' must produce it alongside the installer; pass -WorkshopZipPath if it is written elsewhere."
+        }
+        Assert-FreshArtifact -Path $WorkshopZipPath -Label 'Workshop' -BuildStartedAt $buildStartedAt -PackageCommand $PackageCommand
+    }
+
     # Fixed asset names -> stable download URLs:
     # github.com/<owner>/<repo>/releases/download/<DevTag>/<asset>
     $releaseDir = Join-Path $ProjectRoot 'release'
     $sources = [ordered]@{ "$ModName-dev-installer.zip" = $InstallerZipPath }
     if (-not $NoNexusZip) {
         $sources["$ModName-dev-nexus.zip"] = $NexusZipPath
+    }
+    if ($WorkshopZip) {
+        $sources["$ModName-dev-workshop.zip"] = $WorkshopZipPath
     }
 
     $assets = @()
@@ -235,6 +254,9 @@ function Publish-NightlyBuild {
     $installHint = "To install manually: download the installer zip below, extract it, and run install.cmd."
     if (-not $NoNexusZip) {
         $installHint += " The nexus zip is the same build laid out to extract straight into the game folder."
+    }
+    if ($WorkshopZip) {
+        $installHint += " The workshop zip is the same build as a Steam Workshop item, for the game's own Workshop uploader."
     }
     $hashLines = ($assets | ForEach-Object { "$($_.Name): $($_.Hash)" }) -join "`n"
     # Plain-text notes (no markdown backticks - backtick is PowerShell's
