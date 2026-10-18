@@ -21,9 +21,24 @@
 #error "win32_host.h is for the WebAssembly build: include cameraunlock/os/win32.h"
 #endif
 
+#include <cstddef>
 #include <cstdlib>
 
 #include "cameraunlock/os/win32_host_types.h"
+
+// The layouts as the module has them, which java/src/com/cameraunlock/core/Win32Host.java reads and
+// writes at these offsets: wchar_t is 32 bits here, so a WCHAR array is twice the SDK's.
+static_assert(sizeof(BY_HANDLE_FILE_INFORMATION) == 52, "Win32Host copies 52 bytes");
+static_assert(sizeof(WIN32_FILE_ATTRIBUTE_DATA) == 36, "Win32Host copies 36 bytes");
+static_assert(offsetof(WIN32_FIND_DATAW, cFileName) == 44, "Win32Host's FIND_DATA_HEAD");
+static_assert(offsetof(WIN32_FIND_DATAW, cAlternateFileName) == 44 + 4 * 260, "Win32Host's FIND_DATA_NAME in UTF-32");
+static_assert(sizeof(WIN32_FIND_DATAW) == 44 + 4 * (260 + 14), "Win32Host's FIND_DATA_ALTERNATE in UTF-32");
+static_assert(sizeof(SYSTEMTIME) == 16, "Win32Host copies 16 bytes");
+static_assert(sizeof(RECT) == 16, "Win32Host copies 16 bytes");
+static_assert(sizeof(MONITORINFO) == 40 && offsetof(MONITORINFO, rcWork) == 20, "Win32Host copies 40 bytes");
+static_assert(sizeof(sockaddr_in) == 16, "Win32Host's SOCKADDR_IN");
+static_assert(sizeof(LARGE_INTEGER) == 8, "Win32Host writes 8 bytes");
+static_assert(sizeof(u_long) == 4, "Win32Host copies ioctlsocket's 4 bytes");
 
 #define CAMERAUNLOCK_WIN32_IMPORT(name) __attribute__((import_module("cameraunlock_win32"), import_name(#name)))
 
@@ -97,7 +112,8 @@ DWORD cameraunlock_win32_FormatMessageA(DWORD flags, LPCVOID source, DWORD messa
 namespace cameraunlock::win32_host {
 
 // FORMAT_MESSAGE_ALLOCATE_BUFFER, which the host does not take: the text goes into a buffer of
-// ours, doubled while Windows says it is too small, up to 64K characters.
+// ours, doubled while Windows says it is too small, up to 64K units (bytes for the A function,
+// UTF-16 units for the W one).
 template <typename Char>
 DWORD FormatAllocated(DWORD (*format)(DWORD, LPCVOID, DWORD, DWORD, Char*, DWORD, void*), DWORD flags, LPCVOID source,
                       DWORD message, DWORD language, Char** out, void* arguments) {

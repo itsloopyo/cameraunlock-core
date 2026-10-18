@@ -5,7 +5,8 @@
 //
 // The shim is compiled first, into namespace shim, and each of its macros is read into a constant
 // there and undefined before the SDK's headers define their own. Its structures are laid out here
-// by MSVC for x64; none of them holds a pointer, so wasm32 lays them out the same way.
+// by MSVC for x64, with the SDK's 16-bit WCHAR. The module's own layouts, where wchar_t is 32 bits,
+// are held by static_asserts in win32_host.h to the offsets Win32Host.java reads and writes at.
 
 #include <cstddef>
 #include <cstdint>
