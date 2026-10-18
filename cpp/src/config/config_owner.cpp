@@ -4,9 +4,9 @@
 #include <string>
 #include <utility>
 
-#ifdef _WIN32
+#include "cameraunlock/os/win32.h"
 
-#include <windows.h>
+#if CAMERAUNLOCK_WIN32
 
 #include "canonical_ini_internal.h"
 #include "checked_file_writer_internal.h"
@@ -93,7 +93,7 @@ bool DefaultsFileIsSet(const DefaultsFile& file) { return file.kind_ != Defaults
 
 }  // namespace detail
 
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 
 namespace detail {
 
@@ -463,6 +463,6 @@ void OwnerLogNotCarried(const std::string& snapshot, const std::vector<LegacyKey
 
 }  // namespace detail
 
-#endif  // _WIN32
+#endif  // CAMERAUNLOCK_WIN32
 
 }  // namespace cameraunlock::config

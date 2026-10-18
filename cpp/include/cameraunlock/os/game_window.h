@@ -1,8 +1,6 @@
 #pragma once
 
-#ifdef _WIN32
-#include <Windows.h>
-#endif
+#include "cameraunlock/os/win32.h"
 
 namespace cameraunlock::os {
 
@@ -19,7 +17,7 @@ constexpr int CenteredOrigin(int workStart, int workLength, int windowLength) no
     return workStart + (workLength - windowLength) / 2;
 }
 
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 
 /// Severity of a game-window diagnostic. The numbering matches
 /// cameraunlock::reframework::LogLevel so a REFramework mod's forwarder is a
@@ -73,6 +71,6 @@ void CenterGameWindowOnce(WindowLogFn log);
 /// DPI.
 bool CenterWindowInWorkArea(HWND hwnd, WindowLogFn log);
 
-#endif  // _WIN32
+#endif  // CAMERAUNLOCK_WIN32
 
 }  // namespace cameraunlock::os

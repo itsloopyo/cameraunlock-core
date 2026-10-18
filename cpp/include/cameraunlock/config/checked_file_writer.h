@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cameraunlock/os/win32.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -74,7 +76,7 @@ struct CheckedWriteResult {
     bool Committed() const { return status == CheckedWriteStatus::Committed; }
 };
 
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 
 /// Writes `candidate` to `path` if the file there still holds `expected`, or is still
 /// absent when `expected` is empty (std::nullopt; an empty string is an empty file).
@@ -118,6 +120,6 @@ CheckedWriteResult WriteFileChecked(const std::wstring& path,
                                     const std::optional<std::string>& expected,
                                     const std::string& candidate);
 
-#endif  // _WIN32
+#endif  // CAMERAUNLOCK_WIN32
 
 }  // namespace cameraunlock

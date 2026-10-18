@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cameraunlock/os/win32.h"
+
 #include <cameraunlock/config/canonical_ini.h>
 #include <cameraunlock/config/checked_file_writer.h>
 #include <cameraunlock/config/config_concepts.g.h>
@@ -178,7 +180,7 @@ struct ConfigReloadResult {
     std::string reason;
 };
 
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 
 namespace detail {
 
@@ -1363,6 +1365,6 @@ private:
     std::optional<std::string> reported_unreadable_;
 };
 
-#endif  // _WIN32
+#endif  // CAMERAUNLOCK_WIN32
 
 }  // namespace cameraunlock::config

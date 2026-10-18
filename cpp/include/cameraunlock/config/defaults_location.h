@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cameraunlock/os/win32.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -139,7 +141,7 @@ std::string DefaultsUtf8(const std::wstring& text);
 // ` (this Wine prefix)` after it.
 std::string DefaultsNamed(const DefaultsCandidate& candidate);
 
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 
 // Probes what ResolveDefaults reads. The known folder comes from SHGetKnownFolderPath, and every
 // function a module may lack (the known-folder pair, GetCurrentPackageFullName and the wine

@@ -33,9 +33,9 @@ const char* CheckedWriteStepName(CheckedWriteStep step) {
 
 }  // namespace cameraunlock
 
-#ifdef _WIN32
+#include "cameraunlock/os/win32.h"
 
-#include <windows.h>
+#if CAMERAUNLOCK_WIN32
 
 #include <algorithm>
 #include <random>
@@ -325,4 +325,4 @@ CheckedWriteResult WriteFileChecked(const std::wstring& path, const std::optiona
 
 }  // namespace cameraunlock
 
-#endif  // _WIN32
+#endif  // CAMERAUNLOCK_WIN32

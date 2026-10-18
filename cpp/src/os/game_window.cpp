@@ -1,6 +1,6 @@
 #include <cameraunlock/os/game_window.h>
 
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 
 #include <atomic>
 #include <cstdarg>
@@ -230,4 +230,4 @@ bool CenterWindowInWorkArea(HWND hwnd, WindowLogFn log) {
 
 }  // namespace cameraunlock::os
 
-#endif  // _WIN32
+#endif  // CAMERAUNLOCK_WIN32

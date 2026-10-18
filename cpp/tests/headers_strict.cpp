@@ -25,6 +25,8 @@
 //   cameraunlock/rendering/dx11_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx12_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx9_overlay.h           overlay: covered by cameraunlock_overlay_compile
+//   cameraunlock/os/win32_host.h                   WebAssembly build only: #errors elsewhere
+//   cameraunlock/c/host/cameraunlock_host.h        WebAssembly build only, beside the C interface's headers
 //
 // This target's include path is the public include/ directory alone, so the
 // REFramework plugin SDK is not reachable from it. That is what "external dep"
@@ -92,6 +94,7 @@
 #endif
 #include "cameraunlock/os/game_window.h"
 #include "cameraunlock/os/module_paths.h"
+#include "cameraunlock/os/win32.h"
 #include "cameraunlock/processing/center_offset_manager.h"
 #include "cameraunlock/processing/pose_interpolator.h"
 #include "cameraunlock/processing/position_interpolator.h"

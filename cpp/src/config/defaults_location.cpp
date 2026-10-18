@@ -352,9 +352,9 @@ DefaultsChoice ChooseDefaults(const DefaultsResolution& resolution, const std::v
 
 }  // namespace cameraunlock::config::detail
 
-#ifdef _WIN32
+#include "cameraunlock/os/win32.h"
 
-#include <windows.h>
+#if CAMERAUNLOCK_WIN32
 
 namespace cameraunlock::config::detail {
 namespace {
@@ -472,4 +472,4 @@ std::uint32_t CreateDefaultsFolder(const std::wstring& folder) {
 
 }  // namespace cameraunlock::config::detail
 
-#endif  // _WIN32
+#endif  // CAMERAUNLOCK_WIN32

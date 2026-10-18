@@ -2,15 +2,7 @@
 
 #include <cstdint>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
+#include "cameraunlock/os/win32.h"
 
 namespace cameraunlock::time {
 
@@ -29,7 +21,7 @@ inline uint64_t QpcTicksToMicros(int64_t ticks, int64_t freq) {
            static_cast<uint64_t>((rem * 1000000) / freq);
 }
 
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 // Current QueryPerformanceCounter value in microseconds, using the
 // overflow-safe split conversion above.
 inline uint64_t QpcNowMicros() {

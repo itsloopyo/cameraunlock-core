@@ -3,9 +3,7 @@
 #include <vector>
 #include <stdexcept>
 
-#ifdef _WIN32
-#include <Windows.h>
-#endif
+#include "cameraunlock/os/win32.h"
 
 namespace cameraunlock::input {
 
@@ -234,7 +232,7 @@ void HotkeyPoller::PollLoop() {
 // Key edges are still tracked while unfocused (allowFire=false) so a press
 // that starts in another window doesn't fire a stale callback on refocus.
 namespace {
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 bool IsOwnProcessForeground() {
     DWORD foregroundPid = 0;
     GetWindowThreadProcessId(GetForegroundWindow(), &foregroundPid);

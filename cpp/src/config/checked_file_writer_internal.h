@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cameraunlock/os/win32.h"
+
 // Not installed and not API: WriteFileChecked's fault-injection seam, for tests.
 
 #include <cameraunlock/config/checked_file_writer.h>
@@ -9,7 +11,7 @@
 #include <optional>
 #include <string>
 
-#ifdef _WIN32
+#if CAMERAUNLOCK_WIN32
 
 namespace cameraunlock::detail {
 
@@ -25,4 +27,4 @@ CheckedWriteResult WriteFileCheckedWithFault(const std::wstring& path,
 
 }  // namespace cameraunlock::detail
 
-#endif  // _WIN32
+#endif  // CAMERAUNLOCK_WIN32
