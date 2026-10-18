@@ -139,8 +139,9 @@ std::string CodecError(std::string_view text) {
 template <std::size_t... I>
 std::string ConceptCodecError(schema::Concept id, std::string_view text, std::index_sequence<I...>) {
     std::string error;
-    ((static_cast<std::size_t>(id) == I ? (error = CodecError<static_cast<schema::Concept>(I)>(text), true) : false) ||
-     ...);
+    static_cast<void>(
+        ((static_cast<std::size_t>(id) == I ? (error = CodecError<static_cast<schema::Concept>(I)>(text), true) : false) ||
+         ...));
     return error;
 }
 
