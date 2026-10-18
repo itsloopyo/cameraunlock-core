@@ -40,15 +40,15 @@ which is easy to forget because it holds nothing but the payload subtree.
 | `cyber-engine-tweaks.txt` | Cyber Engine Tweaks | MIT |
 | `d3d8to9.txt` | d3d8to9 | BSD-2-Clause |
 | `dear-imgui.txt` | Dear ImGui | MIT |
-| `endive.txt` | Endive runtime, wasm, wasi, log and annotations 1.1.0 (tag `1.1.0`), the classes core's jar runs its module on | Apache-2.0, with its NOTICE |
 | `directx-shader-compiler.txt` | DirectX Shader Compiler DXBC hash | University of Illinois/NCSA |
+| `endive.txt` | Endive 1.1.0 (tag `1.1.0`): the runtime, wasm, wasi, log and annotations classes core's jar runs its module on, and the code its build-time compiler copies into the module's generated classes (`CoreModuleMachineShaded`) | Apache-2.0, with its NOTICE |
 | `fabric-loader.txt` | Fabric Loader | Apache-2.0 |
 | `glm.txt` | OpenGL Mathematics | MIT / Happy Bunny |
 | `harmonyx.txt` | HarmonyX | MIT |
 | `inih.txt` | inih | BSD-3-Clause |
 | `injector.txt` | injector (ThirteenAG) | zlib |
 | `kiero.txt` | Kiero | MIT |
-| `llvm-runtimes.txt` | libc++, libc++abi and libunwind of llvm-project `895aa2c896ada719451be2e3673c83da8ddf1141` (wasi-sdk 34), compiled into core's WebAssembly module | Apache-2.0 WITH LLVM-exception |
+| `llvm-runtimes.txt` | libc++, libc++abi, libunwind and the compiler-rt builtins of llvm-project `895aa2c896ada719451be2e3673c83da8ddf1141` (wasi-sdk 34), compiled into core's WebAssembly module | Apache-2.0 WITH LLVM-exception |
 | `melonloader.txt` | MelonLoader | Apache-2.0 |
 | `memorymodule.txt` | MemoryModule | MPL-2.0 |
 | `minhook.txt` | MinHook, incl. HDE32/HDE64 | BSD-2-Clause |
@@ -61,7 +61,7 @@ which is easy to forget because it holds nothing but the payload subtree.
 | `ue4ss.txt` | UE4SS | MIT |
 | `ultimate-asi-loader.txt` | Ultimate ASI Loader | MIT |
 | `unity-doorstop.txt` | UnityDoorstop | LGPL-2.1 |
-| `wasi-libc.txt` | wasi-libc `2e6fb9d8ee0cdf9e431fbcabe8af3115de000a13` (wasi-sdk 34), with its musl, cloudlibc and musl-fts parts, compiled into core's WebAssembly module | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT; musl MIT, cloudlibc BSD-2-Clause, musl-fts BSD-3-Clause |
+| `wasi-libc.txt` | wasi-libc `2e6fb9d8ee0cdf9e431fbcabe8af3115de000a13` (wasi-sdk 34), compiled into core's WebAssembly module: parts of its musl, cloudlibc and dlmalloc. The file carries wasi-libc's licence files in full, musl-fts's included though the module links none of it, and the Sun Microsystems notices of the musl math files the module links | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT; musl MIT, cloudlibc BSD-2-Clause, musl-fts BSD-3-Clause |
 
 A loader archive is not one component. The BepInEx `win_x64` zip we vendor
 carries UnityDoorstop (`winhttp.dll`), HarmonyX (`0Harmony.dll`), Mono.Cecil
