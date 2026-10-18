@@ -1,6 +1,7 @@
 package com.cameraunlock.core.agent;
 
 import java.lang.management.ManagementFactory;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import javax.management.ObjectName;
 
@@ -43,9 +44,13 @@ public final class Boot {
 
         // The command's argument is split on spaces and the game folder's path usually has some,
         // so the jar is named relative to the working directory, which the launcher sets to the
-        // game folder.
-        Path jar = Path.of(Boot.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-        Path relative = Path.of("").toAbsolutePath().relativize(jar);
+        // game folder. Both get their long names: a working directory in 8.3 short form
+        // (C:\Users\RUNNER~1 on a CI runner) beside the jar's location in long form relativizes to a
+        // climb out of it. Links are kept, as Windows resolves the relative path from the folder as
+        // it is named, junction and all.
+        Path jar = Path.of(Boot.class.getProtectionDomain().getCodeSource().getLocation().toURI())
+                .toRealPath(LinkOption.NOFOLLOW_LINKS);
+        Path relative = Path.of("").toRealPath(LinkOption.NOFOLLOW_LINKS).relativize(jar);
         Object answer = ManagementFactory.getPlatformMBeanServer().invoke(
                 new ObjectName("com.sun.management:type=DiagnosticCommand"), "jvmtiAgentLoad",
                 new Object[] {new String[] {relative.toString()}}, new String[] {String[].class.getName()});

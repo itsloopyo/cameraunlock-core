@@ -821,6 +821,24 @@ public final class Tests {
 
     private record Ran(int exit, String output) {}
 
+    /**
+     * The 8.3 short form of a folder (GAMEFO~1), as a CI runner's TEMP gives it, or the folder
+     * itself on a volume that keeps no short names.
+     */
+    @SuppressWarnings("restricted")
+    private static Path shortForm(Path folder) throws Throwable {
+        try (Arena arena = Arena.ofConfined()) {
+            MethodHandle getShortPathName = Linker.nativeLinker().downcallHandle(
+                    SymbolLookup.libraryLookup("kernel32", arena).find("GetShortPathNameW").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
+            MemorySegment longName = arena.allocateFrom(folder.toString(), StandardCharsets.UTF_16LE);
+            MemorySegment shortName = arena.allocate(2 * 32768);
+            int length = (int) getShortPathName.invokeExact(longName, shortName, 32768);
+            if (length == 0 || length >= 32768) throw new IOException("GetShortPathNameW failed on " + folder);
+            return Path.of(shortName.getString(0, StandardCharsets.UTF_16LE));
+        }
+    }
+
     /** Runs the boot class as the site JVM config has a game's launcher run it, from the game folder. */
     private static Ran boot(Path game, String agent, boolean namesTheGame) throws IOException, InterruptedException {
         List<String> command = new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
@@ -838,9 +856,10 @@ public final class Tests {
         return new Ran(process.exitValue(), output);
     }
 
-    private static void bootLoadsTheAgentAndStartsTheGame(Path scratch) throws IOException, InterruptedException {
-        // A space in the game folder's path, as an installed game's usually has.
-        Path game = Files.createDirectories(scratch.resolve("Game Folder"));
+    private static void bootLoadsTheAgentAndStartsTheGame(Path scratch) throws Throwable {
+        // A space in the game folder's path, as an installed game's usually has, and the game
+        // started from its short form, which the boot class has to match to the jar's long one.
+        Path game = shortForm(Files.createDirectories(scratch.resolve("Game Folder")));
         Files.copy(CameraUnlock.beside(Tests.class).resolve("boot").resolve("Fixture.jar"), game.resolve("Fixture.jar"));
 
         Ran ran = boot(game, "starts", true);
