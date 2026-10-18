@@ -1,10 +1,11 @@
 # Core as a jar
 
 `CameraUnlockCore.dll` is core for a host that can load a DLL. Some cannot ship one: a Steam
-Workshop item for Project Zomboid is uploaded by the game's own uploader, which refuses any file
-ending in `.exe`, `.dll`, `.bat`, `.app`, `.dylib`, `.sh`, `.so` or `.zip` under the item's
-`Contents/` (`zombie.core.znet.SteamWorkshopItem.validateFileTypes`). For a host on a JVM, core is
-also a jar with no native file in it. It is the same C++, the same C interface and the same Java
+Workshop item for Project Zomboid is uploaded by the game's own uploader, which refuses a file
+whose name ends in `.exe`, `.dll`, `.bat`, `.app`, `.dylib`, `.sh`, `.so` or `.zip` anywhere under
+the item's `Contents/` (`zombie.core.znet.SteamWorkshopItem.validateFileTypes`). The comparison is
+case-sensitive, and a name ending in `pyramid.zip`, in any case, is let through. For a host on a
+JVM, core is also a jar with no native file in it. It is the same C++, the same C interface and the same Java
 binding, so nothing is written twice.
 
 ## What is in it
@@ -14,7 +15,7 @@ binding, so nothing is written twice.
 | Part | From |
 |---|---|
 | The binding and the boot class | `java/src` |
-| The C interface as JVM classes, `com.cameraunlock.core.wasm.CoreModule` | `cpp/` compiled to WebAssembly, then to Java bytecode |
+| The C interface as JVM classes, `com.cameraunlock.core.wasm.CoreModule` | `cpp/` compiled to WebAssembly, then to Java bytecode by Endive's build-time compiler, which also copies code of its own into them (`CoreModuleMachineShaded`) |
 | The classes those run on | Endive 1.1.0: `runtime`, `wasm`, `wasi`, `log`, `annotations` |
 | The notices that travel with them | `META-INF/licenses/`, from `legal/` |
 
@@ -22,8 +23,10 @@ binding, so nothing is written twice.
 `CameraUnlock.load()` and the DLL, and `pixi run test-java` and `pixi run vectors-java` run each
 check on both.
 
-A mod compiles against the jar and puts its whole content in its own jar: a loader that takes one
-jar per mod (ZombieBuddy) needs that, and so does a site config that names one.
+A mod compiles against the jar and puts its whole content in its own jar. A loader that takes one
+jar per mod (ZombieBuddy) needs that, and so does the boot class a site config names
+([java-agent-mod.md](java-agent-mod.md)): `Boot` loads the jar it is in as the agent, so it has to
+be in the mod's jar.
 
 ## How it is built
 
@@ -48,23 +51,29 @@ Windows is `<windows.h>` and in the WebAssembly build (`CAMERAUNLOCK_WIN32_HOST`
 import of module `cameraunlock_win32`. `java/src/com/cameraunlock/core/Win32Host.java` implements
 each import with the same call into kernel32, user32 or ws2_32 through `java.lang.foreign`, so the
 config owner's atomic replace, its file times, the hotkeys and the window centring behave as in the
-DLL. Windows' own DLLs are all it calls, and nothing native ships.
+DLL. Defaults.ini's probe also calls shell32 (`SHGetKnownFolderPath`), ole32 (`CoTaskMemFree`) and,
+where it has them, Wine's functions in ntdll and kernel32. Windows' own DLLs are all it calls, and nothing native
+ships.
 
 The two sides differ in three ways, and Win32Host converts at each call:
 
 - `wchar_t` is 32 bits in the module, so a W function's text is UTF-32 there and lengths count
   code points.
-- Pointers are 32 bits. `HANDLE`, `HWND`, `HMONITOR` and `SOCKET` are Windows' values, which
-  Windows keeps within 32 significant bits; the host sign-extends them.
+- Pointers are 32 bits, and so are `HANDLE`, `HWND`, `HMONITOR` and `SOCKET` in the module. The
+  host sign-extends each to 64 bits on the way to Windows, and checks each value Windows hands
+  back before it cuts it to 32: each has to sign-extend back to the same value (an invalid handle
+  or `INVALID_SOCKET` is -1, which does), and anything else throws
+  `IllegalStateException`. `FindFirstFileW`'s handles are pointers past 32 bits, so the module
+  holds a number the host gives it in their place.
 - A struct passed by value is passed by pointer (`SetFilePointerEx`'s `LARGE_INTEGER`).
 
 `win32_host.h` declares only what core uses. A new Win32 call in core's Windows code fails the
 WebAssembly build until it is declared there and implemented in Win32Host.
 
-Two things are not one call each. Defaults.ini's probe finds its functions by name with
-`GetProcAddress`, which code in WebAssembly cannot call through, so `ProbeDefaults` and
-`WineDosFileName` are imports Win32Host answers with the same lookups. And the file log writes
-through `CreateFileW` and `WriteFile` like the DLL.
+Defaults.ini's probe is not one call each. It finds its functions by name with `GetProcAddress`,
+which code in WebAssembly cannot call through, so `ProbeDefaults` and `WineDosFileName` are imports
+Win32Host answers with the same lookups. The file log writes through `CreateFileW` and `WriteFile`
+like the DLL.
 
 ## Threads
 

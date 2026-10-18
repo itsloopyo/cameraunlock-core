@@ -24,14 +24,14 @@ import run.endive.wasm.types.ValType;
 /**
  * The imports of module "cameraunlock_win32" that the WebAssembly build of the C interface makes
  * (cpp/include/cameraunlock/os/win32_host.h): each is the same call into kernel32, user32, ws2_32,
- * shell32 or ole32 that CameraUnlockCore.dll makes, so core's file, window, key and socket code
- * behaves as it does in the DLL.
+ * shell32, ole32 or ntdll that CameraUnlockCore.dll makes, so core's file, window, key and socket
+ * code behaves as it does in the DLL.
  *
  * The module's side of a call differs from Windows' in three ways, and each import converts:
  * pointers are offsets into the module's memory, which is copied to and from native memory;
  * wchar_t is 32 bits, so W text is UTF-32 there and UTF-16 here, and lengths count code points
- * there; and HANDLE, HWND, HMONITOR and SOCKET are 32 bits, which Windows keeps its values within,
- * so they are sign-extended here.
+ * there; and HANDLE, HWND, HMONITOR and SOCKET are 32 bits there, so they are sign-extended here,
+ * and each value Windows hands back is checked to fit before it is cut to 32 bits.
  *
  * Every import runs inside a call into the module, under WasmCore's lock, so the last error of the
  * one thread there is is kept here and answered by GetLastError and WSAGetLastError. The receive
