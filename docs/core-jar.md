@@ -117,10 +117,35 @@ The reason of a failed call is read inside that call and kept for the thread tha
 
 ## Cost
 
-Measured on the testing module against the testing DLL, one frame with a datagram every fourth:
-about 4 microseconds against 0.3, once warm. Every call allocates its arguments' copies, so
-`frame`, `lean`, `viewFrame`, `viewLean`, `hotkeysTake` and `hotkeysDrop` allocate here, where
-with the DLL they do not.
+`pixi run bench-java` measures both backends. On the machine core is developed on, with other
+builds running beside it:
+
+| | DLL | Module |
+|---|---|---|
+| Load, first in the JVM | 0.15 to 0.18 s | 1.7 to 2.7 s |
+| A frame, a datagram every fourth, warm | 0.3 to 0.4 us | 3.7 to 3.9 us |
+| The same at the 99th percentile | 0.5 us | 7.6 to 9.9 us |
+| A settings save, median | 5 ms | 7 ms |
+| The longest save | 10 to 46 ms | 9 to 18 ms |
+| The longest frame on another thread while saves run | under 1 ms | the longest save |
+| The same while the main thread only waits | 0.2 to 1.1 ms | 0.2 to 2.1 ms |
+
+The load is the whole of `loadBundled` or `load`, and a mod pays it once, where it loads core.
+
+Every call allocates its arguments' copies, so `frame`, `lean`, `viewFrame`, `viewLean`,
+`hotkeysTake` and `hotkeysDrop` allocate here, where with the DLL they do not.
+
+One lock is held through each call, so a call that waits holds every other thread's call up with
+it:
+
+- A settings save holds a frame on another thread for as long as the save takes: in the Module
+  column, the longest frame while saves ran was the longest save each time. A save that finds the
+  file in use by another program sleeps and tries again, up to nine times 20 ms, and the lock is
+  held through that too. A mod saves on a hotkey or a change in its options, so this is a hitch at
+  that moment.
+- `windowCenter` moves the window with `SetWindowPos`, which waits for the window's own thread to
+  answer. Called from any other thread while the window's thread waits for the lock (in `frame`,
+  say), neither goes on. Call it on the thread that made the window.
 
 ## What it does not do
 
