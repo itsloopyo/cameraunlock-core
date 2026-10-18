@@ -283,7 +283,8 @@ check = { depends-on = ["check-config-schema", "check-config-format", "check-can
 # doc = "docfx docfx.json"
 
 [dependencies]
-nodejs = ">=20"
+# 20.12 for Dirent.parentPath, which the wasm and java build scripts read.
+nodejs = ">=20.12"
 # For java/. 25 is the runtime the one Java agent mod's game ships (Project Zomboid 42), and
 # build-java compiles for 22 with it.
 openjdk = ">=25,<26"
