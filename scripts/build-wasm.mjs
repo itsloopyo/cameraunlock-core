@@ -71,7 +71,7 @@ const COMPILE = ['--target=wasm32-wasip1', '-O2', '-std=c++17', '-fwasm-exceptio
 const LINK = ['--target=wasm32-wasip1', '-mexec-model=reactor', '-fwasm-exceptions', '-lunwind', '-Wl,--gc-sections',
     '-Wl,--export=malloc', '-Wl,--export=free'];
 const OTHER_ABI = ['--target=wasm32-wasip1', '-O2', '-mexec-model=reactor', '-I', join(cpp, 'include'), '-Wl,--export=cameraunlock_abi'];
-// FAIL, the default: a function too large for one JVM method stops the build rather than running in Endive's
+// FAIL: a function too large for one JVM method stops the build rather than running in Endive's
 // interpreter.
 const ENDIVE_ARGS = ['--interpreter-fallback', 'FAIL'];
 
