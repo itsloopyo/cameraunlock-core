@@ -61,7 +61,9 @@ try {
 
     mkdirSync(dirname(resolve(target)), { recursive: true });
     rmSync(target, { force: true });
-    run('jar', ['--create', '--file', resolve(target), '-C', classes, '.']);
+    // One date on every entry, and no manifest to carry the JDK's version, so the same sources and
+    // toolchain give the same bytes. Nothing reads a manifest of this jar: a mod takes its classes.
+    run('jar', ['--create', '--no-manifest', '--date', '1980-01-01T00:00:02Z', '--file', resolve(target), '-C', classes, '.']);
     console.log(`built ${resolve(target)}`);
 } finally {
     rmSync(work, { recursive: true, force: true });
