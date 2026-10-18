@@ -8,20 +8,23 @@
 //   <variant>.wasm   the module
 //   src/             the one Java source Endive writes, com/cameraunlock/core/wasm/<Class>.java
 //   classes/         the compiled functions and the module's .meta resource
+//   build.stamp      the toolchain pins and command lines it was built with, written last
 //
 //   core        what a mod ships: CameraUnlock.loadBundled() (CoreModule)
 //   testing     the same with cameraunlock/c/testing/cameraunlock_testing.h (CoreTestingModule)
 //   other-abi   tests/c_other_abi.c, a module of the ABI before this one (CoreOtherAbiModule)
 //
-// A variant whose module is newer than every source it is built from is left as it is.
+// A variant is left as it is when its stamp names the pins and command lines this run would use
+// and is newer than every source, header and this script. The stamp is removed before a rebuild
+// and written once Endive has finished, so a build that stopped part way is not taken for done.
 
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { toolchain } from './wasm-toolchain.mjs';
+import { TOOLCHAIN_PINS, toolchain } from './wasm-toolchain.mjs';
 
 const run = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,6 +70,10 @@ const COMPILE = ['--target=wasm32-wasip1', '-O2', '-std=c++17', '-fwasm-exceptio
     '-DCAMERAUNLOCK_WIN32_HOST', '-I', join(cpp, 'include'), '-Werror', '-Wall'];
 const LINK = ['--target=wasm32-wasip1', '-mexec-model=reactor', '-fwasm-exceptions', '-lunwind', '-Wl,--gc-sections',
     '-Wl,--export=malloc', '-Wl,--export=free'];
+const OTHER_ABI = ['--target=wasm32-wasip1', '-O2', '-mexec-model=reactor', '-I', join(cpp, 'include'), '-Wl,--export=cameraunlock_abi'];
+// FAIL, the default: a function too large for one JVM method stops the build rather than running in Endive's
+// interpreter.
+const ENDIVE_ARGS = ['--interpreter-fallback', 'FAIL'];
 
 const VARIANTS = {
     core: { module: 'CoreModule', defines: [], headers: ['include/cameraunlock/c/cameraunlock.h', 'include/cameraunlock/c/host/cameraunlock_host.h'] },
@@ -132,27 +139,32 @@ async function build(tools, variant) {
     const spec = VARIANTS[variant];
     const folder = join(out, variant);
     const wasm = join(folder, `${variant}.wasm`);
+    const stampFile = join(folder, 'build.stamp');
+    const stamp = `${JSON.stringify({ toolchain: TOOLCHAIN_PINS, sources: SOURCES, compile: COMPILE, link: LINK, otherAbi: OTHER_ABI,
+        endive: ENDIVE_ARGS, variant: spec }, null, 2)}\n`;
     const inputs = Math.max(newest(join(cpp, 'include')), newest(join(cpp, 'src')), statSync(join(cpp, 'tests', 'c_other_abi.c')).mtimeMs,
         statSync(fileURLToPath(import.meta.url)).mtimeMs);
-    if (existsSync(wasm) && existsSync(join(folder, 'classes')) && statSync(wasm).mtimeMs > inputs) {
+    // The newest input is read before the build and kept in the stamp, so a file saved while the
+    // build runs is newer than what the stamp says was built.
+    const built = existsSync(stampFile) ? readFileSync(stampFile, 'utf8') : '';
+    if (built.startsWith(stamp) && Number(built.slice(stamp.length)) >= inputs) {
         process.stderr.write(`${variant}: up to date\n`);
         return;
     }
+    rmSync(stampFile, { force: true });
     mkdirSync(folder, { recursive: true });
     if (variant === 'other-abi') {
-        await run(tools.cc, ['--target=wasm32-wasip1', '-O2', '-mexec-model=reactor', `--sysroot=${tools.sysroot}`, '-I', join(cpp, 'include'),
-            join(cpp, 'tests', 'c_other_abi.c'), '-Wl,--export=cameraunlock_abi', '-o', wasm]);
+        await run(tools.cc, [...OTHER_ABI, `--sysroot=${tools.sysroot}`, join(cpp, 'tests', 'c_other_abi.c'), '-o', wasm]);
     } else {
         const objects = await compile(tools, variant, spec);
         await run(tools.clang, [...LINK, `--sysroot=${tools.sysroot}`, ...objects, ...exportsOf(spec.headers), '-o', wasm],
             { maxBuffer: 64 << 20 });
     }
     for (const generated of ['src', 'classes']) rmSync(join(folder, generated), { recursive: true, force: true });
-    // FAIL, the default: a function too large for one JVM method stops the build rather than
-    // running in Endive's interpreter.
     await run('java', ['-jar', tools.compiler, wasm, '--prefix', `com.cameraunlock.core.wasm.${spec.module}`,
         '--source-dir', join(folder, 'src'), '--class-dir', join(folder, 'classes'), '--wasm-dir', join(folder, 'classes'),
-        '--interpreter-fallback', 'FAIL'], { maxBuffer: 64 << 20 });
+        ...ENDIVE_ARGS], { maxBuffer: 64 << 20 });
+    writeFileSync(stampFile, `${stamp}${inputs}\n`, 'utf8');
     process.stderr.write(`${variant}: ${wasm} (${(statSync(wasm).size / 1048576).toFixed(1)} MB)\n`);
 }
 

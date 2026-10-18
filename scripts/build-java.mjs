@@ -42,7 +42,7 @@ function run(tool, args) {
 /** A module's generated source and classes, which build-wasm.mjs writes. */
 function module(variant) {
     const folder = join(modules, variant);
-    if (!existsSync(join(folder, 'classes'))) throw new Error(`${folder} is not built: run this through \`pixi run build-java\``);
+    if (!existsSync(join(folder, 'build.stamp'))) throw new Error(`${folder} is not built: run this through \`pixi run build-java\``);
     return { src: join(folder, 'src'), classes: join(folder, 'classes') };
 }
 

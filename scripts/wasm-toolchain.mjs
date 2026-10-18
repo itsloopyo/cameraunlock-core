@@ -41,6 +41,9 @@ const ENDIVE = {
 /** The jars the generated classes need at run time: a mod's jar carries their classes. */
 export const ENDIVE_RUNTIME = ['runtime', 'wasm', 'wasi', 'log', 'annotations'];
 
+/** Every pin, for a build to record beside what it made with them. */
+export const TOOLCHAIN_PINS = { wasiSdk: WASI_SDK, endive: { version: ENDIVE_VERSION, sha256: ENDIVE } };
+
 // The whole download, which for the wasi-sdk archive is about 620 MB.
 const FETCH_TIMEOUT_MS = 30 * 60 * 1000;
 // A fetch or unpacking still running is younger than this; one older was left by a run that died.
