@@ -233,12 +233,31 @@ public:
         return m_snapshot;
     }
 
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+    // The WebAssembly build has no threads. Its host receives on the socket this receiver
+    // opened and hands each recvfrom's result to Received, or the reason it stopped waiting to
+    // ReceiveLoopFailed, and calls SupervisorStep about every 16 ms while Start holds.
+    void Received(const char* buffer, int bytes, int error, const sockaddr_in& sender);
+    void ReceiveLoopFailed(const std::string& what);
+    void SupervisorStep(int64_t nowUs);
+    bool IsSupervising() const { return m_supervising.load(std::memory_order_acquire); }
+#endif
+
 private:
     friend struct detail::UdpReceiverTestAccess;
 
     void HandleDatagram(const char* buffer, int bytesReceived, const sockaddr_in& senderAddr, int64_t arrivedUs);
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
     void ReceiverThread();
     void SupervisorThread();
+    /// What one recvfrom gave: `bytes` from `sender`, or SOCKET_ERROR and the socket's `error`.
+    void Received(const char* buffer, int bytes, int error, const sockaddr_in& sender);
+    /// The receive loop gives up: `what` is logged once and the supervisor reopens the socket.
+    void ReceiveLoopFailed(const std::string& what);
+    /// One look by the supervisor: a retry of the bind while it fails, a reopen after the
+    /// receive loop gave up.
+    void SupervisorStep(int64_t nowUs);
+#endif
     /// False with the reason in `failure`, which is then never empty.
     bool BindAndReceive(std::string& failure);
     void StopReceiverThread();
@@ -251,11 +270,21 @@ private:
     std::thread m_supervisorThread;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_stopFlag{false};
-#ifdef _WIN32
+#if defined(_WIN32)
     /// Wakes the receive thread out of its wait for a datagram. Created with
     /// each receive thread and closed after it is joined.
     WSAEVENT m_stopEvent{WSA_INVALID_EVENT};
 #endif
+    // The supervisor's clock and its last failure, kept from one step to the next.
+    int64_t m_retryingSinceUs{0};
+    int64_t m_lastAttemptUs{0};
+    int64_t m_lastWaitLogUs{0};
+    std::string m_supervisorFailure;
+    // The receive path's lines that are logged once, counted from each bind.
+    int64_t m_recvErrLogged{0};
+    int64_t m_waitErrLogged{0};
+    int64_t m_firstPacketLogged{0};
+    int64_t m_shortPacketLogged{0};
     std::atomic<bool> m_supervising{false};
     std::atomic<bool> m_retrying{false};
     std::atomic<bool> m_failed{false};

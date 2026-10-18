@@ -5,7 +5,17 @@
 #include <chrono>
 #include <string>
 
-#ifndef _WIN32
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+// The host's half of the receiver in the WebAssembly build (Win32Host.java): it waits on the
+// socket with select and recvfrom on a thread of its own, hands each result to the receiver's
+// Received, and drops what arrives after StopReceiving.
+extern "C" __attribute__((import_module("cameraunlock_win32"), import_name("ReceiveOn"))) void
+cameraunlock_win32_ReceiveOn(SOCKET socket, cameraunlock::UdpReceiver* receiver);
+extern "C" __attribute__((import_module("cameraunlock_win32"), import_name("StopReceiving"))) void
+cameraunlock_win32_StopReceiving(cameraunlock::UdpReceiver* receiver);
+#endif
+
+#if !defined(_WIN32) && !defined(CAMERAUNLOCK_WIN32_HOST)
 #include <poll.h>
 #endif
 
@@ -54,7 +64,12 @@ bool UdpReceiver::Start(uint16_t port) {
               std::to_string(kRetryIntervalMs) + "ms until it succeeds");
     }
 
+    m_retryingSinceUs = NowUs();
+    m_lastAttemptUs = m_retryingSinceUs;
+    m_lastWaitLogUs = m_retryingSinceUs;
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
     m_supervisorThread = std::thread(&UdpReceiver::SupervisorThread, this);
+#endif
     return bound;
 }
 
@@ -67,7 +82,7 @@ bool UdpReceiver::BindAndReceive(std::string& failure) {
         return false;
     }
 
-#ifdef _WIN32
+#if defined(_WIN32)
     m_stopEvent = WSACreateEvent();
     if (m_stopEvent == WSA_INVALID_EVENT) {
         // The socket opened, so it has no error to give: the reason is this one.
@@ -87,17 +102,22 @@ bool UdpReceiver::BindAndReceive(std::string& failure) {
 
     m_receiveFailed.store(false, std::memory_order_release);
     m_stopFlag.store(false, std::memory_order_release);
+    m_recvErrLogged = 0;
+    m_waitErrLogged = 0;
+    m_firstPacketLogged = 0;
+    m_shortPacketLogged = 0;
+    m_parseFailLogged = false;
     m_running.store(true, std::memory_order_release);
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+    cameraunlock_win32_ReceiveOn(m_socket.GetHandle(), this);
+#else
     m_thread = std::thread(&UdpReceiver::ReceiverThread, this);
+#endif
     return true;
 }
 
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
 void UdpReceiver::SupervisorThread() {
-    int64_t retryingSinceUs = NowUs();
-    int64_t lastAttemptUs = retryingSinceUs;
-    int64_t lastWaitLogUs = retryingSinceUs;
-
-    std::string failure;
     while (m_supervising.load(std::memory_order_acquire)) {
         {
             std::unique_lock<std::mutex> lock(m_supervisorMutex);
@@ -105,51 +125,53 @@ void UdpReceiver::SupervisorThread() {
                                       [this] { return !m_supervising.load(std::memory_order_acquire); });
         }
         if (!m_supervising.load(std::memory_order_acquire)) return;
+        SupervisorStep(NowUs());
+    }
+}
+#endif
 
-        const int64_t now = NowUs();
+void UdpReceiver::SupervisorStep(int64_t now) {
+    if (m_retrying.load(std::memory_order_acquire)) {
+        if (now - m_lastAttemptUs < static_cast<int64_t>(kRetryIntervalMs) * 1000) return;
+        m_lastAttemptUs = now;
 
-        if (m_retrying.load(std::memory_order_acquire)) {
-            if (now - lastAttemptUs < static_cast<int64_t>(kRetryIntervalMs) * 1000) continue;
-            lastAttemptUs = now;
-
-            if (BindAndReceive(failure)) {
-                if (m_log) {
-                    m_log("Bound UDP port " + std::to_string(m_port) + " after " +
-                          std::to_string((now - retryingSinceUs) / 1000000) +
-                          "s of waiting - tracking is live");
-                }
-            } else if (m_log && now - lastWaitLogUs >=
-                                    static_cast<int64_t>(kRetryLogIntervalMs) * 1000) {
-                lastWaitLogUs = now;
-                m_log("Still waiting for UDP port " + std::to_string(m_port) +
-                      " (" + std::to_string((now - retryingSinceUs) / 1000000) +
-                      "s elapsed): " + failure);
+        if (BindAndReceive(m_supervisorFailure)) {
+            if (m_log) {
+                m_log("Bound UDP port " + std::to_string(m_port) + " after " +
+                      std::to_string((now - m_retryingSinceUs) / 1000000) +
+                      "s of waiting - tracking is live");
             }
-            continue;
+        } else if (m_log && now - m_lastWaitLogUs >=
+                                static_cast<int64_t>(kRetryLogIntervalMs) * 1000) {
+            m_lastWaitLogUs = now;
+            m_log("Still waiting for UDP port " + std::to_string(m_port) +
+                  " (" + std::to_string((now - m_retryingSinceUs) / 1000000) +
+                  "s elapsed): " + m_supervisorFailure);
         }
+        return;
+    }
 
-        // Bound. Silence needs no action: a socket that another holder is
-        // taking delivery from starts receiving again by itself the moment
-        // that holder exits. A receive thread that died on a socket error is
-        // the one state that never recovers on its own, so re-establish it.
-        if (!m_receiveFailed.load(std::memory_order_acquire)) continue;
+    // Bound. Silence needs no action: a socket that another holder is
+    // taking delivery from starts receiving again by itself the moment
+    // that holder exits. A receive thread that died on a socket error is
+    // the one state that never recovers on its own, so re-establish it.
+    if (!m_receiveFailed.load(std::memory_order_acquire)) return;
 
-        StopReceiverThread();
-        if (BindAndReceive(failure)) {
-            if (m_log) {
-                m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
-                      " - socket re-established");
-            }
-        } else {
-            retryingSinceUs = NowUs();
-            lastAttemptUs = retryingSinceUs;
-            lastWaitLogUs = retryingSinceUs;
-            if (m_log) {
-                m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
-                      " and it could not be reopened: " + failure +
-                      " -- retrying every " + std::to_string(kRetryIntervalMs) +
-                      "ms until it succeeds");
-            }
+    StopReceiverThread();
+    if (BindAndReceive(m_supervisorFailure)) {
+        if (m_log) {
+            m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
+                  " - socket re-established");
+        }
+    } else {
+        m_retryingSinceUs = NowUs();
+        m_lastAttemptUs = m_retryingSinceUs;
+        m_lastWaitLogUs = m_retryingSinceUs;
+        if (m_log) {
+            m_log("Receive thread failed on UDP port " + std::to_string(m_port) +
+                  " and it could not be reopened: " + m_supervisorFailure +
+                  " -- retrying every " + std::to_string(kRetryIntervalMs) +
+                  "ms until it succeeds");
         }
     }
 }
@@ -157,12 +179,16 @@ void UdpReceiver::SupervisorThread() {
 void UdpReceiver::StopReceiverThread() {
     if (m_running.load(std::memory_order_acquire)) {
         m_stopFlag.store(true, std::memory_order_release);
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+        cameraunlock_win32_StopReceiving(this);
+#else
 #ifdef _WIN32
         WSASetEvent(m_stopEvent);
 #endif
         if (m_thread.joinable()) {
             m_thread.join();
         }
+#endif
         m_running.store(false, std::memory_order_release);
     }
 #ifdef _WIN32
@@ -180,9 +206,11 @@ void UdpReceiver::Stop() {
         m_supervising.store(false, std::memory_order_release);
     }
     m_supervisorWake.notify_all();
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
     if (m_supervisorThread.joinable()) {
         m_supervisorThread.join();
     }
+#endif
 
     StopReceiverThread();
 
@@ -516,6 +544,45 @@ void detail::UdpReceiverTestAccess::Deliver(UdpReceiver& receiver, const void* d
     receiver.m_datagrams.fetch_add(1, std::memory_order_release);
 }
 
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
+void UdpReceiver::Received(const char* buffer, int bytes, int error, const sockaddr_in& sender) {
+    if (bytes == SOCKET_ERROR) {
+        if (!m_recvErrLogged++ && m_log) {
+            m_log("recvfrom failed with WSA error " + std::to_string(error) + " (continuing)");
+        }
+        if (error == WSAEMSGSIZE) {
+            m_datagrams.fetch_add(1, std::memory_order_release);
+        }
+        return;
+    }
+    if (!m_firstPacketLogged++ && m_log) {
+        char ip[INET_ADDRSTRLEN] = {};
+        inet_ntop(AF_INET, &sender.sin_addr, ip, sizeof(ip));
+        m_log("First UDP packet received: " + std::to_string(bytes) + " bytes from " + ip + ":" +
+              std::to_string(ntohs(sender.sin_port)));
+    }
+    if (bytes < static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
+        if (!m_shortPacketLogged++ && m_log) {
+            m_log("packet too short: " + std::to_string(bytes) + " bytes (need >= " +
+                  std::to_string(OpenTrackPacket::kMinPacketSize) + ")");
+        }
+    } else {
+        HandleDatagram(buffer, bytes, sender, NowUs());
+    }
+    // Counted once the datagram has been dealt with, so a reader that sees the count
+    // sees everything the datagram changed.
+    m_datagrams.fetch_add(1, std::memory_order_release);
+}
+#endif
+
+void UdpReceiver::ReceiveLoopFailed(const std::string& what) {
+    if (!m_waitErrLogged++ && m_log) {
+        m_log(what + " - receiver thread exiting");
+    }
+    m_receiveFailed.store(true, std::memory_order_release);
+}
+
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
 void UdpReceiver::ReceiverThread() {
     // The longest datagram a sender core knows of emits is 56 bytes: the 48 of the pose, 54
     // with the HCAM trailer, 56 from an OpenTrack build that appends a frame number. On
@@ -524,15 +591,8 @@ void UdpReceiver::ReceiverThread() {
     constexpr size_t kReceiveBufferSize = 64;
     alignas(16) char buffer[kReceiveBufferSize];
     sockaddr_in senderAddr = {};
-    int senderAddrSize = sizeof(senderAddr);
 
     SOCKET sock = m_socket.GetHandle();
-
-    int64_t s_recvErrLogged = 0;
-    int64_t s_waitErrLogged = 0;
-    int64_t s_firstPacketLogged = 0;
-    int64_t s_shortPacketLogged = 0;
-    m_parseFailLogged = false;
 
 #ifdef _WIN32
     // The thread sleeps until a datagram arrives or StopReceiverThread() sets
@@ -556,7 +616,7 @@ void UdpReceiver::ReceiverThread() {
 
     while (!m_stopFlag.load(std::memory_order_relaxed)) {
 #ifdef _WIN32
-        senderAddrSize = sizeof(senderAddr);
+        int senderAddrSize = sizeof(senderAddr);
         int bytesReceived = recvfrom(
             sock,
             buffer,
@@ -565,55 +625,27 @@ void UdpReceiver::ReceiverThread() {
             reinterpret_cast<sockaddr*>(&senderAddr),
             &senderAddrSize
         );
-        if (bytesReceived == SOCKET_ERROR) {
-            int err = WSAGetLastError();
-            if (err == WSAEWOULDBLOCK) {
-                // Queue drained. The would-block re-arms FD_READ, so a datagram
-                // landing from here on signals dataEvent, including one that
-                // arrived before the wait starts.
-                const DWORD woke = WSAWaitForMultipleEvents(2, waitEvents, FALSE, WSA_INFINITE, FALSE);
-                if (woke == WSA_WAIT_FAILED) {
-                    if (!s_waitErrLogged++ && m_log) {
-                        m_log("WSAWaitForMultipleEvents failed with " +
-                              std::to_string(WSAGetLastError()) + " - receiver thread exiting");
-                    }
-                    m_receiveFailed.store(true, std::memory_order_release);
-                    break;
-                }
-                if (woke == WSA_WAIT_EVENT_0 + 1) WSAResetEvent(dataEvent);
-                continue;
+        const int err = bytesReceived == SOCKET_ERROR ? WSAGetLastError() : 0;
+        if (bytesReceived == SOCKET_ERROR && err == WSAEWOULDBLOCK) {
+            // Queue drained. The would-block re-arms FD_READ, so a datagram
+            // landing from here on signals dataEvent, including one that
+            // arrived before the wait starts.
+            const DWORD woke = WSAWaitForMultipleEvents(2, waitEvents, FALSE, WSA_INFINITE, FALSE);
+            if (woke == WSA_WAIT_FAILED) {
+                ReceiveLoopFailed("WSAWaitForMultipleEvents failed with " + std::to_string(WSAGetLastError()));
+                break;
             }
-            if (!s_recvErrLogged++ && m_log) {
-                m_log("recvfrom failed with WSA error " + std::to_string(err) +
-                      " (continuing)");
-            }
-            if (err == WSAEMSGSIZE) {
-                m_datagrams.fetch_add(1, std::memory_order_release);
-            }
+            if (woke == WSA_WAIT_EVENT_0 + 1) WSAResetEvent(dataEvent);
             continue;
         }
-        if (!s_firstPacketLogged++ && m_log) {
-            char ip[INET_ADDRSTRLEN] = {};
-            inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
-            m_log("First UDP packet received: " + std::to_string(bytesReceived) +
-                  " bytes from " + ip + ":" + std::to_string(ntohs(senderAddr.sin_port)));
-        }
-        if (bytesReceived < static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
-            if (!s_shortPacketLogged++ && m_log) {
-                m_log("packet too short: " + std::to_string(bytesReceived) +
-                      " bytes (need >= " + std::to_string(OpenTrackPacket::kMinPacketSize) + ")");
-            }
-        }
+        Received(buffer, bytesReceived, err, senderAddr);
 #else
         // Bounded so Stop() is noticed, and so the non-blocking socket is not
         // spun on while nothing is sending.
         pollfd readable = {sock, POLLIN, 0};
         const int ready = poll(&readable, 1, kSupervisorTickMs);
         if (ready < 0 && errno != EINTR) {
-            if (!s_waitErrLogged++ && m_log) {
-                m_log("poll failed with " + std::to_string(errno) + " - receiver thread exiting");
-            }
-            m_receiveFailed.store(true, std::memory_order_release);
+            ReceiveLoopFailed("poll failed with " + std::to_string(errno));
             break;
         }
         if (ready <= 0) continue;
@@ -628,19 +660,17 @@ void UdpReceiver::ReceiverThread() {
             &addrLen
         );
         if (bytesReceived < 0) continue;
-#endif
-
         if (bytesReceived >= static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
             HandleDatagram(buffer, bytesReceived, senderAddr, NowUs());
         }
-        // Counted once the datagram has been dealt with, so a reader that sees the count
-        // sees everything the datagram changed.
         m_datagrams.fetch_add(1, std::memory_order_release);
+#endif
     }
 
 #ifdef _WIN32
     WSACloseEvent(dataEvent);
 #endif
 }
+#endif  // !CAMERAUNLOCK_WIN32_HOST
 
 }  // namespace cameraunlock
