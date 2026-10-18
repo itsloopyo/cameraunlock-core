@@ -32,7 +32,7 @@ cameraunlock-core/
 │   ├── tests/                                    # C++ tests
 │   └── CMakeLists.txt
 ├── java/
-│   ├── src/                                      # The binding to CameraUnlockCore.dll and the boot class of a Java agent mod
+│   ├── src/                                      # The binding to the C interface and the boot class of a Java agent mod
 │   ├── harness/                                  # The pipeline vectors' harness for the binding
 │   └── tests/                                    # Its tests
 ├── powershell/                                   # 7 reusable .psm1 modules for mod release pipelines
@@ -146,8 +146,10 @@ pipeline, config owner, hotkey poller and file log behind plain C functions, for
 Lua, Python or Rust host: [docs/c-interface.md](docs/c-interface.md).
 
 For a Java host the binding to it is here too, `java/src/com/cameraunlock/core/CameraUnlock.java`,
-with the boot class a Java agent mod is started through. A mod compiles both into its own jar
-from the submodule: [docs/java-agent-mod.md](docs/java-agent-mod.md).
+with the boot class a Java agent mod is started through. The same binding runs on the C interface
+compiled to WebAssembly and carried as JVM classes in one jar with no native file, for a host that
+cannot ship a DLL ([docs/core-jar.md](docs/core-jar.md)). A mod builds that jar from the submodule:
+[docs/java-agent-mod.md](docs/java-agent-mod.md).
 
 A port that reads or writes a mod's config file follows the canonical config format in
 [docs/canonical-config.md](docs/canonical-config.md), and runs the byte fixtures in
@@ -433,7 +435,9 @@ the installer ZIP, generates release notes, and publishes the GitHub release.
 - REFramework headers (optional, for reframework module)
 
 ### Java
-- OpenJDK 25 from the pixi environment, to compile and test `java/` for Java 22. Nothing else.
+- OpenJDK 25 from the pixi environment, to compile and test `java/` for Java 22.
+- wasi-sdk 34 and Endive 1.1.0, for core's jar: fetched once per user by `scripts/wasm-toolchain.mjs`,
+  pinned by SHA-256.
 
 ### Runtime
 - Unity assemblies provided by consuming projects (weak references)

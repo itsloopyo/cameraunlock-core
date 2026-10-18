@@ -391,6 +391,10 @@ struct. A mod compiles it into its own jar from the submodule's source.
 `pixi run vectors-java` runs the pipeline vectors through it
 (`java/harness/com/cameraunlock/core/ConformanceHarness.java`), the same five the C harness runs.
 
+For a host that cannot ship a native file, the same binding runs on the C interface compiled to
+WebAssembly and carried in the jar as JVM classes: `CameraUnlock.loadBundled()`,
+[core-jar.md](core-jar.md).
+
 ## What a new host writes
 
 1. Load `CameraUnlockCore.dll` by full path and compare `cameraunlock_abi()`.

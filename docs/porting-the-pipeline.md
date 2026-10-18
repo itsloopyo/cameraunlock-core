@@ -102,7 +102,7 @@ that calls `run-vectors.mjs`.
 | `the-pathless-headtracking` | Lua (UE4SS) | 3DOF only - no position processor and no interpolator. Runs the vectors |
 | `beamng-drive-headtracking` | Lua | `mod/lua/ge/extensions/headTracking/pipeline.lua`. No task that runs the vectors |
 | `minecraft-java-edition-headtracking` | Java | 15 hand-written classes under `core/src/main/java/com/cameraunlock/core/`; the submodule is present but the Gradle build compiles nothing from it. Runs the vectors with declared skips |
-| `project-zomboid-headtracking` | Java over a native DLL | Seven hand-written classes (receiver, filter, lean clamp, aim fade, aim mode, lean handover, zoom) beside a DLL that links core for the config and the hotkeys. No task that runs the vectors. The C interface below replaces all seven |
+| `project-zomboid-headtracking` | Java on core's jar | Core's C interface carried in the mod's jar as JVM classes ([core-jar.md](core-jar.md)); the mod writes none of the pipeline |
 | `fusion-360-headtracking` | Python | Runs the vectors |
 | `euro-truck-simulator-2-headtracking` | Python | `bridge/opentrack_to_freetrack.py` reads OpenTrack datagrams and hands them to FreeTrack. No core submodule, no interpolator |
 | `lopari` | Rust over C++ | Was a port: `src-tauri/src/opentrack.rs` read the packet and `src-tauri/src/bridge/interp.rs` interpolated. `src-tauri/build.rs` now compiles core's receiver, parser and session in behind `src-tauri/src/pose_feed.rs`, and no Rust there reads a datagram |
@@ -125,6 +125,9 @@ this repo, behind one call a frame. A Java agent (`java.lang.foreign`, Java 22 o
 conversion at its engine's boundary and its world query for the lean, and neither is in the
 checks below. A port is for a host that cannot load a native library at all: stock Lua in a
 sandbox, for one.
+
+A JVM host that can load a DLL but cannot ship one, as a Steam Workshop item cannot, does not
+port either: core's jar carries the same C++ as JVM classes ([core-jar.md](core-jar.md)).
 
 ## 1. Yaw and roll traverse the shortest arc
 
