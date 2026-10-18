@@ -18,7 +18,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { toolchain } from './wasm-toolchain.mjs';
 
@@ -52,14 +52,14 @@ mkdirSync(out, { recursive: true });
 const lib = join(out, 'lib');
 mkdirSync(lib);
 for (const jar of (await toolchain()).runtime) copyFileSync(jar, join(lib, basename(jar)));
-const runtime = readdirSync(lib).map((jar) => join(lib, jar)).join(';');
+const runtime = readdirSync(lib).map((jar) => join(lib, jar)).join(delimiter);
 
 const core = module('core'), testing = module('testing'), otherAbi = module('other-abi');
 const javac = ['--release', '22', '-Xlint:all', '-Werror'];
-run('javac', [...javac, '-cp', `${runtime};${core.classes}`, '-d', join(out, 'classes'),
+run('javac', [...javac, '-cp', [runtime, core.classes].join(delimiter), '-d', join(out, 'classes'),
     ...sources(join(javaRoot, 'src')), ...sources(core.src)]);
 cpSync(core.classes, join(out, 'classes'), { recursive: true });
-run('javac', [...javac, '-cp', `${runtime};${join(out, 'classes')};${testing.classes};${otherAbi.classes}`,
+run('javac', [...javac, '-cp', [runtime, join(out, 'classes'), testing.classes, otherAbi.classes].join(delimiter),
     '-d', join(out, 'test-classes'), ...sources(join(javaRoot, 'harness')), ...sources(join(javaRoot, 'tests')),
     ...sources(testing.src), ...sources(otherAbi.src)]);
 cpSync(testing.classes, join(out, 'test-classes'), { recursive: true });

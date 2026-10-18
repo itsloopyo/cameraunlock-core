@@ -14,7 +14,7 @@
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { toolchain } from './wasm-toolchain.mjs';
 
@@ -32,7 +32,7 @@ function sources(directory) {
         .map((entry) => join(entry.parentPath, entry.name));
 }
 
-run('node', [join(repoRoot, 'scripts', 'build-wasm.mjs'), 'core']);
+run(process.execPath, [join(repoRoot, 'scripts', 'build-wasm.mjs'), 'core']);
 const tools = await toolchain();
 const module = join(repoRoot, 'cpp', 'build-wasm', 'core');
 
@@ -40,7 +40,7 @@ const work = mkdtempSync(join(tmpdir(), 'cameraunlock-core-jar-'));
 try {
     const classes = join(work, 'classes');
     mkdirSync(classes);
-    run('javac', ['--release', '22', '-Xlint:all', '-Werror', '-cp', [...tools.runtime, join(module, 'classes')].join(';'),
+    run('javac', ['--release', '22', '-Xlint:all', '-Werror', '-cp', [...tools.runtime, join(module, 'classes')].join(delimiter),
         '-d', classes, ...sources(join(repoRoot, 'java', 'src')), ...sources(join(module, 'src'))]);
     cpSync(join(module, 'classes'), classes, { recursive: true });
 
