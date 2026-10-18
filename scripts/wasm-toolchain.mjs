@@ -33,6 +33,8 @@ const ENDIVE = {
 /** The jars the generated classes need at run time: a mod's jar carries their classes. */
 export const ENDIVE_RUNTIME = ['runtime', 'wasm', 'wasi', 'log', 'annotations'];
 
+// The whole download, which for the wasi-sdk archive is about 620 MB.
+const FETCH_TIMEOUT_MS = 30 * 60 * 1000;
 // A fetch or unpacking still running is younger than this; one older was left by a run that died.
 const ABANDONED_MS = 60 * 60 * 1000;
 
@@ -56,9 +58,14 @@ async function fetchChecked(url, file, sha256) {
         return;
     }
     const partial = `${file}.${randomUUID()}.partial`;
-    const response = await fetch(url, { redirect: 'follow' });
-    if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(partial));
+    try {
+        const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        await pipeline(Readable.fromWeb(response.body), createWriteStream(partial));
+    } catch (failure) {
+        rmSync(partial, { force: true });
+        throw new Error(`${url} could not be fetched: ${failure.message}`, { cause: failure });
+    }
     const found = await sha256Of(partial);
     if (found !== sha256) {
         rmSync(partial, { force: true });
