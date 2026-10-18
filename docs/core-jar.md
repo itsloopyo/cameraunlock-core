@@ -72,8 +72,12 @@ The two sides differ in three ways, and Win32Host converts at each call:
   holds a number the host gives it in their place.
 - A struct passed by value is passed by pointer (`SetFilePointerEx`'s `LARGE_INTEGER`).
 
-`win32_host.h` declares only what core uses. A new Win32 call in core's Windows code fails the
-WebAssembly build until it is declared there and implemented in Win32Host.
+`win32_host.h` declares only what core uses. A new Win32 call in core's Windows code does not
+compile for WebAssembly until it is declared there. A declared import Win32Host does not register
+would link, and fail only when the module is instantiated, so `pixi run build-java` runs
+`scripts/check-win32-imports.mjs` first: it reads the modules' imports of `cameraunlock_win32` and
+fails on one Win32Host does not register with the same signature, and on a function Win32Host
+registers that no module imports.
 
 Defaults.ini's probe is not one call each. It finds its functions by name with `GetProcAddress`,
 which code in WebAssembly cannot call through, so `ProbeDefaults` and `WineDosFileName` are imports

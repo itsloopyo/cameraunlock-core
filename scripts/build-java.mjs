@@ -13,6 +13,9 @@
 // java/src is compiled for Java 22, the first release where java.lang.foreign is final, so a
 // construct from a later release fails here and not in a mod on an older runtime.
 //
+// First, check-win32-imports.mjs holds the modules' imports of "cameraunlock_win32" to the
+// functions Win32Host registers.
+//
 // The DLLs and the modules are built by the tasks this depends on (pixi.toml, build-java). javac,
 // jar and node come from the pixi environment.
 
@@ -20,6 +23,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkWin32Imports } from './check-win32-imports.mjs';
 import { toolchain } from './wasm-toolchain.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -55,6 +59,7 @@ for (const jar of (await toolchain()).runtime) copyFileSync(jar, join(lib, basen
 const runtime = readdirSync(lib).map((jar) => join(lib, jar)).join(delimiter);
 
 const core = module('core'), testing = module('testing'), otherAbi = module('other-abi');
+checkWin32Imports(['core', 'testing', 'other-abi'].map((variant) => join(modules, variant, `${variant}.wasm`)));
 const javac = ['--release', '22', '-Xlint:all', '-Werror'];
 run('javac', [...javac, '-cp', [runtime, core.classes].join(delimiter), '-d', join(out, 'classes'),
     ...sources(join(javaRoot, 'src')), ...sources(core.src)]);
