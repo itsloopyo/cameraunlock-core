@@ -26,6 +26,7 @@
 #include "cameraunlock/tracking/head_tracking_session.h"
 
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -37,6 +38,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1525,6 +1527,16 @@ std::int32_t cameraunlock_testing_defaults_path(char* buffer, std::int32_t capac
 
 namespace {
 
+std::uint32_t Count(const std::string& text) {
+    std::uint32_t count = 0;
+    const char* end = text.data() + text.size();
+    const std::from_chars_result read = std::from_chars(text.data(), end, count);
+    if (text.empty() || read.ec != std::errc() || read.ptr != end) {
+        throw std::invalid_argument("argument is not a count that fits 32 bits: " + text);
+    }
+    return count;
+}
+
 std::string Win32Call(const std::string& call, const char* argument) {
     const std::wstring wide = Wide(argument, "argument");
     const auto failed = [&call](DWORD error) {
@@ -1572,7 +1584,7 @@ std::string Win32Call(const std::string& call, const char* argument) {
                                         FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) throw failed(GetLastError());
         LARGE_INTEGER at{};
-        at.QuadPart = std::stoll(cfg::detail::DefaultsUtf8(offset));
+        at.QuadPart = static_cast<LONGLONG>(Count(cfg::detail::DefaultsUtf8(offset)));
         std::string text(256, '\0');
         DWORD read = 0;
         const bool done = SetFilePointerEx(file, at, nullptr, FILE_BEGIN) &&
@@ -1583,7 +1595,7 @@ std::string Win32Call(const std::string& call, const char* argument) {
         text.resize(read);
         return text;
     }
-    if (call == "error_text") return cfg::detail::OwnerErrorText(static_cast<std::uint32_t>(std::stoul(argument)));
+    if (call == "error_text") return cfg::detail::OwnerErrorText(Count(argument));
     if (call == "delete") {
         if (!DeleteFileW(wide.c_str())) throw failed(GetLastError());
         return "1";
@@ -1592,7 +1604,7 @@ std::string Win32Call(const std::string& call, const char* argument) {
         LARGE_INTEGER frequency{}, before{}, after{};
         QueryPerformanceFrequency(&frequency);
         QueryPerformanceCounter(&before);
-        Sleep(static_cast<DWORD>(std::stoul(argument)));
+        Sleep(static_cast<DWORD>(Count(argument)));
         QueryPerformanceCounter(&after);
         return std::to_string((after.QuadPart - before.QuadPart) * 1000 / frequency.QuadPart);
     }

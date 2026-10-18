@@ -150,7 +150,7 @@ public final class Tests {
             Path classes = Path.of("java/build/test-classes").toAbsolutePath();
             check(reason.startsWith("The WebAssembly module in " + classes) && reason.contains("version " + (CameraUnlock.ABI - 1))
                             && reason.contains("written for version " + CameraUnlock.ABI) && reason.contains("the module is the older")
-                            && reason.contains("put together from two builds"),
+                            && reason.contains("come from two builds"),
                     "a module of the ABI before this one is refused at load, and the reason names the module, both versions, the"
                             + " older side and how they came apart: "
                             + reason);
@@ -522,8 +522,12 @@ public final class Tests {
                         && testing.win32("compare", "b\nA").equals("3"),
                 "CompareStringOrdinal orders two texts as Windows does, case aside");
         String encoding = System.getProperty("native.encoding");
-        String codePage = encoding.equals("UTF-8") ? "65001" : encoding.replaceAll("\\D", "");
-        check(testing.win32("code_page", "").equals(codePage), "GetACP is the code page Java was started on: " + encoding);
+        String codePage = testing.win32("code_page", "");
+        Charset ansi = Charset.forName(encoding);
+        check(codePage.equals("65001") ? ansi.equals(StandardCharsets.UTF_8)
+                        : java.util.stream.Stream.concat(java.util.stream.Stream.of(ansi.name()), ansi.aliases().stream())
+                                .anyMatch(alias -> alias.replaceAll("\\D", "").equals(codePage)),
+                "GetACP is the code page Java was started on: " + codePage + " and " + encoding);
         String narrowed = testing.win32("narrow", "caf\u00e9 1");
         check(narrowed.equals(HexFormat.of().formatHex("caf\u00e9 1".getBytes(Charset.forName(encoding)))),
                 "WideCharToMultiByte writes the ANSI code page's bytes: " + narrowed);
@@ -588,22 +592,27 @@ public final class Tests {
         synchronized (module) {
             check((int) closesocket.invokeExact(socket) == 0, "the receive loop's socket is closed under it");
         }
-        StringBuilder log = new StringBuilder();
-        frameUntil(core, input, () -> {}, f -> log.append(core.logTake()).toString().contains("socket re-established"));
-        check(log.toString().contains("Receive thread failed on UDP port " + port + " - socket re-established"),
-                "the receiver says its loop failed and the socket is open again: " + log);
-        try (DatagramSocket tracker = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
-            byte[] pose = datagram(0, 0, 0, -20, 4, 2);
-            CameraUnlock.Frame frame = frameUntil(core, input, () -> {
-                try {
-                    tracker.send(new DatagramPacket(pose, pose.length, InetAddress.getLoopbackAddress(), port));
-                } catch (IOException failure) {
-                    throw new IllegalStateException(failure);
-                }
-            }, f -> (f.flags & CameraUnlock.STATE_POSE) != 0 && near(f.headYaw, -20f));
-            check(near(frame.headYaw, -20f), "and a tracker reaches the frame through it: yaw " + frame.headYaw);
+        try {
+            StringBuilder log = new StringBuilder();
+            frameUntil(core, input, () -> {}, f -> log.append(core.logTake()).toString().contains("socket re-established"));
+            check(log.toString().contains("Receive thread failed on UDP port " + port + " - socket re-established"),
+                    "the receiver says its loop failed and the socket is open again: " + log);
+            // Made only now: the receiver closes the old socket's value as it reopens, and a socket of
+            // this test's made before then could have been given that value.
+            try (DatagramSocket tracker = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
+                byte[] pose = datagram(0, 0, 0, -20, 4, 2);
+                CameraUnlock.Frame frame = frameUntil(core, input, () -> {
+                    try {
+                        tracker.send(new DatagramPacket(pose, pose.length, InetAddress.getLoopbackAddress(), port));
+                    } catch (IOException failure) {
+                        throw new IllegalStateException(failure);
+                    }
+                }, f -> (f.flags & CameraUnlock.STATE_POSE) != 0 && near(f.headYaw, -20f));
+                check(near(frame.headYaw, -20f), "and a tracker reaches the frame through it: yaw " + frame.headYaw);
+            }
+        } finally {
+            core.stop();
         }
-        core.stop();
     }
 
     /** A module that traps is called no more: every later call says it stopped and why, and its tick thread ends. */
@@ -633,10 +642,22 @@ public final class Tests {
     }
 
     private static volatile int heldKey;
+    /** How many times the tick has asked for F9 while it was held, and while it was not. */
+    private static final java.util.concurrent.atomic.AtomicInteger seenDown = new java.util.concurrent.atomic.AtomicInteger(),
+            seenUp = new java.util.concurrent.atomic.AtomicInteger();
 
     @SuppressWarnings("unused")
     private static short keyState(MemorySegment capture, int key) {
-        return (short) (key == heldKey ? 0x8000 : 0);
+        boolean down = key == heldKey;
+        if (key == 0x78) (down ? seenDown : seenUp).incrementAndGet();
+        return (short) (down ? 0x8000 : 0);
+    }
+
+    /** Waits until `count` is past `from`, or two seconds pass. */
+    private static boolean polledPast(java.util.concurrent.atomic.AtomicInteger count, int from) throws InterruptedException {
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (count.get() <= from && System.nanoTime() < end) Thread.sleep(4);
+        return count.get() > from;
     }
 
     @SuppressWarnings("unused")
@@ -674,10 +695,12 @@ public final class Tests {
             }
         }
         try {
+            int down = seenDown.get();
             heldKey = 0x78;
-            Thread.sleep(100);
+            check(polledPast(seenDown, down), "the tick asks for F9 while it is held");
+            int up = seenUp.get();
             heldKey = 0;
-            Thread.sleep(100);
+            check(polledPast(seenUp, up), "and once it is let go");
             int taken = core.hotkeysTake();
             check((taken & CameraUnlock.HOTKEY_LOCAL) != 0, "F9 held and let go in the game's window fires its row: " + Integer.toHexString(taken));
             check(core.hotkeysTake() == 0, "and is taken once");
