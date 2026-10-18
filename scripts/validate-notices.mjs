@@ -43,7 +43,7 @@
 // upstream ships. Failing on it would make the gate permanently red for any
 // mod that legitimately vendors a newer snapshot.
 //
-// Dependencies come from four places:
+// Dependencies come from five places:
 //
 //   - FetchContent_Declare blocks in CMakeLists.txt (native mods).
 //   - Vendored source trees under extern/ | third_party/ | external/.
@@ -53,6 +53,8 @@
 //     core submodule is not a dependency directory of the mod, so nothing
 //     above sees it, and the MinHook statically linked into every such .asi
 //     was invisible to this check until it was looked for by name.
+//   - Core's jar, when pixi.toml or any script under scripts/ names
+//     build-core-jar.mjs: Endive, wasi-libc and the LLVM runtimes ride in it.
 //
 // The third is what covers the managed (C#) mods. They compile nothing from
 // source but ship the loader they vendor - BepInEx, MelonLoader, REFramework,
@@ -142,17 +144,38 @@ const SLUG_ALIASES = {
   cet: "cyber-engine-tweaks",
 };
 
+/** Whether `repo` has core as its cameraunlock-core submodule, as a mod does. */
+function isCoreSubmoduleOf(repo) {
+  const modules = path.join(repo, ".gitmodules");
+  return path.resolve(repo, "cameraunlock-core") === CORE && fs.existsSync(modules)
+    && /^\s*path\s*=\s*cameraunlock-core\s*$/m.test(fs.readFileSync(modules, "utf8"));
+}
+
 const tokens = process.argv.slice(2);
 const jobs = tokens.length ? tokens : [SELF];
 
 let failures = 0;
 for (const token of jobs) {
+  // Run with no repo named, the repo checked is the one core is the submodule of. Core's own
+  // checkout is in no such repo.
+  if (token === SELF && !isCoreSubmoduleOf(ROOT)) {
+    console.log(`ok   ${path.basename(CORE)}: no repo named, and this checkout is not the cameraunlock-core submodule of ${ROOT}; skipped`);
+    continue;
+  }
   const repo = token === SELF ? ROOT : resolveRepo(token);
   const label = path.basename(repo);
 
   if (!fs.existsSync(repo)) {
     console.error(`FAIL ${label}: no such repo`);
     failures += 1;
+    continue;
+  }
+
+  // Core's legal/ is the reference the check reads, and core ships no mod release ZIP. Its own
+  // scripts name the jar build and its vendor/ holds trees for the mods, which would otherwise
+  // read as a mod shipping them.
+  if (fs.existsSync(path.join(repo, "legal")) && fs.existsSync(path.join(repo, "scripts", "validate-notices.mjs"))) {
+    console.log(`ok   ${label}: cameraunlock-core itself, not a mod; skipped`);
     continue;
   }
 
@@ -298,11 +321,10 @@ function collect(repo) {
   }
 
   // A mod that builds core's jar (scripts/build-core-jar.mjs, docs/core-jar.md) ships what the jar
-  // carries besides core: the Endive classes its module runs on, and the C and C++ runtimes
-  // compiled into the module.
-  const scripts = path.join(repo, "scripts");
-  if (fs.existsSync(scripts) && fs.readdirSync(scripts).some((name) =>
-      /\.(ps1|mjs|cmd)$/i.test(name) && read(path.join(scripts, name)).includes("build-core-jar.mjs"))) {
+  // carries besides core: the Endive classes its module runs on and the Endive compiler code
+  // copied into the module's classes, and the C and C++ runtimes and compiler-rt builtins
+  // compiled into the module. The build is named in pixi.toml or in a script under scripts/.
+  if (namesCoreJarBuild(repo)) {
     for (const component of ["endive", "wasi-libc", "llvm-runtimes"]) add(component, null, "cameraunlock-core.jar");
   }
 
@@ -340,6 +362,18 @@ function collect(repo) {
   }
 
   return { found, problems };
+}
+
+function namesCoreJarBuild(repo) {
+  const pixi = path.join(repo, "pixi.toml");
+  if (fs.existsSync(pixi) && read(pixi).includes("build-core-jar.mjs")) return true;
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).some((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return walk(full);
+    return /\.(ps1|psm1|mjs|js|cmd|bat)$/i.test(entry.name) && read(full).includes("build-core-jar.mjs");
+  });
+  const scripts = path.join(repo, "scripts");
+  return fs.existsSync(scripts) && walk(scripts);
 }
 
 // The `- Asset: \`<name>\`` line Update-VendoredLoader writes into the vendor
