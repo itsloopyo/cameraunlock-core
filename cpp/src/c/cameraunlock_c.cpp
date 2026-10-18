@@ -234,6 +234,11 @@ struct Session {
         for (std::int32_t view = 1; view < CAMERAUNLOCK_VIEWS; ++view) {
             views[view].receiver.SetLog([view](const std::string& line) { LogLine(line + Named(view)); });
         }
+#ifdef CAMERAUNLOCK_C_TESTING
+        // A test's tracker is on this machine, and a port open to the network makes Windows ask the
+        // user whether to let each new test executable through the firewall.
+        for (View& view : views) view.receiver.SetLoopbackOnly(true);
+#endif
     }
 
     // The tracking mode is every view's. View 0's pipeline keeps it, where core's cycle is, and a

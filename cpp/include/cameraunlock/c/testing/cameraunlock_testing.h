@@ -1,6 +1,7 @@
 /* Test-only entry points of the C interface. They are exported by CameraUnlockCoreTesting.dll,
  * which core's tests and the pipeline vectors' harness load, and not by CameraUnlockCore.dll,
  * which a mod ships. No host has a use for them: a tracker's poses reach a mod as datagrams.
+ * A session of this build listens on loopback alone.
  */
 #ifndef CAMERAUNLOCK_C_TESTING_CAMERAUNLOCK_TESTING_H
 #define CAMERAUNLOCK_C_TESTING_CAMERAUNLOCK_TESTING_H

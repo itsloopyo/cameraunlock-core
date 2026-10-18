@@ -462,7 +462,7 @@ public final class Tests {
 
     /** A port no socket of this machine holds now. */
     private static int freePort() throws IOException {
-        try (DatagramSocket probe = new DatagramSocket(0)) {
+        try (DatagramSocket probe = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
             return probe.getLocalPort();
         }
     }
@@ -512,7 +512,7 @@ public final class Tests {
         core.stop();
 
         int held = freePort();
-        try (DatagramSocket other = new DatagramSocket(held)) {
+        try (DatagramSocket other = new DatagramSocket(held, InetAddress.getLoopbackAddress())) {
             check(other.getLocalPort() == held, "another socket holds the port");
             core.start(held);
             CameraUnlock.Frame frame = new CameraUnlock.Frame();
@@ -525,7 +525,7 @@ public final class Tests {
         check((bound.flags & CameraUnlock.STATE_LISTENING) != 0 && core.logTake().contains("Bound UDP port " + held + " after"),
                 "once the port is let go the receiver binds it, and says so");
         core.stop();
-        try (DatagramSocket after = new DatagramSocket(held)) {
+        try (DatagramSocket after = new DatagramSocket(held, InetAddress.getLoopbackAddress())) {
             check(after.getLocalPort() == held, "a stop lets the port go");
         }
     }
