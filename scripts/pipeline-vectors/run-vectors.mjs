@@ -33,9 +33,12 @@
 // declaration is checked in both directions: an undeclared skip fails, and a
 // declared vector the harness turns out to run fails too, so the list cannot
 // rot into a permanent excuse. A run that executed nothing fails outright.
+// --expect-skips-file takes the same list from a file, one id per line, for a
+// list several harness runs share.
 //
 // Usage: node scripts/pipeline-vectors/run-vectors.mjs --harness "<command line>"
-//        [--vectors <path>] [--only <id,id>] [--expect-skips <id,id>] [--verbose]
+//        [--vectors <path>] [--only <id,id>] [--expect-skips <id,id> | --expect-skips-file <path>]
+//        [--verbose]
 
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -58,6 +61,7 @@ function parseArgs(argv) {
         else if (a === '--vectors') out.vectors = resolve(argv[++i]);
         else if (a === '--only') out.only = new Set(argv[++i].split(',').map((s) => s.trim()));
         else if (a === '--expect-skips') out.expectSkips = new Set(argv[++i].split(',').map((s) => s.trim()).filter((s) => s.length > 0 && s !== 'none'));
+        else if (a === '--expect-skips-file') out.expectSkips = new Set(readFileSync(resolve(argv[++i]), 'utf8').split(/\r?\n/).map((s) => s.trim()).filter((s) => s.length > 0));
         else if (a === '--verbose') out.verbose = true;
         else throw new Error(`unknown argument: ${a}`);
     }
