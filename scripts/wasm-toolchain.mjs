@@ -80,10 +80,14 @@ export async function toolchain() {
     if (existsSync(sdk) && (!existsSync(marker) || readFileSync(marker, 'ascii').trim() !== WASI_SDK.sha256)) {
         throw new Error(`${sdk} is not the unpacking of the pinned archive ${WASI_SDK.sha256}: delete the folder and build again`);
     }
+    // Kept once unpacked: a build that fetched it can still be about to unpack it.
+    const archive = join(root, `${WASI_SDK.name}.tar.gz`);
     if (!existsSync(sdk)) {
-        const archive = join(root, `${WASI_SDK.name}.tar.gz`);
         process.stderr.write(`fetching ${WASI_SDK.url} (about 620 MB, once per user)\n`);
         await fetchChecked(WASI_SDK.url, archive, WASI_SDK.sha256);
+    }
+    // Checked again: another build may have unpacked it while this one fetched.
+    if (!existsSync(sdk)) {
         const unpacking = join(root, `${WASI_SDK.name}.${randomUUID()}.unpacking`);
         mkdirSync(unpacking);
         // Windows' own tar: a GNU tar earlier on the PATH, as Git Bash has, takes C: for a host to connect to.
@@ -101,7 +105,6 @@ export async function toolchain() {
             rmSync(unpacking, { recursive: true, force: true });
             if (!existsSync(marker)) throw failure;
         }
-        rmSync(archive, { force: true });
     }
 
     const jars = {};
