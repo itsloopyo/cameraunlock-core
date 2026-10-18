@@ -29,6 +29,7 @@ enum class WindowLogLevel { Info = 0, Warning = 1 };
 /// forwarder never has to relay a va_list. Null means no diagnostics.
 using WindowLogFn = void (*)(WindowLogLevel level, const char* message);
 
+#if defined(_WIN32)
 /// The game's main top-level window: owned by this process, visible, not an
 /// owned pop-up, and at least 200x200. Null when no candidate exists - which is
 /// the normal answer during early startup, before the engine has created it.
@@ -48,6 +49,7 @@ HWND FindGameWindow();
 /// puts the title bar behind the taskbar on a top-docked one, and the window
 /// cannot then be dragged back.
 void CenterGameWindowOnce(WindowLogFn log);
+#endif
 
 /// Centres `hwnd` in the work area of the monitor it is on, and can be called
 /// after every placement: when the game creates its window, changes its

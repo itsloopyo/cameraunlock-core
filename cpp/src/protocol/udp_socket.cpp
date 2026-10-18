@@ -14,7 +14,7 @@ namespace {
 /// cleanup call runs, because closesocket/WSACleanup overwrite it.
 std::string DescribeFailure(const char* step, int code) {
     std::string text;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
     char* buffer = nullptr;
     const DWORD length = FormatMessageA(
         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
@@ -49,7 +49,7 @@ bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
     }
     m_lastErrorWasPortInUse = false;
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
     WSADATA wsaData;
     int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (result != 0) {
@@ -63,7 +63,7 @@ bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
     m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (m_socket == INVALID_SOCKET) {
         m_lastError = DescribeFailure("socket creation", LastSocketError());
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
         WSACleanup();
         m_wsaInitialized = false;
 #endif
@@ -83,7 +83,7 @@ bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
     // promptly (UDP has no TIME_WAIT, so a closed socket frees it at once).
 
     // Set non-blocking
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
     u_long mode = 1;
     if (ioctlsocket(m_socket, FIONBIO, &mode) != 0) {
         m_lastError = DescribeFailure("setting non-blocking mode", LastSocketError());
@@ -124,12 +124,12 @@ bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
     if (bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
         const int code = LastSocketError();
         m_lastError = DescribeFailure("bind", code);
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
         m_lastErrorWasPortInUse = code == WSAEADDRINUSE;
 #else
         m_lastErrorWasPortInUse = code == EADDRINUSE;
 #endif
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
         closesocket(m_socket);
         WSACleanup();
         m_wsaInitialized = false;
@@ -146,7 +146,7 @@ bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
 
 void UdpSocket::Close() {
     if (m_socket != INVALID_SOCKET) {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
         closesocket(m_socket);
 #else
         close(m_socket);
@@ -154,7 +154,7 @@ void UdpSocket::Close() {
         m_socket = INVALID_SOCKET;
     }
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
     if (m_wsaInitialized) {
         WSACleanup();
         m_wsaInitialized = false;

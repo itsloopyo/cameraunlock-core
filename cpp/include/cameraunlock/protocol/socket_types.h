@@ -1,8 +1,10 @@
 #pragma once
 
-#ifdef _WIN32
+#if defined(_WIN32)
 #include <WinSock2.h>
 #include <WS2tcpip.h>
+#elif defined(CAMERAUNLOCK_WIN32_HOST)
+#include "cameraunlock/os/win32_host.h"
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -22,7 +24,7 @@ namespace cameraunlock {
 /// The OS error code for the socket call that just failed. Call it before any
 /// cleanup: closesocket/WSACleanup succeed and reset it to 0.
 inline int LastSocketError() {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
     return WSAGetLastError();
 #else
     return errno;

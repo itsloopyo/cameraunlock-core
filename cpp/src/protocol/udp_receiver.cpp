@@ -29,9 +29,11 @@ std::function<void(const std::string&)> DefaultLogSink() {
 
 namespace {
 
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
 /// Supervisor wake-up granularity. Retries are timed off the clock rather than
 /// off tick counts, so this only bounds how fast Stop() interrupts the thread.
 constexpr int kSupervisorTickMs = 100;
+#endif
 
 int64_t NowUs() {
     return std::chrono::duration_cast<std::chrono::microseconds>(

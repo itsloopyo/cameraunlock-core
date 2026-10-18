@@ -15,6 +15,9 @@ struct EnumState {
     HWND hwnd = nullptr;
 };
 
+// Finding and raising the game's window is for a mod inside the game's process: the WebAssembly
+// build is given its window by its host and has no EnumWindows.
+#if defined(_WIN32)
 BOOL CALLBACK PickGameWindow(HWND hwnd, LPARAM lParam) {
     auto* state = reinterpret_cast<EnumState*>(lParam);
 
@@ -39,6 +42,7 @@ BOOL CALLBACK PickGameWindow(HWND hwnd, LPARAM lParam) {
     state->hwnd = hwnd;
     return FALSE;
 }
+#endif
 
 void Emit(WindowLogFn log, WindowLogLevel level, const char* fmt, ...) {
     if (log == nullptr) return;
@@ -52,6 +56,7 @@ void Emit(WindowLogFn log, WindowLogLevel level, const char* fmt, ...) {
 
 }  // namespace
 
+#if defined(_WIN32)
 HWND FindGameWindow() {
     EnumState state;
     state.pid = GetCurrentProcessId();
@@ -164,6 +169,7 @@ void CenterGameWindowOnce(WindowLogFn log) {
          "window: centered %dx%d window at (%d, %d) on work area %dx%d",
          winW, winH, newX, newY, workW, workH);
 }
+#endif
 
 bool CenterWindowInWorkArea(HWND hwnd, WindowLogFn log) {
     if (!IsWindow(hwnd)) {

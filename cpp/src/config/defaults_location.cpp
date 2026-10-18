@@ -1,7 +1,9 @@
 #include <cameraunlock/config/defaults_location.h>
 
+#include <charconv>
 #include <cstddef>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 namespace cameraunlock::config::detail {
@@ -357,6 +359,9 @@ DefaultsChoice ChooseDefaults(const DefaultsResolution& resolution, const std::v
 #if CAMERAUNLOCK_WIN32
 
 namespace cameraunlock::config::detail {
+
+#if defined(_WIN32)
+
 namespace {
 
 constexpr UINT kUnixCodePage = 65010;
@@ -463,6 +468,136 @@ DefaultsProbe ProbeDefaults() {
     probe.dos_file_name = DosFileName(*bytes);
     return probe;
 }
+
+#else
+
+// The probe above finds its functions by name with GetProcAddress, which code in WebAssembly
+// cannot call through. Its Java host makes the same lookups and calls (Win32Host.probeDefaults,
+// Win32Host.wineDosFileName) and hands the answers over as lines of key=value in UTF-8, one per
+// member that has a value. Under Wine, which folder to convert is worked out here, between the
+// two, as it is above.
+extern "C" __attribute__((import_module("cameraunlock_win32"), import_name("ProbeDefaults"))) std::int32_t
+cameraunlock_win32_ProbeDefaults(char* buffer, std::int32_t capacity);
+extern "C" __attribute__((import_module("cameraunlock_win32"), import_name("WineDosFileName"))) std::int32_t
+cameraunlock_win32_WineDosFileName(const wchar_t* unix_folder, char* buffer, std::int32_t capacity);
+
+namespace {
+
+std::wstring WideFromUtf8(const std::string& text) {
+    std::wstring wide;
+    for (std::size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if (lead >= 0x80 && lead < 0xC0) {
+            throw std::runtime_error("ProbeDefaults: the host's answer has a byte that does not start a UTF-8 sequence");
+        }
+        const int extra = lead < 0x80 ? 0 : lead < 0xE0 ? 1 : lead < 0xF0 ? 2 : 3;
+        char32_t point = extra == 0 ? lead : lead & (0x3F >> extra);
+        if (i + static_cast<std::size_t>(extra) >= text.size()) {
+            throw std::runtime_error("ProbeDefaults: the host's answer ends inside a UTF-8 sequence");
+        }
+        for (int k = 1; k <= extra; ++k) {
+            const auto next = static_cast<unsigned char>(text[i + k]);
+            if ((next & 0xC0) != 0x80) throw std::runtime_error("ProbeDefaults: the host's answer has a UTF-8 sequence cut short");
+            point = (point << 6) | (next & 0x3F);
+        }
+        // Win32Host's encoding of Windows' text, with a lone surrogate as three bytes like any other
+        // code point: each in its shortest form, and none past U+10FFFF.
+        static constexpr char32_t kShortest[] = {0, 0x80, 0x800, 0x10000};
+        if (lead >= 0xF8 || point < kShortest[extra] || point > 0x10FFFF) {
+            throw std::runtime_error("ProbeDefaults: the host's answer is not UTF-8 as Win32Host writes it");
+        }
+        wide.push_back(static_cast<wchar_t>(point));
+        i += static_cast<std::size_t>(extra) + 1;
+    }
+    return wide;
+}
+
+// The bytes a value of the host's answer stands for: it sends each as hex, so a value may hold any
+// byte (a line break, an unpaired surrogate) and still arrive whole.
+std::string FromHex(const std::string& hex) {
+    if (hex.size() % 2 != 0) throw std::runtime_error("ProbeDefaults: the host sent a value of odd hex length: " + hex);
+    const auto digit = [&hex](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        throw std::runtime_error("ProbeDefaults: the host sent a value that is not lower-case hex: " + hex);
+    };
+    std::string bytes;
+    for (std::size_t i = 0; i < hex.size(); i += 2) {
+        bytes.push_back(static_cast<char>(digit(hex[i]) * 16 + digit(hex[i + 1])));
+    }
+    return bytes;
+}
+
+// Reads one of the host's answers, the first `length` bytes of `answer`, into `probe`.
+void ReadProbeAnswer(const std::string& answer, std::int32_t length, DefaultsProbe& probe) {
+    if (length < 0 || length > static_cast<std::int32_t>(answer.size())) {
+        throw std::runtime_error("ProbeDefaults: the host's answer does not fit " + std::to_string(answer.size()) + " bytes");
+    }
+    const std::string lines = answer.substr(0, static_cast<std::size_t>(length));
+    std::size_t start = 0;
+    while (start < lines.size()) {
+        std::size_t end = lines.find('\n', start);
+        if (end == std::string::npos) end = lines.size();
+        const std::string line = lines.substr(start, end - start);
+        start = end + 1;
+        const std::size_t equals = line.find('=');
+        if (equals == std::string::npos) throw std::runtime_error("ProbeDefaults: the host sent a line with no '=': " + line);
+        const std::string key = line.substr(0, equals), value = FromHex(line.substr(equals + 1));
+        if (key == "platform") {
+            if (value != "windows" && value != "wine") throw std::runtime_error("ProbeDefaults: unknown platform " + value);
+            probe.platform = value == "wine" ? DefaultsPlatform::kWine : DefaultsPlatform::kWindows;
+        } else if (key == "known_folder") {
+            probe.known_folder = WideFromUtf8(value);
+        } else if (key == "package_result") {
+            long result = 0;
+            const char* end = value.data() + value.size();
+            const std::from_chars_result read = std::from_chars(value.data(), end, result);
+            if (value.empty() || read.ec != std::errc() || read.ptr != end) {
+                throw std::runtime_error("ProbeDefaults: the host sent a package_result that is not a long: " + value);
+            }
+            probe.package_result = result;
+        } else if (key == "wine_version") {
+            probe.wine_version = value;
+        } else if (key == "host_system") {
+            probe.host_system = value;
+        } else if (key == "wine_home_dir") {
+            probe.wine_home_dir = WideFromUtf8(value);
+        } else if (key == "wine_host_xdg_config_home") {
+            probe.wine_host_xdg_config_home = WideFromUtf8(value);
+        } else if (key == "xdg_config_home") {
+            probe.xdg_config_home = WideFromUtf8(value);
+        } else if (key == "code_page_failed") {
+            probe.code_page_failed = value == "1";
+        } else if (key == "dos_file_name") {
+            probe.dos_file_name = WideFromUtf8(value);
+        } else {
+            throw std::runtime_error("ProbeDefaults: the host sent an unknown key " + key);
+        }
+    }
+}
+
+}  // namespace
+
+DefaultsProbe ProbeDefaults() {
+    constexpr std::size_t kMost = 16384;
+    DefaultsProbe probe;
+    // Each answer's length is taken before it is read: an argument that copied the buffer before
+    // the import filled it would read nothing.
+    std::string answer(kMost, '\0');
+    const std::int32_t length = cameraunlock_win32_ProbeDefaults(&answer[0], static_cast<std::int32_t>(kMost));
+    ReadProbeAnswer(answer, length, probe);
+    if (probe.platform != DefaultsPlatform::kWine) return probe;
+    std::string variable;
+    const std::wstring unix_folder = HostUnixFolder(probe, variable);
+    if (unix_folder.empty()) return probe;
+    std::string converted(kMost, '\0');
+    const std::int32_t converted_length =
+        cameraunlock_win32_WineDosFileName(unix_folder.c_str(), &converted[0], static_cast<std::int32_t>(kMost));
+    ReadProbeAnswer(converted, converted_length, probe);
+    return probe;
+}
+
+#endif  // _WIN32
 
 std::uint32_t CreateDefaultsFolder(const std::wstring& folder) {
     if (CreateDirectoryW(folder.c_str(), nullptr)) return 0;
