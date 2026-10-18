@@ -84,6 +84,8 @@ build-java = { cmd = "cmake --build scripts/pipeline-vectors/harness/c/build --c
 # The binding against docs/c-interface.md's layout table and through CameraUnlockCoreTesting.dll,
 # a library of another ABI refused at load, and the boot class run as a game's launcher runs it.
 test-java = { cmd = "java --enable-native-access=ALL-UNNAMED -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Tests && java --enable-native-access=ALL-UNNAMED -Dcameraunlock.bundled=true -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Tests", depends-on = ["build-java"] }
+# What a load, a frame and a settings save cost on each backend: docs/core-jar.md quotes it.
+bench-java = { cmd = "java --enable-native-access=ALL-UNNAMED -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Bench && java --enable-native-access=ALL-UNNAMED -Dcameraunlock.bundled=true -cp \"java/build/classes;java/build/test-classes;java/build/lib/*\" com.cameraunlock.core.Bench", depends-on = ["build-java"] }
 # The vectors the C harness runs, through the Java binding: what they hold is Java's declaration
 # of the three structs a frame crosses in, its units and its order of calls. The skips are the C
 # harness's, for its reasons.
