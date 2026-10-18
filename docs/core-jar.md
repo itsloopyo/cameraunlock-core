@@ -39,6 +39,11 @@ interpreter. It writes three variants under `cpp/build-wasm/`: `core`, which shi
 with the entry points of `cameraunlock_testing.h`, and `other-abi`, for the test of a module of
 the ABI before this one.
 
+Every source of the C interface is compiled with `-Werror -Wall` here, where the MSVC build holds
+only the C interface's own targets to `/W4 /WX`. That is deliberate: clang sees warnings MSVC does
+not, it found a dead constant the DLL build let through, and `pixi run check` builds the module, so
+a warning in any of core's C++ that the jar carries stops the check rather than reaching a mod.
+
 The toolchain is pinned by version and SHA-256 in `scripts/wasm-toolchain.mjs` (wasi-sdk 34,
 Endive 1.1.0), fetched once into `%LOCALAPPDATA%\cameraunlock-core\toolchain` and checked before
 use. It runs on Windows, the same build a developer's `pixi run` and CI's run.
