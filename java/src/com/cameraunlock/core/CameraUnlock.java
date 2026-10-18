@@ -334,6 +334,12 @@ public final class CameraUnlock {
         /** What the library is called in a message: "DLL" or "module". */
         String kind();
 
+        /** The library, as the start of a message. */
+        String describe(Path library);
+
+        /** How the library and the Java code beside it came to be of different builds. */
+        String apart();
+
         /** Called once the library's ABI and structs have been checked. */
         default void started() {}
     }
@@ -387,6 +393,16 @@ public final class CameraUnlock {
             public String kind() {
                 return "DLL";
             }
+
+            @Override
+            public String describe(Path library) {
+                return library.toString();
+            }
+
+            @Override
+            public String apart() {
+                return "Both come from one build of the mod, so one of them was replaced without the other";
+            }
         });
     }
 
@@ -423,17 +439,16 @@ public final class CameraUnlock {
         // Before anything else is looked up: a library of another ABI may not have it.
         int abi = status(bind("cameraunlock_abi", FunctionDescriptor.of(INT)));
         if (abi != ABI) {
-            throw new IllegalStateException(library + " is version " + abi + " of cameraunlock-core's C interface and the"
-                    + " Java code beside it was written for version " + ABI + ": the " + (abi < ABI ? backend.kind() : "Java code")
-                    + " is the older of the two. Both come from one build of the mod, so one of them was replaced"
-                    + " without the other");
+            throw new IllegalStateException(backend.describe(library) + " is version " + abi + " of cameraunlock-core's C"
+                    + " interface and the Java code beside it was written for version " + ABI + ": the "
+                    + (abi < ABI ? backend.kind() : "Java code") + " is the older of the two. " + backend.apart());
         }
         lastError = bind("cameraunlock_last_error", FunctionDescriptor.of(INT, POINTER, INT));
         MethodHandle structSize = bind("cameraunlock_struct_size", FunctionDescriptor.of(INT, INT));
         for (int which = 0; which < STRUCTS.length; which++) {
             int theirs = check(status(structSize, which));
             if (theirs != STRUCTS[which].byteSize()) {
-                throw new IllegalStateException(library + " has " + STRUCTS[which].name().orElseThrow() + " at " + theirs
+                throw new IllegalStateException(backend.describe(library) + " has " + STRUCTS[which].name().orElseThrow() + " at " + theirs
                         + " bytes and the Java code beside it at " + STRUCTS[which].byteSize() + ", though both say they are"
                         + " version " + ABI + " of cameraunlock-core's C interface: they are from different builds");
             }

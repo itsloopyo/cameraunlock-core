@@ -377,7 +377,9 @@ struct. A mod compiles it into its own jar from the submodule's source.
   and from nowhere else.
 - At load it compares `cameraunlock_abi()` with the version it was written for, then each
   `cameraunlock_struct_size` with its own declaration. A difference throws, and the message names
-  the file, both versions and the older side.
+  the DLL, or for the module the jar or class folder its classes are in, both versions and the
+  older side. The DLL and the Java code beside it come from one build of the mod, so one was
+  replaced without the other; the module's classes and the binding come from two builds of core.
 - Each struct is declared once, as a layout with the header's member names, and every member is
   read and written through its name. `pixi run test-java` holds those layouts to the table above.
 - A call that answers `CAMERAUNLOCK_ERROR` throws an `IllegalStateException` whose message is

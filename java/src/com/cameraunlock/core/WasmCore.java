@@ -10,6 +10,7 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -114,6 +115,16 @@ final class WasmCore implements CameraUnlock.Backend {
     @Override
     public String kind() {
         return "module";
+    }
+
+    @Override
+    public String describe(Path library) {
+        return "The WebAssembly module in " + library;
+    }
+
+    @Override
+    public String apart() {
+        return "The module's classes and the Java code beside them come from two builds of cameraunlock-core";
     }
 
     /** Throws when the module is no longer called. */

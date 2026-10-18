@@ -148,9 +148,11 @@ public final class Tests {
             String reason = refusal(() -> CameraUnlock.bundled(com.cameraunlock.core.wasm.CoreOtherAbiModule::load,
                     com.cameraunlock.core.wasm.CoreOtherAbiModule::create, com.cameraunlock.core.wasm.CoreOtherAbiModule.class));
             Path classes = Path.of("java/build/test-classes").toAbsolutePath();
-            check(reason.startsWith(classes.toString()) && reason.contains("version " + (CameraUnlock.ABI - 1))
-                            && reason.contains("written for version " + CameraUnlock.ABI) && reason.contains("the module is the older"),
-                    "a module of the ABI before this one is refused at load, and the reason names both versions and the older side: "
+            check(reason.startsWith("The WebAssembly module in " + classes) && reason.contains("version " + (CameraUnlock.ABI - 1))
+                            && reason.contains("written for version " + CameraUnlock.ABI) && reason.contains("the module is the older")
+                            && reason.contains("put together from two builds"),
+                    "a module of the ABI before this one is refused at load, and the reason names the module, both versions, the"
+                            + " older side and how they came apart: "
                             + reason);
             return;
         }
