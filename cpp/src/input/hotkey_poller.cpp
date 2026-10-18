@@ -1,5 +1,6 @@
 #include <cameraunlock/input/hotkey_poller.h>
 
+#include <algorithm>
 #include <vector>
 #include <stdexcept>
 
