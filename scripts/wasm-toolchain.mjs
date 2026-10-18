@@ -8,7 +8,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -32,6 +32,9 @@ const ENDIVE = {
 };
 /** The jars the generated classes need at run time: a mod's jar carries their classes. */
 export const ENDIVE_RUNTIME = ['runtime', 'wasm', 'wasi', 'log', 'annotations'];
+
+// A fetch or unpacking still running is younger than this; one older was left by a run that died.
+const ABANDONED_MS = 60 * 60 * 1000;
 
 function cacheRoot() {
     const base = process.env.LOCALAPPDATA;
@@ -70,9 +73,23 @@ async function fetchChecked(url, file, sha256) {
     }
 }
 
+/** What a fetch or an unpacking that never finished left in the cache. */
+function sweepAbandoned(root) {
+    for (const entry of readdirSync(root)) {
+        if (!entry.endsWith('.partial') && !entry.endsWith('.unpacking')) continue;
+        const path = join(root, entry);
+        // Another build may have renamed or removed it since the listing.
+        const stat = statSync(path, { throwIfNoEntry: false });
+        if (!stat || Date.now() - stat.mtimeMs < ABANDONED_MS) continue;
+        process.stderr.write(`removing ${path}, left by a build that did not finish\n`);
+        rmSync(path, { recursive: true, force: true });
+    }
+}
+
 export async function toolchain() {
     const root = cacheRoot();
     mkdirSync(root, { recursive: true });
+    sweepAbandoned(root);
 
     // The folder says which archive it came from, so an unpacking from another pin is never used.
     const sdk = join(root, WASI_SDK.name);
