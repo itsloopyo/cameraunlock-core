@@ -86,6 +86,18 @@ if(CAMERAUNLOCK_BUILD_C)
     add_test(NAME cameraunlock_c_tests COMMAND cameraunlock_c_tests)
 endif()
 
+# win32_host_types.h, which the WebAssembly build compiles in place of <windows.h>, against the
+# SDK's own. C4201: the shim's LARGE_INTEGER has the SDK's nameless struct.
+if(MSVC)
+    add_executable(cameraunlock_win32_host_tests win32_host_constants.cpp)
+    target_include_directories(cameraunlock_win32_host_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+    target_link_libraries(cameraunlock_win32_host_tests PRIVATE ws2_32)
+    target_compile_options(cameraunlock_win32_host_tests PRIVATE /W4 /WX /wd4201)
+    target_compile_definitions(cameraunlock_win32_host_tests PRIVATE
+        CAMERAUNLOCK_WIN32_HOST_TYPES_H="${CMAKE_CURRENT_SOURCE_DIR}/../include/cameraunlock/os/win32_host_types.h")
+    add_test(NAME cameraunlock_win32_host_tests COMMAND cameraunlock_win32_host_tests)
+endif()
+
 # Compile-only, and STRICT. Every public header in one TU at the warning level the
 # fleet's own mods use, because a problem that only appears when two headers meet is
 # invisible to any build that includes them separately - which is every build here.

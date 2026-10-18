@@ -26,6 +26,7 @@
 //   cameraunlock/rendering/dx12_overlay.h          overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/rendering/dx9_overlay.h           overlay: covered by cameraunlock_overlay_compile
 //   cameraunlock/os/win32_host.h                   WebAssembly build only: #errors elsewhere
+//   cameraunlock/os/win32_host_types.h             WebAssembly build only: compiled beside the SDK by win32_host_constants.cpp
 //   cameraunlock/c/host/cameraunlock_host.h        WebAssembly build only, beside the C interface's headers
 //
 // This target's include path is the public include/ directory alone, so the

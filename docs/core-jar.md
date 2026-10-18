@@ -79,6 +79,11 @@ would link, and fail only when the module is instantiated, so `pixi run build-ja
 fails on one Win32Host does not register with the same signature, and on a function Win32Host
 registers that no module imports.
 
+The types and constants are in `win32_host_types.h`, which `cpp/tests/win32_host_constants.cpp`
+compiles beside the Windows SDK's in `pixi run test-cpp`: each constant's value and type, the base
+types and the layout of each structure must be the SDK's, and its own `inet_pton`, `inet_ntop` and
+byte order functions must answer as Winsock's do.
+
 Defaults.ini's probe is not one call each. It finds its functions by name with `GetProcAddress`,
 which code in WebAssembly cannot call through, so `ProbeDefaults` and `WineDosFileName` are imports
 Win32Host answers with the same lookups. The file log writes through `CreateFileW` and `WriteFile`
