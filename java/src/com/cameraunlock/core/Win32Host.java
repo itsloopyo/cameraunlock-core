@@ -301,6 +301,7 @@ final class Win32Host {
         return new HostFunction[] {
             function("GetLastError", 0, (m, a) -> lastError),
             function("WSAGetLastError", 0, (m, a) -> lastError),
+            procedure("SetLastError", 1, (m, a) -> lastError = (int) a[0]),
 
             function("CreateFileW", 7, (m, a) -> {
                 requireZero("CreateFileW", "security attributes", a[3]);
