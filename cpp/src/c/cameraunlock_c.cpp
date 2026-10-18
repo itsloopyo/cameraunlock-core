@@ -12,6 +12,7 @@
 #include "cameraunlock/camera/lean_clamp.h"
 #include "cameraunlock/camera/zoom_compensation.h"
 #include "cameraunlock/config/config_owner.h"
+#include "cameraunlock/config/defaults_location.h"
 #include "cameraunlock/config/head_tracking_config_table.h"
 #include "cameraunlock/config/hotkey_codec.h"
 #include "cameraunlock/effects/head_follow_light.h"
@@ -1504,6 +1505,17 @@ std::int32_t cameraunlock_testing_deliver(const void* datagram, std::int32_t len
 std::int32_t cameraunlock_testing_deliver_view(std::int32_t view, const void* datagram, std::int32_t length,
                                                std::int32_t remote) {
     return Guarded("cameraunlock_testing_deliver_view", [&] { return DeliverTo(view, datagram, length, remote); });
+}
+
+std::int32_t cameraunlock_testing_defaults_path(char* buffer, std::int32_t capacity) {
+    std::int32_t length = CAMERAUNLOCK_ERROR;
+    const std::int32_t status = Guarded("cameraunlock_testing_defaults_path", [&] {
+        const cfg::detail::DefaultsResolution found = cfg::detail::ResolveDefaults(cfg::detail::ProbeDefaults());
+        const std::string text = found.candidates.empty() ? found.no_location : cfg::detail::DefaultsUtf8(found.candidates.front().path);
+        length = CopyOut(text, buffer, capacity, true);
+        return CAMERAUNLOCK_OK;
+    });
+    return status == CAMERAUNLOCK_OK ? length : status;
 }
 
 #endif

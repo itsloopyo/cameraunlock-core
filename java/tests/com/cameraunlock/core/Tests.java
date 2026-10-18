@@ -38,6 +38,7 @@ public final class Tests {
         libraryOfAnotherAbiIsRefusedInWords();
         Testing testing = new Testing();
         refusalCarriesTheLibrarysReason(testing.core);
+        defaultsAreLookedForInAppData(testing);
         poseArrivesAndTheLeanIsHeldOffAWall(testing);
         modesAreSetCycledAndNamed(testing.core);
         viewsEachHaveATrackerAndShareTheModes(testing);
@@ -99,6 +100,12 @@ public final class Tests {
             }
             check(documented == struct.memberLayouts().size(), name + " declares the " + documented + " members the document lists");
         }
+    }
+
+    private static void defaultsAreLookedForInAppData(Testing testing) {
+        String expected = System.getenv("APPDATA") + "\\CameraUnlock\\Defaults.ini";
+        String found = testing.defaultsPath();
+        check(found.equalsIgnoreCase(expected), "Defaults.ini is looked for in the roaming AppData folder: " + found);
     }
 
     private static void libraryIsFoundBesideTheClasses() {

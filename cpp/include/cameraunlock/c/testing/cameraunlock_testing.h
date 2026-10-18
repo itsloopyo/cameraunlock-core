@@ -22,6 +22,10 @@ CAMERAUNLOCK_C int32_t cameraunlock_testing_deliver(const void* datagram, int32_
 /* The same for one view. cameraunlock_testing_deliver is view 0. */
 CAMERAUNLOCK_C int32_t cameraunlock_testing_deliver_view(int32_t view, const void* datagram, int32_t length,
                                                          int32_t remote);
+/* Where the player's Defaults.ini is, as the config owner finds it with no defaults path given: the
+ * first candidate's path in UTF-8, or the reason there is none. Answers its length and copies it, with
+ * its NUL, when `capacity` holds length + 1. */
+CAMERAUNLOCK_C int32_t cameraunlock_testing_defaults_path(char* buffer, int32_t capacity);
 
 #ifdef __cplusplus
 }

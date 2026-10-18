@@ -26,6 +26,8 @@ final class Testing {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
     private final MethodHandle deliverView = core.bind("cameraunlock_testing_deliver_view", FunctionDescriptor.of(
             ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+    private final MethodHandle defaultsPath = core.bind("cameraunlock_testing_defaults_path",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
 
     /** A session as a new process has it, in every view. */
     void reset() {
@@ -55,6 +57,21 @@ final class Testing {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment datagram = arena.allocateFrom(ValueLayout.JAVA_BYTE, bytes);
             must((int) deliverView.invokeExact(view, datagram, bytes.length, fromAnotherMachine ? 1 : 0));
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Throwable failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    /** Where the config owner looks for the player's Defaults.ini, or why it looks nowhere. */
+    String defaultsPath() {
+        try (Arena arena = Arena.ofConfined()) {
+            int length = (int) defaultsPath.invokeExact(MemorySegment.NULL, 0);
+            must(length);
+            MemorySegment text = arena.allocate(length + 1L);
+            must((int) defaultsPath.invokeExact(text, length + 1));
+            return text.getString(0);
         } catch (RuntimeException | Error failure) {
             throw failure;
         } catch (Throwable failure) {
