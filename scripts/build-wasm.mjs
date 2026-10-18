@@ -95,7 +95,10 @@ function newest(directory) {
 function exportsOf(headers) {
     const names = new Set();
     for (const header of headers) {
-        for (const match of readFileSync(join(cpp, header), 'utf8').matchAll(/\b(cameraunlock_[a-z0-9_]+)\s*\(/g)) names.add(match[1]);
+        // A function named in a comment is not declared.
+        // One pass, so whichever comment starts first is the one taken out.
+        const code = readFileSync(join(cpp, header), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+        for (const match of code.matchAll(/\b(cameraunlock_[a-z0-9_]+)\s*\(/g)) names.add(match[1]);
     }
     return [...names].sort().map((name) => `-Wl,--export=${name}`);
 }
