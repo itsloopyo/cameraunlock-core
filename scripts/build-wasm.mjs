@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Builds the C interface as WebAssembly and turns each module into JVM classes with Endive's
-// build-time compiler (docs/core-jar.md):
+// build-time compiler (docs/core-jar.md). Windows only, as the toolchain is (wasm-toolchain.mjs):
 //
 //   node scripts/build-wasm.mjs [core|testing|other-abi ...]    (no names: all three)
 //

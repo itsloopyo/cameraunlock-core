@@ -10,6 +10,7 @@
 // that takes one jar per mod (ZombieBuddy) needs.
 //
 // javac and jar come from the caller's environment; the toolchain is fetched by build-wasm.mjs.
+// Windows only, as the toolchain is (wasm-toolchain.mjs).
 
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
