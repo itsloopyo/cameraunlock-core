@@ -28,6 +28,8 @@ final class Testing {
             ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
     private final MethodHandle defaultsPath = core.bind("cameraunlock_testing_defaults_path",
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
+    private final MethodHandle win32 = core.bind("cameraunlock_testing_win32", FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
 
     /** A session as a new process has it, in every view. */
     void reset() {
@@ -71,6 +73,22 @@ final class Testing {
             must(length);
             MemorySegment text = arena.allocate(length + 1L);
             must((int) defaultsPath.invokeExact(text, length + 1));
+            return text.getString(0);
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Throwable failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    /** One of core's Windows calls, made as core makes it: cameraunlock_testing_win32, made once. */
+    String win32(String call, String argument) {
+        try (Arena arena = Arena.ofConfined()) {
+            int most = 4096;
+            MemorySegment text = arena.allocate(most);
+            int length = (int) win32.invokeExact(arena.allocateFrom(call), arena.allocateFrom(argument), text, most);
+            must(length);
+            if (length >= most) throw new IllegalStateException(call + " answered " + length + " bytes, more than " + most);
             return text.getString(0);
         } catch (RuntimeException | Error failure) {
             throw failure;

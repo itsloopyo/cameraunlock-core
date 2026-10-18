@@ -1,6 +1,19 @@
 package com.cameraunlock.core;
 
 import java.io.IOException;
+import java.lang.foreign.Arena;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.SymbolLookup;
+import java.lang.foreign.ValueLayout;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
+import java.lang.reflect.Field;
+import java.nio.charset.Charset;
+import java.util.HexFormat;
+import java.util.Map;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -25,13 +38,14 @@ import java.util.regex.Pattern;
  *
  * Every check runs, and the tally is printed once at the end.
  */
+@SuppressWarnings("restricted")
 public final class Tests {
     private static int checks;
     private static int failures;
 
     private Tests() {}
 
-    public static void main(String[] arguments) throws Exception {
+    public static void main(String[] arguments) throws Throwable {
         Path scratch = Files.createTempDirectory("cameraunlock-java-tests");
         layoutsAreTheDocumentedOnes();
         libraryIsFoundBesideTheClasses();
@@ -39,12 +53,18 @@ public final class Tests {
         Testing testing = new Testing();
         refusalCarriesTheLibrarysReason(testing.core);
         defaultsAreLookedForInAppData(testing);
+        windowsCallsAnswerAsWindowsDoes(testing, scratch);
+        eachThreadIsGivenItsOwnReason(testing.core);
         poseArrivesAndTheLeanIsHeldOffAWall(testing);
         modesAreSetCycledAndNamed(testing.core);
         viewsEachHaveATrackerAndShareTheModes(testing);
         configIsDescribedRenderedLoadedSavedAndReadAgain(testing.core, scratch);
         hotkeysAndTheWindow(testing.core);
         aTrackerOnThePortReachesTheFrame(testing);
+        if (Testing.BUNDLED) {
+            aReceiveLoopThatFailsIsReopened(testing);
+            aModuleThatTrapsIsNotCalledAgain();
+        }
         logGoesToItsFile(testing.core, scratch);
         bootLoadsTheAgentAndStartsTheGame(scratch);
         System.out.println(failures == 0 ? "all " + checks + " checks passed" : failures + " of " + checks + " checks FAILED");
@@ -111,10 +131,10 @@ public final class Tests {
     private static void libraryIsFoundBesideTheClasses() {
         if (Testing.BUNDLED) {
             CameraUnlock core = CameraUnlock.loadBundled();
-            Path from = CameraUnlock.beside(com.cameraunlock.core.wasm.CoreModule.class)
-                    .resolve(CameraUnlock.beside(com.cameraunlock.core.wasm.CoreModule.class).relativize(core.library()));
-            check(core.library().equals(from), "the module a mod ships is named by where its classes are: " + core.library());
+            check(Files.isRegularFile(core.library().resolve("com/cameraunlock/core/wasm/CoreModule.class")),
+                    "the module a mod ships is named by the class folder its classes are in: " + core.library());
             check(core.settingsDefaults().dataFreshnessMs == 500, "and answers");
+            check(CameraUnlock.loadBundled() == core, "and there is one in a process, as there is one DLL");
             return;
         }
         CameraUnlock core = CameraUnlock.load();
@@ -127,8 +147,9 @@ public final class Tests {
         if (Testing.BUNDLED) {
             String reason = refusal(() -> CameraUnlock.bundled(com.cameraunlock.core.wasm.CoreOtherAbiModule::load,
                     com.cameraunlock.core.wasm.CoreOtherAbiModule::create, com.cameraunlock.core.wasm.CoreOtherAbiModule.class));
-            check(reason.contains("version " + (CameraUnlock.ABI - 1)) && reason.contains("written for version " + CameraUnlock.ABI)
-                            && reason.contains("the module is the older"),
+            Path classes = Path.of("java/build/test-classes").toAbsolutePath();
+            check(reason.startsWith(classes.toString()) && reason.contains("version " + (CameraUnlock.ABI - 1))
+                            && reason.contains("written for version " + CameraUnlock.ABI) && reason.contains("the module is the older"),
                     "a module of the ABI before this one is refused at load, and the reason names both versions and the older side: "
                             + reason);
             return;
@@ -454,10 +475,261 @@ public final class Tests {
         core.cycleTrackingMode();
     }
 
-    private static void hotkeysAndTheWindow(CameraUnlock core) {
+    private static void hotkeysAndTheWindow(CameraUnlock core) throws Throwable {
+        core.hotkeysStart();
         core.hotkeysDrop();
         check(core.hotkeysTake() == 0, "with no key pressed nothing is taken");
+        if (Testing.BUNDLED) hotkeysFireFromTheTick(core);
         check(!core.windowCenter(0L), "a window that is none is left alone");
+        aWindowIsCentredInItsWorkArea(core);
+    }
+
+    // ---- Windows, through the calls core makes ------------------------------------------------------
+
+    private static final Linker LINKER = Linker.nativeLinker();
+    private static final SymbolLookup USER32 = SymbolLookup.libraryLookup("user32", Arena.global());
+    private static final SymbolLookup KERNEL32 = SymbolLookup.libraryLookup("kernel32", Arena.global());
+
+    private static MethodHandle windows(SymbolLookup library, String name, FunctionDescriptor descriptor) {
+        return LINKER.downcallHandle(library.find(name).orElseThrow(), descriptor);
+    }
+
+    /** What Windows calls error `error`, as FormatMessageW gives it with no inserts, trailing breaks dropped. */
+    private static String windowsMessage(int error) throws Throwable {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment buffer = arena.allocate(2L * 1024);
+            int units = (int) windows(KERNEL32, "FormatMessageW", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                    ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
+                    ValueLayout.ADDRESS)).invokeExact(0x1000 | 0x200, MemorySegment.NULL, error, 0x400, buffer, 1024, MemorySegment.NULL);
+            String message = new String(buffer.asSlice(0, 2L * units).toArray(ValueLayout.JAVA_CHAR_UNALIGNED));
+            return message.replaceAll("[\\r\\n ]+$", "");
+        }
+    }
+
+    /**
+     * The calls of the config owner, the file writer and the clock that nothing else here reaches,
+     * each against what Windows or Java says: the DLL makes them of Windows, the module of Win32Host.
+     */
+    private static void windowsCallsAnswerAsWindowsDoes(Testing testing, Path scratch) throws Throwable {
+        Path folder = Files.createDirectories(scratch.resolve("win32"));
+        String name = "Gr\u00fc\u00dfe \u540d\u524d \ud83d\ude00.txt";
+        Path named = Files.writeString(folder.resolve(name), "0123456789");
+        check(testing.win32("find", named.toString()).equals(name), "FindFirstFileW finds a file by its name, and gives it whole");
+        check(testing.win32("find", folder + "\\*.txt").equals(name), "and by a pattern");
+        check(testing.win32("compare", "gr\u00fc\u00dfe\nGR\u00dc\u00dfE").equals("2") && testing.win32("compare", "a\nb").equals("1")
+                        && testing.win32("compare", "b\nA").equals("3"),
+                "CompareStringOrdinal orders two texts as Windows does, case aside");
+        String encoding = System.getProperty("native.encoding");
+        String codePage = encoding.equals("UTF-8") ? "65001" : encoding.replaceAll("\\D", "");
+        check(testing.win32("code_page", "").equals(codePage), "GetACP is the code page Java was started on: " + encoding);
+        String narrowed = testing.win32("narrow", "caf\u00e9 1");
+        check(narrowed.equals(HexFormat.of().formatHex("caf\u00e9 1".getBytes(Charset.forName(encoding)))),
+                "WideCharToMultiByte writes the ANSI code page's bytes: " + narrowed);
+        check(testing.win32("read_from", "4\n" + named).equals("456789"), "SetFilePointerEx moves where ReadFile reads from");
+        String text = testing.win32("error_text", "2");
+        check(text.equals("Windows error 2: " + windowsMessage(2)), "FormatMessageW gives Windows' own text for an error: " + text);
+        check(testing.win32("delete", named.toString()).equals("1") && !Files.exists(named), "DeleteFileW deletes the file");
+        long slept = Long.parseLong(testing.win32("sleep", "30"));
+        check(slept >= 25 && slept < 2000, "Sleep waits as long as it is asked, by QueryPerformanceCounter: " + slept + " ms");
+    }
+
+    /** The reason of a refused call is the one the calling thread was refused for, though others are refused at once. */
+    private static void eachThreadIsGivenItsOwnReason(CameraUnlock core) throws InterruptedException {
+        List<String> wrong = java.util.Collections.synchronizedList(new ArrayList<>());
+        Thread views = new Thread(() -> {
+            for (int i = 0; i < 300; i++) {
+                String reason = refusal(() -> core.viewStop(-1));
+                if (!reason.contains("there is no view -1")) wrong.add(reason);
+            }
+        });
+        Thread labels = new Thread(() -> {
+            for (int i = 0; i < 300; i++) {
+                String reason = refusal(() -> core.aimModeLabel(9));
+                if (!reason.contains("aim_mode")) wrong.add(reason);
+            }
+        });
+        views.start();
+        labels.start();
+        views.join();
+        labels.join();
+        check(wrong.isEmpty(), "two threads refused at once are each given their own reason: " + wrong.stream().limit(3).toList());
+    }
+
+    private static Object field(Object owner, String name) throws ReflectiveOperationException {
+        Field field = owner.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(owner);
+    }
+
+    private static void setField(Object owner, String name, Object value) throws ReflectiveOperationException {
+        Field field = owner.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(owner, value);
+    }
+
+    /** A receive loop whose socket fails ends, and the receiver's supervisor opens the port again. */
+    private static void aReceiveLoopThatFailsIsReopened(Testing testing) throws Throwable {
+        CameraUnlock core = testing.core;
+        testing.reset();
+        core.configure(core.settingsDefaults());
+        CameraUnlock.FrameInput input = leaning();
+        input.flags = CameraUnlock.FRAME_ACTIVE;
+        int port = freePort();
+        core.start(port);
+        core.logTake();
+        Object module = field(core, "backend");
+        @SuppressWarnings("unchecked")
+        Map<Integer, Object> receiving = (Map<Integer, Object>) field(field(module, "host"), "receiving");
+        long socket = (long) field(receiving.values().iterator().next(), "socket");
+        MethodHandle closesocket = windows(SymbolLookup.libraryLookup("ws2_32", Arena.global()), "closesocket",
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG));
+        synchronized (module) {
+            check((int) closesocket.invokeExact(socket) == 0, "the receive loop's socket is closed under it");
+        }
+        StringBuilder log = new StringBuilder();
+        frameUntil(core, input, () -> {}, f -> log.append(core.logTake()).toString().contains("socket re-established"));
+        check(log.toString().contains("Receive thread failed on UDP port " + port + " - socket re-established"),
+                "the receiver says its loop failed and the socket is open again: " + log);
+        try (DatagramSocket tracker = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
+            byte[] pose = datagram(0, 0, 0, -20, 4, 2);
+            CameraUnlock.Frame frame = frameUntil(core, input, () -> {
+                try {
+                    tracker.send(new DatagramPacket(pose, pose.length, InetAddress.getLoopbackAddress(), port));
+                } catch (IOException failure) {
+                    throw new IllegalStateException(failure);
+                }
+            }, f -> (f.flags & CameraUnlock.STATE_POSE) != 0 && near(f.headYaw, -20f));
+            check(near(frame.headYaw, -20f), "and a tracker reaches the frame through it: yaw " + frame.headYaw);
+        }
+        core.stop();
+    }
+
+    /** A module that traps is called no more: every later call says it stopped and why, and its tick thread ends. */
+    private static void aModuleThatTrapsIsNotCalledAgain() throws Throwable {
+        CameraUnlock dying = CameraUnlock.bundled(com.cameraunlock.core.wasm.CoreTestingModule::load,
+                com.cameraunlock.core.wasm.CoreTestingModule::create, com.cameraunlock.core.wasm.CoreTestingModule.class);
+        Supplier<Long> tickers = () -> Thread.getAllStackTraces().keySet().stream()
+                .filter(thread -> thread.getName().equals("cameraunlock-core tick")).count();
+        long before = tickers.get();
+        MethodHandle trap = dying.bind("cameraunlock_testing_trap", FunctionDescriptor.of(ValueLayout.JAVA_INT));
+        String first = refusal(() -> {
+            try {
+                int ignored = (int) trap.invokeExact();
+            } catch (RuntimeException | Error failure) {
+                throw failure;
+            } catch (Throwable failure) {
+                throw new IllegalStateException(failure);
+            }
+        });
+        check(first.contains("stopped working and is no longer called"), "a trap stops the module and says so: " + first);
+        String later = refusal(() -> dying.settingsDefaults());
+        check(later.contains("no longer called") && later.contains(first.substring(first.indexOf(": ") + 2)),
+                "and every later call says so with the first cause: " + later);
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (tickers.get() >= before && System.nanoTime() < end) Thread.sleep(16);
+        check(tickers.get() == before - 1, "and its tick thread ends");
+    }
+
+    private static volatile int heldKey;
+
+    @SuppressWarnings("unused")
+    private static short keyState(MemorySegment capture, int key) {
+        return (short) (key == heldKey ? 0x8000 : 0);
+    }
+
+    @SuppressWarnings("unused")
+    private static MemorySegment ourWindow(MemorySegment capture) {
+        return MemorySegment.ofAddress(0x10);
+    }
+
+    @SuppressWarnings("unused")
+    private static int ourProcess(MemorySegment capture, MemorySegment window, MemorySegment process) {
+        if (!process.equals(MemorySegment.NULL)) process.set(ValueLayout.JAVA_INT, 0, (int) ProcessHandle.current().pid());
+        return 1;
+    }
+
+    /**
+     * A key held while the game's window is in front is a press the tick finds: Win32Host's key
+     * state and foreground window answer as the test says, under the module's lock, since a test
+     * presses no real key.
+     */
+    private static void hotkeysFireFromTheTick(CameraUnlock core) throws Throwable {
+        Object module = field(core, "backend");
+        Object host = field(module, "host");
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        Map<String, MethodHandle> fakes = Map.of(
+                "getAsyncKeyState", lookup.findStatic(Tests.class, "keyState",
+                        MethodType.methodType(short.class, MemorySegment.class, int.class)),
+                "getForegroundWindow", lookup.findStatic(Tests.class, "ourWindow",
+                        MethodType.methodType(MemorySegment.class, MemorySegment.class)),
+                "getWindowThreadProcessId", lookup.findStatic(Tests.class, "ourProcess",
+                        MethodType.methodType(int.class, MemorySegment.class, MemorySegment.class, MemorySegment.class)));
+        Map<String, Object> real = new java.util.HashMap<>();
+        synchronized (module) {
+            for (Map.Entry<String, MethodHandle> fake : fakes.entrySet()) {
+                real.put(fake.getKey(), field(host, fake.getKey()));
+                setField(host, fake.getKey(), fake.getValue());
+            }
+        }
+        try {
+            heldKey = 0x78;
+            Thread.sleep(100);
+            heldKey = 0;
+            Thread.sleep(100);
+            int taken = core.hotkeysTake();
+            check((taken & CameraUnlock.HOTKEY_LOCAL) != 0, "F9 held and let go in the game's window fires its row: " + Integer.toHexString(taken));
+            check(core.hotkeysTake() == 0, "and is taken once");
+        } finally {
+            heldKey = 0;
+            synchronized (module) {
+                for (Map.Entry<String, Object> one : real.entrySet()) setField(host, one.getKey(), one.getValue());
+            }
+        }
+    }
+
+    /** A window of this thread, hidden, with a caption: core moves it to the middle of its monitor's work area. */
+    private static void aWindowIsCentredInItsWorkArea(CameraUnlock core) throws Throwable {
+        MethodHandle create = windows(USER32, "CreateWindowExW", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS));
+        MethodHandle destroy = windows(USER32, "DestroyWindow", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+        MethodHandle rectangle = windows(USER32, "GetWindowRect", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS));
+        MethodHandle monitor = windows(USER32, "MonitorFromWindow", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT));
+        MethodHandle monitorInfo = windows(USER32, "GetMonitorInfoW", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS));
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment className = arena.allocateFrom("STATIC\0", StandardCharsets.UTF_16LE);
+            MemorySegment title = arena.allocateFrom("\0", StandardCharsets.UTF_16LE);
+            int overlapped = 0x00CF0000, popup = 0x80000000;
+            MemorySegment window = (MemorySegment) create.invokeExact(0, className, title, overlapped, 7, 9, 320, 200,
+                    MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL);
+            MemorySegment borderless = (MemorySegment) create.invokeExact(0, className, title, popup, 7, 9, 320, 200,
+                    MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL);
+            check(!window.equals(MemorySegment.NULL) && !borderless.equals(MemorySegment.NULL), "two hidden windows are made");
+            try {
+                core.logTake();
+                check(core.windowCenter(window.address()), "a window with a caption is centred");
+                MemorySegment rect = arena.allocate(16), info = arena.allocate(40);
+                info.set(ValueLayout.JAVA_INT, 0, 40);
+                check((int) rectangle.invokeExact(window, rect) != 0
+                        && (int) monitorInfo.invokeExact((MemorySegment) monitor.invokeExact(window, 2), info) != 0, "and asked where it is");
+                int left = rect.get(ValueLayout.JAVA_INT, 0), top = rect.get(ValueLayout.JAVA_INT, 4);
+                int width = rect.get(ValueLayout.JAVA_INT, 8) - left, height = rect.get(ValueLayout.JAVA_INT, 12) - top;
+                int workLeft = info.get(ValueLayout.JAVA_INT, 20), workTop = info.get(ValueLayout.JAVA_INT, 24);
+                int workWidth = info.get(ValueLayout.JAVA_INT, 28) - workLeft, workHeight = info.get(ValueLayout.JAVA_INT, 32) - workTop;
+                check(width == 320 && height == 200 && left == workLeft + (workWidth - width) / 2 && top == workTop + (workHeight - height) / 2,
+                        "it is in the middle of its monitor's work area: " + width + "x" + height + " at " + left + "," + top);
+                check(core.logTake().contains("window: centered 320x200"), "and the log says where it went");
+                check(!core.windowCenter(borderless.address()) && core.logTake().contains("borderless"),
+                        "a window with no caption is left where it is, and the log says why");
+            } finally {
+                int ignored = (int) destroy.invokeExact(window);
+                ignored = (int) destroy.invokeExact(borderless);
+            }
+        }
     }
 
     /** A port no socket of this machine holds now. */

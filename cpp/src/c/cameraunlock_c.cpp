@@ -1523,6 +1523,100 @@ std::int32_t cameraunlock_testing_defaults_path(char* buffer, std::int32_t capac
     return status == CAMERAUNLOCK_OK ? length : status;
 }
 
+namespace {
+
+std::string Win32Call(const std::string& call, const char* argument) {
+    const std::wstring wide = Wide(argument, "argument");
+    const auto failed = [&call](DWORD error) {
+        return std::runtime_error(call + " failed with Windows error " + std::to_string(error));
+    };
+    const auto lines = [&wide]() {
+        const std::size_t split = wide.find(L'\n');
+        Require(split != std::wstring::npos, "argument is not two lines");
+        return std::make_pair(wide.substr(0, split), wide.substr(split + 1));
+    };
+    if (call == "find") {
+        WIN32_FIND_DATAW found{};
+        const HANDLE search = FindFirstFileW(wide.c_str(), &found);
+        if (search == INVALID_HANDLE_VALUE) throw failed(GetLastError());
+        if (!FindClose(search)) throw failed(GetLastError());
+        return cfg::detail::DefaultsUtf8(found.cFileName);
+    }
+    if (call == "compare") {
+        const auto [a, b] = lines();
+        const int compared =
+            CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()), TRUE);
+        if (compared == 0) throw failed(GetLastError());
+        return std::to_string(compared);
+    }
+    if (call == "code_page") return std::to_string(GetACP());
+    if (call == "narrow") {
+        const int length = static_cast<int>(wide.size());
+        const int needed = WideCharToMultiByte(CP_ACP, 0, wide.data(), length, nullptr, 0, nullptr, nullptr);
+        if (needed <= 0) throw failed(GetLastError());
+        std::string bytes(static_cast<std::size_t>(needed), '\0');
+        if (WideCharToMultiByte(CP_ACP, 0, wide.data(), length, bytes.data(), needed, nullptr, nullptr) != needed) {
+            throw failed(GetLastError());
+        }
+        static const char kDigits[] = "0123456789abcdef";
+        std::string hex;
+        for (const char byte : bytes) {
+            hex.push_back(kDigits[static_cast<unsigned char>(byte) >> 4]);
+            hex.push_back(kDigits[static_cast<unsigned char>(byte) & 0xF]);
+        }
+        return hex;
+    }
+    if (call == "read_from") {
+        const auto [offset, path] = lines();
+        const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) throw failed(GetLastError());
+        LARGE_INTEGER at{};
+        at.QuadPart = std::stoll(cfg::detail::DefaultsUtf8(offset));
+        std::string text(256, '\0');
+        DWORD read = 0;
+        const bool done = SetFilePointerEx(file, at, nullptr, FILE_BEGIN) &&
+                          ReadFile(file, text.data(), static_cast<DWORD>(text.size()), &read, nullptr);
+        const DWORD error = done ? 0 : GetLastError();
+        CloseHandle(file);
+        if (!done) throw failed(error);
+        text.resize(read);
+        return text;
+    }
+    if (call == "error_text") return cfg::detail::OwnerErrorText(static_cast<std::uint32_t>(std::stoul(argument)));
+    if (call == "delete") {
+        if (!DeleteFileW(wide.c_str())) throw failed(GetLastError());
+        return "1";
+    }
+    if (call == "sleep") {
+        LARGE_INTEGER frequency{}, before{}, after{};
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&before);
+        Sleep(static_cast<DWORD>(std::stoul(argument)));
+        QueryPerformanceCounter(&after);
+        return std::to_string((after.QuadPart - before.QuadPart) * 1000 / frequency.QuadPart);
+    }
+    throw std::invalid_argument("call is not one cameraunlock_testing_win32 makes: " + call);
+}
+
+}  // namespace
+
+std::int32_t cameraunlock_testing_win32(const char* call, const char* argument, char* buffer, std::int32_t capacity) {
+    std::int32_t length = CAMERAUNLOCK_ERROR;
+    const std::int32_t status = Guarded("cameraunlock_testing_win32", [&] {
+        Require(call != nullptr, "call is NULL");
+        length = CopyOut(Win32Call(call, argument), buffer, capacity, true);
+        return CAMERAUNLOCK_OK;
+    });
+    return status == CAMERAUNLOCK_OK ? length : status;
+}
+
+#if defined(CAMERAUNLOCK_WIN32_HOST)
+std::int32_t cameraunlock_testing_trap(void) {
+    __builtin_trap();
+}
+#endif
+
 #endif
 
 #if defined(CAMERAUNLOCK_WIN32_HOST)
