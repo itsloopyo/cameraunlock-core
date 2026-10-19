@@ -1,6 +1,6 @@
 # CameraUnlock Core
 
-A cross-platform head tracking library for games. Provides complete tracking data processing, aim decoupling, and UI compensation with implementations in both C# (Unity/.NET) and C++ (native). Consumed as a git submodule by game head-tracking mod repos.
+A cross-platform head tracking library for games. Provides complete tracking data processing, aim decoupling, and UI compensation with implementations in C# (Unity/.NET) and C++ (native), and a Java binding to its C interface. Consumed as a git submodule by game head-tracking mod repos.
 
 ## Features
 
@@ -10,6 +10,7 @@ A cross-platform head tracking library for games. Provides complete tracking dat
 - **UI Compensation** - Reticle positioning that accounts for head tracking offset
 - **Thread-Safe Design** - Background UDP receiver safe to poll from the game thread
 - **Broad Compatibility** - Supports .NET 3.5 through .NET Standard 2.0, Unity 2018+, IL2CPP (source-shared)
+- **Java** - The C interface for Java 22 or later, on `CameraUnlockCore.dll` or compiled to WebAssembly and carried in one jar with no native file
 - **Release Tooling** - PowerShell modules, install script templates, and a reusable CI workflow shared by every mod repo
 
 ## Directory Structure
@@ -32,17 +33,20 @@ cameraunlock-core/
 │   ├── tests/                                    # C++ tests
 │   └── CMakeLists.txt
 ├── java/
-│   ├── src/                                      # The binding to the C interface and the boot class of a Java agent mod
-│   ├── harness/                                  # The pipeline vectors' harness for the binding
+│   ├── src/                                      # The binding to the C interface (DLL or WebAssembly module), its Win32 host and the boot class of a Java agent mod
+│   ├── harness/                                  # The pipeline vectors' harness and the bench for the binding
 │   └── tests/                                    # Its tests
-├── powershell/                                   # 7 reusable .psm1 modules for mod release pipelines
+├── powershell/                                   # 9 reusable .psm1 modules for mod release pipelines and tests
 ├── scripts/
 │   ├── templates/                                # install.cmd / uninstall.cmd templates copied into mod repos
 │   └── *.ps1, install-body-*.cmd                 # Game detection, packaging, release-note scripts
 ├── data/
 │   └── games.json                                # Game detection metadata (single source of truth)
+├── legal/                                        # Licence texts of what the mods, and core's jar, carry
 ├── .github/workflows/
-│   └── release-bepinex-mod.yml                   # Reusable release workflow (workflow_call)
+│   ├── check.yml                                 # Core's own build and tests (pixi run check)
+│   ├── release-mod.yml                           # The fleet's reusable release workflow (workflow_call)
+│   └── release-bepinex-mod.yml                   # Release of committed prebuilt DLLs (workflow_call)
 └── pixi.toml                                     # Build/test task definitions
 ```
 
@@ -312,7 +316,10 @@ pixi run test           # dotnet test csharp
 pixi run check          # debug build + quick tests
 pixi run pack           # dotnet pack to dist/
 pixi run test-powershell # vendoring soak tests (Windows only)
-pixi run test-java      # java/: the binding and the boot class (Windows only)
+pixi run build-wasm     # the C interface as WebAssembly modules and JVM classes, under cpp/build-wasm (Windows only)
+pixi run test-java      # java/: the binding on the DLL and on the module, and the boot class (Windows only)
+pixi run vectors-java   # the pipeline vectors through the binding, on both (Windows only)
+pixi run bench-java     # what a load, a frame and a save cost on each (Windows only)
 ```
 
 ### C# (.NET)
@@ -382,11 +389,13 @@ Located in `powershell/`, imported by every mod repo's `release.ps1` / `update-d
 | Module | Purpose |
 |--------|---------|
 | `AssemblyPatching.psm1` | Mono.Cecil IL patching (`Invoke-HeadTrackingPatch`, `New-ScreenCenterPatcher`) |
-| `DevDeploy.psm1` | Local dev-deploy pipelines per loader (`Invoke-DevDeployBepInEx`, `-Cecil`, `-MelonLoader`, `-ASILoader`, `-REFramework`, `-Shim`) |
+| `DevDeploy.psm1` | Local dev-deploy pipelines per loader (`Invoke-DevDeployBepInEx`, `-Cecil`, `-MelonLoader`, `-ASILoader`, `-REFramework`, `-Shim`, `-JavaAgent`) |
+| `DifferentialGate.psm1` | The config differential's provenance check (`Invoke-ConfigDifferential`) |
 | `GamePathDetection.psm1` | Game install detection across Steam/GOG/Epic/Ubisoft/Xbox/registry (`Find-GamePath`, `Get-GameConfig`) |
+| `IsolatedGameTest.psm1` | Background in-game tests with isolated input (`Start-IsolatedGame`, `Invoke-GameInput`, `Stop-IsolatedGame`) |
 | `ModDeployment.psm1` | Mod file deployment, backups, verification (`Copy-ModFiles`, `Test-ModDeployment`) |
 | `ModLoaderSetup.psm1` | BepInEx/MelonLoader/UE4SS install and vendored loader update (`Install-BepInEx`, `Update-VendoredLoader`) |
-| `NightlyRelease.psm1` | Rolling GitHub pre-release publishing for dev builds (`Publish-NightlyBuild`) |
+| `NightlyRelease.psm1` | Rolling GitHub pre-release publishing for dev builds, with the Nexus and Steam Workshop ZIPs where a mod makes them (`Publish-NightlyBuild`) |
 | `ReleaseWorkflow.psm1` | Release automation: versioning, changelog, tagging, submodule sync (`Get-CsprojVersion`, `New-ChangelogFromCommits`, `Update-CameraUnlockCoreToRemoteTip`) |
 
 ## Install Scripts & Templates
@@ -416,11 +425,19 @@ has a window to be caught before it can be vendored.
 and an optional `data_folder` for Cecil-patched mods. Consumed by
 `GamePathDetection.psm1` and `find-game.ps1` in every mod repo.
 
-## Reusable CI Workflow
+## Reusable CI Workflows
 
-`.github/workflows/release-bepinex-mod.yml` is called via `workflow_call` from mod
-repos. It validates that the git tag version matches the csproj version, packages
-the installer ZIP, generates release notes, and publishes the GitHub release.
+`.github/workflows/release-mod.yml` is the fleet's release workflow, called via
+`workflow_call` from each mod's tag-triggered `release.yml` and pinned to a core commit SHA.
+It checks the tag against the version source, runs `pixi run package`, runs
+`pixi run test-differential` where the repo has `tests/config_differential`, and publishes
+the GitHub release with the installer ZIP, and the Nexus and Steam Workshop ZIPs where the
+package task writes them (`release/*-nexus.zip`, `release/*-workshop.zip`). A mod whose
+package builds core's jar sets `wasm-toolchain: true` to cache the WebAssembly toolchain
+between runs.
+
+`.github/workflows/release-bepinex-mod.yml` packages committed prebuilt DLLs for a mod
+whose build cannot run on a CI runner, and compiles and tests nothing. No new mod calls it.
 
 ## Dependencies
 
@@ -438,10 +455,12 @@ the installer ZIP, generates release notes, and publishes the GitHub release.
 - OpenJDK 25 from the pixi environment, to compile and test `java/` for Java 22.
 - wasi-sdk 34 and Endive 1.1.0, for core's jar: fetched once per user by `scripts/wasm-toolchain.mjs`,
   pinned by SHA-256.
+- Node.js 20.12 or later from the pixi environment, for the WebAssembly and Java build scripts.
 
 ### Runtime
 - Unity assemblies provided by consuming projects (weak references)
 - BepInEx provided by mod loader
+- Java 22 or later for the Java binding and core's jar, started with `--enable-native-access=ALL-UNNAMED`
 
 ## License
 
