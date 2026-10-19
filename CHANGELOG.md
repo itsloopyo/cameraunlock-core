@@ -9,6 +9,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - core as one jar with no native file, for a Java host that cannot ship a DLL
+
+A Steam Workshop item for Project Zomboid is uploaded by the game's own uploader, which refuses a
+`.dll` anywhere under the item. `docs/core-jar.md` describes the jar.
+
+- `scripts/build-wasm.mjs` (`pixi run build-wasm`) compiles the C interface with wasi-sdk 34 to
+  WebAssembly, and Endive 1.1.0 compiles that to JVM classes, `com.cameraunlock.core.wasm.CoreModule`,
+  under `cpp/build-wasm/`. `scripts/wasm-toolchain.mjs` fetches both once per user into
+  `%LOCALAPPDATA%\cameraunlock-core\toolchain`, pinned by SHA-256. Windows only.
+- `node cameraunlock-core/scripts/build-core-jar.mjs <out.jar>` writes the binding, the boot class,
+  the module's classes, the Endive classes they run on and their notices as one jar. A mod
+  compiles against it and puts its whole content into its own jar.
+- `CameraUnlock.loadBundled()` starts the binding on the module. Every method behaves as it does
+  on `CameraUnlock.load()` and the DLL. `WasmCore` runs the hotkey tick and the receive threads the
+  DLL runs itself, and `Win32Host` makes the module's Windows calls through `java.lang.foreign`.
+- `cameraunlock/os/win32.h` is `<windows.h>` on Windows and `cameraunlock/os/win32_host.h` in the
+  WebAssembly build. A new Win32 call in core's Windows code has to be declared in `win32_host.h`
+  and registered in `Win32Host`: `scripts/check-win32-imports.mjs`, run by `pixi run build-java`,
+  fails on a mismatch, and `cpp/tests/win32_host_constants.cpp` holds the shim's types and
+  constants to the Windows SDK.
+- `cameraunlock/c/host/cameraunlock_host.h`: `cameraunlock_host_tick`, `cameraunlock_host_received`
+  and `cameraunlock_host_receive_failed`, called by a WebAssembly host only.
+- `CameraUnlockCoreTesting.dll` gains `cameraunlock_testing_defaults_path` and
+  `cameraunlock_testing_win32`, and the module `cameraunlock_testing_trap`. A session of the
+  testing build listens on loopback alone.
+- `pixi run test-java` and `pixi run vectors-java` run every check on the DLL and on the module.
+  `pixi run bench-java` measures a load, a frame and a save on each. `pixi run check` builds the
+  module, so its first run fetches the toolchain.
+- The ABI refusal names the jar or class folder of the module's classes.
+- `Boot` names the agent jar from real paths, so a working directory in 8.3 short form no longer
+  makes the jar's relative path climb out of it.
+- `validate-notices` requires Endive's, wasi-libc's and the LLVM runtimes' notices of a mod whose
+  `pixi.toml` or a script under `scripts/` names `build-core-jar.mjs`. `legal/endive.txt`,
+  `legal/wasi-libc.txt` and `legal/llvm-runtimes.txt` hold them.
+- `release-mod.yml` gains the input `wasm-toolchain` (default false), which caches the toolchain
+  between runs for a mod whose package builds core's jar.
+- The pixi environment's Node.js floor is 20.12, for `Dirent.parentPath`.
+
+### Added - a mod's Steam Workshop ZIP is published with its releases
+
+- `release-mod.yml` attaches `release/*-workshop.zip` to the GitHub release when the package task
+  writes one.
+- `Publish-NightlyBuild -WorkshopZip` publishes `release/<ModName>-v<Version>-workshop.zip` (or
+  `-WorkshopZipPath`) as `<ModName>-dev-workshop.zip`. Asked for, a missing or stale one is fatal,
+  as the Nexus ZIP's is.
+
 ### Added - text rows (ABI 7)
 
 - C interface: `cameraunlock_config_local_text(section, key, comment, flags, default_text)`,
