@@ -9,6 +9,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - the C interface eases a quiet tracker's pose out of the view
+
+**BREAKING** for a host that declares `CameraUnlockFrame` itself: `tracker_share` follows
+`pose_share` at offset 68 and the struct is 96 bytes. The Java binding in `java/` has it.
+
+- Once nothing has arrived for `data_freshness_ms`, the last pose eases out over a second
+  (`tracker_share` 1 to 0), so a closed tracker leaves the view the game's own. It eases back in
+  over half a second when packets return. A view that starts applying with the tracker quiet
+  starts at 0; a tracker's first pose is still applied whole. It used to hold the last pose for
+  as long as the tracker stayed quiet.
+
 ### Added - core as one jar with no native file, for a Java host that cannot ship a DLL
 
 A Steam Workshop item for Project Zomboid is uploaded by the game's own uploader, which refuses a

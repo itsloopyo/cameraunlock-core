@@ -173,8 +173,8 @@ typedef struct CameraUnlockFrame {
     uint32_t flags;
     int32_t tracking_mode;
     int32_t aim_mode;
-    /* What the view turns by, in degrees and the tracker's senses: yaw and pitch scaled by the
-     * zoom and by stock sights, roll as the tracker gave it. */
+    /* What the view turns by, in degrees and the tracker's senses: all three scaled by
+     * tracker_share, yaw and pitch also by the zoom and by stock sights. */
     float yaw;
     float pitch;
     float roll;
@@ -190,8 +190,14 @@ typedef struct CameraUnlockFrame {
     float head_x;
     float head_y;
     float head_z;
-    /* What of yaw, pitch and the lean reaches the view in stock sights: 1 at the hip. */
+    /* What of yaw, pitch and the lean reaches the view: tracker_share, times what stock sights
+     * leave of them (1 at the hip). */
     float pose_share;
+    /* What of the tracker's pose reaches the view at all: 1 while it sends, eased to 0 within a
+     * second once nothing has arrived for data_freshness_ms, and back to 1 when it sends again.
+     * A view that starts applying with the tracker quiet starts at 0, and a tracker's first pose is
+ * applied whole. */
+    float tracker_share;
     float zoom_factor;
     /* The frame time used, in seconds. */
     float delta_seconds;

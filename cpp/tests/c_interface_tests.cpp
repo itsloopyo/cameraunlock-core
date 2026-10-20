@@ -319,15 +319,31 @@ void TestReceiving() {
     frame = Settle();
     Check((frame.flags & CAMERAUNLOCK_STATE_FRESH) == 0, "past data_freshness_ms with no packet the tracker is quiet");
     Check((frame.flags & CAMERAUNLOCK_STATE_POSE) != 0 && Near(frame.head_yaw, 53.5f) && Near(frame.head_x, -0.30f),
-          "and the view keeps the last pose");
+          "and the tracker's last pose is still reported");
+    Check(Near(frame.tracker_share, 0.0f) && Near(frame.yaw, 0.0f) && Near(frame.roll, 0.0f) &&
+              Near(frame.light_yaw, 0.0f) && Near(frame.pose_share, 0.0f),
+          "but a second after it went quiet none of it reaches the view");
 
     // A frame tracking does not apply on.
     frame = Frame(Input(0));
     Check((frame.flags & (CAMERAUNLOCK_STATE_POSE | CAMERAUNLOCK_STATE_ROTATION | CAMERAUNLOCK_STATE_LEAN)) == 0 &&
               frame.yaw == 0.0f,
           "an inactive frame carries no pose");
-    Check(Near(Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).head_yaw, 53.5f),
-          "the first active frame after it is at the tracker's pose");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check(Near(frame.head_yaw, 53.5f) && frame.tracker_share == 0.0f && frame.yaw == 0.0f,
+          "a view that starts applying while the tracker is quiet gets nothing of its old pose");
+
+    sender.Pose(53.5, 0.0, 0.0, -100.0, -100.0, 100.0);
+    Check(WaitFor([] { return (Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).flags & CAMERAUNLOCK_STATE_FRESH) != 0; }),
+          "the tracker sends again");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check(frame.tracker_share > 0.0f && frame.tracker_share < 0.1f && frame.yaw < 5.0f,
+          "and its pose eases back in rather than jumping");
+    for (int i = 0; i < 30; ++i) frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check(frame.tracker_share == 1.0f && Near(frame.yaw, 53.5f), "whole within half a second");
+    frame = Frame(Input(0));
+    Check(Near(Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).yaw, 53.5f),
+          "and a view that starts applying while the tracker sends is at its pose at once");
 }
 
 void TestModes() {

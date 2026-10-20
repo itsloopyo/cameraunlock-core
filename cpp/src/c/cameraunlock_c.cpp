@@ -25,6 +25,7 @@
 #include "cameraunlock/time/frame_clock.h"
 #include "cameraunlock/tracking/head_tracking_session.h"
 
+#include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -52,7 +53,7 @@ static_assert(sizeof(CameraUnlockSettings) == 60, "docs/c-interface.md states th
 static_assert(sizeof(CameraUnlockFrameInput) == 80 && offsetof(CameraUnlockFrameInput, now_ms) == 8 &&
                   offsetof(CameraUnlockFrameInput, aim_forward) == 32,
               "docs/c-interface.md states this layout");
-static_assert(sizeof(CameraUnlockFrame) == 92, "docs/c-interface.md states this layout");
+static_assert(sizeof(CameraUnlockFrame) == 96, "docs/c-interface.md states this layout");
 static_assert(sizeof(CameraUnlockObstruction) == 16, "docs/c-interface.md states this layout");
 static_assert(sizeof(CameraUnlockLean) == 40, "docs/c-interface.md states this layout");
 static_assert(sizeof(CameraUnlockConfig) == 76, "docs/c-interface.md states this layout");
@@ -217,6 +218,9 @@ struct View {
     camera::LeanClamp clamp;
     ads::LeanHandover handover;
     ads::AdsFade stock_fade;
+    // How much of the tracker's pose reaches the view: 1 while its packets are fresh, eased to 0
+    // once it goes quiet, so a tracker that was closed leaves the view the game's own.
+    float tracker_share = 1.0f;
     time::FrameClock clock{std::numeric_limits<float>::max()};
     std::optional<PendingLean> pending;
 };
@@ -287,7 +291,23 @@ bool StopLean(View& s) {
     return s.handover.Stop();
 }
 
+// A quiet tracker's last pose is eased out over kQuietSeconds and a returning one's eased in over
+// kBackSeconds, both smoothstepped, so neither the loss nor the return is a jump.
+constexpr float kQuietSeconds = 1.0f;
+constexpr float kBackSeconds = 0.5f;
+
+float TrackerShare(View& s, bool fresh, float delta) {
+    s.tracker_share = fresh ? std::min(1.0f, s.tracker_share + delta / kBackSeconds)
+                            : std::max(0.0f, s.tracker_share - delta / kQuietSeconds);
+    const float t = s.tracker_share;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// A view that starts applying again starts from the tracker as it is now: nothing of a pose it
+// sent before it went quiet, and whole while it sends or before it has sent anything.
 void Rest(View& s, CameraUnlockFrame& out) {
+    const bool quiet = s.receiver.GetLastReceiveTimestamp() != 0 && (out.flags & CAMERAUNLOCK_STATE_FRESH) == 0;
+    s.tracker_share = quiet ? 0.0f : 1.0f;
     s.tracking.ResetTransientState();
     s.stock_fade.Reset();
     if (StopLean(s)) out.flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
@@ -348,6 +368,7 @@ std::int32_t StopView(std::int32_t view) {
     s.pending.reset();
     s.tracking.ResetTransientState();
     s.stock_fade.Reset();
+    s.tracker_share = 1.0f;
     StopLean(s);
     return CAMERAUNLOCK_OK;
 }
@@ -418,8 +439,10 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
     out->flags |= CAMERAUNLOCK_STATE_POSE;
 
     const bool aiming = (input->flags & CAMERAUNLOCK_FRAME_AIMING) != 0;
-    const float share = s.stock_fade.Update(ads::StockSightsEngaged(aim_mode, aiming), now_ms);
+    const float present = TrackerShare(s, (out->flags & CAMERAUNLOCK_STATE_FRESH) != 0, delta);
+    const float share = present * s.stock_fade.Update(ads::StockSightsEngaged(aim_mode, aiming), now_ms);
     const float zoom = camera::FovZoomFactor(input->tan_half_fov, input->tan_half_fov_base);
+    out->tracker_share = present;
     out->pose_share = share;
     out->zoom_factor = zoom;
 
@@ -431,7 +454,7 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
         out->head_roll = roll;
         out->yaw = camera::ScaleAngleForZoom(yaw * share, zoom);
         out->pitch = camera::ScaleAngleForZoom(pitch * share, zoom);
-        out->roll = roll;
+        out->roll = roll * present;
         const effects::HeadEuler light =
             effects::ScaleHeadEuler({out->yaw, out->pitch, out->roll}, s.settings.light_multiplier);
         out->light_yaw = light.yaw;

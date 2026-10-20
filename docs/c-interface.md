@@ -81,10 +81,11 @@ What comes out:
 | Member | Meaning |
 |---|---|
 | `flags` | `CAMERAUNLOCK_STATE_LISTENING`: the port is bound. `_POSE`: tracking applies and the tracker has sent a pose. `_FRESH`: a packet arrived within `data_freshness_ms`. `_REMOTE`: the sender is not on loopback. `_ROTATION`: yaw, pitch and roll are to be applied. `_LEAN` and `_LEAN_QUERY`: see below. `_RELEASE_RIG`: the rig carried a share of the lean last frame and no longer does. `_LOG`: `cameraunlock_log_take` has lines. |
-| `yaw`, `pitch`, `roll` | Degrees, in the tracker's senses. What the view turns by: yaw and pitch scaled by the zoom and by stock sights, roll as the tracker gave it. |
+| `yaw`, `pitch`, `roll` | Degrees, in the tracker's senses. What the view turns by: all three scaled by `tracker_share`, yaw and pitch also by the zoom and by stock sights. |
 | `light_yaw`, `light_pitch`, `light_roll` | The same three times `light_multiplier`, for a carried light. |
 | `head_yaw` to `head_z` | The tracker's pose after interpolation, smoothing and the position limits, before the zoom and stock sights. Degrees, and metres in the tracker's axes. For a trace. |
-| `pose_share` | What of yaw, pitch and the lean reaches the view in stock sights: 1 at the hip, 0 with the sights up. |
+| `pose_share` | What of yaw, pitch and the lean reaches the view: `tracker_share` times what stock sights leave of them, which is 1 at the hip and 0 with the sights up. |
+| `tracker_share` | What of the tracker's pose reaches the view at all: 1 while it sends, 0 once it has gone quiet. |
 | `zoom_factor`, `delta_seconds` | The zoom factor and the frame time used. |
 | `tracking_mode`, `aim_mode` | The modes this frame ran in. |
 
@@ -92,7 +93,13 @@ The pose is in the tracker's axes and signs. Converting it to the engine's is th
 of pipeline code: negative z is the forward lean, and the doctrine's "Tracker axis signs" says
 where to start for yaw, roll and x.
 
-A tracker that goes quiet keeps `_POSE` and loses `_FRESH`: the view holds the last pose.
+A tracker that goes quiet keeps `_POSE` and loses `_FRESH`, and its last pose eases out of the
+view: `tracker_share` falls from 1 to 0 over a second, so a tracker that was closed leaves the
+view the game's own. When it sends again the pose eases back in over half a second. A view that
+starts applying (after a menu, a load or the master toggle) while the tracker is quiet starts at
+0, and one that starts while it sends starts at 1. A tracker's first pose is applied whole at
+once, as there is nothing from before it to ease out of. `head_yaw` to `head_z` go on reporting the
+last pose whole.
 
 ## The lean
 
@@ -356,7 +363,7 @@ holds these to the header, compiled as C.
 |---|---|---|
 | `CameraUnlockSettings` | 60 | `struct_size` 0, `tracking_mode` 4, `aim_mode` 8, `data_freshness_ms` 12, `collision_enabled` 16, `local_smoothing` 20, `remote_smoothing` 24, `limit_x` 28, `limit_y` 32, `limit_y_down` 36, `limit_z` 40, `limit_z_back` 44, `collision_margin` 48, `collision_release_smoothing` 52, `light_multiplier` 56 |
 | `CameraUnlockFrameInput` | 80 | `struct_size` 0, `flags` 4, `now_ms` 8 (eight bytes), `delta_seconds` 16, `tan_half_fov` 20, `tan_half_fov_base` 24, `forward_stop` 28, `aim_forward` 32, `tracker_to_world` 44 |
-| `CameraUnlockFrame` | 92 | `struct_size` 0, `flags` 4, `tracking_mode` 8, `aim_mode` 12, `yaw` 16, `pitch` 20, `roll` 24, `light_yaw` 28, `light_pitch` 32, `light_roll` 36, `head_yaw` 40, `head_pitch` 44, `head_roll` 48, `head_x` 52, `head_y` 56, `head_z` 60, `pose_share` 64, `zoom_factor` 68, `delta_seconds` 72, `query_direction` 76, `query_reach` 88 |
+| `CameraUnlockFrame` | 96 | `struct_size` 0, `flags` 4, `tracking_mode` 8, `aim_mode` 12, `yaw` 16, `pitch` 20, `roll` 24, `light_yaw` 28, `light_pitch` 32, `light_roll` 36, `head_yaw` 40, `head_pitch` 44, `head_roll` 48, `head_x` 52, `head_y` 56, `head_z` 60, `pose_share` 64, `tracker_share` 68, `zoom_factor` 72, `delta_seconds` 76, `query_direction` 80, `query_reach` 92 |
 | `CameraUnlockObstruction` | 16 | `struct_size` 0, `queried` 4, `blocked` 8, `distance` 12 |
 | `CameraUnlockLean` | 40 | `struct_size` 0, `flags` 4, `camera` 8, `rig` 20, `asked` 32, `given` 36 |
 | `CameraUnlockConfig` | 76 | `struct_size` 0, `udp_port` 4, `enable_on_startup` 8, `world_space_yaw` 12, `settings` 16 |

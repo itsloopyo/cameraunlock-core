@@ -92,7 +92,7 @@ public final class CameraUnlock {
             FLOAT.withName("yaw"), FLOAT.withName("pitch"), FLOAT.withName("roll"), FLOAT.withName("light_yaw"),
             FLOAT.withName("light_pitch"), FLOAT.withName("light_roll"), FLOAT.withName("head_yaw"),
             FLOAT.withName("head_pitch"), FLOAT.withName("head_roll"), FLOAT.withName("head_x"), FLOAT.withName("head_y"),
-            FLOAT.withName("head_z"), FLOAT.withName("pose_share"), FLOAT.withName("zoom_factor"),
+            FLOAT.withName("head_z"), FLOAT.withName("pose_share"), FLOAT.withName("tracker_share"), FLOAT.withName("zoom_factor"),
             FLOAT.withName("delta_seconds"), MemoryLayout.sequenceLayout(3, FLOAT).withName("query_direction"),
             FLOAT.withName("query_reach")).withName("CameraUnlockFrame");
     static final StructLayout OBSTRUCTION = MemoryLayout.structLayout(
@@ -250,7 +250,7 @@ public final class CameraUnlock {
     public static final class Frame {
         public int flags, trackingMode, aimMode;
         public float yaw, pitch, roll, lightYaw, lightPitch, lightRoll, headYaw, headPitch, headRoll, headX, headY, headZ,
-                poseShare, zoomFactor, deltaSeconds, queryReach;
+                poseShare, trackerShare, zoomFactor, deltaSeconds, queryReach;
         public final float[] queryDirection = new float[3];
 
         private static final VarHandle FLAGS = member(FRAME, "flags"), TRACKING_MODE = member(FRAME, "tracking_mode"),
@@ -259,7 +259,7 @@ public final class CameraUnlock {
                 LIGHT_ROLL = member(FRAME, "light_roll"), HEAD_YAW = member(FRAME, "head_yaw"),
                 HEAD_PITCH = member(FRAME, "head_pitch"), HEAD_ROLL = member(FRAME, "head_roll"), HEAD_X = member(FRAME, "head_x"),
                 HEAD_Y = member(FRAME, "head_y"), HEAD_Z = member(FRAME, "head_z"), POSE_SHARE = member(FRAME, "pose_share"),
-                ZOOM_FACTOR = member(FRAME, "zoom_factor"), DELTA_SECONDS = member(FRAME, "delta_seconds"),
+                TRACKER_SHARE = member(FRAME, "tracker_share"), ZOOM_FACTOR = member(FRAME, "zoom_factor"), DELTA_SECONDS = member(FRAME, "delta_seconds"),
                 QUERY_DIRECTION = element(FRAME, "query_direction"), QUERY_REACH = member(FRAME, "query_reach");
 
         private void read(MemorySegment from) {
@@ -279,6 +279,7 @@ public final class CameraUnlock {
             headY = (float) HEAD_Y.get(from, 0L);
             headZ = (float) HEAD_Z.get(from, 0L);
             poseShare = (float) POSE_SHARE.get(from, 0L);
+            trackerShare = (float) TRACKER_SHARE.get(from, 0L);
             zoomFactor = (float) ZOOM_FACTOR.get(from, 0L);
             deltaSeconds = (float) DELTA_SECONDS.get(from, 0L);
             for (int i = 0; i < queryDirection.length; i++) {
