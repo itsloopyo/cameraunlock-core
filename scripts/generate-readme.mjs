@@ -147,7 +147,7 @@ view sits off to one side, centre it in the tracker.`;
 function communitySection() {
   return `- Discord: [Loop's Head Tracking Hangout](https://discord.com/invite/dxyZdyFNT9) - setup help, bug reports, and new-release announcements
 - [Lopari](https://lopari.app) - free Windows launcher with one-click install and launch for the released head-tracking mods
-- [Headcam](https://headcam.app) - free app that turns your iPhone or Android phone into the head tracker`;
+- [Headcam](https://headcam.app) - my free app that turns your iPhone or Android phone into the head tracker`;
 }
 
 const SECTIONS = {
