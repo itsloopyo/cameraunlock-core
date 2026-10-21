@@ -65,17 +65,20 @@ function Stop-StandIn {
 
 # A taker in a process of its own. When a gate file is named it says it is ready ("<gate>.<owner>")
 # and waits for the gate, so several ask at the same moment. It logs "in <owner>" and "out <owner>" round its hold, and writes
-# "<log>.<owner>" when it is refused.
+# "<log>.<owner>" when it is refused. Given a -Pool (names joined by commas) it asks for any of them
+# and writes the one it got to "<log>.<owner>.game".
 $taker = Join-Path $root 'taker.ps1'
 Set-Content $taker -Encoding ASCII -Value @'
 param([string]$Module, [string]$Game, [string]$Owner, [string]$Log, [int]$HoldMs = 0, [string]$Gate = '', [int]$WaitSeconds = 3600,
-      [switch]$Abandon, [string]$StateFolder = '', [string]$SaveFile = '', [string]$TokenFile = '', [switch]$WholeGpu)
+      [switch]$Abandon, [string]$StateFolder = '', [string]$SaveFile = '', [string]$TokenFile = '', [switch]$WholeGpu, [string]$Pool = '')
 $ErrorActionPreference = 'Stop'
 Import-Module $Module
 if ($Gate) { Set-Content "$Gate.$Owner" ''; while (-not (Test-Path $Gate)) { Start-Sleep -Milliseconds 10 } }
-try { $rig = Enter-GameRig -Game $Game -Owner $Owner -WaitSeconds $WaitSeconds -StateFolder $StateFolder -WholeGpu:$WholeGpu 6>$null }
+$which = $(if ($Pool) { @{ Pool = $Pool -split ',' } } else { @{ Game = $Game } })
+try { $rig = Enter-GameRig @which -Owner $Owner -WaitSeconds $WaitSeconds -StateFolder $StateFolder -WholeGpu:$WholeGpu 6>$null }
 catch { Set-Content "$Log.$Owner" "$_"; exit 3 }
 Add-Content $Log "in $Owner"
+if ($Pool) { Set-Content "$Log.$Owner.game" $rig.Game }
 if ($TokenFile) { Set-Content $TokenFile $rig.Token }
 if ($SaveFile) { Save-GameTestState -Files $SaveFile -Folder $StateFolder }
 Start-Sleep -Milliseconds $HoldMs
@@ -321,6 +324,89 @@ Start-Sleep 600
     Exit-GameRig -Rig $card
     Check 'a name that is not a process name is refused' (Throws { Enter-GameRig -Game '..\elsewhere' -Owner 'x' -WaitSeconds 0 } 'cannot name a rig')
 
+    # --- a pool of private copies ------------------------------------------
+    # Two sessions ask for a pool of two at the same moment, neither willing to wait: both get a copy, each its own.
+    $log = Join-Path $root 'pool.log'
+    $gate = Join-Path $root 'pool.gate'
+    $takers = 'p1', 'p2' | ForEach-Object { Start-Taker @{ Pool = 'poola,poolb'; Owner = $_; Log = $log; HoldMs = 4000; Gate = $gate; WaitSeconds = 0 } }
+    Wait-Until { @(Get-ChildItem $root -Filter 'pool.gate.p*').Count -eq 2 }
+    Set-Content $gate ''
+    Wait-Until { @(Get-ChildItem $root -Filter 'pool.log.p?.game').Count -eq 2 -or @(Get-ChildItem $root -Filter 'pool.log.p?').Count -gt 0 }
+    $games = @('p1', 'p2' | ForEach-Object { if (Test-Path "$log.$_.game") { (Get-Content "$log.$_.game" -Raw).Trim() } })
+    Check 'two sessions asking for a pool of two at once both get a copy' ($games.Count -eq 2 -and @(Get-ChildItem $root -Filter 'pool.log.p?').Count -eq 0) `
+        "$($games -join ', ') / $((Get-ChildItem $root -Filter 'pool.log.p?' | ForEach-Object { Get-Content $_.FullName -Raw }) -join ' | ')"
+    Check 'and each a different one' ((($games | Sort-Object) -join ',') -eq 'poola,poolb') ($games -join ',')
+    $state = Get-GameRig -Game 'poola'
+    Check 'each copy is a lock of its own, seen by its own name' ($state.Live -and @('p1', 'p2') -contains $state.Holder.Owner -and (Get-GameRig -Game 'poolb').Live)
+    # A third asks while both are held: it is refused at once, or waits and gets the copy let go first.
+    Check 'a third, unwilling to wait, is told every copy is in use and by whom' `
+        (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'p3' -WaitSeconds 0 } '^every game of the pool poola, poolb is in use: poola by p\d \(.*\); poolb by p\d \(')
+    $third = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'p3'; Log = $log; HoldMs = 200 }
+    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'p3' }
+    Check 'a waiter for a pool is seen waiting on every copy of it' ((Get-GameRig -Game 'poolb').Waiting -contains 'p3')
+    Wait-All ($takers + $third)
+    $lines = @(Get-Content $log)
+    $firstOut = (@($lines | Where-Object { $_ -like 'out *' })[0] -split ' ')[1]
+    Check 'it gets the copy let go first, once it is let go' ((($lines | Select-Object -Last 2) -join ',') -eq 'in p3,out p3' -and (Get-Content "$log.p3.game" -Raw).Trim() -eq (Get-Content "$log.$firstOut.game" -Raw).Trim()) `
+        "$($lines -join ', '), p3 got $((Get-Content "$log.p3.game" -Raw).Trim())"
+    Check 'a released pool leaves nothing behind' ($null -eq (Get-GameRig -Game 'poola') -and $null -eq (Get-GameRig -Game 'poolb'))
+
+    # Queue order holds across pools and single games. Both copies are held here, a pool waiter asks
+    # first and then a waiter for one copy: the pool waiter takes the first copy let go.
+    $log = Join-Path $root 'mixed.log'
+    $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
+    $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
+    Check 'a rig taken by -Game says which game it is' ($heldA.Game -eq 'poola' -and $heldA.Key -eq 'poola')
+    $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; HoldMs = 3000 }
+    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'pooled' }
+    $single = Start-Taker @{ Game = 'poola'; Owner = 'single'; Log = $log; HoldMs = 200 }
+    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'single' }
+    Exit-GameRig -Rig $heldA
+    Wait-Until { Test-Path "$log.pooled.game" }
+    Check 'a pool waiter that asked first takes the first copy let go, ahead of a waiter for that copy' `
+        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and (Get-GameRig -Game 'poola').Waiting -contains 'single')
+    Exit-GameRig -Rig $heldB
+    Wait-All @($pooled, $single)
+    Check 'and the waiter for that copy is served once it is let go, not given the other' ((@(Get-Content $log | Where-Object { $_ -like 'in *' }) -join ',') -eq 'in pooled,in single') ((Get-Content $log) -join ', ')
+
+    # The other way round: a waiter for one copy asked first, so the pool waiter behind it does not
+    # pass it on one free copy, and when both come free it leaves that copy to it.
+    $log = Join-Path $root 'mixed2.log'
+    $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
+    $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
+    $single = Start-Taker @{ Game = 'poolb'; Owner = 'single'; Log = $log; HoldMs = 3000 }
+    Wait-Until { (Get-GameRig -Game 'poolb').Waiting -contains 'single' }
+    $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; HoldMs = 3000 }
+    Wait-Until { (Get-GameRig -Game 'poolb').Waiting -contains 'pooled' }
+    Exit-GameRig -Rig $heldA
+    Start-Sleep -Milliseconds 1500
+    Check 'a pool waiter behind another does not pass it while there is one copy free for the two' (-not (Test-Path "$log.pooled.game") -and -not (Test-Path $log))
+    Exit-GameRig -Rig $heldB
+    Wait-Until { Test-Path "$log.pooled.game" }
+    Wait-All @($pooled, $single)
+    Check 'and with both free it leaves the copy the other can only take to it' `
+        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and @(Get-Content $log | Where-Object { $_ -eq 'in single' }).Count -eq 1) ((Get-Content $log) -join ', ')
+
+    # The whole card still waits for every copy, and holds them off.
+    $copy = Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0
+    Check 'work that needs the whole card waits for a copy that is held' (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0 } "the graphics card is in use: $($copy.Key) is held by player")
+    Exit-GameRig -Rig $copy
+    $card = Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0
+    Check 'and no copy is given out while it holds' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0 } 'the graphics card is in use: gpu is held by pictures')
+    Exit-GameRig -Rig $card
+
+    # A pool of one is -Game.
+    $one = Enter-GameRig -Pool 'solo' -Owner 'alone' -WaitSeconds 0
+    Check 'a pool of one takes that game''s rig' ($one.Game -eq 'solo' -and $one.Key -eq 'solo' -and (Get-GameRig -Game 'solo').Holder.Owner -eq 'alone')
+    $log = Join-Path $root 'solo.log'
+    Wait-All @(Start-Taker @{ Pool = 'solo'; Owner = 'other'; Log = $log; WaitSeconds = 0 })
+    Check 'and refuses another as -Game does' ((Get-Content "$log.other" -Raw) -match '^the rig is in use: alone \(pid \d+, since ') (Get-Content "$log.other" -Raw)
+    Exit-GameRig -Rig $one
+    Check 'a pool with a token is refused' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'x' -Token 'abc' } '-Token takes back one game')
+    Check 'a pool with a game is refused' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Game 'poola' -Owner 'x' } '-Pool and -Game are one or the other')
+    Check 'a pool that names a game twice is refused' (Throws { Enter-GameRig -Pool 'poola', 'POOLA.exe' -Owner 'x' -WaitSeconds 0 } 'names one game twice')
+    Check 'a pool with a kept file is refused' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'x' -KeptIn (Join-Path $root 'k.json') } '-KeptIn keeps one game')
+
     # --- a whole session ----------------------------------------------------
     $mod = Join-Path $root 'mod'
     $saves = Join-Path $root 'saves'
@@ -433,6 +519,48 @@ Start-Sleep 600
         (Throws { Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'x' -Files $made } 'need -StateFolder')
     Check 'a port to write with no port is refused' `
         (Throws { Start-IsolatedGameSession -ProcessName $gameName -Launch $gameExe -ModFolder $mod -Owner 'x' -IniPath $ini -StateFolder (Join-Path $root 'state') } 'need -Port')
+
+    # --- a session on private copies ----------------------------------------
+    # Two copies of the stand-in under names of their own, each with its own mod folder and config.
+    $slotNames = @("$($gameName)A", "$($gameName)B")
+    $slots = @(foreach ($i in 0, 1) {
+        $exe = Join-Path $root "$($slotNames[$i]).exe"
+        Copy-Item $gameExe $exe
+        $folder = Join-Path $root "mod-$i"
+        New-Item -ItemType Directory -Force $folder | Out-Null
+        [IO.File]::WriteAllText((Join-Path $folder 'CameraUnlock.ini'), $iniText)
+        @{ ProcessName = $slotNames[$i]; Launch = $exe; ModFolder = $folder; IniPath = (Join-Path $folder 'CameraUnlock.ini'); Port = 5990 + $i
+           StateFolder = (Join-Path $root "state-$i"); Arguments = @("-cachedir=slot$i"); Number = $i + 1 }
+    })
+    $log = Join-Path $root 'slots.log'
+    $tokenFile = Join-Path $root 'slots.token'
+    $holder = Start-Taker @{ Game = $slotNames[0]; Owner = 'first copy'; Log = $log; HoldMs = 60000; TokenFile = $tokenFile }
+    Wait-Until { Test-Path $tokenFile }
+    $seen = @{}
+    $result = Invoke-IsolatedGameSession -Slots $slots -Owner 'slot test' -SettleSeconds 0 -Prepare { param($s) $seen.Prepared = $s.Slot.ProcessName } -Run {
+        param($s)
+        $seen.ProcessName = $s.ProcessName
+        $seen.Number = $s.Slot.Number
+        $seen.Running = (Get-Process -Id $s.ProcessId).ProcessName
+        $seen.CommandLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($s.ProcessId)").CommandLine
+        $seen.Ini = [IO.File]::ReadAllText($slots[1].IniPath)
+        $seen.Holder = (Get-GameRig -Game $slotNames[1]).Holder
+        $s.Slot.Port
+    }
+    Check 'a session on private copies takes the one that is free, and runs it' ($seen.ProcessName -eq $slotNames[1] -and $seen.Running -eq $slotNames[1]) "$($seen.ProcessName) $($seen.Running)"
+    Check 'the prepare block is handed the session, with the slot it took' ($seen.Prepared -eq $slotNames[1]) "$($seen.Prepared)"
+    Check 'and the slot is carried whole, keys of the caller''s own included' ($seen.Number -eq 2) "$($seen.Number)"
+    Check 'that slot''s port is in that slot''s config' ($seen.Ini -eq $iniText.Replace('4242', '5991')) $seen.Ini
+    Check 'that slot''s arguments are on the command line' ($seen.CommandLine -match ' -cachedir=slot1\s*$') $seen.CommandLine
+    Check 'the lock it took is the session''s, naming that slot''s state' ($seen.Holder.Owner -eq 'slot test' -and $seen.Holder.StateFolder -eq $slots[1].StateFolder) ($seen.Holder | ConvertTo-Json -Compress)
+    Check 'the block''s result is returned' ($result -eq 5991) "$result"
+    Check 'afterwards that slot''s config is back, its copy free and the other still held' `
+        ([IO.File]::ReadAllText($slots[1].IniPath) -eq $iniText -and -not (Test-Path $slots[1].StateFolder) -and $null -eq (Get-GameRig -Game $slotNames[1]) -and (Get-GameRig -Game $slotNames[0]).Holder.Owner -eq 'first copy')
+    $holder.Kill()
+    Check 'slots with a game named as well are refused' (Throws { Start-IsolatedGameSession -Slots $slots -ProcessName $gameName -Owner 'x' } 'leave -ProcessName out')
+    Check 'a session with neither a game nor slots is refused' (Throws { Start-IsolatedGameSession -Owner 'x' } 'needs -ProcessName, -Launch and -ModFolder, or -Slots')
+    Check 'a slot with no launch of its own or the session''s is refused' (Throws { Start-IsolatedGameSession -Slots @(@{ ProcessName = 'a'; ModFolder = $mod }) -Owner 'x' } 'every slot needs a ProcessName, a Launch and a ModFolder')
+    Check 'Stop-GameProcess is exported' ([bool](Get-Command Stop-GameProcess -Module IsolatedGameTest -ErrorAction SilentlyContinue))
 
     # --- a session over several processes -----------------------------------
     # Started in one process, which ends; read back and stopped in this one.

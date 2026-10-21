@@ -524,7 +524,9 @@ function Start-IsolatedGame {
         [ValidateSet('native', 'managed')][string]$ModHost = 'native',
         # The host DLL to copy for a managed mod, when it is not this checkout's x64 build.
         [string]$HostDll = $script:HostDllBuild,
-        [scriptblock]$Started
+        [scriptblock]$Started,
+        # Command-line arguments for an executable -Launch, joined with spaces: quote one that holds a space.
+        [string[]]$Arguments = @()
     )
     if (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue) {
         throw "$ProcessName is already running and this session did not start it. Not launching over it."
@@ -535,7 +537,7 @@ function Start-IsolatedGame {
     Remove-Item "$commandFile.done" -ErrorAction SilentlyContinue
 
     $foreground = [CameraUnlockIsolatedTest.Native]::GetForegroundWindow()
-    Start-Process $Launch
+    if ($Arguments.Count -gt 0) { Start-Process $Launch -ArgumentList $Arguments } else { Start-Process $Launch }
     $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
     $process = $null
     while ((Get-Date) -lt $deadline -and -not $process) {
@@ -875,6 +877,23 @@ function Get-GameRigTickets {
     }
 }
 
+function Get-GameRigTicketKeys {
+    # Every rig a ticket may take: the games of its pool, or the one it named before pools were.
+    param($Ticket)
+    $(if ($Ticket.PSObject.Properties['Keys']) { @($Ticket.Keys) } else { @($Ticket.Key) })
+}
+
+function Set-GameRigStateFolder {
+    # Names the state a session saves on the lock it holds, once a pool has said which lock that is.
+    param([Parameter(Mandatory)]$Rig, [Parameter(Mandatory)][string]$StateFolder)
+    Invoke-GameRigExclusive {
+        $held = Read-GameRigOwner $Rig.Key
+        if (-not $held -or $held.Token -ne $Rig.Token) { throw "the rig for $($Rig.Key) is no longer held by $($Rig.Owner)" }
+        $held.StateFolder = $StateFolder
+        ConvertTo-Json $held | Set-Content (Join-Path $Rig.Path 'owner.json') -Encoding UTF8
+    }
+}
+
 function Get-GameRig {
     <#
     .SYNOPSIS
@@ -889,7 +908,7 @@ function Get-GameRig {
     $key = $(if ($Game) { Get-GameRigKey $Game } else { 'gpu' })
     Invoke-GameRigExclusive {
         $owner = Read-GameRigOwner $key
-        $waiting = @(Get-GameRigTickets | Where-Object { $_.Key -eq $key } | ForEach-Object { $_.Owner })
+        $waiting = @(Get-GameRigTickets | Where-Object { (Get-GameRigTicketKeys $_) -contains $key } | ForEach-Object { $_.Owner })
         if (-not $owner -and $waiting.Count -eq 0) { return }
         [pscustomobject]@{
             Key        = $key
@@ -952,12 +971,22 @@ function Enter-GameRig {
     between two of its processes, or its runner was killed. -SessionFile is recorded with the
     lock for that case, so whoever waits can see what Stop-IsolatedGameSession would need.
 
+    -Pool is for a game this machine keeps several private copies of, each with its own exe name,
+    data folder and so its own lock, so that several sessions can run it at once. It names every
+    copy, and the session takes whichever is free first, in its turn: a session gets a copy
+    beside those that asked before it only while there is a free copy for each of them as well,
+    and a copy that is the only one a session ahead may take is left for it. The rig returned
+    says which copy in Game. Each copy is still a game on the graphics card: -WholeGpu waits
+    for every copy and holds them all off while it runs. -Pool with one name is -Game.
+
     A session that never asks is not seen. Every session on the machine has to take the rig for
     the lock to mean anything.
     #>
     param(
         # The game's process name, as Start-IsolatedGame takes it.
         [string]$Game,
+        # In place of -Game: the process names of interchangeable copies of a game, of which this takes one.
+        [string[]]$Pool = @(),
         # Who is asking, as another session or the person at the machine would know them.
         [Parameter(Mandatory)][string]$Owner,
         # What the rig is wanted for, one line, shown to whoever waits behind this.
@@ -979,15 +1008,32 @@ function Enter-GameRig {
         # With -KeptIn: stop the game the kept lock was left with, by process id, once it is taken back.
         [switch]$StopKept
     )
-    if (-not $Game -and -not $WholeGpu -and -not $Token) { throw 'Enter-GameRig needs -Game, or -WholeGpu for work that has no game' }
+    if (-not $Game -and $Pool.Count -eq 0 -and -not $WholeGpu -and -not $Token) { throw 'Enter-GameRig needs -Game, -Pool, or -WholeGpu for work that has no game' }
+    if ($Pool.Count -gt 0) {
+        if ($Game) { throw '-Pool and -Game are one or the other: -Pool names every game the rig may be' }
+        if ($Token) { throw "-Token takes back one game's lock: name it with -Game, not -Pool" }
+        if ($KeptIn) { throw "-KeptIn keeps one game's lock: name it with -Game, not -Pool" }
+        if ($WholeGpu) { throw '-WholeGpu is work that has no game: leave -Pool out' }
+    }
     if ($KeptIn -and -not $Game) { throw "-KeptIn needs -Game: the lock kept there is a game's" }
-    $key = $(if ($Game) { Get-GameRigKey $Game } else { 'gpu' })
-    $names = [string[]]@(@($Game -replace '\.exe$', '') + $Processes | Where-Object { $_ } | Select-Object -Unique)
     $root = Get-GameRigRoot
-    $rigFolder = Join-Path $root $key
-    $lock = Join-Path $rigFolder 'lock'
     $queue = Join-Path $root '_queue'
     $start = (Get-Process -Id $PID).StartTime.ToFileTimeUtc().ToString()
+    # Each game this may take, with the names that mean it is up and where its lock lives.
+    $candidates = @(foreach ($name in $(if ($Pool.Count -gt 0) { $Pool } elseif ($Game) { @($Game) } else { @('') })) {
+        $candidateKey = $(if ($name) { Get-GameRigKey $name } else { 'gpu' })
+        $plain = $name -replace '\.exe$', ''
+        [pscustomobject]@{
+            Key = $candidateKey; Game = $(if ($plain) { $plain } else { $null }); RigFolder = Join-Path $root $candidateKey
+            Lock = Join-Path (Join-Path $root $candidateKey) 'lock'
+            Names = [string[]]@(@($plain) + $Processes | Where-Object { $_ } | Select-Object -Unique)
+        }
+    })
+    $keys = [string[]]@($candidates | ForEach-Object Key)
+    if (@($keys | Select-Object -Unique).Count -ne $keys.Count) { throw "-Pool names one game twice: $($Pool -join ', ')" }
+    $key = $keys[0]
+    $lock = $candidates[0].Lock
+    $whose = $(if ($Pool.Count -gt 1) { "the pool $($keys -join ', ')" } else { "the rig for $key" })
 
     if ($Token) {
         $rig = Invoke-GameRigExclusive {
@@ -1001,7 +1047,7 @@ function Enter-GameRig {
             $held.ProcessId = $PID
             $held.ProcessStart = $start
             ConvertTo-Json $held | Set-Content (Join-Path $lock 'owner.json') -Encoding UTF8
-            [pscustomobject]@{ Key = $key; Owner = $held.Owner; Token = $Token; Path = $lock; TakenOverFrom = $null }
+            [pscustomobject]@{ Key = $key; Game = $candidates[0].Game; Owner = $held.Owner; Token = $Token; Path = $lock; TakenOverFrom = $null }
         }
         Set-GameRigOnBoard -Rig $rig -What $What
         return $rig
@@ -1010,12 +1056,12 @@ function Enter-GameRig {
     # This session's place in the queue, numbered inside the mutex so no two tickets tie and none
     # is older than one already there.
     $ticket = Invoke-GameRigExclusive {
-        New-Item -ItemType Directory -Force $rigFolder, $queue | Out-Null
+        New-Item -ItemType Directory -Force (@($candidates | ForEach-Object RigFolder) + $queue) | Out-Null
         $tickets = @(Get-GameRigTickets)
         $ticks = [DateTime]::UtcNow.Ticks
         if ($tickets.Count -gt 0) { $ticks = [Math]::Max($ticks, [long]$tickets[-1].Ticks + 1) }
         $file = Join-Path $queue ('{0:D20}-{1}.json' -f $ticks, $PID)
-        ConvertTo-Json ([pscustomobject]@{ Ticks = "$ticks"; Key = $key; Owner = $Owner; ProcessId = $PID; ProcessStart = $start; WholeGpu = [bool]$WholeGpu }) |
+        ConvertTo-Json ([pscustomobject]@{ Ticks = "$ticks"; Key = $key; Keys = $keys; Owner = $Owner; ProcessId = $PID; ProcessStart = $start; WholeGpu = [bool]$WholeGpu }) |
             Set-Content $file -Encoding UTF8
         $file
     }
@@ -1025,11 +1071,10 @@ function Enter-GameRig {
         while ($true) {
             # One turn: the rig, or what this session is waiting for.
             $turn = Invoke-GameRigExclusive {
-                $stale = $null
-                # Whoever asked before this session, for the same rig or for the whole card, goes first.
+                # Whoever asked before this session, for a game this may take or for the whole card, goes first.
                 $ahead = @(foreach ($other in Get-GameRigTickets) {
                     if ($other.File -eq $ticket) { break }
-                    if ($other.Key -eq $key -or $other.WholeGpu -or $WholeGpu) { $other }
+                    if ($other.WholeGpu -or $WholeGpu -or @(Get-GameRigTicketKeys $other | Where-Object { $keys -contains $_ }).Count -gt 0) { $other }
                 })
                 $behind = $(if ($ahead.Count -gt 0) { ", and $($ahead.Count) asked before this session" } else { '' })
                 if ($KeptIn -and (Test-Path $KeptIn)) {
@@ -1048,26 +1093,29 @@ function Enter-GameRig {
                             $left | Add-Member -NotePropertyName Entered -NotePropertyValue ([DateTime]::UtcNow.ToFileTimeUtc().ToString()) -Force
                             ConvertTo-Json $left | Set-Content (Join-Path $lock 'owner.json') -Encoding UTF8
                             Remove-Item $ticket -Force
-                            return [pscustomobject]@{ Key = $key; Owner = $left.Owner; Token = $left.Token; Path = $lock; TakenOverFrom = $null; Kept = $own }
+                            return [pscustomobject]@{ Key = $key; Game = $candidates[0].Game; Owner = $left.Owner; Token = $left.Token; Path = $lock; TakenOverFrom = $null; Kept = $own }
                         }
                     }
                 }
+                $inUse = [ordered]@{}
+                $stale = @{}
                 foreach ($folder in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne '_queue' }) {
                     $held = Read-GameRigOwner $folder.Name
                     if (-not $held) { continue }
                     $live = Test-GameRigOwnerLive $held
-                    if ($folder.Name -eq $key) {
+                    if ($keys -contains $folder.Name) {
                         if ($held.ProcessId -eq $PID -and $held.ProcessStart -eq $start) {
-                            throw "this process already holds the rig for $key ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
+                            throw "this process already holds the rig for $($folder.Name) ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
                         }
                         if ($live) {
                             $orphaned = $(if (-not $held.ProcessId -or (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) { '' } else { ', whose own process has gone while the game runs on' })
-                            return "the rig is in use: $(Format-GameRigOwner $held)$orphaned$behind"
+                            $inUse[$folder.Name] = "$(Format-GameRigOwner $held)$orphaned"
+                            continue
                         }
                         if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
-                            throw "the last session on $key, $(Format-GameRigOwner $held), ended without putting the game's files back. What it saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)', then ask again."
+                            throw "the last session on $($folder.Name), $(Format-GameRigOwner $held), ended without putting the game's files back. What it saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)', then ask again."
                         }
-                        $stale = $held
+                        $stale[$folder.Name] = $held
                     } elseif ($live -and $WholeGpu -and -not $held.ProcessId) {
                         # A game left running may stay up for hours, and everyone who asks after a
                         # whole-card waiter waits behind it: this is refused, not queued.
@@ -1076,30 +1124,43 @@ function Enter-GameRig {
                         return "the graphics card is in use: $($folder.Name) is held by $(Format-GameRigOwner $held)"
                     }
                 }
-                if ($ahead.Count -gt 0) {
-                    return "waiting behind $($ahead[0].Owner) (pid $($ahead[0].ProcessId)), who asked first$(if ($ahead.Count -gt 1) { ", with $($ahead.Count - 1) more ahead of this session" })"
+                $open = @($candidates | Where-Object { -not $inUse.Contains($_.Key) })
+                if ($open.Count -eq 0) {
+                    if ($candidates.Count -eq 1) { return "the rig is in use: $($inUse[$key])$behind" }
+                    return "every game of $whose is in use: $(@($inUse.Keys | ForEach-Object { "$_ by $($inUse[$_])" }) -join '; ')$behind"
                 }
-                $running = @($names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
-                if ($running.Count -gt 0) {
+                # A pool lets this through beside those ahead only while it has a game for each of them as well.
+                if (@($ahead | Where-Object { $_.WholeGpu }).Count -gt 0 -or $ahead.Count -ge $open.Count) {
+                    return "waiting behind $($ahead[0].Owner) (pid $($ahead[0].ProcessId)), who asked first$(if ($ahead.Count -gt 1) { ", with $($ahead.Count - 1) more ahead of this session" })$(if ($candidates.Count -gt 1) { ", for $whose" })"
+                }
+                $free = @($open | Where-Object { -not @($_.Names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }) })
+                if ($free.Count -eq 0) {
+                    $running = @($open | ForEach-Object { @($_.Names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }) } | Select-Object -Unique)
                     return "$($running -join ', ') is running and no session holds its rig: someone started it by hand"
                 }
+                if ($free.Count -le $ahead.Count) {
+                    return "waiting behind $($ahead[0].Owner) (pid $($ahead[0].ProcessId)), who asked first, for $whose, of which $($open.Count - $free.Count) is running with no session holding its rig"
+                }
+                # A game that is the only one a session ahead may take is left for it.
+                $reserved = @($ahead | ForEach-Object { $theirs = @(Get-GameRigTicketKeys $_); if ($theirs.Count -eq 1) { $theirs[0] } })
+                $pick = @($free | Where-Object { $reserved -notcontains $_.Key })[0]
 
-                if ($stale) { Remove-Item $lock -Recurse -Force }
+                if ($stale.ContainsKey($pick.Key)) { Remove-Item $pick.Lock -Recurse -Force }
                 # The owner's record is written first and the folder renamed into place, which
                 # happens whole or not at all: a lock never exists without its owner.
-                $fresh = Join-Path $rigFolder ('taking-' + [Guid]::NewGuid().ToString('N'))
+                $fresh = Join-Path $pick.RigFolder ('taking-' + [Guid]::NewGuid().ToString('N'))
                 New-Item -ItemType Directory $fresh | Out-Null
                 $record = [pscustomobject]@{
-                    Key = $key; Owner = $Owner; ProcessId = $PID; ProcessStart = $start; Since = (Get-Date).ToString('s')
+                    Key = $pick.Key; Owner = $Owner; ProcessId = $PID; ProcessStart = $start; Since = (Get-Date).ToString('s')
                     Entered = [DateTime]::UtcNow.ToFileTimeUtc().ToString()
-                    What = $What; Processes = $names; WholeGpu = [bool]$WholeGpu; StateFolder = $StateFolder
+                    What = $What; Processes = $pick.Names; WholeGpu = [bool]$WholeGpu; StateFolder = $StateFolder
                     SessionFile = $SessionFile
                     Token = [Guid]::NewGuid().ToString('N')
                 }
                 ConvertTo-Json $record | Set-Content (Join-Path $fresh 'owner.json') -Encoding UTF8
-                Move-GameRigFolder -From $fresh -To $lock
+                Move-GameRigFolder -From $fresh -To $pick.Lock
                 Remove-Item $ticket -Force
-                [pscustomobject]@{ Key = $key; Owner = $Owner; Token = $record.Token; Path = $lock; TakenOverFrom = $stale }
+                [pscustomobject]@{ Key = $pick.Key; Game = $pick.Game; Owner = $Owner; Token = $record.Token; Path = $pick.Lock; TakenOverFrom = $(if ($stale.ContainsKey($pick.Key)) { $stale[$pick.Key] } else { $null }) }
             }
             if ($turn -isnot [string]) {
                 if ($StopKept -and $turn.PSObject.Properties['Kept']) {
@@ -1112,16 +1173,16 @@ function Enter-GameRig {
                     }
                 }
                 if ($turn.TakenOverFrom) {
-                    Write-Warning "the rig for $key was still held by $(Format-GameRigOwner $turn.TakenOverFrom), whose process has gone and whose game is not running. It has been taken over. Whatever that session changed and did not save with -StateFolder is as it left it."
+                    Write-Warning "the rig for $($turn.Key) was still held by $(Format-GameRigOwner $turn.TakenOverFrom), whose process has gone and whose game is not running. It has been taken over. Whatever that session changed and did not save with -StateFolder is as it left it."
                 }
                 Set-GameRigOnBoard -Rig $turn -What $What
                 return $turn
             }
             if ($WaitSeconds -le 0) { throw $turn }
-            if ((Get-Date) -ge $deadline) { throw "$turn. Waited $WaitSeconds seconds for the rig for $key." }
+            if ((Get-Date) -ge $deadline) { throw "$turn. Waited $WaitSeconds seconds for $whose." }
             if ($turn -ne $said) {
                 $said = $turn
-                if ($Waiting) { & $Waiting $turn | Out-Host } else { Write-Host "Enter-GameRig ($key, $Owner): $turn" }
+                if ($Waiting) { & $Waiting $turn | Out-Host } else { Write-Host "Enter-GameRig ($($keys -join ', '), $Owner): $turn" }
             }
             Start-Sleep -Milliseconds 500
         }
@@ -1477,9 +1538,16 @@ function Start-IsolatedGameSession {
     released. It runs when the start fails too, -Enter having thrown included, so it must do
     nothing where -Enter did nothing. Pass the same block to Stop-IsolatedGameSession.
 
-    -Prepare runs with the rig held and the state saved, before the launch: build and deploy the
-    dev build, change the game's settings. A build made there cannot land under another session's
-    running game. -Launched runs as the game's process appears, before the settling, and is handed
+    -Prepare runs with the rig held and the state saved, before the launch, and is handed the
+    session: build and deploy the dev build, change the game's settings. A build made there cannot
+    land under another session's running game.
+
+    -Slots is for a game kept in several private copies (Enter-GameRig -Pool), in place of
+    -ProcessName. Each slot is a hashtable with the copy's ProcessName and any of Launch,
+    ModFolder, WorkingDirectory, IniPath, Port, Arguments, Environment and StateFolder, each of
+    which replaces the value passed to the session; Launch and ModFolder must come from one or
+    the other. The session takes whichever copy is free first and runs with that slot's values,
+    and carries the slot it took in Slot, whole: a key of the caller's own rides along there. -Launched runs as the game's process appears, before the settling, and is handed
     the session: start a sampler there to have the process from its first seconds. -IniPath is the mod's config, where -Port is written; it is saved and put back
     with -Files. -PoseFile starts the pose sender on -Port.
 
@@ -1490,9 +1558,12 @@ function Start-IsolatedGameSession {
     Stop-IsolatedGameSession -SessionFile.
     #>
     param(
-        [Parameter(Mandatory)][string]$ProcessName,
-        [Parameter(Mandatory)][string]$Launch,
-        [Parameter(Mandatory)][string]$ModFolder,
+        # The game, or -Slots in its place.
+        [string]$ProcessName = '',
+        [string]$Launch = '',
+        [string]$ModFolder = '',
+        # Private copies of the game, of which the session takes whichever is free first (Enter-GameRig -Pool).
+        [hashtable[]]$Slots = @(),
         # Who is running the test, for the rig's owner record.
         [Parameter(Mandatory)][string]$Owner,
         [string]$What = '',
@@ -1524,26 +1595,58 @@ function Start-IsolatedGameSession {
         [int]$WaitSeconds = 3600,
         # Handed each new line the wait for the rig says (Enter-GameRig -Waiting).
         [scriptblock]$Waiting,
-        [string]$SessionFile = ''
+        [string]$SessionFile = '',
+        # Command-line arguments for the launch (Start-IsolatedGame -Arguments).
+        [string[]]$Arguments = @()
     )
-    if (($IniPath -or $PoseFile) -and $Port -eq 0) { throw '-IniPath and -PoseFile need -Port: pass Get-ModTestPort -RepoName <the repo folder>' }
-    $kept = @($Files + $(if ($IniPath -and $Files -notcontains $IniPath) { $IniPath }) | Where-Object { $_ })
-    $saves = $kept.Count + $Folders.Count -gt 0
-    if ($saves -and -not $StateFolder) { throw '-Files, -Folders and -IniPath need -StateFolder: where what the test changes is kept until it is put back' }
+    # Every way the session can run, each checked before anything is taken: one game, or each slot
+    # with its own values over the ones passed here.
+    $slotted = 'ProcessName', 'Launch', 'ModFolder', 'WorkingDirectory', 'IniPath', 'Port', 'Arguments', 'Environment', 'StateFolder'
+    if ($Slots.Count -gt 0 -and $ProcessName) { throw '-Slots names the game in each slot: leave -ProcessName out' }
+    if ($Slots.Count -eq 0 -and -not ($ProcessName -and $Launch -and $ModFolder)) { throw 'a session needs -ProcessName, -Launch and -ModFolder, or -Slots' }
+    # A session with no slots is one plan whose slot is false: foreach does not go round a $null.
+    $plans = @(foreach ($slot in $(if ($Slots.Count -gt 0) { $Slots } else { $false })) {
+        $plan = @{ Slot = $(if ($slot) { $slot } else { $null }) }
+        foreach ($name in $slotted) { $plan[$name] = (Get-Variable -Name $name -ValueOnly) }
+        if ($slot) {
+            # Keys of the caller's own ride along in the slot, which the session carries whole.
+            foreach ($name in @($slot.Keys | Where-Object { $slotted -contains $_ })) { $plan[$name] = $slot[$name] }
+            if (-not $plan.ProcessName -or -not $plan.Launch -or -not $plan.ModFolder) { throw "every slot needs a ProcessName, a Launch and a ModFolder, of its own or passed to the session: $(@($slot.Keys | ForEach-Object { "$_=$($slot[$_])" }) -join ', ')" }
+        }
+        if (($plan.IniPath -or $PoseFile) -and $plan.Port -eq 0) { throw '-IniPath and -PoseFile need -Port: pass Get-ModTestPort -RepoName <the repo folder>' }
+        $plan.Kept = @($Files + $(if ($plan.IniPath -and $Files -notcontains $plan.IniPath) { $plan.IniPath }) | Where-Object { $_ })
+        $plan.Saves = $plan.Kept.Count + $Folders.Count -gt 0
+        if ($plan.Saves -and -not $plan.StateFolder) { throw '-Files, -Folders and -IniPath need -StateFolder: where what the test changes is kept until it is put back' }
+        $plan
+    })
     if ($SessionFile -and (Test-Path $SessionFile)) { throw "$SessionFile holds a session that was never stopped. Stop it first (Stop-IsolatedGameSession -SessionFile)." }
 
-    $rig = Enter-GameRig -Game $ProcessName -Owner $Owner -What $What -Processes $Processes -WholeGpu:$WholeGpu -WaitSeconds $WaitSeconds `
-        -StateFolder $(if ($saves) { $StateFolder } else { '' }) -SessionFile $SessionFile -Waiting $Waiting
+    $asking = @{ Owner = $Owner; What = $What; Processes = $Processes; WholeGpu = $WholeGpu; WaitSeconds = $WaitSeconds; SessionFile = $SessionFile; Waiting = $Waiting }
+    if ($Slots.Count -gt 0) {
+        $rig = Enter-GameRig @asking -Pool @($plans | ForEach-Object { $_.ProcessName })
+        $plan = @($plans | Where-Object { (Get-GameRigKey $_.ProcessName) -eq $rig.Key })[0]
+        # The pool said which lock is this session's only now: it names the state to restore before any is saved.
+        if ($plan.Saves) {
+            try { Set-GameRigStateFolder -Rig $rig -StateFolder $plan.StateFolder } catch { Exit-GameRig -Rig $rig; throw }
+        }
+    } else {
+        $plan = $plans[0]
+        $rig = Enter-GameRig @asking -Game $ProcessName -StateFolder $(if ($plan.Saves) { $StateFolder } else { '' })
+    }
+    foreach ($name in $slotted) { Set-Variable -Name $name -Value $plan[$name] }
+    $kept = $plan.Kept
+    $saves = $plan.Saves
     $session = [pscustomobject]@{
         ProcessId = 0; ProcessName = $ProcessName; CommandFile = (Join-Path $ModFolder $script:CommandFileName); Sequence = 0
         HostDll = $(if ($ModHost -eq 'managed') { Join-Path $ModFolder $script:HostDllName } else { $null })
         ModFolder = $ModFolder; Port = $Port; PoseFile = $PoseFile; Sender = 0
         StateFolder = $(if ($saves) { $StateFolder } else { '' }); Owner = $Owner; RigToken = $rig.Token; SessionFile = $SessionFile
+        Slot = $plan.Slot
     }
     try {
         if ($Enter) { & $Enter $session | Out-Host }
         if ($saves) { Save-GameTestState -Files $kept -Folders $Folders -Folder $StateFolder }
-        if ($Prepare) { & $Prepare | Out-Host }
+        if ($Prepare) { & $Prepare $session | Out-Host }
         if ($IniPath) { [void](Set-ModTestPort -IniPath $IniPath -Port $Port) }
         if ($PoseFile) {
             Set-TestPose -PoseFile $PoseFile
@@ -1558,7 +1661,7 @@ function Start-IsolatedGameSession {
         try {
             # Written before the settling: a session killed in it has left a game someone has to stop.
             [void](Start-IsolatedGame -ProcessName $ProcessName -Launch $Launch -ModFolder $ModFolder -StartTimeoutSeconds $StartTimeoutSeconds `
-                -SettleSeconds $SettleSeconds -ModHost $ModHost -HostDll $HostDll -Started {
+                -SettleSeconds $SettleSeconds -ModHost $ModHost -HostDll $HostDll -Arguments $Arguments -Started {
                     param($process)
                     $session.ProcessId = $process.Id
                     if ($SessionFile) { Save-IsolatedGameSession -Session $session }
@@ -1697,9 +1800,11 @@ function Invoke-IsolatedGameSession {
     the teardown's is a warning.
     #>
     param(
-        [Parameter(Mandatory)][string]$ProcessName,
-        [Parameter(Mandatory)][string]$Launch,
-        [Parameter(Mandatory)][string]$ModFolder,
+        # The game, or -Slots in its place, as Start-IsolatedGameSession takes them.
+        [string]$ProcessName = '',
+        [string]$Launch = '',
+        [string]$ModFolder = '',
+        [hashtable[]]$Slots = @(),
         [Parameter(Mandatory)][string]$Owner,
         # Handed the session: Invoke-GameInput, Set-TestPose, Save-GameCapture, Wait-GameLogLine.
         [Parameter(Mandatory)][scriptblock]$Run,
@@ -1727,7 +1832,8 @@ function Invoke-IsolatedGameSession {
         [int]$WaitSeconds = 3600,
         [scriptblock]$Waiting,
         [string]$SessionFile = '',
-        [int]$RestoreRetrySeconds = 30
+        [int]$RestoreRetrySeconds = 30,
+        [string[]]$Arguments = @()
     )
     $start = @{} + $PSBoundParameters
     'Run', 'Collect', 'RestoreRetrySeconds' | ForEach-Object { $start.Remove($_) }
@@ -1748,7 +1854,7 @@ function Invoke-IsolatedGameSession {
 }
 
 Export-ModuleMember -Function Get-PeImports, Get-IsolatedInputCoverage, Get-GameInputPaths, Assert-IsolatedInputCovers,
-    Get-ModTestPort, Copy-IsolatedInputHost, Start-IsolatedGame, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
+    Get-ModTestPort, Copy-IsolatedInputHost, Start-IsolatedGame, Stop-GameProcess, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
     Stop-IsolatedGame, Save-GameTestState, Restore-GameTestState, Start-TestPoseSender, Set-TestPose,
     Set-ModTestPort, Get-GameRig, Enter-GameRig, Exit-GameRig, Stop-KeptGame, Wait-GameLogLine, Start-GameProcessSampler, Stop-GameProcessSampler,
     Start-IsolatedGameSession, Stop-IsolatedGameSession, Invoke-IsolatedGameSession, Get-IsolatedGameSession, Save-IsolatedGameSession

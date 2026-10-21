@@ -206,6 +206,45 @@ owner record already in it. A folder made with `New-Item -ItemType Directory`
 is not a lock: PowerShell looks and then makes, and in Project Zomboid on
 2026-10-05 three runs started in the same second got through one.
 
+### Several copies of one game at once
+
+One copy of a game is one test at a time, whoever waits. A game that will run
+from a copy of its own install can be kept in several private copies, so that
+several sessions test it at once. Each copy has its own exe name (so its own
+process name and its own lock), its own data folder and its own mod config, and
+shares nothing another copy writes. `-Pool` names every copy and takes
+whichever is free first:
+
+```text
+$rig = Enter-GameRig -Pool PZRig1, PZRig2, PZRig3 -Owner <who you are> -What 'the lean check'
+try { <run the copy named $rig.Game> } finally { Exit-GameRig -Rig $rig }
+```
+
+The queue still serves whoever asked first. A session gets a copy beside the
+sessions that asked before it only while there is a free copy for each of them
+as well, and a copy that is the only one a session ahead may take is left for
+it. A pool of one is `-Game`. `-Token` and `-KeptIn` take back one game's lock
+and so stay `-Game` only.
+
+`Invoke-IsolatedGameSession -Slots` is the session over a pool. Each slot is a
+hashtable with the copy's `ProcessName` and any of `Launch`, `ModFolder`,
+`WorkingDirectory`, `IniPath`, `Port`, `Arguments`, `Environment` and
+`StateFolder`, each of which replaces the value given to the session. The
+session runs with the slot it took and carries it whole in `Slot`, keys of the
+caller's own included, and `-Prepare` is handed the session, so it can build
+into that copy:
+
+```text
+$slots = 1..3 | ForEach-Object { @{ ProcessName = "PZRig$_"; Launch = "$copies\$_\PZRig$_.exe"; ModFolder = "$copies\$_"
+                                    Port = $port + $_; Arguments = @("-cachedir=$copies\$_\data") } }
+Invoke-IsolatedGameSession -Slots $slots -Owner <who you are> -Prepare { param($s) ... } -Run { param($s) ... }
+```
+
+Every copy is still a game on the graphics card. `-WholeGpu` waits for every
+copy that is held and holds them all off while it runs, and how many copies
+the machine can carry at once is the size of the pool, chosen for the card and
+the memory it has.
+
 ## A whole session
 
 `Invoke-IsolatedGameSession` is the run a mod's `.lab/isolated.ps1` otherwise
