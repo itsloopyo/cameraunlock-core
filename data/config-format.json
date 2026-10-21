@@ -667,6 +667,13 @@
   },
   "allow_legacy_symbols": {},
   "per_game": {
+    "ready-or-not-headtracking": [
+      {
+        "row": "CycleTrackingModeKey",
+        "reason": "Measured in game on 2026-10-21, in the Training range on foot with the MK18 out, through isolated input. The owner reports Page Up is used by the game (it also collapses the Mission Debrief panel at headquarters), so Page Up is dropped from the tracking mode list. Neither Ctrl nor Shift, alone or together, left anything changed after release, so the pair stays Ctrl+Shift. With the pair held a tap of G started a weapon animation, brought up the fire-mode readout and took the HUD's G count from 3 to 2, and a tap of B started a weapon animation; Y, H, U, J, T, K and N changed nothing beyond idle sway. End, Page Down and Insert changed nothing. So the tracking mode takes J, the first free spare letter, and the other actions keep the fleet lists. The committed file holds CycleTrackingModeKey=Ctrl+Shift+J.",
+        "approved": "2026-10-21"
+      }
+    ],
     "bioshock-remastered-headtracking": [
       {
         "row": "PositionLimitYDown",
