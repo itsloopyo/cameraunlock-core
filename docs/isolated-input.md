@@ -115,6 +115,15 @@ whose output a running game would load.
   the rig now or throws). There is nothing to poll and no race to win. While it
   waits it prints who holds the rig and how many asked before it, each time
   that changes. A `-Waiting` block is handed that line in place of the print.
+- **It is on the hivemind board.** Run by an agent (Claude Code or Codex) on a
+  machine with [hivemind](https://github.com/itsloopyo/hivemind) installed,
+  taking the rig runs `hivemind reserve --quiet rig-<process name>` with the
+  owner and `-What`, and releasing it runs `hivemind release`, so the other
+  agents see who has which game in `hivemind status`. A rig left with its
+  running game (`-KeptIn`) stays on the board. It is a copy for them to read:
+  this lock alone decides who gets the rig, and waiters are not on the board.
+  When hivemind refuses, as it does an agent that has not joined, a warning
+  says so and the rig is held all the same.
 - **Only the session that took a lock releases it.** `Exit-GameRig` throws, and
   removes nothing, for a lock that is someone else's.
 - **A lock is taken over only when its taker's process has gone and the game is

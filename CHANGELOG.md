@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the game rig shows on the hivemind board
+
+- `Enter-GameRig` run by an agent with hivemind installed reserves `rig-<process name>` on the
+  board (`hivemind reserve --quiet`, hivemind 85c0a41 or later), and `Exit-GameRig` releases it,
+  so `hivemind status` shows who holds which game. A rig left with its game (`-KeptIn`) stays on
+  the board. The rig lock itself is unchanged. A consuming repo picks this up with a core bump.
+
 ### Changed - the C interface eases a quiet tracker's pose out of the view
 
 **BREAKING** for a host that declares `CameraUnlockFrame` itself: `tracker_share` follows

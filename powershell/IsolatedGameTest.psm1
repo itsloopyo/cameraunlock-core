@@ -728,6 +728,36 @@ function Get-GameRigKey {
     $key
 }
 
+# The rig an agent holds is put on the hivemind board (github.com/itsloopyo/hivemind), so the
+# agents there see who has which game in `hivemind status` without asking this lock. It is a copy
+# for them to read: this lock alone decides who gets the rig. Only under an agent harness, since a
+# person at a terminal has no place on the board, and only where hivemind is installed. hivemind
+# refusing, as it does an agent that never joined, is said and not thrown: the rig is held either
+# way, and the run needs nothing more.
+function Get-GameRigBoardName {
+    param([string]$Key)
+    $name = 'rig-' + ($Key -replace '[^a-z0-9._-]', '-')
+    $name.Substring(0, [Math]::Min(32, $name.Length))
+}
+
+function Invoke-GameRigBoard {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    if (-not ($env:CLAUDECODE -or $env:CODEX_THREAD_ID -or $env:CODEX_SESSION_ID)) { return }
+    if (-not (Get-Command hivemind -CommandType Application -ErrorAction SilentlyContinue)) { return }
+    # Windows PowerShell turns a native command's stderr into a terminating error under Stop.
+    $ErrorActionPreference = 'Continue'
+    $said = & hivemind @Arguments 2>&1 | ForEach-Object { "$_" }
+    if ($LASTEXITCODE -ne 0) { Write-Warning "hivemind $($Arguments[0]) for the rig failed: $($said -join ' ')" }
+}
+
+function Set-GameRigOnBoard {
+    param([Parameter(Mandatory)]$Rig, [string]$What = '')
+    $why = $(if ($What) { "$($Rig.Owner): $What" } else { $Rig.Owner })
+    $why = ($why -replace '\s+', ' ').Trim()
+    $why = $why.Substring(0, [Math]::Min(200, $why.Length))
+    Invoke-GameRigBoard -Arguments @('reserve', '--quiet', (Get-GameRigBoardName $Rig.Key), $why)
+}
+
 function Invoke-GameRigExclusive {
     # Runs -Block with the rig's mutex held. The mutex is named for the root, so a test's root has its own.
     param([Parameter(Mandatory)][scriptblock]$Block)
@@ -960,7 +990,7 @@ function Enter-GameRig {
     $start = (Get-Process -Id $PID).StartTime.ToFileTimeUtc().ToString()
 
     if ($Token) {
-        return Invoke-GameRigExclusive {
+        $rig = Invoke-GameRigExclusive {
             $held = Read-GameRigOwner $key
             if (-not $held -or $held.Token -ne $Token) {
                 throw "the rig for $key is not held under that token$(if ($held) { ': it is held by ' + (Format-GameRigOwner $held) }). The lock this session took is gone."
@@ -973,6 +1003,8 @@ function Enter-GameRig {
             ConvertTo-Json $held | Set-Content (Join-Path $lock 'owner.json') -Encoding UTF8
             [pscustomobject]@{ Key = $key; Owner = $held.Owner; Token = $Token; Path = $lock; TakenOverFrom = $null }
         }
+        Set-GameRigOnBoard -Rig $rig -What $What
+        return $rig
     }
 
     # This session's place in the queue, numbered inside the mutex so no two tickets tie and none
@@ -1082,6 +1114,7 @@ function Enter-GameRig {
                 if ($turn.TakenOverFrom) {
                     Write-Warning "the rig for $key was still held by $(Format-GameRigOwner $turn.TakenOverFrom), whose process has gone and whose game is not running. It has been taken over. Whatever that session changed and did not save with -StateFolder is as it left it."
                 }
+                Set-GameRigOnBoard -Rig $turn -What $What
                 return $turn
             }
             if ($WaitSeconds -le 0) { throw $turn }
@@ -1112,7 +1145,7 @@ function Exit-GameRig {
     the rig is released and the file removed.
     #>
     param([Parameter(Mandatory)]$Rig, [string]$KeptIn = '')
-    Invoke-GameRigExclusive {
+    $kept = Invoke-GameRigExclusive {
         $held = Read-GameRigOwner $Rig.Key
         if (-not $held) { throw "the rig for $($Rig.Key) is not held: the lock $($Rig.Owner) took is gone" }
         if ($held.Token -ne $Rig.Token) { throw "the rig for $($Rig.Key) is held by $(Format-GameRigOwner $held), not by the session releasing it. Left as it is." }
@@ -1127,7 +1160,7 @@ function Exit-GameRig {
                 $held.ProcessId = 0
                 $held.ProcessStart = ''
                 ConvertTo-Json $held | Set-Content (Join-Path $Rig.Path 'owner.json') -Encoding UTF8
-                return
+                return $true
             }
             Remove-Item $KeptIn -Force -ErrorAction SilentlyContinue
         }
@@ -1135,7 +1168,10 @@ function Exit-GameRig {
         $gone = Join-Path (Split-Path -Parent $Rig.Path) ('released-' + [Guid]::NewGuid().ToString('N'))
         Move-GameRigFolder -From $Rig.Path -To $gone
         Remove-Item $gone -Recurse -Force
+        $false
     }
+    # A game left running keeps the rig, and stays on the board with it.
+    if (-not $kept) { Invoke-GameRigBoard -Arguments @('release', (Get-GameRigBoardName $Rig.Key)) }
 }
 
 function Stop-KeptGame {

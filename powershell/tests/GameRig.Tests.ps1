@@ -38,6 +38,15 @@ function Throws {
 $root = Join-Path $env:TEMP ("game-rig-test-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $root | Out-Null
 $env:CAMERAUNLOCK_RIG_ROOT = Join-Path $root 'rig'
+# Run under an agent with hivemind installed, the rig is copied to the hivemind board. A board of
+# this run's own keeps it off the real one, which every agent on the machine reads.
+$env:HIVEMIND_HOME = Join-Path $root 'hivemind'
+$board = ($env:CLAUDECODE -or $env:CODEX_THREAD_ID -or $env:CODEX_SESSION_ID) -and (Get-Command hivemind -CommandType Application -ErrorAction SilentlyContinue)
+if ($board) { hivemind join --name rig-test 'GameRig tests' | Out-Null }
+function Get-BoardHold {
+    param([string]$Resource)
+    @((hivemind state | Out-String | ConvertFrom-Json).reservations | Where-Object { $_.resource -eq $Resource })
+}
 $started = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 
 # The stand-in game: its process name is this run's own, so two runs of these tests never meet.
@@ -186,6 +195,9 @@ Start-Sleep 600
     Check 'and the kept file is still there for it' (Test-Path $keptFile)
     Exit-GameRig -Rig $back -KeptIn $keptFile
     Check 'and leaves it with the game again' ((Get-GameRig -Game $gameName).Holder.ProcessId -eq 0 -and (Test-Path $keptFile))
+    if ($board) {
+        Check 'a rig left with its running game stays on the hivemind board' (@(Get-BoardHold "rig-$($gameName.ToLowerInvariant())").Count -eq 1)
+    }
     # The game that was left ends, and someone starts one of the same name by hand.
     Stop-StandIn
     $hand = Start-StandIn
@@ -679,12 +691,24 @@ public static class StandInStubborn {
         'see the message above'
     Check 'and leaves the folder where it was' ((Test-Path (Join-Path $moveFrom 'owner.json')) -and -not (Test-Path $moveTo))
     $holder.Kill()
+
+    # --- the hivemind board -------------------------------------------------
+    if ($board) {
+        $mine = Enter-GameRig -Game 'board' -Owner 'boarder' -What 'a check' -WaitSeconds 0
+        $held = @(Get-BoardHold 'rig-board')
+        Check 'a rig an agent takes is on the hivemind board, and never in the feeds' ($held.Count -eq 1 -and $held[0].quiet -and $held[0].why -eq 'boarder: a check') ($held | ConvertTo-Json -Compress)
+        Exit-GameRig -Rig $mine
+        Check 'and is off it once released' (@(Get-BoardHold 'rig-board').Count -eq 0)
+    } else {
+        Write-Host 'SKIP  the hivemind board: not under an agent harness, or hivemind is not installed'
+    }
 } finally {
     # By the process objects, which stay tied to what was started: an id can be handed on once its process ends.
     foreach ($process in $started) { if (-not $process.HasExited) { $process.Kill() } }
     Stop-StandIn
     if (Get-Variable stubbornExe -ErrorAction SilentlyContinue) { Set-Content "$stubbornExe.release" '' }
     $env:CAMERAUNLOCK_RIG_ROOT = $null
+    $env:HIVEMIND_HOME = $null
     Start-Sleep -Milliseconds 500
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
