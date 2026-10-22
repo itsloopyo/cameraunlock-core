@@ -334,6 +334,16 @@ jobs:
           $assets = @($installerZip)
           if ($nexusZip) { $assets += $nexusZip }
           if ($workshopZip) { $assets += $workshopZip }
+          # A package whose manifest has files[].release_asset rows also writes a launcher ZIP
+          # without those files, and leaves each file in release/assets/ under the name the row
+          # gives, for the launcher to download from this release.
+          $launcherZip = Get-ChildItem release/*-launcher.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($launcherZip) {
+            $releaseAssets = @(Get-ChildItem release/assets -File -ErrorAction SilentlyContinue | ForEach-Object FullName)
+            $assets += $launcherZip.FullName
+            $assets += $releaseAssets
+            Write-Host "Launcher: $($launcherZip.Name), $($releaseAssets.Count) release asset(s)"
+          }
 
           gh release create $env:RELEASE_TAG `
             --title "$($env:PROJECT_NAME) $($env:RELEASE_TAG)" `

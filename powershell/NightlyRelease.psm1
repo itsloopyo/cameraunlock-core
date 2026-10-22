@@ -220,6 +220,19 @@ function Publish-NightlyBuild {
         Assert-FreshArtifact -Path $WorkshopZipPath -Label 'Workshop' -BuildStartedAt $buildStartedAt -PackageCommand $PackageCommand
     }
 
+    # A package whose manifest has files[].release_asset rows also writes a launcher ZIP without
+    # those files, and leaves each file in release/assets/ under the name the row gives, which the
+    # launcher downloads from this release.
+    $launcherZipPath = Join-Path $ProjectRoot "release\$ModName-v$Version-launcher.zip"
+    $releaseAssetFiles = @()
+    if (Test-Path -LiteralPath $launcherZipPath) {
+        Assert-FreshArtifact -Path $launcherZipPath -Label 'Launcher' -BuildStartedAt $buildStartedAt -PackageCommand $PackageCommand
+        $releaseAssetFiles = @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'release\assets') -File -ErrorAction SilentlyContinue)
+        foreach ($file in $releaseAssetFiles) {
+            Assert-FreshArtifact -Path $file.FullName -Label "Release asset $($file.Name)" -BuildStartedAt $buildStartedAt -PackageCommand $PackageCommand
+        }
+    }
+
     # Fixed asset names -> stable download URLs:
     # github.com/<owner>/<repo>/releases/download/<DevTag>/<asset>
     $releaseDir = Join-Path $ProjectRoot 'release'
@@ -229,6 +242,9 @@ function Publish-NightlyBuild {
     }
     if ($WorkshopZip) {
         $sources["$ModName-dev-workshop.zip"] = $WorkshopZipPath
+    }
+    if (Test-Path -LiteralPath $launcherZipPath) {
+        $sources["$ModName-dev-launcher.zip"] = $launcherZipPath
     }
 
     $assets = @()
@@ -240,6 +256,15 @@ function Publish-NightlyBuild {
             Path = $assetPath
             Size = (Get-Item -LiteralPath $assetPath).Length
             Hash = Get-Sha256Hex -LiteralPath $assetPath
+        }
+    }
+    # Uploaded under their own names, which the launcher ZIP's manifest gives.
+    foreach ($file in $releaseAssetFiles) {
+        $assets += [PSCustomObject]@{
+            Name = $file.Name
+            Path = $file.FullName
+            Size = $file.Length
+            Hash = Get-Sha256Hex -LiteralPath $file.FullName
         }
     }
 
