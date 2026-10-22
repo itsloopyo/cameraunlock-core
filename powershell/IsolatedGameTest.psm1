@@ -1049,7 +1049,9 @@ function Enter-GameRig {
             ConvertTo-Json $held | Set-Content (Join-Path $lock 'owner.json') -Encoding UTF8
             [pscustomobject]@{ Key = $key; Game = $candidates[0].Game; Owner = $held.Owner; Token = $Token; Path = $lock; TakenOverFrom = $null }
         }
-        Set-GameRigOnBoard -Rig $rig -What $What
+        # Taken back by token, the rig is on the board already with what it was taken for. Putting it
+        # there again with no -What wiped that a second before every release (2026-10-21 log).
+        if ($What) { Set-GameRigOnBoard -Rig $rig -What $What }
         return $rig
     }
 

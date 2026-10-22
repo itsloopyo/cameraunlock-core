@@ -825,6 +825,9 @@ public static class StandInStubborn {
         $mine = Enter-GameRig -Game 'board' -Owner 'boarder' -What 'a check' -WaitSeconds 0
         $held = @(Get-BoardHold 'rig-board')
         Check 'a rig an agent takes is on the hivemind board, and never in the feeds' ($held.Count -eq 1 -and $held[0].quiet -and $held[0].why -eq 'boarder: a check') ($held | ConvertTo-Json -Compress)
+        $mine = Enter-GameRig -Game 'board' -Owner 'boarder' -Token $mine.Token
+        $held = @(Get-BoardHold 'rig-board')
+        Check 'taken back by token, it keeps what it was taken for' ($held.Count -eq 1 -and $held[0].why -eq 'boarder: a check') ($held | ConvertTo-Json -Compress)
         Exit-GameRig -Rig $mine
         Check 'and is off it once released' (@(Get-BoardHold 'rig-board').Count -eq 0)
     } else {
