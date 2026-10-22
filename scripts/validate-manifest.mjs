@@ -88,6 +88,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
 import { configWriteProblems, descriptorProblems, preReleaseWarning, releaseProblems, releaseVersionFromEnv } from "./check-config-descriptor.mjs";
@@ -100,6 +101,8 @@ const ROOT = path.resolve(SCRIPT_DIR, "..", "..");
 
 // The schema_version manifest_versioned starts at, and the keys of its jvm_site_config block.
 const VERSIONED_SCHEMA = 3;
+// The schema_version files[].release_asset starts at.
+const RELEASE_ASSET_SCHEMA = 4;
 const JVM_SITE_KEYS = new Set(["config", "site", "agent_jars", "legacy_jars", "main_class"]);
 
 // Sentinel for the no-args case: validate this repo's own built zip.
@@ -197,6 +200,7 @@ function validate(label, zip, repo) {
   // them must resolve: a missing source is a failed install for whoever owns
   // that build of the game, and the packager cannot know which that is.
   const sources = [];
+  const releaseAssets = [];
   for (const payload of payloads(man)) {
     // A fetched loader archive carries no in-zip source - its bytes are
     // downloaded + hash-verified at install time - so only check bundled ones.
@@ -206,10 +210,16 @@ function validate(label, zip, repo) {
     // failure reason with neither the file nor the entry named - and counted toward the
     // length check, defeating it.
     for (const f of payload.files ?? []) {
+      if (f.release_asset !== undefined) {
+        if (f.source !== undefined) throw new Error(`manifest files[] entry has both "source" and "release_asset": ${JSON.stringify(f)}`);
+        releaseAssets.push(f);
+        continue;
+      }
       if (!f.source) throw new Error(`manifest files[] entry has no "source": ${JSON.stringify(f)}`);
       sources.push(f.source);
     }
   }
+  const bundledAssets = checkReleaseAssets(man, releaseAssets, zip, entries);
 
   // A manifest that declares nothing passed the "everything declared is present"
   // check vacuously and printed OK. That is the worst outcome for a gate whose whole
@@ -238,7 +248,7 @@ function validate(label, zip, repo) {
   // is in the ZIP but on neither list is simply never written to the game. That
   // ships an installer which succeeds and leaves the mod incomplete, and the
   // forward check above passes it, because everything declared is still there.
-  const undeclared = undeclaredPayload(entries, sources, tools, man);
+  const undeclared = undeclaredPayload(entries, [...sources, ...bundledAssets], tools, man);
   if (undeclared.fatal.length > 0) {
     throw new Error(
       `zip carries binaries no manifest row deploys, so a launcher install would leave them out and the mod would not run: ${undeclared.fatal.join(", ")}. Add a files[] row for each, or drop it from packaging staging.`,
@@ -252,7 +262,7 @@ function validate(label, zip, repo) {
     : "";
   const patches = tools.length ? `, ${tools.length} patch(es)` : "";
   console.log(
-    `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${seeds} seed(s), ${rt} runtime req(s)${patches}${variants}${descriptor}`,
+    `OK   ${label}: ${path.basename(zip)} - manifest, ${sources.length} file(s), ${releaseAssets.length} release asset(s), ${seeds} seed(s), ${rt} runtime req(s)${patches}${variants}${descriptor}`,
   );
   const preRelease = preReleaseWarning(man);
   if (preRelease !== null) console.log(`WARN ${label}: ${preRelease}`);
@@ -685,6 +695,57 @@ function assertVersionMatchesZipName(man, zip) {
   }
 }
 
+// A files[] row with a release_asset names a file published as an asset of the same GitHub release
+// as the package, which the launcher downloads by name and checks against sha256 and size, so a
+// release whose art has not changed is not downloaded again. The -installer.zip still carries a
+// copy of each, found by its hash, because install.cmd and launchers before schema 4 deploy from
+// the zip. The -launcher.zip carries none, and its assets are read from assets/ beside it, where
+// the package step leaves them for the release to upload. Returns the zip entries that are copies.
+function checkReleaseAssets(man, rows, zip, entries) {
+  if (rows.length === 0) return [];
+  if (man.delivery_mode !== "manifest_versioned" || !(Number.isInteger(man.schema_version) && man.schema_version >= RELEASE_ASSET_SCHEMA)) {
+    throw new Error(`files[].release_asset needs delivery_mode "manifest_versioned" and schema_version ${RELEASE_ASSET_SCHEMA} or above, so a launcher that cannot download it installs through install.cmd`);
+  }
+  const launcherZip = path.basename(zip).toLowerCase().endsWith("-launcher.zip");
+  const byHash = new Map();
+  for (const entry of entries) {
+    if (entry.endsWith("/")) continue;
+    byHash.set(sha256(readEntryBytes(zip, entry)), entry);
+  }
+  const bundled = [];
+  for (const row of rows) {
+    const asset = row.release_asset;
+    if (!asset || typeof asset !== "object" || Array.isArray(asset)) throw new Error(`files[].release_asset must be an object: ${JSON.stringify(row)}`);
+    const { name, sha256: hash, size } = asset;
+    if (typeof name !== "string" || !name || /[\\/]/.test(name) || name.includes("..")) {
+      throw new Error(`files[].release_asset.name must be a bare file name, and is ${JSON.stringify(name)}`);
+    }
+    if (typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash)) throw new Error(`release asset ${name}: sha256 must be 64 lower-case hex digits`);
+    if (!Number.isInteger(size) || size <= 0) throw new Error(`release asset ${name}: size must be a positive whole number of bytes`);
+    if (typeof row.target !== "string" || !row.target) throw new Error(`release asset ${name}: the row has no target`);
+    const copy = byHash.get(hash);
+    if (launcherZip) {
+      if (copy !== undefined) throw new Error(`the launcher zip carries ${copy}, a copy of release asset ${name}, which the launcher downloads instead`);
+      const file = path.join(path.dirname(zip), "assets", name);
+      if (!fs.existsSync(file)) throw new Error(`release asset ${name} is not in ${path.dirname(file)}, where the release takes it from`);
+      const bytes = fs.readFileSync(file);
+      if (bytes.length !== size || sha256(bytes) !== hash) {
+        throw new Error(`${file} is ${bytes.length} bytes with sha256 ${sha256(bytes)}, and the manifest says ${size} bytes with ${hash}`);
+      }
+    } else {
+      if (copy === undefined) {
+        throw new Error(`the zip carries no copy of release asset ${name} (sha256 ${hash}), which install.cmd and launchers before schema ${RELEASE_ASSET_SCHEMA} deploy from the zip`);
+      }
+      bundled.push(copy);
+    }
+  }
+  return bundled;
+}
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 function resolveSources(sources, entryByLower) {
   const missing = [];
   const miscased = [];
@@ -778,6 +839,10 @@ function listZip(zip) {
   return execFileSync(systemTar(), ["-tf", zip], { encoding: "utf8" })
     .split(/\r?\n/)
     .filter(Boolean);
+}
+
+function readEntryBytes(zip, name) {
+  return execFileSync(systemTar(), ["-xf", zip, "-O", name], { maxBuffer: 2 ** 31 - 1, stdio: ["ignore", "pipe", "pipe"] });
 }
 
 function readEntry(zip, name) {

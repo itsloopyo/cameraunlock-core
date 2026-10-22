@@ -19,6 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VALIDATOR = path.join(CORE_ROOT, "scripts", "validate-manifest.mjs");
@@ -283,6 +284,56 @@ const nexus = (files) => [null, files];
     const result = run(VALIDATOR, zip(path.join(scratch, `owml-${scenario}.zip`), man, files));
     const expected = ["valid", "legacy"].includes(scenario) ? 0 : 1;
     check(result.status === expected, `OWML ${scenario}: expected ${expected}, got ${result.status}\n${result.out}`);
+  }
+}
+
+// files[].release_asset: a file the launcher downloads from the same release by name, sha256 and
+// size. The installer ZIP carries a copy of each, found by hash, for install.cmd; the launcher ZIP
+// carries none, and the file sits in assets/ beside it.
+{
+  const ART = "art bytes";
+  const artHash = createHash("sha256").update(ART).digest("hex");
+  const assetRow = (extra = {}) => ({ release_asset: { name: `Mod-art-${artHash.slice(0, 12)}.jar`, sha256: artHash, size: ART.length, ...extra }, target: "Mod-art.jar" });
+  const assetMan = (extra = {}) => ({
+    schema_version: 4,
+    mod_info: { name: "Mod", version: "1.2.0", game_id: "mod" },
+    strategy: "JavaAgent",
+    delivery_mode: "manifest_versioned",
+    files: [{ source: "plugins/Mod.jar", target: "Mod.jar" }, assetRow()],
+    jvm_site_config: { config: "Game64.json", site: "Game64.site.json", agent_jars: ["Mod.jar"] },
+    ...extra,
+  });
+  const scripts = { "install.cmd": "@echo off", "uninstall.cmd": "@echo off" };
+  const installer = (label, man, files = { "plugins/Mod.jar": "jar", "plugins/Mod-art.jar": ART, ...scripts }) =>
+    run(VALIDATOR, zip(path.join(scratch, "assets", label, "Mod-v1.2.0-installer.zip"), man, files));
+  const launcher = (label, man, assets, files = { "plugins/Mod.jar": "jar", ...scripts }) => {
+    const dir = path.join(scratch, "assets", label);
+    for (const [name, text] of Object.entries(assets)) {
+      fs.mkdirSync(path.join(dir, "assets"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "assets", name), text);
+    }
+    return run(VALIDATOR, zip(path.join(dir, "Mod-v1.2.0-launcher.zip"), man, files));
+  };
+  const assetName = assetRow().release_asset.name;
+
+  const full = installer("full", assetMan());
+  check(full.status === 0 && full.out.includes("1 file(s), 1 release asset(s)") && !full.out.includes("Mod-art.jar"), `release_asset: an installer ZIP with a copy of the asset should pass and not call it undeclared, got ${full.status}\n${full.out}`);
+  const slim = launcher("slim", assetMan(), { [assetName]: ART });
+  check(slim.status === 0, `release_asset: a launcher ZIP with the asset beside it should pass, got ${slim.status}\n${slim.out}`);
+
+  for (const [label, result, expected] of [
+    ["no-copy", installer("no-copy", assetMan(), { "plugins/Mod.jar": "jar", ...scripts }), "the zip carries no copy of release asset"],
+    ["stale-copy", installer("stale-copy", assetMan(), { "plugins/Mod.jar": "jar", "plugins/Mod-art.jar": "old art", ...scripts }), "the zip carries no copy of release asset"],
+    ["old-schema", installer("old-schema", assetMan({ schema_version: 3 })), "files[].release_asset needs delivery_mode \"manifest_versioned\" and schema_version 4"],
+    ["both", installer("both", assetMan({ files: [{ source: "plugins/Mod.jar", target: "Mod.jar" }, { ...assetRow(), source: "plugins/Mod-art.jar" }] })), 'has both "source" and "release_asset"'],
+    ["path-name", installer("path-name", assetMan({ files: [{ source: "plugins/Mod.jar", target: "Mod.jar" }, assetRow({ name: "../art.jar" })] })), "must be a bare file name"],
+    ["bad-hash", installer("bad-hash", assetMan({ files: [{ source: "plugins/Mod.jar", target: "Mod.jar" }, assetRow({ sha256: artHash.toUpperCase() })] })), "sha256 must be 64 lower-case hex digits"],
+    ["bad-size", installer("bad-size", assetMan({ files: [{ source: "plugins/Mod.jar", target: "Mod.jar" }, assetRow({ size: 0 })] })), "size must be a positive whole number"],
+    ["launcher-missing", launcher("launcher-missing", assetMan(), {}), `release asset ${assetName} is not in`],
+    ["launcher-wrong", launcher("launcher-wrong", assetMan(), { [assetName]: "other bytes" }), "and the manifest says"],
+    ["launcher-copy", launcher("launcher-copy", assetMan(), { [assetName]: ART }, { "plugins/Mod.jar": "jar", "plugins/Mod-art.jar": ART, ...scripts }), "the launcher zip carries plugins/Mod-art.jar"],
+  ]) {
+    check(result.status === 1 && result.out.includes(expected), `release_asset: ${label} should fail with "${expected}", got ${result.status}\n${result.out}`);
   }
 }
 
