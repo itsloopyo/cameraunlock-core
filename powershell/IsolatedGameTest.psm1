@@ -1134,20 +1134,24 @@ function Enter-GameRig {
                     if ($candidates.Count -eq 1) { return "the rig is in use: $($inUse[$key])$behind" }
                     return "every game of $whose is in use: $(@($inUse.Keys | ForEach-Object { "$_ by $($inUse[$_])" }) -join '; ')$behind"
                 }
-                # A pool lets this through beside those ahead only while it has a game for each of them as well.
-                if (@($ahead | Where-Object { $_.WholeGpu }).Count -gt 0 -or $ahead.Count -ge $open.Count) {
-                    return "waiting behind $($ahead[0].Owner) (pid $($ahead[0].ProcessId)), who asked first$(if ($ahead.Count -gt 1) { ", with $($ahead.Count - 1) more ahead of this session" })$(if ($candidates.Count -gt 1) { ", for $whose" })"
+                # Only those ahead that may take one of the open games compete for them: one asking for
+                # other copies of the pool loses nothing when this takes a copy it cannot have.
+                $openKeys = @($open | ForEach-Object Key)
+                $rivals = @($ahead | Where-Object { $_.WholeGpu -or $WholeGpu -or @(Get-GameRigTicketKeys $_ | Where-Object { $openKeys -contains $_ }).Count -gt 0 })
+                # A pool lets this through beside those rivals only while it has a game for each of them as well.
+                if (@($ahead | Where-Object { $_.WholeGpu }).Count -gt 0 -or $rivals.Count -ge $open.Count) {
+                    return "waiting behind $($rivals[0].Owner) (pid $($rivals[0].ProcessId)), who asked first$(if ($rivals.Count -gt 1) { ", with $($rivals.Count - 1) more ahead of this session" })$(if ($candidates.Count -gt 1) { ", for $whose" })"
                 }
                 $free = @($open | Where-Object { -not @($_.Names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }) })
                 if ($free.Count -eq 0) {
                     $running = @($open | ForEach-Object { @($_.Names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }) } | Select-Object -Unique)
                     return "$($running -join ', ') is running and no session holds its rig: someone started it by hand"
                 }
-                if ($free.Count -le $ahead.Count) {
-                    return "waiting behind $($ahead[0].Owner) (pid $($ahead[0].ProcessId)), who asked first, for $whose, of which $($open.Count - $free.Count) is running with no session holding its rig"
+                if ($free.Count -le $rivals.Count) {
+                    return "waiting behind $($rivals[0].Owner) (pid $($rivals[0].ProcessId)), who asked first, for $whose, of which $($open.Count - $free.Count) is running with no session holding its rig"
                 }
                 # A game that is the only one a session ahead may take is left for it.
-                $reserved = @($ahead | ForEach-Object { $theirs = @(Get-GameRigTicketKeys $_); if ($theirs.Count -eq 1) { $theirs[0] } })
+                $reserved = @($rivals | ForEach-Object { $theirs = @(Get-GameRigTicketKeys $_); if ($theirs.Count -eq 1) { $theirs[0] } })
                 $pick = @($free | Where-Object { $reserved -notcontains $_.Key })[0]
 
                 if ($stale.ContainsKey($pick.Key)) { Remove-Item $pick.Lock -Recurse -Force }

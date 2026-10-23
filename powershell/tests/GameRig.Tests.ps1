@@ -371,8 +371,8 @@ Start-Sleep 600
     Wait-All @($pooled, $single)
     Check 'and the waiter for that copy is served once it is let go, not given the other' ((@(Get-Content $log | Where-Object { $_ -like 'in *' }) -join ',') -eq 'in pooled,in single') ((Get-Content $log) -join ', ')
 
-    # The other way round: a waiter for one copy asked first, so the pool waiter behind it does not
-    # pass it on one free copy, and when both come free it leaves that copy to it.
+    # The other way round: a waiter for one copy asked first. A copy it cannot take is no loss to it,
+    # so the pool waiter behind takes that one and the waiter for one copy still gets its own.
     $log = Join-Path $root 'mixed2.log'
     $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
     $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
@@ -381,13 +381,36 @@ Start-Sleep 600
     $pooled = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pooled'; Log = $log; HoldMs = 3000 }
     Wait-Until { (Get-GameRig -Game 'poolb').Waiting -contains 'pooled' }
     Exit-GameRig -Rig $heldA
-    Start-Sleep -Milliseconds 1500
-    Check 'a pool waiter behind another does not pass it while there is one copy free for the two' (-not (Test-Path "$log.pooled.game") -and -not (Test-Path $log))
-    Exit-GameRig -Rig $heldB
     Wait-Until { Test-Path "$log.pooled.game" }
+    Check 'a pool waiter takes a copy the waiter ahead of it cannot have' `
+        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and (Get-GameRig -Game 'poolb').Waiting -contains 'single')
+    Exit-GameRig -Rig $heldB
     Wait-All @($pooled, $single)
-    Check 'and with both free it leaves the copy the other can only take to it' `
-        ((Get-Content "$log.pooled.game" -Raw).Trim() -eq 'poola' -and @(Get-Content $log | Where-Object { $_ -eq 'in single' }).Count -eq 1) ((Get-Content $log) -join ', ')
+    Check 'and the waiter ahead of it still gets its own copy when it is let go' `
+        (@(Get-Content $log | Where-Object { $_ -eq 'in single' }).Count -eq 1) ((Get-Content $log) -join ', ')
+
+    # A waiter for part of a pool ahead does not hold up one for the whole pool when only the rest is
+    # free, and still comes before it for the part it asked for.
+    $log = Join-Path $root 'subpool.log'
+    $heldA = Enter-GameRig -Game 'poola' -Owner 'holder' -WaitSeconds 0
+    $heldB = Enter-GameRig -Game 'poolb' -Owner 'holder' -WaitSeconds 0
+    $heldC = Enter-GameRig -Game 'poolc' -Owner 'holder' -WaitSeconds 0
+    $part = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'part'; Log = $log; HoldMs = 3000 }
+    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'part' }
+    $whole = Start-Taker @{ Pool = 'poola,poolb,poolc'; Owner = 'whole'; Log = $log; HoldMs = 3000 }
+    Wait-Until { (Get-GameRig -Game 'poolc').Waiting -contains 'whole' }
+    Exit-GameRig -Rig $heldC
+    Wait-Until { Test-Path "$log.whole.game" }
+    Check 'a waiter for the whole pool takes the copy a waiter for part of it ahead cannot have' `
+        ((Get-Content "$log.whole.game" -Raw).Trim() -eq 'poolc' -and (Get-GameRig -Game 'poola').Waiting -contains 'part')
+    $late = Start-Taker @{ Pool = 'poola,poolb,poolc'; Owner = 'late'; Log = $log; HoldMs = 200 }
+    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'late' }
+    Exit-GameRig -Rig $heldA
+    Wait-Until { Test-Path "$log.part.game" }
+    Check 'and a copy of the part comes free to the waiter for the part, who asked first' `
+        ((Get-Content "$log.part.game" -Raw).Trim() -eq 'poola' -and -not (Test-Path "$log.late.game"))
+    Exit-GameRig -Rig $heldB
+    Wait-All @($part, $whole, $late)
 
     # The whole card still waits for every copy, and holds them off.
     $copy = Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0
