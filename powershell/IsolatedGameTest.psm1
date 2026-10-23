@@ -1013,7 +1013,6 @@ function Enter-GameRig {
         if ($Game) { throw '-Pool and -Game are one or the other: -Pool names every game the rig may be' }
         if ($Token) { throw "-Token takes back one game's lock: name it with -Game, not -Pool" }
         if ($KeptIn) { throw "-KeptIn keeps one game's lock: name it with -Game, not -Pool" }
-        if ($WholeGpu) { throw '-WholeGpu is work that has no game: leave -Pool out' }
     }
     if ($KeptIn -and -not $Game) { throw "-KeptIn needs -Game: the lock kept there is a game's" }
     $root = Get-GameRigRoot
@@ -1105,26 +1104,30 @@ function Enter-GameRig {
                     $held = Read-GameRigOwner $folder.Name
                     if (-not $held) { continue }
                     $live = Test-GameRigOwnerLive $held
-                    if ($keys -contains $folder.Name) {
-                        if ($held.ProcessId -eq $PID -and $held.ProcessStart -eq $start) {
-                            throw "this process already holds the rig for $($folder.Name) ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
-                        }
-                        if ($live) {
-                            $orphaned = $(if (-not $held.ProcessId -or (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) { '' } else { ', whose own process has gone while the game runs on' })
-                            $inUse[$folder.Name] = "$(Format-GameRigOwner $held)$orphaned"
-                            continue
-                        }
-                        if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
-                            throw "the last session on $($folder.Name), $(Format-GameRigOwner $held), ended without putting the game's files back. What it saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)', then ask again."
-                        }
-                        $stale[$folder.Name] = $held
-                    } elseif ($live -and $WholeGpu -and -not $held.ProcessId) {
+                    $mine = $keys -contains $folder.Name
+                    if ($mine -and $held.ProcessId -eq $PID -and $held.ProcessStart -eq $start) {
+                        throw "this process already holds the rig for $($folder.Name) ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
+                    }
+                    # The whole card is every rig, a copy of this session's own pool as much as any
+                    # other game: a copy held beside a free one still has the card.
+                    if ($live -and $WholeGpu -and -not $held.ProcessId) {
                         # A game left running may stay up for hours, and everyone who asks after a
                         # whole-card waiter waits behind it: this is refused, not queued.
                         throw "the graphics card is in use by a game left running: $($folder.Name) is held by $(Format-GameRigOwner $held). Stop it, then ask again."
-                    } elseif ($live -and ($WholeGpu -or $held.WholeGpu)) {
+                    }
+                    if ($live -and ($WholeGpu -or $held.WholeGpu) -and -not ($mine -and $candidates.Count -eq 1)) {
                         return "the graphics card is in use: $($folder.Name) is held by $(Format-GameRigOwner $held)"
                     }
+                    if (-not $mine) { continue }
+                    if ($live) {
+                        $orphaned = $(if (-not $held.ProcessId -or (Test-GameRigProcessAlive -Id $held.ProcessId -Start $held.ProcessStart)) { '' } else { ', whose own process has gone while the game runs on' })
+                        $inUse[$folder.Name] = "$(Format-GameRigOwner $held)$orphaned"
+                        continue
+                    }
+                    if ($held.StateFolder -and (Test-Path (Join-Path $held.StateFolder 'state.json'))) {
+                        throw "the last session on $($folder.Name), $(Format-GameRigOwner $held), ended without putting the game's files back. What it saved is in $($held.StateFolder): run Restore-GameTestState -Folder '$($held.StateFolder)', then ask again."
+                    }
+                    $stale[$folder.Name] = $held
                 }
                 $open = @($candidates | Where-Object { -not $inUse.Contains($_.Key) })
                 if ($open.Count -eq 0) {

@@ -215,6 +215,8 @@ Start-Sleep 600
     Exit-GameRig -Rig $back -KeptIn $keptFile
     Check 'work that wants the whole card is refused at once while a game left running holds a rig' (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' } 'in use by a game left running')
     Check 'and leaves no ticket for others to wait behind' ($null -eq (Get-GameRig))
+    Check 'and so is a pool session wanting the whole card, when the game left running is a copy of that pool' `
+        (Throws { Enter-GameRig -Pool $gameName, 'poolz' -WholeGpu -Owner 'pictures' } 'in use by a game left running')
     # A process takes the kept lock back and dies with the game up.
     $died = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
         "Import-Module '$modulePath'; Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn '$keptFile' -WaitSeconds 0 | Out-Null; Start-Sleep 600")
@@ -394,6 +396,30 @@ Start-Sleep 600
     $card = Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0
     Check 'and no copy is given out while it holds' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0 } 'the graphics card is in use: gpu is held by pictures')
     Exit-GameRig -Rig $card
+
+    # A pool session that needs the whole card takes a copy, once every copy and every other rig is free.
+    $log = Join-Path $root 'poolcard.log'
+    $tokenFile = Join-Path $root 'poolcard.token'
+    $copy = Start-Taker @{ Game = 'poola'; Owner = 'player'; Log = $log; HoldMs = 8000; TokenFile = $tokenFile }
+    Wait-Until { Test-Path $tokenFile }
+    Check 'a pool session wanting the whole card does not take a free copy beside a held one' `
+        (Throws { Enter-GameRig -Pool 'poola', 'poolb' -WholeGpu -Owner 'pictures' -WaitSeconds 0 } '^the graphics card is in use: poola is held by player')
+    $carder = Start-Taker @{ Pool = 'poola,poolb'; Owner = 'pictures'; Log = $log; HoldMs = 5000; WholeGpu = $true }
+    Wait-Until { $state = Get-GameRig -Game 'poolb'; $state -and $state.Waiting -contains 'pictures' }
+    Start-Sleep -Milliseconds 1000
+    Check 'and waits while that copy is held' (-not (Test-Path "$log.pictures.game") -and $null -eq (Get-GameRig -Game 'poolb').Holder)
+    Wait-All @($copy)
+    Wait-Until { Test-Path "$log.pictures.game" }
+    $taken = (Get-Content "$log.pictures.game" -Raw).Trim()
+    Check 'once every copy is free it takes one, holding the whole card' ((Get-GameRig -Game $taken).Holder.WholeGpu -and (Get-GameRig -Game $taken).Holder.Owner -eq 'pictures') $taken
+    $other = @('poola', 'poolb' | Where-Object { $_ -ne $taken })[0]
+    Check 'while it holds, a session asking for the same pool waits though another copy is free' `
+        (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0 } "^the graphics card is in use: $taken is held by pictures \(.*the whole graphics card\)")
+    Check 'and so does one asking for that other copy by name' (Throws { Enter-GameRig -Game $other -Owner 'player' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
+    Check 'and one asking for a game outside the pool' (Throws { Enter-GameRig -Game 'cardgame' -Owner 'player' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
+    Check 'and one wanting the whole card itself' (Throws { Enter-GameRig -WholeGpu -Owner 'more' -WaitSeconds 0 } "the graphics card is in use: $taken is held by pictures")
+    Wait-All @($carder)
+    Check 'and once it lets go the pool is free' ($null -eq (Get-GameRig -Game 'poola') -and $null -eq (Get-GameRig -Game 'poolb'))
 
     # A pool of one is -Game.
     $one = Enter-GameRig -Pool 'solo' -Owner 'alone' -WaitSeconds 0
