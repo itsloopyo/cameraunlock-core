@@ -894,6 +894,7 @@ struct Paged {
     std::string key = "F9";
     int channel = 3;
     int unsaved = 1;
+    bool rewind = false;
 };
 
 ConfigTable<Paged> PagedTable() {
@@ -916,6 +917,7 @@ ConfigTable<Paged> PagedTable() {
     table.Local("Content", "NextKey", &P::key, HotkeyCodec(), "A key list.").Writable();
     table.Local("Content", "MeshBudget", &P::channel, IntCodec<int>(0, 31), "Engine data.").Engine().Writable();
     table.Local("Content", "Unsaved", &P::unsaved, IntCodec<int>(0, 9), "Not writable.");
+    table.Local("Content", "Rewind30s", &P::rewind, BoolCodec(), "A number in its key.").Writable();
     return table;
 }
 
@@ -926,10 +928,10 @@ void TestOptions() {
 
     std::string ids;
     for (const ConfigOption& option : options) ids += option.id + " ";
-    Check(ids == "WorldSpaceYaw TrackingMode AimMode FieldOfView Gain DetailLevel OwnArms Trees ",
+    Check(ids == "WorldSpaceYaw TrackingMode AimMode FieldOfView Gain DetailLevel OwnArms Trees Rewind30s ",
           "the writable rows a control holds, each mode as one option where its first row is, and no key list, "
           "Engine row or unwritable row: " + ids);
-    if (options.size() != 8) return;
+    if (options.size() != 9) return;
 
     Check(options[0].kind == OptionKind::kBool && options[0].label == "World space yaw" &&
               options[0].section == "General" && !options[0].comment.empty() && options[0].max == 1.0,
@@ -952,6 +954,7 @@ void TestOptions() {
           "an enum row has its words as words");
     Check(options[7].kind == OptionKind::kInt && options[7].min == 0.0 && options[7].max == 100.0 && options[7].step == 1.0,
           "an int row has its range and a step of 1");
+    Check(options[8].label == "Rewind 30s", "a number in a key is a word of its own: " + options[8].label);
 
     Paged values;
     Check(table.OptionValue(values, 0) == 1.0 && table.OptionValue(values, 1) == 0.0 && table.OptionValue(values, 2) == 0.0 &&
@@ -977,7 +980,7 @@ void TestOptions() {
     Check(Contains(Thrown([&] { table.SetOption(values, 3, 111.0); }), "outside the row's range"), "and one outside a range");
     Check(Contains(Thrown([&] { table.SetOption(values, 5, 3.0); }), "none of the row's words"), "and one past the words");
     Check(Contains(Thrown([&] { table.SetOption(values, 7, 4.5); }), "not a whole number"), "and a fraction for an int");
-    Check(Contains(Thrown([&] { table.OptionValue(values, 8); }), "no option 8"), "and an option the table has not");
+    Check(Contains(Thrown([&] { table.OptionValue(values, 9); }), "no option 9"), "and an option the table has not");
     Check(values.trees == 40 && values.fov == 90.5f, "a refused value changes nothing");
 
     struct Wide {

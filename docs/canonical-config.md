@@ -619,7 +619,7 @@ far (`config/config_table.h`), and through the C interface for any other host
   the table has every row of the mode and all are Writable. A mode's rows are never options of
   their own, so a page cannot be made to write a pair that names no mode.
 - A `ConfigOption` has the row's key as `id`, its `section`, a `label` made from the key
-  ("Field of view" for `FieldOfView`), the file's `comment` for a tooltip, a `kind`, `min` and
+  ("Field of view" for `FieldOfView`, "Rewind 30s" for `Rewind30s`), the file's `comment` for a tooltip, a `kind`, `min` and
   `max`, a slider `step` (1 for a whole number, and for a float the power of ten nearest a
   fiftieth of its range) and an enum's `choices` as words.
 - `table.OptionValue(config, option)` reads an option as one `double`: a bool as 0 or 1, a

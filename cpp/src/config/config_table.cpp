@@ -425,7 +425,8 @@ std::string AsWords(std::string_view name) {
         const bool word_follows = i + 1 < name.size() && IsLower(name[i + 1]);
         const bool starts = i > 0 && IsUpper(c) &&
                             (IsLower(name[i - 1]) || IsDigit(name[i - 1]) || (IsUpper(name[i - 1]) && word_follows));
-        if (starts) words += ' ';
+        const bool number_starts = i > 0 && IsDigit(c) && !IsDigit(name[i - 1]);
+        if (starts || number_starts) words += ' ';
         words += starts && word_follows ? static_cast<char>(c - 'A' + 'a') : c;
     }
     return words;
