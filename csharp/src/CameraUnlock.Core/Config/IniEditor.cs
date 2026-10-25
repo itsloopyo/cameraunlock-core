@@ -123,7 +123,7 @@ namespace CameraUnlock.Core.Config
             int nul = Array.IndexOf(s, (byte)0);
             if (nul >= 0)
             {
-                return Refuse(IniEditRefusal.NulByte, null, new[] { LineOfOffset(s, nul) });
+                return Refuse(IniEditRefusal.NulByte, null, new[] { CodecText.LineOfOffset(s, nul) });
             }
             int body = s.Length >= 3 && s[0] == 0xEF && s[1] == 0xBB && s[2] == 0xBF ? 3 : 0;
 
@@ -187,7 +187,7 @@ namespace CameraUnlock.Core.Config
                 foreach (int header in headers)
                 {
                     Line h = lines[header];
-                    if (!h.Named || !EqualsAsciiIgnoreCase(s, h.NameBegin, h.NameEnd, edit.Section)) continue;
+                    if (!h.Named || !CodecText.EqualsAsciiIgnoreCase(s, h.NameBegin, h.NameEnd, edit.Section)) continue;
                     namesSection[header] = true;
                     if (firstHeader < 0) firstHeader = header;
                     lastHeader = header;
@@ -201,7 +201,7 @@ namespace CameraUnlock.Core.Config
                     int target = -1;
                     for (int i = 0; i < newSections.Count; i++)
                     {
-                        if (EqualsAsciiIgnoreCase(newSections[i].Name, 0, newSections[i].Name.Length, edit.Section)) target = i;
+                        if (CodecText.EqualsAsciiIgnoreCase(newSections[i].Name, 0, newSections[i].Name.Length, edit.Section)) target = i;
                     }
                     if (target < 0)
                     {
@@ -221,7 +221,7 @@ namespace CameraUnlock.Core.Config
                     Line line = lines[i];
                     if (line.Kind != LineKind.Key || !namesSection[owner[i]]) continue;
                     if (owner[i] == block) anchor = i;
-                    if (EqualsAsciiIgnoreCase(s, line.NameBegin, line.NameEnd, edit.Key))
+                    if (CodecText.EqualsAsciiIgnoreCase(s, line.NameBegin, line.NameEnd, edit.Key))
                     {
                         if (firstKey < 0) firstKey = i;
                         lastKey = i;
@@ -310,8 +310,8 @@ namespace CameraUnlock.Core.Config
                 }
                 foreach (EncodedEdit earlier in encoded)
                 {
-                    if (EqualsAsciiIgnoreCase(earlier.Section, 0, earlier.Section.Length, section) &&
-                        EqualsAsciiIgnoreCase(earlier.Key, 0, earlier.Key.Length, key))
+                    if (CodecText.EqualsAsciiIgnoreCase(earlier.Section, 0, earlier.Section.Length, section) &&
+                        CodecText.EqualsAsciiIgnoreCase(earlier.Key, 0, earlier.Key.Length, key))
                     {
                         throw new ArgumentException("IniEdit batch edits [" + edit.Section + "] " + edit.Key + " twice");
                     }
@@ -382,9 +382,9 @@ namespace CameraUnlock.Core.Config
         private static void ClassifyLine(byte[] s, Line line)
         {
             int first = line.Begin;
-            while (first < line.ContentEnd && IsSpaceOrTab(s[first])) first++;
+            while (first < line.ContentEnd && CodecText.IsSpaceOrTab(s[first])) first++;
             int last = line.ContentEnd;
-            while (last > first && IsSpaceOrTab(s[last - 1])) last--;
+            while (last > first && CodecText.IsSpaceOrTab(s[last - 1])) last--;
 
             if (first == last)
             {
@@ -404,8 +404,8 @@ namespace CameraUnlock.Core.Config
                 if (close < 0) return;
                 int nameBegin = first + 1;
                 int nameEnd = close;
-                while (nameBegin < nameEnd && IsSpaceOrTab(s[nameBegin])) nameBegin++;
-                while (nameEnd > nameBegin && IsSpaceOrTab(s[nameEnd - 1])) nameEnd--;
+                while (nameBegin < nameEnd && CodecText.IsSpaceOrTab(s[nameBegin])) nameBegin++;
+                while (nameEnd > nameBegin && CodecText.IsSpaceOrTab(s[nameEnd - 1])) nameEnd--;
                 line.Named = true;
                 line.NameBegin = nameBegin;
                 line.NameEnd = nameEnd;
@@ -415,11 +415,11 @@ namespace CameraUnlock.Core.Config
             int eq = Array.IndexOf(s, (byte)'=', first, last - first);
             if (eq < 0) return;
             int keyEnd = eq;
-            while (keyEnd > first && IsSpaceOrTab(s[keyEnd - 1])) keyEnd--;
+            while (keyEnd > first && CodecText.IsSpaceOrTab(s[keyEnd - 1])) keyEnd--;
             if (keyEnd == first) return;
 
             int valueBegin = eq + 1;
-            while (valueBegin < line.ContentEnd && IsSpaceOrTab(s[valueBegin])) valueBegin++;
+            while (valueBegin < line.ContentEnd && CodecText.IsSpaceOrTab(s[valueBegin])) valueBegin++;
 
             line.Kind = LineKind.Key;
             line.NameBegin = first;
@@ -427,40 +427,9 @@ namespace CameraUnlock.Core.Config
             line.ValueBegin = valueBegin;
         }
 
-        private static bool IsSpaceOrTab(byte b)
-        {
-            return b == ' ' || b == '\t';
-        }
-
         private static bool IsLineEnd(byte b)
         {
             return b == '\r' || b == '\n';
-        }
-
-        private static byte FoldAscii(byte b)
-        {
-            return b >= 'A' && b <= 'Z' ? (byte)(b - 'A' + 'a') : b;
-        }
-
-        private static bool EqualsAsciiIgnoreCase(byte[] text, int begin, int end, byte[] other)
-        {
-            if (end - begin != other.Length) return false;
-            for (int i = 0; i < other.Length; i++)
-            {
-                if (FoldAscii(text[begin + i]) != FoldAscii(other[i])) return false;
-            }
-            return true;
-        }
-
-        // The canonical reader's line count up to offset: CRLF, LF and a lone CR each end a line.
-        private static int LineOfOffset(byte[] s, int offset)
-        {
-            int line = 1;
-            for (int i = 0; i < offset; i++)
-            {
-                if (s[i] == '\n' || (s[i] == '\r' && (i + 1 >= s.Length || s[i + 1] != '\n'))) line++;
-            }
-            return line;
         }
 
 #if NULLABLE_ENABLED
@@ -533,7 +502,7 @@ namespace CameraUnlock.Core.Config
             while (begin > bodyBegin && !IsLineEnd(s[begin - 1])) begin--;
             for (int i = begin; i < end; i++)
             {
-                if (!IsSpaceOrTab(s[i])) return false;
+                if (!CodecText.IsSpaceOrTab(s[i])) return false;
             }
             return true;
         }

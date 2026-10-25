@@ -124,7 +124,7 @@ namespace CameraUnlock.Core.Config
             int nul = Array.IndexOf(bytes, (byte)0);
             if (nul >= 0)
             {
-                return new CanonicalIni(CanonicalReadStatus.NulByte, LineOfOffset(bytes, nul), 0,
+                return new CanonicalIni(CanonicalReadStatus.NulByte, CodecText.LineOfOffset(bytes, nul), 0,
                     new CanonicalSection[0], new CanonicalDiagnostic[0]);
             }
 
@@ -523,28 +523,12 @@ namespace CameraUnlock.Core.Config
             }
         }
 
-        private static int LineOfOffset(byte[] bytes, int offset)
-        {
-            int line = 1;
-            for (int i = 0; i < offset; i++)
-            {
-                bool loneCr = bytes[i] == (byte)'\r' && (i + 1 >= bytes.Length || bytes[i + 1] != (byte)'\n');
-                if (bytes[i] == (byte)'\n' || loneCr) line++;
-            }
-            return line;
-        }
-
-        private static bool IsSpaceOrTab(byte b)
-        {
-            return b == (byte)' ' || b == (byte)'\t';
-        }
-
         private static Span Trim(byte[] bytes, Span span)
         {
             int begin = span.Begin;
             int end = span.End;
-            while (begin < end && IsSpaceOrTab(bytes[begin])) begin++;
-            while (end > begin && IsSpaceOrTab(bytes[end - 1])) end--;
+            while (begin < end && CodecText.IsSpaceOrTab(bytes[begin])) begin++;
+            while (end > begin && CodecText.IsSpaceOrTab(bytes[end - 1])) end--;
             return new Span(begin, end);
         }
 
@@ -560,19 +544,9 @@ namespace CameraUnlock.Core.Config
             return header;
         }
 
-        private static byte FoldAscii(byte b)
-        {
-            return b >= (byte)'A' && b <= (byte)'Z' ? (byte)(b - 'A' + 'a') : b;
-        }
-
         private static bool EqualsAsciiIgnoreCase(byte[] bytes, Span span, byte[] other)
         {
-            if (span.Length != other.Length) return false;
-            for (int i = 0; i < other.Length; i++)
-            {
-                if (FoldAscii(bytes[span.Begin + i]) != FoldAscii(other[i])) return false;
-            }
-            return true;
+            return CodecText.EqualsAsciiIgnoreCase(bytes, span.Begin, span.End, other);
         }
     }
 }

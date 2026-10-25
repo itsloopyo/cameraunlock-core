@@ -98,6 +98,53 @@ namespace CameraUnlock.Core.Config
             return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
         }
 
+        public static byte FoldAscii(byte b)
+        {
+            return b >= 'A' && b <= 'Z' ? (byte)(b - 'A' + 'a') : b;
+        }
+
+        public static bool EqualsAsciiIgnoreCase(string a, string b)
+        {
+            if (a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (FoldAscii(a[i]) != FoldAscii(b[i])) return false;
+            }
+            return true;
+        }
+
+        /// <summary>Whether text[begin..end) equals <paramref name="other"/>, folding A-Z only.</summary>
+        public static bool EqualsAsciiIgnoreCase(byte[] text, int begin, int end, byte[] other)
+        {
+            if (end - begin != other.Length) return false;
+            for (int i = 0; i < other.Length; i++)
+            {
+                if (FoldAscii(text[begin + i]) != FoldAscii(other[i])) return false;
+            }
+            return true;
+        }
+
+        /// <summary>The canonical reader's 1-based line of <paramref name="offset"/>: CRLF, LF and a lone CR each end a line.</summary>
+        public static int LineOfOffset(byte[] bytes, int offset)
+        {
+            int line = 1;
+            for (int i = 0; i < offset; i++)
+            {
+                if (bytes[i] == '\n' || (bytes[i] == '\r' && (i + 1 >= bytes.Length || bytes[i + 1] != '\n'))) line++;
+            }
+            return line;
+        }
+
+        public static bool IsPascalCase(string token)
+        {
+            if (token.Length == 0 || token[0] < 'A' || token[0] > 'Z') return false;
+            foreach (char c in token)
+            {
+                if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return false;
+            }
+            return true;
+        }
+
         public static bool IsSpaceOrTab(byte b)
         {
             return b == ' ' || b == '\t';

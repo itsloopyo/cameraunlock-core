@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Text;
 using CameraUnlock.Core.Input;
 using CameraUnlock.Core.Tracking;
@@ -85,7 +84,7 @@ namespace CameraUnlock.Core.Config
                 for (int i = 0; i < values.Length; i++) values[i] = DefaultsIniValue.Absent;
                 string why = doc.Status == CanonicalReadStatus.Utf16
                     ? "it is saved as UTF-16; save it as ANSI or UTF-8"
-                    : "line " + Number(doc.UnreadableLine) + " holds a NUL byte";
+                    : "line " + CodecText.Number(doc.UnreadableLine) + " holds a NUL byte";
                 return new DefaultsIniSnapshot(why, null, values, false);
             }
 
@@ -97,9 +96,9 @@ namespace CameraUnlock.Core.Config
             foreach (CanonicalDiagnostic diagnostic in doc.Diagnostics)
             {
                 if (diagnostic.Kind != CanonicalDiagnosticKind.ConfigFormatNewer) continue;
-                formatLine = "Defaults.ini: line " + Number(diagnostic.Lines[0]) + ": " + Text(diagnostic.Key) + "="
+                formatLine = "Defaults.ini: line " + CodecText.Number(diagnostic.Lines[0]) + ": " + Text(diagnostic.Key) + "="
                     + Text(diagnostic.Value) + " was written by a newer version of the mod. This version reads format "
-                    + Number(CanonicalIni.ConfigFormat) + ".";
+                    + CodecText.Number(CanonicalIni.ConfigFormat) + ".";
             }
 
             for (int i = 0; i < values.Length; i++)
@@ -144,7 +143,7 @@ namespace CameraUnlock.Core.Config
             {
                 throw new ArgumentException("the value is " + value.State + ", and only a refused value has a line", "value");
             }
-            return "Defaults.ini: line " + Number(value.Line) + ": " + Setting(value) + " is not read (" + value.Reason
+            return "Defaults.ini: line " + CodecText.Number(value.Line) + ": " + Setting(value) + " is not read (" + value.Reason
                 + "), so the built-in " + builtIn + " is used.";
         }
 
@@ -172,8 +171,8 @@ namespace CameraUnlock.Core.Config
             if (held.Count == 2 && held[1].Line < held[0].Line) held.Reverse();
 
             string text = held.Count == 1
-                ? "line " + Number(held[0].Line) + ": " + Setting(held[0]) + " is not read"
-                : "lines " + Number(held[0].Line) + " and " + Number(held[1].Line) + ": " + Setting(held[0]) + " and "
+                ? "line " + CodecText.Number(held[0].Line) + ": " + Setting(held[0]) + " is not read"
+                : "lines " + CodecText.Number(held[0].Line) + " and " + CodecText.Number(held[1].Line) + ": " + Setting(held[0]) + " and "
                     + Setting(held[1]) + " are not read";
             return "Defaults.ini: " + text + " (" + held[0].Reason + "), so the built-in RotationEnabled=" + rotationBuiltIn
                 + " and PositionEnabled=" + positionBuiltIn + " are used.";
@@ -233,7 +232,7 @@ namespace CameraUnlock.Core.Config
         {
             foreach (KeyNames.Modifier modifier in KeyNames.Modifiers)
             {
-                if (EqualsAsciiIgnoreCase(token, modifier.Name)) return true;
+                if (CodecText.EqualsAsciiIgnoreCase(token, modifier.Name)) return true;
             }
             return false;
         }
@@ -242,19 +241,9 @@ namespace CameraUnlock.Core.Config
         {
             foreach (KeyNames.Key key in KeyNames.Keys)
             {
-                if (key.VirtualKey != 0 && !KeyBindings.IsModifierKey(key.UnityKeyCode) && EqualsAsciiIgnoreCase(token, key.Name)) return true;
+                if (key.VirtualKey != 0 && !KeyBindings.IsModifierKey(key.UnityKeyCode) && CodecText.EqualsAsciiIgnoreCase(token, key.Name)) return true;
             }
             return false;
-        }
-
-        private static bool EqualsAsciiIgnoreCase(string a, string b)
-        {
-            if (a.Length != b.Length) return false;
-            for (int i = 0; i < a.Length; i++)
-            {
-                if (CodecText.FoldAscii(a[i]) != CodecText.FoldAscii(b[i])) return false;
-            }
-            return true;
         }
 
         // Why the pair is refused, or null when it names a tracking mode.
@@ -301,11 +290,6 @@ namespace CameraUnlock.Core.Config
         private static string Text(byte[] bytes)
         {
             return CodecText.Utf8Text(bytes);
-        }
-
-        private static string Number(int n)
-        {
-            return n.ToString(CultureInfo.InvariantCulture);
         }
     }
 }

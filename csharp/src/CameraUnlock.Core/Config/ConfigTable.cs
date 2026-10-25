@@ -783,11 +783,11 @@ namespace CameraUnlock.Core.Config
 
         private void CheckLocalRow(Row row)
         {
-            if (!IsPascalCase(row.Section))
+            if (!CodecText.IsPascalCase(row.Section))
             {
                 throw new ArgumentException(row.Name + ": the section name is not PascalCase ASCII letters and digits", "section");
             }
-            if (!IsPascalCase(row.Key))
+            if (!CodecText.IsPascalCase(row.Key))
             {
                 throw new ArgumentException(row.Name + ": the key is not PascalCase ASCII letters and digits", "key");
             }
@@ -798,7 +798,7 @@ namespace CameraUnlock.Core.Config
             }
             foreach (string section in ConfigConcepts.Sections)
             {
-                if (!EqualsAsciiIgnoreCase(row.Section, section)) continue;
+                if (!CodecText.EqualsAsciiIgnoreCase(row.Section, section)) continue;
                 if (row.Section != section)
                 {
                     throw new ArgumentException(row.Name + ": the schema spells this section [" + section + "]", "section");
@@ -816,7 +816,7 @@ namespace CameraUnlock.Core.Config
             }
             foreach (KeyValuePair<string, string> other in ConfigConcepts.NonCanonicalSectionReasons)
             {
-                if (EqualsAsciiIgnoreCase(row.Section, other.Key))
+                if (CodecText.EqualsAsciiIgnoreCase(row.Section, other.Key))
                 {
                     throw new ArgumentException(row.Name + ": [" + row.Section + "] holds only settings a canonical file "
                         + "does not carry, so it has no rows: " + other.Value, "section");
@@ -824,7 +824,7 @@ namespace CameraUnlock.Core.Config
             }
             foreach (Row earlier in rows)
             {
-                if (EqualsAsciiIgnoreCase(earlier.Section, row.Section) && earlier.Section != row.Section)
+                if (CodecText.EqualsAsciiIgnoreCase(earlier.Section, row.Section) && earlier.Section != row.Section)
                 {
                     throw new ArgumentException(row.Name + ": " + earlier.Name + " spells this section [" + earlier.Section + "]",
                         "section");
@@ -1011,26 +1011,6 @@ namespace CameraUnlock.Core.Config
             foreach (char c in text)
             {
                 if (c < 0x20 || c > 0x7E) return false;
-            }
-            return true;
-        }
-
-        private static bool IsPascalCase(string name)
-        {
-            if (name.Length == 0 || name[0] < 'A' || name[0] > 'Z') return false;
-            foreach (char c in name)
-            {
-                if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return false;
-            }
-            return true;
-        }
-
-        private static bool EqualsAsciiIgnoreCase(string a, string b)
-        {
-            if (a.Length != b.Length) return false;
-            for (int i = 0; i < a.Length; i++)
-            {
-                if (CodecText.FoldAscii(a[i]) != CodecText.FoldAscii(b[i])) return false;
             }
             return true;
         }

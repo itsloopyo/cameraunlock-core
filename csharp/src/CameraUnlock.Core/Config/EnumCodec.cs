@@ -28,7 +28,7 @@ namespace CameraUnlock.Core.Config
             {
                 string token = this.tokens[i].Token;
                 if (token == null) throw new ArgumentNullException("tokens", "token " + CodecText.Number(i + 1) + " is null");
-                if (!IsPascalCase(token))
+                if (!CodecText.IsPascalCase(token))
                 {
                     throw new ArgumentException("enum token '" + token
                         + "' is not PascalCase: expected a capital letter, then letters and digits", "tokens");
@@ -95,16 +95,6 @@ namespace CameraUnlock.Core.Config
         public bool Equal(TEnum a, TEnum b)
         {
             return EqualityComparer<TEnum>.Default.Equals(a, b);
-        }
-
-        private static bool IsPascalCase(string token)
-        {
-            if (token.Length == 0 || token[0] < 'A' || token[0] > 'Z') return false;
-            foreach (char c in token)
-            {
-                if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return false;
-            }
-            return true;
         }
     }
 }
