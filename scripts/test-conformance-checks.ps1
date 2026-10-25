@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 #Requires -Version 5.1
 # ============================================================================
-# Tests for conformance.ps1's pipeline-port, changelog-unreleased and manifest checks
+# Tests for conformance.ps1's pipeline-port, changelog-unreleased, manifest and file-hash checks
 # ============================================================================
 # Run: pixi run test-conformance-checks
 #
@@ -393,6 +393,26 @@ $manifestCases['release-asset-unversioned'] = @{
     Expect = @("FAIL 1 files\[\] row carries release_asset, which needs delivery_mode 'manifest_versioned' and schema_version 4 or above; this one is 'manifest' on '2'")
 }
 
+# The file-hash check runs on its own, like the manifest check.
+$hashCall = "`$h = (Get-FileHash -Algorithm SHA256 -LiteralPath `$jar).Hash`n"
+$hashCases = [ordered]@{}
+$hashCases['hash-call'] = @{
+    Root = (New-Repo 'hash-call' @{ 'scripts/package-release.ps1' = $hashCall })
+    Expect = @("FAIL scripts/package-release\.ps1 calls Get-FileHash")
+}
+$hashCases['hash-call-module'] = @{
+    Root = (New-Repo 'hash-call-module' @{ 'scripts/Guards.psm1' = "function Get-H { Get-FileHash `$args[0] }`n" })
+    Expect = @("FAIL scripts/Guards\.psm1 calls Get-FileHash")
+}
+$hashCases['hash-in-comments'] = @{
+    Root = (New-Repo 'hash-in-comments' @{ 'scripts/update-deps.ps1' = "<#`n.NOTES`n    Get-FileHash is not found under 5.1 from pwsh.`n#>`n# Not Get-FileHash: see FileHash.psm1`n`$h = Get-FileSha256 -LiteralPath `$f # not Get-FileHash`n" })
+    Expect = @()
+}
+$hashCases['hash-in-core-and-docs'] = @{
+    Root = (New-Repo 'hash-in-core-and-docs' @{ 'cameraunlock-core/powershell/tests/X.Tests.ps1' = $hashCall; 'README.md' = $hashCall })
+    Expect = @()
+}
+
 function Test-Cases {
     param($Cases, [string]$Checks)
     $roots = @($Cases.Values | ForEach-Object { $_.Root })
@@ -422,6 +442,7 @@ try {
 
     Test-Cases $cases 'pipeline-port,changelog-unreleased'
     Test-Cases $manifestCases 'manifest'
+    Test-Cases $hashCases 'file-hash'
 
     # A long [Unreleased] is something to decide about, not a broken repo.
     $warnOnly = & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$conformance' -Repo '$($cases['changelog-long-unreleased'].Root)' -Check changelog-unreleased -Json | Out-Null; exit `$LASTEXITCODE"
@@ -434,4 +455,4 @@ if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) failed" -ForegroundColor Red
     exit 1
 }
-Write-Host 'All pipeline-port, changelog-unreleased and manifest cases passed' -ForegroundColor Green
+Write-Host 'All pipeline-port, changelog-unreleased, manifest and file-hash cases passed' -ForegroundColor Green

@@ -59,7 +59,7 @@ $CHECK_IDS = @(
     'shim-marker', 'cmd-crlf', 'pixi-tasks', 'action-pins', 'workflow-ref', 'workflow-build', 'core-pin',
     'manifest', 'manifest-seed', 'mod-version', 'stray-manifest', 'license', 'readme',
     'config-format', 'config-legacy-reader', 'config-preserve', 'config-descriptor', 'config-defaults',
-    'release-canonical-since', 'ci-minutes', 'pipeline-port', 'changelog-unreleased'
+    'release-canonical-since', 'ci-minutes', 'pipeline-port', 'changelog-unreleased', 'file-hash'
 )
 
 # Every task a mod's tooling, its docs or another mod's error message assumes
@@ -1777,6 +1777,21 @@ function Test-ChangelogUnreleased {
     Add-Finding $Name 'changelog-unreleased' 'WARN' "CHANGELOG.md's [Unreleased] holds $bullets bullets (more than $MAX_UNRELEASED_BULLETS). scripts/release.ps1 renames a non-empty [Unreleased] to the version's heading and keeps it as written, reading no commit (New-ChangelogFromCommits), so all $bullets are published as one version's entry, and a bullet written the day a behaviour landed stays after the behaviour is replaced. $fix"
 }
 
+# Every mod's pixi tasks run powershell.exe, and CI starts them from a shell: pwsh step, so the
+# powershell.exe inherits pwsh's PSModulePath. Windows PowerShell 5.1 autoloads Get-FileHash from
+# a script module, finds the Core-only Microsoft.PowerShell.Utility first, and reports the cmdlet
+# as not recognized: the script passes on a machine without pwsh and fails in CI.
+function Test-FileHash {
+    param([string]$Name, [string]$Root)
+
+    foreach ($rel in @(Get-TrackedFiles $Root | Where-Object { $_ -match '\.psm?1$' -and $_ -notmatch $LEGACY_SCAN_SKIP })) {
+        $code = [regex]::Replace((Read-TextFile (Join-Path $Root $rel)), '(?s)<#.*?#>', '')
+        $calls = @($code -split '\r?\n' | Where-Object { ($_ -replace '#.*$', '') -match '\bGet-FileHash\b' })
+        if ($calls.Count -eq 0) { continue }
+        Add-Finding $Name 'file-hash' 'FAIL' "$rel calls Get-FileHash, which a powershell.exe started from pwsh (GitHub Actions' shell: pwsh) reports as not recognized. Import cameraunlock-core/powershell/FileHash.psm1 and call Get-FileSha256 -LiteralPath <file>, which returns the lowercase hex"
+    }
+}
+
 $CHECK_TABLE = [ordered]@{
     'install-wrapper'   = ${function:Test-InstallWrapper}
     'delayed-expansion' = ${function:Test-DelayedExpansion}
@@ -1805,6 +1820,7 @@ $CHECK_TABLE = [ordered]@{
     'ci-minutes'        = ${function:Test-CiMinutes}
     'pipeline-port'     = ${function:Test-PipelinePort}
     'changelog-unreleased' = ${function:Test-ChangelogUnreleased}
+    'file-hash'         = ${function:Test-FileHash}
 }
 
 # ---------------------------------------------------------------------------
