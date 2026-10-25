@@ -16,7 +16,6 @@ Set-StrictMode -Version Latest
     Call Initialize-AssemblyPatching first with the path to Mono.Cecil.dll.
 #>
 
-# Track if Mono.Cecil is loaded
 $Script:CecilLoaded = $false
 $Script:CecilPath = $null
 
@@ -470,12 +469,10 @@ function Invoke-HeadTrackingPatch {
     $readerParams.InMemory = $true
 
     try {
-        # Read assembly into memory
         $assemblyBytes = [System.IO.File]::ReadAllBytes($AssemblyPath)
         $memStream = New-Object System.IO.MemoryStream(,$assemblyBytes)
         $assembly = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($memStream, $readerParams)
 
-        # Check if already patched
         if ($patcher::IsPatched($assembly)) {
             $results.AlreadyPatched = $true
             $results.Success = $true
@@ -520,7 +517,6 @@ function Invoke-HeadTrackingPatch {
         $modAssembly.Dispose()
         $modStream.Dispose()
 
-        # Find controller and inject call
         $controllerType = $assembly.MainModule.Types | Where-Object { $_.Name -eq $ControllerTypeName } | Select-Object -First 1
         if ($controllerType) {
             $targetMethod = $controllerType.Methods | Where-Object { $_.Name -eq $ControllerMethodName -and -not $_.IsStatic -and $_.HasBody } | Select-Object -First 1
@@ -542,7 +538,6 @@ function Invoke-HeadTrackingPatch {
             Write-Host "  Warning: $ControllerTypeName not found" -ForegroundColor Yellow
         }
 
-        # Patch raycast calls
         if ($getAimScreenPositionRef -and $RaycastTypeNames.Count -gt 0) {
             foreach ($typeName in $RaycastTypeNames) {
                 $type = $assembly.MainModule.Types | Where-Object { $_.Name -eq $typeName } | Select-Object -First 1
@@ -557,10 +552,8 @@ function Invoke-HeadTrackingPatch {
             }
         }
 
-        # Add patch marker
         $patcher::AddPatchMarker($assembly)
 
-        # Write patched assembly
         $assembly.Write($AssemblyPath)
         Write-Host "  Successfully patched $(Split-Path -Leaf $AssemblyPath)" -ForegroundColor Green
 
@@ -576,7 +569,6 @@ function Invoke-HeadTrackingPatch {
     return $results
 }
 
-# Export functions
 Export-ModuleMember -Function @(
     'Initialize-AssemblyPatching',
     'Get-ScreenCenterPatcherCode',

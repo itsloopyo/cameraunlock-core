@@ -5,11 +5,10 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# Get-BepInExPluginsPath / Get-MelonLoaderModsPath live in GamePathDetection.
-# They used to be defined here as well, with different path separators, so which
-# implementation a consumer got depended on module import order. Imported and
-# re-exported instead, so the name keeps working for callers that only import
-# this module.
+# Get-BepInExPluginsPath / Get-MelonLoaderModsPath live in GamePathDetection and
+# are re-exported from here, so callers that only import this module keep them.
+# A second definition here would make which one a consumer got depend on module
+# import order.
 # NO -Force here. Remove-Module is not scoped to the importing module, so -Force
 # (which is Remove-Module + re-import) unloads GamePathDetection from the CALLER's
 # session too - and every mod's release.ps1 imports GamePathDetection first, then this
@@ -211,7 +210,7 @@ function ConvertFrom-JsonToHashtable {
     return ConvertTo-HashtableRecursive ($Json | ConvertFrom-Json)
 }
 
-# Single reader for the state file. A parse failure is reported once, here.
+# This module's reader of the state file. A parse failure is reported once, here.
 function Read-ModLoaderStateFile {
     param(
         [Parameter(Mandatory=$true)]
@@ -437,7 +436,6 @@ function Install-BepInEx {
         [int]$MinimumAgeDays = 14
     )
 
-    # Check if already installed
     if ((Test-BepInExInstalled -GamePath $GamePath) -and -not $Force) {
         Write-Host "BepInEx already installed at: $GamePath" -ForegroundColor Green
         return @{
@@ -523,13 +521,11 @@ function Install-BepInEx {
         Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
     }
 
-    # Create plugins directory
     $pluginsPath = Get-BepInExPluginsPath -GamePath $GamePath
     if (-not (Test-Path -LiteralPath $pluginsPath)) {
         New-Item -ItemType Directory -Path $pluginsPath -Force | Out-Null
     }
 
-    # Configure console logging
     if ($EnableConsole) {
         $configDir = Join-Path $GamePath "BepInEx/config"
         if (-not (Test-Path -LiteralPath $configDir)) {
@@ -548,7 +544,6 @@ Enabled = true
         Write-Host "  Console logging enabled" -ForegroundColor Gray
     }
 
-    # Update state file
     $stateFile = Join-Path $GamePath $Script:StateFileName
     $state = Merge-ModLoaderState -StateFile $stateFile -Framework @{
         type = "BepInEx"
@@ -594,7 +589,6 @@ function Install-MelonLoader {
         [switch]$Force
     )
 
-    # Check if already installed
     if ((Test-MelonLoaderInstalled -GamePath $GamePath) -and -not $Force) {
         Write-Host "MelonLoader already installed at: $GamePath" -ForegroundColor Green
         return @{
@@ -606,11 +600,9 @@ function Install-MelonLoader {
 
     Write-Host "Installing MelonLoader v$Version to: $GamePath" -ForegroundColor Yellow
 
-    # Construct download URL
     $archSuffix = if ($Architecture -eq 'x64') { 'x64' } else { 'x86' }
     $zipUrl = "https://github.com/LavaGang/MelonLoader/releases/download/v$Version/MelonLoader.$archSuffix.zip"
 
-    # Download
     $tempZip = Join-Path $env:TEMP "MelonLoader_install.zip"
     Write-Host "  Downloading MelonLoader v$Version ($archSuffix)..." -ForegroundColor Gray
 
@@ -620,7 +612,6 @@ function Install-MelonLoader {
         throw "Failed to download MelonLoader: $_"
     }
 
-    # Extract
     Write-Host "  Extracting to game directory..." -ForegroundColor Gray
     try {
         Expand-Archive -LiteralPath $tempZip -DestinationPath $GamePath -Force
@@ -630,13 +621,11 @@ function Install-MelonLoader {
 
     Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
 
-    # Create Mods directory
     $modsPath = Get-MelonLoaderModsPath -GamePath $GamePath
     if (-not (Test-Path -LiteralPath $modsPath)) {
         New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
     }
 
-    # Update state file
     $stateFile = Join-Path $GamePath $Script:StateFileName
     $state = Merge-ModLoaderState -StateFile $stateFile -Framework @{
         type = "MelonLoader"
@@ -917,7 +906,6 @@ function Install-UE4SS {
         throw "Could not find Unreal Engine binaries folder. Please specify BinariesPath."
     }
 
-    # Check if already installed
     if ((Test-UE4SSInstalled -GamePath $GamePath -BinariesPath $BinariesPath) -and -not $Force) {
         Write-Host "UE4SS already installed at: $BinariesPath" -ForegroundColor Green
         return @{
@@ -929,7 +917,6 @@ function Install-UE4SS {
 
     Write-Host "Installing UE4SS to: $BinariesPath" -ForegroundColor Yellow
 
-    # Fetch release info from GitHub
     Write-Host "  Fetching UE4SS release information..." -ForegroundColor Gray
     $apiUrl = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 
@@ -983,7 +970,6 @@ function Install-UE4SS {
         throw "Could not find UE4SS download asset in release"
     }
 
-    # Download
     $tempZip = Join-Path $env:TEMP "UE4SS_install.zip"
     Write-Host "  Downloading: $($asset.name)..." -ForegroundColor Gray
 
@@ -1045,7 +1031,6 @@ function Install-UE4SS {
         }
     }
 
-    # Create Mods directory
     $modsPath = Join-Path $ue4ssDestDir "Mods"
     if (-not (Test-Path -LiteralPath $modsPath)) {
         New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
@@ -1061,11 +1046,9 @@ function Install-UE4SS {
         )
     }
 
-    # Cleanup
     Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Update state file
     $stateFile = Join-Path $GamePath $Script:StateFileName
     $state = Merge-ModLoaderState -StateFile $stateFile -Framework @{
         type = "UE4SS"
@@ -1109,7 +1092,6 @@ function Set-UE4SSModEnabled {
     $modsTxt = Join-Path $ModsPath "mods.txt"
 
     if (-not (Test-Path -LiteralPath $modsTxt)) {
-        # Create new mods.txt
         Write-ModsTxt -Path $modsTxt -Lines @("$ModName : $(if ($Enabled) { '1' } else { '0' })")
         return
     }
@@ -1134,7 +1116,6 @@ function Set-UE4SSModEnabled {
     Write-ModsTxt -Path $modsTxt -Lines $newLines
 }
 
-# Export functions
 <#
 .SYNOPSIS
     Resolves the latest upstream release of a mod loader within a pinned version range, then downloads the matching asset to OutputPath.

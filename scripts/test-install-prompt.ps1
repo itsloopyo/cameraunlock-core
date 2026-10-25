@@ -65,17 +65,17 @@ function Invoke-Install {
 
     $script:caseIndex++
     $stem = Join-Path $caseRoot ('case{0:d2}' -f $script:caseIndex)
-    $input = "$stem.in"
+    $typedFile = "$stem.in"
     $result = "$stem.exit"
     $driver = "$stem.cmd"
     $script:lastOutput = "$stem.out"
 
     # One trailing blank line beyond what the case types: the run ends on a
     # `pause` whenever /y is absent, and that read has to find something.
-    [IO.File]::WriteAllText($input, (($Typed + @('')) -join "`r`n") + "`r`n")
+    [IO.File]::WriteAllText($typedFile, (($Typed + @('')) -join "`r`n") + "`r`n")
     $lines = @(
         '@echo off',
-        ('call "{0}\install.cmd" {1} < "{2}" > "{3}" 2>&1' -f $caseRoot, $Flags, $input, $script:lastOutput),
+        ('call "{0}\install.cmd" {1} < "{2}" > "{3}" 2>&1' -f $caseRoot, $Flags, $typedFile, $script:lastOutput),
         ('> "{0}" echo %errorlevel%' -f $result))
     [IO.File]::WriteAllText($driver, ($lines -join "`r`n") + "`r`n")
 

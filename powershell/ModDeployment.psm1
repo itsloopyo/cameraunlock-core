@@ -59,7 +59,6 @@ function Copy-ModFiles {
         Errors = @()
     }
 
-    # Verify source directory exists
     if (-not (Test-Path -LiteralPath $SourceDir)) {
         $results.Success = $false
         $results.Errors += "Source directory not found: $SourceDir"
@@ -72,7 +71,6 @@ function Copy-ModFiles {
         Write-Host "Created target directory: $TargetDir" -ForegroundColor Gray
     }
 
-    # Copy main mod DLL
     $modDllPath = Join-Path $SourceDir $ModDllName
     if (Test-Path -LiteralPath $modDllPath) {
         $destPath = Join-Path $TargetDir $ModDllName
@@ -85,7 +83,6 @@ function Copy-ModFiles {
         return $results
     }
 
-    # Copy required dependencies
     foreach ($dep in $Dependencies) {
         $depPath = Join-Path $SourceDir $dep
         if (Test-Path -LiteralPath $depPath) {
@@ -98,7 +95,6 @@ function Copy-ModFiles {
         }
     }
 
-    # Copy optional dependencies
     foreach ($dep in $OptionalDependencies) {
         $depPath = Join-Path $SourceDir $dep
         if (Test-Path -LiteralPath $depPath) {
@@ -338,7 +334,6 @@ function Test-ModDeployment {
         FoundFiles = @()
     }
 
-    # Check main mod DLL
     $modPath = Join-Path $TargetDir $ModDllName
     if (Test-Path -LiteralPath $modPath) {
         $results.FoundFiles += $ModDllName
@@ -347,7 +342,6 @@ function Test-ModDeployment {
         $results.MissingFiles += $ModDllName
     }
 
-    # Check dependencies
     foreach ($dep in $Dependencies) {
         $depPath = Join-Path $TargetDir $dep
         if (Test-Path -LiteralPath $depPath) {
@@ -480,7 +474,6 @@ function Get-BuildOutputPath {
     return Join-Path $ProjectRoot "src\$ProjectName\bin\$Configuration\$TargetFramework"
 }
 
-# Export functions
 Export-ModuleMember -Function @(
     'Copy-ModFiles',
     'New-FileBackup',

@@ -445,7 +445,7 @@ try {
     Test-Cases $hashCases 'file-hash'
 
     # A long [Unreleased] is something to decide about, not a broken repo.
-    $warnOnly = & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$conformance' -Repo '$($cases['changelog-long-unreleased'].Root)' -Check changelog-unreleased -Json | Out-Null; exit `$LASTEXITCODE"
+    $null = & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$conformance' -Repo '$($cases['changelog-long-unreleased'].Root)' -Check changelog-unreleased -Json | Out-Null; exit `$LASTEXITCODE"
     Check 'a warning alone exits 0' ($LASTEXITCODE -eq 0) "exit $LASTEXITCODE"
 } finally {
     Remove-Item -LiteralPath $sandbox -Recurse -Force

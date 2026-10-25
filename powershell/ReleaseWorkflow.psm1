@@ -491,7 +491,6 @@ function Update-ManifestVersion {
 
     $manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
 
-    # Determine version property name
     $propName = $VersionProperty
     if (-not $propName) {
         if ($manifest.PSObject.Properties['version']) {
@@ -733,7 +732,6 @@ function New-ChangelogFromCommits {
         }
     }
 
-    # Build new entry
     $newEntry = "## [$Version] - $date$nl$nl"
 
     if ($isMaintenance -and $firstRelease) {
@@ -1574,7 +1572,6 @@ function Assert-ReleaseNotBelowCanonicalSince {
     }
 }
 
-# Export functions
 Export-ModuleMember -Function @(
     'Update-CameraUnlockCoreToRemoteTip',
     'Get-PinnedCoreCommit',

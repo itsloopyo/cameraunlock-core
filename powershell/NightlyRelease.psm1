@@ -59,7 +59,8 @@ function Publish-NightlyBuild {
     [CmdletBinding()]
     param(
         # Lowercase-hyphenated slug, matches the lopari catalog entry.
-        # Display/logging only now - the GitHub repo is the storage key.
+        # Deprecated and not read: the GitHub repo is the storage key. Kept
+        # because every caller passes it.
         [Parameter(Mandatory)][string]$ModId,
 
         # PascalCase assembly/project name. Used to find the installer ZIP

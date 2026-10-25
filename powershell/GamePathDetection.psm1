@@ -151,7 +151,6 @@ function Find-SteamLibraries {
 
     $libraries = [System.Collections.Generic.List[string]]::new()
 
-    # Find Steam installation from registry
     $steamPath = $null
 
     # A key can exist with the value missing (a partial uninstall, a
@@ -1302,7 +1301,6 @@ function Get-AvailableGames {
     return @((Get-GameConfigs).Keys)
 }
 
-# Export functions
 Export-ModuleMember -Function @(
     'Find-SteamLibraries',
     'Find-SteamGameByAppId',

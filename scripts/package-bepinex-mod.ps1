@@ -46,7 +46,6 @@ $ProgressPreference = 'SilentlyContinue'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Import-Module (Join-Path $scriptDir "..\powershell\ReleaseWorkflow.psm1") -Force
 
-# Resolve paths
 $CsprojPath = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $CsprojPath))
 $BuildOutputDir = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $BuildOutputDir))
 $releaseDir = Join-Path $ProjectRoot "release"
@@ -59,7 +58,6 @@ $version = Get-CsprojVersion $CsprojPath
 Write-Host "Version: $version" -ForegroundColor Cyan
 Write-Host ""
 
-# Validate all DLLs exist
 foreach ($dll in $ModDlls) {
     $dllPath = Join-Path $BuildOutputDir $dll
     if (-not (Test-Path $dllPath)) {
@@ -67,12 +65,10 @@ foreach ($dll in $ModDlls) {
     }
 }
 
-# Create release directory
 if (-not (Test-Path $releaseDir)) {
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 }
 
-# Create staging directory
 $stagingDir = Join-Path $releaseDir "staging"
 if (Test-Path $stagingDir) {
     Remove-Item -Recurse -Force $stagingDir

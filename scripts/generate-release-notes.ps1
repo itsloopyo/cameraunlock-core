@@ -52,7 +52,6 @@ if (Test-Path "RELEASE_NOTES.md") {
     exit 0
 }
 
-# Check for previous tag
 # Match version tags only. The nightly publisher moves the rolling `dev` tag to
 # the tip on every build, so an unfiltered describe resolves to `dev` sitting
 # just behind HEAD: a first release never reaches the branch below, and a later
