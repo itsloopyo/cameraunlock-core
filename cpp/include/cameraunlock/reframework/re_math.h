@@ -6,6 +6,11 @@ namespace cameraunlock::reframework {
 
 constexpr float kDegToRad = 0.0174532925f;
 
+namespace detail {
+// A projected point with a view-space depth below this is taken as behind the eye.
+inline constexpr float kMinViewDepth = 1e-4f;
+}  // namespace detail
+
 struct Matrix4x4f { float m[4][4]; };
 struct alignas(16) REQuat { float x, y, z, w; };
 
@@ -217,7 +222,7 @@ inline bool ProjectCleanRayToHeadGui(const float cleanToHead[3][3], float rollRa
     float vx = C0[0]*cleanX + C0[1]*cleanY + C0[2]*cleanZ;
     float vy = C1[0]*cleanX + C1[1]*cleanY + C1[2]*cleanZ;
     float vz = cleanToHead[2][0]*cleanX + cleanToHead[2][1]*cleanY + cleanToHead[2][2]*cleanZ;
-    if (vz < 1e-4f) return false;
+    if (vz < detail::kMinViewDepth) return false;
     guiX = -(vx / vz) * fx;
     guiY =  (vy / vz) * fy;
     return true;
@@ -249,7 +254,7 @@ inline bool ProjectForwardToViewTangents(const Matrix4x4f& clean, const Matrix4x
     float vy = dx * head.m[1][0] + dy * head.m[1][1] + dz * head.m[1][2];
     float vz = dx * head.m[2][0] + dy * head.m[2][1] + dz * head.m[2][2];
 
-    if (vz <= 1e-4f) return false;
+    if (vz <= detail::kMinViewDepth) return false;
 
     tanRight = vx / vz;
     tanUp = vy / vz;
@@ -273,7 +278,7 @@ inline bool ProjectAimToViewTangents(const Matrix4x4f& clean, const Matrix4x4f& 
     float vy = dx * head.m[1][0] + dy * head.m[1][1] + dz * head.m[1][2];
     float vz = dx * head.m[2][0] + dy * head.m[2][1] + dz * head.m[2][2];
 
-    if (vz <= 1e-4f) return false;
+    if (vz <= detail::kMinViewDepth) return false;
 
     tanRight = vx / vz;
     tanUp = vy / vz;

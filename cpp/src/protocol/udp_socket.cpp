@@ -59,7 +59,6 @@ bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
     m_wsaInitialized = true;
 #endif
 
-    // Create UDP socket
     m_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (m_socket == INVALID_SOCKET) {
         m_lastError = DescribeFailure("socket creation", LastSocketError());
@@ -82,7 +81,6 @@ bool UdpSocket::Open(uint16_t port, bool loopbackOnly) {
     // interval is short enough that a relaunch still reclaims the port
     // promptly (UDP has no TIME_WAIT, so a closed socket frees it at once).
 
-    // Set non-blocking
 #if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
     u_long mode = 1;
     if (ioctlsocket(m_socket, FIONBIO, &mode) != 0) {

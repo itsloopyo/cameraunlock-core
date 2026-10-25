@@ -148,7 +148,6 @@ bool HotkeyPoller::Start(int pollIntervalMs) {
     m_pollInterval.store(pollIntervalMs);
     m_stopFlag.store(false);
 
-    // Reset key states
     m_toggleKeyDown.store(false);
     m_recenterKeyDown.store(false);
     {

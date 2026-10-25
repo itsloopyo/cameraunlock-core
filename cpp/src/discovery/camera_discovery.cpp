@@ -5,7 +5,6 @@
 
 #include <cstdarg>
 #include <cstdio>
-#include <cstring>
 #include <cmath>
 #include <algorithm>
 
@@ -218,7 +217,7 @@ Phase CameraDiscovery::RunProbing() {
     if (sel.decision == ProbeDecision::KeepProbing) {
         // Waiting on a forced slot never times out, so say so periodically,
         // otherwise the log just stops and "forced slot never fired" looks
-        // exactly like the silent non-start this feature was added to fix.
+        // exactly like discovery never starting.
         if (m_config.forced_vfunc_index >= 0 &&
             m_probeFrameCount % kForcedWaitLogIntervalFrames == 0) {
             Log("DISC: forced vfunc[%d] still waiting, %d calls after %d frames",
@@ -350,7 +349,6 @@ Phase CameraDiscovery::RunAnalyzeLayout() {
         return Phase::Failed;
     }
 
-    // Read all candidate float values
     struct AngleCandidate { size_t offset; float value; float absValue; };
     std::vector<AngleCandidate> candidates;
     for (size_t off : m_candidateAngleOffsets) {

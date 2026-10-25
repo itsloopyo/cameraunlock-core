@@ -4,7 +4,6 @@
 #include <cameraunlock/reframework/log_callback.h>
 
 #include <windows.h>
-#include <cstring>
 #include <cstdio>
 #include <deque>
 #include <mutex>

@@ -112,24 +112,20 @@ public:
     using KeyState = bool (*)(int vkCode);
     void DisarmHoldPressesWith(KeyState isDown);
 
-    // Remove a hotkey by ID
     void RemoveHotkey(int id);
 
     // Start the polling thread
     // pollIntervalMs: polling interval in milliseconds (default 16ms = ~60Hz)
     bool Start(int pollIntervalMs = 16);
 
-    // Stop the polling thread
     void Stop();
 
-    // Check if polling is running
     bool IsRunning() const { return m_running.load(); }
 
     // Update hotkeys at runtime (thread-safe)
     void SetToggleKeyCode(int vkCode);
     void SetRecenterKeyCode(int vkCode);
 
-    // Get current key codes
     int GetToggleKeyCode() const { return m_toggleKey.load(); }
     int GetRecenterKeyCode() const { return m_recenterKey.load(); }
 

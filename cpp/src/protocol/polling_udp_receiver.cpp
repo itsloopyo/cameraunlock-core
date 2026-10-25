@@ -2,7 +2,6 @@
 #include "cameraunlock/protocol/opentrack_packet.h"
 #include "cameraunlock/data/position_data.h"
 
-#include <cmath>
 #include <cstring>
 #include <chrono>
 #include <string>

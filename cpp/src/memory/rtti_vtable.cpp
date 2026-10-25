@@ -6,7 +6,6 @@
 #include <Psapi.h>
 #endif
 
-#include <cstring>
 #include <string>
 
 namespace cameraunlock::memory {

@@ -1,12 +1,14 @@
 #include <cameraunlock/discovery/float_classifier.h>
 
 #include <cmath>
-#include <cstring>
 #include <vector>
 
 namespace cameraunlock::discovery {
 
 namespace {
+
+// A float this close to 0 or 1 counts as exactly 0 or 1.
+constexpr float kExactTolerance = 0.001f;
 
 bool IsPlausibleFloat(float f) {
     return std::isfinite(f) && std::fabsf(f) < 1e10f;
@@ -41,10 +43,10 @@ LayoutReport ClassifyMemoryRegion(const void* region, size_t size) {
         if (std::fabsf(len2 - 1.0f) < 0.01f) {
             // At least one component should be non-trivial (not just 0,0,0,1)
             int nonzero = 0;
-            if (std::fabsf(a) > 0.001f) nonzero++;
-            if (std::fabsf(b) > 0.001f) nonzero++;
-            if (std::fabsf(c) > 0.001f) nonzero++;
-            if (std::fabsf(d) > 0.001f) nonzero++;
+            if (std::fabsf(a) > kExactTolerance) nonzero++;
+            if (std::fabsf(b) > kExactTolerance) nonzero++;
+            if (std::fabsf(c) > kExactTolerance) nonzero++;
+            if (std::fabsf(d) > kExactTolerance) nonzero++;
             if (nonzero >= 2) {
                 auto& g = report.groups[report.group_count++];
                 g.offset = i * sizeof(float);
@@ -67,7 +69,7 @@ LayoutReport ClassifyMemoryRegion(const void* region, size_t size) {
         // All coords in reasonable world range
         bool inRange = std::fabsf(x) < 100000.0f && std::fabsf(y) < 100000.0f && std::fabsf(z) < 100000.0f;
         // w=1.0 at the next float (homogeneous coordinate)
-        bool hasW1 = (i + 3 < floatCount) && std::fabsf(floats[i+3] - 1.0f) < 0.001f;
+        bool hasW1 = (i + 3 < floatCount) && std::fabsf(floats[i+3] - 1.0f) < kExactTolerance;
 
         if (hasLarge && inRange && hasW1) {
             auto& g = report.groups[report.group_count++];
@@ -87,7 +89,7 @@ LayoutReport ClassifyMemoryRegion(const void* region, size_t size) {
         if (!IsAngleLike(a) || !IsAngleLike(b) || !IsAngleLike(c)) continue;
 
         // At least one must be nonzero
-        if (std::fabsf(a) < 0.001f && std::fabsf(b) < 0.001f && std::fabsf(c) < 0.001f) continue;
+        if (std::fabsf(a) < kExactTolerance && std::fabsf(b) < kExactTolerance && std::fabsf(c) < kExactTolerance) continue;
 
         // Distinguish from small position values: at least one should be > 1 degree
         // or all should be < 360 and not look like a tiny position
@@ -97,7 +99,7 @@ LayoutReport ClassifyMemoryRegion(const void* region, size_t size) {
         float vals[3] = {a, b, c};
         for (int k = 0; k < 3; k++) {
             float absv = std::fabsf(vals[k]);
-            if (absv > 0.001f && std::fabsf(absv - 1.0f) > 0.001f) {
+            if (absv > kExactTolerance && std::fabsf(absv - 1.0f) > kExactTolerance) {
                 allTrivial = false;
                 break;
             }

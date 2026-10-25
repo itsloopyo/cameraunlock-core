@@ -1,9 +1,7 @@
 #include "cameraunlock/data/tracking_pose.h"
-#include <cmath>
 
 namespace cameraunlock {
 
-// TrackingData implementation
 void TrackingData::Set(float y, float p, float r) {
     yaw.store(y, std::memory_order_relaxed);
     pitch.store(p, std::memory_order_relaxed);
@@ -28,7 +26,6 @@ void TrackingData::Reset() {
     has_data.store(false, std::memory_order_release);
 }
 
-// TrackingPose implementation
 TrackingPose::TrackingPose(float y, float p, float r)
     : yaw(y), pitch(p), roll(r), timestamp_us(CurrentTimestamp()) {}
 
@@ -61,7 +58,6 @@ int64_t TrackingPose::CurrentTimestamp() {
     return std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
 }
 
-// SensitivitySettings implementation
 SensitivitySettings SensitivitySettings::Uniform(float sensitivity) {
     SensitivitySettings s;
     s.yaw = sensitivity;
@@ -70,7 +66,6 @@ SensitivitySettings SensitivitySettings::Uniform(float sensitivity) {
     return s;
 }
 
-// DeadzoneSettings implementation
 DeadzoneSettings DeadzoneSettings::Uniform(float deadzone) {
     DeadzoneSettings d;
     d.yaw = deadzone;

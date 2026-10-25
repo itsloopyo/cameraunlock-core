@@ -157,7 +157,6 @@ void HookManager::RemoveAllHooks() {
     m_hooks.clear();
 }
 
-// ScopedHook implementation
 
 ScopedHook::ScopedHook(void* target, void* detour, void** original) {
     Create(target, detour, original);

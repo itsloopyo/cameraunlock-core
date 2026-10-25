@@ -33,7 +33,6 @@ const char* HookStatusToString(HookStatus status);
 // This class requires MinHook to be linked to the application
 class HookManager {
 public:
-    // Get singleton instance
     static HookManager& Instance();
 
     // Initialize MinHook - must be called before creating any hooks
@@ -48,28 +47,20 @@ public:
     // original: receives address of trampoline to call original function
     HookStatus CreateHook(void* target, void* detour, void** original);
 
-    // Remove a previously created hook
     HookStatus RemoveHook(void* target);
 
-    // Enable a created hook
     HookStatus EnableHook(void* target);
 
-    // Disable an enabled hook
     HookStatus DisableHook(void* target);
 
-    // Enable all created hooks
     HookStatus EnableAllHooks();
 
-    // Disable all enabled hooks
     HookStatus DisableAllHooks();
 
-    // Remove all hooks
     void RemoveAllHooks();
 
-    // Check if initialized
     bool IsInitialized() const { return m_initialized; }
 
-    // Get number of tracked hooks
     size_t GetHookCount() const { return m_hooks.size(); }
 
     // Non-copyable
@@ -100,11 +91,9 @@ public:
     // Create and enable hook
     HookStatus Create(void* target, void* detour, void** original);
 
-    // Check if hook is valid
     bool IsValid() const { return m_target != nullptr; }
     explicit operator bool() const { return IsValid(); }
 
-    // Get target address
     void* GetTarget() const { return m_target; }
 
     // Release ownership without removing hook

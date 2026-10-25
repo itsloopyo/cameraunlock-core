@@ -142,9 +142,8 @@ private:
     float m_posZOffset = 0.0f;
     bool m_hasOffset = false;
 
-    // Remote recenter (Headcam trailer). The trailer only rides packets sent
-    // right after a CENTER press, so any sighting with a new counter is a
-    // press.
+    // Headcam trailer counter, latched and never acted on: the tracker owns the
+    // centre, so m_recenterRequested stays false.
     uint8_t m_lastRecenterCounter = 0;
     bool m_hasRecenterCounter = false;
     bool m_recenterRequested = false;
