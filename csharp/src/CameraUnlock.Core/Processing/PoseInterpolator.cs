@@ -58,8 +58,13 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public float SegmentPosition(float progress, float timeSinceLastSample)
         {
+            return SegmentPosition(progress, timeSinceLastSample, MaxExtrapolationFraction);
+        }
+
+        internal static float SegmentPosition(float progress, float timeSinceLastSample, float maxExtrapolationFraction)
+        {
             if (progress < 0f) return 0f;
-            float maxPt = 1f + MaxExtrapolationFraction;
+            float maxPt = 1f + maxExtrapolationFraction;
             float pt = progress > maxPt ? maxPt : progress;
             if (timeSinceLastSample <= ExtrapolationHoldSeconds) return pt;
 
@@ -71,14 +76,14 @@ namespace CameraUnlock.Core.Processing
         }
 
         // EMA blend factor for sample interval estimation
-        private const float IntervalBlend = 0.3f;
+        internal const float IntervalBlend = 0.3f;
 
         // Assumed interval until we observe real samples (30Hz)
-        private const float DefaultSampleInterval = 1f / 30f;
+        internal const float DefaultSampleInterval = 1f / 30f;
 
         // Bounds for sample interval estimate
-        private const float MinSampleInterval = 0.001f;
-        private const float MaxSampleInterval = 0.2f;
+        internal const float MinSampleInterval = 0.001f;
+        internal const float MaxSampleInterval = 0.2f;
 
         // Interpolation start point (where we're coming from)
         private float _fromYaw, _fromPitch, _fromRoll;

@@ -17,12 +17,12 @@ namespace CameraUnlock.Core.Processing
         /// <summary>
         /// Mirrors PoseInterpolator.ExtrapolationHoldSeconds.
         /// </summary>
-        public const float ExtrapolationHoldSeconds = 0.25f;
+        public const float ExtrapolationHoldSeconds = PoseInterpolator.ExtrapolationHoldSeconds;
 
         /// <summary>
         /// Mirrors PoseInterpolator.ExtrapolationDecaySeconds.
         /// </summary>
-        public const float ExtrapolationDecaySeconds = 0.35f;
+        public const float ExtrapolationDecaySeconds = PoseInterpolator.ExtrapolationDecaySeconds;
 
         /// <summary>
         /// Segment position to sample at, given progress and how long the next
@@ -33,22 +33,13 @@ namespace CameraUnlock.Core.Processing
         /// </summary>
         public float SegmentPosition(float progress, float timeSinceLastSample)
         {
-            if (progress < 0f) return 0f;
-            float maxPt = 1f + MaxExtrapolationFraction;
-            float pt = progress > maxPt ? maxPt : progress;
-            if (timeSinceLastSample <= ExtrapolationHoldSeconds) return pt;
-
-            float late = timeSinceLastSample - ExtrapolationHoldSeconds;
-            float u = late / ExtrapolationDecaySeconds;
-            if (u > 1f) u = 1f;
-            float eased = u * u * (3f - 2f * u);
-            return pt + (1f - pt) * eased;
+            return PoseInterpolator.SegmentPosition(progress, timeSinceLastSample, MaxExtrapolationFraction);
         }
 
-        private const float IntervalBlend = 0.3f;
-        private const float DefaultSampleInterval = 1f / 30f;
-        private const float MinSampleInterval = 0.001f;
-        private const float MaxSampleInterval = 0.2f;
+        private const float IntervalBlend = PoseInterpolator.IntervalBlend;
+        private const float DefaultSampleInterval = PoseInterpolator.DefaultSampleInterval;
+        private const float MinSampleInterval = PoseInterpolator.MinSampleInterval;
+        private const float MaxSampleInterval = PoseInterpolator.MaxSampleInterval;
 
         private float _fromX, _fromY, _fromZ;
         private float _toX, _toY, _toZ;
