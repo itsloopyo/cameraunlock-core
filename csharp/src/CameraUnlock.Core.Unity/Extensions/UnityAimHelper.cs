@@ -1,6 +1,5 @@
 using UnityEngine;
 using CameraUnlock.Core.Aim;
-using CameraUnlock.Core.Data;
 
 namespace CameraUnlock.Core.Unity.Extensions
 {
@@ -23,7 +22,6 @@ namespace CameraUnlock.Core.Unity.Extensions
             AimDecoupler.ComputeAimDirection(yaw, pitch, roll, out float ax, out float ay, out float az);
             Vector3 localAim = new Vector3(ax, ay, az);
             
-            // Transform to world space
             return cameraRotation * localAim;
         }
 
@@ -68,11 +66,9 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <returns>Screen offset from center in pixels, or zero if behind camera.</returns>
         public static Vector2 ComputeScreenOffset(Camera camera, Vector3 aimDirection)
         {
-            // Project a point along the aim direction
             Vector3 aimWorldPoint = camera.transform.position + aimDirection * 10f;
             Vector3 screenPoint = camera.WorldToScreenPoint(aimWorldPoint);
 
-            // Compute offset from screen center
             float halfWidth = Screen.width * 0.5f;
             float halfHeight = Screen.height * 0.5f;
 
@@ -95,8 +91,16 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <returns>Screen offset from center in pixels.</returns>
         public static Vector2 ComputeScreenOffsetClamped(Camera camera, Vector3 aimDirection, float edgeMargin = 0.9f)
         {
-            // Project a point along the aim direction
-            Vector3 aimWorldPoint = camera.transform.position + aimDirection * 10f;
+            return ProjectAimClamped(camera, aimDirection, 10f, edgeMargin);
+        }
+
+        /// <summary>
+        /// The offset from screen centre of the point <paramref name="projectionDistance"/> along the
+        /// aim, or the screen edge in the aim's direction when that point is behind the camera.
+        /// </summary>
+        internal static Vector2 ProjectAimClamped(Camera camera, Vector3 aimDirection, float projectionDistance, float edgeMargin)
+        {
+            Vector3 aimWorldPoint = camera.transform.position + aimDirection * projectionDistance;
             Vector3 screenPoint = camera.WorldToScreenPoint(aimWorldPoint);
 
             float halfWidth = Screen.width * 0.5f;
@@ -108,7 +112,6 @@ namespace CameraUnlock.Core.Unity.Extensions
                 return new Vector2(screenPoint.x - halfWidth, screenPoint.y - halfHeight);
             }
 
-            // Aim is behind camera - clamp to screen edge
             return ClampToScreenEdge(aimDirection, camera, halfWidth, halfHeight, edgeMargin);
         }
 

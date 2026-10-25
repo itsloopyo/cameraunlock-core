@@ -40,13 +40,11 @@ namespace CameraUnlock.Core.Unity.Extensions
                 throw new ArgumentNullException(nameof(cam));
             }
 
-            // Get canvas dimensions
             float canvasWidth = canvasRectTransform.rect.width;
             float canvasHeight = canvasRectTransform.rect.height;
             float halfWidth = canvasWidth * 0.5f;
             float halfHeight = canvasHeight * 0.5f;
 
-            // Calculate projection parameters
             float verticalFov = cam.fieldOfView;
             float horizontalFov = ScreenOffsetCalculator.CalculateHorizontalFov(verticalFov, cam.aspect);
 
@@ -64,7 +62,6 @@ namespace CameraUnlock.Core.Unity.Extensions
             float cosRoll = Mathf.Cos(rollRad);
             float sinRoll = Mathf.Sin(rollRad);
 
-            // Iterate all children
             int childCount = canvasRectTransform.childCount;
             for (int i = 0; i < childCount; i++)
             {
@@ -80,12 +77,10 @@ namespace CameraUnlock.Core.Unity.Extensions
                     continue;
                 }
 
-                // Get current position relative to canvas center
                 Vector2 pos = rectTransform.anchoredPosition;
                 float relX = pos.x - halfWidth;
                 float relY = pos.y - halfHeight;
 
-                // Apply roll rotation
                 float rotatedRelX = relX * cosRoll - relY * sinRoll;
                 float rotatedRelY = relX * sinRoll + relY * cosRoll;
 
@@ -131,11 +126,9 @@ namespace CameraUnlock.Core.Unity.Extensions
             float halfWidth = canvasWidth * 0.5f;
             float halfHeight = canvasHeight * 0.5f;
 
-            // Calculate projection parameters
             float verticalFov = cam.fieldOfView;
             float horizontalFov = ScreenOffsetCalculator.CalculateHorizontalFov(verticalFov, cam.aspect);
 
-            // Calculate yaw/pitch offset
             ScreenOffsetCalculator.Calculate(
                 yaw, pitch, 0f,
                 horizontalFov, verticalFov,
@@ -143,15 +136,12 @@ namespace CameraUnlock.Core.Unity.Extensions
                 1f,
                 out float offsetX, out float offsetY);
 
-            // Get current position relative to canvas center
             Vector2 pos = element.anchoredPosition;
             float relX = pos.x - halfWidth;
             float relY = pos.y - halfHeight;
 
-            // Apply roll rotation
             ScreenOffsetCalculator.ApplyRollRotation(relX, relY, roll, out float rotatedRelX, out float rotatedRelY);
 
-            // Apply yaw/pitch offset
             float newX = rotatedRelX + offsetX + halfWidth;
             float newY = rotatedRelY + offsetY + halfHeight;
 
@@ -472,7 +462,7 @@ namespace CameraUnlock.Core.Unity.Extensions
                 Vector3 dirToPoint = (worldPoint - cam.transform.position).normalized;
                 float halfWidth = Screen.width * 0.5f;
                 float halfHeight = Screen.height * 0.5f;
-                Vector2 edgeOffset = ClampToScreenEdge(dirToPoint, cam, halfWidth, halfHeight);
+                Vector2 edgeOffset = UnityAimHelper.ClampToScreenEdge(dirToPoint, cam, halfWidth, halfHeight);
 
                 if (canvasScaleFactor > 0f && canvasScaleFactor != 1f)
                 {
@@ -503,43 +493,7 @@ namespace CameraUnlock.Core.Unity.Extensions
                 throw new ArgumentNullException(nameof(cam));
             }
 
-            // Project a point along the aim direction to screen coordinates
-            Vector3 aimWorldPoint = cam.transform.position + aimDirection * projectionDistance;
-            Vector3 screenPoint = cam.WorldToScreenPoint(aimWorldPoint);
-
-            float halfWidth = Screen.width * 0.5f;
-            float halfHeight = Screen.height * 0.5f;
-
-            // screenPoint.z > 0 means the point is in front of the camera
-            if (screenPoint.z > 0)
-            {
-                return new Vector2(screenPoint.x - halfWidth, screenPoint.y - halfHeight);
-            }
-
-            // Aim is behind camera - clamp to screen edge
-            return ClampToScreenEdge(aimDirection, cam, halfWidth, halfHeight);
-        }
-
-        /// <summary>
-        /// Clamps the reticle offset to the screen edge when aim direction is behind the camera.
-        /// </summary>
-        private static Vector2 ClampToScreenEdge(Vector3 aimDirection, Camera cam, float halfWidth, float halfHeight)
-        {
-            Vector3 localAim = cam.transform.InverseTransformDirection(aimDirection);
-
-            // Invert and normalize to edge
-            float x = -localAim.x;
-            float y = -localAim.y;
-
-            float maxComponent = Mathf.Max(Mathf.Abs(x), Mathf.Abs(y));
-            if (maxComponent > 0.001f)
-            {
-                x /= maxComponent;
-                y /= maxComponent;
-            }
-
-            // Scale to 90% of screen edge
-            return new Vector2(x * halfWidth * 0.9f, y * halfHeight * 0.9f);
+            return UnityAimHelper.ProjectAimClamped(cam, aimDirection, projectionDistance, 0.9f);
         }
     }
 }

@@ -208,7 +208,7 @@ namespace CameraUnlock.Core.Unity.Aim
                 return Vector2.zero;
             }
 
-            return ProjectAimDirection(camera, GetAimDirection(camera));
+            return UnityAimHelper.ComputeScreenOffsetClamped(camera, GetAimDirection(camera));
         }
 
         /// <summary>
@@ -225,26 +225,7 @@ namespace CameraUnlock.Core.Unity.Aim
                 return Vector2.zero;
             }
 
-            return ProjectAimDirection(camera, GetAimDirectionForViewMatrix(camera));
-        }
-
-        private static Vector2 ProjectAimDirection(Camera camera, Vector3 aimDirection)
-        {
-            // Project aim point onto screen
-            Vector3 aimWorldPoint = camera.transform.position + aimDirection * 10f;
-            Vector3 screenPoint = camera.WorldToScreenPoint(aimWorldPoint);
-
-            float halfWidth = Screen.width * 0.5f;
-            float halfHeight = Screen.height * 0.5f;
-
-            // screenPoint.z > 0 means the point is in front of the camera
-            if (screenPoint.z > 0f)
-            {
-                return new Vector2(screenPoint.x - halfWidth, screenPoint.y - halfHeight);
-            }
-
-            // Aim is behind camera - clamp to screen edge using shared helper
-            return UnityAimHelper.ClampToScreenEdge(aimDirection, camera, halfWidth, halfHeight);
+            return UnityAimHelper.ComputeScreenOffsetClamped(camera, GetAimDirectionForViewMatrix(camera));
         }
     }
 }
