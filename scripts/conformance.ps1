@@ -49,6 +49,7 @@ $ErrorActionPreference = 'Stop'
 $CoreRoot = Split-Path -Parent $PSScriptRoot
 $ReposRoot = Split-Path -Parent $CoreRoot
 Import-Module (Join-Path $CoreRoot 'powershell/ReleaseWorkflow.psm1') -Force
+. (Join-Path $PSScriptRoot 'lib/FleetRepos.ps1')
 
 # The one SHA the fleet is meant to agree on per action. Bumping is a deliberate
 # edit to that file; sync-templates.ps1 is what pushes it out.
@@ -1827,14 +1828,6 @@ $CHECK_TABLE = [ordered]@{
 # Repo selection
 # ---------------------------------------------------------------------------
 
-function Resolve-RepoPath {
-    param([string]$Token)
-    foreach ($candidate in @($Token, (Join-Path $ReposRoot $Token), (Join-Path $ReposRoot "$Token-headtracking"), (Join-Path $ReposRoot "$Token-head-tracking"))) {
-        if (Test-Path -LiteralPath $candidate -PathType Container) { return (Resolve-Path -LiteralPath $candidate).Path }
-    }
-    throw "No repo found for '$Token' - tried it as a path and under $ReposRoot."
-}
-
 $selected = @($Check | Where-Object { $_ })
 if ($selected.Count -eq 0) { $selected = $CHECK_IDS }
 foreach ($id in $selected) {
@@ -1843,42 +1836,9 @@ foreach ($id in $selected) {
 
 if ($All) {
     if ($Repo) { throw '-All and -Repo are mutually exclusive.' }
-    # A mod repo, not every sibling checkout: either a git checkout that
-    # vendors this core, or one whose name marks it as a head-tracking mod.
-    # lopari, headcam and quickfeed all have scripts/ and a pixi.toml, none of
-    # them vendors core and none is named like a mod, and none of these
-    # invariants applies to them.
-    #
-    # Neither signal alone is enough. Vendoring alone (the previous rule)
-    # missed homeworld-remastered-collection and kingdom-come-deliverance-2,
-    # which pin core but do not carry the `-headtracking` suffix - that is why
-    # this rule replaced a bare `-headtracking` name match in the first place.
-    # But vendoring alone also misses a mod repo that has not (yet, or ever)
-    # taken a core dependency: a-plague-tale-innocence-headtracking,
-    # baldurs-gate-3-headtracking, euro-truck-simulator-2-headtracking,
-    # generic-freelook-headtracking, poppy-playtime-headtracking,
-    # red-dead-redemption-head-tracking, system-shock-2-headtracking,
-    # the-long-dark-head-tracking and universal-head-tracking all ship (or are
-    # building toward) a head-tracking mod with nothing under
-    # `cameraunlock-core` checked out, so the vendoring-only rule scanned none
-    # of them. Checking either signal - name or vendoring - is what catches
-    # both groups without re-excluding the two that motivated the first
-    # widening. Individual checks that need a core pin (core-pin, and any
-    # wrapper/action-pin sync unit that needs scripts/*.cmd or
-    # .github/workflows to exist) already no-op or WARN gracefully when the
-    # thing they need is absent; that is what makes it safe to widen the
-    # selection instead of the checks.
-    #
-    # sync-templates.ps1 and sync-core-notices.ps1 use this same rule.
-    $roots = @(Get-ChildItem -Path $ReposRoot -Directory |
-        Where-Object {
-            $_.FullName -ne $CoreRoot -and
-            (Test-Path (Join-Path $_.FullName '.git')) -and
-            ((Test-Path (Join-Path $_.FullName 'cameraunlock-core')) -or ($_.Name -match '-head-?tracking$'))
-        } |
-        Select-Object -ExpandProperty FullName)
+    $roots = @(Get-FleetModRepos -ReposRoot $ReposRoot -CoreRoot $CoreRoot)
 } elseif ($Repo) {
-    $roots = @($Repo | ForEach-Object { Resolve-RepoPath $_ })
+    $roots = @($Repo | ForEach-Object { Resolve-RepoPath -Token $_ -ReposRoot $ReposRoot })
 } else {
     $roots = @([System.IO.Path]::GetFullPath((Join-Path $CoreRoot '..')))
 }

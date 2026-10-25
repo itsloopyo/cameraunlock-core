@@ -17,7 +17,6 @@
 // --report prints the fleet report: game-local (section, key) pairs shared by three or more
 // canonical repos, the game-local section names in use, and each repo's per_game rows.
 
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,11 +37,9 @@ import {
 } from "./lib/canonical-ini.mjs";
 import { readConfigFormat } from "./lib/config-format-file.mjs";
 import { parseKeyBindings } from "./lib/key-bindings.mjs";
+import { REPOS_ROOT, git, readCoreJson, resolveRepoRoot } from "./lib/repos.mjs";
 
-const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REPOS_ROOT = path.dirname(CORE_ROOT);
-const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(CORE_ROOT, rel), "utf8"));
-const SCHEMA = readJson("data/config-schema.json");
+const SCHEMA = readCoreJson("data/config-schema.json");
 const FORMAT = readConfigFormat();
 
 // Design 1.6 rule 3: the bare nouns of the schema's deliberately_unaliased list.
@@ -303,12 +300,6 @@ export function lintCanonicalConfig(bytes, { dialect, perGame }) {
   return problems;
 }
 
-function git(root, args) {
-  const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
-  if (result.error) throw result.error;
-  return result;
-}
-
 const lowerKeys = (object) => new Map(Object.keys(object).map((name) => [name.toLowerCase(), name]));
 const EXEMPT = lowerKeys(FORMAT.exempt);
 const CONFIGS = lowerKeys(FORMAT.configs);
@@ -415,13 +406,6 @@ export function manualZipConfigEntries(state, entries) {
     .map((e) => e.replace(/\\/g, "/"))
     .filter((e) => !e.endsWith("/"))
     .filter((e) => files.some((p) => p === e.toLowerCase() || p.endsWith(`/${e.toLowerCase()}`)));
-}
-
-function resolveRoot(token) {
-  for (const candidate of [token, path.join(REPOS_ROOT, token), path.join(REPOS_ROOT, `${token}-headtracking`)]) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return path.resolve(candidate);
-  }
-  throw new Error(`no repo found for '${token}', as a path or under ${REPOS_ROOT}`);
 }
 
 function lintMain(roots) {
@@ -554,7 +538,7 @@ function main(argv) {
   if (rootsFile !== null) {
     tokens = [...tokens, ...fs.readFileSync(rootsFile, "utf8").split(/\r?\n/).filter((line) => line !== "")];
   }
-  const roots = tokens.length > 0 ? tokens.map(resolveRoot) : [REPOS_ROOT];
+  const roots = tokens.length > 0 ? tokens.map(resolveRepoRoot) : [REPOS_ROOT];
   if (json) {
     console.log(JSON.stringify(roots.map(repoState), null, 1));
     return 0;

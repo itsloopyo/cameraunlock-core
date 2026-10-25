@@ -31,7 +31,6 @@
 // canonical_since above every v* tag whose committed config lacks the stamp needs the tags, so
 // it runs on a full clone only.
 
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,13 +47,11 @@ import {
   trimSpaceTab,
 } from "./lib/canonical-ini.mjs";
 import { readConfigFormat } from "./lib/config-format-file.mjs";
+import { REPOS_ROOT, git, readCoreJson, resolveRepoRoot } from "./lib/repos.mjs";
 
-const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REPOS_ROOT = path.dirname(CORE_ROOT);
-const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(CORE_ROOT, rel), "utf8"));
-const SCHEMA = readJson("data/config-schema.json");
+const SCHEMA = readCoreJson("data/config-schema.json");
 const FORMAT = readConfigFormat();
-const GAMES = readJson("data/games.json").games;
+const GAMES = readCoreJson("data/games.json").games;
 
 const FIELDS = ["path", "anchor", "legacy_source", "canonical_since", "per_game"];
 // The renderer writes an Engine row marked PerGame() at its default as "; Key=value".
@@ -439,12 +436,6 @@ export function descriptorProblems(man, { root, state, checkVersion }) {
   return repoProblems(man, root, state ?? repoState(root));
 }
 
-function git(root, args, encoding = "utf8") {
-  const result = spawnSync("git", ["-C", root, ...args], { encoding });
-  if (result.error) throw result.error;
-  return result;
-}
-
 // canonical_since has to be above every v* tag whose committed config carries no stamp, since
 // it marks where the canonical file starts and each of those versions reads the old format.
 export function tagProblems(root, state, config) {
@@ -522,13 +513,6 @@ export function repoReport(root, state = repoState(root), release = null) {
   return report;
 }
 
-function resolveRoot(token) {
-  for (const candidate of [token, path.join(REPOS_ROOT, token), path.join(REPOS_ROOT, `${token}-headtracking`)]) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return path.resolve(candidate);
-  }
-  throw new Error(`no repo found for '${token}', as a path or under ${REPOS_ROOT}`);
-}
-
 function main(argv) {
   const rootsFileAt = argv.indexOf("--roots-file");
   let tokens = argv;
@@ -550,7 +534,7 @@ function main(argv) {
   tokens = tokens.filter((t) => t !== "--json" && t !== "--package");
   const unknown = tokens.find((t) => t.startsWith("--"));
   if (unknown) throw new Error(`unknown option ${unknown}`);
-  const roots = tokens.length > 0 ? tokens.map(resolveRoot) : [REPOS_ROOT];
+  const roots = tokens.length > 0 ? tokens.map(resolveRepoRoot) : [REPOS_ROOT];
   if (release !== null) {
     let refused = false;
     for (const root of roots) {
