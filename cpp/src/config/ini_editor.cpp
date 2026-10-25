@@ -1,4 +1,7 @@
 #include "cameraunlock/config/ini_editor.h"
+#include "cameraunlock/config/value_codecs.h"
+
+#include "ascii_text_internal.h"
 
 #include <cstddef>
 #include <stdexcept>
@@ -10,9 +13,11 @@ namespace {
 
 constexpr size_t kNpos = std::string::npos;
 
-bool IsSpaceOrTab(char c) { return c == ' ' || c == '\t'; }
-
-char FoldAscii(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
+using config::detail::CanonicalLineOfOffset;
+using config::detail::EqualsAsciiIgnoreCase;
+using config::detail::FoldAscii;
+using config::detail::HexByte;
+using config::detail::IsSpaceOrTab;
 
 bool EqualsAsciiIgnoreCase(const std::string& text, size_t begin, size_t end,
                            const std::string& other) {
@@ -23,17 +28,11 @@ bool EqualsAsciiIgnoreCase(const std::string& text, size_t begin, size_t end,
     return true;
 }
 
-bool EqualsAsciiIgnoreCase(const std::string& a, const std::string& b) {
-    return EqualsAsciiIgnoreCase(a, 0, a.size(), b);
-}
-
 void RequirePrintableAscii(const std::string& text, const char* what) {
-    static const char kHex[] = "0123456789ABCDEF";
     for (const char c : text) {
         const unsigned char b = static_cast<unsigned char>(c);
         if (b >= 0x20 && b <= 0x7E) continue;
-        throw std::invalid_argument(std::string("IniEdit ") + what + " holds the byte 0x" +
-                                    kHex[b >> 4] + kHex[b & 0xF] +
+        throw std::invalid_argument(std::string("IniEdit ") + what + " holds the byte " + HexByte(b) +
                                     ", and only printable ASCII (0x20 to 0x7E) can be written");
     }
 }
@@ -41,13 +40,12 @@ void RequirePrintableAscii(const std::string& text, const char* what) {
 // A value is text for a person to read, a device's name in their own language for one: it may
 // hold UTF-8, which the reader keeps as its bytes. A control byte would end or corrupt the line.
 void RequireValueText(const std::string& text) {
-    static const char kHex[] = "0123456789ABCDEF";
     size_t i = 0;
     while (i < text.size()) {
         const unsigned char b = static_cast<unsigned char>(text[i]);
         if (b < 0x80) {
             if (b < 0x20 || b == 0x7F) {
-                throw std::invalid_argument(std::string("IniEdit value holds the byte 0x") + kHex[b >> 4] + kHex[b & 0xF] +
+                throw std::invalid_argument("IniEdit value holds the byte " + HexByte(b) +
                                             ", a control byte, which cannot be written");
             }
             ++i;
@@ -188,15 +186,6 @@ void ClassifyLine(const std::string& s, Line& line) {
     line.value_begin = value_begin;
 }
 
-// The canonical reader's line count up to `offset`: CRLF, LF and a lone CR each end a line.
-int LineOfOffset(const std::string& s, size_t offset) {
-    int line = 1;
-    for (size_t i = 0; i < offset; ++i) {
-        if (s[i] == '\n' || (s[i] == '\r' && (i + 1 >= s.size() || s[i + 1] != '\n'))) ++line;
-    }
-    return line;
-}
-
 IniEditResult Refuse(IniEditRefusal refusal, std::vector<int> lines) {
     IniEditResult result;
     result.refusal = refusal;
@@ -273,7 +262,7 @@ IniEditResult EditIni(const std::string& original, const std::vector<IniEdit>& e
         return Refuse(IniEditRefusal::Utf16, {});
     }
     const size_t nul = s.find('\0');
-    if (nul != kNpos) return Refuse(IniEditRefusal::NulByte, {LineOfOffset(s, nul)});
+    if (nul != kNpos) return Refuse(IniEditRefusal::NulByte, {CanonicalLineOfOffset(s, nul)});
     const size_t body = s.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
 
     std::vector<Line> lines;

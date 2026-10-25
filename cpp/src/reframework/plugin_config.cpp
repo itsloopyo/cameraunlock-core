@@ -4,10 +4,13 @@
 #include <cameraunlock/config/ini_editor.h>
 #include <cameraunlock/config/ini_reader.h>
 #include <cameraunlock/config/retired_keys.h>
+#include <cameraunlock/config/value_codecs.h>
 #include <cameraunlock/config/value_guards.h>
 #include <cameraunlock/math/finite_utils.h>
 #include <cameraunlock/protocol/port_utils.h>
 #include <cameraunlock/reframework/log_callback.h>
+
+#include "../config/ascii_text_internal.h"
 
 #include <windows.h>
 
@@ -152,7 +155,11 @@ std::string FromEditorView(const std::string& view) {
     return bytes;
 }
 
-bool IsSpaceOrTab(char c) { return c == ' ' || c == '\t'; }
+using cameraunlock::config::detail::EqualsAsciiIgnoreCase;
+using cameraunlock::config::detail::IsSpaceOrTab;
+using cameraunlock::config::detail::TrimSpaceOrTab;
+
+std::string HexByte(char c) { return cameraunlock::config::detail::HexByte(static_cast<unsigned char>(c)); }
 
 // GetPrivateProfileStringA skips these before or after a key, before a header, just inside
 // its brackets and at the start of a value, while EditIni keeps them as part of the line.
@@ -160,30 +167,6 @@ bool IsSpaceOrTab(char c) { return c == ' ' || c == '\t'; }
 bool IsSkippedControlByte(char c) {
     const unsigned char b = static_cast<unsigned char>(c);
     return b >= 0x01 && b < 0x20 && c != '\t' && c != '\n' && c != '\r';
-}
-
-std::string HexByte(char c) {
-    static const char kHex[] = "0123456789ABCDEF";
-    const unsigned char b = static_cast<unsigned char>(c);
-    return std::string("0x") + kHex[b >> 4] + kHex[b & 0xF];
-}
-
-std::string_view TrimSpaceOrTab(std::string_view text) {
-    while (!text.empty() && IsSpaceOrTab(text.front())) text.remove_prefix(1);
-    while (!text.empty() && IsSpaceOrTab(text.back())) text.remove_suffix(1);
-    return text;
-}
-
-bool EqualsAsciiIgnoreCase(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        char x = a[i];
-        char y = b[i];
-        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
-        if (x != y) return false;
-    }
-    return true;
 }
 
 int LineOfOffset(const std::string& bytes, size_t offset) {
@@ -587,7 +570,7 @@ bool PluginConfig::Save(const char* path, const PluginConfigSchema& schema) cons
     file << "; Delete this file to reset to defaults\n\n";
 
     file << "[Network]\n";
-    file << "; UDP port for OpenTrack data (default: 4242)\n";
+    file << "; UDP port for OpenTrack data (default: " << kDefaultUdpPort << ")\n";
     file << "UDPPort=" << udpPort << "\n\n";
 
     file << "[Sensitivity]\n";

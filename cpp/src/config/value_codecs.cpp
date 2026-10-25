@@ -1,5 +1,7 @@
 #include "cameraunlock/config/value_codecs.h"
 
+#include "ascii_text_internal.h"
+
 #include <charconv>
 #include <cmath>
 #include <cstring>
@@ -37,11 +39,7 @@ DecimalScan ScanDecimal(std::string_view text, bool& negative, unsigned long lon
 bool EqualsAsciiIgnoreCase(std::string_view a, std::string_view b) {
     if (a.size() != b.size()) return false;
     for (std::size_t i = 0; i < a.size(); ++i) {
-        char x = a[i];
-        char y = b[i];
-        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y - 'A' + 'a');
-        if (x != y) return false;
+        if (FoldAscii(a[i]) != FoldAscii(b[i])) return false;
     }
     return true;
 }
@@ -67,15 +65,10 @@ std::string JoinAlternatives(const std::vector<std::string>& items) {
 
 namespace {
 
-bool IsSpaceOrTab(char c) { return c == ' ' || c == '\t'; }
-
-std::string_view Trim(std::string_view text) {
-    std::size_t begin = 0;
-    std::size_t end = text.size();
-    while (begin < end && IsSpaceOrTab(text[begin])) ++begin;
-    while (end > begin && IsSpaceOrTab(text[end - 1])) --end;
-    return text.substr(begin, end - begin);
-}
+using detail::HexByte;
+using detail::IsSpaceOrTab;
+using detail::Quote;
+using detail::TrimSpaceOrTab;
 
 std::vector<std::string_view> SplitAtCommas(std::string_view text) {
     std::vector<std::string_view> parts;
@@ -89,16 +82,6 @@ std::vector<std::string_view> SplitAtCommas(std::string_view text) {
         parts.push_back(text.substr(start, comma - start));
         start = comma + 1;
     }
-}
-
-std::string Quote(std::string_view text) { return "'" + std::string(text) + "'"; }
-
-std::string HexByte(unsigned char byte) {
-    static const char kDigits[] = "0123456789ABCDEF";
-    std::string text = "0x";
-    text += kDigits[byte >> 4];
-    text += kDigits[byte & 0x0F];
-    return text;
 }
 
 bool IsDigit(char c) { return c >= '0' && c <= '9'; }
@@ -397,7 +380,7 @@ CodecParseResult<ColorCodec::Value> ColorCodec::Parse(std::string_view text) con
     }
     const FloatCodec component(0.0f, 1.0f);
     for (std::size_t i = 0; i < 4; ++i) {
-        const std::string_view item = Trim(parts[i]);
+        const std::string_view item = TrimSpaceOrTab(parts[i]);
         const CodecParseResult<float> read = component.Parse(item);
         if (!read.ok()) {
             result.value = Value{};
@@ -429,12 +412,12 @@ bool ColorCodec::Equal(const Value& a, const Value& b) const {
 template <class ItemCodec>
 CodecParseResult<typename ListCodec<ItemCodec>::Value> ListCodec<ItemCodec>::Parse(std::string_view text) const {
     CodecParseResult<Value> result;
-    if (Trim(text).empty()) return result;
+    if (TrimSpaceOrTab(text).empty()) return result;
 
     const ItemCodec codec{};
     const std::vector<std::string_view> parts = SplitAtCommas(text);
     for (std::size_t i = 0; i < parts.size(); ++i) {
-        const std::string_view item = Trim(parts[i]);
+        const std::string_view item = TrimSpaceOrTab(parts[i]);
         if (item.empty()) {
             result.value.clear();
             result.error = "item " + std::to_string(i + 1) + " is empty: expected a value between commas";

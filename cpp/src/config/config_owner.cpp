@@ -112,16 +112,6 @@ std::uint64_t FileTimeCount(const FILETIME& time) {
 
 bool IsSeparator(wchar_t c) { return c == L'\\' || c == L'/'; }
 
-char FoldAscii(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
-
-bool EqualsAsciiIgnoreCase(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        if (FoldAscii(a[i]) != FoldAscii(b[i])) return false;
-    }
-    return true;
-}
-
 // Returns the Win32 error, 0 when the handle was read to its end.
 std::uint32_t ReadToEnd(HANDLE handle, std::string& bytes) {
     bytes.clear();

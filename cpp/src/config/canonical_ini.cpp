@@ -1,6 +1,8 @@
 #include "cameraunlock/config/canonical_ini.h"
 
+#include "ascii_text_internal.h"
 #include "canonical_ini_internal.h"
+#include "cameraunlock/config/value_codecs.h"
 
 #include <algorithm>
 #include <climits>
@@ -22,30 +24,13 @@ bool StartsWithUtf16Mark(std::string_view bytes) {
 
 namespace {
 
+using detail::CanonicalLineOfOffset;
+using detail::EqualsAsciiIgnoreCase;
 using detail::StartsWithUtf16Mark;
+using detail::TrimSpaceOrTab;
 
 constexpr std::string_view kStampSection = "CameraUnlock";
 constexpr std::string_view kFormatKey = "ConfigFormat";
-
-bool IsSpaceOrTab(char c) { return c == ' ' || c == '\t'; }
-
-char FoldAscii(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
-
-bool EqualsAsciiIgnoreCase(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (FoldAscii(a[i]) != FoldAscii(b[i])) return false;
-    }
-    return true;
-}
-
-std::string_view Trim(std::string_view s) {
-    size_t begin = 0;
-    size_t end = s.size();
-    while (begin < end && IsSpaceOrTab(s[begin])) ++begin;
-    while (end > begin && IsSpaceOrTab(s[end - 1])) --end;
-    return s.substr(begin, end - begin);
-}
 
 // Calls visit(line, number) for each line, untrimmed and without its terminator.
 template <class Visit>
@@ -65,16 +50,6 @@ void ForEachLine(std::string_view bytes, Visit visit) {
     }
 }
 
-int LineOfOffset(std::string_view bytes, size_t offset) {
-    int line = 1;
-    for (size_t i = 0; i < offset; ++i) {
-        if (bytes[i] == '\n' || (bytes[i] == '\r' && (i + 1 >= bytes.size() || bytes[i + 1] != '\n'))) {
-            ++line;
-        }
-    }
-    return line;
-}
-
 struct Header {
     bool closed = false;
     std::string_view name;
@@ -87,15 +62,15 @@ Header ParseHeader(std::string_view line) {
     const size_t close = line.find(']', 1);
     if (close == std::string_view::npos) return header;
     header.closed = true;
-    header.name = Trim(line.substr(1, close - 1));
-    header.trailing = Trim(line.substr(close + 1));
+    header.name = TrimSpaceOrTab(line.substr(1, close - 1));
+    header.trailing = TrimSpaceOrTab(line.substr(close + 1));
     return header;
 }
 
 bool HasStampInBytes(std::string_view bytes) {
     bool found = false;
     ForEachLine(bytes, [&](std::string_view raw, int) {
-        const std::string_view line = Trim(raw);
+        const std::string_view line = TrimSpaceOrTab(raw);
         if (found || line.empty() || line[0] != '[') return;
         const Header header = ParseHeader(line);
         found = header.closed && EqualsAsciiIgnoreCase(header.name, kStampSection);
@@ -203,7 +178,7 @@ CanonicalIni ParseCanonicalIni(std::string_view bytes) {
     const size_t nul = bytes.find('\0');
     if (nul != std::string_view::npos) {
         doc.status = CanonicalReadStatus::NulByte;
-        doc.unreadable_line = LineOfOffset(bytes, nul);
+        doc.unreadable_line = CanonicalLineOfOffset(bytes, nul);
         return doc;
     }
 
@@ -211,7 +186,7 @@ CanonicalIni ParseCanonicalIni(std::string_view bytes) {
     int current = -1;
     int stamp_header_line = 0;
     ForEachLine(bytes, [&](std::string_view raw, int number) {
-        const std::string_view line = Trim(raw);
+        const std::string_view line = TrimSpaceOrTab(raw);
         if (line.empty() || line[0] == ';' || line[0] == '#') return;
 
         if (line[0] == '[') {
@@ -249,8 +224,8 @@ CanonicalIni ParseCanonicalIni(std::string_view bytes) {
             doc.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::MissingEquals, number, "", "", line));
             return;
         }
-        const std::string_view key = Trim(line.substr(0, equals));
-        const std::string_view value = Trim(line.substr(equals + 1));
+        const std::string_view key = TrimSpaceOrTab(line.substr(0, equals));
+        const std::string_view value = TrimSpaceOrTab(line.substr(equals + 1));
         if (key.empty()) {
             doc.diagnostics.push_back(MakeDiagnostic(CanonicalDiagnosticKind::EmptyKey, number, "", "", line));
             return;
@@ -303,7 +278,7 @@ std::vector<CanonicalKeyLine> CanonicalKeyLines(std::string_view bytes) {
     std::vector<CanonicalKeyLine> found;
     std::optional<std::string> section;
     ForEachLine(bytes, [&](std::string_view raw, int number) {
-        const std::string_view line = Trim(raw);
+        const std::string_view line = TrimSpaceOrTab(raw);
         if (line.empty() || line[0] == ';' || line[0] == '#') return;
         if (line[0] == '[') {
             const Header header = ParseHeader(line);
@@ -313,9 +288,9 @@ std::vector<CanonicalKeyLine> CanonicalKeyLines(std::string_view bytes) {
         }
         const size_t equals = line.find('=');
         if (equals == std::string_view::npos) return;
-        const std::string_view key = Trim(line.substr(0, equals));
+        const std::string_view key = TrimSpaceOrTab(line.substr(0, equals));
         if (key.empty()) return;
-        found.push_back(CanonicalKeyLine{section, std::string(key), std::string(Trim(line.substr(equals + 1))), number});
+        found.push_back(CanonicalKeyLine{section, std::string(key), std::string(TrimSpaceOrTab(line.substr(equals + 1))), number});
     });
     return found;
 }

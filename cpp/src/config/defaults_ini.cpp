@@ -7,6 +7,8 @@
 #include "cameraunlock/input/key_names.g.h"
 #include "cameraunlock/tracking/tracking_mode.h"
 
+#include "ascii_text_internal.h"
+
 #include <array>
 #include <cstddef>
 #include <iterator>
@@ -33,14 +35,6 @@ constexpr const char* kHeader[] = {
     "; Space, Escape, Pause, Print, Menu, Numlock, CapsLock, ScrollLock, LeftWindows, RightWindows.",
     "; A value holding any other key makes every game use its built-in keys for that action.",
 };
-
-std::string_view Trim(std::string_view text) {
-    std::size_t begin = 0;
-    std::size_t end = text.size();
-    while (begin < end && (text[begin] == ' ' || text[begin] == '\t')) ++begin;
-    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t')) --end;
-    return text.substr(begin, end - begin);
-}
 
 // The bytes as UTF-8 for a log line: well-formed sequences kept, each maximal subpart of an
 // ill-formed one written as U+FFFD, which is how C# core's CodecText.Utf8Text decodes them.
@@ -108,7 +102,7 @@ std::string KeyNameError(std::string_view text) {
         const std::string_view item =
             text.substr(start, comma == std::string_view::npos ? std::string_view::npos : comma - start);
         const std::size_t plus = item.rfind('+');
-        const std::string_view key = Trim(plus == std::string_view::npos ? item : item.substr(plus + 1));
+        const std::string_view key = TrimSpaceOrTab(plus == std::string_view::npos ? item : item.substr(plus + 1));
         if (!key.empty() && !IsModifier(key) && !IsVirtualKeyName(key)) {
             return std::string(key) + " is not one of the key names this file takes";
         }
