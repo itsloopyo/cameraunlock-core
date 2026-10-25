@@ -48,6 +48,7 @@ final class Win32Host {
     private static final int ERROR_INSUFFICIENT_BUFFER = 122;
     private static final int SOCKET_ERROR = -1;
     private static final int WSAEWOULDBLOCK = 10035;
+    private static final int WSAEMSGSIZE = 10040;
     /** Wine's Unix code page, which defaults_location.cpp converts with. */
     private static final int UNIX_CODE_PAGE = 65010;
     /** WIN32_FIND_DATAW up to cFileName, the same in both: attributes, three FILETIMEs, sizes, two reserved. */
@@ -862,19 +863,21 @@ final class Win32Host {
                 }
                 if (ready == 0) continue;
                 senderSize.set(INT, 0, SOCKADDR_IN);
-                int bytes;
+                int bytes, error;
                 // Under the lock StopReceiving and closesocket are called under, so the socket read is
                 // this thread's and not a new one given the same handle value. It does not block: the
                 // socket is non-blocking and select said it is readable.
                 synchronized (core) {
                     if (mine.stopped) return;
                     bytes = (int) invoke(recvfrom, threadCapture, socketHandle, buffer, RECEIVE_BUFFER, 0, sender, senderSize);
-                    int error = bytes == SOCKET_ERROR ? (int) WSA_LAST_ERROR.get(threadCapture, 0L) : 0;
+                    error = bytes == SOCKET_ERROR ? (int) WSA_LAST_ERROR.get(threadCapture, 0L) : 0;
                     if (bytes == SOCKET_ERROR && error == WSAEWOULDBLOCK) continue;
                     core.received(receiver, buffer.toArray(ValueLayout.JAVA_BYTE), bytes, error, sender.toArray(ValueLayout.JAVA_BYTE));
                 }
-                // A socket that fails every read would otherwise take the module's lock in a loop.
-                if (bytes == SOCKET_ERROR) Thread.sleep(WasmCore.TICK_MS);
+                // A socket that fails every read would otherwise take the module's lock in a loop. A datagram
+                // too long for the buffer is one datagram dropped, not a failing socket: sleeping on each would
+                // let anyone sending more than about sixty a second hold every pose behind them.
+                if (bytes == SOCKET_ERROR && error != WSAEMSGSIZE) Thread.sleep(WasmCore.TICK_MS);
             }
             if (mine.stopped || core.dead()) return;
         } catch (Throwable failure) {

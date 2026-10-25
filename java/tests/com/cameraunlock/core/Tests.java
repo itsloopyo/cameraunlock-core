@@ -63,6 +63,7 @@ public final class Tests {
         aTrackerOnThePortReachesTheFrame(testing);
         if (Testing.BUNDLED) {
             aReceiveLoopThatFailsIsReopened(testing);
+            aFloodOfLongDatagramsDoesNotHoldThePoseBack(testing);
             aModuleThatTrapsIsNotCalledAgain();
         }
         logGoesToItsFile(testing.core, scratch);
@@ -612,6 +613,37 @@ public final class Tests {
             }
         } finally {
             core.stop();
+        }
+    }
+
+    /** Datagrams too long for a pose are dropped one by one, and a pose sent after a burst of them still arrives at once. */
+    private static void aFloodOfLongDatagramsDoesNotHoldThePoseBack(Testing testing) throws Throwable {
+        CameraUnlock core = testing.core;
+        testing.reset();
+        core.configure(core.settingsDefaults());
+        CameraUnlock.FrameInput input = leaning();
+        input.flags = CameraUnlock.FRAME_ACTIVE;
+        int port = freePort();
+        core.start(port);
+        try (DatagramSocket tracker = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
+            byte[] tooLong = new byte[200];
+            for (int sent = 0; sent < 300; sent++) {
+                tracker.send(new DatagramPacket(tooLong, tooLong.length, InetAddress.getLoopbackAddress(), port));
+            }
+            byte[] pose = datagram(0, 0, 0, 25, 0, 0);
+            long start = System.nanoTime();
+            CameraUnlock.Frame frame = frameUntil(core, input, () -> {
+                try {
+                    tracker.send(new DatagramPacket(pose, pose.length, InetAddress.getLoopbackAddress(), port));
+                } catch (IOException failure) {
+                    throw new IllegalStateException(failure);
+                }
+            }, f -> (f.flags & CameraUnlock.STATE_POSE) != 0 && near(f.headYaw, 25f));
+            long took = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            check(near(frame.headYaw, 25f) && took < 1000, "a pose behind 300 datagrams too long for one arrives in " + took + " ms, yaw " + frame.headYaw);
+        } finally {
+            core.stop();
+            core.logTake();
         }
     }
 
