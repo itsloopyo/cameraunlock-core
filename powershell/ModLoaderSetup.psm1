@@ -16,26 +16,9 @@ $ProgressPreference = "SilentlyContinue"
 # module, then calls Find-GamePath. That is a CommandNotFoundException for the whole
 # fleet, and an order-dependent one, so it presents as intermittent.
 Import-Module (Join-Path $PSScriptRoot 'GamePathDetection.psm1')
+Import-Module (Join-Path $PSScriptRoot 'FileHash.psm1')
 
 $Script:StateFileName = ".headtracking-state.json"
-
-# Not Get-FileHash: Windows PowerShell 5.1 autoloads it from a script module,
-# and a powershell.exe started from pwsh (GitHub Actions' shell: pwsh)
-# inherits pwsh's PSModulePath, resolves the Core-only
-# Microsoft.PowerShell.Utility first and reports the cmdlet as not recognized.
-function Get-Sha256Hex {
-    [OutputType([string])]
-    param([Parameter(Mandatory)][string]$LiteralPath)
-
-    $sha    = [System.Security.Cryptography.SHA256]::Create()
-    $stream = [System.IO.File]::OpenRead((Convert-Path -LiteralPath $LiteralPath))
-    try {
-        return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
-    } finally {
-        $stream.Dispose()
-        $sha.Dispose()
-    }
-}
 
 # The state file is parsed by the Lopari launcher with a strict JSON parser
 # that rejects a UTF-8 BOM (the mod then reads as "not installed"). Windows
@@ -1210,7 +1193,7 @@ function Invoke-FetchLatestLoader {
 
     if ($DirectUrl) {
         Invoke-WebRequest -Uri $DirectUrl -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
-        $sha = Get-Sha256Hex -LiteralPath $OutputPath
+        $sha = Get-FileSha256 -LiteralPath $OutputPath
         return @{
             Tag = ''
             CommitSha = ''
@@ -1265,7 +1248,7 @@ function Invoke-FetchLatestLoader {
 
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $OutputPath -UseBasicParsing -TimeoutSec $TimeoutSec -Headers (New-DownloadRequestHeaders)
 
-    $sha = Get-Sha256Hex -LiteralPath $OutputPath
+    $sha = Get-FileSha256 -LiteralPath $OutputPath
 
     $commitSha = ''
     try {
@@ -1366,7 +1349,7 @@ function Update-VendoredLoader {
     # SHA-256, leave the tree alone. Otherwise every run dirties README.md with a new
     # FetchedAt timestamp even when upstream is unchanged.
     if ((Test-Path -LiteralPath $targetPath) -and (Test-Path -LiteralPath $readmePath) -and (Test-Path -LiteralPath $licensePath)) {
-        $existingSha = Get-Sha256Hex -LiteralPath $targetPath
+        $existingSha = Get-FileSha256 -LiteralPath $targetPath
         if ($existingSha -eq $meta.Sha256) {
             Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
             Write-Host "    no change (sha256=$($meta.Sha256.Substring(0,12))... matches on-disk vendor copy)" -ForegroundColor DarkGray
@@ -1492,5 +1475,6 @@ Export-ModuleMember -Function @(
     'Set-UE4SSModEnabled',
     'Invoke-FetchLatestLoader',
     'Update-VendoredLoader',
-    'Refresh-VendoredLoader'
+    'Refresh-VendoredLoader',
+    'Get-FileSha256'
 )

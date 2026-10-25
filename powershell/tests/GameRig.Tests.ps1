@@ -18,6 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 $modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'IsolatedGameTest.psm1'
 Import-Module $modulePath -Force
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'FileHash.psm1')
 
 $script:Failures = 0
 function Check {
@@ -758,7 +759,7 @@ public static class StandInHolder {
     Copy-Item $hostOld $hostCopy -Force
     $old = Start-Holder -Path $hostCopy -How load
     $ran = Invoke-Warned { Invoke-IsolatedGameSession @managed -Run {
-        $seen.Fresh = (Get-FileHash $hostCopy).Hash -eq (Get-FileHash $hostBuilt).Hash
+        $seen.Fresh = (Get-FileSha256 $hostCopy) -eq (Get-FileSha256 $hostBuilt)
         Set-Content (Join-Path $saves 'player.bin') 'changed' -Encoding ASCII
     } }
     Check 'a start with an earlier run''s host DLL still loaded in the folder works, on a fresh copy' ($ran.Thrown -eq '' -and $seen.Fresh) $ran.Thrown

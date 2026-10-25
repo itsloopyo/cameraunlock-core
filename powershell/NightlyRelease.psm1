@@ -36,24 +36,7 @@
 # build is announced, so publishing without it is refused up front.
 
 Import-Module (Join-Path $PSScriptRoot 'DifferentialGate.psm1')
-
-# Not Get-FileHash: Windows PowerShell 5.1 autoloads it from a script module,
-# and a powershell.exe started from pwsh (GitHub Actions' shell: pwsh)
-# inherits pwsh's PSModulePath, resolves the Core-only
-# Microsoft.PowerShell.Utility first and reports the cmdlet as not recognized.
-function Get-Sha256Hex {
-    [OutputType([string])]
-    param([Parameter(Mandatory)][string]$LiteralPath)
-
-    $sha    = [System.Security.Cryptography.SHA256]::Create()
-    $stream = [System.IO.File]::OpenRead((Convert-Path -LiteralPath $LiteralPath))
-    try {
-        return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
-    } finally {
-        $stream.Dispose()
-        $sha.Dispose()
-    }
-}
+Import-Module (Join-Path $PSScriptRoot 'FileHash.psm1')
 
 # release/ keeps the previous run's zips. If the package step didn't actually
 # produce one this time, that stale file is what gets hashed, uploaded as the
@@ -255,7 +238,7 @@ function Publish-NightlyBuild {
             Name = $assetName
             Path = $assetPath
             Size = (Get-Item -LiteralPath $assetPath).Length
-            Hash = Get-Sha256Hex -LiteralPath $assetPath
+            Hash = Get-FileSha256 -LiteralPath $assetPath
         }
     }
     # Uploaded under their own names, which the launcher ZIP's manifest gives.
@@ -264,7 +247,7 @@ function Publish-NightlyBuild {
             Name = $file.Name
             Path = $file.FullName
             Size = $file.Length
-            Hash = Get-Sha256Hex -LiteralPath $file.FullName
+            Hash = Get-FileSha256 -LiteralPath $file.FullName
         }
     }
 
