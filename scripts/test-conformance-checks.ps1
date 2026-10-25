@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 #Requires -Version 5.1
 # ============================================================================
-# Tests for conformance.ps1's pipeline-port and changelog-unreleased checks
+# Tests for conformance.ps1's pipeline-port, changelog-unreleased and manifest checks
 # ============================================================================
 # Run: pixi run test-conformance-checks
 #
@@ -364,29 +364,64 @@ $cases['changelog-long-dev-tag'] = @{
     Expect = @('WARN CHANGELOG\.md''s \[Unreleased\] holds 51 bullets.*The repo has no v\* tag')
 }
 
+function Get-Manifest {
+    param([string]$Mode, $Schema, [switch]$ReleaseAsset)
+    $row = if ($ReleaseAsset) { '{ "source": "mod.jar", "target": "mod.jar", "release_asset": "mod.jar" }' } else { '{ "source": "mod.jar", "target": "mod.jar" }' }
+    return "{ ""schema_version"": $Schema, ""delivery_mode"": ""$Mode"", ""files"": [ $row ] }`n"
+}
+
+# The manifest check runs on its own: over the cases above it would warn that each has no manifest.
+$manifestCases = [ordered]@{}
+$manifestCases['manifest-on-2'] = @{ Root = (New-Repo 'manifest-on-2' @{ 'launcher-manifest.json' = (Get-Manifest 'manifest' 2) }); Expect = @() }
+$manifestCases['manifest-on-3'] = @{
+    Root = (New-Repo 'manifest-on-3' @{ 'launcher-manifest.json' = (Get-Manifest 'manifest' 3) })
+    Expect = @("FAIL schema_version is '3', and delivery_mode 'manifest' is on 2")
+}
+$manifestCases['versioned-on-2'] = @{
+    Root = (New-Repo 'versioned-on-2' @{ 'launcher-manifest.json' = (Get-Manifest 'manifest_versioned' 2) })
+    Expect = @("FAIL schema_version is '2', and delivery_mode 'manifest_versioned' needs 3 or above")
+}
+$manifestCases['versioned-on-3'] = @{ Root = (New-Repo 'versioned-on-3' @{ 'launcher-manifest.json' = (Get-Manifest 'manifest_versioned' 3) }); Expect = @() }
+$manifestCases['versioned-on-4'] = @{ Root = (New-Repo 'versioned-on-4' @{ 'launcher-manifest.json' = (Get-Manifest 'manifest_versioned' 4) }); Expect = @() }
+$manifestCases['release-asset-on-4'] = @{ Root = (New-Repo 'release-asset-on-4' @{ 'launcher-manifest.json' = (Get-Manifest 'manifest_versioned' 4 -ReleaseAsset) }); Expect = @() }
+$manifestCases['release-asset-on-3'] = @{
+    Root = (New-Repo 'release-asset-on-3' @{ 'launcher-manifest.json' = (Get-Manifest 'manifest_versioned' 3 -ReleaseAsset) })
+    Expect = @("FAIL 1 files\[\] row carries release_asset, which needs delivery_mode 'manifest_versioned' and schema_version 4 or above; this one is 'manifest_versioned' on '3'")
+}
+$manifestCases['release-asset-unversioned'] = @{
+    Root = (New-Repo 'release-asset-unversioned' @{ 'launcher-manifest.json' = (Get-Manifest 'manifest' 2 -ReleaseAsset) })
+    Expect = @("FAIL 1 files\[\] row carries release_asset, which needs delivery_mode 'manifest_versioned' and schema_version 4 or above; this one is 'manifest' on '2'")
+}
+
+function Test-Cases {
+    param($Cases, [string]$Checks)
+    $roots = @($Cases.Values | ForEach-Object { $_.Root })
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $json = & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$conformance' -Repo $(($roots | ForEach-Object { "'$_'" }) -join ',') -Check $Checks -Json; exit `$LASTEXITCODE" 2>&1
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    $text = (@($json | ForEach-Object { "$_" }) -join "`n").TrimStart([char]0xFEFF)
+    Check "conformance -Check $Checks exits 1 when a repo fails" ($code -eq 1) "exit $code`n$text"
+    # Windows PowerShell 5.1 hands a JSON array down the pipeline as one object.
+    $findings = @(($text | ConvertFrom-Json) | ForEach-Object { $_ })
+
+    foreach ($name in $Cases.Keys) {
+        $got = @($findings | Where-Object { $_.repo -eq $name } | ForEach-Object { "$($_.severity) $($_.message)" })
+        $expect = @($Cases[$name].Expect)
+        $unmatched = @($expect | Where-Object { $pattern = $_; -not ($got | Where-Object { $_ -match $pattern }) })
+        $extra = @($got | Where-Object { $finding = $_; -not ($expect | Where-Object { $finding -match $_ }) })
+        Check $name ($unmatched.Count -eq 0 -and $extra.Count -eq 0 -and $got.Count -eq $expect.Count) "missing: $($unmatched -join ' | ') extra: $($extra -join ' | ') got: $($got -join ' | ')"
+    }
+}
+
 try {
     $doc = ((Get-Content -LiteralPath (Join-Path $CoreRoot 'docs/porting-the-pipeline.md') -Raw) -replace '\*\*', '' -replace '\s+', ' ')
     $quoted = [regex]::Match((Get-Content -LiteralPath $conformance -Raw), "(?m)^\`$PORT_LINK_IT = '(.+)'\s*$").Groups[1].Value
     Check 'the quoted sentence is in docs/porting-the-pipeline.md' ($quoted -and $doc.Contains($quoted)) "conformance.ps1 quotes: $quoted"
 
-    $roots = @($cases.Values | ForEach-Object { $_.Root })
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $json = & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$conformance' -Repo $(($roots | ForEach-Object { "'$_'" }) -join ',') -Check pipeline-port,changelog-unreleased -Json; exit `$LASTEXITCODE" 2>&1
-    $code = $LASTEXITCODE
-    $ErrorActionPreference = $prev
-    $text = (@($json | ForEach-Object { "$_" }) -join "`n").TrimStart([char]0xFEFF)
-    Check 'conformance exits 1 when a repo fails' ($code -eq 1) "exit $code`n$text"
-    # Windows PowerShell 5.1 hands a JSON array down the pipeline as one object.
-    $findings = @(($text | ConvertFrom-Json) | ForEach-Object { $_ })
-
-    foreach ($name in $cases.Keys) {
-        $got = @($findings | Where-Object { $_.repo -eq $name } | ForEach-Object { "$($_.severity) $($_.message)" })
-        $expect = @($cases[$name].Expect)
-        $unmatched = @($expect | Where-Object { $pattern = $_; -not ($got | Where-Object { $_ -match $pattern }) })
-        $extra = @($got | Where-Object { $finding = $_; -not ($expect | Where-Object { $finding -match $_ }) })
-        Check $name ($unmatched.Count -eq 0 -and $extra.Count -eq 0 -and $got.Count -eq $expect.Count) "missing: $($unmatched -join ' | ') extra: $($extra -join ' | ') got: $($got -join ' | ')"
-    }
+    Test-Cases $cases 'pipeline-port,changelog-unreleased'
+    Test-Cases $manifestCases 'manifest'
 
     # A long [Unreleased] is something to decide about, not a broken repo.
     $warnOnly = & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$conformance' -Repo '$($cases['changelog-long-unreleased'].Root)' -Check changelog-unreleased -Json | Out-Null; exit `$LASTEXITCODE"
@@ -399,4 +434,4 @@ if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) failed" -ForegroundColor Red
     exit 1
 }
-Write-Host 'All pipeline-port and changelog-unreleased cases passed' -ForegroundColor Green
+Write-Host 'All pipeline-port, changelog-unreleased and manifest cases passed' -ForegroundColor Green

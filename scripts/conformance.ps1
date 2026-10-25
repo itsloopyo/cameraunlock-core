@@ -701,11 +701,20 @@ function Test-Manifest {
         Add-Finding $Name 'manifest' 'FAIL' "delivery_mode is '$mode'; expected manifest, manifest_variants, manifest_versioned, install_cmd or external"
     }
     # manifest_versioned is native deployment only on a launcher that knows its schema_version,
-    # so it is the one mode that is past 2.
+    # so it is the one mode that is past 2. The bounds are validate-manifest.mjs's
+    # VERSIONED_SCHEMA and RELEASE_ASSET_SCHEMA.
     $schema = if ($man.PSObject.Properties.Name -contains 'schema_version') { $man.schema_version } else { $null }
-    $wantSchema = if ($mode -eq 'manifest_versioned') { 3 } else { 2 }
-    if ($schema -ne $wantSchema) {
-        Add-Finding $Name 'manifest' 'FAIL' "schema_version is '$schema', and delivery_mode '$mode' is on $wantSchema"
+    if ($mode -eq 'manifest_versioned') {
+        if (-not ($schema -is [int] -or $schema -is [long]) -or $schema -lt 3) {
+            Add-Finding $Name 'manifest' 'FAIL' "schema_version is '$schema', and delivery_mode 'manifest_versioned' needs 3 or above"
+        }
+    } elseif ($schema -ne 2) {
+        Add-Finding $Name 'manifest' 'FAIL' "schema_version is '$schema', and delivery_mode '$mode' is on 2"
+    }
+    $files = if ($man.PSObject.Properties.Name -contains 'files') { @($man.files) } else { @() }
+    $assetRows = @($files | Where-Object { $_ -and $_.PSObject.Properties.Name -contains 'release_asset' })
+    if ($assetRows.Count -gt 0 -and -not ($mode -eq 'manifest_versioned' -and ($schema -is [int] -or $schema -is [long]) -and $schema -ge 4)) {
+        Add-Finding $Name 'manifest' 'FAIL' "$($assetRows.Count) files[] row$(if ($assetRows.Count -gt 1) { 's carry' } else { ' carries' }) release_asset, which needs delivery_mode 'manifest_versioned' and schema_version 4 or above; this one is '$mode' on '$schema'"
     }
 }
 
