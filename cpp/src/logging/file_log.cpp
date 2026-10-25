@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 
 #include "cameraunlock/os/win32.h"
@@ -44,17 +45,30 @@ HANDLE CurrentHandle() {
 // a process crash (the page cache outlives the process); only kernel
 // crash/power loss can lose them, which EmergencyLine covers for the one path
 // where that durability matters.
+//
+// A line that fits g_line goes out in one WriteFile, so a reader tailing the
+// log never sees half of it. g_line is only touched under g_mutex.
+constexpr size_t kPrefixCapacity = 32;
+char g_line[kPrefixCapacity + 2048 + 2];
+
 void WriteTimestampedLocked(const char* msg, size_t len) {
     const HANDLE handle = CurrentHandle();
     if (handle == INVALID_HANDLE_VALUE) return;
     SYSTEMTIME st;
     GetLocalTime(&st);
-    char prefix[32];
-    const int n = std::snprintf(prefix, sizeof(prefix),
+    const int n = std::snprintf(g_line, kPrefixCapacity,
         "[%02d:%02d:%02d.%03d] ",
         st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    const size_t prefix = n > 0 ? static_cast<size_t>(n) : 0;
     DWORD written = 0;
-    if (n > 0) WriteFile(handle, prefix, static_cast<DWORD>(n), &written, nullptr);
+    if (prefix + len + 2 <= sizeof(g_line)) {
+        std::memcpy(g_line + prefix, msg, len);
+        g_line[prefix + len] = '\r';
+        g_line[prefix + len + 1] = '\n';
+        WriteFile(handle, g_line, static_cast<DWORD>(prefix + len + 2), &written, nullptr);
+        return;
+    }
+    if (prefix > 0) WriteFile(handle, g_line, static_cast<DWORD>(prefix), &written, nullptr);
     WriteFile(handle, msg, static_cast<DWORD>(len), &written, nullptr);
     WriteFile(handle, "\r\n", 2, &written, nullptr);
 }
