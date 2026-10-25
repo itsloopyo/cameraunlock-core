@@ -6,8 +6,6 @@ namespace CameraUnlock.Core.Tests.Data
 {
     public class Vec3Tests
     {
-        private const float Epsilon = 0.0001f;
-
         [Fact]
         public void Constructor_SetsComponents()
         {

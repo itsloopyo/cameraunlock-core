@@ -300,7 +300,6 @@ namespace CameraUnlock.Core.Unity.Tracking
                 throw new ArgumentNullException(nameof(cam), "Camera cannot be null");
             }
 
-            // Compute view matrix from current transform
             Matrix4x4 camToWorld = cam.transform.localToWorldMatrix;
             Matrix4x4 viewMatrix = camToWorld.inverse;
 
@@ -344,14 +343,11 @@ namespace CameraUnlock.Core.Unity.Tracking
                 throw new ArgumentNullException(nameof(cam), "Camera cannot be null");
             }
 
-            // Get current modified matrix
             Matrix4x4 currentMatrix = cam.worldToCameraMatrix;
 
-            // Get what the default matrix would be
             cam.ResetWorldToCameraMatrix();
             Matrix4x4 defaultMatrix = cam.worldToCameraMatrix;
 
-            // Restore the modified matrix
             cam.worldToCameraMatrix = currentMatrix;
 
             // Calculate the difference: current = headRot * default

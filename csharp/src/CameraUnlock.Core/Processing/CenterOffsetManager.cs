@@ -117,7 +117,6 @@ namespace CameraUnlock.Core.Processing
 
         /// <summary>
         /// Composes an additional relative offset into the existing center.
-        /// Used by Recenter() to add the current smoothed rotation as an offset.
         /// </summary>
         public void ComposeAdditionalOffset(Quat4 relativeQ)
         {

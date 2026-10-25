@@ -370,7 +370,6 @@ namespace CameraUnlock.Core.Protocol
 
         /// <summary>
         /// Gets raw pose with timestamp, without any offset applied.
-        /// Used by PoseInterpolator to detect new vs stale samples.
         /// </summary>
         public TrackingPose GetRawPose()
         {

@@ -80,16 +80,13 @@ namespace CameraUnlock.Core.Config.Profiles
             _profilesDirectory = profilesDirectory;
             _profiles = new Dictionary<string, ConfigProfile>(StringComparer.OrdinalIgnoreCase);
 
-            // Create directory if needed
             if (!Directory.Exists(_profilesDirectory))
             {
                 Directory.CreateDirectory(_profilesDirectory);
             }
 
-            // Load existing profiles
             LoadAllProfiles();
 
-            // Create defaults if empty
             if (_profiles.Count == 0)
             {
                 CreateDefaultProfiles();

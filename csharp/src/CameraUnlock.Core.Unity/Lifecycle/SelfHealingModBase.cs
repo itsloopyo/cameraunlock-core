@@ -17,7 +17,6 @@ namespace CameraUnlock.Core.Unity.Lifecycle
         private static GameObject _recreatorObject;
         private static SelfHealingModBase _instance;
         private static bool _recreateScheduled;
-        private static Type _modType;
 
         /// <summary>
         /// Gets the current mod instance.
@@ -52,8 +51,6 @@ namespace CameraUnlock.Core.Unity.Lifecycle
             {
                 return (T)_instance;
             }
-
-            _modType = typeof(T);
 
             // Reuse the host when only the component was destroyed. Allocating unconditionally
             // left the old GameObject behind with its own recreator still running Update, so a

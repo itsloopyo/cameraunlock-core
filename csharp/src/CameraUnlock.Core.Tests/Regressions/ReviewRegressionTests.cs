@@ -1,7 +1,6 @@
 using System;
 using System.Globalization;
 using System.IO;
-using System.Threading;
 using Xunit;
 using CameraUnlock.Core.Aim;
 using CameraUnlock.Core.Config;

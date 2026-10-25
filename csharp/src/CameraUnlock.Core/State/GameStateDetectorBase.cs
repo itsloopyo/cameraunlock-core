@@ -85,7 +85,6 @@ namespace CameraUnlock.Core.State
                 return false;
             }
 
-            // Check if game is paused
             if (IsGamePaused())
             {
                 return false;
@@ -97,7 +96,6 @@ namespace CameraUnlock.Core.State
                 return false;
             }
 
-            // Check if a menu is visible
             if (IsMenuVisible())
             {
                 return false;
@@ -115,13 +113,11 @@ namespace CameraUnlock.Core.State
                 return false;
             }
 
-            // Check if player is dead
             if (IsPlayerDead())
             {
                 return false;
             }
 
-            // Check if player has camera control
             if (!HasCameraControl())
             {
                 return false;

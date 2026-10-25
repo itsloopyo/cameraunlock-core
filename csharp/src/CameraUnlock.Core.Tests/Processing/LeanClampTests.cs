@@ -42,7 +42,7 @@ namespace CameraUnlock.Core.Tests.Processing
         public void NullQueryPassesThrough()
         {
             LeanClamp clamp = MakeClamp(0.10f);
-            Vec3 output = clamp.Apply(new Vec3(1f, 2f, 3f), new Vec3(0.3f, 0f, 0f), Dt, null);
+            Vec3 output = clamp.Apply(new Vec3(1f, 2f, 3f), new Vec3(0.3f, 0f, 0f), Dt, null!);
 
             Near(0.3f, output.X);
             Near(0f, output.Y);

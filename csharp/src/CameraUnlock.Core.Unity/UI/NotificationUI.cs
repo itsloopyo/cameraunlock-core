@@ -142,14 +142,12 @@ namespace CameraUnlock.Core.Unity.UI
 
             EnsureStyles();
 
-            // Calculate alpha for fade out
             float alpha = 1f;
             if (_displayTimer < FadeDuration)
             {
                 alpha = _displayTimer / FadeDuration;
             }
 
-            // Get color based on notification type
             Color textColor = GetColorForType(_currentType);
 
             // Calculate position (top-center)

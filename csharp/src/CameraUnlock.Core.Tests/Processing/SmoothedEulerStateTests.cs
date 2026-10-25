@@ -7,7 +7,6 @@ namespace CameraUnlock.Core.Tests.Processing
     public class SmoothedEulerStateTests
     {
         private const float DeltaTime = 1f / 60f;
-        private const float Epsilon = 0.01f;
 
         [Fact]
         public void Update_ZeroSmoothing_FirstFrameReturnsTargetExactly()

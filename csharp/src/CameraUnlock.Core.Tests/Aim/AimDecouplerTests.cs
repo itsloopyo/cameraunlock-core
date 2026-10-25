@@ -8,8 +8,6 @@ namespace CameraUnlock.Core.Tests.Aim
 {
     public class AimDecouplerTests
     {
-        private const float Epsilon = 0.001f;
-
         [Fact]
         public void ComputeAimDirectionLocal_ZeroRotation_ReturnsForward()
         {

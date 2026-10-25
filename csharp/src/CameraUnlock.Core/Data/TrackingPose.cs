@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using CameraUnlock.Core.Math;
 
 namespace CameraUnlock.Core.Data
 {

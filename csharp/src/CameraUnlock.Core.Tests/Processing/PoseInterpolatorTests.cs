@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Xunit;
 using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Processing;

@@ -144,22 +144,17 @@ namespace CameraUnlock.Core.Processing.AxisTransform
                 return 0f;
             }
 
-            // Apply deadzone
             input = ApplyDeadzone(input);
 
-            // Apply sensitivity curve
             float curveMultiplier = ApplySensitivityCurve(input);
 
-            // Apply sensitivity and curve
             float result = input * Sensitivity * curveMultiplier;
 
-            // Apply inversion
             if (Inverted)
             {
                 result = -result;
             }
 
-            // Apply limits
             if (EnableLimits)
             {
                 result = SysMath.Max(MinLimit, SysMath.Min(MaxLimit, result));

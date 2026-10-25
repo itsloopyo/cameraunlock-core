@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.InteropServices;
 using CameraUnlock.Core.Data;
 
 namespace CameraUnlock.Core.Protocol

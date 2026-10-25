@@ -28,7 +28,6 @@ namespace CameraUnlock.Core.Tests.Config
         private const string FileName = "CameraUnlock.ini";
         private const string LegacyName = "HeadTracking.ini";
         private const string Display = "Test Game";
-        private const int HResultGenFailure = unchecked((int)0x8007001F);
         private const int HResultUnableToMoveReplacement = unchecked((int)0x80070498);
 
         // Line 5 holds a key the legacy reader does not read.
