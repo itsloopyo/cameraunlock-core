@@ -4,6 +4,7 @@
 #include "cameraunlock/data/position_data.h"
 #include <chrono>
 #include <string>
+#include <system_error>
 
 #if defined(CAMERAUNLOCK_WIN32_HOST)
 // The host's half of the receiver in the WebAssembly build (Win32Host.java): it waits on the
@@ -32,6 +33,10 @@ namespace {
 #if !defined(CAMERAUNLOCK_WIN32_HOST) && !defined(_WIN32)
 /// How long the receive thread's poll runs before it looks at the stop flag again.
 constexpr int kReceivePollMs = 100;
+#endif
+
+#if defined(_WIN32) && !defined(CAMERAUNLOCK_WIN32_HOST)
+constexpr DWORD kReceiveErrorBackoffMs = 16;
 #endif
 
 int64_t NowUs() {
@@ -112,7 +117,22 @@ bool UdpReceiver::BindAndReceive(std::string& failure) {
 #if defined(CAMERAUNLOCK_WIN32_HOST)
     cameraunlock_win32_ReceiveOn(m_socket.GetHandle(), this);
 #else
-    m_thread = std::thread(&UdpReceiver::ReceiverThread, this);
+    // On the supervisor thread nothing above this catches, so a thread the process cannot
+    // create would end the game; it is a failed bind to retry, like any other.
+    try {
+        m_thread = std::thread(&UdpReceiver::ReceiverThread, this);
+    } catch (const std::system_error& e) {
+        failure = std::string("the receive thread could not be started: ") + e.what();
+        m_running.store(false, std::memory_order_release);
+#ifdef _WIN32
+        WSACloseEvent(m_stopEvent);
+        m_stopEvent = WSA_INVALID_EVENT;
+#endif
+        m_socket.Close();
+        m_failed.store(true, std::memory_order_release);
+        m_retrying.store(true, std::memory_order_release);
+        return false;
+    }
 #endif
     return true;
 }
@@ -646,6 +666,16 @@ void UdpReceiver::ReceiverThread() {
             continue;
         }
         Received(buffer, bytesReceived, err, senderAddr);
+        // A socket that fails every read (WSAENETDOWN) would otherwise spin a core until
+        // Stop(). A datagram too long for the buffer is one datagram dropped, not a failing
+        // socket, and waiting on each would let a sender hold every pose behind it. The
+        // WebAssembly host's loop does the same (Win32Host.java, WasmCore.TICK_MS).
+        if (bytesReceived == SOCKET_ERROR && err != WSAEMSGSIZE) {
+            if (WSAWaitForMultipleEvents(1, &m_stopEvent, FALSE, kReceiveErrorBackoffMs, FALSE) == WSA_WAIT_FAILED) {
+                ReceiveLoopFailed("WSAWaitForMultipleEvents failed with " + std::to_string(WSAGetLastError()));
+                break;
+            }
+        }
 #else
         // Bounded so Stop() is noticed, and so the non-blocking socket is not
         // spun on while nothing is sending.
