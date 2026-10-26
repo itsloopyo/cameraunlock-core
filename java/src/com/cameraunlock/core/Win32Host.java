@@ -860,6 +860,7 @@ final class Win32Host {
             MemorySegment threadCapture = arena.allocate(CAPTURE);
             MemorySegment readable = arena.allocate(FD_SET_BYTES), timeout = arena.allocate(8);
             MemorySegment buffer = arena.allocate(RECEIVE_BUFFER), sender = arena.allocate(SOCKADDR_IN), senderSize = arena.allocate(INT);
+            byte[] datagram = new byte[RECEIVE_BUFFER], from = new byte[SOCKADDR_IN];
             while (!mine.stopped && !core.dead()) {
                 readable.set(INT, 0, 1);
                 readable.set(LONG, 8, socketHandle);
@@ -882,7 +883,9 @@ final class Win32Host {
                     bytes = (int) invoke(recvfrom, threadCapture, socketHandle, buffer, RECEIVE_BUFFER, 0, sender, senderSize);
                     error = bytes == SOCKET_ERROR ? (int) WSA_LAST_ERROR.get(threadCapture, 0L) : 0;
                     if (bytes == SOCKET_ERROR && error == WSAEWOULDBLOCK) continue;
-                    core.received(receiver, buffer.toArray(ValueLayout.JAVA_BYTE), bytes, error, sender.toArray(ValueLayout.JAVA_BYTE));
+                    MemorySegment.copy(buffer, ValueLayout.JAVA_BYTE, 0, datagram, 0, RECEIVE_BUFFER);
+                    MemorySegment.copy(sender, ValueLayout.JAVA_BYTE, 0, from, 0, SOCKADDR_IN);
+                    core.received(receiver, datagram, bytes, error, from);
                 }
                 // A socket that fails every read would otherwise take the module's lock in a loop. A datagram
                 // too long for the buffer is one datagram dropped, not a failing socket: sleeping on each would
