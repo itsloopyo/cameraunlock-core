@@ -157,10 +157,15 @@ namespace CameraUnlock.Core.Config.Profiles
                     File.Move(tempPath, filePath);
                 }
             }
-            catch
+            catch (Exception failure)
             {
-                // Don't strand the temp file in the profiles directory on a failed swap.
-                // The original is still intact either way; the exception propagates.
+                // A replace that fails after Windows has moved the original away
+                // (ERROR_UNABLE_TO_MOVE_REPLACEMENT with no backup name) leaves the profile
+                // only in the temp file, which is then kept and named.
+                if (!File.Exists(filePath))
+                {
+                    throw new IOException("the profile could not be put in place, and is kept at " + tempPath, failure);
+                }
                 try { File.Delete(tempPath); }
                 catch (IOException) { }
                 throw;
