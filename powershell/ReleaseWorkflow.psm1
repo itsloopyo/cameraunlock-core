@@ -1427,9 +1427,9 @@ function Assert-ManifestSeedsMatchShipped {
     and does not say why.
 .DESCRIPTION
     Lopari deploys natively only for "manifest", "manifest_variants" and
-    "manifest_versioned" (the last only from a Lopari that knows the
-    manifest's schema_version; every older one reads it as install.cmd),
-    and for "external" with an external.owml_mod_id, matched case-sensitively.
+    "manifest_versioned" whose schema_version it knows (a Lopari older than
+    the manifest's schema_version installs it through install.cmd), and for
+    "external" with an external.owml_mod_id, matched case-sensitively.
     Every other string installs through install.cmd without a word: an absent
     field, a typo, a value in another case and a value it has never heard of.
     "external" passes here because an external mod is routed by the catalog's
