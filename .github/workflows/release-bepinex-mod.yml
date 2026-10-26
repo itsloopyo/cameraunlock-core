@@ -115,6 +115,8 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          # The job's write token stays out of .git/config while the mod's package task runs.
+          persist-credentials: false
 
       - name: Extract version from tag
         id: version
@@ -140,10 +142,13 @@ jobs:
 
       - name: Validate version matches csproj
         shell: pwsh
+        env:
+          CSPROJ_PATH: ${{ inputs.csproj-path }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         run: |
           Import-Module ./cameraunlock-core/powershell/ReleaseWorkflow.psm1 -Force
-          $csprojVersion = Get-CsprojVersion "${{ inputs.csproj-path }}"
-          $tagVersion = "${{ steps.version.outputs.version }}"
+          $csprojVersion = Get-CsprojVersion $env:CSPROJ_PATH
+          $tagVersion = $env:TAG_VERSION
 
           Write-Host "csproj version: $csprojVersion"
           Write-Host "Tag version: $tagVersion"
@@ -158,13 +163,16 @@ jobs:
       - name: Copy prebuilt DLLs
         if: inputs.prebuilt-dir != ''
         shell: pwsh
+        env:
+          BUILD_OUTPUT_DIR: ${{ inputs.build-output-dir }}
+          PREBUILT_DIR: ${{ inputs.prebuilt-dir }}
         run: |
           Write-Host "Using prebuilt DLLs..." -ForegroundColor Cyan
 
-          $buildOutput = "${{ inputs.build-output-dir }}"
+          $buildOutput = $env:BUILD_OUTPUT_DIR
           New-Item -ItemType Directory -Path $buildOutput -Force | Out-Null
 
-          Copy-Item "${{ inputs.prebuilt-dir }}/*.dll" $buildOutput -Force
+          Copy-Item "$env:PREBUILT_DIR/*.dll" $buildOutput -Force
 
           Write-Host "Prebuilt DLLs copied to build output:" -ForegroundColor Green
           Get-ChildItem $buildOutput -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
@@ -172,14 +180,20 @@ jobs:
       - name: Package release
         id: package
         shell: pwsh
+        env:
+          MOD_DLLS: ${{ inputs.mod-dlls }}
+          CREATE_NEXUS_ZIP: ${{ inputs.create-nexus-zip }}
+          MOD_NAME: ${{ inputs.mod-name }}
+          CSPROJ_PATH: ${{ inputs.csproj-path }}
+          BUILD_OUTPUT_DIR: ${{ inputs.build-output-dir }}
         run: |
-          $dlls = "${{ inputs.mod-dlls }}" -split '\s+'
-          $createNexus = "${{ inputs.create-nexus-zip }}" -eq "true"
+          $dlls = $env:MOD_DLLS -split '\s+'
+          $createNexus = $env:CREATE_NEXUS_ZIP -eq "true"
 
           $params = @{
-            ModName = "${{ inputs.mod-name }}"
-            CsprojPath = "${{ inputs.csproj-path }}"
-            BuildOutputDir = "${{ inputs.build-output-dir }}"
+            ModName = $env:MOD_NAME
+            CsprojPath = $env:CSPROJ_PATH
+            BuildOutputDir = $env:BUILD_OUTPUT_DIR
             ModDlls = $dlls
           }
           if ($createNexus) {
@@ -213,22 +227,30 @@ jobs:
 
       - name: Generate release notes
         shell: pwsh
+        env:
+          ARTIFACT_PATHS: ${{ inputs.artifact-paths }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          PROJECT_NAME: ${{ inputs.project-name }}
         run: |
-          $artifactPaths = "${{ inputs.artifact-paths }}" -split '\s+'
+          $artifactPaths = $env:ARTIFACT_PATHS -split '\s+'
 
           & cameraunlock-core/scripts/generate-release-notes.ps1 `
-            -Version "${{ steps.version.outputs.version }}" `
+            -Version $env:TAG_VERSION `
             -ArtifactPaths $artifactPaths `
-            -ProjectName "${{ inputs.project-name }}"
+            -ProjectName $env:PROJECT_NAME
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          ZIP_PATH: ${{ steps.package.outputs.zip_path }}
+          NEXUS_ZIP_PATH: ${{ steps.package.outputs.nexus_zip_path }}
+          PROJECT_NAME: ${{ inputs.project-name }}
         shell: pwsh
         run: |
-          $tag = "${{ steps.version.outputs.tag }}"
-          $zipPath = "${{ steps.package.outputs.zip_path }}"
-          $nexusZipPath = "${{ steps.package.outputs.nexus_zip_path }}"
+          $tag = $env:RELEASE_TAG
+          $zipPath = $env:ZIP_PATH
+          $nexusZipPath = $env:NEXUS_ZIP_PATH
 
           $assets = @($zipPath)
           if ($nexusZipPath) {
@@ -238,7 +260,7 @@ jobs:
           Write-Host "Creating GitHub Release for $tag..." -ForegroundColor Cyan
 
           gh release create $tag `
-            --title "${{ inputs.project-name }} $tag" `
+            --title "$env:PROJECT_NAME $tag" `
             --notes-file "release-notes.txt" `
             @assets
 

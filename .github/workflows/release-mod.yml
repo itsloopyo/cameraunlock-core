@@ -150,6 +150,8 @@ jobs:
           # since the previous tag, and a shallow clone has no previous tag.
           fetch-depth: 0
           submodules: recursive
+          # The job's write token stays out of .git/config while the mod's package task runs.
+          persist-credentials: false
 
       - name: Extract version from tag
         id: version
@@ -300,6 +302,8 @@ jobs:
       - name: Find release ZIPs
         id: find_zips
         shell: pwsh
+        env:
+          PACKAGE_TASK: ${{ inputs.package-task }}
         run: |
           # Every mod's package task writes release/<Name>-v<version>-installer.zip;
           # the NexusMods and Steam Workshop variants are optional and only some mods produce them.
@@ -308,7 +312,7 @@ jobs:
           $workshopZip = Get-ChildItem release/*-workshop.zip -ErrorAction SilentlyContinue | Select-Object -First 1
 
           if (-not $installerZip) {
-            Write-Host "::error::No release/*-installer.zip after 'pixi run ${{ inputs.package-task }}'. The package task must write the installer ZIP into release/."
+            Write-Host "::error::No release/*-installer.zip after 'pixi run $env:PACKAGE_TASK'. The package task must write the installer ZIP into release/."
             exit 1
           }
 
@@ -328,11 +332,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PROJECT_NAME: ${{ inputs.project-name }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          INSTALLER_ZIP: ${{ steps.find_zips.outputs.installer_zip }}
+          NEXUS_ZIP: ${{ steps.find_zips.outputs.nexus_zip }}
+          WORKSHOP_ZIP: ${{ steps.find_zips.outputs.workshop_zip }}
         shell: pwsh
         run: |
-          $installerZip = "${{ steps.find_zips.outputs.installer_zip }}"
-          $nexusZip = "${{ steps.find_zips.outputs.nexus_zip }}"
-          $workshopZip = "${{ steps.find_zips.outputs.workshop_zip }}"
+          $installerZip = $env:INSTALLER_ZIP
+          $nexusZip = $env:NEXUS_ZIP
+          $workshopZip = $env:WORKSHOP_ZIP
           $assets = @($installerZip)
           if ($nexusZip) { $assets += $nexusZip }
           if ($workshopZip) { $assets += $workshopZip }
