@@ -1426,18 +1426,18 @@ function main() {
     let stale = 0;
 
     for (const { path, text } of outputs) {
+        let current = null;
+        try {
+            current = readFileSync(path, 'utf8');
+        } catch (err) {
+            if (err.code !== 'ENOENT') throw err;
+        }
+        if (current === text) continue;
         if (check) {
-            let current = null;
-            try {
-                current = readFileSync(path, 'utf8');
-            } catch {
-                current = null;
-            }
-            if (current !== text) {
-                console.error(`STALE: ${path}`);
-                stale++;
-            }
+            console.error(`STALE: ${path}`);
+            stale++;
         } else {
+            // Written only when it differs: build-wasm rebuilds from the newest time under cpp/.
             writeFileSync(path, text);
             console.log(`wrote ${path}`);
         }
