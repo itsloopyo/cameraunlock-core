@@ -318,6 +318,9 @@ const nexus = (files) => [null, files];
 
   const full = installer("full", assetMan());
   check(full.status === 0 && full.out.includes("1 file(s), 1 release asset(s)") && !full.out.includes("Mod-art.jar"), `release_asset: an installer ZIP with a copy of the asset should pass and not call it undeclared, got ${full.status}\n${full.out}`);
+  // tar reads a member name as a pattern, which once made this entry name Mod-art1.jar.
+  const bracketed = installer("bracketed", assetMan(), { "plugins/Mod.jar": "jar", "plugins/Mod-art[1].jar": ART, ...scripts });
+  check(bracketed.status === 0, `release_asset: a copy whose name holds [ ] should be read as itself, got ${bracketed.status}\n${bracketed.out}`);
   const slim = launcher("slim", assetMan(), { [assetName]: ART });
   check(slim.status === 0, `release_asset: a launcher ZIP with the asset beside it should pass, got ${slim.status}\n${slim.out}`);
 

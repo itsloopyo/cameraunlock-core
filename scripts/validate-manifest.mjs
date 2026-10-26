@@ -85,6 +85,7 @@
 // (check-config-descriptor.mjs releaseProblems).
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -92,6 +93,14 @@ import { createHash } from "node:crypto";
 
 import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
 import { configWriteProblems, descriptorProblems, preReleaseWarning, releaseProblems, releaseVersionFromEnv } from "./check-config-descriptor.mjs";
+
+// tar reads a member operand as a pattern, so `x[1].dll` named the bytes of `x1.dll`
+// and `*` joined several entries. Each zip is unpacked once and its entries read as
+// files; tar refuses a `..` or absolute entry on the way out.
+const extracted = new Map();
+process.on("exit", () => {
+  for (const dir of extracted.values()) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 // core lives at <root>/cameraunlock-core/scripts. Two levels up is the repo
@@ -154,8 +163,8 @@ function validate(label, zip, repo) {
   if (entryByLower.size !== entries.length) {
     throw new Error("ZIP contains duplicate paths after normalizing case and separators");
   }
+  if (!entries.includes("launcher-manifest.json")) throw new Error("no launcher-manifest.json in zip");
   const manifestRaw = readEntry(zip, "launcher-manifest.json");
-  if (manifestRaw === null) throw new Error("no launcher-manifest.json in zip");
   const man = JSON.parse(manifestRaw.replace(/^﻿/, ""));
 
   assertVersionMatchesZipName(man, zip);
@@ -313,10 +322,6 @@ function validateInstallCmd(label, zip, man, entries, entryByLower) {
       continue;
     }
     const body = readEntry(zip, entry);
-    if (body === null) {
-      problems.push(`${declared} is listed in the zip but could not be read`);
-      continue;
-    }
     checked += 1;
     for (const dep of scriptDependencies(body)) {
       if (!entryByLower.has(dep.toLowerCase())) {
@@ -841,17 +846,23 @@ function listZip(zip) {
     .filter(Boolean);
 }
 
+function extractedZip(zip) {
+  let dir = extracted.get(zip);
+  if (dir === undefined) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-manifest-"));
+    extracted.set(zip, dir);
+    execFileSync(systemTar(), ["-xf", zip, "-C", dir], { stdio: ["ignore", "ignore", "pipe"] });
+  }
+  return dir;
+}
+
 function readEntryBytes(zip, name) {
-  return execFileSync(systemTar(), ["-xf", zip, "-O", name], { maxBuffer: 2 ** 31 - 1, stdio: ["ignore", "pipe", "pipe"] });
+  const dir = extractedZip(zip);
+  const file = path.resolve(dir, name);
+  if (path.relative(dir, file).startsWith("..")) throw new Error(`${name} is outside the zip`);
+  return fs.readFileSync(file);
 }
 
 function readEntry(zip, name) {
-  try {
-    return execFileSync(systemTar(), ["-xf", zip, "-O", name], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return null;
-  }
+  return readEntryBytes(zip, name).toString("utf8");
 }
