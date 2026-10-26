@@ -161,19 +161,42 @@ Assert-NotDeployed
 Invoke-Install -Typed @() -Expected 1 -Flags '/y'
 Assert-NotDeployed
 
-# A game in a folder with an accented name. The shim hands the path to cmd.exe
-# in a batch stub, which an ASCII stub turned into `?`. The env var carries it
-# because the driver and stdin are read in the console's code page too.
-$accented = Join-Path $caseRoot ('J' + [char]0x00F6 + 'rg Game')
+# A detected path reaches the body through the stub find-game.ps1 writes, which
+# cmd.exe reads in the console's code page. Written as ASCII, an accented
+# letter came back as '?' and the install worked on a folder that does not
+# exist. Detected here through the override env var, given with the trailing
+# backslash a hand-typed variable often has, which used to reach tar -C as a
+# quote on the end of the folder. The names are built from code points so this
+# file stays ASCII for Windows PowerShell 5.1.
+$accented = Join-Path $caseRoot ('Caf' + [char]0x00E9 + ' ! Game')
 New-Item -ItemType Directory -Path $accented | Out-Null
 [IO.File]::WriteAllText((Join-Path $accented 'fixture.exe'), '')
-$env:CUL_FIXTURE_PATH = $accented
+$env:CUL_FIXTURE_PATH = $accented + '\'
 try {
     Invoke-Install -Typed @() -Expected 0 -Flags '/y'
 } finally {
-    Remove-Item Env:CUL_FIXTURE_PATH
+    Remove-Item Env:\CUL_FIXTURE_PATH
 }
-if (-not (Test-Path -LiteralPath (Join-Path $accented 'fixture.asi'))) { throw 'Not deployed into the folder with an accented name' }
+foreach ($leaf in @('winmm.dll', 'fixture.asi', '.fixture-state.json')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $accented $leaf))) { throw "Expected $leaf in the accented game folder" }
+}
 
-Write-Host 'PASS install prompt: typed path, quoted path, wrong folder, missing folder, relative path, cancel, /y non-interactive, accented folder'
+# A letter the console's code page has no byte for is refused by name, never
+# written as a '?' that names some other folder.
+$unencodable = Join-Path $caseRoot ([string][char]0x0418 + [char]0x0433 + [char]0x0440 + [char]0x0430)
+New-Item -ItemType Directory -Path $unencodable | Out-Null
+[IO.File]::WriteAllText((Join-Path $unencodable 'fixture.exe'), '')
+$codePage = [Text.Encoding]::GetEncoding([int](Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage').OEMCP)
+if ($codePage.GetString($codePage.GetBytes($unencodable)) -ne $unencodable) {
+    $env:CUL_FIXTURE_PATH = $unencodable
+    try {
+        Invoke-Install -Typed @() -Expected 1 -Flags '/y'
+    } finally {
+        Remove-Item Env:\CUL_FIXTURE_PATH
+    }
+    Assert-OutputContains 'cannot hold'
+    if (Test-Path -LiteralPath (Join-Path $unencodable 'fixture.asi')) { throw 'Deployed into a folder whose name the stub could not carry' }
+}
+
+Write-Host 'PASS install prompt: typed path, quoted path, wrong folder, missing folder, relative path, cancel, /y non-interactive, accented detected path, unencodable path'
 Write-Host "Fixtures retained at $root"

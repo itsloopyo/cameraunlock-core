@@ -186,6 +186,14 @@ if (-not $gamePath) {
     exit 2
 }
 
+# The bodies pass GAME_PATH as a quoted argument ("%GAME_PATH%"), where a
+# trailing backslash escapes the closing quote: tar -C then gets the folder
+# with a quote on the end. The override env var and GOG's registry value come
+# through as written, so one can end in a separator. A drive root keeps the
+# "X:\." form the bodies give a given path.
+$gamePath = $gamePath.TrimEnd('\')
+if ($gamePath.EndsWith(':')) { $gamePath += '\.' }
+
 # cmd.exe reads a batch file in the console's code page, so the stub is
 # written in it. ASCII turned every other character into `?`, so a game in a
 # folder with an accented name was not found by the install body. A
