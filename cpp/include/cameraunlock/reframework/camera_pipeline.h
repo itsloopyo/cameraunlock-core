@@ -49,8 +49,9 @@ struct FrameProjection {
     bool cleanToHeadValid = false;
 
     // The head's translation away from the clean camera, in metres, in the clean
-    // camera's own axes. Subtract it from a depth-scaled anchor ray before
-    // projecting through cleanToHead to pin a world anchor under a lean. Valid
+    // camera's own axes. Add it to a depth-scaled anchor ray before projecting
+    // through cleanToHead to pin a world anchor under a lean
+    // (ComputeCleanLocalPositionDelta says why it is added). Valid
     // whenever cleanToHeadValid; zero when position tracking is off.
     float cleanLocalPositionDelta[3] = {};
 };

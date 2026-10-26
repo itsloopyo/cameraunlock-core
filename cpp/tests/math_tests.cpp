@@ -186,6 +186,44 @@ int RunMathTests() {
         Check(!behind, "degenerate aim point (zero depth) reports failure");
     }
 
+    // The aim point is in front of the camera (CameraForward is -row2). A head
+    // turned toward +row0 by atan(lean / distance) and an eye leaned along +row0
+    // by that lean both see the point at the same place, so they give the same
+    // tangent: the lean term carries the rotation term's sign.
+    {
+        const float distance = 10.f;
+        const float lean = 0.1f;
+        const float angle = std::atan(lean / distance);
+        Matrix4x4f turned = Identity();
+        turned.m[0][0] = std::cos(angle); turned.m[0][2] = std::sin(angle);
+        turned.m[2][0] = -std::sin(angle); turned.m[2][2] = std::cos(angle);
+        Matrix4x4f leaned = Identity();
+        leaned.m[3][0] = lean;
+
+        float turnRight = 0.f, turnUp = 0.f, leanRight = 0.f, leanUp = 0.f;
+        bool turnOk = ProjectAimToViewTangents(Identity(), turned, distance, turnRight, turnUp);
+        bool leanOk = ProjectAimToViewTangents(Identity(), leaned, distance, leanRight, leanUp);
+        Check(turnOk && leanOk && NearEqual(turnRight, leanRight) && NearEqual(leanRight, lean / distance),
+              "a lean gives the tangent of the turn that moves the aim point the same way");
+
+        float forwardRight = 0.f, forwardUp = 0.f;
+        ProjectForwardToViewTangents(Identity(), turned, forwardRight, forwardUp);
+        Check(NearEqual(turnRight, forwardRight),
+              "a turn gives the aim point the forward projection's tangent");
+
+        // The documented marker recipe: the delta added to the depth-scaled ray
+        // lands where the aim tangent puts the same point.
+        float delta[3];
+        ComputeCleanLocalPositionDelta(Identity(), leaned, delta);
+        float cleanToHead[3][3];
+        ComputeCleanToHeadRotation(Identity(), leaned, cleanToHead);
+        float guiX = 0.f, guiY = 0.f;
+        bool recipeOk = ProjectCleanRayToHeadGui(cleanToHead, 0.f, delta[0], delta[1], distance + delta[2],
+                                                 1.f, 1.f, guiX, guiY);
+        Check(recipeOk && NearEqual(guiX, -leanRight) && NearEqual(guiY, 0.f),
+              "a lean added to a marker ray moves it as the aim tangent moves the reticle");
+    }
+
     // Rotation-only forward projection: identical bases give zero tangents even
     // under head translation; a yawed head view shifts the tangent; a head view
     // facing away from the clean forward reports failure.

@@ -136,10 +136,10 @@ inline void ApplyCameraLocalHeadRotation(Matrix4x4f& worldMat, float yawRad, flo
 // The unit direction a camera looks in, in world space: the negative of row 2
 // of its world matrix. Measured, not assumed: in Resident Evil 2 and in Requiem
 // the engine's own view and projection matrices put the point at eye - row2 * d
-// in front of the camera and eye + row2 * d behind it. The projections below
-// walk out along +row2 on both the clean and the head-tracked matrix, so their
-// rotation terms come out the same either way; anything that casts or moves
-// along the view in the world needs this.
+// in front of the camera and eye + row2 * d behind it. ProjectForwardToViewTangents
+// below walks out along +row2 on both the clean and the head-tracked matrix,
+// which gives the same rotation term; anything that casts or moves along the
+// view in the world, a lean included, needs this.
 inline void CameraForward(const Matrix4x4f& camera, float out[3]) {
     out[0] = -camera.m[2][0];
     out[1] = -camera.m[2][1];
@@ -186,14 +186,16 @@ inline void ApplyViewSpacePositionOffset(Matrix4x4f& worldMat, const Matrix4x4f&
 // Express the head-tracked camera's translation relative to the clean camera
 // in the clean camera's local axes.
 //
-// World-anchored GUI compensation SUBTRACTS this from a depth-scaled anchor ray
-// before projecting it, which is what pins a marker under 6DOF head translation:
-// an anchor at depth d along the clean-view ray (tanRight, tanUp, 1) is
-// (d*tanRight, d*tanUp, d) in clean-local axes, and the same point in head-local
-// axes is that minus this delta, rotated by ComputeCleanToHeadRotation. The
-// depth is what makes the term per-marker - the screen shift is lean/depth, so a
-// caller with one write for markers at several depths has no single right value
-// and must leave the term out.
+// World-anchored GUI compensation ADDS this to a depth-scaled anchor ray before
+// projecting it, which is what pins a marker under 6DOF head translation. The
+// rays these projections take, (tanRight, tanUp, 1), point along +row2, behind
+// the camera: they are the mirror of the real view ray through the eye, with
+// their tangents negated. The anchor at depth d is P = (-d*tanRight, -d*tanUp, -d)
+// in clean-local axes and the head sees P minus this delta, which is the
+// negation of (d*tanRight, d*tanUp, d) plus this delta; the projections divide
+// the sign out. The depth is what makes the term per-marker - the screen shift is
+// lean/depth, so a caller with one write for markers at several depths has no
+// single right value and must leave the term out.
 inline void ComputeCleanLocalPositionDelta(const Matrix4x4f& clean, const Matrix4x4f& head, float out[3]) {
     float dwx = head.m[3][0] - clean.m[3][0];
     float dwy = head.m[3][1] - clean.m[3][1];
@@ -238,9 +240,9 @@ inline bool ProjectCleanRayToHeadGui(const float cleanToHead[3][3], float rollRa
 // and the leftover is lean/depth. These tangents carry none of it: they are
 // depth-independent, and a caller that shifts markers sitting at several depths
 // with one write cannot express a per-depth value anyway. A caller holding one
-// marker at a known depth adds the translation half itself, by subtracting
-// ComputeCleanLocalPositionDelta from a depth-scaled ray and projecting that
-// through ProjectCleanRayToHeadGui.
+// marker at a known depth adds the translation half itself, by adding
+// ComputeCleanLocalPositionDelta to a depth-scaled ray and projecting that
+// through ProjectCleanRayToHeadGui (see there for why it is added).
 //
 // Returns false when the clean forward direction lands behind the head-tracked
 // view.
@@ -261,27 +263,31 @@ inline bool ProjectForwardToViewTangents(const Matrix4x4f& clean, const Matrix4x
     return true;
 }
 
-// Project the clean aim point (camera forward * aimDist) into the head-tracked
-// view to get the screen-space tangents GUI/crosshair compensation reads.
-// Returns false when the aim point falls behind the head-tracked camera.
+// Project the clean aim point, aimDist along the clean camera's forward, into the
+// head-tracked view to get the screen-space tangents GUI/crosshair compensation
+// reads. Returns false when the aim point falls behind the head-tracked camera.
+//
+// The point is taken in front of the camera, where it is, so a lean moves it
+// across the view the way it does in the world. The tangents keep the sign
+// ProjectForwardToViewTangents gives a head rotation, which is the sign the
+// callers are built on: the same screen movement, from a turn or from a lean,
+// gives the same tangent.
 inline bool ProjectAimToViewTangents(const Matrix4x4f& clean, const Matrix4x4f& head,
                                      float aimDist, float& tanRight, float& tanUp) {
-    float aimPtX = clean.m[3][0] + aimDist * clean.m[2][0];
-    float aimPtY = clean.m[3][1] + aimDist * clean.m[2][1];
-    float aimPtZ = clean.m[3][2] + aimDist * clean.m[2][2];
-
-    float dx = aimPtX - head.m[3][0];
-    float dy = aimPtY - head.m[3][1];
-    float dz = aimPtZ - head.m[3][2];
+    float cleanForward[3];
+    CameraForward(clean, cleanForward);
+    float dx = clean.m[3][0] + aimDist * cleanForward[0] - head.m[3][0];
+    float dy = clean.m[3][1] + aimDist * cleanForward[1] - head.m[3][1];
+    float dz = clean.m[3][2] + aimDist * cleanForward[2] - head.m[3][2];
 
     float vx = dx * head.m[0][0] + dy * head.m[0][1] + dz * head.m[0][2];
     float vy = dx * head.m[1][0] + dy * head.m[1][1] + dz * head.m[1][2];
-    float vz = dx * head.m[2][0] + dy * head.m[2][1] + dz * head.m[2][2];
+    float depth = -(dx * head.m[2][0] + dy * head.m[2][1] + dz * head.m[2][2]);
 
-    if (vz <= detail::kMinViewDepth) return false;
+    if (depth <= detail::kMinViewDepth) return false;
 
-    tanRight = vx / vz;
-    tanUp = vy / vz;
+    tanRight = -vx / depth;
+    tanUp = -vy / depth;
     return true;
 }
 
