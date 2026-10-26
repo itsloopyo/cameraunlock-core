@@ -311,6 +311,17 @@ if not exist "!VENDOR_ZIP!" (
     exit /b 1
 )
 
+:: MelonLoader's own version.dll would replace another loader's proxy of that
+:: name with no copy kept, and the uninstall would then delete it.
+if exist "!GAME_PATH!\version.dll" if not exist "!GAME_PATH!\MelonLoader\" (
+    echo   ERROR: The game folder already has a version.dll that is not MelonLoader's:
+    echo     !GAME_PATH!\version.dll
+    echo   It is most likely another mod loader. MelonLoader needs that file name, so
+    echo   move the other loader out of the game folder, or install MelonLoader
+    echo   yourself, then run this installer again.
+    exit /b 1
+)
+
 echo   Extracting bundled MelonLoader to game directory...
 "%SystemRoot%\System32\tar.exe" -xf "!VENDOR_ZIP!" -C "!GAME_PATH!"
 if errorlevel 1 (
