@@ -80,14 +80,14 @@ public:
         constexpr int kSegments = 16;
         constexpr float kTau = 6.28318530718f;
         const OverlayVertex centre{cx, cy, color};
+        OverlayVertex p0{cx + radius, cy, color};
         for (int i = 0; i < kSegments; ++i) {
-            const float a0 = (kTau * i) / kSegments;
             const float a1 = (kTau * (i + 1)) / kSegments;
-            const OverlayVertex p0{cx + std::cos(a0) * radius, cy + std::sin(a0) * radius, color};
             const OverlayVertex p1{cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color};
             m_triVerts.push_back(centre);
             m_triVerts.push_back(p0);
             m_triVerts.push_back(p1);
+            p0 = p1;
         }
     }
 

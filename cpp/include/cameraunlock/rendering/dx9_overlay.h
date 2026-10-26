@@ -188,14 +188,14 @@ inline void DX9DrawContext::DrawDot(float cx, float cy, float radius, Argb color
     constexpr int kSegments = 16;
     constexpr float kTau = 6.28318530718f;
     DX9OverlayVertex centre{cx - 0.5f, cy - 0.5f, 0.0f, 1.0f, color};
+    DX9OverlayVertex p0{cx + radius - 0.5f, cy - 0.5f, 0.0f, 1.0f, color};
     for (int i = 0; i < kSegments; ++i) {
-        float a0 = (kTau * i) / kSegments;
         float a1 = (kTau * (i + 1)) / kSegments;
-        DX9OverlayVertex p0{cx + std::cos(a0) * radius - 0.5f, cy + std::sin(a0) * radius - 0.5f, 0.0f, 1.0f, color};
         DX9OverlayVertex p1{cx + std::cos(a1) * radius - 0.5f, cy + std::sin(a1) * radius - 0.5f, 0.0f, 1.0f, color};
         m_triVerts.push_back(centre);
         m_triVerts.push_back(p0);
         m_triVerts.push_back(p1);
+        p0 = p1;
     }
 }
 
