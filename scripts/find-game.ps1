@@ -180,7 +180,7 @@ if (-not $gamePath) {
     } else {
         "No Steam libraries detected on this machine."
     }
-    Write-Error "Could not find $displayName installation. $hint"
+    [Console]::Error.WriteLine("Could not find $displayName installation. $hint")
     exit 2
 }
 
