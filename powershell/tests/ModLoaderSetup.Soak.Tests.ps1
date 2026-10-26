@@ -27,6 +27,7 @@ $mod = Import-Module $modulePath -Force -PassThru -WarningAction SilentlyContinu
 
     function script:Invoke-RestMethod {
         param($Uri, $Headers, $TimeoutSec)
+        if ($script:MockZipDownloads -and $Uri -match '/license$') { throw "404 for $Uri" }
         if ($Uri -match '/releases') { return $script:MockReleases }
         if ($Uri -match '/git/tags/') { return [pscustomobject]@{ object = [pscustomobject]@{ sha = 'c0ffee'; type = 'commit' } } }
         if ($script:MockAnnotatedTag) {
@@ -35,8 +36,16 @@ $mod = Import-Module $modulePath -Force -PassThru -WarningAction SilentlyContinu
         return [pscustomobject]@{ object = [pscustomobject]@{ sha = 'deadbeef'; type = 'commit' } }
     }
 
+    $script:MockZipDownloads = $false
+
     function script:Invoke-WebRequest {
         param($Uri, $OutFile, $Headers, $TimeoutSec, [switch]$UseBasicParsing)
+        if ($script:MockZipDownloads) {
+            if ($Uri -match 'raw\.githubusercontent\.com') { throw "404 for $Uri" }
+            Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+            [IO.Compression.ZipFile]::Open($OutFile, 'Create').Dispose()
+            return
+        }
         $script:MockDownloadedUrl = $Uri
         Set-Content -Path $OutFile -Value "payload for $Uri"
     }
@@ -186,6 +195,20 @@ try {
     Update-VendoredLoader -Name 'asiloader' -OutputDir $vendorDir -OutputFileName 'dinput8.zip' @asiArgs | Out-Null
 } catch { $err = $_.Exception.Message }
 Check 'Update-VendoredLoader inherits the soak' (($null -ne $err) -and ($err -like '*14 days*')) "err=$err"
+
+# A bump whose archive and repo yield no LICENSE: the previous version's file
+# used to stay beside the new archive, under a README naming the new tag.
+if (Test-Path $vendorDir) { Remove-Item $vendorDir -Recurse -Force }
+New-Item -ItemType Directory -Path $vendorDir | Out-Null
+Set-Content -LiteralPath (Join-Path $vendorDir 'LICENSE') -Value 'the previous version''s licence'
+Set-MockReleases @((New-MockRelease -Tag 'v9.6.0' -AgeDays 40))
+& $mod { $script:MockZipDownloads = $true }
+try {
+    Update-VendoredLoader -Name 'asiloader' -OutputDir $vendorDir -OutputFileName 'dinput8.zip' -WarningAction SilentlyContinue @asiArgs | Out-Null
+} finally {
+    & $mod { $script:MockZipDownloads = $false }
+}
+Check 'a bump with no LICENSE source leaves no stale LICENSE' (-not (Test-Path -LiteralPath (Join-Path $vendorDir 'LICENSE'))) 'the old LICENSE is still there'
 
 # --- Install-BepInEx (legacy GitHub path) ---------------------------------
 

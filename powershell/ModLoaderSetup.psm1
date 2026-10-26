@@ -1362,6 +1362,9 @@ function Update-VendoredLoader {
     #   2. LICENSE extracted from the downloaded zip.
     #   3. GitHub API /repos/:owner/:repo/license as last resort.
     $extractedLicense = $false
+    # The previous version's LICENSE would otherwise stay beside the new archive
+    # whenever no source below resolves, under a README naming the new tag.
+    if (Test-Path -LiteralPath $licensePath) { Remove-Item -LiteralPath $licensePath -Force }
 
     if ($LicenseUrl) {
         try {
@@ -1374,25 +1377,21 @@ function Update-VendoredLoader {
     }
 
     if (-not $extractedLicense -and $targetPath -match '\.zip$') {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($targetPath)
         try {
-            Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
-            $zip = [System.IO.Compression.ZipFile]::OpenRead($targetPath)
-            try {
-                $entry = $zip.Entries | Where-Object {
-                    $_.Name -match '^LICENSE(\.md|\.txt)?$' -and $_.FullName -notmatch '/.+/'
-                } | Select-Object -First 1
-                if ($entry) {
-                    $outStream = [System.IO.File]::Create($licensePath)
-                    try {
-                        $in = $entry.Open()
-                        try { $in.CopyTo($outStream) } finally { $in.Dispose() }
-                    } finally { $outStream.Dispose() }
-                    $extractedLicense = $true
-                }
-            } finally { $zip.Dispose() }
-        } catch {
-            # Fall through to API fetch.
-        }
+            $entry = $zip.Entries | Where-Object {
+                $_.Name -match '^LICENSE(\.md|\.txt)?$' -and $_.FullName -notmatch '/.+/'
+            } | Select-Object -First 1
+            if ($entry) {
+                $outStream = [System.IO.File]::Create($licensePath)
+                try {
+                    $in = $entry.Open()
+                    try { $in.CopyTo($outStream) } finally { $in.Dispose() }
+                } finally { $outStream.Dispose() }
+                $extractedLicense = $true
+            }
+        } finally { $zip.Dispose() }
     }
 
     if (-not $extractedLicense -and $Owner -and $Repo) {
