@@ -852,11 +852,10 @@ LocalRow FleetKey(const FleetKeyRow& fleet) {
 }
 
 // A row's key list on the poller, as the kind of row its bits make it. Answers the poller's ids for it.
-std::vector<int> Register(ConfigState& c, const LocalRow& row, const std::string& keys) {
+std::vector<int> Register(ConfigState& c, input::HotkeyPoller& poller, const LocalRow& row, const std::string& keys) {
     const input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
     if (!parsed.ok()) throw std::runtime_error(row.key + "=" + keys + ": " + parsed.error);
     std::atomic<std::int32_t>* pressed = &c.pressed;
-    input::HotkeyPoller& poller = *c.poller.load();
     const auto answer = [pressed](std::int32_t bit) { return [pressed, bit] { pressed->fetch_or(bit); }; };
     if (!row.more_tap_bits.empty()) {
         std::vector<std::function<void()>> taps{answer(row.hotkey_bit)};
@@ -877,7 +876,7 @@ void Reregister(ConfigState& c, const LocalRow& row, std::vector<int>& ids, cons
     input::HotkeyPoller* poller = c.poller.load();
     if (poller == nullptr) return;
     for (const int id : ids) poller->RemoveHotkey(id);
-    ids = Register(c, row, keys);
+    ids = Register(c, *poller, row, keys);
     // The player has most likely just pressed the new key to choose it.
     poller->DisarmPresses();
 }
@@ -1307,7 +1306,7 @@ std::int32_t cameraunlock_config_reload(void) {
                 c.loaded.locals[i] = reloaded.config->locals[i];
                 if (rebind) {
                     for (const int id : c.locals[i].hotkey_ids) poller->RemoveHotkey(id);
-                    c.locals[i].hotkey_ids = Register(c, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
+                    c.locals[i].hotkey_ids = Register(c, *poller, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
                 }
             }
         }
@@ -1693,19 +1692,29 @@ std::int32_t cameraunlock_hotkeys_start(void) {
         const std::lock_guard<std::mutex> lock(c.mutex);
         RequireLoaded(c);
         if (c.poller.load() != nullptr) throw std::logic_error("the hotkeys are already started");
-        c.poller.store(new input::HotkeyPoller());
-        for (ConceptRow& row : c.concepts) {
-            if (const FleetKeyRow* fleet = FleetKeyOf(row.id)) row.hotkey_ids = Register(c, FleetKey(*fleet), c.loaded.*fleet->keys);
+        // Published only once it is started: one stored before a throw below would leave every
+        // later call refused as "already started" with no hotkeys polled.
+        auto poller = std::make_unique<input::HotkeyPoller>();
+        std::vector<std::vector<int>> concept_ids(c.concepts.size());
+        for (std::size_t i = 0; i < c.concepts.size(); ++i) {
+            if (const FleetKeyRow* fleet = FleetKeyOf(c.concepts[i].id)) {
+                concept_ids[i] = Register(c, *poller, FleetKey(*fleet), c.loaded.*fleet->keys);
+            }
         }
+        std::vector<std::vector<int>> local_ids(c.locals.size());
         for (std::size_t i = 0; i < c.locals.size(); ++i) {
             if (c.locals[i].kind == LocalKind::Hotkey) {
-                c.locals[i].hotkey_ids = Register(c, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
+                local_ids[i] = Register(c, *poller, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
             }
         }
 #if !defined(CAMERAUNLOCK_WIN32_HOST)
         // The WebAssembly build's host polls through cameraunlock_host_tick instead.
-        if (!c.poller.load()->Start()) throw std::runtime_error("the hotkey poller did not start");
-#else
+        if (!poller->Start()) throw std::runtime_error("the hotkey poller did not start");
+#endif
+        for (std::size_t i = 0; i < c.concepts.size(); ++i) c.concepts[i].hotkey_ids = std::move(concept_ids[i]);
+        for (std::size_t i = 0; i < c.locals.size(); ++i) c.locals[i].hotkey_ids = std::move(local_ids[i]);
+        c.poller.store(poller.release());
+#if defined(CAMERAUNLOCK_WIN32_HOST)
         c.polled = true;
 #endif
         return CAMERAUNLOCK_OK;
