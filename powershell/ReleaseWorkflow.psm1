@@ -1429,10 +1429,11 @@ function Assert-ManifestSeedsMatchShipped {
     Lopari deploys natively only for "manifest", "manifest_variants" and
     "manifest_versioned" (the last only from a Lopari that knows the
     manifest's schema_version; every older one reads it as install.cmd),
-    matched case-sensitively. Every other string, "external" included,
-    installs through install.cmd without a word: an absent field, a typo, a
-    value in another case and a value it has never heard of. An external mod
-    is routed by the catalog's install_strategy, not by this field. Black Mesa
+    and for "external" with an external.owml_mod_id, matched case-sensitively.
+    Every other string installs through install.cmd without a word: an absent
+    field, a typo, a value in another case and a value it has never heard of.
+    "external" passes here because an external mod is routed by the catalog's
+    install_strategy, not by this field. Black Mesa
     shipped "installer" that way and twenty mods sat on "install_cmd" with
     nobody deciding they should. So install_cmd is allowed only when the
     manifest names what the deploy engine cannot express, in
