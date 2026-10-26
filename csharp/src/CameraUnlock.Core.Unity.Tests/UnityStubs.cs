@@ -87,6 +87,8 @@ namespace UnityEngine
 
         public static Vector2 zero => new Vector2(0f, 0f);
 
+        public static Vector2 operator /(Vector2 v, float d) => new Vector2(v.x / d, v.y / d);
+
         public static Vector2 Lerp(Vector2 a, Vector2 b, float t)
         {
             if (t < 0f) t = 0f;
