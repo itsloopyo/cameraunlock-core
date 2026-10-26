@@ -2,9 +2,9 @@
 // Set (or audit) the DISCORD_RELEASE_WEBHOOK secret on every mod repo that
 // needs it. Discovers repos the same way sync-discord-announce.mjs does:
 // sibling checkouts of cameraunlock-core whose release workflow references
-// DISCORD_RELEASE_WEBHOOK, plus reusable-workflow callers (they inherit the
-// announce step from release-bepinex-mod.yml but still need the secret via
-// `secrets: inherit`).
+// DISCORD_RELEASE_WEBHOOK, plus the callers of the reusable release workflows
+// (release-mod.yml and release-bepinex-mod.yml), which run the announce step
+// themselves and get the secret through `secrets: inherit` without naming it.
 //
 // By default only repos missing the secret are set, so re-running is cheap.
 //
@@ -55,7 +55,7 @@ function needsSecret(repoPath) {
   if (!existsSync(wfDir)) return false;
   return readdirSync(wfDir)
     .filter((f) => /\.ya?ml$/i.test(f))
-    .some((f) => new RegExp(`${secretName}|release-bepinex-mod\\.yml`).test(readFileSync(join(wfDir, f), 'utf8')));
+    .some((f) => new RegExp(`${secretName}|release-(bepinex-)?mod\\.yml`).test(readFileSync(join(wfDir, f), 'utf8')));
 }
 
 const repos = readdirSync(siblingsRoot)
