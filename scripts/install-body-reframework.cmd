@@ -366,6 +366,7 @@ for %%f in (openvr_api.dll openxr_loader.dll) do (
         if errorlevel 1 (
             echo   ERROR: could not set aside the existing %%f - refusing to
             echo   overwrite it. Check the game folder is writable.
+            call :restore_preexisting_vr
             exit /b 1
         )
     )
@@ -405,24 +406,29 @@ for %%f in (openvr_api.dll openxr_loader.dll DELETE_OPENVR_API_DLL_IF_YOU_WANT_T
 )
 
 call :restore_preexisting_vr
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :: ============================================
 :: Put back whatever the game or another mod already had at the VR runtime
-:: names. No-op when there was nothing to set aside.
+:: names. No-op when there was nothing to set aside. Exits 1 when a file could
+:: not be put back.
 :: ============================================
 :restore_preexisting_vr
+set "_VR_RESTORE_FAILED="
 for %%f in (openvr_api.dll openxr_loader.dll) do (
     if exist "!GAME_PATH!\%%f.cul-preexisting" (
         move /y "!GAME_PATH!\%%f.cul-preexisting" "!GAME_PATH!\%%f" >nul
         if errorlevel 1 (
             echo   ERROR: your original %%f is still at %%f.cul-preexisting -
             echo   rename it back by hand.
+            set "_VR_RESTORE_FAILED=1"
         ) else (
             echo   Kept your existing %%f
         )
     )
 )
+if defined _VR_RESTORE_FAILED exit /b 1
 exit /b 0
 
 :: UTC ISO-8601, read through PowerShell: %DATE% is whatever the user's regional
