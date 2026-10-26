@@ -21,7 +21,8 @@ namespace {
 // variables let it pick up a handle value Close() had already given back to the
 // OS. Win32 recycles handle values, so the game reopening a file in that window
 // can receive the same numeric handle and take our crash report into the
-// player's save.
+// player's save. The atomic narrows that to an EmergencyLine already past its
+// load when Close() runs, which needs a crash during a Close on another thread.
 constexpr intptr_t kNoHandle = -1;  // INVALID_HANDLE_VALUE, as a constant initializer
 std::atomic<intptr_t> g_handle{kNoHandle};
 std::mutex g_mutex;
@@ -29,7 +30,9 @@ std::mutex g_mutex;
 // One rotation per process, not per Open(). A mod that honours a "log to file"
 // setting closes the log and can reopen it later in the same run; rotating a
 // second time would file the run still in progress away as the previous
-// generation, losing the launch the player actually wants to send.
+// generation, losing the launch the player actually wants to send. It counts
+// only once a file was opened: after an Open that failed, the path a host
+// tries next is still rotated before CREATE_ALWAYS truncates it.
 bool g_rotated = false;
 
 HANDLE CurrentHandle() {
@@ -82,7 +85,6 @@ void Open(const std::wstring& filename) {
     bool rotationFailed = false;
     DWORD rotationError = 0;
     if (!g_rotated) {
-        g_rotated = true;
         // Only a rename over an existing log can fail in a way worth reporting;
         // a first-ever launch has nothing to rotate and must stay quiet.
         const bool hadPriorLog =
@@ -107,6 +109,7 @@ void Open(const std::wstring& filename) {
         FILE_ATTRIBUTE_NORMAL,
         nullptr);
     g_handle.store(reinterpret_cast<intptr_t>(handle), std::memory_order_release);
+    if (handle != INVALID_HANDLE_VALUE) g_rotated = true;
 
     // Said here rather than dropped: CREATE_ALWAYS has just truncated the file,
     // so a failed rename means the previous session is gone and whatever sits in

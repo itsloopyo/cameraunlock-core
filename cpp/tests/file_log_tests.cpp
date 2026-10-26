@@ -89,6 +89,11 @@ void TestRotationAcrossOpens() {
         seed << "previous launch";
     }
 
+    // A host whose first choice of folder cannot be written tries another. The
+    // failed Open is not the one rotation, or the next path is truncated unkept.
+    Open(L"C:\\cameraunlock-no-such-folder\\HeadTracking.log");
+    Check(!IsOpen(), "an Open into a folder that does not exist opens nothing");
+
     Open(live);
     Line("current launch");
     Close();
