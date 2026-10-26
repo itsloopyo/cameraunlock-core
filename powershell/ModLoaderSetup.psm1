@@ -1247,12 +1247,12 @@ function Invoke-FetchLatestLoader {
 
     $sha = Get-FileSha256 -LiteralPath $OutputPath
 
-    $commitSha = ''
-    try {
-        $tagInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$Owner/$Repo/git/refs/tags/$($release.tag_name)" -Headers $headers -TimeoutSec $TimeoutSec
-        $commitSha = $tagInfo.object.sha
-    } catch {
-        # Tag lookup is best-effort; fallback to empty.
+    $tagRef = Invoke-RestMethod -Uri "https://api.github.com/repos/$Owner/$Repo/git/refs/tags/$($release.tag_name)" -Headers $headers -TimeoutSec $TimeoutSec
+    $commitSha = $tagRef.object.sha
+    # An annotated tag's ref names the tag object, which the vendored README would then
+    # record as the commit. The commit is the object the tag points at.
+    if ($tagRef.object.type -eq 'tag') {
+        $commitSha = (Invoke-RestMethod -Uri $tagRef.object.url -Headers $headers -TimeoutSec $TimeoutSec).object.sha
     }
 
     return @{

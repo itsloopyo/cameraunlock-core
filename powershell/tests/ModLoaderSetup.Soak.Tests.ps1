@@ -23,11 +23,16 @@ $mod = Import-Module $modulePath -Force -PassThru -WarningAction SilentlyContinu
 & $mod {
     $script:MockReleases = @()
     $script:MockDownloadedUrl = $null
+    $script:MockAnnotatedTag = $false
 
     function script:Invoke-RestMethod {
         param($Uri, $Headers, $TimeoutSec)
         if ($Uri -match '/releases') { return $script:MockReleases }
-        return [pscustomobject]@{ object = [pscustomobject]@{ sha = 'deadbeef' } }
+        if ($Uri -match '/git/tags/') { return [pscustomobject]@{ object = [pscustomobject]@{ sha = 'c0ffee'; type = 'commit' } } }
+        if ($script:MockAnnotatedTag) {
+            return [pscustomobject]@{ object = [pscustomobject]@{ sha = 'a7a90b'; type = 'tag'; url = 'https://api.github.com/repos/o/r/git/tags/a7a90b' } }
+        }
+        return [pscustomobject]@{ object = [pscustomobject]@{ sha = 'deadbeef'; type = 'commit' } }
     }
 
     function script:Invoke-WebRequest {
@@ -113,6 +118,15 @@ Set-MockReleases @((New-MockRelease -Tag 'v9.7.3' -AgeDays 2), (New-MockRelease 
 $meta = Invoke-FetchLatestLoader -OutputPath $outFile @asiArgs
 Check 'takes the 40-day-old release over the 2-day-old one' ($meta.Tag -eq 'v9.6.0') "got $($meta.Tag)"
 Check 'downloads the asset of the release it selected' ((Get-MockDownloadedUrl) -like '*v9.6.0*') "got $(Get-MockDownloadedUrl)"
+Check 'a lightweight tag records the commit its ref names' ($meta.CommitSha -eq 'deadbeef') "got $($meta.CommitSha)"
+
+& $mod { $script:MockAnnotatedTag = $true }
+try {
+    $meta = Invoke-FetchLatestLoader -OutputPath $outFile @asiArgs
+} finally {
+    & $mod { $script:MockAnnotatedTag = $false }
+}
+Check 'an annotated tag records the commit it points at, not the tag object' ($meta.CommitSha -eq 'c0ffee') "got $($meta.CommitSha)"
 
 Set-MockReleases @((New-MockRelease -Tag 'v9.7.3' -AgeDays 2), (New-MockRelease -Tag 'v9.7.2' -AgeDays 5))
 $err = $null
