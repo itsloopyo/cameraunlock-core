@@ -1,10 +1,10 @@
-﻿#pragma once
+#pragma once
 
 #include "cameraunlock/math/angle_utils.h"
 
 namespace cameraunlock {
 
-/// Return type for PoseInterpolator â€” interpolated rotation values in degrees.
+/// Return type for PoseInterpolator - interpolated rotation values in degrees.
 struct InterpolatedPose {
     float yaw = 0.0f;
     float pitch = 0.0f;
@@ -88,7 +88,7 @@ public:
 
         if (is_new_sample) {
             if (!m_hasFirstSample) {
-                // Very first sample â€” park at this position
+                // Very first sample - park at this position
                 m_fromYaw = yaw;    m_fromPitch = pitch;    m_fromRoll = roll;
                 m_toYaw = yaw;      m_toPitch = pitch;      m_toRoll = roll;
                 m_progress = 1.0f;
@@ -168,7 +168,7 @@ private:
     static constexpr float kMinSampleInterval = 0.001f;
     static constexpr float kMaxSampleInterval = 0.2f;
 
-    // Interpolation segment: lerp from â†’ to
+    // Interpolation segment: lerp from -> to
     float m_fromYaw = 0.0f, m_fromPitch = 0.0f, m_fromRoll = 0.0f;
     float m_toYaw = 0.0f, m_toPitch = 0.0f, m_toRoll = 0.0f;
 
