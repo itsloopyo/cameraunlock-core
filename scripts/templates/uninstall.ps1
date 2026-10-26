@@ -23,10 +23,6 @@
     isn't on disk (release ZIPs, Lopari profiles); optional in a dev
     checkout where auto-detect can run.
 
-.PARAMETER KeepConfig
-    Backs up <mod folder>/config.json (or equivalent) to %TEMP% before
-    removing the mod folder.
-
 .PARAMETER Force
     Accepted for compatibility with the CameraUnlock uninstall contract.
     Whether it does anything is per-mod - the contract uses it to
@@ -39,9 +35,6 @@
 param(
     [Parameter(Mandatory = $false)]
     [string]$GamePath,
-
-    [Parameter(Mandatory = $false)]
-    [switch]$KeepConfig,
 
     [Parameter(Mandatory = $false)]
     [switch]$Force
@@ -60,17 +53,16 @@ $ModDisplayName  = 'MyMod'
 # user-supplied -GamePath.
 $GameExeRelpath  = 'bin\x64\Game.exe'
 
-# Paths to remove (relative to $GamePath). The mod folder is removed
-# recursively; the plugin file is removed if present. Add or remove
-# entries as needed - all are optional, missing paths log "not present".
+# Paths to remove (relative to $GamePath). Everything in the mod folder but
+# the config files below is removed; the plugin file is removed if present.
+# Add or remove entries as needed - all are optional, missing paths log
+# "not present".
 $ModFolderRelpath  = 'bin\x64\plugins\cyber_engine_tweaks\mods\MyMod'
 $PluginFileRelpath = 'red4ext\plugins\MyMod.dll'
 
-# Filename inside the mod folder to back up when -KeepConfig is set.
-$ConfigFilename    = 'config.json'
-
-# Backup destination for -KeepConfig.
-$ConfigBackupName  = "$ModDisplayName-config-backup.json"
+# Files inside the mod folder that hold the player's settings. They stay,
+# so a reinstall picks them up, as uninstall-body.cmd's PRESERVE_FILES does.
+$ConfigFilenames   = @('CameraUnlock.ini')
 # --- END CONFIG BLOCK -----------------------------------------------------
 
 function Write-Info    { param([string]$Message) Write-Host "[INFO] $Message" -ForegroundColor Cyan }
@@ -161,16 +153,17 @@ $dllPath = Resolve-TargetUnderGame -Relpath $PluginFileRelpath -Label 'Plugin fi
 $removedSomething = $false
 
 if ($modDir -and (Test-Path -LiteralPath $modDir)) {
-    if ($KeepConfig) {
-        $cfgSrc = Join-Path $modDir $ConfigFilename
-        if (Test-Path -LiteralPath $cfgSrc) {
-            $backup = Join-Path $env:TEMP $ConfigBackupName
-            Copy-Item -LiteralPath $cfgSrc -Destination $backup -Force
-            Write-Info "Backed up $ConfigFilename to: $backup"
-        }
+    $kept = @()
+    foreach ($item in @(Get-ChildItem -LiteralPath $modDir -Force)) {
+        if ($ConfigFilenames -contains $item.Name) { $kept += $item.Name; continue }
+        Remove-Item -LiteralPath $item.FullName -Recurse -Force
     }
-    Remove-Item -LiteralPath $modDir -Recurse -Force
-    Write-Info "Removed mod folder: $modDir"
+    if ($kept.Count -gt 0) {
+        Write-Info "Removed the mod's files; kept $($kept -join ', ') in $modDir"
+    } else {
+        Remove-Item -LiteralPath $modDir -Force
+        Write-Info "Removed mod folder: $modDir"
+    }
     $removedSomething = $true
 } elseif ($modDir) {
     Write-Info "Mod folder not present (already removed?)"
