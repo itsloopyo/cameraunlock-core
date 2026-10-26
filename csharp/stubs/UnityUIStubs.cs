@@ -52,7 +52,7 @@ namespace UnityEngine.UI {
         public UnityEngine.Sprite sprite { get; set; }
         public Type type { get; set; }
         public bool fillCenter { get; set; }
-        public enum Type { Simple, Sliced, Tiled, Filled }
+        public enum Type { Simple = 0, Sliced = 1, Tiled = 2, Filled = 3 }
     }
     public class RawImage : MaskableGraphic {
         public UnityEngine.Texture texture { get; set; }

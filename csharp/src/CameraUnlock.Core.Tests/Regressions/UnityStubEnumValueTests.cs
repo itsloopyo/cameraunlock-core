@@ -266,6 +266,37 @@ namespace CameraUnlock.Core.Tests.Regressions
         }
 
         /// <summary>
+        /// The pinned enums above are not every enum the stubs declare. Any member left implicit
+        /// takes its number from its position, so every enum in every stub source is held to an
+        /// explicit value, whether or not its values are pinned here.
+        /// </summary>
+        [Fact]
+        public void EveryStubEnumMember_HasAnExplicitValue()
+        {
+            string stubs = Path.Combine(RepoRoot(), "csharp", "stubs");
+            int enums = 0;
+            foreach (string file in Directory.GetFiles(stubs, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)) continue;
+                string source = Regex.Replace(File.ReadAllText(file), @"//[^\n]*", "");
+                foreach (Match declaration in Regex.Matches(source, @"\benum\s+(?<name>\w+)\s*\{(?<body>[^}]*)\}"))
+                {
+                    enums++;
+                    foreach (string raw in declaration.Groups["body"].Value.Split(','))
+                    {
+                        string member = raw.Trim();
+                        if (member.Length == 0) continue;
+                        Assert.True(
+                            member.Contains("="),
+                            Path.GetFileName(file) + ": " + declaration.Groups["name"].Value + "." + member
+                                + " has no explicit value.");
+                    }
+                }
+            }
+            Assert.True(enums >= 20, "found only " + enums + " enums under csharp/stubs");
+        }
+
+        /// <summary>
         /// The consts are inlined the same way the enum members are. Physics's three came off
         /// a shipped UnityEngine.PhysicsModule.dll: IgnoreRaycastLayer 4, DefaultRaycastLayers
         /// -5, AllLayers -1. GL's came off the same CoreModule as the enums above.

@@ -361,7 +361,7 @@ namespace UnityEngine {
         public static CursorLockMode lockState { get; set; }
         public static bool visible { get; set; }
     }
-    public enum CursorLockMode { None, Locked, Confined }
+    public enum CursorLockMode { None = 0, Locked = 1, Confined = 2 }
     // A struct in the shipped engine, like LayerMask. Every member is static and no
     // signature anywhere mentions the type, so the old `static class` bound correctly;
     // it is a struct here so the file has one rule for class-vs-struct rather than two.
@@ -424,13 +424,13 @@ namespace UnityEngine {
         public FontStyle fontStyle { get; set; }
         public Vector2 CalcSize(GUIContent content) => default;
     }
-    public enum FontStyle { Normal, Bold, Italic, BoldAndItalic }
+    public enum FontStyle { Normal = 0, Bold = 1, Italic = 2, BoldAndItalic = 3 }
     public class GUIStyleState {
         public Color textColor { get; set; }
         public Texture2D background { get; set; }
     }
     public class Font : Object { }
-    public enum TextAnchor { UpperLeft, UpperCenter, UpperRight, MiddleLeft, MiddleCenter, MiddleRight, LowerLeft, LowerCenter, LowerRight }
+    public enum TextAnchor { UpperLeft = 0, UpperCenter = 1, UpperRight = 2, MiddleLeft = 3, MiddleCenter = 4, MiddleRight = 5, LowerLeft = 6, LowerCenter = 7, LowerRight = 8 }
     public static class GUI {
         public static Color color { get; set; }
         public static Color backgroundColor { get; set; }
@@ -493,8 +493,8 @@ namespace UnityEngine {
         Alpha8 = 1, ARGB4444 = 2, RGB24 = 3, RGBA32 = 4, ARGB32 = 5, RGB565 = 7,
         R16 = 9, DXT1 = 10, DXT5 = 12
     }
-    public enum FilterMode { Point, Bilinear, Trilinear }
-    public enum ScaleMode { StretchToFill, ScaleAndCrop, ScaleToFit }
+    public enum FilterMode { Point = 0, Bilinear = 1, Trilinear = 2 }
+    public enum ScaleMode { StretchToFill = 0, ScaleAndCrop = 1, ScaleToFit = 2 }
     // x/y/width/height are PROPERTIES in the real UnityEngine, not fields.
     // Declaring them as fields makes the compiler emit ldfld, which throws
     // MissingFieldException against the shipped assembly.
@@ -644,7 +644,7 @@ namespace UnityEngine {
         public Camera worldCamera { get; set; }
         public float scaleFactor { get; set; }
     }
-    public enum RenderMode { ScreenSpaceOverlay, ScreenSpaceCamera, WorldSpace }
+    public enum RenderMode { ScreenSpaceOverlay = 0, ScreenSpaceCamera = 1, WorldSpace = 2 }
     public class RectTransform : Transform {
         public Vector2 anchoredPosition { get; set; }
         public Vector2 sizeDelta { get; set; }
@@ -801,7 +801,7 @@ namespace UnityEngine.SceneManagement {
         public bool isLoaded { get; }
         public bool IsValid() => false;
     }
-    public enum LoadSceneMode { Single, Additive }
+    public enum LoadSceneMode { Single = 0, Additive = 1 }
     public static class SceneManager {
         public static Scene GetActiveScene() => default;
         public static void LoadScene(string sceneName) { }
