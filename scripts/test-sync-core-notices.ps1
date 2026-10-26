@@ -209,6 +209,19 @@ try {
     $run = Invoke-Sync $repo
     Check 'with no index entry, the pin comes from HEAD' `
         ((Read-Notices $repo).Contains("``$pinA``") -and $run.Exit -eq 0) "exit $($run.Exit), notices: $(Read-Notices $repo)"
+
+    # --- packaging compiles a checked-out bump the index does not name yet ----
+
+    $repo = New-ModRepo 'unstaged-bump' $pinA $pinA
+    $core = Join-Path $repo 'cameraunlock-core'
+    New-Item -ItemType Directory -Path $core -Force | Out-Null
+    Invoke-Git $core @('init', '-q', '-b', 'main') | Out-Null
+    Invoke-Git $core @('commit', '-q', '--allow-empty', '-m', 'core') | Out-Null
+    Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'powershell/ReleaseWorkflow.psm1') -Force
+    $message = ''
+    try { Assert-CoreCommitInNotices -RepoRoot $repo } catch { $message = $_.Exception.Message }
+    Check 'an unstaged bump is refused, and the fix stages it before the sync' `
+        ($message -match 'git add cameraunlock-core, then') "message: $message"
 } finally {
     Remove-Item -LiteralPath $sandbox -Recurse -Force
 }

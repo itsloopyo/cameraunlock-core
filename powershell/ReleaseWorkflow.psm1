@@ -1313,7 +1313,8 @@ function Assert-CoreCommitInNotices {
     [CmdletBinding()]
     param([Parameter(Mandatory=$true)][string]$RepoRoot)
 
-    if (-not (Get-PinnedCoreCommit -RepoRoot $RepoRoot)) { return }
+    $pinned = Get-PinnedCoreCommit -RepoRoot $RepoRoot
+    if (-not $pinned) { return }
 
     # Packaging consumes the checkout, including a submodule bump waiting for
     # the parent commit. The parent's index still names the previous build.
@@ -1321,6 +1322,9 @@ function Assert-CoreCommitInNotices {
     if ($LASTEXITCODE -ne 0) { throw "Cannot read the core checkout at $RepoRoot." }
     $state = Sync-CoreCommitInNotices -RepoRoot $RepoRoot -Commit $compiledCommit.Trim() -ReadOnly
     $fix   = "powershell -ExecutionPolicy Bypass -File cameraunlock-core\scripts\sync-core-notices.ps1 -Repo ."
+    # sync-core-notices stamps the gitlink in the index, so a bump that is checked out but not
+    # staged has to be staged first or the script writes the commit this build does not compile.
+    if ($pinned -ne $compiledCommit.Trim()) { $fix = "git add cameraunlock-core, then $fix" }
 
     if ($state.Recorded -eq 0) {
         throw "THIRD-PARTY-NOTICES.md records no cameraunlock-core commit, but $($state.Pin) is compiled into this build. Add the pinned commit to the cameraunlock-core entry, then re-run."
