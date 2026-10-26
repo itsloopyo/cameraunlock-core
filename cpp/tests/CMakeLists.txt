@@ -95,6 +95,7 @@ if(CAMERAUNLOCK_BUILD_C)
     add_custom_command(TARGET cameraunlock_c_tests POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:cameraunlock_c> $<TARGET_FILE_DIR:cameraunlock_c_tests>)
     add_test(NAME cameraunlock_c_tests COMMAND cameraunlock_c_tests)
+    add_test(NAME cameraunlock_c_tests_saves_without_rows COMMAND cameraunlock_c_tests --saves-without-rows)
 endif()
 
 # win32_host_types.h, which the WebAssembly build compiles in place of <windows.h>, against the

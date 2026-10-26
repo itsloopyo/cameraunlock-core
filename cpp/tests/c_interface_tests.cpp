@@ -1205,6 +1205,31 @@ void TestWindow() {
           "a window that is gone is left alone, with the reason in the log");
 }
 
+// Its own process (the --saves-without-rows run): a description is settled at the load,
+// and the main run's describes every row these saves write.
+void TestSavesWithoutRows(const fs::path& scratch) {
+    std::cout << "\n[c interface: a save with no row to write]\n";
+    const std::string file = (scratch / "CameraUnlock.ini").u8string();
+    const std::string defaults = (scratch / "defaults" / "Defaults.ini").u8string();
+    CameraUnlockConfig config = {};
+    config.struct_size = sizeof(config);
+    Check(cameraunlock_config_describe("Test Game") == CAMERAUNLOCK_OK &&
+              cameraunlock_config_concept("UdpPort", 0, nullptr, nullptr) == CAMERAUNLOCK_OK &&
+              cameraunlock_config_load(file.c_str(), defaults.c_str(), &config) >= 0,
+          "a config of one row loads: " + LastError());
+    const std::string before = ReadFile(scratch / "CameraUnlock.ini");
+    Check(cameraunlock_config_save_tracking_mode() == CAMERAUNLOCK_ERROR &&
+              LastError().find("did not describe the RotationEnabled row") != std::string::npos,
+          "the tracking mode does not save without its rows: " + LastError());
+    Check(cameraunlock_config_save_aim_mode() == CAMERAUNLOCK_ERROR &&
+              LastError().find("did not describe the TrueFreeLook row") != std::string::npos,
+          "nor the aim mode: " + LastError());
+    Check(cameraunlock_config_save_world_space_yaw(0) == CAMERAUNLOCK_ERROR &&
+              LastError().find("did not describe the WorldSpaceYaw row") != std::string::npos,
+          "nor the yaw mode: " + LastError());
+    Check(ReadFile(scratch / "CameraUnlock.ini") == before, "and the file is as it was");
+}
+
 void TestLog(const fs::path& scratch) {
     std::cout << "\n[c interface: the log]\n";
     Check(cameraunlock_log_write("too early") == CAMERAUNLOCK_ERROR, "a line for the file log before it is open is refused");
@@ -1242,12 +1267,18 @@ void TestLog(const fs::path& scratch) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
     const fs::path scratch = fs::temp_directory_path() / ("cameraunlock-c-tests-" + std::to_string(GetCurrentProcessId()));
     fs::remove_all(scratch);
     fs::create_directories(scratch);
+
+    if (argc > 1 && std::string(argv[1]) == "--saves-without-rows") {
+        TestSavesWithoutRows(scratch);
+        std::cout << (g_failures == 0 ? "\nAll tests passed!\n" : "\n" + std::to_string(g_failures) + " test(s) FAILED\n");
+        return g_failures == 0 ? 0 : 1;
+    }
 
     TestBoundary();
     TestPortInUse();
