@@ -365,7 +365,7 @@ echo Existing BepInEx is the wrong architecture for this game ^(expected %BEPINE
 echo This usually means another mod manager ^(Thunderstore Mod Manager,
 echo r2modman, ...^) installed the wrong BepInExPack first.
 echo The loader core will be replaced with the matching %BEPINEX_ARCH% build.
-echo Your BepInEx\plugins\ and BepInEx\config\ are set aside and put back.
+echo Your other plugins, patchers and configs under BepInEx\ stay where they are.
 if not defined YES_FLAG (
     echo.
     set /p "_REPLY=Replace the wrong-architecture BepInEx? [y/N] "
@@ -373,6 +373,13 @@ if not defined YES_FLAG (
         echo Aborted - nothing was changed.
         exit /b 1
     )
+)
+call :resolve_vendor_zip
+if not exist "!VENDOR_ZIP!" (
+    echo   ERROR: Bundled BepInEx not found at:
+    echo     !VENDOR_ZIP!
+    echo   The installer ZIP is corrupt. Re-download the release. Nothing was changed.
+    exit /b 1
 )
 call :wipe_existing_bepinex
 if errorlevel 1 exit /b 1
@@ -605,59 +612,27 @@ if defined _IL2CPP (
 exit /b 0
 
 :: ============================================
-:: Wipe an existing wrong-arch BepInEx loader so :install_bepinex can lay
-:: down our matching one. The loader core is ours to replace, but
-:: BepInEx\plugins\ and BepInEx\config\ are NOT - a Thunderstore user can
-:: easily have five other plugins and their configs under there, and
-:: rmdir /s on BepInEx\ took the lot. Move both aside first;
-:: :restore_bepinex_stash puts them back once the new core is extracted.
+:: Remove an existing wrong-arch BepInEx loader so :install_bepinex can lay
+:: down our matching one. Only BepInEx\core\ and the doorstop files at the
+:: game root are the loader. Everything else under BepInEx\ belongs to the
+:: player: other mods' plugins, their preloader patchers in patchers\, and
+:: every config. Removing the whole of BepInEx\ took all of it.
 :: ============================================
 :wipe_existing_bepinex
 echo   Replacing the wrong-architecture BepInEx core...
-:: Staged INSIDE the game folder under a fixed name, not %!TEMP!% under a
-:: random one. The old form was unrecoverable: :restore_bepinex_stash only
-:: ran on the success path, so any loader-install failure (missing vendored
-:: zip, extraction error, xcopy error) - or a Ctrl+C - deleted BepInEx\ from
-:: the game and left the user's other mods' plugins and every plugin config
-:: in a %!TEMP!% folder whose randomised name was never printed. Same volume
-:: also makes the move atomic rather than a copy.
-set "_BEP_STASH=!GAME_PATH!\BepInEx-cul-stash"
-:: A stash already here means a previous run died between the move and the
-:: restore. Put it back before doing anything else, or this run overwrites
-:: the only copy of the user's data.
-if exist "!_BEP_STASH!" (
+:: An installer from before this one moved plugins\ and config\ aside to this
+:: folder and deleted BepInEx\. One that died between the two left the
+:: player's files only here, so they go back before anything else changes.
+if exist "!GAME_PATH!\BepInEx-cul-stash" (
     echo   Found plugins/config staged by an earlier interrupted run - restoring first.
     call :restore_bepinex_stash
     if errorlevel 1 exit /b 1
 )
-set "_BEP_STASH="
-if exist "!GAME_PATH!\BepInEx\plugins" set "_BEP_STASH=!GAME_PATH!\BepInEx-cul-stash"
-if exist "!GAME_PATH!\BepInEx\config" if not defined _BEP_STASH set "_BEP_STASH=!GAME_PATH!\BepInEx-cul-stash"
-if defined _BEP_STASH (
-    mkdir "!_BEP_STASH!"
-    if errorlevel 1 (
-        echo   ERROR: could not create the staging folder next to BepInEx\.
-        echo   Is the game folder writable?
-        exit /b 1
-    )
+if exist "!GAME_PATH!\BepInEx\core" rmdir /s /q "!GAME_PATH!\BepInEx\core"
+if exist "!GAME_PATH!\BepInEx\core" (
+    echo   ERROR: could not remove BepInEx\core\. Close the game and re-run.
+    exit /b 1
 )
-if exist "!GAME_PATH!\BepInEx\plugins" (
-    move "!GAME_PATH!\BepInEx\plugins" "!_BEP_STASH!\plugins" >nul
-    if errorlevel 1 (
-        echo   ERROR: could not set aside BepInEx\plugins\ - refusing to delete it.
-        exit /b 1
-    )
-    echo   Set aside your BepInEx\plugins\
-)
-if exist "!GAME_PATH!\BepInEx\config" (
-    move "!GAME_PATH!\BepInEx\config" "!_BEP_STASH!\config" >nul
-    if errorlevel 1 (
-        echo   ERROR: could not set aside BepInEx\config\ - refusing to delete it.
-        exit /b 1
-    )
-    echo   Set aside your BepInEx\config\
-)
-if exist "!GAME_PATH!\BepInEx" rmdir /s /q "!GAME_PATH!\BepInEx"
 if exist "!GAME_PATH!\winhttp.dll" del /f /q "!GAME_PATH!\winhttp.dll"
 if exist "!GAME_PATH!\doorstop_config.ini" del /f /q "!GAME_PATH!\doorstop_config.ini"
 if exist "!GAME_PATH!\.doorstop_version" del /f /q "!GAME_PATH!\.doorstop_version"

@@ -175,6 +175,29 @@ try {
     Check $c.Name ($r.Exit -eq 0) "uninstall exited $($r.Exit): $($r.Output)"
     Check $c.Name (-not (Test-Path -LiteralPath (Join-Path $c.Game 'BepInEx\core'))) 'the loader this mod installed was not removed'
     Check $c.Name ((Text $c "$managed\Assembly-CSharp.dll") -eq $pristine) 'the untouched assembly changed'
+
+    # A wrong-architecture BepInEx another manager installed: only the loader is
+    # replaced, and another mod's patcher and config stay. With the bundled zip
+    # missing, nothing is touched at all.
+    foreach ($zipPresent in $true, $false) {
+        $c = New-Case ('wrong-arch-' + $(if ($zipPresent) { 'zip' } else { 'no-zip' })) -PlayersBepInEx
+        Copy-Item -LiteralPath (Join-Path $env:WINDIR 'SysWOW64\winhttp.dll') -Destination (Join-Path $c.Game 'winhttp.dll') -Force
+        New-Item -ItemType Directory -Path (Join-Path $c.Game 'BepInEx\patchers\Other'), (Join-Path $c.Game 'BepInEx\config') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $c.Game 'BepInEx\patchers\Other\Other.Patcher.dll'), "player's patcher")
+        [IO.File]::WriteAllText((Join-Path $c.Game 'BepInEx\config\Other.cfg'), "player's config")
+        if (-not $zipPresent) { Remove-Item -LiteralPath (Join-Path $c.Root 'vendor\bepinex\BepInEx_win_x64.zip') }
+        $r = Invoke-Script $c 'install'
+        if ($zipPresent) {
+            Check $c.Name ($r.Exit -eq 0) "install exited $($r.Exit): $($r.Output)"
+            Check $c.Name ((Text $c 'BepInEx\core\BepInEx.dll') -eq 'vendored loader') 'the wrong-architecture loader was not replaced'
+        } else {
+            Check $c.Name ($r.Exit -eq 1) "install exited $($r.Exit): $($r.Output)"
+            Check $c.Name ((Text $c 'BepInEx\core\BepInEx.dll') -eq "player's loader") 'the loader was removed with nothing to replace it'
+        }
+        Check $c.Name ((Text $c 'BepInEx\patchers\Other\Other.Patcher.dll') -eq "player's patcher") "another mod's patcher was removed"
+        Check $c.Name ((Text $c 'BepInEx\config\Other.cfg') -eq "player's config") "another mod's config was removed"
+        Check $c.Name ((Text $c 'BepInEx\plugins\Other.dll') -eq "player's other plugin") "another mod's plugin was removed"
+    }
 } finally {
     if ($failures.Count -eq 0) { Remove-Item -LiteralPath $root -Recurse -Force }
 }
@@ -184,4 +207,4 @@ if ($failures.Count -gt 0) {
     Write-Host "Case folders kept under $root"
     exit 1
 }
-Write-Host 'loader switch: 4 cases passed' -ForegroundColor Green
+Write-Host 'loader switch: 6 cases passed' -ForegroundColor Green
