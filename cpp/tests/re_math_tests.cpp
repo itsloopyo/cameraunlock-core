@@ -169,9 +169,8 @@ void TestTheLeanTermPinsAMarkerAtItsOwnDepth() {
 
     const float lean = 0.30f;
 
-    // Pin the delta's own convention first. The ray below negates it, so a sign
-    // flip inside ComputeCleanLocalPositionDelta would cancel out there and the
-    // projection checks would still pass.
+    // Pin the delta's own convention first. A sign flip inside
+    // ComputeCleanLocalPositionDelta would otherwise read as a flip of the recipe.
     {
         float delta[3];
         ComputeCleanLocalPositionDelta(IdentityCamera(), YawedCamera(0.0f, lean, 0.0f, 0.0f), delta);
@@ -187,8 +186,9 @@ void TestTheLeanTermPinsAMarkerAtItsOwnDepth() {
               "and it is resolved in the clean camera's own axes, not world axes");
     }
 
-    // Pure lateral lean, no head rotation. A marker sitting on the view axis at
-    // depth d must move by f * lean / d pixels, and by nothing else.
+    // Pure lateral lean, no head rotation. A marker on the view axis d in front
+    // of the camera must move by f * lean / d pixels the other way, and by nothing
+    // else: leaning right puts what is ahead to the left.
     for (float depth : { 2.0f, 3.0f, 5.0f }) {
         const Matrix4x4f clean = IdentityCamera();
         const Matrix4x4f head = YawedCamera(0.0f, lean, 0.0f, 0.0f);
@@ -200,11 +200,11 @@ void TestTheLeanTermPinsAMarkerAtItsOwnDepth() {
 
         float guiX = 0.0f, guiY = 0.0f;
         Check(ProjectCleanRayToHeadGui(cleanToHead, 0.0f,
-                                       -delta[0], -delta[1], depth - delta[2],
+                                       delta[0], delta[1], depth + delta[2],
                                        kReferenceFocal, kReferenceFocal, guiX, guiY),
               "the leaned ray projects in front of the head camera");
-        Check(NearPixels(guiX, kReferenceFocal * lean / depth),
-              "lateral lean shifts the marker by f * lean / depth");
+        Check(NearPixels(guiX, -kReferenceFocal * lean / depth),
+              "lateral lean shifts the marker by f * lean / depth the other way");
         Check(NearPixels(guiY, 0.0f), "and leaves the vertical alone");
     }
 
@@ -219,12 +219,12 @@ void TestTheLeanTermPinsAMarkerAtItsOwnDepth() {
         ComputeCleanLocalPositionDelta(clean, head, delta);
 
         float at2 = 0.0f, at5 = 0.0f, ignored = 0.0f;
-        ProjectCleanRayToHeadGui(cleanToHead, 0.0f, -delta[0], -delta[1], 2.0f - delta[2],
+        ProjectCleanRayToHeadGui(cleanToHead, 0.0f, delta[0], delta[1], 2.0f + delta[2],
                                  kReferenceFocal, kReferenceFocal, at2, ignored);
-        ProjectCleanRayToHeadGui(cleanToHead, 0.0f, -delta[0], -delta[1], 5.0f - delta[2],
+        ProjectCleanRayToHeadGui(cleanToHead, 0.0f, delta[0], delta[1], 5.0f + delta[2],
                                  kReferenceFocal, kReferenceFocal, at5, ignored);
-        Check(at2 > 105.0f && at2 < 107.0f, "a 0.30m lean moves a 2m marker about 106px");
-        Check(at5 > 41.0f && at5 < 43.0f, "and a 5m marker about 42px");
+        Check(at2 < -105.0f && at2 > -107.0f, "a 0.30m lean right moves a 2m marker about 106px left");
+        Check(at5 < -41.0f && at5 > -43.0f, "and a 5m marker about 42px");
         // The term is per-depth, so a caller that dropped the depth would land
         // on one value for both. This is what a container-wide write cannot do.
         Check(!NearPixels(at2, at5), "the shift is depth-dependent, not a single constant");
@@ -244,8 +244,11 @@ void TestTheLeanTermReproducesTheTrueHeadViewPosition() {
     float delta[3];
     ComputeCleanLocalPositionDelta(clean, head, delta);
 
-    // An off-centre world point, so the test exercises more than the view axis.
-    const float wx = 0.9f, wy = -0.4f, wz = 3.0f;
+    // An off-centre world point in front of the camera, so the test exercises
+    // more than the view axis. A point behind it projects to the same place as
+    // its mirror through the eye, and under the wrong sign of the lean term the
+    // mirror is the one that lands.
+    const float wx = 0.9f, wy = -0.4f, wz = -3.0f;
 
     // What the engine draws while the camera transform is the clean one.
     float cleanX = 0.0f, cleanY = 0.0f;
@@ -256,16 +259,17 @@ void TestTheLeanTermReproducesTheTrueHeadViewPosition() {
     CanvasPositionOf(head, wx, wy, wz, kReferenceFocal, kReferenceFocal, trueX, trueY);
 
     // The anchor read a mod has: the clean canvas position, unprojected to a
-    // ray, scaled to the marker's depth, with the lean taken off.
+    // ray, scaled to the marker's depth, with the lean added (see
+    // ComputeCleanLocalPositionDelta for why it is added).
     const float tanRight = -cleanX / kReferenceFocal;
     const float tanUp = cleanY / kReferenceFocal;
-    const float depth = wz;  // clean camera is at the origin looking down +z
+    const float depth = -wz;  // the clean camera is at the origin looking down -z
 
     float guiX = 0.0f, guiY = 0.0f;
     Check(ProjectCleanRayToHeadGui(cleanToHead, 0.0f,
-                                   depth * tanRight - delta[0],
-                                   depth * tanUp - delta[1],
-                                   depth - delta[2],
+                                   depth * tanRight + delta[0],
+                                   depth * tanUp + delta[1],
+                                   depth + delta[2],
                                    kReferenceFocal, kReferenceFocal, guiX, guiY),
           "the depth-scaled leaned ray projects in front of the head camera");
     Check(NearPixels(guiX, trueX), "the reprojected marker lands where the head view puts it (x)");
