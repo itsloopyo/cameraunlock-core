@@ -133,6 +133,12 @@ Set-MockReleases @((New-MockRelease -Tag 'v9.7.3' -AgeDays 1 -PublishedAsDateTim
 $meta = Invoke-FetchLatestLoader -OutputPath $outFile @asiArgs
 Check 'published_at as a DateTime is handled' ($meta.Tag -eq 'v9.6.0') "got $($meta.Tag)"
 
+$reuploaded = New-MockRelease -Tag 'v9.7.3' -AgeDays 40
+$reuploaded.assets[0] | Add-Member updated_at $script:Now.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ')
+Set-MockReleases @($reuploaded, (New-MockRelease -Tag 'v9.6.0' -AgeDays 30))
+$meta = Invoke-FetchLatestLoader -OutputPath $outFile @asiArgs
+Check 'an asset re-uploaded 2 days ago keeps its release in the window' ($meta.Tag -eq 'v9.6.0') "got $($meta.Tag)"
+
 Set-MockReleases @((New-MockRelease -Tag 'v9.9.9' -AgeDays 0 -NoPublishedAt))
 $err = $null
 try { Invoke-FetchLatestLoader -OutputPath $outFile @asiArgs } catch { $err = $_.Exception.Message }

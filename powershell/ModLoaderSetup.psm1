@@ -77,6 +77,22 @@ function ConvertTo-UtcDateTime {
 # compromised release is live before anyone yanks it. Every path here that
 # resolves "newest release from GitHub" filters through this first; the default
 # is 14 days and callers override it only deliberately.
+# An asset can be uploaded again after its release was published, and the new
+# file has had only as long as its own upload to be caught. So a release's age
+# runs from the later of published_at and the newest asset's updated_at.
+function Get-ReleaseSoakStart {
+    param([Parameter(Mandatory=$true)] $Release)
+
+    $start = ConvertTo-UtcDateTime $Release.published_at
+    if (-not $start) { return $null }
+    foreach ($asset in @($Release.assets)) {
+        if (-not $asset -or -not ($asset.PSObject.Properties.Name -contains 'updated_at')) { continue }
+        $updated = ConvertTo-UtcDateTime $asset.updated_at
+        if ($updated -and $updated -gt $start) { $start = $updated }
+    }
+    return $start
+}
+
 function Select-SoakedReleases {
     param(
         [Parameter(Mandatory=$true)] [AllowEmptyCollection()] $Releases,
@@ -90,14 +106,14 @@ function Select-SoakedReleases {
     $eligible = [System.Collections.Generic.List[object]]::new()
 
     foreach ($candidate in $Releases) {
-        $published = ConvertTo-UtcDateTime $candidate.published_at
+        $published = Get-ReleaseSoakStart $candidate
         if (-not $published) {
             Write-Host "    skipping $($candidate.tag_name): no published_at timestamp, age cannot be verified" -ForegroundColor DarkYellow
             continue
         }
         if ($published -gt $cutoff) {
             $ageDays = [math]::Floor(($now - $published).TotalDays)
-            Write-Host "    skipping $($candidate.tag_name): published $($published.ToString('yyyy-MM-dd')), ${ageDays}d old, minimum is ${MinimumAgeDays}d" -ForegroundColor DarkYellow
+            Write-Host "    skipping $($candidate.tag_name): published or last re-uploaded $($published.ToString('yyyy-MM-dd')), ${ageDays}d old, minimum is ${MinimumAgeDays}d" -ForegroundColor DarkYellow
             continue
         }
         $eligible.Add($candidate)
@@ -162,9 +178,9 @@ function Get-SoakEligibilityDetail {
     param([AllowEmptyCollection()] $Releases, [int]$MinimumAgeDays)
 
     foreach ($candidate in @($Releases)) {
-        $published = ConvertTo-UtcDateTime $candidate.published_at
+        $published = Get-ReleaseSoakStart $candidate
         if ($published) {
-            return " Newest match '$($candidate.tag_name)' was published $($published.ToString('yyyy-MM-dd')) and becomes usable on $($published.AddDays($MinimumAgeDays).ToString('yyyy-MM-dd'))."
+            return " Newest match '$($candidate.tag_name)' was published or last re-uploaded $($published.ToString('yyyy-MM-dd')) and becomes usable on $($published.AddDays($MinimumAgeDays).ToString('yyyy-MM-dd'))."
         }
     }
     return " No matching release carries a usable publish timestamp, so none can be age-verified."
