@@ -267,6 +267,33 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 - `Set-GameRigLimit -Count <n>` caps how many rigs, of every game, `Enter-GameRig` gives out at
   once. A session past it waits, and the next free place goes to whoever asked first for any game.
 
+### Fixed - receivers, config saves and the install and release scripts
+
+- The C++ `PollingUdpReceiver` and the C# `OpenTrackReceiver` follow the first tracker that
+  sends and ignore any other until it has been silent for 2 seconds, as `UdpReceiver` already
+  did. Two trackers sending to one port made the view flick between them. `PollingUdpReceiver`
+  also runs its poses through the pose jump gate, and `Initialize` clears the last position and
+  the position offset.
+- `ConfigOwner` saves `TrueFreeLook`, `FreeLookMarker` and `StockSights` together when the aim
+  mode changes, in both languages. A save that changed one of them used to leave the others at
+  `default`, so a new Defaults.ini value could put the file in a mode the player never chose.
+- `IniEditor.Edit` / `EditIni` write a value holding a tab, which the reader reads back. A
+  leading or trailing tab is still refused.
+- `ProfileSerializer` keeps its temporary file and names it in the error when a failed replace
+  has already removed the original.
+- `find-game.ps1` exits 2 when it cannot find the game, and `install-body-reframework.cmd` puts
+  back the VR runtimes it set aside when it stops part way.
+- `GamePathDetection.psm1` reads Steam and Xbox manifests as UTF-8, `package-bepinex-mod.ps1`
+  reads `launcher-manifest.json` as UTF-8, and `generate-release-notes.ps1` reads commit subjects
+  as UTF-8, so a non-ASCII game folder or subject is no longer garbled.
+- `Invoke-FetchLatestLoader` counts the 14-day soak from a release's newest asset upload, so an
+  asset replaced after publishing waits out its own soak.
+- The config differential gate counts `pixi.lock`, `global.json` and `packages.lock.json` as
+  inputs, so a toolchain bump runs the differential again.
+- `Enter-GameRig`'s board entry ends with the process that holds the rig, and a rig kept by
+  `-KeptIn` stays on the board under the game's process.
+- The dotnet `test-differential` template fails when its filter matches no test.
+
 ### Fixed - the C interface says to put the rig back after a stop or a missed lean
 
 - `cameraunlock_session_stop`, `cameraunlock_view_stop` and a frame whose lean was never called
