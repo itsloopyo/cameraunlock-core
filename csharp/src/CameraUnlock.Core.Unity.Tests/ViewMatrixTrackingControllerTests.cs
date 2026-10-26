@@ -543,6 +543,31 @@ namespace CameraUnlock.Core.Unity.Tests
             Assert.Equal(0, menuCam.ResetWorldToCameraMatrixCalls);
         }
 
+        // A fade out from a centred head has nothing to apply. The override is sticky, so it was
+        // left as last written, freezing the view at that transform until the fade ended.
+        [Fact]
+        public void FadeOutFromACentredHead_ResetsTheMatrixAtOnce()
+        {
+            var cam = new Camera();
+            var controller = NewController(() => cam);
+            controller.Enable();
+            try
+            {
+                ApplyFrameTo(controller, cam);
+                Assert.Equal(0, cam.ResetWorldToCameraMatrixCalls);
+
+                Time.AdvanceFrame();
+                controller.ProcessFrame(false);
+                Camera.onPreCull(cam);
+
+                Assert.Equal(1, cam.ResetWorldToCameraMatrixCalls);
+            }
+            finally
+            {
+                controller.Disable();
+            }
+        }
+
         [Fact]
         public void Disable_AppliedCameraWasDestroyed_DoesNotTouchIt()
         {
