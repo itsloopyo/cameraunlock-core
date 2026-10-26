@@ -17,6 +17,7 @@ namespace CameraUnlock.Core.Protocol
         public const int DefaultPort = 4242;
         private const int ReceiveTimeoutMs = 100;
         private const int DisconnectThreshold = 50;
+        private const int ErrorBackoffMs = 16;
         // Polled fast rather than lazily: the common case is a second game still
         // holding the port, and the user expects tracking to come alive as soon as
         // they close it. A failed bind is cheap, so the wait is sub-second.
@@ -604,6 +605,12 @@ namespace CameraUnlock.Core.Protocol
 
                     byte[] data = client.Receive(ref remoteEndpoint);
 
+                    // Traffic that publishes nothing (short, unparseable, gated, or from a
+                    // sender other than the locked one) never times the receive out, so
+                    // the timeout count alone kept IsReceiving true on the last pose for
+                    // as long as anyone on the LAN kept sending.
+                    DisconnectIfSilent();
+
                     if (data.Length >= OpenTrackPacket.MinPacketSize)
                     {
                         // ALL-OR-NOTHING, matching the C++ ports' TryParseAll: a datagram
@@ -745,6 +752,8 @@ namespace CameraUnlock.Core.Protocol
                         {
                             _isConnected = false;
                         }
+                        // A socket that fails every call would otherwise spin a core until Stop().
+                        Thread.Sleep(ErrorBackoffMs);
                     }
                 }
                 catch (ObjectDisposedException)
@@ -752,6 +761,15 @@ namespace CameraUnlock.Core.Protocol
                     break;
                 }
             }
+        }
+
+        private void DisconnectIfSilent()
+        {
+            if (!_isConnected) return;
+            long silenceTicks = Stopwatch.Frequency * ReceiveTimeoutMs * DisconnectThreshold / 1000;
+            if (Stopwatch.GetTimestamp() - Interlocked.Read(ref _timestampTicks) < silenceTicks) return;
+            _isConnected = false;
+            _hasRecenterCounter = false;
         }
 
         private bool FollowsSource(IPEndPoint sender)

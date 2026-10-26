@@ -273,6 +273,29 @@ namespace CameraUnlock.Core.Tests.Protocol
             Assert.True(_receiver.IsReceiving);
         }
 
+        // Short datagrams never time the receive out, so they once held IsReceiving true on
+        // the last pose for as long as they kept coming.
+        [Fact]
+        public void IsReceiving_GoesFalse_WhenOnlyJunkArrivesAfterTheTracker()
+        {
+            _receiver = new OpenTrackReceiver();
+            _receiver.Start(TestPort);
+
+            SendTestPacket(TestPort, 10.0, 20.0, 30.0);
+            Assert.True(WaitFor(() => _receiver.IsReceiving, 2000));
+
+            var junk = new byte[8];
+            var stopwatch = Stopwatch.StartNew();
+            while (_receiver.IsReceiving && stopwatch.ElapsedMilliseconds < 10000)
+            {
+                Sender.Send(junk, junk.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
+                Thread.Sleep(20);
+            }
+
+            Assert.False(_receiver.IsReceiving);
+            Assert.InRange(stopwatch.ElapsedMilliseconds, 4000, 9000);
+        }
+
         [Fact]
         public void ReceivesUdpPacket_DataIsFresh()
         {
