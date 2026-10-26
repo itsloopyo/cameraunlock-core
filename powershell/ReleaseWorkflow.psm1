@@ -65,7 +65,7 @@ function Update-CameraUnlockCoreToRemoteTip {
     # directly; we only care about $LASTEXITCODE for routing.
     & git -C $modRoot submodule update --remote --merge -- cameraunlock-core
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to fast-forward cameraunlock-core (git exit $LASTEXITCODE). Resolve local conflicts in cameraunlock-core/ and re-run, or pass -NoRefresh to Copy-SharedBundle to skip."
+        throw "Failed to fast-forward cameraunlock-core (git exit $LASTEXITCODE). Resolve local conflicts in cameraunlock-core/ and re-run, or drop -RefreshCore to package against the pinned commit."
     }
 
     # The pointer has moved, so the commit THIRD-PARTY-NOTICES.md names is now

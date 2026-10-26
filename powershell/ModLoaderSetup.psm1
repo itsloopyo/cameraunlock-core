@@ -1432,7 +1432,7 @@ function Update-VendoredLoader {
     $readme += "- Fetched at: $($meta.FetchedAt)"
     $readme += "- Source: $($meta.Source)"
     $readme += ''
-    $readme += 'Do not edit this directory by hand. Run ``pixi run package`` (or CI release) to refresh.'
+    $readme += 'Do not edit this directory by hand. Refresh it with ``pixi run update-deps``, then commit.'
     $readme -join "`n" | Set-Content $readmePath -Encoding UTF8
 
     Write-Host "    tag=$($meta.Tag) asset=$($meta.AssetName) sha256=$($meta.Sha256.Substring(0,12))..." -ForegroundColor DarkGray
