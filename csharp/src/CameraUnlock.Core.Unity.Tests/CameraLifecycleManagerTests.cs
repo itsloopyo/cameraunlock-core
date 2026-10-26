@@ -52,5 +52,21 @@ namespace CameraUnlock.Core.Unity.Tests
             Assert.Equal(1, manager.Lost);
             Assert.True(ReferenceEquals(manager.TrackedCamera, null));
         }
+
+        // A scene load destroys the camera and the new scene's camera is found in the same frame.
+        [Fact]
+        public void ACameraDestroyedAndReplacedAtOnce_IsLostBeforeTheNewOneIsTaken()
+        {
+            var first = new Camera();
+            var second = new Camera();
+            var manager = new Manager { Next = first };
+            manager.Frame();
+            Object.Destroy(first);
+            manager.Next = second;
+            manager.Frame();
+
+            Assert.Equal(1, manager.Lost);
+            Assert.True(ReferenceEquals(manager.TrackedCamera, second));
+        }
     }
 }
