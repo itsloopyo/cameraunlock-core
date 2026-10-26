@@ -412,9 +412,8 @@ namespace CameraUnlock.Core.Config
                             }
                             else
                             {
-                                log?.Invoke(string.Format(
-                                    "Config key '{0}' has an out-of-range value '{1}' (expected 1-65535) - using {2}",
-                                    kvp.Key, value, UdpPort.ToString(CultureInfo.InvariantCulture)));
+                                WarnOutOfRange(log, kvp.Key, value, "1-65535",
+                                    UdpPort.ToString(CultureInfo.InvariantCulture));
                             }
                         }
                         break;
@@ -435,9 +434,8 @@ namespace CameraUnlock.Core.Config
                             }
                             else
                             {
-                                log?.Invoke(string.Format(
-                                    "Config key '{0}' has an out-of-range value '{1}' (expected 1 or more) - using {2}",
-                                    kvp.Key, value, DataFreshnessMs.ToString(CultureInfo.InvariantCulture)));
+                                WarnOutOfRange(log, kvp.Key, value, "1 or more",
+                                    DataFreshnessMs.ToString(CultureInfo.InvariantCulture));
                             }
                         }
                         break;
@@ -641,11 +639,9 @@ namespace CameraUnlock.Core.Config
                             }
                             else
                             {
-                                log?.Invoke(string.Format(
-                                    "Config key '{0}' has an out-of-range value '{1}' (expected 0-{2}) - using {3}",
-                                    kvp.Key, value,
-                                    HeadFollowLightSettings.MaxMultiplier.ToString(CultureInfo.InvariantCulture),
-                                    Light.Multiplier.ToString(CultureInfo.InvariantCulture)));
+                                WarnOutOfRange(log, kvp.Key, value,
+                                    "0-" + HeadFollowLightSettings.MaxMultiplier.ToString(CultureInfo.InvariantCulture),
+                                    Light.Multiplier.ToString(CultureInfo.InvariantCulture));
                             }
                         }
                         break;
@@ -688,9 +684,8 @@ namespace CameraUnlock.Core.Config
                             }
                             else
                             {
-                                log?.Invoke(string.Format(
-                                    "Config key '{0}' has an out-of-range value '{1}' (expected 0-1) - using {2}",
-                                    kvp.Key, value, CollisionReleaseSmoothing.ToString(CultureInfo.InvariantCulture)));
+                                WarnOutOfRange(log, kvp.Key, value, "0-1",
+                                    CollisionReleaseSmoothing.ToString(CultureInfo.InvariantCulture));
                             }
                         }
                         break;
@@ -793,6 +788,17 @@ namespace CameraUnlock.Core.Config
             log?.Invoke(string.Format(
                 "Config keys '{0}' and '{1}' are two spellings of the same setting. Only one takes effect and which one is not defined - remove one.",
                 firstSpelling, secondSpelling));
+        }
+
+#if NULLABLE_ENABLED
+        private static void WarnOutOfRange(Action<string>? log, string key, string value, string expected, string current)
+#else
+        private static void WarnOutOfRange(Action<string> log, string key, string value, string expected, string current)
+#endif
+        {
+            log?.Invoke(string.Format(
+                "Config key '{0}' has an out-of-range value '{1}' (expected {2}) - using {3}",
+                key, value, expected, current));
         }
 
 #if NULLABLE_ENABLED

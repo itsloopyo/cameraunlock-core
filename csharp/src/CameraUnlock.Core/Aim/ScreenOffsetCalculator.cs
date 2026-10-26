@@ -40,53 +40,10 @@ namespace CameraUnlock.Core.Aim
             out float offsetX,
             out float offsetY)
         {
-            float halfWidth = screenWidth * 0.5f;
-            float halfHeight = screenHeight * 0.5f;
-
-            float tanHalfFovX = (float)System.Math.Tan(horizontalFov * MathConstants.DegToRad * 0.5f);
-            float tanHalfFovY = (float)System.Math.Tan(verticalFov * MathConstants.DegToRad * 0.5f);
-
-            // Exact spherical coordinate projection matching camera rotation.
-            // Original aim direction decomposed into tracked camera basis:
-            //   right   = -sin(yaw)
-            //   up      = sin(pitch) * cos(yaw)
-            //   forward = cos(pitch) * cos(yaw)
-            // The key correction vs independent tangent projection is the 1/cos(pitch)
-            // factor on the x term, which prevents "orbiting" when both yaw and pitch are non-zero.
-            float yawRad = yawDegrees * MathConstants.DegToRad;
-            float pitchRad = pitchDegrees * MathConstants.DegToRad;
-
-            float sinY = (float)System.Math.Sin(yawRad);
-            float cosY = (float)System.Math.Cos(yawRad);
-            float sinP = (float)System.Math.Sin(pitchRad);
-            float cosP = (float)System.Math.Cos(pitchRad);
-
-            float ax = -sinY;
-            float ay = sinP * cosY;
-            float az = cosP * cosY;
-
-            // Apply roll in direction space (before perspective divide) to avoid
-            // elliptical distortion from different horizontal/vertical FOV scales.
-            ApplyRollRotation(ax, ay, rollDegrees, out ax, out ay);
-
-            // Perspective divide and FOV scaling. az -> 0 when pitch or yaw approach
-            // ±90°, and tanHalf* -> 0 when FOV is degenerate (e.g. zoomed-out menu cam).
-            // In either case the projection is undefined; emit zero offset so the
-            // reticle stays centred instead of jumping to ±Infinity / NaN on screen.
-            // az < 0 is the half-space behind the camera plane: dividing by it mirrors
-            // the offset, so a 100° yaw would report a reticle just right of centre
-            // while the aim is actually behind the player. Rejected, not clamped.
-            if (az < ProjectionEpsilon ||
-                System.Math.Abs(tanHalfFovX) < ProjectionEpsilon ||
-                System.Math.Abs(tanHalfFovY) < ProjectionEpsilon)
-            {
-                offsetX = 0f;
-                offsetY = 0f;
-                return;
-            }
-
-            offsetX = (ax / az) / tanHalfFovX * halfWidth * compensationScale;
-            offsetY = (ay / az) / tanHalfFovY * halfHeight * compensationScale;
+            float tanHalfFovX, tanHalfFovY;
+            PrecomputeFovTangents(horizontalFov, verticalFov, out tanHalfFovX, out tanHalfFovY);
+            CalculatePrecomputed(yawDegrees, pitchDegrees, rollDegrees, tanHalfFovX, tanHalfFovY,
+                screenWidth * 0.5f, screenHeight * 0.5f, compensationScale, out offsetX, out offsetY);
         }
 
 #if NETSTANDARD2_0
@@ -150,6 +107,13 @@ namespace CameraUnlock.Core.Aim
             out float offsetX,
             out float offsetY)
         {
+            // Exact spherical coordinate projection matching camera rotation.
+            // Original aim direction decomposed into tracked camera basis:
+            //   right   = -sin(yaw)
+            //   up      = sin(pitch) * cos(yaw)
+            //   forward = cos(pitch) * cos(yaw)
+            // The key correction vs independent tangent projection is the 1/cos(pitch)
+            // factor on the x term, which prevents "orbiting" when both yaw and pitch are non-zero.
             float yawRad = yawDegrees * MathConstants.DegToRad;
             float pitchRad = pitchDegrees * MathConstants.DegToRad;
 
@@ -162,11 +126,17 @@ namespace CameraUnlock.Core.Aim
             float ay = sinP * cosY;
             float az = cosP * cosY;
 
+            // Apply roll in direction space (before perspective divide) to avoid
+            // elliptical distortion from different horizontal/vertical FOV scales.
             ApplyRollRotation(ax, ay, rollDegrees, out ax, out ay);
 
-            // See Calculate(): clamp to zero offset when the projection is singular or
-            // behind the camera plane, so callers don't propagate ±Infinity / NaN or a
-            // mirrored offset into the reticle UI.
+            // Perspective divide and FOV scaling. az -> 0 when pitch or yaw approach
+            // ±90°, and tanHalf* -> 0 when FOV is degenerate (e.g. zoomed-out menu cam).
+            // In either case the projection is undefined; emit zero offset so the
+            // reticle stays centred instead of jumping to ±Infinity / NaN on screen.
+            // az < 0 is the half-space behind the camera plane: dividing by it mirrors
+            // the offset, so a 100° yaw would report a reticle just right of centre
+            // while the aim is actually behind the player. Rejected, not clamped.
             if (az < ProjectionEpsilon ||
                 System.Math.Abs(tanHalfFovX) < ProjectionEpsilon ||
                 System.Math.Abs(tanHalfFovY) < ProjectionEpsilon)

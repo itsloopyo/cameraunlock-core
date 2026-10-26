@@ -64,11 +64,13 @@ namespace CameraUnlock.Core.Unity.Extensions
             remove { _handler.OnRecenter -= value; }
         }
 
+        private const float DefaultCooldownSeconds = 0.3f;
+
         /// <summary>
         /// Creates a Unity hotkey handler with default keys (Home = Recenter, End = Toggle).
         /// </summary>
         /// <param name="cooldownSeconds">Minimum time between key activations (default 0.3s).</param>
-        public UnityHotkeyHandler(float cooldownSeconds = 0.3f)
+        public UnityHotkeyHandler(float cooldownSeconds = DefaultCooldownSeconds)
             : this(KeyCode.End, KeyCode.Home, null, cooldownSeconds)
         {
         }
@@ -79,7 +81,7 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <param name="toggleKey">Key to toggle head tracking on/off.</param>
         /// <param name="recenterKey">Key to recenter head tracking.</param>
         /// <param name="cooldownSeconds">Minimum time between key activations (default 0.3s).</param>
-        public UnityHotkeyHandler(KeyCode toggleKey, KeyCode recenterKey, float cooldownSeconds = 0.3f)
+        public UnityHotkeyHandler(KeyCode toggleKey, KeyCode recenterKey, float cooldownSeconds = DefaultCooldownSeconds)
             : this(toggleKey, recenterKey, null, cooldownSeconds)
         {
         }
@@ -91,7 +93,7 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <param name="recenterKey">Key to recenter head tracking.</param>
         /// <param name="listener">Interface to receive callbacks (recommended for Unity 2018).</param>
         /// <param name="cooldownSeconds">Minimum time between key activations (default 0.3s).</param>
-        public UnityHotkeyHandler(KeyCode toggleKey, KeyCode recenterKey, IHotkeyListener listener, float cooldownSeconds = 0.3f)
+        public UnityHotkeyHandler(KeyCode toggleKey, KeyCode recenterKey, IHotkeyListener listener, float cooldownSeconds = DefaultCooldownSeconds)
         {
             _handler = new HotkeyHandler(
                 keyCode => UnityEngine.Input.GetKeyDown((KeyCode)keyCode),

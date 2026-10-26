@@ -323,11 +323,7 @@ namespace CameraUnlock.Core.Tracking
                     // offset a second time, parking the view mirrored from the
                     // pre-press drift.
                     _processor.RecenterTo(_receiver.GetLatestPose());
-                    _poseInterpolator.Reset();
-                    _positionProcessor.SetCenter(_receiver.GetLatestPosition());
-                    _positionInterpolator.Reset();
-                    _poseSeeded = false;
-                    _positionSeeded = false;
+                    RestartFromNewCenter();
                     // The tracker zeroed its own output: the stage starts from the new pose
                     // rather than easing across that step.
                     _accelaHasOutput = false;
@@ -487,6 +483,11 @@ namespace CameraUnlock.Core.Tracking
             // recenter path above already guards against.
             _hasCentered = true;
             _processor.Recenter();
+            RestartFromNewCenter();
+        }
+
+        private void RestartFromNewCenter()
+        {
             _poseInterpolator.Reset();
             _positionProcessor.SetCenter(_receiver.GetLatestPosition());
             _positionInterpolator.Reset();

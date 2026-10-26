@@ -1,7 +1,6 @@
 // Test files intentionally pass null to test exception handling
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type
 
-using System;
 using Xunit;
 using CameraUnlock.Core.Data;
 

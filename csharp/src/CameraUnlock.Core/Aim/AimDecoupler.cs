@@ -1,4 +1,3 @@
-using System;
 using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Math;
 

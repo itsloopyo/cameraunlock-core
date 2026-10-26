@@ -83,6 +83,9 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
         /// </summary>
         protected virtual float DefaultSensitivity => 1.0f;
 
+        private const float MinSensitivity = 0.1f;
+        private const float MaxSensitivity = 3.0f;
+
         /// <summary>
         /// Default toggle hotkey.
         /// </summary>
@@ -144,7 +147,7 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
                 DefaultSensitivity,
                 new ConfigDescription(
                     "Yaw (left/right) sensitivity multiplier",
-                    new AcceptableValueRange<float>(0.1f, 3.0f)
+                    new AcceptableValueRange<float>(MinSensitivity, MaxSensitivity)
                 )
             );
 
@@ -154,7 +157,7 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
                 DefaultSensitivity,
                 new ConfigDescription(
                     "Pitch (up/down) sensitivity multiplier",
-                    new AcceptableValueRange<float>(0.1f, 3.0f)
+                    new AcceptableValueRange<float>(MinSensitivity, MaxSensitivity)
                 )
             );
 
@@ -164,7 +167,7 @@ namespace CameraUnlock.Core.Unity.BepInEx.Config
                 DefaultSensitivity,
                 new ConfigDescription(
                     "Roll (tilt) sensitivity multiplier",
-                    new AcceptableValueRange<float>(0.1f, 3.0f)
+                    new AcceptableValueRange<float>(MinSensitivity, MaxSensitivity)
                 )
             );
 

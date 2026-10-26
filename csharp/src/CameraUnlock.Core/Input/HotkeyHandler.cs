@@ -119,6 +119,8 @@ namespace CameraUnlock.Core.Input
         public event RecenterEventHandler OnRecenter;
 #endif
 
+        private const float DefaultCooldownSeconds = 0.3f;
+
         /// <summary>
         /// Creates a new hotkey handler with event-based callbacks.
         /// </summary>
@@ -126,9 +128,9 @@ namespace CameraUnlock.Core.Input
         /// <param name="textInputCheck">Function to check if text input is active (can be null to disable check).</param>
         /// <param name="cooldownSeconds">Minimum time between key activations (default 0.3s).</param>
 #if NULLABLE_ENABLED
-        public HotkeyHandler(KeyDownCheck keyDownCheck, TextInputActiveCheck? textInputCheck = null, float cooldownSeconds = 0.3f)
+        public HotkeyHandler(KeyDownCheck keyDownCheck, TextInputActiveCheck? textInputCheck = null, float cooldownSeconds = DefaultCooldownSeconds)
 #else
-        public HotkeyHandler(KeyDownCheck keyDownCheck, TextInputActiveCheck textInputCheck = null, float cooldownSeconds = 0.3f)
+        public HotkeyHandler(KeyDownCheck keyDownCheck, TextInputActiveCheck textInputCheck = null, float cooldownSeconds = DefaultCooldownSeconds)
 #endif
             : this(keyDownCheck, textInputCheck, null, cooldownSeconds)
         {
@@ -142,9 +144,9 @@ namespace CameraUnlock.Core.Input
         /// <param name="listener">Interface to receive callbacks (recommended for Unity 2018).</param>
         /// <param name="cooldownSeconds">Minimum time between key activations (default 0.3s).</param>
 #if NULLABLE_ENABLED
-        public HotkeyHandler(KeyDownCheck keyDownCheck, TextInputActiveCheck? textInputCheck, IHotkeyListener? listener, float cooldownSeconds = 0.3f)
+        public HotkeyHandler(KeyDownCheck keyDownCheck, TextInputActiveCheck? textInputCheck, IHotkeyListener? listener, float cooldownSeconds = DefaultCooldownSeconds)
 #else
-        public HotkeyHandler(KeyDownCheck keyDownCheck, TextInputActiveCheck textInputCheck, IHotkeyListener listener, float cooldownSeconds = 0.3f)
+        public HotkeyHandler(KeyDownCheck keyDownCheck, TextInputActiveCheck textInputCheck, IHotkeyListener listener, float cooldownSeconds = DefaultCooldownSeconds)
 #endif
         {
             _keyDownCheck = keyDownCheck;
