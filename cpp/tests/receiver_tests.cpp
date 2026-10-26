@@ -158,6 +158,16 @@ bool PollUntilReceived(cameraunlock::PollingUdpReceiver& rx) {
     return false;
 }
 
+/// True if any Poll within `ms` took a pose.
+bool PollFor(cameraunlock::PollingUdpReceiver& rx, int ms) {
+    bool took = false;
+    for (int i = 0; i < ms; i++) {
+        took = rx.Poll() || took;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return took;
+}
+
 bool NearEqual(float a, float b, float eps = 1e-4f) {
     return std::fabs(a - b) <= eps;
 }
@@ -251,6 +261,36 @@ int RunReceiverTests() {
     rx.ResetOffset();
     Check(rx.GetPosition(x, y, z) && NearEqual(x, 1.1f) && NearEqual(y, 0.5f) && NearEqual(z, -0.25f),
           "ResetOffset restores raw position");
+
+    // A tracker that loses the head repeats one pose bit for bit: the jump to it is held.
+    len = BuildPacket(pkt, 110.0, 50.0, -25.0, 40.0, 5.0, -2.0);
+    Check(SendTo(sender, pkt, len) && !PollFor(rx, 200), "a large jump is held back");
+    Check(SendTo(sender, pkt, len) && !PollFor(rx, 200), "and stays held while the pose repeats bit for bit");
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 10.f), "the pose the head was in is kept");
+    len = BuildPacket(pkt, 110.0, 50.0, -25.0, 41.0, 5.0, -2.0);
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "a pose that moves on is taken");
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 41.f), "and published");
+
+    // A second app sending to the port is ignored until the first has gone silent.
+    UdpSocket second;
+    Check(second.Open(0), "a second sender opens an ephemeral port");
+    len = BuildPacket(pkt, 110.0, 50.0, -25.0, 42.0, 5.0, -2.0);
+    Check(SendTo(second, pkt, len) && !PollFor(rx, 200), "a second source is ignored while the first sends");
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 41.f), "and its pose does not reach the game");
+    std::this_thread::sleep_for(std::chrono::milliseconds(PollingUdpReceiver::kSourceHandoverMs + 100));
+    Check(SendTo(second, pkt, len) && PollUntilReceived(rx), "it takes over once the first has been silent");
+    Check(rx.GetRotation(yaw, pitch, roll) && NearEqual(yaw, 42.f), "and drives the pose from then on");
+    second.Close();
+
+    // Started again, the receiver keeps nothing of the last run: no position, no offset.
+    rx.Recenter();
+    rx.Shutdown();
+    Check(rx.Initialize(receiverPort), "the receiver starts again on its port");
+    Check(!rx.GetPosition(x, y, z), "a restarted receiver has no position until a packet arrives");
+    len = BuildPacket(pkt, 120.0, 50.0, -25.0, 42.0, 5.0, -2.0);
+    Check(SendTo(sender, pkt, len) && PollUntilReceived(rx), "a packet arrives after the restart");
+    Check(rx.GetPosition(x, y, z) && NearEqual(x, 1.2f) && NearEqual(y, 0.5f) && NearEqual(z, -0.25f),
+          "and its position carries no offset from before");
 
     rx.Shutdown();
     sender.Close();

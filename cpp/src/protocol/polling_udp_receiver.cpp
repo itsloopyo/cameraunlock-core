@@ -38,7 +38,12 @@ bool PollingUdpReceiver::Initialize(uint16_t port) {
     m_bytesReceived = 0;
     m_isRemoteConnection = false;
     m_hasData = false;
-    m_hasOffset = false;
+    m_hasPosition = false;
+    ResetOffset();
+    m_primarySource = 0;
+    m_primaryLastSeenMs = 0;
+    m_secondSourceLogged = false;
+    m_poseGate.Reset();
     m_lastRecenterCounter = 0;
     m_hasRecenterCounter = false;
     m_recenterRequested = false;
@@ -122,12 +127,10 @@ bool PollingUdpReceiver::Poll() {
 
         packetsThisFrame++;
 
-        if (ParsePacket(m_receiveBuffer, bytesReceived)) {
+        if (ParsePacket(m_receiveBuffer, bytesReceived, senderAddr, GetCurrentTimeMs())) {
             m_packetsReceived++;
             m_bytesReceived += static_cast<uint64_t>(bytesReceived);
             receivedAny = true;
-
-            m_isRemoteConnection = IsRemoteAddress(senderAddr);
 
             // Latched on an ACCEPTED packet, not on any datagram. The latch is
             // one-shot, so logging before validation lets a stray keepalive or a
@@ -239,24 +242,52 @@ bool PollingUdpReceiver::GetPosition(float& x, float& y, float& z) const {
     return true;
 }
 
-bool PollingUdpReceiver::ParsePacket(const char* buffer, int bytesReceived) {
-    // Use shared OpenTrack packet parsing (rotation + position)
+// The rules UdpReceiver::HandleDatagram gives its reasons for, in the same order: a datagram
+// that does not parse changes nothing, the source lock comes next, and the trailer is read
+// before the pose gate.
+bool PollingUdpReceiver::ParsePacket(const char* buffer, int bytesReceived, const sockaddr_in& sender,
+                                     int64_t nowMs) {
     TrackingPose pose;
     PositionData position;
     if (!OpenTrackPacket::TryParseAll(buffer, static_cast<size_t>(bytesReceived), pose, position)) {
         return false;
     }
 
+    const uint64_t source = (static_cast<uint64_t>(sender.sin_addr.s_addr) << 16) | ntohs(sender.sin_port);
+    if (m_primarySource != 0 && source != m_primarySource) {
+        if (nowMs - m_primaryLastSeenMs < kSourceHandoverMs) {
+            if (!m_secondSourceLogged && m_log) {
+                m_secondSourceLogged = true;
+                m_log("a SECOND tracker source is sending to this port - IGNORING it while the first one sends."
+                      " Two sources make the head pose alternate between them. Close whichever tracker you"
+                      " are not using.");
+            }
+            return false;
+        }
+        if (m_log) m_log("tracker source went silent; switching to the one now sending");
+    }
+    m_primarySource = source;
+    m_primaryLastSeenMs = nowMs;
+
     // The trailer is parsed but no longer raises a recenter request. Headcam owns
     // centring: it zeroes its own output on CENTER, and the pipeline's centre is
     // identity by default, so the zeroed stream is already correct without the mod
-    // doing anything. An older app that still sends the trailer is simply ignored.
+    // doing anything. A press still marks the jump to the app's new neutral as real.
     uint8_t recenterCounter;
-    if (OpenTrackPacket::TryParseRecenterCounter(buffer, static_cast<size_t>(bytesReceived), recenterCounter)) {
+    const bool hasTrailer =
+        OpenTrackPacket::TryParseRecenterCounter(buffer, static_cast<size_t>(bytesReceived), recenterCounter);
+    const bool pressed = hasTrailer && (!m_hasRecenterCounter || recenterCounter != m_lastRecenterCounter);
+    if (hasTrailer) {
         m_lastRecenterCounter = recenterCounter;
         m_hasRecenterCounter = true;
     }
+    if (pressed) {
+        m_poseGate.Announce(pose.yaw, pose.pitch, pose.roll);
+    } else if (!m_poseGate.Accept(pose.yaw, pose.pitch, pose.roll)) {
+        return false;
+    }
 
+    m_isRemoteConnection = IsRemoteAddress(sender);
     m_yaw = pose.yaw;
     m_pitch = pose.pitch;
     m_roll = pose.roll;

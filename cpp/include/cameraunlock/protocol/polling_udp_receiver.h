@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 #include "cameraunlock/data/tracking_pose.h"
+#include "cameraunlock/protocol/pose_jump_gate.h"
 #include "cameraunlock/protocol/socket_types.h"
 #include "cameraunlock/protocol/udp_socket.h"
 #include "cameraunlock/protocol/udp_receiver.h"
@@ -27,6 +28,10 @@ public:
     // See UdpReceiver::kRecenterRearmMs - the trailer re-arm window is a wire-contract
     // constant (~5s of silence), not the connection-liveness timeout.
     static constexpr int kRecenterRearmMs = 5000;
+
+    /// As UdpReceiver: the receiver follows the first source that sends, and another
+    /// takes over only once that one has been silent this long.
+    static constexpr int kSourceHandoverMs = UdpReceiver::kSourceHandoverMs;
 
     /// Maximum receive buffer size.
     static constexpr size_t kMaxBufferSize = 256;
@@ -53,9 +58,11 @@ public:
     void Shutdown();
 
     /// Polls for incoming data (non-blocking).
-    /// Drains all pending packets and keeps only the latest.
+    /// Drains all pending packets and keeps only the latest. Like UdpReceiver, it
+    /// follows one source and holds back a jump that the next packet does not
+    /// corroborate (PoseJumpGate).
     /// Should be called once per frame from the main game loop.
-    /// @return True if new data was received this frame.
+    /// @return True if a new pose was taken this frame.
     bool Poll();
 
     /// Gets the latest tracking pose (rotation only, with offset applied).
@@ -105,7 +112,7 @@ public:
     uint64_t GetBytesReceived() const { return m_bytesReceived; }
 
 private:
-    bool ParsePacket(const char* buffer, int bytesReceived);
+    bool ParsePacket(const char* buffer, int bytesReceived, const sockaddr_in& sender, int64_t nowMs);
     int64_t GetCurrentTimeMs() const;
 
     UdpSocket m_socket;
@@ -147,6 +154,12 @@ private:
     uint8_t m_lastRecenterCounter = 0;
     bool m_hasRecenterCounter = false;
     bool m_recenterRequested = false;
+
+    // The source followed, packed as (s_addr << 16) | port, and when it last sent.
+    uint64_t m_primarySource = 0;
+    int64_t m_primaryLastSeenMs = 0;
+    bool m_secondSourceLogged = false;
+    PoseJumpGate m_poseGate;
 
     // Connection state
     int64_t m_lastReceiveTimeMs = 0;
