@@ -352,28 +352,33 @@ public:
     }
 
     std::optional<OptionShape> Shape() const override {
-        OptionShape shape;
-        if constexpr (std::is_same_v<Codec, BoolCodec>) {
-            shape.kind = OptionKind::kBool;
-            shape.max = 1.0;
-        } else if constexpr (IsIntCodec<Codec>::value) {
-            shape.kind = OptionKind::kInt;
-            shape.min = static_cast<double>(codec_.min());
-            shape.max = static_cast<double>(codec_.max());
-        } else if constexpr (IsFloatingCodec<Codec>::value) {
-            shape.kind = OptionKind::kFloat;
-            shape.min = static_cast<double>(codec_.min());
-            shape.max = static_cast<double>(codec_.max());
-            shape.ranged = codec_.min() != std::numeric_limits<Value>::lowest() &&
-                           codec_.max() != std::numeric_limits<Value>::max();
-        } else if constexpr (IsEnumCodec<Codec>::value) {
-            shape.kind = OptionKind::kEnum;
-            for (const auto& entry : codec_.tokens()) shape.tokens.push_back(entry.token);
-            shape.max = static_cast<double>(shape.tokens.size() - 1);
-        } else {
+        // The nullopt branch comes first so no instantiation ends in an unreachable
+        // `return shape;`, which is C4702 and an error in mods that build with /W4 /WX.
+        if constexpr (!std::is_same_v<Codec, BoolCodec> && !IsIntCodec<Codec>::value &&
+                      !IsFloatingCodec<Codec>::value && !IsEnumCodec<Codec>::value) {
             return std::nullopt;
+        } else {
+            OptionShape shape;
+            if constexpr (std::is_same_v<Codec, BoolCodec>) {
+                shape.kind = OptionKind::kBool;
+                shape.max = 1.0;
+            } else if constexpr (IsIntCodec<Codec>::value) {
+                shape.kind = OptionKind::kInt;
+                shape.min = static_cast<double>(codec_.min());
+                shape.max = static_cast<double>(codec_.max());
+            } else if constexpr (IsFloatingCodec<Codec>::value) {
+                shape.kind = OptionKind::kFloat;
+                shape.min = static_cast<double>(codec_.min());
+                shape.max = static_cast<double>(codec_.max());
+                shape.ranged = codec_.min() != std::numeric_limits<Value>::lowest() &&
+                               codec_.max() != std::numeric_limits<Value>::max();
+            } else {
+                shape.kind = OptionKind::kEnum;
+                for (const auto& entry : codec_.tokens()) shape.tokens.push_back(entry.token);
+                shape.max = static_cast<double>(shape.tokens.size() - 1);
+            }
+            return shape;
         }
-        return shape;
     }
 
     double Number(const Config& config) const override {
