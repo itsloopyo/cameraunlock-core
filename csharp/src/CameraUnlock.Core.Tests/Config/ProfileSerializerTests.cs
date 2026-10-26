@@ -182,6 +182,25 @@ AxisMapping.Roll.Source=Roll
         }
 
         [Fact]
+        public void Deserialize_KeepsTheDefault_ForANumberThatIsNotFinite()
+        {
+            string content = @"
+AxisMapping.Yaw.Sensitivity=NaN
+AxisMapping.Yaw.MaxLimit=Infinity
+AxisMapping.Pitch.CurveStrength=-Infinity
+Setting.Gain=NaN
+";
+            var defaults = new MappingConfig();
+
+            var profile = ProfileSerializer.Deserialize(content);
+
+            Assert.Equal(defaults.YawConfig.Sensitivity, profile.AxisMapping.YawConfig.Sensitivity);
+            Assert.Equal(defaults.YawConfig.MaxLimit, profile.AxisMapping.YawConfig.MaxLimit);
+            Assert.Equal(defaults.PitchConfig.CurveStrength, profile.AxisMapping.PitchConfig.CurveStrength);
+            Assert.Equal("NaN", profile.GetSetting<string>("Gain"));
+        }
+
+        [Fact]
         public void RoundTrip_PreservesAllData()
         {
             var original = new ConfigProfile("RoundTrip", "Round Trip Test", "TestGame");

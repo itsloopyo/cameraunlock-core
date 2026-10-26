@@ -145,9 +145,11 @@ namespace CameraUnlock.Core.Config.Profiles
             // freshly-closed temp file is enough) or if the process dies between the two
             // - which is strictly worse than the partial file this is meant to prevent.
             string tempPath = filePath + ".tmp";
-            File.WriteAllText(tempPath, content, Encoding.UTF8);
+            bool written = false;
             try
             {
+                File.WriteAllText(tempPath, content, Encoding.UTF8);
+                written = true;
                 if (File.Exists(filePath))
                 {
                     File.Replace(tempPath, filePath, null);
@@ -162,12 +164,18 @@ namespace CameraUnlock.Core.Config.Profiles
                 // A replace that fails after Windows has moved the original away
                 // (ERROR_UNABLE_TO_MOVE_REPLACEMENT with no backup name) leaves the profile
                 // only in the temp file, which is then kept and named.
-                if (!File.Exists(filePath))
+                if (written && !File.Exists(filePath))
                 {
                     throw new IOException("the profile could not be put in place, and is kept at " + tempPath, failure);
                 }
-                try { File.Delete(tempPath); }
-                catch (IOException) { }
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch (IOException cleanup)
+                {
+                    throw new IOException(failure.Message + " The temporary " + tempPath + " could not be removed either: " + cleanup.Message, failure);
+                }
                 throw;
             }
         }
@@ -318,9 +326,17 @@ namespace CameraUnlock.Core.Config.Profiles
                 return boolVal;
             if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int intVal))
                 return intVal;
-            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float floatVal))
+            if (TryParseFinite(value, out float floatVal))
                 return floatVal;
             return value;
+        }
+
+        // float.TryParse takes "NaN" and "Infinity", and either one in a sensitivity or a
+        // limit turns every transformed angle into NaN.
+        private static bool TryParseFinite(string value, out float result)
+        {
+            return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result)
+                && !float.IsNaN(result) && !float.IsInfinity(result);
         }
 
         private static void ParseAxisMapping(ConfigProfile profile, string key, string value)
@@ -362,7 +378,7 @@ namespace CameraUnlock.Core.Config.Profiles
                         config.Source = sourceTemp;
                     break;
                 case "Sensitivity":
-                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
+                    if (TryParseFinite(value, out floatTemp))
                         config.Sensitivity = floatTemp;
                     break;
                 case "Inverted":
@@ -370,19 +386,19 @@ namespace CameraUnlock.Core.Config.Profiles
                         config.Inverted = boolTemp;
                     break;
                 case "DeadzoneMin":
-                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
+                    if (TryParseFinite(value, out floatTemp))
                         config.DeadzoneMin = floatTemp;
                     break;
                 case "DeadzoneMax":
-                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
+                    if (TryParseFinite(value, out floatTemp))
                         config.DeadzoneMax = floatTemp;
                     break;
                 case "MinLimit":
-                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
+                    if (TryParseFinite(value, out floatTemp))
                         config.MinLimit = floatTemp;
                     break;
                 case "MaxLimit":
-                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
+                    if (TryParseFinite(value, out floatTemp))
                         config.MaxLimit = floatTemp;
                     break;
                 case "EnableLimits":
@@ -394,11 +410,11 @@ namespace CameraUnlock.Core.Config.Profiles
                         config.SensitivityCurve = curveTemp;
                     break;
                 case "CurveStrength":
-                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
+                    if (TryParseFinite(value, out floatTemp))
                         config.CurveStrength = floatTemp;
                     break;
                 case "MaxInputRange":
-                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out floatTemp))
+                    if (TryParseFinite(value, out floatTemp))
                         config.MaxInputRange = floatTemp;
                     break;
             }
