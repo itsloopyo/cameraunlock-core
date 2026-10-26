@@ -86,7 +86,7 @@ function Find-GameInstallation {
 
     if ($CustomPath) {
         $exePath = Join-Path $CustomPath $GameExeRelpath
-        if ((Test-Path $CustomPath) -and (Test-Path $exePath)) { return $CustomPath }
+        if ((Test-Path -LiteralPath $CustomPath) -and (Test-Path -LiteralPath $exePath)) { return $CustomPath }
         Write-Fail "Provided -GamePath does not contain $ModDisplayName's expected exe at $GameExeRelpath : $CustomPath"
         exit 1
     }
