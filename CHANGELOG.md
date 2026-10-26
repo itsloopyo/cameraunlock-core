@@ -343,6 +343,29 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 - `UnityAimHelper.ClampToScreenEdge` puts a behind-camera aim on the edge it points at, read from
   the view matrix, instead of the opposite edge.
 - `UIElementOffsetController` puts its element back when the component is disabled while offset.
+- The C# `OpenTrackReceiver` drops `IsReceiving` after 5 seconds with no accepted pose even while
+  other datagrams arrive, and both receivers wait 16 ms after a failed receive instead of spinning.
+  The C++ `UdpReceiver` retries a supervisor thread that would not start.
+- The canonical INI reader indexes sections and keys in both languages. A file with 100,000 keys
+  took minutes to read in C#, and now reads in well under the tests' 2 second bound.
+- `EditIni` looks for `]` and `=` only within the line it is reading.
+- `cameraunlock_hotkeys_start` publishes the poller only once it has started.
+- `ProfileSerializer` keeps the default for a number that is not finite, and `ProfileManager`
+  lists a new profile only once its file is written and refuses a reserved device name
+  (`CON`, `NUL`, `COM1` and the rest) as a profile name.
+- The Java binding refuses a host buffer over 2 GiB.
+- The MelonLoader, BepInEx and REFramework install bodies stop with exit 1 instead of replacing a
+  `version.dll`, `winhttp.dll` or `dinput8.dll` that belongs to another loader.
+- `install-body-xnvse.cmd` finds and copies xNVSE with delayed expansion off, so a TEMP or game
+  path holding `!` installs.
+- `find-game.ps1` drops a trailing `\` from the game path, and the uninstall template tests the
+  path literally.
+- `Update-VendoredLoader` records the commit an annotated tag points at, and removes a stale
+  LICENSE before it looks for the new one.
+- `validate-manifest.mjs` reads a ZIP entry as a file, so an entry named `x[1].txt` is no longer
+  read as `x1.txt`.
+- The release workflows pass inputs to their scripts through the environment and check out with
+  `persist-credentials: false`. `nuget.config` maps each package id to the feed that publishes it.
 
 ### Fixed - the C interface says to put the rig back after a stop or a missed lean
 
