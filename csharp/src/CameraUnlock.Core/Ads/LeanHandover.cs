@@ -33,8 +33,9 @@ namespace CameraUnlock.Core.Ads
     /// before the split, because the rig carries the muzzle and the start point and an
     /// unclamped share would shoot through the wall. Both shares come back in the space the
     /// lean went in, so a mod converts the rig's share through world space when its rig's
-    /// local frame is not the camera's; the two shares always sum to the lean, so the eye
-    /// lands in the same place whichever carrier holds it.
+    /// local frame is not the camera's. The two shares sum to the lean, so the eye lands in
+    /// the same place whichever carrier holds it, except where the forward stop holds the eye
+    /// back or, with no rig, the lateral lean eases out.
     /// </para>
     /// <para>
     /// Only the camera's share opens a gap between the eye and the round, so it is the only
