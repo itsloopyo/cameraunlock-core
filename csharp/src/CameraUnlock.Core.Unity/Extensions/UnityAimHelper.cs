@@ -127,11 +127,12 @@ namespace CameraUnlock.Core.Unity.Extensions
         /// <returns>Screen offset clamped to edge.</returns>
         public static Vector2 ClampToScreenEdge(Vector3 aimDirection, Camera camera, float halfWidth, float halfHeight, float edgeMargin = 0.9f)
         {
-            Vector3 localAim = camera.transform.InverseTransformDirection(aimDirection);
-
-            // Negate because we want to point toward the edge in the direction of the aim
-            float x = -localAim.x;
-            float y = -localAim.y;
+            // The view matrix, not the transform: in view-matrix mode the head rotation is only
+            // in worldToCameraMatrix, which is also what WorldToScreenPoint projected with.
+            // Camera space has x right and y up, so its x and y already point at the edge.
+            Vector3 viewAim = camera.worldToCameraMatrix.MultiplyVector(aimDirection);
+            float x = viewAim.x;
+            float y = viewAim.y;
 
             // Normalize to the larger component so we hit the edge
             float maxComponent = Mathf.Max(Mathf.Abs(x), Mathf.Abs(y));
