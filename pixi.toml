@@ -121,7 +121,17 @@ test-powershell-game-rig = "powershell -NoProfile -ExecutionPolicy Bypass -File 
 # back. It detours user32 in that child alone, and sends no input to any window.
 build-isolated-input-host = "cmake -S cpp/tools/isolated_input_host -B cpp/tools/isolated_input_host/build && cmake --build cpp/tools/isolated_input_host/build --config Release"
 test-isolated-input-host = { cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/IsolatedInputHost.Tests.ps1", depends-on = ["build-isolated-input-host", "build-debug"] }
-test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-conformance-checks", "test-powershell-differential-gate", "test-powershell-isolated-game-test", "test-powershell-game-rig"] }
+# The install and uninstall bodies, run through a real cmd.exe on synthetic game folders whose
+# paths hold `!`. They start no game and touch no real install.
+test-uninstall-preserve = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-preserve.ps1"
+test-install-prompt = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-install-prompt.ps1"
+test-javaagent-installer = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-javaagent-installer.ps1"
+test-shim-installers = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-shim-installers.ps1"
+test-loader-switch = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-loader-switch.ps1"
+# validate-manifest.mjs over manifest_variants packages, and Assert-ManifestSeedsMatchShipped. Needs node.
+test-manifest-variants = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-manifest-variants.ps1"
+test-install = { depends-on = ["test-uninstall-preserve", "test-install-prompt", "test-javaagent-installer", "test-shim-installers", "test-loader-switch", "test-manifest-variants"] }
+test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-conformance-checks", "test-powershell-differential-gate", "test-powershell-isolated-game-test", "test-powershell-game-rig", "test-install"] }
 
 # Building
 build = "dotnet build csharp -c Release"

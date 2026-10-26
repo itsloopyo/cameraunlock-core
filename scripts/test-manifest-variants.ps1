@@ -7,6 +7,14 @@ Add-Type -AssemblyName System.IO.Compression
 $root = Join-Path ([IO.Path]::GetTempPath()) ('manifest-variants-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 $validator = Join-Path $PSScriptRoot 'validate-manifest.mjs'
+$checks = 0
+$failures = 0
+function Report([bool]$Passed, [string]$Name, [string]$Detail = '') {
+    $script:checks++
+    if ($Passed) { Write-Host "PASS $Name"; return }
+    $script:failures++
+    Write-Host "FAIL $Name $Detail"
+}
 $template = @'
 {
   "schema_version": 2,
@@ -73,13 +81,11 @@ foreach ($case in $cases) {
     $process = Start-Process -FilePath $Node -ArgumentList @(('"' + $validator + '"'), ('"' + $zipPath + '"')) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $output = (Get-Content $stdout -Raw) + (Get-Content $stderr -Raw)
     if ($case.Error) {
-        if ($process.ExitCode -eq 0 -or $output -notlike ('*' + $case.Error + '*')) {
-            throw "$($case.Name) did not fail as expected: $output"
-        }
-    } elseif ($process.ExitCode -ne 0) { throw "$($case.Name) failed: $output" }
-    Write-Host "PASS $($case.Name)"
+        Report ($process.ExitCode -ne 0 -and $output -like ('*' + $case.Error + '*')) $case.Name "did not fail as expected: $output"
+    } else {
+        Report ($process.ExitCode -eq 0) $case.Name "failed: $output"
+    }
 }
-Write-Host "$($cases.Count) manifest variant checks passed. Fixtures: $root"
 
 Import-Module (Join-Path $PSScriptRoot '../powershell/ReleaseWorkflow.psm1') -Force
 $seedRoot = Join-Path $root 'seeds'
@@ -91,15 +97,21 @@ foreach ($index in 0, 1) {
     $manifest.variants[$index].loader | Add-Member seed @($seed)
     $manifestPath = Join-Path $seedRoot 'launcher-manifest.json'
     [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 20))
-    Assert-ManifestSeedsMatchShipped -ManifestPath $manifestPath -ProjectRoot $seedRoot
+    $accepted = $true
+    try { Assert-ManifestSeedsMatchShipped -ManifestPath $manifestPath -ProjectRoot $seedRoot }
+    catch { $accepted = $false; Write-Host $_.Exception.Message }
+    Report $accepted "variant $index seed that matches is accepted"
     $seed.content_b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('stale'))
     [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 20))
-    $rejected = $false
+    $message = ''
     try { Assert-ManifestSeedsMatchShipped -ManifestPath $manifestPath -ProjectRoot $seedRoot }
-    catch {
-        if ($_.Exception.Message -notlike '*no longer matches*') { throw }
-        $rejected = $true
-    }
-    if (-not $rejected) { throw "Variant $index seed mismatch was accepted." }
-    Write-Host "PASS variant $index seed validation"
+    catch { $message = $_.Exception.Message }
+    Report ($message -like '*no longer matches*') "variant $index seed mismatch is refused" $message
 }
+
+Write-Host "Fixtures: $root"
+if ($failures -gt 0) {
+    Write-Host "$failures of $checks manifest variant checks FAILED"
+    exit 1
+}
+Write-Host "all $checks manifest variant checks passed"

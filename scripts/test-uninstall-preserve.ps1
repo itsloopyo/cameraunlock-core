@@ -108,7 +108,9 @@ function New-Case {
         [IO.File]::WriteAllText($path, $allFiles[$rel])
     }
     if ($InstalledByUs) {
-        [IO.File]::WriteAllText((Join-Path $game '.fixture-state.json'), "{`r`n  ""mod"": ""Fixture"",`r`n  ""installed_by_us"": $InstalledByUs`r`n}`r`n")
+        # The shape the install bodies write: the uninstall reads installed_by_us only for the framework named beside it.
+        [IO.File]::WriteAllText((Join-Path $game '.fixture-state.json'),
+            "{`r`n  ""framework"": {`r`n    ""type"": ""$($Config['FRAMEWORK_TYPE'])"",`r`n    ""installed_by_us"": $InstalledByUs`r`n  },`r`n  ""mod"": {`r`n    ""id"": ""fixture""`r`n  }`r`n}`r`n")
     }
     $lines = @('@echo off', 'setlocal disabledelayedexpansion', 'set "WRAPPER_DIR=%~dp0"',
         'set "GAME_ID=fixture"', 'set "MOD_DISPLAY_NAME=Fixture"', 'set "MOD_INTERNAL_NAME=Fixture"',
@@ -574,14 +576,14 @@ $uninstallPairs = @(@('<games.json id>', 'fixture'), @('<Game Name> Head Trackin
 $templateFiles = [ordered]@{}
 foreach ($rel in @('bin\winmm.dll', 'bin\Fixture.asi', 'bin\HeadTracking.ini', 'bin\user.txt', 'bin\OtherMod\OtherMod.asi')) { $templateFiles[$rel] = $rel }
 
-$case = New-Case -Name 'uninstall-template' -Config ([ordered]@{}) -Files $templateFiles -ExeRelPath 'bin\fixture.exe' -Under (Join-Path $root 'Wrapper ! Folder')
+$case = New-Case -Name 'uninstall-template' -Config ([ordered]@{ FRAMEWORK_TYPE = 'ASILoader' }) -Files $templateFiles -ExeRelPath 'bin\fixture.exe' -Under (Join-Path $root 'Wrapper ! Folder')
 Write-Template 'uninstall-wrapper.cmd' $uninstallPairs (Join-Path $case.Root 'uninstall.cmd')
 $output = Invoke-InConsole $uninstallConsole { Invoke-Uninstall $case 0 }
 Assert-Files $case @('bin\fixture.exe', 'bin\user.txt', 'bin\OtherMod\OtherMod.asi')
 if ($output -match '(?m)^\s*Kept: ') { throw "uninstall-template: the inherited PRESERVE_FILES reached the body`n$output" }
 Assert-Output $case $output @('Removed: winmm.dll', 'Removed: Fixture.asi', 'Removed: HeadTracking.ini', '=== Uninstall Complete ===')
 
-$case = New-Case -Name 'uninstall-template-no-asi-subdir' -Config ([ordered]@{}) -Files $templateFiles -ExeRelPath 'bin\fixture.exe' -Under (Join-Path $root 'Wrapper ! Folder')
+$case = New-Case -Name 'uninstall-template-no-asi-subdir' -Config ([ordered]@{ FRAMEWORK_TYPE = 'ASILoader' }) -Files $templateFiles -ExeRelPath 'bin\fixture.exe' -Under (Join-Path $root 'Wrapper ! Folder')
 Write-Template 'uninstall-wrapper.cmd' $uninstallPairs (Join-Path $case.Root 'uninstall.cmd') -Drop 'ASI_SUBDIR'
 Invoke-InConsole $uninstallConsole { Invoke-Uninstall $case 0 } | Out-Null
 foreach ($rel in @('bin\winmm.dll', 'bin\Fixture.asi')) {
