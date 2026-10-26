@@ -590,7 +590,9 @@ namespace CameraUnlock.Core.Protocol
 
         private void ReceiveLoop()
         {
-            var remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
+            EndPoint remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
+            // UdpClient.Receive's own buffer size, so no datagram is cut short.
+            var data = new byte[0x10000];
 
             while (_isRunning)
             {
@@ -602,8 +604,11 @@ namespace CameraUnlock.Core.Protocol
                     // .NET Framework rather than just ending tracking.
                     var client = _udpClient;
                     if (client == null) break;
+                    // Snapshotted for the same reason: closing the UdpClient nulls Client.
+                    var socket = client.Client;
+                    if (socket == null) break;
 
-                    byte[] data = client.Receive(ref remoteEndpoint);
+                    int received = socket.ReceiveFrom(data, ref remoteEndpoint);
 
                     // Traffic that publishes nothing (short, unparseable, gated, or from a
                     // sender other than the locked one) never times the receive out, so
@@ -611,7 +616,7 @@ namespace CameraUnlock.Core.Protocol
                     // as long as anyone on the LAN kept sending.
                     DisconnectIfSilent();
 
-                    if (data.Length >= OpenTrackPacket.MinPacketSize)
+                    if (received >= OpenTrackPacket.MinPacketSize)
                     {
                         // ALL-OR-NOTHING, matching the C++ ports' TryParseAll: a datagram
                         // counts only if BOTH the angles and the position are finite.
@@ -630,7 +635,7 @@ namespace CameraUnlock.Core.Protocol
                         // apps sending to the port made the pose alternate between them
                         // packet by packet, and the view flick between two positions. After
                         // the parse, so garbage from another host cannot take the lock.
-                        if (poseValid && !FollowsSource(remoteEndpoint)) continue;
+                        if (poseValid && !FollowsSource((IPEndPoint)remoteEndpoint)) continue;
 
                         // The trailer is read BEFORE the gate below. It no longer raises a
                         // recenter request: Headcam owns centring, zeroing its own output
@@ -640,7 +645,10 @@ namespace CameraUnlock.Core.Protocol
                         // tracker saying the jump is deliberate. A new counter, or the
                         // first one of a stream, is a press.
                         bool pressed = false;
-                        if (poseValid && OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
+                        // The parser tests the array's length, not the datagram's, and past this
+                        // datagram's end the buffer holds an earlier one's bytes.
+                        if (poseValid && received >= OpenTrackPacket.PacketSizeWithTrailer &&
+                            OpenTrackPacket.TryParseRecenterCounter(data, out byte recenterCounter))
                         {
                             pressed = !_hasRecenterCounter || recenterCounter != _lastRecenterCounter;
                             _lastRecenterCounter = recenterCounter;
@@ -674,7 +682,7 @@ namespace CameraUnlock.Core.Protocol
                             // any LAN host flip a local user onto RemoteSmoothing by
                             // sending 48 bytes of garbage at the port.
                             //
-                            _isRemoteConnection = IsRemoteAddress(remoteEndpoint.Address);
+                            _isRemoteConnection = IsRemoteAddress(((IPEndPoint)remoteEndpoint).Address);
 
                             // Latched once per session. Without it a mod's log shows the
                             // port bound and then nothing, so "no head tracking" cannot be
