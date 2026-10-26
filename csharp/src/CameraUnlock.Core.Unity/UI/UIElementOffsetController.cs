@@ -121,6 +121,19 @@ namespace CameraUnlock.Core.Unity.UI
         }
 
         /// <summary>
+        /// Called by Unity when the component is disabled. LateUpdate stops running, so the
+        /// element is put back here or it stays at its offset position.
+        /// </summary>
+        protected virtual void OnDisable()
+        {
+            if (_wasDecoupled && _originalStateCaptured && IsTargetValid())
+            {
+                RestoreOriginalState();
+            }
+            _wasDecoupled = false;
+        }
+
+        /// <summary>
         /// Called by Unity when component is destroyed.
         /// Restores original state before destruction.
         /// </summary>
