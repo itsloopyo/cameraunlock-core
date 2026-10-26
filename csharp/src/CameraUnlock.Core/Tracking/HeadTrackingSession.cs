@@ -272,7 +272,10 @@ namespace CameraUnlock.Core.Tracking
         /// </summary>
         public bool IsHolding { get; private set; }
 
-        /// <summary>Processed head rotation from the latest <see cref="Update"/>.</summary>
+        /// <summary>
+        /// Processed head rotation from the latest <see cref="Update"/>.
+        /// Zero when rotation is not part of the current mode.
+        /// </summary>
         public TrackingPose Rotation { get; private set; }
 
         /// <summary>
@@ -427,7 +430,7 @@ namespace CameraUnlock.Core.Tracking
                     positionOffset = _positionProcessor.Process(interpolatedPosition, physicalRotationQ, deltaTime);
                 }
 
-                Rotation = rotation;
+                Rotation = RotationActive ? rotation : NoRotation(rotation);
                 PositionOffset = positionOffset;
                 _heldRotation = rotation;
                 _heldPositionOffset = positionOffset;
@@ -446,9 +449,14 @@ namespace CameraUnlock.Core.Tracking
 
             // Tracking loss: hold the last pose rather than snapping to center.
             IsHolding = true;
-            Rotation = _heldRotation;
+            Rotation = RotationActive ? _heldRotation : NoRotation(_heldRotation);
             PositionOffset = PositionActive ? _heldPositionOffset : Vec3.Zero;
             return true;
+        }
+
+        private static TrackingPose NoRotation(TrackingPose pose)
+        {
+            return new TrackingPose(0f, 0f, 0f, pose.TimestampTicks);
         }
 
         /// <summary>

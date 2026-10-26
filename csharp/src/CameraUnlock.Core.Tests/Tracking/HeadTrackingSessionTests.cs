@@ -127,6 +127,19 @@ namespace CameraUnlock.Core.Tests.Tracking
         }
 
         [Fact]
+        public void Update_PositionOnlyMode_RotationIsZero()
+        {
+            _session.Mode = TrackingMode.PositionOnly;
+            StartReceiverAndSend(yaw: 30.0, pitch: 10.0, roll: 5.0);
+
+            Assert.True(_session.Update(FrameTime));
+
+            Assert.Equal(0f, _session.Rotation.Yaw);
+            Assert.Equal(0f, _session.Rotation.Pitch);
+            Assert.Equal(0f, _session.Rotation.Roll);
+        }
+
+        [Fact]
         public void Update_AfterDataLoss_HoldsLastPose()
         {
             StartReceiverAndSend(yaw: 30.0, pitch: 10.0, roll: 0.0);
