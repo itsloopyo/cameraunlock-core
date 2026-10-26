@@ -81,7 +81,7 @@ What comes out:
 
 | Member | Meaning |
 |---|---|
-| `flags` | `CAMERAUNLOCK_STATE_LISTENING`: the port is bound. `_POSE`: tracking applies and the tracker has sent a pose. `_FRESH`: a packet arrived within `data_freshness_ms`. `_REMOTE`: the sender is not on loopback. `_ROTATION`: yaw, pitch and roll are to be applied. `_LEAN` and `_LEAN_QUERY`: see below. `_RELEASE_RIG`: the rig carried a share of the lean last frame and no longer does. `_LOG`: `cameraunlock_log_take` has lines. |
+| `flags` | `CAMERAUNLOCK_STATE_LISTENING`: the port is bound. `_POSE`: tracking applies and the tracker has sent a pose. `_FRESH`: a packet arrived within `data_freshness_ms`. `_REMOTE`: the sender is not on loopback. `_ROTATION`: yaw, pitch and roll are to be applied. `_LEAN` and `_LEAN_QUERY`: see below. `_RELEASE_RIG`: the rig carried a share of the lean and no longer does, since the last frame, a stop or a frame whose lean was not asked for. `_LOG`: `cameraunlock_log_take` has lines. |
 | `yaw`, `pitch`, `roll` | Degrees, in the tracker's senses. What the view turns by: all three scaled by `tracker_share`, yaw and pitch also by the zoom and by stock sights. |
 | `light_yaw`, `light_pitch`, `light_roll` | The same three times `light_multiplier`, for a carried light. |
 | `head_yaw` to `head_z` | The tracker's pose after interpolation, smoothing and the position limits, before the zoom and stock sights. Degrees, and metres in the tracker's axes. For a trace. |

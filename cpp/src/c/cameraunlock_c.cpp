@@ -223,6 +223,9 @@ struct View {
     float tracker_share = 1.0f;
     time::FrameClock clock{std::numeric_limits<float>::max()};
     std::optional<PendingLean> pending;
+    // A stop or a missed lean let go of a rig that carried a share. The host is told on this
+    // view's next frame that returns, or it would leave the rig offset for good.
+    bool release_rig = false;
 };
 
 struct Session {
@@ -369,7 +372,7 @@ std::int32_t StopView(std::int32_t view) {
     s.tracking.ResetTransientState();
     s.stock_fade.Reset();
     s.tracker_share = 1.0f;
-    StopLean(s);
+    if (StopLean(s)) s.release_rig = true;
     return CAMERAUNLOCK_OK;
 }
 
@@ -388,7 +391,7 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
 
     if (s.pending) {
         s.pending.reset();
-        StopLean(s);
+        if (StopLean(s)) s.release_rig = true;
         throw std::logic_error(
             view == 0 ? "the frame before this one asked for cameraunlock_session_lean, which was not called"
                       : "the frame of view " + std::to_string(view) +
@@ -404,6 +407,7 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
         now_ms = static_cast<std::uint64_t>(SteadyMicros() / 1000);
     }
     out->delta_seconds = delta;
+    if (s.release_rig) out->flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
 
     const TrackingMode mode = session.mode().GetMode();
     // Not on view 0, which keeps the mode: a cycle on another thread between the two would be undone.
@@ -426,6 +430,7 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
 
     if ((input->flags & CAMERAUNLOCK_FRAME_ACTIVE) == 0) {
         Rest(s, *out);
+        s.release_rig = false;
         return CAMERAUNLOCK_OK;
     }
     Require(std::isfinite(input->tan_half_fov) && input->tan_half_fov > 0.0f &&
@@ -434,6 +439,7 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
 
     if (!s.tracking.Update(delta)) {
         Rest(s, *out);
+        s.release_rig = false;
         return CAMERAUNLOCK_OK;
     }
     out->flags |= CAMERAUNLOCK_STATE_POSE;
@@ -471,6 +477,7 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
     }
     if (!has_position || (input->flags & CAMERAUNLOCK_FRAME_LEAN) == 0) {
         if (StopLean(s)) out->flags |= CAMERAUNLOCK_STATE_RELEASE_RIG;
+        s.release_rig = false;
         return CAMERAUNLOCK_OK;
     }
 
@@ -506,6 +513,7 @@ std::int32_t FrameOf(std::int32_t view, const CameraUnlockFrameInput* input, Cam
     }
     s.pending = pending;
     out->flags |= CAMERAUNLOCK_STATE_LEAN;
+    s.release_rig = false;
     return CAMERAUNLOCK_OK;
 }
 

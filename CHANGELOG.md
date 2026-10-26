@@ -267,6 +267,14 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 - `Set-GameRigLimit -Count <n>` caps how many rigs, of every game, `Enter-GameRig` gives out at
   once. A session past it waits, and the next free place goes to whoever asked first for any game.
 
+### Fixed - the C interface says to put the rig back after a stop or a missed lean
+
+- `cameraunlock_session_stop`, `cameraunlock_view_stop` and a frame whose lean was never called
+  let go of a rig that carried a share of the lean without saying so, and the host kept the rig
+  offset. The view's next frame that returns now carries `CAMERAUNLOCK_STATE_RELEASE_RIG`.
+- `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 12: `_RELEASE_RIG` now also follows a stop or a
+  frame whose lean was not asked for.
+
 ### Added - the game rig shows on the hivemind board
 
 - `Enter-GameRig` run by an agent with hivemind installed reserves `rig-<process name>` on the

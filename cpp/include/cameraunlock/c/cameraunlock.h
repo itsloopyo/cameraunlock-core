@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 11
+#define CAMERAUNLOCK_ABI 12
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -164,7 +164,8 @@ typedef struct CameraUnlockFrameInput {
 #define CAMERAUNLOCK_STATE_LEAN 0x20u
 /* Measure the world along query_direction for query_reach first, and hand the answer in. */
 #define CAMERAUNLOCK_STATE_LEAN_QUERY 0x40u
-/* The rig carried a share of the lean last frame and no longer does: put it back. */
+/* The rig carried a share of the lean and no longer does, since the last frame, a stop or a frame
+ * whose lean was not asked for: put it back. */
 #define CAMERAUNLOCK_STATE_RELEASE_RIG 0x80u
 #define CAMERAUNLOCK_STATE_LOG 0x100u     /* cameraunlock_log_take has lines */
 

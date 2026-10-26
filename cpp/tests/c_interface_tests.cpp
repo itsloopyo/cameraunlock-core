@@ -469,6 +469,34 @@ void TestLean() {
           "and the first frame with no lean says the rig is to be put back");
     Check((Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).flags & CAMERAUNLOCK_STATE_RELEASE_RIG) == 0, "once");
 
+    // A lean that was asked for and never called lets go of the rig all the same.
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    g_now_ms += 1000;
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    Frame(Input(sights_up));
+    const CameraUnlockFrameInput after_missed = Input(CAMERAUNLOCK_FRAME_ACTIVE);
+    Check(lean.rig[0] > 0.05f && cameraunlock_session_frame(&after_missed, &refused) == CAMERAUNLOCK_ERROR,
+          "a rig carrying the lean, and a frame whose lean was never called");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check((frame.flags & CAMERAUNLOCK_STATE_RELEASE_RIG) != 0, "the next frame that returns says the rig is to be put back");
+    Check((Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).flags & CAMERAUNLOCK_STATE_RELEASE_RIG) == 0, "once");
+
+    // So does a stop.
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    g_now_ms += 1000;
+    Frame(Input(sights_up));
+    cameraunlock_session_lean(&found, &lean);
+    Check(lean.rig[0] > 0.05f && cameraunlock_session_stop() == CAMERAUNLOCK_OK, "a rig carrying the lean, and a stop");
+    frame = Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE));
+    Check((frame.flags & CAMERAUNLOCK_STATE_RELEASE_RIG) != 0, "the frame after a stop says the rig is to be put back");
+    Check((Frame(Input(CAMERAUNLOCK_FRAME_ACTIVE)).flags & CAMERAUNLOCK_STATE_RELEASE_RIG) == 0, "once");
+    Check(cameraunlock_session_start(kPort) == CAMERAUNLOCK_OK, "and the session starts again");
+    sender.Pose(1.0, 0.0, 0.0, 20.0, 0.0, 0.0);
+    Check(WaitFor([] { return Near(Settle().head_x, 0.20f); }), "with the head 20 cm to one side again");
+
     // The host's axes: a matrix that turns the tracker's x into the world's -y.
     CameraUnlockFrameInput turned = Input(leaning);
     std::memset(turned.tracker_to_world, 0, sizeof(turned.tracker_to_world));

@@ -28,7 +28,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 11;
+    public static final int ABI = 12;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
