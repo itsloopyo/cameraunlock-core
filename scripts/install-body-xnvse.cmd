@@ -403,6 +403,10 @@ if not "!_XNVSE_EC!"=="0" (
 :: expansion has run, so a `!VAR!` root is taken literally and every path it
 :: yields comes back relative to the current directory instead.
 pushd "!XNVSE_EXTRACT!"
+:: The FOR variables carry the whole TEMP path, and delayed expansion strips a
+:: `!` out of them (a Windows account named Bob!), so the walk and the copy run
+:: with it off.
+setlocal disabledelayedexpansion
 
 :: The legacy-version asset wraps the binaries in an inner .zip. Unpack any
 :: nested archive in place and delete it so only the binaries remain to copy.
@@ -422,16 +426,15 @@ set "XNVSE_SRC="
 for /r . %%f in (nvse_loader.exe) do (
     if not defined XNVSE_SRC if exist "%%f" set "XNVSE_SRC=%%~dpf"
 )
+call :copy_found_xnvse
+endlocal & set "_XCOPY_EC=%_XCOPY_EC%"
 popd
 
-if not defined XNVSE_SRC (
+if "!_XCOPY_EC!"=="missing" (
     echo   ERROR: nvse_loader.exe is not in the downloaded archive.
     rmdir /s /q "!XNVSE_EXTRACT!" 2>nul
     exit /b 1
 )
-
-xcopy "!XNVSE_SRC!*" "!GAME_PATH!\" /s /y /q >nul
-set "_XCOPY_EC=!errorlevel!"
 rmdir /s /q "!XNVSE_EXTRACT!" 2>nul
 if not "!_XCOPY_EC!"=="0" (
     echo   ERROR: failed to copy xNVSE into the game folder ^(xcopy exit code !_XCOPY_EC!^).
@@ -445,6 +448,17 @@ if not exist "!GAME_PATH!\nvse_loader.exe" (
 )
 
 echo   xNVSE installed successfully^^!
+exit /b 0
+
+:: Called with delayed expansion off. Sets _XCOPY_EC to xcopy's exit code, or
+:: to `missing` when the walk found no nvse_loader.exe.
+:copy_found_xnvse
+if not defined XNVSE_SRC (
+    set "_XCOPY_EC=missing"
+    exit /b 0
+)
+xcopy "%XNVSE_SRC%*" "%GAME_PATH%\" /s /y /q >nul
+set "_XCOPY_EC=%errorlevel%"
 exit /b 0
 
 :: ============================================
