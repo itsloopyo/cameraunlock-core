@@ -222,6 +222,17 @@ try {
     Check $c.Name ((Text $c 'BepInEx\core\BepInEx.dll') -eq 'vendored loader') 'the wrong-architecture loader was not replaced'
     Check $c.Name ((Text $c 'BepInEx\config\BepInEx.cfg') -eq "player's BepInEx.cfg") "the pack's BepInEx.cfg replaced the player's"
     Check $c.Name ((Text $c 'BepInEx\config\Pack.cfg') -eq "pack's own config") "the pack's own config did not arrive"
+
+    # Another loader's winhttp.dll with no Doorstop config beside it: the
+    # extraction would have replaced it with no copy kept, and the uninstall
+    # would then have deleted it.
+    $c = New-Case 'foreign-winhttp'
+    [IO.File]::WriteAllText((Join-Path $c.Game 'winhttp.dll'), 'another loader')
+    $r = Invoke-Script $c 'install'
+    Check $c.Name ($r.Exit -eq 1) "install exited $($r.Exit): $($r.Output)"
+    Check $c.Name ($r.Output -match 'not BepInEx') "the refusal does not say why: $($r.Output)"
+    Check $c.Name ((Text $c 'winhttp.dll') -eq 'another loader') "the other loader's winhttp.dll was replaced"
+    Check $c.Name (-not (Test-Path -LiteralPath (Join-Path $c.Game 'BepInEx'))) 'BepInEx was installed anyway'
 } finally {
     if ($failures.Count -eq 0) { Remove-Item -LiteralPath $root -Recurse -Force }
 }
@@ -231,4 +242,4 @@ if ($failures.Count -gt 0) {
     Write-Host "Case folders kept under $root"
     exit 1
 }
-Write-Host 'loader switch: 7 cases passed' -ForegroundColor Green
+Write-Host 'loader switch: 8 cases passed' -ForegroundColor Green

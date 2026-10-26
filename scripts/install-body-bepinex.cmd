@@ -386,6 +386,17 @@ if errorlevel 1 exit /b 1
 goto :do_install_loader
 
 :install_loader
+:: BepInEx's Doorstop is a winhttp.dll. One with no doorstop_config.ini beside it
+:: is another loader's proxy, which the extraction would replace with no copy
+:: kept and the uninstall would then delete.
+if exist "!GAME_PATH!\winhttp.dll" if not exist "!GAME_PATH!\doorstop_config.ini" (
+    echo ERROR: The game folder already has a winhttp.dll that is not BepInEx's:
+    echo   !GAME_PATH!\winhttp.dll
+    echo It is most likely another mod loader. BepInEx needs that file name, so
+    echo move the other loader out of the game folder, or install BepInEx
+    echo yourself, then run this installer again.
+    exit /b 1
+)
 echo BepInEx not found. Installing...
 
 :do_install_loader
