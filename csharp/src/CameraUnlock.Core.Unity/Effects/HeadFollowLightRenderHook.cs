@@ -15,7 +15,8 @@ namespace CameraUnlock.Core.Unity.Effects
     /// under URP or HDRP, so a direct subscription is a silent no-op on any SRP game - the
     /// light simply never turns, with nothing in the log - and an SRP-only Unity 6 build
     /// strips the legacy accessor outright, which makes a direct reference a
-    /// MissingMethodException at JIT time. The helper picks the right pair per pipeline.
+    /// MissingMethodException at JIT time. The helper subscribes both pairs through
+    /// reflection, and a frame fires only the pair of the pipeline that renders it.
     /// </para>
     /// <para>
     /// The helper's pre/post pair is a single global registration, so one of these may be

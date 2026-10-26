@@ -19,9 +19,22 @@ namespace CameraUnlock.Core.Unity.Tests
         private static readonly FieldInfo StoredPreRender =
             typeof(RenderPipelineHelper).GetField("_storedPreRender", BindingFlags.Static | BindingFlags.NonPublic);
 
+        public RenderPipelineHelperTests()
+        {
+            Reset();
+        }
+
         public void Dispose()
         {
+            Reset();
             StoredPreRender.SetValue(null, null);
+        }
+
+        private static void Reset()
+        {
+            RenderPipelineHelper.UnregisterCallbacks();
+            Camera.onPreCull = null;
+            Camera.onPostRender = null;
         }
 
         private static Delegate Wrap(Type delegateType, string field)
@@ -70,6 +83,28 @@ namespace CameraUnlock.Core.Unity.Tests
         {
             var e = Assert.Throws<InvalidOperationException>(() => Wrap(typeof(Action<Camera[]>), "_storedPreRender"));
             Assert.Contains("does not take (context, Camera)", e.Message);
+        }
+
+        [Fact]
+        public void RegisterCallbacks_SubscribesTheLegacyPair_AndUnregisterRemovesOnlyItsOwn()
+        {
+            int pre = 0;
+            int post = 0;
+            int otherMod = 0;
+            Camera.onPreCull += cam => otherMod++;
+
+            RenderPipelineHelper.RegisterCallbacks(cam => pre++, cam => post++);
+            Camera.onPreCull(new Camera());
+            Camera.onPostRender(new Camera());
+            Assert.Equal(1, pre);
+            Assert.Equal(1, post);
+            Assert.Equal(1, otherMod);
+
+            RenderPipelineHelper.UnregisterCallbacks();
+            Assert.Null(Camera.onPostRender);
+            Camera.onPreCull(new Camera());
+            Assert.Equal(1, pre);
+            Assert.Equal(2, otherMod);
         }
     }
 }

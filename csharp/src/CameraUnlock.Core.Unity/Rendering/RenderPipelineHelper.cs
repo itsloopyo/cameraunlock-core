@@ -5,24 +5,22 @@ namespace CameraUnlock.Core.Unity.Rendering
 {
     /// <summary>
     /// Provides unified render callback registration for both SRP (URP/HDRP) and Legacy render pipelines.
-    /// Automatically detects which pipeline is active and registers appropriate callbacks.
     ///
     /// Usage:
     /// 1. Call RegisterCallbacks() with your pre/post render methods
     /// 2. Call UnregisterCallbacks() when done
     ///
-    /// Note: On older Unity (pre-2019 without SRP), only legacy callbacks are used.
-    /// SRP detection and callback registration uses reflection to avoid compile-time
-    /// dependencies on SRP types which may not exist in all Unity versions.
+    /// Every hook goes through reflection: SRP types may not exist in a given Unity build, and
+    /// SRP-only Unity 6 builds strip the legacy Camera hooks, so a direct reference to either
+    /// throws MissingMethodException at JIT time.
     /// </summary>
     public static class RenderPipelineHelper
     {
         private static bool _isRegistered;
-        private static bool _usingSRP;
+        private static bool _registeredSRP;
 
-        // Stored callbacks for unregistration - use Camera.CameraCallback to match Unity's delegate type
-        private static Camera.CameraCallback _legacyPreRender;
-        private static Camera.CameraCallback _legacyPostRender;
+        private static Delegate _legacyPreRender;
+        private static Delegate _legacyPostRender;
 
         // For SRP, we use reflection to avoid compile-time dependency
         private static object _srpPreRenderDelegate;
@@ -82,10 +80,11 @@ namespace CameraUnlock.Core.Unity.Rendering
         }
 
         /// <summary>
-        /// Registers render callbacks. Automatically detects SRP vs Legacy pipeline.
-        ///
-        /// For SRP: Uses RenderPipelineManager.beginCameraRendering/endCameraRendering
-        /// For Legacy: Uses Camera.onPreCull/Camera.onPostRender
+        /// Registers render callbacks on both pipelines: SRP's
+        /// RenderPipelineManager.beginCameraRendering/endCameraRendering where this Unity build has
+        /// them, and the legacy Camera.onPreCull/Camera.onPostRender where it has those. A frame is
+        /// rendered by one pipeline, which fires only its own pair, so this relies on no pipeline
+        /// detection (GraphicsSettings.currentRenderPipeline is missing before Unity 2019.3).
         /// </summary>
         /// <param name="onPreRender">Called before camera renders. Use to modify camera/view matrix.</param>
         /// <param name="onPostRender">Called after camera renders. Use to restore state.</param>
@@ -108,22 +107,14 @@ namespace CameraUnlock.Core.Unity.Rendering
                 throw new ArgumentNullException("onPostRender");
             }
 
-            _usingSRP = IsSRP;
-
-            if (_usingSRP)
+            _registeredSRP = CheckSRPAvailable();
+            if (_registeredSRP)
             {
-                // SRP path - use reflection
                 RegisterSRPCallbacks(onPreRender, onPostRender);
             }
-            else
-            {
-                // Legacy path - wrap Action<Camera> in Camera.CameraCallback
-                _legacyPreRender = new Camera.CameraCallback(onPreRender);
-                _legacyPostRender = new Camera.CameraCallback(onPostRender);
 
-                Camera.onPreCull += _legacyPreRender;
-                Camera.onPostRender += _legacyPostRender;
-            }
+            _legacyPreRender = AddLegacyCameraCallback("onPreCull", onPreRender);
+            _legacyPostRender = AddLegacyCameraCallback("onPostRender", onPostRender);
 
             _isRegistered = true;
         }
@@ -139,23 +130,16 @@ namespace CameraUnlock.Core.Unity.Rendering
                 return;
             }
 
-            if (_usingSRP)
+            if (_registeredSRP)
             {
                 UnregisterSRPCallbacks();
+                _registeredSRP = false;
             }
-            else
-            {
-                if (_legacyPreRender != null)
-                {
-                    Camera.onPreCull -= _legacyPreRender;
-                    _legacyPreRender = null;
-                }
-                if (_legacyPostRender != null)
-                {
-                    Camera.onPostRender -= _legacyPostRender;
-                    _legacyPostRender = null;
-                }
-            }
+
+            RemoveLegacyCameraCallback("onPreCull", _legacyPreRender);
+            RemoveLegacyCameraCallback("onPostRender", _legacyPostRender);
+            _legacyPreRender = null;
+            _legacyPostRender = null;
 
             _isRegistered = false;
         }
@@ -269,27 +253,11 @@ namespace CameraUnlock.Core.Unity.Rendering
                 throw new InvalidOperationException("An onPreCull callback is already subscribed. Call RemoveOnPreCull() first.");
             }
 
-            var onPreCullField = GetOnPreCullField();
-            if (onPreCullField != null)
+            _onPreCullDelegate = AddLegacyCameraCallback("onPreCull", onPreCull);
+            if (_onPreCullDelegate != null)
             {
                 _storedOnPreCull = onPreCull;
-                _onPreCullDelegate = Delegate.CreateDelegate(onPreCullField.FieldType, onPreCull.Target, onPreCull.Method);
-                var existing = (Delegate)onPreCullField.GetValue(null);
-                onPreCullField.SetValue(null, Delegate.Combine(existing, _onPreCullDelegate));
-                return;
             }
-
-            var onPreCullEvent = GetOnPreCullEvent();
-            if (onPreCullEvent == null)
-            {
-                // SRP-only build: the legacy hook genuinely does not exist here and
-                // AddBeginCameraRendering is the path that fires.
-                return;
-            }
-
-            _storedOnPreCull = onPreCull;
-            _onPreCullDelegate = Delegate.CreateDelegate(onPreCullEvent.EventHandlerType, onPreCull.Target, onPreCull.Method);
-            onPreCullEvent.AddEventHandler(null, _onPreCullDelegate);
         }
 
         /// <summary>
@@ -302,38 +270,59 @@ namespace CameraUnlock.Core.Unity.Rendering
                 return;
             }
 
-            if (_onPreCullDelegate != null)
-            {
-                var onPreCullField = GetOnPreCullField();
-                if (onPreCullField != null)
-                {
-                    var existing = (Delegate)onPreCullField.GetValue(null);
-                    onPreCullField.SetValue(null, Delegate.Remove(existing, _onPreCullDelegate));
-                }
-                else
-                {
-                    var onPreCullEvent = GetOnPreCullEvent();
-                    if (onPreCullEvent != null)
-                    {
-                        onPreCullEvent.RemoveEventHandler(null, _onPreCullDelegate);
-                    }
-                }
-            }
-
+            RemoveLegacyCameraCallback("onPreCull", _onPreCullDelegate);
             _onPreCullDelegate = null;
             _storedOnPreCull = null;
         }
 
-        private static System.Reflection.FieldInfo GetOnPreCullField()
+        /// <summary>
+        /// Adds a callback to a legacy static Camera hook (onPreCull, onPostRender) and returns the
+        /// delegate added, or null when this Unity build has no such hook (SRP-only Unity 6).
+        /// Unity declares these as public static delegate FIELDS, not events, so they are resolved
+        /// with GetField and combined by hand; resolving one with GetEvent returns null and
+        /// silently subscribes nothing.
+        /// </summary>
+        private static Delegate AddLegacyCameraCallback(string hookName, Action<Camera> callback)
         {
-            return typeof(Camera).GetField("onPreCull",
+            var field = typeof(Camera).GetField(hookName,
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (field != null)
+            {
+                var added = Delegate.CreateDelegate(field.FieldType, callback.Target, callback.Method);
+                field.SetValue(null, Delegate.Combine((Delegate)field.GetValue(null), added));
+                return added;
+            }
+
+            var hookEvent = typeof(Camera).GetEvent(hookName,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (hookEvent == null)
+            {
+                return null;
+            }
+
+            var handler = Delegate.CreateDelegate(hookEvent.EventHandlerType, callback.Target, callback.Method);
+            hookEvent.AddEventHandler(null, handler);
+            return handler;
         }
 
-        private static System.Reflection.EventInfo GetOnPreCullEvent()
+        private static void RemoveLegacyCameraCallback(string hookName, Delegate added)
         {
-            return typeof(Camera).GetEvent("onPreCull",
+            if (added == null)
+            {
+                return;
+            }
+
+            var field = typeof(Camera).GetField(hookName,
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (field != null)
+            {
+                field.SetValue(null, Delegate.Remove((Delegate)field.GetValue(null), added));
+                return;
+            }
+
+            typeof(Camera).GetEvent(hookName,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                .RemoveEventHandler(null, added);
         }
 
         /// <summary>

@@ -21,6 +21,11 @@ namespace CameraUnlock.Core.Unity.Tracking
     /// target was destroyed on a scene transition throws MissingReferenceException on its first
     /// property access - and Unity ABORTS the whole multicast invocation at the throwing
     /// delegate, silently killing every other subscriber's camera hook, other mods included.
+    ///
+    /// The camera hooks here are the built-in pipeline's, referenced directly. They never fire
+    /// under URP or HDRP, and an SRP-only Unity 6 build strips them, so the registration methods
+    /// throw MissingMethodException there. A mod that can run on SRP subscribes through
+    /// RenderPipelineHelper instead.
     /// </summary>
     public sealed class CameraCallbackLifecycle : IDisposable
     {
