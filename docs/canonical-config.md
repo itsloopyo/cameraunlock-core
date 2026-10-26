@@ -1907,7 +1907,7 @@ owner's rules:
   occurrence replaced, a missing key goes after the last key line of its section, a missing
   section at the end, and new lines take the file's most common line ending. A section and a key
   are written as printable ASCII, and a value as printable ASCII or well-formed UTF-8 with no
-  control byte, which is how a string row holds a device's name in the player's own language.
+  control byte but a tab inside it, which is how a string row holds a device's name in the player's own language.
   The editor refuses a UTF-16 file and one holding a NUL byte. `editor/` pins all of it.
 - Read with the reader's rules (`reader/`) and read the edited bytes back before writing them.
 - Expect no protection from the running mod. The owner's lock covers one process, and its check

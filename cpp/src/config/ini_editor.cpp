@@ -38,13 +38,14 @@ void RequirePrintableAscii(const std::string& text, const char* what) {
 }
 
 // A value is text for a person to read, a device's name in their own language for one: it may
-// hold UTF-8, which the reader keeps as its bytes. A control byte would end or corrupt the line.
+// hold UTF-8, which the reader keeps as its bytes, and a tab, which the reader trims only at the
+// ends. Any other control byte would end or corrupt the line.
 void RequireValueText(const std::string& text) {
     size_t i = 0;
     while (i < text.size()) {
         const unsigned char b = static_cast<unsigned char>(text[i]);
         if (b < 0x80) {
-            if (b < 0x20 || b == 0x7F) {
+            if ((b < 0x20 && b != '\t') || b == 0x7F) {
                 throw std::invalid_argument("IniEdit value holds the byte " + HexByte(b) +
                                             ", a control byte, which cannot be written");
             }
@@ -88,9 +89,10 @@ void RequireValueText(const std::string& text) {
 }
 
 void RequireNoSurroundingSpace(const std::string& text, const char* what) {
-    if (!text.empty() && (text.front() == ' ' || text.back() == ' ')) {
+    const auto space = [](char c) { return c == ' ' || c == '\t'; };
+    if (!text.empty() && (space(text.front()) || space(text.back()))) {
         throw std::invalid_argument(std::string("IniEdit ") + what + " '" + text +
-                                    "' starts or ends with a space, which the reader trims away");
+                                    "' starts or ends with a space or tab, which the reader trims away");
     }
 }
 

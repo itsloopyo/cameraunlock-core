@@ -90,7 +90,7 @@ struct IniEditResult {
 ///
 /// Throws std::invalid_argument for an edit that cannot be written so that it reads back
 /// as given: a section or key holding a byte outside printable ASCII (0x20 to 0x7E), a
-/// value holding a byte below 0x20 or 0x7F, or bytes above 0x7F that are not well-formed
+/// value holding a byte below 0x20 other than tab or 0x7F, or bytes above 0x7F that are not well-formed
 /// UTF-8 (an overlong form, a surrogate, past U+10FFFF or cut short), an empty section or key, a section, key or value with a leading or trailing
 /// space, a section holding ']', a key holding '=' or starting '[', ';' or '#', and two
 /// edits of the same key. A value may be empty.

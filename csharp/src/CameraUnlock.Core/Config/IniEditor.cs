@@ -103,7 +103,7 @@ namespace CameraUnlock.Core.Config
         /// <exception cref="ArgumentException">
         /// An edit cannot be written so that it reads back as given: a section or key holding a
         /// character outside printable ASCII (U+0020 to U+007E), a value holding a control
-        /// character (below U+0020, or U+007F) or a surrogate that is not one of a pair, an
+        /// character (below U+0020 other than tab, or U+007F) or a surrogate that is not one of a pair, an
         /// empty section or key, a section, key or value with a leading or trailing space, a section holding
         /// ']', a key holding '=' or starting '[', ';' or '#', or two edits of the same key. A
         /// value may be empty.
@@ -341,13 +341,13 @@ namespace CameraUnlock.Core.Config
         private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
 
         // A value is text for a person to read, a device's name in their own language for one: it
-        // is written as UTF-8, which the reader keeps as its bytes. A control character would end
-        // or corrupt the line.
+        // is written as UTF-8, which the reader keeps as its bytes, and a tab, which the reader
+        // trims only at the ends. Any other control character would end or corrupt the line.
         private static byte[] RequireValueText(string text)
         {
             foreach (char c in text)
             {
-                if (c < 0x20 || c == 0x7F)
+                if ((c < 0x20 && c != '\t') || c == 0x7F)
                 {
                     throw new ArgumentException("IniEdit value holds U+" +
                         ((int)c).ToString("X4", CultureInfo.InvariantCulture) + ", a control character, which cannot be written");
@@ -373,9 +373,9 @@ namespace CameraUnlock.Core.Config
 
         private static void RequireNoSurroundingSpace(byte[] bytes, string text, string what)
         {
-            if (bytes.Length > 0 && (bytes[0] == ' ' || bytes[bytes.Length - 1] == ' '))
+            if (bytes.Length > 0 && (CodecText.IsSpaceOrTab(bytes[0]) || CodecText.IsSpaceOrTab(bytes[bytes.Length - 1])))
             {
-                throw new ArgumentException("IniEdit " + what + " '" + text + "' starts or ends with a space, which the reader trims away");
+                throw new ArgumentException("IniEdit " + what + " '" + text + "' starts or ends with a space or tab, which the reader trims away");
             }
         }
 

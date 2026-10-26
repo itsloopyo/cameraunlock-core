@@ -46,7 +46,7 @@ namespace CameraUnlock.Core.Tests.Config
                 if (char.IsSurrogate((char)c)) continue;
                 string ch = ((char)c).ToString();
                 bool printable = c >= 0x20 && c <= 0x7E;
-                bool control = c < 0x20 || c == 0x7F;
+                bool control = (c < 0x20 && c != '\t') || c == 0x7F;
                 Assert.True(Throws(new IniEdit("General", "A", "x" + ch + "x", true)) == control, "value U+" + c.ToString("X4"));
                 Assert.True(Throws(new IniEdit("General", "K" + ch + "K", "1", true)) == (!printable || c == '='), "key U+" + c.ToString("X4"));
                 Assert.True(Throws(new IniEdit("S" + ch + "S", "A", "1", true)) == (!printable || c == ']'), "section U+" + c.ToString("X4"));

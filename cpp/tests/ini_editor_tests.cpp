@@ -380,16 +380,16 @@ bool Throws(const std::vector<IniEdit>& edits) {
 }
 
 void TestPrintableAsciiBoundary() {
-    std::cout << "EditIni writes exactly printable ASCII:\n";
+    std::cout << "EditIni writes exactly printable ASCII, and a value a tab inside too:\n";
     int wrong = 0;
     for (int b = 0; b <= 0xFF; ++b) {
         const std::string byte(1, static_cast<char>(b));
         const bool printable = b >= 0x20 && b <= 0x7E;
-        if (Throws({{"General", "A", "x" + byte + "x"}}) != !printable) ++wrong;
+        if (Throws({{"General", "A", "x" + byte + "x"}}) != (!printable && b != '\t')) ++wrong;
         if (Throws({{"General", "K" + byte + "K", "1"}}) != (!printable || b == '=')) ++wrong;
         if (Throws({{"S" + byte + "S", "A", "1"}}) != (!printable || b == ']')) ++wrong;
     }
-    Check(wrong == 0, "inside a value every byte from 0x20 to 0x7E is writable and no other is alone; "
+    Check(wrong == 0, "inside a value tab and every byte from 0x20 to 0x7E is writable and no other is alone; "
                       "a key refuses '=' as well, and a section ']'");
 }
 
