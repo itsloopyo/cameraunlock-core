@@ -213,7 +213,6 @@ namespace CameraUnlock.Core.Config.Profiles
             var profile = new ConfigProfile(name, description, gameName);
             profile.AxisMapping.ResetToDefault();
 
-            _profiles[name] = profile;
             SaveProfile(profile);
 
             return profile;
@@ -237,13 +236,13 @@ namespace CameraUnlock.Core.Config.Profiles
                 throw new InvalidOperationException("Cannot delete protected profile: " + profileName);
             }
 
-            _profiles.Remove(profileName);
-
             string filePath = GetProfilePath(profileName);
             if (File.Exists(filePath))
             {
                 File.Delete(filePath);
             }
+
+            _profiles.Remove(profileName);
 
             // Switch to default if we deleted the active profile
             if (_activeProfileName != null &&
@@ -291,7 +290,6 @@ namespace CameraUnlock.Core.Config.Profiles
             duplicate.IsDefault = false;
             duplicate.IsReadOnly = false;
 
-            _profiles[newName] = duplicate;
             SaveProfile(duplicate);
 
             return duplicate;
@@ -382,6 +380,13 @@ namespace CameraUnlock.Core.Config.Profiles
         // directory and then vanishes from the listing, and a name holding ':' or '*'
         // throws out of File.WriteAllText only after the in-memory dictionary has already
         // been mutated, leaving a profile that ProfileExists reports but no file backs.
+        private static readonly string[] ReservedDeviceNames =
+        {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        };
+
         private static void ValidateProfileName(string profileName)
         {
             if (string.IsNullOrEmpty(profileName) || profileName.Trim().Length == 0)
@@ -406,6 +411,13 @@ namespace CameraUnlock.Core.Config.Profiles
             if (profileName == "." || profileName == "..")
             {
                 throw new ArgumentException("Profile name must not be a directory reference", nameof(profileName));
+            }
+
+            // Windows opens the device, not a file, for these names whatever extension follows.
+            string stem = profileName.Split('.')[0].TrimEnd(' ').ToUpperInvariant();
+            if (Array.IndexOf(ReservedDeviceNames, stem) >= 0)
+            {
+                throw new ArgumentException("Profile name is a reserved Windows device name: " + profileName, nameof(profileName));
             }
         }
     }

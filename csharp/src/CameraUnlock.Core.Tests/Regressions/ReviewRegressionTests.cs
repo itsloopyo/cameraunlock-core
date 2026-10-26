@@ -306,6 +306,40 @@ namespace CameraUnlock.Core.Tests.Regressions
             finally { Cleanup(dir); }
         }
 
+        [Theory]
+        [InlineData("CON")]
+        [InlineData("nul")]
+        [InlineData("Com1")]
+        [InlineData("LPT9.backup")]
+        public void CreateProfile_ReservedDeviceName_IsRejected(string name)
+        {
+            string dir = NewTempDir();
+            try
+            {
+                var manager = new ProfileManager(dir);
+                Assert.Throws<ArgumentException>(() => manager.CreateProfile(name, "d"));
+                Assert.False(manager.ProfileExists(name));
+            }
+            finally { Cleanup(dir); }
+        }
+
+        [Fact]
+        public void CreateProfile_WhoseFileCannotBeWritten_IsNotListed()
+        {
+            string dir = NewTempDir();
+            try
+            {
+                var manager = new ProfileManager(dir);
+                Directory.CreateDirectory(Path.Combine(dir, "Blocked" + ProfileManager.ProfileExtension));
+
+                Assert.ThrowsAny<IOException>(() => manager.CreateProfile("Blocked", "d"));
+
+                Assert.False(manager.ProfileExists("Blocked"),
+                    "a profile with no file behind it must not be listed");
+            }
+            finally { Cleanup(dir); }
+        }
+
         [Fact]
         public void CreateProfile_OrdinaryNameWithSpaces_IsAccepted()
         {
