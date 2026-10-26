@@ -448,9 +448,7 @@ static bool InitCachedFunctions() {
 
 void InitCameraPipeline(const CameraPipelineDescriptor& descriptor) {
     if (!descriptor.gate) {
-        LogError("CameraPipelineDescriptor::gate is null - the pipeline has no way to tell "
-                 "gameplay from a menu and stays inert");
-        return;
+        throw std::invalid_argument("CameraPipelineDescriptor: gate is null, so the pipeline cannot tell gameplay from a menu");
     }
     const int rigCallbacks = (descriptor.rigAvailable ? 1 : 0) + (descriptor.writeRig ? 1 : 0) +
                              (descriptor.restoreRig ? 1 : 0);
