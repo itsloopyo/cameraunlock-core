@@ -11,6 +11,9 @@ namespace CameraUnlock.Core.Tests.Protocol
 {
     public class OpenTrackReceiverTests : IDisposable
     {
+        // One sender for every packet, as a tracker app sends: the receiver follows one source.
+        private static readonly UdpClient Sender = new UdpClient();
+
         private OpenTrackReceiver? _receiver;
         private const int TestPort = 14242; // Use non-default port to avoid conflicts
 
@@ -359,6 +362,30 @@ namespace CameraUnlock.Core.Tests.Protocol
             Assert.Equal(pose.Roll, transformed.Roll, precision: 1);
         }
 
+        [Fact]
+        public void ASecondSource_IsIgnoredUntilTheFirstGoesSilent()
+        {
+            _receiver = new OpenTrackReceiver();
+            Assert.True(_receiver.Start(TestPort));
+            SendTestPacket(TestPort, 10, 0, 0);
+            Thread.Sleep(100);
+            Assert.Equal(10f, _receiver.GetLatestPose().Yaw, precision: 3);
+
+            using (var other = new UdpClient())
+            {
+                byte[] packet = new byte[48];
+                Array.Copy(BitConverter.GetBytes(12.0), 0, packet, 24, 8);
+                other.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
+                Thread.Sleep(100);
+                Assert.Equal(10f, _receiver.GetLatestPose().Yaw, precision: 3);
+
+                Thread.Sleep(OpenTrackReceiver.SourceHandoverMs);
+                other.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
+                Thread.Sleep(100);
+                Assert.Equal(12f, _receiver.GetLatestPose().Yaw, precision: 3);
+            }
+        }
+
         /// <summary>
         /// Sends a test OpenTrack packet to the specified port.
         /// OpenTrack packet format: 48 bytes (6 doubles)
@@ -379,10 +406,7 @@ namespace CameraUnlock.Core.Tests.Protocol
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, 32, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, 40, 8);
 
-            using (var client = new UdpClient())
-            {
-                client.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, port));
-            }
+            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, port));
         }
     }
 }

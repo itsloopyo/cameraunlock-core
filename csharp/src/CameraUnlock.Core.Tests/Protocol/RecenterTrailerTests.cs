@@ -12,6 +12,9 @@ namespace CameraUnlock.Core.Tests.Protocol
 {
     public class RecenterTrailerTests : IDisposable
     {
+        // One sender for every packet, as a tracker app sends: the receiver follows one source.
+        private static readonly UdpClient Sender = new UdpClient();
+
         private const int TestPort = 14260;
 
         private OpenTrackReceiver? _receiver;
@@ -242,10 +245,7 @@ namespace CameraUnlock.Core.Tests.Protocol
 
         private static void Send(byte[] packet)
         {
-            using (var client = new UdpClient())
-            {
-                client.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
-            }
+            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, TestPort));
         }
 
         private static byte[] BuildPacket(double yaw, double pitch, double roll, byte? recenterCounter = null,

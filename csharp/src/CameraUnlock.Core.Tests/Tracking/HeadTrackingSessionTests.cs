@@ -15,6 +15,9 @@ namespace CameraUnlock.Core.Tests.Tracking
 {
     public class HeadTrackingSessionTests : IDisposable
     {
+        // One sender for every packet, as a tracker app sends: the receiver follows one source.
+        private static readonly UdpClient Sender = new UdpClient();
+
         private const int TestPort = 14245;
         private const float FrameTime = 1f / 60f;
 
@@ -505,10 +508,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             Array.Copy(BitConverter.GetBytes(pitch), 0, packet, 32, 8);
             Array.Copy(BitConverter.GetBytes(roll), 0, packet, 40, 8);
 
-            using (var client = new UdpClient())
-            {
-                client.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, port));
-            }
+            lock (Sender) Sender.Send(packet, packet.Length, new IPEndPoint(IPAddress.Loopback, port));
         }
     }
 }

@@ -12,6 +12,9 @@ namespace CameraUnlock.Core.Tests.Tracking
 {
     public class StaticHeadTrackingCoreTests : IDisposable
     {
+        // One sender for every packet, as a tracker app sends: the receiver follows one source.
+        private static readonly System.Net.Sockets.UdpClient Sender = new System.Net.Sockets.UdpClient();
+
         private readonly TestConfig _config;
 
         public StaticHeadTrackingCoreTests()
@@ -438,11 +441,7 @@ namespace CameraUnlock.Core.Tests.Tracking
             byte[] packet = new byte[48];
             Array.Copy(BitConverter.GetBytes(yaw), 0, packet, 24, 8);
 
-            using (var client = new System.Net.Sockets.UdpClient())
-            {
-                client.Send(packet, packet.Length,
-                    new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port));
-            }
+            lock (Sender) Sender.Send(packet, packet.Length, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port));
         }
 
         private class TestConfig : IHeadTrackingConfig

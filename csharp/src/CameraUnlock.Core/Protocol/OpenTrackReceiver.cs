@@ -29,6 +29,12 @@ namespace CameraUnlock.Core.Protocol
         /// </summary>
         public const int DefaultMaxDataAgeMs = 500;
 
+        /// <summary>
+        /// How long the source followed may go quiet before another sender takes over, as
+        /// the C++ UdpReceiver's kSourceHandoverMs.
+        /// </summary>
+        public const int SourceHandoverMs = 2000;
+
 #if NULLABLE_ENABLED
         private UdpClient? _udpClient;
         private Thread? _receiveThread;
@@ -77,6 +83,15 @@ namespace CameraUnlock.Core.Protocol
         private bool _hasRecenterCounter;
         private readonly PoseJumpGate _poseGate = new PoseJumpGate();
         private long _frozenPackets;
+
+        // The sender followed, and when it last sent. Receive thread only; Start() resets them.
+#if NULLABLE_ENABLED
+        private IPEndPoint? _primarySource;
+#else
+        private IPEndPoint _primarySource;
+#endif
+        private long _primaryLastSeenTicks;
+        private bool _secondSourceLogged;
         private int _recenterRequested;
 
         // Recenter offset
@@ -186,6 +201,9 @@ namespace CameraUnlock.Core.Protocol
             _firstPacketLogged = false;
             _hasRecenterCounter = false;
             _poseGate.Reset();
+            _primarySource = null;
+            _primaryLastSeenTicks = 0;
+            _secondSourceLogged = false;
             Interlocked.Exchange(ref _frozenPackets, 0L);
             Interlocked.Exchange(ref _recenterRequested, 0);
             Interlocked.Exchange(ref _timestampTicks, 0L);
@@ -600,6 +618,13 @@ namespace CameraUnlock.Core.Protocol
                         bool positionValid = OpenTrackPacket.TryParsePosition(data, out PositionData positionParsed);
                         bool poseValid = anglesValid && positionValid;
 
+                        // Lock onto the first tracker that sends and ignore any other until it
+                        // has been silent for SourceHandoverMs, as the C++ receiver does. Two
+                        // apps sending to the port made the pose alternate between them
+                        // packet by packet, and the view flick between two positions. After
+                        // the parse, so garbage from another host cannot take the lock.
+                        if (poseValid && !FollowsSource(remoteEndpoint)) continue;
+
                         // The trailer is read BEFORE the gate below. It no longer raises a
                         // recenter request: Headcam owns centring, zeroing its own output
                         // on CENTER, and the pipeline's centre is identity. But a press is
@@ -727,6 +752,30 @@ namespace CameraUnlock.Core.Protocol
                     break;
                 }
             }
+        }
+
+        private bool FollowsSource(IPEndPoint sender)
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (_primarySource != null && !(_primarySource.Address.Equals(sender.Address) && _primarySource.Port == sender.Port))
+            {
+                if ((now - _primaryLastSeenTicks) * 1000 / Stopwatch.Frequency < SourceHandoverMs)
+                {
+                    if (!_secondSourceLogged)
+                    {
+                        _secondSourceLogged = true;
+                        Log?.Invoke(string.Format(
+                            "a SECOND tracker source is sending to this port ({0}) - IGNORING it; the view is driven by {1}."
+                            + " Two sources make the head pose alternate between them. Close whichever tracker you are not using.",
+                            sender, _primarySource));
+                    }
+                    return false;
+                }
+                Log?.Invoke(string.Format("tracker source went silent; switching to {0}", sender));
+            }
+            _primarySource = new IPEndPoint(sender.Address, sender.Port);
+            _primaryLastSeenTicks = now;
+            return true;
         }
 
         public void Dispose()
