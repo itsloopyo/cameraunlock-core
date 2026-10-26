@@ -292,6 +292,7 @@ if not exist "!_MARKER_CHECK!" (
 )
 
 echo Backing up %ASSEMBLY_DLL%...
+set "_BACKUP_FROM_LIVE="
 if not exist "!BACKUP_PATH!" (
     set "_PRISTINE_PATH=!ASSEMBLY_PATH!"
     call :assert_pristine "%ASSEMBLY_DLL% is already patched but no .original backup exists"
@@ -307,7 +308,12 @@ if not exist "!BACKUP_PATH!" (
     )
     echo   Created: %ASSEMBLY_DLL%.original
     set "WE_INSTALLED=true"
+    set "_BACKUP_FROM_LIVE=1"
 ) else (
+    call :refresh_backup_if_unpatched
+    if errorlevel 1 exit /b 1
+)
+if not defined _BACKUP_FROM_LIVE (
     set "_PRISTINE_PATH=!BACKUP_PATH!"
     call :assert_pristine "%ASSEMBLY_DLL%.original is itself patched - corrupt backup"
     if errorlevel 1 exit /b 1
@@ -445,6 +451,33 @@ exit /b 0
     echo   }
     echo }
 )
+exit /b 0
+
+:: ============================================
+:: An unpatched assembly beside an existing backup is a game update or a file
+:: verify that replaced the patched one, so it is the game's current build and
+:: the backup is an older one. Restoring the backup would put the game on old
+:: code: the backup is taken again from the live file instead.
+:: ============================================
+:refresh_backup_if_unpatched
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!ASSEMBLY_PATH!" -Marker "%PATCH_MARKER%"
+set "_MK_EC=%errorlevel%"
+if "%_MK_EC%"=="0" exit /b 0
+if not "%_MK_EC%"=="1" (
+    echo   ERROR: could not read %ASSEMBLY_DLL% to verify patch state ^(code %_MK_EC%^).
+    exit /b 1
+)
+copy /y "!ASSEMBLY_PATH!" "!BACKUP_PATH!" >nul
+if errorlevel 1 (
+    echo   ERROR: could not refresh the %ASSEMBLY_DLL%.original backup at:
+    echo     !BACKUP_PATH!
+    echo   Nothing has been patched. Close the game, check the folder is
+    echo   writable, and re-run.
+    exit /b 1
+)
+echo   %ASSEMBLY_DLL% is unpatched ^(a game update or a file verify^): refreshed
+echo   the .original backup from it.
+set "_BACKUP_FROM_LIVE=1"
 exit /b 0
 
 :: ============================================

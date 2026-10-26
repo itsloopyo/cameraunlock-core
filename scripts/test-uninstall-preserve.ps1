@@ -264,6 +264,13 @@ Assert-KeptLines $case $output @('HeadTracking.cfg')
 Assert-Output $case $output @('Removed: HeadTracking.log', '=== Uninstall Complete ===')
 Write-Host 'PASS cecil: MANAGED_EXTRAS entry quoted with a space kept'
 
+$updated = Copy-Map $cecilFiles @{ "$m\Assembly-CSharp.dll" = 'game update build' }
+$case = New-Case -Name 'cecil-updated' -Config $cecilConfig -Files $updated -ExeRelPath 'fixture.exe'
+$output = Invoke-Uninstall $case 0
+Assert-Files $case @('fixture.exe', "$m\Assembly-CSharp.dll") @{ "$m\Assembly-CSharp.dll" = 'game update build' }
+Assert-Output $case $output @('older .original backup is not restored.', '=== Uninstall Complete ===')
+Write-Host 'PASS cecil: an unpatched assembly from a game update is kept and the older backup removed'
+
 # ---------------------------------------------------------------- loader trees
 $bepConfig = 'BepInEx\config\CameraUnlock.ini'
 $bepLegacy = 'BepInEx\config\com.cameraunlock.fixture.headtracking.cfg'

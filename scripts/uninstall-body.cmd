@@ -1166,6 +1166,21 @@ if not exist "!BACKUP_PATH!" (
     echo   Run Steam "Verify integrity of game files" to restore a clean assembly, then re-run uninstall.
     exit /b 1
 )
+:: An unpatched assembly beside a backup is a game update or a file verify that
+:: replaced the patched one. It is the game's current build, and the backup is
+:: an older one: restoring it would put the game on old code.
+set "_MARKER_PATH=!ASSEMBLY_PATH!"
+set "_MARKER_VALUE=!PATCH_MARKER!"
+call :marker_state
+if errorlevel 2 ( echo   ERROR: could not verify %ASSEMBLY_DLL% patch state. & exit /b 1 )
+if errorlevel 1 (
+    echo   %ASSEMBLY_DLL% is already unpatched ^(a game update or a file verify^), so the
+    echo   older .original backup is not restored.
+    set "_DEL_PATH=!BACKUP_PATH!"
+    set "_DEL_LABEL=%ASSEMBLY_DLL%.original"
+    call :del_one
+    exit /b 0
+)
 set "_MARKER_PATH=!BACKUP_PATH!"
 set "_MARKER_VALUE=!PATCH_MARKER!"
 call :marker_state
