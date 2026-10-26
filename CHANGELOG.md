@@ -295,6 +295,19 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 - `Enter-GameRig`'s board entry ends with the process that holds the rig, and a rig kept by
   `-KeptIn` stays on the board under the game's process.
 - The dotnet `test-differential` template fails when its filter matches no test.
+- `install-body-xnvse.cmd` hands PowerShell the download URL and path by environment variable, so
+  a TEMP path holding an apostrophe no longer breaks the download.
+- The C++ file log's one rotation per run is used up only by an `Open` that opened a file, so after
+  a failed `Open` the path tried next still has its previous log kept before it is truncated.
+- `RenderPipelineHelper.RegisterCallbacks` subscribes the legacy `Camera` pair as well where the
+  SRP's `RenderPipelineManager` exists, since a build can render with either.
+- `CameraLifecycleManager` calls `OnCameraLost` for a camera a scene load destroyed, whether or
+  not another camera is found in its place.
+- `ViewMatrixTrackingController` resets the view matrix at once on a fade out with nothing left to
+  apply, and treats a destroyed camera's replacement as a camera cut.
+- `UnityAimHelper.ClampToScreenEdge` puts a behind-camera aim on the edge it points at, read from
+  the view matrix, instead of the opposite edge.
+- `UIElementOffsetController` puts its element back when the component is disabled while offset.
 
 ### Fixed - the C interface says to put the rig back after a stop or a missed lean
 
