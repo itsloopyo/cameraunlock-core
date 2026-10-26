@@ -23,11 +23,10 @@
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve, basename } from 'node:path';
+import { join, basename } from 'node:path';
+import { REPOS_ROOT } from './lib/repos.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const siblingsRoot = resolve(__dirname, '..', '..');
+const siblingsRoot = REPOS_ROOT;
 const OWNER = 'itsloopyo';
 
 const argv = process.argv.slice(2);

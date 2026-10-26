@@ -15,14 +15,13 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { hasCanonicalStamp, parseCanonicalIni } from "./lib/canonical-ini.mjs";
 import { formatKeyBindings, parseKeyBindings } from "./lib/key-bindings.mjs";
 import { formatPlayerList, parsePlayerList } from "./lib/player-list.mjs";
 import { lintCanonicalConfig } from "./check-canonical-config.mjs";
+import { CORE_ROOT } from "./lib/repos.mjs";
 
-const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = path.join(CORE_ROOT, "data", "fixtures", "canonical-ini");
 
 const failures = [];

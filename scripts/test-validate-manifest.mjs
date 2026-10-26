@@ -18,10 +18,9 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { CORE_ROOT } from "./lib/repos.mjs";
 
-const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VALIDATOR = path.join(CORE_ROOT, "scripts", "validate-manifest.mjs");
 const TAR = process.platform === "win32" ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe") : "tar";
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "validate-manifest-"));

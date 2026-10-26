@@ -82,12 +82,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { CORE_ROOT, REPOS_ROOT } from "./lib/repos.mjs";
 
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const CORE = path.resolve(SCRIPT_DIR, "..");
+const CORE = CORE_ROOT;
 const LEGAL = path.join(CORE, "legal");
-const ROOT = path.resolve(CORE, "..");
+const ROOT = REPOS_ROOT;
 
 const SELF = Symbol("self");
 const VENDORED_SOURCE_DIRS = ["extern", "third_party", "external"];

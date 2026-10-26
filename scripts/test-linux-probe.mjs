@@ -16,9 +16,9 @@ import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { CORE_ROOT } from './lib/repos.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = CORE_ROOT;
 const IMAGE = 'cameraunlock-core-linux-probe';
 const CONTEXT = path.join(ROOT, 'containers', 'linux-probe');
 const OUT = path.join(ROOT, 'build-linux-probe');

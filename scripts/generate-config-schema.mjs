@@ -17,12 +17,11 @@
 // generated runtime table would agree with the file by construction and prove nothing.
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-
+import { join } from 'node:path';
+import { CORE_ROOT } from './lib/repos.mjs';
 import { formatPlayerList, parsePlayerList } from './lib/player-list.mjs';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = CORE_ROOT;
 const schemaPath = join(repoRoot, 'data', 'config-schema.json');
 const csharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Config', 'ConfigKeySchema.g.cs');
 const cppPath = join(repoRoot, 'cpp', 'include', 'cameraunlock', 'config', 'config_key_schema.g.h');

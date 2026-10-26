@@ -17,9 +17,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { CORE_ROOT, REPOS_ROOT } from "./lib/repos.mjs";
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const REPO_ROOT = CORE_ROOT;
 const GAMES_PATH = path.join(REPO_ROOT, "data", "games.json");
 
 const TOP_LEVEL_KEYS = new Set(["$comment", "schema_version", "games"]);
@@ -188,7 +188,7 @@ console.log(
 // kingdom-come-deliverance-2-headtracking is checked out as
 // kingdom-come-deliverance-2 here.
 function checkFleet(games, byRepo) {
-  const fleetRoot = path.dirname(REPO_ROOT);
+  const fleetRoot = REPOS_ROOT;
   const checkouts = new Map();
   for (const entry of fs.readdirSync(fleetRoot, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;

@@ -15,9 +15,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { CORE_ROOT } from "./lib/repos.mjs";
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const REPO_ROOT = CORE_ROOT;
 const FORMAT_PATH = path.join(REPO_ROOT, "data", "config-format.json");
 const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "data", "config-schema.json"), "utf8"));
 

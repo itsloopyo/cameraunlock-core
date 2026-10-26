@@ -25,8 +25,8 @@ import { fileURLToPath } from "node:url";
 
 import { repoState } from "./check-canonical-config.mjs";
 import { expectedPerGame } from "./check-config-descriptor.mjs";
+import { CORE_ROOT } from "./lib/repos.mjs";
 
-const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // `given` stands in for repoState(root), for a test of an entry no real repo has yet.
 export function encodePerGame(root, given = null) {

@@ -17,9 +17,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { CORE_ROOT } from './lib/repos.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = CORE_ROOT;
 const DOCS = path.join(ROOT, 'docs');
 const MARKER = /^<!-- (excerpt|file): (\S+) -->$/;
 const CHECKED_LANGUAGES = new Set(['cpp', 'csharp']);

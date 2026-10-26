@@ -15,12 +15,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { configBlock } from "./generate-readme.mjs";
 import { findSection, findValue, parseCanonicalIni } from "./lib/canonical-ini.mjs";
+import { CORE_ROOT } from "./lib/repos.mjs";
 
-const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VALUES = "data/fixtures/readme/values.ini";
 const FRESH = "data/fixtures/canonical-ini/example/CameraUnlock.ini";
 const ALL_FRESH = "data/fixtures/canonical-ini/head-tracking/all-concepts-fresh.ini";

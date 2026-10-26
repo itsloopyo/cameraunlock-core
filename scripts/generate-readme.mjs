@@ -53,9 +53,8 @@ import { fileURLToPath } from 'node:url';
 
 import { repoState } from './check-canonical-config.mjs';
 import { equalsAsciiIgnoreCase, isDefaultToken, parseCanonicalIni } from './lib/canonical-ini.mjs';
+import { CORE_ROOT, REPOS_ROOT } from './lib/repos.mjs';
 
-const CORE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const REPOS_ROOT = path.dirname(CORE_ROOT);
 
 // ---------------------------------------------------------------------------
 // Facts. Every number here is read out of core, not remembered.
