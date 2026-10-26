@@ -687,6 +687,11 @@ if defined BEPINEX_SUBFOLDER (
         rmdir /s /q "!BEP_TEMP!" 2>nul
         exit /b 1
     )
+    rem A pack can ship BepInEx\config\BepInEx.cfg. One the game folder already
+    rem holds is the player's, so the pack's copy of it is dropped before the copy.
+    for %%F in ("!BEP_TEMP!\%BEPINEX_SUBFOLDER%\BepInEx\config\*") do (
+        if exist "!GAME_PATH!\BepInEx\config\%%~nxF" del /f /q "%%F"
+    )
     xcopy /s /e /y /q "!BEP_TEMP!\%BEPINEX_SUBFOLDER%\*" "!GAME_PATH!\" >nul
     set "_XCOPY_EC=!errorlevel!"
     rmdir /s /q "!BEP_TEMP!"

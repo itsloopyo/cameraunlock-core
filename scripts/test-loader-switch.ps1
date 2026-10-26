@@ -31,7 +31,7 @@ function Check([string]$Case, [bool]$Ok, [string]$What) {
     if (-not $Ok) { $failures.Add("${Case}: $What") }
 }
 
-function New-Case([string]$Name, [switch]$CecilInstall, [switch]$PlayersBepInEx) {
+function New-Case([string]$Name, [switch]$CecilInstall, [switch]$PlayersBepInEx, [string]$PackFolder = '') {
     $caseRoot = Join-Path $root $Name
     $game = Join-Path $caseRoot 'Game ! Folder'
     $shared = Join-Path $caseRoot 'shared'
@@ -51,9 +51,17 @@ function New-Case([string]$Name, [switch]$CecilInstall, [switch]$PlayersBepInEx)
 
     $zip = [IO.Compression.ZipFile]::Open((Join-Path $vendor 'BepInEx_win_x64.zip'), 'Create')
     try {
-        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $proxy, 'winhttp.dll') | Out-Null
-        $entry = $zip.CreateEntry('BepInEx/core/BepInEx.dll')
-        $w = New-Object IO.StreamWriter($entry.Open()); try { $w.Write('vendored loader') } finally { $w.Dispose() }
+        $prefix = if ($PackFolder) { "$PackFolder/" } else { '' }
+        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $proxy, "${prefix}winhttp.dll") | Out-Null
+        $entries = @{ 'BepInEx/core/BepInEx.dll' = 'vendored loader' }
+        if ($PackFolder) {
+            $entries['BepInEx/config/BepInEx.cfg'] = "pack's BepInEx.cfg"
+            $entries['BepInEx/config/Pack.cfg'] = "pack's own config"
+        }
+        foreach ($entryName in $entries.Keys) {
+            $entry = $zip.CreateEntry($prefix + $entryName)
+            $w = New-Object IO.StreamWriter($entry.Open()); try { $w.Write($entries[$entryName]) } finally { $w.Dispose() }
+        }
     } finally { $zip.Dispose() }
 
     foreach ($dll in 'Fixture.dll', 'CameraUnlock.Core.dll') {
@@ -86,7 +94,7 @@ function New-Case([string]$Name, [switch]$CecilInstall, [switch]$PlayersBepInEx)
         'set "MOD_INTERNAL_NAME=Fixture"', 'set "STATE_FILE=.fixture-state.json"', 'set "FRAMEWORK_TYPE=BepInEx"',
         'set "MOD_DLLS=Fixture.dll CameraUnlock.Core.dll"', 'set "PLUGIN_SUBFOLDER="', 'set "MOD_SEED_FILES="')
     $install = $common + @('set "MOD_VERSION=1.0.0"', 'set "BEPINEX_ARCH=x64"', 'set "BEPINEX_VENDOR_ZIP_NAME="',
-        'set "BEPINEX_SUBFOLDER="', 'set "MOD_CONTROLS=Controls:"', 'set "IL2CPP_VENDOR_DIR_NAME="',
+        ('set "BEPINEX_SUBFOLDER={0}"' -f $PackFolder), 'set "MOD_CONTROLS=Controls:"', 'set "IL2CPP_VENDOR_DIR_NAME="',
         'set "IL2CPP_VENDOR_ZIP_NAME="', 'set "IL2CPP_PLUGIN_DIR_NAME="', 'set "IL2CPP_MOD_DLLS="',
         'call "%~dp0shared\install-body-bepinex.cmd" %*', 'exit /b %errorlevel%')
     $uninstall = $common + @('set "LEGACY_DLLS="',
@@ -198,6 +206,18 @@ try {
         Check $c.Name ((Text $c 'BepInEx\config\Other.cfg') -eq "player's config") "another mod's config was removed"
         Check $c.Name ((Text $c 'BepInEx\plugins\Other.dll') -eq "player's other plugin") "another mod's plugin was removed"
     }
+
+    # A Thunderstore pack that ships BepInEx.cfg keeps the player's over its own, and
+    # brings a config the player does not have.
+    $c = New-Case 'wrong-arch-pack' -PlayersBepInEx -PackFolder 'BepInExPack'
+    Copy-Item -LiteralPath (Join-Path $env:WINDIR 'SysWOW64\winhttp.dll') -Destination (Join-Path $c.Game 'winhttp.dll') -Force
+    New-Item -ItemType Directory -Path (Join-Path $c.Game 'BepInEx\config') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $c.Game 'BepInEx\config\BepInEx.cfg'), "player's BepInEx.cfg")
+    $r = Invoke-Script $c 'install'
+    Check $c.Name ($r.Exit -eq 0) "install exited $($r.Exit): $($r.Output)"
+    Check $c.Name ((Text $c 'BepInEx\core\BepInEx.dll') -eq 'vendored loader') 'the wrong-architecture loader was not replaced'
+    Check $c.Name ((Text $c 'BepInEx\config\BepInEx.cfg') -eq "player's BepInEx.cfg") "the pack's BepInEx.cfg replaced the player's"
+    Check $c.Name ((Text $c 'BepInEx\config\Pack.cfg') -eq "pack's own config") "the pack's own config did not arrive"
 } finally {
     if ($failures.Count -eq 0) { Remove-Item -LiteralPath $root -Recurse -Force }
 }
@@ -207,4 +227,4 @@ if ($failures.Count -gt 0) {
     Write-Host "Case folders kept under $root"
     exit 1
 }
-Write-Host 'loader switch: 6 cases passed' -ForegroundColor Green
+Write-Host 'loader switch: 7 cases passed' -ForegroundColor Green
