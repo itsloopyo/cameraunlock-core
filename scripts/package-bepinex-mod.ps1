@@ -149,7 +149,7 @@ if (-not (Test-Path $manifestSource)) {
 # build instead.
 Assert-ManifestSeedsMatchShipped -ManifestPath $manifestSource -ProjectRoot $ProjectRoot
 
-$manifestJson = Get-Content $manifestSource -Raw | ConvertFrom-Json
+$manifestJson = Get-Content -LiteralPath $manifestSource -Raw -Encoding UTF8 | ConvertFrom-Json
 $manifestJson.mod_info.version = $version
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText(
