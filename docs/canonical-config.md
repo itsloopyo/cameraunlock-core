@@ -1000,8 +1000,8 @@ the file. A value written in a game's `CameraUnlock.ini` changes that game only.
 
 Every head tracking mod that keeps its settings in `CameraUnlock.ini` through core's config owner
 reads it: a C# or C++ `ConfigOwner`, or core's REFramework `PluginMod` with `canonicalConfig` set.
-No other mod does. The seven repos `data/config-format.json` lists as `exempt` (beamng-drive,
-firewatch, fusion-360, minecraft-java-edition,
+No other mod does. The six repos `data/config-format.json` lists as `exempt` (beamng-drive,
+fusion-360, minecraft-java-edition,
 ni-no-kuni-wrath-of-the-white-witch, outer-wilds and the-pathless) never read it, and neither
 does a repo that has not converted, or a build of a converted repo from before its conversion.
 Every text a player is given states it that way, as a condition: the header of every rendered
@@ -1506,12 +1506,12 @@ Not verified, because nobody has run it:
 
 `data/config-format.json` names three groups:
 
-- **`legacy`**: the 88 repos that published a pre-canonical build, a `v*` release or the rolling
+- **`legacy`**: the 89 repos that published a pre-canonical build, a `v*` release or the rolling
   `dev` pre-release on GitHub. Only these carry a legacy import, because only their players hold a
   file an older build wrote. The set is frozen: `pixi run check-config-format` pins its names.
-- **`exempt`**: seven repos that cannot move to a canonical reader or have no config, each with its
+- **`exempt`**: six repos that cannot move to a canonical reader or have no config, each with its
   reason.
-- Every other repo carries no import: the 40 unpublished repos that convert, and every new repo,
+- Every other repo carries no import: the 46 unpublished repos that convert, and every new repo,
   which is canonical from its first build.
 
 ### The legacy import
