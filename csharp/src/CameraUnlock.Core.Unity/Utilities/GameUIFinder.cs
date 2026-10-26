@@ -85,12 +85,12 @@ namespace CameraUnlock.Core.Unity.Utilities
             foreach (GameObject obj in allObjects)
             {
                 if (obj == null) continue;
-                string objName = obj.name.ToLowerInvariant();
+                string objName = obj.name;
 
                 foreach (string keyword in loweredKeywords)
                 {
                     if (keyword == null) continue;
-                    if (objName.Contains(keyword))
+                    if (objName.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         return obj;
                     }
