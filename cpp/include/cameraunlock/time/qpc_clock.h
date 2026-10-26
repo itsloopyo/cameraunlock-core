@@ -25,8 +25,11 @@ inline uint64_t QpcTicksToMicros(int64_t ticks, int64_t freq) {
 // Current QueryPerformanceCounter value in microseconds, using the
 // overflow-safe split conversion above.
 inline uint64_t QpcNowMicros() {
-    static LARGE_INTEGER freq = {};
-    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    static const LARGE_INTEGER freq = [] {
+        LARGE_INTEGER f;
+        QueryPerformanceFrequency(&f);
+        return f;
+    }();
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     return QpcTicksToMicros(now.QuadPart, freq.QuadPart);
