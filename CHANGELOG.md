@@ -272,6 +272,8 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 - `cameraunlock_session_stop`, `cameraunlock_view_stop` and a frame whose lean was never called
   let go of a rig that carried a share of the lean without saying so, and the host kept the rig
   offset. The view's next frame that returns now carries `CAMERAUNLOCK_STATE_RELEASE_RIG`.
+- A hotkey row marked `CAMERAUNLOCK_ROW_LIVE` kept the keys it was started with after
+  `cameraunlock_config_reload` read new ones. The reload now binds the new keys in place of the old.
 - `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 12: `_RELEASE_RIG` now also follows a stop or a
   frame whose lean was not asked for.
 

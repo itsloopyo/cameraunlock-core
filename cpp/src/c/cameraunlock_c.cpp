@@ -1285,8 +1285,16 @@ std::int32_t cameraunlock_config_reload(void) {
         const cfg::ConfigReloadResult<HostConfig> reloaded = c.owner->Reload();
         LogLines(reloaded.log);
         if (reloaded.config) {
+            input::HotkeyPoller* poller = c.poller.load();
             for (std::size_t i = 0; i < c.locals.size(); ++i) {
-                if ((c.locals[i].flags & CAMERAUNLOCK_ROW_LIVE) != 0) c.loaded.locals[i] = reloaded.config->locals[i];
+                if ((c.locals[i].flags & CAMERAUNLOCK_ROW_LIVE) == 0) continue;
+                const bool rebind = c.locals[i].kind == LocalKind::Hotkey && poller != nullptr &&
+                                    c.loaded.locals[i] != reloaded.config->locals[i];
+                c.loaded.locals[i] = reloaded.config->locals[i];
+                if (rebind) {
+                    for (const int id : c.locals[i].hotkey_ids) poller->RemoveHotkey(id);
+                    c.locals[i].hotkey_ids = Register(c, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
+                }
             }
         }
         return static_cast<std::int32_t>(reloaded.status);

@@ -64,7 +64,7 @@ public final class Tests {
         viewsEachHaveATrackerAndShareTheModes(testing);
         configIsDescribedRenderedLoadedSavedAndReadAgain(testing.core, scratch);
         theReloadLooksAtTheWriteTimesFirst(scratch);
-        hotkeysAndTheWindow(testing.core);
+        hotkeysAndTheWindow(testing.core, scratch);
         aTrackerOnThePortReachesTheFrame(testing);
         if (Testing.BUNDLED) {
             aReceiveLoopThatFailsIsReopened(testing);
@@ -363,8 +363,8 @@ public final class Tests {
         int quality = core.configLocalEnum("General", "Quality", "The graphics mode.", CameraUnlock.ROW_WRITABLE, "Automatic,Low,Medium,High", 1);
         int arms = core.configLocalBool("Content", "OwnArms", "The mod's own arms.", 0, true);
         int trees = core.configLocalInt("Content", "Trees", "How many trees.", 0, 12, 0, 100);
-        int key = core.configLocalHotkey("GraphicsKey", "Goes to the next graphics mode.", CameraUnlock.ROW_WRITABLE, "F9",
-                CameraUnlock.HOTKEY_LOCAL);
+        int key = core.configLocalHotkey("GraphicsKey", "Goes to the next graphics mode.", CameraUnlock.ROW_WRITABLE | CameraUnlock.ROW_LIVE,
+                "F9", CameraUnlock.HOTKEY_LOCAL);
         check(fov == 0 && quality == 1 && arms == 2 && trees == 3 && key == 4, "local rows are numbered as they are added");
         String taken = refusal(() -> core.configLocalHotkeyHeld("SeatKey", "Tapped for the first player, held for the second.", 0,
                 "Delete", CameraUnlock.HOTKEY_LOCAL << 1, CameraUnlock.HOTKEY_LOCAL));
@@ -627,11 +627,11 @@ public final class Tests {
                 ConfigWatch::lastWriteTime);
     }
 
-    private static void hotkeysAndTheWindow(CameraUnlock core) throws Throwable {
+    private static void hotkeysAndTheWindow(CameraUnlock core, Path scratch) throws Throwable {
         core.hotkeysStart();
         core.hotkeysDrop();
         check(core.hotkeysTake() == 0, "with no key pressed nothing is taken");
-        if (Testing.BUNDLED) hotkeysFireFromTheTick(core);
+        if (Testing.BUNDLED) hotkeysFireFromTheTick(core, scratch.resolve("game").resolve("CameraUnlock.ini"));
         check(!core.windowCenter(0L), "a window that is none is left alone");
         aWindowIsCentredInItsWorkArea(core);
     }
@@ -834,6 +834,18 @@ public final class Tests {
         return (short) (down ? 0x8000 : 0);
     }
 
+    /** Holds `key` until the tick has seen it down, then lets it go until the tick has seen it up. */
+    private static void press(int key) throws InterruptedException {
+        watchedKey = key;
+        int down = seenDown.get();
+        heldKey = key;
+        boolean held = polledPast(seenDown, down);
+        int up = seenUp.get();
+        heldKey = 0;
+        boolean released = polledPast(seenUp, up);
+        check(held && released, "the tick asks for key " + Integer.toHexString(key) + " while it is held and once it is let go");
+    }
+
     /** Waits until `count` is past `from`, or two seconds pass. */
     private static boolean polledPast(java.util.concurrent.atomic.AtomicInteger count, int from) throws InterruptedException {
         long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
@@ -857,7 +869,7 @@ public final class Tests {
      * state and foreground window answer as the test says, under the module's lock, since a test
      * presses no real key.
      */
-    private static void hotkeysFireFromTheTick(CameraUnlock core) throws Throwable {
+    private static void hotkeysFireFromTheTick(CameraUnlock core, Path file) throws Throwable {
         Object module = field(core, "backend");
         Object host = field(module, "host");
         MethodHandles.Lookup lookup = MethodHandles.lookup();
@@ -886,6 +898,21 @@ public final class Tests {
             check((taken & CameraUnlock.HOTKEY_LOCAL) != 0, "F9 held and let go in the game's window fires its row: " + Integer.toHexString(taken));
             check(core.hotkeysTake() == 0, "and is taken once");
 
+            String text = Files.readString(file, StandardCharsets.US_ASCII);
+            Files.writeString(file, text.replace("\r\nGraphicsKey=F9\r\n", "\r\nGraphicsKey=F8\r\n"), StandardCharsets.US_ASCII);
+            Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 10000));
+            check(core.configReload() == CameraUnlock.RELOAD_APPLIED, "a live key row the player changed is read again");
+            press(0x77);
+            check((core.hotkeysTake() & CameraUnlock.HOTKEY_LOCAL) != 0, "its new key fires it");
+            // The poller asks only for keys some row is bound to, so its old key is no longer asked for.
+            watchedKey = 0x78;
+            int askedBefore = seenDown.get() + seenUp.get();
+            heldKey = 0x78;
+            Thread.sleep(200);
+            heldKey = 0;
+            Thread.sleep(200);
+            check(seenDown.get() + seenUp.get() == askedBefore && (core.hotkeysTake() & CameraUnlock.HOTKEY_LOCAL) == 0,
+                    "and its old one is no longer asked for and fires nothing");
             // GraphicsKey, the config test's row 4, chosen anew while its new key is down, as an options screen does.
             watchedKey = 0x76;
             heldKey = 0x76;
@@ -900,13 +927,13 @@ public final class Tests {
             up = seenUp.get();
             heldKey = 0;
             check(polledPast(seenUp, up) && (core.hotkeysTake() & CameraUnlock.HOTKEY_LOCAL) != 0, "and fires the row");
-            watchedKey = 0x78;
+            watchedKey = 0x77;
             int asked = seenDown.get() + seenUp.get();
-            heldKey = 0x78;
+            heldKey = 0x77;
             Thread.sleep(64);
             heldKey = 0;
             Thread.sleep(64);
-            check(seenDown.get() + seenUp.get() == asked && core.hotkeysTake() == 0, "and F9, its old key, is no longer asked for");
+            check(seenDown.get() + seenUp.get() == asked && core.hotkeysTake() == 0, "and F8, its old key, is no longer asked for");
         } finally {
             watchedKey = 0x78;
             heldKey = 0;

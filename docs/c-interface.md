@@ -210,7 +210,8 @@ A host describes its `CameraUnlock.ini` at run time, then loads it:
    which needs the owner-approved `per_game` entry `docs/canonical-config.md` describes.
 3. `cameraunlock_config_local_bool`, `_int`, `_float`, `_enum`, `_text`, `_hotkey`, `_hotkey_held`
    and `_hotkey_taps` for the game's own rows. Each answers the row's number. `CAMERAUNLOCK_ROW_LIVE` marks a row
-   `cameraunlock_config_reload` reads again while the game runs.
+   `cameraunlock_config_reload` reads again while the game runs; a hotkey row's new keys replace its
+   old ones on the poller.
 4. `cameraunlock_config_load(path, defaults_path, out)`. `defaults_path` is `NULL` in a mod, for
    the player's own Defaults.ini, and a scratch file in every test.
 

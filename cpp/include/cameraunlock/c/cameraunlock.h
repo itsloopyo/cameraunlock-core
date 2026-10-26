@@ -267,7 +267,8 @@ CAMERAUNLOCK_C int32_t cameraunlock_view_lean(int32_t view, const CameraUnlockOb
 /* Row flags. */
 #define CAMERAUNLOCK_ROW_WRITABLE 0x1u /* a save may change the row */
 #define CAMERAUNLOCK_ROW_PER_GAME 0x2u /* a global concept this game keeps its own default of */
-/* A local row read again by cameraunlock_config_reload while the game runs. */
+/* A local row read again by cameraunlock_config_reload while the game runs. A hotkey row's new
+ * keys replace its old ones on the poller. */
 #define CAMERAUNLOCK_ROW_LIVE 0x4u
 
 /* Starts the description of the game's CameraUnlock.ini. `display_name` is the game's name as
