@@ -99,8 +99,6 @@ namespace detail {
 
 namespace {
 
-constexpr DWORD kReadChunk = 64 * 1024;
-
 bool IsAbsent(DWORD error) { return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND; }
 
 // The failures .NET's File.GetLastWriteTimeUtc reports as a missing file.
@@ -110,17 +108,15 @@ std::uint64_t FileTimeCount(const FILETIME& time) {
     return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
 }
 
-bool IsSeparator(wchar_t c) { return c == L'\\' || c == L'/'; }
-
 // Returns the Win32 error, 0 when the handle was read to its end.
 std::uint32_t ReadToEnd(HANDLE handle, std::string& bytes) {
     bytes.clear();
-    std::vector<char> chunk(kReadChunk);
+    char chunk[4096];
     for (;;) {
         DWORD read = 0;
-        if (!ReadFile(handle, chunk.data(), kReadChunk, &read, nullptr)) return GetLastError();
+        if (!ReadFile(handle, chunk, sizeof(chunk), &read, nullptr)) return GetLastError();
         if (read == 0) return 0;
-        bytes.append(chunk.data(), read);
+        bytes.append(chunk, read);
     }
 }
 
@@ -230,10 +226,7 @@ std::uint64_t OwnerLastWriteTime(const std::wstring& path) {
 
 std::wstring OwnerFullPath(const std::wstring& path, const char* option) {
     if (path.empty()) throw std::invalid_argument(std::string("the options name no ") + option);
-    const bool drive = path.size() >= 3 && ((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) &&
-                       path[1] == L':' && IsSeparator(path[2]);
-    const bool unc = path.size() >= 2 && IsSeparator(path[0]) && IsSeparator(path[1]);
-    if (!drive && !unc) {
+    if (!IsFullyQualified(path)) {
         throw std::invalid_argument(std::string(option) + " '" + OwnerUtf8(path) + "' is not a fully qualified path");
     }
     const DWORD length = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
@@ -268,11 +261,8 @@ bool OwnerFileExists(const std::wstring& path) {
 bool OwnerPathExists(const std::wstring& path) { return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
 std::uint64_t DefaultsLastWriteTime(const std::wstring& path) {
-    try {
-        return OwnerLastWriteTime(path);
-    } catch (const std::system_error&) {
-        return UINT64_MAX;
-    }
+    std::uint64_t time = 0;
+    return OwnerTryLastWriteTime(path, time) == 0 ? time : UINT64_MAX;
 }
 
 std::string DefaultsFolderWhy(std::uint32_t error) {
