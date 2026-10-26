@@ -351,7 +351,11 @@ exit /b 0
 set "XNVSE_DL=!TEMP!\cul-xnvse-%RANDOM%-%RANDOM%.zip"
 
 echo   Downloading xNVSE %XNVSE_VERSION%...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%XNVSE_URL%' -OutFile '!XNVSE_DL!' -UseBasicParsing -TimeoutSec 120 } catch { Write-Host $_.Exception.Message; exit 1 }"
+:: By environment variable, as below: a TEMP path with an apostrophe in it would
+:: close a single-quoted literal early.
+set "CUL_XNVSE_URL=%XNVSE_URL%"
+set "CUL_XNVSE_ZIP=!XNVSE_DL!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri $env:CUL_XNVSE_URL -OutFile $env:CUL_XNVSE_ZIP -UseBasicParsing -TimeoutSec 120 } catch { Write-Host $_.Exception.Message; exit 1 }"
 if errorlevel 1 (
     echo   ERROR: Failed to download xNVSE from:
     echo     %XNVSE_URL%
@@ -377,7 +381,6 @@ if errorlevel 1 (
 :: in TEMP, which every process running as this user can write.
 :: Paths travel by environment variable: a TEMP path with an apostrophe in it
 :: would close a single-quoted literal early and fail to parse.
-set "CUL_XNVSE_ZIP=!XNVSE_DL!"
 set "CUL_XNVSE_SHA=%XNVSE_SHA256%"
 set "CUL_XNVSE_DIR=!XNVSE_EXTRACT!"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
