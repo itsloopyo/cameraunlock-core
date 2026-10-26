@@ -802,8 +802,11 @@ if not exist "!_UNINSTALL!" (
     exit /b 1
 )
 echo An earlier release installed this mod another way. Removing it first...
-cmd /d /c ""!_UNINSTALL!" "!GAME_PATH!" /y"
-if errorlevel 1 (
+set "_CUL_UNINSTALL_GAME_PATH=!GAME_PATH!"
+cmd /d /c ""!_UNINSTALL!" /y"
+set "_REMOVE_EC=!errorlevel!"
+set "_CUL_UNINSTALL_GAME_PATH="
+if not "!_REMOVE_EC!"=="0" (
     echo ERROR: removing the earlier install failed; nothing new was deployed.
     exit /b 1
 )

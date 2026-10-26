@@ -168,6 +168,9 @@ set "_ARG="
 :: throws "Illegal characters in path" and the run dies on a stack trace.
 :: `%~1` strips the launcher's own quotes, so `C:\Games\Foo\` passes the
 :: `if exist` above and gets that far.
+:: An install body that removes another framework's install of this mod hands the
+:: game path over here: on its own command line a `%` or a `^` in it is lost.
+if not defined _GIVEN_PATH if defined _CUL_UNINSTALL_GAME_PATH set "_GIVEN_PATH=%_CUL_UNINSTALL_GAME_PATH%"
 :strip_given_slash
 if not defined _GIVEN_PATH goto :given_normalised
 if not "%_GIVEN_PATH:~-1%"=="\" goto :given_normalised
