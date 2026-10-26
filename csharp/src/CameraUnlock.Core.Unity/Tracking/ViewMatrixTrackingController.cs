@@ -636,14 +636,24 @@ namespace CameraUnlock.Core.Unity.Tracking
                 {
                     ApplyToCamera(cam, fadedYaw, fadedPitch, fadedRoll, fadedPos);
                 }
+                else if (_appliedCamera != null)
+                {
+                    // The override is sticky: left in place it would freeze the view at the
+                    // transform it was last written from for the rest of the fade.
+                    _appliedCamera.ResetWorldToCameraMatrix();
+                    _appliedCamera = null;
+                }
             }
         }
 
         private void ApplyToCamera(Camera cam, float yaw, float pitch, float roll, Vec3 position)
         {
-            if (_appliedCamera != null && _appliedCamera != cam)
+            if (!ReferenceEquals(_appliedCamera, null) && !ReferenceEquals(_appliedCamera, cam))
             {
-                _appliedCamera.ResetWorldToCameraMatrix();
+                // Unity's == reads a destroyed camera as null: it needs no matrix reset, but
+                // a scene load that destroyed it is still a camera cut.
+                if (_appliedCamera != null)
+                    _appliedCamera.ResetWorldToCameraMatrix();
                 // A camera cut: the allowance describes the previous camera's surroundings.
                 _leanClamp.Reset();
             }
