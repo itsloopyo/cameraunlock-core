@@ -223,7 +223,7 @@ namespace CameraUnlock.Core.Unity.UI
         /// </summary>
         public void ResetReferences()
         {
-            if (_originalStateCaptured)
+            if (_originalStateCaptured && IsTargetValid())
             {
                 RestoreOriginalState();
             }
