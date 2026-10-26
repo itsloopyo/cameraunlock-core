@@ -65,12 +65,10 @@ struct HasRemoteConnection<T, std::void_t<decltype(std::declval<T&>().IsRemoteCo
 ///   void Recenter()
 /// and may provide (detected at compile time):
 ///   bool TryConsumeRecenterRequest()
-/// When present, Update() recenters whenever the tracker app signals CENTER
-/// through the packet trailer. When absent the whole remote-recenter branch
-/// compiles away with no diagnostic - a receiver ADAPTER that wraps a core
-/// receiver but forgets to forward TryConsumeRecenterRequest() silently loses
-/// tracker-app recentering. Adapters should assert against it:
-///   static_assert(MySession::kHasRemoteRecenter);
+/// When present, Update() recenters whenever it returns true. Core's receivers
+/// always return false: the tracker owns the centre and zeroes its own output on
+/// CENTER, so the session never centres for it. A receiver of the mod's own that
+/// returns true still gets the recenter.
 ///
 /// GetLastReceiveTimestamp() is how Update() tells a new packet from one it has
 /// already taken. A receiver filled on another thread moves it after the pose
@@ -241,11 +239,9 @@ public:
     /// wait forever - gate on GetRotation() succeeding instead.
     bool HasCentered() const { return m_hasCentered; }
 
-    /// How many times the tracker app has recentered us through the packet
-    /// trailer. Compare across frames to report a press: the session recenters
-    /// itself inside Update(), so without this a mod cannot say whether the
-    /// player's CENTER press reached the game, and "I pressed it and nothing
-    /// happened" has no evidence either way.
+    /// How many times Update() recentered because the receiver's
+    /// TryConsumeRecenterRequest() returned true. Core's receivers never do, so with
+    /// them this stays 0.
     uint64_t GetRemoteRecenterCount() const { return m_remoteRecenters; }
 
     /// Runs the pipeline for this frame. Returns false when the receiver has

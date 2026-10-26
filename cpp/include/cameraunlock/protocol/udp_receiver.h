@@ -78,10 +78,9 @@ public:
 
     // Separate from the connection-liveness timeout above. Re-arming trailer
     // first-sighting is a wire-contract rule fixed at ~5s of packet silence (see
-    // AGENTS.md and OpenTrackReceiver.cs, which implements 50 x 100ms). Reusing the
-    // 500ms liveness value meant a routine Wi-Fi stall inside a recenter burst re-armed
-    // mid-burst, so the burst's tail - carrying the SAME counter - read as a second
-    // press and recentred on whatever pose the head had drifted to.
+    // OpenTrackReceiver.cs, which implements 50 x 100ms). A press no longer recenters,
+    // but it still lets its pose past the pose gate, and a 500ms re-arm would read a
+    // burst's tail after a Wi-Fi stall as a second press.
     static constexpr int kRecenterRearmMs = 5000;
     /// How long the chosen tracker may go quiet before another sender is
     /// allowed to take over. Long enough that ordinary jitter or a dropped
