@@ -985,6 +985,9 @@ public static class StandInStubborn {
         Check 'taken back by token, it keeps what it was taken for' ($held.Count -eq 1 -and $held[0].why -eq 'boarder: a check') ($held | ConvertTo-Json -Compress)
         Exit-GameRig -Rig $mine
         Check 'and is off it once released' (@(Get-BoardHold 'rig-board').Count -eq 0)
+        $lost = (& powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module '$modulePath'; `$r = Enter-GameRig -Game 'board' -Owner 'lost' -WaitSeconds 0; @(`$env:HIVEMIND_HOME | ForEach-Object { (hivemind state | Out-String | ConvertFrom-Json).reservations | Where-Object { `$_.resource -eq 'rig-board' } }).Count" | Out-String).Trim()
+        Check 'a run that ends without releasing had the rig on the board' ($lost -eq '1') $lost
+        Check 'and it leaves the board with the process that held it' (@(Get-BoardHold 'rig-board').Count -eq 0)
     } else {
         Write-Host 'SKIP  the hivemind board: not under an agent harness, or hivemind is not installed'
     }

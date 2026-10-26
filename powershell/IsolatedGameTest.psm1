@@ -773,7 +773,8 @@ function Get-GameRigKey {
 # for them to read: this lock alone decides who gets the rig. Only under an agent harness, since a
 # person at a terminal has no place on the board, and only where hivemind is installed. hivemind
 # refusing, as it does an agent that never joined, is said and not thrown: the rig is held either
-# way, and the run needs nothing more.
+# way, and the run needs nothing more. The copy ends with the process that holds the rig (--while),
+# because a release from a run whose shell was reaped never reaches hivemind (2026-10-26).
 function Get-GameRigBoardName {
     param([string]$Key)
     $name = 'rig-' + ($Key -replace '[^a-z0-9._-]', '-')
@@ -786,15 +787,18 @@ function Invoke-GameRigBoard {
     $hivemind = Get-Command hivemind -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $hivemind) { return }
     $run = Invoke-ConsoleProgram -Path $hivemind.Source -Arguments $Arguments
+    # A copy held --while a process that has ended is gone already, which is what a release asks for.
+    if ($run.ExitCode -ne 0 -and $Arguments[0] -eq 'release' -and "$($run.Output)" -match 'you hold no reservation') { return }
     if ($run.ExitCode -ne 0) { Write-RigWarning "hivemind $($Arguments[0]) for the rig failed (exit $($run.ExitCode)): $($run.Output)" }
 }
 
 function Set-GameRigOnBoard {
-    param([Parameter(Mandatory)]$Rig, [string]$What = '')
+    param([Parameter(Mandatory)]$Rig, [string]$What = '', [int]$While = $PID)
     $why = $(if ($What) { "$($Rig.Owner): $What" } else { $Rig.Owner })
     $why = ($why -replace '\s+', ' ').Trim()
     $why = $why.Substring(0, [Math]::Min(200, $why.Length))
-    Invoke-GameRigBoard -Arguments @('reserve', '--quiet', (Get-GameRigBoardName $Rig.Key), $why)
+    $Rig | Add-Member -NotePropertyName BoardWhat -NotePropertyValue $What -Force
+    Invoke-GameRigBoard -Arguments @('reserve', '--quiet', '--while', "$While", (Get-GameRigBoardName $Rig.Key), $why)
 }
 
 function Invoke-GameRigExclusive {
@@ -1354,7 +1358,7 @@ function Exit-GameRig {
                 $held.ProcessId = 0
                 $held.ProcessStart = ''
                 ConvertTo-Json $held | Set-Content (Join-Path $Rig.Path 'owner.json') -Encoding UTF8
-                return $true
+                return [int]$left[0].Id
             }
             Remove-Item $KeptIn -Force -ErrorAction SilentlyContinue
         }
@@ -1364,8 +1368,13 @@ function Exit-GameRig {
         Remove-Item $gone -Recurse -Force
         $false
     }
-    # A game left running keeps the rig, and stays on the board with it.
-    if (-not $kept) { Invoke-GameRigBoard -Arguments @('release', (Get-GameRigBoardName $Rig.Key)) }
+    # A game left running keeps the rig, and stays on the board with it, for as long as it runs.
+    if ($kept) {
+        $what = $(if ($Rig.PSObject.Properties['BoardWhat']) { $Rig.BoardWhat } else { '' })
+        Set-GameRigOnBoard -Rig $Rig -What $what -While $kept
+    } else {
+        Invoke-GameRigBoard -Arguments @('release', (Get-GameRigBoardName $Rig.Key))
+    }
 }
 
 function Stop-KeptGame {
