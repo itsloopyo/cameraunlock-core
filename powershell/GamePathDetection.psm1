@@ -174,7 +174,7 @@ function Find-SteamLibraries {
     $vdfPath = Join-Path $steamPath 'steamapps\libraryfolders.vdf'
 
     if (Test-Path -LiteralPath $vdfPath) {
-        $content = Get-Content -LiteralPath $vdfPath -Raw
+        $content = Get-Content -LiteralPath $vdfPath -Raw -Encoding UTF8
         # Match path entries in VDF format
         $pathMatches = [regex]::Matches($content, '"path"\s+"([^"]+)"')
         foreach ($match in $pathMatches) {
@@ -396,7 +396,7 @@ function Find-SteamGameByAppId {
         # need `installdir`. A one-line regex is safer than pulling in
         # a VDF parser; `installdir` is always a simple "key" "value"
         # on its own line.
-        $content = Get-Content -Raw -LiteralPath $manifest
+        $content = Get-Content -Raw -Encoding UTF8 -LiteralPath $manifest
         if ($content -match '"installdir"\s+"([^"]+)"') {
             $installDir = $matches[1]
             $gamePath = Join-Path $library "steamapps\common\$installDir"
@@ -480,7 +480,7 @@ function Get-XboxPackageIdentity {
         Select-Object -First 1
     if (-not $config) { return '' }
     try {
-        $xml = [xml](Get-Content -Raw -LiteralPath $config.FullName)
+        $xml = [xml](Get-Content -Raw -Encoding UTF8 -LiteralPath $config.FullName)
     } catch {
         # A config the publisher shipped malformed is not a title we can
         # identify; the executable check still decides on its own.
