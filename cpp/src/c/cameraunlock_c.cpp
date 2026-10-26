@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -737,6 +738,19 @@ const LocalRow& LocalAt(const ConfigState& c, std::int32_t row) {
         throw std::invalid_argument("there is no local row " + std::to_string(row));
     }
     return c.locals[static_cast<std::size_t>(row)];
+}
+
+// The owner refuses a change to a row that is not Writable, but a field with no row at all would
+// save nothing and still answer SAVED.
+void RequireConcepts(const ConfigState& c, std::initializer_list<cfg::schema::Concept> ids) {
+    for (const cfg::schema::Concept id : ids) {
+        bool described = false;
+        for (const ConceptRow& row : c.concepts) described = described || row.id == id;
+        if (!described) {
+            throw std::logic_error(std::string("the mod did not describe the ") +
+                                   cfg::schema::kConcepts[static_cast<std::size_t>(id)].name + " row, so it cannot be saved");
+        }
+    }
 }
 
 std::int32_t Save(ConfigState& c, const std::function<void(HostConfig&)>& change) {
@@ -1553,6 +1567,7 @@ std::int32_t cameraunlock_config_save_tracking_mode(void) {
         const TrackingModeChannels channels = EncodeTrackingMode(TheSession().mode().GetMode());
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireConcepts(c, {cfg::schema::Concept::RotationEnabled, cfg::schema::Concept::PositionEnabled});
         return Save(c, [&](HostConfig& config) {
             config.rotation_enabled = channels.rotation_enabled;
             config.position_enabled = channels.position_enabled;
@@ -1565,6 +1580,8 @@ std::int32_t cameraunlock_config_save_aim_mode(void) {
         const ads::AimModeSettings mode = ads::EncodeAimMode(static_cast<ads::AimMode>(TheSession().aim_mode.load()));
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireConcepts(c, {cfg::schema::Concept::TrueFreeLook, cfg::schema::Concept::FreeLookMarker,
+                            cfg::schema::Concept::StockSights});
         return Save(c, [&](HostConfig& config) {
             config.true_free_look = mode.trueFreeLook;
             config.free_look_marker = mode.freeLookMarker;
@@ -1577,6 +1594,7 @@ std::int32_t cameraunlock_config_save_world_space_yaw(std::int32_t world_space_y
     return Guarded("cameraunlock_config_save_world_space_yaw", [&] {
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireConcepts(c, {cfg::schema::Concept::WorldSpaceYaw});
         return Save(c, [&](HostConfig& config) { config.world_space_yaw = world_space_yaw != 0; });
     });
 }

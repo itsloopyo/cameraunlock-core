@@ -413,7 +413,8 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_save_concept_keys(const char* name, c
  * and no row changed. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_rows(const int32_t* rows, const double* values, int32_t count);
 /* The session's tracking mode as RotationEnabled and PositionEnabled, and its aim mode as
- * TrueFreeLook, FreeLookMarker and StockSights. */
+ * TrueFreeLook, FreeLookMarker and StockSights. Each is an error when the mod did not describe
+ * every row it writes. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_tracking_mode(void);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_aim_mode(void);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_world_space_yaw(int32_t world_space_yaw);

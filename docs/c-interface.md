@@ -246,7 +246,8 @@ likely the one the player pressed to choose it.
 write of the file, or none of them when one is refused. A text row holds what the file holds
 as it is, such as a device's name, and a save writes it as UTF-8. It is no option
 (below): a host that shows it on an options screen does so with a control of its own. `cameraunlock_config_save_tracking_mode` and `_save_aim_mode` write
-the session's modes, and `_save_world_space_yaw` the yaw mode, which the host holds.
+the session's modes, and `_save_world_space_yaw` the yaw mode, which the host holds. Each of the
+three is an error, and writes nothing, when the mod did not describe every row it writes.
 
 ## Options
 
