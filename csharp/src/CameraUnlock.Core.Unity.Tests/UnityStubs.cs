@@ -321,6 +321,11 @@ namespace UnityEngine
         public float m20, m21, m22, m23;
         public float m30, m31, m32, m33;
 
+        public Vector3 MultiplyVector(Vector3 v) => new Vector3(
+            m00 * v.x + m01 * v.y + m02 * v.z,
+            m10 * v.x + m11 * v.y + m12 * v.z,
+            m20 * v.x + m21 * v.y + m22 * v.z);
+
         public static Matrix4x4 identity
         {
             get
@@ -484,6 +489,7 @@ namespace UnityEngine
 
         public static float Tan(float radians) => (float)System.Math.Tan(radians);
         public static float Abs(float v) => System.Math.Abs(v);
+        public static float Max(float a, float b) => System.Math.Max(a, b);
     }
 
     /// Test-controlled clock. Unity drives these from the player loop; here the test
@@ -550,6 +556,31 @@ namespace UnityEngine
         public Matrix4x4 worldToLocalMatrix => localToWorldMatrix.inverse;
     }
 
+    public struct Ray
+    {
+        public Vector3 origin;
+        public Vector3 direction;
+
+        public Ray(Vector3 origin, Vector3 direction)
+        {
+            this.origin = origin;
+            this.direction = direction;
+        }
+    }
+
+    public struct RaycastHit
+    {
+    }
+
+    public static class Physics
+    {
+        public static bool Raycast(Ray ray, out RaycastHit hit, float maxDistance, int layerMask)
+        {
+            hit = default(RaycastHit);
+            return false;
+        }
+    }
+
     public class GameObject : Object
     {
     }
@@ -604,6 +635,11 @@ namespace UnityEngine
         public object targetTexture;
 
         public Matrix4x4 worldToCameraMatrix = Matrix4x4.identity;
+
+        public Vector3 WorldToScreenPoint(Vector3 position)
+        {
+            throw new NotSupportedException("The stub Camera does not model projection.");
+        }
 
         /// Counts calls so a test can assert the sticky-override reset actually fired.
         public int ResetWorldToCameraMatrixCalls { get; private set; }
