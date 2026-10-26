@@ -156,35 +156,39 @@ final class WasmCore implements CameraUnlock.Backend {
         requireAlive();
         List<MemoryLayout> layouts = descriptor.argumentLayouts();
         long[] values = new long[arguments.length];
-        int[] copies = new int[arguments.length];
+        // Every pointer argument is copied into one block, each copy at a 16-byte boundary as its own
+        // malloc would have put it; -1 for an argument that is not copied.
+        int[] offsets = new int[arguments.length];
+        int total = 0;
+        for (int i = 0; i < arguments.length; i++) {
+            offsets[i] = -1;
+            if (layouts.get(i) instanceof AddressLayout && !((MemorySegment) arguments[i]).equals(MemorySegment.NULL)) {
+                offsets[i] = total;
+                total += (Math.max((int) ((MemorySegment) arguments[i]).byteSize(), 1) + 15) & ~15;
+            }
+        }
+        int block = total == 0 ? 0 : allocate(total);
         long[] results;
         try {
             for (int i = 0; i < arguments.length; i++) {
                 MemoryLayout layout = layouts.get(i);
-                if (layout instanceof AddressLayout) {
-                    MemorySegment segment = (MemorySegment) arguments[i];
-                    if (!segment.equals(MemorySegment.NULL)) {
-                        copies[i] = copyIn(segment);
-                        values[i] = copies[i];
-                    }
-                } else {
+                if (offsets[i] >= 0) {
+                    values[i] = block + offsets[i];
+                    memory.write(block + offsets[i], ((MemorySegment) arguments[i]).toArray(ValueLayout.JAVA_BYTE));
+                } else if (!(layout instanceof AddressLayout)) {
                     values[i] = value(layout, arguments[i]);
                 }
             }
             results = enter(() -> function.apply(values));
             for (int i = 0; i < arguments.length; i++) {
-                if (copies[i] != 0) {
+                if (offsets[i] >= 0) {
                     MemorySegment segment = (MemorySegment) arguments[i];
-                    MemorySegment.copy(memory.readBytes(copies[i], (int) segment.byteSize()), 0, segment, ValueLayout.JAVA_BYTE, 0,
+                    MemorySegment.copy(memory.readBytes(block + offsets[i], (int) segment.byteSize()), 0, segment, ValueLayout.JAVA_BYTE, 0,
                             (int) segment.byteSize());
                 }
             }
         } finally {
-            if (dead == null) {
-                for (int copy : copies) {
-                    if (copy != 0) release(copy);
-                }
-            }
+            if (block != 0 && dead == null) release(block);
         }
         Object result = descriptor.returnLayout().map(layout -> result(layout, results[0])).orElse(null);
         if ((result instanceof Integer status && status == CameraUnlock.ERROR) || MemorySegment.NULL.equals(result)) {
@@ -233,13 +237,6 @@ final class WasmCore implements CameraUnlock.Backend {
         throw new IllegalArgumentException("no Java value for a result laid out as " + layout);
     }
 
-    /** The module's address of a copy of `segment`, which `release` frees. Under the lock. */
-    int copyIn(MemorySegment segment) {
-        int at = allocate((int) segment.byteSize());
-        memory.write(at, segment.toArray(ValueLayout.JAVA_BYTE));
-        return at;
-    }
-
     /** `size` bytes of the module's memory, which `release` frees. Under the lock. */
     int allocate(int size) {
         if (malloc == null) {
@@ -272,17 +269,13 @@ final class WasmCore implements CameraUnlock.Backend {
     /** What one recvfrom gave, for the receiver at `receiver` (cameraunlock_host_received). Takes the lock. */
     synchronized void received(int receiver, byte[] datagram, int bytes, int error, byte[] sender) {
         requireAlive();
-        int buffer = allocate(datagram.length);
+        int buffer = allocate(datagram.length + sender.length);
+        int from = buffer + datagram.length;
         long status;
         try {
-            int from = allocate(sender.length);
-            try {
-                memory.write(buffer, datagram);
-                memory.write(from, sender);
-                status = enter(() -> received.apply(receiver, buffer, bytes, error, from))[0];
-            } finally {
-                if (dead == null) release(from);
-            }
+            memory.write(buffer, datagram);
+            memory.write(from, sender);
+            status = enter(() -> received.apply(receiver, buffer, bytes, error, from))[0];
         } finally {
             if (dead == null) release(buffer);
         }
