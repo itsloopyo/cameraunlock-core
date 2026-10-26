@@ -47,7 +47,7 @@ if (Test-Path "RELEASE_NOTES.md") {
     # the release body - this is the likeliest path to carry one, because it is the only
     # file a human edits in an editor. Every Update-VendoredLoader README in the fleet
     # opens with a BOM, so the assumption that local files are BOM-less does not hold.
-    Write-NotesFile -Path $OutputFile -Text (Get-Content -Raw -LiteralPath "RELEASE_NOTES.md")
+    Write-NotesFile -Path $OutputFile -Text (Get-Content -Raw -Encoding UTF8 -LiteralPath "RELEASE_NOTES.md")
     Get-Content $OutputFile
     exit 0
 }
@@ -75,7 +75,18 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Generating changelog from $previousTag to HEAD" -ForegroundColor Cyan
 Write-Host "Artifact paths: $($ArtifactPaths -join ', ')" -ForegroundColor Gray
 
-$commits = git log "$previousTag..HEAD" --pretty=format:"- %s" --no-merges -- $ArtifactPaths
+# As New-ChangelogFromCommits: the manifest is part of what a release ships.
+if ($ArtifactPaths -notcontains 'launcher-manifest.json') { $ArtifactPaths = @($ArtifactPaths) + 'launcher-manifest.json' }
+
+# git writes UTF-8, and a native command's output is decoded with [Console]::OutputEncoding,
+# the OEM codepage on a Windows console, which would mangle a non-ASCII commit subject.
+$prevConsoleEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+try {
+    $commits = git log "$previousTag..HEAD" --pretty=format:"- %s" --no-merges -- $ArtifactPaths
+} finally {
+    [Console]::OutputEncoding = $prevConsoleEncoding
+}
 if ($LASTEXITCODE -ne 0) {
     throw "git log $previousTag..HEAD failed with exit code $LASTEXITCODE. See the git error above."
 }
