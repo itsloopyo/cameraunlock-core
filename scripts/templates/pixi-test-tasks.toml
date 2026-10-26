@@ -64,8 +64,9 @@ test = { depends-on = ["test-unit", "test-differential"] }
 # The differential's classes live in a namespace ending in Differential or
 # ConfigDifferential, compiled into a test project from tests/config_differential.
 # A project with no differential in it runs whole in test-unit.
+# A filter that matches nothing passes dotnet test, so test-differential makes it an error.
 test-unit = { cmd = "dotnet test tests/ModHeadTracking.Tests/ModHeadTracking.Tests.csproj -c Release --filter FullyQualifiedName!~Differential", depends-on = ["build"] }
-test-differential = { cmd = "dotnet test tests/ModHeadTracking.Tests/ModHeadTracking.Tests.csproj -c Release --filter FullyQualifiedName~Differential && node tests/config_differential/lint-migrated.mjs tests/ModHeadTracking.Tests/bin/Release/net48/migrated", depends-on = ["build"] }
+test-differential = { cmd = "dotnet test tests/ModHeadTracking.Tests/ModHeadTracking.Tests.csproj -c Release --filter FullyQualifiedName~Differential -- RunConfiguration.TreatNoTestsAsError=true && node tests/config_differential/lint-migrated.mjs tests/ModHeadTracking.Tests/bin/Release/net48/migrated", depends-on = ["build"] }
 test = { depends-on = ["test-unit", "test-differential"] }
 
 # --- cargo -----------------------------------------------------------------
