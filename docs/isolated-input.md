@@ -241,9 +241,19 @@ Invoke-IsolatedGameSession -Slots $slots -Owner <who you are> -Prepare { param($
 ```
 
 Every copy is still a game on the graphics card. `-WholeGpu` waits for every
-copy that is held and holds them all off while it runs, and how many copies
-the machine can carry at once is the size of the pool, chosen for the card and
-the memory it has.
+copy that is held and holds them all off while it runs.
+
+### How many rigs the machine runs at once
+
+Each pool and each game queues on its own, so on their own they let as many
+rigs run as there are copies and games. `Set-GameRigLimit -Count <n>` caps the
+rigs held at once, of every game together, and `Enter-GameRig` queues a session
+past it: whoever asked first, for any game, gets the next free place, unless
+every game it may take is held. The number is the machine's and is kept in the
+rig root (`max-rigs.txt`), outside every repo. Measure it from the rigs
+themselves: on 2026-10-26 five Project Zomboid rigs, two game copies at up to
+10 GB private each and three offline renders at 9.5 to 11 GB, left 7 GB free of
+62, so that machine runs four.
 
 ## A whole session
 

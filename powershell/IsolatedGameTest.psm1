@@ -863,6 +863,38 @@ function Format-GameRigOwner {
     "$text)"
 }
 
+function Get-GameRigLimit {
+    # How many rigs this machine runs at once, from <root>\max-rigs.txt (Set-GameRigLimit). 0 is no
+    # limit. Read inside the mutex, which Set-GameRigLimit writes it under.
+    $file = Join-Path (Get-GameRigRoot) 'max-rigs.txt'
+    if (-not (Test-Path $file)) { return 0 }
+    $text = "$(Get-Content $file -Raw)".Trim()
+    if ($text -notmatch '^[1-9][0-9]*$') { throw "$file holds '$text': it takes the number of rigs this machine runs at once, as Set-GameRigLimit writes it" }
+    [int]$text
+}
+
+function Set-GameRigLimit {
+    <#
+    .SYNOPSIS
+    Sets how many rigs, of any game, this machine runs at once. Enter-GameRig queues a session past
+    that number in its turn. -Count 0 takes the limit away.
+    .DESCRIPTION
+    Each rig is a game or an offline render with gigabytes of its own, and the queue per game does
+    not see the others: on 2026-10-26 five Project Zomboid rigs (two game copies, three harness
+    renders) left 7 GB free of 62. The number is the machine's, so it lives in the rig root
+    beside the locks, not in any repo.
+    #>
+    param([Parameter(Mandatory)][int]$Count)
+    if ($Count -lt 0) { throw "-Count is how many rigs run at once: $Count is not one" }
+    $root = Get-GameRigRoot
+    $file = Join-Path $root 'max-rigs.txt'
+    Invoke-GameRigExclusive {
+        if ($Count -eq 0) { if (Test-Path $file) { Remove-Item $file -Force }; return }
+        New-Item -ItemType Directory -Force $root | Out-Null
+        Set-Content $file "$Count" -Encoding ASCII
+    }
+}
+
 function Get-GameRigTickets {
     # The live tickets, oldest first. A ticket whose process has gone is removed: called inside the mutex.
     $queue = Join-Path (Get-GameRigRoot) '_queue'
@@ -978,6 +1010,10 @@ function Enter-GameRig {
     and a copy that is the only one a session ahead may take is left for it. The rig returned
     says which copy in Game. Each copy is still a game on the graphics card: -WholeGpu waits
     for every copy and holds them all off while it runs. -Pool with one name is -Game.
+
+    Set-GameRigLimit caps how many rigs, of every game, are held at once. A session that would
+    go past it waits, and those that asked first, for any game, are served first while there is
+    room. A rig taken back by -Token or -KeptIn is held already and is not asked for again.
 
     A session that never asks is not seen. Every session on the machine has to take the rig for
     the lock to mean anything.
@@ -1100,10 +1136,13 @@ function Enter-GameRig {
                 }
                 $inUse = [ordered]@{}
                 $stale = @{}
+                $limit = Get-GameRigLimit
+                $machine = [ordered]@{}
                 foreach ($folder in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne '_queue' }) {
                     $held = Read-GameRigOwner $folder.Name
                     if (-not $held) { continue }
                     $live = Test-GameRigOwnerLive $held
+                    if ($live) { $machine[$folder.Name] = $held }
                     $mine = $keys -contains $folder.Name
                     if ($mine -and $held.ProcessId -eq $PID -and $held.ProcessStart -eq $start) {
                         throw "this process already holds the rig for $($folder.Name) ($(Format-GameRigOwner $held)): waiting for it would wait on itself"
@@ -1149,6 +1188,25 @@ function Enter-GameRig {
                 }
                 if ($free.Count -le $rivals.Count) {
                     return "waiting behind $($rivals[0].Owner) (pid $($rivals[0].ProcessId)), who asked first, for $whose, of which $($open.Count - $free.Count) is running with no session holding its rig"
+                }
+                if ($limit -gt 0) {
+                    # Whoever asked first, for any game, is served first while the machine has room.
+                    # Only those that could take a game now count, each against a game of its own:
+                    # one whose games are all held, or running with no rig, could not use the room.
+                    $given = @{}
+                    $first = @(foreach ($other in Get-GameRigTickets) {
+                        if ($other.File -eq $ticket) { break }
+                        $could = @(Get-GameRigTicketKeys $other | Where-Object {
+                            -not $machine.Contains($_) -and -not $given.Contains($_) -and -not (Get-Process -Name $_ -ErrorAction SilentlyContinue)
+                        })
+                        if ($could.Count -gt 0) { $given[$could[0]] = $true; $other }
+                    })
+                    if ($machine.Count -ge $limit) {
+                        return "this machine runs $limit rigs at once and $($machine.Count) are held: $(@($machine.Keys | ForEach-Object { "$_ by $($machine[$_].Owner)" }) -join '; ')$(if ($first.Count -gt 0) { ", and $($first.Count) asked before this session" })"
+                    }
+                    if ($first.Count -ge $limit - $machine.Count) {
+                        return "waiting behind $($first[0].Owner) (pid $($first[0].ProcessId)), who asked first: this machine runs $limit rigs at once and $($machine.Count) are held"
+                    }
                 }
                 # A game that is the only one a session ahead may take is left for it.
                 $reserved = @($rivals | ForEach-Object { $theirs = @(Get-GameRigTicketKeys $_); if ($theirs.Count -eq 1) { $theirs[0] } })
@@ -1865,5 +1923,5 @@ function Invoke-IsolatedGameSession {
 Export-ModuleMember -Function Get-PeImports, Get-IsolatedInputCoverage, Get-GameInputPaths, Assert-IsolatedInputCovers,
     Get-ModTestPort, Copy-IsolatedInputHost, Start-IsolatedGame, Stop-GameProcess, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
     Stop-IsolatedGame, Save-GameTestState, Restore-GameTestState, Start-TestPoseSender, Set-TestPose,
-    Set-ModTestPort, Get-GameRig, Enter-GameRig, Exit-GameRig, Stop-KeptGame, Wait-GameLogLine, Start-GameProcessSampler, Stop-GameProcessSampler,
+    Set-ModTestPort, Get-GameRig, Set-GameRigLimit, Enter-GameRig, Exit-GameRig, Stop-KeptGame, Wait-GameLogLine, Start-GameProcessSampler, Stop-GameProcessSampler,
     Start-IsolatedGameSession, Stop-IsolatedGameSession, Invoke-IsolatedGameSession, Get-IsolatedGameSession, Save-IsolatedGameSession

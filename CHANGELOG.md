@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a limit on rigs held at once
+
+- `Set-GameRigLimit -Count <n>` caps how many rigs, of every game, `Enter-GameRig` gives out at
+  once. A session past it waits, and the next free place goes to whoever asked first for any game.
+
 ### Added - the game rig shows on the hivemind board
 
 - `Enter-GameRig` run by an agent with hivemind installed reserves `rig-<process name>` on the

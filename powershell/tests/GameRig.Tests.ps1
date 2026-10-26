@@ -457,6 +457,55 @@ Start-Sleep 600
     Check 'a pool that names a game twice is refused' (Throws { Enter-GameRig -Pool 'poola', 'POOLA.exe' -Owner 'x' -WaitSeconds 0 } 'names one game twice')
     Check 'a pool with a kept file is refused' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'x' -KeptIn (Join-Path $root 'k.json') } '-KeptIn keeps one game')
 
+    # --- the machine's limit -----------------------------------------------
+    Set-GameRigLimit -Count 2
+    try {
+    $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
+    $b = Enter-GameRig -Game 'limb' -Owner 'hb' -WaitSeconds 0
+    Check 'past the machine''s limit a rig of another game is not given out' `
+        (Throws { Enter-GameRig -Game 'limc' -Owner 'x' -WaitSeconds 0 } '^this machine runs 2 rigs at once and 2 are held: lima by ha; limb by hb')
+    $log = Join-Path $root 'limit.log'
+    $c = Start-Taker @{ Game = 'limc'; Owner = 'tc'; Log = $log; HoldMs = 4000 }
+    Wait-Until { @(Get-GameRig -Game 'limc').Count -eq 1 }
+    $d = Start-Taker @{ Pool = 'limd,lime'; Owner = 'td'; Log = $log; HoldMs = 200 }
+    Wait-Until { @(Get-GameRig -Game 'limd').Count -eq 1 }
+    Exit-GameRig -Rig $a
+    Wait-Until { (Test-Path $log) -and @(Get-Content $log) -contains 'in tc' }
+    Start-Sleep -Milliseconds 1500
+    Check 'a freed place goes to whoever asked first, for any game' (@(Get-Content $log) -notcontains 'in td') (@(Get-Content $log) -join ', ')
+    Exit-GameRig -Rig $b
+    Wait-All @($c, $d)
+    Check 'and the next to whoever asked next' ((@(Get-Content $log) -join ',') -eq 'in tc,in td,out td,out tc') (@(Get-Content $log) -join ', ')
+    $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
+    $log = Join-Path $root 'limit2.log'
+    $x = Start-Taker @{ Game = 'lima'; Owner = 'tx'; Log = $log; HoldMs = 200 }
+    Wait-Until { @((Get-GameRig -Game 'lima').Waiting).Count -eq 1 }
+    $e = Enter-GameRig -Game 'lime' -Owner 'he' -WaitSeconds 0
+    Check 'one ahead whose games are all held does not keep the room from another game' ($e.Game -eq 'lime')
+    Exit-GameRig -Rig $e
+    Exit-GameRig -Rig $a
+    Wait-All @($x)
+    $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
+    Check 'a rig taken back by token is not asked for again under a full limit' `
+        ((Enter-GameRig -Game 'lima' -Owner 'ha' -Token $a.Token).Token -eq $a.Token)
+    $hand = Start-StandIn
+    $log = Join-Path $root 'limit3.log'
+    $y = Start-Taker @{ Game = $gameName; Owner = 'ty'; Log = $log; HoldMs = 200 }
+    Wait-Until { $r = Get-GameRig -Game $gameName; $r -and @($r.Waiting).Count -eq 1 }
+    $e = Enter-GameRig -Game 'lime' -Owner 'he' -WaitSeconds 0
+    Check 'nor does one ahead whose game someone started by hand' ($e.Game -eq 'lime')
+    Exit-GameRig -Rig $e
+    Stop-StandIn
+    Wait-All @($y)
+    Exit-GameRig -Rig $a
+    $limitFile = Join-Path $env:CAMERAUNLOCK_RIG_ROOT 'max-rigs.txt'
+    Set-Content $limitFile 'four'
+    Check 'a limit that is not a number is refused' (Throws { Enter-GameRig -Game 'lima' -Owner 'x' -WaitSeconds 0 } "holds 'four'")
+    Set-Content $limitFile ''
+    Check 'and so is an empty one' (Throws { Enter-GameRig -Game 'lima' -Owner 'x' -WaitSeconds 0 } "holds ''")
+    } finally { Set-GameRigLimit -Count 0 }
+    Check 'and -Count 0 takes the limit away' (-not (Test-Path (Join-Path $env:CAMERAUNLOCK_RIG_ROOT 'max-rigs.txt')))
+
     # --- a whole session ----------------------------------------------------
     $mod = Join-Path $root 'mod'
     $saves = Join-Path $root 'saves'
