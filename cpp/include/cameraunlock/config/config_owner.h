@@ -616,7 +616,7 @@ private:
                 log.push_back(path_text_ + ": settings are read from this file. " + legacy_text_ +
                               " is left as it was and is not read.");
             }
-            return ReadCanonical(read.bytes, HasCanonicalStamp(read.bytes), std::move(log));
+            return ReadCanonical(read.bytes, std::move(log));
         }
         if (legacy_path_.empty()) return Create(std::move(log));
 
@@ -641,7 +641,7 @@ private:
                               ". The mod runs on its default settings this session.");
     }
 
-    ConfigLoadResult<Config> ReadCanonical(const std::string& bytes, bool stamped, std::vector<std::string> log) {
+    ConfigLoadResult<Config> ReadCanonical(const std::string& bytes, std::vector<std::string> log) {
         const CanonicalIni doc = ParseCanonicalIni(bytes);
         if (!doc.IsReadable()) {
             const std::string why = Unreadable(doc);
@@ -652,7 +652,7 @@ private:
         }
         Config config = table_.defaults();
         std::vector<CanonicalDiagnostic> diagnostics = Apply(doc, config, log);
-        if (!stamped) {
+        if (doc.FindSection("CameraUnlock") == nullptr) {
             log.push_back(path_text_ +
                           ": has no [CameraUnlock] section. It is read as the canonical format, and the next save "
                           "adds the section.");
@@ -773,7 +773,7 @@ private:
         }
 
         detail::OwnerStep(hook_, "Remember", path_);
-        committed_ = rendered;
+        committed_ = std::move(rendered);
         recorded_write_time_ = detail::OwnerLastWriteTime(path_);
         saves_allowed_ = true;
         log.push_back(path_text_ + ": created from " + legacy_text_ + ", which is left as it was.");
@@ -856,7 +856,7 @@ private:
                           " is newer than this build's " + std::to_string(kConfigFormat));
             return NotSaved(name_ + " was written by a newer version of the mod", 0, std::move(log));
         }
-        const bool stamped = HasCanonicalStamp(snapshot);
+        const bool stamped = doc.FindSection("CameraUnlock") != nullptr;
 
         Config baseline = table_.defaults();
         const std::vector<detail::ValueSource> baseline_sources =
@@ -915,7 +915,7 @@ private:
             stamp.insert_if_absent = true;
             edits.push_back(std::move(stamp));
         }
-        const IniEditResult edit = EditIni(snapshot, edits);
+        IniEditResult edit = EditIni(snapshot, edits);
         if (!edit.Succeeded()) {
             throw std::logic_error(std::string("the editor refused a file the canonical reader reads: ") +
                                    IniEditRefusalName(edit.refusal));
@@ -967,7 +967,7 @@ private:
             // Reload.
             committed_.reset();
         } else {
-            committed_ = candidate;
+            committed_ = std::move(edit.bytes);
             recorded_write_time_ = detail::OwnerLastWriteTime(path_);
         }
         ConfigSaveResult saved;
@@ -1102,19 +1102,19 @@ private:
         const detail::DefaultsCandidate& at = candidates[static_cast<std::size_t>(choice.read)];
         std::string bytes;
         if (outcomes[static_cast<std::size_t>(choice.read)].kind == detail::DefaultsCreation::kCreated) {
-            bytes = *created;
+            bytes = std::move(*created);
         } else {
-            const detail::OwnerFileRead read = detail::OwnerReadFile(at.path);
+            detail::OwnerFileRead read = detail::OwnerReadFile(at.path);
             if (read.error != 0) return NotRead(log, at, detail::OwnerReadWhy(read.error));
             if (!read.present) {
                 NotRead(log, at, "the file was deleted at the same time");
                 return {};
             }
-            bytes = read.bytes;
+            bytes = std::move(read.bytes);
         }
 
-        defaults_seen_ = bytes;
-        detail::DefaultsIniSnapshot snapshot = detail::ReadDefaultsIni(bytes);
+        defaults_seen_ = std::move(bytes);
+        detail::DefaultsIniSnapshot snapshot = detail::ReadDefaultsIni(*defaults_seen_);
         if (snapshot.unreadable) return NotRead(log, at, *snapshot.unreadable);
         log.push_back(choice.line);
         if (snapshot.format_line) log.push_back(*snapshot.format_line);
@@ -1157,7 +1157,7 @@ private:
         changed = false;
         if (!defaults_at_) return {};
         const std::string named = detail::DefaultsNamed(*defaults_at_);
-        const detail::OwnerFileRead read = detail::OwnerReadFile(defaults_at_->path);
+        detail::OwnerFileRead read = detail::OwnerReadFile(defaults_at_->path);
         if (read.error != 0) return KeptValues(log, named, detail::OwnerReadWhy(read.error));
         if (!read.present) {
             if (!defaults_seen_) return {};
@@ -1166,8 +1166,8 @@ private:
             return std::string("Defaults.ini is missing.") + kKeptUntilRestart;
         }
         if (defaults_seen_ && read.bytes == *defaults_seen_) return {};
-        defaults_seen_ = read.bytes;
-        detail::DefaultsIniSnapshot snapshot = detail::ReadDefaultsIni(read.bytes);
+        defaults_seen_ = std::move(read.bytes);
+        detail::DefaultsIniSnapshot snapshot = detail::ReadDefaultsIni(*defaults_seen_);
         if (snapshot.unreadable) return KeptValues(log, named, *snapshot.unreadable);
         log.push_back("Defaults.ini: " + named + " (read)");
         if (snapshot.format_line) log.push_back(*snapshot.format_line);
