@@ -707,6 +707,9 @@ namespace CameraUnlock.Core.Config
         {
             log.Add(path + ": could not be opened: " + e.Message);
             if (path == _legacySourcePath) return Defer(OnDefaults(), path, log, Why(e), true);
+            // Unrecorded, as Reload leaves a file it could not read, so a watcher keeps asking once
+            // whatever held the file lets it go.
+            _recordedWriteTime = DateTime.MinValue;
             return Result(ConfigLoadStatus.Deferred, OnDefaults(), NoDiagnostics(), log,
                 System.IO.Path.GetFileName(path) + " cannot be read: " + Why(e)
                     + ". The mod runs on its default settings this session.");
@@ -928,24 +931,10 @@ namespace CameraUnlock.Core.Config
                 return NotSaved("the settings file could not be used this session", null, log);
             }
 
-            // Asked before the file is read, as Reload asks: an edit that lands later moves the time again.
-            bool unread;
-            try
-            {
-                unread = File.GetLastWriteTimeUtc(_path) != _recordedWriteTime;
-            }
-            catch (IOException)
-            {
-                unread = true;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                unread = true;
-            }
-
             byte[] snapshot;
             try
             {
+                Step("Save.Read", _path);
 #if NULLABLE_ENABLED
                 byte[]? read = ReadIfPresent(_path);
 #else
@@ -967,6 +956,23 @@ namespace CameraUnlock.Core.Config
             {
                 log.Add(_path + ": not saved: could not be read: " + e.Message);
                 return NotSaved(Why(e), e, log);
+            }
+
+            // Asked after the file is read, unlike Reload: this save records its own write time, which
+            // would replace a time an edit moved between the question and the read. An edit before the
+            // read is unread here, and one after it fails the writer's check of the bytes.
+            bool unread;
+            try
+            {
+                unread = File.GetLastWriteTimeUtc(_path) != _recordedWriteTime;
+            }
+            catch (IOException)
+            {
+                unread = true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                unread = true;
             }
 
             CanonicalIni doc = CanonicalIni.Parse(snapshot);

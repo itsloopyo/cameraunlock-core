@@ -633,6 +633,9 @@ private:
 
     ConfigLoadResult<Config> CannotOpenConfig(std::uint32_t error, std::vector<std::string> log) {
         log.push_back(path_text_ + ": could not be opened: " + detail::OwnerErrorText(error));
+        // Unrecorded, as Reload leaves a file it could not read, so a watcher keeps asking once
+        // whatever held the file lets it go. Not 0: that is the time of a missing file.
+        recorded_write_time_ = UINT64_MAX;
         return LoadResult(ConfigLoadStatus::Deferred, OnDefaults(), {}, std::move(log),
                           name_ + " cannot be read: " + detail::OwnerReadWhy(error) +
                               ". The mod runs on its default settings this session.");
@@ -823,12 +826,7 @@ private:
             return NotSaved("the settings file could not be used this session", 0, std::move(log));
         }
 
-        // Asked before the file is read, as Reload asks: an edit that lands later moves the time
-        // again.
-        std::uint64_t write_time = 0;
-        const bool unread = detail::OwnerTryLastWriteTime(path_, write_time) != 0 ||
-                            write_time != recorded_write_time_;
-
+        detail::OwnerStep(hook_, "Save.Read", path_);
         const detail::OwnerFileRead read = detail::OwnerReadFile(path_);
         if (read.error != 0) {
             log.push_back(path_text_ + ": not saved: could not be read: " + detail::OwnerErrorText(read.error));
@@ -839,6 +837,13 @@ private:
             return NotSaved("the settings file is missing; it is created again at the next launch", 0, std::move(log));
         }
         const std::string& snapshot = read.bytes;
+
+        // Asked after the file is read, unlike Reload: this save records its own write time, which
+        // would replace a time an edit moved between the question and the read. An edit before the
+        // read is unread here, and one after it fails the writer's check of the bytes.
+        std::uint64_t write_time = 0;
+        const bool unread = detail::OwnerTryLastWriteTime(path_, write_time) != 0 ||
+                            write_time != recorded_write_time_;
 
         const CanonicalIni doc = ParseCanonicalIni(snapshot);
         if (!doc.IsReadable()) {

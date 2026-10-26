@@ -868,7 +868,8 @@ void AConfigHeldDenyingReadSharingDefersAndNothingIsImported(const fs::path& dir
     const HANDLE exclusive = CreateFileW(rig.path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                                          FILE_ATTRIBUTE_NORMAL, nullptr);
     Check(exclusive != INVALID_HANDLE_VALUE, "another program holds the config with no sharing");
-    const Load load = rig.Make()->Load();
+    auto owner = rig.Make();
+    const Load load = owner->Load();
     CloseHandle(exclusive);
     ExpectStatus(load, ConfigLoadStatus::Deferred);
     Check(Contains(load.reason, kFileNameText + " cannot be read: the file is in use by another program"s),
@@ -878,6 +879,11 @@ void AConfigHeldDenyingReadSharingDefersAndNothingIsImported(const fs::path& dir
     Check(HoldsBytes(rig.path, canonical), "the config is not written");
     ExpectLegacyKept(rig);
     Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
+    Check(owner->FileChanged(), "the write time stays unrecorded, so the watcher reloads once the file is let go");
+    const Reload reload = owner->Reload();
+    Check(reload.status == ConfigReloadStatus::Applied,
+          std::string("the file is applied once it can be read, got ") + ConfigReloadStatusName(reload.status));
+    ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }));
 }
 
 void AFilePendingDeletionDefers(const fs::path& dir) {
@@ -909,7 +915,7 @@ void AFilePendingDeletionDefers(const fs::path& dir) {
     Check(Same(load.config, Defaults()), "the session runs on the defaults");
     Check(rig.legacy->Runs() == 0, "the legacy file is not imported in place of a config that cannot be read");
     ExpectSunkOnce(rig, load.reason);
-    Check(!owner->FileChanged(), "FileChanged reads the write time the folder still lists");
+    Check(owner->FileChanged(), "the write time stays unrecorded, so the watcher keeps asking");
     const Reload reload = owner->Reload();
     Check(reload.status == ConfigReloadStatus::Unreadable && !reload.config, "Reload is Unreadable: " + reload.reason);
 
@@ -1248,7 +1254,7 @@ void ASaveWithNothingChangedWritesNothing(const fs::path& dir) {
         return 0;
     };
     ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = true; }));
-    Check(steps.empty(), "the writer never ran");
+    Check(steps == std::vector<std::string>{"Save.Read"}, "the file is read and the writer never ran");
     Check(HoldsBytes(rig.path, Fresh()) && fs::last_write_time(rig.path) == written, "the file is not rewritten");
 }
 
@@ -1418,6 +1424,28 @@ void ASaveLeavesAnUnreadEditForTheReload(const fs::path& dir) {
     Check(!owner->FileChanged(), "a save of a file the owner has read records its write");
     Check(owner->Reload().status == ConfigReloadStatus::Unchanged, "and its bytes reload as Unchanged");
     Check(rig.sink.empty(), "nothing is reported");
+}
+
+void ASaveSeesAnEditMadeAsItReads(const fs::path& dir) {
+    Rig rig(dir);
+    auto owner = rig.Make();
+    ExpectStatus(owner->Load(), ConfigLoadStatus::Created);
+    rig.hook = [&](const std::string& step, const std::wstring&) -> std::uint32_t {
+        if (step == "Save.Read") {
+            WriteBytes(rig.path, Replace(ReadBytes(rig.path), "UdpPort=default", "UdpPort=6000"));
+            fs::last_write_time(rig.path, fs::last_write_time(rig.path) + std::chrono::seconds(5));
+        }
+        return 0;
+    };
+    ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = false; }));
+    rig.hook = nullptr;
+    const std::string saved = ReadBytes(rig.path);
+    Check(Contains(saved, "UdpPort=6000") && Contains(saved, "WorldSpaceYaw=false"),
+          "the file holds the edit and the saved row");
+    Check(owner->FileChanged(), "an edit made as the save read the file is still a change");
+    const Reload reload = owner->Reload();
+    Check(reload.status == ConfigReloadStatus::Applied && reload.config && reload.config->udp_port == 6000,
+          std::string("the reload applies the edit, got ") + ConfigReloadStatusName(reload.status));
 }
 
 void ReloadReadsAnUnstampedConfigAndNeverImports(const fs::path& dir) {
@@ -2435,6 +2463,7 @@ int RunConfigOwnerTests() {
     RunScenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites);
     RunScenario("a-save-leaves-an-unread-edit-for-the-reload", ASaveLeavesAnUnreadEditForTheReload);
     RunScenario("watched-is-what-file-changed-compares", WatchedIsWhatFileChangedCompares);
+    RunScenario("a-save-sees-an-edit-made-as-it-reads", ASaveSeesAnEditMadeAsItReads);
     RunScenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports);
     RunScenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings);
     RunScenario("a-reload-that-keeps-failing-is-reported-once", AReloadThatKeepsFailingIsReportedOnce);
