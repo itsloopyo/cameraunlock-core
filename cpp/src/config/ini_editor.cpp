@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace cameraunlock {
@@ -161,8 +162,10 @@ void ClassifyLine(const std::string& s, Line& line) {
     }
     if (lead == '[') {
         line.kind = LineKind::Section;
-        const size_t close = s.find(']', first + 1);
-        if (close == kNpos || close >= last) return;
+        // Searched within the line: past it, a file of lines with no ']' scans to its end
+        // from every one of them.
+        const size_t close = std::string_view(s).substr(0, last).find(']', first + 1);
+        if (close == kNpos) return;
         size_t name_begin = first + 1;
         size_t name_end = close;
         while (name_begin < name_end && IsSpaceOrTab(s[name_begin])) ++name_begin;
@@ -173,8 +176,8 @@ void ClassifyLine(const std::string& s, Line& line) {
         return;
     }
 
-    const size_t eq = s.find('=', first);
-    if (eq == kNpos || eq >= last) return;
+    const size_t eq = std::string_view(s).substr(0, last).find('=', first);
+    if (eq == kNpos) return;
     size_t key_end = eq;
     while (key_end > first && IsSpaceOrTab(s[key_end - 1])) --key_end;
     if (key_end == first) return;

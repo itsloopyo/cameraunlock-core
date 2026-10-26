@@ -7,6 +7,7 @@
 #include <cameraunlock/config/ini_editor.h>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -430,6 +431,26 @@ void TestNoEditsKeepsBytes() {
           "no edits still refuses a document the reader cannot read");
 }
 
+// A line's ']' and '=' are looked for within the line. Looked for to the end of the file,
+// a file of lines with neither scans the rest of it from each one, which on 200 000 lines
+// is tens of billions of reads; within the line it is a few milliseconds.
+void TestLinesWithoutBracketOrEqualsStayLinear() {
+    std::cout << "EditIni on many lines with no ']' or '=':\n";
+    for (const char* filler : {"x\n", "[\n"}) {
+        std::string original;
+        for (int i = 0; i < 200000; ++i) original += filler;
+        original += "[General]\r\nA=1\r\n";
+        const auto started = std::chrono::steady_clock::now();
+        const IniEditResult result = EditIni(original, {{"General", "A", "2"}});
+        const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        const std::string name = std::string(filler[0] == 'x' ? "plain" : "unclosed section") + " lines";
+        Check(result.Succeeded() && result.bytes.size() == original.size() &&
+                  result.bytes.compare(result.bytes.size() - 5, 5, "A=2\r\n") == 0,
+              name + ": the key after them is edited");
+        Check(seconds < 2.0, name + ": edited in " + std::to_string(seconds) + "s, under 2s");
+    }
+}
+
 void TestRefusalNames() {
     std::cout << "IniEditRefusalName:\n";
     Check(std::string(cameraunlock::IniEditRefusalName(IniEditRefusal::KeyNotFound)) == "KeyNotFound",
@@ -452,6 +473,7 @@ int RunIniEditorTests() {
     TestValueUtf8();
     TestUnwritableEditsThrow();
     TestNoEditsKeepsBytes();
+    TestLinesWithoutBracketOrEqualsStayLinear();
     TestRefusalNames();
     return g_failures;
 }
