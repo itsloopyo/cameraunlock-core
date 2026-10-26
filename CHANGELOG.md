@@ -290,6 +290,8 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 - `install-body-bepinex.cmd` replaces only `BepInEx\core` and the doorstop files on a
   wrong-architecture swap, so the player's other plugins, patchers and configs stay. It checks the
   vendored loader is there before removing anything.
+- `install-body-bepinex.cmd` keeps a config the player already has in `BepInEx\config` when
+  it installs a Thunderstore pack that ships its own copy of that file.
 - `find-game.ps1` treats a closed stdin at the folder prompt as a cancel (exit 2) instead of
   stopping with a script error.
 - The `uninstall.ps1` template keeps `CameraUnlock.ini` in the mod folder. It deleted the folder
@@ -297,8 +299,8 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 - `set-discord-webhook-secret.mjs` finds the callers of `release-mod.yml` as well as
   `release-bepinex-mod.yml`, and takes the secret only from the environment.
 - `pixi run test` is the whole suite but the Docker-only `test-linux-probe` (`check`, the
-  PowerShell tests, the net35 framework tests and the isolated-input host), and `check` runs the install-body tests and the PowerShell release, soak, notices and
-  differential-gate suites.
+  PowerShell tests, the net35 framework tests and the isolated-input host), and `check` runs
+  the install-body tests and the PowerShell release, soak, notices and differential-gate suites.
 
 ### Fixed - receivers, config saves and the install and release scripts
 
