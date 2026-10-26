@@ -41,9 +41,10 @@ TrackingPose TrackingProcessor::Process(float yaw, float pitch, float roll, floa
         m_smoothedRoll = croll;
         m_hasSmoothedValue = true;
     } else {
-        m_smoothedYaw = math::SmoothAngle(m_smoothedYaw, cyaw, effective_smoothing, delta_time);
-        m_smoothedPitch = math::Smooth(m_smoothedPitch, cpitch, effective_smoothing, delta_time);
-        m_smoothedRoll = math::SmoothAngle(m_smoothedRoll, croll, effective_smoothing, delta_time);
+        const float t = math::CalculateSmoothingFactor(effective_smoothing, delta_time);
+        m_smoothedYaw = math::NormalizeAngle(m_smoothedYaw + math::ShortestAngleDelta(m_smoothedYaw, cyaw) * t);
+        m_smoothedPitch = m_smoothedPitch + (cpitch - m_smoothedPitch) * t;
+        m_smoothedRoll = math::NormalizeAngle(m_smoothedRoll + math::ShortestAngleDelta(m_smoothedRoll, croll) * t);
     }
 
     // Step 4: Apply sensitivity
