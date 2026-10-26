@@ -39,7 +39,10 @@ namespace CameraUnlock.Core.Processing
     /// </summary>
     public delegate LeanObstruction LeanQuery(Vec3 start, Vec3 direction, float maxDistance);
 
-    /// <summary>C# twin of cameraunlock::camera::LeanClampSettings.</summary>
+    /// <summary>
+    /// C# twin of cameraunlock::camera::LeanClampSettings. <c>new LeanClampSettings()</c> holds
+    /// zero in both fields, a release with no smoothing; start from <see cref="Default"/>.
+    /// </summary>
     public struct LeanClampSettings
     {
         /// <summary>
