@@ -230,6 +230,16 @@ final class Win32Host {
         if (at != 0) memory.write(at, segment.asSlice(0, bytes).toArray(ValueLayout.JAVA_BYTE));
     }
 
+    /**
+     * A buffer size the module passed, which Windows reads as a DWORD. Over 2 GiB it is negative
+     * here, and the native buffer sized from it would be one byte that Windows then writes past.
+     */
+    private static int size(String function, long value) {
+        int bytes = (int) value;
+        if (bytes < 0) throw new IllegalArgumentException(function + ": a buffer of " + Integer.toUnsignedString(bytes) + " bytes");
+        return bytes;
+    }
+
     private static void requireZero(String function, String what, long value) {
         if (value != 0) throw new UnsupportedOperationException(function + ": " + what + " is not supported in the WebAssembly build");
     }
@@ -315,7 +325,7 @@ final class Win32Host {
             function("ReadFile", 5, (m, a) -> {
                 requireZero("ReadFile", "an overlapped read", a[4]);
                 try (Arena arena = Arena.ofConfined()) {
-                    int size = (int) a[2];
+                    int size = size("ReadFile", a[2]);
                     MemorySegment buffer = arena.allocate(Math.max(size, 1)), read = arena.allocate(INT);
                     int result = callInt(readFile, handle(a[0]), buffer, size, read, MemorySegment.NULL);
                     int got = read.get(INT, 0);
@@ -485,7 +495,7 @@ final class Win32Host {
                 requireZero("FormatMessageW", "a message source", a[1]);
                 requireZero("FormatMessageW", "inserts", a[6]);
                 try (Arena arena = Arena.ofConfined()) {
-                    int capacity = (int) a[5];
+                    int capacity = size("FormatMessageW", a[5]);
                     MemorySegment buffer = arena.allocate(2L * Math.max(capacity, 1));
                     int units = callInt(formatMessageW, (int) a[0], MemorySegment.NULL, (int) a[2], (int) a[3], buffer, capacity,
                             MemorySegment.NULL);
@@ -499,7 +509,7 @@ final class Win32Host {
                 requireZero("FormatMessageA", "a message source", a[1]);
                 requireZero("FormatMessageA", "inserts", a[6]);
                 try (Arena arena = Arena.ofConfined()) {
-                    int capacity = (int) a[5];
+                    int capacity = size("FormatMessageA", a[5]);
                     MemorySegment buffer = arena.allocate(Math.max(capacity, 1));
                     int bytes = callInt(formatMessageA, (int) a[0], MemorySegment.NULL, (int) a[2], (int) a[3], buffer, capacity,
                             MemorySegment.NULL);
@@ -588,7 +598,7 @@ final class Win32Host {
                 requireZero("WSAIoctl", "an overlapped call", a[7]);
                 requireZero("WSAIoctl", "a completion routine", a[8]);
                 try (Arena arena = Arena.ofConfined()) {
-                    int inSize = (int) a[3], outSize = (int) a[5];
+                    int inSize = size("WSAIoctl", a[3]), outSize = size("WSAIoctl", a[5]);
                     MemorySegment out = a[4] == 0 ? MemorySegment.NULL : arena.allocate(Math.max(outSize, 1));
                     MemorySegment returned = arena.allocate(INT);
                     int result = callInt(wsaIoctl, (long) (int) a[0], (int) a[1], nullable(arena, m, a[2], inSize), inSize, out,
