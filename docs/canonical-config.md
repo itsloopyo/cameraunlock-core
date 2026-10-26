@@ -1686,8 +1686,9 @@ and in `dropped` as `PoseShaping`.
 The test also holds the import to the rule above. On the shipped file and an empty file, every
 row that follows Defaults.ini is in `follows_defaults_ini` and migrates as `default`, the mode pair
 on both rows. On each corpus input that changes one key to another valid value, the row it maps to
-is not listed, and it migrates as that value wherever Defaults.ini gives another. A migration run
-against a Defaults.ini holding a value other than the built-in one for every such row shows it:
+is not listed, and it migrates as that value wherever Defaults.ini gives another, with the other
+row of the mode pair, and for an aim mode row the other aim mode rows the table binds, written as
+values beside it. A migration run against a Defaults.ini holding a value other than the built-in one for every such row shows it:
 the untouched rows take Defaults.ini's values, and the changed row keeps the player's. Comparison 2
 allows the difference this makes: a row in `follows_defaults_ini` holds what `default` gives, not
 what the import read, where the two differ.
@@ -1704,7 +1705,9 @@ When `Load` finds no config file and the legacy file exists:
    requires every row to equal the import's (floats bit for bit). The render writes `default` on a global concept
    row not marked `PerGame` where the imported value equals what `default` gives that row at this
    `Load` (floats by their bits, hotkey lists by their canonical text), and the value otherwise;
-   the tracking-mode pair is `default` on both rows only when both are equal. The read-back uses
+   the tracking-mode pair is `default` on both rows only when both are equal, and the aim mode's
+`TrueFreeLook`, `FreeLookMarker` and `StockSights` rows are `default` only when every one of them
+the table binds would be. The read-back uses
    the same Defaults.ini values, so a `default` row reads back as the value it replaced. A player
    who never changed a setting gets the file a new player gets, and takes Defaults.ini's values,
    which can differ from the defaults the legacy build ran on.
