@@ -289,6 +289,7 @@ namespace CameraUnlock.Core.Config
             public byte[] Name = Empty;
             public int Line;
             public readonly List<Entry> Values = new List<Entry>();
+            public readonly Dictionary<string, int> ValueIndex = new Dictionary<string, int>();
         }
 
         private sealed class Builder
@@ -296,6 +297,9 @@ namespace CameraUnlock.Core.Config
             private readonly byte[] _bytes;
             private readonly List<SectionEntry> _sections = new List<SectionEntry>();
             private readonly List<CanonicalDiagnostic> _diagnostics = new List<CanonicalDiagnostic>();
+            // Sections by folded name, so a file of many sections or keys is read in one pass
+            // rather than comparing every line with every earlier one.
+            private readonly Dictionary<string, int> _sectionIndex = new Dictionary<string, int>();
             // Index into _sections, or -1 above the first header and below one naming none.
             private int _current = -1;
             private int _stampHeaderLine;
@@ -337,15 +341,18 @@ namespace CameraUnlock.Core.Config
                     return;
                 }
                 SectionEntry section = _sections[_current];
-                foreach (Entry existing in section.Values)
+                string folded = Folded(key);
+                int known;
+                if (section.ValueIndex.TryGetValue(folded, out known))
                 {
-                    if (!EqualsAsciiIgnoreCase(_bytes, key, existing.Key)) continue;
+                    Entry existing = section.Values[known];
                     existing.EarlierLines.Add(existing.Line);
                     existing.Key = Slice(key);
                     existing.Value = Slice(value);
                     existing.Line = number;
                     return;
                 }
+                section.ValueIndex.Add(folded, section.Values.Count);
                 section.Values.Add(new Entry { Key = Slice(key), Value = Slice(value), Line = number });
             }
 
@@ -408,17 +415,22 @@ namespace CameraUnlock.Core.Config
                     Add(CanonicalDiagnosticKind.EmptySectionName, number, Empty, Empty, Slice(line));
                     return;
                 }
-                for (int i = 0; i < _sections.Count; i++)
-                {
-                    if (EqualsAsciiIgnoreCase(_bytes, header.Name, _sections[i].Name)) _current = i;
-                }
-                if (_current >= 0) return;
+                string folded = Folded(header.Name);
+                if (_sectionIndex.TryGetValue(folded, out _current)) return;
                 _current = _sections.Count;
+                _sectionIndex.Add(folded, _current);
                 _sections.Add(new SectionEntry { Name = Slice(header.Name), Line = number });
                 if (_stampHeaderLine == 0 && EqualsAsciiIgnoreCase(_bytes, header.Name, StampSection))
                 {
                     _stampHeaderLine = number;
                 }
+            }
+
+            private string Folded(Span span)
+            {
+                var chars = new char[span.Length];
+                for (int i = 0; i < chars.Length; i++) chars[i] = (char)CodecText.FoldAscii(_bytes[span.Begin + i]);
+                return new string(chars);
             }
 
             private int ReadFormat(CanonicalSection[] sections)

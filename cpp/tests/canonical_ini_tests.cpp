@@ -4,6 +4,7 @@
 #include <cameraunlock/config/canonical_ini.h>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -305,6 +306,31 @@ void TestStamp() {
     Check(!HasCanonicalStamp("\xFF\xFE"), "a bare UTF-16 mark is not stamped");
 }
 
+// Each key and header used to be compared with every earlier one, so 100 000 keys in one
+// section, or as many sections, took billions of comparisons on every load, save and reload.
+void TestManyKeysStayLinear() {
+    std::cout << "Canonical INI with many keys and sections:\n";
+    std::string keys = "[A]\r\n";
+    std::string sections;
+    for (int i = 0; i < 100000; ++i) {
+        keys += "k" + std::to_string(i) + "=1\r\n";
+        sections += "[s" + std::to_string(i) + "]\r\n";
+    }
+    keys += "K0=2\r\n";
+    sections += "[S0]\r\nx=1\r\n";
+    const auto started = std::chrono::steady_clock::now();
+    const CanonicalIni many_keys = ParseCanonicalIni(keys);
+    const CanonicalIni many_sections = ParseCanonicalIni(sections);
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    const CanonicalValue* repeated = many_keys.Find("a", "k0");
+    Check(many_keys.sections.size() == 1 && many_keys.sections[0].values.size() == 100000 && repeated != nullptr &&
+              repeated->value == "2" && repeated->earlier_lines == std::vector<int>{2},
+          "a repeated key among many is still found and keeps its earlier line");
+    Check(many_sections.sections.size() == 100000 && many_sections.Find("s0", "x") != nullptr,
+          "a repeated header among many is still the same section");
+    Check(seconds < 2.0, "both read in " + std::to_string(seconds) + "s, under 2s");
+}
+
 }  // namespace
 
 int RunCanonicalIniTests() {
@@ -314,5 +340,6 @@ int RunCanonicalIniTests() {
     TestUnreadable();
     TestDiagnostics();
     TestStamp();
+    TestManyKeysStayLinear();
     return g_failures;
 }

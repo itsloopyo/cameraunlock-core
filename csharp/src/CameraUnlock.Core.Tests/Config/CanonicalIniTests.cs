@@ -94,6 +94,37 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(2, doc.Sections.Count);
         }
 
+        // Each key and header used to be compared with every earlier one, so 100 000 keys in one
+        // section, or as many sections, took billions of comparisons on every load, save and reload.
+        [Fact]
+        public void ManyKeysAndSectionsAreReadInLinearTime()
+        {
+            var keys = new StringBuilder("[A]\r\n");
+            var sections = new StringBuilder();
+            for (int i = 0; i < 100000; i++)
+            {
+                keys.Append('k').Append(i).Append("=1\r\n");
+                sections.Append("[s").Append(i).Append("]\r\n");
+            }
+            keys.Append("K0=2\r\n");
+            sections.Append("[S0]\r\nx=1\r\n");
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            CanonicalIni manyKeys = CanonicalIni.Parse(Bytes(keys.ToString()));
+            CanonicalIni manySections = CanonicalIni.Parse(Bytes(sections.ToString()));
+            stopwatch.Stop();
+
+            Assert.Single(manyKeys.Sections);
+            Assert.Equal(100000, manyKeys.Sections[0].Values.Count);
+            CanonicalValue? repeated = manyKeys.Find("a", "k0");
+            Assert.NotNull(repeated);
+            Assert.Equal("2", Text(repeated!.Value));
+            Assert.Equal(new[] { 2 }, repeated.EarlierLines);
+            Assert.Equal(100000, manySections.Sections.Count);
+            Assert.NotNull(manySections.Find("s0", "x"));
+            Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 2000);
+        }
+
         [Fact]
         public void LookupRejectsNamesThatHaveNoBytes()
         {

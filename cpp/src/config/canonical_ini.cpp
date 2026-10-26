@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace cameraunlock::config {
@@ -26,6 +27,7 @@ namespace {
 
 using detail::CanonicalLineOfOffset;
 using detail::EqualsAsciiIgnoreCase;
+using detail::FoldAscii;
 using detail::StartsWithUtf16Mark;
 using detail::TrimSpaceOrTab;
 
@@ -184,6 +186,15 @@ CanonicalIni ParseCanonicalIni(std::string_view bytes) {
 
     // Index into doc.sections, or -1 above the first header and below one naming none.
     int current = -1;
+    // Sections and each section's keys by folded name, so a file of many keys is read in
+    // one pass rather than comparing every line with every earlier one.
+    const auto fold = [](std::string_view text) {
+        std::string folded(text);
+        for (char& c : folded) c = FoldAscii(c);
+        return folded;
+    };
+    std::unordered_map<std::string, int> section_index;
+    std::vector<std::unordered_map<std::string, size_t>> key_index;
     int stamp_header_line = 0;
     ForEachLine(bytes, [&](std::string_view raw, int number) {
         const std::string_view line = TrimSpaceOrTab(raw);
@@ -206,12 +217,11 @@ CanonicalIni ParseCanonicalIni(std::string_view bytes) {
                     MakeDiagnostic(CanonicalDiagnosticKind::EmptySectionName, number, "", "", line));
                 return;
             }
-            for (size_t i = 0; i < doc.sections.size(); ++i) {
-                if (EqualsAsciiIgnoreCase(doc.sections[i].name, header.name)) current = static_cast<int>(i);
-            }
-            if (current < 0) {
-                current = static_cast<int>(doc.sections.size());
+            const auto known = section_index.emplace(fold(header.name), static_cast<int>(doc.sections.size()));
+            current = known.first->second;
+            if (known.second) {
                 doc.sections.push_back(CanonicalSection{std::string(header.name), {}, number});
+                key_index.emplace_back();
                 if (stamp_header_line == 0 && EqualsAsciiIgnoreCase(header.name, kStampSection)) {
                     stamp_header_line = number;
                 }
@@ -236,8 +246,9 @@ CanonicalIni ParseCanonicalIni(std::string_view bytes) {
             return;
         }
         CanonicalSection& section = doc.sections[static_cast<size_t>(current)];
-        for (CanonicalValue& existing : section.values) {
-            if (!EqualsAsciiIgnoreCase(existing.key, key)) continue;
+        const auto known = key_index[static_cast<size_t>(current)].emplace(fold(key), section.values.size());
+        if (!known.second) {
+            CanonicalValue& existing = section.values[known.first->second];
             existing.earlier_lines.push_back(existing.line);
             existing.key = std::string(key);
             existing.value = std::string(value);
