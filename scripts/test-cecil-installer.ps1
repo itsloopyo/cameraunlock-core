@@ -105,6 +105,7 @@ try {
     $c = New-Case 'corrupt-backup' @{ $assembly = "game build 1 $marker"; $backup = "game build 1 $marker" }
     $r = Invoke-Install $c
     Check $c.Name ($r.Exit -eq 1) "install exited $($r.Exit): $($r.Output)"
+    Check $c.Name ($r.Output.Contains('Assembly-CSharp.dll.original is itself patched - corrupt backup')) "the refusal did not name the backup: $($r.Output)"
     Check $c.Name ((Text $c $assembly) -eq "game build 1 $marker") 'the assembly changed on a refused install'
 } finally {
     if ($failures.Count -eq 0) { Remove-Item -LiteralPath $root -Recurse -Force }
