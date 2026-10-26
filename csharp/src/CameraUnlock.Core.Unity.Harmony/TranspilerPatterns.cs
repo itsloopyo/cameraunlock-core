@@ -285,12 +285,6 @@ namespace CameraUnlock.Core.Unity.Harmony
                    instruction.opcode == OpCodes.Ldarg;
         }
     
-        // Mutated in place rather than replaced. A fresh CodeInstruction drops the
-        // original's labels and exception blocks, and Harmony's IL reader parks branch
-        // targets on exactly the kind of instruction these patterns match (the first of a
-        // statement). Losing one makes the ILGenerator fail to resolve the label, which
-        // aborts the whole PatchAll - so every other patch in the mod, camera hook
-
         // Clones rather than copying references. The replacement below mutates entries in
         // place - which is required, because constructing a fresh CodeInstruction drops
         // the original's labels and exception blocks and an unresolvable branch label
@@ -308,6 +302,11 @@ namespace CameraUnlock.Core.Unity.Harmony
             return codes;
         }
 
+        // Mutated in place rather than replaced. A fresh CodeInstruction drops the
+        // original's labels and exception blocks, and Harmony's IL reader parks branch
+        // targets on exactly the kind of instruction these patterns match (the first of a
+        // statement). Losing one makes the ILGenerator fail to resolve the label, which
+        // aborts the whole PatchAll - so every other patch in the mod, camera hook
         // included, silently never applies.
         private static void ReplaceWithCall(CodeInstruction instruction, MethodInfo replacementMethod)
         {
