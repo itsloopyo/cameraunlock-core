@@ -76,7 +76,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         /// <param name="cam">The camera to modify.</param>
         /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
-        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="pitch">Head tracking pitch in degrees, in Unity's sign: positive looks down, so a tracker's look-up pitch is negated.</param>
         /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
         /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
         public static void ApplyHeadRotation(Camera cam, float yaw, float pitch, float roll)
@@ -133,7 +133,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         /// <param name="cam">The camera to modify.</param>
         /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
-        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="pitch">Head tracking pitch in degrees, in Unity's sign: positive looks down, so a tracker's look-up pitch is negated.</param>
         /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
         /// <param name="positionOffset">Positional offset in meters, in the processor's
         /// convention (X = right, Y = up, NEGATIVE Z = forward). See the class remarks.</param>
@@ -154,7 +154,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         /// <param name="cam">The camera to modify.</param>
         /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
-        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="pitch">Head tracking pitch in degrees, in Unity's sign: positive looks down, so a tracker's look-up pitch is negated.</param>
         /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
         /// <exception cref="ArgumentNullException">Thrown when cam is null.</exception>
         public static void ApplyHeadRotationDecomposed(Camera cam, float yaw, float pitch, float roll)
@@ -205,7 +205,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         /// <param name="cam">The camera to modify.</param>
         /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
-        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="pitch">Head tracking pitch in degrees, in Unity's sign: positive looks down, so a tracker's look-up pitch is negated.</param>
         /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
         /// <param name="positionOffset">Positional offset in meters, in the processor's
         /// convention (X = right, Y = up, NEGATIVE Z = forward). See the class remarks.</param>
@@ -254,7 +254,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// Unity view-space convention: forward is -Z.
         /// </summary>
         /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
-        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="pitch">Head tracking pitch in degrees, in Unity's sign: positive looks down, so a tracker's look-up pitch is negated.</param>
         /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
         public static Vector3 ComputeAimDirectionInTrackedView(float yaw, float pitch, float roll)
         {
@@ -271,7 +271,7 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         /// <param name="baseRotation">The camera transform's clean rotation (the game's intended view direction).</param>
         /// <param name="yaw">Head tracking yaw in degrees (positive = look right).</param>
-        /// <param name="pitch">Head tracking pitch in degrees (positive = look up).</param>
+        /// <param name="pitch">Head tracking pitch in degrees, in Unity's sign: positive looks down, so a tracker's look-up pitch is negated.</param>
         /// <param name="roll">Head tracking roll in degrees (positive = tilt left).</param>
         public static Vector3 ComputeAimDirectionInTrackedViewDecomposed(
             Quaternion baseRotation, float yaw, float pitch, float roll)
