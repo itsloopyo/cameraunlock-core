@@ -9,18 +9,17 @@
 // By default only repos missing the secret are set, so re-running is cheap.
 //
 //   node set-discord-webhook-secret.mjs --check         # audit, change nothing
-//   node set-discord-webhook-secret.mjs --url <webhook> # set where missing
-//   node set-discord-webhook-secret.mjs                 # same, URL from $DISCORD_RELEASE_WEBHOOK
-//   node set-discord-webhook-secret.mjs --force ...     # overwrite everywhere (rotation)
+//   node set-discord-webhook-secret.mjs                 # set where missing, from $DISCORD_RELEASE_WEBHOOK
+//   node set-discord-webhook-secret.mjs --force         # overwrite everywhere (rotation)
 //
 // --name switches which secret is managed across the same repo set (the
 // release pipeline's other secrets ride the same workflows), e.g.:
 //
 //   node set-discord-webhook-secret.mjs --name LOPARI_APP_ACTIONS_TOKEN --check
-//   node set-discord-webhook-secret.mjs --name LOPARI_APP_ACTIONS_TOKEN --value <pat>
 //
-// Without --value the value comes from the env var named by --name.
-// The value is passed to `gh secret set` via stdin, never argv.
+// The value comes from the env var named by --name, never from the command line,
+// where it would stay in the shell history and the process list. It is passed to
+// `gh secret set` via stdin.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -43,10 +42,14 @@ if (!/^[A-Z][A-Z0-9_]*$/.test(secretName)) {
   console.error(`Invalid secret name: ${secretName}`);
   process.exit(1);
 }
-const secretValue = flagValue('--value') ?? flagValue('--url') ?? process.env[secretName];
+if (argv.includes('--value') || argv.includes('--url')) {
+  console.error(`--value and --url are not taken: a secret on the command line stays in the shell history. Set $${secretName} instead.`);
+  process.exit(2);
+}
+const secretValue = process.env[secretName];
 
 if (!checkOnly && !secretValue) {
-  console.error(`No value for ${secretName}: pass --value <v>, set $${secretName}, or use --check to audit.`);
+  console.error(`No value for ${secretName}: set $${secretName}, or use --check to audit.`);
   process.exit(1);
 }
 
