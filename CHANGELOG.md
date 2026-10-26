@@ -267,6 +267,39 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 - `Set-GameRigLimit -Count <n>` caps how many rigs, of every game, `Enter-GameRig` gives out at
   once. A session past it waits, and the next free place goes to whoever asked first for any game.
 
+### Fixed - vtable reads, RE aim tangents, config saves and the install bodies
+
+- `ReadVfuncs` stops at the first vtable entry that is not executable code, so a class's count no
+  longer runs on into the next class's RTTI and vtable.
+- `ProjectAimToViewTangents` (REFramework) gives the lean its true sign. The comments on it and on
+  `ComputeCleanLocalPositionDelta` now say to add the clean delta, which is what the RE mods do.
+- The C# `HeadTrackingSession` reports zero rotation in position-only mode, as the C++ session does.
+- `ConfigOwner` leaves a deferred load's write time unrecorded, so the watcher reloads the file
+  once another program lets it go, and a save asks the write time after it has read the file, so
+  an edit made as it reads is still seen as a change. Both languages.
+- The C interface's `_save_tracking_mode`, `_save_aim_mode` and `_save_world_space_yaw` are an
+  error when the mod did not describe every row they write. They answered SAVED and wrote nothing.
+- The Java binding asks again for a text row that a reload lengthened between its two calls,
+  which read as an empty string.
+- `InitCameraPipeline` throws for a descriptor with no gate, as it does for its other checks,
+  instead of logging and leaving the pipeline off.
+- `UIElementOffsetController.ResetReferences` does not write to a target that was destroyed.
+- `install-body-cecil.cmd` keeps a game update's unpatched assembly over an older `.original`
+  backup, and `uninstall-body.cmd` deletes that older backup instead of restoring it over the
+  update.
+- `install-body-bepinex.cmd` replaces only `BepInEx\core` and the doorstop files on a
+  wrong-architecture swap, so the player's other plugins, patchers and configs stay. It checks the
+  vendored loader is there before removing anything.
+- `find-game.ps1` treats a closed stdin at the folder prompt as a cancel (exit 2) instead of
+  stopping with a script error.
+- The `uninstall.ps1` template keeps `CameraUnlock.ini` in the mod folder. It deleted the folder
+  whole, and `-KeepConfig` is gone with the copy to %TEMP% it made.
+- `set-discord-webhook-secret.mjs` finds the callers of `release-mod.yml` as well as
+  `release-bepinex-mod.yml`, and takes the secret only from the environment.
+- `pixi run test` is the whole suite (`check`, the PowerShell tests and the net35 framework
+  tests), and `check` runs the install-body tests and the PowerShell release, soak, notices and
+  differential-gate suites.
+
 ### Fixed - receivers, config saves and the install and release scripts
 
 - The C++ `PollingUdpReceiver` and the C# `OpenTrackReceiver` follow the first tracker that
