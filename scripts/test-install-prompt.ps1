@@ -61,7 +61,8 @@ function Invoke-Install {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Typed,
         [Parameter(Mandatory = $true)][int]$Expected,
         [string]$Flags = '',
-        [string]$WorkingDirectory = $PWD.ProviderPath)
+        [string]$WorkingDirectory = $PWD.ProviderPath,
+        [switch]$ClosedInput)
 
     $script:caseIndex++
     $stem = Join-Path $caseRoot ('case{0:d2}' -f $script:caseIndex)
@@ -72,7 +73,8 @@ function Invoke-Install {
 
     # One trailing blank line beyond what the case types: the run ends on a
     # `pause` whenever /y is absent, and that read has to find something.
-    [IO.File]::WriteAllText($typedFile, (($Typed + @('')) -join "`r`n") + "`r`n")
+    if ($ClosedInput) { $typedFile = 'nul' }
+    else { [IO.File]::WriteAllText($typedFile, (($Typed + @('')) -join "`r`n") + "`r`n") }
     $lines = @(
         '@echo off',
         ('call "{0}\install.cmd" {1} < "{2}" > "{3}" 2>&1' -f $caseRoot, $Flags, $typedFile, $script:lastOutput),
@@ -147,6 +149,11 @@ Reset-Game
 
 # Blank cancels, and cancelling installs nothing.
 Invoke-Install -Typed @() -Expected 1
+Assert-NotDeployed
+
+# A closed stdin reads as no folder given, not as a script error.
+Invoke-Install -Typed @() -Expected 1 -ClosedInput
+Assert-OutputContains 'No folder given, so Fixture was not located.'
 Assert-NotDeployed
 
 # /y is the launcher's call shape: no prompt, no stdin read, and it fails

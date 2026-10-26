@@ -91,7 +91,9 @@ function Read-GamePathFromUser {
 
     while ($true) {
         Write-Host "  $DisplayName folder: " -NoNewline
-        $typed = (Read-Host).Trim().Trim('"').Trim()
+        $typed = Read-Host
+        if ($null -eq $typed) { return $null }
+        $typed = $typed.Trim().Trim('"').Trim()
         if (-not $typed) { return $null }
 
         # Never trim past a drive root: "C:" is not "C:\", it is whatever
