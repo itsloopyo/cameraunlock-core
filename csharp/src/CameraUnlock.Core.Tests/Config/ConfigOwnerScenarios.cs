@@ -114,6 +114,7 @@ namespace CameraUnlock.Core.Tests.Config
                 AnUntouchedTrackingModeFollowsDefaultsIniAsOneUnit),
             Scenario("a-toggle-on-a-default-row-writes-its-value", AToggleOnADefaultRowWritesItsValue),
             Scenario("a-mode-change-from-default-writes-both-rows", AModeChangeFromDefaultWritesBothRows),
+            Scenario("an-aim-mode-change-from-default-writes-every-writable-row", AnAimModeChangeFromDefaultWritesEveryWritableRow),
             Scenario("end-saves-nothing", EndSavesNothing),
             Scenario("a-save-after-defaults-ini-changed-keeps-default-rows", ASaveAfterDefaultsIniChangedKeepsDefaultRows),
             Scenario("reload-and-file-changed-follow-defaults-ini", ReloadAndFileChangedFollowDefaultsIni),
@@ -1686,6 +1687,50 @@ namespace CameraUnlock.Core.Tests.Config
                 rig.Path + ": PositionEnabled=false is now set for this game, and no longer follows Defaults.ini.",
             }), "the pair stops following Defaults.ini together, got:\n" + string.Join("\n", save.Log.ToArray()));
             ExpectBytes(rig.DefaultsPath, DefaultsIni.Render());
+        }
+
+        // Defaults.ini puts every game in free look with a marker; the cycle moves this one to true
+        // free look, which changes FreeLookMarker only. TrueFreeLook must be written too, or a later
+        // Defaults.ini edit to it would take this game to sights locked.
+        private static void AnAimModeChangeFromDefaultWritesEveryWritableRow(string dir)
+        {
+            var rig = new Rig(dir);
+            rig.Table = HeadTrackingConfigTable.Create(ConfigConcepts.UdpPort, ConfigConcepts.TrueFreeLook,
+                    ConfigConcepts.FreeLookMarker, ConfigConcepts.StockSights)
+                .Select(ConfigConcepts.TrueFreeLook).Writable()
+                .Select(ConfigConcepts.FreeLookMarker).Writable()
+                .Select(ConfigConcepts.StockSights).Writable();
+            rig.PutDefaults(Ascii("[Position]\r\nTrueFreeLook=true\r\nFreeLookMarker=true\r\n"));
+            ConfigOwner<HeadTrackingConfigData> owner = rig.Owner();
+            ExpectStatus(owner.Load(), ConfigLoadStatus.Created);
+            ConfigSaveResult save = owner.Save(c => c.FreeLookMarker = false);
+            ExpectSaved(save);
+            string saved = Encoding.ASCII.GetString(File.ReadAllBytes(rig.Path));
+            ExpectContains(saved, "\r\nTrueFreeLook=true\r\n");
+            ExpectContains(saved, "\r\nFreeLookMarker=false\r\n");
+            ExpectContains(saved, "\r\nStockSights=false\r\n");
+            Expect(save.Log.Count == 3, "the three rows stop following Defaults.ini together, got:\n" + string.Join("\n", save.Log.ToArray()));
+
+            rig.PutDefaults(Ascii("[Position]\r\nTrueFreeLook=false\r\nFreeLookMarker=true\r\n"));
+            ConfigLoadResult<HeadTrackingConfigData> load = rig.Owner().Load();
+            ExpectStatus(load, ConfigLoadStatus.Canonical);
+            Expect(load.Config.TrueFreeLook && !load.Config.FreeLookMarker && !load.Config.StockSights,
+                "the game keeps true free look after Defaults.ini changes");
+
+            HeadTrackingConfigData effective = rig.Table.CreateDefaults();
+            effective.TrueFreeLook = true;
+            effective.FreeLookMarker = true;
+            HeadTrackingConfigData imported = rig.Table.CreateDefaults();
+            imported.TrueFreeLook = true;
+            string migrated = Encoding.ASCII.GetString(rig.Table.RenderMigration(imported, effective, new RenderHeader(Display)));
+            ExpectContains(migrated, "\r\nTrueFreeLook=true\r\n");
+            ExpectContains(migrated, "\r\nFreeLookMarker=false\r\n");
+            ExpectContains(migrated, "\r\nStockSights=false\r\n");
+            imported.FreeLookMarker = true;
+            string followed = Encoding.ASCII.GetString(rig.Table.RenderMigration(imported, effective, new RenderHeader(Display)));
+            ExpectContains(followed, "\r\nTrueFreeLook=default\r\n");
+            ExpectContains(followed, "\r\nFreeLookMarker=default\r\n");
+            ExpectContains(followed, "\r\nStockSights=default\r\n");
         }
 
         // End changes only the session: the mod changes its running config and calls nothing.

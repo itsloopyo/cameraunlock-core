@@ -128,6 +128,11 @@ inline bool FollowsDefaultsIni(const TableRow& row) {
            !row.per_game;
 }
 
+inline bool IsAimModeRow(const TableRow& row) {
+    return row.concept_id == schema::Concept::TrueFreeLook || row.concept_id == schema::Concept::FreeLookMarker ||
+           row.concept_id == schema::Concept::StockSights;
+}
+
 // Where a row's value came from when ApplyCanonicalEffective read a file: the file's own value,
 // or the row's start, the effective default, which Defaults.ini or the table gave.
 enum class ValueSource { kFile, kDefaultsIni, kBuiltIn };
@@ -910,7 +915,8 @@ EffectiveApplyResult ApplyCanonicalEffective(const CanonicalIni& doc, const Conf
 /// PerGame is written `Key=default` when its value equals its value in `effective`, and otherwise
 /// as its value, never in the commented form of an Engine row, which would read back as the
 /// effective default. RotationEnabled and PositionEnabled are written default only when both equal
-/// their effective values. Throws as RenderCanonical, and std::invalid_argument for a table that
+/// their effective values, and TrueFreeLook, FreeLookMarker and StockSights only when all three of those
+/// that follow Defaults.ini do. Throws as RenderCanonical, and std::invalid_argument for a table that
 /// marks one of RotationEnabled and PositionEnabled PerGame and not the other.
 template <class Config>
 std::string RenderCanonicalMigration(const ConfigTable<Config>& table, const Config& values, const Config& effective,
@@ -933,6 +939,13 @@ std::string RenderCanonicalMigration(const ConfigTable<Config>& table, const Con
         (forms[rotation] == RowForm::kValue || forms[position] == RowForm::kValue)) {
         if (forms[rotation] == RowForm::kDefault) forms[rotation] = RowForm::kValue;
         if (forms[position] == RowForm::kDefault) forms[position] = RowForm::kValue;
+    }
+    bool aim_value = false;
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (IsAimModeRow(rows[i]) && forms[i] == RowForm::kValue) aim_value = true;
+    }
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        if (aim_value && IsAimModeRow(rows[i]) && forms[i] == RowForm::kDefault) forms[i] = RowForm::kValue;
     }
     const ConfigRowSource<Config> source(rows, table.ops_, table.defaults_, values);
     return RenderRows(rows, GameFileHeader(rows, header), source, forms);

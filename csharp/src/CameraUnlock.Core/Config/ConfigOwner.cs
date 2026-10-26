@@ -277,7 +277,9 @@ namespace CameraUnlock.Core.Config
         /// file as it is now and sets the new values on it; the game has already applied them to
         /// its running state. A row that holds a new value afterwards must be marked Writable in the
         /// table, or this throws. When RotationEnabled or PositionEnabled changes, both are written,
-        /// so a tracking mode is always one edit. A row that held <c>default</c> or was missing is
+        /// so a tracking mode is always one edit, and when one of TrueFreeLook, FreeLookMarker and
+        /// StockSights changes, each of the three the table marks Writable is written, so an aim
+        /// mode is too. A row that held <c>default</c> or was missing is
         /// written as its value, so from then on this game keeps it, and the log says so.
         /// <para>
         /// Saves only a file the canonical reader can read and whose ConfigFormat is not newer than
@@ -998,6 +1000,23 @@ namespace CameraUnlock.Core.Config
             {
                 edited[rotation] = true;
                 edited[position] = true;
+            }
+            // The aim mode is three rows, and the one the cycle leaves unchanged may hold default,
+            // which would follow a later Defaults.ini edit into another mode.
+            int[] aim =
+            {
+                _table.RowOf(ConfigConcepts.TrueFreeLook),
+                _table.RowOf(ConfigConcepts.FreeLookMarker),
+                _table.RowOf(ConfigConcepts.StockSights),
+            };
+            bool aimEdited = false;
+            foreach (int row in aim) aimEdited |= row >= 0 && edited[row];
+            if (aimEdited)
+            {
+                foreach (int row in aim)
+                {
+                    if (row >= 0 && _table.RowWritable(row)) edited[row] = true;
+                }
             }
 
             var edits = new List<IniEdit>();

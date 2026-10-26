@@ -500,7 +500,9 @@ namespace CameraUnlock.Core.Config
         /// global concept row that is not PerGame is written <c>Key=default</c> when its value equals its
         /// value in <paramref name="effective"/>, and otherwise as its value, never in the commented
         /// form of an Engine row, which would read back as the effective default. RotationEnabled and
-        /// PositionEnabled are written default only when both equal their effective values.
+        /// PositionEnabled are written default only when both equal their effective values, and
+        /// TrueFreeLook, FreeLookMarker and StockSights only when all three of those that follow
+        /// Defaults.ini do.
         /// </summary>
         /// <exception cref="ArgumentNullException">An argument is null.</exception>
         /// <exception cref="ArgumentException">As <see cref="Render"/>, or the table marks one of
@@ -522,6 +524,12 @@ namespace CameraUnlock.Core.Config
             {
                 if (forms[rotation] == RowForm.Default) forms[rotation] = RowForm.Value;
                 if (forms[position] == RowForm.Default) forms[position] = RowForm.Value;
+            }
+            bool aimValue = false;
+            for (int i = 0; i < rows.Count; i++) aimValue |= rows[i].AimMode && forms[i] == RowForm.Value;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (aimValue && rows[i].AimMode && forms[i] == RowForm.Default) forms[i] = RowForm.Value;
             }
             return RenderRows(values, GameFileHeader(header), forms);
         }
@@ -1062,6 +1070,15 @@ namespace CameraUnlock.Core.Config
             public bool FollowsDefaultsIni
             {
                 get { return Concept != null && Concept.Global && !PerGame; }
+            }
+
+            public bool AimMode
+            {
+                get
+                {
+                    return Concept == ConfigConcepts.TrueFreeLook || Concept == ConfigConcepts.FreeLookMarker
+                        || Concept == ConfigConcepts.StockSights;
+                }
             }
 
             public string Name

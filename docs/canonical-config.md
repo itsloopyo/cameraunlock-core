@@ -911,7 +911,8 @@ A config file the owner cannot open is deferred on the defaults, and nothing is 
 
 `Save(change)` hands `change` the settings read from the file as it is now; the change sets the
 new values. The owner then checks that only Writable rows changed, builds one edit (both mode rows
-when either changed), runs the editor, reads the edited bytes back through the table, where only
+when either changed, and each Writable aim mode row of TrueFreeLook, FreeLookMarker and
+StockSights when one of them changed), runs the editor, reads the edited bytes back through the table, where only
 the changed rows may differ, and writes exactly those bytes, only if the file still holds the
 bytes it read. That last check and the replacement are two operations, not a compare-and-swap, so
 a program that writes the file between them is overwritten. A change that leaves every row as it

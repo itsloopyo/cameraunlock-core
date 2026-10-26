@@ -424,7 +424,8 @@ public:
     /// and sets the new values on it; the game has already applied them to its running state. A
     /// row that holds a new value afterwards must be marked Writable in the table. When
     /// RotationEnabled or PositionEnabled changes, both are written, so a tracking mode is always
-    /// one edit. A row that held `default` or was missing is written as its value, so from then on
+    /// one edit, and when one of TrueFreeLook, FreeLookMarker and StockSights changes, each of the
+    /// three the table marks Writable is written, so an aim mode is too. A row that held `default` or was missing is written as its value, so from then on
     /// this game keeps it, and the log says so.
     ///
     /// Saves only a file the canonical reader can read and whose ConfigFormat is not newer than
@@ -877,6 +878,18 @@ private:
         if (rotation && position && (edited[*rotation] || edited[*position])) {
             edited[*rotation] = true;
             edited[*position] = true;
+        }
+        // The aim mode is three rows, and the one the cycle leaves unchanged may hold `default`,
+        // which would follow a later Defaults.ini edit into another mode.
+        const std::size_t aim[] = {RowOf(schema::Concept::TrueFreeLook).value_or(count),
+                                   RowOf(schema::Concept::FreeLookMarker).value_or(count),
+                                   RowOf(schema::Concept::StockSights).value_or(count)};
+        bool aim_edited = false;
+        for (const std::size_t row : aim) aim_edited = aim_edited || (row < count && edited[row]);
+        if (aim_edited) {
+            for (const std::size_t row : aim) {
+                if (row < count && table_.rows_[row].writable) edited[row] = true;
+            }
         }
 
         std::vector<IniEdit> edits;

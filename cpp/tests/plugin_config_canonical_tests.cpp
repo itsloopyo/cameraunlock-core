@@ -991,8 +991,9 @@ void TestTrueFreeLook(const fs::path& root) {
     const bool to_marker = step(AimMode::SightsLocked);
     const std::string in_marker = ReadBytes(file);
     Check(to_marker && Contains(in_marker, "\r\nTrueFreeLook=true\r\n") &&
-              Contains(in_marker, "\r\nFreeLookMarker=true\r\n") && ChangedLineCount(converted, in_marker) == 2,
-          "the first press saves free look with a marker, edits those two lines only, and a restart comes back in it");
+              Contains(in_marker, "\r\nFreeLookMarker=true\r\n") && Contains(in_marker, "\r\nStockSights=false\r\n") &&
+              ChangedLineCount(converted, in_marker) == 3,
+          "the first press saves free look with a marker as all three values, and a restart comes back in it");
     const bool to_free = step(AimMode::FreeLookMarker);
     const std::string in_free = ReadBytes(file);
     Check(to_free && OnlyChangedLine(in_marker, in_free) == "FreeLookMarker=false",

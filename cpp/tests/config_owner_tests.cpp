@@ -1993,6 +1993,49 @@ void AModeChangeFromDefaultWritesBothRows(const fs::path& dir) {
     Check(HoldsBytes(rig.defaults_path, detail::RenderDefaultsIni()), "Defaults.ini is not written");
 }
 
+// Defaults.ini puts every game in free look with a marker; the cycle moves this one to true free
+// look, which changes FreeLookMarker only. TrueFreeLook must be written too, or a later Defaults.ini
+// edit to it would take this game to sights locked.
+void AnAimModeChangeFromDefaultWritesEveryWritableRow(const fs::path& dir) {
+    Rig rig(dir);
+    ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable<HeadTrackingConfig>(
+        {Concept::UdpPort, Concept::TrueFreeLook, Concept::FreeLookMarker, Concept::StockSights});
+    table.Select(Concept::TrueFreeLook).Writable().Select(Concept::FreeLookMarker).Writable()
+        .Select(Concept::StockSights).Writable();
+    rig.table = table;
+    rig.PutDefaults("[Position]\r\nTrueFreeLook=true\r\nFreeLookMarker=true\r\n");
+    auto owner = rig.Make();
+    ExpectStatus(owner->Load(), ConfigLoadStatus::Created);
+    const ConfigSaveResult save = owner->Save([](HeadTrackingConfig& c) { c.free_look_marker = false; });
+    ExpectSaved(save);
+    const std::string saved = ReadBytes(rig.path);
+    Check(Contains(saved, "\r\nTrueFreeLook=true\r\n") && Contains(saved, "\r\nFreeLookMarker=false\r\n") &&
+              Contains(saved, "\r\nStockSights=false\r\n"),
+          "all three aim mode rows are written");
+    Check(save.log.size() == 3, "the three rows stop following Defaults.ini together" + Joined(save.log));
+
+    rig.PutDefaults("[Position]\r\nTrueFreeLook=false\r\nFreeLookMarker=true\r\n");
+    auto later = rig.Make();
+    const Load load = later->Load();
+    ExpectStatus(load, ConfigLoadStatus::Canonical);
+    Check(load.config.true_free_look && !load.config.free_look_marker && !load.config.stock_sights,
+          "the game keeps true free look after Defaults.ini changes");
+
+    HeadTrackingConfig effective = table.defaults();
+    effective.true_free_look = true;
+    effective.free_look_marker = true;
+    HeadTrackingConfig imported = effective;
+    imported.free_look_marker = false;
+    const std::string migrated = detail::RenderCanonicalMigration(table, imported, effective, RenderHeader{kDisplay});
+    Check(Contains(migrated, "\r\nTrueFreeLook=true\r\n") && Contains(migrated, "\r\nFreeLookMarker=false\r\n") &&
+              Contains(migrated, "\r\nStockSights=false\r\n"),
+          "a migration writes the aim mode as three values when one differs");
+    const std::string followed = detail::RenderCanonicalMigration(table, effective, effective, RenderHeader{kDisplay});
+    Check(Contains(followed, "\r\nTrueFreeLook=default\r\n") && Contains(followed, "\r\nFreeLookMarker=default\r\n") &&
+              Contains(followed, "\r\nStockSights=default\r\n"),
+          "and as default when all three follow Defaults.ini");
+}
+
 // End changes only the session: the mod changes its running config and calls nothing.
 void EndSavesNothing(const fs::path& dir) {
     Rig rig(dir);
@@ -2422,6 +2465,8 @@ int RunConfigOwnerTests() {
                 AnUntouchedTrackingModeFollowsDefaultsIniAsOneUnit);
     RunScenario("a-toggle-on-a-default-row-writes-its-value", AToggleOnADefaultRowWritesItsValue);
     RunScenario("a-mode-change-from-default-writes-both-rows", AModeChangeFromDefaultWritesBothRows);
+    RunScenario("an-aim-mode-change-from-default-writes-every-writable-row",
+                AnAimModeChangeFromDefaultWritesEveryWritableRow);
     RunScenario("end-saves-nothing", EndSavesNothing);
     RunScenario("a-save-after-defaults-ini-changed-keeps-default-rows", ASaveAfterDefaultsIniChangedKeepsDefaultRows);
     RunScenario("reload-and-file-changed-follow-defaults-ini", ReloadAndFileChangedFollowDefaultsIni);
