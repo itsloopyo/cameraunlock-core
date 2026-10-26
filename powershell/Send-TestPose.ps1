@@ -13,9 +13,11 @@ param(
 $udp = New-Object System.Net.Sockets.UdpClient
 $udp.Connect('127.0.0.1', $Port)
 $random = New-Object System.Random
-$packet = New-Object byte[] 48
-$current = New-Object 'double[]' 6
-$goal = New-Object 'double[]' 6
+# x y z yaw pitch roll, each a little-endian double: the 48-byte OpenTrack pose.
+$axes = 6
+$packet = New-Object byte[] ($axes * 8)
+$current = New-Object 'double[]' $axes
+$goal = New-Object 'double[]' $axes
 $deadline = (Get-Date).AddMinutes($Minutes)
 $lastRead = [datetime]::MinValue
 $culture = [Globalization.CultureInfo]::InvariantCulture
@@ -34,10 +36,10 @@ while ((Get-Date) -lt $deadline) {
                                       ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
             $reader = New-Object IO.StreamReader $stream
             $parts = [regex]::Split($reader.ReadToEnd().Trim(), '\s+')
-            if ($parts.Length -eq 6) {
-                $parsed = New-Object 'double[]' 6
+            if ($parts.Length -eq $axes) {
+                $parsed = New-Object 'double[]' $axes
                 $ok = $true
-                for ($i = 0; $i -lt 6; $i++) {
+                for ($i = 0; $i -lt $axes; $i++) {
                     # A [ref] to an array element does not write back, so each number lands in a
                     # variable first.
                     $number = 0.0
@@ -51,13 +53,13 @@ while ((Get-Date) -lt $deadline) {
             if ($stream) { $stream.Dispose() }
         }
     }
-    for ($i = 0; $i -lt 6; $i++) {
+    for ($i = 0; $i -lt $axes; $i++) {
         # Eased, so each step stays under a receiver's large-jump threshold.
         $current[$i] += ($goal[$i] - $current[$i]) * 0.10
         $value = $current[$i] + ($random.NextDouble() - 0.5) * $noise[$i]
         [Array]::Copy([BitConverter]::GetBytes([double]$value), 0, $packet, $i * 8, 8)
     }
-    [void]$udp.Send($packet, 48)
+    [void]$udp.Send($packet, $packet.Length)
     Start-Sleep -Milliseconds 16
 }
 $udp.Close()

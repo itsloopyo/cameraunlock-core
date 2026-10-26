@@ -201,6 +201,30 @@ function Test-PatchResultFailure {
     return ($null -ne $property) -and (-not $property.Value)
 }
 
+# Deploys to every install of the game (see Resolve-DevGamePaths) through one of
+# the *ToPath functions, handed the wrapper's own parameters with GivenPath set to
+# each install. Returns the result for the last install written, which is what the
+# single-install callers have always been handed.
+function Invoke-DevDeployToEveryInstall {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$BoundParameters,
+        [Parameter(Mandatory)][string]$ToPathCommand
+    )
+    $targets = Resolve-DevGamePaths -GameId $BoundParameters['GameId'] `
+        -GameDisplayName $BoundParameters['GameDisplayName'] -GivenPath $BoundParameters['GivenPath']
+    $result = $null
+    foreach ($target in $targets) {
+        if ($targets.Count -gt 1) {
+            Write-Host ""
+            Write-Host "--- $target" -ForegroundColor Cyan
+        }
+        $forward = @{} + $BoundParameters
+        $forward['GivenPath'] = $target
+        $result = & $ToPathCommand @forward
+    }
+    return $result
+}
+
 function Invoke-DevDeployCecilToPath {
     [CmdletBinding()]
     param(
@@ -329,9 +353,6 @@ function Invoke-DevDeployCecilToPath {
     }
 }
 
-# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
-# result for the last install written, which is what the single-install callers
-# have always been handed.
 function Invoke-DevDeployCecil {
     [CmdletBinding()]
     param(
@@ -362,18 +383,7 @@ function Invoke-DevDeployCecil {
         [switch]$CleanDoorstop
     )
 
-    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
-    $result = $null
-    foreach ($target in $targets) {
-        if ($targets.Count -gt 1) {
-            Write-Host ""
-            Write-Host "--- $target" -ForegroundColor Cyan
-        }
-        $forward = @{} + $PSBoundParameters
-        $forward['GivenPath'] = $target
-        $result = Invoke-DevDeployCecilToPath @forward
-    }
-    return $result
+    return Invoke-DevDeployToEveryInstall -BoundParameters $PSBoundParameters -ToPathCommand 'Invoke-DevDeployCecilToPath'
 }
 
 <#
@@ -441,9 +451,6 @@ function Invoke-DevDeployBepInExToPath {
     }
 }
 
-# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
-# result for the last install written, which is what the single-install callers
-# have always been handed.
 function Invoke-DevDeployBepInEx {
     [CmdletBinding()]
     param(
@@ -460,18 +467,7 @@ function Invoke-DevDeployBepInEx {
         [string]$PluginSubfolder
     )
 
-    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
-    $result = $null
-    foreach ($target in $targets) {
-        if ($targets.Count -gt 1) {
-            Write-Host ""
-            Write-Host "--- $target" -ForegroundColor Cyan
-        }
-        $forward = @{} + $PSBoundParameters
-        $forward['GivenPath'] = $target
-        $result = Invoke-DevDeployBepInExToPath @forward
-    }
-    return $result
+    return Invoke-DevDeployToEveryInstall -BoundParameters $PSBoundParameters -ToPathCommand 'Invoke-DevDeployBepInExToPath'
 }
 
 <#
@@ -533,9 +529,6 @@ function Invoke-DevDeployMelonLoaderToPath {
     }
 }
 
-# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
-# result for the last install written, which is what the single-install callers
-# have always been handed.
 function Invoke-DevDeployMelonLoader {
     [CmdletBinding()]
     param(
@@ -550,18 +543,7 @@ function Invoke-DevDeployMelonLoader {
         [string]$Version
     )
 
-    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
-    $result = $null
-    foreach ($target in $targets) {
-        if ($targets.Count -gt 1) {
-            Write-Host ""
-            Write-Host "--- $target" -ForegroundColor Cyan
-        }
-        $forward = @{} + $PSBoundParameters
-        $forward['GivenPath'] = $target
-        $result = Invoke-DevDeployMelonLoaderToPath @forward
-    }
-    return $result
+    return Invoke-DevDeployToEveryInstall -BoundParameters $PSBoundParameters -ToPathCommand 'Invoke-DevDeployMelonLoaderToPath'
 }
 
 <#
@@ -659,9 +641,6 @@ function Invoke-DevDeployASILoaderToPath {
     }
 }
 
-# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
-# result for the last install written, which is what the single-install callers
-# have always been handed.
 function Invoke-DevDeployASILoader {
     [CmdletBinding()]
     param(
@@ -677,18 +656,7 @@ function Invoke-DevDeployASILoader {
         [string]$ExeSubDir
     )
 
-    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
-    $result = $null
-    foreach ($target in $targets) {
-        if ($targets.Count -gt 1) {
-            Write-Host ""
-            Write-Host "--- $target" -ForegroundColor Cyan
-        }
-        $forward = @{} + $PSBoundParameters
-        $forward['GivenPath'] = $target
-        $result = Invoke-DevDeployASILoaderToPath @forward
-    }
-    return $result
+    return Invoke-DevDeployToEveryInstall -BoundParameters $PSBoundParameters -ToPathCommand 'Invoke-DevDeployASILoaderToPath'
 }
 
 <#
@@ -772,9 +740,6 @@ function Invoke-DevDeployREFrameworkToPath {
     }
 }
 
-# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
-# result for the last install written, which is what the single-install callers
-# have always been handed.
 function Invoke-DevDeployREFramework {
     [CmdletBinding()]
     param(
@@ -788,18 +753,7 @@ function Invoke-DevDeployREFramework {
         [string]$GivenPath
     )
 
-    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
-    $result = $null
-    foreach ($target in $targets) {
-        if ($targets.Count -gt 1) {
-            Write-Host ""
-            Write-Host "--- $target" -ForegroundColor Cyan
-        }
-        $forward = @{} + $PSBoundParameters
-        $forward['GivenPath'] = $target
-        $result = Invoke-DevDeployREFrameworkToPath @forward
-    }
-    return $result
+    return Invoke-DevDeployToEveryInstall -BoundParameters $PSBoundParameters -ToPathCommand 'Invoke-DevDeployREFrameworkToPath'
 }
 
 <#
@@ -917,9 +871,6 @@ function Invoke-DevDeployShimToPath {
     }
 }
 
-# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
-# result for the last install written, which is what the single-install callers
-# have always been handed.
 function Invoke-DevDeployShim {
     [CmdletBinding()]
     param(
@@ -937,18 +888,7 @@ function Invoke-DevDeployShim {
         [Parameter(Mandatory)][string]$ShimMarker
     )
 
-    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
-    $result = $null
-    foreach ($target in $targets) {
-        if ($targets.Count -gt 1) {
-            Write-Host ""
-            Write-Host "--- $target" -ForegroundColor Cyan
-        }
-        $forward = @{} + $PSBoundParameters
-        $forward['GivenPath'] = $target
-        $result = Invoke-DevDeployShimToPath @forward
-    }
-    return $result
+    return Invoke-DevDeployToEveryInstall -BoundParameters $PSBoundParameters -ToPathCommand 'Invoke-DevDeployShimToPath'
 }
 
 <#
@@ -1049,9 +989,6 @@ function Invoke-DevDeployJavaAgentToPath {
     }
 }
 
-# Deploys to every install of the game (see Resolve-DevGamePaths). Returns the
-# result for the last install written, which is what the single-install callers
-# have always been handed.
 function Invoke-DevDeployJavaAgent {
     [CmdletBinding()]
     param(
@@ -1065,18 +1002,7 @@ function Invoke-DevDeployJavaAgent {
         [string]$GivenPath
     )
 
-    $targets = Resolve-DevGamePaths -GameId $GameId -GameDisplayName $GameDisplayName -GivenPath $GivenPath
-    $result = $null
-    foreach ($target in $targets) {
-        if ($targets.Count -gt 1) {
-            Write-Host ""
-            Write-Host "--- $target" -ForegroundColor Cyan
-        }
-        $forward = @{} + $PSBoundParameters
-        $forward['GivenPath'] = $target
-        $result = Invoke-DevDeployJavaAgentToPath @forward
-    }
-    return $result
+    return Invoke-DevDeployToEveryInstall -BoundParameters $PSBoundParameters -ToPathCommand 'Invoke-DevDeployJavaAgentToPath'
 }
 
 Export-ModuleMember -Function @(
