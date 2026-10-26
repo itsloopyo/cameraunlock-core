@@ -687,10 +687,10 @@ if defined BEPINEX_SUBFOLDER (
         rmdir /s /q "!BEP_TEMP!" 2>nul
         exit /b 1
     )
-    rem A pack can ship BepInEx\config\BepInEx.cfg. One the game folder already
-    rem holds is the player's, so the pack's copy of it is dropped before the copy.
-    for %%F in ("!BEP_TEMP!\%BEPINEX_SUBFOLDER%\BepInEx\config\*") do (
-        if exist "!GAME_PATH!\BepInEx\config\%%~nxF" del /f /q "%%F"
+    call :drop_pack_configs
+    if errorlevel 1 (
+        rmdir /s /q "!BEP_TEMP!" 2>nul
+        exit /b 1
     )
     xcopy /s /e /y /q "!BEP_TEMP!\%BEPINEX_SUBFOLDER%\*" "!GAME_PATH!\" >nul
     set "_XCOPY_EC=!errorlevel!"
@@ -724,6 +724,23 @@ if not exist "!GAME_PATH!\BepInEx\config\BepInEx.cfg" (
 )
 
 echo   BepInEx installed successfully^^!
+exit /b 0
+
+:: A pack can ship BepInEx\config\BepInEx.cfg. One the game folder already
+:: holds is the player's, so the pack's copy of it is dropped before the copy.
+:: Delayed expansion is off so a ! in TEMP or in a file name reaches del intact.
+:drop_pack_configs
+setlocal disabledelayedexpansion
+for %%F in ("%BEP_TEMP%\%BEPINEX_SUBFOLDER%\BepInEx\config\*") do (
+    if exist "%GAME_PATH%\BepInEx\config\%%~nxF" (
+        del /f /q "%%F"
+        if exist "%%F" (
+            echo   ERROR: could not drop the pack's %%~nxF, which would replace yours:
+            echo     %%F
+            exit /b 1
+        )
+    )
+)
 exit /b 0
 
 :: ============================================

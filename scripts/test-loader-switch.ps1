@@ -10,7 +10,8 @@ param(
 # runs the release's own uninstall.cmd first when the state file names another
 # framework, and the uninstall body undoes the Cecil patch a wrapper still names
 # while leaving alone a loader the state file does not say this mod installed.
-# Each case runs the real bodies on a synthetic game folder whose path holds `!`.
+# Each case runs the real bodies on a synthetic game folder whose path holds `!`,
+# with TEMP under one that holds it too.
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -18,6 +19,9 @@ Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 
 $root = Join-Path $WorkRoot ('loader-switch-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $root -Force | Out-Null
+# The bodies extract a pack under TEMP, so it holds `!` as well.
+$tempDir = Join-Path $root 'Temp ! Folder'
+New-Item -ItemType Directory -Path $tempDir | Out-Null
 
 $marker = 'HeadTracking_Patched_Fixture_v1'
 $pristine = 'pristine assembly bytes'
@@ -112,7 +116,7 @@ function New-Case([string]$Name, [switch]$CecilInstall, [switch]$PlayersBepInEx,
 function Invoke-Script($Case, [string]$Script) {
     $Case.Runs++
     $stem = Join-Path $Case.Root ('run{0}' -f $Case.Runs)
-    $lines = @('@echo off', ('call "{0}\{1}.cmd" "{2}" /y > "{3}.out" 2>&1' -f $Case.Root, $Script, $Case.Game, $stem),
+    $lines = @('@echo off', ('set "TEMP={0}"' -f $tempDir), ('set "TMP={0}"' -f $tempDir), ('call "{0}\{1}.cmd" "{2}" /y > "{3}.out" 2>&1' -f $Case.Root, $Script, $Case.Game, $stem),
         ('> "{0}.exit" echo %errorlevel%' -f $stem))
     [IO.File]::WriteAllText("$stem.cmd", ($lines -join "`r`n") + "`r`n")
     $p = Start-Process $env:ComSpec -ArgumentList @('/d', '/c', ('""{0}.cmd""' -f $stem)) -WindowStyle Hidden -PassThru
