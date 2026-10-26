@@ -628,3 +628,27 @@ namespace UnityEngine
         }
     }
 }
+
+namespace UnityEngine.Rendering
+{
+    public struct ScriptableRenderContext
+    {
+    }
+
+    /// The SRP's per-camera events. RenderPipelineHelper finds this type by the name
+    /// "UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule", so a test that wants it
+    /// found points that assembly name at this one (RenderPipelineHelperTests).
+    public static class RenderPipelineManager
+    {
+        public static event System.Action<ScriptableRenderContext, Camera> beginCameraRendering;
+        public static event System.Action<ScriptableRenderContext, Camera> endCameraRendering;
+
+        public static bool HasSubscribers => beginCameraRendering != null || endCameraRendering != null;
+
+        public static void Render(Camera camera)
+        {
+            beginCameraRendering?.Invoke(default(ScriptableRenderContext), camera);
+            endCameraRendering?.Invoke(default(ScriptableRenderContext), camera);
+        }
+    }
+}

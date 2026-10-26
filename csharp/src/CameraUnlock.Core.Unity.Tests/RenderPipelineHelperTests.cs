@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using Xunit;
 using UnityEngine;
+using UnityEngine.Rendering;
 using CameraUnlock.Core.Unity.Rendering;
 
 namespace CameraUnlock.Core.Unity.Tests
@@ -105,6 +106,42 @@ namespace CameraUnlock.Core.Unity.Tests
             Camera.onPreCull(new Camera());
             Assert.Equal(1, pre);
             Assert.Equal(2, otherMod);
+        }
+
+        // A Unity build with the SRP: the legacy pair is subscribed beside the SRP pair, since a
+        // build can render with either, and Unregister takes both off. Before, the legacy pair was
+        // left out wherever RenderPipelineManager existed.
+        [Fact]
+        public void RegisterCallbacks_WithTheSrpPresent_SubscribesBothPairs_AndUnregisterRemovesBoth()
+        {
+            ResolveEventHandler coreModule = (sender, args) =>
+                new AssemblyName(args.Name).Name == "UnityEngine.CoreModule" ? typeof(RenderPipelineManager).Assembly : null;
+            AppDomain.CurrentDomain.AssemblyResolve += coreModule;
+            try
+            {
+                Assert.NotNull(Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule"));
+
+                int pre = 0;
+                int post = 0;
+                RenderPipelineHelper.RegisterCallbacks(cam => pre++, cam => post++);
+                RenderPipelineManager.Render(new Camera());
+                Assert.Equal(1, pre);
+                Assert.Equal(1, post);
+                Camera.onPreCull(new Camera());
+                Camera.onPostRender(new Camera());
+                Assert.Equal(2, pre);
+                Assert.Equal(2, post);
+
+                RenderPipelineHelper.UnregisterCallbacks();
+                Assert.False(RenderPipelineManager.HasSubscribers);
+                Assert.Null(Camera.onPreCull);
+                Assert.Null(Camera.onPostRender);
+            }
+            finally
+            {
+                RenderPipelineHelper.UnregisterCallbacks();
+                AppDomain.CurrentDomain.AssemblyResolve -= coreModule;
+            }
         }
     }
 }
