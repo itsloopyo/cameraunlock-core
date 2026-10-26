@@ -14,8 +14,8 @@
 //
 // Reconciling, not insert-once: a step that exists but no longer matches its
 // template is replaced in place, so template edits propagate on re-run.
-// Reusable-workflow callers are skipped (they inherit both steps from
-// release-bepinex-mod.yml).
+// Reusable-workflow callers are skipped (they inherit the steps from
+// release-mod.yml or release-bepinex-mod.yml).
 //
 //   node sync-discord-announce.mjs            # dry run, reports per repo
 //   node sync-discord-announce.mjs --apply    # write changes
@@ -160,7 +160,9 @@ function processRepo(repoPath) {
 
 function processWorkflowFile(repoName, wf) {
   const name = `${repoName}/${basename(wf.path)}`;
-  if (/release-bepinex-mod\.yml/.test(wf.text)) return { name, status: 'REUSABLE_CALLER' };
+  if (/^\s*uses:\s*\S*\/\.github\/workflows\/release-(bepinex-)?mod\.yml@/m.test(wf.text)) {
+    return { name, status: 'REUSABLE_CALLER' };
+  }
 
   const eol = wf.text.includes('\r\n') ? '\r\n' : '\n';
   const lines = wf.text.replace(/\r\n/g, '\n').split('\n');
