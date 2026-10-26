@@ -160,8 +160,7 @@ bool GetElementCanvasSize(::reframework::API::ManagedObject* element,
     count = 0;
     if (!element || !g_gui.findObjectsByType || !g_gui.playObjectType) return nullptr;
 
-    std::vector<void*> findArgs = { g_gui.playObjectType };
-    auto arrRet = g_gui.findObjectsByType->invoke(element, findArgs);
+    auto arrRet = InvokeMethodWithArg(g_gui.findObjectsByType, element, g_gui.playObjectType);
     if (arrRet.exception_thrown || !arrRet.ptr) return nullptr;
 
     auto arr = reinterpret_cast<::reframework::API::ManagedObject*>(arrRet.ptr);
