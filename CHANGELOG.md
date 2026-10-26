@@ -296,8 +296,8 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
   whole, and `-KeepConfig` is gone with the copy to %TEMP% it made.
 - `set-discord-webhook-secret.mjs` finds the callers of `release-mod.yml` as well as
   `release-bepinex-mod.yml`, and takes the secret only from the environment.
-- `pixi run test` is the whole suite (`check`, the PowerShell tests and the net35 framework
-  tests), and `check` runs the install-body tests and the PowerShell release, soak, notices and
+- `pixi run test` is the whole suite but the Docker-only `test-linux-probe` (`check`, the
+  PowerShell tests, the net35 framework tests and the isolated-input host), and `check` runs the install-body tests and the PowerShell release, soak, notices and
   differential-gate suites.
 
 ### Fixed - receivers, config saves and the install and release scripts

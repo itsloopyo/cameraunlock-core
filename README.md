@@ -312,7 +312,7 @@ tested. It is built into the base `cameraunlock` library, not the optional disco
 
 ```bash
 pixi run build          # dotnet build csharp -c Release
-pixi run test           # the whole suite: check, test-powershell and test-framework-net35
+pixi run test           # the whole suite but test-linux-probe: check, test-powershell, test-framework-net35 and test-isolated-input-host
 pixi run check          # what CI runs: the node gates, vectors, C#, C++, Java and the install bodies
 pixi run test-csharp    # dotnet test csharp
 pixi run pack           # dotnet pack to dist/

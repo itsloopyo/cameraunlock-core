@@ -7,10 +7,11 @@ platforms = ["win-64", "linux-64", "osx-64"]
 
 [tasks]
 # Testing
-# The whole suite: what a session runs on the tree about to become main. `check` is
-# what CI runs; the rest need what a CI runner lacks (the Windows ".NET Framework 3.5"
-# feature, core's full history, the desktop session the input tests use).
-test = { depends-on = ["check", "test-powershell", "test-framework-net35"] }
+# The whole suite but test-linux-probe, which needs Docker: what a session runs on the
+# tree about to become main. `check` is what CI runs; the rest need what a CI runner
+# lacks (the Windows ".NET Framework 3.5" feature, core's full history, the desktop
+# session the input tests use).
+test = { depends-on = ["check", "test-powershell", "test-framework-net35", "test-isolated-input-host"] }
 test-csharp = "dotnet test csharp --verbosity normal"
 test-quick = "dotnet test csharp --verbosity quiet"
 test-coverage = "dotnet test csharp --collect:\"XPlat Code Coverage\""
