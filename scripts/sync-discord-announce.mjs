@@ -23,7 +23,7 @@
 // Scans sibling repos of the cameraunlock-core checkout (../*-headtracking and
 // ../*-head-tracking). Pass explicit repo paths as args to limit the scan.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, basename } from 'node:path';
@@ -113,8 +113,9 @@ function resolveYamlValidator() {
 
 const pythonExe = resolveYamlValidator();
 
-function validateYaml(path) {
-  execFileSync(pythonExe, ['-c', 'import sys,yaml; yaml.safe_load(open(sys.argv[1],encoding="utf-8"))', path], {
+function validateYaml(text) {
+  execFileSync(pythonExe, ['-c', 'import sys,yaml; yaml.safe_load(sys.stdin.buffer.read().decode("utf-8"))'], {
+    input: text,
     stdio: 'pipe',
   });
 }
@@ -260,31 +261,21 @@ function processWorkflowFile(repoName, wf) {
   const out = newLines.join(eol);
   const opsLabel = ops.sort().join(',');
 
+  let yamlErr = '';
+  try {
+    validateYaml(out);
+  } catch (e) {
+    yamlErr = String(e.stderr || e);
+  }
+
   if (apply) {
+    // The file is left as it was when the render does not parse.
+    if (yamlErr) return { name, status: 'YAML_INVALID_REVERTED', error: yamlErr, wf: wf.path };
     writeFileSync(wf.path, out, 'utf8');
-    try {
-      validateYaml(wf.path);
-    } catch (e) {
-      writeFileSync(wf.path, wf.text, 'utf8'); // revert
-      return { name, status: 'YAML_INVALID_REVERTED', error: String(e.stderr || e), wf: wf.path };
-    }
     return { name, status: 'PATCHED', ops: opsLabel, wf: wf.path };
   }
 
-  // Dry run: validate a temp render without touching the file.
-  const tmp = wf.path + '.discord-dryrun';
-  writeFileSync(tmp, out, 'utf8');
-  let yamlOk = true;
-  let yamlErr = '';
-  try {
-    validateYaml(tmp);
-  } catch (e) {
-    yamlOk = false;
-    yamlErr = String(e.stderr || e);
-  } finally {
-    unlinkSync(tmp);
-  }
-  return { name, status: yamlOk ? 'WOULD_PATCH' : 'WOULD_FAIL_YAML', ops: opsLabel, error: yamlErr, wf: wf.path };
+  return { name, status: yamlErr ? 'WOULD_FAIL_YAML' : 'WOULD_PATCH', ops: opsLabel, error: yamlErr, wf: wf.path };
 }
 
 function discoverRepos() {
