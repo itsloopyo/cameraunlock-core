@@ -154,5 +154,19 @@ Assert-NotDeployed
 Invoke-Install -Typed @() -Expected 1 -Flags '/y'
 Assert-NotDeployed
 
-Write-Host 'PASS install prompt: typed path, quoted path, wrong folder, missing folder, relative path, cancel, /y non-interactive'
+# A game in a folder with an accented name. The shim hands the path to cmd.exe
+# in a batch stub, which an ASCII stub turned into `?`. The env var carries it
+# because the driver and stdin are read in the console's code page too.
+$accented = Join-Path $caseRoot ('J' + [char]0x00F6 + 'rg Game')
+New-Item -ItemType Directory -Path $accented | Out-Null
+[IO.File]::WriteAllText((Join-Path $accented 'fixture.exe'), '')
+$env:CUL_FIXTURE_PATH = $accented
+try {
+    Invoke-Install -Typed @() -Expected 0 -Flags '/y'
+} finally {
+    Remove-Item Env:CUL_FIXTURE_PATH
+}
+if (-not (Test-Path -LiteralPath (Join-Path $accented 'fixture.asi'))) { throw 'Not deployed into the folder with an accented name' }
+
+Write-Host 'PASS install prompt: typed path, quoted path, wrong folder, missing folder, relative path, cancel, /y non-interactive, accented folder'
 Write-Host "Fixtures retained at $root"

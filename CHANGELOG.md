@@ -285,7 +285,9 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
   back the VR runtimes it set aside when it stops part way.
 - `GamePathDetection.psm1` reads Steam and Xbox manifests as UTF-8, `package-bepinex-mod.ps1`
   reads `launcher-manifest.json` as UTF-8, and `generate-release-notes.ps1` reads commit subjects
-  as UTF-8, so a non-ASCII game folder or subject is no longer garbled.
+  as UTF-8. `find-game.ps1` writes the batch stub the install bodies call in the console's code
+  page instead of ASCII, which had turned an accented game folder into `?`, and stops with exit 1
+  on a character the code page cannot hold.
 - `Invoke-FetchLatestLoader` counts the 14-day soak from a release's newest asset upload, so an
   asset replaced after publishing waits out its own soak.
 - The config differential gate counts `pixi.lock`, `global.json` and `packages.lock.json` as

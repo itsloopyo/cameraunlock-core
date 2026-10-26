@@ -184,10 +184,10 @@ if (-not $gamePath) {
     exit 2
 }
 
-# ASCII encoding for batch. Paths with extended chars (unusual on
-# Windows game installs) would need UTF-8 but we write with ASCII
-# to stay compatible with cmd.exe's legacy interpreter without BOM
-# tricks. Real paths under Steam/GOG/Epic are ASCII in practice.
+# cmd.exe reads a batch file in the console's code page, so the stub is
+# written in it. ASCII turned every other character into `?`, so a game in a
+# folder with an accented name was not found by the install body. A
+# character the code page cannot hold stops here instead.
 #
 # WriteAllBytes (single tight win32 call) instead of Out-File: the
 # `.cmd` extension trips Windows Defender's script-scan, which briefly
@@ -232,5 +232,12 @@ $lines = @(
     "set `"GAME_DISPLAY_NAME=$displayNameCmd`""
     "set `"ENV_VAR_NAME=$envVarNameCmd`""
 )
-[System.IO.File]::WriteAllBytes($OutFile, [System.Text.Encoding]::ASCII.GetBytes($lines -join "`r`n"))
+$stubEncoding = [System.Text.Encoding]::GetEncoding([Console]::OutputEncoding.CodePage,
+    [System.Text.EncoderFallback]::ExceptionFallback, [System.Text.DecoderFallback]::ExceptionFallback)
+try {
+    $stubBytes = $stubEncoding.GetBytes($lines -join "`r`n")
+} catch [System.Text.EncoderFallbackException] {
+    throw "The game path or name holds a character the console's code page ($($stubEncoding.CodePage)) cannot hold, so cmd.exe cannot be handed it: $gamePath"
+}
+[System.IO.File]::WriteAllBytes($OutFile, $stubBytes)
 exit 0
