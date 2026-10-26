@@ -1,5 +1,8 @@
 #include <cameraunlock/input/key_bindings.h>
+#include <cameraunlock/config/value_codecs.h>
 #include <cameraunlock/input/key_names.g.h>
+
+#include "../config/ascii_text_internal.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -15,25 +18,9 @@ constexpr int kMaxCode = 0xFE;
 static_assert(kKeyModifierCount == 3, "KeyModifiers declares Ctrl, Shift and Alt as the flags 1, 2 and 4");
 constexpr unsigned kAllModifiers = (1u << kKeyModifierCount) - 1;
 
-std::string_view Trim(std::string_view text) {
-    std::size_t begin = 0;
-    std::size_t end = text.size();
-    while (begin < end && (text[begin] == ' ' || text[begin] == '\t')) ++begin;
-    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t')) --end;
-    return text.substr(begin, end - begin);
-}
-
-char FoldAscii(char c) {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-bool EqualsAsciiIgnoreCase(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        if (FoldAscii(a[i]) != FoldAscii(b[i])) return false;
-    }
-    return true;
-}
+using config::detail::EqualsAsciiIgnoreCase;
+using config::detail::Quote;
+using config::detail::TrimSpaceOrTab;
 
 std::vector<std::string_view> Split(std::string_view text, char separator) {
     std::vector<std::string_view> parts;
@@ -47,10 +34,6 @@ std::vector<std::string_view> Split(std::string_view text, char separator) {
         parts.push_back(text.substr(start, at - start));
         start = at + 1;
     }
-}
-
-std::string Quote(std::string_view text) {
-    return "'" + std::string(text) + "'";
 }
 
 // The index into kKeyModifiers of the modifier a token names, or -1. Its flag is 1 << index.
@@ -140,20 +123,20 @@ KeyBindingsParseResult Fail(std::string error) {
 
 KeyBindingsParseResult ParseKeyBindings(std::string_view text) {
     KeyBindingsParseResult result;
-    if (Trim(text).empty()) return result;
+    if (TrimSpaceOrTab(text).empty()) return result;
 
     const std::vector<std::string_view> items = Split(text, ',');
     for (std::size_t n = 0; n < items.size(); ++n) {
-        const std::string_view item = Trim(items[n]);
+        const std::string_view item = TrimSpaceOrTab(items[n]);
         if (item.empty()) {
-            return Fail("item " + std::to_string(n + 1) + " of " + Quote(Trim(text)) +
+            return Fail("item " + std::to_string(n + 1) + " of " + Quote(TrimSpaceOrTab(text)) +
                         " is empty: expected a key such as End or Ctrl+Shift+Y between commas");
         }
 
         const std::vector<std::string_view> tokens = Split(item, '+');
         KeyBinding binding;
         for (std::size_t t = 0; t + 1 < tokens.size(); ++t) {
-            const int index = ModifierIndex(Trim(tokens[t]));
+            const int index = ModifierIndex(TrimSpaceOrTab(tokens[t]));
             if (index < 0) {
                 return Fail(Quote(item) + ": expected Ctrl, Shift or Alt before each '+' and one key after the last");
             }
@@ -165,7 +148,7 @@ KeyBindingsParseResult ParseKeyBindings(std::string_view text) {
             binding.modifiers = binding.modifiers | modifier;
         }
 
-        const std::string_view key = Trim(tokens.back());
+        const std::string_view key = TrimSpaceOrTab(tokens.back());
         if (key.empty()) {
             return Fail(Quote(item) + ": expected Ctrl, Shift or Alt before each '+' and one key after the last");
         }

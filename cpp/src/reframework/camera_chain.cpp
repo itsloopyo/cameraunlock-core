@@ -44,6 +44,9 @@ void* CameraTransformResolver::ResolveCamera() {
     auto sm = ::reframework::API::get()->get_native_singleton("via.SceneManager");
     if (!sm) return nullptr;
 
+    // Reflecting through a camera that was torn down during a scene transition
+    // can dereference freed memory inside the engine; guard the whole chain so
+    // a stale object yields nullptr instead of crashing.
     __try {
         auto mv = CallMethod(m_getMainView, sm);
         if (!mv) return nullptr;
@@ -70,19 +73,10 @@ float CameraTransformResolver::ResolveFovDegrees(void* camera) {
 
 void* CameraTransformResolver::ResolveTransform(void** outCamera) {
     if (outCamera) *outCamera = nullptr;
-    if (!m_initialized || m_failed) return nullptr;
+    void* cam = ResolveCamera();
+    if (!cam) return nullptr;
 
-    auto sm = ::reframework::API::get()->get_native_singleton("via.SceneManager");
-    if (!sm) return nullptr;
-
-    // Reflecting through a camera that was torn down during a scene transition
-    // can dereference freed memory inside the engine; guard the whole chain so
-    // a stale object yields nullptr instead of crashing.
     __try {
-        auto mv = CallMethod(m_getMainView, sm);
-        if (!mv) return nullptr;
-        auto cam = CallMethod(m_getPrimaryCamera, mv);
-        if (!cam) return nullptr;
         auto go = CallMethod(m_getGameObject, cam);
         if (!go) return nullptr;
         void* transform = CallMethod(m_getTransform, go);

@@ -20,10 +20,12 @@
 
 namespace cameraunlock::reframework {
 
+constexpr uint64_t kMicrosPerSecond = 1000000ull;
+
 // Minimum gap between repeats of the camera-controller-not-found warning.
 // Wall-clock, not frame-count: a frame-gated warning writes hundreds of lines
 // an hour on a high-refresh display and buries the startup sequence.
-constexpr uint64_t kHookWarnIntervalUs = 30ull * 1000000ull;
+constexpr uint64_t kHookWarnIntervalUs = 30ull * kMicrosPerSecond;
 
 static CameraPipelineDescriptor g_descriptor;
 
@@ -89,7 +91,7 @@ static struct {
 // A clean eye that moves further than this in one frame is a camera cut
 // (teleport, load, cinematic hand-back), not walking.
 constexpr float kCameraCutMetres = 1.0f;
-constexpr uint64_t kClampSampleIntervalUs = 10ull * 1000000ull;
+constexpr uint64_t kClampSampleIntervalUs = 10ull * kMicrosPerSecond;
 
 static struct {
     bool loggedFirst = false;
@@ -106,6 +108,11 @@ static struct {
 // transform, which the load may have freed.
 static void* g_cachedTransform = nullptr;
 static void* g_cachedCamera = nullptr;
+
+static void InvalidateCameraCache() {
+    g_cachedTransform = nullptr;
+    g_cachedCamera = nullptr;
+}
 
 static void* GetCameraTransformCached() {
     if (g_cachedTransform) return g_cachedTransform;
@@ -165,7 +172,7 @@ static float ZoomFactor() {
 // lean in that comes up short reads straight off this line: requested is the
 // lean after the position limits and the zoom factor, applied is what the clamp,
 // the forward stop and the hand-over left of it.
-constexpr uint64_t kLeanSampleIntervalUs = 2ull * 1000000ull;
+constexpr uint64_t kLeanSampleIntervalUs = 2ull * kMicrosPerSecond;
 
 static void LogLean(const cameraunlock::math::Vec3& requested, const cameraunlock::math::Vec3& applied,
                     const cameraunlock::math::Vec3& rig, const cameraunlock::math::Vec3& aimForward, bool aiming,
@@ -359,8 +366,7 @@ void CameraPipelinePostEndRendering() {
 
 static int CameraUpdatePreHook(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys,
                                unsigned long long ret_addr) {
-    g_cachedTransform = nullptr;
-    g_cachedCamera = nullptr;
+    InvalidateCameraCache();
 
     if (!g_saved.hasGameMatrix || !PluginMod::Instance().IsEnabled()) {
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
@@ -540,6 +546,10 @@ bool GetMarkerFocalLengths(float& fx, float& fy) {
 
 // --- Per-frame projection ---
 
+// A resolved FOV at or below this counts as no reading (ResolveFovDegrees gives 0 when it
+// fails): the projection keeps its last FOV and the aim projection is not valid.
+constexpr float kMinUsableFovDegrees = 10.f;
+
 static void UpdateFrameProjection(const Matrix4x4f& clean, const Matrix4x4f& head) {
     const float dt = PluginMod::Instance().GetLastDeltaTime();
 
@@ -548,7 +558,7 @@ static void UpdateFrameProjection(const Matrix4x4f& clean, const Matrix4x4f& hea
     g_projection.cleanToHeadValid = true;
 
     float rawFov = g_cameraResolver.ResolveFovDegrees(g_cachedCamera);
-    if (rawFov <= 10.f) rawFov = g_projection.fovDegrees;
+    if (rawFov <= kMinUsableFovDegrees) rawFov = g_projection.fovDegrees;
     static cameraunlock::math::SmoothedFloat s_fov;
     g_projection.fovDegrees = s_fov.Update(rawFov, kProjectionSmoothing, dt);
 
@@ -577,7 +587,7 @@ static void UpdateFrameProjection(const Matrix4x4f& clean, const Matrix4x4f& hea
         static cameraunlock::math::SmoothedFloat s_aimUp;
         g_projection.aimTanRight = s_aimRight.Update(rawRight, kProjectionSmoothing, dt);
         g_projection.aimTanUp = s_aimUp.Update(rawUp, kProjectionSmoothing, dt);
-        g_projection.aimValid = g_projection.fovDegrees > 10.f;
+        g_projection.aimValid = g_projection.fovDegrees > kMinUsableFovDegrees;
     } else {
         g_projection.aimValid = false;
     }
@@ -699,8 +709,7 @@ void CameraPipelinePostRender() {
         }
     }
 
-    g_cachedTransform = nullptr;
-    g_cachedCamera = nullptr;
+    InvalidateCameraCache();
 }
 
 } // namespace cameraunlock::reframework

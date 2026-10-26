@@ -254,6 +254,26 @@ std::vector<std::pair<std::string, std::string>> ParseIniConfig(const std::strin
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
+namespace {
+
+// A smoothing that does not parse takes the shipped default rather than keeping the
+// current value, unlike the range-guarded keys.
+void ApplySmoothing(const char* key, const std::string& value, double shipped_default,
+                    const HeadTrackingConfig::LogFn& log, float& out) {
+    float parsed = 0.0f;
+    if (TryParseConfigFloat(value, parsed)) {
+        out = Clamp01(parsed);
+        return;
+    }
+    out = static_cast<float>(shipped_default);
+    if (log) {
+        log(std::string("Config key '") + key + "' has an unusable value '" + value +
+            "' (not a finite number) - using " + std::to_string(out));
+    }
+}
+
+}  // namespace
+
 void HeadTrackingConfig::ApplyValues(
     const std::vector<std::pair<std::string, std::string>>& values, const LogFn& log) {
     bool saw_limit_y = false;
@@ -321,25 +341,9 @@ void HeadTrackingConfig::ApplyValues(
         } else if (canonical == config_keys::kInvertRoll) {
             if (TryParseConfigBool(value, bool_val)) invert_roll = bool_val;
         } else if (canonical == config_keys::kLocalSmoothing) {
-            if (TryParseConfigFloat(value, float_val)) {
-                local_smoothing = Clamp01(float_val);
-            } else {
-                local_smoothing = static_cast<float>(math::kDefaultLocalSmoothing);
-                if (log) {
-                    log("Config key 'LocalSmoothing' has an unusable value '" + value +
-                        "' (not a finite number) - using " + std::to_string(local_smoothing));
-                }
-            }
+            ApplySmoothing("LocalSmoothing", value, math::kDefaultLocalSmoothing, log, local_smoothing);
         } else if (canonical == config_keys::kRemoteSmoothing) {
-            if (TryParseConfigFloat(value, float_val)) {
-                remote_smoothing = Clamp01(float_val);
-            } else {
-                remote_smoothing = static_cast<float>(math::kDefaultRemoteSmoothing);
-                if (log) {
-                    log("Config key 'RemoteSmoothing' has an unusable value '" + value +
-                        "' (not a finite number) - using " + std::to_string(remote_smoothing));
-                }
-            }
+            ApplySmoothing("RemoteSmoothing", value, math::kDefaultRemoteSmoothing, log, remote_smoothing);
         } else if (canonical == config_keys::kWorldSpaceYaw) {
             if (TryParseConfigBool(value, bool_val)) world_space_yaw = bool_val;
         } else if (canonical == config_keys::kAimDecoupling) {

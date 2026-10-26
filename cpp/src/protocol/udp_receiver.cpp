@@ -44,6 +44,20 @@ int64_t NowUs() {
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+/// A sender packed as (s_addr << 16) | port, the receiver's key for a source.
+uint64_t SourceOf(const sockaddr_in& sender) {
+    return (static_cast<uint64_t>(sender.sin_addr.s_addr) << 16) | ntohs(sender.sin_port);
+}
+
+/// "ip:port" for a source packed by SourceOf.
+std::string DescribeSource(uint64_t source) {
+    in_addr addr = {};
+    addr.s_addr = static_cast<uint32_t>(source >> 16);
+    char ip[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &addr, ip, sizeof(ip));
+    return std::string(ip) + ":" + std::to_string(static_cast<uint16_t>(source & 0xFFFF));
+}
+
 }  // namespace
 
 UdpReceiver::~UdpReceiver() {
@@ -239,12 +253,7 @@ void UdpReceiver::Stop() {
     m_failed.store(false, std::memory_order_release);
     m_receiveFailed.store(false, std::memory_order_release);
     m_trackingData.Reset();
-    m_yawOffset.store(0.0f, std::memory_order_relaxed);
-    m_pitchOffset.store(0.0f, std::memory_order_relaxed);
-    m_rollOffset.store(0.0f, std::memory_order_relaxed);
-    m_posXOffset.store(0.0f, std::memory_order_relaxed);
-    m_posYOffset.store(0.0f, std::memory_order_relaxed);
-    m_posZOffset.store(0.0f, std::memory_order_relaxed);
+    ResetOffset();
     m_recenterRequested.store(false, std::memory_order_relaxed);
     m_lastRecenterCounter = 0;
     m_hasRecenterCounter = false;
@@ -274,11 +283,7 @@ bool UdpReceiver::IsReceiving() const {
     int64_t lastTs = m_lastReceiveTimestamp.load(std::memory_order_acquire);
     if (lastTs == 0) return false;
 
-    auto now = std::chrono::steady_clock::now();
-    int64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
-        now.time_since_epoch()).count();
-
-    int64_t elapsedMs = (nowUs - lastTs) / 1000;
+    int64_t elapsedMs = (NowUs() - lastTs) / 1000;
     return elapsedMs < kConnectionTimeoutMs;
 }
 
@@ -328,19 +333,6 @@ void UdpReceiver::ResetOffset() {
     m_posZOffset.store(0.0f, std::memory_order_relaxed);
 }
 
-namespace {
-
-/// "ip:port" for a source packed as (s_addr << 16) | port.
-std::string DescribeSource(uint64_t source) {
-    in_addr addr = {};
-    addr.s_addr = static_cast<uint32_t>(source >> 16);
-    char ip[INET_ADDRSTRLEN] = {};
-    inet_ntop(AF_INET, &addr, ip, sizeof(ip));
-    return std::string(ip) + ":" + std::to_string(static_cast<uint16_t>(source & 0xFFFF));
-}
-
-}  // namespace
-
 // One datagram of at least the pose's length, on the receive thread.
 //
 // A datagram that does not parse changes nothing: not the pose, not the source the
@@ -369,8 +361,7 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
     // doing it hides the real problem, so the second one is dropped and
     // named in the log.
 
-    const uint64_t source =
-        (static_cast<uint64_t>(senderAddr.sin_addr.s_addr) << 16) | ntohs(senderAddr.sin_port);
+    const uint64_t source = SourceOf(senderAddr);
 
     // Census of every endpoint that sends here, logged once each. Which
     // apps are really on this port - and whether one of them rotates its
@@ -383,10 +374,7 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
         }
         if (!known && m_seenSourceCount < kMaxSeenSources) {
             m_seenSources[m_seenSourceCount++] = source;
-            char ip[INET_ADDRSTRLEN] = {};
-            inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
-            m_log(std::string("tracker source seen: ") + ip + ":" +
-                  std::to_string(ntohs(senderAddr.sin_port)) + " (" +
+            m_log("tracker source seen: " + DescribeSource(source) + " (" +
                   std::to_string(m_seenSourceCount) + " distinct so far)");
         }
     }
@@ -412,12 +400,10 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
             return;
         }
         if (m_log && m_avoidSource != 0) {
-            char ip[INET_ADDRSTRLEN] = {};
-            inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
             m_log(std::string(source == m_avoidSource
                                   ? "only one tracker source is sending; staying on "
                                   : "switched to tracker source ") +
-                  ip + ":" + std::to_string(ntohs(senderAddr.sin_port)));
+                  DescribeSource(source));
         }
         m_avoidSource = 0;
         m_primarySource = source;
@@ -447,10 +433,7 @@ void UdpReceiver::HandleDatagram(const char* buffer, int bytesReceived, const so
 
         if (incumbentSilent) {
             if (m_log) {
-                char ip[INET_ADDRSTRLEN] = {};
-                inet_ntop(AF_INET, &senderAddr.sin_addr, ip, sizeof(ip));
-                m_log(std::string("tracker source went silent; switching to ") +
-                      ip + ":" + std::to_string(ntohs(senderAddr.sin_port)));
+                m_log("tracker source went silent; switching to " + DescribeSource(source));
             }
             m_primarySource = source;
             m_primaryLastSeenUs = arrivedUs;
@@ -583,10 +566,8 @@ void UdpReceiver::Received(const char* buffer, int bytes, int error, const socka
         return;
     }
     if (!m_firstPacketLogged++ && m_log) {
-        char ip[INET_ADDRSTRLEN] = {};
-        inet_ntop(AF_INET, &sender.sin_addr, ip, sizeof(ip));
-        m_log("First UDP packet received: " + std::to_string(bytes) + " bytes from " + ip + ":" +
-              std::to_string(ntohs(sender.sin_port)));
+        m_log("First UDP packet received: " + std::to_string(bytes) + " bytes from " +
+              DescribeSource(SourceOf(sender)));
     }
     if (bytes < static_cast<int>(OpenTrackPacket::kMinPacketSize)) {
         if (!m_shortPacketLogged++ && m_log) {

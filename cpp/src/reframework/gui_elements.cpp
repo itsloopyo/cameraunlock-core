@@ -111,26 +111,27 @@ void SetTransformPosition(::reframework::API::ManagedObject* transform, float x,
     InvokeMethodWithArg(g_gui.setPosition, transform, (void*)&pos[0]);
 }
 
-// Both position reads go through TryInvoke rather than Method::invoke. A read
+// The two-float reads go through TryInvoke rather than Method::invoke. A read
 // that failed at the SDK level comes back zero-filled with exception_thrown
 // clear, and (0, 0) is a position a GUI element genuinely holds - so without the
 // SDK's own result there is nothing to tell a broken read from the canvas
 // origin, and a caller offsetting from it would move the element to a place it
 // was never at.
-bool GetTransformPosition(::reframework::API::ManagedObject* transform, float& x, float& y) {
+static bool TryInvokeFloat2(::reframework::API::Method* method, ::reframework::API::ManagedObject* obj,
+                            float& first, float& second) {
     ::reframework::InvokeRet ret;
-    if (!TryInvoke(g_gui.getPosition, transform, ret)) return false;
-    x = *reinterpret_cast<const float*>(&ret.bytes[0]);
-    y = *reinterpret_cast<const float*>(&ret.bytes[4]);
+    if (!TryInvoke(method, obj, ret)) return false;
+    first = *reinterpret_cast<const float*>(&ret.bytes[0]);
+    second = *reinterpret_cast<const float*>(&ret.bytes[4]);
     return true;
 }
 
+bool GetTransformPosition(::reframework::API::ManagedObject* transform, float& x, float& y) {
+    return TryInvokeFloat2(g_gui.getPosition, transform, x, y);
+}
+
 bool GetTransformGlobalPosition(::reframework::API::ManagedObject* transform, float& x, float& y) {
-    ::reframework::InvokeRet ret;
-    if (!TryInvoke(g_gui.getGlobalPosition, transform, ret)) return false;
-    x = *reinterpret_cast<const float*>(&ret.bytes[0]);
-    y = *reinterpret_cast<const float*>(&ret.bytes[4]);
-    return true;
+    return TryInvokeFloat2(g_gui.getGlobalPosition, transform, x, y);
 }
 
 bool ShiftElementView(::reframework::API::ManagedObject* element, float dx, float dy) {
@@ -147,11 +148,7 @@ bool GetElementCanvasSize(::reframework::API::ManagedObject* element,
     auto view = GetElementView(element);
     if (!view) return false;
 
-    ::reframework::InvokeRet sizeRet;
-    if (!TryInvoke(g_gui.viewGetScreenSize, view, sizeRet)) return false;
-
-    canvasW = *reinterpret_cast<const float*>(&sizeRet.bytes[0]);
-    canvasH = *reinterpret_cast<const float*>(&sizeRet.bytes[4]);
+    if (!TryInvokeFloat2(g_gui.viewGetScreenSize, view, canvasW, canvasH)) return false;
     return canvasW > 100.f && canvasW < 16384.f && canvasH > 100.f && canvasH < 16384.f;
 }
 

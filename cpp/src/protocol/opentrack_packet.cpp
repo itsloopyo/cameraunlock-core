@@ -5,15 +5,15 @@
 namespace cameraunlock {
 
 namespace {
+// Matches OpenTrackPacket.CmToMeters on the C# side.
+constexpr float kCmToMeters = 0.01f;
+
 // A finite double can exceed the float range (e.g. 1e300), in which case the
 // narrowing cast produces +/-inf - which then poisons every downstream
 // sin/cos and view-matrix computation with NaN. Checking isnan/isinf on the
 // source double is not enough; the float result must also be finite. Packets
 // arrive from any host on the network (the socket binds INADDR_ANY), so this
 // is an untrusted-input boundary.
-// Matches OpenTrackPacket.CmToMeters on the C# side.
-constexpr float kCmToMeters = 0.01f;
-
 // The comparison is false for a NaN and for either infinity, so one test covers
 // finiteness and the bound.
 inline bool Within(double v, float bound, float& out) {
@@ -72,30 +72,14 @@ bool OpenTrackPacket::TryParsePosition(const void* data, size_t length, Position
 }
 
 bool OpenTrackPacket::TryParseAll(const void* data, size_t length, TrackingPose& pose, PositionData& position) {
-    if (data == nullptr || length < kMinPacketSize) {
+    TrackingPose parsedPose;
+    PositionData parsedPosition;
+    if (!TryParse(data, length, parsedPose) || !TryParsePosition(data, length, parsedPosition)) {
         return false;
     }
 
-    const auto* bytes = static_cast<const uint8_t*>(data);
-
-    double px, py, pz, yaw, pitch, roll;
-    std::memcpy(&px, bytes + kPosXOffset, sizeof(double));
-    std::memcpy(&py, bytes + kPosYOffset, sizeof(double));
-    std::memcpy(&pz, bytes + kPosZOffset, sizeof(double));
-    std::memcpy(&yaw, bytes + kYawOffset, sizeof(double));
-    std::memcpy(&pitch, bytes + kPitchOffset, sizeof(double));
-    std::memcpy(&roll, bytes + kRollOffset, sizeof(double));
-
-    float fyaw, fpitch, froll, fx, fy, fz;
-    // See TryParsePosition: validate the raw double's narrowing, scale in float.
-    if (!Within(yaw, kMaxRotationDegrees, fyaw) || !Within(pitch, kMaxRotationDegrees, fpitch) ||
-        !Within(roll, kMaxRotationDegrees, froll) || !Within(px, kMaxPositionCm, fx) ||
-        !Within(py, kMaxPositionCm, fy) || !Within(pz, kMaxPositionCm, fz)) {
-        return false;
-    }
-
-    pose = TrackingPose(fyaw, fpitch, froll);
-    position = PositionData(fx * kCmToMeters, fy * kCmToMeters, fz * kCmToMeters);
+    pose = parsedPose;
+    position = parsedPosition;
     return true;
 }
 

@@ -15,7 +15,9 @@
 #endif
 #include <windows.h>
 
+#include <cstddef>
 #include <cstring>
+#include <iterator>
 
 namespace cameraunlock::reframework {
 
@@ -70,6 +72,56 @@ static struct {
     ::reframework::API::Method* getGameObject = nullptr;
 } g_state;
 
+namespace {
+
+constexpr std::size_t kSingletonNameCapacity = 256;
+
+// FindSingleton answers in a static buffer its next call overwrites, so a name kept past
+// that call is copied into one of the caller's own.
+const char* KeepSingletonName(const char* name, char (&buffer)[kSingletonNameCapacity]) {
+    strncpy(buffer, name, kSingletonNameCapacity - 1);
+    buffer[kSingletonNameCapacity - 1] = '\0';
+    return buffer;
+}
+
+template <std::size_t N>
+bool Probe(::reframework::API::TDB* tdb, const ::reframework::API* api, const char* typeName,
+           const char* (&methodNames)[N], MethodCheck& out, const char* label) {
+    return ProbeManager(tdb, api, typeName, methodNames, static_cast<int>(N), out, label);
+}
+
+void DiscoverGuiOpenCloseChain(::reframework::API::TDB* tdb, const ::reframework::API* api) {
+    const char* guiNames[] = {"GuiManager", "GUIManager"};
+    for (auto gn : guiNames) {
+        auto guiType = FindType(tdb, gn);
+        if (!guiType) continue;
+        auto openCloseMethod = guiType->find_method("get_GuiOpenCloseData");
+        if (!openCloseMethod) openCloseMethod = guiType->find_method("get_guiOpenCloseData");
+        if (!openCloseMethod) continue;
+
+        auto sn = FindSingleton(api, gn);
+        if (!sn) continue;
+
+        const char* ocdNames[] = { "gui.GuiOpenCloseData", "GuiOpenCloseData" };
+        for (auto ocdn : ocdNames) {
+            auto ocdType = FindType(tdb, ocdn);
+            if (!ocdType) continue;
+            const char* ilMethods[] = {"get_CurrActiveInputevel", "get_CurrActiveInputLevel"};
+            auto ilMethod = FindMethod(ocdType, ilMethods, static_cast<int>(std::size(ilMethods)));
+            if (!ilMethod) continue;
+
+            static char guiSnBuf[kSingletonNameCapacity];
+            g_state.guiSingletonName = KeepSingletonName(sn, guiSnBuf);
+            g_state.guiOpenClose.method = openCloseMethod;
+            g_state.inputLevel.method = ilMethod;
+            LogInfo("Probe OK: GuiOpenCloseData -> CurrActiveInputLevel (singleton: %s)", guiSnBuf);
+            return;
+        }
+    }
+}
+
+}  // namespace
+
 void DiscoverManagerProbes() {
     const auto api = ::reframework::API::get().get();
     auto tdb = api->tdb();
@@ -81,79 +133,47 @@ void DiscoverManagerProbes() {
     LogInfo("GlobalSpeed: %s", g_state.getGlobalSpeed ? "found" : "NOT found");
 
     { const char* methods[] = {"get_isPaused", "get_IsPaused", "get_Paused"};
-      ProbeManager(tdb, api, "PauseManager", methods, 3, g_state.isPaused, "PauseManager.isPaused"); }
+      Probe(tdb, api, "PauseManager", methods, g_state.isPaused, "PauseManager.isPaused"); }
     { const char* methods[] = {"get_lastPauseBits", "get_PauseBits", "get_currentPauseFlag", "get_PauseFlag"};
-      ProbeManager(tdb, api, "PauseManager", methods, 4, g_state.pauseBits, "PauseManager.pauseBits"); }
+      Probe(tdb, api, "PauseManager", methods, g_state.pauseBits, "PauseManager.pauseBits"); }
     { const char* methods[] = {"get_IsPlayingEvent", "get_isPlayingEvent"};
-      if (!ProbeManager(tdb, api, "GuiManager", methods, 2, g_state.isPlayingEvent, "GuiManager.IsPlayingEvent"))
-          ProbeManager(tdb, api, "GUIManager", methods, 2, g_state.isPlayingEvent, "GUIManager.IsPlayingEvent"); }
+      if (!Probe(tdb, api, "GuiManager", methods, g_state.isPlayingEvent, "GuiManager.IsPlayingEvent"))
+          Probe(tdb, api, "GUIManager", methods, g_state.isPlayingEvent, "GUIManager.IsPlayingEvent"); }
     { const char* methods[] = {"get_CurrentSituationType", "get_SituationType"};
-      if (!ProbeManager(tdb, api, "GuiManager", methods, 2, g_state.situationType, "GuiManager.SituationType"))
-          ProbeManager(tdb, api, "GUIManager", methods, 2, g_state.situationType, "GUIManager.SituationType"); }
+      if (!Probe(tdb, api, "GuiManager", methods, g_state.situationType, "GuiManager.SituationType"))
+          Probe(tdb, api, "GUIManager", methods, g_state.situationType, "GUIManager.SituationType"); }
     { const char* methods[] = {"get_isOpen", "get_IsOpen"};
-      if (!ProbeManager(tdb, api, "GuiManager", methods, 2, g_state.isOpen, "GuiManager.isOpen"))
-          ProbeManager(tdb, api, "GUIManager", methods, 2, g_state.isOpen, "GUIManager.isOpen"); }
+      if (!Probe(tdb, api, "GuiManager", methods, g_state.isOpen, "GuiManager.isOpen"))
+          Probe(tdb, api, "GUIManager", methods, g_state.isOpen, "GUIManager.isOpen"); }
     { const char* methods[] = {"get_isEnableSystemFlow", "get_IsEnableSystemFlow"};
-      if (!ProbeManager(tdb, api, "GuiManager", methods, 2, g_state.isSystemFlow, "GuiManager.isEnableSystemFlow"))
-          ProbeManager(tdb, api, "GUIManager", methods, 2, g_state.isSystemFlow, "GUIManager.isEnableSystemFlow"); }
+      if (!Probe(tdb, api, "GuiManager", methods, g_state.isSystemFlow, "GuiManager.isEnableSystemFlow"))
+          Probe(tdb, api, "GUIManager", methods, g_state.isSystemFlow, "GUIManager.isEnableSystemFlow"); }
     { const char* methods[] = {"get_isEnableEventFlow", "get_IsEnableEventFlow"};
-      if (!ProbeManager(tdb, api, "GuiManager", methods, 2, g_state.isEventFlow, "GuiManager.isEnableEventFlow"))
-          ProbeManager(tdb, api, "GUIManager", methods, 2, g_state.isEventFlow, "GUIManager.isEnableEventFlow"); }
+      if (!Probe(tdb, api, "GuiManager", methods, g_state.isEventFlow, "GuiManager.isEnableEventFlow"))
+          Probe(tdb, api, "GUIManager", methods, g_state.isEventFlow, "GUIManager.isEnableEventFlow"); }
     { const char* methods[] = {"get_isPlaying", "get_IsPlaying"};
-      if (!ProbeManager(tdb, api, "SequenceManager", methods, 2, g_state.isPlaying, "SequenceManager.isPlaying"))
-          ProbeManager(tdb, api, "CutsceneManager", methods, 2, g_state.isPlaying, "CutsceneManager.isPlaying"); }
+      if (!Probe(tdb, api, "SequenceManager", methods, g_state.isPlaying, "SequenceManager.isPlaying"))
+          Probe(tdb, api, "CutsceneManager", methods, g_state.isPlaying, "CutsceneManager.isPlaying"); }
     { const char* methods[] = {"get_isRunningTransition", "get_IsRunningTransition"};
-      ProbeManager(tdb, api, "SceneTransitionManager", methods, 2, g_state.isTransition, "SceneTransitionManager.isRunningTransition"); }
+      Probe(tdb, api, "SceneTransitionManager", methods, g_state.isTransition, "SceneTransitionManager.isRunningTransition"); }
     { const char* methods[] = {"get_Status", "get_CurrentStatus", "get_status"};
-      ProbeManager(tdb, api, "GameFlowManager", methods, 3, g_state.flowStatus, "GameFlowManager.Status"); }
+      Probe(tdb, api, "GameFlowManager", methods, g_state.flowStatus, "GameFlowManager.Status"); }
     { const char* methods[] = {"getPlayerContextRef", "get_PlayerContextRef", "get_playerContextRef"};
-      ProbeManager(tdb, api, "CharacterManager", methods, 3, g_state.playerContext, "CharacterManager.playerCtx"); }
+      Probe(tdb, api, "CharacterManager", methods, g_state.playerContext, "CharacterManager.playerCtx"); }
     if (!g_state.playerContext.method) {
         const char* methods[] = {"getCurrentSurvivor", "get_CurrentSurvivor"};
-        ProbeManager(tdb, api, "survivor.SurvivorManager", methods, 2, g_state.playerContext, "SurvivorManager.currentSurvivor");
+        Probe(tdb, api, "survivor.SurvivorManager", methods, g_state.playerContext, "SurvivorManager.currentSurvivor");
     }
 
-    // GuiOpenCloseData chain
-    {
-        const char* guiNames[] = {"GuiManager", "GUIManager"};
-        for (auto gn : guiNames) {
-            auto guiType = FindType(tdb, gn);
-            if (!guiType) continue;
-            auto openCloseMethod = guiType->find_method("get_GuiOpenCloseData");
-            if (!openCloseMethod) openCloseMethod = guiType->find_method("get_guiOpenCloseData");
-            if (!openCloseMethod) continue;
-
-            auto sn = FindSingleton(api, gn);
-            if (!sn) continue;
-
-            const char* ocdNames[] = { "gui.GuiOpenCloseData", "GuiOpenCloseData" };
-            for (auto ocdn : ocdNames) {
-                auto ocdType = FindType(tdb, ocdn);
-                if (!ocdType) continue;
-                const char* ilMethods[] = {"get_CurrActiveInputevel", "get_CurrActiveInputLevel"};
-                auto ilMethod = FindMethod(ocdType, ilMethods, 2);
-                if (!ilMethod) continue;
-
-                static char guiSnBuf[256];
-                strncpy(guiSnBuf, sn, 255);
-                guiSnBuf[255] = '\0';
-                g_state.guiSingletonName = guiSnBuf;
-                g_state.guiOpenClose.method = openCloseMethod;
-                g_state.inputLevel.method = ilMethod;
-                LogInfo("Probe OK: GuiOpenCloseData -> CurrActiveInputLevel (singleton: %s)", guiSnBuf);
-                goto doneOpenClose;
-            }
-        }
-        doneOpenClose:;
-    }
+    DiscoverGuiOpenCloseChain(tdb, api);
 
     // EventManager / MovieManager
     { const char* methods[] = {"get_isPlaying", "get_IsPlaying", "get_isEventPlaying", "get_IsEventPlaying"};
-      if (!ProbeManager(tdb, api, "EventManager", methods, 4, g_state.isEventPlaying, "EventManager.isPlaying"))
-          ProbeManager(tdb, api, "event.EventManager", methods, 4, g_state.isEventPlaying, "event.EventManager.isPlaying"); }
+      if (!Probe(tdb, api, "EventManager", methods, g_state.isEventPlaying, "EventManager.isPlaying"))
+          Probe(tdb, api, "event.EventManager", methods, g_state.isEventPlaying, "event.EventManager.isPlaying"); }
     { const char* methods[] = {"get_isPlaying", "get_IsPlaying", "get_isActive", "get_IsActive"};
-      if (!ProbeManager(tdb, api, "MovieManager", methods, 4, g_state.isMoviePlaying, "MovieManager.isPlaying"))
-          ProbeManager(tdb, api, "CinematicManager", methods, 4, g_state.isMoviePlaying, "CinematicManager.isPlaying"); }
+      if (!Probe(tdb, api, "MovieManager", methods, g_state.isMoviePlaying, "MovieManager.isPlaying"))
+          Probe(tdb, api, "CinematicManager", methods, g_state.isMoviePlaying, "CinematicManager.isPlaying"); }
 
     // InputManager / PlayerManager. Blocked-polarity spellings are probed first
     // and win outright, so a title exposing both is read on the one whose true
@@ -170,12 +190,12 @@ void DiscoverManagerProbes() {
       };
       for (auto tn : types) {
           if (g_state.isInputBlocked.method) break;
-          ProbeManager(tdb, api, tn, blockedMethods, 7, g_state.isInputBlocked, "InputBlocked");
+          Probe(tdb, api, tn, blockedMethods, g_state.isInputBlocked, "InputBlocked");
       }
       if (!g_state.isInputBlocked.method) {
           for (auto tn : types) {
               if (g_state.isInputEnabled.method) break;
-              ProbeManager(tdb, api, tn, enabledMethods, 4, g_state.isInputEnabled, "InputEnabled");
+              Probe(tdb, api, tn, enabledMethods, g_state.isInputEnabled, "InputEnabled");
           }
       }
     }
@@ -191,7 +211,7 @@ void DiscoverManagerProbes() {
       };
       for (auto tn : types) {
           if (g_state.isCutscene.method) break;
-          ProbeManager(tdb, api, tn, methods, 6, g_state.isCutscene, tn);
+          Probe(tdb, api, tn, methods, g_state.isCutscene, tn);
       }
     }
 
@@ -201,10 +221,8 @@ void DiscoverManagerProbes() {
         if (guiType) {
             auto sn = FindSingleton(api, "GuiManager");
             if (sn) {
-                static char guiSnBuf2[256];
-                strncpy(guiSnBuf2, sn, 255);
-                guiSnBuf2[255] = '\0';
-                g_state.guiManagerSingleton = guiSnBuf2;
+                static char guiSnBuf2[kSingletonNameCapacity];
+                g_state.guiManagerSingleton = KeepSingletonName(sn, guiSnBuf2);
 
                 const char* boolGetters[] = {
                     "get_Initialized", "get_IsSystemReady",
