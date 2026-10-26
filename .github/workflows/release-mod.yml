@@ -39,7 +39,7 @@ on:
         required: true
         type: string
       version-source:
-        description: "Where this mod's authoritative version lives: csproj | cmake | cargo | pixi | manifest"
+        description: "Where this mod's authoritative version lives: csproj | cmake | cargo | pixi | manifest | regex"
         required: true
         type: string
       version-path:

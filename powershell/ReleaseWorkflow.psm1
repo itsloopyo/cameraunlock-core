@@ -1463,7 +1463,7 @@ function Assert-LauncherManifestDelivery {
         if ($isString -and $mode -cin @('manifest', 'manifest_variants', 'manifest_versioned', 'external')) { return }
         if (-not ($isString -and $mode -ceq 'install_cmd')) {
             $text = if ($null -eq $mode) { 'null' } else { "$mode" }
-            throw "launcher-manifest.json has delivery_mode `"$text`", which the launcher does not know and silently installs through install.cmd. Use `"manifest`" (or `"manifest_variants`" / `"external`") and declare the payload in files / loader."
+            throw "launcher-manifest.json has delivery_mode `"$text`", which the launcher does not know and silently installs through install.cmd. Use `"manifest`" (or `"manifest_variants`", `"manifest_versioned`" or `"external`") and declare the payload in files / loader."
         }
     }
     $shown = if ($modeProperty.Count -gt 0) { '"install_cmd"' } else { 'absent (the launcher reads that as "install_cmd")' }
