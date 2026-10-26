@@ -72,6 +72,22 @@ uintptr_t ScanRunForColPointer(uintptr_t runBase, size_t runSize, uintptr_t colA
     return 0;
 }
 
+// MSVC lays vtables out back to back as [COL ptr][vfuncs...][COL ptr][vfuncs...], so
+// "inside the module" admits the next vtable's COL pointer and then the next class's
+// functions. A vtable ends at the first entry that is not executable memory.
+bool IsExecutableAddress(uintptr_t addr) {
+#ifdef _WIN32
+    MEMORY_BASIC_INFORMATION mbi = {};
+    if (VirtualQuery(reinterpret_cast<const void*>(addr), &mbi, sizeof(mbi)) == 0) return false;
+    if (mbi.State != MEM_COMMIT) return false;
+    constexpr DWORD kExecute = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    return (mbi.Protect & kExecute) != 0;
+#else
+    (void)addr;
+    return true;
+#endif
+}
+
 int ReadVfuncs(uintptr_t vtable, uintptr_t codeStart, uintptr_t codeEnd,
                uintptr_t* out, int max_vfuncs) {
     int count = 0;
@@ -84,8 +100,8 @@ int ReadVfuncs(uintptr_t vtable, uintptr_t codeStart, uintptr_t codeEnd,
             // The "is it a code address" test below only runs after the dereference.
             if (vtable + (v + 1) * sizeof(uintptr_t) > codeEnd) break;
             uintptr_t funcAddr = *reinterpret_cast<const uintptr_t*>(vtable + v * sizeof(uintptr_t));
-            // Valid code address: within the module
             if (funcAddr < codeStart || funcAddr >= codeEnd) break;
+            if (!IsExecutableAddress(funcAddr)) break;
             out[v] = funcAddr;
             count = v + 1;
         }

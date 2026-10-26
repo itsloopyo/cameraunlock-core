@@ -25,6 +25,9 @@ int RunConfigSchemaTests();
 int RunSafeMemoryTests();
 int RunLeanClampTests();
 int RunHeldPointerTests();
+#ifdef CAMERAUNLOCK_TESTS_DISCOVERY
+int RunRttiVtableTests();
+#endif
 int RunInputScriptTests();
 int RunDirectInputStateTests();
 int RunGameInputStateTests();
@@ -127,6 +130,9 @@ int main(int argc, char** argv) {
     failures += RunIniMutationsTests();
     failures += RunConfigOwnerTests();
     failures += RunCanonicalConfigExampleTests();
+#ifdef CAMERAUNLOCK_TESTS_DISCOVERY
+    failures += RunRttiVtableTests();
+#endif
 #ifdef CAMERAUNLOCK_TESTS_REFRAMEWORK
     failures += RunPluginConfigMigrationTests();
     failures += RunPluginConfigCanonicalTests();

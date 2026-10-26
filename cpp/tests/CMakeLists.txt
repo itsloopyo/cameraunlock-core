@@ -77,6 +77,12 @@ if(CAMERAUNLOCK_BUILD_REFRAMEWORK)
         CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/reframework-legacy")
 endif()
 
+if(TARGET cameraunlock_discovery)
+    target_sources(cameraunlock_tests PRIVATE rtti_vtable_tests.cpp)
+    target_link_libraries(cameraunlock_tests PRIVATE cameraunlock_discovery)
+    target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_DISCOVERY)
+endif()
+
 add_test(NAME cameraunlock_tests COMMAND cameraunlock_tests)
 
 # The C interface, driven as a host drives it: through CameraUnlockCore.dll and the C header
