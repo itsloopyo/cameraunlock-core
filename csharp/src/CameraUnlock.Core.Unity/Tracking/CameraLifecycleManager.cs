@@ -215,7 +215,9 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         private void HandleCameraLost()
         {
-            if (_trackedCamera != null)
+            // By reference: a camera a scene load destroyed compares equal to null, and its
+            // loss is the one the subclass most needs to hear of.
+            if (!ReferenceEquals(_trackedCamera, null))
             {
                 // The _trackedCamera null check already makes this fire exactly once per
                 // loss, so the interval could only ever suppress a real notification.

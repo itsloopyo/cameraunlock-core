@@ -63,6 +63,11 @@ namespace UnityEngine
 
         public static bool operator !=(Object a, Object b) => !(a == b);
 
+        public static void Destroy(Object obj)
+        {
+            if (!ReferenceEquals(obj, null)) obj.MarkDestroyed();
+        }
+
         public override bool Equals(object obj) => ReferenceEquals(this, obj);
 
         public override int GetHashCode() =>
@@ -492,6 +497,7 @@ namespace UnityEngine
         // must keep running while paused - the view-matrix transitions, hotkey cooldowns -
         // is only testable against that split.
         public static float unscaledDeltaTime = 1f / 60f;
+        public static float unscaledTime;
         public static int frameCount = 1;
 
         public static void AdvanceFrame()
@@ -503,6 +509,7 @@ namespace UnityEngine
         {
             deltaTime = 1f / 60f;
             unscaledDeltaTime = 1f / 60f;
+            unscaledTime = 0f;
             frameCount = 1;
         }
     }
@@ -543,6 +550,23 @@ namespace UnityEngine
         public Matrix4x4 worldToLocalMatrix => localToWorldMatrix.inverse;
     }
 
+    public class GameObject : Object
+    {
+    }
+
+    public class Component : Object
+    {
+        public GameObject gameObject = new GameObject();
+    }
+
+    public class Behaviour : Component
+    {
+    }
+
+    public class MonoBehaviour : Behaviour
+    {
+    }
+
     public class Canvas : Object
     {
         public static Action willRenderCanvases;
@@ -557,7 +581,7 @@ namespace UnityEngine
         Reflection = 16,
     }
 
-    public class Camera : Object
+    public class Camera : Behaviour
     {
         public delegate void CameraCallback(Camera cam);
 

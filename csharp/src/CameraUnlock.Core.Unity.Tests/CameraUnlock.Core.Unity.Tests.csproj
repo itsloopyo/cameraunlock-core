@@ -66,6 +66,9 @@
     <Compile Include="..\CameraUnlock.Core.Unity\Tracking\CameraCallbackLifecycle.cs">
       <Link>UnderTest\CameraCallbackLifecycle.cs</Link>
     </Compile>
+    <Compile Include="..\CameraUnlock.Core.Unity\Tracking\CameraLifecycleManager.cs">
+      <Link>UnderTest\CameraLifecycleManager.cs</Link>
+    </Compile>
     <Compile Include="..\CameraUnlock.Core.Unity\Effects\HeadFollowLight.cs">
       <Link>UnderTest\HeadFollowLight.cs</Link>
     </Compile>
