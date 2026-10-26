@@ -45,6 +45,17 @@ int RunRttiVtableTests() {
     const uintptr_t threeVtable = *reinterpret_cast<uintptr_t*>(g_three);
     const uintptr_t fourVtable = *reinterpret_cast<uintptr_t*>(g_four);
 
+    // The count check below proves the stop only where the word after the third
+    // slot is an address inside this module (the next vtable's locator pointer),
+    // which a read bounded by the module alone would take as a fourth slot.
+    const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    const uintptr_t end = base + nt->OptionalHeader.SizeOfImage;
+    const uintptr_t afterThird = reinterpret_cast<const uintptr_t*>(threeVtable)[3];
+    Check(afterThird >= base && afterThird < end,
+          "the word after the three slots lies inside the module, so a bounds-only read runs on");
+
     cameraunlock::memory::VtableInfo info{};
     const bool found = cameraunlock::memory::FindVtableFromRTTI(
         GetModuleHandleW(nullptr), "RttiProbeThreeSlots", info, 8);
