@@ -7,12 +7,15 @@ param(
     # An install-body-reframework.cmd from before MOD_SEED_FILES existed. Given,
     # the REFramework install without the list also runs against it and must
     # leave the same tree and print the same output.
-    [string]$ReferenceInstallBody = ''
+    [string]$ReferenceInstallBody = '',
+    # findstr cannot open a path past MAX_PATH, and the deepest case nests four
+    # folders under its own: a checkout deep in a worktree needs a shorter root.
+    [string]$WorkRoot = (Join-Path (Split-Path $PSScriptRoot) '.lab')
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$root = Join-Path (Split-Path $PSScriptRoot) ('.lab/uninstall-preserve-tests-' + [guid]::NewGuid().ToString('N'))
+$root = Join-Path $WorkRoot ('uninstall-preserve-tests-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $holding = 'CameraUnlock-kept-configs'
