@@ -233,17 +233,36 @@ if exist "!GAME_PATH!\%STATE_FILE%" (
 )
 
 :: -------- Ensure REFramework --------
-if not exist "!GAME_PATH!\dinput8.dll" (
-    echo REFramework not found. Installing...
-    echo.
-    call :install_reframework
-    if errorlevel 1 exit /b 1
-    set "WE_INSTALLED=true"
-    echo REFramework installed successfully.
-    echo.
-) else (
-    echo Existing REFramework detected, skipping loader install, deploying plugin only.
+if not exist "!GAME_PATH!\dinput8.dll" goto :install_loader
+:: Another loader's dinput8.dll used to count as REFramework, and the plugin then
+:: went where nothing loads it while the install reported success.
+call :reframework_marker
+if errorlevel 2 (
+    echo ERROR: Could not read the game's dinput8.dll to tell whether it is REFramework:
+    echo   !GAME_PATH!\dinput8.dll
+    exit /b 1
 )
+if errorlevel 1 (
+    echo ERROR: The game folder already has a dinput8.dll that is not REFramework:
+    echo   !GAME_PATH!\dinput8.dll
+    echo It is most likely another mod loader. REFramework needs that file name, so
+    echo move the other loader out of the game folder, or install REFramework
+    echo yourself, then run this installer again.
+    exit /b 1
+)
+echo Existing REFramework detected, skipping loader install, deploying plugin only.
+goto :loader_ready
+
+:install_loader
+echo REFramework not found. Installing...
+echo.
+call :install_reframework
+if errorlevel 1 exit /b 1
+set "WE_INSTALLED=true"
+echo REFramework installed successfully.
+echo.
+
+:loader_ready
 
 :: -------- Deploy mod files --------
 set "PLUGINS_DIR=!GAME_PATH!\reframework\plugins"
@@ -333,6 +352,15 @@ echo Make sure OpenTrack is running and sending
 echo data to UDP port 4242.
 echo.
 exit /b 0
+
+:: 0 when the game's dinput8.dll names REFramework, 1 when it does not, 2 when it
+:: cannot be read.
+:reframework_marker
+set "_MARKER_CHECK=!SCRIPT_DIR!shared\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" set "_MARKER_CHECK=!SCRIPT_DIR!..\cameraunlock-core\scripts\cecil-marker-check.ps1"
+if not exist "!_MARKER_CHECK!" exit /b 2
+powershell -NoProfile -ExecutionPolicy Bypass -File "!_MARKER_CHECK!" -AssemblyPath "!GAME_PATH!\dinput8.dll" -Marker "REFramework"
+exit /b %errorlevel%
 
 :install_reframework
 set "VENDOR_DIR=!SCRIPT_DIR!vendor\reframework"

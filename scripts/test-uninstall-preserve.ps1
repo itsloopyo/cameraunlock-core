@@ -606,7 +606,9 @@ Write-Host 'PASS uninstall wrapper template: every blank CONFIG BLOCK name anoth
 # its payload from its own folder, so both paths go through the body.
 $reZipEntries = @('dinput8.dll', 'reframework_revision.txt', 'reframework/', 'reframework/autorun/', 'reframework/autorun/loader.lua')
 $reLoader = [ordered]@{}
-foreach ($entryName in $reZipEntries) { if (-not $entryName.EndsWith('/')) { $reLoader[$entryName.Replace('/', '\')] = $entryName } }
+# The body takes a dinput8.dll as REFramework only when it names REFramework.
+function Get-ReEntryContent([string]$EntryName) { if ($EntryName -eq 'dinput8.dll') { 'REFramework dinput8.dll' } else { $EntryName } }
+foreach ($entryName in $reZipEntries) { if (-not $entryName.EndsWith('/')) { $reLoader[$entryName.Replace('/', '\')] = Get-ReEntryContent $entryName } }
 
 function New-InstallCase {
     param(
@@ -638,7 +640,7 @@ function New-InstallCase {
             $entry = $zip.CreateEntry($entryName)
             if (-not $entryName.EndsWith('/')) {
                 $writer = New-Object IO.StreamWriter($entry.Open())
-                try { $writer.Write($entryName) } finally { $writer.Dispose() }
+                try { $writer.Write((Get-ReEntryContent $entryName)) } finally { $writer.Dispose() }
             }
         }
     } finally { $zip.Dispose() }
@@ -682,7 +684,7 @@ $reInstall = [ordered]@{ MOD_DLLS = 'HeadTracking.dll'; MOD_VERSION = '1.0.0'; R
 $reUninstall = [ordered]@{ MOD_DLLS = 'HeadTracking.dll'; MOD_SEED_FILES = 'HeadTracking.ini Extra.ini'; PRESERVE_FILES = "$p\HeadTracking.ini" }
 # Extra.ini sits at the package root, the fallback MOD_DLLS already use.
 $rePackage = [ordered]@{ 'plugins\HeadTracking.dll' = 'dll 1'; 'plugins\HeadTracking.ini' = 'default 1'; 'Extra.ini' = 'extra default' }
-$preexisting = [ordered]@{ 'dinput8.dll' = 'their dinput8.dll'; 'reframework\autorun\theirs.lua' = 'theirs.lua' }
+$preexisting = [ordered]@{ 'dinput8.dll' = 'their REFramework dinput8.dll'; 'reframework\autorun\theirs.lua' = 'theirs.lua' }
 
 foreach ($variant in @(@{ By = 'true'; Loader = $reLoader; GameFiles = @{}; Flags = '/y' },
         @{ By = 'false'; Loader = $preexisting; GameFiles = $preexisting; Flags = '/force /y' })) {
@@ -713,6 +715,15 @@ foreach ($variant in @(@{ By = 'true'; Loader = $reLoader; GameFiles = @{}; Flag
         "$p\HeadTracking.dll" = 'dll 2'; "$p\HeadTracking.ini" = 'tuned by the player'; "$p\Extra.ini" = 'extra default' }) 'true'
     Write-Host "PASS reframework seed, installed_by_us $($variant.By) ($($variant.Flags)): fresh install seeds, reinstall keeps an edited seed and replaces the DLL, uninstall keeps the listed seed through the loader removal, the next install keeps it"
 }
+
+# Another loader's dinput8.dll is not REFramework: the install stops with
+# nothing deployed, where it used to report success with the plugin in a
+# folder nothing loads.
+$case = New-InstallCase -Name 're-foreign-dinput8' -Install $reInstall -Uninstall $reUninstall -Package $rePackage -GameFiles @{ 'dinput8.dll' = 'an ASI loader' }
+$output = Invoke-Install $case 1
+Assert-Output $case $output @('ERROR: The game folder already has a dinput8.dll that is not REFramework:')
+Assert-Files $case @('fixture.exe', 'dinput8.dll') @{ 'dinput8.dll' = 'an ASI loader' }
+Write-Host 'PASS reframework over a foreign dinput8.dll: refused, nothing deployed'
 
 # Without the list the INI stays in MOD_DLLS and every install overwrites it.
 $unlistedInstall = Copy-Map $reInstall @{ MOD_DLLS = 'HeadTracking.dll HeadTracking.ini'; MOD_SEED_FILES = '' }
