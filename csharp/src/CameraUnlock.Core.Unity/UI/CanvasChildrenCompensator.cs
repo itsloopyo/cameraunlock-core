@@ -49,6 +49,7 @@ namespace CameraUnlock.Core.Unity.UI
 
             float canvasWidth = canvasRectTransform.rect.width;
             float canvasHeight = canvasRectTransform.rect.height;
+            CanvasCompensation.CalculateOffset(cam, yaw, pitch, canvasWidth, canvasHeight, out float offsetX, out float offsetY);
 
             for (int i = 0; i < _children.Count; i++)
             {
@@ -58,8 +59,8 @@ namespace CameraUnlock.Core.Unity.UI
                     continue;
                 }
 
-                CanvasCompensation.RepositionElement(
-                    child, _originals[i], canvasWidth, canvasHeight, cam, yaw, pitch, roll);
+                CanvasCompensation.PlaceElement(
+                    child, _originals[i], canvasWidth, canvasHeight, offsetX, offsetY, roll);
             }
 
             _isOffset = true;

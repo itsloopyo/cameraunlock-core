@@ -187,6 +187,14 @@ namespace CameraUnlock.Core.Unity.Extensions
                 throw new ArgumentNullException(nameof(cam));
             }
 
+            CalculateOffset(cam, yaw, pitch, canvasWidth, canvasHeight, out float offsetX, out float offsetY);
+            PlaceElement(element, originalAnchoredPosition, canvasWidth, canvasHeight, offsetX, offsetY, roll);
+        }
+
+        internal static void CalculateOffset(
+            Camera cam, float yaw, float pitch, float canvasWidth, float canvasHeight,
+            out float offsetX, out float offsetY)
+        {
             float verticalFov = cam.fieldOfView;
             float horizontalFov = ScreenOffsetCalculator.CalculateHorizontalFov(verticalFov, cam.aspect);
 
@@ -195,8 +203,13 @@ namespace CameraUnlock.Core.Unity.Extensions
                 horizontalFov, verticalFov,
                 canvasWidth, canvasHeight,
                 1f,
-                out float offsetX, out float offsetY);
+                out offsetX, out offsetY);
+        }
 
+        internal static void PlaceElement(
+            RectTransform element, Vector2 originalAnchoredPosition, float canvasWidth, float canvasHeight,
+            float offsetX, float offsetY, float roll)
+        {
             GetCenterRelativePosition(
                 element, originalAnchoredPosition, canvasWidth, canvasHeight,
                 out float relX, out float relY);
