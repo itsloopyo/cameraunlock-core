@@ -20,7 +20,10 @@ which is easy to forget because it holds nothing but the payload subtree.
 ## Adding a component
 
 1. Take the text from the upstream `LICENSE` verbatim. Strip a UTF-8 BOM if
-   present; change nothing else.
+   present; change nothing else. Where upstream has a `NOTICE`, it goes first,
+   then a blank line, then the licence (Apache-2.0 section 4(d)). Where the
+   licence names a holder other than the one on the file we compile, as DXC's
+   does, the file's own header goes first in the same way.
 2. Read the whole file before assuming one holder. `minhook.txt` carries a
    second, separate copyright for Hacker Disassembler Engine 32/64 (Vyacheslav
    Patkov) below Tsuda Kageyu's. Attributing only the headline project drops a
@@ -40,21 +43,22 @@ which is easy to forget because it holds nothing but the payload subtree.
 | `cyber-engine-tweaks.txt` | Cyber Engine Tweaks | MIT |
 | `d3d8to9.txt` | d3d8to9 | BSD-2-Clause |
 | `dear-imgui.txt` | Dear ImGui | MIT |
-| `directx-shader-compiler.txt` | DirectX Shader Compiler DXBC hash | University of Illinois/NCSA |
+| `directx-shader-compiler.txt` | DirectX Shader Compiler DXBC hash (`lib/DxilHash/DxilHash.cpp`, Copyright (C) Microsoft Corporation, derived from the RSA Data Security, Inc. MD5 Message-Digest Algorithm): the file's own header, then DXC's `LICENSE.TXT` | University of Illinois/NCSA |
 | `endive.txt` | Endive 1.1.0 (tag `1.1.0`): the runtime, wasm, wasi, log and annotations classes core's jar runs its module on, and the code its build-time compiler copies into the module's generated classes (`CoreModuleMachineShaded`) | Apache-2.0, with its NOTICE |
-| `fabric-loader.txt` | Fabric Loader | Apache-2.0 |
+| `fabric-loader.txt` | Fabric Loader. The `LICENSE` leaves the appendix placeholder unfilled; upstream's `HEADER` names the holder, Copyright 2016 FabricMC | Apache-2.0 |
 | `glm.txt` | OpenGL Mathematics | MIT / Happy Bunny |
 | `harmonyx.txt` | HarmonyX | MIT |
 | `inih.txt` | inih | BSD-3-Clause |
 | `injector.txt` | injector (ThirteenAG) | zlib |
 | `kiero.txt` | Kiero | MIT |
 | `llvm-runtimes.txt` | libc++, libc++abi, libunwind and the compiler-rt builtins of llvm-project `895aa2c896ada719451be2e3673c83da8ddf1141` (wasi-sdk 34), compiled into core's WebAssembly module, with the Boost notice of the two Ryu files of libc++ the module links (`d2fixed.cpp`, `f2s.cpp`) | Apache-2.0 WITH LLVM-exception; the Ryu files also BSL-1.0 |
-| `melonloader.txt` | MelonLoader | Apache-2.0 |
-| `memorymodule.txt` | MemoryModule | MPL-2.0 |
+| `melonloader.txt` | MelonLoader | Apache-2.0, with its NOTICE |
+| `memorymodule.txt` | MemoryModule. The MPL text names no holder; `MemoryModule.c` at `5f83e41c3a3e7c6e8284a5c1afa5a38790809461` names Joachim Bauch (2004-2015) and Thomas Heller (2013 portions) | MPL-2.0 |
 | `minhook.txt` | MinHook, incl. HDE32/HDE64 | BSD-2-Clause |
 | `miniz.txt` | miniz | MIT |
 | `mono-cecil.txt` | Mono.Cecil | MIT |
 | `monomod.txt` | MonoMod | MIT |
+| `nlohmann.txt` | JSON for Modern C++ (nlohmann/json), `LICENSE.MIT` at `v3.12.0` | MIT |
 | `red4ext.txt` | RED4ext | MIT |
 | `reframework.txt` | REFramework | MIT |
 | `tweakxl.txt` | TweakXL | MIT |

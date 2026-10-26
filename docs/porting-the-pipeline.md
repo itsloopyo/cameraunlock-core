@@ -334,9 +334,8 @@ source the receiver follows and the locality flag included.
 
 ## 10. The mod-side center starts at identity
 
-The pipeline consumes the tracker's pose as absolute, the way TrackIR does: the
-driver owns the center and the game does not keep one of its own until the player
-asks. Headcam zeroes at tracking start and on every CENTER press, opentrack
+The pipeline consumes the tracker's pose as absolute: the tracker owns the center
+and the mod does not keep one of its own until the player asks. Headcam zeroes at tracking start and on every CENTER press, opentrack
 centers on its own Center bind, so the stream arriving at a port is already
 centered.
 

@@ -32,7 +32,6 @@ namespace CameraUnlock.Core.Unity.Rendering
     /// Renders a reticle using Unity's IMGUI system.
     /// Supports dot (filled circle) and circle (outline) styles.
     /// Attach to a GameObject and call Initialize() to set up.
-    /// Based on proven pattern from gone-home and green-hell mods.
     /// </summary>
     public sealed class IMGUIReticle : MonoBehaviour
     {

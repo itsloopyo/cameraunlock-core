@@ -175,8 +175,7 @@ public:
     /// the tracker's. The two then disagree, and a Center press in the tracker
     /// app leaves the view parked at the negated captured center until the user
     /// also hits the mod's recenter hotkey. Identity by default means one press
-    /// anywhere is enough, which is how TrackIR and every native implementation
-    /// behaves.
+    /// in the tracker app is enough.
     ///
     /// Enable only for a tracker whose origin is arbitrary at startup and which
     /// cannot zero itself. Doing so reintroduces the double-center for that mod.

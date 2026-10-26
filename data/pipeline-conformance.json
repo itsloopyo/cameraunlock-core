@@ -844,7 +844,7 @@
       "id": "packet-accepts-a-longer-datagram-without-inventing-a-trailer",
       "section": 9,
       "title": "Extra bytes past the pose are not a Headcam trailer",
-      "catches": "Reading the trailer off length alone. Plain OpenTrack sends 56 bytes when it appends its frame counter, and byte 52 of that counter is not a version number - a parser that skips the magic check reports a trailer, latches a counter out of the middle of a double, and a port that ever acts on that recenters at random. The magic has to be checked, and a datagram carrying a truncated trailer (53 bytes) has to report no trailer while still delivering its pose.",
+      "catches": "Reading the trailer off length alone. A sender may put other bytes after the pose (the case here is a 56-byte datagram with an 8-byte frame counter), and byte 52 of that is not a version number - a parser that skips the magic check reports a trailer, latches a counter out of the middle of a double, and a port that ever acts on that recenters at random. The magic has to be checked, and a datagram carrying a truncated trailer (53 bytes) has to report no trailer while still delivering its pose.",
       "unit": "packet",
       "config": {},
       "steps": [
@@ -942,7 +942,7 @@
       "id": "duplicate-packets-track-the-source-rate",
       "section": 2,
       "title": "The estimated sample interval follows the SOURCE rate, not the packet rate",
-      "catches": "Deriving 'is this a new sample' from a packet counter or a receive timestamp alone, with no comparison of the pose values. OpenTrack relays at ~250 Hz regardless of source rate, so the interval EMA collapses to the packet interval, each segment finishes within a frame or two of the sample that started it, and the inter-sample frames the interpolator exists to generate collapse into flat spots. Here 256 datagrams per second carry a value that changes only every 8th one, a 32 Hz source. With the filter the output climbs steadily at ~1 degree per frame all the way across each source period; without it it lurches on the frame the value changes and then crawls, so the floor on the per-frame movement is what separates them.",
+      "catches": "Deriving 'is this a new sample' from a packet counter or a receive timestamp alone, with no comparison of the pose values. When a sender repeats a pose in more packets than the source produces new ones, the interval EMA collapses to the packet interval, each segment finishes within a frame or two of the sample that started it, and the inter-sample frames the interpolator exists to generate collapse into flat spots. Here 256 datagrams per second carry a value that changes only every 8th one, a 32 Hz source. With the filter the output climbs steadily at ~1 degree per frame all the way across each source period; without it it lurches on the frame the value changes and then crawls, so the floor on the per-frame movement is what separates them.",
       "unit": "session_rot",
       "config": {},
       "steps": [

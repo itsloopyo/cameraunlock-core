@@ -5,7 +5,6 @@ namespace CameraUnlock.Core.Aim
 {
     /// <summary>
     /// Framework-agnostic screen offset calculation using FOV-based tangent projection.
-    /// Based on the proven pattern from green-hell's AimController.
     /// </summary>
     public static class ScreenOffsetCalculator
     {

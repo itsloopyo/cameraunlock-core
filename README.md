@@ -271,10 +271,10 @@ Optional modules (all `OFF` by default):
 
 | CMake option | Target | Requires |
 |--------------|--------|----------|
-| `CAMERAUNLOCK_BUILD_HOOKS` | `cameraunlock_hooks` | MinHook target provided by consumer |
+| `CAMERAUNLOCK_BUILD_HOOKS` | `cameraunlock_hooks` | A consumer's `minhook` target, else the vendored `vendor/minhook` |
 | `CAMERAUNLOCK_BUILD_DISCOVERY` | `cameraunlock_discovery` | `CAMERAUNLOCK_BUILD_HOOKS=ON` |
 | `CAMERAUNLOCK_BUILD_UNREAL` | `cameraunlock_unreal` | Windows |
-| `CAMERAUNLOCK_BUILD_REFRAMEWORK` | `cameraunlock_reframework` | REFramework headers from consumer (C++20) |
+| `CAMERAUNLOCK_BUILD_REFRAMEWORK` | `cameraunlock_reframework` | C++20; a consumer's REFramework headers, else the vendored `vendor/reframework` |
 
 Tests build by default (`CAMERAUNLOCK_BUILD_TESTS=ON`) into `cameraunlock_tests`.
 
@@ -448,8 +448,9 @@ whose build cannot run on a CI runner, and compiles and tests nothing. No new mo
 
 ### C++
 - Winsock2 (Windows UDP)
-- MinHook (optional, for hooks/discovery modules)
-- REFramework headers (optional, for reframework module)
+- MinHook v1.3.4 (optional, for hooks/discovery modules), vendored in `vendor/minhook`
+- REFramework plugin API 1.15.0 headers (optional, for reframework module), vendored in `vendor/reframework`
+- The DXBC hash of DirectX Shader Compiler v1.8.2505.1, vendored in `vendor/dxc-hash`
 
 ### Java
 - OpenJDK 25 from the pixi environment, to compile and test `java/` for Java 22.
@@ -465,3 +466,9 @@ whose build cannot run on a CI runner, and compiles and tests nothing. No new mo
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+The vendored code under `vendor/` keeps its own licence, in the licence file
+beside it: MinHook BSD-2-Clause (with Hacker Disassembler Engine 32/64),
+REFramework MIT, and DirectX Shader Compiler's DXBC hash University of
+Illinois/NCSA. [legal/](legal/README.md) holds the licence text of every
+third-party component the mods bundle, vendor or link.

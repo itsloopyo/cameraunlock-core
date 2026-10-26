@@ -4,3 +4,6 @@ Source: https://github.com/microsoft/DirectXShaderCompiler/blob/b106a961d09221b3
 DxilHash.cpp is unmodified. dxc/WinAdapter.h supplies the two integer aliases
 needed by this file on non-Windows platforms. The C++ adapter places the
 upstream symbols in cameraunlock::graphics::detail.
+DxilHash.cpp is Copyright (C) Microsoft Corporation under the University of
+Illinois Open Source License in LICENSE.TXT. Its hash is derived from the RSA
+Data Security, Inc. MD5 Message-Digest Algorithm.

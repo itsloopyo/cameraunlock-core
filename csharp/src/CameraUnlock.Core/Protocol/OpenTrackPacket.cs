@@ -147,9 +147,9 @@ namespace CameraUnlock.Core.Protocol
         /// <summary>
         /// Attempts to parse the recenter counter from a Headcam trailer.
         /// The trailer is appended after the standard 48 OpenTrack bytes:
-        /// magic "HCAM", version byte, recenter counter byte. Packets from
-        /// plain OpenTrack (48 bytes, or 56 with a frame counter) fail the
-        /// magic check and return false.
+        /// magic "HCAM", version byte, recenter counter byte. A packet
+        /// without the magic after the 48 pose bytes, whatever its length,
+        /// fails the magic check and returns false.
         /// </summary>
         /// <param name="data">Raw packet data.</param>
         /// <param name="recenterCounter">Parsed recenter counter if successful.</param>

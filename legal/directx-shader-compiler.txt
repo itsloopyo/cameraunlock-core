@@ -1,3 +1,9 @@
+DxilHash.cpp
+Copyright (C) Microsoft Corporation. All rights reserved.
+This file is distributed under the University of Illinois Open Source
+License. See LICENSE.TXT for details.
+Derived from the RSA Data Security, Inc. MD5 Message-Digest Algorithm.
+
 ==============================================================================
 LLVM Release License
 ==============================================================================

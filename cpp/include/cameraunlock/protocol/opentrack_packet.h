@@ -71,8 +71,8 @@ struct OpenTrackPacket {
     static bool TryParseAll(const void* data, size_t length, TrackingPose& pose, PositionData& position);
 
     /// Attempts to parse the recenter counter from a Headcam trailer.
-    /// Packets from plain OpenTrack (48 bytes, or 56 with a frame counter)
-    /// fail the magic check and return false.
+    /// A packet without the magic after the 48 pose bytes, whatever its
+    /// length, fails the magic check and returns false.
     /// @param data Raw packet data.
     /// @param length Length of the data in bytes.
     /// @param recenterCounter Output counter if a version-1 (or later,

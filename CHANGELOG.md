@@ -4701,7 +4701,7 @@ That put a SECOND center in series with the tracker's own, and the two drift
 apart because each side recenters at moments the other cannot see. The cost lands
 on the user:
 
-- **opentrack, AITrack, any sender with its own Center bind and no HCAM trailer.**
+- **A sender with its own Center bind and no HCAM trailer.**
   The user presses Center, the sender's output drops to zero, and the mod is
   still subtracting the pose it captured at session start - so the view parks at
   the negated drift and the user has to hit the mod's recenter hotkey as well.
@@ -4712,8 +4712,7 @@ on the user:
   at startup, and Headcam zeroes at tracking start, so the insurance was being
   paid for by every other sender.
 
-Native head tracking does not work this way: with TrackIR the driver owns the
-center and the game consumes the pose as absolute. The pipeline now matches that.
+The pipeline now leaves the center to the tracker.
 The center is identity until something asks for one - the user's hotkey, or a
 tracker-app CENTER press arriving through the HCAM trailer.
 

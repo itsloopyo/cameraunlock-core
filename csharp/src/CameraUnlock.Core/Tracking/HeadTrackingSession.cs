@@ -112,9 +112,8 @@ namespace CameraUnlock.Core.Tracking
         /// Whether to capture the incoming pose as the center once the connection
         /// stabilizes. Off by default.
         /// <para>
-        /// The pipeline assumes the tracker's stream is already centered, which is how
-        /// TrackIR and every native implementation works: the driver owns the center and
-        /// the game consumes the pose as absolute. Headcam zeroes at tracking start and
+        /// The pipeline assumes the tracker's stream is already centered: the tracker owns
+        /// the center and the mod consumes the pose as absolute. Headcam zeroes at tracking start and
         /// on every CENTER press; opentrack centers on its own Center bind.
         /// </para>
         /// <para>
@@ -287,8 +286,8 @@ namespace CameraUnlock.Core.Tracking
                 TrackingPose rawPose = _receiver.GetLatestPose();
                 PositionData rawPosition = _receiver.GetLatestPosition();
 
-                // New DATA, not merely a new packet. OpenTrack relays at ~250 Hz whatever
-                // the source rate is, so deriving this from the receive timestamp alone
+                // New DATA, not merely a new packet. A sender can repeat a pose in more
+                // packets than its source produces, so deriving this from the receive timestamp alone
                 // collapses the interpolator's interval estimate onto the packet rate:
                 // every segment finishes within a frame or two of the sample that started
                 // it and the inter-sample frames the interpolator exists to generate become
