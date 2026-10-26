@@ -261,7 +261,8 @@ list of its own to keep in step with the rows:
    `min` to `max` in notches of `step` for `_INT` and `_FLOAT`, a list of its `choices` words for
    `_ENUM`. The label names it and the comment is its tooltip.
 3. `cameraunlock_config_option_get(option, out)` for what the control shows, read again each
-   time the screen opens: a hotkey or a hand edit of the file may have changed it since.
+   time the screen opens: a hotkey, or a hand edit of a `CAMERAUNLOCK_ROW_LIVE` row that
+   `cameraunlock_config_reload` has read, may have changed it since.
 4. `cameraunlock_config_option_save(option, value)` when the player applies a change, then the
    host applies the value to its own running state, as after any save.
 
@@ -368,10 +369,13 @@ either a move or a refusal goes to the log.
 ## Testing without a socket
 
 `CameraUnlockCoreTesting.dll` (CMake target `cameraunlock_c_testing`, never shipped) is the same
-library with three more functions, declared in `cameraunlock/c/testing/cameraunlock_testing.h`:
+library with more functions, declared in `cameraunlock/c/testing/cameraunlock_testing.h`:
 `cameraunlock_testing_deliver` hands a session that is not started one datagram as if it had just
-arrived, `cameraunlock_testing_deliver_view` does the same for one view, and
-`cameraunlock_testing_reset` gives a fresh session, in every view. They are for core's vectors
+arrived, `cameraunlock_testing_deliver_view` does the same for one view,
+`cameraunlock_testing_reset` gives a fresh session, in every view,
+`cameraunlock_testing_defaults_path` answers where the owner finds Defaults.ini,
+`cameraunlock_testing_win32` makes one of the Windows calls core makes, and, in the WebAssembly
+build alone, `cameraunlock_testing_trap` traps. They are for core's vectors
 harness and a binding's own. A mod has no use for them: a tracker's poses reach it as datagrams.
 
 ## Layouts
@@ -446,7 +450,7 @@ WebAssembly and carried in the jar as JVM classes: `CameraUnlock.loadBundled()`,
   lost-tracker gate holds.
 - No legacy import: a described config has no legacy file. A mod that published builds before the
   canonical format keeps its C++ table and import.
-- No string, list or color local row, no `Engine()` row, and no concept row read again by
+- No list or color local row, no `Engine()` row, and no concept row read again by
   `cameraunlock_config_reload`.
 - `os::CenterGameWindowOnce`, the one-shot that also raises the window, is not exported.
 - No camera cut signal for the lean clamp. An inactive frame resets it.
