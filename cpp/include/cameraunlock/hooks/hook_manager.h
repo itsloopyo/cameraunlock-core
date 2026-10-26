@@ -79,6 +79,7 @@ private:
 class ScopedHook {
 public:
     ScopedHook() = default;
+    // A failure shows only as IsValid() false. Create() answers why.
     ScopedHook(void* target, void* detour, void** original);
     ~ScopedHook();
 
