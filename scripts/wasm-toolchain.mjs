@@ -39,7 +39,7 @@ const ENDIVE = {
     annotations: '45573e0fd0e3eed33f8851cfece89cc5e3868df9e94a7b9598b75913d54a3d7e',
 };
 /** The jars the generated classes need at run time: a mod's jar carries their classes. */
-export const ENDIVE_RUNTIME = ['runtime', 'wasm', 'wasi', 'log', 'annotations'];
+const ENDIVE_RUNTIME = ['runtime', 'wasm', 'wasi', 'log', 'annotations'];
 
 /** Every pin, for a build to record beside what it made with them. */
 export const TOOLCHAIN_PINS = { wasiSdk: WASI_SDK, endive: { version: ENDIVE_VERSION, sha256: ENDIVE } };

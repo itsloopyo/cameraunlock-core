@@ -10,11 +10,12 @@
 // over every module the host serves.
 
 import { readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CORE_ROOT } from './lib/repos.mjs';
 
 const MODULE = 'cameraunlock_win32';
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = CORE_ROOT;
 const hostSource = join(repoRoot, 'java', 'src', 'com', 'cameraunlock', 'core', 'Win32Host.java');
 
 const VALTYPES = { 0x7f: 'i32', 0x7e: 'i64', 0x7d: 'f32', 0x7c: 'f64' };
@@ -62,7 +63,7 @@ function reader(bytes) {
 }
 
 /** Each import of MODULE in a module: name -> "(i32,i32)->i32". */
-export function importsOf(wasm) {
+function importsOf(wasm) {
     const bytes = readFileSync(wasm);
     if (bytes.readUInt32LE(0) !== 0x6d736100 || bytes.readUInt32LE(4) !== 1) throw new Error(`${wasm} is not a WebAssembly module`);
     const r = reader(bytes);
@@ -113,7 +114,7 @@ export function importsOf(wasm) {
 }
 
 /** Each function Win32Host registers: name -> "(i32,...)->i32", or ->void for a procedure. */
-export function hostFunctions(source = readFileSync(hostSource, 'utf8')) {
+function hostFunctions(source = readFileSync(hostSource, 'utf8')) {
     const functions = new Map();
     // Comments out first, in one pass so whichever starts first is taken: a registration commented
     // out is not one.

@@ -59,6 +59,7 @@ final class Win32Host {
     /** The receive buffer of UdpReceiver::ReceiverThread. */
     private static final int RECEIVE_BUFFER = 64;
     private static final int SOCKADDR_IN = 16;
+    private static final int SYSTEMTIME = 16, RECT = 16;
     /** FOLDERID_RoamingAppData, as defaults_location.cpp has it. */
     private static final byte[] ROAMING_APP_DATA = {(byte) 0xDB, (byte) 0x85, (byte) 0xB6, 0x3E, (byte) 0xF9, 0x65, (byte) 0xF6, 0x4C,
             (byte) 0xA0, 0x3A, (byte) 0xE3, (byte) 0xEF, 0x65, 0x72, (byte) 0x9F, 0x3D};
@@ -478,9 +479,9 @@ final class Win32Host {
             function("QueryPerformanceFrequency", 1, (m, a) -> largeInteger(m, queryPerformanceFrequency, (int) a[0])),
             procedure("GetLocalTime", 1, (m, a) -> {
                 try (Arena arena = Arena.ofConfined()) {
-                    MemorySegment time = arena.allocate(16);
+                    MemorySegment time = arena.allocate(SYSTEMTIME);
                     call(getLocalTime, time);
-                    copyOut(m, time, (int) a[0], 16);
+                    copyOut(m, time, (int) a[0], SYSTEMTIME);
                 }
             }),
             function("GetCurrentProcessId", 0, (m, a) -> {
@@ -552,9 +553,9 @@ final class Win32Host {
             function("GetWindowLongW", 2, (m, a) -> callInt(getWindowLongW, handle(a[0]), (int) a[1])),
             function("GetWindowRect", 2, (m, a) -> {
                 try (Arena arena = Arena.ofConfined()) {
-                    MemorySegment rect = arena.allocate(16);
+                    MemorySegment rect = arena.allocate(RECT);
                     int result = callInt(getWindowRect, handle(a[0]), rect);
-                    copyOut(m, rect, (int) a[1], 16);
+                    copyOut(m, rect, (int) a[1], RECT);
                     return result;
                 }
             }),

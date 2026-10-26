@@ -87,12 +87,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 import { manualZipConfigEntries, repoState } from "./check-canonical-config.mjs";
 import { configWriteProblems, descriptorProblems, preReleaseWarning, releaseProblems, releaseVersionFromEnv } from "./check-config-descriptor.mjs";
+import { REPOS_ROOT } from "./lib/repos.mjs";
 
 // tar reads a member operand as a pattern, so `x[1].dll` named the bytes of `x1.dll`
 // and `*` joined several entries. Each zip is unpacked once and its entries read as
@@ -102,11 +102,10 @@ process.on("exit", () => {
   for (const dir of extracted.values()) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-// core lives at <root>/cameraunlock-core/scripts. Two levels up is the repo
+// core lives at <root>/cameraunlock-core. One level up is the repo
 // that vendors core (a mod repo -> self-validate target), or the repos root
 // when core is a standalone sibling checkout (-> sibling repo tokens resolve).
-const ROOT = path.resolve(SCRIPT_DIR, "..", "..");
+const ROOT = REPOS_ROOT;
 
 // The schema_version manifest_versioned starts at, and the keys of its jvm_site_config block.
 const VERSIONED_SCHEMA = 3;
@@ -814,9 +813,12 @@ function resolveZip(token) {
 // party manager consumes the package directly - the newest release ZIP that is
 // not the Nexus payload-only variant. Still returns null on an empty release
 // directory, so a repo that never packaged is reported rather than skipped.
+function byNewest(a, b) {
+  return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
+}
+
 function newestInstaller(dir) {
   if (!fs.existsSync(dir)) return null;
-  const byNewest = (a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs;
   const names = fs.readdirSync(dir).filter((n) => n.toLowerCase().endsWith(".zip"));
   const installers = names.filter((n) => n.endsWith("-installer.zip"));
   const pool = installers.length ? installers : names.filter((n) => !n.endsWith("-nexus.zip"));
@@ -829,7 +831,7 @@ function newestNexus(dir) {
     .readdirSync(dir)
     .filter((n) => n.endsWith("-nexus.zip"))
     .map((n) => path.join(dir, n));
-  return zips.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] ?? null;
+  return zips.sort(byNewest)[0] ?? null;
 }
 
 function systemTar() {

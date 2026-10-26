@@ -12,26 +12,16 @@
 // javac and jar come from the caller's environment; the toolchain is fetched by build-wasm.mjs.
 // Windows only, as the toolchain is (wasm-toolchain.mjs).
 
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { toolchain } from './wasm-toolchain.mjs';
+import { JAVAC_FLAGS, javaSources as sources, run } from './lib/java-build.mjs';
+import { CORE_ROOT } from './lib/repos.mjs';
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = CORE_ROOT;
 const target = process.argv[2];
 if (!target) throw new Error('usage: node build-core-jar.mjs <out.jar>');
-
-function run(tool, args, options = {}) {
-    execFileSync(tool, args, { stdio: 'inherit', ...options });
-}
-
-function sources(directory) {
-    return readdirSync(directory, { recursive: true, withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith('.java'))
-        .map((entry) => join(entry.parentPath, entry.name));
-}
 
 run(process.execPath, [join(repoRoot, 'scripts', 'build-wasm.mjs'), 'core']);
 const tools = await toolchain();
@@ -41,7 +31,7 @@ const work = mkdtempSync(join(tmpdir(), 'cameraunlock-core-jar-'));
 try {
     const classes = join(work, 'classes');
     mkdirSync(classes);
-    run('javac', ['--release', '22', '-Xlint:all', '-Werror', '-cp', [...tools.runtime, join(module, 'classes')].join(delimiter),
+    run('javac', [...JAVAC_FLAGS, '-cp', [...tools.runtime, join(module, 'classes')].join(delimiter),
         '-d', classes, ...sources(join(repoRoot, 'java', 'src')), ...sources(join(module, 'src'))]);
     cpSync(join(module, 'classes'), classes, { recursive: true });
 

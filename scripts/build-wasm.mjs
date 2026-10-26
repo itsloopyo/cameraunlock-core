@@ -21,13 +21,15 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { TOOLCHAIN_PINS, toolchain } from './wasm-toolchain.mjs';
+import { CORE_ROOT } from './lib/repos.mjs';
 
 const run = promisify(execFile);
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const TOOL_OUTPUT = { maxBuffer: 64 << 20 };
+const repoRoot = CORE_ROOT;
 const cpp = join(repoRoot, 'cpp');
 const out = join(cpp, 'build-wasm');
 
@@ -129,7 +131,7 @@ async function compile(tools, variant, spec) {
         const object = join(objects, source.replaceAll('/', '_') + '.o');
         try {
             await run(tools.clang, [...COMPILE, ...spec.defines, `--sysroot=${tools.sysroot}`, '-c', join(cpp, source), '-o', object],
-                { maxBuffer: 64 << 20 });
+                TOOL_OUTPUT);
         } catch (failure) {
             throw new Error(`${source} did not compile for WebAssembly (${variant}):\n${failure.stderr || failure.message}`);
         }
@@ -162,12 +164,12 @@ async function build(tools, variant) {
     } else {
         const objects = await compile(tools, variant, spec);
         await run(tools.clang, [...LINK, `--sysroot=${tools.sysroot}`, ...objects, ...exportsOf(spec.headers), '-o', wasm],
-            { maxBuffer: 64 << 20 });
+            TOOL_OUTPUT);
     }
     for (const generated of ['src', 'classes']) rmSync(join(folder, generated), { recursive: true, force: true });
     await run('java', ['-jar', tools.compiler, wasm, '--prefix', `com.cameraunlock.core.wasm.${spec.module}`,
         '--source-dir', join(folder, 'src'), '--class-dir', join(folder, 'classes'), '--wasm-dir', join(folder, 'classes'),
-        ...ENDIVE_ARGS], { maxBuffer: 64 << 20 });
+        ...ENDIVE_ARGS], TOOL_OUTPUT);
     writeFileSync(stampFile, `${stamp}${inputs}\n`, 'utf8');
     process.stderr.write(`${variant}: ${wasm} (${(statSync(wasm).size / 1048576).toFixed(1)} MB)\n`);
 }

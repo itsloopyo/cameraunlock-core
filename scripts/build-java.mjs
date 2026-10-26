@@ -19,29 +19,19 @@
 // The DLLs and the modules are built by the tasks this depends on (pixi.toml, build-java). javac,
 // jar and node come from the pixi environment.
 
-import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, delimiter, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { basename, delimiter, join } from 'node:path';
 import { checkWin32Imports } from './check-win32-imports.mjs';
 import { toolchain } from './wasm-toolchain.mjs';
+import { JAVAC_FLAGS, javaSources as sources, run } from './lib/java-build.mjs';
+import { CORE_ROOT } from './lib/repos.mjs';
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = CORE_ROOT;
 const javaRoot = join(repoRoot, 'java');
 const out = join(javaRoot, 'build');
 const dllRoot = join(repoRoot, 'scripts', 'pipeline-vectors', 'harness', 'c', 'build', 'cameraunlock', 'Release');
 const dlls = ['CameraUnlockCore.dll', 'CameraUnlockCoreTesting.dll', 'CameraUnlockCoreOtherAbi.dll'];
 const modules = join(repoRoot, 'cpp', 'build-wasm');
-
-function sources(directory) {
-    return readdirSync(directory, { recursive: true, withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith('.java'))
-        .map((entry) => join(entry.parentPath, entry.name));
-}
-
-function run(tool, args) {
-    execFileSync(tool, args, { stdio: 'inherit' });
-}
 
 /** A module's generated source and classes, which build-wasm.mjs writes. */
 function module(variant) {
@@ -60,11 +50,10 @@ const runtime = readdirSync(lib).map((jar) => join(lib, jar)).join(delimiter);
 
 const core = module('core'), testing = module('testing'), otherAbi = module('other-abi');
 checkWin32Imports(['core', 'testing', 'other-abi'].map((variant) => join(modules, variant, `${variant}.wasm`)));
-const javac = ['--release', '22', '-Xlint:all', '-Werror'];
-run('javac', [...javac, '-cp', [runtime, core.classes].join(delimiter), '-d', join(out, 'classes'),
+run('javac', [...JAVAC_FLAGS, '-cp', [runtime, core.classes].join(delimiter), '-d', join(out, 'classes'),
     ...sources(join(javaRoot, 'src')), ...sources(core.src)]);
 cpSync(core.classes, join(out, 'classes'), { recursive: true });
-run('javac', [...javac, '-cp', [runtime, join(out, 'classes'), testing.classes, otherAbi.classes].join(delimiter),
+run('javac', [...JAVAC_FLAGS, '-cp', [runtime, join(out, 'classes'), testing.classes, otherAbi.classes].join(delimiter),
     '-d', join(out, 'test-classes'), ...sources(join(javaRoot, 'harness')), ...sources(join(javaRoot, 'tests')),
     ...sources(testing.src), ...sources(otherAbi.src)]);
 cpSync(testing.classes, join(out, 'test-classes'), { recursive: true });
