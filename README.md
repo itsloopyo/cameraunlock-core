@@ -312,10 +312,11 @@ tested. It is built into the base `cameraunlock` library, not the optional disco
 
 ```bash
 pixi run build          # dotnet build csharp -c Release
-pixi run test           # dotnet test csharp
-pixi run check          # debug build + quick tests
+pixi run test           # the whole suite: check, test-powershell and test-framework-net35
+pixi run check          # what CI runs: the node gates, vectors, C#, C++, Java and the install bodies
+pixi run test-csharp    # dotnet test csharp
 pixi run pack           # dotnet pack to dist/
-pixi run test-powershell # vendoring soak tests (Windows only)
+pixi run test-powershell # the powershell/ modules, conformance checks and install bodies (Windows only)
 pixi run build-wasm     # the C interface as WebAssembly modules and JVM classes, under cpp/build-wasm (Windows only)
 pixi run test-java      # java/: the binding on the DLL and on the module, and the boot class (Windows only)
 pixi run vectors-java   # the pipeline vectors through the binding, on both (Windows only)

@@ -7,7 +7,11 @@ platforms = ["win-64", "linux-64", "osx-64"]
 
 [tasks]
 # Testing
-test = "dotnet test csharp --verbosity normal"
+# The whole suite: what a session runs on the tree about to become main. `check` is
+# what CI runs; the rest need what a CI runner lacks (the Windows ".NET Framework 3.5"
+# feature, core's full history, the desktop session the input tests use).
+test = { depends-on = ["check", "test-powershell", "test-framework-net35"] }
+test-csharp = "dotnet test csharp --verbosity normal"
 test-quick = "dotnet test csharp --verbosity quiet"
 test-coverage = "dotnet test csharp --collect:\"XPlat Code Coverage\""
 
@@ -95,11 +99,12 @@ vectors-java = { cmd = "node scripts/pipeline-vectors/run-vectors.mjs --harness 
 
 vectors = { depends-on = ["vectors-cpp", "vectors-csharp", "vectors-c", "vectors-java"] }
 
-# Windows-only: the powershell/ modules are a Windows surface, so this is not
-# part of `check`. Covers the vendoring soak that keeps update-deps off
-# freshly-published upstream releases, ReleaseWorkflow.psm1's release-path
-# behaviour that only misbehaves under Windows PowerShell 5.1, and
-# sync-core-notices.ps1 stamping the pin a merge or staged bump will commit.
+# The powershell/ modules and the install bodies are a Windows surface; CI runs on
+# Windows too, so the suites that need no history, game or desktop are part of `check`.
+# They cover the vendoring soak that keeps update-deps off freshly-published upstream
+# releases, ReleaseWorkflow.psm1's release-path behaviour that only misbehaves under
+# Windows PowerShell 5.1, sync-core-notices.ps1 stamping the pin a merge or staged bump
+# will commit, and the install and uninstall bodies.
 test-powershell-soak = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/ModLoaderSetup.Soak.Tests.ps1"
 test-powershell-release = "powershell -NoProfile -ExecutionPolicy Bypass -File powershell/tests/ReleaseWorkflow.Tests.ps1"
 test-sync-core-notices = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-sync-core-notices.ps1"
@@ -292,7 +297,7 @@ config-report = "node scripts/check-canonical-config.mjs --report"
 # next: building their two harnesses compiles the C++ library and CameraUnlock.Core,
 # so a syntax error in either surfaces here rather than in the slower full builds
 # below.
-check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-validate-manifest", "test-jvm-site-config", "test-generate-readme", "validate-games", "vectors", "test-java", "build-debug", "test-quick", "test-framework-net472", "test-cpp"] }
+check = { depends-on = ["check-config-schema", "check-config-format", "check-canonical-ini-js", "check-doc-examples", "test-config-descriptor", "test-validate-manifest", "test-jvm-site-config", "test-generate-readme", "validate-games", "vectors", "test-java", "build-debug", "test-quick", "test-framework-net472", "test-cpp", "test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-powershell-differential-gate", "test-install"] }
 
 # Documentation
 # doc = "docfx docfx.json"
