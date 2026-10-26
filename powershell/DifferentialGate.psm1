@@ -26,7 +26,8 @@
 #            repo and the commit of each submodule. Safe, and rarely skips.
 # Every runner adds the whole of tests/config_differential, the committed config
 # the migration is compared against, the JavaScript the lint imports and the
-# JSON it reads, pixi.toml and the test scripts.
+# JSON it reads, pixi.toml and its lock, global.json, any packages.lock.json and the test
+# scripts.
 #
 # A dependency can only be added by editing a file already on the list (a
 # source, a CMakeLists.txt, a project file), so a stale list cannot hide one.
@@ -459,8 +460,13 @@ function Get-DifferentialInputs {
     }
     [void]$entries.Add('dir:tests/config_differential')
     foreach ($f in (Get-ScriptDependencies -Index $index)) { [void]$entries.Add($f) }
-    foreach ($f in @('pixi.toml', 'scripts/run-tests.ps1', 'scripts/check-differential-provenance.ps1')) {
+    # The lock files pin the compiler, the SDK and the packages the build used, and a toolchain
+    # update changes only them.
+    foreach ($f in @('pixi.toml', 'pixi.lock', 'global.json', 'scripts/run-tests.ps1', 'scripts/check-differential-provenance.ps1')) {
         if ($index.Tracked.Contains($f)) { [void]$entries.Add($f) }
+    }
+    foreach ($t in $index.Tracked) {
+        if ($t -match '(^|/)packages\.lock\.json$') { [void]$entries.Add($t) }
     }
     $repoName = Split-Path -Leaf $index.Root
     foreach ($sub in $index.Submodules) {
