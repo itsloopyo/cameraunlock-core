@@ -174,6 +174,15 @@ namespace CameraUnlock.Core.Unity.Tracking
         /// </summary>
         private void AttachHook(Camera camera)
         {
+            // A switch straight from one camera to another, or to a new one in the frame a
+            // scene load destroyed the old, never passes through HandleCameraLost, and the
+            // subclass's cleanup for the old camera has to run all the same.
+            if (!ReferenceEquals(_trackedCamera, null) && !ReferenceEquals(_trackedCamera, camera))
+            {
+                OnCameraLost();
+                _trackedCamera = null;
+            }
+
             // Clean up old hook if it exists
             if (_trackingHook != null && _trackingHook.gameObject != null)
             {
