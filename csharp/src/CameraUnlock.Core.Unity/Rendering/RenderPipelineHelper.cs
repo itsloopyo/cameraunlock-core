@@ -343,12 +343,7 @@ namespace CameraUnlock.Core.Unity.Rendering
         /// </summary>
         private static bool CheckSRPAvailable()
         {
-            var type = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
-            if (type == null)
-            {
-                type = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
-            }
-            return type != null;
+            return GetRenderPipelineManagerType() != null;
         }
 
         /// <summary>
@@ -360,12 +355,7 @@ namespace CameraUnlock.Core.Unity.Rendering
         /// </summary>
         private static void RegisterSRPCallbacks(Action<Camera> onPreRender, Action<Camera> onPostRender)
         {
-            var rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
-            if (rpmType == null)
-            {
-                rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
-            }
-
+            var rpmType = GetRenderPipelineManagerType();
             if (rpmType == null)
             {
                 throw new InvalidOperationException("SRP detected but RenderPipelineManager type not found.");
@@ -453,12 +443,7 @@ namespace CameraUnlock.Core.Unity.Rendering
         /// </summary>
         private static void UnregisterSRPCallbacks()
         {
-            var rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine.CoreModule");
-            if (rpmType == null)
-            {
-                rpmType = Type.GetType("UnityEngine.Rendering.RenderPipelineManager, UnityEngine");
-            }
-
+            var rpmType = GetRenderPipelineManagerType();
             if (rpmType == null)
             {
                 throw new InvalidOperationException("SRP was registered but RenderPipelineManager type no longer found.");
