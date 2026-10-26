@@ -20,8 +20,8 @@ struct CrosshairProjectionParams {
     float pitchOffset = 0.0f;
     float rollOffset = 0.0f;
 
-    // Base camera pitch from game input (gamepad/mouse) in radians
-    // This is the pitch before head tracking is applied
+    // Not read by ProjectCrosshair: the projection is relative to the game's
+    // camera, whatever its pitch. Kept so existing callers compile.
     float gameCameraPitch = 0.0f;
 };
 
@@ -42,7 +42,6 @@ constexpr float kDegToRad = 0.0174532925f;  // pi / 180
 // The rotation model uses camera-local axes:
 //   Yaw around camera up (0,1,0), Pitch around camera right (0,0,-1).
 //   Only forward is rotated; up is re-derived.
-// This matches ApplyHeadTrackingRotation in rotation_math.h.
 //
 // Coordinate system: X=forward, Y=up, Z=left (DL2)
 inline ScreenPosition ProjectCrosshair(const CrosshairProjectionParams& params) {
@@ -64,7 +63,7 @@ inline ScreenPosition ProjectCrosshair(const CrosshairProjectionParams& params) 
     float rollRad = params.rollOffset * kDegToRad;
 
     // Camera space before head tracking: fwd=(1,0,0), up=(0,1,0), right=(0,0,-1)
-    // Construct forward from spherical coordinates - matches ApplyHeadTrackingRotation.
+    // Construct forward from spherical coordinates.
     // This ensures yaw and pitch are independent (no arc artifacts).
     float cosY = std::cos(yawRad), sinY = std::sin(yawRad);
     float cosP = std::cos(pitchRad), sinP = std::sin(pitchRad);

@@ -6,9 +6,10 @@ namespace cameraunlock::logging {
 
 // Process-wide log file. One per mod: open it next to the game EXE (or the
 // mod DLL) during bootstrap, write timestamped lines from any thread, close
-// on shutdown. Lines are flushed through to disk immediately so the log
-// survives a hard process kill - that is what makes it usable as the crash
-// reporter's output channel.
+// on shutdown. Each line goes straight to the OS, with no buffer in the
+// process, so the log survives a hard process kill - that is what makes it
+// usable as the crash reporter's output channel. Only EmergencyLine also
+// flushes the file to disk.
 
 // Name Open() rotates the outgoing generation to: "HeadTracking.log" becomes
 // "HeadTracking.prev.log". Exposed for tests; callers do not need it.
@@ -22,7 +23,7 @@ void Close();
 // holding it) leaves every Line a no-op.
 bool IsOpen();
 
-// printf-style. Timestamped, mutex-serialized, flushed per line. The formatted
+// printf-style. Timestamped, mutex-serialized, handed to the OS per line. The formatted
 // line is cut at 2047 bytes.
 void Line(const char* fmt, ...);
 

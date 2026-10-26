@@ -134,7 +134,7 @@ private:
     float m_roll = 0.0f;
     bool m_hasData = false;
 
-    // Latest received position data (in mm)
+    // Latest received position data (metres)
     float m_posX = 0.0f;
     float m_posY = 0.0f;
     float m_posZ = 0.0f;

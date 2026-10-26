@@ -163,7 +163,7 @@ public:
     /// True when that Start() failed because another socket holds the port.
     bool StartFoundPortInUse() const { return m_startFoundPortInUse; }
 
-    /// Timestamp of the last received packet (microseconds since epoch).
+    /// Timestamp of the last received packet (microseconds on the steady clock).
     /// Compare across frames to detect new samples for interpolation. It moves after
     /// the pose and position of its packet are in place, so a GetRotation() or
     /// GetPosition() made after this read is that packet's or a newer one's.
@@ -314,7 +314,7 @@ private:
     std::atomic<float> m_posYOffset{0.0f};
     std::atomic<float> m_posZOffset{0.0f};
 
-    // Position data (mm, from OpenTrack)
+    // Position data (metres: OpenTrack's centimetres, converted on receipt)
     std::atomic<float> m_posX{0.0f};
     std::atomic<float> m_posY{0.0f};
     std::atomic<float> m_posZ{0.0f};
