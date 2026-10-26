@@ -134,9 +134,10 @@ test-install-prompt = "powershell -NoProfile -ExecutionPolicy Bypass -File scrip
 test-javaagent-installer = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-javaagent-installer.ps1"
 test-shim-installers = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-shim-installers.ps1"
 test-loader-switch = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-loader-switch.ps1"
+test-cecil-installer = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-cecil-installer.ps1"
 # validate-manifest.mjs over manifest_variants packages, and Assert-ManifestSeedsMatchShipped. Needs node.
 test-manifest-variants = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-manifest-variants.ps1"
-test-install = { depends-on = ["test-uninstall-preserve", "test-install-prompt", "test-javaagent-installer", "test-shim-installers", "test-loader-switch", "test-manifest-variants"] }
+test-install = { depends-on = ["test-uninstall-preserve", "test-install-prompt", "test-javaagent-installer", "test-shim-installers", "test-loader-switch", "test-cecil-installer", "test-manifest-variants"] }
 test-powershell = { depends-on = ["test-powershell-soak", "test-powershell-release", "test-sync-core-notices", "test-ci-minutes", "test-conformance-checks", "test-powershell-differential-gate", "test-powershell-isolated-game-test", "test-powershell-game-rig", "test-install"] }
 
 # Building
