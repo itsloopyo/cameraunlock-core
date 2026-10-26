@@ -46,6 +46,7 @@ packages/
 .millhouse/
 AGENTS.md
 CLAUDE.md
+NEXUS_MODS.md
 
 # OS
 .DS_Store
