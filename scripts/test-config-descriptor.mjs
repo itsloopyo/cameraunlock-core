@@ -686,7 +686,8 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
 
   // conformance's release-canonical-since check: a manifest with canonical_since needs
   // scripts/release.ps1 to call Assert-ReleaseNotBelowCanonicalSince or New-ReleaseTag, and a
-  // commented-out call does not count. A manifest with no block needs neither.
+  // commented-out call, or the name in a trailing comment or a string, does not count. A manifest
+  // with no block needs neither.
   const gated = (label, release) =>
     repo(`release-${label}`, "abzu-headtracking", {
       "launcher-manifest.json": JSON.stringify(abzuMan()),
@@ -697,22 +698,26 @@ function zipRepo(label, config, extra = {}, committedText = ALL) {
     "commented",
     "# Assert-ReleaseNotBelowCanonicalSince -RepoRoot $projectDir -Version $Version\r\n<#\r\nNew-ReleaseTag -Version $Version\r\n#>\r\ngit tag \"v$Version\"\r\n",
   );
+  const mentioned = gated(
+    "mentioned",
+    "git tag \"v$Version\" # New-ReleaseTag would check canonical_since\r\nWrite-Host 'run Assert-ReleaseNotBelowCanonicalSince first'\r\n",
+  );
   const asserted = gated("asserted", "Import-Module $core\r\nAssert-ReleaseNotBelowCanonicalSince -RepoRoot $projectDir -Version $Version\r\n");
   const viaTag = gated("tagged", "New-ReleaseTag -Version $Version\r\n");
   const unblocked = repo("release-no-block", "abzu-headtracking", { "launcher-manifest.json": JSON.stringify(abzuMan(() => undefined)) });
   const release = spawnSync(
     "powershell",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo ${[noScript, commented, asserted, viaTag, unblocked].map((r) => `'${r}'`).join(",")} -Check release-canonical-since -Json; exit $LASTEXITCODE`],
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& '${path.join(SCRIPTS, "conformance.ps1")}' -Repo ${[noScript, commented, mentioned, asserted, viaTag, unblocked].map((r) => `'${r}'`).join(",")} -Check release-canonical-since -Json; exit $LASTEXITCODE`],
     { encoding: "utf8" },
   );
   const releaseFindings = JSON.parse(release.stdout.replace(/^﻿/, "") || "[]");
   const releaseList = (Array.isArray(releaseFindings) ? releaseFindings : [releaseFindings]).map((x) => `${x.severity} ${x.message}`);
   const releaseCount = (prefix) => releaseList.filter((m) => m.startsWith(prefix)).length;
   check(
-    release.status === 1 && releaseList.length === 2 &&
+    release.status === 1 && releaseList.length === 3 &&
       releaseCount("FAIL launcher-manifest.json carries config.canonical_since and there is no scripts/release.ps1") === 1 &&
-      releaseCount("FAIL launcher-manifest.json carries config.canonical_since and scripts/release.ps1 calls neither") === 1,
-    `conformance: release-canonical-since should fail the repo with no release script and the one whose calls are commented out, and nothing else, got ${release.status}\n${release.stdout}${release.stderr}`,
+      releaseCount("FAIL launcher-manifest.json carries config.canonical_since and scripts/release.ps1 calls neither") === 2,
+    `conformance: release-canonical-since should fail the repo with no release script and the ones that only name the calls in comments or strings, and nothing else, got ${release.status}\n${release.stdout}${release.stderr}`,
   );
 }
 

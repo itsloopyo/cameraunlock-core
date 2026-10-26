@@ -1305,8 +1305,14 @@ function Test-ReleaseCanonicalSince {
         Add-Finding $Name 'release-canonical-since' 'FAIL' 'launcher-manifest.json carries config.canonical_since and there is no scripts/release.ps1 to refuse a release below it before tagging'
         return
     }
-    $code = (Read-TextFile $release) -replace '(?s)<#.*?#>', '' -replace '(?m)^\s*#.*$', ''
-    if ($code -match '\b(Assert-ReleaseNotBelowCanonicalSince|New-ReleaseTag)\b') { return }
+    # Tokenized, so a name in a comment or a string is not taken for a call.
+    $parseErrors = $null
+    $tokens = [System.Management.Automation.PSParser]::Tokenize((Read-TextFile $release), [ref]$parseErrors)
+    $calls = @($tokens | Where-Object {
+        $_.Type -eq [System.Management.Automation.PSTokenType]::Command -and
+        $_.Content -in @('Assert-ReleaseNotBelowCanonicalSince', 'New-ReleaseTag')
+    })
+    if ($calls.Count -gt 0) { return }
     Add-Finding $Name 'release-canonical-since' 'FAIL' "launcher-manifest.json carries config.canonical_since and scripts/release.ps1 calls neither Assert-ReleaseNotBelowCanonicalSince nor New-ReleaseTag, so a version below it is tagged and pushed before CI refuses it. Call Assert-ReleaseNotBelowCanonicalSince -RepoRoot `$projectDir -Version `$Version as soon as the version is resolved"
 }
 
