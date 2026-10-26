@@ -870,9 +870,16 @@ public final class CameraUnlock {
     public String configGetText(int row) {
         try (Arena arena = Arena.ofConfined()) {
             int length = check(status(configGetText, row, MemorySegment.NULL, 0));
-            MemorySegment buffer = arena.allocate(length + 1L);
-            check(status(configGetText, row, buffer, length + 1));
-            return buffer.getString(0);
+            while (true) {
+                // A reload between the two calls can lengthen the row, and a buffer too small for
+                // it is left alone, so the copy is asked for again at the new length.
+                MemorySegment buffer = arena.allocate(length + 1L);
+                int copied = check(status(configGetText, row, buffer, length + 1));
+                if (copied <= length) {
+                    return buffer.getString(0);
+                }
+                length = copied;
+            }
         }
     }
 
