@@ -262,6 +262,23 @@ Start-Sleep 600
     Check 'the rig is then the new owner''s' ((Get-GameRig -Game $absent).Holder.Owner -eq 'next')
     Exit-GameRig -Rig $mine
 
+    # --- a dead owner's id handed on to a process whose start cannot be read ---
+    $lsass = Get-Process lsass
+    $lsassStart = (Get-CimInstance Win32_Process -Filter "ProcessId=$($lsass.Id)").CreationDate.ToFileTimeUtc().ToString()
+    $alive = { param($Id, $Start) & (Get-Module IsolatedGameTest) { param($Id, $Start) Test-GameRigProcessAlive -Id $Id -Start $Start } $Id $Start }
+    Check 'a process this one may not open is alive under its own start' ((& $alive $lsass.Id $lsassStart) -eq $true)
+    Check 'and not under a dead owner''s start' ((& $alive $lsass.Id '1') -eq $false)
+    $key = $absent.ToLowerInvariant()
+    New-Item -ItemType Directory -Force (Join-Path $env:CAMERAUNLOCK_RIG_ROOT "$key\lock"), (Join-Path $env:CAMERAUNLOCK_RIG_ROOT '_queue') | Out-Null
+    ConvertTo-Json ([pscustomobject]@{ Key = $key; Owner = 'reused'; ProcessId = $lsass.Id; ProcessStart = '1'; Since = (Get-Date).ToString('s'); Processes = @() }) |
+        Set-Content (Join-Path $env:CAMERAUNLOCK_RIG_ROOT "$key\lock\owner.json") -Encoding UTF8
+    $ticket = Join-Path $env:CAMERAUNLOCK_RIG_ROOT '_queue\00000000000000000001-1.json'
+    ConvertTo-Json ([pscustomobject]@{ Ticks = '1'; Key = $key; Keys = @($key); Owner = 'reused'; ProcessId = $lsass.Id; ProcessStart = '1'; WholeGpu = $false }) |
+        Set-Content $ticket -Encoding UTF8
+    $mine = Enter-GameRig -Game $absent -Owner 'next' -WaitSeconds 0 -WarningAction SilentlyContinue
+    Check 'such a lock and ticket are taken over, not thrown on' ($mine.TakenOverFrom.Owner -eq 'reused' -and -not (Test-Path $ticket))
+    Exit-GameRig -Rig $mine
+
     # --- a live owner's lock ------------------------------------------------
     $log = Join-Path $root 'live.log'
     $tokenFile = Join-Path $root 'live.token'

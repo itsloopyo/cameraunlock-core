@@ -796,6 +796,14 @@ function Test-GameRigProcessAlive {
     if (-not $Id) { return $false }
     $process = Get-Process -Id $Id -ErrorAction SilentlyContinue
     if (-not $process) { return $false }
+    if ($null -eq $process.StartTime) {
+        # Windows PowerShell gives no start time, rather than throwing, for a process this one may not
+        # open: System, lsass, an elevated one. A dead lock's id handed on to one of those threw from
+        # every queue turn. WMI reads any process's start, to the microsecond.
+        $created = (Get-CimInstance Win32_Process -Filter "ProcessId=$Id").CreationDate
+        if (-not $created) { return $false }
+        return [Math]::Abs($created.ToFileTimeUtc() - [long]$Start) -lt 10
+    }
     try { $process.StartTime.ToFileTimeUtc().ToString() -eq $Start }
     # A process whose start time cannot be read is another user's, and it is running.
     catch [System.ComponentModel.Win32Exception] { $true }
