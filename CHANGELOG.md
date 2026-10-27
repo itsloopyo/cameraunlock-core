@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a key held for the hotkey poller from inside the game
+
+- `isolated_input.h`: `HoldIsolatedKey(vk, down)`, and the host DLL's
+  `CameraUnlockHoldIsolatedKey(vk, down)`, hold a key for the key state functions alone, from
+  any thread, for a harness inside the game such as a Java probe that feeds the game's keyboard
+  itself. A press from another thread flips the `GetKeyState` toggle in one exchange.
+
 ### Changed - a whole-card waiter lets free rigs go until it is next
 
 - `Enter-GameRig -WholeGpu` waiting holds off new rigs only once nobody who asked before it is

@@ -107,6 +107,11 @@ Check 'with the command file and no host DLL it throws naming the DLL' `
     (Throws { [CameraUnlock.Core.Dev.IsolatedInput]::StartIfAsked($mod, $log) } 'host DLL is missing: .*CameraUnlockIsolatedInput\.dll')
 
 Copy-IsolatedInputHost -ModFolder $mod -HostDll $HostDll | Out-Null
+# The copy StartIfAsked loads, not the build: a second file is a second module with a state of its own.
+Add-Type -Namespace CameraUnlockHostTest -Name Host -MemberDefinition @"
+[DllImport(@"$(Join-Path $mod 'CameraUnlockIsolatedInput.dll')")] public static extern int CameraUnlockHoldIsolatedKey(int vk, int down);
+"@
+Check 'a key is not held before the host has started' ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(0x43, 1) -eq 1)
 Check 'with both it starts' ([CameraUnlock.Core.Dev.IsolatedInput]::StartIfAsked($mod, $log))
 Check 'and logs where the input now comes from' ($lines.Count -eq 1 -and $lines[0] -match 'CameraUnlockInput\.txt') ($lines -join ' | ')
 Check 'a second start in the same process throws' `
@@ -132,6 +137,14 @@ Check 'GetKeyboardState reports it up, still toggled on' ((KeyboardState)[$keyA]
 Play 3 'tap A'
 $state = [CameraUnlockHostTest.User32]::GetKeyState($keyA)
 Check 'a second press turns the toggle off' ($state -eq 0) "$state"
+
+$keyC = 0x43
+Check 'a key held through the export is down to GetAsyncKeyState' `
+    ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey($keyC, 1) -eq 0 -and ([CameraUnlockHostTest.User32]::GetAsyncKeyState($keyC) -band 0x8000) -ne 0)
+Check 'and to GetKeyState, toggled on' ([CameraUnlockHostTest.User32]::GetKeyState($keyC) -eq -32767)
+Check 'and let go through it, up again' `
+    ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey($keyC, 0) -eq 0 -and ([CameraUnlockHostTest.User32]::GetAsyncKeyState($keyC) -band 0x8000) -eq 0)
+Check 'a key code that is none is refused' ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(256, 1) -eq 2 -and [CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(0, 1) -eq 2)
 
 $hostLog = Get-Content (Join-Path $mod 'CameraUnlockIsolatedInput.log') -Raw
 Check 'the host log says the detours are in' ($hostLog -match 'takes its keyboard and mouse from the command file')

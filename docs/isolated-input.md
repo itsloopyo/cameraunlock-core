@@ -507,10 +507,17 @@ played, each time the foreground was handed back. `Stop-IsolatedGame` leaves bot
 logs to be read, so name them in `Save-GameTestState -Files` to have the restore
 remove them.
 
-The DLL's one export is `int CameraUnlockStartIsolatedInput(const wchar_t* commandFile)`:
+The DLL's start is `int CameraUnlockStartIsolatedInput(const wchar_t* commandFile)`:
 0 when it started, 1 when MinHook did not initialise, 2 when a detour could not
 be installed (none is left in), 3 when it was already started in this process.
 Loading the DLL starts nothing.
+
+`int CameraUnlockHoldIsolatedKey(int vk, int down)` holds a virtual key down
+(`down` 1) or lets it go (0) for `GetAsyncKeyState`, `GetKeyState` and
+`GetKeyboardState` alone, and posts nothing to the game's window: 0 when held, 1
+before the start, 2 for a key code outside 1 to 255. It is for a harness inside
+the game that feeds the game's own keyboard another way and has to reach the
+mod's hotkey poller as well, which reads `GetAsyncKeyState`.
 
 For a Unity game the binary that reads input is `UnityPlayer.dll`, and a native
 plugin of the game can read input too: Untitled Goose Game ships Rewired's
@@ -538,6 +545,9 @@ compile `isolated_input.h`, and loads the same host DLL a C# mod does.
    NUL-terminated UTF-16 string. Throw unless it answers 0.
 3. Start the session with `-ModHost managed`, which copies the DLL into
    `-ModFolder`. `Assert-IsolatedInputCovers` takes `-ModHost jvm`.
+4. A probe that feeds the game's keyboard from Java (Project Zomboid's) reaches
+   the mod's hotkeys too by calling `CameraUnlockHoldIsolatedKey` on the same
+   DLL for each key it presses and lets go.
 
 Where the JVM is told what to load through the launch's environment
 (`JAVA_TOOL_OPTIONS`), `Invoke-IsolatedGameSession -Environment` sets it for the

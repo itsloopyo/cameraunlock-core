@@ -52,3 +52,15 @@ extern "C" __declspec(dllexport) int CameraUnlockStartIsolatedInput(const wchar_
     g_started = true;
     return kStarted;
 }
+
+// Holds a key down (`down` 1) or lets it go (0) for the key state functions alone
+// (cameraunlock::dev::HoldIsolatedKey). For a harness running inside the game that is
+// not a C# mod, which binds it by name. 0 when held, 1 before
+// CameraUnlockStartIsolatedInput has started, 2 for a key code outside 1 to 255.
+extern "C" __declspec(dllexport) int CameraUnlockHoldIsolatedKey(int vk, int down) {
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_started) return 1;
+    }
+    return cameraunlock::dev::HoldIsolatedKey(vk, down != 0) ? 0 : 2;
+}

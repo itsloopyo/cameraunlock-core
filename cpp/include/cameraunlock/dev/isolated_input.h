@@ -89,6 +89,13 @@ bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLogFn log)
 // put on. It takes effect once a `cursor` command has placed the cursor.
 void LetGameMoveScriptedCursor(bool allowed);
 
+// Holds a key down, or lets it go, for GetAsyncKeyState, GetKeyState and
+// GetKeyboardState alone, from any thread: nothing is posted to the game's
+// window. For a test harness inside the game that feeds the game's own keyboard
+// another way and has to reach a mod's hotkey poller too, as Project Zomboid's
+// Java probe does. False for a key code outside 1 to 255.
+bool HoldIsolatedKey(int vk, bool down);
+
 }  // namespace cameraunlock::dev
 
 #ifdef CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION
@@ -856,9 +863,11 @@ inline int LeftHandModifier(int vk) {
 inline void HoldKeyState(int vk, bool down) {
     const bool wasDown = S().keyDown[vk].exchange(down, std::memory_order_acq_rel);
     if (down) S().keyPressedSinceRead[vk].store(true, std::memory_order_release);
-    // Only the command-file thread writes the toggle, so this read and write cannot interleave.
+    // HoldIsolatedKey can press from another thread than the command file's, so the flip is one exchange.
     if (down && !wasDown) {
-        S().keyToggled[vk].store(!S().keyToggled[vk].load(std::memory_order_relaxed), std::memory_order_release);
+        bool toggled = S().keyToggled[vk].load(std::memory_order_relaxed);
+        while (!S().keyToggled[vk].compare_exchange_weak(toggled, !toggled, std::memory_order_acq_rel)) {
+        }
     }
 }
 
@@ -1214,6 +1223,13 @@ inline void UnhookAll() {
 
 inline void LetGameMoveScriptedCursor(bool allowed) {
     isolated::S().gameMovesCursor.store(allowed, std::memory_order_release);
+}
+
+inline bool HoldIsolatedKey(int vk, bool down) {
+    if (vk < 1 || vk > 255) return false;
+    isolated::HoldKeyState(vk, down);
+    if (const int left = isolated::LeftHandModifier(vk)) isolated::S().keyDown[left].store(down, std::memory_order_release);
+    return true;
 }
 
 inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLogFn log) {
