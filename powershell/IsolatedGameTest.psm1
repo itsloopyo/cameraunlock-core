@@ -296,7 +296,7 @@ function Assert-IsolatedInputCovers {
     if ($modHostEntry.status -ne 'supported' -or $usable.Count -eq 0) {
         throw ("Isolated input does not cover this game yet. Do not test it with the real keyboard and mouse: close the gap in cameraunlock-core first (docs/isolated-input.md, 'A game it does not cover yet').`n - " + ($gaps -join "`n - "))
     }
-    foreach ($gap in $gaps) { Write-Warning $gap }
+    foreach ($gap in $gaps) { Write-RigWarning $gap }
     $paths
 }
 
@@ -486,7 +486,7 @@ function Copy-IsolatedInputHost {
         $left = Remove-IsolatedInputHostCopy -Path $target
         if (-not $left) { break }
         if ($left.Moved) {
-            Write-Warning "an isolated-input host DLL from an earlier run was still in use at $target ($($left.Reason)): $($left.Use). It was moved aside to $($left.Path) and a fresh copy put in its place."
+            Write-RigWarning "an isolated-input host DLL from an earlier run was still in use at $target ($($left.Reason)): $($left.Use). It was moved aside to $($left.Path) and a fresh copy put in its place."
             break
         }
         if ((Get-Date) -ge $deadline) {
@@ -704,7 +704,7 @@ function Stop-IsolatedGame {
     Remove-Item $Session.CommandFile, "$($Session.CommandFile).done" -ErrorAction SilentlyContinue
     if ($Session.HostDll) {
         $left = Remove-IsolatedInputHostCopy -Path $Session.HostDll -PatienceSeconds 10
-        if ($left) { Write-Warning "The game is stopped, and $(Format-HostDllLeft $left)" }
+        if ($left) { Write-RigWarning "The game is stopped, and $(Format-HostDllLeft $left)" }
     }
 }
 
@@ -747,25 +747,8 @@ function Invoke-GameRigBoard {
     if (-not ($env:CLAUDECODE -or $env:CODEX_THREAD_ID -or $env:CODEX_SESSION_ID)) { return }
     $hivemind = Get-Command hivemind -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $hivemind) { return }
-    # A session whose runner was killed has lost the console it was started in: a console program
-    # started into that console dies before it runs (0xC0000142), and the host's own output throws
-    # (0xE9). So hivemind gets a hidden console of its own, and a failure goes to stderr, which a
-    # runner's log redirect still takes, when the host cannot show it.
-    $start = New-Object System.Diagnostics.ProcessStartInfo
-    $start.FileName = $hivemind.Source
-    $start.Arguments = ($Arguments | ForEach-Object { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' }) -join ' '
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    $process = [System.Diagnostics.Process]::Start($start)
-    $errors = $process.StandardError.ReadToEndAsync()
-    $said = $process.StandardOutput.ReadToEnd() + $errors.Result
-    $process.WaitForExit()
-    if ($process.ExitCode -eq 0) { return }
-    $text = "hivemind $($Arguments[0]) for the rig failed (exit $($process.ExitCode)): $(($said -replace '\s+', ' ').Trim())"
-    try { Write-Warning $text }
-    catch [System.Management.Automation.Host.HostException] { [Console]::Error.WriteLine("WARNING: $text") }
+    $run = Invoke-ConsoleProgram -Path $hivemind.Source -Arguments $Arguments
+    if ($run.ExitCode -ne 0) { Write-RigWarning "hivemind $($Arguments[0]) for the rig failed (exit $($run.ExitCode)): $($run.Output)" }
 }
 
 function Set-GameRigOnBoard {
@@ -1264,7 +1247,7 @@ function Enter-GameRig {
                     }
                 }
                 if ($turn.TakenOverFrom) {
-                    Write-Warning "the rig for $($turn.Key) was still held by $(Format-GameRigOwner $turn.TakenOverFrom), whose process has gone and whose game is not running. It has been taken over. Whatever that session changed and did not save with -StateFolder is as it left it."
+                    Write-RigWarning "the rig for $($turn.Key) was still held by $(Format-GameRigOwner $turn.TakenOverFrom), whose process has gone and whose game is not running. It has been taken over. Whatever that session changed and did not save with -StateFolder is as it left it."
                 }
                 Set-GameRigOnBoard -Rig $turn -What $What
                 return $turn
@@ -1273,7 +1256,7 @@ function Enter-GameRig {
             if ((Get-Date) -ge $deadline) { throw "$turn. Waited $WaitSeconds seconds for $whose." }
             if ($turn -ne $said) {
                 $said = $turn
-                if ($Waiting) { & $Waiting $turn | Out-Host } else { Write-Host "Enter-GameRig ($($keys -join ', '), $Owner): $turn" }
+                if ($Waiting) { & $Waiting $turn | Out-RigHost } else { "Enter-GameRig ($($keys -join ', '), $Owner): $turn" | Out-RigHost }
             }
             Start-Sleep -Milliseconds 500
         }
@@ -1362,15 +1345,69 @@ function Stop-KeptGame {
 # The files a test changes
 # ---------------------------------------------------------------------------
 
+# A session whose runner was killed (a harness reaping the shell it was started from) has lost the
+# console it was started in. A console program started into that console dies before it runs
+# (0xC0000142), and the host's own output throws (0xE9) the moment it asks the console anything.
+# What a session runs or shows on its way out goes through these three, so that a lost console
+# cannot keep the game's files from going back or the rig from being released.
+
+function Invoke-ConsoleProgram {
+    # Runs a console program in a hidden console of its own. Returns its ExitCode, and Output: its
+    # stdout and stderr on one line.
+    param([Parameter(Mandatory)][string]$Path, [string[]]$Arguments = @())
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = $Path
+    $start.Arguments = ($Arguments | ForEach-Object { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' }) -join ' '
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($start)
+    try {
+        $errors = $process.StandardError.ReadToEndAsync()
+        $said = $process.StandardOutput.ReadToEnd() + $errors.Result
+        $process.WaitForExit()
+        [pscustomobject]@{ ExitCode = $process.ExitCode; Output = ($said -replace '\s+', ' ').Trim() }
+    } finally { $process.Dispose() }
+}
+
+function Write-RigWarning {
+    # Write-Warning, or the same line on stderr, which a runner's log redirect still takes, when the
+    # host has lost its console.
+    param([Parameter(Mandatory)][string]$Text)
+    try { Write-Warning $Text }
+    catch [System.Management.Automation.Host.HostException] { [Console]::Error.WriteLine("WARNING: $Text") }
+}
+
+function Out-RigHost {
+    # Out-Host, or stdout when the host has lost its console: what was not shown yet goes there.
+    param([Parameter(ValueFromPipeline)]$InputObject)
+    begin {
+        $shown = { Out-Host }.GetSteppablePipeline()
+        $lost = $false
+        try { $shown.Begin($true) } catch [System.Management.Automation.Host.HostException] { $lost = $true }
+    }
+    process {
+        if (-not $lost) {
+            try { $shown.Process($InputObject); return } catch [System.Management.Automation.Host.HostException] { $lost = $true }
+        }
+        [Console]::Out.Write(($InputObject | Out-String))
+    }
+    end {
+        if (-not $lost) {
+            try { $shown.End() } catch [System.Management.Automation.Host.HostException] { [Console]::Error.WriteLine('WARNING: the host lost its console while it was showing output: what it had not shown yet is lost') }
+        }
+    }
+}
+
 function Invoke-FolderMirror {
     # robocopy /MIR makes Target the same as Source without ever emptying Target first: a file it
     # cannot write is tried again, and one that never frees is left as it was with the rest in place.
     param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Target)
-    & robocopy $Source $Target /MIR /R:10 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
-    $code = $LASTEXITCODE
-    # robocopy answers 1 to 7 for a copy that worked, which a script run with -File would exit with.
-    $global:LASTEXITCODE = 0
-    if ($code -ge 8) { throw "robocopy could not make $Target the same as $Source (exit code $code)" }
+    $robocopy = (Get-Command robocopy -CommandType Application | Select-Object -First 1).Source
+    $run = Invoke-ConsoleProgram -Path $robocopy -Arguments $Source, $Target, '/MIR', '/R:10', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+    # robocopy answers 1 to 7 for a copy that worked. A negative code is one that never ran.
+    if ($run.ExitCode -lt 0 -or $run.ExitCode -ge 8) { throw "robocopy could not make $Target the same as $Source (exit code $($run.ExitCode)): $($run.Output)" }
 }
 
 function Save-GameTestState {
@@ -1735,9 +1772,9 @@ function Start-IsolatedGameSession {
         Slot = $plan.Slot
     }
     try {
-        if ($Enter) { & $Enter $session | Out-Host }
+        if ($Enter) { & $Enter $session | Out-RigHost }
         if ($saves) { Save-GameTestState -Files $kept -Folders $Folders -Folder $StateFolder }
-        if ($Prepare) { & $Prepare $session | Out-Host }
+        if ($Prepare) { & $Prepare $session | Out-RigHost }
         if ($IniPath) { [void](Set-ModTestPort -IniPath $IniPath -Port $Port) }
         if ($PoseFile) {
             Set-TestPose -PoseFile $PoseFile
@@ -1756,7 +1793,7 @@ function Start-IsolatedGameSession {
                     param($process)
                     $session.ProcessId = $process.Id
                     if ($SessionFile) { Save-IsolatedGameSession -Session $session }
-                    if ($Launched) { & $Launched $session | Out-Host }
+                    if ($Launched) { & $Launched $session | Out-RigHost }
                 })
         } finally {
             if ($WorkingDirectory) { Pop-Location }
@@ -1767,7 +1804,7 @@ function Start-IsolatedGameSession {
         # The first error is the one to report. One from putting things back is said beside it.
         $failure = $_
         try { Complete-IsolatedGameSession -Session $session -Rig $rig -Leave $Leave -RestoreRetrySeconds 30 }
-        catch { Write-Warning "and the session could not be put back: $_" }
+        catch { Write-RigWarning "and the session could not be put back: $_" }
         throw $failure
     }
 }
@@ -1793,16 +1830,18 @@ function Complete-IsolatedGameSession {
         $sender = Get-Process -Id $Session.Sender -ErrorAction SilentlyContinue
         if ($sender -and $sender.ProcessName -eq 'powershell') { Stop-Process -Id $Session.Sender -Force }
     }
-    if ($Collect) { try { & $Collect $Session | Out-Host } catch { $failures.Add($_) } }
+    if ($Collect) { try { & $Collect $Session | Out-RigHost } catch { $failures.Add($_) } }
     if ($Session.StateFolder -and (Test-Path (Join-Path $Session.StateFolder 'state.json'))) {
         Restore-GameTestState -Folder $Session.StateFolder -RetrySeconds $RestoreRetrySeconds
     }
-    if ($Session.HostDll) {
-        $left = Remove-IsolatedInputHostCopy -Path $Session.HostDll -PatienceSeconds 10
-        if ($left) { Write-Warning "The session ended as it should, with the game stopped and its files back, and $(Format-HostDllLeft $left)" }
-    }
-    if ($Leave) { try { & $Leave $Session | Out-Host } catch { $failures.Add($_) } }
-    Exit-GameRig -Rig $Rig
+    # The files are back: nothing from here on may keep the rig held.
+    try {
+        if ($Session.HostDll) {
+            $left = Remove-IsolatedInputHostCopy -Path $Session.HostDll -PatienceSeconds 10
+            if ($left) { Write-RigWarning "The session ended as it should, with the game stopped and its files back, and $(Format-HostDllLeft $left)" }
+        }
+        if ($Leave) { try { & $Leave $Session | Out-RigHost } catch { $failures.Add($_) } }
+    } finally { Exit-GameRig -Rig $Rig }
     if ($Session.SessionFile) { Remove-Item $Session.SessionFile -Force -ErrorAction SilentlyContinue }
     if ($failures.Count -gt 0) { throw $failures[0] }
 }
@@ -1939,7 +1978,7 @@ function Invoke-IsolatedGameSession {
         try { Stop-IsolatedGameSession -Session $session -Collect $Collect -Leave $Leave -RestoreRetrySeconds $RestoreRetrySeconds }
         catch {
             if (-not $thrown) { throw }
-            Write-Warning "and the session could not be put back: $_"
+            Write-RigWarning "and the session could not be put back: $_"
         }
     }
 }

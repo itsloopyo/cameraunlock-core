@@ -131,7 +131,8 @@ try {
     Check 'the saved state is gone once the folders are restored' (-not (Test-Path $state))
     Check 'a save of nothing is refused' (Throws { Save-GameTestState -Folder $state } 'nothing to save')
     Check 'a file named as a folder is refused' (Throws { Save-GameTestState -Folders $existing -Folder $state } 'is a file')
-    Check 'a robocopy success code does not become the exit code' ($LASTEXITCODE -eq 0) "$LASTEXITCODE"
+    $exitCode = Get-Variable -Name LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    Check 'a robocopy success code does not become the exit code' (-not $exitCode) "$exitCode"
 
     # A file the game still holds is waited for when the caller asks.
     Save-GameTestState -Files $existing -Folder $state
