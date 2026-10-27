@@ -224,7 +224,7 @@ by both the mod and its build.
 
 `cameraunlock_config_get_int`, `_get_float` and `_get_text` read a local row.
 `cameraunlock_config_save_int`, `_save_float` and `_save_text` write one.
-`cameraunlock_config_save_rows(rows, values, count)` writes several rows that are not text in one
+`cameraunlock_config_save_rows(rows, values, count)` writes several rows that are not text or keys in one
 write of the file, or none of them when one is refused. A text row holds what the file holds
 as it is, such as a device's name, and a save writes it as UTF-8. It is no option
 (below): a host that shows it on an options screen does so with a control of its own. `cameraunlock_config_save_tracking_mode` and `_save_aim_mode` write

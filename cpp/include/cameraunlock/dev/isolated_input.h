@@ -93,7 +93,9 @@ void LetGameMoveScriptedCursor(bool allowed);
 // GetKeyboardState alone, from any thread: nothing is posted to the game's
 // window. For a test harness inside the game that feeds the game's own keyboard
 // another way and has to reach a mod's hotkey poller too, as Project Zomboid's
-// Java probe does. False for a key code outside 1 to 255.
+// Java probe does. A modifier is held as the script holds one: VK_SHIFT, VK_CONTROL or
+// VK_MENU holds the left-hand key too, and the left-hand key alone is not the generic
+// one. False for a key code outside 1 to 255.
 bool HoldIsolatedKey(int vk, bool down);
 
 }  // namespace cameraunlock::dev
