@@ -1010,6 +1010,9 @@ void TestConfig(const fs::path& scratch) {
     Check(cameraunlock_config_get_text(fov, text, sizeof(text)) == CAMERAUNLOCK_ERROR &&
               cameraunlock_config_get_int(microphone, &number) == CAMERAUNLOCK_ERROR,
           "a float row is not read as text, nor a text row as a number");
+    const std::int32_t keyLength = cameraunlock_config_get_text(key, text, sizeof(text));
+    Check(keyLength > 0 && ReadFile(scratch / "CameraUnlock.ini").find(std::string("\r\nGraphicsKey=") + text + "\r\n") != std::string::npos,
+          "a key list row reads back as the keys the file names, for a host to tell the player: " + std::string(text));
     const char* named = "Microphone (USB Audio Device) \xc3\xa9";
     Check(cameraunlock_config_save_text(microphone, named) == CAMERAUNLOCK_SAVE_SAVED, "a writable text row saves: " + LastError());
     Check(ReadFile(scratch / "CameraUnlock.ini").find(std::string("Microphone=") + named) != std::string::npos,

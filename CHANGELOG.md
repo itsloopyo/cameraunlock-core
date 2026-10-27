@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - a key list row read as text
+
+- `cameraunlock_config_get_text` (and Java's `configGetText`) reads a key list row as the keys the file
+  names, so a host can tell the player which key does what. Saving one as text is still refused.
+
 ### Added - a key held for the hotkey poller from inside the game
 
 - `isolated_input.h`: `HoldIsolatedKey(vk, down)`, and the host DLL's

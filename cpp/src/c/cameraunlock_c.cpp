@@ -1271,7 +1271,9 @@ std::int32_t cameraunlock_config_get_text(std::int32_t row, char* buffer, std::i
         const std::lock_guard<std::mutex> lock(c.mutex);
         RequireLoaded(c);
         const LocalRow& described = LocalAt(c, row);
-        if (described.kind != LocalKind::Text) throw std::invalid_argument(described.key + " is not a text row");
+        if (described.kind != LocalKind::Text && described.kind != LocalKind::Hotkey) {
+            throw std::invalid_argument(described.key + " is not a text row");
+        }
         return CopyOut(std::get<std::string>(c.loaded.locals[static_cast<std::size_t>(row)]), buffer, capacity, true);
     });
 }

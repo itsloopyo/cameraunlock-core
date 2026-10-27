@@ -366,8 +366,8 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_reload(void);
 /* A local row's value: a bool as 0 or 1, an int, an enum as its word's place. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_int(int32_t row, int32_t* out);
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_float(int32_t row, float* out);
-/* A text row's value. Answers its length in bytes and copies it, with its NUL, when `capacity`
- * holds length + 1. */
+/* A text row's value, or a key list row's keys as the file names them. Answers its length in
+ * bytes and copies it, with its NUL, when `capacity` holds length + 1. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_text(int32_t row, char* buffer, int32_t capacity);
 
 /* Each writes rows of the file and answers a CAMERAUNLOCK_SAVE_*. Synchronous: from a thread
