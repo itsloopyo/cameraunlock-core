@@ -218,6 +218,14 @@ Start-Sleep 600
     Check 'and leaves no ticket for others to wait behind' ($null -eq (Get-GameRig))
     Check 'and so is a pool session wanting the whole card, when the game left running is a copy of that pool' `
         (Throws { Enter-GameRig -Pool $gameName, 'poolz' -WholeGpu -Owner 'pictures' } 'in use by a game left running')
+    $heldAhead = Enter-GameRig -Game 'leftahead' -Owner 'holder' -WaitSeconds 0
+    $log = Join-Path $root 'leftcard.log'
+    $aheadTaker = Start-Taker @{ Game = 'leftahead'; Owner = 'ahead'; Log = $log; HoldMs = 200 }
+    Wait-Until { (Get-GameRig -Game 'leftahead').Waiting -contains 'ahead' }
+    Check 'but behind a session that asked first it waits for the game left running, holding nobody off yet' `
+        (Throws { Enter-GameRig -WholeGpu -Owner 'pictures' -WaitSeconds 0 } '^the graphics card is in use by a game left running: .*, and 1 asked before this session$')
+    Exit-GameRig -Rig $heldAhead
+    Wait-All @($aheadTaker)
     # A process takes the kept lock back and dies with the game up.
     $died = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
         "Import-Module '$modulePath'; Enter-GameRig -Game $gameName -Owner 'keeper' -KeptIn '$keptFile' -WaitSeconds 0 | Out-Null; Start-Sleep 600")
@@ -441,13 +449,14 @@ Start-Sleep 600
     # A whole-card waiter holds off new rigs only once nobody who asked before it still waits.
     $log = Join-Path $root 'cardqueue.log'
     $long = Enter-GameRig -Game 'poola' -Owner 'long' -WaitSeconds 0
-    $ahead = Start-Taker @{ Game = 'poola'; Owner = 'ahead'; Log = $log; HoldMs = 4000 }
+    $ahead = Start-Taker @{ Game = 'poola'; Owner = 'ahead'; Log = $log; HoldMs = 8000 }
     Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'ahead' }
     $carder = Start-Taker @{ Owner = 'card'; Log = $log; HoldMs = 200; WholeGpu = $true }
     Wait-Until { $state = Get-GameRig; $state -and $state.Waiting -contains 'card' }
-    $beside = Enter-GameRig -Game 'poolb' -Owner 'later' -WaitSeconds 0
-    Check 'while a session ahead of a whole-card waiter still waits, one that asked after it takes a free copy' ((Get-GameRig -Game 'poolb').Holder.Owner -eq 'later')
-    Exit-GameRig -Rig $beside
+    $beside = try { Enter-GameRig -Game 'poolb' -Owner 'later' -WaitSeconds 0 } catch { "$_" }
+    Check 'while a session ahead of a whole-card waiter still waits, one that asked after it takes a free copy' `
+        ($beside -isnot [string] -and (Get-GameRig -Game 'poolb').Holder.Owner -eq 'later') "$beside"
+    if ($beside -isnot [string]) { Exit-GameRig -Rig $beside }
     Exit-GameRig -Rig $long
     Wait-Until { (Get-Content $log -ErrorAction SilentlyContinue) -contains 'in ahead' }
     Check 'once the waiter is first, no rig is given out though that copy is free' `
@@ -520,6 +529,18 @@ Start-Sleep 600
     Exit-GameRig -Rig $e
     Exit-GameRig -Rig $a
     Wait-All @($x)
+    $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
+    $log = Join-Path $root 'limit4.log'
+    $x = Start-Taker @{ Game = 'lima'; Owner = 'tx'; Log = $log; HoldMs = 200 }
+    Wait-Until { @((Get-GameRig -Game 'lima').Waiting).Count -eq 1 }
+    $w = Start-Taker @{ Owner = 'tw'; Log = $log; HoldMs = 200; WholeGpu = $true }
+    Wait-Until { $r = Get-GameRig; $r -and $r.Waiting -contains 'tw' }
+    $e = try { Enter-GameRig -Game 'lime' -Owner 'he' -WaitSeconds 0 } catch { "$_" }
+    Check 'nor does a whole-card waiter that is not yet first' ($e -isnot [string] -and $e.Game -eq 'lime') "$e"
+    if ($e -isnot [string]) { Exit-GameRig -Rig $e }
+    Exit-GameRig -Rig $a
+    Wait-All @($x, $w)
+    Check 'and it has the card once the room is free' ((@(Get-Content $log) -join ',') -eq 'in tx,out tx,in tw,out tw') (@(Get-Content $log) -join ',')
     $a = Enter-GameRig -Game 'lima' -Owner 'ha' -WaitSeconds 0
     Check 'a rig taken back by token is not asked for again under a full limit' `
         ((Enter-GameRig -Game 'lima' -Owner 'ha' -Token $a.Token).Token -eq $a.Token)

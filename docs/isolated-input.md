@@ -178,8 +178,9 @@ timeout on a long wait) does not strand it: the next `Enter-GameRig -KeptIn`
 takes it back again, for as long as the processes it was left with still run.
 
 Work that wants the whole card (`-WholeGpu`, below) is refused at once while a
-game left running holds a rig. Nothing says when that game will end, and every
-session that asked after the waiter would wait behind it. The refusal names the
+game left running holds a rig and nobody who asked before it is still waiting.
+Nothing says when that game will end, and every session that asked after the
+waiter would wait behind it. The refusal names the
 file `Stop-KeptGame` needs.
 
 Work that needs the whole graphics card takes the rig too, with `-WholeGpu`: an
@@ -198,12 +199,14 @@ behind it.
 
 While it waits, a whole-card waiter holds off new rigs only once it is next on
 every rig: once nobody who asked before it is still waiting. Until then a
-session that asked after it takes a free copy or a free game as if it were not
-there, since the waiter could not have started yet anyway. It is never starved:
-a ticket is never numbered before one already in the queue, so the sessions
-ahead of it only leave, and once it is first nothing new is given out, so it
-starts when the last held rig comes back. A rig held for a long time while the
-waiter is first still keeps every other copy idle until it comes back.
+session that asked after it takes a free copy or a free game, so copies are not
+left idle while the waiter could not start anyway. The waiter pays for that: a
+rig taken in the meantime and held past the moment the waiter comes first holds
+it up for as long. It is never starved: a ticket is never numbered before one
+already in the queue, so the sessions ahead of it only leave, and once it is
+first nothing new is given out, so it starts when the last held rig comes back.
+While it is first, a rig held for a long time keeps every other copy idle until
+it comes back.
 
 The lock is a convention, not a fence. A session that never asks is not seen,
 and a script that still calls `Start-IsolatedGame` without the rig runs beside

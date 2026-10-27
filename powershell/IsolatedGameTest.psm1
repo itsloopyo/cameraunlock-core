@@ -981,7 +981,8 @@ function Enter-GameRig {
     work needs no game: leave -Game out. Run it from the PowerShell that took the lock, because
     the lock of a process that has ended, with no game running, is anyone's to take over. While
     it waits it holds off new rigs only once nobody who asked before it is still waiting; until
-    then a session that asked after it takes a free game as if it were not there.
+    then a session that asked after it takes a free game, and one it holds past that moment
+    holds the waiter up for as long.
 
     -Token takes back the lock an earlier process of the same session took: pass the Token of the
     rig that process got. This is how a session that starts the game in one process stops it in
@@ -1002,8 +1003,9 @@ function Enter-GameRig {
     runs, and whatever of the game's names started after its holder took it. A game that was
     already up when the holder came is never the holder's.
 
-    -WholeGpu is refused at once, not queued, while a game left running holds a rig: nothing
-    says when that game will end, and every session that asked later would wait behind it.
+    -WholeGpu is refused at once, not queued, while a game left running holds a rig and nobody
+    who asked before it is still waiting: nothing says when that game will end, and every
+    session that asked later would wait behind it.
 
     While it waits it says what for, each time that changes: who holds the rig and how many asked
     before this session. -Waiting is a block handed that line in place of its being printed, for a
@@ -1117,7 +1119,8 @@ function Enter-GameRig {
         while ($true) {
             # One turn: the rig, or what this session is waiting for.
             $turn = Invoke-GameRigExclusive {
-                # Whoever asked before this session, for a game this may take or for the whole card, goes first.
+                # Whoever asked before this session for a game this may take goes first, and a whole-card waiter
+                # once it is first in the queue (below).
                 $tickets = @(Get-GameRigTickets)
                 $ahead = @(foreach ($other in $tickets) {
                     if ($other.File -eq $ticket) { break }
@@ -1160,8 +1163,10 @@ function Enter-GameRig {
                     # The whole card is every rig, a copy of this session's own pool as much as any
                     # other game: a copy held beside a free one still has the card.
                     if ($live -and $WholeGpu -and -not $held.ProcessId) {
-                        # A game left running may stay up for hours, and everyone who asks after a
-                        # whole-card waiter waits behind it: this is refused, not queued.
+                        # A game left running may stay up for hours, and once a whole-card waiter is first
+                        # everyone who asks after it waits behind it: then this is refused, not queued.
+                        # Before that it holds nobody off, and the game may be stopped before its turn.
+                        if ($ahead.Count -gt 0) { return "the graphics card is in use by a game left running: $($folder.Name) is held by $(Format-GameRigOwner $held)$behind" }
                         throw "the graphics card is in use by a game left running: $($folder.Name) is held by $(Format-GameRigOwner $held). Stop it, then ask again."
                     }
                     if ($live -and ($WholeGpu -or $held.WholeGpu) -and -not ($mine -and $candidates.Count -eq 1)) {
@@ -1184,10 +1189,12 @@ function Enter-GameRig {
                     return "every game of $whose is in use: $(@($inUse.Keys | ForEach-Object { "$_ by $($inUse[$_])" }) -join '; ')$behind"
                 }
                 # A whole-card waiter holds off new rigs only once it is next on every rig, which is
-                # once nobody who asked before it is still waiting: before that it could not start
-                # whatever this took, so a copy this takes costs it nothing. It is not starved: no
-                # ticket is ever numbered before one already queued, so those ahead of it only
-                # go, and once it is first no rig is given out until every held one comes back.
+                # once nobody who asked before it is still waiting, so copies are not left idle while
+                # it could not start anyway. The cost is the waiter's: a rig this takes in the
+                # meantime and holds past the moment the waiter comes first holds the waiter up for
+                # as long. It is never starved: no ticket is numbered before one already queued, so
+                # those ahead of it only go, and once it is first no rig is given out until every
+                # held one comes back.
                 $card = @($ahead | Where-Object { $_.WholeGpu -and $_.File -eq $tickets[0].File })
                 if ($card.Count -gt 0) {
                     return "waiting behind $($card[0].Owner) (pid $($card[0].ProcessId)), who asked first, for the whole graphics card"
@@ -1215,6 +1222,8 @@ function Enter-GameRig {
                     $given = @{}
                     $first = @(foreach ($other in Get-GameRigTickets) {
                         if ($other.File -eq $ticket) { break }
+                        # A whole-card waiter ahead that is not first takes no room yet, and one that is first stopped this above.
+                        if ($other.WholeGpu) { continue }
                         $could = @(Get-GameRigTicketKeys $other | Where-Object {
                             -not $machine.Contains($_) -and -not $given.Contains($_) -and -not (Get-Process -Name $_ -ErrorAction SilentlyContinue)
                         })
