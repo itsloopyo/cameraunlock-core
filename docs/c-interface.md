@@ -223,9 +223,10 @@ config block is generated from. The description therefore lives in one place in 
 by both the mod and its build.
 
 `cameraunlock_config_get_int`, `_get_float` and `_get_text` read a local row.
-`cameraunlock_config_save_int`, `_save_float` and `_save_text` write one. `cameraunlock_config_save_rows(rows, values, count)` writes several
-in one write of the file, or none of them when one is refused. A text row holds what
-the file holds as it is, such as a device's name, and a save writes it as UTF-8. It is no option
+`cameraunlock_config_save_int`, `_save_float` and `_save_text` write one.
+`cameraunlock_config_save_rows(rows, values, count)` writes several rows that are not text in one
+write of the file, or none of them when one is refused. A text row holds what the file holds
+as it is, such as a device's name, and a save writes it as UTF-8. It is no option
 (below): a host that shows it on an options screen does so with a control of its own. `cameraunlock_config_save_tracking_mode` and `_save_aim_mode` write
 the session's modes, and `_save_world_space_yaw` the yaw mode, which the host holds.
 
