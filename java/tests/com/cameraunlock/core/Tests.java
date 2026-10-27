@@ -382,6 +382,10 @@ public final class Tests {
         check(microphone == 7, "a text row is numbered like the others");
         check(refusal(() -> core.configLocalText("Voice", "Speaker", "Which speaker.", 0, "Default ")).contains("cameraunlock_config_local_text"),
                 "and one with a default the file cannot hold as it is is refused");
+        int ready = core.configLocalBool("Batch", "Ready", "Whether it is ready.", CameraUnlock.ROW_WRITABLE, true);
+        int amount = core.configLocalInt("Batch", "Amount", "How many.", CameraUnlock.ROW_WRITABLE, 5, 0, 10);
+        int scale = core.configLocalFloat("Batch", "Scale", "How large.", CameraUnlock.ROW_WRITABLE, 1f, 0.5f, 2f);
+        check(ready == 8 && amount == 9 && scale == 10, "writable rows of each kind follow it");
 
         core.configRender(rendered);
         String fresh = Files.readString(rendered, StandardCharsets.US_ASCII);
@@ -408,22 +412,28 @@ public final class Tests {
                 "a writable row saves as its word");
         check(refusal(() -> core.configSaveInt(arms, 0)).contains("Writable"), "a row not marked writable does not");
         check(refusal(() -> core.configSaveFloat(quality, 1f)).contains("not a float row"), "nor a float into an enum row");
-        check(core.configSaveRows(new int[] {quality}, new double[] {2}) == CameraUnlock.SAVE_SAVED
-                        && Files.readString(file).contains("\r\nQuality=Medium\r\n") && core.configGetInt(quality) == 2,
-                "rows saved together are written and read back");
+        check(core.configSaveRows(new int[] {quality, ready, amount, scale}, new double[] {2, 0, 7, 1.5}) == CameraUnlock.SAVE_SAVED
+                        && Files.readString(file).contains("\r\nQuality=Medium\r\n") && Files.readString(file).contains("\r\nReady=false\r\n")
+                        && Files.readString(file).contains("\r\nAmount=7\r\n") && Files.readString(file).contains("\r\nScale=1.5\r\n")
+                        && core.configGetInt(quality) == 2 && core.configGetInt(ready) == 0 && core.configGetInt(amount) == 7
+                        && core.configGetFloat(scale) == 1.5f,
+                "rows of each kind save together, and read back as saved");
         byte[] before = Files.readAllBytes(file);
-        String together = refusal(() -> core.configSaveRows(new int[] {quality, arms}, new double[] {1, 0}));
-        check(together.contains("cameraunlock_config_save_rows") && together.contains("Writable")
-                        && Arrays.equals(Files.readAllBytes(file), before) && core.configGetInt(quality) == 2,
-                "a row among them that may not be saved refuses them all, with nothing written: " + together);
+        String together = refusal(() -> core.configSaveRows(new int[] {amount, arms}, new double[] {3, 0}));
+        String range = refusal(() -> core.configSaveRows(new int[] {ready, amount}, new double[] {1, 11}));
+        check(together.contains("cameraunlock_config_save_rows") && together.contains("not marked Writable")
+                        && range.contains("whole number from 0 to 10")
+                        && Arrays.equals(Files.readAllBytes(file), before) && core.configGetInt(amount) == 7 && core.configGetInt(ready) == 0,
+                "a row among them that may not be saved, or a value out of its range, refuses them all with nothing written: " + together
+                        + " / " + range);
         String uneven = "";
         try {
             core.configSaveRows(new int[] {quality}, new double[] {1, 2});
         } catch (IllegalArgumentException refused) {
             uneven = refused.getMessage();
         }
-        check(uneven.equals("1 rows and 2 values"), "and as many values as rows are given: " + uneven);
-        check(core.configSaveRows(new int[] {quality}, new double[] {3}) == CameraUnlock.SAVE_SAVED, "the row saves again");
+        check(uneven.equals("configSaveRows takes a value for each row, and was given 2 for 1"), "and as many values as rows are given: " + uneven);
+        check(core.configSaveRows(new int[] {quality}, new double[] {3}) == CameraUnlock.SAVE_SAVED, "one row saves alone");
         check(core.configGetText(microphone).equals("Default"), "a text row reads back");
         String named = "Microphone (USB Audio Device) é";
         check(core.configSaveText(microphone, named) == CameraUnlock.SAVE_SAVED
@@ -449,7 +459,7 @@ public final class Tests {
 
         CameraUnlock.Option yaw = core.configOption(0), tracking = core.configOption(1), aim = core.configOption(2),
                 graphics = core.configOption(3);
-        check(core.configOptionCount() == 4 && yaw.id.equals("WorldSpaceYaw") && yaw.kind == CameraUnlock.OPTION_BOOL
+        check(core.configOptionCount() == 7 && yaw.id.equals("WorldSpaceYaw") && yaw.kind == CameraUnlock.OPTION_BOOL
                         && yaw.source == CameraUnlock.OPTION_ROW && yaw.choices.length == 0 && yaw.max == 1 && !yaw.comment.isEmpty(),
                 "the options are the writable rows a control holds: a bool row");
         check(tracking.id.equals("TrackingMode") && tracking.source == CameraUnlock.OPTION_TRACKING_MODE
@@ -479,7 +489,7 @@ public final class Tests {
                 "a saved mode is the session's, and a mode the session cycled is what its option reads");
         check(refusal(() -> core.configOptionSave(3, 7)).contains("none of the row's words")
                         && refusal(() -> core.configOptionSave(1, 3)).contains("not a tracking mode")
-                        && refusal(() -> core.configOption(4)).contains("no option 4") && core.configOptionGet(3) == 2,
+                        && refusal(() -> core.configOption(7)).contains("no option 7") && core.configOptionGet(3) == 2,
                 "a value an option does not hold, and an option that is not there, are refused in the library's words");
         core.configOptionSave(1, CameraUnlock.TRACKING_ROTATION_ONLY);
 

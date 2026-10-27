@@ -732,7 +732,7 @@ void TestOptions(const fs::path& scratch, std::int32_t quality) {
         return cameraunlock_config_option_get(option, &held) == CAMERAUNLOCK_ERROR ? -1.0 : held;
     };
 
-    Check(cameraunlock_config_option_count() == 4 && text(0, CAMERAUNLOCK_OPTION_TEXT_ID) == "WorldSpaceYaw" &&
+    Check(cameraunlock_config_option_count() == 7 && text(0, CAMERAUNLOCK_OPTION_TEXT_ID) == "WorldSpaceYaw" &&
               text(1, CAMERAUNLOCK_OPTION_TEXT_ID) == "TrackingMode" && text(2, CAMERAUNLOCK_OPTION_TEXT_ID) == "AimMode" &&
               text(3, CAMERAUNLOCK_OPTION_TEXT_ID) == "Quality",
           "the options are the writable rows a control holds, each mode as one: " + LastError());
@@ -757,7 +757,7 @@ void TestOptions(const fs::path& scratch, std::int32_t quality) {
     Check(cameraunlock_config_option_text(3, CAMERAUNLOCK_OPTION_TEXT_ID, small, sizeof(small)) == 7 && small[0] == 'x',
           "a text that does not fit answers its length and copies nothing");
     Check(text(3, CAMERAUNLOCK_OPTION_TEXT_CHOICE + 4) == "(error)" && text(0, CAMERAUNLOCK_OPTION_TEXT_CHOICE) == "(error)" &&
-              text(4, CAMERAUNLOCK_OPTION_TEXT_ID) == "(error)" && cameraunlock_config_option(-1, &option) == CAMERAUNLOCK_ERROR,
+              text(7, CAMERAUNLOCK_OPTION_TEXT_ID) == "(error)" && cameraunlock_config_option(-1, &option) == CAMERAUNLOCK_ERROR,
           "a word or an option that is not there is refused");
 
     Check(value(0) == 0.0 && value(1) == CAMERAUNLOCK_TRACKING_ROTATION_ONLY && value(2) == CAMERAUNLOCK_AIM_FREE_LOOK_MARKER &&
@@ -915,6 +915,11 @@ void TestConfig(const fs::path& scratch) {
     Check(cameraunlock_config_local_text("Voice", "Speaker", "Which speaker.", 0, nullptr) == CAMERAUNLOCK_ERROR &&
               LastError().find("default_text is NULL") != std::string::npos,
           "and so is none at all");
+    const std::int32_t ready = cameraunlock_config_local_bool("Batch", "Ready", "Whether it is ready.", CAMERAUNLOCK_ROW_WRITABLE, 1);
+    const std::int32_t amount = cameraunlock_config_local_int("Batch", "Amount", "How many.", CAMERAUNLOCK_ROW_WRITABLE, 5, 0, 10);
+    const std::int32_t scale =
+        cameraunlock_config_local_float("Batch", "Scale", "How large.", CAMERAUNLOCK_ROW_WRITABLE, 1.0f, 0.5f, 2.0f);
+    Check(ready == 8 && amount == 9 && scale == 10, "writable rows of each kind follow it: " + LastError());
 
     Check(cameraunlock_config_render(rendered.c_str()) == CAMERAUNLOCK_OK, "the description renders: " + LastError());
     const std::string fresh = ReadFile(scratch / "rendered.ini");
@@ -955,46 +960,46 @@ void TestConfig(const fs::path& scratch) {
           "a row not marked writable does not: " + LastError());
     Check(cameraunlock_config_save_int(quality, 9) == CAMERAUNLOCK_ERROR, "nor a value that names no word");
 
-    const std::int32_t one[] = {quality};
-    const double medium[] = {2.0};
-    Check(cameraunlock_config_save_rows(one, medium, 1) == CAMERAUNLOCK_SAVE_SAVED &&
-              ReadFile(scratch / "CameraUnlock.ini").find("Quality=Medium") != std::string::npos &&
-              cameraunlock_config_get_int(quality, &number) == CAMERAUNLOCK_OK && number == 2,
-          "rows saved together are written and read back: " + LastError());
-    const std::string before = ReadFile(scratch / "CameraUnlock.ini");
-    const std::int32_t with_arms[] = {quality, arms};
-    const double low_and_off[] = {1.0, 0.0};
-    Check(cameraunlock_config_save_rows(with_arms, low_and_off, 2) == CAMERAUNLOCK_ERROR &&
-              LastError().find("Writable") != std::string::npos,
-          "a row among them not marked writable refuses them all: " + LastError());
-    const std::int32_t with_text[] = {quality, microphone};
-    Check(cameraunlock_config_save_rows(with_text, low_and_off, 2) == CAMERAUNLOCK_ERROR &&
-              LastError().find("not a bool, an int, a float or an enum row") != std::string::npos,
-          "and so does a text row: " + LastError());
-    const std::int32_t twice[] = {quality, quality};
-    Check(cameraunlock_config_save_rows(twice, low_and_off, 2) == CAMERAUNLOCK_ERROR &&
-              LastError().find("in rows twice") != std::string::npos,
-          "and one row given twice: " + LastError());
-    const std::int32_t with_count[] = {quality, count};
-    const double halves[] = {1.0, 12.5};
-    const std::int32_t with_fov[] = {quality, arms, fov};
-    const double odd[] = {1.0, 0.5, 70.0};
-    const double no_word[] = {4.0};
-    const std::int32_t nowhere[] = {quality, 99};
-    Check(cameraunlock_config_save_rows(with_count, halves, 2) == CAMERAUNLOCK_ERROR &&
-              cameraunlock_config_save_rows(with_fov, odd, 3) == CAMERAUNLOCK_ERROR &&
-              cameraunlock_config_save_rows(one, no_word, 1) == CAMERAUNLOCK_ERROR &&
-              cameraunlock_config_save_rows(nowhere, low_and_off, 2) == CAMERAUNLOCK_ERROR,
-          "as do a value a row does not hold and a row that is none");
-    Check(cameraunlock_config_save_rows(one, medium, 0) == CAMERAUNLOCK_ERROR &&
-              cameraunlock_config_save_rows(nullptr, medium, 1) == CAMERAUNLOCK_ERROR &&
-              cameraunlock_config_save_rows(one, nullptr, 1) == CAMERAUNLOCK_ERROR,
+    const std::int32_t all[] = {quality, ready, amount, scale};
+    const double changed[] = {2.0, 0.0, 7.0, 1.5};
+    Check(cameraunlock_config_save_rows(all, changed, 4) == CAMERAUNLOCK_SAVE_SAVED, "rows of each kind save together: " + LastError());
+    const std::string together = ReadFile(scratch / "CameraUnlock.ini");
+    float large = 0.0f;
+    std::int32_t is_ready = -1;
+    std::int32_t how_many = -1;
+    Check(together.find("Quality=Medium") != std::string::npos && together.find("Ready=false") != std::string::npos &&
+              together.find("Amount=7") != std::string::npos && together.find("Scale=1.5") != std::string::npos,
+          "and are written: " + together.substr(together.find("[Batch]") == std::string::npos ? 0 : together.find("[Batch]")));
+    Check(cameraunlock_config_get_int(quality, &number) == CAMERAUNLOCK_OK && number == 2 &&
+              cameraunlock_config_get_int(ready, &is_ready) == CAMERAUNLOCK_OK && is_ready == 0 &&
+              cameraunlock_config_get_int(amount, &how_many) == CAMERAUNLOCK_OK && how_many == 7 &&
+              cameraunlock_config_get_float(scale, &large) == CAMERAUNLOCK_OK && large == 1.5f,
+          "and read back as saved");
+    const auto refused = [&](std::vector<std::int32_t> rows, std::vector<double> values, const char* reason) {
+        return cameraunlock_config_save_rows(rows.data(), values.data(), static_cast<std::int32_t>(rows.size())) ==
+                   CAMERAUNLOCK_ERROR &&
+               LastError().find(reason) != std::string::npos;
+    };
+    Check(refused({amount, arms}, {3.0, 0.0}, "not marked Writable"), "a row among them not marked writable refuses them all: " + LastError());
+    Check(refused({amount, microphone}, {3.0, 0.0}, "not a bool, an int, a float or an enum row"), "and so does a text row: " + LastError());
+    Check(refused({amount, amount}, {3.0, 4.0}, "in rows twice"), "and one row given twice: " + LastError());
+    Check(refused({amount, ready}, {3.0, 0.5}, "saved as 0 or 1") && refused({ready, amount}, {1.0, 3.5}, "whole number from 0 to 10") &&
+              refused({ready, amount}, {1.0, 11.0}, "whole number from 0 to 10") &&
+              refused({amount, scale}, {3.0, 2.5}, "number from 0.5") &&
+              refused({amount, scale}, {3.0, std::numeric_limits<double>::quiet_NaN()}, "number from 0.5") &&
+              refused({amount, scale}, {3.0, 1e300}, "number from 0.5") && refused({amount, quality}, {3.0, 4.0}, "names no token") &&
+              refused({amount, 99}, {3.0, 1.0}, "no local row 99"),
+          "and a value a row does not hold, and a row that is none: " + LastError());
+    Check(cameraunlock_config_save_rows(all, changed, 0) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_rows(nullptr, changed, 1) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_rows(all, nullptr, 1) == CAMERAUNLOCK_ERROR,
           "and no rows at all");
-    Check(ReadFile(scratch / "CameraUnlock.ini") == before && cameraunlock_config_get_int(quality, &number) == CAMERAUNLOCK_OK &&
-              number == 2,
+    Check(ReadFile(scratch / "CameraUnlock.ini") == together && cameraunlock_config_get_int(amount, &how_many) == CAMERAUNLOCK_OK &&
+              how_many == 7,
           "each refusal writes nothing and changes no row");
+    const std::int32_t one[] = {quality};
     const double high[] = {3.0};
-    Check(cameraunlock_config_save_rows(one, high, 1) == CAMERAUNLOCK_SAVE_SAVED, "and the row saves again: " + LastError());
+    Check(cameraunlock_config_save_rows(one, high, 1) == CAMERAUNLOCK_SAVE_SAVED, "and one row saves alone: " + LastError());
 
     char text[64] = {};
     Check(cameraunlock_config_get_text(microphone, text, sizeof(text)) == 7 && std::string(text) == "Default",

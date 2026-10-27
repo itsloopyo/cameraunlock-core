@@ -860,11 +860,13 @@ public final class CameraUnlock {
 
     /**
      * Local rows in one write of the file, rows[i] taking values[i]: a bool as 0 or 1, an int, an
-     * enum as its word's place, a float. One the library refuses throws with nothing written.
+     * enum as its word's place, a float. One the library refuses throws with nothing written, and
+     * arrays of two lengths throw an IllegalArgumentException.
      */
     public int configSaveRows(int[] rows, double[] values) {
         if (rows.length != values.length) {
-            throw new IllegalArgumentException(rows.length + " rows and " + values.length + " values");
+            throw new IllegalArgumentException("configSaveRows takes a value for each row, and was given " + values.length
+                    + " for " + rows.length);
         }
         try (Arena arena = Arena.ofConfined()) {
             return check(status(configSaveRows, arena.allocateFrom(INT, rows), arena.allocateFrom(DOUBLE, values), rows.length));

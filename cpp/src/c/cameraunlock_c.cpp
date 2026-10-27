@@ -1344,6 +1344,11 @@ std::int32_t cameraunlock_config_save_rows(const std::int32_t* rows, const doubl
             for (const auto& earlier : changes) {
                 if (earlier.first == index) throw std::invalid_argument(described.key + " is in rows twice");
             }
+            // Checked here and not left to the owner: a load that could not use the file saves nothing
+            // and the session still takes the values, so a refusal there would come too late.
+            if ((described.flags & CAMERAUNLOCK_ROW_WRITABLE) == 0) {
+                throw std::invalid_argument(described.key + " is not marked Writable, so it is not saved");
+            }
             const double value = values[i];
             const bool whole = std::isfinite(value) && value == std::floor(value) &&
                                value >= static_cast<double>(std::numeric_limits<std::int32_t>::min()) &&
@@ -1355,7 +1360,10 @@ std::int32_t cameraunlock_config_save_rows(const std::int32_t* rows, const doubl
                     next = value != 0.0;
                     break;
                 case LocalKind::Int:
-                    if (!whole) throw std::invalid_argument(described.key + " is an int row, saved as a whole number");
+                    if (!whole || value < described.int_min || value > described.int_max) {
+                        throw std::invalid_argument(described.key + " holds a whole number from " + std::to_string(described.int_min) +
+                                                    " to " + std::to_string(described.int_max));
+                    }
                     next = static_cast<std::int32_t>(value);
                     break;
                 case LocalKind::Enum:
@@ -1365,6 +1373,11 @@ std::int32_t cameraunlock_config_save_rows(const std::int32_t* rows, const doubl
                     next = static_cast<HostEnum>(static_cast<std::int32_t>(value));
                     break;
                 case LocalKind::Float:
+                    if (!(value >= described.float_min && value <= described.float_max)) {
+                        const cfg::FloatCodec codec(described.float_min, described.float_max);
+                        throw std::invalid_argument(described.key + " holds a number from " + codec.Render(described.float_min) +
+                                                    " to " + codec.Render(described.float_max));
+                    }
                     next = static_cast<float>(value);
                     break;
                 default:
