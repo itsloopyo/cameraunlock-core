@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 7
+#define CAMERAUNLOCK_ABI 8
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -375,6 +375,11 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_get_text(int32_t row, char* buffer, i
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_int(int32_t row, int32_t value);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_float(int32_t row, float value);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_text(int32_t row, const char* value);
+/* `count` local rows in one write of the file, each `rows[i]` taking `values[i]`: a bool as 0 or
+ * 1, an int as a whole number, an enum as its word's place, a float. An error for a row that is
+ * none, is in `rows` twice, is a text or key row, or a value it does not hold, with nothing
+ * written. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_save_rows(const int32_t* rows, const double* values, int32_t count);
 /* The session's tracking mode as RotationEnabled and PositionEnabled, and its aim mode as
  * TrueFreeLook, FreeLookMarker and StockSights. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_tracking_mode(void);

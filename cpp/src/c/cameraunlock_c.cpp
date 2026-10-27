@@ -1329,6 +1329,55 @@ std::int32_t cameraunlock_config_save_text(std::int32_t row, const char* value) 
     });
 }
 
+std::int32_t cameraunlock_config_save_rows(const std::int32_t* rows, const double* values, std::int32_t count) {
+    return Guarded("cameraunlock_config_save_rows", [&] {
+        Require(count > 0, "count is not 1 or more");
+        Require(rows != nullptr, "rows is NULL");
+        Require(values != nullptr, "values is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        std::vector<std::pair<std::size_t, LocalValue>> changes;
+        for (std::int32_t i = 0; i < count; ++i) {
+            const LocalRow& described = LocalAt(c, rows[i]);
+            const std::size_t index = static_cast<std::size_t>(rows[i]);
+            for (const auto& earlier : changes) {
+                if (earlier.first == index) throw std::invalid_argument(described.key + " is in rows twice");
+            }
+            const double value = values[i];
+            const bool whole = std::isfinite(value) && value == std::floor(value) &&
+                               value >= static_cast<double>(std::numeric_limits<std::int32_t>::min()) &&
+                               value <= static_cast<double>(std::numeric_limits<std::int32_t>::max());
+            LocalValue next;
+            switch (described.kind) {
+                case LocalKind::Bool:
+                    if (value != 0.0 && value != 1.0) throw std::invalid_argument(described.key + " is a bool row, saved as 0 or 1");
+                    next = value != 0.0;
+                    break;
+                case LocalKind::Int:
+                    if (!whole) throw std::invalid_argument(described.key + " is an int row, saved as a whole number");
+                    next = static_cast<std::int32_t>(value);
+                    break;
+                case LocalKind::Enum:
+                    if (!whole || value < 0.0 || value >= static_cast<double>(described.tokens.size())) {
+                        throw std::invalid_argument(described.key + ": the value names no token");
+                    }
+                    next = static_cast<HostEnum>(static_cast<std::int32_t>(value));
+                    break;
+                case LocalKind::Float:
+                    next = static_cast<float>(value);
+                    break;
+                default:
+                    throw std::invalid_argument(described.key + " is not a bool, an int, a float or an enum row");
+            }
+            changes.emplace_back(index, std::move(next));
+        }
+        return Save(c, [&](HostConfig& config) {
+            for (const auto& change : changes) config.locals[change.first] = change.second;
+        });
+    });
+}
+
 std::int32_t cameraunlock_config_save_tracking_mode(void) {
     return Guarded("cameraunlock_config_save_tracking_mode", [&] {
         const TrackingModeChannels channels = EncodeTrackingMode(TheSession().mode().GetMode());

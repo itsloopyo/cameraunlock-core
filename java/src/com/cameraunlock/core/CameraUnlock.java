@@ -28,7 +28,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 7;
+    public static final int ABI = 8;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -353,7 +353,7 @@ public final class CameraUnlock {
             viewStop, viewFrame, viewLean, configDescribe,
             configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalText, configLocalHotkey,
             configLocalHotkeyHeld, configLocalHotkeyTaps, configRender,
-            configLoad, configReload, configGetInt, configGetFloat, configGetText, configSaveInt, configSaveFloat, configSaveText,
+            configLoad, configReload, configGetInt, configGetFloat, configGetText, configSaveInt, configSaveFloat, configSaveText, configSaveRows,
             configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, configOptionCount, configOption, configOptionText, configOptionGet,
             configOptionSave, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
@@ -496,6 +496,7 @@ public final class CameraUnlock {
         configSaveInt = bind("cameraunlock_config_save_int", FunctionDescriptor.of(INT, INT, INT));
         configSaveFloat = bind("cameraunlock_config_save_float", FunctionDescriptor.of(INT, INT, FLOAT));
         configSaveText = bind("cameraunlock_config_save_text", FunctionDescriptor.of(INT, INT, POINTER));
+        configSaveRows = bind("cameraunlock_config_save_rows", FunctionDescriptor.of(INT, POINTER, POINTER, INT));
         configSaveTrackingMode = bind("cameraunlock_config_save_tracking_mode", FunctionDescriptor.of(INT));
         configSaveAimMode = bind("cameraunlock_config_save_aim_mode", FunctionDescriptor.of(INT));
         configSaveWorldSpaceYaw = bind("cameraunlock_config_save_world_space_yaw", FunctionDescriptor.of(INT, INT));
@@ -854,6 +855,19 @@ public final class CameraUnlock {
     public int configSaveText(int row, String value) {
         try (Arena arena = Arena.ofConfined()) {
             return check(status(configSaveText, row, text(arena, value)));
+        }
+    }
+
+    /**
+     * Local rows in one write of the file, rows[i] taking values[i]: a bool as 0 or 1, an int, an
+     * enum as its word's place, a float. One the library refuses throws with nothing written.
+     */
+    public int configSaveRows(int[] rows, double[] values) {
+        if (rows.length != values.length) {
+            throw new IllegalArgumentException(rows.length + " rows and " + values.length + " values");
+        }
+        try (Arena arena = Arena.ofConfined()) {
+            return check(status(configSaveRows, arena.allocateFrom(INT, rows), arena.allocateFrom(DOUBLE, values), rows.length));
         }
     }
 

@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - several rows saved in one write (ABI 8)
+
+- C interface: `cameraunlock_config_save_rows(rows, values, count)` writes several local rows of
+  the file at once, or none of them when one is refused. Java: `configSaveRows(int[], double[])`.
+  `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 8.
+
 ### Added - a limit on rigs held at once
 
 - `Set-GameRigLimit -Count <n>` caps how many rigs, of every game, `Enter-GameRig` gives out at

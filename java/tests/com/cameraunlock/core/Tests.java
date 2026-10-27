@@ -408,6 +408,22 @@ public final class Tests {
                 "a writable row saves as its word");
         check(refusal(() -> core.configSaveInt(arms, 0)).contains("Writable"), "a row not marked writable does not");
         check(refusal(() -> core.configSaveFloat(quality, 1f)).contains("not a float row"), "nor a float into an enum row");
+        check(core.configSaveRows(new int[] {quality}, new double[] {2}) == CameraUnlock.SAVE_SAVED
+                        && Files.readString(file).contains("\r\nQuality=Medium\r\n") && core.configGetInt(quality) == 2,
+                "rows saved together are written and read back");
+        byte[] before = Files.readAllBytes(file);
+        String together = refusal(() -> core.configSaveRows(new int[] {quality, arms}, new double[] {1, 0}));
+        check(together.contains("cameraunlock_config_save_rows") && together.contains("Writable")
+                        && Arrays.equals(Files.readAllBytes(file), before) && core.configGetInt(quality) == 2,
+                "a row among them that may not be saved refuses them all, with nothing written: " + together);
+        String uneven = "";
+        try {
+            core.configSaveRows(new int[] {quality}, new double[] {1, 2});
+        } catch (IllegalArgumentException refused) {
+            uneven = refused.getMessage();
+        }
+        check(uneven.equals("1 rows and 2 values"), "and as many values as rows are given: " + uneven);
+        check(core.configSaveRows(new int[] {quality}, new double[] {3}) == CameraUnlock.SAVE_SAVED, "the row saves again");
         check(core.configGetText(microphone).equals("Default"), "a text row reads back");
         String named = "Microphone (USB Audio Device) é";
         check(core.configSaveText(microphone, named) == CameraUnlock.SAVE_SAVED
