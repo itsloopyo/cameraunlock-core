@@ -196,6 +196,15 @@ live, the lock of a process that has ended is anyone's to take over. Hold it for
 a batch, not for an evening, because every game session on the machine waits
 behind it.
 
+While it waits, a whole-card waiter holds off new rigs only once it is next on
+every rig: once nobody who asked before it is still waiting. Until then a
+session that asked after it takes a free copy or a free game as if it were not
+there, since the waiter could not have started yet anyway. It is never starved:
+a ticket is never numbered before one already in the queue, so the sessions
+ahead of it only leave, and once it is first nothing new is given out, so it
+starts when the last held rig comes back. A rig held for a long time while the
+waiter is first still keeps every other copy idle until it comes back.
+
 The lock is a convention, not a fence. A session that never asks is not seen,
 and a script that still calls `Start-IsolatedGame` without the rig runs beside
 whoever holds it.

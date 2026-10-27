@@ -438,6 +438,24 @@ Start-Sleep 600
     Check 'and no copy is given out while it holds' (Throws { Enter-GameRig -Pool 'poola', 'poolb' -Owner 'player' -WaitSeconds 0 } 'the graphics card is in use: gpu is held by pictures')
     Exit-GameRig -Rig $card
 
+    # A whole-card waiter holds off new rigs only once nobody who asked before it still waits.
+    $log = Join-Path $root 'cardqueue.log'
+    $long = Enter-GameRig -Game 'poola' -Owner 'long' -WaitSeconds 0
+    $ahead = Start-Taker @{ Game = 'poola'; Owner = 'ahead'; Log = $log; HoldMs = 4000 }
+    Wait-Until { (Get-GameRig -Game 'poola').Waiting -contains 'ahead' }
+    $carder = Start-Taker @{ Owner = 'card'; Log = $log; HoldMs = 200; WholeGpu = $true }
+    Wait-Until { $state = Get-GameRig; $state -and $state.Waiting -contains 'card' }
+    $beside = Enter-GameRig -Game 'poolb' -Owner 'later' -WaitSeconds 0
+    Check 'while a session ahead of a whole-card waiter still waits, one that asked after it takes a free copy' ((Get-GameRig -Game 'poolb').Holder.Owner -eq 'later')
+    Exit-GameRig -Rig $beside
+    Exit-GameRig -Rig $long
+    Wait-Until { (Get-Content $log -ErrorAction SilentlyContinue) -contains 'in ahead' }
+    Check 'once the waiter is first, no rig is given out though that copy is free' `
+        (Throws { Enter-GameRig -Game 'poolb' -Owner 'later' -WaitSeconds 0 } '^waiting behind card \(pid \d+\), who asked first, for the whole graphics card$')
+    Wait-All @($ahead, $carder)
+    Check 'and the waiter has the card as soon as the rig held ahead of it comes back' `
+        ((@(Get-Content $log) -join ',') -eq 'in ahead,out ahead,in card,out card' -and -not (Test-Path "$log.card")) (@(Get-Content $log) -join ',')
+
     # A pool session that needs the whole card takes a copy, once every copy and every other rig is free.
     $log = Join-Path $root 'poolcard.log'
     $tokenFile = Join-Path $root 'poolcard.token'

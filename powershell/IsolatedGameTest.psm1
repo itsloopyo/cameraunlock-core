@@ -979,7 +979,9 @@ function Enter-GameRig {
     -WholeGpu is for work that needs the graphics card to itself, an image generation run as much
     as a benchmark: it waits until no rig is held, and no rig is given out while it holds. Such
     work needs no game: leave -Game out. Run it from the PowerShell that took the lock, because
-    the lock of a process that has ended, with no game running, is anyone's to take over.
+    the lock of a process that has ended, with no game running, is anyone's to take over. While
+    it waits it holds off new rigs only once nobody who asked before it is still waiting; until
+    then a session that asked after it takes a free game as if it were not there.
 
     -Token takes back the lock an earlier process of the same session took: pass the Token of the
     rig that process got. This is how a session that starts the game in one process stops it in
@@ -1116,7 +1118,8 @@ function Enter-GameRig {
             # One turn: the rig, or what this session is waiting for.
             $turn = Invoke-GameRigExclusive {
                 # Whoever asked before this session, for a game this may take or for the whole card, goes first.
-                $ahead = @(foreach ($other in Get-GameRigTickets) {
+                $tickets = @(Get-GameRigTickets)
+                $ahead = @(foreach ($other in $tickets) {
                     if ($other.File -eq $ticket) { break }
                     if ($other.WholeGpu -or $WholeGpu -or @(Get-GameRigTicketKeys $other | Where-Object { $keys -contains $_ }).Count -gt 0) { $other }
                 })
@@ -1180,12 +1183,21 @@ function Enter-GameRig {
                     if ($candidates.Count -eq 1) { return "the rig is in use: $($inUse[$key])$behind" }
                     return "every game of $whose is in use: $(@($inUse.Keys | ForEach-Object { "$_ by $($inUse[$_])" }) -join '; ')$behind"
                 }
+                # A whole-card waiter holds off new rigs only once it is next on every rig, which is
+                # once nobody who asked before it is still waiting: before that it could not start
+                # whatever this took, so a copy this takes costs it nothing. It is not starved: no
+                # ticket is ever numbered before one already queued, so those ahead of it only
+                # go, and once it is first no rig is given out until every held one comes back.
+                $card = @($ahead | Where-Object { $_.WholeGpu -and $_.File -eq $tickets[0].File })
+                if ($card.Count -gt 0) {
+                    return "waiting behind $($card[0].Owner) (pid $($card[0].ProcessId)), who asked first, for the whole graphics card"
+                }
                 # Only those ahead that may take one of the open games compete for them: one asking for
                 # other copies of the pool loses nothing when this takes a copy it cannot have.
                 $openKeys = @($open | ForEach-Object Key)
-                $rivals = @($ahead | Where-Object { $_.WholeGpu -or $WholeGpu -or @(Get-GameRigTicketKeys $_ | Where-Object { $openKeys -contains $_ }).Count -gt 0 })
+                $rivals = @($ahead | Where-Object { $WholeGpu -or (-not $_.WholeGpu -and @(Get-GameRigTicketKeys $_ | Where-Object { $openKeys -contains $_ }).Count -gt 0) })
                 # A pool lets this through beside those rivals only while it has a game for each of them as well.
-                if (@($ahead | Where-Object { $_.WholeGpu }).Count -gt 0 -or $rivals.Count -ge $open.Count) {
+                if ($rivals.Count -ge $open.Count) {
                     return "waiting behind $($rivals[0].Owner) (pid $($rivals[0].ProcessId)), who asked first$(if ($rivals.Count -gt 1) { ", with $($rivals.Count - 1) more ahead of this session" })$(if ($candidates.Count -gt 1) { ", for $whose" })"
                 }
                 $free = @($open | Where-Object { -not @($_.Names | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }) })

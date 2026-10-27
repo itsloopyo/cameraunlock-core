@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - a whole-card waiter lets free rigs go until it is next
+
+- `Enter-GameRig -WholeGpu` waiting holds off new rigs only once nobody who asked before it is
+  still waiting. Until then a session that asked after it takes a free copy or game, where every
+  rig used to sit idle for as long as the waiter was queued.
+
 ### Added - several rows saved in one write (ABI 8)
 
 - C interface: `cameraunlock_config_save_rows(rows, values, count)` writes several local rows of
