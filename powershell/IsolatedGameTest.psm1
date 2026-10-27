@@ -745,11 +745,27 @@ function Get-GameRigBoardName {
 function Invoke-GameRigBoard {
     param([Parameter(Mandatory)][string[]]$Arguments)
     if (-not ($env:CLAUDECODE -or $env:CODEX_THREAD_ID -or $env:CODEX_SESSION_ID)) { return }
-    if (-not (Get-Command hivemind -CommandType Application -ErrorAction SilentlyContinue)) { return }
-    # Windows PowerShell turns a native command's stderr into a terminating error under Stop.
-    $ErrorActionPreference = 'Continue'
-    $said = & hivemind @Arguments 2>&1 | ForEach-Object { "$_" }
-    if ($LASTEXITCODE -ne 0) { Write-Warning "hivemind $($Arguments[0]) for the rig failed: $($said -join ' ')" }
+    $hivemind = Get-Command hivemind -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $hivemind) { return }
+    # A session whose runner was killed has lost the console it was started in: a console program
+    # started into that console dies before it runs (0xC0000142), and the host's own output throws
+    # (0xE9). So hivemind gets a hidden console of its own, and a failure goes to stderr, which a
+    # runner's log redirect still takes, when the host cannot show it.
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = $hivemind.Source
+    $start.Arguments = ($Arguments | ForEach-Object { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' }) -join ' '
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($start)
+    $errors = $process.StandardError.ReadToEndAsync()
+    $said = $process.StandardOutput.ReadToEnd() + $errors.Result
+    $process.WaitForExit()
+    if ($process.ExitCode -eq 0) { return }
+    $text = "hivemind $($Arguments[0]) for the rig failed (exit $($process.ExitCode)): $(($said -replace '\s+', ' ').Trim())"
+    try { Write-Warning $text }
+    catch [System.Management.Automation.Host.HostException] { [Console]::Error.WriteLine("WARNING: $text") }
 }
 
 function Set-GameRigOnBoard {
