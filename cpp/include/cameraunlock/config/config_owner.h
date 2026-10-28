@@ -180,6 +180,19 @@ struct ConfigReloadResult {
     std::string reason;
 };
 
+/// What ConfigOwner::FileChanged compares, from ConfigOwner::Watched.
+struct ConfigWatched {
+    /// The config file's full path.
+    std::wstring path;
+    /// The write time FileChanged compares the file's with, as a FILETIME count.
+    std::uint64_t write_time = 0;
+    /// Defaults.ini where Load found it, empty where it found none.
+    std::optional<std::wstring> defaults_path;
+    /// The write time FileChanged compares Defaults.ini's with: 0 where Load found none, and the
+    /// largest count where its time could not be read.
+    std::uint64_t defaults_write_time = 0;
+};
+
 #if CAMERAUNLOCK_WIN32
 
 namespace detail {
@@ -497,6 +510,26 @@ public:
         std::uint64_t write_time = 0;
         if (detail::OwnerTryLastWriteTime(path_, write_time) != 0) return true;
         return write_time != recorded_write_time_ || DefaultsWriteTime() != defaults_write_time_;
+    }
+
+    /// What FileChanged compares, for a watcher that reads the two write times itself so a poll
+    /// that finds nothing changed does not hold the mutex while Windows answers. FileChanged is
+    /// false whenever GetFileAttributesExW gives each file's time, or fails with
+    /// ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND or ERROR_NOT_READY for a time of 0, and both
+    /// equal the ones here (with no Defaults.ini found, its time is 0). Where either differs, or
+    /// GetFileAttributesExW fails otherwise, the watcher calls FileChanged. The paths stay the
+    /// same until the next Load.
+    ///
+    /// Throws std::logic_error when Load has not run.
+    ConfigWatched Watched() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        RequireLoaded("Watched");
+        ConfigWatched watched;
+        watched.path = path_;
+        watched.write_time = recorded_write_time_;
+        if (defaults_at_) watched.defaults_path = defaults_at_->path;
+        watched.defaults_write_time = defaults_write_time_;
+        return watched;
     }
 
 private:

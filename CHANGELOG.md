@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - the config poll no longer holds the module while Windows reads a write time (ABI 9)
+
+- Java's `configReload` reads the write times of CameraUnlock.ini and Defaults.ini itself and calls
+  the library only when one is not the time it recorded. Under `loadBundled` the poll held the
+  module's one lock through the stat, and a slow stat stalled the frame. The answers, the statuses
+  and the log lines are the library's as before.
+- C interface: `cameraunlock_config_watched(which, buffer, capacity, recorded)` gives the paths the
+  reload watches and the times recorded for them. C++: `ConfigOwner::Watched()`.
+  `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 9.
+
 ### Added - a key list row read as text
 
 - `cameraunlock_config_get_text` (and Java's `configGetText`) reads a key list row as the keys the file

@@ -26,7 +26,8 @@ beside its own code and loads it by full path.
 
 ## Rules that hold for every function
 
-- Plain C, fixed-width types. Text in and out is UTF-8 and NUL terminated. Paths are full paths.
+- Plain C, fixed-width types. Text in and out is UTF-8 and NUL terminated, but for the path
+  `cameraunlock_config_watched` gives, which is UTF-16. Paths are full paths.
 - Nothing thrown inside the library leaves it. A function that fails answers `CAMERAUNLOCK_ERROR`
   (-1), or `NULL` for `cameraunlock_aim_mode_label`. The reason is text: `cameraunlock_last_error`
   gives the calling thread's last one, and the same line goes to the log, once a second at most
@@ -221,6 +222,13 @@ it, with the table's own reason.
 after the same description to produce its committed `config/CameraUnlock.ini`, which the README's
 config block is generated from. The description therefore lives in one place in the host, called
 by both the mod and its build.
+
+`cameraunlock_config_watched(which, buffer, capacity, recorded)` gives what the reload looks at:
+the file's path or Defaults.ini's, and the write time the library recorded for it. A host that
+reads the two times itself, and finds both as recorded, answers `CAMERAUNLOCK_RELOAD_UNCHANGED`
+without calling `cameraunlock_config_reload`, so a poll that finds nothing changed holds no lock of
+the library's while Windows answers. The path is UTF-16, the one text here that is not UTF-8,
+because the host hands it to Windows and an unpaired surrogate has to come through as it is.
 
 `cameraunlock_config_get_int`, `_get_float` and `_get_text` read a local row.
 `cameraunlock_config_save_int`, `_save_float` and `_save_text` write one.

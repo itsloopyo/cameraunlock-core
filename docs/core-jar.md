@@ -143,6 +143,10 @@ it:
   file in use by another program sleeps and tries again, up to nine times 20 ms, and the lock is
   held through that too. A mod saves on a hotkey or a change in its options, so this is a hitch at
   that moment.
+- `configReload` reads the two write times itself, outside the lock, and calls the module only
+  when one is not the time the module recorded. Each poll still makes four short calls for the
+  paths and the times. A write time Windows is slow to give (a virus scanner, a busy disk) once
+  held a frame for 1.87 s, with the stat inside the module.
 - `windowCenter` moves the window with `SetWindowPos`, which waits for the window's own thread to
   answer. Called from any other thread while the window's thread waits for the lock (in `frame`,
   say), neither goes on. Call it on the thread that made the window.

@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 8
+#define CAMERAUNLOCK_ABI 9
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -362,6 +362,21 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_load(const char* path, const char* de
  * CAMERAUNLOCK_ROW_LIVE hold what the file holds now; every other row keeps what the load gave
  * it. For a thread that is not drawing a frame, once a second or so. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_reload(void);
+
+#define CAMERAUNLOCK_WATCHED_FILE 0
+#define CAMERAUNLOCK_WATCHED_DEFAULTS 1
+/* What cameraunlock_config_reload looks at to decide whether anything changed, for a host that
+ * looks itself first, so a poll that finds nothing changed does not wait on the library while
+ * Windows answers: the file (`which` CAMERAUNLOCK_WATCHED_FILE) or Defaults.ini where the load
+ * found it (CAMERAUNLOCK_WATCHED_DEFAULTS). `recorded` gets the write time, a FILETIME count,
+ * that reload compares the file's own with. Answers the full path's length in UTF-16 code units and
+ * copies it, with a NUL, when `capacity` holds length + 1: UTF-16, as the library hands it to
+ * Windows, where the rest of this interface speaks UTF-8. 0 for Defaults.ini where the load found
+ * none, whose recorded time is then 0. Reload would answer CAMERAUNLOCK_RELOAD_UNCHANGED whenever
+ * GetFileAttributesExW gives each path's last write time, or fails with ERROR_FILE_NOT_FOUND,
+ * ERROR_PATH_NOT_FOUND or ERROR_NOT_READY for a time of 0, and both equal `recorded`. On any other
+ * answer the host calls reload. The paths stay the same until the next load. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_watched(int32_t which, uint16_t* buffer, int32_t capacity, uint64_t* recorded);
 
 /* A local row's value: a bool as 0 or 1, an int, an enum as its word's place. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_int(int32_t row, int32_t* out);

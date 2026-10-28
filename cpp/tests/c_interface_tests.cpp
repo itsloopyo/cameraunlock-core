@@ -1041,6 +1041,29 @@ void TestConfig(const fs::path& scratch) {
     TestOptions(scratch, quality);
 
     Check(cameraunlock_config_reload() == CAMERAUNLOCK_RELOAD_UNCHANGED, "a file nobody touched is not read again");
+    const auto attributes_time = [](const fs::path& path) {
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        Check(GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data) != 0, "Windows reads the write time");
+        return (static_cast<std::uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
+    };
+    const auto watched = [](std::int32_t which, std::uint64_t& recorded) {
+        const std::int32_t length = cameraunlock_config_watched(which, nullptr, 0, &recorded);
+        Check(length > 0, "a watched path has a length: " + LastError());
+        std::vector<std::uint16_t> path(static_cast<std::size_t>(length) + 1, u'?');
+        Check(cameraunlock_config_watched(which, path.data(), length + 1, &recorded) == length && path.back() == 0,
+              "and is copied with its NUL");
+        return fs::path(std::wstring(path.begin(), path.end() - 1));
+    };
+    std::uint64_t recorded = 0;
+    Check(fs::equivalent(watched(CAMERAUNLOCK_WATCHED_FILE, recorded), scratch / "CameraUnlock.ini") &&
+              recorded == attributes_time(scratch / "CameraUnlock.ini"),
+          "the reload watches the file, at the write time Windows reads now");
+    Check(fs::equivalent(watched(CAMERAUNLOCK_WATCHED_DEFAULTS, recorded), scratch / "defaults" / "Defaults.ini") &&
+              recorded == attributes_time(scratch / "defaults" / "Defaults.ini"),
+          "and Defaults.ini where the load found it");
+    Check(cameraunlock_config_watched(2, nullptr, 0, &recorded) == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_watched(CAMERAUNLOCK_WATCHED_FILE, nullptr, 0, nullptr) == CAMERAUNLOCK_ERROR,
+          "a file that is neither, and no time to fill, are refused");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     saved.replace(saved.find("FieldOfView=65"), 14, "FieldOfView=90");
     saved.replace(saved.find("Trees=12"), 8, "Trees=40");
@@ -1048,6 +1071,9 @@ void TestConfig(const fs::path& scratch) {
     saved.replace(saved.find(held), held.size(), "Microphone=None");
     std::ofstream(scratch / "CameraUnlock.ini", std::ios::binary | std::ios::trunc) << saved;
     Check(cameraunlock_config_reload() == CAMERAUNLOCK_RELOAD_APPLIED, "a file the player saved is: " + LastError());
+    Check(cameraunlock_config_watched(CAMERAUNLOCK_WATCHED_FILE, nullptr, 0, &recorded) > 0 &&
+              recorded == attributes_time(scratch / "CameraUnlock.ini"),
+          "and its write time is the one watched from then");
     Check(cameraunlock_config_get_float(fov, &degrees) == CAMERAUNLOCK_OK && degrees == 90.0f, "a live row holds the new value");
     Check(cameraunlock_config_get_text(microphone, text, sizeof(text)) == 4 && std::string(text) == "None",
           "a live text row too");

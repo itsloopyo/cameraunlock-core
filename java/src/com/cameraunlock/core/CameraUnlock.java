@@ -28,7 +28,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 8;
+    public static final int ABI = 9;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -51,6 +51,7 @@ public final class CameraUnlock {
             LOAD_LEGACY_REFUSED = 4, LOAD_UNREADABLE = 5;
     public static final int SAVE_SAVED = 0, SAVE_NOT_SAVED = 1, SAVE_UNCERTAIN = 2;
     public static final int RELOAD_UNCHANGED = 0, RELOAD_APPLIED = 1, RELOAD_UNREADABLE = 3;
+    static final int WATCHED_FILE = 0, WATCHED_DEFAULTS = 1;
     /** Option.kind: a tick box, a slider of whole numbers, a slider, a list of words. */
     public static final int OPTION_BOOL = 0, OPTION_INT = 1, OPTION_FLOAT = 2, OPTION_ENUM = 3;
     /** Option.source: one row of the file, or the session's tracking mode or aim mode. */
@@ -353,7 +354,7 @@ public final class CameraUnlock {
             viewStop, viewFrame, viewLean, configDescribe,
             configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalText, configLocalHotkey,
             configLocalHotkeyHeld, configLocalHotkeyTaps, configRender,
-            configLoad, configReload, configGetInt, configGetFloat, configGetText, configSaveInt, configSaveFloat, configSaveText, configSaveRows,
+            configLoad, configReload, configWatched, configGetInt, configGetFloat, configGetText, configSaveInt, configSaveFloat, configSaveText, configSaveRows,
             configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, configOptionCount, configOption, configOptionText, configOptionGet,
             configOptionSave, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
@@ -490,6 +491,7 @@ public final class CameraUnlock {
         configRender = bind("cameraunlock_config_render", FunctionDescriptor.of(INT, POINTER));
         configLoad = bind("cameraunlock_config_load", FunctionDescriptor.of(INT, POINTER, POINTER, POINTER));
         configReload = bind("cameraunlock_config_reload", FunctionDescriptor.of(INT));
+        configWatched = bind("cameraunlock_config_watched", FunctionDescriptor.of(INT, INT, POINTER, INT, POINTER));
         configGetInt = bind("cameraunlock_config_get_int", FunctionDescriptor.of(INT, INT, POINTER));
         configGetFloat = bind("cameraunlock_config_get_float", FunctionDescriptor.of(INT, INT, POINTER));
         configGetText = bind("cameraunlock_config_get_text", FunctionDescriptor.of(INT, INT, POINTER, INT));
@@ -812,9 +814,31 @@ public final class CameraUnlock {
         }
     }
 
-    /** Answers a RELOAD_*. Not from the thread that draws. */
+    /**
+     * Answers a RELOAD_*. Not from the thread that draws. The two write times are read here, with
+     * no call into the library in progress, and the library is called only when they are not the
+     * ones it recorded (ConfigWatch).
+     */
     public int configReload() {
+        if (ConfigWatch.unchanged(configWatched(WATCHED_FILE), configWatched(WATCHED_DEFAULTS), ConfigWatch::lastWriteTime)) {
+            return RELOAD_UNCHANGED;
+        }
         return check(status(configReload));
+    }
+
+    /** cameraunlock_config_watched: a file configReload looks at, and the write time the library recorded for it. */
+    ConfigWatch.Watched configWatched(int which) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment recorded = arena.allocate(LONG);
+            int length = check(status(configWatched, which, MemorySegment.NULL, 0, recorded));
+            MemorySegment path = arena.allocate(ValueLayout.JAVA_CHAR, length + 1L);
+            int copied = check(status(configWatched, which, path, length + 1, recorded));
+            if (copied != length) {
+                throw new IllegalStateException("cameraunlock_config_watched answered " + length + " units and then " + copied
+                        + ": the config was loaded again on another thread in between, and config calls are made one at a time");
+            }
+            return new ConfigWatch.Watched(new String(path.toArray(ValueLayout.JAVA_CHAR), 0, length), recorded.get(LONG, 0));
+        }
     }
 
     /** A local row's value: a bool as 0 or 1, an int, an enum as its word's place. */

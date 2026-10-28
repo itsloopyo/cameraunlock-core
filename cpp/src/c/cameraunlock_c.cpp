@@ -1227,6 +1227,38 @@ std::int32_t cameraunlock_config_reload(void) {
     });
 }
 
+std::int32_t cameraunlock_config_watched(std::int32_t which, std::uint16_t* buffer, std::int32_t capacity,
+                                         std::uint64_t* recorded) {
+    return Guarded("cameraunlock_config_watched", [&] {
+        Require(recorded != nullptr, "recorded is NULL");
+        Require(which == CAMERAUNLOCK_WATCHED_FILE || which == CAMERAUNLOCK_WATCHED_DEFAULTS,
+                "which is not CAMERAUNLOCK_WATCHED_FILE or CAMERAUNLOCK_WATCHED_DEFAULTS");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const cfg::ConfigWatched watched = c.owner->Watched();
+        const bool file = which == CAMERAUNLOCK_WATCHED_FILE;
+        *recorded = file ? watched.write_time : watched.defaults_write_time;
+        // wchar_t is 32 bits in the WebAssembly build, where a code point past U+FFFF is one unit.
+        std::u16string units;
+        for (const wchar_t unit : file ? watched.path : watched.defaults_path.value_or(std::wstring())) {
+            const auto code = static_cast<std::uint32_t>(unit);
+            if (code > 0xFFFF) {
+                units.push_back(static_cast<char16_t>(0xD800 + ((code - 0x10000) >> 10)));
+                units.push_back(static_cast<char16_t>(0xDC00 + ((code - 0x10000) & 0x3FF)));
+            } else {
+                units.push_back(static_cast<char16_t>(code));
+            }
+        }
+        const auto length = static_cast<std::int32_t>(units.size());
+        if (buffer != nullptr && capacity >= length + 1) {
+            std::memcpy(buffer, units.data(), units.size() * sizeof(char16_t));
+            buffer[length] = 0;
+        }
+        return length;
+    });
+}
+
 std::int32_t cameraunlock_config_get_int(std::int32_t row, std::int32_t* out) {
     return Guarded("cameraunlock_config_get_int", [&] {
         Require(out != nullptr, "out is NULL");

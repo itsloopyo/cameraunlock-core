@@ -1337,7 +1337,13 @@ the one recorded, so a mod that already watches its file picks up an edit to Def
 new code. A Defaults.ini whose write time cannot be read counts as one fixed time, so it never
 throws and never flaps. A game's file whose write time cannot be read, for a reason other than its
 absence, makes `FileChanged` true, and `Reload` then returns `Unreadable` with the reason, which
-goes to the status sink once until a reload reads the file or the reason changes. A mod that does not watch reads Defaults.ini again at the next start. An
+goes to the status sink once until a reload reads the file or the reason changes. A mod that does not watch reads Defaults.ini again at the next start.
+
+C++'s `Watched()` gives what `FileChanged` compares: the file's path, Defaults.ini's where `Load`
+found it, and the write time recorded for each. A watcher that must not hold the owner's lock while
+Windows answers reads the two times itself with `GetFileAttributesExW`, a missing file as 0, and
+calls `FileChanged` and `Reload` only when one differs or the read fails otherwise. The Java
+binding's `configReload` does this through `cameraunlock_config_watched`. An
 editor that truncates the file and writes it in place can be caught halfway: the rows it has not
 reached yet take the built-in value until its last write moves the write time again.
 

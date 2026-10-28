@@ -12,7 +12,11 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.nio.charset.Charset;
+import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.OptionalLong;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.util.Map;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -59,6 +63,7 @@ public final class Tests {
         modesAreSetCycledAndNamed(testing.core);
         viewsEachHaveATrackerAndShareTheModes(testing);
         configIsDescribedRenderedLoadedSavedAndReadAgain(testing.core, scratch);
+        theReloadLooksAtTheWriteTimesFirst(scratch);
         hotkeysAndTheWindow(testing.core);
         aTrackerOnThePortReachesTheFrame(testing);
         if (Testing.BUNDLED) {
@@ -499,9 +504,101 @@ public final class Tests {
         check(core.configReload() == CameraUnlock.RELOAD_APPLIED, "a file the player saved is");
         check(core.configGetFloat(fov) == 90f && core.configGetInt(trees) == 12,
                 "a live row holds the new value and a row not marked live what the load gave it");
+        theReloadWatchesWhatTheLibraryRecorded(core, file, defaults, quality);
         core.setAimMode(CameraUnlock.AIM_SIGHTS_LOCKED);
         core.cycleTrackingMode();
         core.cycleTrackingMode();
+    }
+
+    /** What configReload decides before it calls the library, over write times a test gives it. */
+    private static void theReloadLooksAtTheWriteTimesFirst(Path scratch) throws IOException {
+        ConfigWatch.Watched file = new ConfigWatch.Watched("C:\\game\\CameraUnlock.ini", 7L);
+        ConfigWatch.Watched defaults = new ConfigWatch.Watched("C:\\roaming\\CameraUnlock\\Defaults.ini", -1L);
+        Map<String, OptionalLong> now = new HashMap<>();
+        ConfigWatch.Times times = path -> {
+            if (!now.containsKey(path)) throw new IllegalStateException("asked for the time of " + path);
+            return now.get(path);
+        };
+        now.put(file.path(), OptionalLong.of(7L));
+        now.put(defaults.path(), OptionalLong.of(-1L));
+        check(ConfigWatch.unchanged(file, defaults, times), "both times as recorded: unchanged, with no call into the library");
+        check(ConfigWatch.unchanged(file, new ConfigWatch.Watched("", 0L), times),
+                "with no Defaults.ini found, the file's time alone, as the library reads it");
+        check(!ConfigWatch.unchanged(file, new ConfigWatch.Watched("", 3L), times),
+                "and a time recorded for a Defaults.ini that was not found differs from its 0");
+        now.put(file.path(), OptionalLong.of(8L));
+        check(!ConfigWatch.unchanged(file, defaults, times), "the file written since: the library is called");
+        now.put(file.path(), OptionalLong.of(0L));
+        check(!ConfigWatch.unchanged(file, defaults, times), "the file gone since (time 0): the library is called");
+        now.put(file.path(), OptionalLong.empty());
+        check(!ConfigWatch.unchanged(file, defaults, times), "the file's time not certain: the library is called");
+        now.put(file.path(), OptionalLong.of(7L));
+        now.put(defaults.path(), OptionalLong.of(9L));
+        check(!ConfigWatch.unchanged(file, defaults, times), "Defaults.ini written since: the library is called");
+        now.put(defaults.path(), OptionalLong.empty());
+        check(!ConfigWatch.unchanged(file, defaults, times), "Defaults.ini's time not certain: the library is called");
+
+        Path there = Files.writeString(scratch.resolve("watched.ini"), "x");
+        FileTime set = FileTime.from(Instant.parse("2026-01-02T03:04:05.1234567Z"));
+        Files.setLastModifiedTime(there, set);
+        // A FILETIME counts 100 ns from 1601.
+        long filetime = (set.to(TimeUnit.MICROSECONDS) + 11_644_473_600_000_000L) * 10 + 7;
+        check(ConfigWatch.lastWriteTime(there.toString()).equals(OptionalLong.of(filetime)),
+                "a file's time is GetFileAttributesExW's FILETIME count: " + ConfigWatch.lastWriteTime(there.toString()));
+        check(ConfigWatch.lastWriteTime(scratch.resolve("absent.ini").toString()).equals(OptionalLong.of(0))
+                        && ConfigWatch.lastWriteTime(scratch.resolve("absent").resolve("absent.ini").toString()).equals(OptionalLong.of(0)),
+                "a missing file, or folder, is time 0 as the library counts it");
+        check(ConfigWatch.lastWriteTime(scratch + "\\in<valid.ini").isEmpty(),
+                "another failure is not certain, since the library tries FindFirstFileW then");
+        check(ConfigWatch.lastWriteTime(scratch + "\\lone\uD800.ini").isEmpty(),
+                "nor is a path with an unpaired surrogate, which the DLL and the module hand Windows differently");
+    }
+
+    /** The files configReload looks at are the library's, at the times it recorded, and its decision is the library's. */
+    private static void theReloadWatchesWhatTheLibraryRecorded(CameraUnlock core, Path file, Path defaults, int writable)
+            throws IOException {
+        ConfigWatch.Watched watchedFile = core.configWatched(CameraUnlock.WATCHED_FILE);
+        ConfigWatch.Watched watchedDefaults = core.configWatched(CameraUnlock.WATCHED_DEFAULTS);
+        check(Path.of(watchedFile.path()).equals(file.toAbsolutePath()) && Path.of(watchedDefaults.path()).equals(defaults.toAbsolutePath()),
+                "the library watches the file and Defaults.ini where the load found it: " + watchedFile + " " + watchedDefaults);
+        check(ConfigWatch.lastWriteTime(watchedFile.path()).equals(OptionalLong.of(watchedFile.recorded()))
+                        && ConfigWatch.lastWriteTime(watchedDefaults.path()).equals(OptionalLong.of(watchedDefaults.recorded())),
+                "each at the write time Windows gives now, the one the last reload recorded");
+        check(unchangedBeforeTheLibrary(core) && core.configReload() == CameraUnlock.RELOAD_UNCHANGED,
+                "so a poll now answers unchanged without the library");
+
+        FileTime later = FileTime.fromMillis(System.currentTimeMillis() + 10_000);
+        Files.writeString(defaults, Files.readString(defaults, StandardCharsets.US_ASCII) + "\r\n", StandardCharsets.US_ASCII);
+        Files.setLastModifiedTime(defaults, later);
+        check(!unchangedBeforeTheLibrary(core), "Defaults.ini written since is a change the library is asked about");
+        core.configReload();
+        check(unchangedBeforeTheLibrary(core), "and once it has read it, there is none");
+
+        check(core.configSaveInt(writable, core.configGetInt(writable) == 1 ? 2 : 1) == CameraUnlock.SAVE_SAVED
+                        && unchangedBeforeTheLibrary(core) && core.configReload() == CameraUnlock.RELOAD_UNCHANGED,
+                "a save through the library records its own write");
+
+        byte[] held = Files.readAllBytes(file);
+        Files.writeString(file, "[General]\r\n", StandardCharsets.US_ASCII);
+        Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() + 20_000));
+        check(core.configSaveInt(writable, core.configGetInt(writable) == 1 ? 2 : 1) == CameraUnlock.SAVE_SAVED
+                        && !unchangedBeforeTheLibrary(core) && core.configReload() == CameraUnlock.RELOAD_APPLIED,
+                "a save over an edit the library had not read leaves that write unrecorded, so the edit is still read");
+
+        Files.delete(file);
+        check(!unchangedBeforeTheLibrary(core) && core.configReload() == CameraUnlock.RELOAD_UNREADABLE,
+                "a file gone since is asked about, and the library finds it missing");
+        check(unchangedBeforeTheLibrary(core) && core.configReload() == CameraUnlock.RELOAD_UNCHANGED,
+                "the library recorded it missing, so the next poll is unchanged, as the library would answer");
+        Files.write(file, held);
+        Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() + 30_000));
+        check(!unchangedBeforeTheLibrary(core) && core.configReload() == CameraUnlock.RELOAD_APPLIED,
+                "a file that appears again is asked about, and read");
+    }
+
+    private static boolean unchangedBeforeTheLibrary(CameraUnlock core) {
+        return ConfigWatch.unchanged(core.configWatched(CameraUnlock.WATCHED_FILE), core.configWatched(CameraUnlock.WATCHED_DEFAULTS),
+                ConfigWatch::lastWriteTime);
     }
 
     private static void hotkeysAndTheWindow(CameraUnlock core) throws Throwable {

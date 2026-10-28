@@ -1349,6 +1349,51 @@ void ReloadIgnoresTheOwnersOwnWrites(const fs::path& dir) {
     Check(ListingIs(dir, {kFileName, kLegacyName}), "nothing else is written");
 }
 
+std::uint64_t AttributesTime(const fs::path& path) {
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return 0;
+    return (static_cast<std::uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
+}
+
+// A watcher that reads the two times itself and finds both as Watched gives them knows FileChanged
+// would answer false.
+void WatchedIsWhatFileChangedCompares(const fs::path& dir) {
+    Rig rig(dir);
+    auto owner = rig.Make();
+    ExpectStatus(owner->Load(), ConfigLoadStatus::Created);
+    ConfigWatched watched = owner->Watched();
+    Check(fs::equivalent(watched.path, rig.path) && watched.defaults_path && fs::equivalent(*watched.defaults_path, rig.defaults_path),
+          "the file and Defaults.ini where Load found it");
+    Check(watched.write_time == AttributesTime(rig.path) && watched.write_time != 0 &&
+              watched.defaults_write_time == AttributesTime(rig.defaults_path) && watched.defaults_write_time != 0,
+          "each with the write time GetFileAttributesExW reads now");
+    Check(!owner->FileChanged(), "and FileChanged agrees nothing changed");
+
+    WriteBytes(rig.path, Replace(ReadBytes(rig.path), "UdpPort=default", "UdpPort=6000"));
+    fs::last_write_time(rig.path, fs::last_write_time(rig.path) + std::chrono::seconds(5));
+    Check(owner->Watched().write_time == watched.write_time && AttributesTime(rig.path) != watched.write_time &&
+              owner->FileChanged(),
+          "an outside edit leaves the recorded time, so the times differ and FileChanged is true");
+    Check(owner->Reload().status == ConfigReloadStatus::Applied, "the edit is applied");
+    watched = owner->Watched();
+    Check(watched.write_time == AttributesTime(rig.path) && !owner->FileChanged(), "the reload records the new time");
+
+    ExpectSaved(owner->Save([](HeadTrackingConfig& c) { c.world_space_yaw = false; }));
+    Check(owner->Watched().write_time == AttributesTime(rig.path) && !owner->FileChanged(), "a committed save records its time");
+
+    WriteBytes(rig.defaults_path, ReadBytes(rig.defaults_path) + "; read again\r\n");
+    fs::last_write_time(rig.defaults_path, fs::last_write_time(rig.defaults_path) + std::chrono::seconds(5));
+    Check(owner->Watched().defaults_write_time != AttributesTime(rig.defaults_path) && owner->FileChanged(),
+          "Defaults.ini written is a difference too");
+    owner->Reload();
+    Check(owner->Watched().defaults_write_time == AttributesTime(rig.defaults_path) && !owner->FileChanged(),
+          "and the reload records it");
+
+    fs::remove(rig.path);
+    Check(owner->Reload().status == ConfigReloadStatus::Unreadable, "a deleted file is Unreadable");
+    Check(owner->Watched().write_time == 0 && !owner->FileChanged(), "a missing file is recorded as time 0");
+}
+
 // An editor saves the file and a hotkey's save runs before the mod's watch has looked.
 void ASaveLeavesAnUnreadEditForTheReload(const fs::path& dir) {
     Rig rig(dir);
@@ -2346,6 +2391,7 @@ int RunConfigOwnerTests() {
     RunScenario("an-unfinished-save-is-uncertain", AnUnfinishedSaveIsUncertain);
     RunScenario("reload-ignores-the-owners-own-writes", ReloadIgnoresTheOwnersOwnWrites);
     RunScenario("a-save-leaves-an-unread-edit-for-the-reload", ASaveLeavesAnUnreadEditForTheReload);
+    RunScenario("watched-is-what-file-changed-compares", WatchedIsWhatFileChangedCompares);
     RunScenario("reload-reads-an-unstamped-config-and-never-imports", ReloadReadsAnUnstampedConfigAndNeverImports);
     RunScenario("reload-of-an-unreadable-file-keeps-the-settings", ReloadOfAnUnreadableFileKeepsTheSettings);
     RunScenario("a-reload-that-keeps-failing-is-reported-once", AReloadThatKeepsFailingIsReportedOnce);
