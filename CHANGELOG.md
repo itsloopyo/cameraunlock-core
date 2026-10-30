@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed - a packet that arrives while a frame reads the receiver is taken
+
+- `HeadTrackingSession::Update` reads the receiver's packet timestamp before the pose, with acquire
+  against the receive thread's release store. Read after the pose, a packet published between the
+  two reads was marked taken beside the pose before it, so its pose never reached the
+  interpolator, and a tracker that sent nothing more left the view one pose behind until it did.
+  A receiver of your own that is filled on another thread must store its timestamp after the pose,
+  with release, as `UdpReceiver` does.
+
 ### Added - the fleet's key lists read by name (ABI 10)
 
 - `cameraunlock_config_get_concept_keys(name, buffer, capacity)`, and Java's `configGetConceptKeys`,

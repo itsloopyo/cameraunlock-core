@@ -68,6 +68,12 @@ struct HasRemoteConnection<T, std::void_t<decltype(std::declval<T&>().IsRemoteCo
 /// tracker-app recentering. Adapters should assert against it:
 ///   static_assert(MySession::kHasRemoteRecenter);
 ///
+/// GetLastReceiveTimestamp() is how Update() tells a new packet from one it has
+/// already taken. A receiver filled on another thread moves it after the pose
+/// and position it belongs to are in place, with a release store, and reads it
+/// with acquire, as UdpReceiver does: Update() reads it before the pose, so the
+/// pose it reads is never older than the packet the timestamp marks.
+///
 /// Unlike the C# session, recentering happens at the receiver level: the C++
 /// TrackingProcessor's center manager overwrites rather than composes offsets,
 /// so processor-level recentering only works for the first recenter. This is
@@ -230,6 +236,11 @@ public:
         }
         m_positionWasActive = positionActive;
 
+        // The timestamp before the pose: the receive thread can publish a packet between any
+        // two of these reads, and a timestamp read after the pose could mark the newest packet
+        // taken beside the pose before it, so that its own pose never reached the interpolator.
+        const int64_t receiveTs = m_receiver.GetLastReceiveTimestamp();
+
         float rawYaw, rawPitch, rawRoll;
         if (!m_receiver.GetRotation(rawYaw, rawPitch, rawRoll)) {
             m_rotationValid = false;
@@ -252,7 +263,6 @@ public:
             m_positionProcessor.SetIsRemoteConnection(m_isRemoteConnection);
         }
 
-        const int64_t receiveTs = m_receiver.GetLastReceiveTimestamp();
         const bool isNewPacket = (receiveTs != m_lastReceiveTimestamp);
         m_lastReceiveTimestamp = receiveTs;
 

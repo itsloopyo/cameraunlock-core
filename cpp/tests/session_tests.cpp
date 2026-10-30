@@ -128,6 +128,50 @@ struct NonConstRemoteReceiver {
     bool IsRemoteConnection() { return isRemote; }
 };
 
+// UdpReceiver's receive thread can publish a packet while a frame is reading the receiver,
+// between any two of its reads. This stand-in has UdpReceiver's members, so Update() reads it
+// as it reads the real one, and publishes `next` straight after the read numbered
+// `publishAfter`, counted from 1.
+struct RacingReceiver {
+    struct Packet {
+        float yaw = 0.f;
+        float x = 0.f;
+        int64_t timestamp = 0;
+    };
+    mutable Packet published;
+    Packet next;
+    int publishAfter = 0;
+    mutable int reads = 0;
+
+    void Read() const {
+        if (++reads == publishAfter) published = next;
+    }
+    bool GetRotation(float& y, float& p, float& r) const {
+        y = published.yaw; p = 0.f; r = 0.f;
+        Read();
+        return true;
+    }
+    bool GetPosition(float& x, float& y, float& z) const {
+        x = published.x; y = 0.f; z = 0.f;
+        Read();
+        return true;
+    }
+    int64_t GetLastReceiveTimestamp() const {
+        const int64_t timestamp = published.timestamp;
+        Read();
+        return timestamp;
+    }
+    bool IsRemoteConnection() const {
+        Read();
+        return false;
+    }
+    bool TryConsumeRecenterRequest() {
+        Read();
+        return false;
+    }
+    void Recenter() {}
+};
+
 using Session = cameraunlock::HeadTrackingSession<FakeReceiver>;
 using cameraunlock::TrackingMode;
 
@@ -411,6 +455,48 @@ void TestDuplicatePacketFiltering() {
     rx.yaw = 2.f;
     session.Update(0.016f);
     Check(session.WasNewSample(), "new packet with changed data is a new sample");
+}
+
+// The tracker's last packet before it goes quiet, published by the receive thread while a frame
+// is reading the receiver. Its timestamp taken beside the pose before it would leave the view on
+// that pose until the tracker sent again, for good if it never did.
+void TestPacketPublishedMidFrameIsTaken() {
+    std::cout << "A packet published while a frame reads the receiver:\n";
+
+    const RacingReceiver::Packet first{10.f, 0.05f, 1000};
+    const RacingReceiver::Packet last{30.f, 0.10f, 2000};
+    int readsPerFrame = 0;
+    {
+        RacingReceiver rx;
+        rx.published = first;
+        cameraunlock::HeadTrackingSession<RacingReceiver> session(rx);
+        session.Update(1.f / 60.f);
+        readsPerFrame = rx.reads;
+    }
+    Check(readsPerFrame >= 3, "a frame reads the timestamp, the rotation and the position");
+
+    bool allTaken = true;
+    for (int after = 1; after <= readsPerFrame; ++after) {
+        RacingReceiver rx;
+        rx.published = first;
+        cameraunlock::HeadTrackingSession<RacingReceiver> session(rx);
+        for (int i = 0; i < 60; ++i) session.Update(1.f / 60.f);
+
+        rx.next = last;
+        rx.reads = 0;
+        rx.publishAfter = after;
+        for (int i = 0; i < 120; ++i) session.Update(1.f / 60.f);
+
+        float yaw = 0.f, pitch = 0.f, roll = 0.f;
+        session.GetRotation(yaw, pitch, roll);
+        const float x = session.GetLastInterpolatedPosition().x;
+        if (!NearEqual(yaw, last.yaw) || !NearEqual(x, last.x)) {
+            std::cout << "    published after read " << after << " of " << readsPerFrame << ": yaw " << yaw
+                      << ", x " << x << "\n";
+            allTaken = false;
+        }
+    }
+    Check(allTaken, "the frames after it reach its pose, whichever read it lands after");
 }
 
 // The pose a bridge to another protocol hands on: interpolated, and nothing after that.
@@ -888,6 +974,7 @@ int RunSessionTests() {
     TestPositionResetDeferredToUpdate();
     TestConcurrentCyclesAllLand();
     TestDuplicatePacketFiltering();
+    TestPacketPublishedMidFrameIsTaken();
     TestInterpolatedPositionIsBeforeTheProcessor();
     TestRecenterZeroesPose();
     TestManualRecenterDisarmsTheAutomaticOne();

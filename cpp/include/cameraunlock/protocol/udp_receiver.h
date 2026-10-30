@@ -160,8 +160,10 @@ public:
     bool StartFoundPortInUse() const { return m_startFoundPortInUse; }
 
     /// Timestamp of the last received packet (microseconds since epoch).
-    /// Compare across frames to detect new samples for interpolation.
-    int64_t GetLastReceiveTimestamp() const { return m_lastReceiveTimestamp.load(std::memory_order_relaxed); }
+    /// Compare across frames to detect new samples for interpolation. It moves after
+    /// the pose and position of its packet are in place, so a GetRotation() or
+    /// GetPosition() made after this read is that packet's or a newer one's.
+    int64_t GetLastReceiveTimestamp() const { return m_lastReceiveTimestamp.load(std::memory_order_acquire); }
 
     /// Gets the current rotation values with offset applied.
     /// @return True if data is available.
