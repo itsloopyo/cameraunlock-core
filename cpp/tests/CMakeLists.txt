@@ -59,6 +59,8 @@ add_executable(cameraunlock_tests
 target_link_libraries(cameraunlock_tests PRIVATE cameraunlock)
 if(WIN32)
     target_link_libraries(cameraunlock_tests PRIVATE bcrypt)
+    target_sources(cameraunlock_tests PRIVATE game_link_tests.cpp)
+    target_compile_definitions(cameraunlock_tests PRIVATE CAMERAUNLOCK_TESTS_GAME_LINK)
 endif()
 target_compile_definitions(cameraunlock_tests PRIVATE
     CAMERAUNLOCK_INI_EDITOR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../data/fixtures/canonical-ini/editor"

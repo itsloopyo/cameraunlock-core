@@ -78,9 +78,11 @@ else()
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 endif()
 
-# Link Winsock for UDP on Windows
+# Link Winsock for UDP on Windows. The game link is Winsock too: it is reached only
+# from isolated input, so a release build, which never compiles that, links none of it.
 if(WIN32)
     target_link_libraries(cameraunlock PUBLIC ws2_32)
+    target_sources(cameraunlock PRIVATE src/dev/game_link.cpp)
 endif()
 
 # Optional hook manager module (requires MinHook)

@@ -664,6 +664,52 @@ US keyboard, with Shift held for upper case and the shifted symbols. It types
 printable ASCII and nothing else: no Tab, no Enter (`tap Return`), no accented
 letters. Each key is held 40 ms.
 
+## The game link
+
+For a harness that plays the game as it goes (a simulated player that reacts to
+what happens), the command file is too slow and says nothing back. The game link
+is a TCP connection to the dev build, on 127.0.0.1 only, that plays each command
+as it arrives and carries messages out.
+
+It is on when the folder of the command file also holds `CameraUnlockLink.txt`
+with a port number in it, read once as isolated input starts. Every dev build
+with isolated input has it, the host DLL included; a mod adds nothing to get it.
+Write the file in `-Prepare` and name it in `-Files`, so the session takes it
+away again. A container on Docker Desktop reaches the link through
+`host.docker.internal`.
+
+In, one line at a time:
+
+```text
+<a line of the command language>   played at once; not `wait`: the client times its own commands
+mod <text>                         queued for the mod to take, for what only the mod can reach
+```
+
+A `tap` is played with its hold, and the link takes nothing else meanwhile: a
+client that drives several controllers at once sends `down` and `up` itself.
+
+Out, one JSON object a line:
+
+```text
+{"type":"hello","protocol":1,"pid":<the game's process id>}   on connecting
+{"type":"error","line":"<the line>","message":"<why>"}        a line not played
+```
+
+and whatever the mod publishes. One client at a time; the next is taken once the
+last has gone. A line over 4096 bytes is answered with an error and the client is
+let go.
+
+A native mod publishes with `cameraunlock::dev::PublishToGameLink(json)` and takes
+`mod` commands with `cameraunlock::dev::TakeModCommand(line)`, from any thread
+(`cameraunlock/dev/game_link.h`). A mod on the host DLL calls its exports:
+`CameraUnlockPublishToGameLink(const char* json)` (0 sent, 1 not sent: nobody
+connected, or not one line holding an object) and
+`CameraUnlockTakeModCommand(char* buffer, int size)` (the length taken, 0 when none
+waits, or minus the size needed, keeping the command for the next call; 4097
+bytes is always enough). Input that isolated input does not reach, such as
+Project Zomboid's controllers through GLFW, comes to the mod as `mod` commands
+for it to play itself.
+
 ## What the dev build detours
 
 For a game that reads raw input: each synthetic event is posted to the game's

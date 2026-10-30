@@ -95,9 +95,14 @@
 // number on the first line, commands after it. The file is played each time
 // that number changes, and `<file>.done` then holds the number, or the number
 // and the line that did not parse.
+//
+// When the command file's folder also holds CameraUnlockLink.txt with a port
+// number in it, the game link (game_link.h) listens on that port as well, and
+// plays each command line as it arrives.
 
 #include "cameraunlock/dev/directinput_state.h"
 #include "cameraunlock/dev/gameinput_state.h"
+#include "cameraunlock/dev/game_link.h"
 #include "cameraunlock/dev/input_script.h"
 
 #include <string>
@@ -146,7 +151,9 @@ bool HoldIsolatedKey(int vk, bool down);
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -262,6 +269,9 @@ struct State {
 
     IsolatedInputLogFn log = nullptr;
     std::wstring commandFile;
+    // The command file and the game link play from threads of their own. One step at
+    // a time, so a chord or a key's down and up from one never interleaves the other's.
+    std::mutex playLock;
 };
 
 inline State& S() {
@@ -1856,6 +1866,11 @@ inline void PlayFile(long long sequence, std::ifstream& file) {
     }
     int failed = 0;
     for (const InputStep& step : steps) {
+        if (step.action == InputAction::kWait) {
+            Play(step);
+            continue;
+        }
+        std::lock_guard<std::mutex> lock(S().playLock);
         if (!Play(step)) ++failed;
     }
     if (failed == 0) {
@@ -1893,6 +1908,45 @@ inline void RunCommandFile() {
         lastSequence = sequence;
         PlayFile(sequence, file);
     }
+}
+
+// A line from the game link, played as it arrives. A tap's hold is played, so it
+// holds the link that long: a client that times its own presses sends down and up.
+inline bool PlayLinkLine(const std::string& line, std::string& error) {
+    std::string_view first = detail::Trim(line);
+    first = first.substr(0, first.find(' '));
+    if (first == "wait") {
+        error = "the link plays each line as it arrives: time the commands from the client";
+        return false;
+    }
+    std::vector<InputStep> steps;
+    if (!ParseInputLine(line, steps, error)) return false;
+    for (const InputStep& step : steps) {
+        if (step.action == InputAction::kWait) {
+            Play(step);
+            continue;
+        }
+        std::lock_guard<std::mutex> lock(S().playLock);
+        if (!Play(step)) {
+            error = "could not be sent (no game window yet?)";
+            return false;
+        }
+    }
+    return true;
+}
+
+inline void StartGameLinkIfAsked() {
+    const std::filesystem::path portFile = std::filesystem::path(S().commandFile).parent_path() / kGameLinkPortFile;
+    std::ifstream file(portFile);
+    if (!file) return;
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    int port = 0;
+    std::string error;
+    if (!ParseGameLinkPort(text, port, error)) {
+        Log(("game link: CameraUnlockLink.txt: " + error + ", so the link is off").c_str());
+        return;
+    }
+    StartGameLink(port, &PlayLinkLine, S().log);
 }
 
 inline LRESULT CALLBACK GameWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -2149,6 +2203,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     std::thread(&RunCommandFile).detach();
     std::thread(&GuardForeground).detach();
     Log("isolated input: the game takes its keyboard and mouse from the command file, not from the real devices");
+    StartGameLinkIfAsked();
     return true;
 }
 

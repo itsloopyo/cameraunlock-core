@@ -68,6 +68,7 @@
 #include "cameraunlock/data/tracking_pose.h"
 #include "cameraunlock/dev/directinput_state.h"
 #include "cameraunlock/dev/gameinput_state.h"
+#include "cameraunlock/dev/game_link.h"
 #include "cameraunlock/diagnostics/crash_handler.h"
 #include "cameraunlock/discovery/camera_discovery.h"
 #include "cameraunlock/discovery/float_classifier.h"

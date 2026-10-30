@@ -141,7 +141,15 @@ Copy-IsolatedInputHost -ModFolder $mod -HostDll $HostDll | Out-Null
 # The copy StartIfAsked loads, not the build: a second file is a second module with a state of its own.
 Add-Type -Namespace CameraUnlockHostTest -Name Host -MemberDefinition @"
 [DllImport(@"$(Join-Path $mod 'CameraUnlockIsolatedInput.dll')")] public static extern int CameraUnlockHoldIsolatedKey(int vk, int down);
+[DllImport(@"$(Join-Path $mod 'CameraUnlockIsolatedInput.dll')")] public static extern int CameraUnlockPublishToGameLink(byte[] json);
+[DllImport(@"$(Join-Path $mod 'CameraUnlockIsolatedInput.dll')")] public static extern int CameraUnlockTakeModCommand(byte[] buffer, int size);
 "@
+# A free port for the game link, which starts with the detours when the port file is there.
+$probe = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+$probe.Start()
+$linkPort = $probe.LocalEndpoint.Port
+$probe.Stop()
+Set-Content (Join-Path $mod 'CameraUnlockLink.txt') "$linkPort" -Encoding ASCII
 Check 'a key is not held before the host has started' ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(0x43, 1) -eq 1)
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System;
@@ -230,6 +238,54 @@ Check 'and let go through it, up again' `
     ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey($keyC, 0) -eq 0 -and ([CameraUnlockHostTest.User32]::GetAsyncKeyState($keyC) -band 0x8000) -eq 0)
 Check 'a key code that is none is refused' ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(256, 1) -eq 2 -and [CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(0, 1) -eq 2)
 
+function Utf8Z([string]$Text) { [Text.Encoding]::UTF8.GetBytes($Text + [char]0) }
+
+$link = New-Object System.Net.Sockets.TcpClient
+$link.Connect('127.0.0.1', $linkPort)
+$link.ReceiveTimeout = 5000
+$linkReader = New-Object IO.StreamReader($link.GetStream(), [Text.Encoding]::UTF8)
+$linkWriter = New-Object IO.StreamWriter($link.GetStream(), (New-Object Text.UTF8Encoding $false))
+$linkWriter.NewLine = "`n"
+$linkWriter.AutoFlush = $true
+$hello = $linkReader.ReadLine()
+Check 'the game link greets a client with hello' ($hello -match '^\{"type":"hello","protocol":1,"pid":\d+\}$') $hello
+
+$linkWriter.WriteLine('down B')
+$deadline = (Get-Date).AddSeconds(5)
+while ((Get-Date) -lt $deadline -and ([CameraUnlockHostTest.User32]::GetAsyncKeyState($keyB) -band 0x8000) -eq 0) { Start-Sleep -Milliseconds 20 }
+Check 'a command from the link holds its key' (([CameraUnlockHostTest.User32]::GetAsyncKeyState($keyB) -band 0x8000) -ne 0)
+# This process has no window, so the key's message has nowhere to go, and the link says so
+# as the command file does.
+$reply = $linkReader.ReadLine()
+Check 'and says the key could not reach a game window' ($reply -match '"line":"down B".*no game window') $reply
+$linkWriter.WriteLine('up B')
+$reply = $linkReader.ReadLine()
+Check 'the key is let go the same way' ($reply -match '"line":"up B"' -and ([CameraUnlockHostTest.User32]::GetAsyncKeyState($keyB) -band 0x8000) -eq 0) $reply
+
+$linkWriter.WriteLine('wait 100')
+$reply = $linkReader.ReadLine()
+Check 'the link refuses wait, naming the line' ($reply -match '"line":"wait 100"' -and $reply -match 'as it arrives') $reply
+$linkWriter.WriteLine('tap NoSuchKey')
+$reply = $linkReader.ReadLine()
+Check 'a line that does not parse comes back as an error' ($reply -match '"type":"error","line":"tap NoSuchKey"') $reply
+
+$linkWriter.WriteLine('mod pad 1 join')
+$buffer = New-Object byte[] 4
+$deadline = (Get-Date).AddSeconds(5)
+$taken = 0
+while ((Get-Date) -lt $deadline -and ($taken = [CameraUnlockHostTest.Host]::CameraUnlockTakeModCommand($buffer, $buffer.Length)) -eq 0) { Start-Sleep -Milliseconds 20 }
+Check 'a mod command too long for the buffer says the size it needs' ($taken -eq -11) "$taken"
+$buffer = New-Object byte[] 11
+$taken = [CameraUnlockHostTest.Host]::CameraUnlockTakeModCommand($buffer, $buffer.Length)
+Check 'and is kept for the next call' ($taken -eq 10 -and [Text.Encoding]::UTF8.GetString($buffer, 0, 10) -eq 'pad 1 join') "$taken"
+Check 'then nothing waits' ([CameraUnlockHostTest.Host]::CameraUnlockTakeModCommand($buffer, $buffer.Length) -eq 0)
+
+Check 'the mod publishes to the client' ([CameraUnlockHostTest.Host]::CameraUnlockPublishToGameLink((Utf8Z '{"type":"state","hp":3}')) -eq 0)
+$published = $linkReader.ReadLine()
+Check 'and the client reads it' ($published -eq '{"type":"state","hp":3}') $published
+Check 'what is not one JSON object is not published' ([CameraUnlockHostTest.Host]::CameraUnlockPublishToGameLink((Utf8Z 'hp 3')) -eq 1)
+$link.Close()
+
 $notConnected = 1167
 $capabilities = New-Object byte[] 20
 Check 'XInputGetCapabilities answers no controller before a script plugs one in' `
@@ -300,6 +356,7 @@ Check 'a cursor set while the count is below zero stays hidden' (-not (CursorInf
 Check 'GetCursorInfo with a wrong cbSize is refused, as Windows refuses it' (-not (CursorInfo -Size 20).Read)
 
 $hostLog = Get-Content (Join-Path $mod 'CameraUnlockIsolatedInput.log') -Raw
+Check 'the host log says where the game link listens' ($hostLog -match "game link: listening on 127\.0\.0\.1:$linkPort")
 Check 'the host log says the detours are in' ($hostLog -match 'takes its keyboard and mouse from the command file')
 Check 'the host log names GetKeyState once it is read' ($hostLog -match 'through GetKeyState')
 Check 'the host log names GetKeyboardState once it is read' ($hostLog -match 'through GetKeyboardState')

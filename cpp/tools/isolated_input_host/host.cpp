@@ -11,8 +11,10 @@
 #define CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION
 #include "cameraunlock/dev/isolated_input.h"
 
+#include <cstring>
 #include <filesystem>
 #include <mutex>
+#include <string>
 
 namespace {
 
@@ -63,4 +65,31 @@ extern "C" __declspec(dllexport) int CameraUnlockHoldIsolatedKey(int vk, int dow
         if (!g_started) return 1;
     }
     return cameraunlock::dev::HoldIsolatedKey(vk, down != 0) ? 0 : 2;
+}
+
+// Sends one JSON object, UTF-8 with a NUL, to the game link's client
+// (cameraunlock::dev::PublishToGameLink). 0 when sent, 1 when not: nobody is
+// connected, the link is not on, or it was not one line holding an object (logged).
+extern "C" __declspec(dllexport) int CameraUnlockPublishToGameLink(const char* json) {
+    return cameraunlock::dev::PublishToGameLink(json) ? 0 : 1;
+}
+
+// Takes the oldest `mod` command from the game link into `buffer`, UTF-8 with a NUL
+// (cameraunlock::dev::TakeModCommand). Returns its length, 0 when none waits, or
+// minus the size it needs when `size` is too small, in which case it is kept for the
+// next call. kGameLinkMaxLine + 1 is always enough.
+extern "C" __declspec(dllexport) int CameraUnlockTakeModCommand(char* buffer, int size) {
+    static std::mutex lock;
+    static std::string kept;
+    static bool keeping = false;
+    std::lock_guard<std::mutex> guard(lock);
+    if (!keeping) {
+        if (!cameraunlock::dev::TakeModCommand(kept)) return 0;
+        keeping = true;
+    }
+    const int needed = static_cast<int>(kept.size()) + 1;
+    if (size < needed) return -needed;
+    std::memcpy(buffer, kept.c_str(), static_cast<std::size_t>(needed));
+    keeping = false;
+    return needed - 1;
 }

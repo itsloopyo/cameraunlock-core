@@ -28,6 +28,9 @@ int RunHeldPointerTests();
 int RunInputScriptTests();
 int RunDirectInputStateTests();
 int RunGameInputStateTests();
+#ifdef CAMERAUNLOCK_TESTS_GAME_LINK
+int RunGameLinkTests();
+#endif
 int RunLeanLineSweepTests();
 int RunRigLeanTests();
 int RunZoomCompensationTests();
@@ -103,6 +106,9 @@ int main(int argc, char** argv) {
     failures += RunInputScriptTests();
     failures += RunDirectInputStateTests();
     failures += RunGameInputStateTests();
+#ifdef CAMERAUNLOCK_TESTS_GAME_LINK
+    failures += RunGameLinkTests();
+#endif
     failures += RunLeanLineSweepTests();
     failures += RunRigLeanTests();
     failures += RunZoomCompensationTests();
