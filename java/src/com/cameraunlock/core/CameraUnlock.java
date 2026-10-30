@@ -28,7 +28,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 9;
+    public static final int ABI = 10;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -354,7 +354,7 @@ public final class CameraUnlock {
             viewStop, viewFrame, viewLean, configDescribe,
             configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalText, configLocalHotkey,
             configLocalHotkeyHeld, configLocalHotkeyTaps, configRender,
-            configLoad, configReload, configWatched, configGetInt, configGetFloat, configGetText, configSaveInt, configSaveFloat, configSaveText, configSaveRows,
+            configLoad, configReload, configWatched, configGetInt, configGetFloat, configGetText, configGetConceptKeys, configSaveInt, configSaveFloat, configSaveText, configSaveRows,
             configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, configOptionCount, configOption, configOptionText, configOptionGet,
             configOptionSave, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
@@ -495,6 +495,7 @@ public final class CameraUnlock {
         configGetInt = bind("cameraunlock_config_get_int", FunctionDescriptor.of(INT, INT, POINTER));
         configGetFloat = bind("cameraunlock_config_get_float", FunctionDescriptor.of(INT, INT, POINTER));
         configGetText = bind("cameraunlock_config_get_text", FunctionDescriptor.of(INT, INT, POINTER, INT));
+        configGetConceptKeys = bind("cameraunlock_config_get_concept_keys", FunctionDescriptor.of(INT, POINTER, POINTER, INT));
         configSaveInt = bind("cameraunlock_config_save_int", FunctionDescriptor.of(INT, INT, INT));
         configSaveFloat = bind("cameraunlock_config_save_float", FunctionDescriptor.of(INT, INT, FLOAT));
         configSaveText = bind("cameraunlock_config_save_text", FunctionDescriptor.of(INT, INT, POINTER));
@@ -863,6 +864,20 @@ public final class CameraUnlock {
             int length = check(status(configGetText, row, MemorySegment.NULL, 0));
             MemorySegment buffer = arena.allocate(length + 1L);
             check(status(configGetText, row, buffer, length + 1));
+            return buffer.getString(0);
+        }
+    }
+
+    /**
+     * The keys of one of the fleet's key list rows, by its concept name ("CycleTrackingModeKey"): the
+     * keys the load gave the row, which hotkeysStart listens for.
+     */
+    public String configGetConceptKeys(String name) {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment concept = text(arena, name);
+            int length = check(status(configGetConceptKeys, concept, MemorySegment.NULL, 0));
+            MemorySegment buffer = arena.allocate(length + 1L);
+            check(status(configGetConceptKeys, concept, buffer, length + 1));
             return buffer.getString(0);
         }
     }

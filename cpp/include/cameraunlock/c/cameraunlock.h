@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 9
+#define CAMERAUNLOCK_ABI 10
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -384,6 +384,11 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_get_float(int32_t row, float* out);
 /* A text row's value, or a key list row's keys as the file names them. Answers its length in
  * bytes and copies it, with its NUL, when `capacity` holds length + 1. */
 CAMERAUNLOCK_C int32_t cameraunlock_config_get_text(int32_t row, char* buffer, int32_t capacity);
+/* The keys of one of the fleet's key list rows, by its name in data/config-schema.json
+ * ("CycleTrackingModeKey"): the keys the load gave the row, which cameraunlock_hotkeys_start
+ * listens for. Answers their length in bytes and copies them, with a NUL, when `capacity` holds
+ * length + 1. An error for a row the description has not added, and for one that is not a key list. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_get_concept_keys(const char* name, char* buffer, int32_t capacity);
 
 /* Each writes rows of the file and answers a CAMERAUNLOCK_SAVE_*. Synchronous: from a thread
  * that is not drawing a frame. The host has already applied the value to its running state. */

@@ -448,6 +448,13 @@ public final class Tests {
         check(refusal(() -> core.configSaveText(microphone, "two\nlines")).contains("cameraunlock_config_save_text")
                         && refusal(() -> core.configGetText(fov)).contains("not a text row"),
                 "text the file cannot hold is refused, and a float row is not read as text");
+        String toggle = core.configGetConceptKeys("ToggleKey");
+        check(!toggle.isEmpty() && Files.readString(file, StandardCharsets.UTF_8).contains("\r\nToggleKey=default\r\n")
+                        && Files.readString(defaults, StandardCharsets.UTF_8).contains("\r\nToggleKey=" + toggle + "\r\n"),
+                "one of the fleet's key rows reads back as its keys, from Defaults.ini where the file says default: " + toggle);
+        check(refusal(() -> core.configGetConceptKeys("YawModeKey")).contains("not a concept row of the description")
+                        && refusal(() -> core.configGetConceptKeys("LocalSmoothing")).contains("not a key list row"),
+                "a fleet key row the description did not add is refused, and so is a row that is no key list");
         // The checks after this one read the file as ASCII.
         core.configSaveText(microphone, "Default");
 

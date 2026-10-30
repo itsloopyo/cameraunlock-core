@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - the fleet's key lists read by name (ABI 10)
+
+- `cameraunlock_config_get_concept_keys(name, buffer, capacity)`, and Java's `configGetConceptKeys`,
+  read one of the fleet's four key lists by its name, such as `CycleTrackingModeKey`: the keys the
+  load gave the row, which `cameraunlock_hotkeys_start` listens for. A host could read its own key
+  rows with `cameraunlock_config_get_text` but not these, so one that told the player which key
+  does what had to print the defaults.
+  `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 10.
+
 ### Fixed - the config poll no longer holds the module while Windows reads a write time (ABI 9)
 
 - Java's `configReload` reads the write times of CameraUnlock.ini and Defaults.ini itself and calls

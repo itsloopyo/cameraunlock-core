@@ -1013,6 +1013,22 @@ void TestConfig(const fs::path& scratch) {
     const std::int32_t keyLength = cameraunlock_config_get_text(key, text, sizeof(text));
     Check(keyLength > 0 && ReadFile(scratch / "CameraUnlock.ini").find(std::string("\r\nGraphicsKey=") + text + "\r\n") != std::string::npos,
           "a key list row reads back as the keys the file names, for a host to tell the player: " + std::string(text));
+    const std::int32_t cycleLength = cameraunlock_config_get_concept_keys("CycleTrackingModeKey", text, sizeof(text));
+    Check(cycleLength > 0 && cycleLength == static_cast<std::int32_t>(std::strlen(text)) &&
+              ReadFile(scratch / "CameraUnlock.ini").find("\r\nCycleTrackingModeKey=default\r\n") != std::string::npos &&
+              ReadFile(scratch / "defaults" / "Defaults.ini").find(std::string("\r\nCycleTrackingModeKey=") + text + "\r\n") !=
+                  std::string::npos,
+          "one of the fleet's key rows reads back as its keys, from Defaults.ini where the file says default: " + std::string(text));
+    const std::string cycleKeys = text;
+    Check(cameraunlock_config_get_concept_keys("CycleTrackingModeKey", small, sizeof(small)) == cycleLength && small[0] == 'x',
+          "a buffer too small for them is told the length and left alone");
+    Check(cameraunlock_config_get_concept_keys("YawModeKey", text, sizeof(text)) == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a concept row of the description") != std::string::npos,
+          "a fleet key row the description did not add is refused");
+    Check(cameraunlock_config_get_concept_keys("LocalSmoothing", text, sizeof(text)) == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a key list row") != std::string::npos &&
+              cameraunlock_config_get_concept_keys(nullptr, text, sizeof(text)) == CAMERAUNLOCK_ERROR,
+          "and so are a row that is no key list and no name at all");
     const char* named = "Microphone (USB Audio Device) \xc3\xa9";
     Check(cameraunlock_config_save_text(microphone, named) == CAMERAUNLOCK_SAVE_SAVED, "a writable text row saves: " + LastError());
     Check(ReadFile(scratch / "CameraUnlock.ini").find(std::string("Microphone=") + named) != std::string::npos,
@@ -1067,6 +1083,7 @@ void TestConfig(const fs::path& scratch) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     saved.replace(saved.find("FieldOfView=65"), 14, "FieldOfView=90");
     saved.replace(saved.find("Trees=12"), 8, "Trees=40");
+    saved.replace(saved.find("CycleTrackingModeKey=default"), 28, "CycleTrackingModeKey=F6");
     const std::string held = std::string("Microphone=") + named;
     saved.replace(saved.find(held), held.size(), "Microphone=None");
     std::ofstream(scratch / "CameraUnlock.ini", std::ios::binary | std::ios::trunc) << saved;
@@ -1079,6 +1096,8 @@ void TestConfig(const fs::path& scratch) {
           "a live text row too");
     Check(cameraunlock_config_get_int(count, &number) == CAMERAUNLOCK_OK && number == 12,
           "a row not marked live keeps what the load gave it");
+    Check(cameraunlock_config_get_concept_keys("CycleTrackingModeKey", text, sizeof(text)) == cycleLength && text == cycleKeys,
+          "and a fleet key row keeps the keys the load gave it, which the poller listens for");
 
     Check(cameraunlock_hotkeys_start() == CAMERAUNLOCK_OK, "the key lists go on the poller: " + LastError());
     Check(cameraunlock_hotkeys_start() == CAMERAUNLOCK_ERROR, "once");

@@ -1310,6 +1310,25 @@ std::int32_t cameraunlock_config_get_text(std::int32_t row, char* buffer, std::i
     });
 }
 
+std::int32_t cameraunlock_config_get_concept_keys(const char* name, char* buffer, std::int32_t capacity) {
+    return Guarded("cameraunlock_config_get_concept_keys", [&] {
+        Require(name != nullptr, "name is NULL");
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        const auto described = std::find_if(c.concepts.begin(), c.concepts.end(), [&](const ConceptRow& row) {
+            return std::strcmp(cfg::schema::kConcepts[static_cast<std::size_t>(row.id)].name, name) == 0;
+        });
+        if (described == c.concepts.end()) throw std::invalid_argument(std::string(name) + " is not a concept row of the description");
+        using Concept = cfg::schema::Concept;
+        if (described->id == Concept::ToggleKey) return CopyOut(c.loaded.toggle_key_name, buffer, capacity, true);
+        if (described->id == Concept::CycleTrackingModeKey) return CopyOut(c.loaded.cycle_tracking_mode_key_name, buffer, capacity, true);
+        if (described->id == Concept::YawModeKey) return CopyOut(c.loaded.yaw_mode_key_name, buffer, capacity, true);
+        if (described->id == Concept::TrueFreeLookKey) return CopyOut(c.loaded.true_free_look_key_name, buffer, capacity, true);
+        throw std::invalid_argument(std::string(name) + " is not a key list row");
+    });
+}
+
 std::int32_t cameraunlock_config_save_int(std::int32_t row, std::int32_t value) {
     return Guarded("cameraunlock_config_save_int", [&] {
         ConfigState& c = TheConfig();

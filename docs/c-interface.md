@@ -231,6 +231,9 @@ the library's while Windows answers. The path is UTF-16, the one text here that 
 because the host hands it to Windows and an unpaired surrogate has to come through as it is.
 
 `cameraunlock_config_get_int`, `_get_float` and `_get_text` read a local row.
+`cameraunlock_config_get_concept_keys(name, buffer, capacity)` reads one of the fleet's four key
+lists by its name, such as `CycleTrackingModeKey`: the keys the load gave the row, which
+`cameraunlock_hotkeys_start` listens for and a reload leaves as they are.
 `cameraunlock_config_save_int`, `_save_float` and `_save_text` write one.
 `cameraunlock_config_save_rows(rows, values, count)` writes several rows that are not text or keys in one
 write of the file, or none of them when one is refused. A text row holds what the file holds
