@@ -805,7 +805,7 @@ void TestConfig(const fs::path& scratch) {
     const char* plain[] = {"UdpPort", "EnableOnStartup", "DataFreshnessMs", "LocalSmoothing", "RemoteSmoothing",
                            "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                            "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey", "CycleTrackingModeKey",
-                           "TrueFreeLookKey", "LightMultiplier"};
+                           "LightMultiplier"};
     bool added = true;
     for (const char* name : plain) added = cameraunlock_config_concept(name, 0, nullptr, nullptr) == CAMERAUNLOCK_OK && added;
     const char* writable[] = {"WorldSpaceYaw", "RotationEnabled", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
@@ -815,6 +815,7 @@ void TestConfig(const fs::path& scratch) {
     }
     added = cameraunlock_config_concept("CollisionMargin", 0, "How far the view is held off a wall, in map tiles.",
                                         "0.12") == CAMERAUNLOCK_OK && added;
+    added = cameraunlock_config_concept("TrueFreeLookKey", CAMERAUNLOCK_ROW_PER_GAME, nullptr, "F4") == CAMERAUNLOCK_OK && added;
     Check(added, "the fleet's rows are named by concept: " + LastError());
     Check(cameraunlock_config_concept("FieldOfVision", 0, nullptr, nullptr) == CAMERAUNLOCK_ERROR &&
               LastError().find("not a canonical concept") != std::string::npos,
@@ -1020,6 +1021,8 @@ void TestConfig(const fs::path& scratch) {
                   std::string::npos,
           "one of the fleet's key rows reads back as its keys, from Defaults.ini where the file says default: " + std::string(text));
     const std::string cycleKeys = text;
+    Check(cameraunlock_config_get_concept_keys("TrueFreeLookKey", text, sizeof(text)) == 2 && std::string(text) == "F4",
+          "and one the game gives keys of its own reads back as those, not the schema's");
     Check(cameraunlock_config_get_concept_keys("CycleTrackingModeKey", small, sizeof(small)) == cycleLength && small[0] == 'x',
           "a buffer too small for them is told the length and left alone");
     Check(cameraunlock_config_get_concept_keys("YawModeKey", text, sizeof(text)) == CAMERAUNLOCK_ERROR &&

@@ -355,6 +355,7 @@ public final class Tests {
             core.configConcept(name, CameraUnlock.ROW_WRITABLE, null, null);
         }
         core.configConcept("CollisionMargin", 0, "How far the view is held off a wall, in map tiles.", "0.12");
+        core.configConcept("TrueFreeLookKey", CameraUnlock.ROW_PER_GAME, null, "F4");
         check(refusal(() -> core.configConcept("FieldOfVision", 0, null, null)).contains("not a canonical concept"),
                 "a name that is no concept is refused in the library's words");
 
@@ -452,6 +453,8 @@ public final class Tests {
         check(!toggle.isEmpty() && Files.readString(file, StandardCharsets.UTF_8).contains("\r\nToggleKey=default\r\n")
                         && Files.readString(defaults, StandardCharsets.UTF_8).contains("\r\nToggleKey=" + toggle + "\r\n"),
                 "one of the fleet's key rows reads back as its keys, from Defaults.ini where the file says default: " + toggle);
+        check(core.configGetConceptKeys("TrueFreeLookKey").equals("F4"),
+                "and one the game gives keys of its own reads back as those, not the schema's");
         check(refusal(() -> core.configGetConceptKeys("YawModeKey")).contains("not a concept row of the description")
                         && refusal(() -> core.configGetConceptKeys("LocalSmoothing")).contains("not a key list row"),
                 "a fleet key row the description did not add is refused, and so is a row that is no key list");
