@@ -821,10 +821,16 @@ public final class CameraUnlock {
      * ones it recorded (ConfigWatch).
      */
     public int configReload() {
-        if (ConfigWatch.unchanged(configWatched(WATCHED_FILE), configWatched(WATCHED_DEFAULTS), ConfigWatch::lastWriteTime)) {
-            return RELOAD_UNCHANGED;
-        }
-        return check(status(configReload));
+        return configChanged() ? check(status(configReload)) : RELOAD_UNCHANGED;
+    }
+
+    /**
+     * False when configReload would answer RELOAD_UNCHANGED without calling the library, for a host
+     * that gathers what it compares a reload with only when there may be one. True may still
+     * reload as RELOAD_UNCHANGED. Not from the thread that draws.
+     */
+    public boolean configChanged() {
+        return !ConfigWatch.unchanged(configWatched(WATCHED_FILE), configWatched(WATCHED_DEFAULTS), ConfigWatch::lastWriteTime);
     }
 
     /** cameraunlock_config_watched: a file configReload looks at, and the write time the library recorded for it. */

@@ -508,10 +508,11 @@ public final class Tests {
                 "a value an option does not hold, and an option that is not there, are refused in the library's words");
         core.configOptionSave(1, CameraUnlock.TRACKING_ROTATION_ONLY);
 
-        check(core.configReload() == CameraUnlock.RELOAD_UNCHANGED, "a file nobody touched is not read again");
+        check(!core.configChanged() && core.configReload() == CameraUnlock.RELOAD_UNCHANGED, "a file nobody touched is not read again");
         Files.writeString(file, saved.replace("FieldOfView=65.0", "FieldOfView=90").replace("Trees=12", "Trees=40"), StandardCharsets.US_ASCII);
         Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 5000));
-        check(core.configReload() == CameraUnlock.RELOAD_APPLIED, "a file the player saved is");
+        check(core.configChanged() && core.configReload() == CameraUnlock.RELOAD_APPLIED && !core.configChanged(),
+                "a file the player saved is, and is not changed once read");
         check(core.configGetFloat(fov) == 90f && core.configGetInt(trees) == 12,
                 "a live row holds the new value and a row not marked live what the load gave it");
         theReloadWatchesWhatTheLibraryRecorded(core, file, defaults, quality);
