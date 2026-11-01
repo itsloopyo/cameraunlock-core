@@ -892,6 +892,25 @@ void TestPluginModRequiresDefaults() {
           "PluginMod::Initialize refuses a canonical config with no defaults, naming both factories: " + error);
 }
 
+// Refused before the owner is built, so no file is read or written beside the test.
+void TestPluginModRequiresCanonicalFileName(const fs::path& root) {
+    cameraunlock::reframework::PluginModDescriptor descriptor;
+    descriptor.config = kRe8Schema;
+    descriptor.config.canonicalConfig = true;
+    descriptor.gameName = "Resident Evil Village";
+    descriptor.defaults = DefaultsFile::At((root / "no-defaults" / "Defaults.ini").wstring());
+    descriptor.configFileName = nullptr;
+    descriptor.canonicalConfigFileName = "";
+    std::string error;
+    try {
+        cameraunlock::reframework::PluginMod::Instance().Initialize(descriptor);
+    } catch (const std::invalid_argument& e) {
+        error = e.what();
+    }
+    Check(Contains(error, "PluginModDescriptor::canonicalConfigFileName is empty"),
+          "PluginMod::Initialize refuses an empty canonicalConfigFileName: " + error);
+}
+
 void TestLoadIgnoresCanonicalConfig(const fs::path& root) {
     const std::string base = ReadBytes(fs::path(CAMERAUNLOCK_REFRAMEWORK_LEGACY_FIXTURES) / kFixtures[4].file);
     PluginConfigSchema canonical = kRe8Schema;
@@ -1099,6 +1118,7 @@ int RunPluginConfigCanonicalTests() {
     TestTableRendersTheGamesRows();
     TestEverySchemaRendersFresh();
     TestPluginModRequiresDefaults();
+    TestPluginModRequiresCanonicalFileName(root);
     TestImportKeysAreWhatReadReads();
     TestImportDropsAndCorrection(root);
     TestShippedShapingIsFolded(root);

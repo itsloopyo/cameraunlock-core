@@ -26,9 +26,10 @@ struct PluginModDescriptor {
     const char* displayName = "Head Tracking";
     const char* version = "0.0.0";
     // File name of the INI, resolved beside the plugin DLL. With config.canonicalConfig it
-    // names the legacy file instead: settings live in CameraUnlock.ini beside the plugin DLL,
-    // and this file is imported into it once, while CameraUnlock.ini is absent. It is never
-    // written.
+    // names the legacy file instead: settings live in canonicalConfigFileName beside the plugin
+    // DLL, and this file is imported into it once, while that file is absent. It is never
+    // written. Null with canonicalConfig: the plugin never shipped a legacy file, so nothing
+    // is imported.
     const char* configFileName = "HeadTracking.ini";
     PluginConfigSchema config;
     // The game's name as data/games.json spells it, in printable ASCII, written at the
@@ -36,9 +37,12 @@ struct PluginModDescriptor {
     const char* gameName = nullptr;
     // Where Defaults.ini is, which the canonical config's concept rows take their defaults from:
     // config::DefaultsFile::PerUser() in a mod, config::DefaultsFile::At with a scratch path in a
-    // test. Required with config.canonicalConfig. Members are only ever appended, and this one
-    // is last.
+    // test. Required with config.canonicalConfig.
     config::DefaultsFile defaults;
+    // The canonical config's file name beside the plugin DLL. A plugin that shares a game's
+    // plugin folder with that game's own mod names a file of its own here, so the two never
+    // read each other's settings. Members are only ever appended, and this one is last.
+    const char* canonicalConfigFileName = "CameraUnlock.ini";
 };
 
 // The tracking pipeline every RE Engine head-tracking plugin owns: config load,

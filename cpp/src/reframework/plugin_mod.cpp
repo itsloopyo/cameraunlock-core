@@ -166,6 +166,20 @@ bool PluginMod::LoadConfig() {
     return true;
 }
 
+static std::wstring AnsiFileName(const char* name, const char* member) {
+    if (name == nullptr || *name == '\0') {
+        throw std::invalid_argument(std::string("PluginModDescriptor::") + member + " is empty");
+    }
+    const int length = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, name, -1, nullptr, 0);
+    std::wstring wide(length > 0 ? static_cast<size_t>(length) : 0, L'\0');
+    if (length <= 0 || MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, name, -1, &wide[0], length) != length) {
+        throw std::invalid_argument(std::string("PluginModDescriptor::") + member + " '" + name +
+                                    "' is not valid in the ANSI code page");
+    }
+    wide.resize(static_cast<size_t>(length) - 1);
+    return wide;
+}
+
 bool PluginMod::LoadCanonicalConfig() {
     if (m_descriptor.gameName == nullptr) {
         throw std::invalid_argument("PluginModDescriptor::gameName is required with canonicalConfig");
@@ -182,21 +196,16 @@ bool PluginMod::LoadCanonicalConfig() {
     if (directory.empty()) {
         LogError("Could not resolve the plugin directory - config not loaded or written");
     } else {
-        const char* name = m_descriptor.configFileName;
-        const int length = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, name, -1, nullptr, 0);
-        std::wstring wideName(length > 0 ? static_cast<size_t>(length) : 0, L'\0');
-        if (length <= 0 || MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, name, -1, &wideName[0], length) != length) {
-            throw std::invalid_argument(std::string("PluginModDescriptor::configFileName '") + name +
-                                        "' is not valid in the ANSI code page");
-        }
-        wideName.resize(static_cast<size_t>(length) - 1);
-        const std::wstring path = directory + L"\\CameraUnlock.ini";
+        const std::wstring path =
+            directory + L"\\" + AnsiFileName(m_descriptor.canonicalConfigFileName, "canonicalConfigFileName");
 
         cameraunlock::config::ConfigOwnerOptions<PluginConfig> options;
         options.path = path;
         options.table = PluginConfigTable(m_descriptor.config);
-        options.import = PluginConfigLegacyImport(m_descriptor.config);
-        options.legacy_path = directory + L"\\" + wideName;
+        if (m_descriptor.configFileName != nullptr) {
+            options.import = PluginConfigLegacyImport(m_descriptor.config);
+            options.legacy_path = directory + L"\\" + AnsiFileName(m_descriptor.configFileName, "configFileName");
+        }
         options.header.display_name = m_descriptor.gameName;
         options.defaults = m_descriptor.defaults;
         m_configOwner = std::make_unique<cameraunlock::config::ConfigOwner<PluginConfig>>(std::move(options));
