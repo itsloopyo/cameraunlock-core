@@ -355,7 +355,7 @@ public final class Tests {
             core.configConcept(name, CameraUnlock.ROW_WRITABLE, null, null);
         }
         core.configConcept("CollisionMargin", 0, "How far the view is held off a wall, in map tiles.", "0.12");
-        core.configConcept("TrueFreeLookKey", CameraUnlock.ROW_PER_GAME, null, "F4");
+        core.configConcept("TrueFreeLookKey", CameraUnlock.ROW_PER_GAME | CameraUnlock.ROW_WRITABLE, null, "F4");
         check(refusal(() -> core.configConcept("FieldOfVision", 0, null, null)).contains("not a canonical concept"),
                 "a name that is no concept is refused in the library's words");
 
@@ -363,7 +363,8 @@ public final class Tests {
         int quality = core.configLocalEnum("General", "Quality", "The graphics mode.", CameraUnlock.ROW_WRITABLE, "Automatic,Low,Medium,High", 1);
         int arms = core.configLocalBool("Content", "OwnArms", "The mod's own arms.", 0, true);
         int trees = core.configLocalInt("Content", "Trees", "How many trees.", 0, 12, 0, 100);
-        int key = core.configLocalHotkey("GraphicsKey", "Goes to the next graphics mode.", 0, "F9", CameraUnlock.HOTKEY_LOCAL);
+        int key = core.configLocalHotkey("GraphicsKey", "Goes to the next graphics mode.", CameraUnlock.ROW_WRITABLE, "F9",
+                CameraUnlock.HOTKEY_LOCAL);
         check(fov == 0 && quality == 1 && arms == 2 && trees == 3 && key == 4, "local rows are numbered as they are added");
         String taken = refusal(() -> core.configLocalHotkeyHeld("SeatKey", "Tapped for the first player, held for the second.", 0,
                 "Delete", CameraUnlock.HOTKEY_LOCAL << 1, CameraUnlock.HOTKEY_LOCAL));
@@ -458,6 +459,20 @@ public final class Tests {
         check(refusal(() -> core.configGetConceptKeys("YawModeKey")).contains("not a concept row of the description")
                         && refusal(() -> core.configGetConceptKeys("LocalSmoothing")).contains("not a key list row"),
                 "a fleet key row the description did not add is refused, and so is a row that is no key list");
+        check(core.configSaveKeys(key, "f8, ctrl+shift+g") == CameraUnlock.SAVE_SAVED && core.configGetText(key).equals("F8, Ctrl+Shift+G")
+                        && Files.readString(file, StandardCharsets.UTF_8).contains("\r\nGraphicsKey=F8, Ctrl+Shift+G\r\n"),
+                "a writable key row saves its keys as the file writes them");
+        check(core.configSaveConceptKeys("TrueFreeLookKey", "f6") == CameraUnlock.SAVE_SAVED && core.configGetConceptKeys("TrueFreeLookKey").equals("F6")
+                        && Files.readString(file, StandardCharsets.UTF_8).contains("\r\nTrueFreeLookKey=F6\r\n"),
+                "and so does one of the fleet's, by its name");
+        String keysBefore = Files.readString(file, StandardCharsets.UTF_8);
+        check(refusal(() -> core.configSaveKeys(key, "F6, Banana")).contains("GraphicsKey=F6, Banana")
+                        && refusal(() -> core.configSaveConceptKeys("ToggleKey", "F6")).contains("not marked Writable")
+                        && refusal(() -> core.configSaveKeys(quality, "F6")).contains("not a key list row")
+                        && Files.readString(file, StandardCharsets.UTF_8).equals(keysBefore) && core.configGetText(key).equals("F8, Ctrl+Shift+G"),
+                "keys the file cannot hold, a key row not marked writable and a row that is no key list are refused, with nothing written");
+        check(core.configSaveKeys(key, "F9") == CameraUnlock.SAVE_SAVED && core.configSaveConceptKeys("TrueFreeLookKey", "F4") == CameraUnlock.SAVE_SAVED,
+                "and the keys go back as they were");
         // The checks after this one read the file as ASCII.
         core.configSaveText(microphone, "Default");
 
@@ -807,15 +822,15 @@ public final class Tests {
         check(tickers.get() == before - 1, "and its tick thread ends");
     }
 
-    private static volatile int heldKey;
-    /** How many times the tick has asked for F9 while it was held, and while it was not. */
+    private static volatile int heldKey, watchedKey = 0x78;
+    /** How many times the tick has asked for watchedKey while it was held, and while it was not. */
     private static final java.util.concurrent.atomic.AtomicInteger seenDown = new java.util.concurrent.atomic.AtomicInteger(),
             seenUp = new java.util.concurrent.atomic.AtomicInteger();
 
     @SuppressWarnings("unused")
     private static short keyState(MemorySegment capture, int key) {
         boolean down = key == heldKey;
-        if (key == 0x78) (down ? seenDown : seenUp).incrementAndGet();
+        if (key == watchedKey) (down ? seenDown : seenUp).incrementAndGet();
         return (short) (down ? 0x8000 : 0);
     }
 
@@ -870,7 +885,30 @@ public final class Tests {
             int taken = core.hotkeysTake();
             check((taken & CameraUnlock.HOTKEY_LOCAL) != 0, "F9 held and let go in the game's window fires its row: " + Integer.toHexString(taken));
             check(core.hotkeysTake() == 0, "and is taken once");
+
+            // GraphicsKey, the config test's row 4, chosen anew while its new key is down, as an options screen does.
+            watchedKey = 0x76;
+            heldKey = 0x76;
+            down = seenDown.get();
+            check(core.configSaveKeys(4, "F7") == CameraUnlock.SAVE_SAVED && polledPast(seenDown, down + 1), "the tick asks for F7 once it is the row's key, while it is still down");
+            up = seenUp.get();
+            heldKey = 0;
+            check(polledPast(seenUp, up) && core.hotkeysTake() == 0, "and the press that was down as it was chosen does nothing");
+            down = seenDown.get();
+            heldKey = 0x76;
+            check(polledPast(seenDown, down), "the next press of F7 is seen");
+            up = seenUp.get();
+            heldKey = 0;
+            check(polledPast(seenUp, up) && (core.hotkeysTake() & CameraUnlock.HOTKEY_LOCAL) != 0, "and fires the row");
+            watchedKey = 0x78;
+            int asked = seenDown.get() + seenUp.get();
+            heldKey = 0x78;
+            Thread.sleep(64);
+            heldKey = 0;
+            Thread.sleep(64);
+            check(seenDown.get() + seenUp.get() == asked && core.hotkeysTake() == 0, "and F9, its old key, is no longer asked for");
         } finally {
+            watchedKey = 0x78;
             heldKey = 0;
             synchronized (module) {
                 for (Map.Entry<String, Object> one : real.entrySet()) setField(host, one.getKey(), one.getValue());

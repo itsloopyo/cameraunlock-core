@@ -98,7 +98,7 @@ struct HoldRig {
         wasForeground = foreground;
     }
 
-    void Disarm() { poller.DisarmHoldPressesWith(&FakeDown); }
+    void Disarm() { poller.DisarmPressesWith(&FakeDown); }
 
 private:
     void Poll(int ms, bool foreground) {
@@ -283,7 +283,7 @@ struct TapRig {
         wasForeground = foreground;
     }
 
-    void Disarm() { poller.DisarmHoldPressesWith(&FakeDown); }
+    void Disarm() { poller.DisarmPressesWith(&FakeDown); }
 
     bool Ran(int t, int d, int h) const { return taps == t && doubles == d && holds == h; }
 
@@ -583,7 +583,7 @@ void TestFourTaps() {
     {
         FourTapRig rig;
         rig.Taps(0, 2);
-        rig.poller.DisarmHoldPressesWith(&FakeDown);
+        rig.poller.DisarmPressesWith(&FakeDown);
         int up = rig.Taps(400, 1);
         rig.At(up + 300, false);
         Check(rig.Ran(1, 0, 0, 0, 0), "a run is forgotten when the presses are disarmed, and the press after is a first tap");
@@ -610,6 +610,33 @@ void TestFourTaps() {
     g_down[cameraunlock::input::VK::Delete] = false;
 }
 
+void TestDisarmPlainKey() {
+    using cameraunlock::input::VK::Insert;
+    const auto poll = [](cameraunlock::input::HotkeyPoller& poller, int ms) {
+        poller.PollAt(std::chrono::steady_clock::time_point() + std::chrono::milliseconds(ms), true, &FakeDown);
+    };
+    cameraunlock::input::HotkeyPoller poller;
+    int runs = 0;
+    g_down[Insert] = true;
+    poller.AddHotkey(Insert, [&runs] { ++runs; });
+    poller.DisarmPressesWith(&FakeDown);
+    poll(poller, 0);
+    poll(poller, 16);
+    Check(runs == 0, "a key added while it is down and then disarmed runs nothing for that press");
+    g_down[Insert] = false;
+    poll(poller, 32);
+    g_down[Insert] = true;
+    poll(poller, 48);
+    Check(runs == 1, "and runs for the press after it");
+    g_down[Insert] = false;
+    poll(poller, 64);
+    poller.DisarmPressesWith(&FakeDown);
+    g_down[Insert] = true;
+    poll(poller, 80);
+    Check(runs == 2, "a disarm while the key is up leaves its next press alone");
+    g_down[Insert] = false;
+}
+
 }  // namespace
 
 int RunHotkeyTests() {
@@ -620,5 +647,6 @@ int RunHotkeyTests() {
     TestTapAndHold();
     TestTapDoubleTapAndHold();
     TestFourTaps();
+    TestDisarmPlainKey();
     return g_failures;
 }

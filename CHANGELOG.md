@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - key lists saved and listened for at once (ABI 11)
+
+- `cameraunlock_config_save_keys(row, keys)` saves a local key list row, and
+  `cameraunlock_config_save_concept_keys(name, keys)` one of the fleet's four by its name, such as
+  `CycleTrackingModeKey`. Java has `configSaveKeys` and `configSaveConceptKeys`. The keys are kept
+  as their canonical text. Once `cameraunlock_hotkeys_start` has run, the poller listens for the
+  new keys from its next look and no longer for the old, so a game's options screen can let the
+  player choose a key and have it work with no restart. A key down as the list changes, most
+  likely the one the player pressed to choose it, does nothing for that press. The row has to be
+  marked `CAMERAUNLOCK_ROW_WRITABLE`; keys the file cannot hold, a row that is no key list and one
+  not marked Writable are refused, with nothing written.
+- `HotkeyPoller::DisarmHoldPresses` is `DisarmPresses` (and `DisarmPressesWith`), and also
+  covers `AddHotkey` keys: one that went down since the last poll runs nothing for that press. So
+  `cameraunlock_hotkeys_drop` now also drops a plain key pressed just before it.
+  `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 11.
+
 ### Fixed - a packet that arrives while a frame reads the receiver is taken
 
 - `HeadTrackingSession::Update` reads the receiver's packet timestamp before the pose, with acquire

@@ -28,7 +28,7 @@ import java.nio.file.Path;
  */
 public final class CameraUnlock {
     /** The CAMERAUNLOCK_ABI this class was written against. */
-    public static final int ABI = 10;
+    public static final int ABI = 11;
     /** The library's file, beside the jar or the class folder this class is in. */
     public static final String LIBRARY = "CameraUnlockCore.dll";
 
@@ -354,7 +354,7 @@ public final class CameraUnlock {
             viewStop, viewFrame, viewLean, configDescribe,
             configConcept, configLocalBool, configLocalInt, configLocalFloat, configLocalEnum, configLocalText, configLocalHotkey,
             configLocalHotkeyHeld, configLocalHotkeyTaps, configRender,
-            configLoad, configReload, configWatched, configGetInt, configGetFloat, configGetText, configGetConceptKeys, configSaveInt, configSaveFloat, configSaveText, configSaveRows,
+            configLoad, configReload, configWatched, configGetInt, configGetFloat, configGetText, configGetConceptKeys, configSaveInt, configSaveFloat, configSaveText, configSaveKeys, configSaveConceptKeys, configSaveRows,
             configSaveTrackingMode,
             configSaveAimMode, configSaveWorldSpaceYaw, configOptionCount, configOption, configOptionText, configOptionGet,
             configOptionSave, hotkeysStart, hotkeysTake, hotkeysDrop, windowCenter;
@@ -499,6 +499,8 @@ public final class CameraUnlock {
         configSaveInt = bind("cameraunlock_config_save_int", FunctionDescriptor.of(INT, INT, INT));
         configSaveFloat = bind("cameraunlock_config_save_float", FunctionDescriptor.of(INT, INT, FLOAT));
         configSaveText = bind("cameraunlock_config_save_text", FunctionDescriptor.of(INT, INT, POINTER));
+        configSaveKeys = bind("cameraunlock_config_save_keys", FunctionDescriptor.of(INT, INT, POINTER));
+        configSaveConceptKeys = bind("cameraunlock_config_save_concept_keys", FunctionDescriptor.of(INT, POINTER, POINTER));
         configSaveRows = bind("cameraunlock_config_save_rows", FunctionDescriptor.of(INT, POINTER, POINTER, INT));
         configSaveTrackingMode = bind("cameraunlock_config_save_tracking_mode", FunctionDescriptor.of(INT));
         configSaveAimMode = bind("cameraunlock_config_save_aim_mode", FunctionDescriptor.of(INT));
@@ -900,6 +902,25 @@ public final class CameraUnlock {
     public int configSaveText(int row, String value) {
         try (Arena arena = Arena.ofConfined()) {
             return check(status(configSaveText, row, text(arena, value)));
+        }
+    }
+
+    /**
+     * A key list row's keys, as the file holds a list ("F6, Ctrl+Shift+G", or empty for none). Once
+     * hotkeysStart has run, the new keys are listened for from the next poll in place of the old, and
+     * a key down as they change does nothing for that press. Keys the file cannot hold, a row that
+     * is no key list and one not ROW_WRITABLE throw, with nothing written.
+     */
+    public int configSaveKeys(int row, String keys) {
+        try (Arena arena = Arena.ofConfined()) {
+            return check(status(configSaveKeys, row, text(arena, keys)));
+        }
+    }
+
+    /** The same for one of the fleet's key list rows, by its concept name ("CycleTrackingModeKey"). */
+    public int configSaveConceptKeys(String name, String keys) {
+        try (Arena arena = Arena.ofConfined()) {
+            return check(status(configSaveConceptKeys, text(arena, name), text(arena, keys)));
         }
     }
 

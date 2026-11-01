@@ -257,12 +257,15 @@ void HotkeyPoller::Poll() {
     PollAt(std::chrono::steady_clock::now(), IsOwnProcessForeground(), &IsKeyDown);
 }
 
-void HotkeyPoller::DisarmHoldPresses() {
-    DisarmHoldPressesWith(&IsKeyDown);
+void HotkeyPoller::DisarmPresses() {
+    DisarmPressesWith(&IsKeyDown);
 }
 
-void HotkeyPoller::DisarmHoldPressesWith(KeyState isDown) {
+void HotkeyPoller::DisarmPressesWith(KeyState isDown) {
     std::lock_guard<std::mutex> lock(m_hotkeyMutex);
+    for (auto& entry : m_hotkeys) {
+        if (entry.vkCode != 0 && isDown(entry.vkCode)) entry.keyDown = true;
+    }
     for (auto& entry : m_holdHotkeys) {
         if (entry.vkCode == 0) continue;
         // The key is read here as well: one that went down since the last poll is a

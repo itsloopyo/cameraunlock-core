@@ -23,7 +23,7 @@ extern "C" {
 
 /* Raised when a function is added, a function's meaning changes or a struct's layout changes, so
  * a host that asks first never looks for a function this library does not have. */
-#define CAMERAUNLOCK_ABI 10
+#define CAMERAUNLOCK_ABI 11
 
 #define CAMERAUNLOCK_OK 0
 #define CAMERAUNLOCK_ERROR (-1)
@@ -395,6 +395,15 @@ CAMERAUNLOCK_C int32_t cameraunlock_config_get_concept_keys(const char* name, ch
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_int(int32_t row, int32_t value);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_float(int32_t row, float value);
 CAMERAUNLOCK_C int32_t cameraunlock_config_save_text(int32_t row, const char* value);
+/* A key list row's keys: a local row by its number, or one of the fleet's four by its name in
+ * data/config-schema.json ("CycleTrackingModeKey"). `keys` is a list as the file holds one ("F6,
+ * Ctrl+Shift+G", or empty for none), kept as its canonical text. Where cameraunlock_hotkeys_start has
+ * run, the poller listens for the new keys from the next poll and no longer for the old ones, and a
+ * key down as the list changes runs nothing for that press. An error for keys the file cannot hold,
+ * a row that is no key list, and one not marked CAMERAUNLOCK_ROW_WRITABLE, with nothing written and
+ * the keys listened for as they were. */
+CAMERAUNLOCK_C int32_t cameraunlock_config_save_keys(int32_t row, const char* keys);
+CAMERAUNLOCK_C int32_t cameraunlock_config_save_concept_keys(const char* name, const char* keys);
 /* `count` local rows in one write of the file, each `rows[i]` taking `values[i]`: a bool as 0 or
  * 1, an int as a whole number within its range, an enum as its word's place, a float within its
  * range. An error for a row that is none, is in `rows` twice, is a text or key row, is not

@@ -235,6 +235,12 @@ because the host hands it to Windows and an unpaired surrogate has to come throu
 lists by its name, such as `CycleTrackingModeKey`: the keys the load gave the row, which
 `cameraunlock_hotkeys_start` listens for and a reload leaves as they are.
 `cameraunlock_config_save_int`, `_save_float` and `_save_text` write one.
+`cameraunlock_config_save_keys(row, keys)` writes a local key list row, and
+`cameraunlock_config_save_concept_keys(name, keys)` one of the fleet's four by its name. Each row has
+to be marked `CAMERAUNLOCK_ROW_WRITABLE`, and the keys are kept as their canonical text. Once
+`cameraunlock_hotkeys_start` has run, the poller listens for the new keys from its next look and no
+longer for the old ones, and a key down as the list changes does nothing for that press: it is most
+likely the one the player pressed to choose it.
 `cameraunlock_config_save_rows(rows, values, count)` writes several rows that are not text or keys in one
 write of the file, or none of them when one is refused. A text row holds what the file holds
 as it is, such as a device's name, and a save writes it as UTF-8. It is no option

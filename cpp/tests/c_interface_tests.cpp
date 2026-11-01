@@ -815,7 +815,9 @@ void TestConfig(const fs::path& scratch) {
     }
     added = cameraunlock_config_concept("CollisionMargin", 0, "How far the view is held off a wall, in map tiles.",
                                         "0.12") == CAMERAUNLOCK_OK && added;
-    added = cameraunlock_config_concept("TrueFreeLookKey", CAMERAUNLOCK_ROW_PER_GAME, nullptr, "F4") == CAMERAUNLOCK_OK && added;
+    added = cameraunlock_config_concept("TrueFreeLookKey", CAMERAUNLOCK_ROW_PER_GAME | CAMERAUNLOCK_ROW_WRITABLE, nullptr, "F4") ==
+                CAMERAUNLOCK_OK &&
+            added;
     Check(added, "the fleet's rows are named by concept: " + LastError());
     Check(cameraunlock_config_concept("FieldOfVision", 0, nullptr, nullptr) == CAMERAUNLOCK_ERROR &&
               LastError().find("not a canonical concept") != std::string::npos,
@@ -831,7 +833,7 @@ void TestConfig(const fs::path& scratch) {
     const std::int32_t arms = cameraunlock_config_local_bool("Content", "OwnArms", "The mod's own arms.", 0, 1);
     const std::int32_t count = cameraunlock_config_local_int("Content", "Trees", "How many trees.", 0, 12, 0, 100);
     const std::int32_t key =
-        cameraunlock_config_local_hotkey("GraphicsKey", "Goes to the next graphics mode.", 0, "f9", 0x100);
+        cameraunlock_config_local_hotkey("GraphicsKey", "Goes to the next graphics mode.", CAMERAUNLOCK_ROW_WRITABLE, "f9", 0x100);
     Check(fov == 0 && quality == 1 && arms == 2 && count == 3 && key == 4, "local rows are numbered as they are added: " + LastError());
     Check(cameraunlock_config_local_enum("General", "Style", "The style.", 0, "vivid,Natural", 0) == CAMERAUNLOCK_ERROR,
           "an enum word that is not PascalCase is refused, by core's own codec: " + LastError());
@@ -1102,8 +1104,50 @@ void TestConfig(const fs::path& scratch) {
     Check(cameraunlock_config_get_concept_keys("CycleTrackingModeKey", text, sizeof(text)) == cycleLength && text == cycleKeys,
           "and a fleet key row keeps the keys the load gave it, which the poller listens for");
 
+    const auto keysOf = [&](std::int32_t row) {
+        const std::int32_t length = cameraunlock_config_get_text(row, text, sizeof(text));
+        return length < 0 ? std::string("(error)") : std::string(text, static_cast<std::size_t>(length));
+    };
+    const auto conceptKeysOf = [&](const char* name) {
+        const std::int32_t length = cameraunlock_config_get_concept_keys(name, text, sizeof(text));
+        return length < 0 ? std::string("(error)") : std::string(text, static_cast<std::size_t>(length));
+    };
+    Check(cameraunlock_config_save_keys(key, "f8, ctrl+shift+g") == CAMERAUNLOCK_SAVE_SAVED &&
+              keysOf(key) == "F8, Ctrl+Shift+G" &&
+              ReadFile(scratch / "CameraUnlock.ini").find("\r\nGraphicsKey=F8, Ctrl+Shift+G\r\n") != std::string::npos,
+          "a writable key row saves its keys as the file writes them, before the poller runs: " + LastError());
+    Check(cameraunlock_config_save_concept_keys("TrueFreeLookKey", "f6") == CAMERAUNLOCK_SAVE_SAVED &&
+              conceptKeysOf("TrueFreeLookKey") == "F6" &&
+              ReadFile(scratch / "CameraUnlock.ini").find("\r\nTrueFreeLookKey=F6\r\n") != std::string::npos,
+          "and so does one of the fleet's, by its name: " + LastError());
+    const std::string beforeRefusals = ReadFile(scratch / "CameraUnlock.ini");
+    Check(cameraunlock_config_save_keys(5, "Home") == CAMERAUNLOCK_ERROR && LastError().find("not marked Writable") != std::string::npos,
+          "a key row not marked writable does not: " + LastError());
+    Check(cameraunlock_config_save_concept_keys("CycleTrackingModeKey", "F6") == CAMERAUNLOCK_ERROR &&
+              LastError().find("not marked Writable") != std::string::npos,
+          "nor a fleet key row not marked writable: " + LastError());
+    Check(cameraunlock_config_save_keys(quality, "F6") == CAMERAUNLOCK_ERROR && LastError().find("not a key list row") != std::string::npos &&
+              cameraunlock_config_save_concept_keys("LocalSmoothing", "F6") == CAMERAUNLOCK_ERROR &&
+              LastError().find("not a key list row") != std::string::npos,
+          "a row that is no key list is refused either way: " + LastError());
+    Check(cameraunlock_config_save_keys(key, "F6, Banana") == CAMERAUNLOCK_ERROR && LastError().find("GraphicsKey=F6, Banana") != std::string::npos &&
+              cameraunlock_config_save_keys(key, "LeftShift") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_concept_keys("TrueFreeLookKey", "F6, F6") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_keys(key, nullptr) == CAMERAUNLOCK_ERROR,
+          "and so are keys the file cannot hold, and none at all: " + LastError());
+    Check(cameraunlock_config_save_keys(99, "F6") == CAMERAUNLOCK_ERROR && cameraunlock_config_save_concept_keys("YawModeKey", "F6") == CAMERAUNLOCK_ERROR &&
+              cameraunlock_config_save_concept_keys(nullptr, "F6") == CAMERAUNLOCK_ERROR,
+          "and rows that are none");
+    Check(ReadFile(scratch / "CameraUnlock.ini") == beforeRefusals && keysOf(key) == "F8, Ctrl+Shift+G" && conceptKeysOf("TrueFreeLookKey") == "F6",
+          "each refusal writes nothing and changes no keys");
+
     Check(cameraunlock_hotkeys_start() == CAMERAUNLOCK_OK, "the key lists go on the poller: " + LastError());
     Check(cameraunlock_hotkeys_start() == CAMERAUNLOCK_ERROR, "once");
+    Check(cameraunlock_config_save_keys(key, "F9") == CAMERAUNLOCK_SAVE_SAVED && keysOf(key) == "F9" &&
+              cameraunlock_config_save_concept_keys("TrueFreeLookKey", "") == CAMERAUNLOCK_SAVE_SAVED && conceptKeysOf("TrueFreeLookKey").empty() &&
+              cameraunlock_config_save_concept_keys("TrueFreeLookKey", "Insert") == CAMERAUNLOCK_SAVE_SAVED &&
+              conceptKeysOf("TrueFreeLookKey") == "Insert",
+          "with the poller running a key row saves and its new keys go on the poller in place of the old, none included: " + LastError());
     cameraunlock_hotkeys_drop();
     Check(cameraunlock_hotkeys_take() == 0, "with no key pressed nothing is taken");
 }

@@ -598,6 +598,9 @@ throws, naming it. That is how a mod states which of its controls persist:
   that has both must mark both Writable or neither; the owner refuses a table that marks one.
 - The yaw-mode control writes `WorldSpaceYaw`, and the aim mode key (`TrueFreeLookKey`)
   writes `TrueFreeLook`, `FreeLookMarker` and `StockSights` together.
+- A key list row is Writable where the mod lets the player choose its keys in the game, and the
+  C interface's `cameraunlock_config_save_keys` and `_save_concept_keys` save it and put the new
+  keys on the poller at once ([c-interface.md](c-interface.md)).
 - The on/off toggle (End) does not persist: it changes only the session. `EnableOnStartup` is
   Writable only in a mod with a separate control that saves it, and the toggle still never calls
   `Save` for it.

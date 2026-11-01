@@ -586,6 +586,8 @@ struct LocalRow {
     // What a key of the row answers tapped twice, three times and so on, empty for a row that
     // counts no taps: hotkey_bit is what it answers tapped once.
     std::vector<std::int32_t> more_tap_bits;
+    // The poller's ids for the row's keys, once cameraunlock_hotkeys_start has put them there.
+    std::vector<int> hotkey_ids;
 };
 
 struct ConceptRow {
@@ -593,6 +595,8 @@ struct ConceptRow {
     std::uint32_t flags = 0;
     std::optional<std::string> comment;
     std::optional<std::string> start;
+    // The poller's ids for a key list row's keys, as LocalRow's.
+    std::vector<int> hotkey_ids;
 };
 
 struct ConfigState {
@@ -782,16 +786,51 @@ std::int32_t AddHotkeyRow(ConfigState& c, const char* key, const char* comment, 
     return AddLocal(c, "Hotkeys", key, comment, flags, std::move(row));
 }
 
+// The fleet's four key list rows: each one's keys in the config, and the bit they answer as a key goes down.
+struct FleetKeyRow {
+    cfg::schema::Concept id;
+    std::string HeadTrackingConfig::*keys;
+    std::int32_t bit;
+};
+
+const FleetKeyRow kFleetKeys[] = {
+    {cfg::schema::Concept::ToggleKey, &HeadTrackingConfig::toggle_key_name, CAMERAUNLOCK_HOTKEY_TOGGLE},
+    {cfg::schema::Concept::CycleTrackingModeKey, &HeadTrackingConfig::cycle_tracking_mode_key_name,
+     CAMERAUNLOCK_HOTKEY_CYCLE_TRACKING_MODE},
+    {cfg::schema::Concept::YawModeKey, &HeadTrackingConfig::yaw_mode_key_name, CAMERAUNLOCK_HOTKEY_YAW_MODE},
+    {cfg::schema::Concept::TrueFreeLookKey, &HeadTrackingConfig::true_free_look_key_name, CAMERAUNLOCK_HOTKEY_AIM_MODE},
+};
+
+const FleetKeyRow* FleetKeyOf(cfg::schema::Concept id) {
+    for (const FleetKeyRow& row : kFleetKeys) {
+        if (row.id == id) return &row;
+    }
+    return nullptr;
+}
+
+const char* ConceptName(cfg::schema::Concept id) {
+    return cfg::schema::kConcepts[static_cast<std::size_t>(id)].name;
+}
+
+// Under the config's mutex. The concept row of the description by its name in data/config-schema.json.
+ConceptRow& DescribedConcept(ConfigState& c, const char* name) {
+    Require(name != nullptr, "name is NULL");
+    const auto described = std::find_if(c.concepts.begin(), c.concepts.end(),
+                                        [&](const ConceptRow& row) { return std::strcmp(ConceptName(row.id), name) == 0; });
+    if (described == c.concepts.end()) throw std::invalid_argument(std::string(name) + " is not a concept row of the description");
+    return *described;
+}
+
 // One of the fleet's four key rows, which answer their bit as a key goes down.
-LocalRow FleetKey(const char* name, std::int32_t bit) {
+LocalRow FleetKey(const FleetKeyRow& fleet) {
     LocalRow row{LocalKind::Hotkey};
-    row.key = name;
-    row.hotkey_bit = bit;
+    row.key = ConceptName(fleet.id);
+    row.hotkey_bit = fleet.bit;
     return row;
 }
 
-// A row's key list on the poller, as the kind of row its bits make it.
-void Register(ConfigState& c, const LocalRow& row, const std::string& keys) {
+// A row's key list on the poller, as the kind of row its bits make it. Answers the poller's ids for it.
+std::vector<int> Register(ConfigState& c, const LocalRow& row, const std::string& keys) {
     const input::KeyBindingsParseResult parsed = input::ParseKeyBindings(keys);
     if (!parsed.ok()) throw std::runtime_error(row.key + "=" + keys + ": " + parsed.error);
     std::atomic<std::int32_t>* pressed = &c.pressed;
@@ -800,14 +839,33 @@ void Register(ConfigState& c, const LocalRow& row, const std::string& keys) {
     if (!row.more_tap_bits.empty()) {
         std::vector<std::function<void()>> taps{answer(row.hotkey_bit)};
         for (const std::int32_t tap : row.more_tap_bits) taps.push_back(answer(tap));
-        input::RegisterTapKeyBindings(poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, CAMERAUNLOCK_TAP_GAP_MS, taps,
-                                      answer(row.held_bit));
-    } else if (row.held_bit != 0) {
-        input::RegisterHoldKeyBindings(poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, answer(row.hotkey_bit),
-                                       answer(row.held_bit));
-    } else {
-        input::RegisterKeyBindings(poller, parsed.bindings, answer(row.hotkey_bit));
+        return input::RegisterTapKeyBindings(poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, CAMERAUNLOCK_TAP_GAP_MS, taps,
+                                             answer(row.held_bit));
     }
+    if (row.held_bit != 0) {
+        return input::RegisterHoldKeyBindings(poller, parsed.bindings, CAMERAUNLOCK_HOLD_MS, answer(row.hotkey_bit),
+                                              answer(row.held_bit));
+    }
+    return input::RegisterKeyBindings(poller, parsed.bindings, answer(row.hotkey_bit));
+}
+
+// Under the config's mutex. A key list the host saved goes on the poller in place of the row's old
+// one, where cameraunlock_hotkeys_start has run, so the new keys work at once and the old ones stop.
+void Reregister(ConfigState& c, const LocalRow& row, std::vector<int>& ids, const std::string& keys) {
+    input::HotkeyPoller* poller = c.poller.load();
+    if (poller == nullptr) return;
+    for (const int id : ids) poller->RemoveHotkey(id);
+    ids = Register(c, row, keys);
+    // The player has most likely just pressed the new key to choose it.
+    poller->DisarmPresses();
+}
+
+// The canonical text of a key list a host hands in for a row.
+std::string CanonicalKeys(const std::string& row, const char* keys) {
+    Require(keys != nullptr, "keys is NULL");
+    const cfg::CodecParseResult<std::string> parsed = cfg::HotkeyCodec().Parse(keys);
+    if (!parsed.ok()) throw std::invalid_argument(row + "=" + keys + ": " + parsed.error);
+    return parsed.value;
 }
 
 }  // namespace
@@ -1312,20 +1370,12 @@ std::int32_t cameraunlock_config_get_text(std::int32_t row, char* buffer, std::i
 
 std::int32_t cameraunlock_config_get_concept_keys(const char* name, char* buffer, std::int32_t capacity) {
     return Guarded("cameraunlock_config_get_concept_keys", [&] {
-        Require(name != nullptr, "name is NULL");
         ConfigState& c = TheConfig();
         const std::lock_guard<std::mutex> lock(c.mutex);
         RequireLoaded(c);
-        const auto described = std::find_if(c.concepts.begin(), c.concepts.end(), [&](const ConceptRow& row) {
-            return std::strcmp(cfg::schema::kConcepts[static_cast<std::size_t>(row.id)].name, name) == 0;
-        });
-        if (described == c.concepts.end()) throw std::invalid_argument(std::string(name) + " is not a concept row of the description");
-        using Concept = cfg::schema::Concept;
-        if (described->id == Concept::ToggleKey) return CopyOut(c.loaded.toggle_key_name, buffer, capacity, true);
-        if (described->id == Concept::CycleTrackingModeKey) return CopyOut(c.loaded.cycle_tracking_mode_key_name, buffer, capacity, true);
-        if (described->id == Concept::YawModeKey) return CopyOut(c.loaded.yaw_mode_key_name, buffer, capacity, true);
-        if (described->id == Concept::TrueFreeLookKey) return CopyOut(c.loaded.true_free_look_key_name, buffer, capacity, true);
-        throw std::invalid_argument(std::string(name) + " is not a key list row");
+        const FleetKeyRow* fleet = FleetKeyOf(DescribedConcept(c, name).id);
+        if (fleet == nullptr) throw std::invalid_argument(std::string(name) + " is not a key list row");
+        return CopyOut(c.loaded.*fleet->keys, buffer, capacity, true);
     });
 }
 
@@ -1379,6 +1429,44 @@ std::int32_t cameraunlock_config_save_text(std::int32_t row, const char* value) 
         const std::size_t index = static_cast<std::size_t>(row);
         const std::string text = value;
         return Save(c, [&](HostConfig& config) { config.locals[index] = text; });
+    });
+}
+
+std::int32_t cameraunlock_config_save_keys(std::int32_t row, const char* keys) {
+    return Guarded("cameraunlock_config_save_keys", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        LocalAt(c, row);
+        LocalRow& described = c.locals[static_cast<std::size_t>(row)];
+        if (described.kind != LocalKind::Hotkey) throw std::invalid_argument(described.key + " is not a key list row");
+        // Checked here and not left to the owner, as cameraunlock_config_save_rows checks it.
+        if ((described.flags & CAMERAUNLOCK_ROW_WRITABLE) == 0) {
+            throw std::invalid_argument(described.key + " is not marked Writable, so it is not saved");
+        }
+        const std::string text = CanonicalKeys(described.key, keys);
+        const std::size_t index = static_cast<std::size_t>(row);
+        const std::int32_t status = Save(c, [&](HostConfig& config) { config.locals[index] = text; });
+        Reregister(c, described, described.hotkey_ids, text);
+        return status;
+    });
+}
+
+std::int32_t cameraunlock_config_save_concept_keys(const char* name, const char* keys) {
+    return Guarded("cameraunlock_config_save_concept_keys", [&] {
+        ConfigState& c = TheConfig();
+        const std::lock_guard<std::mutex> lock(c.mutex);
+        RequireLoaded(c);
+        ConceptRow& described = DescribedConcept(c, name);
+        const FleetKeyRow* fleet = FleetKeyOf(described.id);
+        if (fleet == nullptr) throw std::invalid_argument(std::string(name) + " is not a key list row");
+        if ((described.flags & CAMERAUNLOCK_ROW_WRITABLE) == 0) {
+            throw std::invalid_argument(std::string(name) + " is not marked Writable, so it is not saved");
+        }
+        const std::string text = CanonicalKeys(name, keys);
+        const std::int32_t status = Save(c, [&](HostConfig& config) { config.*fleet->keys = text; });
+        Reregister(c, FleetKey(*fleet), described.hotkey_ids, text);
+        return status;
     });
 }
 
@@ -1572,22 +1660,12 @@ std::int32_t cameraunlock_hotkeys_start(void) {
         RequireLoaded(c);
         if (c.poller.load() != nullptr) throw std::logic_error("the hotkeys are already started");
         c.poller.store(new input::HotkeyPoller());
-        using Concept = cfg::schema::Concept;
-        for (const ConceptRow& row : c.concepts) {
-            if (row.id == Concept::ToggleKey) {
-                Register(c, FleetKey("ToggleKey", CAMERAUNLOCK_HOTKEY_TOGGLE), c.loaded.toggle_key_name);
-            } else if (row.id == Concept::CycleTrackingModeKey) {
-                Register(c, FleetKey("CycleTrackingModeKey", CAMERAUNLOCK_HOTKEY_CYCLE_TRACKING_MODE),
-                         c.loaded.cycle_tracking_mode_key_name);
-            } else if (row.id == Concept::YawModeKey) {
-                Register(c, FleetKey("YawModeKey", CAMERAUNLOCK_HOTKEY_YAW_MODE), c.loaded.yaw_mode_key_name);
-            } else if (row.id == Concept::TrueFreeLookKey) {
-                Register(c, FleetKey("TrueFreeLookKey", CAMERAUNLOCK_HOTKEY_AIM_MODE), c.loaded.true_free_look_key_name);
-            }
+        for (ConceptRow& row : c.concepts) {
+            if (const FleetKeyRow* fleet = FleetKeyOf(row.id)) row.hotkey_ids = Register(c, FleetKey(*fleet), c.loaded.*fleet->keys);
         }
         for (std::size_t i = 0; i < c.locals.size(); ++i) {
             if (c.locals[i].kind == LocalKind::Hotkey) {
-                Register(c, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
+                c.locals[i].hotkey_ids = Register(c, c.locals[i], std::get<std::string>(c.loaded.locals[i]));
             }
         }
 #if !defined(CAMERAUNLOCK_WIN32_HOST)
@@ -1811,6 +1889,6 @@ void cameraunlock_hotkeys_drop(void) {
     ConfigState& c = TheConfig();
     // First, so a key down now ends as nothing: its tap or its hold would otherwise be answered
     // after this, when the host is acting on keys again.
-    if (input::HotkeyPoller* poller = c.poller.load()) poller->DisarmHoldPresses();
+    if (input::HotkeyPoller* poller = c.poller.load()) poller->DisarmPresses();
     c.pressed.store(0);
 }
