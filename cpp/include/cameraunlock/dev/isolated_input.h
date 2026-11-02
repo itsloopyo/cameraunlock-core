@@ -118,12 +118,14 @@ bool HoldIsolatedKey(int vk, bool down);
 #define DIRECTINPUT_VERSION 0x0800
 #endif
 #include <dinput.h>
+#include <dbt.h>
 
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
 #include <mutex>
 #include <thread>
@@ -151,6 +153,7 @@ using SetForegroundWindow_t = BOOL (WINAPI*)(HWND);
 using GetCursorPos_t = BOOL (WINAPI*)(LPPOINT);
 using XInputGetState_t = DWORD (WINAPI*)(DWORD, void*);
 using XInputSetState_t = DWORD (WINAPI*)(DWORD, void*);
+using XInputGetCapabilities_t = DWORD (WINAPI*)(DWORD, DWORD, void*);
 
 // The XInput DLLs a game can be reading its controllers through. Only the ones
 // the game has already loaded are detoured.
@@ -207,6 +210,7 @@ struct State {
     PadState pads[kPadCount];
     XInputGetState_t origXInputGetState[kXInputDllCount] = {};
     XInputSetState_t origXInputSetState[kXInputDllCount] = {};
+    XInputGetCapabilities_t origXInputGetCapabilities[kXInputDllCount] = {};
     std::atomic<bool> padRead{false};
 
     IsolatedInputLogFn log = nullptr;
@@ -399,6 +403,40 @@ inline DWORD WINAPI HookedXInputGetState(DWORD index, void* state) {
     const XInputStateLayout out = {pad.packet, pad.buttons, pad.leftTrigger, pad.rightTrigger,
                                    pad.leftX, pad.leftY, pad.rightX, pad.rightY};
     std::memcpy(state, &out, sizeof(out));
+    return ERROR_SUCCESS;
+}
+
+// XINPUT_CAPABILITIES: type, subtype, flags, then an XINPUT_GAMEPAD and an
+// XINPUT_VIBRATION saying which controls and motors are there.
+#pragma pack(push, 1)
+struct XInputCapabilitiesLayout {
+    BYTE type;
+    BYTE subType;
+    WORD flags;
+    WORD buttons;
+    BYTE leftTrigger;
+    BYTE rightTrigger;
+    SHORT leftX;
+    SHORT leftY;
+    SHORT rightX;
+    SHORT rightY;
+    WORD leftMotor;
+    WORD rightMotor;
+};
+#pragma pack(pop)
+static_assert(sizeof(XInputCapabilitiesLayout) == 20, "XINPUT_CAPABILITIES is 4 bytes, an XINPUT_GAMEPAD and an XINPUT_VIBRATION");
+
+// A game that sets a controller up only once XInput describes it (Wreckfest asks
+// for its capabilities when a pad appears, and sets up none the call fails for)
+// would otherwise take a script pad only while a real one sat at the same index.
+inline DWORD WINAPI HookedXInputGetCapabilities(DWORD index, DWORD, void* capabilities) {
+    if (index >= static_cast<DWORD>(kPadCount) || !capabilities) return ERROR_DEVICE_NOT_CONNECTED;
+    std::lock_guard<std::mutex> lock(S().padLock);
+    if (!S().pads[index].connected) return ERROR_DEVICE_NOT_CONNECTED;
+    // XINPUT_DEVTYPE_GAMEPAD and XINPUT_DEVSUBTYPE_GAMEPAD, with every button, both
+    // triggers, both sticks and both motors.
+    const XInputCapabilitiesLayout out = {1, 1, 0, 0xF3FF, 0xFF, 0xFF, -64, -64, -64, -64, 0xFFFF, 0xFFFF};
+    std::memcpy(capabilities, &out, sizeof(out));
     return ERROR_SUCCESS;
 }
 
@@ -1464,8 +1502,12 @@ inline bool SendCharacter(char character) {
     return ok;
 }
 
-// A pad command, and the device-change message a game waits for before it
-// looks for a controller that was not there a moment ago.
+// A pad command, and the device-change messages a game waits for before it
+// looks for a controller that was not there a moment ago: Unreal Engine 4 looks
+// on any change of the devices, Wreckfest only on an interface arriving. The
+// arrival names an XInput controller's HID interface as Windows names one (IG_
+// marks it XInput). Windows refuses to post it, since it carries a pointer, so it
+// is sent, and given up on if the game's window does not answer.
 inline bool SendPad(const InputStep& step) {
     bool plugged = false;
     {
@@ -1476,8 +1518,22 @@ inline bool SendPad(const InputStep& step) {
     }
     if (!plugged) return true;
     const HWND window = S().window.load();
-    // DBT_DEVNODES_CHANGED.
-    return window && PostMessageW(window, WM_DEVICECHANGE, 0x0007, 0);
+    if (!window) return false;
+    const bool changed = PostMessageW(window, WM_DEVICECHANGE, DBT_DEVNODES_CHANGED, 0) != 0;
+    constexpr std::size_t kNameLength = 96;
+    alignas(DEV_BROADCAST_DEVICEINTERFACE_W) BYTE bytes[sizeof(DEV_BROADCAST_DEVICEINTERFACE_W) + kNameLength * sizeof(wchar_t)] = {};
+    auto* arrival = reinterpret_cast<DEV_BROADCAST_DEVICEINTERFACE_W*>(bytes);
+    arrival->dbcc_size = sizeof(bytes);
+    arrival->dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    // GUID_DEVINTERFACE_HID.
+    arrival->dbcc_classguid = {0x4D1E55B2, 0xF16F, 0x11CF, {0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30}};
+    std::swprintf(arrival->dbcc_name, kNameLength,
+                  L"\\\\?\\HID#VID_045E&PID_028E&IG_%02d#cameraunlock&%d#{4d1e55b2-f16f-11cf-88cb-001111000030}", step.pad,
+                  step.pad);
+    DWORD_PTR answer = 0;
+    const bool arrived = SendMessageTimeoutW(window, WM_DEVICECHANGE, DBT_DEVICEARRIVAL, reinterpret_cast<LPARAM>(arrival),
+                                             SMTO_ABORTIFHUNG, 2000, &answer) != 0;
+    return changed && arrived;
 }
 
 inline bool Play(const InputStep& step) {
@@ -1731,6 +1787,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
         if (!GetModuleHandleW(kXInputDlls[i])) continue;
         Hook(kXInputDlls[i], "XInputGetState", &HookedXInputGetState, s.origXInputGetState[i]);
         Hook(kXInputDlls[i], "XInputSetState", &HookedXInputSetState, s.origXInputSetState[i]);
+        Hook(kXInputDlls[i], "XInputGetCapabilities", &HookedXInputGetCapabilities, s.origXInputGetCapabilities[i]);
     }
     bool all = true;
     for (const bool one : hooked) all = all && one;

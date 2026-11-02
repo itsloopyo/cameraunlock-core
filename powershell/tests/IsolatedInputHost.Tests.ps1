@@ -60,7 +60,12 @@ Add-Type -Namespace CameraUnlockHostTest -Name User32 -MemberDefinition @'
 [DllImport("user32.dll")] public static extern short GetKeyState(int vk);
 [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
 [DllImport("user32.dll")] public static extern bool GetKeyboardState(byte[] state);
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr LoadLibraryW(string name);
+[DllImport("xinput1_4.dll")] public static extern int XInputGetState(int index, byte[] state);
+[DllImport("xinput1_4.dll")] public static extern int XInputGetCapabilities(int index, int flags, byte[] capabilities);
 '@
+# Only an XInput DLL the process has loaded when the host starts is detoured, as in a game.
+if ([CameraUnlockHostTest.User32]::LoadLibraryW('xinput1_4.dll') -eq [IntPtr]::Zero) { throw 'xinput1_4.dll did not load' }
 
 function Throws {
     param([scriptblock]$Block, [string]$Pattern)
@@ -145,6 +150,22 @@ Check 'and to GetKeyState, toggled on' ([CameraUnlockHostTest.User32]::GetKeySta
 Check 'and let go through it, up again' `
     ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey($keyC, 0) -eq 0 -and ([CameraUnlockHostTest.User32]::GetAsyncKeyState($keyC) -band 0x8000) -eq 0)
 Check 'a key code that is none is refused' ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(256, 1) -eq 2 -and [CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(0, 1) -eq 2)
+
+$notConnected = 1167
+$capabilities = New-Object byte[] 20
+Check 'XInputGetCapabilities answers no controller before a script plugs one in' `
+    ([CameraUnlockHostTest.User32]::XInputGetCapabilities(0, 1, $capabilities) -eq $notConnected)
+Play 4 'pad 0 a down'
+$result = [CameraUnlockHostTest.User32]::XInputGetCapabilities(0, 1, $capabilities)
+Check 'XInputGetCapabilities describes the script pad as a gamepad' `
+    ($result -eq 0 -and $capabilities[0] -eq 1 -and $capabilities[1] -eq 1) "result $result, type $($capabilities[0]), subtype $($capabilities[1])"
+Check 'with its buttons, triggers and sticks there' `
+    ([BitConverter]::ToUInt16($capabilities, 4) -ne 0 -and $capabilities[6] -ne 0 -and $capabilities[7] -ne 0 -and [BitConverter]::ToInt16($capabilities, 8) -ne 0)
+$state = New-Object byte[] 16
+$result = [CameraUnlockHostTest.User32]::XInputGetState(0, $state)
+Check 'XInputGetState reports its A button held' ($result -eq 0 -and ([BitConverter]::ToUInt16($state, 4) -band 0x1000) -ne 0) "result $result"
+Check 'XInputGetCapabilities answers no controller at an index the script has not named' `
+    ([CameraUnlockHostTest.User32]::XInputGetCapabilities(1, 1, $capabilities) -eq $notConnected)
 
 $hostLog = Get-Content (Join-Path $mod 'CameraUnlockIsolatedInput.log') -Raw
 Check 'the host log says the detours are in' ($hostLog -match 'takes its keyboard and mouse from the command file')

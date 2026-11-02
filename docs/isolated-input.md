@@ -700,10 +700,15 @@ For a game that has an XInput DLL loaded (`xinput1_4.dll`, `xinput1_3.dll`,
 |---|---|---|
 | `XInputGetState` | the script's controller at that index, or `ERROR_DEVICE_NOT_CONNECTED` for one the script has not named | the real controllers never reach the game, and a second player can be played from a script |
 | `XInputSetState` | `ERROR_SUCCESS` for a plugged-in script controller, without reaching XInput | rumble goes nowhere |
+| `XInputGetCapabilities` | a gamepad (`XINPUT_DEVTYPE_GAMEPAD`, `XINPUT_DEVSUBTYPE_GAMEPAD`) with every button, both triggers, both sticks and both motors for a plugged-in script controller, `ERROR_DEVICE_NOT_CONNECTED` for any other | a game that sets a controller up only once XInput describes it takes the script's, with no real controller at that index |
 
-A controller's first command also posts `WM_DEVICECHANGE` to the game window:
-Unreal Engine 4 looks for new controllers only when Windows says the devices
-changed. The log says once that the game reads XInput.
+A controller's first command also tells the game window of it with
+`WM_DEVICECHANGE`, as Windows does when a controller is plugged in: it posts
+`DBT_DEVNODES_CHANGED`, which is when Unreal Engine 4 looks for new controllers,
+and sends (Windows will not post it) `DBT_DEVICEARRIVAL` with a `DEV_BROADCAST_DEVICEINTERFACE` naming an XInput
+controller's HID interface, which is when Wreckfest does. Wreckfest sets up its
+controllers only at startup and on that arrival, so a script pad it was not told
+of is never read. The log says once that the game reads XInput.
 
 For a game that has GameInput loaded (`GameInputRedist.dll` from the Microsoft.GameInput NuGet
 package, or the inbox `GameInput.dll`; neither is ever loaded for it): GameInput reads the devices
@@ -762,6 +767,22 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
   title with an input whose effect the mod also logs, and read the log.
 
 ## Measured
+
+Wreckfest 1.308438 (Steam, 64-bit DX11), 2026-11-02, the host DLL started by an ASI shim under
+Ultimate ASI Loader, no real controller plugged in:
+
+- The exe imports `XInputGetState`, `XInputSetState` and `XInputGetCapabilities` from
+  `xinput1_3.dll` by ordinal. It builds a controller for each index only at startup and when its
+  window is sent `WM_DEVICECHANGE` with `DBT_DEVICEARRIVAL` and a named device interface, and it
+  keeps one only if `XInputGetCapabilities` succeeds and does not report a wheel.
+- With neither answered, the title ignored every pad and keyboard script. With
+  `XInputGetCapabilities` answered alone, one launch took the pad and the next never
+  did.
+- With `XInputGetCapabilities` answered and the arrival sent, the first pad command made the
+  game rebuild its controllers (the title dimmed and came back, and that press was not taken),
+  and every press after it was: `pad 0 a down`, `wait 200`, `pad 0 a up` passed the title, and
+  the pad drove the menus, a race, the pause menu and the results screen.
+- `tap Return` at the title did nothing before the change, and was not tried after it.
 
 Minecraft Bedrock 1.26.6005 (Microsoft Store, GDK, `GameInputRedist.dll` 4.0.302.0), 2026-11-02, a
 native backend injected 8 seconds after launch, windowed and behind other windows for the whole

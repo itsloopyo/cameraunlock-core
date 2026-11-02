@@ -51,7 +51,7 @@
       "proven_in": ["red-eclipse"]
     },
     "xinput": {
-      "what": "XInput controllers, read with XInputGetState. The `pad` command plugs one in and holds its buttons, sticks and triggers.",
+      "what": "XInput controllers, read with XInputGetState and described by XInputGetCapabilities. The `pad` command plugs one in and holds its buttons, sticks and triggers.",
       "dlls": ["xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll", "xinput1_2.dll", "xinput1_1.dll"],
       "status": "supported",
       "proven_in": ["the-ascent"]
