@@ -29,10 +29,9 @@ std::function<void(const std::string&)> DefaultLogSink() {
 
 namespace {
 
-#if !defined(CAMERAUNLOCK_WIN32_HOST)
-/// Supervisor wake-up granularity. Retries are timed off the clock rather than
-/// off tick counts, so this only bounds how fast Stop() interrupts the thread.
-constexpr int kSupervisorTickMs = 100;
+#if !defined(CAMERAUNLOCK_WIN32_HOST) && !defined(_WIN32)
+/// How long the receive thread's poll runs before it looks at the stop flag again.
+constexpr int kReceivePollMs = 100;
 #endif
 
 int64_t NowUs() {
@@ -123,7 +122,7 @@ void UdpReceiver::SupervisorThread() {
     while (m_supervising.load(std::memory_order_acquire)) {
         {
             std::unique_lock<std::mutex> lock(m_supervisorMutex);
-            m_supervisorWake.wait_for(lock, std::chrono::milliseconds(kSupervisorTickMs),
+            m_supervisorWake.wait_for(lock, m_supervisorTick,
                                       [this] { return !m_supervising.load(std::memory_order_acquire); });
         }
         if (!m_supervising.load(std::memory_order_acquire)) return;
@@ -546,6 +545,12 @@ void detail::UdpReceiverTestAccess::Deliver(UdpReceiver& receiver, const void* d
     receiver.m_datagrams.fetch_add(1, std::memory_order_release);
 }
 
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
+void detail::UdpReceiverTestAccess::SetSupervisorTick(UdpReceiver& receiver, std::chrono::milliseconds tick) {
+    receiver.m_supervisorTick = tick;
+}
+#endif
+
 #if defined(_WIN32) || defined(CAMERAUNLOCK_WIN32_HOST)
 void UdpReceiver::Received(const char* buffer, int bytes, int error, const sockaddr_in& sender) {
     if (bytes == SOCKET_ERROR) {
@@ -645,7 +650,7 @@ void UdpReceiver::ReceiverThread() {
         // Bounded so Stop() is noticed, and so the non-blocking socket is not
         // spun on while nothing is sending.
         pollfd readable = {sock, POLLIN, 0};
-        const int ready = poll(&readable, 1, kSupervisorTickMs);
+        const int ready = poll(&readable, 1, kReceivePollMs);
         if (ready < 0 && errno != EINTR) {
             ReceiveLoopFailed("poll failed with " + std::to_string(errno));
             break;

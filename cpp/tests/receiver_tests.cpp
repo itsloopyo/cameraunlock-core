@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -479,19 +480,24 @@ int RunReceiverTests() {
               "with the OS's own reason");
         blocked.Stop();
 
-        // The supervisor used to sleep 100 ms between looks at its flag, so a Stop this
-        // soon after Start took what was left of that every time. The fastest of five is
-        // taken, so a machine busy with something else does not fail the check.
-        int64_t fastestFailedStopMs = 1000;
-        for (int i = 0; i < 5; i++) {
-            blocked.Start(kStartFailurePort);
-            const auto stopStart = std::chrono::steady_clock::now();
-            blocked.Stop();
-            const int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - stopStart).count();
-            if (ms < fastestFailedStopMs) fastestFailedStopMs = ms;
-        }
-        Check(fastestFailedStopMs < 30, "Stop after a failed Start does not wait out the supervisor's tick");
+        // The supervisor used to sleep out its tick between looks at its flag, so a Stop
+        // this soon after Start took what was left of it every time. With the tick far
+        // longer than the time allowed here, a Stop that returns at all was woken by Stop.
+        using cameraunlock::detail::UdpReceiverTestAccess;
+        constexpr auto kLongTick = std::chrono::seconds(30);
+        constexpr auto kStopAllowed = std::chrono::seconds(10);
+        const auto stopsWithoutTheTick = [&](bool settle) {
+            bool woken = true;
+            for (int i = 0; i < 5; i++) {
+                blocked.Start(kStartFailurePort);
+                if (settle) std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                std::future<void> stopped = std::async(std::launch::async, [&] { blocked.Stop(); });
+                if (stopped.wait_for(kStopAllowed) != std::future_status::ready) woken = false;
+            }
+            return woken;
+        };
+        UdpReceiverTestAccess::SetSupervisorTick(blocked, kLongTick);
+        Check(stopsWithoutTheTick(false), "Stop after a failed Start does not wait out the supervisor's tick");
         holder.Close();
 
         Check(blocked.Start(kStartFailurePort), "the same receiver binds once the port is free");
@@ -499,19 +505,7 @@ int RunReceiverTests() {
               "and a Start that binds reports no failure");
         blocked.Stop();
 
-        int64_t fastestBoundStopMs = 1000;
-        for (int i = 0; i < 5; i++) {
-            blocked.Start(kStartFailurePort);
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
-            const auto stopStart = std::chrono::steady_clock::now();
-            blocked.Stop();
-            const int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - stopStart).count();
-            if (ms < fastestBoundStopMs) fastestBoundStopMs = ms;
-        }
-        Check(fastestBoundStopMs < 30, "Stop of a bound receiver does not wait out the supervisor's tick");
-        std::cout << "    (fastest Stop of five: " << fastestFailedStopMs << " ms after a failed Start, "
-                  << fastestBoundStopMs << " ms bound)\n";
+        Check(stopsWithoutTheTick(true), "Stop of a bound receiver does not wait out the supervisor's tick");
     }
 
     // ---- UdpReceiver: a snapshot is one datagram's, with a writer running ----
@@ -528,8 +522,13 @@ int RunReceiverTests() {
         tracker.sin_port = htons(5000);
         inet_pton(AF_INET, "127.0.0.1", &tracker.sin_addr);
 
+        // Every kHandshake poses the writer waits until the reader has read that pose, so
+        // the reader takes snapshots all through the publishes however the scheduler
+        // shares the cores out, and between handshakes the two run free of each other.
         constexpr int kPoses = 200000;
+        constexpr int kHandshake = 100;
         std::atomic<bool> done{false};
+        std::atomic<uint64_t> readerSaw{0};
         std::thread writer([&] {
             uint8_t datagram[54];
             uint8_t counter = 0;
@@ -544,6 +543,11 @@ int RunReceiverTests() {
                                                   0.0, 1.0 + (i % 2) * 0.5, 0.0, 0.0, press ? &counter : nullptr);
                 UdpReceiverTestAccess::Deliver(published, datagram, static_cast<int>(length), tracker,
                                                1000000 + static_cast<int64_t>(i) * 1000);
+                if (i % kHandshake == 0) {
+                    while (readerSaw.load(std::memory_order_acquire) < static_cast<uint64_t>(i)) {
+                        std::this_thread::yield();
+                    }
+                }
             }
             done.store(true, std::memory_order_release);
         });
@@ -555,6 +559,7 @@ int RunReceiverTests() {
         while (!done.load(std::memory_order_acquire)) {
             const cameraunlock::PoseSnapshot s = published.GetSnapshot();
             if (s.sequence == 0) continue;
+            readerSaw.store(s.sequence, std::memory_order_release);
             if (s.sequence < lastSequence) backwards++;
             if (s.sequence != lastSequence) distinct++;
             lastSequence = s.sequence;
@@ -569,7 +574,7 @@ int RunReceiverTests() {
         writer.join();
         const cameraunlock::PoseSnapshot last = published.GetSnapshot();
         Check(last.sequence == kPoses && last.centers == kPoses / 7, "every pose and every press is counted");
-        Check(distinct > 1000, "the reader saw the writer at work");
+        Check(distinct >= kPoses / kHandshake, "the reader saw the writer at work");
         Check(torn == 0 && backwards == 0, "no snapshot mixed two datagrams or went back");
         std::cout << "    (" << distinct << " distinct snapshots read during " << kPoses << " publishes)\n";
         published.Stop();

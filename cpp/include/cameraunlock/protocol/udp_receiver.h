@@ -30,6 +30,11 @@ namespace detail {
 struct UdpReceiverTestAccess {
     static void Deliver(UdpReceiver& receiver, const void* datagram, int length, const sockaddr_in& sender,
                         int64_t arrivedUs);
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
+    /// Sets how long the supervisor of a receiver that is not started waits between looks, so
+    /// a test can make the wait longer than any Stop() could take and see Stop() wake it.
+    static void SetSupervisorTick(UdpReceiver& receiver, std::chrono::milliseconds tick);
+#endif
 };
 
 }  // namespace detail
@@ -287,6 +292,11 @@ private:
     int64_t m_waitErrLogged{0};
     int64_t m_firstPacketLogged{0};
     int64_t m_shortPacketLogged{0};
+#if !defined(CAMERAUNLOCK_WIN32_HOST)
+    /// Retries are timed off the clock, so this only bounds how long the supervisor
+    /// sleeps when nothing wakes it.
+    std::chrono::milliseconds m_supervisorTick{100};
+#endif
     std::atomic<bool> m_supervising{false};
     std::atomic<bool> m_retrying{false};
     std::atomic<bool> m_failed{false};
