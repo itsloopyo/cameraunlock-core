@@ -698,6 +698,7 @@ placed the cursor: start the script with `cursor <x> <y>`.
 | `ShowCursor`, `SetCursor` | passed on, and the display count returned and the cursor given are kept for `GetCursorInfo` | this is how a game shows and hides its cursor. Each is kept from whichever thread called last |
 | the game window's procedure | never sees `WM_ACTIVATEAPP`, `WM_ACTIVATE`, `WM_KILLFOCUS` or `WM_NCACTIVATE` saying it lost the foreground, and is posted all four saying it has it when the window is found | a game that stops, or stops following its mouse, when deactivated carries on |
 | the game window's procedure, after a `WM_SETCURSOR` | the window thread's cursor (`GetCursor`) is kept for `GetCursorInfo` | `DefWindowProc` puts the window class's cursor back without calling `SetCursor`. Windows sends `WM_SETCURSOR` only when the real mouse is over the window, and the script sends none |
+| the game window's procedure, for `WM_MOUSELEAVE` | never sees it. The log says so the first time | Windows sends it when the real cursor is not over the window, and the script's cursor never leaves it. SDL2 drops its mouse focus on one, and Amnesia: Rebirth turns on relative mouse mode only while SDL says the mouse is in its window: launched behind other windows, it never did, and its view turned thousands of degrees a second |
 
 The dev build also watches the real foreground itself. Whenever a window of the
 game holds it, the game gives it back to the window that had it before, or to the

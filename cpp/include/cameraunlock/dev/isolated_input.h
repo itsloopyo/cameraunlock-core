@@ -199,6 +199,7 @@ struct State {
     std::atomic<int> displayCount{0};
     std::atomic<HCURSOR> cursor{nullptr};
     std::atomic<bool> cursorInfoRead{false};
+    std::atomic<bool> mouseLeaveWithheld{false};
 
     // The cursor the script placed, in the game window's client area.
     std::atomic<bool> cursorPlaced{false};
@@ -1855,6 +1856,17 @@ inline LRESULT CALLBACK GameWindowProc(HWND window, UINT message, WPARAM wParam,
     const bool leftForeground = (message == WM_ACTIVATEAPP && wParam == FALSE) ||
                                 (message == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE) || message == WM_KILLFOCUS;
     if (leftForeground) return 0;
+    // Windows sends WM_MOUSELEAVE when the real cursor is not over the window,
+    // and the script's cursor never leaves it. SDL drops its mouse focus on one,
+    // and Amnesia: Rebirth turns on relative mouse mode only while SDL says the
+    // mouse is in its window. Out of that mode its view turned thousands of
+    // degrees a second.
+    if (message == WM_MOUSELEAVE) {
+        if (!S().mouseLeaveWithheld.exchange(true, std::memory_order_acq_rel)) {
+            Log("isolated input: the real cursor left the game window; WM_MOUSELEAVE is withheld");
+        }
+        return 0;
+    }
     // The frame is told it went inactive, so the title bar is drawn as Windows
     // wants it, and the game is not: Deus Ex: Mankind Divided takes its active
     // state from this message and reads no raw input while it is inactive.

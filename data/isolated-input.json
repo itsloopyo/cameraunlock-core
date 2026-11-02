@@ -51,10 +51,10 @@
       "proven_in": ["minecraft-bedrock"]
     },
     "sdl": {
-      "what": "SDL's event queue, through what SDL itself reads. SDL2 on Windows takes relative mouse movement and mouse buttons from raw input and keys and typed text from window messages, which the raw-input path sends, so nothing is pushed into SDL. Check SDL's own import table with Get-GameInputPaths on the SDL DLL the game loads. Proven with SDL2; a game on SDL3 is proven again before it counts",
+      "what": "SDL's event queue, through what SDL itself reads. SDL2 on Windows takes relative mouse movement and mouse buttons from raw input and keys and typed text from window messages, which the raw-input path sends, so nothing is pushed into SDL. The WM_MOUSELEAVE Windows sends for the real cursor is withheld, so SDL keeps its mouse focus and a game that turns on relative mouse mode only with that focus still does. Check SDL's own import table with Get-GameInputPaths on the SDL DLL the game loads. Proven with SDL2; a game on SDL3 is proven again before it counts",
       "dlls": ["sdl2.dll", "sdl3.dll"],
       "status": "supported",
-      "proven_in": ["red-eclipse"]
+      "proven_in": ["red-eclipse", "amnesia-rebirth"]
     },
     "xinput": {
       "what": "XInput controllers, read with XInputGetState and described by XInputGetCapabilities. The `pad` command plugs one in and holds its buttons, sticks and triggers.",
