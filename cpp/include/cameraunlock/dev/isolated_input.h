@@ -58,7 +58,9 @@
 // For games that read DirectInput 8 (dinput8.dll loaded in the process): the
 // keyboard and mouse devices answer GetDeviceState and GetDeviceData from the
 // script alone (directinput_state.h), through detours on the device vtable, so
-// a device the game makes later is covered too. The real devices are never
+// a device the game makes later is covered too. They answer in the data format
+// the game set, whatever its layout: DirectInput is asked which object sits at
+// each offset of it. The real devices are never
 // acquired: Acquire and Poll succeed without reaching DirectInput, and
 // SetCooperativeLevel is passed on as background and non-exclusive. Any other
 // DirectInput device (a controller) is left as it was. dinput8.dll is never
@@ -577,10 +579,9 @@ static_assert(offsetof(DIDEVICEOBJECTDATA, dwOfs) == offsetof(DirectInputEvent, 
               && offsetof(DIDEVICEOBJECTDATA, dwTimeStamp) == offsetof(DirectInputEvent, timeMs)
               && offsetof(DIDEVICEOBJECTDATA, dwSequence) == offsetof(DirectInputEvent, sequence),
               "DirectInputEvent is the head of DIDEVICEOBJECTDATA");
-static_assert(sizeof(DIMOUSESTATE) == kMouseStateSize && sizeof(DIMOUSESTATE2) == kMouseState2Size
-              && offsetof(DIMOUSESTATE, lX) == kMouseOffsetX && offsetof(DIMOUSESTATE, lY) == kMouseOffsetY
-              && offsetof(DIMOUSESTATE, rgbButtons) == kMouseOffsetButton0,
-              "directinput_state.h writes the standard mouse data format");
+static_assert(offsetof(DIMOUSESTATE2, lX) == kMouseOffsetX && offsetof(DIMOUSESTATE2, lY) == kMouseOffsetY
+              && offsetof(DIMOUSESTATE2, lZ) == kMouseOffsetZ && offsetof(DIMOUSESTATE2, rgbButtons) == kMouseOffsetButton0,
+              "directinput_state.h names a mouse control by its offset in DIMOUSESTATE2");
 static_assert(DIK_LSHIFT == kDikLeftShift, "directinput_state.h holds this Shift for a shifted character");
 
 // IDirectInputDevice8 vtable slots, the same in the A and the W interface.
@@ -592,9 +593,14 @@ enum DirectInputMethod {
     kDiGetDeviceData,
     kDiSetCooperativeLevel,
     kDiPoll,
+    kDiSetDataFormat,
     kDiMethods
 };
-inline constexpr int kDiSlots[kDiMethods] = {2, 3, 7, 9, 10, 13, 25};
+inline constexpr int kDiSlots[kDiMethods] = {2, 3, 7, 9, 10, 13, 25, 11};
+inline constexpr int kDiGetObjectInfoSlot = 14;
+// How far into a format whose size is not known DirectInput is asked for
+// objects: a keyboard laid out four bytes a key reaches 1024.
+inline constexpr DWORD kFormatProbeBytes = 2048;
 // A and W interface, keyboard and mouse: at most this many addresses for one
 // method.
 inline constexpr int kDiVariants = 4;
@@ -605,6 +611,8 @@ using DiAcquire_t = HRESULT (STDMETHODCALLTYPE*)(void*);
 using DiGetDeviceState_t = HRESULT (STDMETHODCALLTYPE*)(void*, DWORD, LPVOID);
 using DiGetDeviceData_t = HRESULT (STDMETHODCALLTYPE*)(void*, DWORD, LPDIDEVICEOBJECTDATA, LPDWORD, DWORD);
 using DiSetCooperativeLevel_t = HRESULT (STDMETHODCALLTYPE*)(void*, HWND, DWORD);
+using DiSetDataFormat_t = HRESULT (STDMETHODCALLTYPE*)(void*, LPCDIDATAFORMAT);
+using DiGetObjectInfo_t = HRESULT (STDMETHODCALLTYPE*)(void*, void*, DWORD, DWORD);
 using DirectInput8Create_t = HRESULT (WINAPI*)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 using DiCreateDevice_t = HRESULT (STDMETHODCALLTYPE*)(void*, REFGUID, void**, LPUNKNOWN);
 
@@ -613,6 +621,11 @@ inline constexpr GUID kIidDirectInput8A = {0xBF798030, 0x483A, 0x4DA2, {0xAA, 0x
 inline constexpr GUID kIidDirectInput8W = {0xBF798031, 0x483A, 0x4DA2, {0xAA, 0x99, 0x5D, 0x64, 0xED, 0x36, 0x97, 0x00}};
 inline constexpr GUID kGuidSysMouse = {0x6F1D2B60, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
 inline constexpr GUID kGuidSysKeyboard = {0x6F1D2B61, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kGuidXAxis = {0xA36D02E0, 0xC9F3, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kGuidYAxis = {0xA36D02E1, 0xC9F3, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kGuidZAxis = {0xA36D02E2, 0xC9F3, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kGuidButton = {0xA36D02F0, 0xC9F3, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+inline constexpr GUID kGuidKey = {0x55728220, 0xD33C, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
 
 struct DirectInputDevice {
     void* object = nullptr;
@@ -622,6 +635,7 @@ struct DirectInputDevice {
     bool stateLogged = false;
     bool dataLogged = false;
     DirectInputReader reader;
+    DirectInputFormat format;
 };
 
 struct DirectInput {
@@ -652,8 +666,43 @@ inline const char* DiKindName(const DirectInputDevice& device) {
     return device.reader.kind == DirectInputKind::kKeyboard ? "keyboard" : "mouse";
 }
 
+inline DirectInputGuid ObjectGuid(const GUID& guid) {
+    if (guid == kGuidKey) return DirectInputGuid::kKey;
+    if (guid == kGuidXAxis) return DirectInputGuid::kXAxis;
+    if (guid == kGuidYAxis) return DirectInputGuid::kYAxis;
+    if (guid == kGuidZAxis) return DirectInputGuid::kZAxis;
+    if (guid == kGuidButton) return DirectInputGuid::kButton;
+    return DirectInputGuid::kOther;
+}
+
+// The device's data format as it stands, asked of DirectInput one offset at a
+// time (GetObjectInfo with DIPH_BYOFFSET answers the object at an offset of the
+// format set, where EnumObjects answers the device's own layout). Called without
+// the lock. The A and the W interface take objects of different sizes, so the
+// W size is tried first and the A size when DirectInput refuses it.
+inline DirectInputFormat ReadDataFormat(void* object, DirectInputKind kind, DWORD bytes, DWORD dataSize) {
+    const auto getObjectInfo = reinterpret_cast<DiGetObjectInfo_t>(Vtable(object)[kDiGetObjectInfoSlot]);
+    DIDEVICEOBJECTINSTANCEW info = {};
+    DWORD infoSize = sizeof(DIDEVICEOBJECTINSTANCEW);
+    DirectInputFormat format;
+    format.dataSize = dataSize;
+    for (DWORD offset = 0; offset < bytes; ++offset) {
+        info.dwSize = infoSize;
+        HRESULT result = getObjectInfo(object, &info, offset, DIPH_BYOFFSET);
+        if (result == DIERR_INVALIDPARAM && infoSize == sizeof(DIDEVICEOBJECTINSTANCEW)) {
+            infoSize = sizeof(DIDEVICEOBJECTINSTANCEA);
+            info.dwSize = infoSize;
+            result = getObjectInfo(object, &info, offset, DIPH_BYOFFSET);
+        }
+        if (FAILED(result)) continue;
+        format.Add(kind, offset, ObjectGuid(info.guidType), DIDFT_GETINSTANCE(info.dwType));
+    }
+    return format;
+}
+
 // The entry for a device, made the first time the device is seen. Called with
-// `lock` held, and lets go of it while it asks DirectInput what the device is.
+// `lock` held, and lets go of it while it asks DirectInput what the device is
+// and what data format it has.
 inline DirectInputDevice& DiDevice(void* object, std::unique_lock<std::mutex>& lock) {
     DirectInput& d = D();
     for (DirectInputDevice& device : d.devices) {
@@ -664,15 +713,20 @@ inline DirectInputDevice& DiDevice(void* object, std::unique_lock<std::mutex>& l
     caps.dwSize = sizeof(caps);
     reinterpret_cast<DiGetCapabilities_t>(Vtable(object)[kDiSlots[kDiGetCapabilities]])(object, &caps);
     const BYTE type = GET_DIDEVICE_TYPE(caps.dwDevType);
+    const bool synthetic = type == DI8DEVTYPE_KEYBOARD || type == DI8DEVTYPE_MOUSE;
+    const DirectInputKind kind = type == DI8DEVTYPE_MOUSE ? DirectInputKind::kMouse : DirectInputKind::kKeyboard;
+    DirectInputFormat format;
+    if (synthetic) format = ReadDataFormat(object, kind, kFormatProbeBytes, 0);
     lock.lock();
     for (DirectInputDevice& device : d.devices) {
         if (device.object == object) return device;
     }
     DirectInputDevice device;
     device.object = object;
-    device.synthetic = type == DI8DEVTYPE_KEYBOARD || type == DI8DEVTYPE_MOUSE;
-    device.reader = d.state.Open(type == DI8DEVTYPE_MOUSE ? DirectInputKind::kMouse : DirectInputKind::kKeyboard);
-    d.devices.push_back(device);
+    device.synthetic = synthetic;
+    device.reader = d.state.Open(kind);
+    device.format = std::move(format);
+    d.devices.push_back(std::move(device));
     return d.devices.back();
 }
 
@@ -689,10 +743,11 @@ inline void LogDeviceRead(const char* kind, const char* call, DWORD size) {
 }
 
 // True when the device is a keyboard or a mouse, and `result` is then the
-// answer. Only the standard data formats are answered.
+// answer, in the data format the game set.
 inline bool AnswerDeviceState(void* object, DWORD size, LPVOID data, HRESULT& result) {
     DirectInput& d = D();
     const char* logKind = nullptr;
+    size_t objects = 0;
     {
         std::unique_lock<std::mutex> lock(d.mutex);
         DirectInputDevice& device = DiDevice(object, lock);
@@ -700,22 +755,18 @@ inline bool AnswerDeviceState(void* object, DWORD size, LPVOID data, HRESULT& re
         if (!device.stateLogged) {
             device.stateLogged = true;
             logKind = DiKindName(device);
+            objects = device.format.entries.size();
         }
         auto* const out = static_cast<uint8_t*>(data);
-        if (out == nullptr) {
-            result = DIERR_INVALIDPARAM;
-        } else if (device.reader.kind == DirectInputKind::kMouse) {
-            result = d.state.MouseState(device.reader, out, size) ? DI_OK : DIERR_INVALIDPARAM;
-        } else if (size == kKeyboardStateSize) {
-            d.state.KeyboardState(out);
-            result = DI_OK;
-        } else {
-            result = DIERR_INVALIDPARAM;
-        }
+        result = out != nullptr && d.state.FormattedState(device.reader, device.format, out, size) ? DI_OK
+                                                                                                  : DIERR_INVALIDPARAM;
     }
     if (logKind) {
         LogDeviceRead(logKind, "GetDeviceState", size);
-        if (FAILED(result)) Log("isolated input: that is not the standard data format, the only one isolated input answers");
+        char line[160];
+        std::snprintf(line, sizeof(line), "isolated input: its data format holds %zu keys, buttons and axes it answers%s",
+                      objects, FAILED(result) ? ", and that size is not the format's, so the read is refused" : "");
+        Log(line);
     }
     return true;
 }
@@ -738,7 +789,7 @@ inline bool AnswerDeviceData(void* object, DWORD objectSize, LPDIDEVICEOBJECTDAT
             DirectInputEvent events[kDirectInputEventSlots];
             bool overflowed = false;
             const size_t count = d.state.ReadEvents(device.reader, data ? events : nullptr, *inOut,
-                                                    (flags & DIGDD_PEEK) != 0, overflowed);
+                                                    (flags & DIGDD_PEEK) != 0, overflowed, &device.format);
             for (size_t i = 0; data && i < count; ++i) {
                 BYTE* const at = reinterpret_cast<BYTE*>(data) + i * objectSize;
                 std::memset(at, 0, objectSize);
@@ -812,6 +863,32 @@ inline HRESULT STDMETHODCALLTYPE HookedDiSetCooperativeLevel(void* object, HWND 
     return result;
 }
 
+// Passed on, so DirectInput checks the format against the real device, and read
+// back from DirectInput once it has taken it.
+template <int Variant>
+inline HRESULT STDMETHODCALLTYPE HookedDiSetDataFormat(void* object, LPCDIDATAFORMAT format) {
+    const HRESULT result = DiOriginal<DiSetDataFormat_t>(kDiSetDataFormat, Variant)(object, format);
+    if (FAILED(result) || !IsSyntheticDevice(object)) return result;
+    DirectInput& d = D();
+    DirectInputKind kind;
+    {
+        std::unique_lock<std::mutex> lock(d.mutex);
+        kind = DiDevice(object, lock).reader.kind;
+    }
+    DirectInputFormat read = ReadDataFormat(object, kind, format->dwDataSize, format->dwDataSize);
+    char line[200];
+    std::snprintf(line, sizeof(line),
+                  "isolated input: the game set its DirectInput %s data format: %lu bytes, %lu objects, %zu of them answered",
+                  kind == DirectInputKind::kKeyboard ? "keyboard" : "mouse", format->dwDataSize, format->dwNumObjs,
+                  read.entries.size());
+    {
+        std::unique_lock<std::mutex> lock(d.mutex);
+        DiDevice(object, lock).format = std::move(read);
+    }
+    Log(line);
+    return result;
+}
+
 template <int Variant>
 inline void* DiDetour(DirectInputMethod method) {
     switch (method) {
@@ -821,6 +898,7 @@ inline void* DiDetour(DirectInputMethod method) {
         case kDiGetDeviceData:       return reinterpret_cast<void*>(&HookedDiGetDeviceData<Variant>);
         case kDiSetCooperativeLevel: return reinterpret_cast<void*>(&HookedDiSetCooperativeLevel<Variant>);
         case kDiPoll:                return reinterpret_cast<void*>(&HookedDiPoll<Variant>);
+        case kDiSetDataFormat:       return reinterpret_cast<void*>(&HookedDiSetDataFormat<Variant>);
         default:                     return nullptr;
     }
 }

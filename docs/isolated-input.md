@@ -690,7 +690,8 @@ device that is neither a keyboard nor a mouse is left as it was.
 
 | Method | Answer | Why |
 |---|---|---|
-| `GetDeviceState` | keyboard: 256 bytes, `0x80` at the `DIK_` code of each key the script holds. Mouse: the buttons held and the movement since that device last asked, as `DIMOUSESTATE` or `DIMOUSESTATE2` | the real device is never read |
+| `GetDeviceState` | in the data format the game set: `0x80` at the offset of each key or button the script holds, the movement since that device last asked at the offset of X and of Y, and 0 everywhere else. With `c_dfDIKeyboard` that is 256 bytes with `0x80` at each held key's `DIK_` code; with `c_dfDIMouse` or `c_dfDIMouse2` it is `DIMOUSESTATE` or `DIMOUSESTATE2` | the real device is never read |
+| `SetDataFormat` | passed on, and the format then read back from DirectInput | DirectInput checks the format against the real device, and the answers above follow whatever layout it took |
 | `GetDeviceData` | the events played since that device last asked: `dwOfs` a `DIK_` code or `DIMOFS_X`, `DIMOFS_Y`, `DIMOFS_BUTTON0` to `2`. Honours the caller's capacity, `DIGDD_PEEK` and a null buffer, and answers `DI_BUFFEROVERFLOW` after more than 256 unread events | a game that reads buffered input is covered as well |
 | `Acquire`, `Poll` | `DI_OK`, without reaching DirectInput | the real keyboard and mouse are never acquired, so a lost or refused acquire cannot reach the game |
 | `SetCooperativeLevel` | passed on as `DISCL_BACKGROUND \| DISCL_NONEXCLUSIVE` | the device stays usable behind other windows |
@@ -741,9 +742,18 @@ reading the real devices.
 `Get-GameInputPaths` finds GameInput only in a binary that imports it. Minecraft Bedrock loads it
 through the NuGet package's loader and imports neither DLL, so there the log is what shows it.
 
-Only the standard data formats are answered (`c_dfDIKeyboard`, `c_dfDIMouse`,
-`c_dfDIMouse2`): a `GetDeviceState` of any other size is refused and the log says
-so. There is no mouse wheel command, so `lZ` is always 0. A game that waits on
+Any data format is answered, standard or the game's own. F.E.A.R. sets formats of
+its own: 504 bytes for its keyboard, 44 for its mouse. Where each key, axis and button sits is asked of DirectInput
+(`GetObjectInfo` with `DIPH_BYOFFSET`, which answers the object at an offset of the
+format set; `EnumObjects` answers the device's own layout), so a format the game
+set before the detours went in, as it is when the mod is injected after launch,
+is read back as well. Its size is then not known, and a `GetDeviceState` is
+answered at the size the game asks for when every object fits in it. A key reads
+its `DIK_` code as DirectInput's instance number; a mouse lists X, Y and the wheel
+as instances 0 to 2 and buttons 0 to 7 as 3 to 10. The log says, for each device,
+how many of the format's keys, buttons and axes it answers, and a
+`GetDeviceState` of a size that is not the format's is refused. There is no mouse
+wheel command, so the wheel is always 0. A game that waits on
 `SetEventNotification` is not signalled. The log names, once for each device,
 which of `GetDeviceState` and `GetDeviceData` the game reads it through.
 

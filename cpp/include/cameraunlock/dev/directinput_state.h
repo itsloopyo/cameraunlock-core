@@ -8,12 +8,17 @@
 // A device is one DirectInputReader. Each reader has its own place in the
 // events and its own count of the mouse movement it has reported, so two
 // devices of a kind each see everything once.
+//
+// The state is kept in the standard data formats (c_dfDIKeyboard, c_dfDIMouse2).
+// A device whose game set a format of its own with SetDataFormat is answered
+// through a DirectInputFormat, which says where in that format each control sits.
 
 #include "cameraunlock/dev/input_script.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace cameraunlock::dev {
 
@@ -131,18 +136,82 @@ struct DirectInputEvent {
     uint32_t sequence = 0;
 };
 
-// Where a mouse event's `offset` points, in the standard mouse data format.
+// Where a mouse event's `offset` points, in the standard mouse data format
+// (DIMOUSESTATE2).
 inline constexpr uint32_t kMouseOffsetX = 0;
 inline constexpr uint32_t kMouseOffsetY = 4;
+inline constexpr uint32_t kMouseOffsetZ = 8;
 inline constexpr uint32_t kMouseOffsetButton0 = 12;
 
 inline constexpr size_t kKeyboardStateSize = 256;
-// DIMOUSESTATE, with four buttons, and DIMOUSESTATE2, with eight.
-inline constexpr size_t kMouseStateSize = 16;
-inline constexpr size_t kMouseState2Size = 20;
 
 // How many events a device that is not being read keeps. The oldest go first.
 inline constexpr size_t kDirectInputEventSlots = 256;
+
+// The type GUID of a DirectInput object: a key, an axis of a mouse, a button,
+// or anything else.
+enum class DirectInputGuid { kKey, kXAxis, kYAxis, kZAxis, kButton, kOther };
+
+// A control in the data format a game set, and the place in the standard format
+// of the same control: a key's DIK code, a mouse axis's or button's offset in
+// DIMOUSESTATE2.
+struct DirectInputFormatEntry {
+    uint32_t standardOffset = 0;
+    uint32_t offset = 0;
+    bool axis = false;
+};
+
+// The instance numbers DirectInput's EnumObjects gives a mouse's buttons, after
+// X, Y and the wheel as 0 to 2. A key's instance is its DIK code.
+inline constexpr uint32_t kMouseFirstButtonInstance = 3;
+inline constexpr uint32_t kMouseButtons = 8;
+
+struct DirectInputFormat {
+    // The size the game gave SetDataFormat, or 0 for a format read back from a
+    // device whose format was set before isolated input was there to see it.
+    size_t dataSize = 0;
+    std::vector<DirectInputFormatEntry> entries;
+
+    // Adds the object DirectInput reports at `offset` of the format. False for
+    // an object a keyboard or mouse state has no place for, which is left out.
+    bool Add(DirectInputKind kind, uint32_t offset, DirectInputGuid guid, uint32_t instance) {
+        DirectInputFormatEntry entry;
+        entry.offset = offset;
+        if (kind == DirectInputKind::kKeyboard) {
+            if (guid != DirectInputGuid::kKey || instance < 1 || instance > 255) return false;
+            entry.standardOffset = instance;
+        } else if (guid == DirectInputGuid::kXAxis || guid == DirectInputGuid::kYAxis || guid == DirectInputGuid::kZAxis) {
+            entry.axis = true;
+            entry.standardOffset = guid == DirectInputGuid::kXAxis   ? kMouseOffsetX
+                                   : guid == DirectInputGuid::kYAxis ? kMouseOffsetY
+                                                                     : kMouseOffsetZ;
+        } else if (guid == DirectInputGuid::kButton && instance >= kMouseFirstButtonInstance
+                   && instance < kMouseFirstButtonInstance + kMouseButtons) {
+            entry.standardOffset = kMouseOffsetButton0 + (instance - kMouseFirstButtonInstance);
+        } else {
+            return false;
+        }
+        entries.push_back(entry);
+        return true;
+    }
+
+    const DirectInputFormatEntry* Find(uint32_t standardOffset) const {
+        for (const DirectInputFormatEntry& entry : entries) {
+            if (entry.standardOffset == standardOffset) return &entry;
+        }
+        return nullptr;
+    }
+
+    // The bytes the entries reach to.
+    size_t Extent() const {
+        size_t extent = 0;
+        for (const DirectInputFormatEntry& entry : entries) {
+            const size_t end = entry.offset + (entry.axis ? sizeof(int32_t) : 1);
+            if (end > extent) extent = end;
+        }
+        return extent;
+    }
+};
 
 struct DirectInputReader {
     DirectInputKind kind = DirectInputKind::kKeyboard;
@@ -192,45 +261,66 @@ public:
         return reader;
     }
 
-    // `out` is kKeyboardStateSize bytes: 0x80 at the code of each key held.
-    void KeyboardState(uint8_t* out) const {
-        for (size_t dik = 0; dik < kKeyboardStateSize; ++dik) out[dik] = keys_[dik] ? 0x80 : 0;
-    }
-
-    // The mouse as a relative-axis device reports it: the movement since this
-    // reader last asked, which is then spent. False, with nothing written or
-    // spent, for a size that is neither mouse state.
-    bool MouseState(DirectInputReader& reader, uint8_t* out, size_t size) const {
-        if (size != kMouseStateSize && size != kMouseState2Size) return false;
-        const int32_t axes[3] = {static_cast<int32_t>(totalX_ - reader.seenX),
-                                 static_cast<int32_t>(totalY_ - reader.seenY), 0};
-        reader.seenX = totalX_;
-        reader.seenY = totalY_;
+    // The device's state in the format the game set. `size` must be the format's
+    // size, or, for a format read back with no size, at least what its entries
+    // reach to. Each key or button in the format reads 0x80 while held, each axis
+    // the movement since this reader last asked (the wheel never moves), and
+    // every other byte 0. False, with nothing written or spent, for another size.
+    bool FormattedState(DirectInputReader& reader, const DirectInputFormat& format, uint8_t* out, size_t size) const {
+        if (format.dataSize != 0 ? size != format.dataSize : size < format.Extent()) return false;
         std::memset(out, 0, size);
-        std::memcpy(out, axes, sizeof(axes));
-        for (int i = 0; i < 3; ++i) out[sizeof(axes) + i] = buttons_[i] ? 0x80 : 0;
+        for (const DirectInputFormatEntry& entry : format.entries) {
+            if (entry.axis) {
+                const int32_t value = entry.standardOffset == kMouseOffsetX   ? static_cast<int32_t>(totalX_ - reader.seenX)
+                                      : entry.standardOffset == kMouseOffsetY ? static_cast<int32_t>(totalY_ - reader.seenY)
+                                                                              : 0;
+                std::memcpy(out + entry.offset, &value, sizeof(value));
+            } else if (Held(reader.kind, entry.standardOffset)) {
+                out[entry.offset] = 0x80;
+            }
+        }
+        if (reader.kind == DirectInputKind::kMouse) {
+            reader.seenX = totalX_;
+            reader.seenY = totalY_;
+        }
         return true;
     }
 
     // The events this reader has not had, oldest first, at most `capacity` of
     // them. `out` may be null, to count or to throw away. A peek leaves them to
     // be read again. `overflowed` is set when events were lost because more
-    // than kDirectInputEventSlots went unread.
-    size_t ReadEvents(DirectInputReader& reader, DirectInputEvent* out, size_t capacity, bool peek,
-                      bool& overflowed) const {
+    // than kDirectInputEventSlots went unread. With the format the game set,
+    // each event's offset is its control's place in that format, and an event of
+    // a control the format leaves out is passed over: DirectInput reports only
+    // the objects in the format.
+    size_t ReadEvents(DirectInputReader& reader, DirectInputEvent* out, size_t capacity, bool peek, bool& overflowed,
+                      const DirectInputFormat* format = nullptr) const {
         const Log& log = reader.kind == DirectInputKind::kKeyboard ? keyboard_ : mouse_;
         uint64_t next = reader.next;
         overflowed = log.count - next > kDirectInputEventSlots;
         if (overflowed) next = log.count - kDirectInputEventSlots;
         size_t count = 0;
-        for (; count < capacity && next < log.count; ++count, ++next) {
-            if (out) out[count] = log.events[next % kDirectInputEventSlots];
+        for (; count < capacity && next < log.count; ++next) {
+            DirectInputEvent event = log.events[next % kDirectInputEventSlots];
+            if (format) {
+                const DirectInputFormatEntry* entry = format->Find(event.offset);
+                if (!entry) continue;
+                event.offset = entry->offset;
+            }
+            if (out) out[count] = event;
+            ++count;
         }
         if (!peek) reader.next = next;
         return count;
     }
 
 private:
+    bool Held(DirectInputKind kind, uint32_t standardOffset) const {
+        if (kind == DirectInputKind::kKeyboard) return standardOffset < kKeyboardStateSize && keys_[standardOffset];
+        return standardOffset >= kMouseOffsetButton0 && standardOffset - kMouseOffsetButton0 < 3
+               && buttons_[standardOffset - kMouseOffsetButton0];
+    }
+
     struct Log {
         DirectInputEvent events[kDirectInputEventSlots] = {};
         uint64_t count = 0;

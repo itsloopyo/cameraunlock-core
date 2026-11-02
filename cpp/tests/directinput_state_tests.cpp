@@ -18,6 +18,8 @@ void Check(bool cond, const char* name) {
 }
 
 using cameraunlock::dev::DirectInputEvent;
+using cameraunlock::dev::DirectInputFormat;
+using cameraunlock::dev::DirectInputGuid;
 using cameraunlock::dev::DirectInputKeyStroke;
 using cameraunlock::dev::DirectInputKind;
 using cameraunlock::dev::DirectInputReader;
@@ -35,6 +37,27 @@ int32_t Axis(const uint8_t* state, size_t offset) {
     int32_t value = 0;
     std::memcpy(&value, state + offset, sizeof(value));
     return value;
+}
+
+// c_dfDIKeyboard as DirectInput reports it back: each key at its DIK code.
+DirectInputFormat StandardKeyboard() {
+    DirectInputFormat format;
+    format.dataSize = 256;
+    for (uint32_t dik = 1; dik < 256; ++dik) format.Add(DirectInputKind::kKeyboard, dik, DirectInputGuid::kKey, dik);
+    return format;
+}
+
+// c_dfDIMouse (16 bytes, four buttons) or c_dfDIMouse2 (20 bytes, eight).
+DirectInputFormat StandardMouse(size_t size) {
+    DirectInputFormat format;
+    format.dataSize = size;
+    format.Add(DirectInputKind::kMouse, 0, DirectInputGuid::kXAxis, 0);
+    format.Add(DirectInputKind::kMouse, 4, DirectInputGuid::kYAxis, 1);
+    format.Add(DirectInputKind::kMouse, 8, DirectInputGuid::kZAxis, 2);
+    for (uint32_t button = 0; button < size - 12; ++button) {
+        format.Add(DirectInputKind::kMouse, 12 + button, DirectInputGuid::kButton, 3 + button);
+    }
+    return format;
 }
 
 }  // namespace
@@ -73,18 +96,20 @@ int RunDirectInputStateTests() {
 
     {
         DirectInputState state;
+        DirectInputReader keyboard = state.Open(DirectInputKind::kKeyboard);
+        const DirectInputFormat format = StandardKeyboard();
         uint8_t keys[256];
         std::memset(keys, 0xFF, sizeof(keys));
-        state.KeyboardState(keys);
+        Check(state.FormattedState(keyboard, format, keys, sizeof(keys)), "the standard keyboard format is answered");
         bool allUp = true;
         for (const uint8_t key : keys) allUp = allUp && key == 0;
         Check(allUp, "no key is down before anything is played");
 
         Check(state.Key(0x11, true, 100) && state.Key(0x2A, true, 100), "a key press is taken");
-        state.KeyboardState(keys);
+        state.FormattedState(keyboard, format, keys, sizeof(keys));
         Check(keys[0x11] == 0x80 && keys[0x2A] == 0x80 && keys[0x1E] == 0, "held keys read 0x80 at their code");
         state.Key(0x11, false, 120);
-        state.KeyboardState(keys);
+        state.FormattedState(keyboard, format, keys, sizeof(keys));
         Check(keys[0x11] == 0 && keys[0x2A] == 0x80, "a released key reads 0 and the others stay held");
         Check(!state.Key(0, true, 130) && !state.Key(256, true, 130), "a code that is no key is refused");
     }
@@ -92,38 +117,122 @@ int RunDirectInputStateTests() {
     {
         DirectInputState state;
         DirectInputReader mouse = state.Open(DirectInputKind::kMouse);
+        const DirectInputFormat four = StandardMouse(16);
+        const DirectInputFormat eight = StandardMouse(20);
         uint8_t small[16];
         uint8_t large[20];
 
         state.Move(-260, 10, 5);
         state.Move(60, 5, 6);
         state.Button(MouseButton::kRight, true, 7);
-        Check(state.MouseState(mouse, small, sizeof(small)) && Axis(small, 0) == -200 && Axis(small, 4) == 15
+        Check(state.FormattedState(mouse, four, small, sizeof(small)) && Axis(small, 0) == -200 && Axis(small, 4) == 15
                   && Axis(small, 8) == 0,
               "mouse state is the movement since the last read");
         Check(small[12] == 0 && small[13] == 0x80 && small[14] == 0 && small[15] == 0,
               "a held button reads 0x80 in its slot: left, right, middle");
-        Check(state.MouseState(mouse, small, sizeof(small)) && Axis(small, 0) == 0 && Axis(small, 4) == 0,
+        Check(state.FormattedState(mouse, four, small, sizeof(small)) && Axis(small, 0) == 0 && Axis(small, 4) == 0,
               "movement is reported once");
         Check(small[13] == 0x80, "a button stays held between reads");
 
         state.Move(3, 0, 8);
         std::memset(large, 0xFF, sizeof(large));
-        Check(state.MouseState(mouse, large, sizeof(large)) && Axis(large, 0) == 3 && large[13] == 0x80
+        Check(state.FormattedState(mouse, eight, large, sizeof(large)) && Axis(large, 0) == 3 && large[13] == 0x80
                   && large[16] == 0 && large[19] == 0,
               "the eight-button state is answered too");
 
         uint8_t wrong[24] = {};
         state.Move(9, 9, 9);
-        Check(!state.MouseState(mouse, wrong, sizeof(wrong)), "a size that is no mouse state is refused");
-        Check(state.MouseState(mouse, small, sizeof(small)) && Axis(small, 0) == 9,
+        Check(!state.FormattedState(mouse, four, wrong, sizeof(wrong)), "a size that is not the format's is refused");
+        Check(state.FormattedState(mouse, four, small, sizeof(small)) && Axis(small, 0) == 9,
               "a refused read spends no movement");
 
         DirectInputReader second = state.Open(DirectInputKind::kMouse);
         state.Move(4, 0, 10);
-        Check(state.MouseState(second, small, sizeof(small)) && Axis(small, 0) == 4
-                  && state.MouseState(mouse, small, sizeof(small)) && Axis(small, 0) == 4,
+        Check(state.FormattedState(second, four, small, sizeof(small)) && Axis(small, 0) == 4
+                  && state.FormattedState(mouse, four, small, sizeof(small)) && Axis(small, 0) == 4,
               "each device has the movement once, and a new device none from before it");
+    }
+
+    {
+        // F.E.A.R.'s layout: every object the device lists, four bytes apart, so its keyboard is
+        // 126 keys in 504 bytes and its mouse X, Y, wheel and eight buttons in 44.
+        DirectInputFormat keyboardFormat;
+        keyboardFormat.dataSize = 504;
+        const uint32_t listed[] = {0x01, 0x11, 0x2D, 0x21, 0x32};
+        for (uint32_t i = 0; i < 126; ++i) {
+            const uint32_t dik = i < 5 ? listed[i] : 0x80 + i;
+            keyboardFormat.Add(DirectInputKind::kKeyboard, 4 * i, DirectInputGuid::kKey, dik);
+        }
+        DirectInputFormat mouseFormat;
+        mouseFormat.dataSize = 44;
+        Check(mouseFormat.Add(DirectInputKind::kMouse, 0, DirectInputGuid::kXAxis, 0)
+                  && mouseFormat.Add(DirectInputKind::kMouse, 4, DirectInputGuid::kYAxis, 1)
+                  && mouseFormat.Add(DirectInputKind::kMouse, 8, DirectInputGuid::kZAxis, 2),
+              "a mouse's axes take their place in a format");
+        for (uint32_t button = 0; button < 8; ++button) {
+            mouseFormat.Add(DirectInputKind::kMouse, 12 + 4 * button, DirectInputGuid::kButton, 3 + button);
+        }
+
+        DirectInputState state;
+        DirectInputReader keyboard = state.Open(DirectInputKind::kKeyboard);
+        DirectInputReader mouse = state.Open(DirectInputKind::kMouse);
+        uint8_t keys[504];
+        uint8_t buttons[44];
+        state.Key(0x2D, true, 10);
+        state.Key(0x1E, true, 11);
+        Check(state.FormattedState(keyboard, keyboardFormat, keys, sizeof(keys)) && keys[8] == 0x80 && keys[4] == 0
+                  && keys[9] == 0 && keys[0] == 0,
+              "a custom keyboard format reads a held key at its own offset, and nothing else");
+        bool onlyX = true;
+        for (size_t i = 0; i < sizeof(keys); ++i) onlyX = onlyX && (i == 8 || keys[i] == 0);
+        Check(onlyX, "a held key the format leaves out shows nowhere");
+
+        state.Move(7, -3, 12);
+        state.Button(MouseButton::kLeft, true, 13);
+        state.Button(MouseButton::kMiddle, true, 14);
+        Check(state.FormattedState(mouse, mouseFormat, buttons, sizeof(buttons)) && Axis(buttons, 0) == 7
+                  && Axis(buttons, 4) == -3 && Axis(buttons, 8) == 0 && buttons[12] == 0x80 && buttons[16] == 0
+                  && buttons[20] == 0x80 && buttons[24] == 0,
+              "a custom mouse format reads axes and buttons at its own offsets");
+        Check(!state.FormattedState(keyboard, keyboardFormat, keys, 256), "a read of the standard size is refused");
+
+        DirectInputEvent events[8];
+        bool overflowed = false;
+        state.Key(0x2D, false, 20);
+        size_t count = state.ReadEvents(keyboard, events, 8, false, overflowed, &keyboardFormat);
+        Check(count == 2 && events[0].offset == 8 && events[0].data == 0x80 && events[1].offset == 8 && events[1].data == 0,
+              "buffered key events carry the key's offset in the format");
+        count = state.ReadEvents(mouse, events, 8, false, overflowed, &mouseFormat);
+        Check(count == 4 && events[0].offset == 0 && events[1].offset == 4 && events[2].offset == 12
+                  && events[3].offset == 20,
+              "buffered mouse events carry the axis or button offset in the format");
+
+        state.Key(0x1E, false, 30);
+        state.Key(0x11, true, 31);
+        Check(state.ReadEvents(keyboard, events, 1, false, overflowed, &keyboardFormat) == 1 && events[0].offset == 4
+                  && state.ReadEvents(keyboard, events, 8, false, overflowed, &keyboardFormat) == 0,
+              "an event of a key the format leaves out is passed over, and does not take a place in the read");
+    }
+
+    {
+        DirectInputFormat format;
+        Check(!format.Add(DirectInputKind::kKeyboard, 0, DirectInputGuid::kButton, 3)
+                  && !format.Add(DirectInputKind::kKeyboard, 0, DirectInputGuid::kKey, 0)
+                  && !format.Add(DirectInputKind::kMouse, 0, DirectInputGuid::kKey, 0x11)
+                  && !format.Add(DirectInputKind::kMouse, 0, DirectInputGuid::kButton, 11)
+                  && !format.Add(DirectInputKind::kMouse, 0, DirectInputGuid::kOther, 0) && format.entries.empty(),
+              "an object a keyboard or mouse state has no place for is left out");
+
+        // A format set before isolated input could see it is read back with no size.
+        DirectInputFormat readBack;
+        readBack.Add(DirectInputKind::kKeyboard, 40, DirectInputGuid::kKey, 0x11);
+        DirectInputState state;
+        DirectInputReader keyboard = state.Open(DirectInputKind::kKeyboard);
+        uint8_t keys[64];
+        state.Key(0x11, true, 1);
+        Check(state.FormattedState(keyboard, readBack, keys, 44) && keys[40] == 0x80
+                  && !state.FormattedState(keyboard, readBack, keys, 40),
+              "a format read back with no size takes any read it fits in");
     }
 
     {
