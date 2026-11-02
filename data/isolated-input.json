@@ -38,6 +38,12 @@
       "status": "supported",
       "proven_in": ["far-cry-6", "ready-or-not"]
     },
+    "cursor-shown": {
+      "what": "whether the cursor shows, as the game sets it with ShowCursor and SetCursor and a mod reads it back with GetCursorInfo to tell a menu from play. GetCursorInfo answers the game's own setting, never the cursor of the window in front",
+      "imports": ["ShowCursor", "SetCursor"],
+      "status": "supported",
+      "proven_in": ["minecraft-bedrock"]
+    },
     "gameinput": {
       "what": "the GDK's GameInput API, from the inbox GameInput.dll or the Microsoft.GameInput NuGet package's GameInputRedist.dll. API version 2 is answered from the script: keyboard, mouse and gamepad, and no other controller. Every other version is given no readings, so the real devices never reach it, and the script does not drive it either. A game that loads it at run time through the NuGet package's loader, as Minecraft Bedrock does, imports neither DLL, so only the dev build's log shows it",
       "dlls": ["gameinput.dll", "gameinputredist.dll"],

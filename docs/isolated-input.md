@@ -671,7 +671,10 @@ placed the cursor: start the script with `cursor <x> <y>`.
 | `SetForegroundWindow` | nothing | the game cannot take the foreground back |
 | `GetRawInputData`, `GetRawInputBuffer`, for an event of the real keyboard or mouse | the event with no movement, no buttons and no key | a window registered with `RIDEV_INPUTSINK` is sent the real devices in the background. The log says so the first time one arrives |
 | `GetCursorPos` | the point the last `cursor` command gave, and the middle of the game window until one has | a menu with a pointer follows the script's cursor, and a game that reads the cursor never follows the real one |
+| `GetCursorInfo` | the cursor as the game last set it: `CURSOR_SHOWING` while its `ShowCursor` display count is not negative and it has a cursor set, the cursor handle it set (the arrow until it sets one), and the point `GetCursorPos` answers | Windows answers for the foreground window, which is never the game's, so a mod that holds its pose while a menu shows the cursor would read the desktop's cursor and hold in every state. The log says once that it is read |
+| `ShowCursor`, `SetCursor` | passed on, and the display count returned and the cursor given are kept for `GetCursorInfo` | this is how a game shows and hides its cursor. Each is kept from whichever thread called last |
 | the game window's procedure | never sees `WM_ACTIVATEAPP`, `WM_ACTIVATE`, `WM_KILLFOCUS` or `WM_NCACTIVATE` saying it lost the foreground, and is posted all four saying it has it when the window is found | a game that stops, or stops following its mouse, when deactivated carries on |
+| the game window's procedure, after a `WM_SETCURSOR` | the window thread's cursor (`GetCursor`) is kept for `GetCursorInfo` | `DefWindowProc` puts the window class's cursor back without calling `SetCursor`. Windows sends `WM_SETCURSOR` only when the real mouse is over the window, and the script sends none |
 
 The dev build also watches the real foreground itself. Whenever a window of the
 game holds it, the game gives it back to the window that had it before, or to the

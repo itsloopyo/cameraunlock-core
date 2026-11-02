@@ -37,6 +37,13 @@
 //     point: a menu that reads where the cursor is gets the script's cursor, as a
 //     WM_MOUSEMOVE at that point and as the position it reads back, and a button
 //     then also arrives as the window message a click there would be.
+//   - GetCursorInfo answers the cursor as the game last set it, shown or
+//     hidden, and where GetCursorPos says it is. Windows answers for the
+//     foreground window, which is never the game's, so a mod that holds its
+//     pose while a menu shows the cursor would read the desktop's cursor. The
+//     game's setting is followed through ShowCursor's display count, the cursor
+//     SetCursor was last given, and the cursor the window has after
+//     WM_SETCURSOR, which is where DefWindowProc puts the class cursor back.
 //
 // And two things that keep the game in the background without it knowing:
 //
@@ -151,6 +158,9 @@ using GetClipCursor_t = BOOL (WINAPI*)(LPRECT);
 using SetCursorPos_t = BOOL (WINAPI*)(int, int);
 using SetForegroundWindow_t = BOOL (WINAPI*)(HWND);
 using GetCursorPos_t = BOOL (WINAPI*)(LPPOINT);
+using ShowCursor_t = int (WINAPI*)(BOOL);
+using SetCursor_t = HCURSOR (WINAPI*)(HCURSOR);
+using GetCursorInfo_t = BOOL (WINAPI*)(PCURSORINFO);
 using XInputGetState_t = DWORD (WINAPI*)(DWORD, void*);
 using XInputSetState_t = DWORD (WINAPI*)(DWORD, void*);
 using XInputGetCapabilities_t = DWORD (WINAPI*)(DWORD, DWORD, void*);
@@ -174,6 +184,15 @@ struct State {
     SetCursorPos_t origSetCursorPos = nullptr;
     SetForegroundWindow_t origSetForegroundWindow = nullptr;
     GetCursorPos_t origGetCursorPos = nullptr;
+    ShowCursor_t origShowCursor = nullptr;
+    SetCursor_t origSetCursor = nullptr;
+    GetCursorInfo_t origGetCursorInfo = nullptr;
+
+    // The cursor as the game last set it, from whichever of its threads set it
+    // last. The arrow until the game sets one.
+    std::atomic<int> displayCount{0};
+    std::atomic<HCURSOR> cursor{nullptr};
+    std::atomic<bool> cursorInfoRead{false};
 
     // The cursor the script placed, in the game window's client area.
     std::atomic<bool> cursorPlaced{false};
@@ -360,10 +379,7 @@ inline BOOL WINAPI HookedSetCursorPos(int x, int y) {
     return TRUE;
 }
 
-inline BOOL WINAPI HookedGetCursorPos(LPPOINT point) {
-    if (!S().cursorPosRead.exchange(true, std::memory_order_acq_rel)) {
-        Log("isolated input: the game reads the cursor's position (GetCursorPos)");
-    }
+inline BOOL ScriptCursorPos(LPPOINT point) {
     const HWND window = S().window.load(std::memory_order_acquire);
     if (!point || !window) return S().origGetCursorPos(point);
     if (!S().cursorPlaced.load(std::memory_order_acquire)) {
@@ -377,6 +393,38 @@ inline BOOL WINAPI HookedGetCursorPos(LPPOINT point) {
     *point = {S().cursorX.load(std::memory_order_relaxed), S().cursorY.load(std::memory_order_relaxed)};
     return ClientToScreen(window, point);
 }
+
+inline BOOL WINAPI HookedGetCursorPos(LPPOINT point) {
+    if (!S().cursorPosRead.exchange(true, std::memory_order_acq_rel)) {
+        Log("isolated input: the game reads the cursor's position (GetCursorPos)");
+    }
+    return ScriptCursorPos(point);
+}
+
+inline int WINAPI HookedShowCursor(BOOL show) {
+    const int count = S().origShowCursor(show);
+    S().displayCount.store(count, std::memory_order_release);
+    return count;
+}
+
+inline HCURSOR WINAPI HookedSetCursor(HCURSOR cursor) {
+    const HCURSOR previous = S().origSetCursor(cursor);
+    S().cursor.store(cursor, std::memory_order_release);
+    return previous;
+}
+
+// Shown while the game's display count is not negative and it has a cursor set.
+inline BOOL WINAPI HookedGetCursorInfo(PCURSORINFO info) {
+    if (!info || info->cbSize != sizeof(CURSORINFO)) return S().origGetCursorInfo(info);
+    if (!S().cursorInfoRead.exchange(true, std::memory_order_acq_rel)) {
+        Log("isolated input: GetCursorInfo is read, and answers the cursor as the game set it");
+    }
+    const HCURSOR cursor = S().cursor.load(std::memory_order_acquire);
+    info->flags = S().displayCount.load(std::memory_order_acquire) >= 0 && cursor ? CURSOR_SHOWING : 0;
+    info->hCursor = cursor;
+    return ScriptCursorPos(&info->ptScreenPos);
+}
+
 inline BOOL WINAPI HookedSetForegroundWindow(HWND) { return TRUE; }
 
 // XINPUT_STATE: the packet number, then XINPUT_GAMEPAD.
@@ -1642,8 +1690,12 @@ inline LRESULT CALLBACK GameWindowProc(HWND window, UINT message, WPARAM wParam,
                                        : DefWindowProcA(window, message, wParam, lParam);
     }
     const WNDPROC original = S().windowProc.load(std::memory_order_acquire);
-    return IsWindowUnicode(window) ? CallWindowProcW(original, window, message, wParam, lParam)
-                                   : CallWindowProcA(original, window, message, wParam, lParam);
+    const LRESULT result = IsWindowUnicode(window) ? CallWindowProcW(original, window, message, wParam, lParam)
+                                                   : CallWindowProcA(original, window, message, wParam, lParam);
+    // DefWindowProc sets the class cursor without passing through the SetCursor
+    // detour, so the cursor is read back on the window's own thread.
+    if (message == WM_SETCURSOR) S().cursor.store(GetCursor(), std::memory_order_release);
+    return result;
 }
 
 // From the moment the game has a window it is told that window has the
@@ -1760,6 +1812,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     State& s = S();
     s.log = log;
     s.commandFile = commandFile;
+    s.cursor.store(LoadCursor(nullptr, IDC_ARROW), std::memory_order_release);
     FindDevices();
 
     static const wchar_t* const kUser32 = L"user32.dll";
@@ -1780,6 +1833,9 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
             || Hook(L"win32u.dll", "NtUserSetCursorPos", &HookedSetCursorPos, s.origSetCursorPos),
         Hook(kUser32, "SetForegroundWindow", &HookedSetForegroundWindow, s.origSetForegroundWindow),
         Hook(kUser32, "GetCursorPos", &HookedGetCursorPos, s.origGetCursorPos),
+        Hook(kUser32, "ShowCursor", &HookedShowCursor, s.origShowCursor),
+        Hook(kUser32, "SetCursor", &HookedSetCursor, s.origSetCursor),
+        Hook(kUser32, "GetCursorInfo", &HookedGetCursorInfo, s.origGetCursorInfo),
     };
     // A controller DLL the game has not loaded is left alone, and one it has is
     // optional: a game is driven by its keyboard and mouse without it.

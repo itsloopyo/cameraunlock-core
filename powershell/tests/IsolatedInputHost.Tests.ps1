@@ -63,6 +63,10 @@ Add-Type -Namespace CameraUnlockHostTest -Name User32 -MemberDefinition @'
 [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr LoadLibraryW(string name);
 [DllImport("xinput1_4.dll")] public static extern int XInputGetState(int index, byte[] state);
 [DllImport("xinput1_4.dll")] public static extern int XInputGetCapabilities(int index, int flags, byte[] capabilities);
+[DllImport("user32.dll")] public static extern int ShowCursor(bool show);
+[DllImport("user32.dll")] public static extern IntPtr SetCursor(IntPtr cursor);
+[DllImport("user32.dll")] public static extern IntPtr LoadCursorW(IntPtr instance, IntPtr name);
+[DllImport("user32.dll")] public static extern bool GetCursorInfo(int[] info);
 '@
 # Only an XInput DLL the process has loaded when the host starts is detoured, as in a game.
 if ([CameraUnlockHostTest.User32]::LoadLibraryW('xinput1_4.dll') -eq [IntPtr]::Zero) { throw 'xinput1_4.dll did not load' }
@@ -90,6 +94,15 @@ function KeyboardState {
     $state = New-Object byte[] 256
     if (-not [CameraUnlockHostTest.User32]::GetKeyboardState($state)) { throw 'GetKeyboardState failed' }
     , $state
+}
+
+# CURSORINFO as six ints: cbSize, flags, hCursor (two), ptScreenPos.
+function CursorInfo {
+    param([int]$Size = 24)
+    $info = New-Object int[] 6
+    $info[0] = $Size
+    $read = [CameraUnlockHostTest.User32]::GetCursorInfo($info)
+    [pscustomobject]@{ Read = $read; Showing = ($info[1] -band 1) -ne 0; Cursor = [long]$info[2] -bor ([long]$info[3] -shl 32) }
 }
 
 function KeysDown {
@@ -167,10 +180,33 @@ Check 'XInputGetState reports its A button held' ($result -eq 0 -and ([BitConver
 Check 'XInputGetCapabilities answers no controller at an index the script has not named' `
     ([CameraUnlockHostTest.User32]::XInputGetCapabilities(1, 1, $capabilities) -eq $notConnected)
 
+# The child has no window and is not in front, so Windows would answer GetCursorInfo for the
+# window that is, and nothing this process does would hide that cursor.
+$arrow = [CameraUnlockHostTest.User32]::LoadCursorW([IntPtr]::Zero, [IntPtr]32512).ToInt64()
+$info = CursorInfo
+Check 'GetCursorInfo answers the arrow, shown, before the game sets a cursor' ($info.Read -and $info.Showing -and $info.Cursor -eq $arrow) "$info"
+$count = [CameraUnlockHostTest.User32]::ShowCursor($false)
+$info = CursorInfo
+Check 'ShowCursor(FALSE) takes the display count below zero and GetCursorInfo answers it hidden' ($count -eq -1 -and $info.Read -and -not $info.Showing) "count $count, $info"
+$count = [CameraUnlockHostTest.User32]::ShowCursor($true)
+Check 'ShowCursor(TRUE) brings it back to zero, shown' ($count -eq 0 -and (CursorInfo).Showing) "count $count"
+[CameraUnlockHostTest.User32]::SetCursor([IntPtr]::Zero) | Out-Null
+$info = CursorInfo
+Check 'SetCursor(NULL) hides it, with no cursor handle' ($info.Read -and -not $info.Showing -and $info.Cursor -eq 0) "$info"
+$previous = [CameraUnlockHostTest.User32]::SetCursor([IntPtr]$arrow)
+$info = CursorInfo
+Check 'SetCursor with a cursor shows that cursor' ($info.Showing -and $info.Cursor -eq $arrow) "$info"
+Check 'and SetCursor still answers the cursor it replaced' ($previous -eq [IntPtr]::Zero) "$previous"
+[CameraUnlockHostTest.User32]::ShowCursor($false) | Out-Null
+Check 'a cursor set while the count is below zero stays hidden' (-not (CursorInfo).Showing)
+[CameraUnlockHostTest.User32]::ShowCursor($true) | Out-Null
+Check 'GetCursorInfo with a wrong cbSize is refused, as Windows refuses it' (-not (CursorInfo -Size 20).Read)
+
 $hostLog = Get-Content (Join-Path $mod 'CameraUnlockIsolatedInput.log') -Raw
 Check 'the host log says the detours are in' ($hostLog -match 'takes its keyboard and mouse from the command file')
 Check 'the host log names GetKeyState once it is read' ($hostLog -match 'through GetKeyState')
 Check 'the host log names GetKeyboardState once it is read' ($hostLog -match 'through GetKeyboardState')
+Check 'the host log names GetCursorInfo once it is read' ($hostLog -match 'GetCursorInfo is read')
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) check(s) failed" -ForegroundColor Red
