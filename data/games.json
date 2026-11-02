@@ -1395,7 +1395,7 @@
       "display_name": "The Vanishing of Ethan Carter Redux",
       "env_var": "ETHAN_CARTER_REDUX_PATH",
       "executable_relpath": "EthanCarter\\Binaries\\Win64\\EthanCarter-Win64-Shipping.exe",
-      "steam_app_id": 258520,
+      "steam_app_id": 400430,
       "steam_folder": "The Vanishing of Ethan Carter Redux",
       "loader": "AsiLoader",
       "delivery_mode": "manifest",
