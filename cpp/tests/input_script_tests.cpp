@@ -58,6 +58,20 @@ int RunInputScriptTests() {
     steps = Parse("tap E 250", ok);
     Check(ok && steps.size() == 3 && steps[1].waitMs == 250, "tap takes its hold time");
 
+    steps = Parse("post Return", ok);
+    Check(ok && steps.size() == 3 && steps[0].action == InputAction::kPostDown && steps[0].vk == 0x0D
+              && steps[1].action == InputAction::kWait && steps[1].waitMs == 60
+              && steps[2].action == InputAction::kPostUp && steps[2].vk == 0x0D,
+          "post sends a key as window messages, down, held 60 ms, and up");
+    steps = Parse("post Space 400", ok);
+    Check(ok && steps.size() == 3 && steps[0].vk == 0x20 && steps[1].waitMs == 400, "post takes its hold time");
+    Check(Rejects("post Ctrl+Return") && Rejects("post Return soon") && Rejects("post Return 400 more"),
+          "post takes one key with no modifiers and a number");
+
+    steps = Parse("activate", ok);
+    Check(ok && steps.size() == 1 && steps[0].action == InputAction::kActivate, "activate is one step");
+    Check(Rejects("activate now"), "activate takes nothing after it");
+
     steps = Parse("tap Ctrl+Shift+U", ok);
     Check(ok && steps.size() == 11, "a chord is its modifiers, the key and the waits between");
     Check(ok && steps.size() == 11 && steps[0].vk == 0x11 && steps[0].action == InputAction::kKeyDown

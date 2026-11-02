@@ -1550,6 +1550,57 @@ inline void PostKeyMessage(int vk, bool down) {
                  static_cast<WPARAM>(vk), 1 | scan | extended | released);
 }
 
+// The game's top-level windows, shown or not: a game can have more than the one
+// isolated input takes for its window.
+inline std::vector<HWND> GameWindows() {
+    std::vector<HWND> windows;
+    EnumWindows(
+        [](HWND window, LPARAM context) -> BOOL {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(window, &pid);
+            if (pid == GetCurrentProcessId()) reinterpret_cast<std::vector<HWND>*>(context)->push_back(window);
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&windows));
+    return windows;
+}
+
+// A `post` key: the window messages a keypress makes, to every top-level window
+// of the game, and nothing to raw input, DirectInput or the key state. The title
+// screens of Dishonored, Mirror's Edge and Arkham City answered a Return posted
+// this way and no `tap` (2026-11-02). A letter types its lower-case character.
+inline bool PostKey(int vk, bool down) {
+    const LPARAM scan = static_cast<LPARAM>(MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_VSC) & 0xFF) << 16;
+    const LPARAM extended = IsExtendedKey(vk) ? (static_cast<LPARAM>(1) << 24) : 0;
+    const LPARAM lParam = 1 | scan | extended | (down ? 0 : static_cast<LPARAM>(0xC0000000));
+    UINT character = MapVirtualKeyW(static_cast<UINT>(vk), MAPVK_VK_TO_CHAR);
+    if (character & 0x80000000) character = 0;
+    if (character >= 'A' && character <= 'Z') character += 'a' - 'A';
+    const std::vector<HWND> windows = GameWindows();
+    bool ok = !windows.empty();
+    for (const HWND window : windows) {
+        ok = PostMessageW(window, down ? WM_KEYDOWN : WM_KEYUP, static_cast<WPARAM>(vk), lParam) != 0 && ok;
+        if (down && character) ok = PostMessageW(window, WM_CHAR, character, lParam) != 0 && ok;
+    }
+    return ok;
+}
+
+// `activate`: every top-level window of the game is told it has the foreground,
+// as the window isolated input takes for the game is when it is found. A
+// minimized Dishonored or Mirror's Edge window drew nothing until
+// WM_ACTIVATEAPP and WM_ACTIVATE were posted to it (2026-11-02).
+inline bool PostActivate() {
+    const std::vector<HWND> windows = GameWindows();
+    bool ok = !windows.empty();
+    for (const HWND window : windows) {
+        ok = PostMessageW(window, WM_ACTIVATEAPP, TRUE, 0) != 0 && ok;
+        ok = PostMessageW(window, WM_NCACTIVATE, TRUE, 0) != 0 && ok;
+        ok = PostMessageW(window, WM_ACTIVATE, WA_ACTIVE, 0) != 0 && ok;
+        ok = PostMessageW(window, WM_SETFOCUS, 0, 0) != 0 && ok;
+    }
+    return ok;
+}
+
 inline bool SendKey(int vk, bool down) {
     const bool directInput = SendDirectInputKey(VkToDik(vk), down);
     PostKeyMessage(vk, down);
@@ -1667,6 +1718,9 @@ inline bool Play(const InputStep& step) {
         case InputAction::kPad:       return SendPad(step);
         case InputAction::kKeyDown:   return SendKey(step.vk, true);
         case InputAction::kKeyUp:     return SendKey(step.vk, false);
+        case InputAction::kPostDown:  return PostKey(step.vk, true);
+        case InputAction::kPostUp:    return PostKey(step.vk, false);
+        case InputAction::kActivate:  return PostActivate();
         case InputAction::kMouseDown:
             SendDirectInputButton(step.button, true);
             SendGameInputButton(step.button, true);

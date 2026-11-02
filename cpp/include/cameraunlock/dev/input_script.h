@@ -11,6 +11,12 @@
 //   up <key>              release it
 //   tap <binding> [ms]    press and release, held ms (default 60). A binding
 //                         may be a chord, as in a hotkey list: Ctrl+Shift+U
+//   post <key> [ms]       the key as window messages alone, held ms (default
+//                         60): WM_KEYDOWN, the WM_CHAR it types, and WM_KEYUP,
+//                         posted to every top-level window of the game, for a
+//                         menu that reads nothing else
+//   activate              tell every top-level window of the game it has the
+//                         foreground, for one that came up minimized
 //   mouse <left|right|middle> <down|up|click>
 //   move <dx> <dy>        relative mouse movement, in counts
 //   cursor <x> <y>        put the mouse cursor at a point of the game window's
@@ -39,7 +45,7 @@
 
 namespace cameraunlock::dev {
 
-enum class InputAction { kKeyDown, kKeyUp, kMouseDown, kMouseUp, kMouseMove, kCursor, kText, kWait, kPad };
+enum class InputAction { kKeyDown, kKeyUp, kPostDown, kPostUp, kActivate, kMouseDown, kMouseUp, kMouseMove, kCursor, kText, kWait, kPad };
 enum class MouseButton { kLeft, kRight, kMiddle };
 
 struct InputStep {
@@ -199,6 +205,26 @@ inline bool ParseInputLine(std::string_view line, std::vector<InputStep>& out, s
             out.push_back(WaitStep(kDefaultTapHoldMs));
             out.push_back(KeyStep(InputAction::kKeyUp, *it));
         }
+        return true;
+    }
+    if (EqualsIgnoreCase(command, "post")) {
+        int vk = 0;
+        const std::string_view key = NextWord(rest);
+        unsigned holdMs = kDefaultTapHoldMs;
+        const std::string_view hold = NextWord(rest);
+        if (!hold.empty() && !ParseNumber(hold, holdMs)) { error = "expected a hold time in milliseconds"; return false; }
+        if (!Trim(rest).empty()) { error = "expected one key and an optional hold time"; return false; }
+        if (!ParseHeldKey(key, vk, error)) return false;
+        out.push_back(KeyStep(InputAction::kPostDown, vk));
+        out.push_back(WaitStep(holdMs));
+        out.push_back(KeyStep(InputAction::kPostUp, vk));
+        return true;
+    }
+    if (EqualsIgnoreCase(command, "activate")) {
+        if (!Trim(rest).empty()) { error = "activate takes nothing after it"; return false; }
+        InputStep step;
+        step.action = InputAction::kActivate;
+        out.push_back(step);
         return true;
     }
     if (EqualsIgnoreCase(command, "mouse")) {

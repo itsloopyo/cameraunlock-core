@@ -591,6 +591,8 @@ nothing. Whatever the file holds when the game starts is not played.
 down <key>            press and hold: a key name, or Ctrl, Shift or Alt
 up <key>              release it
 tap <binding> [ms]    press and release, held ms (default 60); a chord works: Ctrl+Shift+U
+post <key> [ms]       the key as window messages alone, held ms (default 60), to every window of the game
+activate              tell every window of the game it has the foreground
 mouse <left|right|middle> <down|up|click>
 move <dx> <dy>        relative mouse movement, in counts
 cursor <x> <y>        put the mouse cursor at a point of the game window's client area, in pixels
@@ -608,6 +610,25 @@ frame. The real controllers are not read while isolated input is on.
 
 Key names are the ones hotkey lists use (`data/keys.json`). A key with no name is
 its code: the backquote is `tap 0xC0`, the digit 2 is `tap 0x32`.
+
+`post` is for a menu that `tap` does not reach. It posts `WM_KEYDOWN`, the `WM_CHAR`
+the key types (a letter in lower case) and, after the hold, `WM_KEYUP`, to every
+top-level window of the game process, shown or not. Nothing else sees it: not raw
+input, DirectInput, GameInput or the key state functions, so a game that reads its
+keys any of those ways does not see a `post`. It is sent even where the game
+registered its keyboard with `RIDEV_NOLEGACY`, which `tap` respects. The title
+screens of Dishonored, Mirror's Edge and Batman: Arkham City ignored `tap Return`,
+a click and (Dishonored) pad A, and went on when Return was posted this way
+(2026-11-02, from a separate tool that does the same; `post` itself has not been
+run in those games yet).
+
+`activate` posts `WM_ACTIVATEAPP`, `WM_NCACTIVATE`, `WM_ACTIVATE` and `WM_SETFOCUS`,
+each saying the window has the foreground, to every top-level window of the game.
+The window isolated input takes for the game is told this when it is found; a game
+with more than one window can have the one that draws elsewhere. The windows of
+Dishonored and Mirror's Edge came up minimized under the rig and drew nothing
+until `WM_ACTIVATEAPP` and `WM_ACTIVATE` were posted to them (2026-11-02, from a
+separate tool), and a posted Return passed their title screens after that.
 
 A hotkey that does one thing tapped and another held (`RegisterHoldKeyBindings`, or a row of the
 C interface's `cameraunlock_config_local_hotkey_held`, which holds for 400 ms) is driven by the
