@@ -735,6 +735,14 @@ controller's HID interface, which is when Wreckfest does. Wreckfest sets up its
 controllers only at startup and on that arrival, so a script pad it was not told
 of is never read. The log says once that the game reads XInput.
 
+That first command is held back: the controller goes in with nothing held, and
+the command is played once the game has read it three times, or after 5 seconds
+if it has not. Wreckfest rebuilds its controllers on the arrival, and a press
+that is already down when the rebuilt controller first reads the pad is never
+seen going down. The log says how many reads it took and how long; when the wait
+runs out, the log says so and the script's `.done` reports a step that could not
+be sent.
+
 For a game that has GameInput loaded (`GameInputRedist.dll` from the Microsoft.GameInput NuGet
 package, or the inbox `GameInput.dll`; neither is ever loaded for it): GameInput reads the devices
 itself, and it does not stand down for a game behind other windows: before this, the real mouse
@@ -817,6 +825,9 @@ Ultimate ASI Loader, no real controller plugged in:
   and every press after it was: `pad 0 a down`, `wait 200`, `pad 0 a up` passed the title, and
   the pad drove the menus, a race, the pause menu and the results screen.
 - `tap Return` at the title did nothing before the change, and was not tried after it.
+- With the first command held back until the game had read the new pad three times (the game
+  read it 3 times in 359 ms), the first script after launch, `pad 0 a down`, `wait 400`,
+  `pad 0 a up`, passed the title on the first try.
 
 Minecraft Bedrock 1.26.6005 (Microsoft Store, GDK, `GameInputRedist.dll` 4.0.302.0), 2026-11-02, a
 native backend injected 8 seconds after launch, windowed and behind other windows for the whole

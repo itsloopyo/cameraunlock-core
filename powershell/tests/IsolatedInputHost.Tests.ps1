@@ -76,11 +76,16 @@ function Throws {
     try { & $Block | Out-Null; return $false } catch { return $_.Exception.Message -match $Pattern }
 }
 
-function Play {
+function Send {
     param([int]$Sequence, [string[]]$Commands)
     $commandFile = Join-Path $mod 'CameraUnlockInput.txt'
     [IO.File]::WriteAllLines("$commandFile.tmp", @("$Sequence") + $Commands)
     Move-Item "$commandFile.tmp" $commandFile -Force
+}
+
+function WaitPlayed {
+    param([int]$Sequence)
+    $commandFile = Join-Path $mod 'CameraUnlockInput.txt'
     $deadline = (Get-Date).AddSeconds(10)
     while ((Get-Date) -lt $deadline) {
         $done = Get-Content "$commandFile.done" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -88,6 +93,12 @@ function Play {
         Start-Sleep -Milliseconds 20
     }
     throw "script $Sequence was not played within 10 seconds"
+}
+
+function Play {
+    param([int]$Sequence, [string[]]$Commands)
+    Send $Sequence $Commands
+    WaitPlayed $Sequence
 }
 
 function KeyboardState {
@@ -168,13 +179,21 @@ $notConnected = 1167
 $capabilities = New-Object byte[] 20
 Check 'XInputGetCapabilities answers no controller before a script plugs one in' `
     ([CameraUnlockHostTest.User32]::XInputGetCapabilities(0, 1, $capabilities) -eq $notConnected)
-Play 4 'pad 0 a down'
+$state = New-Object byte[] 16
+Send 4 'pad 0 a down'
+$deadline = (Get-Date).AddSeconds(5)
+do { $result = [CameraUnlockHostTest.User32]::XInputGetState(0, $state) } while ($result -ne 0 -and (Get-Date) -lt $deadline)
+Check 'a pad command plugs the pad in with nothing held' ($result -eq 0 -and [BitConverter]::ToUInt16($state, 4) -eq 0) "result $result, buttons $([BitConverter]::ToUInt16($state, 4))"
+Start-Sleep -Milliseconds 300
+[void][CameraUnlockHostTest.User32]::XInputGetState(0, $state)
+Check 'and holds its first command back while the game has not read the pad enough' ([BitConverter]::ToUInt16($state, 4) -eq 0) "buttons $([BitConverter]::ToUInt16($state, 4))"
+for ($read = 0; $read -lt 3; $read++) { [void][CameraUnlockHostTest.User32]::XInputGetState(0, $state) }
+WaitPlayed 4
 $result = [CameraUnlockHostTest.User32]::XInputGetCapabilities(0, 1, $capabilities)
 Check 'XInputGetCapabilities describes the script pad as a gamepad' `
     ($result -eq 0 -and $capabilities[0] -eq 1 -and $capabilities[1] -eq 1) "result $result, type $($capabilities[0]), subtype $($capabilities[1])"
 Check 'with its buttons, triggers and sticks there' `
     ([BitConverter]::ToUInt16($capabilities, 4) -ne 0 -and $capabilities[6] -ne 0 -and $capabilities[7] -ne 0 -and [BitConverter]::ToInt16($capabilities, 8) -ne 0)
-$state = New-Object byte[] 16
 $result = [CameraUnlockHostTest.User32]::XInputGetState(0, $state)
 Check 'XInputGetState reports its A button held' ($result -eq 0 -and ([BitConverter]::ToUInt16($state, 4) -band 0x1000) -ne 0) "result $result"
 Check 'XInputGetCapabilities answers no controller at an index the script has not named' `
@@ -207,6 +226,7 @@ Check 'the host log says the detours are in' ($hostLog -match 'takes its keyboar
 Check 'the host log names GetKeyState once it is read' ($hostLog -match 'through GetKeyState')
 Check 'the host log names GetKeyboardState once it is read' ($hostLog -match 'through GetKeyboardState')
 Check 'the host log names GetCursorInfo once it is read' ($hostLog -match 'GetCursorInfo is read')
+Check 'the host log says when the plugged pad was read and its first command played' ($hostLog -match 'pad 0 plugged in; the game read it \d+ times in \d+ ms, then its first command was played')
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) check(s) failed" -ForegroundColor Red

@@ -148,6 +148,10 @@ namespace isolated {
 inline constexpr int kEventSlots = 256;
 inline constexpr unsigned kPollMs = 50;
 inline constexpr unsigned kTextKeyMs = 40;
+// A pad's first command is held back until the game has read the new pad this
+// many times, or given up on after the wait.
+inline constexpr unsigned kPadPlugReads = 3;
+inline constexpr unsigned kPadPlugWaitMs = 5000;
 
 using GetRawInputData_t = UINT (WINAPI*)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
 using GetRawInputBuffer_t = UINT (WINAPI*)(PRAWINPUT, PUINT, UINT);
@@ -233,6 +237,8 @@ struct State {
     XInputSetState_t origXInputSetState[kXInputDllCount] = {};
     XInputGetCapabilities_t origXInputGetCapabilities[kXInputDllCount] = {};
     std::atomic<bool> padRead{false};
+    // Reads of each script pad that found it plugged in.
+    std::atomic<unsigned> padReads[kPadCount] = {};
 
     IsolatedInputLogFn log = nullptr;
     std::wstring commandFile;
@@ -450,6 +456,7 @@ inline DWORD WINAPI HookedXInputGetState(DWORD index, void* state) {
     std::lock_guard<std::mutex> lock(S().padLock);
     const PadState& pad = S().pads[index];
     if (!pad.connected) return ERROR_DEVICE_NOT_CONNECTED;
+    S().padReads[index].fetch_add(1, std::memory_order_release);
     const XInputStateLayout out = {pad.packet, pad.buttons, pad.leftTrigger, pad.rightTrigger,
                                    pad.leftX, pad.leftY, pad.rightX, pad.rightY};
     std::memcpy(state, &out, sizeof(out));
@@ -1193,6 +1200,7 @@ inline bool STDMETHODCALLTYPE GrGamepadState(void* reading, GameInputGamepadStat
     }
     std::lock_guard<std::mutex> lock(S().padLock);
     *state = GameInputPad(S().pads[0]);
+    if (S().pads[0].connected) S().padReads[0].fetch_add(1, std::memory_order_release);
     return true;
 }
 
@@ -1679,21 +1687,13 @@ inline bool SendCharacter(char character) {
     return ok;
 }
 
-// A pad command, and the device-change messages a game waits for before it
-// looks for a controller that was not there a moment ago: Unreal Engine 4 looks
-// on any change of the devices, Wreckfest only on an interface arriving. The
-// arrival names an XInput controller's HID interface as Windows names one (IG_
-// marks it XInput). Windows refuses to post it, since it carries a pointer, so it
-// is sent, and given up on if the game's window does not answer.
-inline bool SendPad(const InputStep& step) {
-    bool plugged = false;
-    {
-        std::lock_guard<std::mutex> lock(S().padLock);
-        PadState& pad = S().pads[step.pad];
-        plugged = !pad.connected;
-        ApplyPadStep(pad, step.padControl, step.padButton, step.padDown, step.padX, step.padY);
-    }
-    if (!plugged) return true;
+// The device-change messages a game waits for before it looks for a controller
+// that was not there a moment ago: Unreal Engine 4 looks on any change of the
+// devices, Wreckfest only on an interface arriving. The arrival names an XInput
+// controller's HID interface as Windows names one (IG_ marks it XInput). Windows
+// refuses to post it, since it carries a pointer, so it is sent, and given up on
+// if the game's window does not answer.
+inline bool TellGamePadArrived(int index) {
     const HWND window = S().window.load();
     if (!window) return false;
     const bool changed = PostMessageW(window, WM_DEVICECHANGE, DBT_DEVNODES_CHANGED, 0) != 0;
@@ -1705,12 +1705,53 @@ inline bool SendPad(const InputStep& step) {
     // GUID_DEVINTERFACE_HID.
     arrival->dbcc_classguid = {0x4D1E55B2, 0xF16F, 0x11CF, {0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30}};
     std::swprintf(arrival->dbcc_name, kNameLength,
-                  L"\\\\?\\HID#VID_045E&PID_028E&IG_%02d#cameraunlock&%d#{4d1e55b2-f16f-11cf-88cb-001111000030}", step.pad,
-                  step.pad);
+                  L"\\\\?\\HID#VID_045E&PID_028E&IG_%02d#cameraunlock&%d#{4d1e55b2-f16f-11cf-88cb-001111000030}", index,
+                  index);
     DWORD_PTR answer = 0;
     const bool arrived = SendMessageTimeoutW(window, WM_DEVICECHANGE, DBT_DEVICEARRIVAL, reinterpret_cast<LPARAM>(arrival),
                                              SMTO_ABORTIFHUNG, 2000, &answer) != 0;
     return changed && arrived;
+}
+
+// A pad command. A pad's first command plugs it in with nothing held, tells the
+// game, and is played only once the game has read the new pad: Wreckfest rebuilds
+// its controllers on the arrival, and a press already held when the rebuilt
+// controller first reads the pad is never seen going down.
+inline bool SendPad(const InputStep& step) {
+    bool plugged = false;
+    {
+        std::lock_guard<std::mutex> lock(S().padLock);
+        PadState& pad = S().pads[step.pad];
+        plugged = !pad.connected;
+        if (plugged) {
+            pad.connected = true;
+            ++pad.packet;
+        } else {
+            ApplyPadStep(pad, step.padControl, step.padButton, step.padDown, step.padX, step.padY);
+        }
+    }
+    if (!plugged) return true;
+    const bool told = TellGamePadArrived(step.pad);
+    const unsigned before = S().padReads[step.pad].load(std::memory_order_acquire);
+    const ULONGLONG start = GetTickCount64();
+    unsigned reads = 0;
+    while ((reads = S().padReads[step.pad].load(std::memory_order_acquire) - before) < kPadPlugReads
+           && GetTickCount64() - start < kPadPlugWaitMs) {
+        Sleep(5);
+    }
+    const unsigned long long waited = GetTickCount64() - start;
+    {
+        std::lock_guard<std::mutex> lock(S().padLock);
+        ApplyPadStep(S().pads[step.pad], step.padControl, step.padButton, step.padDown, step.padX, step.padY);
+    }
+    const bool read = reads >= kPadPlugReads;
+    char line[200];
+    std::snprintf(line, sizeof(line),
+                  read ? "isolated input: pad %d plugged in; the game read it %u times in %llu ms, then its first command was played"
+                       : "isolated input: pad %d plugged in, and the game read it only %u times in %llu ms; its first command was played anyway and may be lost",
+                  step.pad, reads, waited);
+    Log(line);
+    return told && read;
 }
 
 inline bool Play(const InputStep& step) {
