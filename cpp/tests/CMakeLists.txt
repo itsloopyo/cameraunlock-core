@@ -32,6 +32,7 @@ add_executable(cameraunlock_tests
     held_pointer_tests.cpp
     input_script_tests.cpp
     directinput_state_tests.cpp
+    gameinput_state_tests.cpp
     lean_line_sweep_tests.cpp
     rig_lean_tests.cpp
     zoom_compensation_tests.cpp
