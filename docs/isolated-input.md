@@ -616,19 +616,21 @@ the key types (a letter in lower case) and, after the hold, `WM_KEYUP`, to every
 top-level window of the game process, shown or not. Nothing else sees it: not raw
 input, DirectInput, GameInput or the key state functions, so a game that reads its
 keys any of those ways does not see a `post`. It is sent even where the game
-registered its keyboard with `RIDEV_NOLEGACY`, which `tap` respects. The title
-screens of Dishonored, Mirror's Edge and Batman: Arkham City ignored `tap Return`,
-a click and (Dishonored) pad A, and went on when Return was posted this way
-(2026-11-02, from a separate tool that does the same; `post` itself has not been
-run in those games yet).
+registered its keyboard with `RIDEV_NOLEGACY`, which `tap` respects. Mirror's Edge
+ignored `tap Return` at "Press Any Key" and went on to the rooftop after `post Return`.
+In Dishonored `post Return` passed the mission briefing's "Press any key", but did
+nothing on the main menu, nor did posted arrow keys; there `cursor` on CONTINUE and a
+left button held 250 ms started the game (2026-11-02). Batman: Arkham City
+went on the same way from a separate tool that posts these messages; `post` has not
+been run there.
 
 `activate` posts `WM_ACTIVATEAPP`, `WM_NCACTIVATE`, `WM_ACTIVATE` and `WM_SETFOCUS`,
 each saying the window has the foreground, to every top-level window of the game.
 The window isolated input takes for the game is told this when it is found; a game
-with more than one window can have the one that draws elsewhere. The windows of
-Dishonored and Mirror's Edge came up minimized under the rig and drew nothing
-until `WM_ACTIVATEAPP` and `WM_ACTIVATE` were posted to them (2026-11-02, from a
-separate tool), and a posted Return passed their title screens after that.
+with more than one window can have the one that draws elsewhere. It does not show a
+minimized window. Dishonored and Mirror's Edge came up minimized under the rig; once
+the rig had shown the window without activating it (`SW_SHOWNOACTIVATE`), `activate`
+made it draw, where before it drew nothing (2026-11-02).
 
 A hotkey that does one thing tapped and another held (`RegisterHoldKeyBindings`, or a row of the
 C interface's `cameraunlock_config_local_hotkey_held`, which holds for 400 ms) is driven by the

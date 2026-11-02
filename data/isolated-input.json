@@ -36,7 +36,7 @@
       "what": "where the mouse cursor is, read with GetCursorPos or from WM_MOUSEMOVE, as a menu with a pointer does. The `cursor` command places it.",
       "imports": ["GetCursorPos"],
       "status": "supported",
-      "proven_in": ["far-cry-6", "ready-or-not"]
+      "proven_in": ["dishonored", "far-cry-6", "ready-or-not"]
     },
     "cursor-shown": {
       "what": "whether the cursor shows, as the game sets it with ShowCursor and SetCursor and a mod reads it back with GetCursorInfo to tell a menu from play. GetCursorInfo answers the game's own setting, never the cursor of the window in front",
