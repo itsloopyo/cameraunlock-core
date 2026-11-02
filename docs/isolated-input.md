@@ -705,6 +705,34 @@ A controller's first command also posts `WM_DEVICECHANGE` to the game window:
 Unreal Engine 4 looks for new controllers only when Windows says the devices
 changed. The log says once that the game reads XInput.
 
+For a game that has GameInput loaded (`GameInputRedist.dll` from the Microsoft.GameInput NuGet
+package, or the inbox `GameInput.dll`; neither is ever loaded for it): GameInput reads the devices
+itself, and it does not stand down for a game behind other windows: before this, the real mouse
+turned Minecraft Bedrock's view while the game was in the background. (GameInput imports
+`GetForegroundWindow`, which answers the game's window here; whether that is how it decides it
+has the focus was not followed up.) One GameInput object answers
+every API version, each through a vtable of its own, and so does each reading. The detours write
+over those vtables' slots, so the game's own object is covered however early it was made.
+
+| Version | Answer |
+|---|---|
+| 2 | `GetCurrentReading`, `GetNextReading`, `GetPreviousReading` and the callbacks of `RegisterReadingCallback` pass the game GameInput's own readings, and every reading answers from the script: `GetKeyCount` and `GetKeyState` the keys the script holds (the left-hand key for a held Ctrl, Shift or Alt), `GetMouseState` the buttons held and the movement played so far as `positionX` and `positionY`, `GetGamepadState` script pad 0 (at rest until a `pad 0` command), the controller axis, button and switch counts 0, and every other state false |
+| 0, 1, 3 and 4 | no readings: `GAMEINPUT_E_READING_NOT_FOUND`, and `RegisterReadingCallback` answers `E_NOTIMPL` |
+| any other | `GameInputInitialize` refuses it with `E_NOINTERFACE` |
+
+The real devices make readings as they always do, and each one answers the script's state, so a
+game that reads its mouse as the change between two readings sees no movement of its own. A
+script's `move` reaches a game that reads `GetCurrentReading` as it polls. It makes no reading of
+its own, so a game that only takes readings as they arrive sees it with the next one the real
+devices make. The log says which of the four the game calls, the first time it calls each, and
+says once when a reading of the real keyboard, of the real mouse moving or pressed, or of a real
+gamepad was answered from the script instead. The detours go in from the command-file thread
+once the DLL is loaded. A GameInput the dev build cannot wrap stops the game, rather than leave it
+reading the real devices.
+
+`Get-GameInputPaths` finds GameInput only in a binary that imports it. Minecraft Bedrock loads it
+through the NuGet package's loader and imports neither DLL, so there the log is what shows it.
+
 Only the standard data formats are answered (`c_dfDIKeyboard`, `c_dfDIMouse`,
 `c_dfDIMouse2`): a `GetDeviceState` of any other size is refused and the log says
 so. There is no mouse wheel command, so `lZ` is always 0. A game that waits on
@@ -734,6 +762,25 @@ which of `GetDeviceState` and `GetDeviceData` the game reads it through.
   title with an input whose effect the mod also logs, and read the log.
 
 ## Measured
+
+Minecraft Bedrock 1.26.6005 (Microsoft Store, GDK, `GameInputRedist.dll` 4.0.302.0), 2026-11-02, a
+native backend injected 8 seconds after launch, windowed and behind other windows for the whole
+session, the game never holding the foreground:
+
+- The exe imports neither GameInput DLL. It holds the IID of `IGameInput` version 2 (and of version
+  0, which the NuGet package's loader keeps for an old inbox DLL), and loads
+  `GameInputRedist.dll` from System32.
+- The log read `the game reads GameInput through GetCurrentReading (kinds 0x20)`: the mouse, polled.
+  No other GameInput call was seen. Keys reached the menus as window messages, as before.
+- Real mouse movement sent with `SendInput` (30 moves of 20 counts right, then back) while the game
+  was in a world: the log read `the game was handed a GameInput reading of the real mouse moving or
+  pressed; it reads the script's mouse in its place`, and the view did not turn. Captures before and
+  during differed in 9% of sampled pixels, less than two captures a second apart with nothing sent
+  (12.5%: smoke, a walking villager). Before this, the real mouse turned the view.
+- `Test-IsolatedInputProof` passed on `move 400 0`: the view turned, 83% of pixels changed.
+- Not tried: a real mouse button or key through GameInput. `SendInput` would have pressed it in
+  the window that had the foreground. The button state comes from the same answer as the movement.
+- The worlds folder was saved before the launch and put back after it.
 
 Project Zomboid (Steam, a Java agent on the game's own Java 25 runtime), from the mod's notes of
 2026-10-05 and the host's log of one run, not measured again for this entry:

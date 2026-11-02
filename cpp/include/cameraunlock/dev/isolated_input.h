@@ -57,6 +57,14 @@
 // DirectInput device (a controller) is left as it was. dinput8.dll is never
 // loaded by this header: a game that has not loaded it gets no such detours.
 //
+// For games that read GameInput (GameInputRedist.dll or GameInput.dll loaded in
+// the process): the readings of API version 2 answer their keyboard, mouse and
+// gamepad from the script (gameinput_state.h) and report no other controller,
+// through the vtables GameInput hands out, so the game's own object is covered
+// however early it was made. Every other version is given no readings, and a
+// version this header does not know is refused when the game asks for it.
+// GameInput is never loaded by this header either.
+//
 // Never in a release build: with these detours in, the game does not answer to
 // the real keyboard. Requires MinHook, already initialised. Exactly one
 // translation unit defines CAMERAUNLOCK_ISOLATED_INPUT_IMPLEMENTATION before
@@ -69,6 +77,7 @@
 // and the line that did not parse.
 
 #include "cameraunlock/dev/directinput_state.h"
+#include "cameraunlock/dev/gameinput_state.h"
 #include "cameraunlock/dev/input_script.h"
 
 #include <string>
@@ -113,6 +122,7 @@ bool HoldIsolatedKey(int vk, bool down);
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -840,6 +850,457 @@ inline void SendDirectInputMove(int dx, int dy) {
     d.state.Move(dx, dy, GetTickCount());
 }
 
+// GameInput, the GDK's input API: GameInputRedist.dll from the Microsoft.GameInput NuGet package,
+// or the inbox GameInput.dll. GameInput reads the devices itself and does not stand down for a
+// game in the background: the real mouse turned Minecraft Bedrock's view from behind other windows.
+//
+// One object answers every API version, each through a vtable of its own, and so does each
+// reading. Version 2's are answered from the script by writing over their vtable slots, so the
+// game's own object is covered whenever it was made. Every other version is given no readings at
+// all, and GameInputInitialize refuses a version it does not know.
+inline constexpr int kGameInputVersions = 5;
+inline constexpr int kGameInputAnswered = 2;
+inline constexpr GUID kIidGameInput[kGameInputVersions] = {
+    {0x11BE2A7E, 0x4254, 0x445A, {0x9C, 0x09, 0xFF, 0xC4, 0x0F, 0x00, 0x69, 0x18}},
+    {0x40FFB7E4, 0x6150, 0x407A, {0xB4, 0x39, 0x13, 0x2B, 0xAD, 0xC0, 0x8D, 0x2D}},
+    {0xBBAA66D2, 0x837A, 0x40F7, {0xA3, 0x03, 0x91, 0x7D, 0x50, 0x09, 0x55, 0xF4}},
+    {0x20EFC1C7, 0x5D9A, 0x43BA, {0xB2, 0x6F, 0xB8, 0x07, 0xFA, 0x48, 0x60, 0x9C}},
+    {0xF2DAAE4C, 0x4D21, 0x4250, {0x89, 0x53, 0x4F, 0x79, 0x1E, 0x62, 0x79, 0xAB}},
+};
+inline constexpr HRESULT kGameInputReadingNotFound = static_cast<HRESULT>(0x838A0003L);
+inline constexpr uint32_t kGameInputKindKeyboard = 0x10;
+inline constexpr uint32_t kGameInputKindMouse = 0x20;
+inline constexpr uint32_t kGameInputKindGamepad = 0x40000;
+
+// IGameInput slots. Version 0 has GetTemporalReading at 7 and RegisterReadingCallback at 8.
+enum GameInputMethod { kGiGetCurrentReading, kGiGetNextReading, kGiGetPreviousReading, kGiRegisterReadingCallback, kGiMethods };
+inline constexpr int kGiSlots[kGiMethods] = {4, 5, 6, 7};
+inline constexpr int kGiV0GetTemporalReading = 7;
+inline constexpr int kGiV0RegisterReadingCallback = 8;
+
+// Version 2's IGameInputReading slots, GetInputKind and then GetControllerAxisCount to
+// GetUiNavigationState, the ones answered.
+enum GameInputReadingSlot {
+    kGrGetInputKind = 3,
+    kGrAxisCount = 6, kGrAxisState, kGrButtonCount, kGrButtonState, kGrSwitchCount, kGrSwitchState,
+    kGrKeyCount, kGrKeyState, kGrMouseState, kGrSensorsState, kGrArcadeStickState, kGrFlightStickState,
+    kGrGamepadState, kGrRacingWheelState, kGrUiNavigationState, kGrSlotEnd
+};
+inline constexpr int kGrMaxVtables = 16;
+
+using GameInputInitialize_t = HRESULT (WINAPI*)(REFIID, void**);
+using GameInputCreate_t = HRESULT (WINAPI*)(void**);
+using GiRelease_t = ULONG (STDMETHODCALLTYPE*)(void*);
+using GiGetCurrentReading_t = HRESULT (STDMETHODCALLTYPE*)(void*, uint32_t, void*, void**);
+using GiGetOtherReading_t = HRESULT (STDMETHODCALLTYPE*)(void*, void*, uint32_t, void*, void**);
+using GiReadingCallback_t = void (CALLBACK*)(uint64_t, void*, void*);
+using GiRegisterReadingCallback_t = HRESULT (STDMETHODCALLTYPE*)(void*, void*, uint32_t, void*, GiReadingCallback_t, uint64_t*);
+using GrGetInputKind_t = uint32_t (STDMETHODCALLTYPE*)(void*);
+using GrCount_t = uint32_t (STDMETHODCALLTYPE*)(void*);
+using GrKeyState_t = uint32_t (STDMETHODCALLTYPE*)(void*, uint32_t, GameInputKeyState*);
+using GrMouseState_t = bool (STDMETHODCALLTYPE*)(void*, GameInputMouseState*);
+using GrGamepadState_t = bool (STDMETHODCALLTYPE*)(void*, GameInputGamepadState*);
+
+struct GameInputReadingVtable {
+    void** vtable = nullptr;
+    void* originals[kGrSlotEnd] = {};
+};
+
+struct GameInput {
+    std::mutex mutex;
+    GameInputMouse mouse;
+    bool haveRealMouse = false;
+    int64_t realMouseX = 0;
+    int64_t realMouseY = 0;
+
+    bool redistAttempted = false;
+    bool inboxAttempted = false;
+    void* originals[kGiMethods] = {};
+    GameInputInitialize_t origInitialize = nullptr;
+
+    std::mutex patchMutex;
+    GameInputReadingVtable readings[kGrMaxVtables];
+    std::atomic<int> readingCount{0};
+
+    std::atomic<bool> calledLogged[kGiMethods] = {};
+    std::atomic<bool> refusedLogged[kGameInputVersions] = {};
+    std::atomic<bool> realMouseLogged{false};
+    std::atomic<bool> realKeysLogged{false};
+    std::atomic<bool> realPadLogged{false};
+    std::atomic<bool> controllerLogged{false};
+};
+
+// Never destroyed: a game reads GameInput until its last thread stops.
+inline GameInput& G() {
+    static GameInput* const g = new GameInput;
+    return *g;
+}
+
+inline void LogOnce(std::atomic<bool>& said, const char* text) {
+    if (!said.exchange(true, std::memory_order_acq_rel)) Log(text);
+}
+
+// A pointer-sized write, so a call through the slot sees the old function or the new one.
+inline bool WriteSlot(void** vtable, int slot, void* detour) {
+    DWORD protection = 0;
+    if (!VirtualProtect(&vtable[slot], sizeof(void*), PAGE_READWRITE, &protection)) return false;
+    InterlockedExchangePointer(&vtable[slot], detour);
+    VirtualProtect(&vtable[slot], sizeof(void*), protection, &protection);
+    return true;
+}
+
+inline void* ReadingOriginal(void* reading, GameInputReadingSlot slot) {
+    void** const vtable = Vtable(reading);
+    const int count = G().readingCount.load(std::memory_order_acquire);
+    for (int i = 0; i < count; ++i) {
+        if (G().readings[i].vtable == vtable) return G().readings[i].originals[slot];
+    }
+    // Only reached through a vtable that was written over, and that one is listed first.
+    std::abort();
+}
+
+inline bool IsKeyboardReading(void* reading) {
+    return (reinterpret_cast<GrGetInputKind_t>(Vtable(reading)[kGrGetInputKind])(reading) & kGameInputKindKeyboard) != 0;
+}
+
+inline uint32_t STDMETHODCALLTYPE GrNoControllerCount(void*) {
+    LogOnce(G().controllerLogged, "isolated input: the game reads GameInput controller axes, buttons or switches; it is given none");
+    return 0;
+}
+
+inline uint32_t STDMETHODCALLTYPE GrNoControllerState(void*, uint32_t, void*) { return 0; }
+
+inline bool STDMETHODCALLTYPE GrNoState(void*, void*) { return false; }
+
+inline size_t ScriptKeys(uint8_t* keys, size_t capacity) {
+    bool down[256];
+    for (int vk = 0; vk < 256; ++vk) down[vk] = S().keyDown[vk].load(std::memory_order_acquire);
+    return GameInputHeldKeys(down, keys, capacity);
+}
+
+inline uint32_t STDMETHODCALLTYPE GrKeyCount(void* reading) {
+    const uint32_t real = reinterpret_cast<GrCount_t>(ReadingOriginal(reading, kGrKeyCount))(reading);
+    if (!IsKeyboardReading(reading)) return real;
+    if (real != 0) {
+        LogOnce(G().realKeysLogged, "isolated input: the game was handed a GameInput reading of the real keyboard; it reads the script's keys in its place");
+    }
+    return static_cast<uint32_t>(ScriptKeys(nullptr, 0));
+}
+
+inline uint32_t STDMETHODCALLTYPE GrKeyState(void* reading, uint32_t capacity, GameInputKeyState* states) {
+    if (!IsKeyboardReading(reading)) {
+        return reinterpret_cast<GrKeyState_t>(ReadingOriginal(reading, kGrKeyState))(reading, capacity, states);
+    }
+    uint8_t keys[256];
+    const size_t held = ScriptKeys(keys, sizeof(keys));
+    const uint32_t written = static_cast<uint32_t>(held < capacity ? held : capacity);
+    for (uint32_t i = 0; i < written; ++i) {
+        const UINT character = MapVirtualKeyW(keys[i], MAPVK_VK_TO_CHAR);
+        states[i] = {MapVirtualKeyW(keys[i], MAPVK_VK_TO_VSC_EX), character & 0xFFFF, keys[i], (character & 0x80000000) != 0};
+    }
+    return written;
+}
+
+inline bool STDMETHODCALLTYPE GrMouseState(void* reading, GameInputMouseState* state) {
+    GameInputMouseState real = {};
+    if (!reinterpret_cast<GrMouseState_t>(ReadingOriginal(reading, kGrMouseState))(reading, &real)) return false;
+    GameInput& g = G();
+    bool realMoved = false;
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        realMoved = real.buttons != 0 || (g.haveRealMouse && (real.positionX != g.realMouseX || real.positionY != g.realMouseY));
+        g.haveRealMouse = true;
+        g.realMouseX = real.positionX;
+        g.realMouseY = real.positionY;
+        *state = g.mouse.State();
+    }
+    if (realMoved) {
+        LogOnce(g.realMouseLogged, "isolated input: the game was handed a GameInput reading of the real mouse moving or pressed; it reads the script's mouse in its place");
+    }
+    return true;
+}
+
+inline bool STDMETHODCALLTYPE GrGamepadState(void* reading, GameInputGamepadState* state) {
+    GameInputGamepadState real = {};
+    if (!reinterpret_cast<GrGamepadState_t>(ReadingOriginal(reading, kGrGamepadState))(reading, &real)) return false;
+    if (real.buttons != 0 || real.leftTrigger != 0.0f || real.rightTrigger != 0.0f || real.leftThumbstickX != 0.0f
+        || real.leftThumbstickY != 0.0f || real.rightThumbstickX != 0.0f || real.rightThumbstickY != 0.0f) {
+        LogOnce(G().realPadLogged, "isolated input: the game was handed a GameInput reading of a real gamepad; it reads script pad 0 in its place");
+    }
+    std::lock_guard<std::mutex> lock(S().padLock);
+    *state = GameInputPad(S().pads[0]);
+    return true;
+}
+
+inline void* ReadingDetour(int slot) {
+    switch (slot) {
+        case kGrAxisCount: case kGrButtonCount: case kGrSwitchCount:
+            return reinterpret_cast<void*>(&GrNoControllerCount);
+        case kGrAxisState: case kGrButtonState: case kGrSwitchState:
+            return reinterpret_cast<void*>(&GrNoControllerState);
+        case kGrKeyCount:   return reinterpret_cast<void*>(&GrKeyCount);
+        case kGrKeyState:   return reinterpret_cast<void*>(&GrKeyState);
+        case kGrMouseState: return reinterpret_cast<void*>(&GrMouseState);
+        case kGrGamepadState: return reinterpret_cast<void*>(&GrGamepadState);
+        default:            return reinterpret_cast<void*>(&GrNoState);
+    }
+}
+
+// Writes the script's answers over a version 2 reading's vtable, the first time a reading of
+// that vtable is seen. Every reading of the vtable, the game's included, then answers from the
+// script.
+inline void AnswerReadingsOf(void* reading) {
+    if (!reading) return;
+    void** const vtable = Vtable(reading);
+    GameInput& g = G();
+    for (int i = 0; i < g.readingCount.load(std::memory_order_acquire); ++i) {
+        if (g.readings[i].vtable == vtable) return;
+    }
+    std::lock_guard<std::mutex> lock(g.patchMutex);
+    const int count = g.readingCount.load(std::memory_order_acquire);
+    for (int i = 0; i < count; ++i) {
+        if (g.readings[i].vtable == vtable) return;
+    }
+    if (count == kGrMaxVtables) {
+        Log("isolated input: more GameInput reading vtables than isolated input keeps; stopping the game rather than let one through");
+        std::abort();
+    }
+    GameInputReadingVtable& entry = g.readings[count];
+    entry.vtable = vtable;
+    for (int slot = kGrAxisCount; slot < kGrSlotEnd; ++slot) entry.originals[slot] = vtable[slot];
+    g.readingCount.store(count + 1, std::memory_order_release);
+    for (int slot = kGrAxisCount; slot < kGrSlotEnd; ++slot) {
+        if (!WriteSlot(vtable, slot, ReadingDetour(slot))) {
+            Log("isolated input: could not write over a GameInput reading's vtable; stopping the game rather than let the real devices through");
+            std::abort();
+        }
+    }
+    Log("isolated input: GameInput readings answer from the command file");
+}
+
+inline void LogGameInputCall(GameInputMethod method, uint32_t kind) {
+    if (G().calledLogged[method].exchange(true, std::memory_order_acq_rel)) return;
+    static constexpr const char* kNames[kGiMethods] = {"GetCurrentReading", "GetNextReading", "GetPreviousReading",
+                                                       "RegisterReadingCallback"};
+    char line[160];
+    std::snprintf(line, sizeof(line), "isolated input: the game reads GameInput through %s (kinds 0x%X)", kNames[method], kind);
+    Log(line);
+}
+
+inline HRESULT STDMETHODCALLTYPE GiGetCurrentReading(void* self, uint32_t kind, void* device, void** reading) {
+    LogGameInputCall(kGiGetCurrentReading, kind);
+    const HRESULT result = reinterpret_cast<GiGetCurrentReading_t>(G().originals[kGiGetCurrentReading])(self, kind, device, reading);
+    if (SUCCEEDED(result)) AnswerReadingsOf(*reading);
+    return result;
+}
+
+template <GameInputMethod Method>
+inline HRESULT STDMETHODCALLTYPE GiGetOtherReading(void* self, void* reference, uint32_t kind, void* device, void** reading) {
+    LogGameInputCall(Method, kind);
+    const HRESULT result = reinterpret_cast<GiGetOtherReading_t>(G().originals[Method])(self, reference, kind, device, reading);
+    if (SUCCEEDED(result)) AnswerReadingsOf(*reading);
+    return result;
+}
+
+struct GameInputCallback {
+    GiReadingCallback_t function;
+    void* context;
+};
+
+inline void CALLBACK GiOnReading(uint64_t token, void* context, void* reading) {
+    const auto* callback = static_cast<const GameInputCallback*>(context);
+    AnswerReadingsOf(reading);
+    callback->function(token, callback->context, reading);
+}
+
+// The game's callback is called through ours, which first makes sure the reading answers from
+// the script. Ours is never freed: GameInput can still be calling it as the game unregisters.
+inline HRESULT STDMETHODCALLTYPE GiRegisterReadingCallback(void* self, void* device, uint32_t kind, void* context,
+                                                           GiReadingCallback_t function, uint64_t* token) {
+    LogGameInputCall(kGiRegisterReadingCallback, kind);
+    auto* const callback = new GameInputCallback{function, context};
+    return reinterpret_cast<GiRegisterReadingCallback_t>(G().originals[kGiRegisterReadingCallback])(
+        self, device, kind, callback, &GiOnReading, token);
+}
+
+template <int Version>
+inline void LogRefused() {
+    if (G().refusedLogged[Version].exchange(true, std::memory_order_acq_rel)) return;
+    char line[160];
+    std::snprintf(line, sizeof(line),
+                  "isolated input: the game reads GameInput API version %d, which isolated input does not answer; it is given no readings",
+                  Version);
+    Log(line);
+}
+
+template <int Version>
+inline HRESULT STDMETHODCALLTYPE GiRefuseCurrentReading(void*, uint32_t, void*, void** reading) {
+    LogRefused<Version>();
+    if (reading) *reading = nullptr;
+    return kGameInputReadingNotFound;
+}
+
+template <int Version>
+inline HRESULT STDMETHODCALLTYPE GiRefuseOtherReading(void*, void*, uint32_t, void*, void** reading) {
+    LogRefused<Version>();
+    if (reading) *reading = nullptr;
+    return kGameInputReadingNotFound;
+}
+
+inline HRESULT STDMETHODCALLTYPE GiRefuseTemporalReading(void*, uint64_t, void*, void** reading) {
+    LogRefused<0>();
+    if (reading) *reading = nullptr;
+    return kGameInputReadingNotFound;
+}
+
+template <int Version>
+inline HRESULT STDMETHODCALLTYPE GiRefuseReadingCallback(void*, void*, uint32_t, void*, void*, uint64_t* token) {
+    LogRefused<Version>();
+    if (token) *token = 0;
+    return E_NOTIMPL;
+}
+
+inline HRESULT STDMETHODCALLTYPE GiRefuseReadingCallbackV0(void*, void*, uint32_t, float, void*, void*, uint64_t* token) {
+    LogRefused<0>();
+    if (token) *token = 0;
+    return E_NOTIMPL;
+}
+
+template <int Version>
+inline bool RefuseGameInputVersion(void** vtable) {
+    bool ok = WriteSlot(vtable, kGiSlots[kGiGetCurrentReading], reinterpret_cast<void*>(&GiRefuseCurrentReading<Version>))
+              && WriteSlot(vtable, kGiSlots[kGiGetNextReading], reinterpret_cast<void*>(&GiRefuseOtherReading<Version>))
+              && WriteSlot(vtable, kGiSlots[kGiGetPreviousReading], reinterpret_cast<void*>(&GiRefuseOtherReading<Version>));
+    if constexpr (Version == 0) {
+        ok = ok && WriteSlot(vtable, kGiV0GetTemporalReading, reinterpret_cast<void*>(&GiRefuseTemporalReading))
+             && WriteSlot(vtable, kGiV0RegisterReadingCallback, reinterpret_cast<void*>(&GiRefuseReadingCallbackV0));
+    } else {
+        ok = ok && WriteSlot(vtable, kGiSlots[kGiRegisterReadingCallback], reinterpret_cast<void*>(&GiRefuseReadingCallback<Version>));
+    }
+    return ok;
+}
+
+inline bool AnswerGameInputVersion2(void** vtable) {
+    GameInput& g = G();
+    void* const detours[kGiMethods] = {reinterpret_cast<void*>(&GiGetCurrentReading),
+                                       reinterpret_cast<void*>(&GiGetOtherReading<kGiGetNextReading>),
+                                       reinterpret_cast<void*>(&GiGetOtherReading<kGiGetPreviousReading>),
+                                       reinterpret_cast<void*>(&GiRegisterReadingCallback)};
+    for (int method = 0; method < kGiMethods; ++method) {
+        g.originals[method] = vtable[kGiSlots[method]];
+        if (!WriteSlot(vtable, kGiSlots[method], detours[method])) return false;
+    }
+    return true;
+}
+
+// True when the vtable already answers through isolated input: the redist hands the inbox
+// GameInput.dll its own object.
+inline bool GameInputVtableTaken(void** vtable) {
+    const void* const slot = vtable[kGiSlots[kGiGetCurrentReading]];
+    return slot == reinterpret_cast<void*>(&GiGetCurrentReading) || slot == reinterpret_cast<void*>(&GiRefuseCurrentReading<0>)
+           || slot == reinterpret_cast<void*>(&GiRefuseCurrentReading<1>) || slot == reinterpret_cast<void*>(&GiRefuseCurrentReading<3>)
+           || slot == reinterpret_cast<void*>(&GiRefuseCurrentReading<4>);
+}
+
+inline bool WrapGameInputVersion(int version, void** vtable) {
+    if (GameInputVtableTaken(vtable)) return true;
+    switch (version) {
+        case 0:  return RefuseGameInputVersion<0>(vtable);
+        case 1:  return RefuseGameInputVersion<1>(vtable);
+        case 2:  return AnswerGameInputVersion2(vtable);
+        case 3:  return RefuseGameInputVersion<3>(vtable);
+        default: return RefuseGameInputVersion<4>(vtable);
+    }
+}
+
+inline HRESULT WINAPI HookedGameInputInitialize(REFIID riid, void** gameInput) {
+    for (const GUID& known : kIidGameInput) {
+        if (IsEqualGUID(riid, known)) return G().origInitialize(riid, gameInput);
+    }
+    char line[200];
+    std::snprintf(line, sizeof(line),
+                  "isolated input: the game asked for a GameInput API version isolated input does not know "
+                  "({%08lX-%04X-%04X-...}); it is refused",
+                  riid.Data1, riid.Data2, riid.Data3);
+    Log(line);
+    if (gameInput) *gameInput = nullptr;
+    return E_NOINTERFACE;
+}
+
+// Makes a throwaway reading of each kind the script answers, so readings that reach the game
+// through a callback it registered before isolated input started answer from the script too.
+inline void AnswerCurrentReadings(void* gameInput) {
+    const auto current = reinterpret_cast<GiGetCurrentReading_t>(G().originals[kGiGetCurrentReading]);
+    for (const uint32_t kind : {kGameInputKindKeyboard, kGameInputKindMouse, kGameInputKindGamepad}) {
+        void* reading = nullptr;
+        if (FAILED(current(gameInput, kind, nullptr, &reading))) continue;
+        AnswerReadingsOf(reading);
+        reinterpret_cast<GiRelease_t>(Vtable(reading)[2])(reading);
+    }
+}
+
+// False when a vtable could not be written over, which leaves the game reading the real devices.
+inline bool WrapGameInputModule(const wchar_t* name, HMODULE module) {
+    const auto initialize = reinterpret_cast<GameInputInitialize_t>(reinterpret_cast<void*>(GetProcAddress(module, "GameInputInitialize")));
+    if (!initialize) {
+        const auto create = reinterpret_cast<GameInputCreate_t>(reinterpret_cast<void*>(GetProcAddress(module, "GameInputCreate")));
+        void* gameInput = nullptr;
+        if (!create || FAILED(create(&gameInput))) {
+            Log("isolated input: GameInput.dll is loaded and GameInputCreate made nothing, so there is nothing of it to answer");
+            return true;
+        }
+        const bool wrapped = WrapGameInputVersion(0, Vtable(gameInput));
+        reinterpret_cast<GiRelease_t>(Vtable(gameInput)[2])(gameInput);
+        return wrapped;
+    }
+    for (int version = 0; version < kGameInputVersions; ++version) {
+        void* gameInput = nullptr;
+        if (FAILED(initialize(kIidGameInput[version], &gameInput))) continue;
+        const bool wrapped = WrapGameInputVersion(version, Vtable(gameInput));
+        if (wrapped && version == kGameInputAnswered) AnswerCurrentReadings(gameInput);
+        reinterpret_cast<GiRelease_t>(Vtable(gameInput)[2])(gameInput);
+        if (!wrapped) return false;
+    }
+    void* const target = reinterpret_cast<void*>(initialize);
+    if (MH_CreateHook(target, reinterpret_cast<void*>(&HookedGameInputInitialize), reinterpret_cast<void**>(&G().origInitialize)) != MH_OK
+        || MH_EnableHook(target) != MH_OK) {
+        return false;
+    }
+    char line[200];
+    std::snprintf(line, sizeof(line),
+                  "isolated input: GameInput (%ls) answers version 2 from the command file and gives every other version no readings",
+                  name);
+    Log(line);
+    return true;
+}
+
+// Run from the command-file thread, as InstallDirectInput is: a game loads GameInput when it
+// starts reading input, which can be after the mod. GameInput is never loaded by this header.
+inline void InstallGameInput() {
+    GameInput& g = G();
+    struct Module { const wchar_t* name; bool& attempted; };
+    for (const Module& candidate : {Module{L"GameInputRedist.dll", g.redistAttempted}, Module{L"GameInput.dll", g.inboxAttempted}}) {
+        if (candidate.attempted) continue;
+        const HMODULE module = GetModuleHandleW(candidate.name);
+        if (!module) continue;
+        candidate.attempted = true;
+        if (!WrapGameInputModule(candidate.name, module)) {
+            Log("isolated input: GameInput could not be wrapped; stopping the game rather than let the real devices through");
+            std::abort();
+        }
+    }
+}
+
+inline void SendGameInputMove(int dx, int dy) {
+    std::lock_guard<std::mutex> lock(G().mutex);
+    G().mouse.Move(dx, dy);
+}
+
+inline void SendGameInputButton(MouseButton button, bool down) {
+    std::lock_guard<std::mutex> lock(G().mutex);
+    G().mouse.Button(button, down);
+}
+
 inline bool IsExtendedKey(int vk) {
     switch (vk) {
         case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END: case VK_PRIOR: case VK_NEXT:
@@ -1026,16 +1487,19 @@ inline bool Play(const InputStep& step) {
         case InputAction::kKeyUp:     return SendKey(step.vk, false);
         case InputAction::kMouseDown:
             SendDirectInputButton(step.button, true);
+            SendGameInputButton(step.button, true);
             HoldButtonKeyState(step.button, true);
             PostCursorButton(step.button, true);
             return SendMouse(ButtonFlag(step.button, true), 0, 0);
         case InputAction::kMouseUp:
             SendDirectInputButton(step.button, false);
+            SendGameInputButton(step.button, false);
             HoldButtonKeyState(step.button, false);
             PostCursorButton(step.button, false);
             return SendMouse(ButtonFlag(step.button, false), 0, 0);
         case InputAction::kMouseMove:
             SendDirectInputMove(step.dx, step.dy);
+            SendGameInputMove(step.dx, step.dy);
             return SendMouse(0, step.dx, step.dy);
         case InputAction::kCursor:    return PlaceCursor(step.dx, step.dy);
         case InputAction::kWait:      Sleep(step.waitMs); return true;
@@ -1091,6 +1555,7 @@ inline void RunCommandFile() {
     for (;;) {
         Sleep(kPollMs);
         InstallDirectInput();
+        InstallGameInput();
         std::ifstream file(S().commandFile);
         std::string header;
         if (!file || !std::getline(file, header)) continue;

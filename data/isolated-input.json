@@ -39,10 +39,10 @@
       "proven_in": ["far-cry-6", "ready-or-not"]
     },
     "gameinput": {
-      "what": "the GDK's GameInput API",
-      "dlls": ["gameinput.dll"],
-      "status": "unsupported",
-      "build": "Wrap the IGameInput the game obtains (GameInputCreate) in isolated_input.h and answer GetCurrentReading for keyboard and mouse from the synthetic state."
+      "what": "the GDK's GameInput API, from the inbox GameInput.dll or the Microsoft.GameInput NuGet package's GameInputRedist.dll. API version 2 is answered from the script: keyboard, mouse and gamepad, and no other controller. Every other version is given no readings, so the real devices never reach it, and the script does not drive it either. A game that loads it at run time through the NuGet package's loader, as Minecraft Bedrock does, imports neither DLL, so only the dev build's log shows it",
+      "dlls": ["gameinput.dll", "gameinputredist.dll"],
+      "status": "supported",
+      "proven_in": ["minecraft-bedrock"]
     },
     "sdl": {
       "what": "SDL's event queue, through what SDL itself reads. SDL2 on Windows takes relative mouse movement and mouse buttons from raw input and keys and typed text from window messages, which the raw-input path sends, so nothing is pushed into SDL. Check SDL's own import table with Get-GameInputPaths on the SDL DLL the game loads. Proven with SDL2; a game on SDL3 is proven again before it counts",

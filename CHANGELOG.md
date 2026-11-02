@@ -24,6 +24,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   covers `AddHotkey` keys: one that went down since the last poll runs nothing for that press. So
   `cameraunlock_hotkeys_drop` now also drops a plain key pressed just before it.
   `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 11.
+### Added - isolated input covers GameInput
+
+- A dev build with isolated input now wraps GameInput (`GameInputRedist.dll` or `GameInput.dll`)
+  once the game has loaded it. API version 2's readings answer their keyboard, mouse and gamepad
+  from the script (`cameraunlock/dev/gameinput_state.h` is the pure half) and report no other
+  controller. Every other version is given no readings, and `GameInputInitialize` refuses one it
+  does not know. Before this the real mouse turned Minecraft Bedrock's view behind other windows.
+  `data/isolated-input.json` lists `gameinputredist.dll` and marks the entry supported. A mod
+  picks this up by bumping core and rebuilding its dev build; nothing in its own code changes.
 
 ### Fixed - a packet that arrives while a frame reads the receiver is taken
 
