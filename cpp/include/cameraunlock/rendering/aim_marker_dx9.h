@@ -12,27 +12,15 @@
 // CAMERAUNLOCK_AIM_MARKER_DX9_IMPLEMENTATION before including this, and MinHook
 // must already be initialised by the time the install runs.
 //
-// Two things differ from the D3D11 and D3D12 bindings. Both are forced by how
-// D3D9 is reached, and neither is a choice a consuming mod gets to make:
+// The overlay reaches Present off a probe device's vtable, so Ensure() works at
+// any point in the game's life. Only where no probe device can be made does it
+// fall back to waiting for the game's own CreateDevice; there Ensure() has to
+// come before the game makes its device, and Ready() means that hook is armed,
+// not that anything is drawn.
 //
-//  - **Ensure() has to be called at load, not from the frame that wants the
-//    marker.** The D3D9 overlay reaches Present by hooking
-//    IDirect3D9::CreateDevice and reading the vtable off the device the game
-//    creates, so the hook must be armed before that call. A first Ensure() at
-//    the moment a player selects the marker mode is minutes late: CreateDevice
-//    has already returned and is not called again. Call it once during
-//    initialisation and let the mode decide only what Publish() says.
-//  - **Ready() means the CreateDevice hook is armed, not that anything is being
-//    drawn yet.** With the swap chain backends Install() finds a live device;
-//    here it can only wait for one. Nothing draws until Publish() is called with
-//    `visible`, so the difference costs a mod nothing, but do not read Ready()
-//    as "the marker is on screen".
-//
-// One more thing to know rather than to work around: AimMarkerStyle's colours
-// are 0xAABBGGRR, and D3DCOLOR - what DX9DrawContext takes - is 0xAARRGGBB. The
-// shipped style is white on black, which reads the same in either order, so the
-// default marker is byte-identical to every other backend's. A mod that sets a
-// COLOURED style on D3D9 has to give it in D3DCOLOR order.
+// The mark is drawn into the shared draw list (OverlayDrawList, colours
+// 0xAABBGGRR as on the other backends), which the overlay turns into D3DCOLOR,
+// so a coloured style means the same colour here as on D3D11 and D3D12.
 
 #ifdef CAMERAUNLOCK_AIM_MARKER_DX9_IMPLEMENTATION
 #define CAMERAUNLOCK_AIM_MARKER_IMPLEMENTATION
@@ -45,7 +33,7 @@ namespace cameraunlock::rendering {
 
 struct DX9AimMarkerTraits {
     using Overlay     = DX9Overlay;
-    using DrawContext = DX9DrawContext;
+    using DrawContext = OverlayDrawList;
     static void SetLogger(OverlayLogFn fn) { SetDX9OverlayLogger(fn); }
 };
 

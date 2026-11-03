@@ -34,6 +34,8 @@
 #include <functional>
 #include <vector>
 
+#include "cameraunlock/rendering/overlay_draw_list.h"
+
 namespace cameraunlock::rendering {
 
 // D3DCOLOR: 0xAARRGGBB (fixed-function diffuse).
@@ -65,6 +67,10 @@ public:
     // central `gap` left empty.
     void DrawCross(float cx, float cy, float arm, Argb color, float thickness = 1.0f, float gap = 0.0f);
 
+    // The triangles of a shared draw list (overlay_draw_list.h), whose colours
+    // are 0xAABBGGRR, turned to D3DCOLOR and shifted as this context's own are.
+    void AppendDrawList(const OverlayDrawList& list);
+
     const std::vector<DX9OverlayVertex>& TriVerts() const { return m_triVerts; }
 
 private:
@@ -74,6 +80,9 @@ private:
 };
 
 using DX9RenderCallback = std::function<void(DX9DrawContext&)>;
+// The same drawn through the shared draw list, which is what aim_marker.h and a
+// mod's overlay code written once for every API draw into.
+using DX9DrawListCallback = std::function<void(OverlayDrawList&)>;
 
 // Optional diagnostic log sink.
 using DX9LogFn = void (*)(const char* msg);
@@ -84,6 +93,13 @@ void SetDX9OverlayLogger(DX9LogFn fn);
 // copy of the 119 IDirect3DDevice9 entries for hooking additional methods.
 using DX9DeviceReadyFn = void (*)(void** deviceVTable);
 void SetDX9DeviceReadyCallback(DX9DeviceReadyFn fn);
+
+// Called in the hooked Present after the overlay has drawn and before the frame
+// goes to the screen, with the presenting IDirect3DDevice9, for a mod that reads
+// the finished frame back (a capture). Present can be hooked once per process,
+// so this is how a second reader of it shares the overlay's hook.
+using DX9BeforePresentFn = void (*)(void* device);
+void SetDX9BeforePresentCallback(DX9BeforePresentFn fn);
 
 class DX9Overlay {
 public:
@@ -100,6 +116,7 @@ public:
     void Remove();
 
     void SetRenderCallback(DX9RenderCallback cb);
+    void SetRenderCallback(DX9DrawListCallback cb);
 
     bool IsInstalled() const { return m_hookInstalled; }
 
@@ -121,6 +138,7 @@ private:
 #include <Windows.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <memory>
 #include <mutex>
@@ -175,6 +193,13 @@ inline void DX9DrawContext::DrawDot(float cx, float cy, float radius, Argb color
     }
 }
 
+inline void DX9DrawContext::AppendDrawList(const OverlayDrawList& list) {
+    for (const OverlayVertex& v : list.TriVerts()) {
+        const Argb argb = (v.color & 0xFF00FF00u) | ((v.color & 0x000000FFu) << 16) | ((v.color & 0x00FF0000u) >> 16);
+        m_triVerts.push_back({v.x - 0.5f, v.y - 0.5f, 0.0f, 1.0f, argb});
+    }
+}
+
 inline void DX9DrawContext::DrawCross(float cx, float cy, float arm, Argb color, float thickness, float gap) {
     if (arm <= gap) return;
     DrawLine(cx - arm, cy, cx - gap, cy, color, thickness);
@@ -223,6 +248,7 @@ struct DX9State {
     std::mutex        callbackMutex;
     DX9LogFn          logFn = nullptr;
     DX9DeviceReadyFn  deviceReadyFn = nullptr;
+    std::atomic<DX9BeforePresentFn> beforePresentFn{nullptr};
     bool              firstPresentLogged = false;
 };
 
@@ -314,6 +340,7 @@ inline HRESULT __stdcall HookedPresent(IDirect3DDevice9* dev, const RECT* src, c
         Log("dx9_overlay: Present hook fired (first invocation)");
     }
     RenderFrame(dev);
+    if (const auto before = s.beforePresentFn.load(std::memory_order_acquire)) before(dev);
     return orig(dev, src, dst, wnd, dirty);
 }
 
@@ -423,6 +450,10 @@ inline DX9Overlay::~DX9Overlay() { Remove(); }
 inline void SetDX9OverlayLogger(DX9LogFn fn) { detail::State().logFn = fn; }
 
 inline void SetDX9DeviceReadyCallback(DX9DeviceReadyFn fn) { detail::State().deviceReadyFn = fn; }
+
+inline void SetDX9BeforePresentCallback(DX9BeforePresentFn fn) {
+    detail::State().beforePresentFn.store(fn, std::memory_order_release);
+}
 
 inline bool DX9Overlay::Install() {
     auto& s = detail::State();
@@ -545,6 +576,14 @@ inline void DX9Overlay::SetRenderCallback(DX9RenderCallback cb) {
     }
     std::lock_guard<std::mutex> lock(s.callbackMutex);
     s.callback = std::make_shared<const DX9RenderCallback>(std::move(cb));
+}
+
+inline void DX9Overlay::SetRenderCallback(DX9DrawListCallback cb) {
+    SetRenderCallback(DX9RenderCallback([draw = std::move(cb)](DX9DrawContext& dc) {
+        OverlayDrawList list(dc.Width(), dc.Height());
+        draw(list);
+        dc.AppendDrawList(list);
+    }));
 }
 
 #endif // CAMERAUNLOCK_DX9_OVERLAY_IMPLEMENTATION
