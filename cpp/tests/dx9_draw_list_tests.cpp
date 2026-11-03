@@ -19,19 +19,18 @@ void Check(bool ok, const char* what) {
     std::fprintf(stderr, "FAIL: %s\n", what);
 }
 
-HRESULT __stdcall FakeMethod() { return D3D_OK; }
-void* fakeTable[119]{};
-struct { void** table; } fakeDevice{fakeTable};
+int fakeDevice = 0;
 
 void* seenBefore = nullptr;
 int presented = 0;
+int presentedBefore = -1;
 HRESULT __stdcall OriginalPresent(IDirect3DDevice9*, const RECT*, const RECT*, HWND, const RGNDATA*) {
     ++presented;
     return D3D_OK;
 }
 void BeforePresent(void* device) {
     seenBefore = device;
-    if (presented != 0) std::fprintf(stderr, "the before-present callback ran after Present\n");
+    presentedBefore = presented;
 }
 
 }  // namespace
@@ -59,13 +58,13 @@ int main() {
     marker.Publish(true, 0.0f, 0.0f, 1.0f);
     Check(!marker.Ready(), "the D3D9 marker is not ready before Ensure");
 
-    for (void*& slot : fakeTable) slot = reinterpret_cast<void*>(&FakeMethod);
-    auto& s = rndr::detail::State();
+    auto& s = rndr::detail9::State();
     s.origPresent = &OriginalPresent;
     rndr::SetDX9BeforePresentCallback(&BeforePresent);
     auto* device = reinterpret_cast<IDirect3DDevice9*>(&fakeDevice);
-    Check(rndr::detail::HookedPresent(device, nullptr, nullptr, nullptr, nullptr) == D3D_OK, "the hooked Present presents");
-    Check(seenBefore == device && presented == 1, "the before-present callback sees the presenting device, then the frame is presented");
+    Check(rndr::detail9::HookedPresent(device, nullptr, nullptr, nullptr, nullptr) == D3D_OK, "the hooked Present presents");
+    Check(seenBefore == device, "the before-present callback sees the presenting device");
+    Check(presentedBefore == 0 && presented == 1, "the before-present callback runs before the frame is presented");
     s.origPresent = nullptr;
 
     std::printf("%d checks, %d failed\n", checks, failures);

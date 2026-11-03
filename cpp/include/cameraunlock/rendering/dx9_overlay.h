@@ -120,6 +120,11 @@ public:
 
     bool IsInstalled() const { return m_hookInstalled; }
 
+    // Present itself is hooked. Install() can succeed with only the
+    // CreateDevice hook armed, which draws nothing for a device that already
+    // exists.
+    bool PresentHooked() const;
+
 private:
     DX9RenderCallback m_callback;
     bool m_hookInstalled = false;
@@ -213,7 +218,7 @@ inline void DX9DrawContext::DrawCross(float cx, float cy, float arm, Argb color,
 // Singleton-by-design: the Present hook is a free function, so we keep one
 // active overlay at a time. Every mod we ship has exactly one HUD.
 
-namespace detail {
+namespace detail9 {
 
 struct DX9State {
     bool hookInstalled = false;
@@ -443,20 +448,22 @@ inline HRESULT __stdcall HookedCreateDevice(IDirect3D9* self, UINT adapter, D3DD
     return hr;
 }
 
-} // namespace detail
+} // namespace detail9
 
 inline DX9Overlay::~DX9Overlay() { Remove(); }
 
-inline void SetDX9OverlayLogger(DX9LogFn fn) { detail::State().logFn = fn; }
+inline void SetDX9OverlayLogger(DX9LogFn fn) { detail9::State().logFn = fn; }
 
-inline void SetDX9DeviceReadyCallback(DX9DeviceReadyFn fn) { detail::State().deviceReadyFn = fn; }
+inline void SetDX9DeviceReadyCallback(DX9DeviceReadyFn fn) { detail9::State().deviceReadyFn = fn; }
+
+inline bool DX9Overlay::PresentHooked() const { return detail9::State().presentHooked; }
 
 inline void SetDX9BeforePresentCallback(DX9BeforePresentFn fn) {
-    detail::State().beforePresentFn.store(fn, std::memory_order_release);
+    detail9::State().beforePresentFn.store(fn, std::memory_order_release);
 }
 
 inline bool DX9Overlay::Install() {
-    auto& s = detail::State();
+    auto& s = detail9::State();
     if (s.hookInstalled) {
         // Refused, not silently taken over. The hooks and the callback slot are
         // process-wide but there is exactly one of each, so a second instance
@@ -464,7 +471,7 @@ inline bool DX9Overlay::Install() {
         // whichever instance is destroyed FIRST tears down the hooks and D3D
         // resources out from under the other. Returning true here also told the
         // caller it had a working overlay when it had stolen someone else's.
-        detail::Log("dx9_overlay: Install refused, another DX9Overlay in this "
+        detail9::Log("dx9_overlay: Install refused, another DX9Overlay in this "
                     "module already owns the hooks");
         return false;
     }
@@ -480,7 +487,7 @@ inline bool DX9Overlay::Install() {
 
     // Present outright, off a probe device's vtable. This is the whole path on
     // any machine that can create a device.
-    if (detail::HookPresentViaProbeDevice()) {
+    if (detail9::HookPresentViaProbeDevice()) {
         return true;
     }
 
@@ -496,7 +503,7 @@ inline bool DX9Overlay::Install() {
     // fires when the game creates its device.
     IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!d3d) {
-        detail::Log("dx9_overlay: Direct3DCreate9 failed");
+        detail9::Log("dx9_overlay: Direct3DCreate9 failed");
         s.hookInstalled = false;
         m_hookInstalled = false;
         return false;
@@ -505,16 +512,16 @@ inline bool DX9Overlay::Install() {
     s.createDeviceTarget = d3dVTable[16];  // IDirect3D9::CreateDevice
     d3d->Release();
 
-    if (MH_CreateHook(s.createDeviceTarget, &detail::HookedCreateDevice,
+    if (MH_CreateHook(s.createDeviceTarget, &detail9::HookedCreateDevice,
                       reinterpret_cast<LPVOID*>(&s.origCreateDevice)) != MH_OK) {
-        detail::Log("dx9_overlay: MH_CreateHook(CreateDevice) failed");
+        detail9::Log("dx9_overlay: MH_CreateHook(CreateDevice) failed");
         s.createDeviceTarget = nullptr;
         s.hookInstalled = false;
         m_hookInstalled = false;
         return false;
     }
     if (MH_EnableHook(s.createDeviceTarget) != MH_OK) {
-        detail::Log("dx9_overlay: MH_EnableHook(CreateDevice) failed");
+        detail9::Log("dx9_overlay: MH_EnableHook(CreateDevice) failed");
         MH_RemoveHook(s.createDeviceTarget);
         s.createDeviceTarget = nullptr;
         s.hookInstalled = false;
@@ -522,7 +529,7 @@ inline bool DX9Overlay::Install() {
         return false;
     }
 
-    detail::Log("dx9_overlay: CreateDevice hook armed (waiting for game device)");
+    detail9::Log("dx9_overlay: CreateDevice hook armed (waiting for game device)");
     return true;
 }
 
@@ -531,7 +538,7 @@ inline void DX9Overlay::Remove() {
     // installed anything must not tear down the live overlay's hooks.
     if (!m_hookInstalled) return;
 
-    auto& s = detail::State();
+    auto& s = detail9::State();
     // Targets AND trampolines are cleared. MH_DisableHook does NOT drain threads out
     // of the user detour first - it freezes threads and relocates instruction pointers
     // only within the target and trampoline regions, and HookedPresent is arbitrary
@@ -569,9 +576,9 @@ inline void DX9Overlay::Remove() {
 // reported success.
 inline void DX9Overlay::SetRenderCallback(DX9RenderCallback cb) {
     m_callback = cb;
-    auto& s = detail::State();
+    auto& s = detail9::State();
     if (s.hookInstalled && !m_hookInstalled) {
-        detail::Log("dx9_overlay: SetRenderCallback ignored, another overlay owns the hooks");
+        detail9::Log("dx9_overlay: SetRenderCallback ignored, another overlay owns the hooks");
         return;
     }
     std::lock_guard<std::mutex> lock(s.callbackMutex);
