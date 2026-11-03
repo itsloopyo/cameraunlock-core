@@ -193,10 +193,13 @@ public static class CursorWindow {
 '@
 [CursorWindow]::Start()
 Check 'the stand-in window''s thread hid its cursor before the host started' ([CursorWindow]::HiddenCount -eq -1) "count $([CursorWindow]::HiddenCount)"
+# What other isolated games and the harness read so as never to hand the foreground to this one.
+Check 'the process does not read as isolated before the host starts' (-not (Test-IsolatedInputProcess -ProcessId $PID))
 Check 'with both it starts' ([CameraUnlock.Core.Dev.IsolatedInput]::StartIfAsked($mod, $log))
 Check 'and logs where the input now comes from' ($lines.Count -eq 1 -and $lines[0] -match 'CameraUnlockInput\.txt') ($lines -join ' | ')
 Check 'a second start in the same process throws' `
     (Throws { [CameraUnlock.Core.Dev.IsolatedInput]::StartIfAsked($mod, $log) } 'already started')
+Check 'once started, the process reads as isolated' (Test-IsolatedInputProcess -ProcessId $PID)
 
 Check 'no key is down before a script holds one' ((KeysDown) -eq 0) "$(KeysDown)"
 

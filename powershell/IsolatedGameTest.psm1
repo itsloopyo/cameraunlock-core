@@ -498,6 +498,24 @@ function Copy-IsolatedInputHost {
     $target
 }
 
+function Test-IsolatedInputProcess {
+    <#
+    .SYNOPSIS
+    True when the process runs isolated input: it holds the event cameraunlock/dev/isolated_input.h
+    makes for it. An event that exists but cannot be opened, as one of a process at a higher
+    integrity level, counts.
+    #>
+    param([Parameter(Mandatory)][uint32]$ProcessId)
+    $event = $null
+    try {
+        if (-not [Threading.EventWaitHandle]::TryOpenExisting("Local\CameraUnlock.IsolatedInput.$ProcessId", [ref]$event)) { return $false }
+    } catch [UnauthorizedAccessException] {
+        return $true
+    }
+    $event.Dispose()
+    $true
+}
+
 function Start-IsolatedGame {
     <#
     .SYNOPSIS
@@ -505,7 +523,9 @@ function Start-IsolatedGame {
     .DESCRIPTION
     Writes the command file beside the mod (its presence is what switches a dev build's isolated
     input on), launches, waits for the process, and for -SettleSeconds returns the foreground to the
-    window that held it each time the new game window takes it. Returns the session the other
+    window that last held it before each time a window of the game takes it: a foreground moved
+    anywhere else is left where it went, and becomes the window given back to. A window of another
+    process running isolated input (Test-IsolatedInputProcess) is never given it. Returns the session the other
     functions take. Refuses to start while the game is already running: that one is someone else's.
     -Started is handed the process the moment it appears, before the settling.
     With -ModHost managed it also copies the host DLL beside the mod (Copy-IsolatedInputHost), and
@@ -537,6 +557,9 @@ function Start-IsolatedGame {
     Remove-Item "$commandFile.done" -ErrorAction SilentlyContinue
 
     $foreground = [CameraUnlockIsolatedTest.Native]::GetForegroundWindow()
+    $owner = [uint32]0
+    [void][CameraUnlockIsolatedTest.Native]::GetWindowThreadProcessId($foreground, [ref]$owner)
+    if (Test-IsolatedInputProcess -ProcessId $owner) { $foreground = [IntPtr]::Zero }
     if ($Arguments.Count -gt 0) { Start-Process $Launch -ArgumentList $Arguments } else { Start-Process $Launch }
     $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
     $process = $null
@@ -547,12 +570,27 @@ function Start-IsolatedGame {
     if (-not $process) { throw "$ProcessName did not start within $StartTimeoutSeconds seconds of launching $Launch" }
     if ($Started) { & $Started $process | Out-Null }
 
+    # Only a window of the game is moved off, and it goes to the window that last held the foreground
+    # before it: the person at the machine, and other sessions' launches, move the foreground while
+    # this game starts, and the window this launch began over may be long left behind.
     $settled = (Get-Date).AddSeconds($SettleSeconds)
     while ((Get-Date) -lt $settled) {
         Start-Sleep -Milliseconds 500
-        if ([CameraUnlockIsolatedTest.Native]::IsWindow($foreground) -and
-            [CameraUnlockIsolatedTest.Native]::GetForegroundWindow() -ne $foreground) {
-            [void][CameraUnlockIsolatedTest.Native]::SetForegroundWindow($foreground)
+        $now = [CameraUnlockIsolatedTest.Native]::GetForegroundWindow()
+        if ($now -eq [IntPtr]::Zero) { continue }
+        $owner = [uint32]0
+        [void][CameraUnlockIsolatedTest.Native]::GetWindowThreadProcessId($now, [ref]$owner)
+        $gameIds = @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | ForEach-Object Id)
+        if ($gameIds -notcontains [int]$owner) {
+            if (-not (Test-IsolatedInputProcess -ProcessId $owner)) { $foreground = $now }
+            continue
+        }
+        if ([CameraUnlockIsolatedTest.Native]::IsWindow($foreground) -and $foreground -ne $now) {
+            $previous = [uint32]0
+            [void][CameraUnlockIsolatedTest.Native]::GetWindowThreadProcessId($foreground, [ref]$previous)
+            if (-not (Test-IsolatedInputProcess -ProcessId $previous)) {
+                [void][CameraUnlockIsolatedTest.Native]::SetForegroundWindow($foreground)
+            }
         }
     }
     [pscustomobject]@{ ProcessId = $process.Id; ProcessName = $ProcessName; CommandFile = $commandFile; Sequence = 0; HostDll = $deployedHost }
@@ -2005,7 +2043,7 @@ function Invoke-IsolatedGameSession {
 }
 
 Export-ModuleMember -Function Get-PeImports, Get-IsolatedInputCoverage, Get-GameInputPaths, Assert-IsolatedInputCovers,
-    Get-ModTestPort, Copy-IsolatedInputHost, Start-IsolatedGame, Stop-GameProcess, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
+    Get-ModTestPort, Copy-IsolatedInputHost, Test-IsolatedInputProcess, Start-IsolatedGame, Stop-GameProcess, Invoke-GameInput, Save-GameCapture, Test-CaptureDiffers, Test-IsolatedInputProof,
     Stop-IsolatedGame, Save-GameTestState, Restore-GameTestState, Start-TestPoseSender, Set-TestPose,
     Set-ModTestPort, Get-GameRig, Set-GameRigLimit, Enter-GameRig, Exit-GameRig, Stop-KeptGame, Wait-GameLogLine, Start-GameProcessSampler, Stop-GameProcessSampler,
     Start-IsolatedGameSession, Stop-IsolatedGameSession, Invoke-IsolatedGameSession, Get-IsolatedGameSession, Save-IsolatedGameSession

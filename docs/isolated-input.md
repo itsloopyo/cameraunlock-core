@@ -704,8 +704,28 @@ placed the cursor: start the script with `cursor <x> <y>`.
 
 The dev build also watches the real foreground itself. Whenever a window of the
 game holds it, the game gives it back to the window that had it before, or to the
-desktop if that one has gone. Only the foreground process may hand the foreground
-on, so this is done from inside the game and not from the harness.
+desktop if there is none. Only the foreground process may hand the foreground
+on, so this is done from inside the game once its isolated input has started.
+
+A window of another process running isolated input is never the one it gives
+back to. Each such process holds the event `Local\CameraUnlock.IsolatedInput.<pid>`
+from just before its detours go in until it ends, and the window is checked both
+when it is remembered and when the foreground is handed to it, because a game's
+window can take the foreground before that game's event exists. An event that
+exists but cannot be opened (a process at a higher integrity level) counts. A
+process in an AppContainer makes its `Local\` objects in a namespace of its own,
+where this check cannot see them. Without the check, two isolated games handed
+the foreground to each other over and over (2026-11-03).
+
+Before the game's isolated input has started, `Start-IsolatedGame` covers the
+launch: for its settle time, whenever a window of a process with the game's
+process name holds the foreground, it calls `SetForegroundWindow` on the window
+that held it last before (Windows may refuse a process that is not in front), and
+leaves any other change alone. `Test-IsolatedInputProcess` reads the
+same event, and a window of an isolated process is never the one it gives back to.
+Before 2026-11-03 it put the window the launch began over back in front of
+whatever had taken the foreground, the person at the machine or another
+session's launch included, every half second for a minute.
 
 For a game that reads DirectInput 8 (`dinput8.dll` loaded in the process): the
 methods of the keyboard and mouse devices are detoured in the device vtable,

@@ -1956,11 +1956,39 @@ inline void WatchGameWindow() {
     SendNotifyMessageW(window, S().readCursorMessage, 0, 0);
 }
 
+// Every process running isolated input holds an event of this name with its
+// process id on the end, for as long as it runs.
+inline std::wstring IsolatedProcessEventName(DWORD pid) {
+    return L"Local\\CameraUnlock.IsolatedInput." + std::to_wstring(pid);
+}
+
+// A process whose event exists but cannot be opened (one running at a higher
+// integrity level) is isolated too.
+inline bool IsIsolatedProcess(DWORD pid) {
+    const HANDLE event = OpenEventW(SYNCHRONIZE, FALSE, IsolatedProcessEventName(pid).c_str());
+    if (!event) return GetLastError() == ERROR_ACCESS_DENIED;
+    CloseHandle(event);
+    return true;
+}
+
+// A window the foreground may be given back to: one that still exists, of a
+// process other than this one that is not running isolated input itself.
+inline bool CanTakeForegroundBack(HWND window) {
+    if (!window || !IsWindow(window)) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    return pid != GetCurrentProcessId() && !IsIsolatedProcess(pid);
+}
+
 // Keeps the real foreground away from the game: remembers which window of
 // another process last held it, and gives it back to that one (to the desktop
-// if it has gone) whenever one of this process's windows has taken it. The
+// if there is none) whenever one of this process's windows has taken it. The
 // window is taken over first, so the game is not told of the loss. A thread of
 // its own, because the command-file thread sleeps through a script's waits.
+// Another isolated game's window is never given the foreground: with two
+// running, each handed it to the other and it went back and forth between them.
+// It is checked again at the hand-back, because a game's window can take the
+// foreground before its isolated input has started and made its event.
 inline void GuardForeground() {
     bool refused = false;
     for (;;) {
@@ -1971,10 +1999,10 @@ inline void GuardForeground() {
         DWORD pid = 0;
         GetWindowThreadProcessId(foreground, &pid);
         if (pid != GetCurrentProcessId()) {
-            S().lastForeground = foreground;
+            if (CanTakeForegroundBack(foreground)) S().lastForeground = foreground;
             continue;
         }
-        const HWND previous = IsWindow(S().lastForeground) ? S().lastForeground : GetShellWindow();
+        const HWND previous = CanTakeForegroundBack(S().lastForeground) ? S().lastForeground : GetShellWindow();
         if (S().origSetForegroundWindow(previous)) {
             refused = false;
             Log("isolated input: the game had the real foreground and gave it back");
@@ -2052,6 +2080,13 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
         Log(line);
         return false;
     }
+    // Made before the detours, so another isolated game knows this one as early as it can. Closed only
+    // if the start fails: it says this process is isolated until the process ends.
+    const HANDLE isolatedEvent = CreateEventW(nullptr, TRUE, FALSE, IsolatedProcessEventName(GetCurrentProcessId()).c_str());
+    if (!isolatedEvent) {
+        Log(("isolated input: could not create the event that marks this process as isolated, error " +
+             std::to_string(GetLastError())).c_str());
+    }
     FindDevices();
 
     static const wchar_t* const kUser32 = L"user32.dll";
@@ -2089,6 +2124,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     for (const bool one : hooked) all = all && one;
     if (!all) {
         UnhookAll();
+        if (isolatedEvent) CloseHandle(isolatedEvent);
         return false;
     }
     std::thread(&RunCommandFile).detach();
