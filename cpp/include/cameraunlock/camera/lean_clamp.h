@@ -126,15 +126,29 @@ public:
         // every lean in over the release time constant from a standing start,
         // including the first lean of the session and the first after any pose
         // that passed through neutral.
-        float allowed = m_has_allowance ? m_allowed : desired;
-        if (allowed > desired) allowed = desired;
+        float allowed = desired;
+        if (m_has_allowance) {
+            // What eases is how far short of the tracker the eye is held, toward
+            // the shortfall this frame's target asks for, not the allowance
+            // itself. Easing the allowance rationed every lean that grew after a
+            // contact however small its cut: a few microns of tracker noise at
+            // rest, blocked by an edge, left an allowance near zero, and the next
+            // lean crawled out over the release time. The floor at last frame's
+            // allowance keeps a lean being pulled back from snapping the eye
+            // toward the player, and keeps the allowance from going negative,
+            // which would push the eye along the other way.
+            const float shortfall =
+                m_shortfall + ((desired - target) - m_shortfall) *
+                                  math::CalculateSmoothingFactor(m_settings.release_smoothing, delta_time);
+            const float held = m_allowed < desired ? m_allowed : desired;
+            allowed = desired - shortfall;
+            if (allowed < held) allowed = held;
+        }
 
         if (target < allowed) {
             allowed = target;
             m_has_allowance = true;
         } else if (m_has_allowance) {
-            allowed += (target - allowed) *
-                       math::CalculateSmoothingFactor(m_settings.release_smoothing, delta_time);
             // The ease approaches asymptotically, so without a settle the
             // allowance never quite arrives and the clamp reports contact
             // forever after one touch. The tolerance is a FRACTION of the lean
@@ -142,19 +156,14 @@ public:
             // a threshold sized to settle in metres is a hundred times tighter
             // in centimetres, which is exactly how this shipped the first time
             // and why an Unreal mod reported contact continuously.
-            if (desired - allowed <= desired * kSettleFraction) {
+            if (target >= desired && desired - allowed <= desired * kSettleFraction) {
                 allowed = desired;
                 m_has_allowance = false;
             }
-        } else {
-            // Never restricted, so there is nothing to ease away FROM. Easing
-            // here anyway makes a lean that is simply growing faster than the
-            // release rate look like a lean held off a wall, which is both a
-            // lie in the log and a drag on the pose the player asked for.
-            allowed = desired;
         }
 
         m_allowed = allowed;
+        m_shortfall = desired - allowed;
         m_contact = allowed < desired;
         return direction * allowed;
     }
@@ -170,6 +179,7 @@ public:
     /// outright instead of easing up to it.
     void Reset() {
         m_allowed = 0.0f;
+        m_shortfall = 0.0f;
         m_has_allowance = false;
         m_contact = false;
         m_query_failed = false;
@@ -187,6 +197,8 @@ private:
 
     LeanClampSettings m_settings{};
     float m_allowed = 0.0f;
+    /// The desired lean less m_allowed, last frame.
+    float m_shortfall = 0.0f;
     /// False means nothing is currently restricting the lean, which is not the
     /// same as an allowance of zero.
     bool m_has_allowance = false;

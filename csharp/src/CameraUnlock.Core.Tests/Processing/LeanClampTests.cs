@@ -1,4 +1,5 @@
 using CameraUnlock.Core.Data;
+using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
 using Xunit;
 
@@ -222,6 +223,68 @@ namespace CameraUnlock.Core.Tests.Processing
             });
 
             Near(0.40f, asked);
+        }
+
+        [Fact]
+        public void UnseenCutDoesNotRationTheNextLean()
+        {
+            // Found in STALKER: tracker noise at rest is a lean of a few microns in a direction
+            // that wanders, and an edge in reach blocks it.
+            LeanClamp clamp = MakeClamp(15f);
+            var world = new World { Blocked = true, Distance = 0f };
+            clamp.Apply(Vec3.Zero, new Vec3(0f, 0.001f, 0f), Dt, world.Query);
+
+            world.Blocked = false;
+            Assert.True(clamp.Apply(Vec3.Zero, new Vec3(0.6f, 0f, 0f), 0.004f, world.Query).X > 0.59f);
+        }
+
+        [Fact]
+        public void ReleaseFollowsAGrowingLean()
+        {
+            LeanClamp clamp = MakeClamp(0.10f);
+            var world = new World { Blocked = true, Distance = 0.15f };
+            clamp.Apply(Vec3.Zero, new Vec3(0.2f, 0f, 0f), Dt, world.Query);
+
+            world.Blocked = false;
+            float x = clamp.Apply(Vec3.Zero, new Vec3(0.3f, 0f, 0f), Dt, world.Query).X;
+            Assert.InRange(x, 0.15f, 0.3f);
+            Assert.NotEqual(0.3f, x);
+        }
+
+        [Fact]
+        public void PullingBackFromAWallKeepsTheEye()
+        {
+            // The floor under the release.
+            LeanClamp clamp = MakeClamp(0.10f);
+            var world = new World { Blocked = true, Distance = 0.20f };
+            clamp.Apply(Vec3.Zero, new Vec3(0.4f, 0f, 0f), Dt, world.Query);
+
+            world.Blocked = false;
+            Assert.InRange(clamp.Apply(Vec3.Zero, new Vec3(0.15f, 0f, 0f), Dt, world.Query).X, 0.10f - 1e-4f, 0.15f);
+        }
+
+        [Fact]
+        public void WanderingWallIsEased()
+        {
+            LeanClamp clamp = MakeClamp(0f);
+            var world = new World { Blocked = true, Distance = 10f };
+            clamp.Apply(Vec3.Zero, new Vec3(40f, 0f, 0f), Dt, world.Query);
+
+            world.Distance = 11f;
+            float k = SmoothingUtils.CalculateSmoothingFactor(0.9f, Dt);
+            Near(10f + 1f * k, clamp.Apply(Vec3.Zero, new Vec3(40f, 0f, 0f), Dt, world.Query).X, 1e-3f);
+        }
+
+        [Fact]
+        public void SettleStaysInsideTheTarget()
+        {
+            LeanClamp clamp = MakeClamp(0f);
+            var world = new World { Blocked = true, Distance = 30f };
+            clamp.Apply(Vec3.Zero, new Vec3(40f, 0f, 0f), Dt, world.Query);
+
+            world.Distance = 39.99f;
+            for (int frame = 0; frame < 240; frame++)
+                Assert.True(clamp.Apply(Vec3.Zero, new Vec3(40f, 0f, 0f), Dt, world.Query).X <= 39.99f + 1e-4f);
         }
     }
 }

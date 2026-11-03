@@ -88,6 +88,8 @@ namespace CameraUnlock.Core.Processing
         private const float SettleFraction = 1e-3f;
 
         private float _allowed;
+        // The desired lean less _allowed, last frame.
+        private float _shortfall;
         // False means nothing is currently restricting the lean, which is not the same as an
         // allowance of zero.
         private bool _hasAllowance;
@@ -152,8 +154,23 @@ namespace CameraUnlock.Core.Processing
 
             // With no allowance carried in, the frame starts at what the tracker asked for.
             // Easing up from zero instead would fade every lean in from a standing start.
-            float allowed = _hasAllowance ? _allowed : desired;
-            if (allowed > desired) allowed = desired;
+            float allowed = desired;
+            if (_hasAllowance)
+            {
+                // What eases is how far short of the tracker the eye is held, toward the
+                // shortfall this frame's target asks for, not the allowance itself. Easing the
+                // allowance rationed every lean that grew after a contact however small its cut: a
+                // few microns of tracker noise at rest, blocked by an edge, left an allowance near
+                // zero, and the next lean crawled out over the release time. The floor at last
+                // frame's allowance keeps a lean being pulled back from snapping the eye toward the
+                // player, and keeps the allowance from going negative, which would push the eye
+                // along the other way.
+                float shortfall = _shortfall + ((desired - target) - _shortfall) *
+                                  SmoothingUtils.CalculateSmoothingFactor(settings.ReleaseSmoothing, deltaTime);
+                float held = _allowed < desired ? _allowed : desired;
+                allowed = desired - shortfall;
+                if (allowed < held) allowed = held;
+            }
 
             if (target < allowed)
             {
@@ -162,24 +179,17 @@ namespace CameraUnlock.Core.Processing
             }
             else if (_hasAllowance)
             {
-                allowed += (target - allowed) *
-                           SmoothingUtils.CalculateSmoothingFactor(settings.ReleaseSmoothing, deltaTime);
                 // The ease is asymptotic, so without a settle the clamp reports contact
                 // forever after one touch.
-                if (desired - allowed <= desired * SettleFraction)
+                if (target >= desired && desired - allowed <= desired * SettleFraction)
                 {
                     allowed = desired;
                     _hasAllowance = false;
                 }
             }
-            else
-            {
-                // Never restricted, so there is nothing to ease away from. Easing anyway makes
-                // a lean growing faster than the release rate look like one held off a wall.
-                allowed = desired;
-            }
 
             _allowed = allowed;
+            _shortfall = desired - allowed;
             InContact = allowed < desired;
             return direction * allowed;
         }
@@ -188,6 +198,7 @@ namespace CameraUnlock.Core.Processing
         public void Reset()
         {
             _allowed = 0f;
+            _shortfall = 0f;
             _hasAllowance = false;
             InContact = false;
             LastQueryFailed = false;

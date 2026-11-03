@@ -270,6 +270,86 @@ void TestResetDropsTheAllowance() {
     Check(NearEqual(out.x, 0.4f), "the first lean after a reset takes its answer outright");
 }
 
+// Found in STALKER: tracker noise at rest is a lean of a few microns in a
+// direction that wanders, and an edge in reach blocks it. The clamp cut a
+// lean nobody could see, and the next real lean was rationed from zero by
+// the release ease for over a second.
+void TestUnseenCutDoesNotRationTheNextLean() {
+    LeanClamp clamp = MakeClamp(15.0f);  // centimetres
+    World world;
+
+    world.blocked = true;
+    world.distance = 0.0f;
+    clamp.Apply(Vec3::Zero(), Vec3(0.0f, 0.001f, 0.0f), 0.016f, &Query, &world);
+
+    world.blocked = false;
+    const Vec3 out = clamp.Apply(Vec3::Zero(), Vec3(0.6f, 0.0f, 0.0f), 0.004f, &Query, &world);
+    Check(out.x > 0.59f, "a lean after a cut of a few microns is not rationed by it");
+}
+
+// A lean held off a wall that grows while the release runs keeps the eye
+// moving with the head, plus the release, rather than parked.
+void TestReleaseFollowsAGrowingLean() {
+    LeanClamp clamp = MakeClamp(0.10f);
+    World world;
+
+    world.blocked = true;
+    world.distance = 0.15f;
+    clamp.Apply(Vec3::Zero(), Vec3(0.2f, 0.0f, 0.0f), 0.016f, &Query, &world);
+
+    world.blocked = false;
+    const Vec3 out = clamp.Apply(Vec3::Zero(), Vec3(0.3f, 0.0f, 0.0f), 0.016f, &Query, &world);
+    Check(out.x > 0.05f + 0.1f && out.x < 0.3f, "the eye follows the head's growth while the release runs");
+}
+
+// The floor under the release: pulling the head back while held off a wall
+// does not snap the eye back toward the player.
+void TestPullingBackFromAWallKeepsTheEye() {
+    LeanClamp clamp = MakeClamp(0.10f);
+    World world;
+
+    world.blocked = true;
+    world.distance = 0.20f;
+    clamp.Apply(Vec3::Zero(), Vec3(0.4f, 0.0f, 0.0f), 0.016f, &Query, &world);
+
+    world.blocked = false;
+    const Vec3 out = clamp.Apply(Vec3::Zero(), Vec3(0.15f, 0.0f, 0.0f), 0.016f, &Query, &world);
+    Check(out.x >= 0.10f - 1e-4f && out.x <= 0.15f, "a lean pulled back inside the release does not snap the eye toward the player");
+}
+
+// A wall whose distance wanders a little from frame to frame, as a sweep
+// landing on different triangles gives, eases the eye toward each new answer
+// at the release rate rather than following it.
+void TestWanderingWallIsEased() {
+    LeanClamp clamp = MakeClamp(0.0f);
+    World world;
+    world.blocked = true;
+    world.distance = 10.0f;
+    clamp.Apply(Vec3::Zero(), Vec3(40.0f, 0.0f, 0.0f), 0.016f, &Query, &world);
+
+    world.distance = 11.0f;
+    const Vec3 out = clamp.Apply(Vec3::Zero(), Vec3(40.0f, 0.0f, 0.0f), 0.016f, &Query, &world);
+    const float k = cameraunlock::math::CalculateSmoothingFactor(0.9f, 0.016f);
+    Check(NearEqual(out.x, 10.0f + 1.0f * k, 1e-3f), "a wall that moves back a little is followed at the release rate");
+}
+
+// The settle never puts the eye past a target short of the lean.
+void TestSettleStaysInsideTheTarget() {
+    LeanClamp clamp = MakeClamp(0.0f);
+    World world;
+    world.blocked = true;
+    world.distance = 30.0f;
+    clamp.Apply(Vec3::Zero(), Vec3(40.0f, 0.0f, 0.0f), 0.016f, &Query, &world);
+
+    world.distance = 39.99f;
+    bool inside = true;
+    for (int frame = 0; frame < 240; ++frame) {
+        const Vec3 out = clamp.Apply(Vec3::Zero(), Vec3(40.0f, 0.0f, 0.0f), 0.016f, &Query, &world);
+        if (out.x > 39.99f + 1e-4f) inside = false;
+    }
+    Check(inside, "the release settles on a target just short of the lean without passing it");
+}
+
 }  // namespace
 
 int RunLeanClampTests() {
@@ -288,6 +368,11 @@ int RunLeanClampTests() {
     TestGrowingLeanInOpenSpaceNeverReportsContact();
     TestReleaseSettlesInEngineUnits();
     TestResetDropsTheAllowance();
+    TestUnseenCutDoesNotRationTheNextLean();
+    TestReleaseFollowsAGrowingLean();
+    TestPullingBackFromAWallKeepsTheEye();
+    TestWanderingWallIsEased();
+    TestSettleStaysInsideTheTarget();
 
     if (g_failures == 0) {
         std::cout << "Lean clamp tests: all passed\n";
