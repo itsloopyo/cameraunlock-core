@@ -20,6 +20,11 @@
 //
 //   - GetForegroundWindow answers the game's own window, so neither the game
 //     nor the mod stands down for being in the background.
+//   - GetFocus answers the game's own window on that window's thread where
+//     Windows answers none, as it can while another app has the foreground.
+//     Kingdom Come: Deliverance compares GetFocus with its window from its main
+//     loop; on NULL it raises its focus-lost event, and its mouse keeps the
+//     cursor shown and unclipped until a focus-back event that never comes.
 //   - GetAsyncKeyState answers from the synthetic key state alone, so the mod's
 //     hotkeys fire for the script and not for what is typed into another app.
 //   - GetKeyState and GetKeyboardState answer from the same synthetic state, for
@@ -159,6 +164,7 @@ inline constexpr unsigned kPadPlugWaitMs = 5000;
 using GetRawInputData_t = UINT (WINAPI*)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
 using GetRawInputBuffer_t = UINT (WINAPI*)(PRAWINPUT, PUINT, UINT);
 using GetForegroundWindow_t = HWND (WINAPI*)();
+using GetFocus_t = HWND (WINAPI*)();
 using GetAsyncKeyState_t = SHORT (WINAPI*)(int);
 using GetKeyState_t = SHORT (WINAPI*)(int);
 using GetKeyboardState_t = BOOL (WINAPI*)(PBYTE);
@@ -185,6 +191,7 @@ struct State {
     GetRawInputBuffer_t origGetRawInputBuffer = nullptr;
     std::atomic<bool> realRawInputSeen{false};
     GetForegroundWindow_t origGetForegroundWindow = nullptr;
+    GetFocus_t origGetFocus = nullptr;
     GetAsyncKeyState_t origGetAsyncKeyState = nullptr;
     GetKeyState_t origGetKeyState = nullptr;
     GetKeyboardState_t origGetKeyboardState = nullptr;
@@ -338,6 +345,16 @@ inline UINT WINAPI HookedGetRawInputData(HRAWINPUT handle, UINT command, LPVOID 
 inline HWND WINAPI HookedGetForegroundWindow() {
     const HWND window = S().window.load(std::memory_order_acquire);
     return window ? window : S().origGetForegroundWindow();
+}
+
+// A window Windows does name is kept: it can be a control inside the game that
+// has the keyboard. Windows answers each thread for its own windows, so another
+// thread is answered as Windows answers it.
+inline HWND WINAPI HookedGetFocus() {
+    const HWND focus = S().origGetFocus();
+    if (focus) return focus;
+    const HWND window = S().window.load(std::memory_order_acquire);
+    return window && GetWindowThreadProcessId(window, nullptr) == GetCurrentThreadId() ? window : nullptr;
 }
 
 inline SHORT WINAPI HookedGetAsyncKeyState(int vk) {
@@ -2042,6 +2059,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
         Hook(kUser32, "GetRawInputData", &HookedGetRawInputData, s.origGetRawInputData),
         Hook(kUser32, "GetRawInputBuffer", &HookedGetRawInputBuffer, s.origGetRawInputBuffer),
         Hook(kUser32, "GetForegroundWindow", &HookedGetForegroundWindow, s.origGetForegroundWindow),
+        Hook(kUser32, "GetFocus", &HookedGetFocus, s.origGetFocus),
         Hook(kUser32, "GetAsyncKeyState", &HookedGetAsyncKeyState, s.origGetAsyncKeyState),
         Hook(kUser32, "GetKeyState", &HookedGetKeyState, s.origGetKeyState),
         Hook(kUser32, "GetKeyboardState", &HookedGetKeyboardState, s.origGetKeyboardState),

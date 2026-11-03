@@ -68,6 +68,7 @@ Add-Type -Namespace CameraUnlockHostTest -Name User32 -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr SetCursor(IntPtr cursor);
 [DllImport("user32.dll")] public static extern IntPtr LoadCursorW(IntPtr instance, IntPtr name);
 [DllImport("user32.dll")] public static extern bool GetCursorInfo(int[] info);
+[DllImport("user32.dll")] public static extern IntPtr GetFocus();
 '@
 # Only an XInput DLL the process has loaded when the host starts is detoured, as in a game.
 if ([CameraUnlockHostTest.User32]::LoadLibraryW('xinput1_4.dll') -eq [IntPtr]::Zero) { throw 'xinput1_4.dll did not load' }
@@ -149,6 +150,12 @@ using System.Threading;
 using System.Windows.Forms;
 public class NoActivateForm : Form {
     protected override bool ShowWithoutActivation { get { return true; } }
+    // The WM_ACTIVATE and WM_SETFOCUS the host posts would have Windows give this
+    // thread the focus. Kingdom Come: Deliverance's thread still had none after them.
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == 0x0006 || m.Msg == 0x0007) return;
+        base.WndProc(ref m);
+    }
     protected override CreateParams CreateParams {
         get { CreateParams p = base.CreateParams; p.ExStyle |= 0x08000000 | 0x80; return p; }
     }
@@ -156,6 +163,8 @@ public class NoActivateForm : Form {
 public static class CursorWindow {
     [DllImport("user32.dll")] static extern int ShowCursor(bool show);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] static extern IntPtr GetFocus();
+    static NoActivateForm Window;
     public static IntPtr Handle;
     public static int HiddenCount;
     // Hides the cursor on a thread of its own and makes that thread's window, still hidden.
@@ -169,6 +178,7 @@ public static class CursorWindow {
             form.ShowInTaskbar = false;
             form.Bounds = new System.Drawing.Rectangle(-32000, -32000, 200, 200);
             Handle = form.Handle;
+            Window = form;
             made.Set();
             Application.Run();
         });
@@ -178,6 +188,7 @@ public static class CursorWindow {
         made.WaitOne();
     }
     public static void Show() { ShowWindow(Handle, 4); }
+    public static IntPtr FocusOnItsThread() { return (IntPtr)Window.Invoke(new Func<IntPtr>(GetFocus)); }
 }
 '@
 [CursorWindow]::Start()
@@ -245,6 +256,9 @@ Check 'XInputGetCapabilities answers no controller at an index the script has no
 $arrow = [CameraUnlockHostTest.User32]::LoadCursorW([IntPtr]::Zero, [IntPtr]32512).ToInt64()
 $info = CursorInfo
 Check 'GetCursorInfo answers the arrow, shown, before the game sets a cursor' ($info.Read -and $info.Showing -and $info.Cursor -eq $arrow) "$info"
+# The stand-in window is hidden and was never activated, so Windows names no focus on its thread.
+$focus = [CursorWindow]::FocusOnItsThread()
+Check 'GetFocus on the window''s thread answers what Windows does until the window is taken for the game''s' ($focus -eq [IntPtr]::Zero) "$focus"
 
 # Shown without activation, the window is taken for the game's, and its thread's
 # display count is read there: below zero, though this thread's is at zero.
@@ -258,6 +272,10 @@ do {
 Check 'the host reads the display count on the game window''s thread once it finds the window' ($hostLog -match $read) $hostLog
 $info = CursorInfo
 Check 'GetCursorInfo then answers the cursor that thread hid before the host started as hidden' ($info.Read -and -not $info.Showing) "$info"
+$focus = [CursorWindow]::FocusOnItsThread()
+Check 'GetFocus on the game window''s thread then answers that window' ($focus -eq [CursorWindow]::Handle) "$focus, window $([CursorWindow]::Handle)"
+$focus = [CameraUnlockHostTest.User32]::GetFocus()
+Check 'and on another thread answers what Windows does: none' ($focus -eq [IntPtr]::Zero) "$focus"
 $count = [CameraUnlockHostTest.User32]::ShowCursor($true)
 Check 'and a ShowCursor after that is followed again' ($count -eq 1 -and (CursorInfo).Showing) "count $count"
 [CameraUnlockHostTest.User32]::ShowCursor($false) | Out-Null

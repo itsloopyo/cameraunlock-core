@@ -684,6 +684,7 @@ placed the cursor: start the script with `cursor <x> <y>`.
 | Function | Answer | Why |
 |---|---|---|
 | `GetForegroundWindow` | the game's own window | neither the game nor the mod stands down for being in the background |
+| `GetFocus` | what Windows answers, and on the game window's thread the game's own window where that is none | a game that polls it reads its own window as having the focus. Kingdom Come: Deliverance raises its focus-lost event on a NULL `GetFocus`, and its mouse then keeps the cursor shown and unclipped through play |
 | `GetAsyncKeyState` | the synthetic key state only | the mod's hotkeys fire for the script, not for what is typed elsewhere |
 | `GetKeyState`, `GetKeyboardState` | the synthetic key state only: the high bit while the script holds the key, the low bit flipped by each press. A held `Ctrl`, `Shift` or `Alt` is also held as its left-hand key | an engine that polls keys or modifiers through them sees the script's keyboard. The log names each one the first time the game calls it |
 | the same three, for `VK_LBUTTON`, `VK_RBUTTON` and `VK_MBUTTON` | held while a `mouse` command holds that button | Windows reports mouse buttons through the key state too, and a game can take its aim or fire button from there |
