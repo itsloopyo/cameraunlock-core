@@ -1075,6 +1075,12 @@ inline void SendDirectInputMove(int dx, int dy) {
     d.state.Move(dx, dy, GetTickCount());
 }
 
+inline void SendDirectInputWheel(int dz) {
+    DirectInput& d = D();
+    std::lock_guard<std::mutex> lock(d.mutex);
+    d.state.Wheel(dz, GetTickCount());
+}
+
 // GameInput, the GDK's input API: GameInputRedist.dll from the Microsoft.GameInput NuGet package,
 // or the inbox GameInput.dll. GameInput reads the devices itself and does not stand down for a
 // game in the background: the real mouse turned Minecraft Bedrock's view from behind other windows.
@@ -1522,6 +1528,11 @@ inline void SendGameInputMove(int dx, int dy) {
     G().mouse.Move(dx, dy);
 }
 
+inline void SendGameInputWheel(int dz) {
+    std::lock_guard<std::mutex> lock(G().mutex);
+    G().mouse.Wheel(dz);
+}
+
 inline void SendGameInputButton(MouseButton button, bool down) {
     std::lock_guard<std::mutex> lock(G().mutex);
     G().mouse.Button(button, down);
@@ -1669,13 +1680,14 @@ inline bool SendKey(int vk, bool down) {
     return SendRawKey(vk, down) && directInput;
 }
 
-inline bool SendMouse(USHORT buttonFlags, int dx, int dy) {
+inline bool SendMouse(USHORT buttonFlags, int dx, int dy, int wheel = 0) {
     RAWINPUT event = {};
     event.header.dwType = RIM_TYPEMOUSE;
     event.header.dwSize = sizeof(RAWINPUTHEADER) + sizeof(RAWMOUSE);
     event.header.hDevice = S().mouse;
     event.data.mouse.usFlags = MOUSE_MOVE_RELATIVE;
     event.data.mouse.usButtonFlags = buttonFlags;
+    event.data.mouse.usButtonData = static_cast<USHORT>(static_cast<SHORT>(wheel));
     event.data.mouse.lLastX = dx;
     event.data.mouse.lLastY = dy;
     return Post(event);
@@ -1694,6 +1706,17 @@ inline bool PlaceCursor(int x, int y) {
     S().cursorY.store(y, std::memory_order_relaxed);
     S().cursorPlaced.store(true, std::memory_order_release);
     return PostMessageW(window, WM_MOUSEMOVE, S().buttonsHeld.load(std::memory_order_relaxed), CursorPoint()) != 0;
+}
+
+// Nothing until a `cursor` command has placed the cursor. WM_MOUSEWHEEL
+// carries the point in screen coordinates.
+inline void PostCursorWheel(int wheel) {
+    if (!S().cursorPlaced.load(std::memory_order_acquire)) return;
+    const HWND window = S().window.load(std::memory_order_acquire);
+    POINT point = {S().cursorX.load(std::memory_order_relaxed), S().cursorY.load(std::memory_order_relaxed)};
+    ClientToScreen(window, &point);
+    const WPARAM wparam = MAKEWPARAM(S().buttonsHeld.load(std::memory_order_relaxed), static_cast<WORD>(static_cast<SHORT>(wheel)));
+    PostMessageW(window, WM_MOUSEWHEEL, wparam, MAKELPARAM(point.x, point.y));
 }
 
 // Nothing until a `cursor` command has placed the cursor.
@@ -1832,6 +1855,11 @@ inline bool Play(const InputStep& step) {
             SendDirectInputMove(step.dx, step.dy);
             SendGameInputMove(step.dx, step.dy);
             return SendMouse(0, step.dx, step.dy);
+        case InputAction::kMouseWheel:
+            SendDirectInputWheel(step.wheel);
+            SendGameInputWheel(step.wheel);
+            PostCursorWheel(step.wheel);
+            return SendMouse(RI_MOUSE_WHEEL, 0, 0, step.wheel);
         case InputAction::kCursor:    return PlaceCursor(step.dx, step.dy);
         case InputAction::kWait:      Sleep(step.waitMs); return true;
         case InputAction::kText: {

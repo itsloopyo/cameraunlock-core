@@ -19,6 +19,8 @@
 //                         foreground, for one that came up minimized
 //   mouse <left|right|middle> <down|up|click>
 //   move <dx> <dy>        relative mouse movement, in counts
+//   wheel <notches>       the mouse wheel turned whole notches, away from the
+//                         player for more than zero, towards for less
 //   cursor <x> <y>        put the mouse cursor at a point of the game window's
 //                         client area, in pixels, for a menu that reads where
 //                         the cursor is and not how the mouse moved
@@ -45,7 +47,7 @@
 
 namespace cameraunlock::dev {
 
-enum class InputAction { kKeyDown, kKeyUp, kPostDown, kPostUp, kActivate, kMouseDown, kMouseUp, kMouseMove, kCursor, kText, kWait, kPad };
+enum class InputAction { kKeyDown, kKeyUp, kPostDown, kPostUp, kActivate, kMouseDown, kMouseUp, kMouseMove, kMouseWheel, kCursor, kText, kWait, kPad };
 enum class MouseButton { kLeft, kRight, kMiddle };
 
 struct InputStep {
@@ -55,6 +57,8 @@ struct InputStep {
     // The movement of kMouseMove, or the client-area point of kCursor.
     int dx = 0;
     int dy = 0;
+    // kMouseWheel: the wheel's turn in WHEEL_DELTA units, 120 a notch.
+    int wheel = 0;
     unsigned waitMs = 0;
     std::string text;
     // kPad: which controller, what on it, and what it is set to.
@@ -68,6 +72,10 @@ struct InputStep {
 
 inline constexpr unsigned kDefaultTapHoldMs = 60;
 inline constexpr unsigned kPadTapHoldMs = 150;
+inline constexpr int kWheelDelta = 120;
+// More notches than a hand turns in one go would overflow the 16 bits a raw
+// mouse event carries the turn in.
+inline constexpr int kMaxWheelNotches = 100;
 // The virtual-key codes of the three modifiers, either side.
 inline constexpr int kVkShift = 0x10;
 inline constexpr int kVkControl = 0x11;
@@ -260,6 +268,19 @@ inline bool ParseInputLine(std::string_view line, std::vector<InputStep>& out, s
             error = "expected two whole numbers";
             return false;
         }
+        out.push_back(step);
+        return true;
+    }
+    if (EqualsIgnoreCase(command, "wheel")) {
+        InputStep step;
+        step.action = InputAction::kMouseWheel;
+        int notches = 0;
+        if (!ParseNumber(NextWord(rest), notches) || notches == 0 || notches > kMaxWheelNotches
+            || notches < -kMaxWheelNotches || !Trim(rest).empty()) {
+            error = "expected a whole number of notches, -100 to 100 and not 0";
+            return false;
+        }
+        step.wheel = notches * kWheelDelta;
         out.push_back(step);
         return true;
     }

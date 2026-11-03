@@ -113,6 +113,16 @@ int RunInputScriptTests() {
     Check(Rejects("cursor -5 20"), "cursor refuses a point left of the client area");
     Check(Rejects("move 10"), "move refuses one number");
     Check(Rejects("move 1.5 2"), "move refuses a fraction");
+    steps = Parse("wheel -3", ok);
+    Check(ok && steps.size() == 1 && steps[0].action == InputAction::kMouseWheel && steps[0].wheel == -360,
+          "wheel takes signed notches, 120 to a notch");
+    steps = Parse("wheel 100", ok);
+    Check(ok && steps.size() == 1 && steps[0].wheel == 12000, "wheel takes up to 100 notches");
+    Check(Rejects("wheel 0"), "wheel refuses no turn");
+    Check(Rejects("wheel 101"), "wheel refuses more notches than a raw mouse event holds");
+    Check(Rejects("wheel"), "wheel refuses no number");
+    Check(Rejects("wheel 2 3"), "wheel refuses a second number");
+    Check(Rejects("wheel 1.5"), "wheel refuses part of a notch");
     Check(Rejects("wait"), "wait refuses no time");
     Check(Rejects("text"), "text refuses nothing to type");
 

@@ -37,12 +37,15 @@ int RunGameInputStateTests() {
               "a mouse the script has not touched holds no button and has not moved");
         Check(still.positions == cameraunlock::dev::kGameInputMouseRelativePosition && still.absolutePositionX == 0
                   && still.absolutePositionY == 0 && still.wheelX == 0 && still.wheelY == 0,
-              "the mouse reports relative movement only, and no wheel");
+              "the mouse reports relative movement only, and a wheel that has not turned");
         mouse.Move(300, -20);
         mouse.Move(-100, 5);
         const GameInputMouseState moved = mouse.State();
         Check(moved.positionX == 200 && moved.positionY == -15, "moves add up, so each is reported once");
         Check(mouse.State().positionX == 200, "reading the state again does not move the mouse");
+        mouse.Wheel(-360);
+        mouse.Wheel(120);
+        Check(mouse.State().wheelY == -240 && mouse.State().wheelX == 0, "wheel turns add up on the vertical wheel");
     }
 
     {

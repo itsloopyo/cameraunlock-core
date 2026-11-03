@@ -24,6 +24,7 @@ using cameraunlock::dev::DirectInputKeyStroke;
 using cameraunlock::dev::DirectInputKind;
 using cameraunlock::dev::DirectInputReader;
 using cameraunlock::dev::DirectInputState;
+using cameraunlock::dev::kMouseOffsetZ;
 using cameraunlock::dev::MouseButton;
 using cameraunlock::dev::UsKeyStroke;
 using cameraunlock::dev::VkToDik;
@@ -151,6 +152,21 @@ int RunDirectInputStateTests() {
         Check(state.FormattedState(second, four, small, sizeof(small)) && Axis(small, 0) == 4
                   && state.FormattedState(mouse, four, small, sizeof(small)) && Axis(small, 0) == 4,
               "each device has the movement once, and a new device none from before it");
+
+        DirectInputReader buffered = state.Open(DirectInputKind::kMouse);
+        state.Wheel(-240, 11);
+        state.Wheel(120, 12);
+        Check(state.FormattedState(mouse, four, small, sizeof(small)) && Axis(small, 8) == -120 && Axis(small, 0) == 0,
+              "the wheel reads its turn since the last read");
+        Check(state.FormattedState(mouse, four, small, sizeof(small)) && Axis(small, 8) == 0, "a turn is reported once");
+        DirectInputReader late = state.Open(DirectInputKind::kMouse);
+        Check(state.FormattedState(late, four, small, sizeof(small)) && Axis(small, 8) == 0,
+              "a new device is owed no turn from before it");
+        DirectInputEvent turns[4];
+        bool lost = false;
+        Check(state.ReadEvents(buffered, turns, 4, false, lost) == 2 && turns[0].offset == kMouseOffsetZ
+                  && static_cast<int32_t>(turns[0].data) == -240 && turns[1].sequence != turns[0].sequence,
+              "each turn is a buffered wheel event of its own");
     }
 
     {

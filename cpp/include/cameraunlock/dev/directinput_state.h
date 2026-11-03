@@ -218,6 +218,7 @@ struct DirectInputReader {
     uint64_t next = 0;
     int64_t seenX = 0;
     int64_t seenY = 0;
+    int64_t seenZ = 0;
 };
 
 class DirectInputState {
@@ -251,6 +252,12 @@ public:
         ++sequence_;
     }
 
+    void Wheel(int dz, uint32_t timeMs) {
+        if (dz == 0) return;
+        totalZ_ += dz;
+        Push(mouse_, kMouseOffsetZ, static_cast<uint32_t>(dz), timeMs, sequence_++);
+    }
+
     // A device that starts reading now: it is owed nothing from before.
     DirectInputReader Open(DirectInputKind kind) const {
         DirectInputReader reader;
@@ -258,13 +265,14 @@ public:
         reader.next = (kind == DirectInputKind::kKeyboard ? keyboard_ : mouse_).count;
         reader.seenX = totalX_;
         reader.seenY = totalY_;
+        reader.seenZ = totalZ_;
         return reader;
     }
 
     // The device's state in the format the game set. `size` must be the format's
     // size, or, for a format read back with no size, at least what its entries
     // reach to. Each key or button in the format reads 0x80 while held, each axis
-    // the movement since this reader last asked (the wheel never moves), and
+    // the movement since this reader last asked, the wheel's turn among them, and
     // every other byte 0. False, with nothing written or spent, for another size.
     bool FormattedState(DirectInputReader& reader, const DirectInputFormat& format, uint8_t* out, size_t size) const {
         if (format.dataSize != 0 ? size != format.dataSize : size < format.Extent()) return false;
@@ -273,7 +281,7 @@ public:
             if (entry.axis) {
                 const int32_t value = entry.standardOffset == kMouseOffsetX   ? static_cast<int32_t>(totalX_ - reader.seenX)
                                       : entry.standardOffset == kMouseOffsetY ? static_cast<int32_t>(totalY_ - reader.seenY)
-                                                                              : 0;
+                                                                              : static_cast<int32_t>(totalZ_ - reader.seenZ);
                 std::memcpy(out + entry.offset, &value, sizeof(value));
             } else if (Held(reader.kind, entry.standardOffset)) {
                 out[entry.offset] = 0x80;
@@ -282,6 +290,7 @@ public:
         if (reader.kind == DirectInputKind::kMouse) {
             reader.seenX = totalX_;
             reader.seenY = totalY_;
+            reader.seenZ = totalZ_;
         }
         return true;
     }
@@ -338,6 +347,7 @@ private:
     bool buttons_[3] = {};
     int64_t totalX_ = 0;
     int64_t totalY_ = 0;
+    int64_t totalZ_ = 0;
     uint32_t sequence_ = 1;
     Log keyboard_;
     Log mouse_;

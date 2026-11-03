@@ -61,11 +61,14 @@ struct GameInputMouse {
     uint32_t buttons = 0;
     int64_t x = 0;
     int64_t y = 0;
+    int64_t wheel = 0;
 
     void Move(int dx, int dy) {
         x += dx;
         y += dy;
     }
+
+    void Wheel(int dz) { wheel += dz; }
 
     void Button(MouseButton button, bool down) {
         const uint32_t bit = button == MouseButton::kLeft    ? kGameInputMouseLeft
@@ -75,7 +78,7 @@ struct GameInputMouse {
     }
 
     GameInputMouseState State() const {
-        return {buttons, kGameInputMouseRelativePosition, x, y, 0, 0, 0, 0};
+        return {buttons, kGameInputMouseRelativePosition, x, y, 0, 0, 0, wheel};
     }
 };
 
