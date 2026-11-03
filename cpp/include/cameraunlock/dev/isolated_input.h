@@ -44,6 +44,9 @@
 //     game's setting is followed through ShowCursor's display count, the cursor
 //     SetCursor was last given, and the cursor the window has after
 //     WM_SETCURSOR, which is where DefWindowProc puts the class cursor back.
+//     The display count is read once on the window's own thread when the
+//     window is taken over, so a cursor the game hid before the mod loaded
+//     reads as hidden, unless a ShowCursor call has already passed the detour.
 //
 // And two things that keep the game in the background without it knowing:
 //
@@ -194,9 +197,13 @@ struct State {
     SetCursor_t origSetCursor = nullptr;
     GetCursorInfo_t origGetCursorInfo = nullptr;
 
+    // Sent to the game window to read its thread's display count there.
+    UINT readCursorMessage = 0;
     // The cursor as the game last set it, from whichever of its threads set it
-    // last. The arrow until the game sets one.
+    // last. The arrow until the game sets one; the count is 0 until the game
+    // window's thread is read or the game calls ShowCursor.
     std::atomic<int> displayCount{0};
+    std::atomic<bool> showCursorCalled{false};
     std::atomic<HCURSOR> cursor{nullptr};
     std::atomic<bool> cursorInfoRead{false};
     std::atomic<bool> mouseLeaveWithheld{false};
@@ -413,6 +420,7 @@ inline BOOL WINAPI HookedGetCursorPos(LPPOINT point) {
 inline int WINAPI HookedShowCursor(BOOL show) {
     const int count = S().origShowCursor(show);
     S().displayCount.store(count, std::memory_order_release);
+    S().showCursorCalled.store(true, std::memory_order_release);
     return count;
 }
 
@@ -1853,6 +1861,25 @@ inline void RunCommandFile() {
 }
 
 inline LRESULT CALLBACK GameWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    // ShowCursor's display count belongs to the calling thread. Showing and
+    // hiding once reads the count and leaves it as it was.
+    if (message == S().readCursorMessage) {
+        S().origShowCursor(TRUE);
+        const int count = S().origShowCursor(FALSE);
+        char line[240];
+        if (S().showCursorCalled.load(std::memory_order_acquire)) {
+            std::snprintf(line, sizeof(line),
+                          "isolated input: the game window's thread has a cursor display count of %d; the game has "
+                          "already called ShowCursor, so GetCursorInfo keeps that call's count of %d",
+                          count, S().displayCount.load(std::memory_order_acquire));
+        } else {
+            S().displayCount.store(count, std::memory_order_release);
+            std::snprintf(line, sizeof(line), "isolated input: the game window's thread has a cursor display count of %d%s",
+                          count, count < 0 ? ", so GetCursorInfo answers the cursor hidden" : "");
+        }
+        Log(line);
+        return 0;
+    }
     const bool leftForeground = (message == WM_ACTIVATEAPP && wParam == FALSE) ||
                                 (message == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE) || message == WM_KILLFOCUS;
     if (leftForeground) return 0;
@@ -1907,6 +1934,9 @@ inline void WatchGameWindow() {
     PostMessageW(window, WM_ACTIVATE, WA_ACTIVE, 0);
     PostMessageW(window, WM_SETFOCUS, 0, 0);
     Log("isolated input: game window found");
+    // Not waited for: the window may not pump messages for seconds after it is made,
+    // and this thread gives the real foreground back.
+    SendNotifyMessageW(window, S().readCursorMessage, 0, 0);
 }
 
 // Keeps the real foreground away from the game: remembers which window of
@@ -1998,6 +2028,13 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
     s.log = log;
     s.commandFile = commandFile;
     s.cursor.store(LoadCursor(nullptr, IDC_ARROW), std::memory_order_release);
+    s.readCursorMessage = RegisterWindowMessageW(L"CameraUnlockIsolatedInputReadCursor");
+    if (!s.readCursorMessage) {
+        char line[96];
+        std::snprintf(line, sizeof(line), "isolated input: RegisterWindowMessage failed (error %lu)", GetLastError());
+        Log(line);
+        return false;
+    }
     FindDevices();
 
     static const wchar_t* const kUser32 = L"user32.dll";

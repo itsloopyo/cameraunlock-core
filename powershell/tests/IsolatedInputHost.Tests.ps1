@@ -12,8 +12,9 @@
 # is held on the real keyboard.
 #
 # The detours go into a child process this test starts and ends. That process
-# has no window, so nothing is posted to one: what a game's window receives is
-# not covered here.
+# has one window, made off screen and never activated, whose thread hides its
+# cursor before the host starts: it stands in for a game that hid its cursor
+# before the mod was loaded. What a game's window receives is not covered here.
 # ============================================================================
 
 param([switch]$Child, [string]$Folder, [string]$CoreDll, [string]$HostDll)
@@ -141,6 +142,46 @@ Add-Type -Namespace CameraUnlockHostTest -Name Host -MemberDefinition @"
 [DllImport(@"$(Join-Path $mod 'CameraUnlockIsolatedInput.dll')")] public static extern int CameraUnlockHoldIsolatedKey(int vk, int down);
 "@
 Check 'a key is not held before the host has started' ([CameraUnlockHostTest.Host]::CameraUnlockHoldIsolatedKey(0x43, 1) -eq 1)
+Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Windows.Forms;
+public class NoActivateForm : Form {
+    protected override bool ShowWithoutActivation { get { return true; } }
+    protected override CreateParams CreateParams {
+        get { CreateParams p = base.CreateParams; p.ExStyle |= 0x08000000 | 0x80; return p; }
+    }
+}
+public static class CursorWindow {
+    [DllImport("user32.dll")] static extern int ShowCursor(bool show);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
+    public static IntPtr Handle;
+    public static int HiddenCount;
+    // Hides the cursor on a thread of its own and makes that thread's window, still hidden.
+    public static void Start() {
+        ManualResetEvent made = new ManualResetEvent(false);
+        Thread thread = new Thread(() => {
+            HiddenCount = ShowCursor(false);
+            NoActivateForm form = new NoActivateForm();
+            form.StartPosition = FormStartPosition.Manual;
+            form.FormBorderStyle = FormBorderStyle.None;
+            form.ShowInTaskbar = false;
+            form.Bounds = new System.Drawing.Rectangle(-32000, -32000, 200, 200);
+            Handle = form.Handle;
+            made.Set();
+            Application.Run();
+        });
+        thread.IsBackground = true;
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        made.WaitOne();
+    }
+    public static void Show() { ShowWindow(Handle, 4); }
+}
+'@
+[CursorWindow]::Start()
+Check 'the stand-in window''s thread hid its cursor before the host started' ([CursorWindow]::HiddenCount -eq -1) "count $([CursorWindow]::HiddenCount)"
 Check 'with both it starts' ([CameraUnlock.Core.Dev.IsolatedInput]::StartIfAsked($mod, $log))
 Check 'and logs where the input now comes from' ($lines.Count -eq 1 -and $lines[0] -match 'CameraUnlockInput\.txt') ($lines -join ' | ')
 Check 'a second start in the same process throws' `
@@ -199,11 +240,27 @@ Check 'XInputGetState reports its A button held' ($result -eq 0 -and ([BitConver
 Check 'XInputGetCapabilities answers no controller at an index the script has not named' `
     ([CameraUnlockHostTest.User32]::XInputGetCapabilities(1, 1, $capabilities) -eq $notConnected)
 
-# The child has no window and is not in front, so Windows would answer GetCursorInfo for the
-# window that is, and nothing this process does would hide that cursor.
+# The child is not in front and its one window is still hidden, so Windows would answer
+# GetCursorInfo for the window that is, and nothing this process does would hide that cursor.
 $arrow = [CameraUnlockHostTest.User32]::LoadCursorW([IntPtr]::Zero, [IntPtr]32512).ToInt64()
 $info = CursorInfo
 Check 'GetCursorInfo answers the arrow, shown, before the game sets a cursor' ($info.Read -and $info.Showing -and $info.Cursor -eq $arrow) "$info"
+
+# Shown without activation, the window is taken for the game's, and its thread's
+# display count is read there: below zero, though this thread's is at zero.
+[CursorWindow]::Show()
+$read = 'the game window''s thread has a cursor display count of -1, so GetCursorInfo answers the cursor hidden'
+$deadline = (Get-Date).AddSeconds(5)
+do {
+    Start-Sleep -Milliseconds 100
+    $hostLog = Get-Content (Join-Path $mod 'CameraUnlockIsolatedInput.log') -Raw
+} while ($hostLog -notmatch $read -and (Get-Date) -lt $deadline)
+Check 'the host reads the display count on the game window''s thread once it finds the window' ($hostLog -match $read) $hostLog
+$info = CursorInfo
+Check 'GetCursorInfo then answers the cursor that thread hid before the host started as hidden' ($info.Read -and -not $info.Showing) "$info"
+$count = [CameraUnlockHostTest.User32]::ShowCursor($true)
+Check 'and a ShowCursor after that is followed again' ($count -eq 1 -and (CursorInfo).Showing) "count $count"
+[CameraUnlockHostTest.User32]::ShowCursor($false) | Out-Null
 $count = [CameraUnlockHostTest.User32]::ShowCursor($false)
 $info = CursorInfo
 Check 'ShowCursor(FALSE) takes the display count below zero and GetCursorInfo answers it hidden' ($count -eq -1 -and $info.Read -and -not $info.Showing) "count $count, $info"
