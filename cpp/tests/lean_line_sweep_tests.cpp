@@ -46,6 +46,10 @@ struct World {
     std::vector<Box> boxes;
     std::vector<Wall> walls;
     bool fail = false;
+    // Casts from this many on cannot run.
+    int failFrom = -1;
+    // The cast gives no surface normal, as X-Ray's rain ray pick gives none.
+    bool noNormals = false;
     int casts = 0;
 };
 
@@ -94,15 +98,17 @@ LineHit CastWall(const Wall& w, const Vec3& s, const Vec3& d, float length) {
 
 LineHit Cast(void* context, const Vec3& s, const Vec3& d, float length) {
     World& world = *static_cast<World*>(context);
+    const bool fail = world.fail || (world.failFrom >= 0 && world.casts >= world.failFrom);
     ++world.casts;
     LineHit best;
-    best.queried = !world.fail;
-    if (world.fail) return best;
+    best.queried = !fail;
+    if (fail) return best;
     const auto take = [&best](const LineHit& h) {
         if (h.hit && (!best.hit || h.distance < best.distance)) best = h;
     };
     for (const Box& b : world.boxes) take(CastBox(b, s, d, length));
     for (const Wall& w : world.walls) take(CastWall(w, s, d, length));
+    if (world.noNormals) best.normal = Vec3::Zero();
     return best;
 }
 
@@ -204,6 +210,137 @@ void TestLeanInAnyDirection() {
     Check(o.blocked && NearEqual(o.distance - 0.1f, 0.2f), "a lean straight up stops a radius under the ceiling");
 }
 
+// A plane through `point` whose normal is `degrees` off the lean (+z), tilted
+// about the y axis, facing the eye.
+Wall TiltedWall(float degrees, const Vec3& point) {
+    const float a = degrees * 0.01745329252f;
+    const Vec3 n(std::sin(a), 0.0f, -std::cos(a));
+    return {n, Vec3::Dot(n, point)};
+}
+
+void TestNoNormalWallFacingTheLean() {
+    World world;
+    world.noNormals = true;
+    world.walls.push_back({Vec3(0.0f, 0.0f, -1.0f), -0.35f});
+    LineSweep sweep = MakeSweep(world);
+    const LeanObstruction o = Ask(sweep, 0.3f);
+    Check(o.blocked && NearEqual(o.distance - 0.1f, 0.25f, 1e-3f),
+          "with no normal from the cast, a wall facing the lean still stops the centre a radius short");
+    Check(world.casts == 1 + 4 + 2 * sweep.settings.ring_rays, "four casts beside the centre ray measure the surface");
+}
+
+void TestNoNormalObliqueWall() {
+    World world;
+    world.noNormals = true;
+    world.walls.push_back(TiltedWall(60.0f, Vec3(0.0f, 0.0f, 0.5f)));
+    LineSweep sweep = MakeSweep(world);
+    const LeanObstruction o = Ask(sweep, 0.45f);
+    Check(o.blocked && NearEqual(o.distance - 0.1f, 0.3f, 1e-3f),
+          "with no normal from the cast, an oblique wall stops the centre at radius / cos");
+}
+
+void TestNoNormalTiltedBothWays() {
+    World world;
+    world.noNormals = true;
+    // Normal 40 degrees off the lean, out of the plane of either basis axis.
+    const Vec3 n = Vec3(0.4f, 0.3f, -std::sqrt(1.0f - 0.25f));
+    world.walls.push_back({n, Vec3::Dot(n, Vec3(0.0f, 0.0f, 0.6f))});
+    LineSweep sweep = MakeSweep(world);
+    const LeanObstruction o = Ask(sweep, 0.55f);
+    const float c = std::fabs(n.z);
+    Check(o.blocked && NearEqual(o.distance - 0.1f, 0.6f - 0.1f / c, 1e-3f),
+          "the angle is measured whatever way the surface tilts across the lean");
+}
+
+void TestNoNormalSteepWallTakesTheWorstAngle() {
+    World world;
+    world.noNormals = true;
+    // 75.7 degrees, just past the worst angle allowed (75.5), and not so steep
+    // that the ring ray on its near side stops the sphere first.
+    world.walls.push_back(TiltedWall(75.7f, Vec3(0.0f, 0.0f, 0.6f)));
+    LineSweep sweep = MakeSweep(world);
+    const LeanObstruction o = Ask(sweep, 0.55f);
+    Check(o.blocked && NearEqual(o.distance - 0.1f, 0.6f - 0.1f / sweep.settings.min_cosine, 1e-3f),
+          "a surface past the worst angle allowed is read at that angle");
+
+    world.walls[0] = TiltedWall(80.0f, Vec3(0.0f, 0.0f, 0.6f));
+    Vec3 u, v;
+    cameraunlock::camera::detail::PerpendicularBasis(Vec3(0.0f, 0.0f, 1.0f), u, v);
+    float c = 0.0f;
+    const bool ran = cameraunlock::camera::detail::MeasuredCosine(sweep, Vec3::Zero(), Vec3(0.0f, 0.0f, 1.0f), u, v, 0.6f, c);
+    Check(ran && c == sweep.settings.min_cosine, "an 80 degree surface measures as the worst angle allowed");
+}
+
+void TestNoNormalAtCentimetreScale() {
+    World world;
+    world.noNormals = true;
+    world.walls.push_back(TiltedWall(30.0f, Vec3(0.0f, 0.0f, 300.0f)));
+    LineSweep sweep = MakeSweep(world, 15.0f);
+    const LeanObstruction o = Ask(sweep, 295.0f);
+    Check(o.blocked && NearEqual(o.distance - 15.0f, 300.0f - 15.0f / std::cos(0.5235988f), 0.05f),
+          "a 15 cm radius 3 m out holds the eye a radius off an oblique wall");
+}
+
+void TestWallWithANormalCastsNoMore() {
+    World world;
+    world.walls.push_back({Vec3(0.0f, 0.0f, -1.0f), -0.35f});
+    LineSweep sweep = MakeSweep(world);
+    Ask(sweep, 0.3f);
+    Check(world.casts == 1 + 2 * sweep.settings.ring_rays, "a cast that gives a normal costs no casts beside the centre ray");
+}
+
+void TestNoNormalInsideCornerTakesTheWorstAngle() {
+    World world;
+    world.noNormals = true;
+    // Two walls meeting in a vertical inside corner 0.6 ahead, each 45 degrees
+    // off the lean. A flat reading of the corner would see a wall facing the
+    // lean and hold the centre 0.1 off the corner, 0.07 off each wall.
+    world.walls.push_back(TiltedWall(45.0f, Vec3(0.0f, 0.0f, 0.6f)));
+    world.walls.push_back(TiltedWall(-45.0f, Vec3(0.0f, 0.0f, 0.6f)));
+    LineSweep sweep = MakeSweep(world);
+    const LeanObstruction o = Ask(sweep, 0.55f);
+    Check(o.blocked && NearEqual(o.distance - 0.1f, 0.6f - 0.1f / sweep.settings.min_cosine, 1e-3f),
+          "an inside corner is not read as one flat wall");
+}
+
+void TestNoNormalEdgeTakesTheWorstAngle() {
+    World world;
+    world.noNormals = true;
+    // The centre ray meets a box's face 1 cm from its edge, so one ray beside
+    // it passes the box.
+    world.boxes.push_back({Vec3(-0.01f, -1.0f, 0.6f), Vec3(1.0f, 1.0f, 0.8f)});
+    LineSweep sweep = MakeSweep(world);
+    const LeanObstruction o = Ask(sweep, 0.55f);
+    Check(o.blocked && NearEqual(o.distance - 0.1f, 0.6f - 0.1f / sweep.settings.min_cosine, 1e-3f),
+          "a ray beside the centre that misses reads as the worst angle");
+}
+
+void TestNoNormalThinObjectBeforeAWallTakesTheWorstAngle() {
+    World world;
+    world.noNormals = true;
+    // A slat 1 cm wide straight ahead with a wall 2 cm behind it. The rays
+    // beside the centre pass the slat and meet the wall, which looks like a
+    // bulge toward the eye but says nothing about the slat's own faces.
+    world.boxes.push_back({Vec3(-0.005f, -1.0f, 0.6f), Vec3(0.005f, 1.0f, 1.0f)});
+    world.walls.push_back({Vec3(0.0f, 0.0f, -1.0f), -0.62f});
+    LineSweep sweep = MakeSweep(world);
+    const LeanObstruction o = Ask(sweep, 0.55f);
+    Check(o.blocked && NearEqual(o.distance - 0.1f, 0.6f - 0.1f / sweep.settings.min_cosine, 1e-3f),
+          "a thin object before a wall is read at the worst angle allowed");
+}
+
+void TestNoNormalFailedMeasureIsUnanswered() {
+    World world;
+    world.noNormals = true;
+    world.walls.push_back({Vec3(0.0f, 0.0f, -1.0f), -0.35f});
+    LineSweep sweep = MakeSweep(world);
+    for (int from = 1; from <= 4; ++from) {
+        world.failFrom = from;
+        world.casts = 0;
+        Check(!Ask(sweep, 0.3f).queried, "a cast measuring the surface that cannot run leaves the query unanswered");
+    }
+}
+
 }  // namespace
 
 int RunLeanLineSweepTests() {
@@ -218,6 +355,16 @@ int RunLeanLineSweepTests() {
     TestFailedCastIsUnanswered();
     TestClampStopsAtTheSweep();
     TestLeanInAnyDirection();
+    TestNoNormalWallFacingTheLean();
+    TestNoNormalObliqueWall();
+    TestNoNormalTiltedBothWays();
+    TestNoNormalSteepWallTakesTheWorstAngle();
+    TestNoNormalAtCentimetreScale();
+    TestWallWithANormalCastsNoMore();
+    TestNoNormalInsideCornerTakesTheWorstAngle();
+    TestNoNormalEdgeTakesTheWorstAngle();
+    TestNoNormalThinObjectBeforeAWallTakesTheWorstAngle();
+    TestNoNormalFailedMeasureIsUnanswered();
 
     if (g_failures == 0) {
         std::cout << "Lean line sweep tests: all passed\n";

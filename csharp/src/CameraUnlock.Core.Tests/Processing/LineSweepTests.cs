@@ -31,15 +31,21 @@ namespace CameraUnlock.Core.Tests.Processing
             public readonly List<Box> Boxes = new List<Box>();
             public readonly List<Wall> Walls = new List<Wall>();
             public bool Fail;
+            // Casts from this many on cannot run.
+            public int FailFrom = -1;
+            // The cast gives no surface normal, as X-Ray's rain ray pick gives none.
+            public bool NoNormals;
             public int Casts;
 
             public LineHit Cast(Vec3 s, Vec3 d, float length)
             {
+                bool fail = Fail || (FailFrom >= 0 && Casts >= FailFrom);
                 Casts++;
-                if (Fail) return new LineHit();
+                if (fail) return new LineHit();
                 LineHit best = LineHit.Miss;
                 foreach (Box b in Boxes) best = Nearer(best, CastBox(b, s, d, length));
                 foreach (Wall w in Walls) best = Nearer(best, CastWall(w, s, d, length));
+                if (NoNormals) best.Normal = Vec3.Zero;
                 return best;
             }
 
@@ -192,6 +198,144 @@ namespace CameraUnlock.Core.Tests.Processing
             LeanObstruction o = Ask(MakeSweep(world), 0.25f, new Vec3(0f, 1f, 0f));
             Assert.True(o.Blocked);
             Near(0.2f, o.Distance - 0.1f);
+        }
+
+        // A plane through `point` whose normal is `degrees` off the lean (+z), tilted about the
+        // y axis, facing the eye.
+        private static Wall TiltedWall(float degrees, Vec3 point)
+        {
+            double a = degrees * System.Math.PI / 180.0;
+            var n = new Vec3((float)System.Math.Sin(a), 0f, -(float)System.Math.Cos(a));
+            return new Wall(n, Vec3.Dot(n, point));
+        }
+
+        [Fact]
+        public void NoNormalWallFacingTheLean()
+        {
+            var world = new World { NoNormals = true };
+            world.Walls.Add(new Wall(new Vec3(0f, 0f, -1f), -0.35f));
+            LineSweep sweep = MakeSweep(world);
+            LeanObstruction o = Ask(sweep, 0.3f, Forward);
+            Assert.True(o.Blocked);
+            Near(0.25f, o.Distance - 0.1f, 1e-3f);
+            Assert.Equal(1 + 4 + 2 * sweep.Settings.RingRays, world.Casts);
+        }
+
+        [Fact]
+        public void NoNormalObliqueWall()
+        {
+            var world = new World { NoNormals = true };
+            world.Walls.Add(TiltedWall(60f, new Vec3(0f, 0f, 0.5f)));
+            LeanObstruction o = Ask(MakeSweep(world), 0.45f, Forward);
+            Assert.True(o.Blocked);
+            Near(0.3f, o.Distance - 0.1f, 1e-3f);
+        }
+
+        [Fact]
+        public void NoNormalTiltedBothWays()
+        {
+            var world = new World { NoNormals = true };
+            // Normal 40 degrees off the lean, out of the plane of either basis axis.
+            var n = new Vec3(0.4f, 0.3f, -(float)System.Math.Sqrt(0.75));
+            world.Walls.Add(new Wall(n, Vec3.Dot(n, new Vec3(0f, 0f, 0.6f))));
+            LeanObstruction o = Ask(MakeSweep(world), 0.55f, Forward);
+            Assert.True(o.Blocked);
+            Near(0.6f - 0.1f / System.Math.Abs(n.Z), o.Distance - 0.1f, 1e-3f);
+        }
+
+        [Fact]
+        public void NoNormalSteepWallTakesTheWorstAngle()
+        {
+            var world = new World { NoNormals = true };
+            // 75.7 degrees, just past the worst angle allowed (75.5), and not so steep that the
+            // ring ray on its near side stops the sphere first.
+            world.Walls.Add(TiltedWall(75.7f, new Vec3(0f, 0f, 0.6f)));
+            LineSweep sweep = MakeSweep(world);
+            LeanObstruction o = Ask(sweep, 0.55f, Forward);
+            Assert.True(o.Blocked);
+            Near(0.6f - 0.1f / sweep.Settings.MinCosine, o.Distance - 0.1f, 1e-3f);
+
+            world.Walls[0] = TiltedWall(80f, new Vec3(0f, 0f, 0.6f));
+            Vec3 u, v;
+            LineSweep.PerpendicularBasis(Forward, out u, out v);
+            float c;
+            Assert.True(sweep.MeasuredCosine(sweep.Settings, Vec3.Zero, Forward, u, v, 0.6f, out c));
+            Assert.Equal(sweep.Settings.MinCosine, c);
+        }
+
+        [Fact]
+        public void NoNormalAtCentimetreScale()
+        {
+            var world = new World { NoNormals = true };
+            world.Walls.Add(TiltedWall(30f, new Vec3(0f, 0f, 300f)));
+            LeanObstruction o = Ask(MakeSweep(world, 15f), 295f, Forward);
+            Assert.True(o.Blocked);
+            Near(300f - 15f / (float)System.Math.Cos(System.Math.PI / 6.0), o.Distance - 15f, 0.05f);
+        }
+
+        [Fact]
+        public void WallWithANormalCastsNoMore()
+        {
+            var world = new World();
+            world.Walls.Add(new Wall(new Vec3(0f, 0f, -1f), -0.35f));
+            LineSweep sweep = MakeSweep(world);
+            Ask(sweep, 0.3f, Forward);
+            Assert.Equal(1 + 2 * sweep.Settings.RingRays, world.Casts);
+        }
+
+        [Fact]
+        public void NoNormalInsideCornerTakesTheWorstAngle()
+        {
+            var world = new World { NoNormals = true };
+            // Two walls meeting in a vertical inside corner 0.6 ahead, each 45 degrees off the
+            // lean. A flat reading of the corner would see a wall facing the lean and hold the
+            // centre 0.1 off the corner, 0.07 off each wall.
+            world.Walls.Add(TiltedWall(45f, new Vec3(0f, 0f, 0.6f)));
+            world.Walls.Add(TiltedWall(-45f, new Vec3(0f, 0f, 0.6f)));
+            LineSweep sweep = MakeSweep(world);
+            LeanObstruction o = Ask(sweep, 0.55f, Forward);
+            Assert.True(o.Blocked);
+            Near(0.6f - 0.1f / sweep.Settings.MinCosine, o.Distance - 0.1f, 1e-3f);
+        }
+
+        [Fact]
+        public void NoNormalEdgeTakesTheWorstAngle()
+        {
+            var world = new World { NoNormals = true };
+            // The centre ray meets a box's face 1 cm from its edge, so one ray beside it passes
+            // the box.
+            world.Boxes.Add(new Box(new Vec3(-0.01f, -1f, 0.6f), new Vec3(1f, 1f, 0.8f)));
+            LineSweep sweep = MakeSweep(world);
+            LeanObstruction o = Ask(sweep, 0.55f, Forward);
+            Assert.True(o.Blocked);
+            Near(0.6f - 0.1f / sweep.Settings.MinCosine, o.Distance - 0.1f, 1e-3f);
+        }
+
+        [Fact]
+        public void NoNormalThinObjectBeforeAWallTakesTheWorstAngle()
+        {
+            var world = new World { NoNormals = true };
+            // A slat 1 cm wide straight ahead with a wall 2 cm behind it. The rays beside the
+            // centre pass the slat and meet the wall, which looks like a bulge toward the eye but
+            // says nothing about the slat's own faces.
+            world.Boxes.Add(new Box(new Vec3(-0.005f, -1f, 0.6f), new Vec3(0.005f, 1f, 1f)));
+            world.Walls.Add(new Wall(new Vec3(0f, 0f, -1f), -0.62f));
+            LineSweep sweep = MakeSweep(world);
+            LeanObstruction o = Ask(sweep, 0.55f, Forward);
+            Assert.True(o.Blocked);
+            Near(0.6f - 0.1f / sweep.Settings.MinCosine, o.Distance - 0.1f, 1e-3f);
+        }
+
+        [Theory]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(3)]
+        [InlineData(4)]
+        public void NoNormalFailedMeasureIsUnanswered(int failFrom)
+        {
+            var world = new World { NoNormals = true, FailFrom = failFrom };
+            world.Walls.Add(new Wall(new Vec3(0f, 0f, -1f), -0.35f));
+            Assert.False(Ask(MakeSweep(world), 0.3f, Forward).Queried);
         }
     }
 }

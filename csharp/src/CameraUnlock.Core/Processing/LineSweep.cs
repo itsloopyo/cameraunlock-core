@@ -16,7 +16,9 @@ namespace CameraUnlock.Core.Processing
 
         /// <summary>
         /// The surface normal at the hit. Either facing is fine; only its angle to the cast is
-        /// used. A zero normal is read as the worst angle allowed.
+        /// used. A zero normal is an unknown one: the sweep measures the surface's angle with
+        /// four more casts, and reads it as the worst angle allowed where those do not find one
+        /// flat surface.
         /// </summary>
         public Vec3 Normal;
 
@@ -64,7 +66,8 @@ namespace CameraUnlock.Core.Processing
     /// One line along the lean guards the centre of the eye's path and nothing around it: the
     /// eye can pass a door frame's edge or a table corner a few millimetres off the line, and
     /// the near plane then culls it. This approximates the sphere the eye needs kept clear
-    /// with one ray down the centre (exact for any flat surface, at any angle), a ring of rays
+    /// with one ray down the centre (exact for any flat surface, at any angle; where the cast
+    /// gives no normal, four rays beside it measure the surface's angle), a ring of rays
     /// around it on the sphere's equator (edges and corners the centre ray passes beside), and
     /// a short sideways probe before each ring ray, so a ring ray never starts inside a
     /// surface already closer to the eye than the radius.
@@ -106,20 +109,28 @@ namespace CameraUnlock.Core.Processing
             // The furthest the sphere's centre may travel, starting from the whole lean.
             float travel = lean;
 
+            Vec3 u, v;
+            PerpendicularBasis(direction, out u, out v);
+
             // Centre ray. For a flat surface at distance d whose normal is at cos c to the
             // lean, the sphere touches it once its centre has gone d - r / c.
             LineHit centre = _cast(start, direction, lean + r / minCos);
             if (!centre.Queried) return LeanObstruction.Failed;
             if (centre.Hit)
             {
-                float c = System.Math.Abs(Vec3.Dot(direction, centre.Normal));
-                if (!(c > minCos)) c = minCos;
+                float c;
+                if (centre.Normal.X == 0f && centre.Normal.Y == 0f && centre.Normal.Z == 0f)
+                {
+                    if (!MeasuredCosine(settings, start, direction, u, v, centre.Distance, out c)) return LeanObstruction.Failed;
+                }
+                else
+                {
+                    c = System.Math.Abs(Vec3.Dot(direction, centre.Normal));
+                    if (!(c > minCos)) c = minCos;
+                }
                 float t = centre.Distance - r / c;
                 if (t < travel) travel = t;
             }
-
-            Vec3 u, v;
-            PerpendicularBasis(direction, out u, out v);
             int n = settings.RingRays;
             for (int k = 0; k < n; k++)
             {
@@ -152,9 +163,48 @@ namespace CameraUnlock.Core.Processing
             return LeanObstruction.Hit((travel > 0f ? travel : 0f) + r);
         }
 
+        // The cosine between the lean and the surface the centre ray met `distance` out, for a
+        // cast that gave no normal. Four rays parallel to the centre ray, half a radius off it
+        // along u and v, sample the surface around the hit. On a flat surface the hit distance
+        // changes by tan(angle) per unit across it, so the two slopes give the angle. Each ray
+        // looks only as far as a surface at the worst angle allowed would put it, so a surface
+        // that steep, or an edge beside the hit, leaves a ray with no hit. A ray with no hit, or
+        // a pair whose hits bend away from a line through the centre hit (an inside corner,
+        // where a flat reading would let the sphere into both walls), answers MinCosine. The
+        // bend allowed is a slope change of 0.1 across each pair, about 6 degrees met head-on
+        // and less at an angle, so a shallow crease or a gently hollow surface can still read as
+        // flat and let the eye a few percent of the radius closer than the radius. False when a
+        // cast could not run.
+        internal bool MeasuredCosine(LineSweepSettings settings, Vec3 start, Vec3 direction, Vec3 u, Vec3 v,
+                                     float distance, out float cosine)
+        {
+            float minCos = settings.MinCosine;
+            float spacing = settings.Radius * 0.5f;
+            float steepest = (float)System.Math.Sqrt(1f - minCos * minCos) / minCos;
+            float length = distance + spacing * steepest * 1.01f;
+            float bend = spacing * 0.1f;
+            cosine = minCos;
+            float slopeU = 0f, slopeV = 0f;
+            for (int a = 0; a < 2; a++)
+            {
+                Vec3 axis = a == 0 ? u : v;
+                LineHit plus = _cast(start + axis * spacing, direction, length);
+                if (!plus.Queried) return false;
+                LineHit minus = _cast(start - axis * spacing, direction, length);
+                if (!minus.Queried) return false;
+                if (!plus.Hit || !minus.Hit || System.Math.Abs(plus.Distance + minus.Distance - 2f * distance) > bend) return true;
+                float slope = (plus.Distance - minus.Distance) / (2f * spacing);
+                if (a == 0) slopeU = slope;
+                else slopeV = slope;
+            }
+            float c = 1f / (float)System.Math.Sqrt(1f + slopeU * slopeU + slopeV * slopeV);
+            if (c > minCos) cosine = c;
+            return true;
+        }
+
         // Two unit vectors perpendicular to d and to each other, crossed with the world axis
         // least aligned with d so the cross product never degenerates.
-        private static void PerpendicularBasis(Vec3 d, out Vec3 u, out Vec3 v)
+        internal static void PerpendicularBasis(Vec3 d, out Vec3 u, out Vec3 v)
         {
             float ax = System.Math.Abs(d.X), ay = System.Math.Abs(d.Y), az = System.Math.Abs(d.Z);
             Vec3 helper = (ax <= ay && ax <= az) ? new Vec3(1f, 0f, 0f)
