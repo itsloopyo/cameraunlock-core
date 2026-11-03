@@ -130,6 +130,14 @@ if(WIN32)
     target_link_libraries(cameraunlock_dx9_device_lifetime_tests PRIVATE d3d9)
     add_test(NAME cameraunlock_dx9_device_lifetime_tests COMMAND cameraunlock_dx9_device_lifetime_tests)
 
+    add_executable(cameraunlock_dx9_probe_failure_tests dx9_probe_failure_tests.cpp)
+    target_include_directories(cameraunlock_dx9_probe_failure_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/overlay_stubs
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
+    target_link_libraries(cameraunlock_dx9_probe_failure_tests PRIVATE d3d9)
+    add_test(NAME cameraunlock_dx9_probe_failure_tests COMMAND cameraunlock_dx9_probe_failure_tests)
+
     add_executable(cameraunlock_dx9_draw_list_tests dx9_draw_list_tests.cpp)
     target_include_directories(cameraunlock_dx9_draw_list_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/overlay_stubs

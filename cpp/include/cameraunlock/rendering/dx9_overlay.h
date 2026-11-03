@@ -145,6 +145,7 @@ private:
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <mutex>
 
@@ -386,8 +387,12 @@ inline bool HookPresentViaProbeDevice() {
     if (FAILED(hr) || !probe) {
         DestroyWindow(window);
         d3d->Release();
-        Log("dx9_overlay: probe device creation failed; falling back to waiting "
-            "for the game's own CreateDevice");
+        char line[160];
+        std::snprintf(line, sizeof(line),
+                      "dx9_overlay: probe device creation failed (HRESULT 0x%08lX); "
+                      "falling back to waiting for the game's own CreateDevice",
+                      static_cast<unsigned long>(hr));
+        Log(line);
         return false;
     }
 
