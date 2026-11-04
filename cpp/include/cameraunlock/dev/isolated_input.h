@@ -25,6 +25,9 @@
 //     Kingdom Come: Deliverance compares GetFocus with its window from its main
 //     loop; on NULL it raises its focus-lost event, and its mouse keeps the
 //     cursor shown and unclipped until a focus-back event that never comes.
+//   - GetActiveWindow answers the game's own window on every thread of the
+//     game where Windows answers none. GLFW's focus test compares it with its
+//     window; No Man's Sky asks from a thread that is not its window's.
 //   - GetAsyncKeyState answers from the synthetic key state alone, so the mod's
 //     hotkeys fire for the script and not for what is typed into another app.
 //   - GetKeyState and GetKeyboardState answer from the same synthetic state, for
@@ -165,6 +168,7 @@ using GetRawInputData_t = UINT (WINAPI*)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
 using GetRawInputBuffer_t = UINT (WINAPI*)(PRAWINPUT, PUINT, UINT);
 using GetForegroundWindow_t = HWND (WINAPI*)();
 using GetFocus_t = HWND (WINAPI*)();
+using GetActiveWindow_t = HWND (WINAPI*)();
 using GetAsyncKeyState_t = SHORT (WINAPI*)(int);
 using GetKeyState_t = SHORT (WINAPI*)(int);
 using GetKeyboardState_t = BOOL (WINAPI*)(PBYTE);
@@ -192,6 +196,7 @@ struct State {
     std::atomic<bool> realRawInputSeen{false};
     GetForegroundWindow_t origGetForegroundWindow = nullptr;
     GetFocus_t origGetFocus = nullptr;
+    GetActiveWindow_t origGetActiveWindow = nullptr;
     GetAsyncKeyState_t origGetAsyncKeyState = nullptr;
     GetKeyState_t origGetKeyState = nullptr;
     GetKeyboardState_t origGetKeyboardState = nullptr;
@@ -355,6 +360,19 @@ inline HWND WINAPI HookedGetFocus() {
     if (focus) return focus;
     const HWND window = S().window.load(std::memory_order_acquire);
     return window && GetWindowThreadProcessId(window, nullptr) == GetCurrentThreadId() ? window : nullptr;
+}
+
+// Windows answers each thread for its own message queue, and NULL while
+// another app is active. An engine on GLFW asks glfwGetWindowAttrib(FOCUSED),
+// which compares GetActiveWindow with its window, from whichever thread runs
+// its game loop, so the game's window is the answer on every thread of the
+// game where Windows answers none. No Man's Sky's cTkSystem stores that answer
+// as its focus flag; with this detour it read 1 in a background session
+// (2026-11-04). Its menus still showed no reaction to scripted input there, so
+// this is not yet proof that No Man's Sky can be driven.
+inline HWND WINAPI HookedGetActiveWindow() {
+    const HWND active = S().origGetActiveWindow();
+    return active ? active : S().window.load(std::memory_order_acquire);
 }
 
 inline SHORT WINAPI HookedGetAsyncKeyState(int vk) {
@@ -2095,6 +2113,7 @@ inline bool StartIsolatedInput(const std::wstring& commandFile, IsolatedInputLog
         Hook(kUser32, "GetRawInputBuffer", &HookedGetRawInputBuffer, s.origGetRawInputBuffer),
         Hook(kUser32, "GetForegroundWindow", &HookedGetForegroundWindow, s.origGetForegroundWindow),
         Hook(kUser32, "GetFocus", &HookedGetFocus, s.origGetFocus),
+        Hook(kUser32, "GetActiveWindow", &HookedGetActiveWindow, s.origGetActiveWindow),
         Hook(kUser32, "GetAsyncKeyState", &HookedGetAsyncKeyState, s.origGetAsyncKeyState),
         Hook(kUser32, "GetKeyState", &HookedGetKeyState, s.origGetKeyState),
         Hook(kUser32, "GetKeyboardState", &HookedGetKeyboardState, s.origGetKeyboardState),
