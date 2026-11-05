@@ -9,6 +9,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - an Accela filter, and a per-packet Accela stage in the head tracking session
+
+- `AccelaFilter` in C++ (`cameraunlock/processing/accela_filter.h`) and C#
+  (`CameraUnlock.Core.Processing.AccelaFilter`), a port of Hypari's webcam filter, itself from
+  opentrack's filter-accela. One amount from 0 to 1 sets every parameter. Its output on
+  `data/accela-cases.json` matches Hypari's Rust filter. Position is in centimetres, as the
+  OpenTrack packet carries it; the deadzone and gains are tuned for that.
+- The head tracking session can run it once per new packet, between the receiver and the
+  interpolators: `SetAccela`, `IsAccelaOn`, `SetAccelaAmount` and `GetAccelaAmount` in C++,
+  `AccelaOn` and `AccelaAmount` in C#. It is off by default. It starts over after a recenter and
+  after 5 seconds with no packet (`kAccelaRestartUs`, `AccelaRestartSeconds`). The receiver gives
+  position in metres, so the stage multiplies by 100 going in and divides coming out; fed metres,
+  a lean of a few centimetres would sit inside the deadzone and never move.
+
 ### Added - key lists saved and listened for at once (ABI 11)
 
 - `cameraunlock_config_save_keys(row, keys)` saves a local key list row, and

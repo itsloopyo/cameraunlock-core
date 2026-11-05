@@ -54,6 +54,7 @@ namespace CameraUnlock.Core.Tracking
         private float _localSmoothing;
         private float _remoteSmoothing;
 
+        private const double CmPerMetre = 100.0;
         private readonly AccelaFilter _accela = new AccelaFilter();
         private bool _accelaOn;
         private bool _accelaHasOutput;
@@ -343,8 +344,11 @@ namespace CameraUnlock.Core.Tracking
                             _accela.Reset();
                         }
                         _accelaLastTicks = ticks;
+                        // The receiver gives metres; the filter's position deadzone and gains are
+                        // in the centimetres OpenTrack sends, as Hypari's webcam filter runs them.
                         _accelaOutput = _accela.Filter(
-                            new AccelaPose(rawPose.Yaw, rawPose.Pitch, rawPose.Roll, rawPosition.X, rawPosition.Y, rawPosition.Z),
+                            new AccelaPose(rawPose.Yaw, rawPose.Pitch, rawPose.Roll,
+                                rawPosition.X * CmPerMetre, rawPosition.Y * CmPerMetre, rawPosition.Z * CmPerMetre),
                             (double)ticks / Stopwatch.Frequency);
                         _accelaHasOutput = true;
                     }
@@ -352,8 +356,8 @@ namespace CameraUnlock.Core.Tracking
                     {
                         rawPose = new TrackingPose((float)_accelaOutput.Yaw, (float)_accelaOutput.Pitch, (float)_accelaOutput.Roll,
                             rawPose.TimestampTicks);
-                        rawPosition = new PositionData((float)_accelaOutput.X, (float)_accelaOutput.Y, (float)_accelaOutput.Z,
-                            rawPosition.TimestampTicks);
+                        rawPosition = new PositionData((float)(_accelaOutput.X / CmPerMetre), (float)(_accelaOutput.Y / CmPerMetre),
+                            (float)(_accelaOutput.Z / CmPerMetre), rawPosition.TimestampTicks);
                     }
                 }
 

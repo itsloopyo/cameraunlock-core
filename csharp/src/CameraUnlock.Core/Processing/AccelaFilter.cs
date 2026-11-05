@@ -4,7 +4,7 @@ namespace CameraUnlock.Core.Processing
 {
     /// <summary>
     /// A head pose as the Accela filter takes and gives it: yaw, pitch and roll in degrees, in
-    /// the OpenTrack packet's convention, and the position in whatever unit the tracker sends.
+    /// the OpenTrack packet's convention, and the position in the centimetres the OpenTrack packet carries, which its deadzone and gains are tuned for.
     /// </summary>
     public struct AccelaPose
     {

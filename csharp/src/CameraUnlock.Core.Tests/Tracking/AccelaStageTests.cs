@@ -93,6 +93,40 @@ namespace CameraUnlock.Core.Tests.Tracking
         }
 
         [Fact]
+        public void FollowsACentimetreLean()
+        {
+            var (source, session) = Make();
+            var (offSource, off) = Make();
+            session.AccelaOn = true;
+            // The same packets in centimetres, through the filter on its own.
+            var alone = new AccelaFilter();
+            long t = Start;
+            foreach (var s in new[] { source, offSource }) s.PacketAt(t);
+            session.Update(1f / 60f);
+            off.Update(1f / 60f);
+            alone.Filter(new AccelaPose(0, 0, 0, 0, 0, 0), (double)t / Stopwatch.Frequency);
+            double moved = 0;
+            for (int i = 0; i < 120; i++)
+            {
+                t += SixtyHz;
+                foreach (var s in new[] { source, offSource })
+                {
+                    s.PositionX = 0.01f;
+                    s.PacketAt(t);
+                }
+                session.Update(1f / 60f);
+                off.Update(1f / 60f);
+                moved = alone.Filter(new AccelaPose(0, 0, 0, 1, 0, 0), (double)t / Stopwatch.Frequency).X;
+            }
+            // The share of the 1 cm lean the filter has moved. Read as 0.01 cm, the lean would
+            // sit inside the position deadzone and never move.
+            Assert.True(moved > 0.1 && moved < 1.0, moved.ToString());
+            Assert.True(off.PositionOffset.X > 0f);
+            double share = session.PositionOffset.X / off.PositionOffset.X;
+            Assert.InRange(share, moved * 0.95, moved * 1.05);
+        }
+
+        [Fact]
         public void StartsFreshAfterATrackerRecenter()
         {
             var (source, session) = Make();

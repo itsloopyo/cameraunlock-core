@@ -356,13 +356,15 @@ public:
                     m_accela.Reset();
                 }
                 m_accelaLastTimestamp = receiveTs;
+                // The receiver gives metres; the filter's position deadzone and gains are in
+                // the centimetres OpenTrack sends, as Hypari's webcam filter runs them.
                 AccelaPose in;
                 in.yaw = rawYaw;
                 in.pitch = rawPitch;
                 in.roll = rawRoll;
-                in.x = px;
-                in.y = py;
-                in.z = pz;
+                in.x = static_cast<double>(px) * kCmPerMetre;
+                in.y = static_cast<double>(py) * kCmPerMetre;
+                in.z = static_cast<double>(pz) * kCmPerMetre;
                 m_accelaOutput = m_accela.Filter(in, static_cast<double>(receiveTs) / 1e6);
                 m_accelaHasOutput = true;
             }
@@ -403,9 +405,9 @@ public:
             float rawX, rawY, rawZ;
             if (m_receiver.GetPosition(rawX, rawY, rawZ)) {
                 if (m_accelaOn && m_accelaHasOutput) {
-                    rawX = static_cast<float>(m_accelaOutput.x);
-                    rawY = static_cast<float>(m_accelaOutput.y);
-                    rawZ = static_cast<float>(m_accelaOutput.z);
+                    rawX = static_cast<float>(m_accelaOutput.x / kCmPerMetre);
+                    rawY = static_cast<float>(m_accelaOutput.y / kCmPerMetre);
+                    rawZ = static_cast<float>(m_accelaOutput.z / kCmPerMetre);
                 }
                 PositionData rawPos(rawX, rawY, rawZ, receiveTs);
 
@@ -595,6 +597,7 @@ private:
 
     int64_t m_lastReceiveTimestamp = 0;
 
+    static constexpr double kCmPerMetre = 100.0;
     AccelaFilter m_accela;
     bool m_accelaOn = false;
     bool m_accelaHasOutput = false;

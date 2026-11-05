@@ -1088,6 +1088,35 @@ void TestAccelaSmoothsPosition() {
           "a position step reaches the interpolator eased, short of where it goes with the stage off");
 }
 
+void TestAccelaFollowsACentimetreLean() {
+    std::cout << "Accela stage on a 1 cm lean:\n";
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.hasPosition = true;
+    Session session(rx);
+    session.SetAccela(true);
+    // The same packets in centimetres, through the filter on its own.
+    cameraunlock::AccelaFilter alone;
+    int64_t t = 1'000'000;
+    Packet(rx, 0.0f, t);
+    session.Update(1.0f / 60.0f);
+    alone.Filter(cameraunlock::AccelaPose{}, static_cast<double>(t) / 1e6);
+    rx.posX = 0.01f;
+    cameraunlock::AccelaPose lean{};
+    lean.x = 1.0;
+    double expected = 0.0;
+    for (int i = 0; i < 120; i++) {
+        t += kSixtyHzUs;
+        Packet(rx, 0.0f, t);
+        session.Update(1.0f / 60.0f);
+        expected = alone.Filter(lean, static_cast<double>(t) / 1e6).x / 100.0;
+    }
+    const float x = session.GetLastInterpolatedPosition().x;
+    // Read as 0.01 cm, the lean would sit inside the position deadzone and never move.
+    Check(expected > 0.001 && std::fabs(x - expected) < expected * 0.05,
+          "the stage reads metres as centimetres: a 1 cm lean moves as the filter moves 1 cm");
+}
+
 void TestAccelaStartsFreshAfterAManualRecenter() {
     std::cout << "Accela stage after the player's recenter:\n";
     FakeReceiver rx;
@@ -1142,6 +1171,7 @@ int RunSessionTests() {
     TestAccelaStartsFreshAfterSilence();
     TestAccelaSmoothsPosition();
     TestAccelaStartsFreshAfterAManualRecenter();
+    TestAccelaFollowsACentimetreLean();
 
     if (g_failures == 0) {
         std::cout << "Session tests: all passed\n";
