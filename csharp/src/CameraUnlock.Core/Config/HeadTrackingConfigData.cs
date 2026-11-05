@@ -231,6 +231,13 @@ namespace CameraUnlock.Core.Config
         public string AccelaPlayers { get; set; } = string.Empty;
 
         /// <summary>
+        /// The key list that switches the view between first person and the game's own camera, in
+        /// a mod that has a first-person view. Core binds it and does not poll it. Read only through
+        /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public string FirstPersonKeyName { get; set; } = "Home, Ctrl+Shift+B";
+
+        /// <summary>
         /// Creates a new config with default values.
         /// </summary>
         public HeadTrackingConfigData()
@@ -321,7 +328,8 @@ namespace CameraUnlock.Core.Config
                 // they resolved to nothing, duplicate-spelling warning included.
                 if (key == ConfigKeySchema.Keys.TrueFreeLook || key == ConfigKeySchema.Keys.TrueFreeLookKey
                     || key == ConfigKeySchema.Keys.FreeLookMarker || key == ConfigKeySchema.Keys.StockSights
-                    || key == ConfigKeySchema.Keys.Accela || key == ConfigKeySchema.Keys.AccelaPlayers) continue;
+                    || key == ConfigKeySchema.Keys.Accela || key == ConfigKeySchema.Keys.AccelaPlayers
+                    || key == ConfigKeySchema.Keys.FirstPersonKey) continue;
 
                 string firstSpelling;
                 if (firstSpellingOf.TryGetValue(key, out firstSpelling))

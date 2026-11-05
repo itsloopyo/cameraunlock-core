@@ -56,6 +56,7 @@ inline constexpr const char* kReticleToggleKey = "reticletogglekey";
 inline constexpr const char* kCycleTrackingModeKey = "cycletrackingmodekey";
 inline constexpr const char* kYawModeKey = "yawmodekey";
 inline constexpr const char* kTrueFreeLookKey = "truefreelookkey";
+inline constexpr const char* kFirstPersonKey = "firstpersonkey";
 inline constexpr const char* kRecenterKey = "recenterkey";
 inline constexpr const char* kLightMultiplier = "lightmultiplier";
 
@@ -115,6 +116,8 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "enableonstartup", "enableonstartup", false },
     { "enableposition", "positionenabled", false },
     { "enablepositiontracking", "positionenabled", false },
+    { "firstpersonkey", "firstpersonkey", false },
+    { "firstpersontogglekey", "firstpersonkey", false },
     { "flashlightfollowshead", "lightfollowshead", true },
     { "flashlightmultiplier", "lightmultiplier", false },
     { "flashlightscale", "lightmultiplier", false },
@@ -249,6 +252,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "stocksights", "stocksights", false },
     { "toggle", "togglekey", false },
     { "togglecrosshairkey", "reticletogglekey", false },
+    { "togglefirstpersonkey", "firstpersonkey", false },
     { "togglekey", "togglekey", false },
     { "togglepositionkey", "positiontogglekey", false },
     { "togglereticlekey", "reticletogglekey", false },
@@ -348,6 +352,7 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "CycleTrackingModeKey", config_keys::kCycleTrackingModeKey, ConfigValueType::kString, 0, 0.0f, false, "", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "YawModeKey", config_keys::kYawModeKey, ConfigValueType::kString, 0, 0.0f, false, "PageDown", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "TrueFreeLookKey", config_keys::kTrueFreeLookKey, ConfigValueType::kString, 0, 0.0f, false, "Insert, Ctrl+Shift+U", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "FirstPersonKey", config_keys::kFirstPersonKey, ConfigValueType::kString, 0, 0.0f, false, "Home, Ctrl+Shift+B", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "RecenterKey", config_keys::kRecenterKey, ConfigValueType::kString, 0, 0.0f, false, "Home", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LightMultiplier", config_keys::kLightMultiplier, ConfigValueType::kFloat, 0, 1.5f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
 };

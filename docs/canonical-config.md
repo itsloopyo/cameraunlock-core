@@ -280,13 +280,13 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way. 25 of them are global: a game's row
+The concepts are the settings every mod spells the same way. 26 of them are global: a game's row
 for one follows Defaults.ini unless the table marks it `PerGame()` (see
 [Which rows follow it](#which-rows-follow-it)). `CollisionMargin` and `CollisionChannel` are not:
 each holds a number in one engine's own units or channels, so the schema marks them
 `"global": false`, and every game keeps its own value. The schema writes `global`, true or false,
 on every canonical concept, and the generator refuses one without it. This is core's table naming
-all 27 of them at their defaults, which both languages render byte for byte
+all 28 of them at their defaults, which both languages render byte for byte
 (`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with `Render`, so
 every row shows its value, `CollisionChannel`, the table's one Engine row, as a comment; the same
 table's fresh render writes `default` on every global row, `CollisionMargin` as its value and the
@@ -381,6 +381,8 @@ YawModeKey=PageDown, Ctrl+Shift+H
 ; Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights
 ; (TrueFreeLook, FreeLookMarker, StockSights).
 TrueFreeLookKey=Insert, Ctrl+Shift+U
+; Switches the view between first person and the game's own camera, where the game has first person.
+FirstPersonKey=Home, Ctrl+Shift+B
 
 [Light]
 ; How far the light turns for each degree your head turns.
@@ -391,11 +393,12 @@ LightMultiplier=1.5
 The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFreshnessMs` 1 to
 2147483647, the smoothing pair, `Accela` and `CollisionReleaseSmoothing` 0 to 1, the five limits 0 to 10,
 `LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its unit is the engine's own),
-and `CollisionChannel` none. The four hotkey lists and
+and `CollisionChannel` none. The five hotkey lists and
 `CollisionEnabled` start at the schema's `canonical_default`. The `default` field and core's field
 initialisers, which the older flat readers use, keep `End` for `ToggleKey` and `PageDown` for
 `YawModeKey`, leave `CycleTrackingModeKey` empty and keep `CollisionEnabled` false. No flat reader
-reads `TrueFreeLookKey`, so its `default` and field initialisers are its `canonical_default`.
+reads `TrueFreeLookKey` or `FirstPersonKey`, so their `default` and field initialisers are their
+`canonical_default`.
 
 `CollisionEnabled` starts on (collision rows ruling of 2026-09-26): it is global, so the value in
 Defaults.ini reaches every game whose table binds the row, and a game without a lean collision
@@ -456,6 +459,15 @@ the list's canonical text, so `3,02` in a file reads as `3, 2`. Core's `HeadTrac
 binds them to `HeadTrackingConfig::accela` and `accela_players`, and
 `HeadTrackingConfigData.Accela` and `AccelaPlayers`, and does not apply them: no core session runs
 the filter from these rows. Neither has an alias, and the older flat readers read neither.
+
+`FirstPersonKey` is the key list that switches the view between first person at the character's
+eyes and the game's own camera, with an animated swoop, in a mod that has a first-person view.
+It is one global setting, `Home, Ctrl+Shift+B` by default (B from the fleet's spare chord
+letters), so every such mod answers the same key unless its table marks the row `PerGame()`.
+Core's `HeadTrackingConfigTable` binds it to `HeadTrackingConfig::first_person_key_name` and
+`HeadTrackingConfigData.FirstPersonKeyName`, and does not poll it: the mod that binds it acts on
+it. Its aliases are `ToggleFirstPersonKey` and `FirstPersonToggleKey`; in a canonical file either
+draws `MisplacedKey` and is not read, and the older flat readers read none of the three spellings.
 
 The schema's other concepts stay in the schema, so the older flat readers still parse them, and
 the canonical format never writes them. Each carries a `canonical_reason`, which the table's
@@ -597,7 +609,7 @@ The list is explicit because a file carries only what the mod binds, and because
 adds later then reaches a mod's file only when that mod names it, so it never breaks an existing
 mod's committed file. An empty list or a concept named twice throws.
 
-The defaults are the config type's own, with the four hotkey lists and `CollisionEnabled` at
+The defaults are the config type's own, with the five hotkey lists and `CollisionEnabled` at
 their `canonical_default`. `CollisionChannel` is an Engine row, and `CollisionMargin` is not.
 `LocalSmoothing` and `RemoteSmoothing` also set the copy the
 position settings carry. `PositionLimitY` never sets `PositionLimitYDown`: no key takes its value
@@ -981,7 +993,7 @@ file, the README config block and the changelog template.
 
 ### Which rows follow it
 
-25 of the 27 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
+26 of the 28 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
 `CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of 2026-09-25,
 collision rows ruling of 2026-09-26). The schema says `global`, true or false, on
 every canonical concept, and `CollisionMargin` and `CollisionChannel` say false: a margin in the
@@ -1073,8 +1085,8 @@ path, choice, line and message above.
   reads as it would for `default`, with an `InvalidValue` diagnostic.
 - **Concept rows only.** A local row never takes the token: a local string row may hold the word
   as data (a Unity layer list can start with the layer `Default`), and a local bool row refuses it.
-  No canonical concept holds a string other than the four hotkey lists, so the token never meets
-  a value a concept can hold.
+  No canonical concept holds a string other than the five hotkey lists and `AccelaPlayers`, so
+  the token never meets a value a concept can hold.
 - **What it means.** Leave this row at its default: the effective default below on a row that
   follows Defaults.ini, and the table's own default on a `PerGame()` row and on a row of a
   concept that is not global.
@@ -1103,7 +1115,7 @@ always a mode.
 ### What a new Defaults.ini holds
 
 The owner creates it from core's own table, `HeadTrackingConfigTable` naming every global
-concept, at the built-in values, with the four hotkey lists and `CollisionEnabled` at their
+concept, at the built-in values, with the five hotkey lists and `CollisionEnabled` at their
 `canonical_default`. Every row is a value. The header is the file's own: what the file is, the
 comment and hotkey lines of every canonical file, and the 98 key names it takes. Both languages
 render it byte for byte:
@@ -1193,6 +1205,8 @@ YawModeKey=PageDown, Ctrl+Shift+H
 ; Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights
 ; (TrueFreeLook, FreeLookMarker, StockSights).
 TrueFreeLookKey=Insert, Ctrl+Shift+U
+; Switches the view between first person and the game's own camera, where the game has first person.
+FirstPersonKey=Home, Ctrl+Shift+B
 
 [Light]
 ; How far the light turns for each degree your head turns.

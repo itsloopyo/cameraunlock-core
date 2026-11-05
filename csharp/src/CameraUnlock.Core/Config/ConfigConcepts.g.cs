@@ -170,6 +170,12 @@ namespace CameraUnlock.Core.Config
             new HotkeyCodec(), new[] { "Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights", "(TrueFreeLook, FreeLookMarker, StockSights)." }, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U",
             true);
 
+        /// <summary>[Hotkeys] FirstPersonKey.</summary>
+        public static readonly ConceptDescriptor<string> FirstPersonKey = new ConceptDescriptor<string>(
+            "FirstPersonKey", "Hotkeys", "FirstPersonKey", ConceptValueFamily.Hotkey,
+            new HotkeyCodec(), new[] { "Switches the view between first person and the game's own camera, where the game has first person." }, "Home, Ctrl+Shift+B", "Home, Ctrl+Shift+B",
+            true);
+
         /// <summary>[Light] LightMultiplier.</summary>
         public static readonly ConceptDescriptor<float> LightMultiplier = new ConceptDescriptor<float>(
             "LightMultiplier", "Light", "LightMultiplier", ConceptValueFamily.Floating,
@@ -205,6 +211,7 @@ namespace CameraUnlock.Core.Config
             CycleTrackingModeKey,
             YawModeKey,
             TrueFreeLookKey,
+            FirstPersonKey,
             LightMultiplier,
         };
 

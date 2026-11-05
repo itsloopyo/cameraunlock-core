@@ -139,6 +139,7 @@ std::vector<FieldRead> Fields() {
         {"CycleTrackingModeKey", [k](const H& c) { return k(c.cycle_tracking_mode_key_name); }},
         {"YawModeKey", [k](const H& c) { return k(c.yaw_mode_key_name); }},
         {"TrueFreeLookKey", [k](const H& c) { return k(c.true_free_look_key_name); }},
+        {"FirstPersonKey", [k](const H& c) { return k(c.first_person_key_name); }},
         {"LightMultiplier", [f](const H& c) { return f(c.light.multiplier); }},
         {"PositionLocalSmoothing", [f](const H& c) { return f(c.position.local_smoothing); }},
         {"PositionRemoteSmoothing", [f](const H& c) { return f(c.position.remote_smoothing); }},
@@ -293,7 +294,8 @@ void TestEveryConceptBound() {
 void TestHotkeyDefaults() {
     std::cout << "\n[hotkey defaults]\n";
     const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable(
-        {Concept::ToggleKey, Concept::CycleTrackingModeKey, Concept::YawModeKey, Concept::TrueFreeLookKey});
+        {Concept::ToggleKey, Concept::CycleTrackingModeKey, Concept::YawModeKey, Concept::TrueFreeLookKey,
+         Concept::FirstPersonKey});
     const HeadTrackingConfig& d = table.defaults();
     Check(d.toggle_key_name == "End, Ctrl+Shift+Y" &&
               d.toggle_key_name == schema::ConceptTraits<Concept::ToggleKey>::kCanonicalDefault,
@@ -308,6 +310,9 @@ void TestHotkeyDefaults() {
     Check(d.true_free_look_key_name == "Insert, Ctrl+Shift+U" &&
               d.true_free_look_key_name == schema::ConceptTraits<Concept::TrueFreeLookKey>::kCanonicalDefault,
           "TrueFreeLookKey defaults to its canonical_default");
+    Check(d.first_person_key_name == "Home, Ctrl+Shift+B" &&
+              d.first_person_key_name == schema::ConceptTraits<Concept::FirstPersonKey>::kCanonicalDefault,
+          "FirstPersonKey defaults to its canonical_default");
 
     const HeadTrackingConfig flat;
     Check(flat.toggle_key_name == "End" && flat.cycle_tracking_mode_key_name.empty() &&
@@ -315,6 +320,8 @@ void TestHotkeyDefaults() {
           "the flat reader's field defaults are single keys");
     Check(flat.true_free_look_key_name == schema::ConceptTraits<Concept::TrueFreeLookKey>::kCanonicalDefault,
           "true_free_look_key_name's initialiser is its canonical_default");
+    Check(flat.first_person_key_name == schema::ConceptTraits<Concept::FirstPersonKey>::kCanonicalDefault,
+          "first_person_key_name's initialiser is its canonical_default");
 
     const ConfigTable<HeadTrackingConfig> collision = HeadTrackingConfigTable({Concept::CollisionEnabled});
     Check(collision.defaults().collision_enabled &&
@@ -323,19 +330,19 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe25TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe26TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 25 the schema names]\n";
+    std::cout << "\n[the global concepts are the 26 the schema names]\n";
     const std::vector<std::string> expected{
         "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "Accela", "AccelaPlayers", "WorldSpaceYaw",
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
         "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
-        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightMultiplier"};
+        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier"};
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 25 listed, in schema order");
+    Check(global == expected, "the global concepts are the 26 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }
@@ -402,6 +409,51 @@ void TestFlatReaderSkipsAccela() {
           "the flat reader leaves accela at 0.75 and accela_players empty, and says nothing");
 }
 
+// A mod with a first-person view names FirstPersonKey and reads the one global key list. The C#
+// twin is HeadTrackingConfigTableTests.AModThatNamesFirstPersonKeyReadsItAndDefaultsToHomeAndCtrlShiftB.
+void TestFirstPersonKey() {
+    std::cout << "\n[FirstPersonKey reads and defaults in a mod that names it]\n";
+    static_assert(schema::ConceptTraits<Concept::FirstPersonKey>::kGlobal &&
+                  schema::ConceptTraits<Concept::FirstPersonKey>::kFamily == schema::ValueFamily::kHotkey);
+    const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable({Concept::ToggleKey, Concept::FirstPersonKey});
+    Check(table.defaults().first_person_key_name == "Home, Ctrl+Shift+B", "the table starts it at Home, Ctrl+Shift+B");
+
+    const std::string fresh = RenderCanonicalFresh(table, kHeader);
+    const std::size_t hotkeys = fresh.find("\r\n[Hotkeys]\r\n");
+    const std::size_t toggle = fresh.find("\r\nToggleKey=default\r\n");
+    const std::size_t key = fresh.find(
+        "\r\n; Switches the view between first person and the game's own camera, where the game has first person."
+        "\r\nFirstPersonKey=default\r\n");
+    Check(hotkeys != std::string::npos && toggle != std::string::npos && key != std::string::npos && hotkeys < toggle &&
+              toggle < key,
+          "the fresh file writes FirstPersonKey=default with its comment under [Hotkeys], after ToggleKey");
+
+    HeadTrackingConfig config;
+    ApplyReport report =
+        ApplyCanonical(ParseCanonicalIni("[Hotkeys]\r\nFirstPersonKey=f7, ctrl+shift+b\r\n"), table, config);
+    Check(config.first_person_key_name == "F7, Ctrl+Shift+B" && report.diagnostics.empty(),
+          "FirstPersonKey=f7, ctrl+shift+b reads as F7, Ctrl+Shift+B with nothing said");
+
+    config = HeadTrackingConfig{};
+    config.first_person_key_name = "F1";
+    report = ApplyCanonical(ParseCanonicalIni("[Hotkeys]\r\nFirstPersonKey=default\r\n"), table, config);
+    Check(config.first_person_key_name == "Home, Ctrl+Shift+B" && report.diagnostics.empty(),
+          "FirstPersonKey=default reads as the canonical_default");
+
+    config = HeadTrackingConfig{};
+    report = ApplyCanonical(ParseCanonicalIni("[Hotkeys]\r\nToggleFirstPersonKey=F7\r\n"), table, config);
+    Check(config.first_person_key_name == "Home, Ctrl+Shift+B" && report.diagnostics.size() == 1 &&
+              report.diagnostics[0].kind == CanonicalDiagnosticKind::MisplacedKey,
+          "a canonical file's ToggleFirstPersonKey is an alias, misplaced and not read");
+
+    HeadTrackingConfig flat;
+    std::vector<std::string> log;
+    flat.ApplyValues({{"FirstPersonKey", "F8"}, {"ToggleFirstPersonKey", "F9"}, {"first_person_toggle_key", "F10"}},
+                     [&log](const std::string& line) { log.push_back(line); });
+    Check(flat.first_person_key_name == "Home, Ctrl+Shift+B" && log.empty(),
+          "the flat reader does not read FirstPersonKey under any spelling, and says nothing");
+}
+
 void TestArguments() {
     std::cout << "\n[arguments]\n";
     Check(Contains(Thrown([] { HeadTrackingConfigTable({}); }), "needs the concepts"), "an empty list throws");
@@ -466,6 +518,7 @@ int RunHeadTrackingConfigTableTests() {
         TestEngineCollisionRows();
         TestTrueFreeLookSpellings();
         TestFlatReaderSkipsAccela();
+        TestFirstPersonKey();
         TestArguments();
         TestOnlyNamedConcepts();
         TestDerivedConfig();

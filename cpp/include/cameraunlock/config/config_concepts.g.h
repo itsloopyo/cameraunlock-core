@@ -38,6 +38,7 @@ enum class Concept {
     CycleTrackingModeKey,
     YawModeKey,
     TrueFreeLookKey,
+    FirstPersonKey,
     LightMultiplier,
 };
 
@@ -372,6 +373,17 @@ struct ConceptTraits<Concept::TrueFreeLookKey> {
 };
 
 template <>
+struct ConceptTraits<Concept::FirstPersonKey> {
+    static constexpr const char* kSection = "Hotkeys";
+    static constexpr const char* kKey = "FirstPersonKey";
+    static constexpr ValueFamily kFamily = ValueFamily::kHotkey;
+    static constexpr const char* kFileComment[] = {"Switches the view between first person and the game's own camera, where the game has first person."};
+    static constexpr const char* kCanonicalDefault = "Home, Ctrl+Shift+B";
+    static constexpr const char* kDefaultText = "Home, Ctrl+Shift+B";
+    static constexpr bool kGlobal = true;
+};
+
+template <>
 struct ConceptTraits<Concept::LightMultiplier> {
     static constexpr const char* kSection = "Light";
     static constexpr const char* kKey = "LightMultiplier";
@@ -427,6 +439,7 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::CycleTrackingModeKey, "CycleTrackingModeKey", "Hotkeys", "CycleTrackingModeKey", ValueFamily::kHotkey, {"Changes the tracking mode: rotation and position, rotation only, position only.", nullptr}, 1, "PageUp, Ctrl+Shift+G", "PageUp, Ctrl+Shift+G", true},
     {Concept::YawModeKey, "YawModeKey", "Hotkeys", "YawModeKey", ValueFamily::kHotkey, {"Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).", nullptr}, 1, "PageDown, Ctrl+Shift+H", "PageDown, Ctrl+Shift+H", true},
     {Concept::TrueFreeLookKey, "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ValueFamily::kHotkey, {"Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights", "(TrueFreeLook, FreeLookMarker, StockSights)."}, 2, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U", true},
+    {Concept::FirstPersonKey, "FirstPersonKey", "Hotkeys", "FirstPersonKey", ValueFamily::kHotkey, {"Switches the view between first person and the game's own camera, where the game has first person.", nullptr}, 1, "Home, Ctrl+Shift+B", "Home, Ctrl+Shift+B", true},
     {Concept::LightMultiplier, "LightMultiplier", "Light", "LightMultiplier", ValueFamily::kFloating, {"How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."}, 2, nullptr, "1.5", true},
 };
 

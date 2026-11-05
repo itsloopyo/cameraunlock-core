@@ -27,11 +27,12 @@ namespace CameraUnlock.Core.Config
     /// they keep the defaults instance's values.
     /// </para>
     /// <para>
-    /// The defaults instance is a new config with the four hotkey lists and CollisionEnabled at the
+    /// The defaults instance is a new config with the five hotkey lists and CollisionEnabled at the
     /// schema's canonical_default (<c>End, Ctrl+Shift+Y</c>, <c>PageUp, Ctrl+Shift+G</c>,
-    /// <c>PageDown, Ctrl+Shift+H</c>, <c>Insert, Ctrl+Shift+U</c>, <c>true</c>); the properties' own
-    /// initialisers, which <see cref="HeadTrackingConfigData.LoadFromFile"/> uses, stay single keys and
-    /// <c>false</c>.
+    /// <c>PageDown, Ctrl+Shift+H</c>, <c>Insert, Ctrl+Shift+U</c>, <c>Home, Ctrl+Shift+B</c>,
+    /// <c>true</c>); the properties' own initialisers, which
+    /// <see cref="HeadTrackingConfigData.LoadFromFile"/> uses, stay single keys and <c>false</c> for the
+    /// first three lists and CollisionEnabled, and are the canonical_default for the two no flat reader reads.
     /// </para>
     /// </summary>
     public static class HeadTrackingConfigTable
@@ -82,6 +83,7 @@ namespace CameraUnlock.Core.Config
             config.CycleTrackingModeKeyName = CanonicalDefault(ConfigConcepts.CycleTrackingModeKey);
             config.YawModeKeyName = CanonicalDefault(ConfigConcepts.YawModeKey);
             config.TrueFreeLookKeyName = CanonicalDefault(ConfigConcepts.TrueFreeLookKey);
+            config.FirstPersonKeyName = CanonicalDefault(ConfigConcepts.FirstPersonKey);
             config.CollisionEnabled = CanonicalDefault(ConfigConcepts.CollisionEnabled) == "true";
             return config;
         }
@@ -206,6 +208,9 @@ namespace CameraUnlock.Core.Config
                     return;
                 case nameof(ConfigConcepts.TrueFreeLookKey):
                     table.Concept(ConfigConcepts.TrueFreeLookKey, c => c.TrueFreeLookKeyName, (c, v) => c.TrueFreeLookKeyName = v);
+                    return;
+                case nameof(ConfigConcepts.FirstPersonKey):
+                    table.Concept(ConfigConcepts.FirstPersonKey, c => c.FirstPersonKeyName, (c, v) => c.FirstPersonKeyName = v);
                     return;
                 case nameof(ConfigConcepts.LightMultiplier):
                     table.Concept(ConfigConcepts.LightMultiplier, c => c.Light.Multiplier,

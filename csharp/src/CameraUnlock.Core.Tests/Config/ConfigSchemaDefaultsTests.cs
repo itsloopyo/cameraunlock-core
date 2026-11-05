@@ -95,6 +95,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "CycleTrackingModeKey", config.CycleTrackingModeKeyName },
                 { "YawModeKey", config.YawModeKeyName },
                 { "TrueFreeLookKey", config.TrueFreeLookKeyName },
+                { "FirstPersonKey", config.FirstPersonKeyName },
                 { "RecenterKey", config.RecenterKeyName },
                 { "LightMultiplier", config.Light.Multiplier },
             };
@@ -179,7 +180,7 @@ namespace CameraUnlock.Core.Tests.Config
                 }
             }
 
-            Assert.Equal(new[] { "CollisionEnabled", "ToggleKey", "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey" },
+            Assert.Equal(new[] { "CollisionEnabled", "ToggleKey", "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey" },
                 withCanonicalDefault);
             Assert.True((bool)started["CollisionEnabled"]);
             Assert.False(new HeadTrackingConfigData().CollisionEnabled);

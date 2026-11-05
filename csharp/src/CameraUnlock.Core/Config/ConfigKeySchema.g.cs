@@ -64,6 +64,7 @@ namespace CameraUnlock.Core.Config
             public const string CycleTrackingModeKey = "cycletrackingmodekey";
             public const string YawModeKey = "yawmodekey";
             public const string TrueFreeLookKey = "truefreelookkey";
+            public const string FirstPersonKey = "firstpersonkey";
             public const string RecenterKey = "recenterkey";
             public const string LightMultiplier = "lightmultiplier";
 
@@ -114,6 +115,8 @@ namespace CameraUnlock.Core.Config
             { "enableonstartup", "enableonstartup" },
             { "enableposition", "positionenabled" },
             { "enablepositiontracking", "positionenabled" },
+            { "firstpersonkey", "firstpersonkey" },
+            { "firstpersontogglekey", "firstpersonkey" },
             { "flashlightfollowshead", "lightfollowshead" },
             { "flashlightmultiplier", "lightmultiplier" },
             { "flashlightscale", "lightmultiplier" },
@@ -248,6 +251,7 @@ namespace CameraUnlock.Core.Config
             { "stocksights", "stocksights" },
             { "toggle", "togglekey" },
             { "togglecrosshairkey", "reticletogglekey" },
+            { "togglefirstpersonkey", "firstpersonkey" },
             { "togglekey", "togglekey" },
             { "togglepositionkey", "positiontogglekey" },
             { "togglereticlekey", "reticletogglekey" },

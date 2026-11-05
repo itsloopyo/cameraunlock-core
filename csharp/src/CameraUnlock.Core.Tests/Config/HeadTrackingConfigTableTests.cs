@@ -71,7 +71,7 @@ namespace CameraUnlock.Core.Tests.Config
         {
             HeadTrackingConfigData defaults = HeadTrackingConfigTableFixtures.Defaults(
                 HeadTrackingConfigTable.Create(ConfigConcepts.ToggleKey, ConfigConcepts.CycleTrackingModeKey, ConfigConcepts.YawModeKey,
-                    ConfigConcepts.TrueFreeLookKey));
+                    ConfigConcepts.TrueFreeLookKey, ConfigConcepts.FirstPersonKey));
 
             Assert.Equal("End, Ctrl+Shift+Y", defaults.ToggleKeyName);
             Assert.Equal(ConfigConcepts.ToggleKey.CanonicalDefault, defaults.ToggleKeyName);
@@ -81,6 +81,8 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal(ConfigConcepts.YawModeKey.CanonicalDefault, defaults.YawModeKeyName);
             Assert.Equal("Insert, Ctrl+Shift+U", defaults.TrueFreeLookKeyName);
             Assert.Equal(ConfigConcepts.TrueFreeLookKey.CanonicalDefault, defaults.TrueFreeLookKeyName);
+            Assert.Equal("Home, Ctrl+Shift+B", defaults.FirstPersonKeyName);
+            Assert.Equal(ConfigConcepts.FirstPersonKey.CanonicalDefault, defaults.FirstPersonKeyName);
         }
 
         [Fact]
@@ -94,7 +96,7 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe25TheSchemaNames()
+        public void TheGlobalConceptsAreThe26TheSchemaNames()
         {
             string[] global =
             {
@@ -102,7 +104,7 @@ namespace CameraUnlock.Core.Tests.Config
                 "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
                 "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
-                "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "LightMultiplier",
+                "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier",
             };
             Assert.Equal(global, ConfigConcepts.All.Where(c => c.Global).Select(c => c.Id));
             Assert.Equal(new[] { "CollisionMargin", "CollisionChannel" }, ConfigConcepts.All.Where(c => !c.Global).Select(c => c.Id));
@@ -131,6 +133,59 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.Equal("End", flat.ToggleKeyName);
             Assert.Equal(string.Empty, flat.CycleTrackingModeKeyName);
             Assert.Equal("PageDown", flat.YawModeKeyName);
+        }
+
+        [Fact]
+        public void FirstPersonKeyNamesInitialiserIsItsCanonicalDefault()
+        {
+            Assert.Equal(ConfigConcepts.FirstPersonKey.CanonicalDefault, new HeadTrackingConfigData().FirstPersonKeyName);
+        }
+
+        // A mod with a first-person view names FirstPersonKey and reads the one global key list.
+        // The C++ twin is TestFirstPersonKey in head_tracking_config_table_tests.cpp.
+        [Fact]
+        public void AModThatNamesFirstPersonKeyReadsItAndDefaultsToHomeAndCtrlShiftB()
+        {
+            Assert.True(ConfigConcepts.FirstPersonKey.Global);
+            Assert.Equal(ConceptValueFamily.Hotkey, ConfigConcepts.FirstPersonKey.Family);
+            ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
+                ConfigConcepts.ToggleKey, ConfigConcepts.FirstPersonKey);
+            Assert.Equal("Home, Ctrl+Shift+B", HeadTrackingConfigTableFixtures.Defaults(table).FirstPersonKeyName);
+
+            string fresh = Encoding.ASCII.GetString(table.RenderFresh(new RenderHeader("G")));
+            int hotkeys = fresh.IndexOf("\r\n[Hotkeys]\r\n", StringComparison.Ordinal);
+            int toggle = fresh.IndexOf("\r\nToggleKey=default\r\n", StringComparison.Ordinal);
+            int key = fresh.IndexOf(
+                "\r\n; Switches the view between first person and the game's own camera, where the game has first person."
+                + "\r\nFirstPersonKey=default\r\n", StringComparison.Ordinal);
+            Assert.True(hotkeys >= 0 && toggle > hotkeys && key > toggle, fresh);
+
+            var config = new HeadTrackingConfigData();
+            ApplyReport report = table.Apply(
+                CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Hotkeys]\r\nFirstPersonKey=f7, ctrl+shift+b\r\n")), config);
+            Assert.Equal("F7, Ctrl+Shift+B", config.FirstPersonKeyName);
+            Assert.Empty(report.Diagnostics);
+
+            config = new HeadTrackingConfigData { FirstPersonKeyName = "F1" };
+            report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Hotkeys]\r\nFirstPersonKey=default\r\n")), config);
+            Assert.Equal("Home, Ctrl+Shift+B", config.FirstPersonKeyName);
+            Assert.Empty(report.Diagnostics);
+
+            config = new HeadTrackingConfigData();
+            report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[Hotkeys]\r\nToggleFirstPersonKey=F7\r\n")), config);
+            Assert.Equal("Home, Ctrl+Shift+B", config.FirstPersonKeyName);
+            Assert.Equal(CanonicalDiagnosticKind.MisplacedKey, Assert.Single(report.Diagnostics).Kind);
+
+            var flat = new HeadTrackingConfigData();
+            var log = new List<string>();
+            flat.ApplyValues(new Dictionary<string, string>
+            {
+                { "FirstPersonKey", "F8" },
+                { "ToggleFirstPersonKey", "F9" },
+                { "first_person_toggle_key", "F10" },
+            }, log.Add);
+            Assert.Equal("Home, Ctrl+Shift+B", flat.FirstPersonKeyName);
+            Assert.Empty(log);
         }
 
         [Fact]

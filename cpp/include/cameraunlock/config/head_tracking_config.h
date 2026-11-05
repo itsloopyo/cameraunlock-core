@@ -116,6 +116,10 @@ struct HeadTrackingConfig {
     /// config::PlayerListCodec: `2, 3`, or empty for none. Core binds it and does not apply it.
     /// Read only through config::HeadTrackingConfigTable; ApplyValues does not read it.
     std::string accela_players;
+    /// The key list that switches the view between first person and the game's own camera, in
+    /// a mod that has a first-person view. Core binds it and does not poll it. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    std::string first_person_key_name = "Home, Ctrl+Shift+B";
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.

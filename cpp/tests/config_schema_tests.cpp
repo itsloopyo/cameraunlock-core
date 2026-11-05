@@ -472,6 +472,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"CycleTrackingModeKey", ShippedString(c.cycle_tracking_mode_key_name)},
         {"YawModeKey", ShippedString(c.yaw_mode_key_name)},
         {"TrueFreeLookKey", ShippedString(c.true_free_look_key_name)},
+        {"FirstPersonKey", ShippedString(c.first_person_key_name)},
         {"RecenterKey", ShippedString(c.recenter_key_name)},
         {"LightMultiplier", ShippedFloat(c.light.multiplier)},
     };
@@ -638,8 +639,8 @@ void TestCanonicalTableStartsAtTheCanonicalDefaults() {
                         .c_str());
     }
     Check(with_canonical_default == std::vector<std::string>{"CollisionEnabled", "ToggleKey", "CycleTrackingModeKey",
-                                                              "YawModeKey", "TrueFreeLookKey"},
-          "the concepts with a canonical_default are CollisionEnabled and the four hotkey lists");
+                                                              "YawModeKey", "TrueFreeLookKey", "FirstPersonKey"},
+          "the concepts with a canonical_default are CollisionEnabled and the five hotkey lists");
     Check(started.at("CollisionEnabled").bool_value && !cameraunlock::HeadTrackingConfig{}.collision_enabled,
           "the canonical table starts CollisionEnabled at true and the flat reader's field stays false");
 }

@@ -9,6 +9,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `[Hotkeys] FirstPersonKey`, the one key that swoops a mod's view into first person
+
+`FirstPersonKey` is a canonical concept: a key list, `canonical_default` `Home, Ctrl+Shift+B`,
+global, directly after `TrueFreeLookKey`. It switches the view between first person at the
+character's eyes and the game's own camera, with an animated swoop, in a mod that has a
+first-person view (owner request: one global setting, Home by default). B is from the fleet's
+spare chord letters; Y, G, H and U are the other four lists'. Its aliases are
+`ToggleFirstPersonKey` and `FirstPersonToggleKey`.
+
+- Fields `HeadTrackingConfigData.FirstPersonKeyName` and `HeadTrackingConfig::first_person_key_name`
+  (the C++ member after every existing one), bound by both `HeadTrackingConfigTable`s, whose
+  defaults instance starts it at its `canonical_default`. Core binds the row and does not poll it.
+- No flat reader reads it, so, as for `TrueFreeLookKey`, its `default` and field initialisers are
+  its `canonical_default`. The C# `ApplyValues` skips it before its duplicate-spelling warning.
+  In a canonical file either alias draws `MisplacedKey` and is not read.
+- Inserting the concept in the schema's order renumbers the later values of `schema::Concept`
+  (`LightMultiplier`).
+- 26 concepts are global, where 25 were.
+- The `head-tracking/` and `global/Defaults.ini` fixtures and docs/canonical-config.md carry it.
+- The C interface is unchanged: it has no hotkey bit for the concept, and its four fleet key rows
+  stay four.
+
+Consuming repos: a new Defaults.ini holds `FirstPersonKey=Home, Ctrl+Shift+B` under `[Hotkeys]`.
+One already on a player's disk is not changed and has no such line, which reads as the built-in
+list. A game's `CameraUnlock.ini` changes only in a mod whose table names the concept. A mod that
+binds it to Home where Home already does something else in that game, or keeps its own
+first-person key, marks the row `PerGame()` under an owner-approved `per_game` entry.
+
 ### Added - an Accela filter, and a per-packet Accela stage in the head tracking session
 
 - `AccelaFilter` in C++ (`cameraunlock/processing/accela_filter.h`) and C#

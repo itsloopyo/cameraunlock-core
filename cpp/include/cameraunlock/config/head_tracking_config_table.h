@@ -130,6 +130,9 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
         case C::TrueFreeLookKey:
             BindHeadTrackingMember<C::TrueFreeLookKey>(table, &H::true_free_look_key_name);
             return;
+        case C::FirstPersonKey:
+            BindHeadTrackingMember<C::FirstPersonKey>(table, &H::first_person_key_name);
+            return;
         case C::LightMultiplier:
             table.template Concept<C::LightMultiplier>([](const Config& c) { return c.light.multiplier; },
                                                        [](Config& c, float v) { c.light.multiplier = v; });
@@ -156,16 +159,17 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
 /// `position`, have no row: the canonical format carries no pose shaping, so they keep the
 /// defaults instance's values.
 ///
-/// The defaults instance is Config{} with the four hotkey lists and CollisionEnabled at the schema's
+/// The defaults instance is Config{} with the five hotkey lists and CollisionEnabled at the schema's
 /// canonical_default (`End, Ctrl+Shift+Y`, `PageUp, Ctrl+Shift+G`, `PageDown, Ctrl+Shift+H`,
-/// `Insert, Ctrl+Shift+U`, true); HeadTrackingConfig's own field initialisers, which the flat reader
-/// uses, stay single keys and false.
+/// `Insert, Ctrl+Shift+U`, `Home, Ctrl+Shift+B`, true); HeadTrackingConfig's own field initialisers,
+/// which the flat reader uses, stay single keys and false for the first three lists and
+/// CollisionEnabled, and are the canonical_default for the two no flat reader reads.
 ///
 /// Throws std::invalid_argument for an empty list, a concept named twice, or a value that is not a
 /// canonical concept.
 ///
 /// `defaults` is what the table's rows start from: a Config whose own members, the ones no concept
-/// binds, already hold their defaults. The four key lists and CollisionEnabled are set on it here.
+/// binds, already hold their defaults. The five key lists and CollisionEnabled are set on it here.
 template <class Config, class Concepts>
 ConfigTable<Config> HeadTrackingConfigTableFrom(const Concepts& implemented, Config defaults) {
     static_assert(std::is_base_of_v<HeadTrackingConfig, Config>,
@@ -187,6 +191,7 @@ ConfigTable<Config> HeadTrackingConfigTableFrom(const Concepts& implemented, Con
         schema::ConceptTraits<schema::Concept::CycleTrackingModeKey>::kCanonicalDefault;
     defaults.yaw_mode_key_name = schema::ConceptTraits<schema::Concept::YawModeKey>::kCanonicalDefault;
     defaults.true_free_look_key_name = schema::ConceptTraits<schema::Concept::TrueFreeLookKey>::kCanonicalDefault;
+    defaults.first_person_key_name = schema::ConceptTraits<schema::Concept::FirstPersonKey>::kCanonicalDefault;
     defaults.collision_enabled =
         std::string_view(schema::ConceptTraits<schema::Concept::CollisionEnabled>::kCanonicalDefault) == "true";
 

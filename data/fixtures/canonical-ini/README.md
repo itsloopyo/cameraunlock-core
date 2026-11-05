@@ -290,7 +290,7 @@ Core's `HeadTrackingConfigTable` naming every canonical concept, over C++ `HeadT
 and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Game`.
 
 - `all-concepts.ini`: the table's defaults instance rendered. It holds every canonical concept at
-  its default, the four hotkey lists and `CollisionEnabled` at their `canonical_default`, so it
+  its default, the five hotkey lists and `CollisionEnabled` at their `canonical_default`, so it
   pins each concept's default rendering in both languages. `CollisionChannel` is the table's one
   Engine row, the commented line `; CollisionChannel=0`.
 - `all-concepts-fresh.ini`: the same table's fresh render, every global concept `Key=default`,
@@ -299,7 +299,7 @@ and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Ga
   gate: every global concept defaults to the schema's `default` (its `canonical_default` where it
   has one), and the table binds `PositionEnabled` beside `RotationEnabled`.
 - `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose
-  rows are `field`, a name and the value as the concept's codec writes it. The names are the 27
+  rows are `field`, a name and the value as the concept's codec writes it. The names are the 28
   concepts in the schema's order, then `PositionLocalSmoothing` and `PositionRemoteSmoothing`,
   the copy of the smoothing pair the position settings carry (C++ `position.local_smoothing`,
   C# `Position.LocalSmoothing`). A runner reads each field straight off the config, not through
