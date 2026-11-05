@@ -98,6 +98,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "FirstPersonKey", config.FirstPersonKeyName },
                 { "RecenterKey", config.RecenterKeyName },
                 { "LightMultiplier", config.Light.Multiplier },
+                { "GameFov", config.GameFov },
             };
         }
 
@@ -256,6 +257,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "PositionLimitZBack", metres },
                 { "CollisionMargin", new double?[] { 0, null } },
                 { "LightMultiplier", new double?[] { 0, HeadFollowLightSettings.MaxMultiplier } },
+                { "GameFov", new double?[] { 0, 140 } },
             };
         }
 

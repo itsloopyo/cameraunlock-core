@@ -216,6 +216,9 @@ namespace CameraUnlock.Core.Config
                     table.Concept(ConfigConcepts.LightMultiplier, c => c.Light.Multiplier,
                         (c, v) => c.Light = new HeadFollowLightSettings { Multiplier = v });
                     return;
+                case nameof(ConfigConcepts.GameFov):
+                    table.Concept(ConfigConcepts.GameFov, c => c.GameFov, (c, v) => c.GameFov = v);
+                    return;
             }
             // Reached by a concept the schema gained after this switch was written.
             throw new InvalidOperationException("HeadTrackingConfigTable has no binding for " + concept.Id);

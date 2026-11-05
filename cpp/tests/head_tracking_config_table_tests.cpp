@@ -141,6 +141,7 @@ std::vector<FieldRead> Fields() {
         {"TrueFreeLookKey", [k](const H& c) { return k(c.true_free_look_key_name); }},
         {"FirstPersonKey", [k](const H& c) { return k(c.first_person_key_name); }},
         {"LightMultiplier", [f](const H& c) { return f(c.light.multiplier); }},
+        {"GameFov", [f](const H& c) { return f(c.game_fov); }},
         {"PositionLocalSmoothing", [f](const H& c) { return f(c.position.local_smoothing); }},
         {"PositionRemoteSmoothing", [f](const H& c) { return f(c.position.remote_smoothing); }},
     };
@@ -330,19 +331,19 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe26TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe27TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 26 the schema names]\n";
+    std::cout << "\n[the global concepts are the 27 the schema names]\n";
     const std::vector<std::string> expected{
         "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "Accela", "AccelaPlayers", "WorldSpaceYaw",
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
         "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
-        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier"};
+        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov"};
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 26 listed, in schema order");
+    Check(global == expected, "the global concepts are the 27 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }
@@ -454,6 +455,39 @@ void TestFirstPersonKey() {
           "the flat reader does not read FirstPersonKey under any spelling, and says nothing");
 }
 
+// GameFov reads as vertical degrees, 0 for the game's own, and refuses a value past 140 for its default. The C#
+// twin is HeadTrackingConfigTableTests.GameFovReadsDegreesAndDefaultsToTheGamesOwn.
+void TestGameFov() {
+    std::cout << "\n[GameFov reads and defaults in a mod that names it]\n";
+    static_assert(schema::ConceptTraits<Concept::GameFov>::kGlobal &&
+                  schema::ConceptTraits<Concept::GameFov>::kFamily == schema::ValueFamily::kFloating);
+    const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable({Concept::LightMultiplier, Concept::GameFov});
+    Check(table.defaults().game_fov == 0.0f, "the table starts it at 0, the game's own");
+
+    const std::string fresh = RenderCanonicalFresh(table, kHeader);
+    const std::size_t light = fresh.find("\r\n[Light]\r\n");
+    const std::size_t view = fresh.find("\r\n[View]\r\n");
+    const std::size_t key = fresh.find(
+        "\r\n; The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9."
+        "\r\n; 0 keeps the game's own. Scopes and zoom keep their share of it.\r\nGameFov=default\r\n");
+    Check(light != std::string::npos && view != std::string::npos && key != std::string::npos && light < view && view < key,
+          "the fresh file writes GameFov=default with its comment under [View], after [Light]");
+
+    HeadTrackingConfig config;
+    ApplyReport report = ApplyCanonical(ParseCanonicalIni("[View]\r\nGameFov=75.5\r\n"), table, config);
+    Check(config.game_fov == 75.5f && report.diagnostics.empty(), "GameFov=75.5 reads as 75.5 with nothing said");
+
+    config = HeadTrackingConfig{};
+    config.game_fov = 60.0f;
+    report = ApplyCanonical(ParseCanonicalIni("[View]\r\nGameFov=141\r\n"), table, config);
+    Check(config.game_fov == 0.0f && report.diagnostics.size() == 1, "GameFov=141 is refused with a diagnostic and the row takes its default, 0");
+
+    HeadTrackingConfig flat;
+    std::vector<std::string> log;
+    flat.ApplyValues({{"GameFov", "90"}}, [&log](const std::string& line) { log.push_back(line); });
+    Check(flat.game_fov == 0.0f && log.empty(), "the flat reader does not read GameFov, and says nothing");
+}
+
 void TestArguments() {
     std::cout << "\n[arguments]\n";
     Check(Contains(Thrown([] { HeadTrackingConfigTable({}); }), "needs the concepts"), "an empty list throws");
@@ -519,6 +553,7 @@ int RunHeadTrackingConfigTableTests() {
         TestTrueFreeLookSpellings();
         TestFlatReaderSkipsAccela();
         TestFirstPersonKey();
+        TestGameFov();
         TestArguments();
         TestOnlyNamedConcepts();
         TestDerivedConfig();

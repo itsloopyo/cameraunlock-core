@@ -388,11 +388,16 @@ FirstPersonKey=Home, Ctrl+Shift+B
 ; How far the light turns for each degree your head turns.
 ; 1 matches the view, 0 keeps the light on your aim.
 LightMultiplier=1.5
+
+[View]
+; The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.
+; 0 keeps the game's own. Scopes and zoom keep their share of it.
+GameFov=0.0
 ```
 
 The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFreshnessMs` 1 to
 2147483647, the smoothing pair, `Accela` and `CollisionReleaseSmoothing` 0 to 1, the five limits 0 to 10,
-`LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its unit is the engine's own),
+`LightMultiplier` 0 to 5, `GameFov` 0 to 140, `CollisionMargin` 0 with no upper bound (its unit is the engine's own),
 and `CollisionChannel` none. The five hotkey lists and
 `CollisionEnabled` start at the schema's `canonical_default`. The `default` field and core's field
 initialisers, which the older flat readers use, keep `End` for `ToggleKey` and `PageDown` for
@@ -1212,6 +1217,11 @@ FirstPersonKey=Home, Ctrl+Shift+B
 ; How far the light turns for each degree your head turns.
 ; 1 matches the view, 0 keeps the light on your aim.
 LightMultiplier=1.5
+
+[View]
+; The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.
+; 0 keeps the game's own. Scopes and zoom keep their share of it.
+GameFov=0.0
 ```
 
 `CollisionMargin` and `CollisionChannel` have no line: they are not global, so each game keeps its

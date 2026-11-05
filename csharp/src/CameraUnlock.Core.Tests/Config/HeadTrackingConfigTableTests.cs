@@ -96,7 +96,7 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe26TheSchemaNames()
+        public void TheGlobalConceptsAreThe27TheSchemaNames()
         {
             string[] global =
             {
@@ -104,7 +104,7 @@ namespace CameraUnlock.Core.Tests.Config
                 "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
                 "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
-                "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier",
+                "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov",
             };
             Assert.Equal(global, ConfigConcepts.All.Where(c => c.Global).Select(c => c.Id));
             Assert.Equal(new[] { "CollisionMargin", "CollisionChannel" }, ConfigConcepts.All.Where(c => !c.Global).Select(c => c.Id));
@@ -185,6 +185,43 @@ namespace CameraUnlock.Core.Tests.Config
                 { "first_person_toggle_key", "F10" },
             }, log.Add);
             Assert.Equal("Home, Ctrl+Shift+B", flat.FirstPersonKeyName);
+            Assert.Empty(log);
+        }
+
+        // GameFov reads as vertical degrees, 0 for the game's own, and refuses a value past 140 for its default.
+        // The C++ twin is TestGameFov in head_tracking_config_table_tests.cpp.
+        [Fact]
+        public void GameFovReadsDegreesAndDefaultsToTheGamesOwn()
+        {
+            Assert.True(ConfigConcepts.GameFov.Global);
+            Assert.Equal(ConceptValueFamily.Floating, ConfigConcepts.GameFov.Family);
+            ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
+                ConfigConcepts.LightMultiplier, ConfigConcepts.GameFov);
+            Assert.Equal(0f, HeadTrackingConfigTableFixtures.Defaults(table).GameFov);
+
+            string fresh = Encoding.ASCII.GetString(table.RenderFresh(new RenderHeader("G")));
+            int light = fresh.IndexOf("\r\n[Light]\r\n", StringComparison.Ordinal);
+            int view = fresh.IndexOf("\r\n[View]\r\n", StringComparison.Ordinal);
+            int key = fresh.IndexOf(
+                "\r\n; The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9."
+                + "\r\n; 0 keeps the game's own. Scopes and zoom keep their share of it.\r\nGameFov=default\r\n",
+                StringComparison.Ordinal);
+            Assert.True(light >= 0 && view > light && key > view, fresh);
+
+            var config = new HeadTrackingConfigData();
+            ApplyReport report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]\r\nGameFov=75.5\r\n")), config);
+            Assert.Equal(75.5f, config.GameFov);
+            Assert.Empty(report.Diagnostics);
+
+            config = new HeadTrackingConfigData { GameFov = 60f };
+            report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]\r\nGameFov=141\r\n")), config);
+            Assert.Equal(0f, config.GameFov);
+            Assert.Single(report.Diagnostics);
+
+            var flat = new HeadTrackingConfigData();
+            var log = new List<string>();
+            flat.ApplyValues(new Dictionary<string, string> { { "GameFov", "90" } }, log.Add);
+            Assert.Equal(0f, flat.GameFov);
             Assert.Empty(log);
         }
 

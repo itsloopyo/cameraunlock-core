@@ -84,7 +84,7 @@
       "note": "The schema default is true. A source and INI sweep of the fleet on 2026-09-23 found three repos that start in camera-local yaw: sonic-racing-crossworlds ([Tracking] WorldSpaceYaw, false in code and in the shipped INI, which calls camera-local the recommendation for the game's loops and walls), pixeljunk-monsters-2 (BepInEx [Rotation] WorldSpaceYaw bound with default false, described as suiting the tilted top-down camera) and battlefield-bad-company-2 (no config key at all; it starts camera-local and only the yaw-mode hotkey changes it). dying-light-2 and dishonored-2 ([Rotation] WorldLockedYaw) defaulted false until their commits 0307ede and 8184371 moved the compiled default, the shipped INI and the launcher seed to true; a HeadTracking.ini already on a user's disk keeps the value it names. quake-ii-rtx and sleeping-dogs, once listed here, default true in code and INI. WorldLockedYaw is aliased because it is genuinely the same concept with the same polarity, but a mod that adopts this schema's DEFAULT in place of its own flips behaviour for its existing users. Check the mod's own default before wiring the table in."
     }
   ],
-  "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle", "Light"],
+  "sections": ["Network", "General", "Sensitivity", "Inversion", "Smoothing", "Position", "Hotkeys", "Reticle", "Light", "View"],
   "concepts": [
     {
       "id": "UdpPort",
@@ -680,6 +680,19 @@
       "global": true,
       "file_comment": ["How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."],
       "range": {"min": 0, "max": 5}
+    },
+    {
+      "id": "GameFov",
+      "section": "View",
+      "key": "GameFov",
+      "type": "float",
+      "default": 0,
+      "aliases": [],
+      "doc": "The field of view the game is drawn at, as VERTICAL degrees (the axis that stays the same at every aspect ratio; 60 vertical is about 91 horizontal at 16:9). 0 leaves the game's own. Set, it replaces the game's un-zoomed FOV and every other FOV the game draws at (a scope, sights, a sprint, a cut scene) keeps its ratio to it, so a 2x scope is still 2x. Each mod converts it to its engine's own axis with the aspect its projection divides by. A value outside [0, 140] is refused with a diagnostic and the row takes its default, the game's own. Not aliased to the fleet's FieldOfView or FovOffset rows: those are horizontal or relative in the mods that wrote them. Only in a mod that binds it; no flat reader reads it.",
+      "canonical": true,
+      "global": true,
+      "file_comment": ["The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.", "0 keeps the game's own. Scopes and zoom keep their share of it."],
+      "range": {"min": 0, "max": 140}
     }
   ],
   "retired": [

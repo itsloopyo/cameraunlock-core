@@ -182,6 +182,12 @@ namespace CameraUnlock.Core.Config
             new FloatCodec(0f, 5f), new[] { "How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim." }, null, "1.5",
             true);
 
+        /// <summary>[View] GameFov.</summary>
+        public static readonly ConceptDescriptor<float> GameFov = new ConceptDescriptor<float>(
+            "GameFov", "View", "GameFov", ConceptValueFamily.Floating,
+            new FloatCodec(0f, 140f), new[] { "The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.", "0 keeps the game's own. Scopes and zoom keep their share of it." }, null, "0",
+            true);
+
         /// <summary>In the schema's concepts order, which is the order a section's concept rows are written in.</summary>
         internal static readonly ConceptDescriptor[] All =
         {
@@ -213,6 +219,7 @@ namespace CameraUnlock.Core.Config
             TrueFreeLookKey,
             FirstPersonKey,
             LightMultiplier,
+            GameFov,
         };
 
         /// <summary>The schema's sections, in the order a canonical file writes them.</summary>
@@ -227,6 +234,7 @@ namespace CameraUnlock.Core.Config
             "Hotkeys",
             "Reticle",
             "Light",
+            "View",
         };
 
         /// <summary>

@@ -67,6 +67,7 @@ namespace CameraUnlock.Core.Config
             public const string FirstPersonKey = "firstpersonkey";
             public const string RecenterKey = "recenterkey";
             public const string LightMultiplier = "lightmultiplier";
+            public const string GameFov = "gamefov";
 
             public const string LightFollowsHead = "lightfollowshead";
             public const string Smoothing = "smoothing";
@@ -121,6 +122,7 @@ namespace CameraUnlock.Core.Config
             { "flashlightmultiplier", "lightmultiplier" },
             { "flashlightscale", "lightmultiplier" },
             { "freelookmarker", "freelookmarker" },
+            { "gamefov", "gamefov" },
             { "horizonlock", "worldspaceyaw" },
             { "horizonlockedyaw", "worldspaceyaw" },
             { "invertpitch", "invertpitch" },

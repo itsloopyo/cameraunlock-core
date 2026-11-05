@@ -387,6 +387,7 @@ void TestSchemaRangesMatchTheGuards() {
         {"PositionLimitZBack", metres},
         {"CollisionMargin", {true, 0.0, false, 0.0}},
         {"LightMultiplier", {true, 0.0, true, static_cast<double>(kMaxLightMultiplier)}},
+        {"GameFov", {true, 0.0, true, 140.0}},
     };
 
     Check(concept_ranges::kConceptRangeCount == expected.size(),
@@ -475,6 +476,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"FirstPersonKey", ShippedString(c.first_person_key_name)},
         {"RecenterKey", ShippedString(c.recenter_key_name)},
         {"LightMultiplier", ShippedFloat(c.light.multiplier)},
+        {"GameFov", ShippedFloat(c.game_fov)},
     };
 }
 

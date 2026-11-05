@@ -33,6 +33,7 @@ inline constexpr ConceptRange kConceptRanges[] = {
     { "CollisionMargin", true, 0, false, 0 },
     { "CollisionReleaseSmoothing", true, 0, true, 1 },
     { "LightMultiplier", true, 0, true, 5 },
+    { "GameFov", true, 0, true, 140 },
 };
 
 inline constexpr size_t kConceptRangeCount = sizeof(kConceptRanges) / sizeof(kConceptRanges[0]);

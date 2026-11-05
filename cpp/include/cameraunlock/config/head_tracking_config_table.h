@@ -137,6 +137,9 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
             table.template Concept<C::LightMultiplier>([](const Config& c) { return c.light.multiplier; },
                                                        [](Config& c, float v) { c.light.multiplier = v; });
             return;
+        case C::GameFov:
+            BindHeadTrackingMember<C::GameFov>(table, &H::game_fov);
+            return;
     }
     // Reached by a concept the schema gained after this switch was written.
     throw std::logic_error(std::string("HeadTrackingConfigTable has no binding for ") + HeadTrackingConceptName(id));

@@ -27,5 +27,6 @@ field	YawModeKey	PageDown, Ctrl+Shift+H
 field	TrueFreeLookKey	Insert, Ctrl+Shift+U
 field	FirstPersonKey	Home, Ctrl+Shift+B
 field	LightMultiplier	1.5
+field	GameFov	0.0
 field	PositionLocalSmoothing	0.0
 field	PositionRemoteSmoothing	0.15

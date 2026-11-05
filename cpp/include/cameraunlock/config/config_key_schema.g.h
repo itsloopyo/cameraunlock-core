@@ -59,6 +59,7 @@ inline constexpr const char* kTrueFreeLookKey = "truefreelookkey";
 inline constexpr const char* kFirstPersonKey = "firstpersonkey";
 inline constexpr const char* kRecenterKey = "recenterkey";
 inline constexpr const char* kLightMultiplier = "lightmultiplier";
+inline constexpr const char* kGameFov = "gamefov";
 
 inline constexpr const char* kLightFollowsHead = "lightfollowshead";
 inline constexpr const char* kSmoothing = "smoothing";
@@ -122,6 +123,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "flashlightmultiplier", "lightmultiplier", false },
     { "flashlightscale", "lightmultiplier", false },
     { "freelookmarker", "freelookmarker", false },
+    { "gamefov", "gamefov", false },
     { "horizonlock", "worldspaceyaw", false },
     { "horizonlockedyaw", "worldspaceyaw", false },
     { "invertpitch", "invertpitch", false },
@@ -355,6 +357,7 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "FirstPersonKey", config_keys::kFirstPersonKey, ConfigValueType::kString, 0, 0.0f, false, "Home, Ctrl+Shift+B", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "RecenterKey", config_keys::kRecenterKey, ConfigValueType::kString, 0, 0.0f, false, "Home", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LightMultiplier", config_keys::kLightMultiplier, ConfigValueType::kFloat, 0, 1.5f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "GameFov", config_keys::kGameFov, ConfigValueType::kFloat, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
 };
 
 inline constexpr size_t kConfigConceptDefaultCount =

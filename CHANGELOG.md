@@ -9,6 +9,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `[View] GameFov`, the field of view a mod draws the game at
+
+`GameFov` is a canonical concept: a float in vertical degrees, `default` 0, range 0 to 140,
+global, in a new last section `[View]`. 0 leaves the game's own field of view; a value replaces
+the game's un-zoomed FOV, and every other FOV the game draws at (a scope, the sights, a sprint, a
+cut scene) keeps its ratio to it. Vertical, because it is the axis that stays put at every aspect
+ratio: 60 vertical is about 91 horizontal at 16:9 and about 128 at 32:9. Each mod converts it to
+its engine's own axis with the aspect its projection divides by (owner request: a game FOV setting
+in Hypari, global with a per-game override). No aliases: the fleet's `FieldOfView` and
+`FovOffset` rows are horizontal or relative in the mods that wrote them, so they stay in the
+unaliased list.
+
+- Fields `HeadTrackingConfigData.GameFov` and `HeadTrackingConfig::game_fov` (the C++ member
+  after every existing one), bound by both `HeadTrackingConfigTable`s. Core binds the row and
+  does not apply it.
+- No flat reader reads it; the C# `ApplyValues` skips it before its duplicate-spelling warning.
+- `schema::Concept::GameFov` is the last value, so no existing value is renumbered.
+- 27 concepts are global, where 26 were.
+- The `head-tracking/` and `global/Defaults.ini` fixtures and docs/canonical-config.md carry it.
+- The C interface is unchanged.
+
+Consuming repos: a new Defaults.ini holds `GameFov=0.0` under `[View]`. One already on a
+player's disk has no such line, which reads as 0, the game's own. A game's `CameraUnlock.ini`
+changes only in a mod whose table names the concept.
+
 ### Added - `[Hotkeys] FirstPersonKey`, the one key that swoops a mod's view into first person
 
 `FirstPersonKey` is a canonical concept: a key list, `canonical_default` `Home, Ctrl+Shift+B`,
