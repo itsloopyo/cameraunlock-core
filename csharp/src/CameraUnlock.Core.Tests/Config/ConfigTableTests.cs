@@ -380,8 +380,17 @@ namespace CameraUnlock.Core.Tests.Config
                         break;
                     default:
                         Assert.Equal("string", type);
-                        Assert.Equal(ConceptValueFamily.Hotkey, d.Family);
-                        Assert.IsType<HotkeyCodec>(((ConceptDescriptor<string>)d).Codec);
+                        if (c.GetProperty("codec").GetString() == "player_list")
+                        {
+                            Assert.Equal(ConceptValueFamily.PlayerList, d.Family);
+                            Assert.IsType<PlayerListCodec>(((ConceptDescriptor<string>)d).Codec);
+                        }
+                        else
+                        {
+                            Assert.Equal("hotkey", c.GetProperty("codec").GetString());
+                            Assert.Equal(ConceptValueFamily.Hotkey, d.Family);
+                            Assert.IsType<HotkeyCodec>(((ConceptDescriptor<string>)d).Codec);
+                        }
                         break;
                 }
             }

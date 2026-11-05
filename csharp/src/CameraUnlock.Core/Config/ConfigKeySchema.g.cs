@@ -28,6 +28,8 @@ namespace CameraUnlock.Core.Config
             public const string InvertRoll = "invertroll";
             public const string LocalSmoothing = "localsmoothing";
             public const string RemoteSmoothing = "remotesmoothing";
+            public const string Accela = "accela";
+            public const string AccelaPlayers = "accelaplayers";
             public const string WorldSpaceYaw = "worldspaceyaw";
             public const string AimDecoupling = "aimdecoupling";
             public const string ShowReticle = "showreticle";
@@ -71,6 +73,8 @@ namespace CameraUnlock.Core.Config
 
         private static readonly Dictionary<string, string> Aliases = new Dictionary<string, string>
         {
+            { "accela", "accela" },
+            { "accelaplayers", "accelaplayers" },
             { "aimdecouple", "aimdecoupling" },
             { "aimdecoupling", "aimdecoupling" },
             { "autoenable", "enableonstartup" },

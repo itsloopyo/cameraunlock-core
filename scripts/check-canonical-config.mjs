@@ -37,6 +37,7 @@ import {
 } from "./lib/canonical-ini.mjs";
 import { readConfigFormat } from "./lib/config-format-file.mjs";
 import { parseKeyBindings } from "./lib/key-bindings.mjs";
+import { parsePlayerList } from "./lib/player-list.mjs";
 import { REPOS_ROOT, git, readCoreJson, resolveRepoRoot } from "./lib/repos.mjs";
 
 const SCHEMA = readCoreJson("data/config-schema.json");
@@ -254,6 +255,9 @@ export function lintCanonicalConfig(bytes, { dialect, perGame }) {
         if (concept.codec === "hotkey") {
           const parsed = parseKeyBindings(v.value, dialect);
           if (parsed.error) problems.push(`${where}=${v.value} is not a ${dialect} key list: ${parsed.error}`);
+        } else if (concept.codec === "player_list") {
+          const parsed = parsePlayerList(v.value);
+          if (parsed.error) problems.push(`${where}=${v.value} is not a player list: ${parsed.error}`);
         }
         continue;
       }

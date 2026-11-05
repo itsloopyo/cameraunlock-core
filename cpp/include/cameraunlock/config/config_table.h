@@ -3,6 +3,7 @@
 #include <cameraunlock/config/canonical_ini.h>
 #include <cameraunlock/config/config_concepts.g.h>
 #include <cameraunlock/config/hotkey_codec.h>
+#include <cameraunlock/config/player_list_codec.h>
 #include <cameraunlock/config/value_codecs.h>
 
 #include <charconv>
@@ -87,7 +88,8 @@ constexpr bool IntegralHolds(long long min, long long max) {
 /// True when a field of type Field can hold concept Id: bool for the kBool family; for kInteger
 /// an integral type other than bool whose limits hold the concept's range, so std::uint16_t
 /// holds UdpPort (1 to 65535) and not DataFreshnessMs (1 to INT_MAX); float or double for
-/// kFloating; std::string for kHotkey. A concept row whose field fails this does not compile.
+/// kFloating; std::string for kHotkey and kPlayerList. A concept row whose field fails this does
+/// not compile.
 template <schema::Concept Id, class Field>
 constexpr bool FieldHoldsConcept() {
     using Traits = schema::ConceptTraits<Id>;
@@ -732,6 +734,8 @@ private:
             return IntCodec<Field>(static_cast<Field>(Traits::kMin), static_cast<Field>(Traits::kMax));
         } else if constexpr (Traits::kFamily == schema::ValueFamily::kFloating) {
             return FloatingCodec<Field>(static_cast<Field>(Traits::kMin), static_cast<Field>(Traits::kMax));
+        } else if constexpr (Traits::kFamily == schema::ValueFamily::kPlayerList) {
+            return PlayerListCodec{};
         } else {
             return HotkeyCodec{};
         }
@@ -743,7 +747,7 @@ private:
         static_assert(FieldHoldsConcept<Id, Field>(),
                       "the field's type does not hold this concept: a bool concept needs bool, an integer concept "
                       "an integral type other than bool whose limits hold the concept's range, a floating concept "
-                      "float or double, a hotkey concept std::string");
+                      "float or double, a hotkey or player list concept std::string");
         static_assert(std::is_invocable_v<Set&, Config&, Field>, "the setter takes (Config&, the field's type)");
         using Codec = decltype(ConceptCodec<Id, Field>());
 

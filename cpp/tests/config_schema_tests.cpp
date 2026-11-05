@@ -10,6 +10,7 @@
 #include <cameraunlock/config/head_tracking_config.h>
 #include <cameraunlock/config/head_tracking_config_table.h>
 #include <cameraunlock/config/hotkey_codec.h>
+#include <cameraunlock/config/player_list_codec.h>
 #include <cameraunlock/config/value_codecs.h>
 
 #include <cameraunlock/config/value_guards.h>
@@ -377,6 +378,7 @@ void TestSchemaRangesMatchTheGuards() {
         {"DataFreshnessMs", {true, 1.0, true, static_cast<double>(INT_MAX)}},
         {"LocalSmoothing", unit},
         {"RemoteSmoothing", unit},
+        {"Accela", unit},
         {"CollisionReleaseSmoothing", unit},
         {"PositionLimitX", metres},
         {"PositionLimitY", metres},
@@ -435,6 +437,8 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"InvertRoll", ShippedBool(c.invert_roll)},
         {"LocalSmoothing", ShippedFloat(c.local_smoothing)},
         {"RemoteSmoothing", ShippedFloat(c.remote_smoothing)},
+        {"Accela", ShippedFloat(c.accela)},
+        {"AccelaPlayers", ShippedString(c.accela_players)},
         {"WorldSpaceYaw", ShippedBool(c.world_space_yaw)},
         {"AimDecoupling", ShippedBool(c.aim_decoupling_enabled)},
         {"ShowReticle", ShippedBool(c.show_decoupled_reticle)},
@@ -585,6 +589,10 @@ void CheckDefaultText() {
         const auto read = config::FloatCodec(Traits::kMin, Traits::kMax).Parse(Traits::kDefaultText);
         error = read.error;
         same = read.ok() && read.value == declared->float_value;
+    } else if constexpr (Traits::kFamily == config::schema::ValueFamily::kPlayerList) {
+        const auto read = config::PlayerListCodec().Parse(Traits::kDefaultText);
+        error = read.error;
+        same = read.ok() && read.value == declared->string_value;
     } else {
         const auto read = config::HotkeyCodec().Parse(Traits::kDefaultText);
         error = read.error;

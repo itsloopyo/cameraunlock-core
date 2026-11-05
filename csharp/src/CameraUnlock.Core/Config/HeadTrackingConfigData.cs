@@ -216,6 +216,21 @@ namespace CameraUnlock.Core.Config
         public float CollisionReleaseSmoothing { get; set; } = 0.9f;
 
         /// <summary>
+        /// How much the Accela filter smooths, 0 to 1. Core binds it and does not apply it: the
+        /// launcher's own backends do. Read only through <see cref="HeadTrackingConfigTable"/>;
+        /// <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public float Accela { get; set; } = 0.75f;
+
+        /// <summary>
+        /// The players whose tracker the Accela filter smooths, as the canonical text of
+        /// <see cref="PlayerListCodec"/>: <c>2, 3</c>, or empty for none. Core binds it and does
+        /// not apply it. Read only through <see cref="HeadTrackingConfigTable"/>;
+        /// <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public string AccelaPlayers { get; set; } = string.Empty;
+
+        /// <summary>
         /// Creates a new config with default values.
         /// </summary>
         public HeadTrackingConfigData()
@@ -305,7 +320,8 @@ namespace CameraUnlock.Core.Config
                 // Added to the schema after this reader was frozen: it skips them as it did when
                 // they resolved to nothing, duplicate-spelling warning included.
                 if (key == ConfigKeySchema.Keys.TrueFreeLook || key == ConfigKeySchema.Keys.TrueFreeLookKey
-                    || key == ConfigKeySchema.Keys.FreeLookMarker || key == ConfigKeySchema.Keys.StockSights) continue;
+                    || key == ConfigKeySchema.Keys.FreeLookMarker || key == ConfigKeySchema.Keys.StockSights
+                    || key == ConfigKeySchema.Keys.Accela || key == ConfigKeySchema.Keys.AccelaPlayers) continue;
 
                 string firstSpelling;
                 if (firstSpellingOf.TryGetValue(key, out firstSpelling))

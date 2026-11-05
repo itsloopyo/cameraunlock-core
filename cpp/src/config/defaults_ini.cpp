@@ -2,6 +2,7 @@
 
 #include "cameraunlock/config/head_tracking_config_table.h"
 #include "cameraunlock/config/hotkey_codec.h"
+#include "cameraunlock/config/player_list_codec.h"
 #include "cameraunlock/config/value_codecs.h"
 #include "cameraunlock/config/value_guards.h"
 #include "cameraunlock/input/key_names.g.h"
@@ -124,6 +125,8 @@ std::string CodecError(std::string_view text) {
         // passes here only if both take it, so every game reads it.
         std::string error = FloatCodec(Traits::kMin, Traits::kMax).Parse(text).error;
         return error.empty() ? DoubleCodec(Traits::kMin, Traits::kMax).Parse(text).error : error;
+    } else if constexpr (Traits::kFamily == schema::ValueFamily::kPlayerList) {
+        return PlayerListCodec().Parse(text).error;
     } else {
         std::string error = KeyNameError(text);
         return error.empty() ? HotkeyCodec().Parse(text).error : error;

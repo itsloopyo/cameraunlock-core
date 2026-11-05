@@ -108,6 +108,14 @@ struct HeadTrackingConfig {
     /// sights are up, whatever the two above hold. Read only through
     /// config::HeadTrackingConfigTable; ApplyValues does not read it.
     bool stock_sights = false;
+    /// How much the Accela filter smooths, 0 to 1. Core binds it and does not apply it: the
+    /// launcher's own backends do. Read only through config::HeadTrackingConfigTable;
+    /// ApplyValues does not read it.
+    float accela = 0.75f;
+    /// The players whose tracker the Accela filter smooths, as the canonical text of
+    /// config::PlayerListCodec: `2, 3`, or empty for none. Core binds it and does not apply it.
+    /// Read only through config::HeadTrackingConfigTable; ApplyValues does not read it.
+    std::string accela_players;
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.

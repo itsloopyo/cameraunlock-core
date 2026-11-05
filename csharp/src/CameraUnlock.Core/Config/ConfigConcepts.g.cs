@@ -38,6 +38,18 @@ namespace CameraUnlock.Core.Config
             new FloatCodec(0f, 1f), new[] { "Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most." }, null, "0.15",
             true);
 
+        /// <summary>[Smoothing] Accela.</summary>
+        public static readonly ConceptDescriptor<float> Accela = new ConceptDescriptor<float>(
+            "Accela", "Smoothing", "Accela", ConceptValueFamily.Floating,
+            new FloatCodec(0f, 1f), new[] { "How much the Accela filter smooths the trackers AccelaPlayers lists. 0 is the least, 1 the most." }, null, "0.75",
+            true);
+
+        /// <summary>[Smoothing] AccelaPlayers.</summary>
+        public static readonly ConceptDescriptor<string> AccelaPlayers = new ConceptDescriptor<string>(
+            "AccelaPlayers", "Smoothing", "AccelaPlayers", ConceptValueFamily.PlayerList,
+            new PlayerListCodec(), new[] { "Players whose tracker is smoothed with Accela, such as 2, 3. Leave empty for none." }, null, "",
+            true);
+
         /// <summary>[General] WorldSpaceYaw.</summary>
         public static readonly ConceptDescriptor<bool> WorldSpaceYaw = new ConceptDescriptor<bool>(
             "WorldSpaceYaw", "General", "WorldSpaceYaw", ConceptValueFamily.Bool,
@@ -171,6 +183,8 @@ namespace CameraUnlock.Core.Config
             EnableOnStartup,
             LocalSmoothing,
             RemoteSmoothing,
+            Accela,
+            AccelaPlayers,
             WorldSpaceYaw,
             RotationEnabled,
             DataFreshnessMs,

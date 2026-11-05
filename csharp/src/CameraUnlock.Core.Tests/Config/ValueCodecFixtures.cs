@@ -45,7 +45,7 @@ namespace CameraUnlock.Core.Tests.Config
                 rows.Add(line);
                 codecs[line.Split('\t')[0]] = true;
             }
-            if (codecs.Count != 14) throw new InvalidOperationException(codecs.Count + " codec names under " + root + ", expected 14");
+            if (codecs.Count != 15) throw new InvalidOperationException(codecs.Count + " codec names under " + root + ", expected 15");
             return rows.ToArray();
         }
 
@@ -70,6 +70,7 @@ namespace CameraUnlock.Core.Tests.Config
                 case "list<hex32>": Run(new Hex32ListCodec(), new uint[0], fields, row, null); break;
                 case "list<hex64>": Run(new Hex64ListCodec(), new ulong[0], fields, row, null); break;
                 case "list<string>": Run(new StringListCodec(), new string[0], fields, row, null); break;
+                case "player_list": Run(new PlayerListCodec(), string.Empty, fields, row, null); break;
                 default: throw new InvalidOperationException("unknown codec in row " + row);
             }
         }

@@ -20,6 +20,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { formatPlayerList, parsePlayerList } from './lib/player-list.mjs';
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const schemaPath = join(repoRoot, 'data', 'config-schema.json');
 const csharpPath = join(repoRoot, 'csharp', 'src', 'CameraUnlock.Core', 'Config', 'ConfigKeySchema.g.cs');
@@ -69,9 +71,13 @@ const valueTypes = {
         v.every((c) => typeof c === 'number' && Number.isFinite(c) && c >= 0 && c <= 1),
 };
 
-// The value family of a canonical concept, by schema type. It fixes the codec a table binds the
-// concept with; a string concept is always a hotkey list (checked below).
+// The value family of a canonical concept, by schema type and, for a string, its codec. It fixes
+// the codec a table binds the concept with. A canonical string concept names its codec (checked
+// below).
 const canonicalFamilies = { bool: 'Bool', int: 'Integer', float: 'Floating', string: 'Hotkey' };
+const stringCodecFamilies = { hotkey: 'Hotkey', player_list: 'PlayerList' };
+const familyOf = (c) => (c.type === 'string' ? stringCodecFamilies[c.codec] : canonicalFamilies[c.type]);
+
 
 class SchemaError extends Error {}
 
@@ -203,9 +209,16 @@ function checkCanonicalFields(where, concept, keyTable) {
     if ('range' in concept) checkRange(where, concept);
 
     if (concept.type === 'string') {
-        if (concept.codec !== 'hotkey') {
+        if (!(concept.codec in stringCodecFamilies)) {
             schemaError(where, `codec is ${JSON.stringify(concept.codec)}: a canonical string concept needs one, ` +
-                "and 'hotkey' is the only one");
+                `one of ${Object.keys(stringCodecFamilies).join(', ')}`);
+        }
+        if (concept.codec === 'player_list') {
+            const read = parsePlayerList(concept.default);
+            if (read.error || formatPlayerList(read.players) !== concept.default) {
+                schemaError(where, `default ${JSON.stringify(concept.default)} is not a player list as the codec writes ` +
+                    "it: numbers from 1 to 8 joined by ', ', or empty");
+            }
         }
     } else if ('codec' in concept) {
         schemaError(where, `has a codec, but only string concepts take one and this one is '${concept.type}'`);
@@ -313,7 +326,10 @@ function validateSchema(schema, keyTable) {
         // flat reader reads, since those parse a single key name; the generator cannot tell
         // which keys those are, and the flat readers' single-key defaults are pinned in
         // HeadTrackingConfigTableTests and head_tracking_config_table_tests.cpp.
-        const listDefault = concept.codec === 'hotkey' && concept.default === concept.canonical_default;
+        // A player list's default is checked by its codec in checkCanonicalFields: digits, commas
+        // and spaces, all safe in a C++ string literal.
+        const listDefault = (concept.codec === 'hotkey' && concept.default === concept.canonical_default) ||
+            concept.codec === 'player_list';
         if (!listDefault && !check(concept.default)) {
             const alphabet = concept.type === 'string'
                 ? '. String defaults are emitted verbatim into a C++ string literal, so they are limited to [A-Za-z0-9_-], or on a hotkey concept to its canonical_default'
@@ -739,7 +755,7 @@ function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
     const cString = (text) => (text === undefined ? 'nullptr' : `"${text}"`);
     const enumerators = concepts.map((c) => `    ${c.id},`).join('\n');
     const traits = concepts.map((c) => {
-        const family = canonicalFamilies[c.type];
+        const family = familyOf(c);
         const lines = [
             'template <>',
             `struct ConceptTraits<Concept::${c.id}> {`,
@@ -763,7 +779,7 @@ function renderConceptsCpp(schema, nonCanonicalKeys, nonCanonicalSections) {
     }).join('\n\n');
     const infos = concepts.map((c) => {
         const comment = [c.file_comment[0], c.file_comment[1]].map(cString).join(', ');
-        return `    {Concept::${c.id}, "${c.id}", "${c.section}", "${c.key}", ValueFamily::k${canonicalFamilies[c.type]}, ` +
+        return `    {Concept::${c.id}, "${c.id}", "${c.section}", "${c.key}", ValueFamily::k${familyOf(c)}, ` +
             `{${comment}}, ${c.file_comment.length}, ${cString(canonicalDefaultText(c))}, ${cString(defaultText(c))}, ` +
             `${isGlobal(c)}},`;
     }).join('\n');
@@ -791,8 +807,9 @@ ${enumerators}
 
 /// What a concept's field holds, which fixes its codec: kBool is BoolCodec over bool, kInteger
 /// IntCodec over an integral type that holds the concept's range, kFloating FloatCodec or
-/// DoubleCodec, and kHotkey HotkeyCodec over std::string.
-enum class ValueFamily { kBool, kInteger, kFloating, kHotkey };
+/// DoubleCodec, kHotkey HotkeyCodec over std::string, and kPlayerList PlayerListCodec over
+/// std::string.
+enum class ValueFamily { kBool, kInteger, kFloating, kHotkey, kPlayerList };
 
 /// The schema's facts about one canonical concept. kMin and kMax, both inclusive, exist for the
 /// kInteger family (within int) and the kFloating family (as float); a bound the schema leaves
@@ -899,7 +916,7 @@ function renderConceptsCsharp(schema, nonCanonicalKeys, nonCanonicalSections) {
             case 'bool': return 'new BoolCodec()';
             case 'int': return `new IntCodec(${rangeBound(c, 'min', 'csharp')}, ${rangeBound(c, 'max', 'csharp')})`;
             case 'float': return `new FloatCodec(${rangeBound(c, 'min', 'csharp')}, ${rangeBound(c, 'max', 'csharp')})`;
-            default: return 'new HotkeyCodec()';
+            default: return c.codec === 'player_list' ? 'new PlayerListCodec()' : 'new HotkeyCodec()';
         }
     };
     const fields = concepts.map((c) => {
@@ -908,7 +925,7 @@ function renderConceptsCsharp(schema, nonCanonicalKeys, nonCanonicalSections) {
         return [
             `        /// <summary>[${c.section}] ${c.key}.</summary>`,
             `        public static readonly ConceptDescriptor<${type}> ${c.id} = new ConceptDescriptor<${type}>(`,
-            `            "${c.id}", "${c.section}", "${c.key}", ConceptValueFamily.${canonicalFamilies[c.type]},`,
+            `            "${c.id}", "${c.section}", "${c.key}", ConceptValueFamily.${familyOf(c)},`,
             `            ${codec(c)}, new[] { ${comment} }, ${csString(canonicalDefaultText(c))}, ${csString(defaultText(c))},`,
             `            ${isGlobal(c)});`,
         ].join('\n');

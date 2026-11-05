@@ -56,6 +56,19 @@ namespace CameraUnlock.Core.Tests.Config
             return error!;
         }
 
+        // The C++ twin is TestPlayerListErrors in value_codecs_tests.cpp.
+        [Fact]
+        public void APlayerListNamesTheItemItRefuses()
+        {
+            var codec = new PlayerListCodec();
+            Assert.Equal("'9' is not a player number from 1 to 8", Error(codec, "2, 9"));
+            Assert.Equal("'' is not a player number from 1 to 8", Error(codec, "2,,3"));
+            Assert.Equal("player 3 is listed twice", Error(codec, "3, 03"));
+            Assert.Throws<ArgumentException>(() => codec.Render("2,3"));
+            Assert.Throws<ArgumentException>(() => codec.Render("9"));
+            Assert.Equal(B("2, 3"), codec.Render("2, 3"));
+        }
+
         [Fact]
         public void ErrorsNameTheExpectation()
         {

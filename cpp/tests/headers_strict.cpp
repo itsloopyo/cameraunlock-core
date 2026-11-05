@@ -59,6 +59,7 @@
 #include "cameraunlock/config/ini_editor.h"
 #include "cameraunlock/config/ini_reader.h"
 #include "cameraunlock/config/legacy_import.h"
+#include "cameraunlock/config/player_list_codec.h"
 #include "cameraunlock/config/value_codecs.h"
 #include "cameraunlock/config/testing/ini_mutations.h"
 #include "cameraunlock/config/value_guards.h"

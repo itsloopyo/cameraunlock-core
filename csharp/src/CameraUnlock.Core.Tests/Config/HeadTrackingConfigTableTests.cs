@@ -94,11 +94,11 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe23TheSchemaNames()
+        public void TheGlobalConceptsAreThe25TheSchemaNames()
         {
             string[] global =
             {
-                "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
+                "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "Accela", "AccelaPlayers", "WorldSpaceYaw",
                 "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
                 "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
@@ -166,6 +166,23 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.False(flat.FreeLookMarker);
             Assert.False(flat.StockSights);
             Assert.Equal("Insert, Ctrl+Shift+U", flat.TrueFreeLookKeyName);
+            Assert.Empty(log);
+        }
+
+        [Fact]
+        public void TheFlatReaderDoesNotReadAccela()
+        {
+            var flat = new HeadTrackingConfigData();
+            var log = new List<string>();
+            flat.ApplyValues(new Dictionary<string, string>
+            {
+                { "Accela", "0.2" },
+                { "accela", "0.3" },
+                { "AccelaPlayers", "2, 3" },
+                { "accela_players", "4" },
+            }, log.Add);
+            Assert.Equal(0.75f, flat.Accela);
+            Assert.Equal(string.Empty, flat.AccelaPlayers);
             Assert.Empty(log);
         }
 

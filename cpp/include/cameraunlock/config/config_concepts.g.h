@@ -16,6 +16,8 @@ enum class Concept {
     EnableOnStartup,
     LocalSmoothing,
     RemoteSmoothing,
+    Accela,
+    AccelaPlayers,
     WorldSpaceYaw,
     RotationEnabled,
     DataFreshnessMs,
@@ -41,8 +43,9 @@ enum class Concept {
 
 /// What a concept's field holds, which fixes its codec: kBool is BoolCodec over bool, kInteger
 /// IntCodec over an integral type that holds the concept's range, kFloating FloatCodec or
-/// DoubleCodec, and kHotkey HotkeyCodec over std::string.
-enum class ValueFamily { kBool, kInteger, kFloating, kHotkey };
+/// DoubleCodec, kHotkey HotkeyCodec over std::string, and kPlayerList PlayerListCodec over
+/// std::string.
+enum class ValueFamily { kBool, kInteger, kFloating, kHotkey, kPlayerList };
 
 /// The schema's facts about one canonical concept. kMin and kMax, both inclusive, exist for the
 /// kInteger family (within int) and the kFloating family (as float); a bound the schema leaves
@@ -103,6 +106,30 @@ struct ConceptTraits<Concept::RemoteSmoothing> {
     static constexpr const char* kFileComment[] = {"Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."};
     static constexpr const char* kCanonicalDefault = nullptr;
     static constexpr const char* kDefaultText = "0.15";
+    static constexpr bool kGlobal = true;
+};
+
+template <>
+struct ConceptTraits<Concept::Accela> {
+    static constexpr const char* kSection = "Smoothing";
+    static constexpr const char* kKey = "Accela";
+    static constexpr ValueFamily kFamily = ValueFamily::kFloating;
+    static constexpr float kMin = 0.0f;
+    static constexpr float kMax = 1.0f;
+    static constexpr const char* kFileComment[] = {"How much the Accela filter smooths the trackers AccelaPlayers lists. 0 is the least, 1 the most."};
+    static constexpr const char* kCanonicalDefault = nullptr;
+    static constexpr const char* kDefaultText = "0.75";
+    static constexpr bool kGlobal = true;
+};
+
+template <>
+struct ConceptTraits<Concept::AccelaPlayers> {
+    static constexpr const char* kSection = "Smoothing";
+    static constexpr const char* kKey = "AccelaPlayers";
+    static constexpr ValueFamily kFamily = ValueFamily::kPlayerList;
+    static constexpr const char* kFileComment[] = {"Players whose tracker is smoothed with Accela, such as 2, 3. Leave empty for none."};
+    static constexpr const char* kCanonicalDefault = nullptr;
+    static constexpr const char* kDefaultText = "";
     static constexpr bool kGlobal = true;
 };
 
@@ -378,6 +405,8 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::EnableOnStartup, "EnableOnStartup", "General", "EnableOnStartup", ValueFamily::kBool, {"true: head tracking is on when the game starts. ToggleKey turns it on and off.", nullptr}, 1, nullptr, "true", true},
     {Concept::LocalSmoothing, "LocalSmoothing", "Smoothing", "LocalSmoothing", ValueFamily::kFloating, {"Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.", nullptr}, 1, nullptr, "0", true},
     {Concept::RemoteSmoothing, "RemoteSmoothing", "Smoothing", "RemoteSmoothing", ValueFamily::kFloating, {"Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."}, 2, nullptr, "0.15", true},
+    {Concept::Accela, "Accela", "Smoothing", "Accela", ValueFamily::kFloating, {"How much the Accela filter smooths the trackers AccelaPlayers lists. 0 is the least, 1 the most.", nullptr}, 1, nullptr, "0.75", true},
+    {Concept::AccelaPlayers, "AccelaPlayers", "Smoothing", "AccelaPlayers", ValueFamily::kPlayerList, {"Players whose tracker is smoothed with Accela, such as 2, 3. Leave empty for none.", nullptr}, 1, nullptr, "", true},
     {Concept::WorldSpaceYaw, "WorldSpaceYaw", "General", "WorldSpaceYaw", ValueFamily::kBool, {"true: yaw turns around the world's up axis. false: around the camera's own up axis.", nullptr}, 1, nullptr, "true", true},
     {Concept::RotationEnabled, "RotationEnabled", "General", "RotationEnabled", ValueFamily::kBool, {"true: turning your head turns the view.", "Tracking mode at startup, with PositionEnabled. The mode hotkey changes both."}, 2, nullptr, "true", true},
     {Concept::DataFreshnessMs, "DataFreshnessMs", "General", "DataFreshnessMs", ValueFamily::kInteger, {"Milliseconds a tracker packet stays current. Once the tracker has sent nothing", "for this long, the mod stops following it until data arrives again."}, 2, nullptr, "500", true},

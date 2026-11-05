@@ -224,12 +224,15 @@ namespace CameraUnlock.Core.Tests.Config
             var i = new IntCodec();
             var f = new FloatCodec();
             var k = new HotkeyCodec();
+            var players = new PlayerListCodec();
             return new[]
             {
                 new FieldRead("UdpPort", c => i.Render(c.UdpPort)),
                 new FieldRead("EnableOnStartup", c => b.Render(c.EnableOnStartup)),
                 new FieldRead("LocalSmoothing", c => f.Render(c.LocalSmoothing)),
                 new FieldRead("RemoteSmoothing", c => f.Render(c.RemoteSmoothing)),
+                new FieldRead("Accela", c => f.Render(c.Accela)),
+                new FieldRead("AccelaPlayers", c => players.Render(c.AccelaPlayers)),
                 new FieldRead("WorldSpaceYaw", c => b.Render(c.WorldSpaceYaw)),
                 new FieldRead("RotationEnabled", c => b.Render(c.RotationEnabled)),
                 new FieldRead("DataFreshnessMs", c => i.Render(c.DataFreshnessMs)),

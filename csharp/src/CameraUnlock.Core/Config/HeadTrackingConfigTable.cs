@@ -118,6 +118,12 @@ namespace CameraUnlock.Core.Config
                         c.Position = c.Position.WithSmoothing(c.LocalSmoothing, c.RemoteSmoothing);
                     });
                     return;
+                case nameof(ConfigConcepts.Accela):
+                    table.Concept(ConfigConcepts.Accela, c => c.Accela, (c, v) => c.Accela = v);
+                    return;
+                case nameof(ConfigConcepts.AccelaPlayers):
+                    table.Concept(ConfigConcepts.AccelaPlayers, c => c.AccelaPlayers, (c, v) => c.AccelaPlayers = v);
+                    return;
                 case nameof(ConfigConcepts.WorldSpaceYaw):
                     table.Concept(ConfigConcepts.WorldSpaceYaw, c => c.WorldSpaceYaw, (c, v) => c.WorldSpaceYaw = v);
                     return;

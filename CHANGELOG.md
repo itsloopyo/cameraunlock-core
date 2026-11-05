@@ -23,6 +23,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   position in metres, so the stage multiplies by 100 going in and divides coming out; fed metres,
   a lean of a few centimetres would sit inside the deadzone and never move.
 
+### Added - `[Smoothing] Accela` and `AccelaPlayers`, and the player list codec
+
+`Accela` is a canonical concept: float, 0 to 1, default `0.75`, no aliases, global, directly after
+`RemoteSmoothing`. It is how much the Accela filter smooths. `AccelaPlayers` follows it: string,
+default empty, no aliases, global, the players whose tracker the filter smooths, such as `2, 3`.
+Hypari writes both into a game's file.
+
+- A canonical string concept may now name `"codec": "player_list"` where it named only `hotkey`.
+  The codec is `PlayerListCodec` in C++ (`cameraunlock/config/player_list_codec.h`) and C#, over
+  the list's canonical text in a `std::string` or `string`. It reads an empty value, or one of only
+  spaces and tabs, as the empty list; otherwise it splits at `,`, trims each item of spaces and
+  tabs, and takes one or more ASCII digits for a number from 1 to 8, each number once, in the order
+  written. It writes the numbers joined by `, `. A refused item is named:
+  `'9' is not a player number from 1 to 8`, `player 2 is listed twice`.
+- `schema::ValueFamily::kPlayerList` and `ConceptValueFamily.PlayerList` (4) are new. The
+  generator, Defaults.ini's reader and the canonical config lint read the codec, the lint for a
+  per_game row through `scripts/lib/player-list.mjs`, and `codecs/cases.tsv` holds it in all three.
+- Fields `HeadTrackingConfigData.Accela` and `AccelaPlayers`, and `HeadTrackingConfig::accela` and
+  `accela_players` (the C++ members after every existing one), bound by both
+  `HeadTrackingConfigTable`s. Core binds the rows and does not apply them.
+- The deprecated flat readers read neither.
+- Inserting the concepts in the schema's order renumbers the later values of `schema::Concept`.
+- 25 concepts are global, where 23 were.
+- The `head-tracking/` and `global/Defaults.ini` fixtures and docs/canonical-config.md carry both.
+
+Consuming repos: a new Defaults.ini holds `Accela=0.75` and `AccelaPlayers=` under `[Smoothing]`.
+One already on a player's disk is not changed and has neither line, which reads as the built-in
+values. A game's `CameraUnlock.ini` changes only in a mod whose table names either concept. Code
+that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
+
 ### Added - key lists saved and listened for at once (ABI 11)
 
 - `cameraunlock_config_save_keys(row, keys)` saves a local key list row, and

@@ -23,8 +23,8 @@
     "Every canonical concept has a `file_comment`, the one or two lines written above its key",
     "for players (`doc` is the developer text), and may have a `range` (`min`, `max`, either",
     "optional; a value outside it is invalid, never clamped), a `codec` ('hotkey' on the key",
-    "lists) and a `canonical_default`, the value a canonical file starts with where it differs",
-    "from `default`: the binding list of a hotkey concept, and `true` for CollisionEnabled. The",
+    "lists, 'player_list' on a list of player numbers 1 to 8) and a `canonical_default`, the",
+    "value a canonical file starts with where it differs from `default`: the binding list of a hotkey concept, and `true` for CollisionEnabled. The",
     "`default` and the field initialisers of a key the flat readers read keep the value those",
     "readers have always shipped (a single key name, `false`), because changing a default is a",
     "breaking change. A hotkey concept no flat reader reads has its `canonical_default` as its",
@@ -202,6 +202,32 @@
       "global": true,
       "file_comment": ["Smoothing when the tracker is another device on the network, such as a phone.", "0 is the least, 1 the most."],
       "range": {"min": 0, "max": 1}
+    },
+    {
+      "id": "Accela",
+      "section": "Smoothing",
+      "key": "Accela",
+      "type": "float",
+      "default": 0.75,
+      "aliases": [],
+      "doc": "Amount of the Accela filter a launcher's backend runs on the players AccelaPlayers lists; no core session runs it from this row. 0 lightest, 1 heaviest. Hypari writes it into a game's file; a mod that does not run the filter does not bind it. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
+      "canonical": true,
+      "global": true,
+      "file_comment": ["How much the Accela filter smooths the trackers AccelaPlayers lists. 0 is the least, 1 the most."],
+      "range": {"min": 0, "max": 1}
+    },
+    {
+      "id": "AccelaPlayers",
+      "section": "Smoothing",
+      "key": "AccelaPlayers",
+      "type": "string",
+      "default": "",
+      "aliases": [],
+      "doc": "Players whose tracker a launcher's backend smooths with Accela; no core session reads this row. A comma list of player numbers 1-8. Empty for none. Hypari writes it into a game's file; a mod that does not run the filter does not bind it. The player_list codec reads it: items split at commas and trimmed, each a number from 1 to 8 given once, kept in the order written, and written joined by a comma and a space. The deprecated flat readers (HeadTrackingConfigData.ApplyValues, HeadTrackingConfig::ApplyValues) do not read this concept.",
+      "canonical": true,
+      "global": true,
+      "file_comment": ["Players whose tracker is smoothed with Accela, such as 2, 3. Leave empty for none."],
+      "codec": "player_list"
     },
     {
       "id": "WorldSpaceYaw",

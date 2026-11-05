@@ -2,6 +2,7 @@
 // C# ValueCodecFixtures runs too, plus a round-trip sweep over floats and doubles and the
 // parts only C++ has: integral types other than int, and strings kept as bytes.
 
+#include <cameraunlock/config/player_list_codec.h>
 #include <cameraunlock/config/value_codecs.h>
 
 #include <charconv>
@@ -202,11 +203,13 @@ void TestFixtures() {
             RunRow(Hex64ListCodec{}, fields, line);
         } else if (codec == "list<string>") {
             RunRow(StringListCodec{}, fields, line);
+        } else if (codec == "player_list") {
+            RunRow(PlayerListCodec{}, fields, line);
         } else {
             throw std::runtime_error("unknown codec in row " + line);
         }
     }
-    Check(rows.size() == 14, "the fixture file covers all 14 codec names (" + std::to_string(rows.size()) + ")");
+    Check(rows.size() == 15, "the fixture file covers all 15 codec names (" + std::to_string(rows.size()) + ")");
 }
 
 std::uint64_t SplitMix64(std::uint64_t& state) {
@@ -454,6 +457,18 @@ void TestListsAndColors() {
     Check(!ColorCodec().Equal({0.0f, 0.0f, 0.0f, 1.0f}, {-0.0f, 0.0f, 0.0f, 1.0f}), "color equality is bitwise");
 }
 
+// The C# twin is ValueCodecTests.APlayerListNamesTheItemItRefuses.
+void TestPlayerListErrors() {
+    std::cout << "Player list errors:\n";
+    const PlayerListCodec codec;
+    Check(codec.Parse("2, 9").error == "'9' is not a player number from 1 to 8", "a number past 8 is named");
+    Check(codec.Parse("2,,3").error == "'' is not a player number from 1 to 8", "an empty item is named");
+    Check(codec.Parse("3, 03").error == "player 3 is listed twice", "a number given twice is named");
+    Check(Throws([&] { (void)codec.Render("2,3"); }) && Throws([&] { (void)codec.Render("9"); }) &&
+              codec.Render("2, 3") == "2, 3",
+          "Render takes only the canonical text of a list");
+}
+
 }  // namespace
 
 int RunValueCodecsTests() {
@@ -468,5 +483,6 @@ int RunValueCodecsTests() {
     TestStringsKeepTheirBytes();
     TestEnumConstruction();
     TestListsAndColors();
+    TestPlayerListErrors();
     return g_failures;
 }

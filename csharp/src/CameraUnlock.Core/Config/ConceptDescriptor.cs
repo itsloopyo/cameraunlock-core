@@ -4,8 +4,8 @@ namespace CameraUnlock.Core.Config
 {
     /// <summary>
     /// What a concept's field holds, which fixes its codec: Bool is <see cref="BoolCodec"/>,
-    /// Integer <see cref="IntCodec"/>, Floating <see cref="FloatCodec"/> and Hotkey
-    /// <see cref="HotkeyCodec"/>.
+    /// Integer <see cref="IntCodec"/>, Floating <see cref="FloatCodec"/>, Hotkey
+    /// <see cref="HotkeyCodec"/> and PlayerList <see cref="PlayerListCodec"/>.
     /// </summary>
     public enum ConceptValueFamily
     {
@@ -13,6 +13,7 @@ namespace CameraUnlock.Core.Config
         Integer = 1,
         Floating = 2,
         Hotkey = 3,
+        PlayerList = 4,
     }
 
     /// <summary>

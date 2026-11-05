@@ -23,6 +23,7 @@ inline constexpr ConceptRange kConceptRanges[] = {
     { "UdpPort", true, 1, true, 65535 },
     { "LocalSmoothing", true, 0, true, 1 },
     { "RemoteSmoothing", true, 0, true, 1 },
+    { "Accela", true, 0, true, 1 },
     { "DataFreshnessMs", true, 1, true, 2147483647 },
     { "PositionLimitX", true, 0, true, 10 },
     { "PositionLimitY", true, 0, true, 10 },

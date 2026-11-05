@@ -165,6 +165,7 @@ that text back as an equal value (floats bit for bit) and write it again unchang
 | `enum` | the tokens `Never`, `MenusOnly`, `AllDialogue` and `AllOverlays`: read ASCII case-insensitively, written in that spelling |
 | `color` | four `float[0,1]` separated by commas, each trimmed; written `r, g, b, a` |
 | `list<hex32>`, `list<hex64>`, `list<string>` | an empty value is an empty list; otherwise items split at `,`, each trimmed of spaces and tabs, non-empty and read by the item codec; written joined by `, ` |
+| `player_list` | an empty value is an empty list; otherwise items split at `,`, each trimmed of spaces and tabs and one or more ASCII digits for a number from 1 to 8, none given twice; written in the order read, joined by `, ` |
 
 Floats. The text written is chosen among `%.Ng` in the C locale, N from 1 to 9 for `float`
 and 1 to 17 for `double`, keeping only the texts that read back to the same bits: the one
@@ -298,7 +299,7 @@ and C# `HeadTrackingConfigData`. The render header's display name is `Fixture Ga
   gate: every global concept defaults to the schema's `default` (its `canonical_default` where it
   has one), and the table binds `PositionEnabled` beside `RotationEnabled`.
 - `apply-values/`, `apply-position-off/`, `apply-empty/`: `input.ini` and `expected.tsv`, whose
-  rows are `field`, a name and the value as the concept's codec writes it. The names are the 25
+  rows are `field`, a name and the value as the concept's codec writes it. The names are the 27
   concepts in the schema's order, then `PositionLocalSmoothing` and `PositionRemoteSmoothing`,
   the copy of the smoothing pair the position settings carry (C++ `position.local_smoothing`,
   C# `Position.LocalSmoothing`). A runner reads each field straight off the config, not through

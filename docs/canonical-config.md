@@ -184,6 +184,7 @@ row the word is an ordinary value, which a string row stores and a bool row refu
 | color | four floats `r, g, b, a`, each 0 to 1 | four comma-separated floats, each trimmed and 0 to 1 |
 | list of hex32, hex64 or string | items joined by `, ` | split at `,`, each item trimmed and non-empty; an empty value is an empty list |
 | hotkey | a key list, see [Hotkeys](#hotkeys) | see [Hotkeys](#hotkeys) |
+| player list | numbers from 1 to 8 joined by `, `, in the order read: `2, 3`; empty for none | empty, or only spaces and tabs, is the empty list; otherwise split at `,`, each item trimmed of spaces and tabs and one or more ASCII digits for a number from 1 to 8 (`02` is 2); a number given twice is invalid |
 
 `data/fixtures/canonical-ini/codecs/cases.tsv` holds both languages to every codec, with three
 values left out because .NET Framework disagrees with the rules there. Its float formatting is
@@ -279,13 +280,13 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way. 23 of them are global: a game's row
+The concepts are the settings every mod spells the same way. 25 of them are global: a game's row
 for one follows Defaults.ini unless the table marks it `PerGame()` (see
 [Which rows follow it](#which-rows-follow-it)). `CollisionMargin` and `CollisionChannel` are not:
 each holds a number in one engine's own units or channels, so the schema marks them
 `"global": false`, and every game keeps its own value. The schema writes `global`, true or false,
 on every canonical concept, and the generator refuses one without it. This is core's table naming
-all 24 of them at their defaults, which both languages render byte for byte
+all 27 of them at their defaults, which both languages render byte for byte
 (`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with `Render`, so
 every row shows its value, `CollisionChannel`, the table's one Engine row, as a comment; the same
 table's fresh render writes `default` on every global row, `CollisionMargin` as its value and the
@@ -331,6 +332,10 @@ LocalSmoothing=0.0
 ; Smoothing when the tracker is another device on the network, such as a phone.
 ; 0 is the least, 1 the most.
 RemoteSmoothing=0.15
+; How much the Accela filter smooths the trackers AccelaPlayers lists. 0 is the least, 1 the most.
+Accela=0.75
+; Players whose tracker is smoothed with Accela, such as 2, 3. Leave empty for none.
+AccelaPlayers=
 
 [Position]
 ; true: moving your head moves the view.
@@ -384,7 +389,7 @@ LightMultiplier=1.5
 ```
 
 The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFreshnessMs` 1 to
-2147483647, the smoothing pair and `CollisionReleaseSmoothing` 0 to 1, the five limits 0 to 10,
+2147483647, the smoothing pair, `Accela` and `CollisionReleaseSmoothing` 0 to 1, the five limits 0 to 10,
 `LightMultiplier` 0 to 5, `CollisionMargin` 0 with no upper bound (its unit is the engine's own),
 and `CollisionChannel` none. The four hotkey lists and
 `CollisionEnabled` start at the schema's `canonical_default`. The `default` field and core's field
@@ -441,6 +446,16 @@ where it can do neither.
 None has an alias: `true_free_look` is read only by a mod's legacy import, and in a
 canonical file it draws `MisplacedKey` and is not read. The older flat readers read none of
 `TrueFreeLook`, `FreeLookMarker`, `StockSights` and `TrueFreeLookKey`.
+
+`Accela` is how much the Accela filter smooths, 0 the least and 1 the most, default 0.75, and
+`AccelaPlayers` is the players whose tracker it smooths, a player list such as `2, 3`, empty for
+none. Hypari writes both into a game's file. Both are
+global, so each follows Defaults.ini unless the table marks it `PerGame()`. `AccelaPlayers` is
+the one concept on the player list codec (`"codec": "player_list"` in the schema); its field holds
+the list's canonical text, so `3,02` in a file reads as `3, 2`. Core's `HeadTrackingConfigTable`
+binds them to `HeadTrackingConfig::accela` and `accela_players`, and
+`HeadTrackingConfigData.Accela` and `AccelaPlayers`, and does not apply them: no core session runs
+the filter from these rows. Neither has an alias, and the older flat readers read neither.
 
 The schema's other concepts stay in the schema, so the older flat readers still parse them, and
 the canonical format never writes them. Each carries a `canonical_reason`, which the table's
@@ -966,7 +981,7 @@ file, the README config block and the changelog template.
 
 ### Which rows follow it
 
-23 of the 25 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
+25 of the 27 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
 `CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of 2026-09-25,
 collision rows ruling of 2026-09-26). The schema says `global`, true or false, on
 every canonical concept, and `CollisionMargin` and `CollisionChannel` say false: a margin in the
@@ -1133,6 +1148,10 @@ LocalSmoothing=0.0
 ; Smoothing when the tracker is another device on the network, such as a phone.
 ; 0 is the least, 1 the most.
 RemoteSmoothing=0.15
+; How much the Accela filter smooths the trackers AccelaPlayers lists. 0 is the least, 1 the most.
+Accela=0.75
+; Players whose tracker is smoothed with Accela, such as 2, 3. Leave empty for none.
+AccelaPlayers=
 
 [Position]
 ; true: moving your head moves the view.

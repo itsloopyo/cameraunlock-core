@@ -425,3 +425,35 @@ list<string>	,a	invalid
 list<string>	a,,b	invalid
 list<string>	a, ,b	invalid
 list<string>	a\x01,b	invalid
+
+# player_list: player numbers 1 to 8, each once
+player_list		canonical	
+player_list	1	canonical	1
+player_list	8	canonical	8
+player_list	2,3	canonical	2, 3
+player_list	2, 3	canonical	2, 3
+player_list	3 ,2	canonical	3, 2
+player_list	2,\x093	canonical	2, 3
+player_list	02	canonical	2
+player_list	0000000000000000000003	canonical	3
+player_list	1,2,3,4,5,6,7,8	canonical	1, 2, 3, 4, 5, 6, 7, 8
+player_list	8, 1	canonical	8, 1
+player_list	0	invalid
+player_list	9	invalid
+player_list	10	invalid
+player_list	-1	invalid
+player_list	+1	invalid
+player_list	a	invalid
+player_list	1.0	invalid
+player_list	2 3	invalid
+player_list	99999999999999999999	invalid
+player_list	2,	invalid
+player_list	,2	invalid
+player_list	2,,3	invalid
+player_list	2, ,3	invalid
+player_list	2,2	invalid
+player_list	2, 02	invalid
+player_list	caf\xC3\xA9	invalid
+player_list	\x20	canonical	
+player_list	\x09	canonical	
+player_list	\x20\x092\x20	canonical	2

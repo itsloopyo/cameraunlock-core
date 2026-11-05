@@ -55,6 +55,12 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
                                                            c.position.remote_smoothing = v;
                                                        });
             return;
+        case C::Accela:
+            BindHeadTrackingMember<C::Accela>(table, &H::accela);
+            return;
+        case C::AccelaPlayers:
+            BindHeadTrackingMember<C::AccelaPlayers>(table, &H::accela_players);
+            return;
         case C::WorldSpaceYaw:
             BindHeadTrackingMember<C::WorldSpaceYaw>(table, &H::world_space_yaw);
             return;

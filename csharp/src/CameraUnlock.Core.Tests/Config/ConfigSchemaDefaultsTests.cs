@@ -60,6 +60,8 @@ namespace CameraUnlock.Core.Tests.Config
                 { "InvertRoll", config.Sensitivity.InvertRoll },
                 { "LocalSmoothing", config.LocalSmoothing },
                 { "RemoteSmoothing", config.RemoteSmoothing },
+                { "Accela", config.Accela },
+                { "AccelaPlayers", config.AccelaPlayers },
                 { "WorldSpaceYaw", config.WorldSpaceYaw },
                 { "AimDecoupling", config.AimDecouplingEnabled },
                 { "ShowReticle", config.ShowDecoupledReticle },
@@ -220,7 +222,9 @@ namespace CameraUnlock.Core.Tests.Config
                             break;
                         case ConceptDescriptor<string> s:
                             Assert.True(s.Codec.TryParse(text, out string? keys, out error), descriptor.Id + ": " + error);
-                            Assert.Equal(declared.GetProperty("canonical_default").GetString(), keys);
+                            Assert.Equal(declared.TryGetProperty("canonical_default", out JsonElement list)
+                                ? list.GetString()
+                                : declared.GetProperty("default").GetString(), keys);
                             break;
                         default:
                             throw new InvalidOperationException(descriptor.Id + " has a type this test cannot read");
@@ -242,6 +246,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "DataFreshnessMs", new double?[] { 1, int.MaxValue } },
                 { "LocalSmoothing", unit },
                 { "RemoteSmoothing", unit },
+                { "Accela", unit },
                 { "CollisionReleaseSmoothing", unit },
                 { "PositionLimitX", metres },
                 { "PositionLimitY", metres },

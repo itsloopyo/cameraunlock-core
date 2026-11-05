@@ -20,6 +20,8 @@ inline constexpr const char* kInvertPitch = "invertpitch";
 inline constexpr const char* kInvertRoll = "invertroll";
 inline constexpr const char* kLocalSmoothing = "localsmoothing";
 inline constexpr const char* kRemoteSmoothing = "remotesmoothing";
+inline constexpr const char* kAccela = "accela";
+inline constexpr const char* kAccelaPlayers = "accelaplayers";
 inline constexpr const char* kWorldSpaceYaw = "worldspaceyaw";
 inline constexpr const char* kAimDecoupling = "aimdecoupling";
 inline constexpr const char* kShowReticle = "showreticle";
@@ -72,6 +74,8 @@ struct ConfigKeyAlias {
 };
 
 inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
+    { "accela", "accela", false },
+    { "accelaplayers", "accelaplayers", false },
     { "aimdecouple", "aimdecoupling", false },
     { "aimdecoupling", "aimdecoupling", false },
     { "autoenable", "enableonstartup", false },
@@ -308,6 +312,8 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "InvertRoll", config_keys::kInvertRoll, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LocalSmoothing", config_keys::kLocalSmoothing, ConfigValueType::kFloat, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "RemoteSmoothing", config_keys::kRemoteSmoothing, ConfigValueType::kFloat, 0, 0.15f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "Accela", config_keys::kAccela, ConfigValueType::kFloat, 0, 0.75f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "AccelaPlayers", config_keys::kAccelaPlayers, ConfigValueType::kString, 0, 0.0f, false, "", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "WorldSpaceYaw", config_keys::kWorldSpaceYaw, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "AimDecoupling", config_keys::kAimDecoupling, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "ShowReticle", config_keys::kShowReticle, ConfigValueType::kBool, 0, 0.0f, true, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },

@@ -4,6 +4,8 @@ field	UdpPort	4242
 field	EnableOnStartup	true
 field	LocalSmoothing	0.0
 field	RemoteSmoothing	0.15
+field	Accela	0.75
+field	AccelaPlayers	
 field	WorldSpaceYaw	true
 field	RotationEnabled	true
 field	DataFreshnessMs	500

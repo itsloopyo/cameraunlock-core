@@ -117,6 +117,8 @@ std::vector<FieldRead> Fields() {
         {"EnableOnStartup", [b](const H& c) { return b(c.enable_on_startup); }},
         {"LocalSmoothing", [f](const H& c) { return f(c.local_smoothing); }},
         {"RemoteSmoothing", [f](const H& c) { return f(c.remote_smoothing); }},
+        {"Accela", [f](const H& c) { return f(c.accela); }},
+        {"AccelaPlayers", [](const H& c) { return PlayerListCodec().Render(c.accela_players); }},
         {"WorldSpaceYaw", [b](const H& c) { return b(c.world_space_yaw); }},
         {"RotationEnabled", [b](const H& c) { return b(c.rotation_enabled); }},
         {"DataFreshnessMs", [i](const H& c) { return i(c.data_freshness_ms); }},
@@ -321,11 +323,11 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe23TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe25TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 23 the schema names]\n";
+    std::cout << "\n[the global concepts are the 25 the schema names]\n";
     const std::vector<std::string> expected{
-        "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "WorldSpaceYaw",
+        "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "Accela", "AccelaPlayers", "WorldSpaceYaw",
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
         "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
@@ -333,7 +335,7 @@ void TestGlobalConcepts() {
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 23 listed, in schema order");
+    Check(global == expected, "the global concepts are the 25 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }
@@ -387,6 +389,17 @@ void TestTrueFreeLookSpellings() {
     Check(!flat.true_free_look && !flat.free_look_marker && !flat.stock_sights && flat.true_free_look_key_name == "Insert, Ctrl+Shift+U" &&
               log.empty(),
           "the flat reader reads none of the aim mode concepts");
+}
+
+// The C# twin is HeadTrackingConfigTableTests.TheFlatReaderDoesNotReadAccela.
+void TestFlatReaderSkipsAccela() {
+    std::cout << "\n[the flat reader does not read Accela or AccelaPlayers]\n";
+    HeadTrackingConfig flat;
+    std::vector<std::string> log;
+    flat.ApplyValues({{"Accela", "0.2"}, {"accela", "0.3"}, {"AccelaPlayers", "2, 3"}, {"accela_players", "4"}},
+                     [&log](const std::string& line) { log.push_back(line); });
+    Check(flat.accela == 0.75f && flat.accela_players.empty() && log.empty(),
+          "the flat reader leaves accela at 0.75 and accela_players empty, and says nothing");
 }
 
 void TestArguments() {
@@ -452,6 +465,7 @@ int RunHeadTrackingConfigTableTests() {
         TestGlobalConcepts();
         TestEngineCollisionRows();
         TestTrueFreeLookSpellings();
+        TestFlatReaderSkipsAccela();
         TestArguments();
         TestOnlyNamedConcepts();
         TestDerivedConfig();
