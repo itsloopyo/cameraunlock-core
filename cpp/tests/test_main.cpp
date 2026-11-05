@@ -13,6 +13,7 @@ int RunUnrealMathTests();
 int RunProjectionTests();
 int RunReMathTests();
 int RunInterpolatorTests();
+int RunAccelaFilterTests();
 int RunProbeSelectionTests();
 int RunFileLogTests();
 int RunHotkeyTests();
@@ -87,6 +88,7 @@ int main(int argc, char** argv) {
     failures += RunProjectionTests();
     failures += RunReMathTests();
     failures += RunInterpolatorTests();
+    failures += RunAccelaFilterTests();
     failures += RunProbeSelectionTests();
     failures += RunFileLogTests();
     failures += RunHotkeyTests();

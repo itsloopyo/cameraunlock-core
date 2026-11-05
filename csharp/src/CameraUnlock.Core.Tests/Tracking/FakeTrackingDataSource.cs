@@ -38,6 +38,12 @@ namespace CameraUnlock.Core.Tests.Tracking
             _timestamp++;
         }
 
+        /// <summary>A new packet received at <paramref name="ticks"/> Stopwatch ticks.</summary>
+        public void PacketAt(long ticks)
+        {
+            _timestamp = ticks;
+        }
+
         public bool IsDataFresh(int maxAgeMs = OpenTrackReceiver.DefaultMaxDataAgeMs)
         {
             return DataFresh;

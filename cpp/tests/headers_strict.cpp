@@ -97,6 +97,7 @@
 #include "cameraunlock/os/game_window.h"
 #include "cameraunlock/os/module_paths.h"
 #include "cameraunlock/os/win32.h"
+#include "cameraunlock/processing/accela_filter.h"
 #include "cameraunlock/processing/center_offset_manager.h"
 #include "cameraunlock/processing/pose_interpolator.h"
 #include "cameraunlock/processing/position_interpolator.h"

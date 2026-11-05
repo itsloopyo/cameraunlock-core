@@ -958,6 +958,154 @@ void TestSessionSmoothingReachesBothProcessors() {
     Check(NearEqual(session.GetRemoteSmoothing(), 0.75f), "session reports remote_smoothing");
 }
 
+
+// The Accela stage, off by default, steps once per new packet between the receiver and the
+// interpolators. GetLastRaw() reports the pose the stage hands on.
+constexpr int64_t kSixtyHzUs = 16667;
+
+void Packet(FakeReceiver& rx, float yaw, int64_t atUs) {
+    rx.yaw = yaw;
+    rx.timestamp = atUs;
+}
+
+void TestAccelaOffChangesNothing() {
+    std::cout << "Accela stage off:\n";
+    FakeReceiver a, b;
+    for (FakeReceiver* rx : {&a, &b}) {
+        rx->hasRotation = true;
+        rx->hasPosition = true;
+    }
+    Session plain(a);
+    Session toggled(b);
+    Check(!plain.IsAccelaOn(), "the stage is off by default");
+    // Both see the same packets; the toggled one runs them through the stage first. Then the
+    // stage goes off and both start their smoothing over, so only the stage can differ.
+    toggled.SetAccela(true);
+    for (int i = 0; i < 30; i++) {
+        for (FakeReceiver* rx : {&a, &b}) Packet(*rx, static_cast<float>(i), 500'000 + i * kSixtyHzUs);
+        plain.Update(1.0f / 60.0f);
+        toggled.Update(1.0f / 60.0f);
+    }
+    toggled.SetAccela(false);
+    plain.ResetTransientState();
+    toggled.ResetTransientState();
+    bool same = true;
+    for (int i = 0; i < 120; i++) {
+        for (FakeReceiver* rx : {&a, &b}) {
+            if (i % 3 == 0) {
+                Packet(*rx, 5.0f * std::sin(i * 0.05f), 1'000'000 + i * kSixtyHzUs);
+                rx->posX = 0.02f * std::cos(i * 0.07f);
+            }
+        }
+        plain.Update(1.0f / 144.0f);
+        toggled.Update(1.0f / 144.0f);
+        float y1, p1, r1, y2, p2, r2, x1, yy1, z1, x2, yy2, z2;
+        plain.GetRotation(y1, p1, r1);
+        toggled.GetRotation(y2, p2, r2);
+        plain.GetPositionOffset(x1, yy1, z1);
+        toggled.GetPositionOffset(x2, yy2, z2);
+        same = same && y1 == y2 && p1 == p2 && r1 == r2 && x1 == x2 && yy1 == yy2 && z1 == z2;
+    }
+    Check(same, "a session with the stage off gives what one without it gives, frame for frame");
+}
+
+void TestAccelaEasesASmallStep() {
+    std::cout << "Accela stage on:\n";
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    Session session(rx);
+    session.SetAccela(true);
+    Packet(rx, 0.0f, 1'000'000);
+    session.Update(0.007f);
+    Packet(rx, 2.0f, 1'000'000 + kSixtyHzUs);
+    session.Update(0.007f);
+    const float first = session.GetLastRaw().yaw;
+    Check(first > 0.0f && first < 2.0f, "a small step eases: the pose handed on lies between the old and the new");
+    session.Update(0.007f);
+    Check(session.GetLastRaw().yaw == first, "a second frame on the same packet does not step the filter");
+}
+
+void TestAccelaStartsFreshAfterARecenter() {
+    std::cout << "Accela stage after a recenter:\n";
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.zeroOnRecenter = true;
+    Session session(rx);
+    session.SetAccela(true);
+    int64_t t = 1'000'000;
+    for (int i = 0; i < 60; i++, t += kSixtyHzUs) {
+        Packet(rx, 20.0f, t);
+        session.Update(1.0f / 60.0f);
+    }
+    rx.recenterRequested = true;
+    Packet(rx, 20.0f, t);
+    session.Update(1.0f / 60.0f);
+    Check(std::fabs(session.GetLastRaw().yaw) < 1e-3f, "the stage starts from the centred pose instead of easing to it");
+}
+
+void TestAccelaStartsFreshAfterSilence() {
+    std::cout << "Accela stage after five seconds without packets:\n";
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    Session session(rx);
+    session.SetAccela(true);
+    Packet(rx, 0.0f, 1'000'000);
+    session.Update(0.016f);
+    Packet(rx, 10.0f, 1'000'000 + Session::kAccelaRestartUs);
+    session.Update(0.016f);
+    Check(NearEqual(session.GetLastRaw().yaw, 10.0f, 1e-3f), "the first packet after the gap passes through");
+
+    FakeReceiver near;
+    near.hasRotation = true;
+    Session eased(near);
+    eased.SetAccela(true);
+    Packet(near, 0.0f, 1'000'000);
+    eased.Update(0.016f);
+    Packet(near, 10.0f, 1'000'000 + Session::kAccelaRestartUs - 1);
+    eased.Update(0.016f);
+    Check(eased.GetLastRaw().yaw < 9.9f, "a gap just under five seconds is eased as one capped step");
+}
+
+void TestAccelaSmoothsPosition() {
+    std::cout << "Accela stage on position:\n";
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.hasPosition = true;
+    FakeReceiver off = rx;
+    Session session(rx);
+    Session plain(off);
+    session.SetAccela(true);
+    for (FakeReceiver* r : {&rx, &off}) Packet(*r, 0.0f, 1'000'000);
+    session.Update(0.016f);
+    plain.Update(0.016f);
+    for (FakeReceiver* r : {&rx, &off}) {
+        r->posX = 1.0f;
+        Packet(*r, 0.0f, 1'000'000 + kSixtyHzUs);
+    }
+    session.Update(0.016f);
+    plain.Update(0.016f);
+    Check(session.GetLastInterpolatedPosition().x < plain.GetLastInterpolatedPosition().x,
+          "a position step reaches the interpolator eased, short of where it goes with the stage off");
+}
+
+void TestAccelaStartsFreshAfterAManualRecenter() {
+    std::cout << "Accela stage after the player's recenter:\n";
+    FakeReceiver rx;
+    rx.hasRotation = true;
+    rx.zeroOnRecenter = true;
+    Session session(rx);
+    session.SetAccela(true);
+    int64_t t = 1'000'000;
+    for (int i = 0; i < 60; i++, t += kSixtyHzUs) {
+        Packet(rx, 20.0f, t);
+        session.Update(1.0f / 60.0f);
+    }
+    session.Recenter();
+    Packet(rx, 20.0f, t);
+    session.Update(1.0f / 60.0f);
+    Check(std::fabs(session.GetLastRaw().yaw) < 1e-3f, "the stage starts from the centred pose");
+}
+
 }  // namespace
 
 int RunSessionTests() {
@@ -988,6 +1136,12 @@ int RunSessionTests() {
     TestGracefulDegradation();
     TestSmoothingSurvivesSettingsAssignmentInBothOrders();
     TestSessionSmoothingReachesBothProcessors();
+    TestAccelaOffChangesNothing();
+    TestAccelaEasesASmallStep();
+    TestAccelaStartsFreshAfterARecenter();
+    TestAccelaStartsFreshAfterSilence();
+    TestAccelaSmoothsPosition();
+    TestAccelaStartsFreshAfterAManualRecenter();
 
     if (g_failures == 0) {
         std::cout << "Session tests: all passed\n";

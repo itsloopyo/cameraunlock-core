@@ -44,6 +44,7 @@ const SOURCES = [
     'src/protocol/udp_receiver.cpp',
     'src/processing/center_offset_manager.cpp',
     'src/processing/tracking_processor.cpp',
+    'src/processing/accela_filter.cpp',
     'src/config/ini_reader.cpp',
     'src/config/head_tracking_config.cpp',
     'src/config/ini_editor.cpp',

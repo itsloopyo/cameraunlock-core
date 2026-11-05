@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using CameraUnlock.Core.Data;
 using CameraUnlock.Core.Math;
 using CameraUnlock.Core.Processing;
@@ -52,6 +53,12 @@ namespace CameraUnlock.Core.Tracking
         // makes call order irrelevant in both directions.
         private float _localSmoothing;
         private float _remoteSmoothing;
+
+        private readonly AccelaFilter _accela = new AccelaFilter();
+        private bool _accelaOn;
+        private bool _accelaHasOutput;
+        private long _accelaLastTicks;
+        private AccelaPose _accelaOutput;
 
         public HeadTrackingSession(ITrackingDataSource receiver, TrackingProcessor processor, PositionProcessor positionProcessor)
         {
@@ -213,6 +220,43 @@ namespace CameraUnlock.Core.Tracking
         public bool IsRemoteConnection { get; private set; }
 
         /// <summary>
+        /// Packets this many seconds apart start the Accela stage fresh: its steps are capped
+        /// at AccelaFilter.MaxDt, so one resumed after a long gap would ease slowly from where
+        /// the head was.
+        /// </summary>
+        public const double AccelaRestartSeconds = 5.0;
+
+        /// <summary>
+        /// The per-packet Accela stage between the receiver and the interpolators, for a
+        /// tracker that sends a raw signal. Off by default; turning it on starts it fresh from
+        /// the next packet. It steps once per new packet, so a frame with no new packet does
+        /// not move it, and it keeps easing toward a repeated pose. Matches HeadTrackingSession
+        /// in the C++ core. Set it, and AccelaAmount, on the thread that calls Update().
+        /// </summary>
+        public bool AccelaOn
+        {
+            get { return _accelaOn; }
+            set
+            {
+                if (value && !_accelaOn) _accelaHasOutput = false;
+                _accelaOn = value;
+            }
+        }
+
+        /// <summary>
+        /// The pose the latest fresh Update() handed to the interpolator: the receiver's, after
+        /// the Accela stage when it is on. Matches GetLastRaw() in the C++ core.
+        /// </summary>
+        public TrackingPose LastRaw { get; private set; }
+
+        /// <summary>The Accela stage's amount, 0 lightest to 1 heaviest. Keeps the stage's state.</summary>
+        public double AccelaAmount
+        {
+            get { return _accela.Amount; }
+            set { _accela.SetAmount(value); }
+        }
+
+        /// <summary>
         /// Optional logging callback (auto-recenter notifications).
         /// </summary>
 #if NULLABLE_ENABLED
@@ -280,11 +324,38 @@ namespace CameraUnlock.Core.Tracking
                     _positionInterpolator.Reset();
                     _poseSeeded = false;
                     _positionSeeded = false;
+                    // The tracker zeroed its own output: the stage starts from the new pose
+                    // rather than easing across that step.
+                    _accelaHasOutput = false;
                     Log?.Invoke("Recentered by tracker app");
                 }
 
                 TrackingPose rawPose = _receiver.GetLatestPose();
                 PositionData rawPosition = _receiver.GetLatestPosition();
+                if (_accelaOn)
+                {
+                    if (rawPose.TimestampTicks != _lastPacketTicks)
+                    {
+                        long ticks = rawPose.TimestampTicks;
+                        if (!_accelaHasOutput ||
+                            (_accelaLastTicks != 0 && (ticks - _accelaLastTicks) >= (long)(AccelaRestartSeconds * Stopwatch.Frequency)))
+                        {
+                            _accela.Reset();
+                        }
+                        _accelaLastTicks = ticks;
+                        _accelaOutput = _accela.Filter(
+                            new AccelaPose(rawPose.Yaw, rawPose.Pitch, rawPose.Roll, rawPosition.X, rawPosition.Y, rawPosition.Z),
+                            (double)ticks / Stopwatch.Frequency);
+                        _accelaHasOutput = true;
+                    }
+                    if (_accelaHasOutput)
+                    {
+                        rawPose = new TrackingPose((float)_accelaOutput.Yaw, (float)_accelaOutput.Pitch, (float)_accelaOutput.Roll,
+                            rawPose.TimestampTicks);
+                        rawPosition = new PositionData((float)_accelaOutput.X, (float)_accelaOutput.Y, (float)_accelaOutput.Z,
+                            rawPosition.TimestampTicks);
+                    }
+                }
 
                 // New DATA, not merely a new packet. A sender can repeat a pose in more
                 // packets than its source produces, so deriving this from the receive timestamp alone
@@ -302,6 +373,7 @@ namespace CameraUnlock.Core.Tracking
                 // that Resets an interpolator clears the matching flag, and an unseeded
                 // interpolator re-seeds from the current pose on the very next frame -
                 // no new packet required, because a recenter can land between two of them.
+                LastRaw = rawPose;
                 bool isNewPacket = rawPose.TimestampTicks != _lastPacketTicks;
                 _lastPacketTicks = rawPose.TimestampTicks;
 
@@ -417,6 +489,7 @@ namespace CameraUnlock.Core.Tracking
         /// </summary>
         public void Reset()
         {
+            _accelaHasOutput = false;
             _poseInterpolator.Reset();
             _processor.ResetSmoothing();
             _positionInterpolator.Reset();

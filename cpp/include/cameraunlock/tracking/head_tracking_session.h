@@ -4,6 +4,7 @@
 #include "cameraunlock/data/tracking_pose.h"
 #include "cameraunlock/math/quat4.h"
 #include "cameraunlock/math/vec3.h"
+#include "cameraunlock/processing/accela_filter.h"
 #include "cameraunlock/processing/pose_interpolator.h"
 #include "cameraunlock/processing/position_interpolator.h"
 #include "cameraunlock/processing/position_processor.h"
@@ -40,8 +41,11 @@ struct HasRemoteConnection<T, std::void_t<decltype(std::declval<T&>().IsRemoteCo
 
 /// Complete per-frame head tracking pipeline:
 ///
-///   rotation: receiver -> PoseInterpolator -> TrackingProcessor
-///   position: receiver -> PositionInterpolator -> PositionProcessor
+///   rotation: receiver -> [Accela] -> PoseInterpolator -> TrackingProcessor
+///   position: receiver -> [Accela] -> PositionInterpolator -> PositionProcessor
+///
+/// The Accela stage is off unless SetAccela(true) turns it on, for a tracker that sends a
+/// raw signal. It steps once per new packet, so a frame with no new packet does not move it.
 ///
 /// C++ port of CameraUnlock.Core.Tracking.HeadTrackingSession (C#), plus the
 /// duplicate-packet filtering needed for trackers that resend identical
@@ -57,7 +61,7 @@ struct HasRemoteConnection<T, std::void_t<decltype(std::declval<T&>().IsRemoteCo
 /// TReceiver must provide:
 ///   bool GetRotation(float&, float&, float&) const
 ///   bool GetPosition(float&, float&, float&) const
-///   int64_t GetLastReceiveTimestamp() const
+///   int64_t GetLastReceiveTimestamp() const   (microseconds on a steady clock)
 ///   void Recenter()
 /// and may provide (detected at compile time):
 ///   bool TryConsumeRecenterRequest()
@@ -145,6 +149,28 @@ public:
         m_remoteSmoothing = smoothing;
         PushSmoothing();
     }
+
+    /// Turns the per-packet Accela stage on or off. Turning it on starts it fresh, from the
+    /// next packet. Off, the session's output is what it was without the stage. Render
+    /// thread, as Update() is; so is SetAccelaAmount().
+    ///
+    /// The stage steps on every new packet, a repeated pose included, so it keeps easing
+    /// toward a head that has stopped. Its output therefore changes at the packet rate while
+    /// it eases, and the interpolators see that as the new samples it is.
+    void SetAccela(bool on) {
+        if (on && !m_accelaOn) m_accelaHasOutput = false;
+        m_accelaOn = on;
+    }
+    bool IsAccelaOn() const { return m_accelaOn; }
+
+    /// The Accela stage's amount, 0 lightest to 1 heaviest. Keeps the stage's state.
+    void SetAccelaAmount(double amount) { m_accela.SetAmount(amount); }
+    double GetAccelaAmount() const { return m_accela.GetAmount(); }
+
+    /// Packets this far apart start the Accela stage fresh: its steps are capped at
+    /// AccelaFilter::kMaxDt, so one resumed after a long gap would ease slowly from where
+    /// the head was.
+    static constexpr int64_t kAccelaRestartUs = 5'000'000;
 
     /// The session's own smoothing values, which is what both processors are running.
     float GetLocalSmoothing() const { return m_localSmoothing; }
@@ -318,6 +344,35 @@ public:
             m_receiver.GetRotation(rawYaw, rawPitch, rawRoll);
         }
 
+        if (m_accelaOn) {
+            // A recenter the receiver applied moves the pose by the centre; the stage starts
+            // over from the centred pose rather than easing across that step.
+            if (recentered) m_accelaHasOutput = false;
+            if (isNewPacket) {
+                float px = 0.0f, py = 0.0f, pz = 0.0f;
+                m_receiver.GetPosition(px, py, pz);
+                if (!m_accelaHasOutput ||
+                    (m_accelaLastTimestamp != 0 && receiveTs - m_accelaLastTimestamp >= kAccelaRestartUs)) {
+                    m_accela.Reset();
+                }
+                m_accelaLastTimestamp = receiveTs;
+                AccelaPose in;
+                in.yaw = rawYaw;
+                in.pitch = rawPitch;
+                in.roll = rawRoll;
+                in.x = px;
+                in.y = py;
+                in.z = pz;
+                m_accelaOutput = m_accela.Filter(in, static_cast<double>(receiveTs) / 1e6);
+                m_accelaHasOutput = true;
+            }
+            if (m_accelaHasOutput) {
+                rawYaw = static_cast<float>(m_accelaOutput.yaw);
+                rawPitch = static_cast<float>(m_accelaOutput.pitch);
+                rawRoll = static_cast<float>(m_accelaOutput.roll);
+            }
+        }
+
         // Detect new DATA, not just new packets.
         bool isNewSample = isNewPacket &&
             (rawYaw != m_lastRawYaw || rawPitch != m_lastRawPitch || rawRoll != m_lastRawRoll);
@@ -347,6 +402,11 @@ public:
         if (positionActive) {
             float rawX, rawY, rawZ;
             if (m_receiver.GetPosition(rawX, rawY, rawZ)) {
+                if (m_accelaOn && m_accelaHasOutput) {
+                    rawX = static_cast<float>(m_accelaOutput.x);
+                    rawY = static_cast<float>(m_accelaOutput.y);
+                    rawZ = static_cast<float>(m_accelaOutput.z);
+                }
                 PositionData rawPos(rawX, rawY, rawZ, receiveTs);
 
                 // Same duplicate-sample filter the rotation path here uses. receiveTs
@@ -413,6 +473,9 @@ public:
     void Recenter() {
         m_hasCentered = true;
         m_receiver.Recenter();
+        // The receiver's pose moves by the whole centre; the stage starts from the centred
+        // pose at the next packet rather than easing across it.
+        m_accelaHasOutput = false;
 
         // ResetSmoothing, not Reset. Reset() also clears the processor's centre offset,
         // so any mod-configured correction applied through
@@ -436,6 +499,7 @@ public:
     /// ease to it from the pose a break began on. For a frame tracking is not applied
     /// on: a menu, a loading screen, the master toggle off. Render thread.
     void ResetTransientState() {
+        m_accelaHasOutput = false;
         m_processor.ResetSmoothing();
         m_poseInterpolator.Reset();
         m_positionProcessor.ResetSmoothing();
@@ -530,6 +594,13 @@ private:
     float m_remoteSmoothing = static_cast<float>(math::kDefaultRemoteSmoothing);
 
     int64_t m_lastReceiveTimestamp = 0;
+
+    AccelaFilter m_accela;
+    bool m_accelaOn = false;
+    bool m_accelaHasOutput = false;
+    int64_t m_accelaLastTimestamp = 0;
+    AccelaPose m_accelaOutput;
+
     float m_lastRawYaw = 0.0f;
     float m_lastRawPitch = 0.0f;
     float m_lastRawRoll = 0.0f;
