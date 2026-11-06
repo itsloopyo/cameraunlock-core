@@ -417,29 +417,46 @@ namespace CameraUnlock.Core.Unity.Rendering
         private static Action<Camera> _storedPostRender;
 
         /// <summary>
-        /// Emits a DynamicMethod matching the SRP event signature (ScriptableRenderContext, Camera),
-        /// loads the stored Action&lt;Camera&gt; from the named static field, and invokes it with just the Camera.
+        /// Builds a delegate of the SRP event's own type (ScriptableRenderContext, Camera) that reads
+        /// the stored Action&lt;Camera&gt; from the named static field on every call and invokes it with
+        /// just the Camera. Bound to a closed generic forwarder over the event's real context type
+        /// rather than emitted, since some Unity Mono profiles (Neon White, Unity 2020.3 URP) throw
+        /// PlatformNotSupportedException for System.Reflection.Emit.DynamicMethod.
         /// </summary>
         private static Delegate CreateSRPWrapperDelegate(string name, Type[] paramTypes, Type delegateType, string fieldName)
         {
-            var dm = new System.Reflection.Emit.DynamicMethod(
-                name,
-                typeof(void),
-                paramTypes,
-                typeof(RenderPipelineHelper).Module,
-                true);
+            if (paramTypes.Length != 2 || paramTypes[1] != typeof(Camera))
+            {
+                throw new InvalidOperationException(name + ": the SRP event " + delegateType + " does not take (context, Camera).");
+            }
 
             var field = typeof(RenderPipelineHelper).GetField(fieldName,
                 System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
-            var invokeMethod = typeof(Action<Camera>).GetMethod("Invoke");
+            if (field == null || field.FieldType != typeof(Action<Camera>))
+            {
+                throw new InvalidOperationException(name + ": no static Action<Camera> field " + fieldName + ".");
+            }
 
-            var il = dm.GetILGenerator();
-            il.Emit(System.Reflection.Emit.OpCodes.Ldsfld, field);
-            il.Emit(System.Reflection.Emit.OpCodes.Ldarg_1);
-            il.Emit(System.Reflection.Emit.OpCodes.Callvirt, invokeMethod);
-            il.Emit(System.Reflection.Emit.OpCodes.Ret);
+            Func<Action<Camera>> read = () => (Action<Camera>)field.GetValue(null);
+            var forwarderType = typeof(SrpCameraForwarder<>).MakeGenericType(paramTypes[0]);
+            var forwarder = Activator.CreateInstance(forwarderType, read);
+            return Delegate.CreateDelegate(delegateType, forwarder, forwarderType.GetMethod("Invoke"));
+        }
 
-            return dm.CreateDelegate(delegateType);
+        /// <summary>Forwards an SRP camera event to the stored Action&lt;Camera&gt;, dropping the context.</summary>
+        private sealed class SrpCameraForwarder<TContext>
+        {
+            private readonly Func<Action<Camera>> _read;
+
+            public SrpCameraForwarder(Func<Action<Camera>> read)
+            {
+                _read = read;
+            }
+
+            public void Invoke(TContext context, Camera camera)
+            {
+                _read()(camera);
+            }
         }
 
         /// <summary>
