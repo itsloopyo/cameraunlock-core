@@ -188,6 +188,12 @@ namespace CameraUnlock.Core.Config
             new FloatCodec(0f, 140f), new[] { "The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.", "0 keeps the game's own. Scopes and zoom keep their share of it." }, null, "0",
             true);
 
+        /// <summary>[View] FrameRateUnlock.</summary>
+        public static readonly ConceptDescriptor<bool> FrameRateUnlock = new ConceptDescriptor<bool>(
+            "FrameRateUnlock", "View", "FrameRateUnlock", ConceptValueFamily.Bool,
+            new BoolCodec(), new[] { "true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed.", "Leave it false if another mod already unlocks this game's frame rate." }, null, "false",
+            true);
+
         /// <summary>In the schema's concepts order, which is the order a section's concept rows are written in.</summary>
         internal static readonly ConceptDescriptor[] All =
         {
@@ -220,6 +226,7 @@ namespace CameraUnlock.Core.Config
             FirstPersonKey,
             LightMultiplier,
             GameFov,
+            FrameRateUnlock,
         };
 
         /// <summary>The schema's sections, in the order a canonical file writes them.</summary>

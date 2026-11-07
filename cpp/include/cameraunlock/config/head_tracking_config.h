@@ -125,6 +125,11 @@ struct HeadTrackingConfig {
     /// converts it to its engine's axis. Read only through config::HeadTrackingConfigTable;
     /// ApplyValues does not read it.
     float game_fov = 0.0f;
+    /// true lifts the game's own frame-rate limit, in a mod that can, with game time, movement,
+    /// physics and timers kept at their normal speed; false leaves the game's frame rate as it is.
+    /// Core binds it and does not apply it: each mod that can unlock its game's frame rate reads
+    /// it. Read only through config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool frame_rate_unlock = false;
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.

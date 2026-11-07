@@ -99,6 +99,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "RecenterKey", config.RecenterKeyName },
                 { "LightMultiplier", config.Light.Multiplier },
                 { "GameFov", config.GameFov },
+                { "FrameRateUnlock", config.FrameRateUnlock },
             };
         }
 

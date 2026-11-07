@@ -9,6 +9,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `[View] FrameRateUnlock`, whether a mod lifts its game's own frame-rate limit
+
+`FrameRateUnlock` is a canonical concept: a bool, `default` false, global, under `[View]` after
+`GameFov`. true: in a game whose mod can lift the game's own frame-rate limit, the mod lifts it
+and keeps game time, movement, physics and timers at their normal speed. false leaves the game's
+frame rate as the game has it, so it does not fight another frame-rate mod a player runs for that
+game. No aliases.
+
+- Fields `HeadTrackingConfigData.FrameRateUnlock` and `HeadTrackingConfig::frame_rate_unlock`
+  (the C++ member after every existing one), bound by both `HeadTrackingConfigTable`s. Core
+  binds the row and does not apply it: each mod that can unlock its game's frame rate reads it.
+- No flat reader reads it; the C# `ApplyValues` skips it before its duplicate-spelling warning.
+- `schema::Concept::FrameRateUnlock` is the last value, so no existing value is renumbered.
+- 28 concepts are global, where 27 were.
+- The `head-tracking/` and `global/Defaults.ini` fixtures and docs/canonical-config.md carry it.
+  The doc's concept counts, which GameFov left one behind, now read 30 concepts, 28 global.
+- The C interface is unchanged.
+
+Consuming repos: a new Defaults.ini holds `FrameRateUnlock=false` under `[View]`. One already on
+a player's disk has no such line, which reads as false. A game's `CameraUnlock.ini` changes only
+in a mod whose table names the concept.
+
 ### Added - `[View] GameFov`, the field of view a mod draws the game at
 
 `GameFov` is a canonical concept: a float in vertical degrees, `default` 0, range 0 to 140,

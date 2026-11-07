@@ -477,6 +477,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"RecenterKey", ShippedString(c.recenter_key_name)},
         {"LightMultiplier", ShippedFloat(c.light.multiplier)},
         {"GameFov", ShippedFloat(c.game_fov)},
+        {"FrameRateUnlock", ShippedBool(c.frame_rate_unlock)},
     };
 }
 

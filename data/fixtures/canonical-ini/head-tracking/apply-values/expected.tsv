@@ -30,5 +30,6 @@ field	TrueFreeLookKey	Delete, Alt+U
 field	FirstPersonKey	F7, Ctrl+Shift+B
 field	LightMultiplier	1.0
 field	GameFov	75.5
+field	FrameRateUnlock	true
 field	PositionLocalSmoothing	0.25
 field	PositionRemoteSmoothing	0.5

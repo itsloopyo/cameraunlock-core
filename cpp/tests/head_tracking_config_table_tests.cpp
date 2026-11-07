@@ -142,6 +142,7 @@ std::vector<FieldRead> Fields() {
         {"FirstPersonKey", [k](const H& c) { return k(c.first_person_key_name); }},
         {"LightMultiplier", [f](const H& c) { return f(c.light.multiplier); }},
         {"GameFov", [f](const H& c) { return f(c.game_fov); }},
+        {"FrameRateUnlock", [b](const H& c) { return b(c.frame_rate_unlock); }},
         {"PositionLocalSmoothing", [f](const H& c) { return f(c.position.local_smoothing); }},
         {"PositionRemoteSmoothing", [f](const H& c) { return f(c.position.remote_smoothing); }},
     };
@@ -331,19 +332,20 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe27TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe28TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 27 the schema names]\n";
+    std::cout << "\n[the global concepts are the 28 the schema names]\n";
     const std::vector<std::string> expected{
         "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "Accela", "AccelaPlayers", "WorldSpaceYaw",
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
         "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
-        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov"};
+        "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov",
+        "FrameRateUnlock"};
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 27 listed, in schema order");
+    Check(global == expected, "the global concepts are the 28 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }
@@ -488,6 +490,40 @@ void TestGameFov() {
     Check(flat.game_fov == 0.0f && log.empty(), "the flat reader does not read GameFov, and says nothing");
 }
 
+// FrameRateUnlock reads as a bool, false by default, and refuses a word that is not one for its default. The C#
+// twin is HeadTrackingConfigTableTests.FrameRateUnlockReadsABoolAndDefaultsToTheGamesOwnLimit.
+void TestFrameRateUnlock() {
+    std::cout << "\n[FrameRateUnlock reads and defaults in a mod that names it]\n";
+    static_assert(schema::ConceptTraits<Concept::FrameRateUnlock>::kGlobal &&
+                  schema::ConceptTraits<Concept::FrameRateUnlock>::kFamily == schema::ValueFamily::kBool);
+    const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable({Concept::GameFov, Concept::FrameRateUnlock});
+    Check(!table.defaults().frame_rate_unlock, "the table starts it at false, the game's own limit");
+
+    const std::string fresh = RenderCanonicalFresh(table, kHeader);
+    const std::size_t view = fresh.find("\r\n[View]\r\n");
+    const std::size_t fov = fresh.find("\r\nGameFov=default\r\n");
+    const std::size_t key = fresh.find(
+        "\r\n; true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed."
+        "\r\n; Leave it false if another mod already unlocks this game's frame rate.\r\nFrameRateUnlock=default\r\n");
+    Check(view != std::string::npos && fov != std::string::npos && key != std::string::npos && view < fov && fov < key,
+          "the fresh file writes FrameRateUnlock=default with its comment under [View], after GameFov");
+
+    HeadTrackingConfig config;
+    ApplyReport report = ApplyCanonical(ParseCanonicalIni("[View]\r\nFrameRateUnlock=true\r\n"), table, config);
+    Check(config.frame_rate_unlock && report.diagnostics.empty(), "FrameRateUnlock=true reads as true with nothing said");
+
+    config = HeadTrackingConfig{};
+    config.frame_rate_unlock = true;
+    report = ApplyCanonical(ParseCanonicalIni("[View]\r\nFrameRateUnlock=maybe\r\n"), table, config);
+    Check(!config.frame_rate_unlock && report.diagnostics.size() == 1,
+          "FrameRateUnlock=maybe is refused with a diagnostic and the row takes its default, false");
+
+    HeadTrackingConfig flat;
+    std::vector<std::string> log;
+    flat.ApplyValues({{"FrameRateUnlock", "true"}}, [&log](const std::string& line) { log.push_back(line); });
+    Check(!flat.frame_rate_unlock && log.empty(), "the flat reader does not read FrameRateUnlock, and says nothing");
+}
+
 void TestArguments() {
     std::cout << "\n[arguments]\n";
     Check(Contains(Thrown([] { HeadTrackingConfigTable({}); }), "needs the concepts"), "an empty list throws");
@@ -554,6 +590,7 @@ int RunHeadTrackingConfigTableTests() {
         TestFlatReaderSkipsAccela();
         TestFirstPersonKey();
         TestGameFov();
+        TestFrameRateUnlock();
         TestArguments();
         TestOnlyNamedConcepts();
         TestDerivedConfig();

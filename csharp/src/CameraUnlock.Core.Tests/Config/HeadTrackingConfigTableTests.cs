@@ -96,7 +96,7 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe27TheSchemaNames()
+        public void TheGlobalConceptsAreThe28TheSchemaNames()
         {
             string[] global =
             {
@@ -105,6 +105,7 @@ namespace CameraUnlock.Core.Tests.Config
                 "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
                 "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov",
+                "FrameRateUnlock",
             };
             Assert.Equal(global, ConfigConcepts.All.Where(c => c.Global).Select(c => c.Id));
             Assert.Equal(new[] { "CollisionMargin", "CollisionChannel" }, ConfigConcepts.All.Where(c => !c.Global).Select(c => c.Id));
@@ -222,6 +223,43 @@ namespace CameraUnlock.Core.Tests.Config
             var log = new List<string>();
             flat.ApplyValues(new Dictionary<string, string> { { "GameFov", "90" } }, log.Add);
             Assert.Equal(0f, flat.GameFov);
+            Assert.Empty(log);
+        }
+
+        // FrameRateUnlock reads as a bool, false by default, and refuses a word that is not one for its default.
+        // The C++ twin is TestFrameRateUnlock in head_tracking_config_table_tests.cpp.
+        [Fact]
+        public void FrameRateUnlockReadsABoolAndDefaultsToTheGamesOwnLimit()
+        {
+            Assert.True(ConfigConcepts.FrameRateUnlock.Global);
+            Assert.Equal(ConceptValueFamily.Bool, ConfigConcepts.FrameRateUnlock.Family);
+            ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
+                ConfigConcepts.GameFov, ConfigConcepts.FrameRateUnlock);
+            Assert.False(HeadTrackingConfigTableFixtures.Defaults(table).FrameRateUnlock);
+
+            string fresh = Encoding.ASCII.GetString(table.RenderFresh(new RenderHeader("G")));
+            int view = fresh.IndexOf("\r\n[View]\r\n", StringComparison.Ordinal);
+            int fov = fresh.IndexOf("\r\nGameFov=default\r\n", StringComparison.Ordinal);
+            int key = fresh.IndexOf(
+                "\r\n; true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed."
+                + "\r\n; Leave it false if another mod already unlocks this game's frame rate.\r\nFrameRateUnlock=default\r\n",
+                StringComparison.Ordinal);
+            Assert.True(view >= 0 && fov > view && key > fov, fresh);
+
+            var config = new HeadTrackingConfigData();
+            ApplyReport report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]\r\nFrameRateUnlock=true\r\n")), config);
+            Assert.True(config.FrameRateUnlock);
+            Assert.Empty(report.Diagnostics);
+
+            config = new HeadTrackingConfigData { FrameRateUnlock = true };
+            report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]\r\nFrameRateUnlock=maybe\r\n")), config);
+            Assert.False(config.FrameRateUnlock);
+            Assert.Single(report.Diagnostics);
+
+            var flat = new HeadTrackingConfigData();
+            var log = new List<string>();
+            flat.ApplyValues(new Dictionary<string, string> { { "FrameRateUnlock", "true" } }, log.Add);
+            Assert.False(flat.FrameRateUnlock);
             Assert.Empty(log);
         }
 

@@ -280,13 +280,13 @@ them, and a mod cannot put a row there.
 
 ### The canonical concept set
 
-The concepts are the settings every mod spells the same way. 26 of them are global: a game's row
+The concepts are the settings every mod spells the same way. 28 of them are global: a game's row
 for one follows Defaults.ini unless the table marks it `PerGame()` (see
 [Which rows follow it](#which-rows-follow-it)). `CollisionMargin` and `CollisionChannel` are not:
 each holds a number in one engine's own units or channels, so the schema marks them
 `"global": false`, and every game keeps its own value. The schema writes `global`, true or false,
 on every canonical concept, and the generator refuses one without it. This is core's table naming
-all 28 of them at their defaults, which both languages render byte for byte
+all 30 of them at their defaults, which both languages render byte for byte
 (`data/fixtures/canonical-ini/head-tracking/all-concepts.ini`). It is written with `Render`, so
 every row shows its value, `CollisionChannel`, the table's one Engine row, as a comment; the same
 table's fresh render writes `default` on every global row, `CollisionMargin` as its value and the
@@ -393,6 +393,9 @@ LightMultiplier=1.5
 ; The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.
 ; 0 keeps the game's own. Scopes and zoom keep their share of it.
 GameFov=0.0
+; true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed.
+; Leave it false if another mod already unlocks this game's frame rate.
+FrameRateUnlock=false
 ```
 
 The ranges come from the schema's `range` field: `UdpPort` 1 to 65535, `DataFreshnessMs` 1 to
@@ -998,7 +1001,7 @@ file, the README config block and the changelog template.
 
 ### Which rows follow it
 
-26 of the 28 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
+28 of the 30 concepts of [the canonical concept set](#the-canonical-concept-set) are global,
 `CollisionEnabled` and `CollisionReleaseSmoothing` included (owner answers of 2026-09-25,
 collision rows ruling of 2026-09-26). The schema says `global`, true or false, on
 every canonical concept, and `CollisionMargin` and `CollisionChannel` say false: a margin in the
@@ -1222,6 +1225,9 @@ LightMultiplier=1.5
 ; The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.
 ; 0 keeps the game's own. Scopes and zoom keep their share of it.
 GameFov=0.0
+; true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed.
+; Leave it false if another mod already unlocks this game's frame rate.
+FrameRateUnlock=false
 ```
 
 `CollisionMargin` and `CollisionChannel` have no line: they are not global, so each game keeps its

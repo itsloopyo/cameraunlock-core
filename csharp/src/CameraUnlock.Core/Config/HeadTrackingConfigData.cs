@@ -246,6 +246,15 @@ namespace CameraUnlock.Core.Config
         public float GameFov { get; set; }
 
         /// <summary>
+        /// true lifts the game's own frame-rate limit, in a mod that can, with game time, movement,
+        /// physics and timers kept at their normal speed; false leaves the game's frame rate as it is.
+        /// Core binds it and does not apply it: each mod that can unlock its game's frame rate reads
+        /// it. Read only through <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/>
+        /// does not read it.
+        /// </summary>
+        public bool FrameRateUnlock { get; set; }
+
+        /// <summary>
         /// Creates a new config with default values.
         /// </summary>
         public HeadTrackingConfigData()
@@ -337,7 +346,8 @@ namespace CameraUnlock.Core.Config
                 if (key == ConfigKeySchema.Keys.TrueFreeLook || key == ConfigKeySchema.Keys.TrueFreeLookKey
                     || key == ConfigKeySchema.Keys.FreeLookMarker || key == ConfigKeySchema.Keys.StockSights
                     || key == ConfigKeySchema.Keys.Accela || key == ConfigKeySchema.Keys.AccelaPlayers
-                    || key == ConfigKeySchema.Keys.FirstPersonKey || key == ConfigKeySchema.Keys.GameFov) continue;
+                    || key == ConfigKeySchema.Keys.FirstPersonKey || key == ConfigKeySchema.Keys.GameFov
+                    || key == ConfigKeySchema.Keys.FrameRateUnlock) continue;
 
                 string firstSpelling;
                 if (firstSpellingOf.TryGetValue(key, out firstSpelling))

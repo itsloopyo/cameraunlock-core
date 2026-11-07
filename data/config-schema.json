@@ -693,6 +693,18 @@
       "global": true,
       "file_comment": ["The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.", "0 keeps the game's own. Scopes and zoom keep their share of it."],
       "range": {"min": 0, "max": 140}
+    },
+    {
+      "id": "FrameRateUnlock",
+      "section": "View",
+      "key": "FrameRateUnlock",
+      "type": "bool",
+      "default": false,
+      "aliases": [],
+      "doc": "true: in a game whose mod can lift the game's own frame-rate limit, the mod lifts it and keeps game time, movement, physics and timers at their normal speed. false (the default) leaves the game's frame rate as the game has it, which is what a player who already runs another frame-rate mod for that game wants. Core binds it and does not apply it: each mod that can unlock its game's frame rate reads it. Only in a mod that binds it; no flat reader reads it.",
+      "canonical": true,
+      "global": true,
+      "file_comment": ["true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed.", "Leave it false if another mod already unlocks this game's frame rate."]
     }
   ],
   "retired": [
