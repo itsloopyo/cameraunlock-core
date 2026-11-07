@@ -222,6 +222,9 @@ namespace CameraUnlock.Core.Config
                 case nameof(ConfigConcepts.FrameRateUnlock):
                     table.Concept(ConfigConcepts.FrameRateUnlock, c => c.FrameRateUnlock, (c, v) => c.FrameRateUnlock = v);
                     return;
+                case nameof(ConfigConcepts.Fxaa):
+                    table.Concept(ConfigConcepts.Fxaa, c => c.Fxaa, (c, v) => c.Fxaa = v);
+                    return;
             }
             // Reached by a concept the schema gained after this switch was written.
             throw new InvalidOperationException("HeadTrackingConfigTable has no binding for " + concept.Id);

@@ -255,6 +255,14 @@ namespace CameraUnlock.Core.Config
         public bool FrameRateUnlock { get; set; }
 
         /// <summary>
+        /// true smooths the jagged edges of the game's 3D with an FXAA pass, in a mod that can draw
+        /// one into the game's frame; false leaves the picture as the game draws it. Core binds it
+        /// and does not apply it: each mod that can draw the pass reads it. Read only through
+        /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public bool Fxaa { get; set; }
+
+        /// <summary>
         /// Creates a new config with default values.
         /// </summary>
         public HeadTrackingConfigData()
@@ -347,7 +355,7 @@ namespace CameraUnlock.Core.Config
                     || key == ConfigKeySchema.Keys.FreeLookMarker || key == ConfigKeySchema.Keys.StockSights
                     || key == ConfigKeySchema.Keys.Accela || key == ConfigKeySchema.Keys.AccelaPlayers
                     || key == ConfigKeySchema.Keys.FirstPersonKey || key == ConfigKeySchema.Keys.GameFov
-                    || key == ConfigKeySchema.Keys.FrameRateUnlock) continue;
+                    || key == ConfigKeySchema.Keys.FrameRateUnlock || key == ConfigKeySchema.Keys.Fxaa) continue;
 
                 string firstSpelling;
                 if (firstSpellingOf.TryGetValue(key, out firstSpelling))

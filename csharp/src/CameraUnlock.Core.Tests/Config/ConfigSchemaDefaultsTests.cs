@@ -100,6 +100,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "LightMultiplier", config.Light.Multiplier },
                 { "GameFov", config.GameFov },
                 { "FrameRateUnlock", config.FrameRateUnlock },
+                { "Fxaa", config.Fxaa },
             };
         }
 

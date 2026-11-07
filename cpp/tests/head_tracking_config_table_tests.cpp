@@ -143,6 +143,7 @@ std::vector<FieldRead> Fields() {
         {"LightMultiplier", [f](const H& c) { return f(c.light.multiplier); }},
         {"GameFov", [f](const H& c) { return f(c.game_fov); }},
         {"FrameRateUnlock", [b](const H& c) { return b(c.frame_rate_unlock); }},
+        {"Fxaa", [b](const H& c) { return b(c.fxaa); }},
         {"PositionLocalSmoothing", [f](const H& c) { return f(c.position.local_smoothing); }},
         {"PositionRemoteSmoothing", [f](const H& c) { return f(c.position.remote_smoothing); }},
     };
@@ -332,20 +333,20 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe28TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe29TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 28 the schema names]\n";
+    std::cout << "\n[the global concepts are the 29 the schema names]\n";
     const std::vector<std::string> expected{
         "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "Accela", "AccelaPlayers", "WorldSpaceYaw",
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
         "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
         "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov",
-        "FrameRateUnlock"};
+        "FrameRateUnlock", "Fxaa"};
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 28 listed, in schema order");
+    Check(global == expected, "the global concepts are the 29 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }
@@ -524,6 +525,39 @@ void TestFrameRateUnlock() {
     Check(!flat.frame_rate_unlock && log.empty(), "the flat reader does not read FrameRateUnlock, and says nothing");
 }
 
+// Fxaa reads as a bool, false by default, and refuses a word that is not one for its default. The C#
+// twin is HeadTrackingConfigTableTests.FxaaReadsABoolAndDefaultsToThePictureAsDrawn.
+void TestFxaa() {
+    std::cout << "\n[Fxaa reads and defaults in a mod that names it]\n";
+    static_assert(schema::ConceptTraits<Concept::Fxaa>::kGlobal &&
+                  schema::ConceptTraits<Concept::Fxaa>::kFamily == schema::ValueFamily::kBool);
+    const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable({Concept::FrameRateUnlock, Concept::Fxaa});
+    Check(!table.defaults().fxaa, "the table starts it at false, the picture as the game draws it");
+
+    const std::string fresh = RenderCanonicalFresh(table, kHeader);
+    const std::size_t view = fresh.find("\r\n[View]\r\n");
+    const std::size_t unlock = fresh.find("\r\nFrameRateUnlock=default\r\n");
+    const std::size_t key = fresh.find(
+        "\r\n; true: smooths the jagged edges of the game's 3D with FXAA where the mod can."
+        "\r\n; It softens fine detail a little; leave it false if the game already has anti-aliasing on.\r\nFxaa=default\r\n");
+    Check(view != std::string::npos && unlock != std::string::npos && key != std::string::npos && view < unlock && unlock < key,
+          "the fresh file writes Fxaa=default with its comment under [View], after FrameRateUnlock");
+
+    HeadTrackingConfig config;
+    ApplyReport report = ApplyCanonical(ParseCanonicalIni("[View]\r\nFxaa=true\r\n"), table, config);
+    Check(config.fxaa && report.diagnostics.empty(), "Fxaa=true reads as true with nothing said");
+
+    config = HeadTrackingConfig{};
+    config.fxaa = true;
+    report = ApplyCanonical(ParseCanonicalIni("[View]\r\nFxaa=maybe\r\n"), table, config);
+    Check(!config.fxaa && report.diagnostics.size() == 1, "Fxaa=maybe is refused with a diagnostic and the row takes its default, false");
+
+    HeadTrackingConfig flat;
+    std::vector<std::string> log;
+    flat.ApplyValues({{"Fxaa", "true"}}, [&log](const std::string& line) { log.push_back(line); });
+    Check(!flat.fxaa && log.empty(), "the flat reader does not read Fxaa, and says nothing");
+}
+
 void TestArguments() {
     std::cout << "\n[arguments]\n";
     Check(Contains(Thrown([] { HeadTrackingConfigTable({}); }), "needs the concepts"), "an empty list throws");
@@ -591,6 +625,7 @@ int RunHeadTrackingConfigTableTests() {
         TestFirstPersonKey();
         TestGameFov();
         TestFrameRateUnlock();
+        TestFxaa();
         TestArguments();
         TestOnlyNamedConcepts();
         TestDerivedConfig();

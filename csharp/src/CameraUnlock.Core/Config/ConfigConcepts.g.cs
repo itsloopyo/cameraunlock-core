@@ -194,6 +194,12 @@ namespace CameraUnlock.Core.Config
             new BoolCodec(), new[] { "true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed.", "Leave it false if another mod already unlocks this game's frame rate." }, null, "false",
             true);
 
+        /// <summary>[View] Fxaa.</summary>
+        public static readonly ConceptDescriptor<bool> Fxaa = new ConceptDescriptor<bool>(
+            "Fxaa", "View", "Fxaa", ConceptValueFamily.Bool,
+            new BoolCodec(), new[] { "true: smooths the jagged edges of the game's 3D with FXAA where the mod can.", "It softens fine detail a little; leave it false if the game already has anti-aliasing on." }, null, "false",
+            true);
+
         /// <summary>In the schema's concepts order, which is the order a section's concept rows are written in.</summary>
         internal static readonly ConceptDescriptor[] All =
         {
@@ -227,6 +233,7 @@ namespace CameraUnlock.Core.Config
             LightMultiplier,
             GameFov,
             FrameRateUnlock,
+            Fxaa,
         };
 
         /// <summary>The schema's sections, in the order a canonical file writes them.</summary>

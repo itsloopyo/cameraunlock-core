@@ -130,6 +130,11 @@ struct HeadTrackingConfig {
     /// Core binds it and does not apply it: each mod that can unlock its game's frame rate reads
     /// it. Read only through config::HeadTrackingConfigTable; ApplyValues does not read it.
     bool frame_rate_unlock = false;
+    /// true smooths the jagged edges of the game's 3D with an FXAA pass, in a mod that can draw
+    /// one into the game's frame; false leaves the picture as the game draws it. Core binds it and
+    /// does not apply it: each mod that can draw the pass reads it. Read only through
+    /// config::HeadTrackingConfigTable; ApplyValues does not read it.
+    bool fxaa = false;
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.

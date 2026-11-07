@@ -9,6 +9,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `[View] Fxaa`, whether a mod smooths the game's jagged edges with FXAA
+
+`Fxaa` is a canonical concept: a bool, `default` false, global, under `[View]` after
+`FrameRateUnlock`. true: in a game whose mod can draw a pass into the game's frame, the mod
+smooths the jagged edges of the game's 3D with FXAA, after the 3D scene and before the HUD where
+the engine allows. false leaves the picture as the game draws it. No aliases.
+
+- Fields `HeadTrackingConfigData.Fxaa` and `HeadTrackingConfig::fxaa` (the C++ member after
+  every existing one), bound by both `HeadTrackingConfigTable`s. Core binds the row and does not
+  apply it: each mod that can draw the pass reads it.
+- No flat reader reads it; the C# `ApplyValues` skips it before its duplicate-spelling warning.
+- `schema::Concept::Fxaa` is the last value, so no existing value is renumbered.
+- 29 concepts are global, where 28 were.
+- The `head-tracking/` and `global/Defaults.ini` fixtures and docs/canonical-config.md carry it.
+- The C interface is unchanged.
+
+Consuming repos: a new Defaults.ini holds `Fxaa=false` under `[View]`. One already on a player's
+disk has no such line, which reads as false. A game's `CameraUnlock.ini` changes only in a mod
+whose table names the concept.
+
 ### Added - `[View] FrameRateUnlock`, whether a mod lifts its game's own frame-rate limit
 
 `FrameRateUnlock` is a canonical concept: a bool, `default` false, global, under `[View]` after

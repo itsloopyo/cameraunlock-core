@@ -96,7 +96,7 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe28TheSchemaNames()
+        public void TheGlobalConceptsAreThe29TheSchemaNames()
         {
             string[] global =
             {
@@ -105,7 +105,7 @@ namespace CameraUnlock.Core.Tests.Config
                 "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
                 "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov",
-                "FrameRateUnlock",
+                "FrameRateUnlock", "Fxaa",
             };
             Assert.Equal(global, ConfigConcepts.All.Where(c => c.Global).Select(c => c.Id));
             Assert.Equal(new[] { "CollisionMargin", "CollisionChannel" }, ConfigConcepts.All.Where(c => !c.Global).Select(c => c.Id));
@@ -260,6 +260,43 @@ namespace CameraUnlock.Core.Tests.Config
             var log = new List<string>();
             flat.ApplyValues(new Dictionary<string, string> { { "FrameRateUnlock", "true" } }, log.Add);
             Assert.False(flat.FrameRateUnlock);
+            Assert.Empty(log);
+        }
+
+        // Fxaa reads as a bool, false by default, and refuses a word that is not one for its default.
+        // The C++ twin is TestFxaa in head_tracking_config_table_tests.cpp.
+        [Fact]
+        public void FxaaReadsABoolAndDefaultsToThePictureAsDrawn()
+        {
+            Assert.True(ConfigConcepts.Fxaa.Global);
+            Assert.Equal(ConceptValueFamily.Bool, ConfigConcepts.Fxaa.Family);
+            ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
+                ConfigConcepts.FrameRateUnlock, ConfigConcepts.Fxaa);
+            Assert.False(HeadTrackingConfigTableFixtures.Defaults(table).Fxaa);
+
+            string fresh = Encoding.ASCII.GetString(table.RenderFresh(new RenderHeader("G")));
+            int view = fresh.IndexOf("\r\n[View]\r\n", StringComparison.Ordinal);
+            int unlock = fresh.IndexOf("\r\nFrameRateUnlock=default\r\n", StringComparison.Ordinal);
+            int key = fresh.IndexOf(
+                "\r\n; true: smooths the jagged edges of the game's 3D with FXAA where the mod can."
+                + "\r\n; It softens fine detail a little; leave it false if the game already has anti-aliasing on.\r\nFxaa=default\r\n",
+                StringComparison.Ordinal);
+            Assert.True(view >= 0 && unlock > view && key > unlock, fresh);
+
+            var config = new HeadTrackingConfigData();
+            ApplyReport report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]\r\nFxaa=true\r\n")), config);
+            Assert.True(config.Fxaa);
+            Assert.Empty(report.Diagnostics);
+
+            config = new HeadTrackingConfigData { Fxaa = true };
+            report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]\r\nFxaa=maybe\r\n")), config);
+            Assert.False(config.Fxaa);
+            Assert.Single(report.Diagnostics);
+
+            var flat = new HeadTrackingConfigData();
+            var log = new List<string>();
+            flat.ApplyValues(new Dictionary<string, string> { { "Fxaa", "true" } }, log.Add);
+            Assert.False(flat.Fxaa);
             Assert.Empty(log);
         }
 

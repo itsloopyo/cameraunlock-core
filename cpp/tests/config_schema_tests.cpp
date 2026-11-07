@@ -478,6 +478,7 @@ std::map<std::string, ShippedDefault> ShippedDefaults(const cameraunlock::HeadTr
         {"LightMultiplier", ShippedFloat(c.light.multiplier)},
         {"GameFov", ShippedFloat(c.game_fov)},
         {"FrameRateUnlock", ShippedBool(c.frame_rate_unlock)},
+        {"Fxaa", ShippedBool(c.fxaa)},
     };
 }
 

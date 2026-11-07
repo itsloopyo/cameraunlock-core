@@ -42,6 +42,7 @@ enum class Concept {
     LightMultiplier,
     GameFov,
     FrameRateUnlock,
+    Fxaa,
 };
 
 /// What a concept's field holds, which fixes its codec: kBool is BoolCodec over bool, kInteger
@@ -422,6 +423,17 @@ struct ConceptTraits<Concept::FrameRateUnlock> {
     static constexpr bool kGlobal = true;
 };
 
+template <>
+struct ConceptTraits<Concept::Fxaa> {
+    static constexpr const char* kSection = "View";
+    static constexpr const char* kKey = "Fxaa";
+    static constexpr ValueFamily kFamily = ValueFamily::kBool;
+    static constexpr const char* kFileComment[] = {"true: smooths the jagged edges of the game's 3D with FXAA where the mod can.", "It softens fine detail a little; leave it false if the game already has anti-aliasing on."};
+    static constexpr const char* kCanonicalDefault = nullptr;
+    static constexpr const char* kDefaultText = "false";
+    static constexpr bool kGlobal = true;
+};
+
 /// One canonical concept, for code that walks them all. kConcepts[static_cast<std::size_t>(id)]
 /// describes id. `file_comment` holds `file_comment_lines` lines; the rest are nullptr.
 /// `default_text` is ConceptTraits<id>::kDefaultText, and `global` ConceptTraits<id>::kGlobal.
@@ -469,6 +481,7 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::LightMultiplier, "LightMultiplier", "Light", "LightMultiplier", ValueFamily::kFloating, {"How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."}, 2, nullptr, "1.5", true},
     {Concept::GameFov, "GameFov", "View", "GameFov", ValueFamily::kFloating, {"The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.", "0 keeps the game's own. Scopes and zoom keep their share of it."}, 2, nullptr, "0", true},
     {Concept::FrameRateUnlock, "FrameRateUnlock", "View", "FrameRateUnlock", ValueFamily::kBool, {"true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed.", "Leave it false if another mod already unlocks this game's frame rate."}, 2, nullptr, "false", true},
+    {Concept::Fxaa, "Fxaa", "View", "Fxaa", ValueFamily::kBool, {"true: smooths the jagged edges of the game's 3D with FXAA where the mod can.", "It softens fine detail a little; leave it false if the game already has anti-aliasing on."}, 2, nullptr, "false", true},
 };
 
 inline constexpr std::size_t kConceptCount = sizeof(kConcepts) / sizeof(kConcepts[0]);

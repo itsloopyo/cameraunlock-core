@@ -69,6 +69,7 @@ namespace CameraUnlock.Core.Config
             public const string LightMultiplier = "lightmultiplier";
             public const string GameFov = "gamefov";
             public const string FrameRateUnlock = "framerateunlock";
+            public const string Fxaa = "fxaa";
 
             public const string LightFollowsHead = "lightfollowshead";
             public const string Smoothing = "smoothing";
@@ -124,6 +125,7 @@ namespace CameraUnlock.Core.Config
             { "flashlightscale", "lightmultiplier" },
             { "framerateunlock", "framerateunlock" },
             { "freelookmarker", "freelookmarker" },
+            { "fxaa", "fxaa" },
             { "gamefov", "gamefov" },
             { "horizonlock", "worldspaceyaw" },
             { "horizonlockedyaw", "worldspaceyaw" },
