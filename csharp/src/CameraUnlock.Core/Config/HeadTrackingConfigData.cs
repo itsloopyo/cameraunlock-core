@@ -235,7 +235,7 @@ namespace CameraUnlock.Core.Config
         /// a mod that has a first-person view. Core binds it and does not poll it. Read only through
         /// <see cref="HeadTrackingConfigTable"/>; <see cref="ApplyValues"/> does not read it.
         /// </summary>
-        public string FirstPersonKeyName { get; set; } = "Home, Ctrl+Shift+B";
+        public string FirstPersonKeyName { get; set; } = "ScrollLock, Ctrl+Shift+B";
 
         /// <summary>
         /// The field of view the game is drawn at, in vertical degrees; 0 leaves the game's own.

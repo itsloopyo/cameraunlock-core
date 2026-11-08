@@ -358,7 +358,7 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "CycleTrackingModeKey", config_keys::kCycleTrackingModeKey, ConfigValueType::kString, 0, 0.0f, false, "", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "YawModeKey", config_keys::kYawModeKey, ConfigValueType::kString, 0, 0.0f, false, "PageDown", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "TrueFreeLookKey", config_keys::kTrueFreeLookKey, ConfigValueType::kString, 0, 0.0f, false, "Insert, Ctrl+Shift+U", {0.0f, 0.0f, 0.0f, 0.0f} },
-    { "FirstPersonKey", config_keys::kFirstPersonKey, ConfigValueType::kString, 0, 0.0f, false, "Home, Ctrl+Shift+B", {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "FirstPersonKey", config_keys::kFirstPersonKey, ConfigValueType::kString, 0, 0.0f, false, "ScrollLock, Ctrl+Shift+B", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "RecenterKey", config_keys::kRecenterKey, ConfigValueType::kString, 0, 0.0f, false, "Home", {0.0f, 0.0f, 0.0f, 0.0f} },
     { "LightMultiplier", config_keys::kLightMultiplier, ConfigValueType::kFloat, 0, 1.5f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "GameFov", config_keys::kGameFov, ConfigValueType::kFloat, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },

@@ -9,6 +9,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed - `[Hotkeys] FirstPersonKey` defaults to `ScrollLock, Ctrl+Shift+B`
+
+`FirstPersonKey`'s `canonical_default`, `default` and both field initialisers move from
+`Home, Ctrl+Shift+B` to `ScrollLock, Ctrl+Shift+B` (owner decision): Home opens Rockstar's
+Social Club overlay in GTA IV. The chord stays Ctrl+Shift+B.
+
+- The generated tables, the `head-tracking/` and `global/Defaults.ini` fixtures, the defaults
+  tests in both languages and docs/canonical-config.md carry the new list.
+- The C interface is unchanged.
+
+Consuming repos: a mod that binds the concept picks up Scroll Lock with this core and changes
+any test, README line or install text that names Home as the first-person key. A Defaults.ini
+already on a player's disk that holds `FirstPersonKey=Home, Ctrl+Shift+B` keeps Home: a written
+value is the player's, and no migration rewrites it.
+
 ### Added - `[View] Fxaa`, whether a mod smooths the game's jagged edges with FXAA
 
 `Fxaa` is a canonical concept: a bool, `default` false, global, under `[View]` after
@@ -78,7 +93,8 @@ changes only in a mod whose table names the concept.
 
 ### Added - `[Hotkeys] FirstPersonKey`, the one key that swoops a mod's view into first person
 
-`FirstPersonKey` is a canonical concept: a key list, `canonical_default` `Home, Ctrl+Shift+B`,
+`FirstPersonKey` is a canonical concept: a key list, `canonical_default` `Home, Ctrl+Shift+B`
+(`ScrollLock, Ctrl+Shift+B` since the Changed entry above),
 global, directly after `TrueFreeLookKey`. It switches the view between first person at the
 character's eyes and the game's own camera, with an animated swoop, in a mod that has a
 first-person view (owner request: one global setting, Home by default). B is from the fleet's

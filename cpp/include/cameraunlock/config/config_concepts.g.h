@@ -381,8 +381,8 @@ struct ConceptTraits<Concept::FirstPersonKey> {
     static constexpr const char* kKey = "FirstPersonKey";
     static constexpr ValueFamily kFamily = ValueFamily::kHotkey;
     static constexpr const char* kFileComment[] = {"Switches the view between first person and the game's own camera, where the game has first person."};
-    static constexpr const char* kCanonicalDefault = "Home, Ctrl+Shift+B";
-    static constexpr const char* kDefaultText = "Home, Ctrl+Shift+B";
+    static constexpr const char* kCanonicalDefault = "ScrollLock, Ctrl+Shift+B";
+    static constexpr const char* kDefaultText = "ScrollLock, Ctrl+Shift+B";
     static constexpr bool kGlobal = true;
 };
 
@@ -477,7 +477,7 @@ inline constexpr ConceptInfo kConcepts[] = {
     {Concept::CycleTrackingModeKey, "CycleTrackingModeKey", "Hotkeys", "CycleTrackingModeKey", ValueFamily::kHotkey, {"Changes the tracking mode: rotation and position, rotation only, position only.", nullptr}, 1, "PageUp, Ctrl+Shift+G", "PageUp, Ctrl+Shift+G", true},
     {Concept::YawModeKey, "YawModeKey", "Hotkeys", "YawModeKey", ValueFamily::kHotkey, {"Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).", nullptr}, 1, "PageDown, Ctrl+Shift+H", "PageDown, Ctrl+Shift+H", true},
     {Concept::TrueFreeLookKey, "TrueFreeLookKey", "Hotkeys", "TrueFreeLookKey", ValueFamily::kHotkey, {"Cycles the aim mode: sights locked, free look with a marker, true free look, stock sights", "(TrueFreeLook, FreeLookMarker, StockSights)."}, 2, "Insert, Ctrl+Shift+U", "Insert, Ctrl+Shift+U", true},
-    {Concept::FirstPersonKey, "FirstPersonKey", "Hotkeys", "FirstPersonKey", ValueFamily::kHotkey, {"Switches the view between first person and the game's own camera, where the game has first person.", nullptr}, 1, "Home, Ctrl+Shift+B", "Home, Ctrl+Shift+B", true},
+    {Concept::FirstPersonKey, "FirstPersonKey", "Hotkeys", "FirstPersonKey", ValueFamily::kHotkey, {"Switches the view between first person and the game's own camera, where the game has first person.", nullptr}, 1, "ScrollLock, Ctrl+Shift+B", "ScrollLock, Ctrl+Shift+B", true},
     {Concept::LightMultiplier, "LightMultiplier", "Light", "LightMultiplier", ValueFamily::kFloating, {"How far the light turns for each degree your head turns.", "1 matches the view, 0 keeps the light on your aim."}, 2, nullptr, "1.5", true},
     {Concept::GameFov, "GameFov", "View", "GameFov", ValueFamily::kFloating, {"The game's field of view in vertical degrees; 60 is about 91 horizontal at 16:9.", "0 keeps the game's own. Scopes and zoom keep their share of it."}, 2, nullptr, "0", true},
     {Concept::FrameRateUnlock, "FrameRateUnlock", "View", "FrameRateUnlock", ValueFamily::kBool, {"true: lifts the game's own frame-rate limit where the mod can, at the game's normal speed.", "Leave it false if another mod already unlocks this game's frame rate."}, 2, nullptr, "false", true},

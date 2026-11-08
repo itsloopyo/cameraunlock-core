@@ -648,14 +648,14 @@
       "section": "Hotkeys",
       "key": "FirstPersonKey",
       "type": "string",
-      "default": "Home, Ctrl+Shift+B",
+      "default": "ScrollLock, Ctrl+Shift+B",
       "aliases": ["ToggleFirstPersonKey", "FirstPersonToggleKey"],
       "doc": "Key list that switches the view between first person at the character's eyes and the game's own camera, with an animated swoop, in a mod that has a first-person view. Only in a mod that binds it. No flat reader reads it, so its default and field initialisers are its canonical_default.",
       "canonical": true,
       "global": true,
       "file_comment": ["Switches the view between first person and the game's own camera, where the game has first person."],
       "codec": "hotkey",
-      "canonical_default": "Home, Ctrl+Shift+B"
+      "canonical_default": "ScrollLock, Ctrl+Shift+B"
     },
     {
       "id": "RecenterKey",

@@ -382,7 +382,7 @@ YawModeKey=PageDown, Ctrl+Shift+H
 ; (TrueFreeLook, FreeLookMarker, StockSights).
 TrueFreeLookKey=Insert, Ctrl+Shift+U
 ; Switches the view between first person and the game's own camera, where the game has first person.
-FirstPersonKey=Home, Ctrl+Shift+B
+FirstPersonKey=ScrollLock, Ctrl+Shift+B
 
 [Light]
 ; How far the light turns for each degree your head turns.
@@ -473,8 +473,9 @@ the filter from these rows. Neither has an alias, and the older flat readers rea
 
 `FirstPersonKey` is the key list that switches the view between first person at the character's
 eyes and the game's own camera, with an animated swoop, in a mod that has a first-person view.
-It is one global setting, `Home, Ctrl+Shift+B` by default (B from the fleet's spare chord
+It is one global setting, `ScrollLock, Ctrl+Shift+B` by default (B from the fleet's spare chord
 letters), so every such mod answers the same key unless its table marks the row `PerGame()`.
+Scroll Lock replaced Home, which opens Rockstar's Social Club overlay in GTA IV.
 Core's `HeadTrackingConfigTable` binds it to `HeadTrackingConfig::first_person_key_name` and
 `HeadTrackingConfigData.FirstPersonKeyName`, and does not poll it: the mod that binds it acts on
 it. Its aliases are `ToggleFirstPersonKey` and `FirstPersonToggleKey`; in a canonical file either
@@ -1217,7 +1218,7 @@ YawModeKey=PageDown, Ctrl+Shift+H
 ; (TrueFreeLook, FreeLookMarker, StockSights).
 TrueFreeLookKey=Insert, Ctrl+Shift+U
 ; Switches the view between first person and the game's own camera, where the game has first person.
-FirstPersonKey=Home, Ctrl+Shift+B
+FirstPersonKey=ScrollLock, Ctrl+Shift+B
 
 [Light]
 ; How far the light turns for each degree your head turns.

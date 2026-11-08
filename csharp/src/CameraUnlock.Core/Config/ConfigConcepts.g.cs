@@ -173,7 +173,7 @@ namespace CameraUnlock.Core.Config
         /// <summary>[Hotkeys] FirstPersonKey.</summary>
         public static readonly ConceptDescriptor<string> FirstPersonKey = new ConceptDescriptor<string>(
             "FirstPersonKey", "Hotkeys", "FirstPersonKey", ConceptValueFamily.Hotkey,
-            new HotkeyCodec(), new[] { "Switches the view between first person and the game's own camera, where the game has first person." }, "Home, Ctrl+Shift+B", "Home, Ctrl+Shift+B",
+            new HotkeyCodec(), new[] { "Switches the view between first person and the game's own camera, where the game has first person." }, "ScrollLock, Ctrl+Shift+B", "ScrollLock, Ctrl+Shift+B",
             true);
 
         /// <summary>[Light] LightMultiplier.</summary>

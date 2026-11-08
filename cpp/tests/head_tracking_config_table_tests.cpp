@@ -313,7 +313,7 @@ void TestHotkeyDefaults() {
     Check(d.true_free_look_key_name == "Insert, Ctrl+Shift+U" &&
               d.true_free_look_key_name == schema::ConceptTraits<Concept::TrueFreeLookKey>::kCanonicalDefault,
           "TrueFreeLookKey defaults to its canonical_default");
-    Check(d.first_person_key_name == "Home, Ctrl+Shift+B" &&
+    Check(d.first_person_key_name == "ScrollLock, Ctrl+Shift+B" &&
               d.first_person_key_name == schema::ConceptTraits<Concept::FirstPersonKey>::kCanonicalDefault,
           "FirstPersonKey defaults to its canonical_default");
 
@@ -414,13 +414,13 @@ void TestFlatReaderSkipsAccela() {
 }
 
 // A mod with a first-person view names FirstPersonKey and reads the one global key list. The C#
-// twin is HeadTrackingConfigTableTests.AModThatNamesFirstPersonKeyReadsItAndDefaultsToHomeAndCtrlShiftB.
+// twin is HeadTrackingConfigTableTests.AModThatNamesFirstPersonKeyReadsItAndDefaultsToScrollLockAndCtrlShiftB.
 void TestFirstPersonKey() {
     std::cout << "\n[FirstPersonKey reads and defaults in a mod that names it]\n";
     static_assert(schema::ConceptTraits<Concept::FirstPersonKey>::kGlobal &&
                   schema::ConceptTraits<Concept::FirstPersonKey>::kFamily == schema::ValueFamily::kHotkey);
     const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable({Concept::ToggleKey, Concept::FirstPersonKey});
-    Check(table.defaults().first_person_key_name == "Home, Ctrl+Shift+B", "the table starts it at Home, Ctrl+Shift+B");
+    Check(table.defaults().first_person_key_name == "ScrollLock, Ctrl+Shift+B", "the table starts it at ScrollLock, Ctrl+Shift+B");
 
     const std::string fresh = RenderCanonicalFresh(table, kHeader);
     const std::size_t hotkeys = fresh.find("\r\n[Hotkeys]\r\n");
@@ -441,12 +441,12 @@ void TestFirstPersonKey() {
     config = HeadTrackingConfig{};
     config.first_person_key_name = "F1";
     report = ApplyCanonical(ParseCanonicalIni("[Hotkeys]\r\nFirstPersonKey=default\r\n"), table, config);
-    Check(config.first_person_key_name == "Home, Ctrl+Shift+B" && report.diagnostics.empty(),
+    Check(config.first_person_key_name == "ScrollLock, Ctrl+Shift+B" && report.diagnostics.empty(),
           "FirstPersonKey=default reads as the canonical_default");
 
     config = HeadTrackingConfig{};
     report = ApplyCanonical(ParseCanonicalIni("[Hotkeys]\r\nToggleFirstPersonKey=F7\r\n"), table, config);
-    Check(config.first_person_key_name == "Home, Ctrl+Shift+B" && report.diagnostics.size() == 1 &&
+    Check(config.first_person_key_name == "ScrollLock, Ctrl+Shift+B" && report.diagnostics.size() == 1 &&
               report.diagnostics[0].kind == CanonicalDiagnosticKind::MisplacedKey,
           "a canonical file's ToggleFirstPersonKey is an alias, misplaced and not read");
 
@@ -454,7 +454,7 @@ void TestFirstPersonKey() {
     std::vector<std::string> log;
     flat.ApplyValues({{"FirstPersonKey", "F8"}, {"ToggleFirstPersonKey", "F9"}, {"first_person_toggle_key", "F10"}},
                      [&log](const std::string& line) { log.push_back(line); });
-    Check(flat.first_person_key_name == "Home, Ctrl+Shift+B" && log.empty(),
+    Check(flat.first_person_key_name == "ScrollLock, Ctrl+Shift+B" && log.empty(),
           "the flat reader does not read FirstPersonKey under any spelling, and says nothing");
 }
 

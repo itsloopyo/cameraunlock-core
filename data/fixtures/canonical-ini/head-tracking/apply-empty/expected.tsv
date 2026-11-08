@@ -25,7 +25,7 @@ field	ToggleKey	End, Ctrl+Shift+Y
 field	CycleTrackingModeKey	PageUp, Ctrl+Shift+G
 field	YawModeKey	PageDown, Ctrl+Shift+H
 field	TrueFreeLookKey	Insert, Ctrl+Shift+U
-field	FirstPersonKey	Home, Ctrl+Shift+B
+field	FirstPersonKey	ScrollLock, Ctrl+Shift+B
 field	LightMultiplier	1.5
 field	GameFov	0.0
 field	FrameRateUnlock	false

@@ -119,7 +119,7 @@ struct HeadTrackingConfig {
     /// The key list that switches the view between first person and the game's own camera, in
     /// a mod that has a first-person view. Core binds it and does not poll it. Read only through
     /// config::HeadTrackingConfigTable; ApplyValues does not read it.
-    std::string first_person_key_name = "Home, Ctrl+Shift+B";
+    std::string first_person_key_name = "ScrollLock, Ctrl+Shift+B";
     /// The field of view the game is drawn at, in vertical degrees; 0 leaves the game's own.
     /// Zoomed views keep their ratio to it. Core binds it and does not apply it: each mod
     /// converts it to its engine's axis. Read only through config::HeadTrackingConfigTable;

@@ -29,7 +29,7 @@ namespace CameraUnlock.Core.Config
     /// <para>
     /// The defaults instance is a new config with the five hotkey lists and CollisionEnabled at the
     /// schema's canonical_default (<c>End, Ctrl+Shift+Y</c>, <c>PageUp, Ctrl+Shift+G</c>,
-    /// <c>PageDown, Ctrl+Shift+H</c>, <c>Insert, Ctrl+Shift+U</c>, <c>Home, Ctrl+Shift+B</c>,
+    /// <c>PageDown, Ctrl+Shift+H</c>, <c>Insert, Ctrl+Shift+U</c>, <c>ScrollLock, Ctrl+Shift+B</c>,
     /// <c>true</c>); the properties' own initialisers, which
     /// <see cref="HeadTrackingConfigData.LoadFromFile"/> uses, stay single keys and <c>false</c> for the
     /// first three lists and CollisionEnabled, and are the canonical_default for the two no flat reader reads.

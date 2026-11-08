@@ -170,7 +170,7 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
 ///
 /// The defaults instance is Config{} with the five hotkey lists and CollisionEnabled at the schema's
 /// canonical_default (`End, Ctrl+Shift+Y`, `PageUp, Ctrl+Shift+G`, `PageDown, Ctrl+Shift+H`,
-/// `Insert, Ctrl+Shift+U`, `Home, Ctrl+Shift+B`, true); HeadTrackingConfig's own field initialisers,
+/// `Insert, Ctrl+Shift+U`, `ScrollLock, Ctrl+Shift+B`, true); HeadTrackingConfig's own field initialisers,
 /// which the flat reader uses, stay single keys and false for the first three lists and
 /// CollisionEnabled, and are the canonical_default for the two no flat reader reads.
 ///
