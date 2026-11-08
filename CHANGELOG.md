@@ -9,6 +9,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added - `[View] CutsceneTracking`, whether head tracking stays on in a game's cutscenes
+
+`CutsceneTracking` is a canonical concept: a bool, `default` false, global, under `[View]` after
+`Fxaa`. true: in a game whose mod can tell its cutscenes apart from its other gated states, head
+tracking stays on while a cutscene plays; menus, loading, death, photo mode and other cameras the
+mod holds the pose off for stay held. false holds the pose off in cutscenes too, as before. No
+aliases.
+
+- Fields `HeadTrackingConfigData.CutsceneTracking` and `HeadTrackingConfig::cutscene_tracking`
+  (the C++ member after every existing one), bound by both `HeadTrackingConfigTable`s. Core binds
+  the row and does not apply it: each mod that can tell a cutscene apart reads it.
+- No flat reader reads it; the C# `ApplyValues` skips it before its duplicate-spelling warning.
+- `schema::Concept::CutsceneTracking` is the last value, so no existing value is renumbered.
+- 30 concepts are global, where 29 were.
+- The `head-tracking/` and `global/Defaults.ini` fixtures and docs/canonical-config.md carry it.
+- The C interface is unchanged.
+
+Consuming repos: a new Defaults.ini holds `CutsceneTracking=false` under `[View]`. One already on
+a player's disk has no such line, which reads as false. A game's `CameraUnlock.ini` changes only
+in a mod whose table names the concept.
+
 ### Changed - `[Hotkeys] FirstPersonKey` defaults to `ScrollLock, Ctrl+Shift+B`
 
 `FirstPersonKey`'s `canonical_default`, `default` and both field initialisers move from

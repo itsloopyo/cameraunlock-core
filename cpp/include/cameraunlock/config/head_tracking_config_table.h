@@ -146,6 +146,9 @@ void BindHeadTrackingConcept(ConfigTable<Config>& table, schema::Concept id) {
         case C::Fxaa:
             BindHeadTrackingMember<C::Fxaa>(table, &H::fxaa);
             return;
+        case C::CutsceneTracking:
+            BindHeadTrackingMember<C::CutsceneTracking>(table, &H::cutscene_tracking);
+            return;
     }
     // Reached by a concept the schema gained after this switch was written.
     throw std::logic_error(std::string("HeadTrackingConfigTable has no binding for ") + HeadTrackingConceptName(id));

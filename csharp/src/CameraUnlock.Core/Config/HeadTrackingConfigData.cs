@@ -263,6 +263,15 @@ namespace CameraUnlock.Core.Config
         public bool Fxaa { get; set; }
 
         /// <summary>
+        /// true keeps head tracking on while the game plays a cutscene, in a mod that can tell its
+        /// cutscenes apart from its other gated states; false holds the pose off in cutscenes as in
+        /// menus and loading. Core binds it and does not apply it: each mod that can tell a cutscene
+        /// apart reads it. Read only through <see cref="HeadTrackingConfigTable"/>;
+        /// <see cref="ApplyValues"/> does not read it.
+        /// </summary>
+        public bool CutsceneTracking { get; set; }
+
+        /// <summary>
         /// Creates a new config with default values.
         /// </summary>
         public HeadTrackingConfigData()
@@ -355,7 +364,8 @@ namespace CameraUnlock.Core.Config
                     || key == ConfigKeySchema.Keys.FreeLookMarker || key == ConfigKeySchema.Keys.StockSights
                     || key == ConfigKeySchema.Keys.Accela || key == ConfigKeySchema.Keys.AccelaPlayers
                     || key == ConfigKeySchema.Keys.FirstPersonKey || key == ConfigKeySchema.Keys.GameFov
-                    || key == ConfigKeySchema.Keys.FrameRateUnlock || key == ConfigKeySchema.Keys.Fxaa) continue;
+                    || key == ConfigKeySchema.Keys.FrameRateUnlock || key == ConfigKeySchema.Keys.Fxaa
+                    || key == ConfigKeySchema.Keys.CutsceneTracking) continue;
 
                 string firstSpelling;
                 if (firstSpellingOf.TryGetValue(key, out firstSpelling))

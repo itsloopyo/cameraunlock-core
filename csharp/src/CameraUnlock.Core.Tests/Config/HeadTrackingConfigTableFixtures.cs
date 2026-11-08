@@ -258,6 +258,7 @@ namespace CameraUnlock.Core.Tests.Config
                 new FieldRead("GameFov", c => f.Render(c.GameFov)),
                 new FieldRead("FrameRateUnlock", c => b.Render(c.FrameRateUnlock)),
                 new FieldRead("Fxaa", c => b.Render(c.Fxaa)),
+                new FieldRead("CutsceneTracking", c => b.Render(c.CutsceneTracking)),
                 new FieldRead("PositionLocalSmoothing", c => f.Render(c.Position.LocalSmoothing)),
                 new FieldRead("PositionRemoteSmoothing", c => f.Render(c.Position.RemoteSmoothing)),
             };

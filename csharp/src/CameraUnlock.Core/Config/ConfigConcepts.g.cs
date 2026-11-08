@@ -200,6 +200,12 @@ namespace CameraUnlock.Core.Config
             new BoolCodec(), new[] { "true: smooths the jagged edges of the game's 3D with FXAA where the mod can.", "It softens fine detail a little; leave it false if the game already has anti-aliasing on." }, null, "false",
             true);
 
+        /// <summary>[View] CutsceneTracking.</summary>
+        public static readonly ConceptDescriptor<bool> CutsceneTracking = new ConceptDescriptor<bool>(
+            "CutsceneTracking", "View", "CutsceneTracking", ConceptValueFamily.Bool,
+            new BoolCodec(), new[] { "true: head tracking stays on in the game's cutscenes, where the mod can tell them apart.", "false holds the view at centre while one plays." }, null, "false",
+            true);
+
         /// <summary>In the schema's concepts order, which is the order a section's concept rows are written in.</summary>
         internal static readonly ConceptDescriptor[] All =
         {
@@ -234,6 +240,7 @@ namespace CameraUnlock.Core.Config
             GameFov,
             FrameRateUnlock,
             Fxaa,
+            CutsceneTracking,
         };
 
         /// <summary>The schema's sections, in the order a canonical file writes them.</summary>

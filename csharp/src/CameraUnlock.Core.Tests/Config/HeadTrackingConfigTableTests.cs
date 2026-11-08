@@ -96,7 +96,7 @@ namespace CameraUnlock.Core.Tests.Config
         }
 
         [Fact]
-        public void TheGlobalConceptsAreThe29TheSchemaNames()
+        public void TheGlobalConceptsAreThe30TheSchemaNames()
         {
             string[] global =
             {
@@ -105,7 +105,7 @@ namespace CameraUnlock.Core.Tests.Config
                 "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
                 "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
                 "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov",
-                "FrameRateUnlock", "Fxaa",
+                "FrameRateUnlock", "Fxaa", "CutsceneTracking",
             };
             Assert.Equal(global, ConfigConcepts.All.Where(c => c.Global).Select(c => c.Id));
             Assert.Equal(new[] { "CollisionMargin", "CollisionChannel" }, ConfigConcepts.All.Where(c => !c.Global).Select(c => c.Id));
@@ -297,6 +297,55 @@ namespace CameraUnlock.Core.Tests.Config
             var log = new List<string>();
             flat.ApplyValues(new Dictionary<string, string> { { "Fxaa", "true" } }, log.Add);
             Assert.False(flat.Fxaa);
+            Assert.Empty(log);
+        }
+
+        // CutsceneTracking reads as a bool, false by default, and refuses a word that is not one for
+        // its default. The C++ twin is TestCutsceneTracking in head_tracking_config_table_tests.cpp.
+        [Fact]
+        public void CutsceneTrackingReadsABoolAndDefaultsToHeldInCutscenes()
+        {
+            Assert.True(ConfigConcepts.CutsceneTracking.Global);
+            Assert.Equal(ConceptValueFamily.Bool, ConfigConcepts.CutsceneTracking.Family);
+            ConfigTable<HeadTrackingConfigData> table = HeadTrackingConfigTable.Create(
+                ConfigConcepts.Fxaa, ConfigConcepts.CutsceneTracking);
+            Assert.False(HeadTrackingConfigTableFixtures.Defaults(table).CutsceneTracking);
+
+            string fresh = Encoding.ASCII.GetString(table.RenderFresh(new RenderHeader("G")));
+            int view = fresh.IndexOf("
+[View]
+", StringComparison.Ordinal);
+            int fxaa = fresh.IndexOf("
+Fxaa=default
+", StringComparison.Ordinal);
+            int key = fresh.IndexOf(
+                "
+; true: head tracking stays on in the game's cutscenes, where the mod can tell them apart."
+                + "
+; false holds the view at centre while one plays.
+CutsceneTracking=default
+",
+                StringComparison.Ordinal);
+            Assert.True(view >= 0 && fxaa > view && key > fxaa, fresh);
+
+            var config = new HeadTrackingConfigData();
+            ApplyReport report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]
+CutsceneTracking=true
+")), config);
+            Assert.True(config.CutsceneTracking);
+            Assert.Empty(report.Diagnostics);
+
+            config = new HeadTrackingConfigData { CutsceneTracking = true };
+            report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]
+CutsceneTracking=maybe
+")), config);
+            Assert.False(config.CutsceneTracking);
+            Assert.Single(report.Diagnostics);
+
+            var flat = new HeadTrackingConfigData();
+            var log = new List<string>();
+            flat.ApplyValues(new Dictionary<string, string> { { "CutsceneTracking", "true" } }, log.Add);
+            Assert.False(flat.CutsceneTracking);
             Assert.Empty(log);
         }
 

@@ -717,6 +717,18 @@
       "canonical": true,
       "global": true,
       "file_comment": ["true: smooths the jagged edges of the game's 3D with FXAA where the mod can.", "It softens fine detail a little; leave it false if the game already has anti-aliasing on."]
+    },
+    {
+      "id": "CutsceneTracking",
+      "section": "View",
+      "key": "CutsceneTracking",
+      "type": "bool",
+      "default": false,
+      "aliases": [],
+      "doc": "true: in a game whose mod can tell its cutscenes apart from its other gated states, head tracking stays on while a cutscene plays. Menus, loading, death, photo mode and any other camera the mod holds the pose off for stay held. false (the default) holds the pose off in cutscenes as in those, with the view eased back to centre. Core binds it and does not apply it: each mod that can tell a cutscene apart reads it. Only in a mod that binds it; no flat reader reads it.",
+      "canonical": true,
+      "global": true,
+      "file_comment": ["true: head tracking stays on in the game's cutscenes, where the mod can tell them apart.", "false holds the view at centre while one plays."]
     }
   ],
   "retired": [

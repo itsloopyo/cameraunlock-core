@@ -62,6 +62,7 @@ inline constexpr const char* kLightMultiplier = "lightmultiplier";
 inline constexpr const char* kGameFov = "gamefov";
 inline constexpr const char* kFrameRateUnlock = "framerateunlock";
 inline constexpr const char* kFxaa = "fxaa";
+inline constexpr const char* kCutsceneTracking = "cutscenetracking";
 
 inline constexpr const char* kLightFollowsHead = "lightfollowshead";
 inline constexpr const char* kSmoothing = "smoothing";
@@ -102,6 +103,7 @@ inline constexpr ConfigKeyAlias kConfigKeyAliases[] = {
     { "crosshaircolor", "reticlecolor", false },
     { "crosshaircolour", "reticlecolor", false },
     { "crosshairtogglekey", "reticletogglekey", false },
+    { "cutscenetracking", "cutscenetracking", false },
     { "cyclemode", "cycletrackingmodekey", false },
     { "cyclemodekey", "cycletrackingmodekey", false },
     { "cycletrackingmode", "cycletrackingmodekey", false },
@@ -364,6 +366,7 @@ inline constexpr ConfigConceptDefault kConfigConceptDefaults[] = {
     { "GameFov", config_keys::kGameFov, ConfigValueType::kFloat, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "FrameRateUnlock", config_keys::kFrameRateUnlock, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
     { "Fxaa", config_keys::kFxaa, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
+    { "CutsceneTracking", config_keys::kCutsceneTracking, ConfigValueType::kBool, 0, 0.0f, false, nullptr, {0.0f, 0.0f, 0.0f, 0.0f} },
 };
 
 inline constexpr size_t kConfigConceptDefaultCount =

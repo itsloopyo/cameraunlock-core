@@ -30,5 +30,6 @@ field	LightMultiplier	1.5
 field	GameFov	0.0
 field	FrameRateUnlock	false
 field	Fxaa	false
+field	CutsceneTracking	false
 field	PositionLocalSmoothing	0.0
 field	PositionRemoteSmoothing	0.15

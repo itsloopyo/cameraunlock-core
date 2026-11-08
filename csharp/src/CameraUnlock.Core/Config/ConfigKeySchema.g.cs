@@ -70,6 +70,7 @@ namespace CameraUnlock.Core.Config
             public const string GameFov = "gamefov";
             public const string FrameRateUnlock = "framerateunlock";
             public const string Fxaa = "fxaa";
+            public const string CutsceneTracking = "cutscenetracking";
 
             public const string LightFollowsHead = "lightfollowshead";
             public const string Smoothing = "smoothing";
@@ -101,6 +102,7 @@ namespace CameraUnlock.Core.Config
             { "crosshaircolor", "reticlecolor" },
             { "crosshaircolour", "reticlecolor" },
             { "crosshairtogglekey", "reticletogglekey" },
+            { "cutscenetracking", "cutscenetracking" },
             { "cyclemode", "cycletrackingmodekey" },
             { "cyclemodekey", "cycletrackingmodekey" },
             { "cycletrackingmode", "cycletrackingmodekey" },

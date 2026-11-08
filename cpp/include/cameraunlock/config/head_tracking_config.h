@@ -135,6 +135,12 @@ struct HeadTrackingConfig {
     /// does not apply it: each mod that can draw the pass reads it. Read only through
     /// config::HeadTrackingConfigTable; ApplyValues does not read it.
     bool fxaa = false;
+    /// true keeps head tracking on while the game plays a cutscene, in a mod that can tell its
+    /// cutscenes apart from its other gated states; false holds the pose off in cutscenes as in
+    /// menus and loading. Core binds it and does not apply it: each mod that can tell a cutscene
+    /// apart reads it. Read only through config::HeadTrackingConfigTable; ApplyValues does not
+    /// read it.
+    bool cutscene_tracking = false;
 
     /// Applies parsed key/value pairs. Keys that resolve to no concept are ignored, so a
     /// mod's own game-specific keys can share the file.

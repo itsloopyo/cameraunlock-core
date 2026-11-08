@@ -101,6 +101,7 @@ namespace CameraUnlock.Core.Tests.Config
                 { "GameFov", config.GameFov },
                 { "FrameRateUnlock", config.FrameRateUnlock },
                 { "Fxaa", config.Fxaa },
+                { "CutsceneTracking", config.CutsceneTracking },
             };
         }
 

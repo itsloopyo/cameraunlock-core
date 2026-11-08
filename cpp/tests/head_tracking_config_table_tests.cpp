@@ -144,6 +144,7 @@ std::vector<FieldRead> Fields() {
         {"GameFov", [f](const H& c) { return f(c.game_fov); }},
         {"FrameRateUnlock", [b](const H& c) { return b(c.frame_rate_unlock); }},
         {"Fxaa", [b](const H& c) { return b(c.fxaa); }},
+        {"CutsceneTracking", [b](const H& c) { return b(c.cutscene_tracking); }},
         {"PositionLocalSmoothing", [f](const H& c) { return f(c.position.local_smoothing); }},
         {"PositionRemoteSmoothing", [f](const H& c) { return f(c.position.remote_smoothing); }},
     };
@@ -333,20 +334,20 @@ void TestHotkeyDefaults() {
     Check(!flat.collision_enabled, "and the flat reader's collision_enabled to false");
 }
 
-// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe29TheSchemaNames.
+// The C# twin is HeadTrackingConfigTableTests.TheGlobalConceptsAreThe30TheSchemaNames.
 void TestGlobalConcepts() {
-    std::cout << "\n[the global concepts are the 29 the schema names]\n";
+    std::cout << "\n[the global concepts are the 30 the schema names]\n";
     const std::vector<std::string> expected{
         "UdpPort", "EnableOnStartup", "LocalSmoothing", "RemoteSmoothing", "Accela", "AccelaPlayers", "WorldSpaceYaw",
         "RotationEnabled", "DataFreshnessMs", "PositionEnabled", "TrueFreeLook", "FreeLookMarker",
         "StockSights", "PositionLimitX", "PositionLimitY", "PositionLimitYDown", "PositionLimitZ", "PositionLimitZBack",
         "CollisionEnabled", "CollisionReleaseSmoothing", "ToggleKey",
         "CycleTrackingModeKey", "YawModeKey", "TrueFreeLookKey", "FirstPersonKey", "LightMultiplier", "GameFov",
-        "FrameRateUnlock", "Fxaa"};
+        "FrameRateUnlock", "Fxaa", "CutsceneTracking"};
     std::vector<std::string> global;
     std::vector<std::string> not_global;
     for (const schema::ConceptInfo& info : schema::kConcepts) (info.global ? global : not_global).push_back(info.name);
-    Check(global == expected, "the global concepts are the 29 listed, in schema order");
+    Check(global == expected, "the global concepts are the 30 listed, in schema order");
     Check(not_global == std::vector<std::string>{"CollisionMargin", "CollisionChannel"},
           "CollisionMargin and CollisionChannel are the concepts that are not global");
 }
@@ -558,6 +559,54 @@ void TestFxaa() {
     Check(!flat.fxaa && log.empty(), "the flat reader does not read Fxaa, and says nothing");
 }
 
+// CutsceneTracking reads as a bool, false by default, and refuses a word that is not one for its
+// default. The C# twin is HeadTrackingConfigTableTests.CutsceneTrackingReadsABoolAndDefaultsToHeldInCutscenes.
+void TestCutsceneTracking() {
+    std::cout << "
+[CutsceneTracking reads and defaults in a mod that names it]
+";
+    static_assert(schema::ConceptTraits<Concept::CutsceneTracking>::kGlobal &&
+                  schema::ConceptTraits<Concept::CutsceneTracking>::kFamily == schema::ValueFamily::kBool);
+    const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable({Concept::Fxaa, Concept::CutsceneTracking});
+    Check(!table.defaults().cutscene_tracking, "the table starts it at false, the pose held off in cutscenes");
+
+    const std::string fresh = RenderCanonicalFresh(table, kHeader);
+    const std::size_t view = fresh.find("
+[View]
+");
+    const std::size_t fxaa = fresh.find("
+Fxaa=default
+");
+    const std::size_t key = fresh.find(
+        "
+; true: head tracking stays on in the game's cutscenes, where the mod can tell them apart."
+        "
+; false holds the view at centre while one plays.
+CutsceneTracking=default
+");
+    Check(view != std::string::npos && fxaa != std::string::npos && key != std::string::npos && view < fxaa && fxaa < key,
+          "the fresh file writes CutsceneTracking=default with its comment under [View], after Fxaa");
+
+    HeadTrackingConfig config;
+    ApplyReport report = ApplyCanonical(ParseCanonicalIni("[View]
+CutsceneTracking=true
+"), table, config);
+    Check(config.cutscene_tracking && report.diagnostics.empty(), "CutsceneTracking=true reads as true with nothing said");
+
+    config = HeadTrackingConfig{};
+    config.cutscene_tracking = true;
+    report = ApplyCanonical(ParseCanonicalIni("[View]
+CutsceneTracking=maybe
+"), table, config);
+    Check(!config.cutscene_tracking && report.diagnostics.size() == 1,
+          "CutsceneTracking=maybe is refused with a diagnostic and the row takes its default, false");
+
+    HeadTrackingConfig flat;
+    std::vector<std::string> log;
+    flat.ApplyValues({{"CutsceneTracking", "true"}}, [&log](const std::string& line) { log.push_back(line); });
+    Check(!flat.cutscene_tracking && log.empty(), "the flat reader does not read CutsceneTracking, and says nothing");
+}
+
 void TestArguments() {
     std::cout << "\n[arguments]\n";
     Check(Contains(Thrown([] { HeadTrackingConfigTable({}); }), "needs the concepts"), "an empty list throws");
@@ -626,6 +675,7 @@ int RunHeadTrackingConfigTableTests() {
         TestGameFov();
         TestFrameRateUnlock();
         TestFxaa();
+        TestCutsceneTracking();
         TestArguments();
         TestOnlyNamedConcepts();
         TestDerivedConfig();
