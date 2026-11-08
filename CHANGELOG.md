@@ -30,6 +30,116 @@ Consuming repos: a new Defaults.ini holds `CutsceneTracking=false` under `[View]
 a player's disk has no such line, which reads as false. A game's `CameraUnlock.ini` changes only
 in a mod whose table names the concept.
 
+### Fixed - vtable reads, RE aim tangents, config saves and the install bodies
+
+- `ReadVfuncs` stops at the first vtable entry that is not executable code, so a class's count no
+  longer runs on into the next class's RTTI and vtable.
+- `ProjectAimToViewTangents` (REFramework) gives the lean its true sign. The comments on it and on
+  `ComputeCleanLocalPositionDelta` now say to add the clean delta, which is what the RE mods do.
+- The C# `HeadTrackingSession` reports zero rotation in position-only mode, as the C++ session does.
+- `ConfigOwner` leaves a deferred load's write time unrecorded, so the watcher reloads the file
+  once another program lets it go, and a save asks the write time after it has read the file, so
+  an edit made as it reads is still seen as a change. Both languages.
+- The C interface's `_save_tracking_mode`, `_save_aim_mode` and `_save_world_space_yaw` are an
+  error when the mod did not describe every row they write. They answered SAVED and wrote nothing.
+- The Java binding asks again for a text row that a reload lengthened between its two calls,
+  which read as an empty string.
+- `InitCameraPipeline` throws for a descriptor with no gate, as it does for its other checks,
+  instead of logging and leaving the pipeline off.
+- `UIElementOffsetController.ResetReferences` does not write to a target that was destroyed.
+- `install-body-cecil.cmd` keeps a game update's unpatched assembly over an older `.original`
+  backup, and `uninstall-body.cmd` deletes that older backup instead of restoring it over the
+  update.
+- `install-body-bepinex.cmd` replaces only `BepInEx\core` and the doorstop files on a
+  wrong-architecture swap, so the player's other plugins, patchers and configs stay. It checks the
+  vendored loader is there before removing anything.
+- `install-body-bepinex.cmd` keeps a config the player already has in `BepInEx\config` when
+  it installs a Thunderstore pack that ships its own copy of that file.
+- `find-game.ps1` treats a closed stdin at the folder prompt as a cancel (exit 2) instead of
+  stopping with a script error.
+- The `uninstall.ps1` template keeps `CameraUnlock.ini` in the mod folder. It deleted the folder
+  whole, and `-KeepConfig` is gone with the copy to %TEMP% it made.
+- `set-discord-webhook-secret.mjs` finds the callers of `release-mod.yml` as well as
+  `release-bepinex-mod.yml`, and takes the secret only from the environment.
+- `pixi run test` is the whole suite but the Docker-only `test-linux-probe` (`check`, the
+  PowerShell tests, the net35 framework tests and the isolated-input host), and `check` runs
+  the install-body tests and the PowerShell release, soak, notices and differential-gate suites.
+
+### Fixed - receivers, config saves and the install and release scripts
+
+- The C++ `PollingUdpReceiver` and the C# `OpenTrackReceiver` follow the first tracker that
+  sends and ignore any other until it has been silent for 2 seconds, as `UdpReceiver` already
+  did. Two trackers sending to one port made the view flick between them. `PollingUdpReceiver`
+  also runs its poses through the pose jump gate, and `Initialize` clears the last position and
+  the position offset.
+- `ConfigOwner` saves `TrueFreeLook`, `FreeLookMarker` and `StockSights` together when the aim
+  mode changes, in both languages. A save that changed one of them used to leave the others at
+  `default`, so a new Defaults.ini value could put the file in a mode the player never chose.
+- `IniEditor.Edit` / `EditIni` write a value holding a tab, which the reader reads back. A
+  leading or trailing tab is still refused.
+- `ProfileSerializer` keeps its temporary file and names it in the error when a failed replace
+  has already removed the original.
+- `find-game.ps1` exits 2 when it cannot find the game, and `install-body-reframework.cmd` puts
+  back the VR runtimes it set aside when it stops part way.
+- `GamePathDetection.psm1` reads Steam and Xbox manifests as UTF-8, `package-bepinex-mod.ps1`
+  reads `launcher-manifest.json` as UTF-8, and `generate-release-notes.ps1` reads commit subjects
+  as UTF-8. `find-game.ps1` writes the batch stub the install bodies call in the console's code
+  page instead of ASCII, which had turned an accented game folder into `?`, and stops with exit 1
+  on a character the code page cannot hold.
+- `Invoke-FetchLatestLoader` counts the 14-day soak from a release's newest asset upload, so an
+  asset replaced after publishing waits out its own soak.
+- The config differential gate counts `pixi.lock`, `global.json` and `packages.lock.json` as
+  inputs, so a toolchain bump runs the differential again.
+- `Enter-GameRig`'s board entry ends with the process that holds the rig, and a rig kept by
+  `-KeptIn` stays on the board under the game's process.
+- The dotnet `test-differential` template fails when its filter matches no test.
+- `install-body-xnvse.cmd` hands PowerShell the download URL and path by environment variable, so
+  a TEMP path holding an apostrophe no longer breaks the download.
+- The C++ file log's one rotation per run is used up only by an `Open` that opened a file, so after
+  a failed `Open` the path tried next still has its previous log kept before it is truncated.
+- `RenderPipelineHelper.RegisterCallbacks` subscribes the legacy `Camera` pair as well where the
+  SRP's `RenderPipelineManager` exists, since a build can render with either.
+- `CameraLifecycleManager` calls `OnCameraLost` for a camera a scene load destroyed, whether or
+  not another camera is found in its place.
+- `ViewMatrixTrackingController` resets the view matrix at once on a fade out with nothing left to
+  apply, and treats a destroyed camera's replacement as a camera cut.
+- `UnityAimHelper.ClampToScreenEdge` puts a behind-camera aim on the edge it points at, read from
+  the view matrix, instead of the opposite edge.
+- `UIElementOffsetController` puts its element back when the component is disabled while offset.
+- The C# `OpenTrackReceiver` drops `IsReceiving` after 5 seconds with no accepted pose even while
+  other datagrams arrive, and both receivers wait 16 ms after a failed receive instead of spinning.
+  The C++ `UdpReceiver` retries a supervisor thread that would not start.
+- The canonical INI reader indexes sections and keys in both languages. A file with 100,000 keys
+  took minutes to read in C#, and now reads in well under the tests' 2 second bound.
+- `EditIni` looks for `]` and `=` only within the line it is reading.
+- `cameraunlock_hotkeys_start` publishes the poller only once it has started.
+- `ProfileSerializer` keeps the default for a number that is not finite, and `ProfileManager`
+  lists a new profile only once its file is written and refuses a reserved device name
+  (`CON`, `NUL`, `COM1` and the rest) as a profile name.
+- The Java binding refuses a host buffer over 2 GiB.
+- The MelonLoader, BepInEx and REFramework install bodies stop with exit 1 instead of replacing a
+  `version.dll`, `winhttp.dll` or `dinput8.dll` that belongs to another loader.
+- `install-body-xnvse.cmd` finds and copies xNVSE with delayed expansion off, so a TEMP or game
+  path holding `!` installs.
+- `find-game.ps1` drops a trailing `\` from the game path, and the uninstall template tests the
+  path literally.
+- `Update-VendoredLoader` records the commit an annotated tag points at, and removes a stale
+  LICENSE before it looks for the new one.
+- `validate-manifest.mjs` reads a ZIP entry as a file, so an entry named `x[1].txt` is no longer
+  read as `x1.txt`.
+- The release workflows pass inputs to their scripts through the environment and check out with
+  `persist-credentials: false`. `nuget.config` maps each package id to the feed that publishes it.
+
+### Fixed - the C interface says to put the rig back after a stop or a missed lean (ABI 12)
+
+- `cameraunlock_session_stop`, `cameraunlock_view_stop` and a frame whose lean was never called
+  let go of a rig that carried a share of the lean without saying so, and the host kept the rig
+  offset. The view's next frame that returns now carries `CAMERAUNLOCK_STATE_RELEASE_RIG`.
+- A hotkey row marked `CAMERAUNLOCK_ROW_LIVE` kept the keys it was started with after
+  `cameraunlock_config_reload` read new ones. The reload now binds the new keys in place of the old.
+- `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 12: `_RELEASE_RIG` now also follows a stop or a
+  frame whose lean was not asked for.
+
 ### Changed - `[Hotkeys] FirstPersonKey` defaults to `ScrollLock, Ctrl+Shift+B`
 
 `FirstPersonKey`'s `canonical_default`, `default` and both field initialisers move from
@@ -266,116 +376,6 @@ that switches over `ValueFamily` or `ConceptValueFamily` meets a fifth value.
 
 - `Set-GameRigLimit -Count <n>` caps how many rigs, of every game, `Enter-GameRig` gives out at
   once. A session past it waits, and the next free place goes to whoever asked first for any game.
-
-### Fixed - vtable reads, RE aim tangents, config saves and the install bodies
-
-- `ReadVfuncs` stops at the first vtable entry that is not executable code, so a class's count no
-  longer runs on into the next class's RTTI and vtable.
-- `ProjectAimToViewTangents` (REFramework) gives the lean its true sign. The comments on it and on
-  `ComputeCleanLocalPositionDelta` now say to add the clean delta, which is what the RE mods do.
-- The C# `HeadTrackingSession` reports zero rotation in position-only mode, as the C++ session does.
-- `ConfigOwner` leaves a deferred load's write time unrecorded, so the watcher reloads the file
-  once another program lets it go, and a save asks the write time after it has read the file, so
-  an edit made as it reads is still seen as a change. Both languages.
-- The C interface's `_save_tracking_mode`, `_save_aim_mode` and `_save_world_space_yaw` are an
-  error when the mod did not describe every row they write. They answered SAVED and wrote nothing.
-- The Java binding asks again for a text row that a reload lengthened between its two calls,
-  which read as an empty string.
-- `InitCameraPipeline` throws for a descriptor with no gate, as it does for its other checks,
-  instead of logging and leaving the pipeline off.
-- `UIElementOffsetController.ResetReferences` does not write to a target that was destroyed.
-- `install-body-cecil.cmd` keeps a game update's unpatched assembly over an older `.original`
-  backup, and `uninstall-body.cmd` deletes that older backup instead of restoring it over the
-  update.
-- `install-body-bepinex.cmd` replaces only `BepInEx\core` and the doorstop files on a
-  wrong-architecture swap, so the player's other plugins, patchers and configs stay. It checks the
-  vendored loader is there before removing anything.
-- `install-body-bepinex.cmd` keeps a config the player already has in `BepInEx\config` when
-  it installs a Thunderstore pack that ships its own copy of that file.
-- `find-game.ps1` treats a closed stdin at the folder prompt as a cancel (exit 2) instead of
-  stopping with a script error.
-- The `uninstall.ps1` template keeps `CameraUnlock.ini` in the mod folder. It deleted the folder
-  whole, and `-KeepConfig` is gone with the copy to %TEMP% it made.
-- `set-discord-webhook-secret.mjs` finds the callers of `release-mod.yml` as well as
-  `release-bepinex-mod.yml`, and takes the secret only from the environment.
-- `pixi run test` is the whole suite but the Docker-only `test-linux-probe` (`check`, the
-  PowerShell tests, the net35 framework tests and the isolated-input host), and `check` runs
-  the install-body tests and the PowerShell release, soak, notices and differential-gate suites.
-
-### Fixed - receivers, config saves and the install and release scripts
-
-- The C++ `PollingUdpReceiver` and the C# `OpenTrackReceiver` follow the first tracker that
-  sends and ignore any other until it has been silent for 2 seconds, as `UdpReceiver` already
-  did. Two trackers sending to one port made the view flick between them. `PollingUdpReceiver`
-  also runs its poses through the pose jump gate, and `Initialize` clears the last position and
-  the position offset.
-- `ConfigOwner` saves `TrueFreeLook`, `FreeLookMarker` and `StockSights` together when the aim
-  mode changes, in both languages. A save that changed one of them used to leave the others at
-  `default`, so a new Defaults.ini value could put the file in a mode the player never chose.
-- `IniEditor.Edit` / `EditIni` write a value holding a tab, which the reader reads back. A
-  leading or trailing tab is still refused.
-- `ProfileSerializer` keeps its temporary file and names it in the error when a failed replace
-  has already removed the original.
-- `find-game.ps1` exits 2 when it cannot find the game, and `install-body-reframework.cmd` puts
-  back the VR runtimes it set aside when it stops part way.
-- `GamePathDetection.psm1` reads Steam and Xbox manifests as UTF-8, `package-bepinex-mod.ps1`
-  reads `launcher-manifest.json` as UTF-8, and `generate-release-notes.ps1` reads commit subjects
-  as UTF-8. `find-game.ps1` writes the batch stub the install bodies call in the console's code
-  page instead of ASCII, which had turned an accented game folder into `?`, and stops with exit 1
-  on a character the code page cannot hold.
-- `Invoke-FetchLatestLoader` counts the 14-day soak from a release's newest asset upload, so an
-  asset replaced after publishing waits out its own soak.
-- The config differential gate counts `pixi.lock`, `global.json` and `packages.lock.json` as
-  inputs, so a toolchain bump runs the differential again.
-- `Enter-GameRig`'s board entry ends with the process that holds the rig, and a rig kept by
-  `-KeptIn` stays on the board under the game's process.
-- The dotnet `test-differential` template fails when its filter matches no test.
-- `install-body-xnvse.cmd` hands PowerShell the download URL and path by environment variable, so
-  a TEMP path holding an apostrophe no longer breaks the download.
-- The C++ file log's one rotation per run is used up only by an `Open` that opened a file, so after
-  a failed `Open` the path tried next still has its previous log kept before it is truncated.
-- `RenderPipelineHelper.RegisterCallbacks` subscribes the legacy `Camera` pair as well where the
-  SRP's `RenderPipelineManager` exists, since a build can render with either.
-- `CameraLifecycleManager` calls `OnCameraLost` for a camera a scene load destroyed, whether or
-  not another camera is found in its place.
-- `ViewMatrixTrackingController` resets the view matrix at once on a fade out with nothing left to
-  apply, and treats a destroyed camera's replacement as a camera cut.
-- `UnityAimHelper.ClampToScreenEdge` puts a behind-camera aim on the edge it points at, read from
-  the view matrix, instead of the opposite edge.
-- `UIElementOffsetController` puts its element back when the component is disabled while offset.
-- The C# `OpenTrackReceiver` drops `IsReceiving` after 5 seconds with no accepted pose even while
-  other datagrams arrive, and both receivers wait 16 ms after a failed receive instead of spinning.
-  The C++ `UdpReceiver` retries a supervisor thread that would not start.
-- The canonical INI reader indexes sections and keys in both languages. A file with 100,000 keys
-  took minutes to read in C#, and now reads in well under the tests' 2 second bound.
-- `EditIni` looks for `]` and `=` only within the line it is reading.
-- `cameraunlock_hotkeys_start` publishes the poller only once it has started.
-- `ProfileSerializer` keeps the default for a number that is not finite, and `ProfileManager`
-  lists a new profile only once its file is written and refuses a reserved device name
-  (`CON`, `NUL`, `COM1` and the rest) as a profile name.
-- The Java binding refuses a host buffer over 2 GiB.
-- The MelonLoader, BepInEx and REFramework install bodies stop with exit 1 instead of replacing a
-  `version.dll`, `winhttp.dll` or `dinput8.dll` that belongs to another loader.
-- `install-body-xnvse.cmd` finds and copies xNVSE with delayed expansion off, so a TEMP or game
-  path holding `!` installs.
-- `find-game.ps1` drops a trailing `\` from the game path, and the uninstall template tests the
-  path literally.
-- `Update-VendoredLoader` records the commit an annotated tag points at, and removes a stale
-  LICENSE before it looks for the new one.
-- `validate-manifest.mjs` reads a ZIP entry as a file, so an entry named `x[1].txt` is no longer
-  read as `x1.txt`.
-- The release workflows pass inputs to their scripts through the environment and check out with
-  `persist-credentials: false`. `nuget.config` maps each package id to the feed that publishes it.
-
-### Fixed - the C interface says to put the rig back after a stop or a missed lean
-
-- `cameraunlock_session_stop`, `cameraunlock_view_stop` and a frame whose lean was never called
-  let go of a rig that carried a share of the lean without saying so, and the host kept the rig
-  offset. The view's next frame that returns now carries `CAMERAUNLOCK_STATE_RELEASE_RIG`.
-- A hotkey row marked `CAMERAUNLOCK_ROW_LIVE` kept the keys it was started with after
-  `cameraunlock_config_reload` read new ones. The reload now binds the new keys in place of the old.
-- `CAMERAUNLOCK_ABI` and `CameraUnlock.ABI` are 12: `_RELEASE_RIG` now also follows a stop or a
-  frame whose lean was not asked for.
 
 ### Added - the game rig shows on the hivemind board
 
