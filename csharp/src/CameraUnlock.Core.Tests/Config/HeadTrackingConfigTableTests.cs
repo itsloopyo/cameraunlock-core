@@ -312,33 +312,21 @@ namespace CameraUnlock.Core.Tests.Config
             Assert.False(HeadTrackingConfigTableFixtures.Defaults(table).CutsceneTracking);
 
             string fresh = Encoding.ASCII.GetString(table.RenderFresh(new RenderHeader("G")));
-            int view = fresh.IndexOf("
-[View]
-", StringComparison.Ordinal);
-            int fxaa = fresh.IndexOf("
-Fxaa=default
-", StringComparison.Ordinal);
+            int view = fresh.IndexOf("\r\n[View]\r\n", StringComparison.Ordinal);
+            int fxaa = fresh.IndexOf("\r\nFxaa=default\r\n", StringComparison.Ordinal);
             int key = fresh.IndexOf(
-                "
-; true: head tracking stays on in the game's cutscenes, where the mod can tell them apart."
-                + "
-; false holds the view at centre while one plays.
-CutsceneTracking=default
-",
+                "\r\n; true: head tracking stays on in the game's cutscenes, where the mod can tell them apart."
+                + "\r\n; false holds the view at centre while one plays.\r\nCutsceneTracking=default\r\n",
                 StringComparison.Ordinal);
             Assert.True(view >= 0 && fxaa > view && key > fxaa, fresh);
 
             var config = new HeadTrackingConfigData();
-            ApplyReport report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]
-CutsceneTracking=true
-")), config);
+            ApplyReport report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]\r\nCutsceneTracking=true\r\n")), config);
             Assert.True(config.CutsceneTracking);
             Assert.Empty(report.Diagnostics);
 
             config = new HeadTrackingConfigData { CutsceneTracking = true };
-            report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]
-CutsceneTracking=maybe
-")), config);
+            report = table.Apply(CanonicalIni.Parse(Encoding.ASCII.GetBytes("[View]\r\nCutsceneTracking=maybe\r\n")), config);
             Assert.False(config.CutsceneTracking);
             Assert.Single(report.Diagnostics);
 

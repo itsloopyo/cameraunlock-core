@@ -562,42 +562,28 @@ void TestFxaa() {
 // CutsceneTracking reads as a bool, false by default, and refuses a word that is not one for its
 // default. The C# twin is HeadTrackingConfigTableTests.CutsceneTrackingReadsABoolAndDefaultsToHeldInCutscenes.
 void TestCutsceneTracking() {
-    std::cout << "
-[CutsceneTracking reads and defaults in a mod that names it]
-";
+    std::cout << "\n[CutsceneTracking reads and defaults in a mod that names it]\n";
     static_assert(schema::ConceptTraits<Concept::CutsceneTracking>::kGlobal &&
                   schema::ConceptTraits<Concept::CutsceneTracking>::kFamily == schema::ValueFamily::kBool);
     const ConfigTable<HeadTrackingConfig> table = HeadTrackingConfigTable({Concept::Fxaa, Concept::CutsceneTracking});
     Check(!table.defaults().cutscene_tracking, "the table starts it at false, the pose held off in cutscenes");
 
     const std::string fresh = RenderCanonicalFresh(table, kHeader);
-    const std::size_t view = fresh.find("
-[View]
-");
-    const std::size_t fxaa = fresh.find("
-Fxaa=default
-");
+    const std::size_t view = fresh.find("\r\n[View]\r\n");
+    const std::size_t fxaa = fresh.find("\r\nFxaa=default\r\n");
     const std::size_t key = fresh.find(
-        "
-; true: head tracking stays on in the game's cutscenes, where the mod can tell them apart."
-        "
-; false holds the view at centre while one plays.
-CutsceneTracking=default
-");
+        "\r\n; true: head tracking stays on in the game's cutscenes, where the mod can tell them apart."
+        "\r\n; false holds the view at centre while one plays.\r\nCutsceneTracking=default\r\n");
     Check(view != std::string::npos && fxaa != std::string::npos && key != std::string::npos && view < fxaa && fxaa < key,
           "the fresh file writes CutsceneTracking=default with its comment under [View], after Fxaa");
 
     HeadTrackingConfig config;
-    ApplyReport report = ApplyCanonical(ParseCanonicalIni("[View]
-CutsceneTracking=true
-"), table, config);
+    ApplyReport report = ApplyCanonical(ParseCanonicalIni("[View]\r\nCutsceneTracking=true\r\n"), table, config);
     Check(config.cutscene_tracking && report.diagnostics.empty(), "CutsceneTracking=true reads as true with nothing said");
 
     config = HeadTrackingConfig{};
     config.cutscene_tracking = true;
-    report = ApplyCanonical(ParseCanonicalIni("[View]
-CutsceneTracking=maybe
-"), table, config);
+    report = ApplyCanonical(ParseCanonicalIni("[View]\r\nCutsceneTracking=maybe\r\n"), table, config);
     Check(!config.cutscene_tracking && report.diagnostics.size() == 1,
           "CutsceneTracking=maybe is refused with a diagnostic and the row takes its default, false");
 
